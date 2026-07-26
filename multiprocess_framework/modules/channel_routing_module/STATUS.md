@@ -38,12 +38,9 @@ ChannelRoutingManager
 
 - **configs/ vs core:** `ChannelRoutingManagerConfig` (реестр/UI) и `ChannelRoutingConfig` в `core/` (база для наследников CRM) — оба нужны; см. **ADR-108**
 - `AsyncSenderBuffer.flush()` — не гарантирует синхронное ожидание; используй `stop()` + `start()`.
-- `BatchBuffer.max_pending` ограничивает **накопленную пачку**, но не то, что уже отдано в `flush_fn`: медленный сток удерживает свою пачку в памяти сверх потолка. Верхняя граница — `max_pending + размер пачки в полёте` на канал.
+- `BatchBuffer.max_pending` ограничивает **накопленную пачку**, но не то, что уже отдано в `flush_fn`. Верхняя граница памяти на канал — `max_pending + max_size` (одна пачка в полёте: параллельные сбросы одного канала запрещены через `_in_flight`).
 - `urgent_flush_requests` считает запросы, а не записанные пачки (сброс идёт вне lock-а). При гонке может превысить `total_batches` — это не ошибка учёта, а семантика имени.
 
-## История изменений
-
-- **2026-07-26 (Ф0.3 `observability-unified-routing`):** у `BatchBuffer` появился потолок `max_pending` на канал + политика переполнения (`drop_oldest` / `drop_newest`) и учёт потерь `dropped` / `dropped_by_channel`. До этого потолка не было вовсе — медленный сток копил записи в памяти без предела и без следа. Счётчик `urgent_flushes` переименован в `urgent_flush_requests` (семантика: запросы, а не записанные пачки). Инвариант учёта `total_enqueued == total_flushed + Σ pending + dropped` зафиксирован тестом. Наружу счётчики выходят командой `introspect.observability`; на живом стенде `dualcam_synth` при `max_pending=3` получено `dropped=581` с разбивкой по каналам.
 - `BatchBuffer` timer thread запускается в `start()` — вызывай `initialize()` перед использованием.
 - `RouterManager` не использует `IBufferStrategy` из CRM — см. ADR-015.
 
@@ -60,3 +57,4 @@ ChannelRoutingManager
 | 2026-03-31 | ADR-108: убран дублирующий `build()` у `ChannelRoutingConfig`; зафиксированы две роли схем | — |
 | 2026-04-09 | Фаза 0.5 документации: локальный `DECISIONS.md`, §6.4, строка в главном `DECISIONS.md`; удалён `base_buffer.py` | 9 |
 | 2026-07-09 | Ф5.15: `observability/` — ObservabilityHub + BoundedChannel + Protocol-контракты (drop-in ObservableMixin, pull-drain, drop_oldest + счётчик потерь, две плоскости фасада); 26 contract-тестов; ADR-CRM-007 | Ф5.15 |
+| 2026-07-26 | **Ф0.3:** потолок `BatchBuffer` (`max_pending` + `overflow_policy`), учёт потерь `dropped`/`flush_failed` по каналам, `_in_flight` (один сбрасывающий поток на канал), контракт `flush_fn → int` («записано», а не «отдано»), `urgent_flushes` → `urgent_flush_requests`. Счётчики выходят наружу командой `introspect.observability`. **Редакция 2 по ревью Opus:** первая редакция применяла потолок безусловно — на дефолтах он не срабатывал никогда, а при `max_pending < max_size` ронял записи на здоровом стоке; реальный безлимитный рост был в пачках «в полёте» | Ф0.3 |

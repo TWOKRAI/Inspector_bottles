@@ -130,10 +130,13 @@ def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:
         return None
     try:
         raw = manager.get_stats()
-    except Exception:  # noqa: BLE001 — наблюдаемость не имеет права ронять команду
-        return None
+    except Exception as exc:  # noqa: BLE001 — наблюдаемость не имеет права ронять команду
+        # НЕ None: «менеджер сломан» и «менеджера нет» — разные факты, и
+        # диагностическая команда не имеет права прятать отказ диагностируемого
+        # (проглоченный сбой — задокументированный класс отказа этого проекта).
+        return {"error": repr(exc)}
     if not isinstance(raw, dict):
-        return None
+        return {"error": f"get_stats вернул {type(raw).__name__}, ожидался dict"}
 
     out: Dict[str, Any] = {}
     buffer = raw.get("batch_stats", raw.get("buffer"))
@@ -147,6 +150,7 @@ def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:
         "error_floor",
         "metrics_count",
         "errors",
+        "flush_failed",
     ):
         if key in raw:
             out[key] = raw[key]

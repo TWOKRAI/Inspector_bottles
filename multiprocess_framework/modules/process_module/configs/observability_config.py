@@ -28,8 +28,13 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
+from ...channel_routing_module.buffers.batch_buffer import (
+    DEFAULT_MAX_PENDING,
+    DEFAULT_OVERFLOW_POLICY,
+    validate_overflow_policy,
+)
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 
 
@@ -88,11 +93,11 @@ class ObservabilityConfig(SchemaBase):
     batch_max_pending: Annotated[
         int,
         FieldMeta("Потолок неотправленных записей на канал (0 — без потолка)", min=0, max=1_000_000),
-    ] = 10_000
+    ] = DEFAULT_MAX_PENDING
     batch_overflow_policy: Annotated[
         str,
         FieldMeta("Что терять при переполнении: drop_oldest (кольцо) | drop_newest"),
-    ] = "drop_oldest"
+    ] = DEFAULT_OVERFLOW_POLICY
     console: Annotated[bool, FieldMeta("Включить консольный sink")] = True
     file: Annotated[bool, FieldMeta("Включить файловые sink-каналы (первичные)")] = True
 
@@ -108,6 +113,12 @@ class ObservabilityConfig(SchemaBase):
         ObservabilityCommandsConfig,
         FieldMeta("Секция команд (CommandManager)"),
     ] = Field(default_factory=ObservabilityCommandsConfig)
+
+    @field_validator("batch_overflow_policy")
+    @classmethod
+    def _check_overflow_policy(cls, value: str) -> str:
+        """Отказ на границе конфига — до того, как правка коснётся менеджеров."""
+        return validate_overflow_policy(value)
 
 
 def _toggled_logger_channels(console: bool, file: bool) -> Dict[str, Dict[str, Any]]:

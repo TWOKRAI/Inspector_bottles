@@ -17,12 +17,14 @@
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, List
+from typing import Any, Dict, Iterator, List
 
 import pytest
 
+from multiprocess_framework.modules.logger_module.channels.log_channel import LogChannel
 from multiprocess_framework.modules.logger_module.core.error_floor import reset_error_floors
 from multiprocess_framework.modules.logger_module.core.log_config import (
     LoggerChannelSchema,
@@ -78,20 +80,81 @@ def _overflow(manager: LoggerManager, count: int) -> None:
         manager.info(f"переполняем буфер {i}", module="unit")
 
 
+class _StuckChannel(LogChannel):
+    """Канал, залипший на записи — модель медленного/подвисшего приёмника.
+
+    Наследует ``LogChannel``, а не утиный тип: ``ChannelRegistry.register``
+    проверяет ``isinstance(channel, IChannel)`` и утку молча отвергает.
+    """
+
+    def __init__(self, name: str = "system_file") -> None:
+        super().__init__(LoggerChannelSchema(name=name, type="console", enabled=True))
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.writes: List[Dict[str, Any]] = []
+
+    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        self.entered.set()
+        self.release.wait(timeout=10.0)
+        self.writes.append(record)
+        return {"status": "success", "channel": self.name}
+
+
+@contextmanager
+def _stuck_sink(manager: LoggerManager) -> Iterator[_StuckChannel]:
+    """Подменить system_file залипшим каналом и занять его сброс."""
+    manager._channel_registry.unregister("system_file")
+    channel = _StuckChannel()
+    manager._channel_registry.register(channel)
+
+    manager.info("первая запись — она и залипнет", module="unit")
+    drainer = threading.Thread(target=lambda: manager.flush(), name="drainer")
+    drainer.start()
+    assert channel.entered.wait(timeout=10.0), "сток не занят — сценарий не воспроизведён"
+    try:
+        yield channel
+    finally:
+        channel.release.set()
+        drainer.join(timeout=10.0)
+
+
 # =============================================================================
 # Потери буфера
 # =============================================================================
 
 
 def test_dropped_by_channel_reaches_get_stats(tmp_path: Path) -> None:
-    """Потеря названа в get_stats() менеджера, с именем канала-виновника."""
+    """Потеря названа в get_stats() менеджера, с именем канала-виновника.
+
+    Сценарий приёмки: сток ЗАЛИП (а не «потолок ниже пачки») — именно так
+    выглядит медленный приёмник на живой системе.
+    """
     with _logger(tmp_path, max_pending=5) as manager:
+        with _stuck_sink(manager):
+            _overflow(manager, 50)
+
+            batch_stats = manager.get_stats()["batch_stats"]
+            assert batch_stats["dropped"] == 45
+            assert batch_stats["dropped_by_channel"] == {"system_file": 45}
+            assert batch_stats["pending"]["system_file"] == 5
+
+
+def test_dead_sink_is_reported_as_flush_failed_not_as_delivered(tmp_path: Path) -> None:
+    """Сток не принял — это не «доставлено».
+
+    До правки: приёмники сняты, 51 запись числится доставленной, ноль байт на
+    диске, все счётчики молчат. Диагностическая команда рапортовала здоровую
+    плоскость при стопроцентной потере.
+    """
+    with _logger(tmp_path, max_pending=10_000) as manager:
+        manager.set_sink_enabled("system_file", False)
         _overflow(manager, 50)
+        manager.flush()
 
         batch_stats = manager.get_stats()["batch_stats"]
-        assert batch_stats["dropped"] == 45
-        assert batch_stats["dropped_by_channel"] == {"system_file": 45}
-        assert batch_stats["pending"]["system_file"] == 5
+        assert batch_stats["total_flushed"] == 0
+        assert batch_stats["flush_failed"] == 50
+        assert batch_stats["flush_failed_by_channel"] == {"system_file": 50}
 
 
 def test_healthy_logger_reports_zero_drops(tmp_path: Path) -> None:
@@ -112,11 +175,12 @@ def test_counters_facade_normalizes_buffer_key(tmp_path: Path) -> None:
     знать, какой из двух менеджеров он спрашивает.
     """
     with _logger(tmp_path, max_pending=5) as manager:
-        _overflow(manager, 50)
+        with _stuck_sink(manager):
+            _overflow(manager, 50)
 
-        counters = observability_counters(logger=manager)
-        assert set(counters) == {"logger"}
-        assert counters["logger"]["buffer"]["dropped_by_channel"] == {"system_file": 45}
+            counters = observability_counters(logger=manager)
+            assert set(counters) == {"logger"}
+            assert counters["logger"]["buffer"]["dropped_by_channel"] == {"system_file": 45}
 
 
 def test_counters_facade_survives_a_broken_manager() -> None:
@@ -126,7 +190,11 @@ def test_counters_facade_survives_a_broken_manager() -> None:
         def get_stats(self):
             raise RuntimeError("boom")
 
-    assert observability_counters(logger=_Broken()) == {}
+    counters = observability_counters(logger=_Broken())
+    assert "error" in counters["logger"], "отказ диагностируемого проглочен"
+    assert "boom" in counters["logger"]["error"]
+
+    # А вот отсутствие менеджера — не отказ: секции просто нет.
     assert observability_counters(logger=None, error=None, stats=None) == {}
 
 
@@ -172,6 +240,9 @@ def test_error_floor_stays_silent_while_channel_is_alive(tmp_path: Path) -> None
 REQUIRED_BUFFER_KEYS: List[str] = [
     "dropped",
     "dropped_by_channel",
+    "flush_failed",
+    "flush_failed_by_channel",
+    "in_flight_records",
     "max_pending",
     "overflow_policy",
     "pending",
@@ -203,9 +274,12 @@ def test_limit_is_operable_from_config(tmp_path: Path) -> None:
         assert buffer_stats["overflow_policy"] == "drop_oldest"
 
 
-def test_config_typo_in_policy_fails_loudly(tmp_path: Path) -> None:
-    """Опечатка в политике — отказ на сборке, а не тихий откат к дефолту."""
-    config = _config(tmp_path, max_pending=100)
-    config.batch_overflow_policy = "drop_middle"
+def test_config_typo_in_policy_fails_loudly() -> None:
+    """Опечатка в политике — отказ на ГРАНИЦЕ конфига, а не посреди reconfigure.
+
+    Валидация в конструкторе буфера ловила её слишком поздно: reconfigure к тому
+    моменту уже остановил старый буфер и пересоздал каналы, и менеджер оставался
+    с молча выключенным батчингом.
+    """
     with pytest.raises(ValueError, match="overflow_policy"):
-        LoggerManager(manager_name="BadPolicyLogger", config=config)
+        LoggerManagerConfig(app_name="bad", batch_overflow_policy="drop_middle")

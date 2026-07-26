@@ -118,18 +118,32 @@ normalize_config(MyConfig())   # → config.build()[1] → dict
 
 | Стратегия | Потолок | Счётчики в `stats` |
 |---|---|---|
-| `BatchBuffer` | `BatchConfig.max_pending` на канал (дефолт 10 000; `0` — без потолка) | `dropped`, `dropped_by_channel` (имя канала-виновника), `max_pending`, `overflow_policy` |
+| `BatchBuffer` | `BatchConfig.max_pending` на канал (дефолт 10 000; `0` — без потолка) | `dropped`, `dropped_by_channel`, `flush_failed`, `flush_failed_by_channel`, `in_flight`, `in_flight_records`, `flush_skipped_busy`, `max_pending`, `overflow_policy` |
 | `AsyncSenderBuffer` | `queue_size` на очередь | `dropped` |
 
-Политика переполнения `BatchBuffer`:
+**Память росла не в очереди.** Deque держит триггер `max_size`, а вот число пачек «в полёте» не держало ничто: медленный сток не мешал каждому следующему потоку начать свой сброс. Поэтому у `BatchBuffer` два механизма, а не один:
+
+1. `_in_flight` — **один сбрасывающий поток на канал**; остальные копят (`flush_skipped_busy` считает отклонённые попытки);
+2. `max_pending` — потолок накопленного, срабатывающий **только пока сток занят**. При свободном стоке переполнение лечится сбросом, поэтому `max_pending < max_size` не превращает батчинг в сэмплирование на здоровой системе.
+
+Политика переполнения:
 
 - `drop_oldest` (дефолт) — кольцо: выбрасывается самая старая запись канала. Ближний к падению контекст ценнее давнего;
 - `drop_newest` — пачка замораживается, новая запись не принимается.
 
-Инвариант учёта (проверяется тестом `test_batch_buffer_limits.py`):
+**Две разные потери названы по-разному:**
+
+| Счётчик | Что значит |
+|---|---|
+| `dropped` / `dropped_by_channel` | не приняли на входе — потолок при занятом стоке |
+| `flush_failed` / `flush_failed_by_channel` | отдали в сток, а сток не принял (канала нет, `write` вернул `status: error`) |
+
+Контракт `flush_fn`: возврат `int` = число **фактически принятых** записей. Возврат `None` (прежний контракт) — «сток не рапортует», пачка считается доставленной. Без этого `total_flushed` означал бы «отдано», а не «записано», и счётчики показывали бы здоровую плоскость при стопроцентной потере.
+
+Инвариант учёта (проверяется тестом `test_batch_buffer_limits.py`), честен **в любой момент**, включая активный сброс:
 
 ```
-total_enqueued == total_flushed + Σ pending + dropped
+total_enqueued == total_flushed + Σ pending + dropped + flush_failed + in_flight_records
 ```
 
 Для логгера и менеджера ошибок потолок задаётся секцией `observability`

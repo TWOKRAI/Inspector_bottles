@@ -166,3 +166,4 @@
 - [Глобальный патч часов = флейк](feedback_global_clock_patch_flake.md) — patch("time.monotonic") с конечным side_effect доедают чужие потоки → StopIteration в невиновном тесте; часы — зависимость объекта
 - [Тест не доказан, пока не красный без правки](feedback_prove_test_red_without_fix.md) — откатить call-site через stash, сверить число упавших арифметически
 - [Три менеджера — одна база](feedback_three_managers_share_base.md) — logger/error/stats братья: общее поднимать в ChannelRoutingManager, не дописывать третью копию
+- [Три роли авторства тестов](feedback_test_authorship_three_roles.md) — автор доказывает свою модель, не реальность; tester от acceptance + ревьюер запуском

@@ -9,9 +9,14 @@ from __future__ import annotations
 
 from typing import Annotated, Dict, List, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ...channel_routing_module import ChannelRoutingConfig
+from ...channel_routing_module.buffers.batch_buffer import (
+    DEFAULT_MAX_PENDING,
+    DEFAULT_OVERFLOW_POLICY,
+    validate_overflow_policy,
+)
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ..log_enums import LogLevel
 
@@ -95,11 +100,11 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             "Потолок неотправленных записей НА КАНАЛ. Медленный сток без потолка "
             "съедает память тихо (Ф0.3). 0 — без потолка."
         ),
-    ] = 10_000
+    ] = DEFAULT_MAX_PENDING
     batch_overflow_policy: Annotated[
         str,
         FieldMeta("Что терять при переполнении: drop_oldest (кольцо) | drop_newest"),
-    ] = "drop_oldest"
+    ] = DEFAULT_OVERFLOW_POLICY
 
     modules: Annotated[
         Dict[str, LoggerModuleSchema],
@@ -219,3 +224,14 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             channels=["system_file"],
         ),
     }
+
+    @field_validator("batch_overflow_policy")
+    @classmethod
+    def _check_overflow_policy(cls, value: str) -> str:
+        """Отказ на ГРАНИЦЕ конфига, а не в конструкторе буфера.
+
+        Иначе опечатка всплывала бы посреди ``reconfigure``: старый буфер уже
+        остановлен, каналы пересозданы, ``self.config`` подменён — и менеджер
+        оставался бы в полуприменённом состоянии с молча выключенным батчингом.
+        """
+        return validate_overflow_policy(value)

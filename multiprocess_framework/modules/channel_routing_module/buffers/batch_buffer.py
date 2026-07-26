@@ -19,17 +19,36 @@ BatchBuffer — буферная стратегия с пакетной запи
     в stats отделяет такие сбросы от сбросов по заполнению.
 
 Потолок и потери (Ф0.3):
-    Пачка канала ограничена ``max_pending``. Раньше потолка не было вовсе: если
-    сток тормозил (медленный диск, зависший stdout, канал под удержанным
-    файловым локом), deque рос без предела — процесс съедал память тихо, а
-    наблюдаемость (которая и должна была об этом сказать) сама и была причиной.
-    При переполнении запись НЕ теряется молча: ``dropped_by_channel`` называет
-    канал-виновник, ``dropped`` даёт итог. Инвариант, проверяемый тестом:
+    Раньше буфер был безлимитным. Память при этом росла НЕ в deque (его держит
+    триггер ``max_size``), а в пачках «в полёте»: медленный сток не мешал каждому
+    следующему потоку начать СВОЙ сброс, и число одновременно живых пачек ничем
+    не ограничивалось. Поэтому лечение двойное:
+
+      1. ``_in_flight`` — один сбрасывающий поток на канал. Остальные копят;
+      2. ``max_pending`` — потолок накопленного, с политикой ``overflow_policy``.
+
+    Ключевое свойство: потолок роняет записи ТОЛЬКО пока сток занят. При
+    свободном стоке переполнение лечится сбросом, поэтому конфигурация
+    ``max_pending < max_size`` не превращает батчинг в сэмплирование на здоровой
+    системе (находка ревью первой редакции Ф0.3).
+
+    Ничто не теряется молча. Две разные потери названы по-разному:
+    ``dropped``/``dropped_by_channel`` — не приняли на входе (потолок);
+    ``flush_failed``/``flush_failed_by_channel`` — отдали в сток, а сток не
+    принял (канала нет, ``write`` упал). Инвариант, проверяемый тестом:
 
         total_enqueued == total_flushed + Σ pending + dropped
+                          + flush_failed + in_flight_records
 
-    (в момент, когда ни один flush не выполняется). ``total_enqueued`` считает
-    ВСЕ вызовы ``enqueue()``, включая отвергнутые потолком.
+    Он честен В ЛЮБОЙ момент, включая момент активного сброса, — именно тогда
+    на счётчики и смотрят. ``total_enqueued`` считает ВСЕ вызовы ``enqueue()``,
+    включая отвергнутые потолком.
+
+    Контракт ``flush_fn``: возврат ``int`` = число ФАКТИЧЕСКИ принятых записей.
+    Возврат ``None`` (прежний контракт) означает «сток не рапортует» — пачка
+    считается доставленной целиком. Без этого `total_flushed` означал бы
+    «отдано», а не «записано», и счётчики показывали бы здоровую плоскость при
+    стопроцентной потере (вторая находка того же ревью).
 
     Кто этим пользуется: с Ф0.9 — НИКТО из лог-слоя. ``LoggerCore`` и
     ``ErrorManager`` больше не кладут error/critical в буфер вообще (пишут
@@ -57,7 +76,24 @@ from ..interfaces import IBufferStrategy
 #: Политики поведения при переполнении пачки канала.
 OVERFLOW_DROP_OLDEST = "drop_oldest"
 OVERFLOW_DROP_NEWEST = "drop_newest"
-_OVERFLOW_POLICIES = (OVERFLOW_DROP_OLDEST, OVERFLOW_DROP_NEWEST)
+OVERFLOW_POLICIES = (OVERFLOW_DROP_OLDEST, OVERFLOW_DROP_NEWEST)
+
+#: Дефолты потолка — ОДИН источник на весь фреймворк. Схемы конфигов
+#: (logger/error/observability) импортируют их, а не переписывают числом:
+#: пять копий дефолта расходятся молча.
+DEFAULT_MAX_PENDING = 10_000
+DEFAULT_OVERFLOW_POLICY = OVERFLOW_DROP_OLDEST
+
+
+def validate_overflow_policy(value: str) -> str:
+    """Проверить политику переполнения. Единая точка для схем и для буфера.
+
+    Вызывается валидаторами конфигов (отказ на ГРАНИЦЕ — до того, как правка
+    коснётся живых менеджеров) и конструктором буфера (защита в глубину).
+    """
+    if value not in OVERFLOW_POLICIES:
+        raise ValueError(f"overflow_policy={value!r} — допустимы {OVERFLOW_POLICIES}")
+    return value
 
 
 @dataclass
@@ -111,10 +147,17 @@ class BatchBuffer(IBufferStrategy):
         self._batches: Dict[str, Deque[Dict[str, Any]]] = defaultdict(deque)
         self._last_flush_time: Dict[str, float] = {}
 
-        if self._config.overflow_policy not in _OVERFLOW_POLICIES:
-            raise ValueError(
-                f"BatchConfig.overflow_policy={self._config.overflow_policy!r} — допустимы {_OVERFLOW_POLICIES}"
-            )
+        # Защита в глубину: основная проверка живёт в схемах конфигов (отказ на
+        # границе, до касания живых менеджеров), здесь — для прямых вызовов.
+        validate_overflow_policy(self._config.overflow_policy)
+
+        #: Каналы, для которых сброс сейчас выполняется (пачка «в полёте»).
+        #: Гарантирует один сбрасывающий поток на канал — см. _flush_channel.
+        self._in_flight: set = set()
+        #: Сколько записей прямо сейчас находится внутри flush_fn. Без этой
+        #: графы инвариант учёта не сходился бы в момент сброса — а именно в
+        #: этот момент оператор и смотрит на подвисший сток.
+        self._in_flight_records: int = 0
 
         self._total_enqueued: int = 0
         self._total_batches: int = 0
@@ -122,6 +165,9 @@ class BatchBuffer(IBufferStrategy):
         self._urgent_flush_requests: int = 0
         self._dropped: int = 0
         self._dropped_by_channel: Dict[str, int] = defaultdict(int)
+        self._flush_failed: int = 0
+        self._flush_failed_by_channel: Dict[str, int] = defaultdict(int)
+        self._flush_skipped_busy: int = 0
         self._errors: int = 0
 
         self._timer_thread: Optional[threading.Thread] = None
@@ -177,15 +223,29 @@ class BatchBuffer(IBufferStrategy):
             self._total_enqueued += 1
 
             limit = self._config.max_pending
-            if 0 < limit <= len(batch):
+            overflowed = 0 < limit <= len(batch)
+            sink_busy = channel in self._in_flight
+
+            # Потолок роняет запись ТОЛЬКО когда сбросом место не освободить —
+            # то есть сток уже занят предыдущей пачкой. При свободном стоке
+            # переполнение лечится сбросом, а не потерей: иначе конфигурация
+            # max_pending < max_size молча превращала бы батчинг в сэмплирование
+            # на полностью здоровой системе (находка ревью Ф0.3).
+            if overflowed and sink_busy:
                 self._dropped += 1
                 self._dropped_by_channel[channel] += 1
                 if self._config.overflow_policy == OVERFLOW_DROP_NEWEST:
                     # Новую запись не принимаем — пачка остаётся как была.
-                    return
-                batch.popleft()
+                    # ВАЖНО: не выходим из метода. Ранний return пропускал бы
+                    # расчёт триггеров, и канал с этой политикой залипал
+                    # навсегда (сток занят → нет сброса → сток не освободится).
+                    data = None
+                else:
+                    batch.popleft()
 
-            batch.append(data)
+            if data is not None:
+                batch.append(data)
+
             current_size = len(batch)
             elapsed = time.time() - self._last_flush_time[channel]
 
@@ -199,7 +259,7 @@ class BatchBuffer(IBufferStrategy):
                 # _flush_channel уже вне lock-а, и при гонке пачку может осушить
                 # соседний поток — тогда запросов больше, чем записанных пачек.
                 self._urgent_flush_requests += 1
-            elif current_size >= self._config.max_size:
+            elif current_size >= self._config.max_size or overflowed:
                 should_flush = True
             elif elapsed >= self._config.flush_interval:
                 should_flush = True
@@ -230,45 +290,90 @@ class BatchBuffer(IBufferStrategy):
 
     @property
     def stats(self) -> Dict[str, Any]:
+        """Когерентный снимок: ВСЕ счётчики читаются под одним локом.
+
+        Иначе опубликованный наружу инвариант нарушался бы на здоровом процессе
+        (`dropped != sum(dropped_by_channel)`), а по нему теперь судят операторы
+        и агенты через ``introspect.observability``. Это не hot-path.
+        """
         with self._lock:
-            pending = {ch: len(buf) for ch, buf in self._batches.items()}
-            dropped_by_channel = dict(self._dropped_by_channel)
-        return {
-            "type": "batch",
-            "total_enqueued": self._total_enqueued,
-            "total_batches": self._total_batches,
-            "urgent_flush_requests": self._urgent_flush_requests,
-            "total_flushed": self._total_flushed,
-            # Имя ключа совпадает с AsyncSenderBuffer.stats["dropped"] — у соседней
-            # стратегии потолок и счётчик потерь были с самого начала.
-            "dropped": self._dropped,
-            "dropped_by_channel": dropped_by_channel,
-            "max_pending": self._config.max_pending,
-            "overflow_policy": self._config.overflow_policy,
-            "errors": self._errors,
-            "pending": pending,
-            "running": bool(self._timer_thread and self._timer_thread.is_alive()),
-        }
+            return {
+                "type": "batch",
+                "total_enqueued": self._total_enqueued,
+                "total_batches": self._total_batches,
+                "urgent_flush_requests": self._urgent_flush_requests,
+                "total_flushed": self._total_flushed,
+                # Имя ключа совпадает с AsyncSenderBuffer.stats["dropped"] — у соседней
+                # стратегии потолок и счётчик потерь были с самого начала.
+                "dropped": self._dropped,
+                "dropped_by_channel": dict(self._dropped_by_channel),
+                # Отдано в сток, но сток НЕ принял (канала нет, write упал).
+                # Отдельно от dropped: там потеря на входе, здесь — на выходе.
+                "flush_failed": self._flush_failed,
+                "flush_failed_by_channel": dict(self._flush_failed_by_channel),
+                "flush_skipped_busy": self._flush_skipped_busy,
+                "in_flight": sorted(self._in_flight),
+                "in_flight_records": self._in_flight_records,
+                "max_pending": self._config.max_pending,
+                "overflow_policy": self._config.overflow_policy,
+                "errors": self._errors,
+                "pending": {ch: len(buf) for ch, buf in self._batches.items()},
+                "running": bool(self._timer_thread and self._timer_thread.is_alive()),
+            }
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     def _flush_channel(self, channel: str) -> None:
-        """Атомарно извлечь пачку, затем вызвать flush_fn вне lock-а."""
+        """Атомарно извлечь пачку, затем вызвать flush_fn вне lock-а.
+
+        Один канал сбрасывается не более чем одним потоком одновременно
+        (``_in_flight``). Без этого медленный сток порождал неограниченное число
+        параллельных сбросов — и память росла не в deque (его держит max_size),
+        а в пачках «в полёте», которых потолок не касается вовсе.
+
+        Учёт доставки: если ``flush_fn`` возвращает int, это число ФАКТИЧЕСКИ
+        принятых записей; разница уходит в ``flush_failed``. Возврат ``None``
+        (старый контракт) означает «сток не рапортует» — тогда пачка считается
+        доставленной целиком, как и раньше.
+        """
         with self._lock:
+            if channel in self._in_flight:
+                self._flush_skipped_busy += 1
+                return
             if not self._batches.get(channel):
                 return
             batch = list(self._batches[channel])
             self._batches[channel].clear()
             self._last_flush_time[channel] = time.time()
             self._total_batches += 1
-            self._total_flushed += len(batch)
+            self._in_flight.add(channel)
+            self._in_flight_records += len(batch)
 
+        written: Any = None
+        failed = False
         try:
-            self._flush_fn(channel, batch)
-        except Exception:
-            self._errors += 1
+            written = self._flush_fn(channel, batch)
+        except Exception:  # noqa: BLE001 — сбой стока не имеет права ронять эмитента
+            failed = True
+
+        with self._lock:
+            self._in_flight.discard(channel)
+            size = len(batch)
+            self._in_flight_records -= size
+            if failed:
+                self._errors += 1
+                accepted = 0
+            elif isinstance(written, int) and not isinstance(written, bool):
+                accepted = max(0, min(written, size))
+            else:
+                accepted = size
+            self._total_flushed += accepted
+            lost = size - accepted
+            if lost:
+                self._flush_failed += lost
+                self._flush_failed_by_channel[channel] += lost
 
     def _timer_worker(self) -> None:
         """Периодически вызывает flush_all() по интервалу."""

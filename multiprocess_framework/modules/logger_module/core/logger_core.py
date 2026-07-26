@@ -48,6 +48,23 @@ _fallback_logger = _stdlib_logging.getLogger(__name__)
 log_context: ContextVar[Dict[str, Any]] = ContextVar("log_context", default={})
 
 
+def _channel_accepted(result: Any) -> bool:
+    """Принял ли канал запись.
+
+    ``IChannel.write`` обязан возвращать ``{"status": "success"|"error", ...}``
+    и ловит свои ошибки САМ (см. ``LogChannel.write``) — исключение наружу не
+    летит. Значит «не бросил» не равно «записал»: без разбора статуса сломанный
+    приёмник считался бы рабочим, батч — доставленным, а floor ошибок не
+    срабатывал бы при живом, но нерабочем канале.
+
+    Каналы, не возвращающие статус (None / не-dict), считаются принявшими —
+    это прежний контракт, ломать его на ровном месте нельзя.
+    """
+    if isinstance(result, dict):
+        return result.get("status") != "error"
+    return True
+
+
 class LoggerCore(ChannelRoutingManager, ILoggerManager):
     """
     Общий лог-слой (наследует ChannelRoutingManager).
@@ -297,8 +314,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                     # Ф0.3: потолок операбелен из конфига — иначе «ограничили»
                     # означало бы «зашили константу», и оператор не может ни
                     # поднять его под свою нагрузку, ни проверить срабатывание.
-                    max_pending=getattr(self.config, "batch_max_pending", 10_000),
-                    overflow_policy=getattr(self.config, "batch_overflow_policy", "drop_oldest"),
+                    # Без getattr-фолбэка: поле объявлено в обеих схемах
+                    # (Logger/Error), и молчаливый откат на свою копию дефолта
+                    # прятал бы расхождение схем вместо того, чтобы его показать.
+                    max_pending=self.config.batch_max_pending,
+                    overflow_policy=self.config.batch_overflow_policy,
                 ),
             )
         else:
@@ -366,24 +386,33 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         """
         self._decision_cache.clear()
 
-    def _flush_batch(self, channel: str, batch: List[Dict]):
-        """Callback для BatchBuffer — записать пачку в канал."""
-        ch = self._channel_registry.get(channel)
-        if ch is not None:
-            for record_dict in batch:
-                try:
-                    ch.write(record_dict)
-                except Exception:  # nosec B110 — глушим per-record ошибки записи, чтобы не порождать лог-шторм внутри логгера
-                    pass
-            return
+    def _flush_batch(self, channel: str, batch: List[Dict]) -> int:
+        """Callback для BatchBuffer — записать пачку в канал.
 
-        ch = self._module_channels.get(channel.replace("module_", "", 1))
-        if ch is not None:
-            for record_dict in batch:
-                try:
-                    ch.write(record_dict)
-                except Exception:  # nosec B110 — см. выше
-                    pass
+        Returns:
+            Число записей, которые канал ФАКТИЧЕСКИ принял.
+
+        Возврат обязателен (Ф0.3, ревью). Раньше метод возвращал ``None`` и молча
+        выходил, если канала нет, — буфер считал такую пачку доставленной, и при
+        снятых приёмниках ``get_stats`` рапортовал «доставлено N, потерь 0» при
+        нуле байт на диске. Разницу между отданным и принятым буфер теперь
+        относит на ``flush_failed_by_channel``.
+        """
+        ch = self._channel_registry.get(channel)
+        if ch is None:
+            ch = self._module_channels.get(channel.replace("module_", "", 1))
+        if ch is None:
+            # Канала нет — вся пачка потеряна. Не событие «ничего не произошло».
+            return 0
+
+        written = 0
+        for record_dict in batch:
+            try:
+                if _channel_accepted(ch.write(record_dict)):
+                    written += 1
+            except Exception:  # nosec B110 — глушим per-record ошибки записи, чтобы не порождать лог-шторм внутри логгера
+                pass
+        return written
 
     # =========================================================================
     # ОСНОВНОЙ API ЛОГИРОВАНИЯ
@@ -526,8 +555,8 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 ch = self._module_channels.get(ch_name.replace("module_", "", 1))
             if ch is not None:
                 try:
-                    ch.write(record_dict)
-                    written += 1
+                    if _channel_accepted(ch.write(record_dict)):
+                        written += 1
                 except Exception:  # nosec B110 — глушим ошибку записи в канал, чтобы не порождать лог-шторм внутри логгера
                     pass
         return written
