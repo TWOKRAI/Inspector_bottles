@@ -111,7 +111,8 @@ logger_module/
 │   └── log_channel.py        ← LogChannel(ILogChannel), FileChannel, ConsoleChannel, HttpChannel
 │
 ├── adapters/
-│   └── logger_adapter.py     ← LoggerAdapter (для интеграции с процессами)
+│   ├── logger_adapter.py     ← LoggerAdapter (для интеграции с процессами)
+│   └── std_facade.py         ← StdLoggerFacade / get_std_logger (мост из stdlib-стиля)
 │
 └── tests/
     └── test_logger_manager.py
@@ -174,6 +175,24 @@ logger.warning("queue almost full", module="worker_module")
 logger.error("connection failed", module="network")
 logger.critical("out of memory", module="allocator")
 ```
+
+### Прикладной код в stdlib-стиле — `get_std_logger()`
+
+Модуль, написанный как `logger = logging.getLogger(__name__)`, в процессе фреймворка
+пишет в никуда: у корневого stdlib-логгера нет хендлеров, запись не попадает ни в
+`logs/<proc>/*.log`, ни в консольный канал. Мост — `StdLoggerFacade`:
+
+```python
+from multiprocess_framework.modules.logger_module import get_std_logger
+
+logger = get_std_logger("gui")          # имя per-module файла: gui/trace/camera/…
+logger.warning("процесс '%s' не удалён", name)   # → logs/<proc>/gui.log + scope-каналы
+```
+
+Поверхность совпадает со stdlib (`debug/info/warning/error/critical/exception/log`),
+включая `%`-форматирование. Если `LoggerManager` ещё не поднят — запись уходит в
+обычный `logging` (фолбэк `mpf.<module>`), а не теряется. Резолв менеджера ленивый:
+модули импортируются до `init_logging()`.
 
 ### Методы по области (scope явный)
 

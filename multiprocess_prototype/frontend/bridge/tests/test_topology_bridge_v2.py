@@ -242,10 +242,12 @@ class TestHotAddProcess:
 class TestHotRemoveProcess:
     """Контракт после GATE G4: отказ целиком вместо разрушительной половины.
 
-    Регресс, который здесь закрыт: ``process.hot_remove`` приёмника не имеет, а
-    каскадный ``wire.teardown`` — имеет и отрабатывает. Прежняя реализация рвала
-    провода живому процессу и возвращала True. Процесс оставался «зомби» без
-    ввода-вывода.
+    Что закрыто: ``process.hot_remove`` приёмника не имеет (живой прогон
+    2026-07-26: ``No handler for key 'process.hot_remove'``), а метод возвращал
+    ``True`` — GUI считал процесс удалённым, тот продолжал работать.
+
+    Каскад ``disconnect_wire`` перед удалением снят по контракту, а не по
+    доказанному ущербу: в проде он не запускался (см. docstring метода).
     """
 
     def test_reports_failure_and_sends_nothing(self, bridge: TopologyBridge, sender: MockSender) -> None:
@@ -255,7 +257,12 @@ class TestHotRemoveProcess:
         assert sender.system_commands == []
 
     def test_process_not_found(self, bridge: TopologyBridge, sender: MockSender) -> None:
-        """hot_remove несуществующего процесса → False."""
+        """hot_remove процесса не из топологии → тот же False, тот же отказ.
+
+        Ранняя проверка существования снята: вердикт в обеих ветках одинаков, а
+        сообщение «процесс не найден» на реальном пути (топология уже сохранена
+        без процесса, сам процесс жив) сбивало с толку.
+        """
         ok = bridge.hot_remove_process("nonexistent")
         assert ok is False
         assert len(sender.system_commands) == 0
@@ -264,8 +271,6 @@ class TestHotRemoveProcess:
         """РЕГРЕСС-СТРАЖ: каскад wire.teardown НЕ запускается, пока remove неисполним.
 
         У ``camera_0`` есть wire camera_0.capture.output|processor_0.color_mask.input.
-        Раньше он отключался — и это единственное место, где «ложь про успех»
-        производила реальный разрушительный эффект.
         """
         bridge.hot_remove_process("camera_0")
         teardown_cmds = [c for c in sender.system_commands if c["cmd"] == "wire.teardown"]

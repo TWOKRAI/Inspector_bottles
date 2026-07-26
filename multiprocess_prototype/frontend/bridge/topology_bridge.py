@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from multiprocess_framework.modules.logger_module import get_logger
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from .diff_engine import compute_diff
 from .wire_protocol import WireConfig, ShmConfig, validate_wire
@@ -33,38 +33,19 @@ from .system_commands import (
 from .wire_monitor import WireStatusMonitor
 
 
+# module="trace" — диагностические сообщения уходят в logs/<proc>/trace.log
+# (см. LoggerManagerConfig.modules["trace"]) плюс в scope-каналы.
+#
+# Раньше здесь жил локальный шим с той же задачей, но он молчал, когда
+# LoggerManager ещё не поднят. Фреймворковый StdLoggerFacade в этом случае
+# пишет в stdlib — не так хорошо, как файл процесса, но не в никуда.
+logger = get_std_logger("trace")
+
+
 def _log(msg: str, level: str = "info") -> None:
-    """Записать в LoggerManager (если инициализирован), иначе тихо.
+    """Записать в trace-модуль LoggerManager."""
+    logger.log(level, msg)
 
-    module="trace" — диагностические сообщения уходят в logs/<proc>/trace.log
-    (см. LoggerManagerConfig.modules["trace"]) плюс в scope-каналы.
-    """
-    lm = get_logger()
-    if lm is None:
-        return
-    getattr(lm, level)(msg, module="trace")
-
-
-# Тонкая прокси-обёртка чтобы прежний `logger.warning(...)` стиль работал
-# без массовых правок в файле. Все вызовы делегируются в LoggerManager.
-class _LegacyLoggerShim:
-    def info(self, msg: str, *args: Any) -> None:
-        _log(msg % args if args else msg)
-
-    def warning(self, msg: str, *args: Any) -> None:
-        _log(msg % args if args else msg, level="warning")
-
-    def error(self, msg: str, *args: Any) -> None:
-        _log(msg % args if args else msg, level="error")
-
-    def debug(self, msg: str, *args: Any) -> None:
-        _log(msg % args if args else msg, level="debug")
-
-    def exception(self, msg: str, *args: Any) -> None:
-        _log(msg % args if args else msg, level="error")
-
-
-logger = _LegacyLoggerShim()
 
 # Дефолтный debounce для числовых полей с min/max (slider)
 _DEFAULT_SLIDER_DEBOUNCE_MS = 50
@@ -402,15 +383,13 @@ class TopologyBridge:
         процессы транзакционно и умеет rollback.
 
         Код метода сохранён намеренно (ярус frozen, `docs/MODULE_TIERS.md`): когда
-        приёмник появится, достаточно снять этот ранний выход.
+        приёмник появится, достаточно снять этот ранний выход и вернуть проверку
+        существования (см. `_process_exists`) — сейчас она снята как бессмысленная:
+        вердикт всё равно ``False`` в обеих ветках.
 
         Returns:
             Всегда ``False`` — операция не поддержана бэкендом.
         """
-        if self._process_exists(process_name):
-            logger.warning("TopologyBridge.hot_add: процесс '%s' уже существует", process_name)
-            return False
-
         logger.warning(
             "TopologyBridge.hot_add('%s'): команда process.hot_add НЕ поддержана "
             "ProcessManager (приёмника нет) — процесс НЕ создан. Живой путь: "
@@ -427,33 +406,40 @@ class TopologyBridge:
     ) -> bool:
         """Горячее удаление процесса — НЕ ИСПОЛНИМО: у команды нет приёмника.
 
-        **Почему здесь ранний выход, а не «как было».** У ``process.hot_remove``
-        нет хендлера в ProcessManager (проверено вживую: ответ
-        ``{"status": "error", "reason": "No handler for key 'process.hot_remove'"}``).
-        Прежняя реализация при этом успевала выполнить каскад ``disconnect_wire``,
-        а ``wire.teardown`` приёмник ИМЕЕТ и отрабатывает по-настоящему. Итог был
-        разрушительным: сам процесс продолжал жить, но провода ему уже оторвали —
-        оставался «зомби» без ввода-вывода, и метод возвращал ``True``.
+        **Что доказано.** У ``process.hot_remove`` нет хендлера в ProcessManager —
+        живой прогон 2026-07-26 через driver вернул
+        ``{"success": false, "result": {"reason": "No handler for key
+        'process.hot_remove'"}}``. Прежняя реализация возвращала ``True``: GUI
+        считал процесс удалённым, а тот продолжал работать (status running).
 
-        Пока remove неисполним, каскад не запускается: половина операции хуже, чем
-        отказ целиком. Живой путь удаления — ``topology.apply``
-        (PM считает diff и делает ``process.stop_all``/``cleanup`` транзакционно).
+        **Чего НЕ было** (первая формулировка G4 утверждала обратное, живая
+        проверка её опровергла): каскад ``disconnect_wire`` перед удалением в
+        проде не запускался ни разу. С кнопки удаления presenter сохраняет
+        топологию БЕЗ процесса до вызова моста, поэтому срабатывала первая же
+        проверка ``_process_exists``; единственный другой вызывающий каскада —
+        ``apply_topology_diff`` из замороженной ветки ActionBus. Плюс сам
+        ``wire.teardown`` реально рвёт только рантайм-провода (созданные явным
+        ``wire.setup``); boot-провода рецепта в его реестре не значатся.
 
-        Код каскада и построение команды сохранены намеренно (ярус frozen): когда
-        приёмник появится, снять ранний выход.
+        Каскад всё равно снят: делать половину операции, когда вторая половина
+        неисполнима, нечем оправдать. Живой путь удаления — ``topology.apply``
+        (PM считает diff и делает stop/cleanup транзакционно).
+
+        **Почему нет ранней проверки существования.** Она стояла первой и на
+        реальном пути выдавала «процесс не найден» — сообщение верное по
+        топологии и полностью сбивающее с толку по сути (процесс-то жив в
+        рантайме). Вердикт в обеих ветках одинаковый, так что проверка ничего не
+        решала, зато стоила одной неверной диагностики. Код построения команды
+        сохранён (ярус frozen): когда приёмник появится, снять ранний выход.
 
         Returns:
             Всегда ``False`` — операция не поддержана бэкендом.
         """
-        if not self._process_exists(process_name):
-            logger.warning("TopologyBridge.hot_remove: процесс '%s' не найден", process_name)
-            return False
-
         logger.warning(
             "TopologyBridge.hot_remove('%s'): команда process.hot_remove НЕ поддержана "
-            "ProcessManager (приёмника нет) — процесс НЕ удалён, каскад wire.teardown "
-            "НЕ запускался (иначе живой процесс остался бы без проводов). Живой путь: "
-            "topology.apply через ProcessManagerProxy.apply_topology",
+            "ProcessManager (приёмника нет) — процесс НЕ удалён и продолжит работать. "
+            "Каскад wire.teardown не запускался. Живой путь: topology.apply через "
+            "ProcessManagerProxy.apply_topology",
             process_name,
         )
         return False
@@ -561,9 +547,10 @@ class TopologyBridge:
 
             # 1. Wire'ы удалённых процессов НЕ отключаем.
             # Раньше здесь шёл каскад disconnect_wire, а на шаге 3 — hot_remove,
-            # у которого нет приёмника. `wire.teardown` при этом отрабатывает
-            # по-настоящему → процесс оставался жив, но без проводов («зомби»).
-            # Пока шаг 3 неисполним, каскад запрещён: половина операции хуже отказа.
+            # у которого нет приёмника: половина операции при неисполнимой второй
+            # половине. Прод это не задевало (единственный вызывающий метода —
+            # замороженная ветка ActionBus), но контракт был нечестен: результат
+            # рапортовал успех за отброшенные команды.
             for pdiff in diff.removed_processes:
                 result.errors.append(
                     f"Процесс '{pdiff.process_name}': удаление на лету не поддержано "

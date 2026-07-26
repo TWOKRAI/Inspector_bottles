@@ -11,9 +11,9 @@ Pure Python (без Qt импортов кроме TYPE_CHECKING).
 """
 
 from __future__ import annotations
-import logging
 from typing import TYPE_CHECKING, Any
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.domain.entities import Process, WorkerSpec
 from multiprocess_prototype.frontend.bridge.worker_bridge import WorkerBridge
@@ -29,7 +29,12 @@ from .data import (  # noqa: F401  (реэкспорт констант для �
     ProcessInfo,
 )
 
-logger = logging.getLogger(__name__)
+# G4-live: раньше здесь стоял `logging.getLogger(__name__)`. В процессе GUI у
+# корневого stdlib-логгера нет хендлеров, поэтому WARNING о расхождении конфига
+# и рантайма (см. delete_process) не попадал ни в logs/<proc>/gui.log, ни в
+# консоль — живая проверка 2026-07-26 показала пустоту в обоих местах.
+# module="gui" → logs/<proc>/gui.log плюс scope-каналы (console/system.log).
+logger = get_std_logger("gui")
 
 
 class ProcessesPresenter:
@@ -432,12 +437,13 @@ class ProcessesPresenter:
     def delete_process(self, name: str) -> bool:
         """Удалить процесс: персист (remove из топологии) + live hot_remove. Protected — запрет.
 
-        H-3: у команды ``process.hot_remove`` НЕТ приёмника в PM (проверено вживую —
-        ``send_command`` возвращает ``{"status": "error", "reason": "No handler for
-        key 'process.hot_remove'"}``). Персист (save) выполняется в любом случае —
-        return True означает «сохранено в конфиге», а НЕ «удалено из рантайма».
-        Если процесс был жив — он продолжит работать до рестарта; расхождение
-        конфига и рантайма логируется WARNING ниже (раньше — молча глоталось).
+        H-3: у команды ``process.hot_remove`` НЕТ приёмника в PM. Живой прогон
+        2026-07-26 вернул ``{"success": false, "result": {"reason": "No handler for
+        key 'process.hot_remove'"}}``, процесс при этом остался ``running``.
+        Персист (save) выполняется в любом случае — return True означает
+        «сохранено в конфиге», а НЕ «удалено из рантайма». Расхождение конфига и
+        рантайма логируется WARNING ниже — и с 2026-07-26 это предупреждение
+        действительно доходит до логов процесса (см. комментарий у ``logger``).
         """
         if self.is_protected(name):
             return False

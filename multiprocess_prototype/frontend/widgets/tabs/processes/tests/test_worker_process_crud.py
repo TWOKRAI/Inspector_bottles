@@ -192,3 +192,65 @@ class TestProcessCrud:
     def test_delete_missing_returns_false(self) -> None:
         presenter, _s, _b = _make_presenter()
         assert presenter.delete_process("ghost") is False
+
+
+# ====================================================================== #
+#  Видимость расхождения конфига и рантайма (G4-live 2026-07-26)         #
+# ====================================================================== #
+
+
+class _RefusingBridge:
+    """Мост, который честно отвечает «live-удаление не поддержано»."""
+
+    def hot_remove_process(self, name: str) -> bool:
+        return False
+
+
+class _RecordingLoggerManager:
+    """Дубль LoggerManager: собирает (level, message, module)."""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str, str]] = []
+
+    def warning(self, message: str, module: str = "main", **_extra: Any) -> None:
+        self.records.append(("warning", message, module))
+
+    def info(self, message: str, module: str = "main", **_extra: Any) -> None:
+        self.records.append(("info", message, module))
+
+
+class TestDivergenceIsVisible:
+    """Удалили из конфига, процесс жив — это обязано быть видно в логах процесса.
+
+    Живая проверка 2026-07-26: presenter логировал через stdlib
+    ``logging.getLogger(__name__)``, у которого в процессе GUI нет хендлеров.
+    Пользователь удалял процесс, тот продолжал работать (status running, hz 21.36),
+    и ни в ``logs/<proc>/gui.log``, ни в консоли не было ни строки.
+    """
+
+    def test_warning_reaches_logger_manager(self, monkeypatch: Any) -> None:
+        from multiprocess_framework.modules.logger_module.adapters import std_facade
+
+        lm = _RecordingLoggerManager()
+        monkeypatch.setattr(std_facade, "get_logger", lambda: lm)
+
+        services = make_processes_services(use_holder=True)
+        presenter = ProcessesPresenter(services, command_sender=_FakeSender(), topology_bridge=_RefusingBridge())
+
+        assert presenter.delete_process("processor") is True, "персист в конфиг выполнен"
+
+        warnings = [r for r in lm.records if r[0] == "warning" and "processor" in r[1]]
+        assert warnings, "расхождение конфига и рантайма обязано попасть в LoggerManager"
+        assert warnings[0][2] == "gui", "module='gui' → logs/<proc>/gui.log"
+
+    def test_no_warning_when_runtime_confirmed_removal(self, monkeypatch: Any) -> None:
+        """Мост подтвердил удаление — расхождения нет, шуметь не о чем."""
+        from multiprocess_framework.modules.logger_module.adapters import std_facade
+
+        lm = _RecordingLoggerManager()
+        monkeypatch.setattr(std_facade, "get_logger", lambda: lm)
+
+        presenter, _s, _b = _make_presenter()  # _FakeTopologyBridge возвращает True
+
+        assert presenter.delete_process("processor") is True
+        assert [r for r in lm.records if r[0] == "warning"] == []

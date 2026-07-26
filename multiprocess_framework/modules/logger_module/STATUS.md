@@ -13,6 +13,17 @@
 | Дублирование | 10 | Нет: registry, BatchBuffer, Dispatcher — из CRM |
 | Работоспособность | 8 | BatchBuffer + scope routing; ErrorManager без LogDispatcher |
 
+## Обновление 2026-07-26 (G4-live)
+
+- **`adapters/std_facade.py`:** `StdLoggerFacade` + `get_std_logger(module)` — мост из
+  stdlib-стиля (`logger.warning("%s", x)`) в `LoggerManager`. Повод: живой прогон показал,
+  что 44 файла GUI-слоя прототипа пишут через `logging.getLogger(__name__)`, у которого в
+  процессе нет ни одного хендлера → записи не доходили ни до `logs/<proc>/*.log`, ни до
+  консоли. Без менеджера фасад пишет в stdlib (фолбэк), а не молчит: тишина — второй
+  проглот той же ошибки. 18 тестов (`tests/test_std_facade.py`).
+- Первые потребители: `topology_bridge.py` (заменил локальный шим), `processes/presenter.py`.
+  Остальные 43 файла — задача H.4.
+
 ## Обновление 2026-04-01
 
 - Резолв относительных путей логов: **`core/log_paths.py`**, поле **`LoggerManagerConfig.log_directory`**; файлы по умолчанию не создаются в каталоге пакета при запуске из `modules/` (см. **ADR-111**).

@@ -30,6 +30,7 @@ from .channels.log_channel import (
 from .channels.router_push_channel import RouterPushChannel
 from .log_enums import LEVEL_ORDER, level_rank
 from .adapters.logger_adapter import LoggerAdapter
+from .adapters.std_facade import StdLoggerFacade, get_std_logger
 from .interfaces import ILoggerManager, ILogChannel
 
 __all__ = [
@@ -51,6 +52,8 @@ __all__ = [
     "LEVEL_ORDER",
     "level_rank",
     "LoggerAdapter",
+    "StdLoggerFacade",
+    "get_std_logger",
     "ILoggerManager",
     "ILogChannel",
     "get_logger",
