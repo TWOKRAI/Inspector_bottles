@@ -85,8 +85,18 @@
 | `WidgetRegistry` (7d) | `frontend_module` | ~~G0 №5: KILL после G2~~ → **G2: FREEZE** | доки + ревью; удаление снято с повестки H.2 |
 | Binding-aware механизм форм: `builders_binding` + `FormContext` (7b) | `frontend_module` | G2: FREEZE | доки; активный прод-путь — 7a legacy (`form_ctx=None`), 7b дремлет |
 | `entity_editor` ~1778 LOC (7c) | `frontend_module` | G2: FREEZE | доки; 0 живых потребителей (верифицировано E4) |
+| Мертвецы `data_schema_module`: `dna_factory`, `version_manager`, `schema_visualizer`, `storage_manager` (~2118 LOC) | `data_schema_module` | ~~G0 №4: KILL в Ф8~~ → **G4: FREEZE** (владелец, 2026-07-26) | доки. Причина пересмотра: не изолированы — внутренние потребители (`storage/process_data_container.py`, `factory/model_factory.py`, `api/manager_adapter.py`, `tools/examples/excel_formatter.py`) плюс `IStorageManager`/`IVersionManager`/`ISchemaVisualizer` в публичном `__all__`. Удаление = рефактор API живого core-модуля, выгода — только метрики |
+| Gen-1 виджеты прототипа: `CommandPanel`, `ProcessStatusWidget` (117 LOC) | `multiprocess_prototype` | ~~G0 №8: KILL в Ф8~~ → **G4: FREEZE** (владелец, 2026-07-26) | доки. Функция полностью перекрыта вкладкой «Процессы» (статусы, ProcessCard, live-телеметрия, отправка команд), но вреда нет: потребителей вне `test_bridge.py` ноль |
 
 **Почему такой список, а не «удалить мёртвое».** Владелец стабильно выбирает **FREEZE вместо KILL**: дремлющий рабочий и покрытый тестами механизм — капитал и опциональность (7b — готовый reactive/undoable write, если ADR-COMM-002 когда-нибудь оживёт). «Унификация N→1» здесь означает *сузить активный путь до одного*, а не физически удалить остальные. Отчёт-первоисточник по 4 механизмам — [`e4-forms-mechanism-diff.md`](../../plans/2026-07-06_constructor-master/e4-forms-mechanism-diff.md).
+
+**Критерий удаления (владелец, GATE G4, 2026-07-26).** Удалять допустимо, только если у функции есть **рабочий и используемый аналог, либо лучший**. Если код просто не используется — он остаётся: фреймворк-конструктор, деталь может пригодиться. Отсюда три класса, которые нельзя путать:
+
+| Класс | Признак | Что делаем |
+|---|---|---|
+| Дремлющий рабочий код | не вызывается, но исправен и покрыт тестами | **frozen** — капитал |
+| Осиротевший байткод | исходников нет, git каталог не отслеживает, остались `.pyc` | уборка (не решение гейта): убраны `Services/Operation_crop`, `Services/webcam_camera`, `Plugins/control/robot_draw` (исходники живут в [`Plugins/io/robot_draw`](../../Plugins/io/robot_draw)), `Plugins/control/vfd_control` |
+| Врущий API | вызываем, возвращает признак успеха, эффекта не производит | разбирается отдельно — хранение опаснее удаления |
 
 **Правило Ф4 (остаётся в силе):** манифесты и контракты пишутся только ярусам `core`/`optional`; замороженным фичам — нет.
 
