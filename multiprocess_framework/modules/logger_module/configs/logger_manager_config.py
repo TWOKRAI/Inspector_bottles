@@ -106,6 +106,23 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         FieldMeta("Что терять при переполнении: drop_oldest (кольцо) | drop_newest"),
     ] = DEFAULT_OVERFLOW_POLICY
 
+    # Ф0.7. Ротация ограничивает каждый файл, но не их число: живой замер дал
+    # 730 файлов / 291 МБ и ни одного удаления за 82 дня. Обе политики
+    # выключены по умолчанию — механизм, который сам решает что удалить, не
+    # включается молча.
+    retention_days: Annotated[
+        int,
+        FieldMeta("Удалять логи старше N суток (0 — выключено)", min=0, max=3650),
+    ] = 0
+    retention_total_mb: Annotated[
+        int,
+        FieldMeta("Потолок суммарного веса каталога логов, МБ (0 — выключено)", min=0, max=1_000_000),
+    ] = 0
+    compress_rotated: Annotated[
+        bool,
+        FieldMeta("Сжимать ротированные бэкапы (foo.log.1 → foo.log.1.gz)"),
+    ] = False
+
     modules: Annotated[
         Dict[str, LoggerModuleSchema],
         FieldMeta("Per-module файлы"),

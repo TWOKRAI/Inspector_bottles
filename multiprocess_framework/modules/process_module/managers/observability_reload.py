@@ -138,6 +138,12 @@ PLANE_COUNTER_KEYS: tuple = (
     "unresolved_channels",
     "channel_write_errors",
     "channel_write_errors_by_channel",
+    # Ф0.7 — чистка каталога логов: сколько удалено/сжато и сколько НЕ удалось.
+    "retention_files_deleted",
+    "retention_files_compressed",
+    "retention_delete_failures",
+    "retention_compress_failures",
+    "retention_bytes_freed",
 )
 
 

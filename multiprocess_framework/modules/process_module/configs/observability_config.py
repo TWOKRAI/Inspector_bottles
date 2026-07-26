@@ -101,6 +101,22 @@ class ObservabilityConfig(SchemaBase):
     console: Annotated[bool, FieldMeta("Включить консольный sink")] = True
     file: Annotated[bool, FieldMeta("Включить файловые sink-каналы (первичные)")] = True
 
+    # Ф0.7. Ротация ограничивает каждый файл, но не их число — за 82 дня
+    # накопилось 730 файлов / 291 МБ без единого удаления. Обе политики
+    # выключены по умолчанию: включать чистку молча нельзя.
+    retention_days: Annotated[
+        int,
+        FieldMeta("Удалять логи старше N суток (0 — выключено)", min=0, max=3650),
+    ] = 0
+    retention_total_mb: Annotated[
+        int,
+        FieldMeta("Потолок суммарного веса каталога логов, МБ (0 — выключено)", min=0, max=1_000_000),
+    ] = 0
+    compress_rotated: Annotated[
+        bool,
+        FieldMeta("Сжимать ротированные бэкапы (foo.log.1 → foo.log.1.gz)"),
+    ] = False
+
     errors: Annotated[
         ObservabilityErrorsConfig,
         FieldMeta("Секция ошибок"),
@@ -159,6 +175,12 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         "enable_batching": cfg.enable_batching,
         "batch_max_pending": cfg.batch_max_pending,
         "batch_overflow_policy": cfg.batch_overflow_policy,
+        # Ретеншен получает ТОЛЬКО logger: каталог логов один на процесс, и
+        # второй подметальщик (error) означал бы два прохода по одному дереву
+        # с гонкой за одни и те же файлы. Один каталог — один хозяин.
+        "retention_days": cfg.retention_days,
+        "retention_total_mb": cfg.retention_total_mb,
+        "compress_rotated": cfg.compress_rotated,
     }
     # log_directory эмитим ТОЛЬКО если задан явно: при overlay-merge поверх дефолтов
     # None затёр бы уже резолвнутый абсолютный путь (managers_from_log_dir). None =

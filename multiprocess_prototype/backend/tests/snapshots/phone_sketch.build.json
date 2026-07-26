@@ -1065,6 +1065,7 @@
         "commands": {
           "log_success": false
         },
+        "compress_rotated": false,
         "console": true,
         "enable_batching": true,
         "errors": {
@@ -1075,6 +1076,8 @@
         "file": true,
         "log_directory": null,
         "log_level": "INFO",
+        "retention_days": 0,
+        "retention_total_mb": 0,
         "stats": {
           "aggregation_interval": 5.0,
           "enabled": true,
@@ -1219,6 +1222,7 @@
               "url": null
             }
           },
+          "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
@@ -1297,6 +1301,8 @@
               "rotate": true
             }
           },
+          "retention_days": 0,
+          "retention_total_mb": 0,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -1506,6 +1512,7 @@
               "url": null
             }
           },
+          "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
@@ -1584,6 +1591,8 @@
               "rotate": true
             }
           },
+          "retention_days": 0,
+          "retention_total_mb": 0,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -1745,6 +1754,7 @@
               "url": null
             }
           },
+          "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
@@ -1823,6 +1833,8 @@
               "rotate": true
             }
           },
+          "retention_days": 0,
+          "retention_total_mb": 0,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -2081,6 +2093,7 @@
               "url": null
             }
           },
+          "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
@@ -2159,6 +2172,8 @@
               "rotate": true
             }
           },
+          "retention_days": 0,
+          "retention_total_mb": 0,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -2375,6 +2390,7 @@
               "url": null
             }
           },
+          "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
@@ -2453,6 +2469,8 @@
               "rotate": true
             }
           },
+          "retention_days": 0,
+          "retention_total_mb": 0,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -3260,6 +3278,7 @@
               "url": null
             }
           },
+          "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
@@ -3338,6 +3357,8 @@
               "rotate": true
             }
           },
+          "retention_days": 0,
+          "retention_total_mb": 0,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -3525,6 +3546,7 @@
               "url": null
             }
           },
+          "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
@@ -3603,6 +3625,8 @@
               "rotate": true
             }
           },
+          "retention_days": 0,
+          "retention_total_mb": 0,
           "scopes": {
             "BUSINESS": {
               "channels": [

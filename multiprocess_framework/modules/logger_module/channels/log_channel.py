@@ -5,13 +5,16 @@
 Все каналы наследуют ILogChannel(IChannel) — совместимы с ChannelRoutingManager.
 """
 
+import gzip
 import logging
 import logging.handlers
 import os
+import re
+import shutil
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 try:
     import requests
@@ -224,6 +227,276 @@ def _reset_shared_handler_registry() -> None:
                 pass
         _shared_handlers.clear()
         _shared_handler_refs.clear()
+
+
+# =============================================================================
+# Ретеншен каталога логов (Ф0.7)
+# =============================================================================
+#
+# Ротация ограничивает КАЖДЫЙ файл (max_size × backup_count), но не ограничивает
+# ЧИСЛО файлов. Живой замер 2026-07-26: ``logs/`` = 730 файлов / 291 МБ,
+# старейший от 2026-05-05 (82 дня, ни одного удаления), ~700 различных
+# ``.log``-баз. При исправно работающей ротации теоретический потолок — 41 ГБ.
+# Потолок стоял не там, где происходил рост.
+#
+# Ретеншен закрывает именно рост: удаление по возрасту, потолок на суммарный
+# вес каталога и компрессия ротированных бэкапов. ОБЕ политики выключены по
+# умолчанию — механизм, который сам решает что удалить, не имеет права
+# включаться молча.
+
+#: Имена файлов, которые sweep не трогает НИКОГДА, каким бы старым файл ни был.
+#: ``errors_floor.jsonl`` (Ф0.9) — последнее свидетельство о падении процесса;
+#: политика дискового места не должна отменять политику сохранности улик.
+PROTECTED_BASENAMES = frozenset({"errors_floor.jsonl"})
+
+#: Что считается ротированным бэкапом: ``foo.log.1``, ``foo.log.12``.
+#: Активный ``foo.log`` под шаблон НЕ попадает — сжимать файл, в который прямо
+#: сейчас пишет открытый хэндлер, нельзя.
+_ROTATED_BACKUP_RE = re.compile(r"\.log\.\d+$")
+
+_MB = 1024 * 1024
+_SEC_PER_DAY = 86400.0
+
+# «Сказали один раз на файл»: неудаляемый файл (на Windows — занятый другим
+# процессом) встречается на КАЖДОМ проходе sweep. Без памяти о сказанном
+# предупреждение превратилось бы в периодический шум ровно того рода, которым
+# логи и переполняются. Учёт при этом не глушится — счётчик растёт всегда.
+_retention_warn_lock = threading.Lock()
+_retention_warned_paths: set = set()
+#: Потолок множества «кому уже сказали»: оно не должно само стать утечкой.
+#: По достижении — предупреждения прекращаются (счётчик продолжает расти).
+_RETENTION_WARNED_LIMIT = 512
+
+
+def _reset_retention_warnings() -> None:
+    """Забыть, о каких файлах уже предупреждали (тест-хелпер)."""
+    with _retention_warn_lock:
+        _retention_warned_paths.clear()
+
+
+def _warn_retention_failure(path: Any, action: str, exc: BaseException) -> None:
+    """Предупредить о сбое sweep — не более одного раза на файл за жизнь процесса."""
+    key = _handler_key(path)
+    with _retention_warn_lock:
+        if key in _retention_warned_paths or len(_retention_warned_paths) >= _RETENTION_WARNED_LIMIT:
+            return
+        _retention_warned_paths.add(key)
+    _fallback_logger.warning(
+        "Ретеншен логов: не удалось %s '%s' (%s: %s). Файл остаётся на диске, "
+        "место не освобождено; повторные отказы по этому же файлу не сообщаются.",
+        action,
+        path,
+        type(exc).__name__,
+        exc,
+    )
+
+
+def _new_retention_result() -> Dict[str, int]:
+    return {
+        "deleted": 0,
+        "compressed": 0,
+        "delete_failures": 0,
+        "compress_failures": 0,
+        "bytes_freed": 0,
+    }
+
+
+def _remove_file(path: Path, result: Dict[str, int]) -> bool:
+    """Удалить файл; вернуть True, если после вызова его на диске нет.
+
+    Отказ учитывается по ФАКТУ («файл на месте»), а не по типу исключения.
+    Причина конкретная: при гонке двух подметальщиков за один файл Windows
+    отдаёт проигравшему не ``FileNotFoundError``, а ``PermissionError``
+    (WinError 5) — удаление уже идёт. Разбор по типу исключения давал бы
+    ненулевой счётчик отказов на исправно работающей системе, то есть ровно
+    ту ложную тревогу, ради борьбы с которой счётчик и заводился.
+    """
+    try:
+        os.remove(path)
+        return True
+    except FileNotFoundError:
+        # Кто-то удалил раньше — это результат, которого мы добивались.
+        return True
+    except OSError as exc:
+        # ``os.path.exists`` (а НЕ ``Path.exists``) намеренно: на Windows файл в
+        # состоянии delete-pending даёт PermissionError уже на stat, и
+        # ``Path.exists`` это исключение пробрасывает. Трактовать его как «файл
+        # на месте» значило бы записать в отказы ровно ту гонку, которая на
+        # самом деле закончилась удалением. ``os.path.exists`` глотает любой
+        # OSError и отвечает False — то есть «дотянуться нельзя», что для
+        # нашего вопроса («осталось ли что удалять») и есть правильный ответ.
+        if not os.path.exists(path):
+            return True
+        result["delete_failures"] += 1
+        _warn_retention_failure(path, "удалить", exc)
+        return False
+
+
+def _compress_backup(path: Path, result: Dict[str, int], mtime: float) -> bool:
+    """Сжать ротированный бэкап в ``<имя>.gz`` и удалить исходник.
+
+    Инвариант: на диске остаётся РОВНО ОДНА копия. Оборвавшаяся компрессия
+    убирает недописанный ``.gz`` (неполный архив хуже отсутствующего), а
+    неудачное удаление исходника откатывает уже созданный ``.gz`` — иначе
+    каталог получил бы обе копии и вырос вместо того, чтобы уменьшиться.
+
+    Возраст переносится на архив (``os.utime``). Без этого компрессия обнуляла
+    бы возраст: свежесозданный ``.gz`` выглядел бы для политики
+    ``retention_days`` минутным, и достаточно старый бэкап не удалялся бы
+    НИКОГДА — две политики работали бы друг против друга.
+    """
+    gz_path = Path(str(path) + ".gz")
+    try:
+        with open(path, "rb") as src, gzip.open(gz_path, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    except OSError as exc:
+        result["compress_failures"] += 1
+        _warn_retention_failure(path, "сжать", exc)
+        try:
+            os.remove(gz_path)
+        except OSError:  # nosec B110 — уборка недописанного архива best-effort
+            pass
+        return False
+
+    if not _remove_file(path, result):
+        # Исходник занят (WinError 32): откатываем архив, иначе двойной вес.
+        try:
+            os.remove(gz_path)
+        except OSError:  # nosec B110 — откат best-effort
+            pass
+        return False
+
+    try:
+        os.utime(gz_path, (mtime, mtime))
+    except OSError:  # nosec B110 — перенос возраста best-effort, архив уже валиден
+        pass
+    result["compressed"] += 1
+    return True
+
+
+def _scan_directory(root: Path, protected: set) -> Tuple[List[List[Any]], int]:
+    """Собрать кандидатов sweep и суммарный вес каталога.
+
+    Returns:
+        (entries, total_bytes) — ``entries`` это ``[path, mtime, size]`` только
+        для файлов, которые МОЖНО трогать; ``total_bytes`` считает и защищённые
+        тоже: место на диске они занимают наравне со всеми, и потолок каталога,
+        который их «не видит», был бы потолком не на то.
+    """
+    entries: List[List[Any]] = []
+    total = 0
+    for path in root.rglob("*"):
+        try:
+            if not path.is_file():
+                continue
+            stat = path.stat()
+        except OSError:
+            # Файл исчез между listdir и stat (сосед отротировал) — пропускаем.
+            continue
+        total += stat.st_size
+        if path.name in PROTECTED_BASENAMES or _handler_key(path) in protected:
+            continue
+        entries.append([path, stat.st_mtime, stat.st_size])
+    return entries, total
+
+
+def enforce_log_retention(
+    directory: Any,
+    *,
+    retention_days: int = 0,
+    retention_total_mb: int = 0,
+    compress_rotated: bool = False,
+    active_files: Iterable[Any] = (),
+) -> Dict[str, int]:
+    """Применить политики ретеншена к каталогу логов (рекурсивно).
+
+    Порядок шагов не произволен: сперва возраст (не тратить CPU на компрессию
+    того, что сейчас удалим), затем компрессия (освобождает место и может
+    увести каталог под потолок сама), затем потолок (добирает остаток
+    удалением старейших).
+
+    Args:
+        directory: корень каталога логов; обходится рекурсивно (``trace/`` и
+            прочие подпапки — часть того же хозяйства).
+        retention_days: удалять файлы старше N суток по mtime. 0 — выключено.
+        retention_total_mb: потолок суммарного веса каталога, МБ; при
+            превышении удаляются старейшие, пока каталог не уйдёт под потолок.
+            0 — выключено.
+        compress_rotated: сжимать ротированные бэкапы (``foo.log.1`` →
+            ``foo.log.1.gz``). Уже сжатые ``.gz`` — обычные файлы для политик
+            возраста и потолка, иммунитета у них нет.
+        active_files: пути, в которые прямо сейчас пишут открытые каналы. Не
+            удаляются и не сжимаются ни при каких условиях — удалить файл под
+            работающим хэндлером значит потерять поток записей молча.
+
+    Returns:
+        Счётчики прохода: ``deleted``, ``compressed``, ``delete_failures``,
+        ``compress_failures``, ``bytes_freed``.
+
+    Note:
+        Каждый менеджер метёт СВОЙ подкаталог (``logs/<процесс>/``), поэтому
+        удалить активный файл соседнего процесса структурно невозможно.
+        Обратная сторона: каталоги давно умерших процессов не метёт никто —
+        это разовая уборка, а не рост, и она вне объёма Ф0.7.
+    """
+    result = _new_retention_result()
+    if retention_days <= 0 and retention_total_mb <= 0 and not compress_rotated:
+        # Обе политики выключены — sweep обязан быть НИЧЕМ, а не «почти ничем»:
+        # выход до обхода каталога, ни одного stat.
+        return result
+
+    root = Path(directory)
+    if not root.is_dir():
+        return result
+
+    protected = {_handler_key(p) for p in active_files}
+    entries, total = _scan_directory(root, protected)
+
+    # 1. Возраст.
+    if retention_days > 0:
+        cutoff = time.time() - retention_days * _SEC_PER_DAY
+        survivors: List[List[Any]] = []
+        for entry in entries:
+            path, mtime, size = entry
+            if mtime < cutoff and _remove_file(path, result):
+                result["deleted"] += 1
+                result["bytes_freed"] += size
+                total -= size
+                continue
+            survivors.append(entry)
+        entries = survivors
+
+    # 2. Компрессия ротированных бэкапов.
+    if compress_rotated:
+        for entry in entries:
+            path, mtime, size = entry
+            if not _ROTATED_BACKUP_RE.search(path.name):
+                continue
+            if not _compress_backup(path, result, mtime):
+                continue
+            gz_path = Path(str(path) + ".gz")
+            try:
+                new_size = gz_path.stat().st_size
+            except OSError:
+                new_size = 0
+            total -= size - new_size
+            entry[0] = gz_path
+            entry[2] = new_size
+
+    # 3. Потолок каталога — старейшие уходят первыми.
+    if retention_total_mb > 0:
+        cap = retention_total_mb * _MB
+        if total > cap:
+            for entry in sorted(entries, key=lambda e: e[1]):
+                if total <= cap:
+                    break
+                path, _mtime, size = entry
+                if _remove_file(path, result):
+                    result["deleted"] += 1
+                    result["bytes_freed"] += size
+                    total -= size
+
+    return result
 
 
 class FileChannel(LogChannel):

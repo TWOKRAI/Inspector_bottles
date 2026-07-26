@@ -41,7 +41,7 @@ from .log_config import LogLevel, LogScope
 from ...channel_routing_module.levels import is_error_level
 from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
 from .log_types import LogRecord
-from ..channels.log_channel import create_channel, LogChannel
+from ..channels.log_channel import create_channel, enforce_log_retention, LogChannel
 from .log_paths import resolve_log_file_path
 
 #: Публичная «форточка» контекста: любой код может положить сюда поля, и они
@@ -62,6 +62,17 @@ log_context: ContextVar[Dict[str, Any]] = ContextVar("log_context", default={})
 #: мутироваться на месте: мутация общего словаря видна всем потокам сразу и
 #: вернула бы ровно ту утечку, ради которой всё это.
 _context_stacks: ContextVar[Dict[int, tuple]] = ContextVar("logger_context_stacks", default={})
+
+#: Счётчики ретеншена (Ф0.7). Один список на объявление в ``self.stats``, на
+#: выдачу в ``get_stats`` и на реестр ``PLANE_COUNTER_KEYS``: разъехавшийся
+#: перечень уже стоил одной невидимой наружу метрики (урок Ф0.4).
+_RETENTION_STAT_KEYS = (
+    "retention_files_deleted",
+    "retention_files_compressed",
+    "retention_delete_failures",
+    "retention_compress_failures",
+    "retention_bytes_freed",
+)
 
 #: Раздатчик ключей инстансов. Не ``id(self)``: id переиспользуется после сборки
 #: мусора, и новый менеджер унаследовал бы контекст покойного в том потоке,
@@ -168,6 +179,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # отказа статусом {"status": "error"} — тот учтён как flush_failed
             # буфера; здесь именно проглоченное исключение.
             "channel_write_errors": 0,
+            # Ф0.7: результат чистки каталога логов (ключи — _RETENTION_STAT_KEYS).
+            # Отдельно «удалили» и «не смогли удалить»: на Windows занятый файл
+            # не удаляется, и молчащий ретеншен неотличим от работающего, если
+            # считать только успехи.
+            **{key: 0 for key in _RETENTION_STAT_KEYS},
         }
 
         # Разбивка потерь по именам каналов + «кому уже сказали». Живут отдельно
@@ -184,6 +200,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         self._setup_channels()
         self._setup_batcher()
+        # Ретеншен применяется и на старте, а не только на reconfigure: процесс,
+        # который подняли с настроенным ретеншеном и ни разу не переконфигурировали,
+        # обязан чистить за собой — иначе чистка зависела бы от факта reload'а.
+        self._enforce_retention()
 
     # =========================================================================
     # ЖИЗНЕННЫЙ ЦИКЛ
@@ -366,6 +386,67 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         else:
             self._buffer = None
 
+    # =========================================================================
+    # РЕТЕНШЕН КАТАЛОГА ЛОГОВ (Ф0.7)
+    # =========================================================================
+
+    def _open_log_file_paths(self) -> List[str]:
+        """Пути, в которые прямо сейчас пишут каналы этого менеджера.
+
+        Их sweep не трогает никогда. Собираются из обоих мест: реестр CRM и
+        отдельный словарь ``_module_channels`` — module-каналы лежат и там, и
+        там, но полагаться на это нельзя (``disable_module_logging`` снимает
+        только из реестра).
+        """
+        paths: List[str] = []
+        for channel in list(self._channel_registry.all()) + list(self._module_channels.values()):
+            file_path = getattr(channel, "file_path", None)
+            if file_path:
+                paths.append(str(file_path))
+        return paths
+
+    def _retention_root(self) -> str:
+        """Каталог, который метёт ЭТОТ менеджер — тот же, куда он пишет свои файлы.
+
+        Не корень ``logs/``: у процесса это ``logs/<имя процесса>/``. Так
+        удалить активный файл соседнего процесса структурно невозможно — знать
+        чужие открытые хэндлы менеджер не может, а значит и претендовать на
+        чужой каталог не должен.
+        """
+        # Fallback без префикса ``logs/`` — иначе резолвер вложил бы ещё один
+        # уровень (``<корень>/logs/…``) и мели бы мы не тот каталог.
+        return str(Path(self._resolved_file_path(None, "retention.probe")).parent)
+
+    def _enforce_retention(self) -> None:
+        """Прогнать чистку каталога логов по текущему конфигу и учесть результат.
+
+        Вызывается на старте и на каждом ``reconfigure``. Обе политики
+        выключены по умолчанию — тогда это ранний выход без единого stat.
+        """
+        cfg = self.config
+        if cfg.retention_days <= 0 and cfg.retention_total_mb <= 0 and not cfg.compress_rotated:
+            return
+        try:
+            result = enforce_log_retention(
+                self._retention_root(),
+                retention_days=cfg.retention_days,
+                retention_total_mb=cfg.retention_total_mb,
+                compress_rotated=cfg.compress_rotated,
+                active_files=self._open_log_file_paths(),
+            )
+        except Exception as e:
+            # Чистка диска не имеет права уронить поднятие логгера: без логгера
+            # не будет видно и самой причины падения.
+            self._fallback_log("ERROR", f"retention sweep failed: {e}")
+            return
+
+        with self._miss_lock:
+            self.stats["retention_files_deleted"] += result["deleted"]
+            self.stats["retention_files_compressed"] += result["compressed"]
+            self.stats["retention_delete_failures"] += result["delete_failures"]
+            self.stats["retention_compress_failures"] += result["compress_failures"]
+            self.stats["retention_bytes_freed"] += result["bytes_freed"]
+
     def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
         """Хук CRM.reconfigure: пересобрать каналы из нового конфига + сбросить кэш.
 
@@ -418,6 +499,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         # 5. Сбросить кэш решений should_log (критический баг — раньше не сбрасывался).
         self.invalidate_decision_cache()
+
+        # 6. Применить ретеншен из нового конфига (Ф0.7). Порядок обязателен:
+        # ПОСЛЕ пересоздания каналов, иначе список активных файлов был бы от
+        # старого состава и sweep удалил бы файл только что открытого канала.
+        self._enforce_retention()
 
     def invalidate_decision_cache(self) -> None:
         """Очистить кэш решений should_log.
@@ -858,6 +944,12 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             base_stats["unresolved_channels"] = dict(self._unresolved_channels)
             base_stats["channel_write_errors"] = self.stats["channel_write_errors"]
             base_stats["channel_write_errors_by_channel"] = dict(self._channel_write_errors)
+            # Ф0.7: та же логика присутствия — ключи есть всегда, даже когда
+            # ретеншен выключен. Нулевой ``retention_delete_failures`` при
+            # ненулевом ``retention_files_deleted`` — «чистка работает»;
+            # обратное сочетание — «настроена, но не может удалить».
+            for key in _RETENTION_STAT_KEYS:
+                base_stats[key] = self.stats[key]
 
         if self._buffer:
             base_stats.update(
