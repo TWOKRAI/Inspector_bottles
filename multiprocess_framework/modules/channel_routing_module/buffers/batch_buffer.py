@@ -84,6 +84,11 @@ OVERFLOW_POLICIES = (OVERFLOW_DROP_OLDEST, OVERFLOW_DROP_NEWEST)
 DEFAULT_MAX_PENDING = 10_000
 DEFAULT_OVERFLOW_POLICY = OVERFLOW_DROP_OLDEST
 
+#: Сколько явный flush()/stop() ждёт чужого сброса, прежде чем сдаться.
+#: Ограничение обязательно: барьер без таймаута превращает подвисший сток в
+#: подвисший процесс. Исчерпание считается в ``flush_timeouts``, а не молчит.
+DEFAULT_FLUSH_BARRIER_TIMEOUT = 5.0
+
 
 def validate_overflow_policy(value: str) -> str:
     """Проверить политику переполнения. Единая точка для схем и для буфера.
@@ -143,7 +148,11 @@ class BatchBuffer(IBufferStrategy):
         self._flush_fn = flush_fn
         self._config = config or BatchConfig()
 
-        self._lock = threading.Lock()
+        # Condition, а не Lock: явный flush()/stop() обязан ДОЖДАТЬСЯ чужого
+        # сброса, иначе он перестаёт быть барьером и хвост теряется молча.
+        # Внутри — обычный Lock (не RLock по умолчанию): случайная реентерантность
+        # должна падать дедлоком, а не проходить незамеченной.
+        self._lock = threading.Condition(threading.Lock())
         self._batches: Dict[str, Deque[Dict[str, Any]]] = defaultdict(deque)
         self._last_flush_time: Dict[str, float] = {}
 
@@ -168,6 +177,9 @@ class BatchBuffer(IBufferStrategy):
         self._flush_failed: int = 0
         self._flush_failed_by_channel: Dict[str, int] = defaultdict(int)
         self._flush_skipped_busy: int = 0
+        self._flush_timeouts: int = 0
+        self._flush_contract_violations: int = 0
+        self._dropped_at_stop: int = 0
         self._errors: int = 0
 
         self._timer_thread: Optional[threading.Thread] = None
@@ -190,12 +202,25 @@ class BatchBuffer(IBufferStrategy):
         self._timer_thread.start()
 
     def stop(self) -> None:
-        """Остановить фоновый поток и сбросить оставшиеся данные."""
+        """Остановить фоновый поток и сбросить оставшиеся данные.
+
+        Два прохода барьерного flush: первый дожидается сброса, идущего прямо
+        сейчас, второй забирает то, что накопилось за время его полёта. Если
+        после этого что-то осталось (эмитенты всё ещё пишут), это НЕ тишина —
+        остаток считается в ``dropped_at_stop``.
+        """
         self._stop_event.set()
         if self._timer_thread and self._timer_thread.is_alive():
             self._timer_thread.join(timeout=5.0)
         self._timer_thread = None
+
         self.flush()
+        self.flush()
+
+        with self._lock:
+            left = sum(len(buf) for buf in self._batches.values())
+            if left:
+                self._dropped_at_stop += left
 
     # ------------------------------------------------------------------
     # IBufferStrategy — enqueue / flush
@@ -231,6 +256,7 @@ class BatchBuffer(IBufferStrategy):
             # переполнение лечится сбросом, а не потерей: иначе конфигурация
             # max_pending < max_size молча превращала бы батчинг в сэмплирование
             # на полностью здоровой системе (находка ревью Ф0.3).
+            accept = True
             if overflowed and sink_busy:
                 self._dropped += 1
                 self._dropped_by_channel[channel] += 1
@@ -239,11 +265,14 @@ class BatchBuffer(IBufferStrategy):
                     # ВАЖНО: не выходим из метода. Ранний return пропускал бы
                     # расчёт триггеров, и канал с этой политикой залипал
                     # навсегда (сток занят → нет сброса → сток не освободится).
-                    data = None
+                    # Флаг, а не ``data = None``: иначе вызов с data=None (контракт
+                    # это запрещает, но проверки нет) молча ломал бы инвариант,
+                    # и причину искали бы в буфере.
+                    accept = False
                 else:
                     batch.popleft()
 
-            if data is not None:
+            if accept:
                 batch.append(data)
 
             current_size = len(batch)
@@ -264,25 +293,42 @@ class BatchBuffer(IBufferStrategy):
             elif elapsed >= self._config.flush_interval:
                 should_flush = True
 
+            # Сток занят — попытка сброса заведомо будет отбита. Не назначаем её:
+            # иначе flush_skipped_busy считал бы «сколько раз писали в занятый
+            # канал» (10 401 на 12 000 записей в замере ревью) вместо обещанного
+            # именем «сколько сбросов пропущено», плюс лишний захват лока.
+            if sink_busy:
+                should_flush = False
+
         if should_flush:
             self._flush_channel(channel)
 
-    def flush(self, channel: Optional[str] = None) -> None:
-        """Принудительно сбросить буфер.
+    def flush(
+        self,
+        channel: Optional[str] = None,
+        *,
+        wait: bool = True,
+        timeout: Optional[float] = None,
+    ) -> None:
+        """Принудительно сбросить буфер. channel=None → все каналы.
 
-        channel=None → сбросить все каналы.
+        ``wait=True`` (дефолт) делает вызов БАРЬЕРОМ: если канал сейчас
+        сбрасывает другой поток, ждём его и забираем накопленное следом.
+        Барьерность здесь не роскошь — на ней держатся два контракта:
+        порядок «контекст раньше ошибки» (``LoggerCore._write_error_record``)
+        и полнота слива при ``stop()``.
         """
         if channel is not None:
-            self._flush_channel(channel)
+            self._flush_channel(channel, wait=wait, timeout=timeout)
         else:
-            self.flush_all()
+            self.flush_all(wait=wait, timeout=timeout)
 
-    def flush_all(self) -> None:
+    def flush_all(self, *, wait: bool = True, timeout: Optional[float] = None) -> None:
         """Принудительно сбросить все каналы."""
         with self._lock:
             channels = list(self._batches.keys())
         for ch in channels:
-            self._flush_channel(ch)
+            self._flush_channel(ch, wait=wait, timeout=timeout)
 
     # ------------------------------------------------------------------
     # Properties
@@ -312,6 +358,13 @@ class BatchBuffer(IBufferStrategy):
                 "flush_failed": self._flush_failed,
                 "flush_failed_by_channel": dict(self._flush_failed_by_channel),
                 "flush_skipped_busy": self._flush_skipped_busy,
+                # Барьерный flush не дождался чужого сброса за отведённое время.
+                "flush_timeouts": self._flush_timeouts,
+                # flush_fn вернул число вне [0, len(batch)] — баг стока, не буфера.
+                "flush_contract_violations": self._flush_contract_violations,
+                # Не успели записать при остановке. Именованная потеря вместо
+                # записей, тихо оставшихся в pending у уходящего процесса.
+                "dropped_at_stop": self._dropped_at_stop,
                 "in_flight": sorted(self._in_flight),
                 "in_flight_records": self._in_flight_records,
                 "max_pending": self._config.max_pending,
@@ -325,7 +378,13 @@ class BatchBuffer(IBufferStrategy):
     # Internal
     # ------------------------------------------------------------------
 
-    def _flush_channel(self, channel: str) -> None:
+    def _flush_channel(
+        self,
+        channel: str,
+        *,
+        wait: bool = False,
+        timeout: Optional[float] = None,
+    ) -> None:
         """Атомарно извлечь пачку, затем вызвать flush_fn вне lock-а.
 
         Один канал сбрасывается не более чем одним потоком одновременно
@@ -333,15 +392,32 @@ class BatchBuffer(IBufferStrategy):
         параллельных сбросов — и память росла не в deque (его держит max_size),
         а в пачках «в полёте», которых потолок не касается вовсе.
 
+        ``wait`` разводит две семантики (иначе явный ``flush()`` перестаёт быть
+        барьером и хвост теряется молча — находка ревью итерации 2):
+
+          * ``False`` — оппортунистический путь из ``enqueue``/таймера: канал
+            занят → пропускаем, сброс произойдёт по следующему триггеру;
+          * ``True`` — явные ``flush()`` / ``flush_all()`` / ``stop()``: ждём
+            завершения чужого сброса и только потом забираем накопленное.
+            Ожидание ограничено таймаутом; его исчерпание — не тишина, а
+            счётчик ``flush_timeouts``.
+
         Учёт доставки: если ``flush_fn`` возвращает int, это число ФАКТИЧЕСКИ
         принятых записей; разница уходит в ``flush_failed``. Возврат ``None``
         (старый контракт) означает «сток не рапортует» — тогда пачка считается
-        доставленной целиком, как и раньше.
+        доставленной целиком. Значение вне ``[0, len(batch)]`` — нарушение
+        контракта стоком: считается в ``flush_contract_violations``, и пачка
+        НЕ засчитывается доставленной (недоказанное не выдаём за записанное).
         """
         with self._lock:
             if channel in self._in_flight:
-                self._flush_skipped_busy += 1
-                return
+                if not wait:
+                    self._flush_skipped_busy += 1
+                    return
+                limit = DEFAULT_FLUSH_BARRIER_TIMEOUT if timeout is None else timeout
+                if not self._lock.wait_for(lambda: channel not in self._in_flight, timeout=limit):
+                    self._flush_timeouts += 1
+                    return
             if not self._batches.get(channel):
                 return
             batch = list(self._batches[channel])
@@ -355,25 +431,40 @@ class BatchBuffer(IBufferStrategy):
         failed = False
         try:
             written = self._flush_fn(channel, batch)
-        except Exception:  # noqa: BLE001 — сбой стока не имеет права ронять эмитента
+        except Exception:  # noqa: BLE001 — сбой стока НЕ имеет права ронять эмитента
             failed = True
-
-        with self._lock:
-            self._in_flight.discard(channel)
-            size = len(batch)
-            self._in_flight_records -= size
-            if failed:
-                self._errors += 1
-                accepted = 0
-            elif isinstance(written, int) and not isinstance(written, bool):
-                accepted = max(0, min(written, size))
-            else:
-                accepted = size
-            self._total_flushed += accepted
-            lost = size - accepted
-            if lost:
-                self._flush_failed += lost
-                self._flush_failed_by_channel[channel] += lost
+        except BaseException:
+            # KeyboardInterrupt / SystemExit — пробрасываем (глушить их нельзя),
+            # но флаг канала снимается в finally. Раньше снятие жило в обычном
+            # блоке после try: один Ctrl+C внутри ch.write (он приходит в главный
+            # поток в произвольной точке) оставлял канал в _in_flight НАВСЕГДА —
+            # сток здоров, а записей ноль.
+            failed = True
+            raise
+        finally:
+            with self._lock:
+                size = len(batch)
+                if failed:
+                    self._errors += 1
+                    accepted = 0
+                elif isinstance(written, int) and not isinstance(written, bool):
+                    if 0 <= written <= size:
+                        accepted = written
+                    else:
+                        # Сток соврал о числе принятых записей. Молча кламповать —
+                        # значит спрятать его баг; недоказанное не доставлено.
+                        self._flush_contract_violations += 1
+                        accepted = 0
+                else:
+                    accepted = size
+                self._total_flushed += accepted
+                lost = size - accepted
+                if lost:
+                    self._flush_failed += lost
+                    self._flush_failed_by_channel[channel] += lost
+                self._in_flight.discard(channel)
+                self._in_flight_records -= size
+                self._lock.notify_all()
 
     def _timer_worker(self) -> None:
         """Периодически вызывает flush_all() по интервалу."""
@@ -381,6 +472,6 @@ class BatchBuffer(IBufferStrategy):
             self._stop_event.wait(self._config.flush_interval)
             if not self._stop_event.is_set():
                 try:
-                    self.flush_all()
+                    self.flush_all(wait=False)
                 except Exception:
                     pass

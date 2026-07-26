@@ -176,7 +176,8 @@ class TestSingleFlusherPerChannel:
             assert buf.stats["in_flight"] == ["ch"]
 
             buf.enqueue("ch", {"n": 1})
-            buf.flush("ch")  # попытка параллельного сброса
+            # Оппортунистический путь (как из enqueue/таймера): не ждём, пропускаем.
+            buf.flush("ch", wait=False)
             stats = buf.stats
             assert stats["flush_skipped_busy"] >= 1
             assert stats["total_batches"] == 1, "начался второй параллельный сброс"
@@ -560,3 +561,144 @@ def test_flush_fn_signature_is_documented_as_optional_int() -> None:
     doc: Optional[str] = BatchBuffer._flush_channel.__doc__
     assert doc is not None
     assert "int" in doc and "None" in doc
+
+
+# ====================================================================== #
+#  Барьер и живучесть флага (находки ревью, итерация 2)                   #
+# ====================================================================== #
+
+
+class TestFlushIsABarrier:
+    def test_explicit_flush_waits_for_the_in_flight_batch(self) -> None:
+        """Явный flush() обязан дождаться чужого сброса и забрать накопленное.
+
+        Иначе он перестаёт быть барьером: на нём держатся порядок «контекст
+        раньше ошибки» (LoggerCore._write_error_record) и полнота слива в stop().
+        """
+        cfg = _never_flushes()
+        sink = _StuckSink()
+        buf = BatchBuffer(flush_fn=sink, config=cfg)
+
+        buf.enqueue("ch", {"n": 0})
+        drainer = _stick_sink(buf, sink)
+        buf.enqueue("ch", {"n": 1})
+
+        done = threading.Event()
+
+        def _barrier() -> None:
+            buf.flush("ch")  # wait=True по умолчанию
+            done.set()
+
+        waiter = threading.Thread(target=_barrier)
+        waiter.start()
+        assert not done.wait(timeout=0.5), "flush не стал ждать занятый канал"
+
+        sink.release.set()
+        drainer.join(timeout=10.0)
+        assert done.wait(timeout=10.0), "flush не разблокировался после сброса"
+        waiter.join(timeout=10.0)
+
+        assert [r["n"] for r in sink.written] == [0, 1]
+        assert buf.stats["pending"]["ch"] == 0
+
+    def test_barrier_gives_up_by_timeout_with_a_named_counter(self) -> None:
+        """Барьер без таймаута превратил бы подвисший сток в подвисший процесс."""
+        cfg = _never_flushes()
+        sink = _StuckSink()
+        buf = BatchBuffer(flush_fn=sink, config=cfg)
+
+        buf.enqueue("ch", {"n": 0})
+        drainer = _stick_sink(buf, sink)
+        try:
+            buf.enqueue("ch", {"n": 1})
+            buf.flush("ch", timeout=0.2)
+            assert buf.stats["flush_timeouts"] == 1
+            assert buf.stats["pending"]["ch"] == 1, "запись потеряна вместо ожидания"
+        finally:
+            sink.release.set()
+            drainer.join(timeout=10.0)
+
+    def test_stop_drains_a_stuck_sink_instead_of_abandoning_the_tail(self) -> None:
+        """Регресс: stop() возвращался мгновенно, оставляя хвост в pending.
+
+        До правки — «записано 3, в pending осталось 5, всё успешно»: пять записей
+        не попали никуда, и счётчика об этом не было.
+        """
+        cfg = _never_flushes()
+        sink = _StuckSink()
+        buf = BatchBuffer(flush_fn=sink, config=cfg)
+
+        buf.enqueue("ch", {"n": 0})
+        drainer = _stick_sink(buf, sink)
+        for i in range(1, 6):
+            buf.enqueue("ch", {"n": i})
+
+        stopped = threading.Event()
+        stopper = threading.Thread(target=lambda: (buf.stop(), stopped.set()))
+        stopper.start()
+        assert not stopped.wait(timeout=0.5), "stop() не дождался занятого стока"
+
+        sink.release.set()
+        drainer.join(timeout=10.0)
+        assert stopped.wait(timeout=10.0), "stop() не завершился после освобождения стока"
+        stopper.join(timeout=10.0)
+
+        assert [r["n"] for r in sink.written] == [0, 1, 2, 3, 4, 5]
+        stats = buf.stats
+        assert stats["pending"]["ch"] == 0
+        assert stats["dropped_at_stop"] == 0
+
+
+class TestInFlightFlagSurvivesFailures:
+    def test_base_exception_does_not_leave_the_channel_locked_forever(self) -> None:
+        """KeyboardInterrupt из стока оставлял канал в _in_flight навсегда.
+
+        Симптом: сток уже исправен, а записей ноль — при СХОДЯЩИХСЯ книгах,
+        потому что пачка вечно числилась «в полёте».
+        """
+        received: List[dict] = []
+        boom = {"armed": True}
+
+        def _sink(channel: str, batch: List[dict]) -> int:
+            if boom["armed"]:
+                boom["armed"] = False
+                raise KeyboardInterrupt("Ctrl+C внутри записи")
+            received.extend(batch)
+            return len(batch)
+
+        buf = BatchBuffer(flush_fn=_sink, config=_never_flushes())
+        buf.enqueue("ch", {"n": 0})
+        with pytest.raises(KeyboardInterrupt):
+            buf.flush("ch")
+
+        assert buf.stats["in_flight"] == [], "канал заперт навсегда"
+        assert buf.stats["in_flight_records"] == 0
+
+        for i in range(1, 4):
+            buf.enqueue("ch", {"n": i})
+        buf.flush("ch")
+        assert [r["n"] for r in received] == [1, 2, 3]
+
+    def test_ordinary_sink_failure_does_not_reach_the_emitter(self) -> None:
+        """Обратная половина: обычное исключение стока эмитента НЕ роняет."""
+        buf = BatchBuffer(
+            flush_fn=lambda ch, batch: (_ for _ in ()).throw(RuntimeError("боль")), config=_never_flushes()
+        )
+        buf.enqueue("ch", {"n": 0})
+        buf.flush("ch")  # не должно бросить
+        assert buf.stats["errors"] == 1
+
+
+class TestSinkContractViolation:
+    @pytest.mark.parametrize("bogus", [-1, 999])
+    def test_lying_sink_is_counted_not_clamped(self, bogus: int) -> None:
+        """Сток, совравший о числе принятых, — баг стока; клампинг его прячет."""
+        buf = BatchBuffer(flush_fn=lambda ch, batch: bogus, config=_never_flushes())
+        for i in range(4):
+            buf.enqueue("ch", {"n": i})
+        buf.flush("ch")
+
+        stats = buf.stats
+        assert stats["flush_contract_violations"] == 1
+        assert stats["total_flushed"] == 0, "недоказанное выдано за записанное"
+        assert stats["flush_failed"] == 4
