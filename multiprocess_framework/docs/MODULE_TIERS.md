@@ -65,21 +65,28 @@
 | 1 | `chain_module` | **frozen**, «0 потребителей» | **core** | ⚠️ **Требует переподтверждения владельца.** Вердикт устарел: C6(d) (2026-07-13, merge `22393392`) поставил pipeline-движок `ProcessModule` на `ChainRunnable`. Импортёры: `process_module/generic/pipeline_executor.py`, `plugin_operation_step.py`, реэкспорт в `multiprocess_framework/__init__.py:125`. Boundary «никто не импортирует chain_module» **уронил бы прод** — поэтому не заводится. |
 | 2 | `console_module` | вне таблицы ярусов (был только вердикт «модуль НЕ трогать») | **core** | Добор, не пересмотр: сам вердикт G0 №3 констатирует «ConsoleManager создаётся в КАЖДОМ процессе». Заморожена **фича** God-Mode, не модуль (§3). |
 | 3 | `app_module`, `telemetry_readmodel_module` | отсутствовали (дрейф «20/21/22») | **optional** | Появились после G0: `app_module` — Ф5.11, `telemetry_readmodel_module` — 2026-07-18 (ADR-136). Это и есть «сверка H.1» из строки G0. |
+| 4 | Механизмы форм 7b/7c/7d (`frontend_module`) | вердикт G0 №5: `WidgetRegistry` — **KILL после G2** | **frozen** (не kill) | Отменено более поздним гейтом: **GATE G2, владелец 2026-07-10** — «не удалять» → FREEZE. Ф5.6 закрыт decision-only, формализация frozen-яруса передана в H.1 — это §3 ниже. Строка «KILL после G2» в таблице G0 §Б устарела. |
 
 **Следствие:** ярус `frozen` на уровне **модулей** сейчас пуст. Всё замороженное — фичи внутри живых модулей (§3). Это не ошибка карты, а факт: G0 замораживал ровно один целый модуль (`chain_module`), и тот ожил.
+
+**Общий принцип владельца — FREEZE, а не KILL** (прецеденты: `actions_module` 2026-07-08, GATE G2 2026-07-10). Дремлющий рабочий и покрытый тестами код считается капиталом: цена хранения ниже риска потери. Поэтому `frozen` — рабочий ярус, а не «зал ожидания перед удалением». Удаление — только по явной per-item санкции владельца (GATE G4 / Ф8 H.2).
 
 ---
 
 ## 3. Замороженные фичи (внутри живых модулей)
 
-Ярус `frozen` неприменим к модулю целиком, но применим к его частям. Вердикты G0 §Б:
+Ярус `frozen` неприменим к модулю целиком, но применим к его частям. Источники — вердикты G0 §Б (2026-07-06) и **GATE G2 (2026-07-10)**, который для механизмов форм заменил KILL на FREEZE:
 
-| Фича | Модуль | Вердикт G0 | Enforcement |
-|------|--------|-----------|-------------|
-| God-Mode консоли (интерактивный режим) | `console_module` | FREEZE только фичи | доки + ревью |
-| dispatch beyond-EXACT_MATCH (PATTERN/FALLBACK/CHAIN/ScenarioBuilder) | `dispatch_module` | FREEZE фич, модуль core | доки + ревью (0 прод-вызовов) |
-| Флагман Gen-1: `FrontendManager`, `LayoutComposer` | `frontend_module` | FREEZE | boundary `.sentrux/rules.toml` (никто извне `frontend_module` не импортирует `application/`); маркер `legacy_gen1` в тестах |
-| `WidgetRegistry` | `frontend_module` | KILL после G2 (E4) | исполнение — Ф8 H.2, не здесь |
+| Фича | Модуль | Вердикт | Enforcement |
+|------|--------|---------|-------------|
+| God-Mode консоли (интерактивный режим) | `console_module` | G0 №3: FREEZE только фичи, модуль core | доки + ревью |
+| dispatch beyond-EXACT_MATCH (PATTERN/FALLBACK/CHAIN/ScenarioBuilder) | `dispatch_module` | G0 №2: FREEZE фич, модуль core | доки + ревью (0 прод-вызовов) |
+| Флагман Gen-1: `FrontendManager`, `WindowManager`, `LayoutComposer` (7d) | `frontend_module` | G0 №5 + G2: FREEZE | boundary `.sentrux/rules.toml` (прикладные слои не импортируют `application/`) + контракт-тест `test_frozen_frontend_flagship_has_no_consumers`; маркер `legacy_gen1` в тестах |
+| `WidgetRegistry` (7d) | `frontend_module` | ~~G0 №5: KILL после G2~~ → **G2: FREEZE** | доки + ревью; удаление снято с повестки H.2 |
+| Binding-aware механизм форм: `builders_binding` + `FormContext` (7b) | `frontend_module` | G2: FREEZE | доки; активный прод-путь — 7a legacy (`form_ctx=None`), 7b дремлет |
+| `entity_editor` ~1778 LOC (7c) | `frontend_module` | G2: FREEZE | доки; 0 живых потребителей (верифицировано E4) |
+
+**Почему такой список, а не «удалить мёртвое».** Владелец стабильно выбирает **FREEZE вместо KILL**: дремлющий рабочий и покрытый тестами механизм — капитал и опциональность (7b — готовый reactive/undoable write, если ADR-COMM-002 когда-нибудь оживёт). «Унификация N→1» здесь означает *сузить активный путь до одного*, а не физически удалить остальные. Отчёт-первоисточник по 4 механизмам — [`e4-forms-mechanism-diff.md`](../../plans/2026-07-06_constructor-master/e4-forms-mechanism-diff.md).
 
 **Правило Ф4 (остаётся в силе):** манифесты и контракты пишутся только ярусам `core`/`optional`; замороженным фичам — нет.
 
