@@ -33,6 +33,7 @@ from multiprocess_framework.modules.logger_module.core.log_config import (
     LogScope,
 )
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+from multiprocess_framework.modules.logger_module.channels.log_channel import LogChannel
 from multiprocess_framework.modules.logger_module.log_enums import is_error_level
 
 _CHILD = Path(__file__).parent / "_crash_log_child.py"
@@ -192,6 +193,31 @@ def test_error_lands_on_disk_synchronously(tmp_path: Path) -> None:
         assert _CRASH_MARKER in (tmp_path / "system.log").read_text(encoding="utf-8")
 
 
+def test_error_is_synchronous_even_with_priority_flush_off(tmp_path: Path) -> None:
+    """Страж обещания README (Ф0.2): синхронность ошибок не зависит от priority_flush.
+
+    До Ф0.9 немедленность ошибок формально приписывалась именно этому параметру
+    ``BatchBuffer`` — и это было неправдой, потому что приоритет в буфер никто
+    не передавал. Теперь ошибки в буфер не попадают вовсе, значит выключенный
+    ``priority_flush`` обязан ничего не менять. Если кто-то вернёт ошибки в
+    пачку, этот тест покраснеет вместе с текстом README.
+    """
+    from multiprocess_framework.modules.channel_routing_module.buffers.batch_buffer import (
+        BatchBuffer,
+        BatchConfig,
+    )
+
+    with _logger(tmp_path) as manager:
+        manager._buffer = BatchBuffer(
+            flush_fn=manager._flush_batch,
+            config=BatchConfig(max_size=10_000, flush_interval=600.0, priority_flush=False),
+        )
+
+        manager.error(_CRASH_MARKER, module="unit")
+
+        assert _CRASH_MARKER in (tmp_path / "system.log").read_text(encoding="utf-8")
+
+
 def test_order_preserved_context_before_error(tmp_path: Path) -> None:
     """Контекст перед падением ложится на диск РАНЬШЕ самой ошибки."""
     with _logger(tmp_path) as manager:
@@ -300,7 +326,109 @@ def test_floor_path_falls_back_to_channel_directory(tmp_path: Path) -> None:
 
 
 # =============================================================================
-# 4. Пара «болезнь воспроизведена → исчезла» на убитом процессе
+# 4. Реентерабельность и отношение floor ↔ tap
+# =============================================================================
+
+
+class _ReentrantChannel(LogChannel):
+    """Канал, который САМ логирует ошибку при попытке записи.
+
+    Худший случай для синхронного пути: ``_write_error_record`` зовёт
+    ``buffer.flush()``, тот выкладывает пачку в ``_flush_batch`` → ``ch.write()``,
+    а канал изнутри записи снова заходит в ``log()``. Если бы ``BatchBuffer``
+    держал свой lock во время ``flush_fn``, это был бы дедлок.
+
+    Наследует ``LogChannel``, а не утиный тип: ``ChannelRegistry.register``
+    проверяет ``isinstance(channel, IChannel)`` и утку молча отвергает
+    (первая редакция теста на этом и провалилась — канал не получил ничего).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(LoggerChannelSchema(name="reentrant", type="file", enabled=True))
+        self.writes: List[Dict[str, Any]] = []
+        self._manager: Any = None
+        self._depth = 0
+
+    def bind(self, manager: Any) -> None:
+        self._manager = manager
+
+    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        self.writes.append(record)
+        # Заходим обратно в логгер ровно один раз — иначе тест сам себя зациклит,
+        # а проверяем мы отсутствие дедлока, а не отсутствие бесконечной рекурсии
+        # в заведомо самоубийственном канале.
+        if self._manager is not None and self._depth == 0:
+            self._depth += 1
+            self._manager.error("ошибка изнутри записи в канал", module="reentrant")
+        return record
+
+
+def test_reentrant_channel_does_not_deadlock(tmp_path: Path) -> None:
+    """Запись, порождающая запись, не должна вешать поток.
+
+    ``BatchBuffer._flush_channel`` отдаёт пачку и ОТПУСКАЕТ lock до вызова
+    flush_fn — на этом держится безопасность. Тест фиксирует это свойство:
+    если кто-то занесёт flush_fn под lock, тест повиснет и упадёт по таймауту.
+    """
+    with _logger(tmp_path) as manager:
+        channel = _ReentrantChannel()
+        channel.bind(manager)
+        manager._channel_registry.register(channel)
+        manager.config.scopes["SYSTEM"].channels = ["reentrant"]
+        manager.invalidate_decision_cache()
+
+        manager.error(_CRASH_MARKER, module="unit")
+
+        # Обе записи дошли: внешняя и та, что канал породил изнутри.
+        messages = [record["message"] for record in channel.writes]
+        assert _CRASH_MARKER in messages
+        assert "ошибка изнутри записи в канал" in messages
+
+
+def test_tap_and_floor_are_different_planes(tmp_path: Path) -> None:
+    """Tap получает запись всегда; floor — только вместо канала, не вдобавок.
+
+    ``_emit_to_taps`` стоит ДО записи в канал, поэтому подписчики (стор, live-хвост)
+    видят ошибку независимо от судьбы канала. Это НЕ дубль в смысле инварианта:
+    tap — другая плоскость (история и подписка), а floor замещает именно канал.
+    Инвариант «без дублей» про то, что floor не добавляет ВТОРУЮ файловую копию
+    к успешно записавшему каналу — и это проверено отдельно.
+    """
+    received: List[Dict[str, Any]] = []
+
+    class _Tap:
+        name = "probe"
+
+        def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+            received.append(record)
+            return record
+
+        def close(self) -> None:
+            pass
+
+    with _logger(tmp_path, with_channel=False) as manager:
+        manager.add_log_tap(_Tap(), min_level=LogLevel.ERROR, name="probe")
+
+        manager.error(_CRASH_MARKER, module="unit")
+
+        assert [r["message"] for r in received] == [_CRASH_MARKER]
+        assert [r["message"] for r in _floor_lines(tmp_path)] == [_CRASH_MARKER]
+
+    # Обратная половина: канал жив → tap получил, floor пуст.
+    other = tmp_path / "alive"
+    other.mkdir()
+    received.clear()
+    with _logger(other) as manager:
+        manager.add_log_tap(_Tap(), min_level=LogLevel.ERROR, name="probe")
+
+        manager.error(_CRASH_MARKER, module="unit")
+
+        assert [r["message"] for r in received] == [_CRASH_MARKER]
+        assert _floor_lines(other) == []
+
+
+# =============================================================================
+# 5. Пара «болезнь воспроизведена → исчезла» на убитом процессе
 # =============================================================================
 
 

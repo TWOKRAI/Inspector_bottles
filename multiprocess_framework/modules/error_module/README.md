@@ -87,7 +87,7 @@ ErrorManager  (override log() для level-based routing)
 |---|---|
 | `message` → `channel_dispatcher(key=type)` → `IMessageChannel` | `error_record` → `_level_to_channel[level]` → `ILogChannel` |
 | `QueueChannel` / `SocketChannel` | `FileChannel` / `ConsoleChannel` |
-| `send_async()` с PriorityQueue | `BatchBuffer` с priority_flush |
+| `send_async()` с PriorityQueue | `BatchBuffer` для WARNING; ERROR/CRITICAL — синхронно мимо буфера |
 | `register_route("set_fps", "ctrl_channel")` | Автоматическая регистрация при `_setup_level_routes()` |
 
 ---
@@ -312,12 +312,28 @@ em.register_channel(alert_ch)
 
 ## Батчинг (BatchBuffer из CRM)
 
+Батчинг здесь касается **только `WARNING`**. `ERROR` и `CRITICAL` в пачку не попадают вовсе
+(Ф0.9): severity-путь сбрасывает пачку своего канала и пишет запись **напрямую**, синхронно.
+Это не зависит ни от `enable_batching`, ни от `priority_flush`.
+
+Почему `WARNING` остался батченым: это не crash-лог, и он спокойно терпит `batch_interval`.
+Синхронная запись каждого предупреждения оплачивалась бы вызывающим потоком без пользы.
+
+> Историческая справка: раньше здесь было написано «ERROR/CRITICAL записываются немедленно»
+> со ссылкой на `priority_flush`. Это было **неправдой** — приоритет в буфер не передавал никто,
+> и окно потери crash-лога равнялось `batch_interval` (0.5 с). Исправлено Ф0.1 → Ф0.9.
+
 | Параметр | По умолчанию | Описание |
 |---|---|---|
-| `enable_batching` | `True` | Включить батчинг |
+| `enable_batching` | `True` | Включить батчинг **для WARNING**. На ERROR/CRITICAL не влияет |
 | `batch_size` | `50` | Максимальный размер пачки |
 | `batch_interval` | `0.5 сек` | Интервал принудительного сброса |
-| `priority_flush` | `True` | ERROR/CRITICAL записываются немедленно |
+
+**Пол ошибок.** Severity-маршрут конфиго-зависим целиком (`_setup_level_routes` строит
+`_level_to_channel` из фактически созданных каналов). Если канал уровня отсутствует, снят через
+`logger.sink.disable` или упал на записи — запись уходит в общий `errors_floor.jsonl`
+(JSON Lines, полный трейсбек и `extra`). Пол срабатывает **только** при непринявшем канале,
+поэтому дубля «и в канал, и в пол» не бывает. Счётчик: `get_stats()["errors_to_floor"]`.
 
 **Thread-safety:** `BatchBuffer` использует `threading.Lock` — несколько потоков одного процесса
 могут одновременно вызывать `em.error()` без гонок данных.
