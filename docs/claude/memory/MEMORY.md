@@ -164,3 +164,4 @@
 - [Дефолтный путь сверять с публикатором](feedback_default_path_must_match_publisher.md) — правило читало несуществующий `drops_count` (реальный `drops`): фича мертва при 26 зелёных тестах на моке; регресс-страж + список кандидатов
 - [Тесты-невидимки мимо testpaths](feedback_tests_invisible_to_testpaths.md) — 3 каталога tests/ вне testpaths = 58 зелёных тестов не гонялись; покрытие судить по конфигу прогона + страж-тест
 - [Глобальный патч часов = флейк](feedback_global_clock_patch_flake.md) — patch("time.monotonic") с конечным side_effect доедают чужие потоки → StopIteration в невиновном тесте; часы — зависимость объекта
+- [Тест не доказан, пока не красный без правки](feedback_prove_test_red_without_fix.md) — откатить call-site через stash, сверить число упавших арифметически
