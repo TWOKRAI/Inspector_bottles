@@ -512,6 +512,35 @@ def enforce_log_retention(
     return result
 
 
+#: Пломба (2.V1) в файловой строке: префикс ``#<seq> `` в самом начале.
+#:
+#: Префиксом, а не суффиксом: у записи с traceback'ом суффикс уехал бы на
+#: последнюю строку блока, и «одна строка — одна запись» перестало бы держаться.
+#: В начале строки он однозначен — продолжения traceback'а начинаются с пробела
+#: или со слова, но не с ``#<цифры> ``.
+SEAL_LINE_RE = r"^#(\d+) "
+
+#: Запись без пломбы (создана мимо ``LoggerCore.log``) помечается явно, а не
+#: пишется без префикса: «пломбы нет» обязано отличаться от «строка не разобрана».
+SEAL_ABSENT = "#- "
+
+
+class SealFormatter(logging.Formatter):
+    """Формат канала + пломба, которую строка формата отменить не может.
+
+    Пломба не поле ``%(seq)s`` намеренно. Формат канала операбелен из конфига и
+    сохраняется в рецептах; поле в нём означало бы, что достаточно сохранить
+    рецепт со старым форматом — и проверяющий 2.V1 молча ослепнет на этом
+    канале, не сказав ни слова. Здесь префикс ставится ПОСЛЕ форматирования и
+    от ``config.format`` не зависит вовсе.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        seq = getattr(record, "seq", None)
+        prefix = f"#{seq} " if seq else SEAL_ABSENT
+        return prefix + super().format(record)
+
+
 class FileChannel(LogChannel):
     """Канал записи в файл"""
 
@@ -520,7 +549,7 @@ class FileChannel(LogChannel):
         self.file_path = Path(config.file_path or f"logs/{config.name}.log")
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        formatter = logging.Formatter(config.format)
+        formatter = SealFormatter(config.format)
         if getattr(config, "rotate", True):
             # Общий хэндлер на путь: несколько каналов на один файл делят один
             # ротатор (иначе конкуренция fd ломает ротацию на Windows — см. реестр
@@ -552,6 +581,9 @@ class FileChannel(LogChannel):
             log_record.created = record["timestamp"]
             extra = record.get("extra") or {}
             log_record.proc_name = extra.get("proc_name") or "-"
+            # Пломба (2.V1). Переносится здесь, а не внутри SealFormatter:
+            # форматтер видит только stdlib-запись, наш словарь до него не доходит.
+            log_record.seq = record.get("seq") or 0
 
             self.handler.emit(log_record)
             return {"status": "success", "channel": self.name}
