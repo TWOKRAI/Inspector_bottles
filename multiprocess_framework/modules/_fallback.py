@@ -8,6 +8,7 @@ FallbackLogger живёт вне пакетов с логикой фреймво
     from ..._fallback import FallbackLogger
     _logger = FallbackLogger(__name__)
 """
+
 import logging as _stdlib
 from typing import Any
 
@@ -18,6 +19,13 @@ class FallbackLogger:
 
     Заменяет паттерн `_logger = logging.getLogger(__name__)` в utility-классах.
     LoggerManager._instance проверяется лениво при каждом вызове.
+
+    Ф2.1: имя (обычно ``__name__``) уходит в ``module=``. До правки оно жило
+    только в stdlib-ветке, а при поднятом LoggerManager отбрасывалось — все
+    записи тринадцати utility-классов ложились в файл под дефолтом ``main``.
+    Нашёл live-прогон: стартовые строки каждого процесса были неотличимы от
+    любых других. Точечное имя (``multiprocess_framework.modules...``) —
+    ровно та форма, на которую опирается резолв по префиксу (2.2).
     """
 
     __slots__ = ("_name", "_stdlib")
@@ -29,6 +37,7 @@ class FallbackLogger:
     def _lm(self) -> Any:
         try:
             from .logger_module.core.logger_manager import LoggerManager
+
             return LoggerManager._instance
         except Exception:
             return None
@@ -44,34 +53,34 @@ class FallbackLogger:
     def debug(self, msg: str, *args: Any) -> None:
         lm = self._lm()
         if lm:
-            lm.debug(self._fmt(msg, args))
+            lm.debug(self._fmt(msg, args), module=self._name)
         else:
             self._stdlib.debug(msg, *args)
 
     def info(self, msg: str, *args: Any) -> None:
         lm = self._lm()
         if lm:
-            lm.info(self._fmt(msg, args))
+            lm.info(self._fmt(msg, args), module=self._name)
         else:
             self._stdlib.info(msg, *args)
 
     def warning(self, msg: str, *args: Any) -> None:
         lm = self._lm()
         if lm:
-            lm.warning(self._fmt(msg, args))
+            lm.warning(self._fmt(msg, args), module=self._name)
         else:
             self._stdlib.warning(msg, *args)
 
     def error(self, msg: str, *args: Any) -> None:
         lm = self._lm()
         if lm:
-            lm.error(self._fmt(msg, args))
+            lm.error(self._fmt(msg, args), module=self._name)
         else:
             self._stdlib.error(msg, *args)
 
     def critical(self, msg: str, *args: Any) -> None:
         lm = self._lm()
         if lm:
-            lm.critical(self._fmt(msg, args))
+            lm.critical(self._fmt(msg, args), module=self._name)
         else:
             self._stdlib.critical(msg, *args)

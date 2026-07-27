@@ -155,6 +155,58 @@ def test_hub_drain_path_preserves_source_name(tmp_path: Path) -> None:
     assert _name_field(_lines(tmp_path)[0]) == "pool_dispatcher"
 
 
+def test_fallback_logger_writes_under_its_own_name(tmp_path: Path) -> None:
+    """FallbackLogger знает своё имя (обычно ``__name__``) и обязан его отдать.
+
+    Находка live-прогона Ф2.1: имя использовалось ТОЛЬКО в stdlib-ветке, а при
+    поднятом LoggerManager отбрасывалось — записи тринадцати utility-классов
+    ложились под ``main``.
+    """
+    from multiprocess_framework.modules._fallback import FallbackLogger
+
+    logger = LoggerManager(config=_config(tmp_path))
+    try:
+        FallbackLogger("multiprocess_framework.modules.spawner").info("процесс порождён")
+    finally:
+        logger.shutdown()
+
+    assert _name_field(_lines(tmp_path)[0]) == "multiprocess_framework.modules.spawner"
+
+
+def test_process_logger_fallback_branch_carries_process_name(tmp_path: Path) -> None:
+    """``_ProcessLogger`` без явного менеджера — та самая ветка, что работает
+    на живом прогоне (``process_runner`` создаёт его именно так)."""
+    from multiprocess_framework.modules.process_manager_module.runner.class_loader import (
+        _ProcessLogger,
+    )
+
+    logger = LoggerManager(config=_config(tmp_path))
+    try:
+        _ProcessLogger("camera_0").info("Process initialized")
+    finally:
+        logger.shutdown()
+
+    first = _lines(tmp_path)[0]
+    assert _name_field(first) == "camera_0"
+    assert first.endswith("Process initialized"), first
+
+
+def test_process_logger_message_with_percent_survives(tmp_path: Path) -> None:
+    """Текст приходит извне и может содержать ``%`` — он не должен ни падать,
+    ни превращаться в мусор при склейке шаблона."""
+    from multiprocess_framework.modules.process_manager_module.runner.class_loader import (
+        _ProcessLogger,
+    )
+
+    logger = LoggerManager(config=_config(tmp_path))
+    try:
+        _ProcessLogger("camera_0").warning("CPU 90% занято")
+    finally:
+        logger.shutdown()
+
+    assert _lines(tmp_path)[0].endswith("CPU 90% занято")
+
+
 def test_hub_keeps_its_own_module_tag(tmp_path: Path) -> None:
     """Обратная сторона предыдущего: собственный тег hub'а не подменяется
     именем источника — записи hub'а по-прежнему группируются по владельцу."""
