@@ -47,6 +47,23 @@ Rules:
   no long waits; on a hang, skip that check and say so, but always issue the verdict.
 - A test that derives its expected value from the code under test agrees with any answer,
   including "nothing". Write the literal, and check the constant separately.
+- **A spy on an implementation API name guards the name, not the property.** Assert the
+  observable effect — cost, bytes written, calls at the OS boundary — or the guarantee
+  evaporates the moment someone swaps an equivalent call. Found by the phase review:
+  a test spying on `Path.rglob` stayed green when the walk was rewritten with `os.walk`
+  while the guarantee it protected was gone.
+- **Skipping the independent tester must be declared out loud** ("tester skipped: internal
+  mechanism, <reason>") in the plan or the commit. Unstated, "selectively" decays into
+  "never".
+- **A fake-harness test proves the harness.** Where a command surface is tested against
+  fakes, add one test that wires the real objects — otherwise renaming a production
+  attribute leaves every test green.
+- **Never write "impossible", "guaranteed" or "cannot" in code, docs or a plan without a
+  reproduction next to it.** A confident wrong explanation outlives a bug: the bug gets
+  found by its symptom, the explanation gets believed. The phase review caught two —
+  a comment claiming a per-channel sum survives channel teardown (it does not) and a
+  docstring calling a filesystem lock a structural guarantee (on POSIX the file would
+  have been deleted).
 
 **Measured over Ф0 of `observability-unified-routing` (2026-07-27), which is why the rules
 are weighted this way.** Independent tester, 5 runs: 3 real findings, 1 wrong model imposed
