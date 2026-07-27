@@ -170,3 +170,4 @@
 - [Русский вывод и wc -w врут](feedback_ru_output_encoding_and_wc.md) — cp866-поток = «инструмент молчал» у потребителя; wc -w режет кириллицу по байту 0xA0
 - [Защита в базе мертва у наследника](feedback_base_guard_dead_in_heir.md) — наследник с config=None обходит механизм базы; проверка с недостижимым отрицательным путём = не защита
 - [qex reindex timeout](project_qex_reindex_timeout.md) — батч 8-10с против зашитого ~10с таймаута, ручки нет; лечится циклом повторов, свежесть по last_indexed
+- [std_facade не используется](project_std_facade_unused.md) — get_std_logger дешевле миксина (1028 vs 1673 нс), но 76 файлов на голом logging пишут в пустоту; 2.2 = доделать его, не переписывать
