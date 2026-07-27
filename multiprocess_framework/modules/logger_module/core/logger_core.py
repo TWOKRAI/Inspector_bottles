@@ -144,6 +144,12 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self.config = log_config
         self.app_name = log_config.app_name
 
+        # R9: в базу ушло config=None (свой конфиг логгер резолвит сам), поэтому
+        # слепок для отката база выставить не может — без этой строки второй
+        # рубеж reconfigure у логгера и ошибок МЁРТВ: откатываться не к чему, и
+        # сбой пересборки оставляет пустой реестр. Найдено слом-инъекцией B1.
+        self._last_applied_config = log_config
+
         # Module-specific channels (separate from main registry)
         self._module_channels: Dict[str, LogChannel] = {}
 
@@ -458,6 +464,16 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             self.stats["retention_delete_failures"] += result["delete_failures"]
             self.stats["retention_compress_failures"] += result["compress_failures"]
             self.stats["retention_bytes_freed"] += result["bytes_freed"]
+
+    def _validate_config(self, config: Dict[str, Any]) -> None:
+        """R9: разобрать конфиг ДО того, как ``reconfigure`` закроет каналы.
+
+        Тот же разбор, что и в ``_rebuild_from_config``, но раньше — и только
+        ради исключения. Раньше единственной проверкой был этот же
+        ``model_validate`` ВНУТРИ пересборки, то есть уже после
+        ``_close_all_channels()``: опечатка в значении поля стоила всего реестра.
+        """
+        self._resolve_log_config(config)
 
     def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
         """Хук CRM.reconfigure: пересобрать каналы из нового конфига + сбросить кэш.

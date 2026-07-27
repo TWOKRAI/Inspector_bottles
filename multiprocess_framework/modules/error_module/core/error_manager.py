@@ -178,6 +178,14 @@ class ErrorManager(LoggerCore, IErrorManager):
             **kwargs,
         )
 
+        # R9: родитель положил в слепок для отката развёрнутый LoggerManagerConfig,
+        # в котором нет include_stacktrace — это флаг ErrorManager, а не логгера.
+        # Откат с такого слепка тихо ВКЛЮЧИЛ бы трейсбеки тому, кто их выключил.
+        # Исходный ввод восстанавливает обе половины; None не подменяем — на нём
+        # родительский слепок уже равен дефолту, к которому и надо возвращаться.
+        if config is not None:
+            self._last_applied_config = config
+
     def initialize(self) -> bool:
         result = super().initialize()
         if result:
@@ -207,6 +215,17 @@ class ErrorManager(LoggerCore, IErrorManager):
             self._level_to_channel["WARNING"] = "warnings_file"
         elif has_errors:
             self._level_to_channel["WARNING"] = "errors_file"
+
+    def _validate_config(self, config: Dict[str, Any]) -> None:
+        """R9: разобрать error-конфиг ДО закрытия каналов.
+
+        Свой override вместо родительского: ErrorManager принимает и плоский
+        error-dict, и развёрнутый LoggerManagerConfig, и разбор у него свой
+        (``expand_error_manager_config``). Родительский ``_resolve_log_config``
+        на плоском error-dict молча вернул бы дефолтный конфиг — то есть
+        «проверка», которая пропускает любую опечатку.
+        """
+        _normalize_error_config(config)
 
     def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
         """Хук CRM.reconfigure: пересобрать каналы + перестроить severity-routing.

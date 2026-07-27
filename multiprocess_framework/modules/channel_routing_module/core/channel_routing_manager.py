@@ -30,6 +30,11 @@ from .config_normalizer import normalize_config
 #: о поломке маршрута наблюдаемости не имеет права идти по этому же маршруту.
 _fallback_logger = _stdlib_logging.getLogger(__name__)
 
+#: Маркер «config не удалось нормализовать». normalize_config на любом отказе
+#: возвращает копию default, поэтому отличить отказ от пустого dict можно только
+#: по содержимому. Ключ намеренно уродливый — он не должен встретиться в конфиге.
+_UNNORMALIZABLE = "__crm_unnormalizable__"
+
 
 class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager):
     """Базовый менеджер маршрутизации: канальный реестр + диспетчер + буфер.
@@ -96,6 +101,12 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         )
 
         self._config = normalize_config(config)
+        # R9: последний ПРИНЯТЫЙ ввод конфига в исходной форме (dict / pydantic /
+        # build()-объект). Нужен для отката, когда пересборка развалилась уже
+        # после закрытия старых каналов. Храним сырой ввод, а не нормализованный
+        # dict: наследники строятся именно из него (ErrorManager теряет
+        # include_stacktrace на dict-форме LoggerManagerConfig).
+        self._last_applied_config: Optional[Union[Dict[str, Any], Any]] = config
         self._key_field = dispatcher_key_field
         self._buffer = buffer_strategy
 
@@ -141,16 +152,36 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             return False
 
     def reconfigure(self, config: Union[Dict[str, Any], Any]) -> bool:
-        """Пересобрать каналы/маршруты из нового конфига (full-rebuild).
+        """Пересобрать каналы/маршруты из нового конфига (validate-then-swap).
 
         Оркестрация (reuse существующих примитивов):
+            normalize_config()    → привести dict/RegisterBase к dict (Dict at Boundary);
+            _validate_config()    → хук наследника: разобрать новый конфиг ДО разрушения;
             flush()  → сбросить накопленный буфер старого набора каналов;
             _close_all_channels() → закрыть и очистить реестр каналов;
-            normalize_config()    → привести dict/RegisterBase к dict (Dict at Boundary);
             _rebuild_from_config() → хук наследника, строящий новые каналы/маршруты.
 
-        Базовая реализация делает no-op rebuild (наследники переопределяют
-        ``_rebuild_from_config``). Метод идемпотентен и безопасен до initialize():
+        **R9 — порядок здесь и есть починка.** Раньше ``_close_all_channels()``
+        стоял ПЕРЕД разбором конфига, а разбор жил внутри ``_rebuild_from_config``
+        у наследника. Любой отвергнутый reload (одна опечатка в значении поля)
+        оставлял менеджер с пустым реестром: воспроизведено 12 каналов → 0,
+        ``system.log`` 0 байт. Отказ применить конфиг превращался в разрушение
+        наблюдаемости — включая возможность узнать, что именно случилось.
+
+        Два рубежа, и они защищают от разного:
+          1. ``_validate_config`` — конфиг не разобрался: реестр НЕ тронут вовсе;
+          2. откат — конфиг разобрался, но пересборка развалилась (сломанный
+             путь, отказ ОС при открытии файла): каналы воссоздаются из
+             последнего принятого конфига.
+
+        Откат восстанавливает конфиг, а не рантайм-надстройки над ним: каналы,
+        добавленные после reconfigure в обход конфига (``enable_module_logging``),
+        в слепок не входят и будут потеряны. Проверено тестом
+        ``test_rollback_loses_runtime_module_channel`` — записано как известное
+        поведение отката, а не как гарантия обратного.
+
+        Базовая реализация делает no-op rebuild и no-op валидацию (наследники
+        переопределяют оба хука). Метод идемпотентен и безопасен до initialize():
         буфер может быть не запущен, flush() в этом случае ничего не делает.
 
         Args:
@@ -164,21 +195,91 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             self._log_warning(f"[{self.manager_name}] reconfigure: config=None — пропущено")
             return False
 
-        normalized = normalize_config(config)
-        if not isinstance(normalized, dict):
+        # Ветка «не разобрался» отличается от «разобрался в пустой dict» ТОЛЬКО
+        # маркером в default: normalize_config на любом отказе возвращает копию
+        # default, и прежняя проверка `not isinstance(normalized, dict)` была
+        # мёртвой — она не срабатывала никогда. Цена мёртвой проверки: мусор на
+        # входе (`reconfigure(42)`) нормализовался в {} и применялся как валидный
+        # пустой конфиг, то есть тихо сносил все каналы и рапортовал успех. Тот
+        # же класс, что R9, только через другую дверь.
+        normalized = normalize_config(config, default={_UNNORMALIZABLE: True})
+        if _UNNORMALIZABLE in normalized:
             self._log_warning(f"[{self.manager_name}] reconfigure: невалидный config ({type(config)!r}) — пропущено")
             return False
 
+        # Рубеж 1: разобрать новый конфиг ДО того, как закрыт хоть один канал.
+        try:
+            self._validate_config(normalized)
+        except Exception as e:
+            self._log_error(
+                f"[{self.manager_name}] reconfigure отвергнут: {e}; "
+                f"реестр не тронут ({len(self._channel_registry)} каналов)"
+            )
+            return False
+
+        previous = self._last_applied_config
         try:
             self.flush()
             self._close_all_channels()
             self._config = normalized
             self._rebuild_from_config(normalized)
+            self._last_applied_config = config
             self._log_info(f"[{self.manager_name}] reconfigured: {len(self._channel_registry)} каналов")
             return True
         except Exception as e:
+            # Рубеж 2: конфиг прошёл валидацию, но пересборка развалилась на
+            # полпути — реестр сейчас пуст или заполнен наполовину.
             self._log_error(f"[{self.manager_name}] reconfigure failed: {e}")
+            self._rollback_to(previous, reason=str(e))
             return False
+
+    def _rollback_to(self, previous: Optional[Union[Dict[str, Any], Any]], *, reason: str) -> bool:
+        """Воссоздать каналы из последнего принятого конфига после сбоя пересборки.
+
+        Сбой отката логируется отдельным сообщением и НЕ бросается наружу:
+        ``reconfigure`` в этот момент уже возвращает False, а исключение из
+        обработчика сбоя заменило бы понятную причину («не смог пересобрать»)
+        на непонятную («не смог откатиться»).
+
+        Returns:
+            True если откат прошёл; False если менеджер остался без каналов —
+            это худший исход, и он назван в логе явно.
+        """
+        if previous is None:
+            self._log_error(
+                f"[{self.manager_name}] откат невозможен: принятого конфига ещё не было; "
+                f"каналов {len(self._channel_registry)}"
+            )
+            return False
+        try:
+            self._close_all_channels()
+            self._config = normalize_config(previous)
+            self._rebuild_from_config(previous)
+            self._log_warning(
+                f"[{self.manager_name}] откат к предыдущему конфигу после сбоя ({reason}): "
+                f"{len(self._channel_registry)} каналов"
+            )
+            return True
+        except Exception as rollback_error:
+            self._log_error(
+                f"[{self.manager_name}] ОТКАТ НЕ УДАЛСЯ ({rollback_error}) после сбоя ({reason}); "
+                f"каналов {len(self._channel_registry)}"
+            )
+            return False
+
+    def _validate_config(self, config: Dict[str, Any]) -> None:
+        """Хук проверки нового конфига ДО разрушения реестра (no-op по умолчанию).
+
+        Контракт: наследник **бросает исключение**, если конфиг не годится.
+        Возвращаемое значение игнорируется — результат разбора здесь намеренно
+        не переиспользуется в ``_rebuild_from_config``: два независимых разбора
+        стоят микросекунды на редком пути, а протаскивание готового объекта
+        через сигнатуру хука сделало бы её третьим контрактом между базой и
+        тремя наследниками.
+
+        База не валидирует ничего: у ``StatsManager`` конфиг — свободный dict,
+        у ``RouterManager`` (транспортный наследник) своего формата каналов нет.
+        """
 
     def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
         """Хук пересборки каналов/маршрутов из dict (no-op по умолчанию).
@@ -186,6 +287,9 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         Наследники переопределяют, чтобы воссоздать свой набор каналов из
         нового конфига после того как ``reconfigure`` закрыл старые. База ничего
         не строит — конкретные менеджеры (Logger/Stats/Error) знают свой формат.
+
+        Зовётся и на откате (``_rollback_to``) — тогда аргументом приходит
+        последний принятый конфиг в исходной форме, не обязательно dict.
         """
 
     def shutdown(self) -> bool:
