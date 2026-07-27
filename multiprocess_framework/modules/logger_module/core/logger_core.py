@@ -45,6 +45,7 @@ from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
 from .log_types import LogRecord
 from ..channels.log_channel import create_channel, enforce_log_retention, LogChannel
 from .log_paths import resolve_log_file_path
+from ..utils import LogMessage, apply_format
 
 #: Публичная «форточка» контекста: любой код может положить сюда поля, и они
 #: попадут в extra записи. Самый низкий приоритет — её перекрывают и база
@@ -87,6 +88,20 @@ _CHANNEL_BACKPRESSURE_KEYS = (
 #: мусора, и новый менеджер унаследовал бы контекст покойного в том потоке,
 #: который не сделал pop.
 _ctx_key_counter = itertools.count()
+
+#: Какой скоуп подразумевает удобный метод уровня (``info`` → BUSINESS и т.д.).
+#: Нужен :meth:`LoggerCore.is_enabled_for`: предикат обязан отвечать про тот же
+#: маршрут, по которому пойдёт ``logger.info(...)``, иначе он «дешёвый», но про
+#: другую запись. Соответствие таблицы фактическому поведению удобных методов
+#: закреплено тестом ``test_gate_predicate.py`` — сама таблица его доказать не
+#: может, она лишь объявляет намерение.
+_LEVEL_DEFAULT_SCOPE = {
+    LogLevel.DEBUG: LogScope.DEBUG,
+    LogLevel.INFO: LogScope.BUSINESS,
+    LogLevel.WARNING: LogScope.SYSTEM,
+    LogLevel.ERROR: LogScope.SYSTEM,
+    LogLevel.CRITICAL: LogScope.SYSTEM,
+}
 
 
 #: Разбор ответа канала поднят в общую базу (``channel_routing_module.interfaces``):
@@ -613,11 +628,26 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # =========================================================================
 
     def should_log(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+        """Решение гейта с кэшем. Ф1.2: ключ — КОРТЕЖ, а не f-string.
+
+        Прежний ключ ``f"{scope.value}:{level.value}:{module}"`` аллоцировал
+        новую строку на КАЖДОЙ записи, включая отклонённую, — то есть самый
+        дешёвый исход стоил дороже всего остального в нём. Кортеж из уже
+        существующих объектов (два члена enum и имя модуля) не аллоцирует ничего
+        сверх самого кортежа, а enum'ы хэшируются по identity.
+
+        Выигрыш — именно аллокация, и только она. Первая редакция этого
+        docstring'а обещала ещё и «исчезла склейка ключей»; слом-инъекция
+        показала, что тест на склейку остаётся зелёным с f-string-ключом, —
+        при трёхчастном ключе и значениях enum без двоеточий коллизия
+        невозможна и у строкового варианта. Обещание снято.
+        """
         if not self._cache_enabled:
             return self._should_log_direct(scope, level, module)
-        cache_key = f"{scope.value}:{level.value}:{module}"
-        if cache_key in self._decision_cache:
-            return self._decision_cache[cache_key]
+        cache_key = (scope, level, module)
+        cached = self._decision_cache.get(cache_key)
+        if cached is not None:
+            return cached
         result = self._should_log_direct(scope, level, module)
         self._decision_cache[cache_key] = result
         return result
@@ -625,6 +655,49 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     def _should_log_direct(self, scope: LogScope, level: LogLevel, module: str) -> bool:
         scope_config = self._scope_schema(scope)
         return scope_config.should_log(level, module)
+
+    def _is_gate_open(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+        """Пройдёт ли запись гейт — ЕДИНСТВЕННОЕ место, где это решается.
+
+        Хук, а не прямой вызов ``should_log`` из двух мест: у наследника решение
+        может приниматься иначе (severity-маршрут ``ErrorManager`` не спрашивает
+        скоуп вовсе), и тогда публичный предикат :meth:`is_enabled_for` обязан
+        отвечать ровно то же, что сделает :meth:`_route`. Иначе появляется
+        второй, чуть-чуть другой гейт — ровно та развилка, которую убирала Ф4.2.
+
+        Согласие двух путей закреплено тестом-сеткой ``test_gate_predicate.py``
+        (для КАЖДОЙ пары scope×level×module: ``is_enabled_for`` ⇔ ``_route is not None``),
+        параметризованным по обоим менеджерам.
+        """
+        return self.should_log(scope, level, module)
+
+    def is_enabled_for(
+        self,
+        name: str,
+        level: LogLevel,
+        scope: Optional[LogScope] = None,
+    ) -> bool:
+        """Дешёвый публичный предикат «эта запись куда-то пойдёт?» (Ф1.3).
+
+        Нужен и stdlib-совместимому коду (``logger.isEnabledFor``), и OTel Logs
+        Bridge API (``Logger.enabled``): вызывающий хочет узнать про гейт ДО
+        того, как заплатит за сборку сообщения. Ленивое сообщение (Ф1.4)
+        закрывает тот же случай изнутри, но не всякий вызов можно свести к
+        одному callable — иногда дорога вся ветка кода вокруг записи.
+
+        Args:
+            name: имя модуля-источника (то же, что ``module`` в :meth:`log`).
+            level: уровень записи.
+            scope: скоуп; ``None`` — тот, который для этого уровня возьмёт
+                удобный метод (:data:`_LEVEL_DEFAULT_SCOPE`), чтобы предикат
+                отвечал про ``logger.info(...)``, а не про абстрактную запись.
+
+        Стоимость — кэшированный гейт: тот же путь, что у :meth:`log`, без
+        сборки записи.
+        """
+        if scope is None:
+            scope = _LEVEL_DEFAULT_SCOPE.get(level, LogScope.SYSTEM)
+        return self._is_gate_open(scope, level, name)
 
     def _route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[List[str]]:
         """Куда пойдёт запись — и пойдёт ли вообще. ``None`` = отклонена гейтом.
@@ -644,7 +717,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         решение принимает не скоуп (severity-маршрут ошибок), должен уметь
         вернуть приёмники, не спрашивая ``should_log`` вовсе.
         """
-        if not self.should_log(scope, level, module):
+        if not self._is_gate_open(scope, level, module):
             return None
 
         scope_config = self._scope_schema(scope)
@@ -668,16 +741,43 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self,
         scope: LogScope,
         level: LogLevel,
-        message: str,
+        message: "LogMessage",
         module: str = "main",
+        *args: Any,
         **extra,
     ):
+        """Записать. Сообщение может быть отложенным (Ф1.4).
+
+        Args:
+            message: строка, ``%``-шаблон или ``Callable[[], str]``. Callable
+                вызывается ТОЛЬКО после гейта и ровно один раз.
+            module: имя модуля-источника.
+            *args: аргументы ``%``-формата (как в stdlib). Применяются один раз
+                — до сборки записи, а не по разу на канал.
+
+        Почему ``*args`` стоит ПОСЛЕ ``module``, а не сразу за сообщением, как в
+        stdlib: ``module`` во фреймворке повсеместно передают четвёртым
+        позиционным аргументом, и перестановка молча съела бы его в ``args``.
+        Совместимость важнее сходства с чужой сигнатурой.
+
+        Отложенность нужна ровно там, где гейт закрыт: цена f-string на
+        call-site платится ДО входа сюда и никаким гейтом внутри не снимается
+        (об этом же — шапка Ф1 в плане). ``log(..., lambda: f"...")`` и
+        ``log(..., "%s", "main", value)`` — два способа эту цену не платить.
+        """
         self.stats["messages_processed"] += 1
 
         channels = self._route(scope, level, module)
         if channels is None:
             self.stats["messages_skipped"] += 1
             return
+
+        # Строго ПОСЛЕ гейта: в этом весь смысл. И ровно один раз — запись
+        # общая для всех каналов, поэтому число приёмников на цену не влияет.
+        if not isinstance(message, str):
+            message = message() if callable(message) else str(message)
+        if args:
+            message = apply_format(message, args)
 
         record = LogRecord(
             timestamp=time.time(),
@@ -912,39 +1012,43 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # УДОБНЫЕ МЕТОДЫ ПО ОБЛАСТИ
     # =========================================================================
 
-    def system(self, level: LogLevel, message: str, module: str = "main", **extra):
-        self.log(LogScope.SYSTEM, level, message, module, **extra)
+    def system(self, level: LogLevel, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.SYSTEM, level, message, module, *args, **extra)
 
-    def business(self, level: LogLevel, message: str, module: str = "main", **extra):
-        self.log(LogScope.BUSINESS, level, message, module, **extra)
+    def business(self, level: LogLevel, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.BUSINESS, level, message, module, *args, **extra)
 
-    def performance(self, level: LogLevel, message: str, module: str = "main", **extra):
-        self.log(LogScope.PERFORMANCE, level, message, module, **extra)
+    def performance(self, level: LogLevel, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.PERFORMANCE, level, message, module, *args, **extra)
 
-    def audit(self, level: LogLevel, message: str, module: str = "main", **extra):
-        self.log(LogScope.AUDIT, level, message, module, **extra)
+    def audit(self, level: LogLevel, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.AUDIT, level, message, module, *args, **extra)
 
-    def security(self, level: LogLevel, message: str, module: str = "main", **extra):
-        self.log(LogScope.SECURITY, level, message, module, **extra)
+    def security(self, level: LogLevel, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.SECURITY, level, message, module, *args, **extra)
 
     # =========================================================================
     # УДОБНЫЕ МЕТОДЫ ПО УРОВНЮ
     # =========================================================================
+    #
+    # Скоуп каждого из них обязан совпадать с таблицей _LEVEL_DEFAULT_SCOPE —
+    # иначе is_enabled_for отвечает про другой маршрут. Сверяет тест-сетка
+    # test_gate_predicate.py, а не глаз.
 
-    def debug(self, message: str, module: str = "main", **extra):
-        self.log(LogScope.DEBUG, LogLevel.DEBUG, message, module, **extra)
+    def debug(self, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.DEBUG, LogLevel.DEBUG, message, module, *args, **extra)
 
-    def info(self, message: str, module: str = "main", **extra):
-        self.log(LogScope.BUSINESS, LogLevel.INFO, message, module, **extra)
+    def info(self, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.BUSINESS, LogLevel.INFO, message, module, *args, **extra)
 
-    def warning(self, message: str, module: str = "main", **extra):
-        self.log(LogScope.SYSTEM, LogLevel.WARNING, message, module, **extra)
+    def warning(self, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.SYSTEM, LogLevel.WARNING, message, module, *args, **extra)
 
-    def error(self, message: str, module: str = "main", **extra):
-        self.log(LogScope.SYSTEM, LogLevel.ERROR, message, module, **extra)
+    def error(self, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.SYSTEM, LogLevel.ERROR, message, module, *args, **extra)
 
-    def critical(self, message: str, module: str = "main", **extra):
-        self.log(LogScope.SYSTEM, LogLevel.CRITICAL, message, module, **extra)
+    def critical(self, message: LogMessage, module: str = "main", *args: Any, **extra):
+        self.log(LogScope.SYSTEM, LogLevel.CRITICAL, message, module, *args, **extra)
 
     # =========================================================================
     # УПРАВЛЕНИЕ МОДУЛЯМИ
@@ -965,6 +1069,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             pass
         self._channel_registry.unregister(f"module_{module_name}")
         del self._module_channels[module_name]
+        # F6: module-каналы — как раз тот случай, ради которого уборка и нужна:
+        # их состав меняется в рантайме, и имя каждого навсегда оседало в
+        # словарях буфера.
+        self._forget_buffered_channel(f"module_{module_name}")
         self._on_channels_changed()
 
     # =========================================================================

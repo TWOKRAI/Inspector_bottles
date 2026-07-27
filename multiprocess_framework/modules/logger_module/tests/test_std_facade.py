@@ -17,31 +17,44 @@ from multiprocess_framework.modules.logger_module.adapters.std_facade import (
     StdLoggerFacade,
     get_std_logger,
 )
+from multiprocess_framework.modules.logger_module.utils import apply_format
 
 
 class _FakeLoggerManager:
-    """Минимальный дубль LoggerManager: собирает (level, message, module)."""
+    """Минимальный дубль LoggerManager: собирает (level, message, module).
+
+    Ф1.5: сигнатура повторяет реальную — ``(message, module="main", *args)``.
+    Форматирование фейк НЕ делает и делать не должен: с Ф1.4 ``%`` применяет
+    менеджер уже за гейтом, и фейк, склеивающий строку сам, доказывал бы
+    поведение фейка. Тесты на фактическую склейку живут там, где проводка
+    настоящая — ``test_lazy_message.py::TestStdFacadeGatesBeforeFormatting``.
+    """
 
     def __init__(self) -> None:
         self.records: list[tuple[str, str, str]] = []
+        self.raw: list[tuple[str, str, str, tuple]] = []
 
-    def _capture(self, level: str, message: str, module: str) -> None:
-        self.records.append((level, message, module))
+    def _capture(self, level: str, message: str, module: str, args: tuple = ()) -> None:
+        # ``records`` хранит СКЛЕЕННЫЙ текст (как его увидит канал), ``raw`` —
+        # то, что фасад передал на самом деле. Первое удобно проверять, второе
+        # доказывает, что фасад ничего не склеил заранее.
+        self.records.append((level, apply_format(message, args), module))
+        self.raw.append((level, message, module, args))
 
-    def debug(self, message: str, module: str = "main", **_extra: Any) -> None:
-        self._capture("debug", message, module)
+    def debug(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
+        self._capture("debug", message, module, args)
 
-    def info(self, message: str, module: str = "main", **_extra: Any) -> None:
-        self._capture("info", message, module)
+    def info(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
+        self._capture("info", message, module, args)
 
-    def warning(self, message: str, module: str = "main", **_extra: Any) -> None:
-        self._capture("warning", message, module)
+    def warning(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
+        self._capture("warning", message, module, args)
 
-    def error(self, message: str, module: str = "main", **_extra: Any) -> None:
-        self._capture("error", message, module)
+    def error(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
+        self._capture("error", message, module, args)
 
-    def critical(self, message: str, module: str = "main", **_extra: Any) -> None:
-        self._capture("critical", message, module)
+    def critical(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
+        self._capture("critical", message, module, args)
 
 
 @pytest.fixture
@@ -70,10 +83,26 @@ class TestRoutingToLoggerManager:
         assert fake_lm.records == [(level, "сообщение", "gui")]
 
     def test_percent_args_formatted(self, fake_lm: _FakeLoggerManager) -> None:
-        """%-аргументы склеиваются, как в stdlib."""
+        """%-аргументы склеиваются, как в stdlib — но уже в менеджере (Ф1.5)."""
         StdLoggerFacade("gui").warning("процесс '%s' не найден (код %d)", "pult", 42)
 
         assert fake_lm.records[0][1] == "процесс 'pult' не найден (код 42)"
+
+    def test_template_and_args_are_handed_over_unformatted(self, fake_lm: _FakeLoggerManager) -> None:
+        """Ф1.5: фасад НЕ склеивает — иначе гейт менеджера уже опоздал.
+
+        Здесь проверяется именно граница «фасад → менеджер»: шаблон приходит
+        целым, аргументы отдельно. Что склейка потом действительно происходит,
+        доказывает предыдущий тест и запись на диск в test_lazy_message.py.
+        """
+        StdLoggerFacade("gui").warning("процесс '%s' не найден (код %d)", "pult", 42)
+
+        assert fake_lm.raw[0] == (
+            "warning",
+            "процесс '%s' не найден (код %d)",
+            "gui",
+            ("pult", 42),
+        )
 
     def test_module_is_passed_through(self, fake_lm: _FakeLoggerManager) -> None:
         StdLoggerFacade("trace").info("x")

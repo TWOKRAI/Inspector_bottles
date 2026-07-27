@@ -578,8 +578,34 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             self._log_debug(f"[{self.manager_name}] close error on '{name}': {exc}")
         changed = self._channel_registry.unregister(name)
         if changed:
+            self._forget_buffered_channel(str(name))
             self._on_channels_changed()
         return changed
+
+    def _forget_buffered_channel(self, name: str) -> None:
+        """Снять рабочее состояние ушедшего канала с буфера (резидуал F6).
+
+        Буфер держит очередь и отметку времени НА КАЖДОЕ имя, которое хоть раз
+        видел. Состав каналов у долгоживущего процесса меняется в рантайме
+        (``sink.disable``, per-module каналы), и без этого вызова словари росли
+        монотонно — замер: 500 имён → 500 пустых очередей.
+
+        Счётчики потерь по каналу не трогаются: их история обязана пережить
+        снятие приёмника (урок ревью фазы Ф0, ``_absorbed_backpressure``).
+        Неотправленное тоже не трогается — буфер откажется забыть канал с
+        непустой очередью, и записи останутся видимы в ``pending``, а при
+        следующем сбросе честно уедут в ``unresolved_channel_records``.
+        Молча выбросить их здесь значило бы завести четвёртый, никем не
+        считаемый класс потери.
+        """
+        buffer = getattr(self, "_buffer", None)
+        forget = getattr(buffer, "forget_channel", None)
+        if forget is None:
+            return
+        try:
+            forget(name)
+        except Exception as exc:  # noqa: BLE001 — уборка не имеет права уронить sink.disable
+            self._log_debug(f"[{self.manager_name}] forget_channel('{name}') failed: {exc}")
 
     def _on_channel_removed(self, channel: IChannel) -> None:
         """Хук: КОНКРЕТНЫЙ канал покидает реестр (снят или пересобран).

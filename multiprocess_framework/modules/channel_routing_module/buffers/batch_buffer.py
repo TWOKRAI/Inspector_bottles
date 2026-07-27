@@ -180,10 +180,20 @@ class BatchBuffer(IBufferStrategy):
         self._flush_timeouts: int = 0
         self._flush_contract_violations: int = 0
         self._dropped_at_stop: int = 0
+        #: Записи, ПРИШЕДШИЕ уже после stop() (резидуал F3). Отдельно от
+        #: ``dropped_at_stop``: тот считает остаток на момент самой остановки,
+        #: а это — то, что пришло потом. Без счётчика такая запись оседала
+        #: полностью молча: воспроизведено — ``pending={'Z': 3}``,
+        #: ``dropped=0``, ``dropped_at_stop=0``.
+        self._enqueued_after_stop: int = 0
         self._errors: int = 0
 
         self._timer_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        #: Буфер остановлен: таймера нет, и сбросить накопленное может только
+        #: явный ``flush()``. Не то же самое, что ``not running``: ``running``
+        #: ложен и до первого ``start()``, когда буфер ещё никто не бросал.
+        self._stopped: bool = False
 
     # ------------------------------------------------------------------
     # IBufferStrategy — lifecycle
@@ -194,6 +204,7 @@ class BatchBuffer(IBufferStrategy):
         if self._timer_thread and self._timer_thread.is_alive():
             return
         self._stop_event.clear()
+        self._stopped = False
         self._timer_thread = threading.Thread(
             target=self._timer_worker,
             name="batch-buffer-timer",
@@ -208,6 +219,11 @@ class BatchBuffer(IBufferStrategy):
         сейчас, второй забирает то, что накопилось за время его полёта. Если
         после этого что-то осталось (эмитенты всё ещё пишут), это НЕ тишина —
         остаток считается в ``dropped_at_stop``.
+
+        Всё, что придёт ПОСЛЕ, считается отдельно (``enqueued_after_stop``,
+        резидуал F3): такие записи принимаются в очередь — явный ``flush()``
+        по-прежнему их доставит, и выбрасывать их было бы хуже, — но факт
+        «пришло к остановленному буферу» перестаёт быть невидимым.
         """
         self._stop_event.set()
         if self._timer_thread and self._timer_thread.is_alive():
@@ -221,6 +237,11 @@ class BatchBuffer(IBufferStrategy):
             left = sum(len(buf) for buf in self._batches.values())
             if left:
                 self._dropped_at_stop += left
+            # Флаг выставляется ПОСЛЕ обоих сбросов, а не в начале stop():
+            # запись, пришедшая от соседнего потока во время слива, второй
+            # проход ещё доставит — считать её «пришедшей к остановленному
+            # буферу» значило бы поднимать сигнал на штатном завершении.
+            self._stopped = True
 
     # ------------------------------------------------------------------
     # IBufferStrategy — enqueue / flush
@@ -246,6 +267,12 @@ class BatchBuffer(IBufferStrategy):
 
             batch = self._batches[channel]
             self._total_enqueued += 1
+            if self._stopped:
+                # F3: буфер уже остановлен. Запись принимаем (явный flush её
+                # ещё доставит), но факт называем: иначе она просто оседает в
+                # pending у уходящего процесса и выглядит как «ничего не
+                # произошло».
+                self._enqueued_after_stop += 1
 
             limit = self._config.max_pending
             overflowed = 0 < limit <= len(batch)
@@ -330,6 +357,36 @@ class BatchBuffer(IBufferStrategy):
         for ch in channels:
             self._flush_channel(ch, wait=wait, timeout=timeout)
 
+    def forget_channel(self, channel: str) -> bool:
+        """Забыть РАБОЧЕЕ состояние канала, который больше не существует (F6).
+
+        Зачем: ``_batches`` и ``_last_flush_time`` — словари по имени канала, и
+        имя туда попадает от первого же ``enqueue``. При статическом составе это
+        десяток записей, но per-module каналы создаются в рантайме
+        (``enable_module_logging``), и у долгоживущего процесса набор имён
+        растёт монотонно. Замер: 500 разных имён → 500 пустых ``deque`` и 500
+        отметок времени, ни одна из которых больше не нужна.
+
+        Что НЕ забывается — счётчики потерь (``dropped_by_channel``,
+        ``flush_failed_by_channel``). Это прямой урок ревью фазы Ф0: снятие
+        канала уже однажды стирало историю потерь ровно в тот момент, когда её
+        читают (оператор жмёт ``sink.disable``, разбирая инцидент). Роста от них
+        нет по построению: запись появляется только при реальной потере, а
+        каналов, что-то потерявших, на порядки меньше, чем просто существовавших.
+
+        Returns:
+            ``True`` если что-то забыли. ``False`` — если у канала есть
+            неотправленное: молча выбросить накопленное нельзя, вызывающий
+            сначала обязан сделать ``flush(channel)``.
+        """
+        with self._lock:
+            pending = self._batches.get(channel)
+            if pending:
+                return False
+            forgotten = self._batches.pop(channel, None) is not None
+            forgotten |= self._last_flush_time.pop(channel, None) is not None
+            return forgotten
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -365,6 +422,11 @@ class BatchBuffer(IBufferStrategy):
                 # Не успели записать при остановке. Именованная потеря вместо
                 # записей, тихо оставшихся в pending у уходящего процесса.
                 "dropped_at_stop": self._dropped_at_stop,
+                # Пришли ПОСЛЕ остановки (F3). Лежат в pending и уедут только
+                # при явном flush(); ненулевое значение — «кто-то ещё пишет в
+                # закрытую плоскость», а не норма.
+                "enqueued_after_stop": self._enqueued_after_stop,
+                "stopped": self._stopped,
                 "in_flight": sorted(self._in_flight),
                 "in_flight_records": self._in_flight_records,
                 "max_pending": self._config.max_pending,
@@ -408,6 +470,22 @@ class BatchBuffer(IBufferStrategy):
         доставленной целиком. Значение вне ``[0, len(batch)]`` — нарушение
         контракта стоком: считается в ``flush_contract_violations``, и пачка
         НЕ засчитывается доставленной (недоказанное не выдаём за записанное).
+
+        **Контракт стока — чего ``flush_fn`` делать НЕЛЬЗЯ (резидуал F2).**
+        Сток вызывается ВНЕ lock-а, но с каналом, помеченным ``_in_flight``.
+        Поэтому ``flush_fn``, вызывающий ``buf.flush(<тот же канал>)``,
+        блокирует сам себя на полный барьер: он ждёт снятия флага, который
+        снимет только его собственный возврат. Замерено — ровно
+        ``DEFAULT_FLUSH_BARRIER_TIMEOUT`` (5.00 с) на вызов, после чего
+        ``flush_timeouts`` растёт, а пачка так и не уходит. Ни один сток
+        фреймворка так не делает; предупреждение здесь потому, что симптом
+        (процесс ползёт, логи целы, ошибок ноль) на буфер не указывает вовсе.
+        Сбросить ДРУГОЙ канал из ``flush_fn`` допустимо.
+
+        Второе свойство того же места (резидуал F4): длительность ``flush_fn``
+        оплачивает поток, назначенный сбрасывающим, — а это, как правило,
+        обычный эмитент внутри своего ``enqueue()``. Медленный сток тормозит
+        не фоновый таймер, а прикладной код. См. ``channel_routing_module/README.md``.
         """
         with self._lock:
             if channel in self._in_flight:

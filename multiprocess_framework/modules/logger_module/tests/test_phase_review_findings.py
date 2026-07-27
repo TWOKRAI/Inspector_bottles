@@ -178,23 +178,55 @@ def _unbatched_error_manager(tmp_path: Path) -> ErrorManager:
     return mgr
 
 
-def test_error_manager_counts_missing_channel_on_warning(tmp_path: Path) -> None:
-    """WARNING в снятый канал при выключенном батчинге не исчезает молча.
+def test_warning_falls_back_to_live_channel_when_its_own_is_removed(tmp_path: Path) -> None:
+    """Снятие ``warnings_file`` переводит WARNING на живой ``errors_file`` (P2).
 
-    Именно этот вход воспроизвёл ревьюер: `em.set_sink_enabled("warnings_file",
-    False); em.warning(...)` → на диске 0 записей, ВСЕ счётчики дельта 0.
-    Ветка просто ничего не делала при ``ch is None``.
+    Прежняя редакция этого теста ожидала здесь РОСТ ``unresolved_channel_records``:
+    маршруты уровней считались один раз на ``initialize()``, и после
+    ``sink.disable`` ``_level_to_channel`` продолжал указывать на снятый канал.
+    Резидуал P2 это починил — fallback-цепочка пересчитывается на каждое
+    изменение состава, и запись теперь не теряется вовсе.
+
+    Инвариант «невидимый дроп невозможен» переехал в тест ниже — на вход, где
+    приёмника действительно не остаётся.
     """
     mgr = _unbatched_error_manager(tmp_path)
     try:
         assert mgr.set_sink_enabled("warnings_file", False), "предусловие: канал был и снят"
+        assert mgr.get_stats()["level_routes"]["WARNING"] == "errors_file", (
+            "маршрут WARNING не пересобрался после снятия его канала"
+        )
+
+        before = mgr.get_stats()
+        mgr.warning("предупреждение с fallback'ом", module="findings")
+        after = mgr.get_stats()
+
+        assert after["unresolved_channel_records"] == before["unresolved_channel_records"]
+        assert "предупреждение с fallback'ом" in (tmp_path / "errors.log").read_text(encoding="utf-8")
+    finally:
+        mgr.shutdown()
+
+
+def test_error_manager_counts_warning_without_any_receiver(tmp_path: Path) -> None:
+    """WARNING без единого приёмника при выключенном батчинге не исчезает молча.
+
+    Тот же инвариант, что проверял ревьюер, но на входе, который после P2
+    действительно означает «приёмника нет»: сняты ВСЕ severity-каналы. Пол
+    сюда не подстилается осознанно — он для ERROR/CRITICAL; WARNING обязан
+    оставить счётчик.
+    """
+    mgr = _unbatched_error_manager(tmp_path)
+    try:
+        for name in list(mgr._channel_registry.names()):
+            mgr.set_sink_enabled(name, False)
+        assert mgr.get_stats()["level_routes"] == {}, "предусловие: severity-маршрутов не осталось"
 
         before = mgr.get_stats()
         mgr.warning("предупреждение в никуда", module="findings")
         after = mgr.get_stats()
 
-        assert after["unresolved_channel_records"] > before["unresolved_channel_records"], (
-            "WARNING в снятый канал исчезло без счётчика — инвариант «невидимый дроп невозможен» нарушен"
+        assert after["records_without_channels"] > before["records_without_channels"], (
+            "WARNING без приёмников исчезло без счётчика — инвариант «невидимый дроп невозможен» нарушен"
         )
     finally:
         mgr.shutdown()

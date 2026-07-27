@@ -24,12 +24,19 @@ import traceback
 from typing import Optional, Any, List, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
+from ...channel_routing_module.levels import rank_of
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.logger_core import LoggerCore
 from ..configs.error_manager_config import ErrorManagerConfig
 from ..interfaces import IErrorManager
 from .error_config_assembly import expand_error_manager_config
 
+
+#: С какого ранга запись принадлежит плоскости ошибок. WARNING, а не ERROR:
+#: ``_setup_level_routes`` строит маршрут и для него, и именно WARNING+ ходят
+#: severity-путём мимо гейта скоупа. Число берётся из общего реестра рангов —
+#: своя константа здесь разъехалась бы с ``_setup_level_routes`` молча.
+_SEVERITY_PLANE_RANK = rank_of("WARNING")
 
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "errors",
@@ -79,7 +86,12 @@ def _normalize_error_config(
     include_stacktrace = True
 
     if config is None:
-        return manager_name, LoggerManagerConfig.model_validate(_DEFAULT_CONFIG), include_stacktrace
+        # Через ту же сборку, что и остальные пути: умолчания плоскости ошибок
+        # (scopes/modules, резидуал P3) обязаны действовать и на ``config=None``,
+        # иначе «дефолтный ErrorManager» и «ErrorManager из ErrorManagerConfig»
+        # получаются разными менеджерами.
+        expanded = expand_error_manager_config(_DEFAULT_CONFIG)
+        return manager_name, LoggerManagerConfig.model_validate(expanded), include_stacktrace
 
     if isinstance(config, LoggerManagerConfig):
         return manager_name, config, include_stacktrace
@@ -182,6 +194,15 @@ class ErrorManager(LoggerCore, IErrorManager):
         if config is not None:
             self._last_applied_config = config
 
+        # Маршруты строятся УЖЕ здесь, а не только в initialize(): между
+        # конструктором и initialize() менеджер обязан уметь записать ошибку.
+        # Раньше в этом промежутке `_level_to_channel` был пуст, и ERROR уходил
+        # scope-путём — в каналы логгера, которых у ErrorManager нет. С P3
+        # (скоупы плоскости ошибок выключены) тот же ERROR был бы просто
+        # отклонён гейтом, то есть починка одного резидуала породила бы дыру
+        # в инварианте 1. Вызов идемпотентен, в initialize() он остаётся.
+        self._setup_level_routes()
+
     def initialize(self) -> bool:
         result = super().initialize()
         if result:
@@ -240,6 +261,43 @@ class ErrorManager(LoggerCore, IErrorManager):
         self._apply_log_config_rebuild(log_config)
         self._setup_level_routes()
 
+    def _on_channels_changed(self) -> None:
+        """Состав каналов поменялся → severity-маршруты пересобрать (резидуал P2).
+
+        Воспроизведение до правки: ``em.set_sink_enabled("critical_file", False)``
+        → ``level_routes`` продолжал утверждать ``CRITICAL → critical_file``, хотя
+        канала в реестре уже нет. Запись при этом не терялась (её ловил floor,
+        ``errors_to_floor`` 0 → 1), но ``errors_file`` был ЖИВ — то есть вместо
+        штатного маршрута ошибка уходила в приёмник последней инстанции, а
+        публичный ``level_routes`` показывал маршрут, которого нет.
+
+        Fallback-цепочка (``critical_file`` → ``errors_file``) считалась ровно
+        один раз на ``initialize()``. Теперь она пересчитывается на каждом
+        изменении состава — то есть ровно тогда, когда fallback и нужен.
+
+        Родительский хук (сброс кэша решений) обязателен: ``_is_gate_open``
+        здесь зависит от ``_level_to_channel``, а тот только что поменялся.
+        """
+        super()._on_channels_changed()
+        self._setup_level_routes()
+
+    def _is_gate_open(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+        """Severity-плоскость открыта всегда; остальное решает скоуп (Ф1.3).
+
+        Условие — «уровень принадлежит плоскости ошибок», а НЕ «для уровня
+        сейчас есть канал». Разница стоила бы инварианта 1: канал у ERROR может
+        исчезнуть (``sink.disable``), и завязка на его наличие закрывала бы
+        гейт ровно в тот момент, когда запись обязана дойти хотя бы до пола.
+
+        Пара к :meth:`_route`: гейт и резолв обязаны отвечать одинаково, иначе
+        публичный ``is_enabled_for`` обещает одно, а ``log()`` делает другое.
+        Сетка ``test_gate_predicate.py`` проверяет их согласие на каждой паре
+        scope×level×module, поэтому расхождение не может проехать молча.
+        """
+        if rank_of(level) >= _SEVERITY_PLANE_RANK:
+            return True
+        return super()._is_gate_open(scope, level, module)
+
     def _route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[List[str]]:
         """WARNING/ERROR/CRITICAL → один канал по уровню; остальное — родителю.
 
@@ -257,10 +315,25 @@ class ErrorManager(LoggerCore, IErrorManager):
         Закреплено характеризационным тестом ``test_severity_path_ignores_scope_gate``.
         """
         channel_name = self._level_to_channel.get(level.value)
-        if channel_name is None:
-            # DEBUG / INFO / неизвестный уровень → scope-based резолв родителя.
-            return super()._route(scope, level, module)
-        return [channel_name]
+        if channel_name is not None:
+            return [channel_name]
+
+        if rank_of(level) >= _SEVERITY_PLANE_RANK:
+            # Уровень плоскости ошибок, но живого приёмника не осталось (все
+            # severity-каналы сняты). Пустой список, а НЕ путь родителя: у
+            # скоупов плоскости ошибок приёмников нет по определению (P3), и
+            # делегирование туда означало бы «ошибка отклонена гейтом» —
+            # то есть тихое исчезновение записи вместо пола.
+            #
+            # Это не теория: правка P2 (пересборка маршрутов на изменение
+            # состава) без этой ветки уронила четыре теста разом, включая оба
+            # теста пола. Пустой список ловит ``_write_error_record`` → floor
+            # для ERROR/CRITICAL и ``_count_records_without_channels`` для
+            # WARNING — обе судьбы видимы наружу.
+            return []
+
+        # DEBUG / INFO / неизвестный уровень → scope-based резолв родителя.
+        return super()._route(scope, level, module)
 
     def log_exception(
         self,

@@ -17,13 +17,18 @@ from ...channel_routing_module.buffers.batch_buffer import (
     DEFAULT_OVERFLOW_POLICY,
     validate_overflow_policy,
 )
+from ...channel_routing_module.levels import LEVEL_ORDER, LEVEL_RANKS, UNKNOWN_RANK
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ..log_enums import LogLevel
 
 _STD_FMT = "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s"
 _FILE_MAX = 10 * 1024 * 1024
 
-_LEVEL_ORDER = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+#: Порядок уровней — из общего дома трёх плоскостей, а не своей копией.
+#: Своя копия здесь уже была: пока она жила рядом, гейт логгера и severity-путь
+#: ошибок сравнивали уровни по двум разным кортежам, и расхождение было бы
+#: молчаливым (тот же класс, что _RETENTION_STAT_KEYS в Ф0.7).
+_LEVEL_ORDER = LEVEL_ORDER
 
 
 class LoggerChannelSchema(SchemaBase):
@@ -49,17 +54,50 @@ class LoggerScopeSchema(SchemaBase):
     channels: List[str] = Field(default_factory=list)
     modules: List[str] = Field(default_factory=list)
 
+    @field_validator("min_level")
+    @classmethod
+    def _normalize_min_level(cls, value: str) -> str:
+        """Ф1.1: порог приводится к канону ОДИН раз — на границе конфига.
+
+        Прежняя реализация звала ``self.min_level.upper()`` на КАЖДОЙ записи,
+        то есть аллоцировала строку ради решения «писать или нет». Нормализация
+        здесь снимает эту цену навсегда и заодно делает ``min_level`` в
+        ``model_dump`` каноничным.
+
+        Валидатор поля, а не хранение производной рядом: приватный атрибут
+        Pydantic-модели читается через ``__getattr__``, и замер показал **921 нс
+        против 47 нс** у обычного поля — «оптимизация» через ``PrivateAttr``
+        делала гейт впятеро ДОРОЖЕ прежнего. Поймано бенчем Ф1.6, а не глазом.
+        """
+        return value.upper() if isinstance(value, str) else value
+
     def should_log(self, level: LogLevel, module: str) -> bool:
+        """Пройдёт ли запись гейт скоупа. Горячий путь — без аллокаций.
+
+        Незнакомый уровень (или незнакомый ``min_level``) ПРОПУСКАЕТ запись
+        вместе с фильтром модулей — ровно как прежняя реализация, где
+        ``ValueError`` из ``index()`` возвращал ``True`` до проверки модулей.
+        Это характеризовано тестом: «тише DEBUG» из-за опечатки в имени уровня
+        было бы тихой потерей.
+
+        Что осталось на пути решения: два обращения к полям модели, два
+        словарных лукапа и сравнение int. Ни линейного поиска по кортежу
+        (``LEVEL_ORDER.index``), ни ``.upper()``.
+        """
         if not self.enabled:
             return False
-        try:
-            lv = _LEVEL_ORDER.index(level.value)
-            mv = _LEVEL_ORDER.index(self.min_level.upper())
-        except ValueError:
+        min_rank = LEVEL_RANKS.get(self.min_level, UNKNOWN_RANK)
+        if min_rank == UNKNOWN_RANK:
             return True
-        if lv < mv:
+        rank = LEVEL_RANKS.get(level.value, UNKNOWN_RANK)
+        if rank == UNKNOWN_RANK:
+            return True
+        if rank < min_rank:
             return False
-        if self.modules and module not in self.modules:
+        # Список, а не frozenset: он почти всегда пуст, а его материализация в
+        # множество жила бы в приватном атрибуте — то есть на дорогом пути.
+        modules = self.modules
+        if modules and module not in modules:
             return False
         return True
 

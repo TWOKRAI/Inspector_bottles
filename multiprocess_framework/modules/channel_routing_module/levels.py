@@ -21,9 +21,20 @@
 #: ``LogRecord.to_dict()``.
 LEVEL_ORDER = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
+#: Имя уровня → ранг. Ф1.1: гейт спрашивают на КАЖДОЙ записи, а
+#: ``LEVEL_ORDER.index(str)`` — линейный поиск по кортежу плюс ``.upper()``,
+#: аллоцирующий новую строку. Словарь убирает и то, и другое: на пути решения
+#: остаются два хэш-лукапа и сравнение int.
+LEVEL_RANKS = {name: index for index, name in enumerate(LEVEL_ORDER)}
+
 #: Ранг, начиная с которого запись считается аварийной: её нельзя ни буферизовать,
 #: ни потерять при выключенных приёмниках (инвариант 1 плана observability-unified-routing).
-ERROR_RANK = LEVEL_ORDER.index("ERROR")
+ERROR_RANK = LEVEL_RANKS["ERROR"]
+
+#: Ответ «такого уровня нет». Отрицательный, а не 0: 0 — это законный ранг
+#: DEBUG, и путать «самый низкий» с «неизвестный» нельзя. Потребители,
+#: которым нужен мягкий дефолт, приводят его сами (см. :func:`level_rank`).
+UNKNOWN_RANK = -1
 
 
 def level_rank(level) -> int:
@@ -31,11 +42,29 @@ def level_rank(level) -> int:
 
     Неизвестный уровень → 0 (не фильтруем — безопасный дефолт «пропустить»).
     """
+    rank = rank_of(level)
+    return 0 if rank == UNKNOWN_RANK else rank
+
+
+def rank_of(level) -> int:
+    """Ранг уровня или :data:`UNKNOWN_RANK`. Принимает ``LogLevel`` или строку.
+
+    Отличается от :func:`level_rank` только тем, что НЕ маскирует незнакомый
+    уровень нулём: гейту ``LoggerScopeSchema.should_log`` разница важна — на
+    незнакомом уровне он обязан пропустить запись, а не сравнивать её ранг
+    с порогом (иначе любой уровень с опечаткой стал бы тише DEBUG).
+
+    Быстрый путь — прямой лукап без ``.upper()``: имена ``LogLevel.value`` уже
+    в верхнем регистре, и на горячем пути лишняя строка не аллоцируется.
+    """
     val = getattr(level, "value", level)
-    try:
-        return LEVEL_ORDER.index(str(val).upper())
-    except ValueError:
-        return 0
+    if isinstance(val, str):
+        rank = LEVEL_RANKS.get(val)
+        if rank is not None:
+            return rank
+        return LEVEL_RANKS.get(val.upper(), UNKNOWN_RANK)
+    # Нестроковый уровень мог прийти только из чужого кода; приводим, как раньше.
+    return LEVEL_RANKS.get(str(val).upper(), UNKNOWN_RANK)
 
 
 def is_error_level(level) -> bool:

@@ -33,6 +33,7 @@ import traceback
 from typing import Any
 
 from ..core.logger_manager import get_logger
+from ..utils import apply_format
 
 __all__ = [
     "StdLoggerFacade",
@@ -109,22 +110,37 @@ class StdLoggerFacade:
 
     @staticmethod
     def _format(msg: str, args: tuple[Any, ...]) -> str:
-        if not args:
-            return msg
-        try:
-            return msg % args
-        except (TypeError, ValueError):
-            # Кривой формат не должен глотать сообщение — отдаём как есть.
-            return f"{msg} {args!r}"
+        """Совместимость: правило форматирования переехало в ``logger_module.utils``.
+
+        Метод оставлен потому, что ``exception()`` форматирует ДО эмиссии
+        осознанно — ему нужен готовый текст, чтобы дописать traceback.
+        """
+        return apply_format(msg, args)
 
     def _emit(self, level: str, msg: str, args: tuple[Any, ...]) -> bool:
-        """Записать. Returns: True если ушло в LoggerManager, False — в фолбэк."""
-        text = self._format(msg, args)
+        """Записать. Returns: True если ушло в LoggerManager, False — в фолбэк.
+
+        Ф1.5: ``msg % args`` здесь БОЛЬШЕ НЕ ВЫПОЛНЯЕТСЯ. Шаблон и аргументы
+        уходят в менеджер как есть, и склейка происходит внутри ``log()`` —
+        то есть строго после гейта. Раньше строка собиралась первой строкой
+        метода, и выключенная группа всё равно стоила полного форматирования
+        (а вместе с ним — всех ``__str__`` аргументов, что и есть настоящая
+        цена на горячем пути GUI).
+
+        Своего гейта здесь нет и не должно быть: он потребовал бы знать
+        соответствие «уровень → скоуп», то есть завести вторую копию решения
+        рядом с ``_LEVEL_DEFAULT_SCOPE``. Один гейт в менеджере — меньше слоёв
+        и нечему разъезжаться.
+
+        Фолбэк форматирует сам: у stdlib-логгера свой ленивый ``%``, но его
+        правило на кривом шаблоне другое (сообщение теряется), а фасад обещает
+        его сохранить.
+        """
         lm = get_logger()
         if lm is None:
-            getattr(self._fallback, level)(text)
+            getattr(self._fallback, level)(apply_format(msg, args))
             return False
-        getattr(lm, level)(text, module=self._module)
+        getattr(lm, level)(msg, self._module, *args)
         return True
 
 

@@ -22,6 +22,7 @@ from typing import Any, Dict, Optional
 from ..base_manager.interfaces import IBaseManager
 from ..channel_routing_module.interfaces import IChannel
 from .core.log_config import LogLevel, LogScope
+from .utils import LogMessage
 
 
 class ILogChannel(IChannel):
@@ -80,8 +81,9 @@ class ILoggerManager(IBaseManager, ABC):
         self,
         scope: LogScope,
         level: LogLevel,
-        message: str,
+        message: "LogMessage",
         module: str = "main",
+        *args: Any,
         **extra: Any,
     ) -> None:
         """Базовый метод логирования с явным указанием scope и level.
@@ -89,31 +91,37 @@ class ILoggerManager(IBaseManager, ABC):
         Args:
             scope:   Область логирования (SYSTEM, BUSINESS, DEBUG, ...).
             level:   Уровень важности (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-            message: Текст сообщения.
+            message: Текст, ``%``-шаблон или ``Callable[[], str]``. Callable
+                     вызывается только после гейта и ровно один раз (Ф1.4).
             module:  Имя модуля/компонента-источника.
+            *args:   Аргументы ``%``-формата; склейка — после гейта.
             **extra: Произвольные поля для контекста (trace_id, user_id, ...).
         """
 
     # ---- Быстрые методы по уровню (scope определяется автоматически) ----
+    #
+    # Все принимают ``message: LogMessage`` и ``*args`` ``%``-формата на тех же
+    # правилах, что :meth:`log`; заявленный здесь scope — тот же, по которому
+    # отвечает :meth:`is_enabled_for`.
 
     @abstractmethod
-    def debug(self, message: str, module: str = "main", **extra: Any) -> None:
+    def debug(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Отладочная информация. scope=DEBUG, level=DEBUG."""
 
     @abstractmethod
-    def info(self, message: str, module: str = "main", **extra: Any) -> None:
+    def info(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Информационное сообщение. scope=BUSINESS, level=INFO."""
 
     @abstractmethod
-    def warning(self, message: str, module: str = "main", **extra: Any) -> None:
+    def warning(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Предупреждение. scope=SYSTEM, level=WARNING."""
 
     @abstractmethod
-    def error(self, message: str, module: str = "main", **extra: Any) -> None:
+    def error(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Ошибка. scope=SYSTEM, level=ERROR."""
 
     @abstractmethod
-    def critical(self, message: str, module: str = "main", **extra: Any) -> None:
+    def critical(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Критическая ошибка. scope=SYSTEM, level=CRITICAL."""
 
     # ---- Методы по области (scope явный, level как параметр) ----
@@ -221,6 +229,33 @@ class ILoggerManager(IBaseManager, ABC):
         """Проверить, нужно ли логировать это сообщение (кэшированная проверка).
 
         Используется внутренне, но полезен для внешних валидаций производительности.
+
+        Для прикладного кода правильный вопрос — :meth:`is_enabled_for`: он не
+        требует знать, какой скоуп подставит ``logger.info(...)``, и у наследника
+        с собственным резолвом (severity-маршрут ошибок) отвечает верно.
+        """
+
+    @abstractmethod
+    def is_enabled_for(
+        self,
+        name: str,
+        level: LogLevel,
+        scope: Optional[LogScope] = None,
+    ) -> bool:
+        """Пойдёт ли такая запись хоть куда-нибудь (Ф1.3).
+
+        Дешёвый предикат для случая «сборка сообщения дороже самой записи»:
+        аналог ``logging.Logger.isEnabledFor`` из stdlib и ``Logger.enabled``
+        из OTel Logs Bridge API.
+
+        Args:
+            name:  Имя модуля-источника (то же, что ``module`` в :meth:`log`).
+            level: Уровень записи.
+            scope: Скоуп; ``None`` — тот, который для этого уровня возьмёт
+                   удобный метод (``info`` → BUSINESS, ``error`` → SYSTEM…).
+
+        Контракт: ответ обязан совпадать с фактическим решением :meth:`log` —
+        предикат, отвечающий про другой маршрут, хуже отсутствующего.
         """
 
 

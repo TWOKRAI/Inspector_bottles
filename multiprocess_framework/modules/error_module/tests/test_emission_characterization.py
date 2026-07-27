@@ -139,8 +139,30 @@ def test_info_uses_scope_channels(tmp_path: Path) -> None:
     Скоуп BUSINESS, а не SYSTEM: у SYSTEM порог ``WARNING``, и INFO отсекается
     гейтом раньше, чем дело доходит до резолва каналов. На SYSTEM тест был бы
     зелёным по неверной причине — «канал пуст, потому что запись не дошла».
+
+    Скоупы и каналы заданы ЯВНО (изменение против первой редакции теста).
+    Причина: резидуал P3 сделал умолчанием плоскости ошибок выключенные
+    скоупы — раньше ErrorManager наследовал скоупы ЛОГГЕРА, ссылавшиеся на
+    ``system_file`` / ``messages_file``, которых в его реестре нет, и собственный
+    ``info()`` на старте давал ненулевой ``unresolved_channel_records`` в покое.
+    Характеризуемое свойство от этого не изменилось и проверяется здесь
+    по-прежнему: **если** скоуп настроен, INFO идёт по его каналам, а не по
+    severity-маршруту. Умолчание проверяет отдельный тест
+    ``test_error_plane_defaults.py``.
     """
-    em = _manager(tmp_path)
+    em = _manager(
+        tmp_path,
+        channels={
+            "system_file": {
+                "type": "file",
+                "enabled": True,
+                "file_path": str(tmp_path / "system.log"),
+            },
+        },
+        scopes={
+            "BUSINESS": {"enabled": True, "min_level": "DEBUG", "channels": ["system_file"]},
+        },
+    )
     try:
         errors = _replace(em, "errors_file")
         system = _replace(em, "system_file")
