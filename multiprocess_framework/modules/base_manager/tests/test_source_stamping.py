@@ -189,6 +189,63 @@ def test_auto_proxy_respects_explicit_module() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Плоскость ошибок
+# ---------------------------------------------------------------------------
+
+
+class _RecordingErrorSlot:
+    """Слот 'error': сигнатура ``track_error(error, context)``, не kwargs."""
+
+    def __init__(self) -> None:
+        self.calls: List[Tuple[BaseException, Dict[str, Any]]] = []
+
+    def track_error(self, error: BaseException, context: Dict[str, Any]) -> bool:
+        self.calls.append((error, context))
+        return True
+
+
+def _manager_with_error_slot(name: str, slot: Any) -> ObservableMixin:
+    class _M(BaseManager, ObservableMixin):
+        def __init__(self) -> None:
+            BaseManager.__init__(self, name)
+            ObservableMixin.__init__(self, managers={"error": slot})
+
+        def initialize(self) -> bool:
+            return True
+
+        def shutdown(self) -> bool:
+            return True
+
+    return _M()
+
+
+def test_track_error_stamps_source_into_context() -> None:
+    """У слота 'error' имя едет в контексте, а не в kwargs: ErrorManager
+    читает его из ctx["module"] и без штампа пишет "unknown"."""
+    slot = _RecordingErrorSlot()
+    _manager_with_error_slot("capture_manager", slot)._track_error(ValueError("сбой"))
+    assert slot.calls[-1][1]["module"] == "capture_manager"
+
+
+def test_track_error_keeps_explicit_module() -> None:
+    slot = _RecordingErrorSlot()
+    mgr = _manager_with_error_slot("capture_manager", slot)
+    mgr._track_error(ValueError("сбой"), {"module": "hikvision"})
+    assert slot.calls[-1][1]["module"] == "hikvision"
+
+
+def test_track_error_does_not_mutate_caller_context() -> None:
+    """Штамп кладётся в КОПИЮ: словарь вызывающего часто переиспользуется,
+    и подмешивание в него чужого поля — тихий побочный эффект."""
+    slot = _RecordingErrorSlot()
+    mgr = _manager_with_error_slot("capture_manager", slot)
+    caller_ctx: Dict[str, Any] = {"attempt": 1}
+    mgr._track_error(ValueError("сбой"), caller_ctx)
+    assert caller_ctx == {"attempt": 1}
+    assert slot.calls[-1][1]["module"] == "capture_manager"
+
+
+# ---------------------------------------------------------------------------
 # Границы процесса
 # ---------------------------------------------------------------------------
 

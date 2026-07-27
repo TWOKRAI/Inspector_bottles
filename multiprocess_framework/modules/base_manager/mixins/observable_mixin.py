@@ -183,8 +183,17 @@ class ObservableMixin(IObservableMixin):
             self._call_manager("statistics", "record_timing", metric_name, duration, tags or {})
 
     def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
-        """Отслеживание ошибки через error manager (каноничный слот 'error')."""
-        ctx = context or {}
+        """Отслеживание ошибки через error manager (каноничный слот 'error').
+
+        Ф2.1: имя источника кладётся в КОНТЕКСТ, а не в kwargs — у слота
+        ``error`` сигнатура другая (``track_error(error, context)``), и
+        ``ErrorManager.track_error`` читает имя именно из ``ctx["module"]``,
+        подставляя ``"unknown"`` при его отсутствии. Без этой строки плоскость
+        ошибок осталась бы без штампа при заштампованной плоскости логов —
+        то есть у самой важной из трёх. Найдено ревью Ф2.1.
+        """
+        ctx = dict(context) if context else {}
+        ctx.setdefault("module", self._observability_source())
         # Task 5.14: имя error-гнезда каноникализировано на 'error'. Legacy-fallback
         # на слот 'errors' убран — все точки регистрации переведены на 'error'.
         result = self._call_manager("error", "track_error", error, ctx)
