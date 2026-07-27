@@ -328,10 +328,44 @@ def test_every_manager_counter_is_published_or_declared_unpublished(make_manager
         # проглотило бы настоящий счётчик.
         not_published = {
             "module_files_created",  # сколько файлов создано на старте, не потеря
+            # Описание менеджера, а не его состояние: спрашивается из конфига.
+            "app_name",
+            "channels_count",
+            "module_channels_count",
+            "batching_enabled",
+            "include_stacktrace",
+            # Едет наружу целиком отдельным ключом ``buffer`` (см. _plane_counters).
+            "batch_stats",
+            "buffer",
+            # Описание менеджера базы CRM (статистика, роутер): состав каналов и
+            # идентичность, а не состояние наблюдаемости. Спрашивается другими
+            # ручками — introspect.status / introspect.router_stats / capabilities.
+            "manager_name",
+            "process_name",
+            "is_initialized",
+            "key_field",
+            "channels",
+            "channel_count",
+            "channel_info",
+            "adapters",
+            "routed",
+            "router",
+            # Список имён метрик статистики: содержимое плоскости, а не её
+            # здоровье; едет наружу telemetry-ручками.
+            "metric_names",
         }
-        missing = sorted(set(manager.stats) - set(PLANE_COUNTER_KEYS) - not_published)
+        # Проверяются ОБА словаря: ``self.stats`` (счётчики) и то, что менеджер
+        # добавляет прямо в ``get_stats()`` мимо него.
+        #
+        # Вторая половина добавлена по находке LIVE-прогона Ф1: ``level_routes``
+        # у ErrorManager живёт только в ``get_stats()``, в ``self.stats`` его
+        # нет — и страж, смотревший лишь в ``self.stats``, не видел его в
+        # принципе. Карта не публиковалась наружу, хотя план называл её
+        # «публичным level_routes» и на неё опирался резидуал P2.
+        surface = set(manager.stats) | set(manager.get_stats())
+        missing = sorted(surface - set(PLANE_COUNTER_KEYS) - not_published)
         assert not missing, (
-            f"счётчики есть в менеджере, но не публикуются наружу: {missing}. "
+            f"поля есть в менеджере, но не публикуются наружу: {missing}. "
             f"Добавь в PLANE_COUNTER_KEYS либо в not_published с причиной"
         )
     finally:
