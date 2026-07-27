@@ -93,6 +93,7 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 
 ### 4. Side effects
 - [ ] Other modules not broken — **ALWAYS use `search_code`** (MCP qex) first for dependency search across the codebase, then Grep for exact symbol matches. Never skip semantic search.
+- [ ] When the diff touches a whole module, also run `python scripts/graph_slice/graph_slice.py <module> --inbound-only` (Bash) — the graph-derived list of dependents, grouped by neighbouring module. Two rules for reading it: a "срез может врать" header means the graph is stale for that module (say so, do not present it as fact), and zero inbound edges on a *method* means the graph attaches calls to the owning class — not that nobody depends on it.
 - [ ] Public APIs not changed without necessity
 
 ---

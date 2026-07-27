@@ -129,6 +129,9 @@ testpaths = [
     # run_app_prototype). Headless, без железа. В дефолтном гейте — чтобы RED на
     # прод-рецептах больше НЕ гнил молча (был красным на main после merge G.3/G.4).
     "multiprocess_prototype/backend/tests",
+    # Тесты инструментов из scripts/ вне testpaths молча не гоняются — как уже
+    # было с тремя каталогами. Срез графа в гейте: он дешёвый (мини-граф, <1с).
+    "scripts/graph_slice/tests",
 ]
 norecursedirs = [".git", "__pycache__", ".venv"]
 python_files = ["test_*.py"]

@@ -97,7 +97,7 @@ Full list in the corresponding mode file. Key commands (46 total in 7 namespaces
 - **Dev:** `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/adr`, `/plan-status`
 - **Spec:** `/spec`, `/spec-sync`
 - **Quality:** `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/doctor`, `/lint-agents`, `/lint-settings`
-- **Analysis:** `/channel-map`, `/message-contracts`, `/todo-inventory`
+- **Analysis:** `/channel-map`, `/message-contracts`, `/todo-inventory`, `/graph-slice`
 - **Memory:** `/memory:init`, `/memory:search`, `/memory:status`
 - **Infra:** `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`, `/diagrams`
 - **Team:** `/team`, `/hire`, `/handoff`, `/docs`, `/wrap-up`

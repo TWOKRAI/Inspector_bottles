@@ -125,13 +125,14 @@ Co-Authored-By: ...
 | Задача | Инструмент |
 |--------|------------|
 | «Где используется `X`?», поиск по семантике кода | `mcp__qex__search_code` |
+| **«Кого заденет правка модуля?»** — границы модуля перед рефакторингом | **`python scripts/graph_slice/graph_slice.py <модуль>`** (slash: `/graph-slice`) — [README](scripts/graph_slice/README.md) |
 | «Насколько модули связаны?», поиск циклов | `mcp__sentrux__dsm` |
 | Baseline перед рефакторингом → дельта после | `session_start` → правки → `session_end` |
 | «Что не покрыто тестами?» перед `/ship` | `mcp__sentrux__test_gaps` |
 | Проверка инвариантов (`process_module` не импортирует `frontend_module` и т.п.) | `mcp__sentrux__check_rules` (через `.sentrux/rules.toml`) |
 | Снимок здоровья проекта целиком | `mcp__sentrux__scan` + `health` |
 
-**qex и sentrux ортогональны:** qex отвечает «*где*», sentrux — «*насколько здорово*». Не дублируют.
+**qex и sentrux ортогональны:** qex отвечает «*где*», sentrux — «*насколько здорово*». Не дублируют. Третья ось — **`/graph-slice`**: «*кого заденет*», граница конкретного модуля из графа graphify (единый граф в `graphify-out/`, отдельных графов на модуль нет). Свежесть графа скрипт печатает сам — устаревший срез за факт не выдавать.
 
 ## Slash-команды
 
@@ -141,7 +142,7 @@ Co-Authored-By: ...
 |-----------|------------------|
 | **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/adr`, `/plan-status` |
 | **quality/** | `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/arch-review`, `/doctor`, `/lint-agents`, `/lint-settings` |
-| **analysis/** | `/channel-map`, `/message-contracts`, `/todo-inventory` |
+| **analysis/** | `/channel-map`, `/message-contracts`, `/todo-inventory`, `/graph-slice` |
 | **memory/** | `/memory:init`, `/memory:search`, `/memory:status` |
 | **spec/** | `/spec`, `/spec-sync` |
 | **infra/** | `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`, `/diagrams` |
