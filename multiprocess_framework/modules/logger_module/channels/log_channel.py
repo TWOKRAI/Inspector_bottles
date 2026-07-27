@@ -578,17 +578,37 @@ class ConsoleChannel(LogChannel):
     предел не упирается никогда — потери начинаются только на реально
     застрявшей консоли.
 
+    Одного предела мало, и это выяснилось не сразу (R12). Ждать по
+    :attr:`_BUSY_WAIT_SEC` на КАЖДОЙ записи — значит платить четверть секунды
+    за строку, пока консоль стоит: процесс не виснет, но ползёт, а на
+    пер-кадровом логировании это хуже честного отказа. Поэтому предел
+    дополнен **размыкателем**: после :attr:`_DEGRADE_AFTER_TIMEOUTS` подряд
+    канал переходит в разомкнутое состояние и перестаёт ждать вовсе — берёт
+    лок без блокировки и мгновенно отбрасывает. Стоимость затыка падает с
+    «0.25 с на запись» до нуля.
+
+    Возврат в строй бесплатен и автоматичен: та же неблокирующая попытка
+    удастся, как только застрявший поток отпустит лок. Отдельного таймера
+    перепроверки нет — состояние канала и есть проба.
+
     ЧЕГО ЭТО НЕ ДЕЛАЕТ, и это надо знать честно: поток, который УЖЕ вошёл в
-    блокирующий ``stream.write()``, остаётся заблокированным. Ограничить его
-    можно только вынеся запись в отдельный поток-писатель, а это размен
-    «консоль переживает падение» на «консоль ограничена» — решение про
-    диагностический канал, которое принимает владелец, а не эта правка.
-    Захват сокращён с «весь процесс» до «один поток», и он теперь считается.
+    блокирующий ``stream.write()``, остаётся заблокированным навсегда.
+    Ограничить его можно только вынеся запись в отдельный поток-писатель.
+    Такой размен здесь отвергнут сознательно: он покупает один потерянный
+    поток ценой того, что консоль перестаёт переживать падение процесса
+    (очередь writer'а умирает вместе с ним) — а консоль это то, на что
+    смотрит человек в момент падения. Размыкатель снимает системную цену
+    затыка, не трогая этот размен.
     """
 
     #: Сколько ждать освобождения консоли, прежде чем бросить запись.
     #: Здоровая запись занимает микросекунды — этот предел на неё не влияет.
     _BUSY_WAIT_SEC = 0.25
+    #: После скольких отказов подряд перестать ждать вовсе (разомкнуть).
+    #: Не 1: одиночный таймаут может быть случайным всплеском, а размыкание —
+    #: это переход к гарантированным потерям, и объявлять его по одному
+    #: событию значит терять записи на дрожании.
+    _DEGRADE_AFTER_TIMEOUTS = 3
     #: С какой длительности запись считается подозрительно медленной.
     _SLOW_WRITE_SEC = 0.05
     #: Не чаще одного предупреждения за интервал — по тем же соображениям,
@@ -605,13 +625,27 @@ class ConsoleChannel(LogChannel):
         self._counter_lock = threading.Lock()
         self.console_writes_dropped = 0
         self.console_slow_writes = 0
+        self._consecutive_timeouts = 0
         self._max_write_sec = 0.0
         self._last_warning_ts = 0.0
 
+    @property
+    def console_degraded(self) -> bool:
+        """Канал разомкнут: ожидание больше не оплачивается, записи отбрасываются сразу."""
+        return self._consecutive_timeouts >= self._DEGRADE_AFTER_TIMEOUTS
+
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        if not self._write_lock.acquire(timeout=self._BUSY_WAIT_SEC):
+        # Разомкнутый канал не ждёт вообще: неблокирующая попытка здесь и есть
+        # проба «консоль ожила?» — отдельный таймер перепроверки не нужен.
+        if self.console_degraded:
+            acquired = self._write_lock.acquire(blocking=False)
+        else:
+            acquired = self._write_lock.acquire(timeout=self._BUSY_WAIT_SEC)
+
+        if not acquired:
             with self._counter_lock:
                 self.console_writes_dropped += 1
+                self._consecutive_timeouts += 1
                 dropped = self.console_writes_dropped
             self._warn_console_stuck(dropped)
             return {
@@ -642,8 +676,13 @@ class ConsoleChannel(LogChannel):
         finally:
             elapsed = time.monotonic() - started
             self._write_lock.release()
-            if elapsed >= self._SLOW_WRITE_SEC:
-                with self._counter_lock:
+            with self._counter_lock:
+                # Сбрасываем ЗДЕСЬ, а не сразу после взятия лока: «вошли» ещё не
+                # значит «вышли». Поток, взявший лок и застрявший внутри
+                # stream.write(), не имеет права объявить канал здоровым — иначе
+                # размыкатель смыкался бы ровно тем потоком, который и застрял.
+                self._consecutive_timeouts = 0
+                if elapsed >= self._SLOW_WRITE_SEC:
                     self.console_slow_writes += 1
                     self._max_write_sec = max(self._max_write_sec, elapsed)
 
@@ -675,6 +714,7 @@ class ConsoleChannel(LogChannel):
                 {
                     "console_writes_dropped": self.console_writes_dropped,
                     "console_slow_writes": self.console_slow_writes,
+                    "console_degraded": self._consecutive_timeouts >= self._DEGRADE_AFTER_TIMEOUTS,
                     "max_write_sec": round(self._max_write_sec, 4),
                 }
             )

@@ -325,6 +325,102 @@ def test_warning_is_emitted_once_per_interval(caplog: pytest.LogCaptureFixture) 
 
 
 # =============================================================================
+# 7. Размыкатель: затык перестаёт стоить времени (R12)
+# =============================================================================
+
+
+def test_stuck_console_stops_costing_time_after_threshold() -> None:
+    """Первые записи платят предел ожидания, дальнейшие — не платят ничего.
+
+    Ради этого размыкатель и появился. Одного предела мало: ждать по 0.25 с на
+    КАЖДОЙ записи, пока консоль стоит, — значит уронить пропускную способность
+    процесса в разы. На пер-кадровом логировании это хуже честного отказа.
+
+    Проверяется отношение времён, а не абсолютные числа: абсолютные зависят от
+    машины, а вот «после размыкания записи стали дешевле на порядок» — свойство
+    механизма.
+    """
+    stream = _StuckStream()
+    channel = _console(stream)
+    try:
+        _occupy(channel, stream)
+
+        # Фаза 1: платим предел ожидания — ровно _DEGRADE_AFTER_TIMEOUTS раз.
+        warmup_started = time.perf_counter()
+        for i in range(ConsoleChannel._DEGRADE_AFTER_TIMEOUTS):
+            assert _write_with_deadline(channel, _record(f"warmup-{i}"))["status"] == "error"
+        warmup_elapsed = time.perf_counter() - warmup_started
+
+        assert channel.console_degraded, "после порога подряд идущих отказов канал обязан разомкнуться"
+
+        # Фаза 2: канал разомкнут — ожидание больше не оплачивается.
+        hot_started = time.perf_counter()
+        for i in range(20):
+            assert _write_with_deadline(channel, _record(f"hot-{i}"))["status"] == "error"
+        hot_elapsed = time.perf_counter() - hot_started
+
+        per_warmup = warmup_elapsed / ConsoleChannel._DEGRADE_AFTER_TIMEOUTS
+        per_hot = hot_elapsed / 20
+        assert per_hot < per_warmup / 10, (
+            f"разомкнутый канал по-прежнему платит ожидание: {per_hot * 1000:.1f} мс на запись "
+            f"против {per_warmup * 1000:.1f} мс до размыкания"
+        )
+        assert channel.get_info()["console_degraded"] is True
+        assert channel.console_writes_dropped == ConsoleChannel._DEGRADE_AFTER_TIMEOUTS + 20
+    finally:
+        stream.release()
+
+
+def test_console_recovers_by_itself_when_stream_unblocks() -> None:
+    """Отпустили поток вывода — канал сомкнулся сам, без таймера перепроверки.
+
+    Неблокирующая попытка взятия лока в разомкнутом состоянии И ЕСТЬ проба.
+    Не будь возврата в строй, единственный затык навсегда лишал бы процесс
+    консоли — лечение стало бы хуже болезни.
+    """
+    stream = _StuckStream()
+    channel = _console(stream)
+    try:
+        occupier = _occupy(channel, stream)
+        for i in range(ConsoleChannel._DEGRADE_AFTER_TIMEOUTS):
+            _write_with_deadline(channel, _record(f"drop-{i}"))
+        assert channel.console_degraded
+
+        stream.release()
+        occupier.join(timeout=2.0)
+
+        result = _write_with_deadline(channel, _record("консоль ожила"))
+        assert result["status"] == "success", "после освобождения потока запись обязана пройти"
+        assert not channel.console_degraded, "канал обязан сомкнуться сам, без внешнего вмешательства"
+    finally:
+        stream.release()
+
+
+def test_thread_stuck_inside_write_does_not_close_the_breaker() -> None:
+    """Поток, взявший лок и застрявший ВНУТРИ записи, не объявляет канал здоровым.
+
+    Счётчик сбрасывается на выходе из записи, а не на входе: «вошли» ещё не
+    значит «вышли». Сбрасывай мы на входе — размыкатель смыкался бы ровно тем
+    потоком, который и застрял, и цикл «разомкнуть/сомкнуть» шёл бы вечно.
+    """
+    stream = _StuckStream()
+    channel = _console(stream)
+    try:
+        _occupy(channel, stream)
+        for i in range(ConsoleChannel._DEGRADE_AFTER_TIMEOUTS):
+            _write_with_deadline(channel, _record(f"drop-{i}"))
+        assert channel.console_degraded
+
+        # Захватчик всё ещё внутри write(). Ещё несколько попыток — состояние
+        # обязано остаться разомкнутым.
+        for i in range(3):
+            _write_with_deadline(channel, _record(f"still-{i}"))
+        assert channel.console_degraded, "канал сомкнулся, пока поток-захватчик всё ещё внутри записи"
+    finally:
+        stream.release()
+
+
+# =============================================================================
 # 5-6. Медленная живая консоль: считается, но не теряется
 # =============================================================================
 
