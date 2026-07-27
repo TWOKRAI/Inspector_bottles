@@ -192,6 +192,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # лечатся разным. Найдено ревью фазы: на прямом (небатченом) пути
             # такой отказ не считал НИКТО.
             "channel_refused_records": 0,
+            # Ф4.2: запись прошла гейт, но приёмников у неё НОЛЬ — резолв вернул
+            # пустой список. Четвёртый класс потери, и он не совпадает ни с
+            # одним из трёх: там имя канала было и что-то с ним случилось, здесь
+            # имени нет вовсе. Достижимо: у скоупа нет своего списка каналов, а
+            # реестр пуст (все приёмники сняты logger.sink.disable). Ошибку в
+            # этом случае спасает floor, а INFO/DEBUG исчезали молча — и при
+            # этом считались как batched, то есть счётчик УВЕРЯЛ, что запись
+            # ушла в буфер. Найдено при слиянии развилки эмиссии.
+            "records_without_channels": 0,
             # Ф0.7: результат чистки каталога логов (ключи — _RETENTION_STAT_KEYS).
             # Отдельно «удалили» и «не смогли удалить»: на Windows занятый файл
             # не удаляется, и молчащий ретеншен неотличим от работающего, если
@@ -207,6 +216,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._warned_unknown_channels: set = set()
         self._warned_write_error_channels: set = set()
         self._warned_refused_channels: set = set()
+        # Ф4.2: «приёмников нет вовсе» — привязать предупреждение не к чему,
+        # поэтому один флаг, а не множество имён.
+        self._warned_without_channels: bool = False
         # R2: счётчики потерь ушедших каналов. Живут на менеджере, потому что
         # канал уносит свои с собой (см. _on_channel_removed).
         self._absorbed_backpressure: Dict[str, int] = {}
@@ -640,6 +652,30 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 f"(дальше считаем молча, счётчик в get_stats['channel_write_errors_by_channel'])",
             )
 
+    def _count_records_without_channels(self, level: LogLevel) -> None:
+        """Учесть запись, у которой не оказалось НИ ОДНОГО приёмника (Ф4.2).
+
+        Отдельно от трёх классов «имя канала есть, но…»: здесь имени нет вовсе,
+        и лечится это не тем же самым (пустой реестр или скоуп без списка
+        каналов, а не опечатка и не сломанный сток).
+
+        Предупреждение одноразовое — по уровню записи, а не по каналу: канала
+        нет, привязать не к чему. Без ограничения оно само стало бы штормом
+        ровно в тот момент, когда приёмников не осталось.
+        """
+        with self._miss_lock:
+            self.stats["records_without_channels"] += 1
+            first_time = not self._warned_without_channels
+            self._warned_without_channels = True
+
+        if first_time:
+            self._fallback_log(
+                "WARNING",
+                f"запись уровня {getattr(level, 'value', level)} потеряна: у неё нет ни одного приёмника "
+                f"(скоуп без списка каналов при пустом реестре; дальше считаем молча, "
+                f"счётчик в get_stats['records_without_channels'])",
+            )
+
     def _count_channel_refused(self, channel_name: str) -> None:
         """Учесть запись, которую живой канал НЕ принял (ответил ``status=error``).
 
@@ -713,19 +749,26 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         scope_config = self._scope_schema(scope)
         return scope_config.should_log(level, module)
 
-    def log(
-        self,
-        scope: LogScope,
-        level: LogLevel,
-        message: str,
-        module: str = "main",
-        **extra,
-    ):
-        self.stats["messages_processed"] += 1
+    def _route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[List[str]]:
+        """Куда пойдёт запись — и пойдёт ли вообще. ``None`` = отклонена гейтом.
 
+        **Единственная точка расширения эмиссии (Ф4.2).** Наследник, у которого
+        другой резолв приёмников, переопределяет ЭТОТ метод, а не ``log()``:
+        всё остальное — контекст, сборка записи, tap'ы, floor, три класса учёта
+        потерь — общее и обязано лежать в одном месте.
+
+        Так закрыта развилка, стоившая фазе четырёх ручных зеркалирований:
+        ``ErrorManager.log`` был полным override'ом, и каждое улучшение
+        ``LoggerCore.log`` приходилось повторять руками — 0.4 в двух местах,
+        0.9 в двух, tap'ы в двух, а 0.5 забыли, из-за чего на ГЛАВНОМ пути
+        ошибок терялся ``proc_name``.
+
+        Гейт стоит здесь, а не в ``log()``, намеренно: наследник, которому
+        решение принимает не скоуп (severity-маршрут ошибок), должен уметь
+        вернуть приёмники, не спрашивая ``should_log`` вовсе.
+        """
         if not self.should_log(scope, level, module):
-            self.stats["messages_skipped"] += 1
-            return
+            return None
 
         scope_config = self._scope_schema(scope)
         channels = scope_config.channels or self._channel_registry.names()
@@ -742,7 +785,22 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             if module_channel not in channels:
                 channels.append(module_channel)
 
-        context = self._build_context(extra)
+        return channels
+
+    def log(
+        self,
+        scope: LogScope,
+        level: LogLevel,
+        message: str,
+        module: str = "main",
+        **extra,
+    ):
+        self.stats["messages_processed"] += 1
+
+        channels = self._route(scope, level, module)
+        if channels is None:
+            self.stats["messages_skipped"] += 1
+            return
 
         record = LogRecord(
             timestamp=time.time(),
@@ -750,16 +808,26 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             scope=scope,
             message=message,
             module=module,
-            extra=context,
+            extra=self._build_context(extra),
         )
 
-        self._emit_to_taps(record.to_dict(), level)
+        # Гейт по наличию tap'ов до ``to_dict()``: сборка словаря ради пустой
+        # рассылки — цена на каждой записи. У severity-пути эта проверка была,
+        # у общего не было; слияние сохраняет дешёвую.
+        if self._tap_sinks:
+            self._emit_to_taps(record.to_dict(), level)
 
         if is_error_level(level):
             # Ф0.9 (floor, вариант B): error/critical НЕ буферизуются. Пачку целевых
             # каналов сбрасываем первой — иначе запись легла бы на диск раньше
             # предшествовавших ей INFO, и контекст перед падением потерял бы порядок.
+            # Пустой список приёмников сюда тоже приходит — и floor его ловит.
             self._write_error_record(record, channels)
+        elif not channels:
+            # Ни одного приёмника: запись потеряна, но НЕ молча. Раньше этот
+            # случай проваливался в ветку буфера, ничего не клал и всё равно
+            # инкрементировал messages_batched — счётчик врал в сторону «ушло».
+            self._count_records_without_channels(level)
         elif self._buffer:
             for ch_name in channels:
                 self._buffer.enqueue(ch_name, record.to_dict())
@@ -1113,6 +1181,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             base_stats["channel_write_errors_by_channel"] = dict(self._channel_write_errors)
             base_stats["channel_refused_records"] = self.stats["channel_refused_records"]
             base_stats["channel_refused_by_channel"] = dict(self._channel_refused)
+            # Ф4.2: четвёртый класс — приёмников не было вовсе. Разбивки по
+            # каналам нет и быть не может: разбивать не по чему.
+            base_stats["records_without_channels"] = self.stats["records_without_channels"]
             # Ф0.7: та же логика присутствия — ключи есть всегда, даже когда
             # ретеншен выключен. Нулевой ``retention_delete_failures`` при
             # ненулевом ``retention_files_deleted`` — «чистка работает»;

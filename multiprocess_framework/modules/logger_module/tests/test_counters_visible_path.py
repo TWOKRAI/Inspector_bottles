@@ -33,6 +33,7 @@ from multiprocess_framework.modules.logger_module.core.log_config import (
 )
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.process_module.managers.observability_reload import (
+    PLANE_COUNTER_KEYS,
     observability_counters,
 )
 
@@ -283,3 +284,63 @@ def test_config_typo_in_policy_fails_loudly() -> None:
     """
     with pytest.raises(ValueError, match="overflow_policy"):
         LoggerManagerConfig(app_name="bad", batch_overflow_policy="drop_middle")
+
+
+def test_every_manager_counter_is_published_or_declared_unpublished() -> None:
+    """Ф4.2: новый счётчик обязан быть виден наружу — или явно объявлен невидимым.
+
+    Комментарий у ``PLANE_COUNTER_KEYS`` называл этот файл своим стражем,
+    «сверяющим список с живым словарём». Такого сравнения тут не было ни одного:
+    проверялись отдельные счётчики поимённо, а сам список не проверялся ничем.
+    Ложное обещание стража хуже его отсутствия — на него ссылаются, когда решают,
+    нужен ли новый тест. Найдено слом-инъекцией C6 (снять публикацию нового
+    счётчика → не покраснело ничего).
+
+    Направление проверки выбрано «изнутри наружу» намеренно: забывают именно
+    его — счётчик заводят в ``self.stats``, а в реестр публикации не вносят, и
+    он существует, будучи невидимым (ровно то, что стреляло в Ф0.3 и Ф0.4).
+    """
+    manager = LoggerManager(manager_name="KeysAudit", config=LoggerManagerConfig(app_name="audit"))
+    try:
+        # Не счётчики потерь — публиковать их наружу незачем. Список явный:
+        # молчаливое исключение по маске («всё, что не *_records») со временем
+        # проглотило бы настоящий счётчик.
+        not_published = {
+            "module_files_created",  # сколько файлов создано на старте, не потеря
+        }
+        missing = sorted(set(manager.stats) - set(PLANE_COUNTER_KEYS) - not_published)
+        assert not missing, (
+            f"счётчики есть в менеджере, но не публикуются наружу: {missing}. "
+            f"Добавь в PLANE_COUNTER_KEYS либо в not_published с причиной"
+        )
+    finally:
+        manager.shutdown()
+
+
+def test_records_without_channels_reaches_the_outside(tmp_path: Path) -> None:
+    """Ф4.2: потеря «приёмников не было вовсе» доезжает до introspect.observability.
+
+    Проверяется маршрут целиком, а не ключ в ``get_stats``: счётчик, видимый
+    только внутри менеджера, спросить у живого процесса нельзя.
+    """
+    manager = LoggerManager(
+        manager_name="NoChannels",
+        config=LoggerManagerConfig(
+            app_name="no_channels",
+            log_directory=str(tmp_path),
+            enable_batching=False,
+            modules={},
+            channels={},  # ни одного приёмника
+            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=[])},
+        ),
+    )
+    manager.initialize()
+    try:
+        manager.info("этой записи некуда идти", module="audit")
+
+        published = observability_counters(logger=manager)["logger"]
+        assert published["records_without_channels"] >= 1, (
+            f"потеря без приёмников не доехала наружу: опубликовано {published.get('records_without_channels')!r}"
+        )
+    finally:
+        manager.shutdown()

@@ -121,9 +121,15 @@ def observability_effective(
 # Список ЖЁСТКИЙ намеренно (get_stats несёт и конфиг, и имена — наружу нужны
 # только счётчики), но именно поэтому он и есть отдельная точка забывания:
 # новый счётчик, добавленный в get_stats и НЕ добавленный сюда, существует и
-# при этом невидим. Ровно этот класс уже стрелял в Ф0.3. Страж — тесты
-# logger_module/tests/test_counters_visible_path.py и
-# test_unknown_channel_accounting.py, сверяющие список с живым словарём.
+# при этом невидим. Ровно этот класс уже стрелял в Ф0.3.
+#
+# Страж — `test_every_manager_counter_is_published_or_declared_unpublished`
+# в logger_module/tests/test_counters_visible_path.py: сверяет ЭТОТ список с
+# живым `manager.stats`. Прежняя редакция комментария называла стражем два
+# файла, «сверяющие список с живым словарём», — такого сравнения там не было ни
+# одного, проверялись отдельные счётчики поимённо. Ложная ссылка на стража хуже
+# её отсутствия: на неё ссылаются, решая, нужен ли новый тест. Найдено
+# слом-инъекцией Ф4.2 (снять публикацию нового счётчика → не покраснело ничего).
 PLANE_COUNTER_KEYS: tuple = (
     "messages_processed",
     "messages_skipped",
@@ -146,6 +152,8 @@ PLANE_COUNTER_KEYS: tuple = (
     "channel_write_errors_by_channel",
     "channel_refused_records",
     "channel_refused_by_channel",
+    # Ф4.2 — приёмников у записи не было вовсе (четвёртый класс потери).
+    "records_without_channels",
     # Ф0.7 — чистка каталога логов: сколько удалено/сжато и сколько НЕ удалось.
     "retention_files_deleted",
     "retention_files_compressed",

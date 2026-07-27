@@ -18,7 +18,7 @@ ChannelRoutingManager  ← базовый класс
 LoggerManager (BatchBuffer, scope-based routing)
         │
         ▼
-ErrorManager  (override log() для level-based routing)
+ErrorManager  (хук _route() для level-based routing; log() общий)
         │
         Чего добавляет ErrorManager:
         ├─ _level_to_channel: {CRITICAL→critical_file, ERROR→errors_file, WARNING→warnings_file}
@@ -65,13 +65,13 @@ ErrorManager  (override log() для level-based routing)
         └─────────────────┬──────────────────────────┘
                           │
         ┌─────────────────▼──────────────────────────┐
-        │  log() метод (override от ErrorManager)     │
+        │  _route() — ЕДИНСТВЕННЫЙ хук (Ф4.2)         │
+        │  сам log() живёт в LoggerCore, один на всех │
         │                                            │
-        │  if level in ["CRITICAL", "ERROR", ...]:  │
-        │    channel = _level_to_channel[level]       │
-        │    buffer.enqueue(channel, record)          │
+        │  if level in _level_to_channel:            │
+        │    return [_level_to_channel[level]]        │
         │  else:                                     │
-        │    super().log() # scope-based routing    │
+        │    return super()._route()  # каналы скоупа │
         └─────────────────┬──────────────────────────┘
                           │
         ┌─────────────────▼──────────────────────────┐
@@ -226,18 +226,30 @@ ERROR    → errors_file
 WARNING  → warnings_file  (если канал не настроен → fallback в errors_file)
 ```
 
-**Главное улучшение (Фаза 3):** переопределённый `log()` метод **реально использует** этот маппинг:
+Маппинг применяется через хук резолва приёмников — `log()` **не переопределяется**
+(Ф4.2, ADR-EM-007):
 
 ```python
-def log(self, scope, level, message, module, **extra):
+def _route(self, scope, level, module):
     channel_name = self._level_to_channel.get(level.value)
-    if channel_name:
-        # Level-based routing РЕАЛЬНО вызывается
-        self._buffer.enqueue(channel_name, record_dict)
-    else:
-        # DEBUG/INFO → scope-based routing через LoggerManager
-        super().log(scope, level, message, module, **extra)
+    if channel_name is None:
+        return super()._route(scope, level, module)  # DEBUG/INFO → каналы скоупа
+    return [channel_name]
 ```
+
+Это **вся** разница между двумя путями эмиссии. Сборка записи, контекст, tap'ы,
+пол ошибок и учёт потерь — общие и физически в одном месте (`LoggerCore.log`).
+
+> **Почему так, а не override `log()`.** Полный override стоил фазе четырёх
+> ручных зеркалирований улучшений родителя: 0.4 — в двух местах, 0.9 — в двух,
+> tap'ы — в двух, а Ф0.5 забыли, из-за чего на ГЛАВНОМ производственном пути
+> ошибок пропал `proc_name`. Развилка воспроизводит этот дефект при каждой
+> следующей правке `log()`, поэтому убрана до фаз адресации и `trace_id`.
+
+Гейт скоупа на severity-пути **не спрашивается**, и это осознанно: приёмник
+ошибки определяет severity, а порог скоупа (у `SYSTEM` это `WARNING`) не должен
+уметь заглушить `ERROR`. Закреплено характеризационным тестом
+`test_severity_path_ignores_scope_gate`.
 
 ---
 

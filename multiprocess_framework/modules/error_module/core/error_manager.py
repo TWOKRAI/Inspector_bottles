@@ -20,16 +20,12 @@ Task 5.14 (CRM-развязка): ErrorManager наследует общий л�
   ErrorManager:    error   → _level_to_channel(key=level) → ILogChannel
 """
 
-import time
 import traceback
-from typing import Optional, Any, Union, Dict
+from typing import Optional, Any, List, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
-from ...channel_routing_module.interfaces import channel_accepted
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
-from ...logger_module.core.log_types import LogRecord
 from ...logger_module.core.logger_core import LoggerCore
-from ...channel_routing_module.levels import is_error_level
 from ..configs.error_manager_config import ErrorManagerConfig
 from ..interfaces import IErrorManager
 from .error_config_assembly import expand_error_manager_config
@@ -244,103 +240,27 @@ class ErrorManager(LoggerCore, IErrorManager):
         self._apply_log_config_rebuild(log_config)
         self._setup_level_routes()
 
-    def log(
-        self,
-        scope: LogScope,
-        level: LogLevel,
-        message: str,
-        module: str = "main",
-        **extra,
-    ) -> None:
-        """Override: WARNING/ERROR/CRITICAL → level-based routing.
+    def _route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[List[str]]:
+        """WARNING/ERROR/CRITICAL → один канал по уровню; остальное — родителю.
 
-        DEBUG/INFO → fallback to LoggerCore.log() (scope-based).
+        **Ф4.2: это ВСЯ разница между двумя путями эмиссии.** Раньше здесь жил
+        полный override ``log()`` — со своей сборкой записи, своим кормлением
+        tap'ов, своим enqueue и своим полом. Развилка обходилась в ручное
+        зеркалирование каждого улучшения родителя: 0.4 — в двух местах, 0.9 — в
+        двух, tap'ы — в двух, а 0.5 забыли, и на ГЛАВНОМ производственном пути
+        ошибок пропал ``proc_name``. Теперь общего кода нет в двух копиях,
+        потому что второй копии нет.
 
-        Теперь level routing РЕАЛЬНО используется (в старом коде маршруты
-        были зарегистрированы но route_by_level() никогда не вызывался).
+        Гейт скоупа на этом пути НЕ спрашивается — и это осознанно, а не
+        побочно: у ошибки приёмник определяет severity, и порог скоупа
+        (у ``SYSTEM`` это ``WARNING``) не должен уметь заглушить ERROR.
+        Закреплено характеризационным тестом ``test_severity_path_ignores_scope_gate``.
         """
-        self.stats["messages_processed"] += 1
-
         channel_name = self._level_to_channel.get(level.value)
         if channel_name is None:
-            # DEBUG / INFO / unknown level → parent scope-based routing
-            # Don't double-count messages_processed
-            self.stats["messages_processed"] -= 1
-            return LoggerCore.log(self, scope, level, message, module, **extra)
-
-        record_dict = LogRecord(
-            timestamp=time.time(),
-            level=level,
-            scope=scope,
-            message=message,
-            module=module,
-            # Общая сборка контекста, а не своя копия. Свою копия брала ТОЛЬКО
-            # потоковый слой — и главный производственный путь ошибок терял
-            # proc_name из базы процесса (ради которой Ф0.5 и делалась) и всю
-            # форточку log_context. Воспроизведено двумя независимыми
-            # ревьюерами фазы независимо друг от друга.
-            extra=self._build_context(extra),
-        ).to_dict()
-
-        # Tail логов (Task 1.5): severity-путь ErrorManager не зовёт super().log(),
-        # поэтому tap'ы кормим здесь явно (DEBUG/INFO уходят в LoggerCore.log выше).
-        if self._tap_sinks:
-            self._emit_to_taps(record_dict, level)
-
-        if is_error_level(level):
-            # Ф0.9 (floor, вариант B): error/critical синхронно и с гарантией.
-            # Этот путь — полный override, LoggerCore.log() он не зовёт, поэтому
-            # floor должен стоять здесь отдельно, а не только у родителя.
-            self._write_error_to_channel(channel_name, record_dict)
-        elif self._buffer is not None:
-            # WARNING остаётся батченым: он не crash-лог и терпит batch_interval.
-            self._buffer.enqueue(channel_name, record_dict)
-            self.stats["messages_batched"] += 1
-        else:
-            # Общий метод базы, а не своя копия цикла. В своей копии не считалось
-            # НИЧЕГО из трёх классов потери: канала нет — тихо; канал ответил
-            # отказом — тихо; канал бросил — только fallback-строка без счётчика.
-            # Путь достижим из прод-конфига (enable_batching операбелен из секции
-            # observability), то есть WARNING терялись молча по команде оператора.
-            # Находка ревью фазы, воспроизведена.
-            self._write_record_to_channels(record_dict, [channel_name])
-
-    def _write_error_to_channel(self, channel_name: str, record_dict: Dict[str, Any]) -> None:
-        """Синхронно записать error/critical в severity-канал; ноль → floor.
-
-        Симметрия с ``LoggerCore._write_error_record``: сперва на диск уходит
-        накопленное до ошибки (порядок), затем сама запись напрямую, и только
-        при нуле принявших приёмников — floor. Дубля нет: floor включается
-        ровно тогда, когда канал не записал.
-        """
-        if self._buffer is not None:
-            try:
-                self._buffer.flush(channel_name)
-            except Exception:  # nosec B110 — сбой сброса не должен съесть саму ошибку
-                pass
-
-        ch = self._channel_registry.get(channel_name)
-        if ch is None:
-            # Ф0.4: имя не резолвится — учесть, а не потерять молча.
-            self._count_unresolved_channel(channel_name)
-        else:
-            try:
-                # Разбор СТАТУСА, а не факта «не бросил». Раньше здесь стояло
-                # `ch.write(...); return` — и закрытый канал (его закрывает
-                # штатный reconfigure, пока воркер пишет ошибку) отвечал
-                # {"status": "error"}, а мы уходили как после успеха: ошибка
-                # исчезала, floor не срабатывал, errors_to_floor оставался
-                # нулём. Ровно тот случай, ради которого floor и заводился.
-                # Блокер ревью Ф0.9, воспроизведён.
-                if channel_accepted(ch.write(record_dict)):
-                    return
-            except Exception as e:
-                self._count_channel_write_error(channel_name)
-                self._fallback_log("ERROR", f"write to {channel_name} failed: {e}")
-
-        # Канал снят (logger.sink.disable), не создался, отбросил запись или
-        # упал — severity-маршрут конфиго-зависим целиком, поэтому пол обязателен.
-        self._write_to_floor(record_dict)
+            # DEBUG / INFO / неизвестный уровень → scope-based резолв родителя.
+            return super()._route(scope, level, module)
+        return [channel_name]
 
     def log_exception(
         self,
