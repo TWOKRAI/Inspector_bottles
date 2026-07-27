@@ -38,8 +38,9 @@ class AggregationWindow(IBufferStrategy):
     ) -> None:
         """
         Args:
-            flush_fn: fn(channel_name: str, batch: List[dict]) — вызывается при flush.
-                      batch содержит один элемент — агрегированный снапшот.
+            flush_fn: fn(channel_name: str, batch: List[dict]) -> int — вызывается
+                      при flush; возвращает, сколько записей каналы ПРИНЯЛИ
+                      (контракт Ф0.3). batch содержит один элемент — снапшот.
             flush_interval: Интервал периодического flush, сек.
         """
         self._flush_fn = flush_fn
@@ -52,6 +53,12 @@ class AggregationWindow(IBufferStrategy):
         self._total_enqueued: int = 0
         self._total_flushes: int = 0
         self._errors: int = 0
+        # P5: «отдано» и «записано» — разные числа. До этой правки окно вообще не
+        # смотрело на результат flush_fn: сток мог не принять ни одной записи, а
+        # по книгам окна всё выглядело сброшенным. Тот же класс, что стрелял в
+        # Ф0.3 у BatchBuffer (`total_flushed` означал «отдано»).
+        self._total_flushed: int = 0
+        self._flush_failed: int = 0
 
         self._timer_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -123,10 +130,7 @@ class AggregationWindow(IBufferStrategy):
             self._total_flushes += 1
 
         for ch in channels:
-            try:
-                self._flush_fn(ch, [snapshot])
-            except Exception:
-                self._errors += 1
+            self._call_flush_fn(ch, [snapshot])
 
     def _build_snapshot(self) -> Dict[str, Any]:
         """Построить агрегированный снапшот."""
@@ -144,10 +148,25 @@ class AggregationWindow(IBufferStrategy):
             self._metrics.clear()
             self._total_flushes += 1
 
+        self._call_flush_fn(channel, [snapshot])
+
+    def _call_flush_fn(self, channel: str, batch: List[Dict[str, Any]]) -> None:
+        """Отдать пачку стоку и УЧЕСТЬ, сколько он принял.
+
+        Сток, вернувший не число (старый контракт), считается принявшим всё:
+        иначе подъём контракта задним числом объявил бы потерянным то, что на
+        самом деле записано. Расхождение при этом не прячется — оно видно как
+        отсутствие роста ``flush_failed`` при заведомо мёртвом стоке.
+        """
         try:
-            self._flush_fn(channel, [snapshot])
+            result = self._flush_fn(channel, batch)
         except Exception:
             self._errors += 1
+            self._flush_failed += len(batch)
+            return
+        accepted = result if isinstance(result, int) else len(batch)
+        self._total_flushed += accepted
+        self._flush_failed += max(0, len(batch) - accepted)
 
     def start(self) -> None:
         """Запустить фоновый поток периодического flush."""
@@ -188,6 +207,8 @@ class AggregationWindow(IBufferStrategy):
             "type": "aggregation",
             "total_enqueued": self._total_enqueued,
             "total_flushes": self._total_flushes,
+            "total_flushed": self._total_flushed,
+            "flush_failed": self._flush_failed,
             "errors": self._errors,
             "pending_metrics": pending,
             "channels": list(self._channels_seen),

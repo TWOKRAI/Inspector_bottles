@@ -31,7 +31,11 @@ from multiprocess_framework.modules.logger_module.core.log_config import (
     LoggerManagerConfig,
     LoggerScopeSchema,
 )
+from multiprocess_framework.modules.channel_routing_module.core.channel_routing_manager import LOSS_COUNTER_KEYS
+from multiprocess_framework.modules.error_module.core.error_manager import ErrorManager
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+from multiprocess_framework.modules.router_module.core.router_manager import RouterManager
+from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
 from multiprocess_framework.modules.process_module.managers.observability_reload import (
     PLANE_COUNTER_KEYS,
     observability_counters,
@@ -286,8 +290,20 @@ def test_config_typo_in_policy_fails_loudly() -> None:
         LoggerManagerConfig(app_name="bad", batch_overflow_policy="drop_middle")
 
 
-def test_every_manager_counter_is_published_or_declared_unpublished() -> None:
-    """Ф4.2: новый счётчик обязан быть виден наружу — или явно объявлен невидимым.
+@pytest.mark.parametrize(
+    "make_manager",
+    [
+        pytest.param(
+            lambda: LoggerManager(manager_name="KeysAudit", config=LoggerManagerConfig(app_name="audit")),
+            id="logger",
+        ),
+        pytest.param(lambda: ErrorManager(manager_name="KeysAuditErr", config={"app_name": "audit_err"}), id="error"),
+        pytest.param(lambda: StatsManager(manager_name="KeysAuditStats", config={"enable_logging": False}), id="stats"),
+        pytest.param(lambda: RouterManager(manager_name="KeysAuditRouter"), id="router"),
+    ],
+)
+def test_every_manager_counter_is_published_or_declared_unpublished(make_manager) -> None:
+    """Новый счётчик обязан быть виден наружу — или явно объявлен невидимым.
 
     Комментарий у ``PLANE_COUNTER_KEYS`` называл этот файл своим стражем,
     «сверяющим список с живым словарём». Такого сравнения тут не было ни одного:
@@ -299,8 +315,13 @@ def test_every_manager_counter_is_published_or_declared_unpublished() -> None:
     Направление проверки выбрано «изнутри наружу» намеренно: забывают именно
     его — счётчик заводят в ``self.stats``, а в реестр публикации не вносят, и
     он существует, будучи невидимым (ровно то, что стреляло в Ф0.3 и Ф0.4).
+
+    P5: проверяются ВСЕ наследники базы, а не только логгер. Счётчики потерь
+    подняты в ``ChannelRoutingManager``, то есть теперь их имеет и статистика, и
+    транспортный ``RouterManager`` — и «видно наружу» обязано быть правдой у
+    каждого, иначе инвариант снова окажется верным для двух плоскостей из трёх.
     """
-    manager = LoggerManager(manager_name="KeysAudit", config=LoggerManagerConfig(app_name="audit"))
+    manager = make_manager()
     try:
         # Не счётчики потерь — публиковать их наружу незачем. Список явный:
         # молчаливое исключение по маске («всё, что не *_records») со временем
@@ -315,6 +336,18 @@ def test_every_manager_counter_is_published_or_declared_unpublished() -> None:
         )
     finally:
         manager.shutdown()
+
+
+def test_loss_counter_registry_matches_the_base() -> None:
+    """Реестр публикации обязан покрывать ВЕСЬ перечень классов потери из базы.
+
+    Два списка в двух модулях — классическая точка расхождения; направление
+    проверки то же, что выше, но здесь сверяется объявление, а не живой словарь:
+    класс потери, заведённый в базе и забытый в реестре, был бы невидим у всех
+    трёх плоскостей сразу.
+    """
+    missing = sorted(set(LOSS_COUNTER_KEYS) - set(PLANE_COUNTER_KEYS))
+    assert not missing, f"классы потери из базы не публикуются наружу: {missing}"
 
 
 def test_records_without_channels_reaches_the_outside(tmp_path: Path) -> None:

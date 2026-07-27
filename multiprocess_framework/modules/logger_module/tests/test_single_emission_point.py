@@ -282,3 +282,33 @@ def test_module_channel_dedup_survives(tmp_path: Path) -> None:
         assert len(spy.written) == 1, f"запись легла в module-канал {len(spy.written)} раз(а)"
     finally:
         mgr.shutdown()
+
+
+def test_module_channel_outside_registry_still_receives(tmp_path: Path) -> None:
+    """P5: module-канал вне реестра — хук резолва, а не «на всякий случай».
+
+    Два хранилища каналов у логгера расходятся штатно: generic-выключение
+    приёмника (``set_sink_enabled``, база Ф0.6) снимает канал из РЕЕСТРА, а
+    словарь ``_module_channels`` его сохраняет. Общий писатель поднят в базу,
+    которая знает только реестр, — без хука ``_resolve_channel`` записи
+    module-каналов в этом состоянии перестали бы доходить, и потеря выглядела бы
+    «законной»: счётчик unresolved растёт, значит система честна. Она была бы
+    честна насчёт неправильного.
+    """
+    mgr = _logger(tmp_path)
+    try:
+        mgr.enable_module_logging("proba")
+        spy = _SpyChannel("module_proba")
+        mgr._module_channels["proba"] = spy  # type: ignore[assignment]
+        mgr._channel_registry.unregister("module_proba")
+        assert "module_proba" not in mgr._channel_registry.names(), "предусловие: канала нет в реестре"
+
+        before_unresolved = mgr.stats["unresolved_channel_records"]
+        mgr.log(LogScope.SYSTEM, LogLevel.INFO, "запись в module-канал", module="proba")
+
+        assert [r["message"] for r in spy.written] == ["запись в module-канал"], (
+            "запись не дошла до module-канала вне реестра"
+        )
+        assert mgr.stats["unresolved_channel_records"] == before_unresolved, "живой канал засчитан как несуществующий"
+    finally:
+        mgr.shutdown()

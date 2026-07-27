@@ -168,65 +168,34 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # Пол ошибок (Ф0.9) — ленивый: резолвится на первой записи, ушедшей в floor.
         self._error_floor: Optional[ErrorFloor] = None
 
-        self.stats = {
-            "messages_processed": 0,
-            "messages_skipped": 0,
-            "messages_batched": 0,
-            "module_files_created": 0,
-            # Сколько раз штатный маршрут ошибок не принял запись и сработал floor.
-            # Ненулевое значение — сигнал «маршрут ошибок сломан», а не норма.
-            "errors_to_floor": 0,
-            # Пол не смог записать — запись потеряна ПОЛНОСТЬЮ. Отдельно от
-            # errors_to_floor: «спасено» и «не спасено» нельзя складывать.
-            "errors_floor_write_failures": 0,
-            # Ф0.4: запись адресована каналу, которого нет (опечатка в scopes,
-            # канал снят logger.sink.disable, module-канал удалён). До этой правки
-            # такая запись исчезала молча — ни счётчика, ни следа.
-            "unresolved_channel_records": 0,
-            # Ф0.4: канал есть, но его write() бросил исключение. Отличается от
-            # отказа статусом {"status": "error"} — тот учтён как flush_failed
-            # буфера; здесь именно проглоченное исключение.
-            "channel_write_errors": 0,
-            # Канал жив, но записи не принял (ответил status=error). Третий
-            # класс потери — отдельно от «канала нет» и «канал бросил»: они
-            # лечатся разным. Найдено ревью фазы: на прямом (небатченом) пути
-            # такой отказ не считал НИКТО.
-            "channel_refused_records": 0,
-            # Ф4.2: запись прошла гейт, но приёмников у неё НОЛЬ — резолв вернул
-            # пустой список. Четвёртый класс потери, и он не совпадает ни с
-            # одним из трёх: там имя канала было и что-то с ним случилось, здесь
-            # имени нет вовсе. Достижимо: у скоупа нет своего списка каналов, а
-            # реестр пуст (все приёмники сняты logger.sink.disable). Ошибку в
-            # этом случае спасает floor, а INFO/DEBUG исчезали молча — и при
-            # этом считались как batched, то есть счётчик УВЕРЯЛ, что запись
-            # ушла в буфер. Найдено при слиянии развилки эмиссии.
-            "records_without_channels": 0,
-            # Ф0.7: результат чистки каталога логов (ключи — _RETENTION_STAT_KEYS).
-            # Отдельно «удалили» и «не смогли удалить»: на Windows занятый файл
-            # не удаляется, и молчащий ретеншен неотличим от работающего, если
-            # считать только успехи.
-            **{key: 0 for key in _RETENTION_STAT_KEYS},
-        }
+        # Только СВОИ счётчики: четыре класса потери на стыке «менеджер → канал»
+        # объявлены в базе (LOSS_COUNTER_KEYS) и общие для трёх плоскостей —
+        # поэтому update(), а не присваивание: оно стёрло бы их.
+        self.stats.update(
+            {
+                "messages_processed": 0,
+                "messages_skipped": 0,
+                "messages_batched": 0,
+                "module_files_created": 0,
+                # Сколько раз штатный маршрут ошибок не принял запись и сработал
+                # floor. Ненулевое значение — сигнал «маршрут ошибок сломан», а
+                # не норма. У статистики аналога нет: там нет записи, которую
+                # нельзя потерять, — метрики агрегаты (см. ADR-CRM-011).
+                "errors_to_floor": 0,
+                # Пол не смог записать — запись потеряна ПОЛНОСТЬЮ. Отдельно от
+                # errors_to_floor: «спасено» и «не спасено» нельзя складывать.
+                "errors_floor_write_failures": 0,
+                # Ф0.7: результат чистки каталога логов (ключи — _RETENTION_STAT_KEYS).
+                # Отдельно «удалили» и «не смогли удалить»: на Windows занятый файл
+                # не удаляется, и молчащий ретеншен неотличим от работающего, если
+                # считать только успехи.
+                **{key: 0 for key in _RETENTION_STAT_KEYS},
+            }
+        )
 
-        # Разбивка потерь по именам каналов + «кому уже сказали». Живут отдельно
-        # от self.stats: там только числа, здесь словари/множество.
-        self._unresolved_channels: Dict[str, int] = {}
-        self._channel_write_errors: Dict[str, int] = {}
-        self._channel_refused: Dict[str, int] = {}
-        self._warned_unknown_channels: set = set()
-        self._warned_write_error_channels: set = set()
-        self._warned_refused_channels: set = set()
-        # Ф4.2: «приёмников нет вовсе» — привязать предупреждение не к чему,
-        # поэтому один флаг, а не множество имён.
-        self._warned_without_channels: bool = False
         # R2: счётчики потерь ушедших каналов. Живут на менеджере, потому что
         # канал уносит свои с собой (см. _on_channel_removed).
         self._absorbed_backpressure: Dict[str, int] = {}
-        # Берётся ТОЛЬКО на пути потери (канала нет / write бросил), поэтому на
-        # здоровом пути не стоит ничего. Без него два потока-эмитента и поток
-        # таймера буфера теряют инкременты — счётчик потерь врал бы в меньшую
-        # сторону, то есть ровно в опасную.
-        self._miss_lock = threading.Lock()
 
         self._setup_channels()
         self._setup_batcher()
@@ -595,110 +564,18 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # УЧЁТ ПОТЕРЬ НА СТЫКЕ «ИМЯ → КАНАЛ» (Ф0.4)
     # =========================================================================
 
-    def _count_unresolved_channel(self, channel_name: str, count: int = 1) -> None:
-        """Учесть ``count`` записей, ушедших в несуществующий канал, и один раз сказать об этом.
+    def _resolve_channel(self, name: str) -> Optional[Any]:
+        """Плюс module-каналы к реестру базы.
 
-        Предупреждение — РОВНО ОДНО на имя за жизнь процесса: имя канала не
-        меняется от записи к записи, а лог-шторм внутри логгера — та самая
-        болезнь, ради которой соседние ``except`` стоят молча. Учёт при этом
-        не глушится никогда: заглушённое предупреждение не должно означать
-        «потерь нет».
-
-        Предупреждение уходит через fallback-логгер (stdlib), а НЕ через
-        собственную маршрутизацию: сообщение о том, что канал не резолвится,
-        не имеет права зависеть от резолва каналов.
+        Они лежат отдельным словарём ``_module_channels`` и в реестре есть не
+        всегда (``disable_module_logging`` снимает только из реестра). Без этого
+        хука подъём писателя в базу молча потерял бы записи module-каналов —
+        и потерял бы их «законно», через счётчик unresolved.
         """
-        with self._miss_lock:
-            self.stats["unresolved_channel_records"] += 1 * count
-            self._unresolved_channels[channel_name] = self._unresolved_channels.get(channel_name, 0) + count
-            total = self._unresolved_channels[channel_name]
-            first_time = channel_name not in self._warned_unknown_channels
-            if first_time:
-                self._warned_unknown_channels.add(channel_name)
-
-        if first_time:
-            # Вне lock-а: fallback-логгер пишет в stderr/handlers, его цена
-            # не должна удерживать счётчик потерь.
-            self._fallback_log(
-                "WARNING",
-                f"канал {channel_name!r} не резолвится — записи до него не доходят "
-                f"(учтено {total}; error/critical подстрахованы floor'ом, остальные "
-                f"уровни потеряны; дальше считаем молча, счётчик в "
-                f"get_stats['unresolved_channels'])",
-            )
-
-    def _count_channel_write_error(self, channel_name: str) -> None:
-        """Учесть запись, потерянную из-за ИСКЛЮЧЕНИЯ в ``write()`` канала.
-
-        Отказ статусом (``{"status": "error"}``) сюда НЕ попадает — у него свой
-        счётчик :meth:`_count_channel_refused`. Прежняя формулировка этого
-        docstring («отказ честно виден как разница отдано-минус-принято через
-        flush_failed буфера») была ВЕРНА ТОЛЬКО ДЛЯ БАТЧЕНОГО ПУТИ и оказалась
-        ровно тем неверным объяснением, из-за которого дыру на прямом пути
-        никто не искал: буфера там нет, а значит нет и разницы, которую можно
-        было бы увидеть.
-        """
-        with self._miss_lock:
-            self.stats["channel_write_errors"] += 1
-            self._channel_write_errors[channel_name] = self._channel_write_errors.get(channel_name, 0) + 1
-            first_time = channel_name not in self._warned_write_error_channels
-            if first_time:
-                self._warned_write_error_channels.add(channel_name)
-
-        if first_time:
-            self._fallback_log(
-                "WARNING",
-                f"канал {channel_name!r} бросил исключение при записи — запись потеряна "
-                f"(дальше считаем молча, счётчик в get_stats['channel_write_errors_by_channel'])",
-            )
-
-    def _count_records_without_channels(self, level: LogLevel) -> None:
-        """Учесть запись, у которой не оказалось НИ ОДНОГО приёмника (Ф4.2).
-
-        Отдельно от трёх классов «имя канала есть, но…»: здесь имени нет вовсе,
-        и лечится это не тем же самым (пустой реестр или скоуп без списка
-        каналов, а не опечатка и не сломанный сток).
-
-        Предупреждение одноразовое — по уровню записи, а не по каналу: канала
-        нет, привязать не к чему. Без ограничения оно само стало бы штормом
-        ровно в тот момент, когда приёмников не осталось.
-        """
-        with self._miss_lock:
-            self.stats["records_without_channels"] += 1
-            first_time = not self._warned_without_channels
-            self._warned_without_channels = True
-
-        if first_time:
-            self._fallback_log(
-                "WARNING",
-                f"запись уровня {getattr(level, 'value', level)} потеряна: у неё нет ни одного приёмника "
-                f"(скоуп без списка каналов при пустом реестре; дальше считаем молча, "
-                f"счётчик в get_stats['records_without_channels'])",
-            )
-
-    def _count_channel_refused(self, channel_name: str) -> None:
-        """Учесть запись, которую живой канал НЕ принял (ответил ``status=error``).
-
-        Третий, отдельный класс потери — рядом с «канала нет»
-        (``unresolved_channel_records``) и «канал бросил»
-        (``channel_write_errors``). Смешивать их нельзя: они лечатся разным.
-        «Канала нет» — опечатка в scopes или снятый sink; «бросил» — дефект
-        канала; «не принял» — сток жив, но отказывает (закрыт, переполнен,
-        консоль отброшена по пределу ожидания).
-        """
-        with self._miss_lock:
-            self.stats["channel_refused_records"] += 1
-            self._channel_refused[channel_name] = self._channel_refused.get(channel_name, 0) + 1
-            first_time = channel_name not in self._warned_refused_channels
-            if first_time:
-                self._warned_refused_channels.add(channel_name)
-
-        if first_time:
-            self._fallback_log(
-                "WARNING",
-                f"канал {channel_name!r} не принял запись (ответил отказом) — запись потеряна "
-                f"(дальше считаем молча, счётчик в get_stats['channel_refused_by_channel'])",
-            )
+        channel = self._channel_registry.get(name)
+        if channel is None:
+            channel = self._module_channels.get(name.replace("module_", "", 1))
+        return channel
 
     def _flush_batch(self, channel: str, batch: List[Dict]) -> int:
         """Callback для BatchBuffer — записать пачку в канал.
@@ -970,45 +847,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             **extra,
         }
 
-    def _write_record_to_channels(self, record: LogRecord, channel_names: List[str]) -> int:
-        """Записать запись напрямую в названные каналы (мимо буфера).
-
-        Принимает и ``LogRecord``, и уже готовый dict: severity-путь
-        ``ErrorManager`` строит запись сам и обязан идти сюда же, а не иметь
-        свою копию цикла (в его копии не считались ни отказ, ни отсутствие
-        канала — см. ``channel_refused_records``).
-
-        Returns:
-            Число каналов, принявших запись. Ноль означает «запись никуда не легла» —
-            по этому признаку ``_write_error_record`` включает floor.
-        """
-        record_dict = record.to_dict() if isinstance(record, LogRecord) else record
-        written = 0
-        for ch_name in channel_names:
-            ch = self._channel_registry.get(ch_name)
-            if ch is None:
-                ch = self._module_channels.get(ch_name.replace("module_", "", 1))
-            if ch is None:
-                # Ф0.4: прямой путь теряет запись так же молча, как батчевый.
-                self._count_unresolved_channel(ch_name)
-                continue
-            try:
-                if _channel_accepted(ch.write(record_dict)):
-                    written += 1
-                else:
-                    # Канал ЖИВ, но записи не принял (закрыт, консоль отброшена
-                    # по пределу ожидания R2, HTTP-сток ответил ошибкой). На
-                    # батченом пути такой отказ ловит flush_failed буфера, а на
-                    # прямом — не ловил НИКТО: для error/critical запись спасал
-                    # floor, а WARNING/INFO/DEBUG исчезали без единого следа.
-                    # Путь достижим из прод-конфига: enable_batching операбелен
-                    # из секции observability, то есть оператор мог выключить
-                    # батчинг и молча включить потери. Находка ревью фазы.
-                    self._count_channel_refused(ch_name)
-            except Exception:  # noqa: BLE001 — сбой одного канала не должен съесть запись целиком; потеря учтена счётчиком
-                self._count_channel_write_error(ch_name)
-        return written
-
     # =========================================================================
     # КОНТЕКСТ
     # =========================================================================
@@ -1174,16 +1012,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # Ф0.4: потери на стыке «имя канала → объект канала». Ключи присутствуют
         # ВСЕГДА (нулями), а не появляются по факту потери: «ключа нет» и
         # «потерь нет» — разные факты, и потребитель не должен их путать.
+        # Четыре класса потери + разбивка по каналам — из базы одним снимком.
+        # Своя копия перечня здесь уже была источником расхождения (Ф0.4).
+        base_stats.update(self._loss_counters_snapshot())
         with self._miss_lock:
-            base_stats["unresolved_channel_records"] = self.stats["unresolved_channel_records"]
-            base_stats["unresolved_channels"] = dict(self._unresolved_channels)
-            base_stats["channel_write_errors"] = self.stats["channel_write_errors"]
-            base_stats["channel_write_errors_by_channel"] = dict(self._channel_write_errors)
-            base_stats["channel_refused_records"] = self.stats["channel_refused_records"]
-            base_stats["channel_refused_by_channel"] = dict(self._channel_refused)
-            # Ф4.2: четвёртый класс — приёмников не было вовсе. Разбивки по
-            # каналам нет и быть не может: разбивать не по чему.
-            base_stats["records_without_channels"] = self.stats["records_without_channels"]
             # Ф0.7: та же логика присутствия — ключи есть всегда, даже когда
             # ретеншен выключен. Нулевой ``retention_delete_failures`` при
             # ненулевом ``retention_files_deleted`` — «чистка работает»;

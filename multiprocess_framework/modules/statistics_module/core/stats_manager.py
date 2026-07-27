@@ -235,18 +235,29 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     # FLUSH CALLBACK
     # =========================================================================
 
-    def _do_flush(self, channel_name: str, batch: List[Dict[str, Any]]) -> None:
+    def _do_flush(self, channel_name: str, batch: List[Dict[str, Any]]) -> int:
         """Callback AggregationWindow: транслировать снапшот во ВСЕ каналы.
 
         channel_name игнорируется намеренно — AggregationWindow вызывает flush
         через sentinel "_stats_", а нам нужно отдать данные всем реальным каналам.
+
+        **P5: свой цикл записи заменён общим писателем базы.** В своей копии не
+        считался ни один класс потери, кроме исключения, да и то безымянно
+        (``_errors`` — «где-то что-то упало»). Отказ канала СТАТУСОМ
+        (``{"status": "error"}``) не считался вовсе: снапшот метрик исчезал молча,
+        и спросить об этом живой процесс было нечем. Инвариант плана «дроп
+        допустим, невидимый дроп — нет» работал для двух плоскостей из трёх.
+
+        Returns:
+            Сколько записей каналы фактически ПРИНЯЛИ (контракт ``flush_fn → int``
+            из Ф0.3). Не «отдано»: живой-но-сломанный сток отдачу принимает, а
+            запись теряет — на этом уже обжигались в буфере логгера.
         """
-        for ch in self._channel_registry.all():
-            for item in batch:
-                try:
-                    ch.write(item)
-                except Exception:
-                    self._errors += 1
+        names = self._channel_registry.names()
+        accepted = 0
+        for item in batch:
+            accepted += self._write_record_to_channels(item, names)
+        return accepted
 
     # =========================================================================
     # ЗАПИСЬ МЕТРИК
