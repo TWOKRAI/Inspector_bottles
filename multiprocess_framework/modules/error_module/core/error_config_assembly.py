@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Dict
 
 _FILE_MAX = 10 * 1024 * 1024
@@ -56,12 +57,15 @@ def expand_error_manager_config(data: Dict[str, Any]) -> Dict[str, Any]:
     # Не setdefault: явные ``None``/``{}`` тоже означают «своих скоупов нет».
     # Пустой словарь скоупов уводил бы гейт на fallback ``_scope_schema``, а тот
     # берёт ПЕРВЫЙ канал реестра — то есть INFO поехал бы в ``critical.log``.
+    #
+    # deepcopy обязателен: без него один и тот же module-level словарь (и те же
+    # вложенные) раздавался бы ВСЕМ конфигам. Pydantic на ``model_validate``
+    # строит новые схемы, поэтому сегодня это безопасно, — но любая правка
+    # ``d["scopes"][...]`` до валидации утекла бы глобально (находка ревью Ф1).
     if not d.get("scopes"):
-        d["scopes"] = _ERROR_PLANE_SCOPES
-    if d.get("modules") is None:
+        d["scopes"] = deepcopy(_ERROR_PLANE_SCOPES)
+    if not d.get("modules"):
         d["modules"] = {}
-    else:
-        d.setdefault("modules", {})
     critical = d.get("critical_file_path", "logs/critical.log")
     err = d.get("error_file_path", "logs/errors.log")
     warnings = d.get("warnings_file_path")

@@ -181,6 +181,46 @@ class TestForgetChannel:
         finally:
             mgr.shutdown()
 
+    def test_sink_disable_forgets_the_channel_too(self, tmp_path) -> None:
+        """ВТОРОЙ путь уборки — ``set_sink_enabled(..., False)`` в базе CRM.
+
+        Найдено ревью Ф1: этот путь назван первым и в docstring, и в README, и
+        в плане, а сторожил его ноль тестов — удаление вызова из
+        ``ChannelRoutingManager.set_sink_enabled`` оставляло 588 тестов
+        зелёными. Соседний тест ходит через ``disable_module_logging``, а тот
+        зовёт уборку СВОИМ вызовом из ``logger_core`` и CRM-ветку не задевает.
+        """
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
+        mgr = LoggerManager(
+            manager_name="SinkForgetProbe",
+            config={
+                "app_name": "sink_forget",
+                "log_directory": str(tmp_path),
+                "enable_batching": True,
+                "modules": {},
+                "channels": {
+                    "a": {"type": "file", "enabled": True, "file_path": str(tmp_path / "a.log")},
+                    "b": {"type": "file", "enabled": True, "file_path": str(tmp_path / "b.log")},
+                },
+                "scopes": {"BUSINESS": {"enabled": True, "min_level": "INFO", "channels": ["a", "b"]}},
+            },
+        )
+        mgr.initialize()
+        try:
+            mgr.info("запись", module="probe")
+            assert "a" in mgr._buffer.stats["pending"], "предусловие: имя канала попало в буфер"
+
+            mgr.flush()
+            assert mgr.set_sink_enabled("a", False), "предусловие: канал был и снят"
+
+            assert "a" not in mgr._buffer.stats["pending"], (
+                "sink.disable не убрал имя канала из буфера — словари растут монотонно"
+            )
+            assert "b" in mgr._buffer.stats["pending"], "уборка задела соседний живой канал"
+        finally:
+            mgr.shutdown()
+
     def test_loss_history_survives_forgetting(self) -> None:
         """Счётчики потерь канала переживают его уход — прямой урок ревью Ф0.
 

@@ -183,10 +183,21 @@ def test_no_floor_while_channel_alive(tmp_path: Path) -> None:
 
 
 def test_floor_catches_error_after_sink_disabled(tmp_path: Path) -> None:
-    """severity-маршрут конфиго-зависим целиком — вот его страховка."""
+    """severity-маршрут конфиго-зависим целиком — вот его страховка.
+
+    Снимаются ВСЕ severity-каналы, а не один. Правка Ф1 (находка ревью: у ERROR
+    не было запасного маршрута) достроила цепочку, и снятие одного
+    ``errors_file`` теперь означает «маршрут перестроился на живой
+    ``critical_file``», а не «приёмника нет». Пол — страховка на случай «нет
+    ни одного», и проверять его надо ровно на этом входе; промежуточное
+    состояние пинует ``test_error_plane_defaults.py::test_every_level_has_a_fallback_receiver``.
+    """
     em = _manager(tmp_path)
     try:
-        assert em.set_sink_enabled("errors_file", False) is True
+        for name in ("errors_file", "critical_file", "warnings_file"):
+            assert em.set_sink_enabled(name, False) is True
+        assert em.get_stats()["level_routes"] == {}, "предусловие: приёмников не осталось"
+
         em.error(_MARKER)
 
         lines = _floor_lines(tmp_path)
@@ -227,11 +238,19 @@ def test_log_exception_keeps_full_traceback_in_floor(tmp_path: Path) -> None:
 
 
 def test_no_duplicate_between_channel_and_floor(tmp_path: Path) -> None:
-    """Одна эмиссия = одна запись: канал ИЛИ пол, никогда оба."""
+    """Одна эмиссия = одна запись: канал ИЛИ пол, никогда оба.
+
+    Приёмники снимаются ВСЕ — см. пояснение в
+    ``test_floor_catches_error_after_sink_disabled``: после Ф1 снятие одного
+    ``errors_file`` переводит ERROR на живой ``critical_file``, и «второй
+    записи» просто неоткуда взяться. Проверяемое свойство (дубля нет) от этого
+    не изменилось, изменился вход, на котором оно проверяется.
+    """
     em = _manager(tmp_path)
     try:
         em.error(_MARKER)
-        em.set_sink_enabled("errors_file", False)
+        for name in ("errors_file", "critical_file", "warnings_file"):
+            em.set_sink_enabled(name, False)
         em.error(f"{_MARKER}-second")
 
         on_disk = (tmp_path / "errors.log").read_text(encoding="utf-8")
@@ -240,5 +259,8 @@ def test_no_duplicate_between_channel_and_floor(tmp_path: Path) -> None:
         assert on_disk.count(_MARKER) == 1
         assert in_floor == [f"{_MARKER}-second"]
         assert f"{_MARKER}-second" not in on_disk
+        assert f"{_MARKER}-second" not in (tmp_path / "critical.log").read_text(encoding="utf-8"), (
+            "запись легла и в пол, и в запасной канал — дубль"
+        )
     finally:
         em.shutdown()

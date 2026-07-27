@@ -213,6 +213,20 @@ class ErrorManager(LoggerCore, IErrorManager):
         """Построить _level_to_channel: {уровень → имя канала}.
 
         После этого self._level_to_channel["ERROR"] == "errors_file" (O(1) в log()).
+
+        **У каждого уровня есть запасной приёмник** — и это правило, а не набор
+        частных случаев. Ревью Ф1 воспроизвело асимметрию: у ERROR запасного не
+        было вовсе, и снятие ОДНОГО ``errors_file`` отправляло ошибку в пол при
+        живом ``critical_file`` (``errors_to_floor`` 0 → 1, ``critical.log``
+        пуст). Потери не было — пол сработал, счётчик виден, — но приёмник
+        последней инстанции нужен для случая «приёмников нет», а не «приёмник
+        есть, просто не тот». После P2 это состояние стало достижимым в
+        рантайме одной командой, поэтому цепочка достроена.
+
+        Направление запасного — к БОЛЕЕ важному файлу, никогда к менее важному:
+        ERROR уходит в ``critical.log``, а не в ``warnings.log``. Файл
+        предупреждений просматривают реже всех, и спрятать ошибку там значит
+        потерять её на практике, формально ничего не потеряв.
         """
         self._level_to_channel = {}
 
@@ -227,11 +241,15 @@ class ErrorManager(LoggerCore, IErrorManager):
 
         if has_errors:
             self._level_to_channel["ERROR"] = "errors_file"
+        elif has_critical:
+            self._level_to_channel["ERROR"] = "critical_file"
 
         if has_warnings:
             self._level_to_channel["WARNING"] = "warnings_file"
         elif has_errors:
             self._level_to_channel["WARNING"] = "errors_file"
+        elif has_critical:
+            self._level_to_channel["WARNING"] = "critical_file"
 
     def _validate_config(self, config: Dict[str, Any]) -> None:
         """R9: разобрать error-конфиг ДО закрытия каналов.

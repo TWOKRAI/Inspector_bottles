@@ -88,17 +88,27 @@ class TestErrorPlaneIsQuietAtRest:
             mgr.shutdown()
 
     def test_default_config_is_quiet_too(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """``ErrorManager()`` без конфига — тот же менеджер, а не другой.
+        """``ErrorManager()`` БЕЗ конфига — тот же менеджер, а не другой.
 
         Путь ``config=None`` собирался мимо ``expand_error_manager_config``, и
         без этой проверки «дефолтный» менеджер остался бы с логгерными скоупами.
+
+        Здесь именно ``config=None``. Первая редакция теста передавала
+        ``config={"log_directory": ...}`` — то есть dict-путь, уже покрытый
+        соседями, — и возврат ветки ``None`` к прежней сборке оставлял все 588
+        тестов зелёными. Docstring при этом обещал обратное. Найдено ревью Ф1;
+        четвёртый вакуумный тест этой фазы.
         """
         monkeypatch.setenv("MULTIPROCESS_LOG_DIR", str(tmp_path))
-        mgr = ErrorManager(config={"log_directory": str(tmp_path)})
+        mgr = ErrorManager()
         mgr.initialize()
         try:
             mgr.flush()
             assert mgr.get_stats()["unresolved_channel_records"] == 0
+            assert [s.enabled for s in mgr.config.scopes.values()] == [False] * len(mgr.config.scopes), (
+                "дефолтный ErrorManager получил ЧУЖИЕ (логгерные) скоупы"
+            )
+            assert mgr.config.modules == {}
         finally:
             mgr.shutdown()
 
@@ -200,6 +210,55 @@ class TestSeverityRoutesFollowChannelChanges:
         finally:
             mgr.shutdown()
 
+    def test_every_level_has_a_fallback_receiver(self, tmp_path: Path) -> None:
+        """Пол — для «приёмников нет», а не для «приёмник есть, просто не тот».
+
+        Ревью Ф1: у ERROR запасного маршрута не было вовсе, и снятие одного
+        ``errors_file`` при живом ``critical_file`` отправляло ошибку в пол
+        (``errors_to_floor`` 0 → 1, ``critical.log`` пуст). Проверяются все три
+        уровня по очереди — асимметрия обязана быть невозможной, а не
+        исправленной в одном месте.
+        """
+        mgr = _manager(tmp_path)
+        try:
+            assert mgr.set_sink_enabled("errors_file", False)
+            assert mgr.get_stats()["level_routes"]["ERROR"] == "critical_file", (
+                "у ERROR нет запасного приёмника при живом critical_file"
+            )
+
+            before = mgr.get_stats()["errors_to_floor"]
+            mgr.error("ошибка при живом critical_file", module="plane")
+
+            assert mgr.get_stats()["errors_to_floor"] == before, "ушло в пол при живом приёмнике"
+            assert "ошибка при живом critical_file" in (tmp_path / "critical.log").read_text(encoding="utf-8")
+
+            # WARNING остаётся на своём, а без него уходит вверх, не вниз.
+            assert mgr.set_sink_enabled("warnings_file", False)
+            assert mgr.get_stats()["level_routes"]["WARNING"] == "critical_file"
+        finally:
+            mgr.shutdown()
+
+    def test_fallback_never_goes_down_in_severity(self, tmp_path: Path) -> None:
+        """Запасной приёмник — всегда более важный файл, никогда менее важный.
+
+        Ошибка, спрятанная в ``warnings.log``, формально не потеряна, а
+        практически потеряна: этот файл просматривают реже всех.
+        """
+        mgr = _manager(tmp_path)
+        try:
+            assert mgr.set_sink_enabled("errors_file", False)
+            assert mgr.set_sink_enabled("critical_file", False)
+            routes = mgr.get_stats()["level_routes"]
+
+            assert "ERROR" not in routes, f"ERROR ушёл вниз по важности: {routes}"
+            assert "CRITICAL" not in routes, f"CRITICAL ушёл вниз по важности: {routes}"
+            assert routes.get("WARNING") == "warnings_file"
+
+            mgr.error("ошибка без приёмников своего уровня", module="plane")
+            assert mgr.get_stats()["errors_to_floor"] == 1, "должен был сработать пол"
+        finally:
+            mgr.shutdown()
+
     def test_error_still_reaches_floor_without_any_receiver(self, tmp_path: Path) -> None:
         """Инвариант 1 переживает P2 и P3 одновременно.
 
@@ -220,6 +279,40 @@ class TestSeverityRoutesFollowChannelChanges:
             assert mgr.get_stats()["errors_to_floor"] == 1
             messages = [rec.get("message") for rec in _floor_records(mgr)]
             assert messages == ["ошибка без единого приёмника"]
+        finally:
+            mgr.shutdown()
+
+    def test_error_before_initialize_still_reaches_its_channel(self, tmp_path: Path) -> None:
+        """Между конструктором и ``initialize()`` ошибка обязана дойти (инвариант 1).
+
+        ``_setup_level_routes()`` зовётся уже в ``__init__`` — и это не украшение:
+        с выключенными скоупами плоскости ошибок (P3) ERROR в этом промежутке
+        ушёл бы scope-путём и был бы отклонён гейтом МОЛЧА. Восьмистрочный
+        комментарий у вызова обосновывал это инвариантом 1 и не был подкреплён
+        ничем: ревью Ф1 удалило вызов из ``__init__`` — 588 тестов остались
+        зелёными.
+        """
+        mgr = ErrorManager(
+            config=ErrorManagerConfig(
+                app_name="preinit",
+                enable_batching=False,
+                critical_file_path=str(tmp_path / "critical.log"),
+                error_file_path=str(tmp_path / "errors.log"),
+                warnings_file_path=str(tmp_path / "warnings.log"),
+            ),
+            process=_FakeProcess("preinit_probe"),
+        )
+        # ВНИМАНИЕ: initialize() намеренно НЕ вызывается.
+        try:
+            assert mgr.get_stats()["level_routes"], "маршруты уровней пусты до initialize()"
+
+            mgr.error("ошибка до initialize", module="plane")
+
+            assert mgr.get_stats()["messages_skipped"] == 0, (
+                "ошибка отклонена гейтом до initialize() — инвариант 1 пробит"
+            )
+            assert "ошибка до initialize" in (tmp_path / "errors.log").read_text(encoding="utf-8")
+            assert mgr.get_stats()["errors_to_floor"] == 0, "запись ушла в пол при живом канале"
         finally:
             mgr.shutdown()
 

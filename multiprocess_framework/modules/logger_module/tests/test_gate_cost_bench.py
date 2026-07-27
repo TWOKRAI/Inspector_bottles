@@ -22,6 +22,7 @@ plans/observability-unified-routing.md, Ф1.6.
 
 from __future__ import annotations
 
+import sys
 import time
 import tracemalloc
 from pathlib import Path
@@ -81,6 +82,28 @@ class _LegacyGate:
         result = self._direct(level, module)
         self.cache[key] = result
         return result
+
+
+def _report(capsys: "pytest.CaptureFixture", line: str) -> None:
+    """Напечатать строку замера мимо capture — БЕЗОПАСНО для дефолтной консоли.
+
+    ``capsys.disabled()`` пишет в настоящий ``sys.stdout``, а он на штатной
+    платформе проекта (Windows, `scripts/run_framework_tests.py` без
+    ``PYTHONIOENCODING``) в cp1251. Первая редакция печатала стрелку ``\\u2192``
+    и роняла три теста ``UnicodeEncodeError`` — то есть «5862 passed» было
+    верно только под utf-8. Ровно тот класс, что записан в памяти проекта
+    («русский вывод в cp866 = инструмент молчал у потребителя»), и найден он
+    ревью, а не мной.
+
+    Отсюда правило файла: строка приводится к ФАКТИЧЕСКОЙ кодировке консоли
+    (а не к предполагаемой — она бывает и cp1251, и cp866, и utf-8), непечатаемое
+    заменяется. Текст остаётся русским: политика языка не отменяется, отменяется
+    только право теста упасть из-за собственной отладочной печати.
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+    safe = line.encode(encoding, errors="replace").decode(encoding, errors="replace")
+    with capsys.disabled():
+        print(safe)
 
 
 def _timed(fn, repeats: int) -> float:
@@ -164,8 +187,7 @@ class TestGateDoesNotAllocatePerDecision:
         new = _upper_calls(LoggerScopeSchema, "INFO")
         old = _upper_calls(_LegacyScopeSchema, "INFO")
 
-        with capsys.disabled():
-            print(f"  .upper() на 100 решений: было {old} → стало {new}")
+        _report(capsys, f"  .upper() на 100 решений: было {old} -> стало {new}")
 
         assert old == 100, "эталон не зовёт .upper() — инструмент смотрит не туда"
         assert new == 0, f"решение всё ещё строит строку: {new} вызовов .upper()"
@@ -241,8 +263,7 @@ class TestGateIsNotSlowerThanBefore:
         new = _timed(lambda: logger.should_log(scope, level, module), self.REPEATS)
         old = _timed(lambda: legacy.should_log(scope, level, module), self.REPEATS)
 
-        with capsys.disabled():
-            print(f"\n  гейт отклонённой записи: было {old * 1e9:.0f} нс → стало {new * 1e9:.0f} нс")
+        _report(capsys, f"\n  гейт отклонённой записи: было {old * 1e9:.0f} нс -> стало {new * 1e9:.0f} нс")
 
         assert new <= old * self.TOLERANCE, f"гейт стал дороже прежнего: {new * 1e9:.0f} нс против {old * 1e9:.0f} нс"
 
@@ -264,8 +285,7 @@ class TestGateIsNotSlowerThanBefore:
         new = _timed(lambda: schema.should_log(LogLevel.DEBUG, "bench_mod"), self.REPEATS)
         old = _timed(lambda: legacy._direct(LogLevel.DEBUG, "bench_mod"), self.REPEATS)
 
-        with capsys.disabled():
-            print(f"  решение скоупа:          было {old * 1e9:.0f} нс → стало {new * 1e9:.0f} нс")
+        _report(capsys, f"  решение скоупа:          было {old * 1e9:.0f} нс -> стало {new * 1e9:.0f} нс")
 
         assert new <= old * self.SCHEMA_TOLERANCE, (
             f"решение скоупа стало кратно дороже: {new * 1e9:.0f} нс против {old * 1e9:.0f} нс"
@@ -290,9 +310,8 @@ class TestRecordCost:
         )
         logger.flush()
 
-        with capsys.disabled():
-            print(f"  запись отклонена:        {rejected * 1e6:.2f} мкс")
-            print(f"  запись принята:          {accepted * 1e6:.2f} мкс")
+        _report(capsys, f"  запись отклонена:        {rejected * 1e6:.2f} мкс")
+        _report(capsys, f"  запись принята:          {accepted * 1e6:.2f} мкс")
 
         assert rejected < accepted, "отклонённая запись обязана быть дешевле принятой"
 
@@ -313,9 +332,8 @@ class TestRecordCost:
             self.REPEATS,
         )
 
-        with capsys.disabled():
-            print(f"  отклонена (готовая):     {ready * 1e6:.2f} мкс")
-            print(f"  отклонена (callable):    {lazy * 1e6:.2f} мкс")
+        _report(capsys, f"  отклонена (готовая):     {ready * 1e6:.2f} мкс")
+        _report(capsys, f"  отклонена (callable):    {lazy * 1e6:.2f} мкс")
 
         assert lazy <= ready * 1.5
 
