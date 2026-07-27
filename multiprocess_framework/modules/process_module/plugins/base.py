@@ -77,10 +77,14 @@ class PluginContext:
         config: dict[str, Any] | None = None,
         io: Any | None = None,
         registers: Any | None = None,
+        plugin_name: str | None = None,
     ) -> None:
         self.services = services
         self.process_name = services.name
         self.config = config or {}
+        # Ф2.1: имя источника для штампа записей. У базового ctx его нет —
+        # штампуется имя процесса; per-plugin копия из with_config несёт своё.
+        self.plugin_name = plugin_name
 
         # Менеджеры через Protocol (плагин использует только то, что ему нужно)
         self.worker_manager = getattr(services, "worker_manager", None)
@@ -98,23 +102,47 @@ class PluginContext:
         # StateProxy (Phase 8) — из services
         self.state_proxy = getattr(services, "state_proxy", None)
 
-        # Логирование и IPC — публичные методы Protocol
-        self.log_info: Callable[[str], None] = services.log_info
-        self.log_error: Callable[[str], None] = services.log_error
+        # Логирование и IPC — публичные методы Protocol.
+        # Ф2.1: если контекст принадлежит конкретному плагину — записи уходят
+        # под его именем, а не под именем процесса. Штамп ставится здесь, а не
+        # на call-site: плагины зовут ctx.log_info(msg) в сотнях мест, и
+        # правка call-sites не входит в задачу по построению.
+        self.log_info: Callable[[str], None] = self._stamped(services.log_info)
+        self.log_error: Callable[[str], None] = self._stamped(services.log_error)
         self.send_message: Callable = getattr(services, "send_message", None)  # type: ignore[assignment]
         self.receive_message: Callable = getattr(services, "receive_message", None)  # type: ignore[assignment]
+
+    def _stamped(self, log_fn: Callable[..., None]) -> Callable[..., None]:
+        """Обернуть log-функцию процесса штампом имени плагина (Ф2.1).
+
+        Без имени плагина возвращает исходную функцию — лишней обёртки на
+        горячем пути не появляется. ``functools.partial`` вместо lambda:
+        сохраняет пикл-совместимость там, где сам ``log_fn`` пиклится.
+
+        ``module=`` идёт keyword'ом, а ``ObservableMixin._log_*`` ставит свой
+        штамп через ``setdefault`` — поэтому имя плагина выигрывает у имени
+        процесса, а явный ``module=`` на call-site выигрывает у обоих.
+        """
+        if not self.plugin_name:
+            return log_fn
+        return functools.partial(log_fn, module=self.plugin_name)
 
     def with_config(
         self,
         plugin_config: dict[str, Any],
         registers: Any | None = None,
+        plugin_name: str | None = None,
     ) -> PluginContext:
-        """Создать копию контекста с plugin-specific конфигом."""
+        """Создать копию контекста с plugin-specific конфигом.
+
+        ``plugin_name`` — имя источника для штампа записей (Ф2.1).
+        """
         new = PluginContext(
             services=self.services,
             config=plugin_config,
             io=self.io,
             registers=registers,
+            plugin_name=plugin_name,
         )
         # state_proxy ставится оркестратором ПОСЛЕ __init__ (процесс хранит его как
         # services._state_proxy — приватный атрибут, недоступный через публичный

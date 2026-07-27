@@ -124,6 +124,33 @@ def _timed(fn, repeats: int) -> float:
     return best / repeats
 
 
+def _timed_pair(new_fn, old_fn, repeats: int) -> tuple[float, float]:
+    """Замер ДВУХ реализаций вперемежку, по секунде на вызов каждой.
+
+    Последовательный замер («сначала три прогона нового, потом три старого»)
+    сравнивает не реализации, а два разных окна загрузки машины. Ф2.1 поймала
+    это на практике: ``test_rejected_record_gate`` упал в полном прогоне suite
+    и прошёл в одиночку на тех же байтах кода — всплеск нагрузки пришёлся на
+    окно нового пути. Чередование внутри раунда даёт обеим реализациям одни и
+    те же условия; минимум по раундам, как и раньше, режет шум ОС.
+    """
+    best_new = best_old = None
+    for _ in range(3):
+        start = time.perf_counter()
+        for _ in range(repeats):
+            new_fn()
+        new_elapsed = time.perf_counter() - start
+
+        start = time.perf_counter()
+        for _ in range(repeats):
+            old_fn()
+        old_elapsed = time.perf_counter() - start
+
+        best_new = new_elapsed if best_new is None else min(best_new, new_elapsed)
+        best_old = old_elapsed if best_old is None else min(best_old, old_elapsed)
+    return best_new / repeats, best_old / repeats
+
+
 @pytest.fixture
 def logger(tmp_path: Path):
     mgr = LoggerManager(
@@ -266,8 +293,11 @@ class TestGateIsNotSlowerThanBefore:
         logger.should_log(scope, level, module)
         legacy.should_log(scope, level, module)
 
-        new = _timed(lambda: logger.should_log(scope, level, module), self.REPEATS)
-        old = _timed(lambda: legacy.should_log(scope, level, module), self.REPEATS)
+        new, old = _timed_pair(
+            lambda: logger.should_log(scope, level, module),
+            lambda: legacy.should_log(scope, level, module),
+            self.REPEATS,
+        )
 
         _report(capsys, f"\n  гейт отклонённой записи: было {old * 1e9:.0f} нс -> стало {new * 1e9:.0f} нс")
 
@@ -288,8 +318,11 @@ class TestGateIsNotSlowerThanBefore:
         legacy = _LegacyGate(min_level="INFO")
         schema = logger.config.scopes["BUSINESS"]
 
-        new = _timed(lambda: schema.should_log(LogLevel.DEBUG, "bench_mod"), self.REPEATS)
-        old = _timed(lambda: legacy._direct(LogLevel.DEBUG, "bench_mod"), self.REPEATS)
+        new, old = _timed_pair(
+            lambda: schema.should_log(LogLevel.DEBUG, "bench_mod"),
+            lambda: legacy._direct(LogLevel.DEBUG, "bench_mod"),
+            self.REPEATS,
+        )
 
         _report(capsys, f"  решение скоупа:          было {old * 1e9:.0f} нс -> стало {new * 1e9:.0f} нс")
 
