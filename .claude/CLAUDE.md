@@ -27,13 +27,34 @@ grew in in-flight batches. The reviewer found it by **running** the scenario, no
 | **Reviewer** (`reviewer`) | **reproduces by running**, quoting real output; does not review by reading the diff alone | both — plus the defects that are invisible in a diff (`except: pass`, a counter that means "handed over" not "written") |
 
 Rules:
-- Non-trivial task → call `tester` **before** the author writes tests. The tester gets the
-  acceptance criteria and the public contract, never the diff.
-- Author's tests are additional, never a replacement.
-- A review verdict without a reproduction is advisory only. Findings must carry
-  input → observed output.
-- "Red without the fix" is mandatory but insufficient: it proves the test covers the
-  change, not that the change is right.
+- **Break-injection is the proof, and it is mandatory.** Not once per commit — once per
+  claimed property. Revert each guarantee separately (throwaway pytest plugin or a scripted
+  textual patch) and record which tests died. State the expected set BEFORE running; a
+  mismatch is a finding either way. A test that stays green under its own break does not
+  exist. A test that **hangs** instead of failing is worse than absent — it hides the
+  regression behind a timeout, so any test that can block must run the call in a daemon
+  thread with a join deadline.
+- **Author writes hazard tests for the mechanism.** Most of the value arrives while writing
+  the docstring — "what can break in *this* mechanism, given how it is built" — not from the
+  run. Author's tests are additional, never a replacement.
+- **Independent `tester` — selectively, not always.** Call it when the contract is
+  observable from outside: config fields, counters, public API, command surface. Skip it for
+  internal mechanism work: not seeing the code, it invents a model and pins it as the
+  contract. When called, it goes **before** the author writes tests and gets the acceptance
+  criteria only, never the diff.
+- **A review verdict without a reproduction is advisory only.** Findings must carry
+  input → observed output. Reviewers work **synchronously** — no background offload,
+  no long waits; on a hang, skip that check and say so, but always issue the verdict.
+- A test that derives its expected value from the code under test agrees with any answer,
+  including "nothing". Write the literal, and check the constant separately.
+
+**Measured over Ф0 of `observability-unified-routing` (2026-07-27), which is why the rules
+are weighted this way.** Independent tester, 5 runs: 3 real findings, 1 wrong model imposed
+as a contract, 1 void run (launched in parallel with the implementation). Break-injection in
+task 0.7 alone exposed **three defective tests of the author's own** — a vacuous one (green
+with the guard fully removed), a flaky one, and one that hung the suite instead of failing.
+The reviewer role delivered only once it was run synchronously against a narrow scope — and
+then it returned two blockers with reproductions.
 
 ## Language policy (STRICT)
 
