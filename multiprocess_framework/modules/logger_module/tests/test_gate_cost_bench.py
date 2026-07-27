@@ -25,6 +25,7 @@ from __future__ import annotations
 import sys
 import time
 import tracemalloc
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -401,3 +402,92 @@ class TestNoRecordIsLostByTheBench:
             if stats[key]
         ]
         assert losses == [], f"бенч потерял записи: {[(k, stats[k]) for k in losses]}"
+
+
+# =============================================================================
+# 2.2 — хэш ключа кэша решений
+# =============================================================================
+
+
+class _DefaultHashLevel(Enum):
+    """Двойник ``LogLevel`` с ШТАТНЫМ ``Enum.__hash__`` — эталон «как было».
+
+    Отдельный enum, а не сохранённая функция: сравнивать надо стоимость поиска
+    в словаре по такому ключу, а подмена ``__hash__`` на живом ``LogLevel``
+    испортила бы кэши всего процесса на время замера.
+    """
+
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+
+
+class _DefaultHashScope(Enum):
+    SYSTEM = "system"
+    DEBUG = "debug"
+
+
+class TestGateKeyHashIsIdentity:
+    """Ключ кэша решений хэшируется по identity, а не через ``Enum.__hash__``.
+
+    Свойство измеряемое, поэтому и проверяется замером, а не именем метода:
+    утверждение ``LogLevel.__hash__ is object.__hash__`` сторожило бы имя, а не
+    выигрыш, и осталось бы зелёным, если кто-то поставит туда свою «быструю»
+    функцию, которая на деле медленнее.
+
+    Порог самокалибруется: рядом лежит двойник со штатным хэшем, и оба ключа
+    меряются вперемежку в одном прогоне (см. :func:`_timed_pair`).
+    """
+
+    #: Во сколько раз ключ из живых enum'ов обязан обгонять ключ из двойника.
+    #: Измерено 7×; порог 2× — запас на медленную и шумную машину. Узкий допуск
+    #: на этом проекте уже давал флейк (Ф2.1, стоимость штампа).
+    SPEEDUP_FLOOR = 2.0
+
+    def test_key_lookup_beats_the_default_enum_hash(self, capsys) -> None:
+        fast_key = (LogScope.DEBUG, LogLevel.DEBUG, "bench_mod")
+        slow_key = (_DefaultHashScope.DEBUG, _DefaultHashLevel.DEBUG, "bench_mod")
+        fast_map = {fast_key: True}
+        slow_map = {slow_key: True}
+
+        fast, slow = _timed_pair(lambda: fast_map.get(fast_key), lambda: slow_map.get(slow_key), 200_000)
+        _report(
+            capsys,
+            f"  ключ кэша, identity-хэш: {fast * 1e9:.0f} нс; "
+            f"штатный Enum.__hash__: {slow * 1e9:.0f} нс; "
+            f"ускорение x{slow / fast:.1f}",
+        )
+        assert slow / fast >= self.SPEEDUP_FLOOR, (
+            f"ключ кэша перестал хэшироваться по identity: ускорение всего x{slow / fast:.1f} "
+            f"(нужно >= x{self.SPEEDUP_FLOOR}). Проверь log_enums._IDENTITY_HASH."
+        )
+
+    def test_identity_hash_did_not_break_equality(self) -> None:
+        """Замена корректна только пока равенство остаётся identity.
+
+        ``Enum`` не определяет ``__eq__``, поэтому хэш по identity ему точно
+        соответствует. Проверяется именно это — а не «ничего не упало».
+        """
+        assert LogLevel.DEBUG == LogLevel.DEBUG
+        assert LogLevel.DEBUG != "DEBUG", "значение стало равно строке — identity-хэш стал некорректным"
+        assert LogLevel.DEBUG != LogScope.DEBUG
+        assert len({LogLevel.DEBUG, LogLevel.DEBUG, LogLevel.INFO}) == 2
+        assert {LogLevel.ERROR: 1}[LogLevel.ERROR] == 1
+
+    def test_dict_keyed_by_enum_survives_pickle(self) -> None:
+        """Словарь с enum-ключами переживает pickle — это не теория.
+
+        Хэш по identity процессный, а фреймворк spawn'ит процессы и гоняет dict
+        между ними. При unpickle члены enum восстанавливаются теми же
+        синглтонами своего процесса, а словарь перехэшируется — но проверить
+        это надо, а не предположить: молчаливый промах ключа после unpickle
+        выглядел бы как «настройка не доехала».
+        """
+        # pickle здесь безопасен: round-trip словаря, собранного этой же
+        # строчкой, без внешних данных — воспроизводится ровно то, что делает
+        # spawn с конфигом менеджера.
+        import pickle  # nosec B403
+
+        payload = {LogLevel.ERROR: "err", LogScope.BUSINESS: "biz"}
+        restored = pickle.loads(pickle.dumps(payload))  # nosec B301 — свои же байты, см. выше
+        assert restored[LogLevel.ERROR] == "err"
+        assert restored[LogScope.BUSINESS] == "biz"
