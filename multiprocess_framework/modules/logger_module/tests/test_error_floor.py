@@ -296,9 +296,17 @@ def test_floor_record_is_complete(tmp_path: Path) -> None:
 
 
 def test_floor_path_falls_back_to_channel_directory(tmp_path: Path) -> None:
-    """log_directory нет (так прод строит ErrorManager) → floor рядом с логами.
+    """log_directory нет (так прод строит ErrorManager) → floor рядом с логами,
+    но в СВОЁМ подкаталоге процесса.
 
     Иначе пол уехал бы в системный temp, а искать его будут в каталоге логов.
+
+    ПРАВКА ПО РЕВЬЮ Ф0.9. Раньше тест требовал, чтобы floor лёг ПРЯМО в каталог
+    логов, — и закреплял тем самым дефект: прод отдаёт всем процессам один и
+    тот же абсолютный каталог, поэтому floor'ы всех процессов сходились в один
+    файл. Дозапись в него не атомарна: 4 процесса × 300 записей давали ~9-11 %
+    потерь и битые строки JSONL — в приёмнике последней инстанции. Теперь путь
+    разведён по процессам, и тест проверяет именно это.
     """
     logs = tmp_path / "logs"
     logs.mkdir()
@@ -320,7 +328,12 @@ def test_floor_path_falls_back_to_channel_directory(tmp_path: Path) -> None:
     )
     manager = LoggerManager(manager_name="PathLogger", config=config)
     try:
-        assert Path(manager._resolve_floor_path()).parent == logs
+        floor_dir = Path(manager._resolve_floor_path()).parent
+        assert floor_dir.parent == logs, "пол обязан лежать в каталоге логов, а не в системном temp"
+        assert floor_dir != logs, (
+            "пол обязан лежать в СВОЁМ подкаталоге: общий каталог сводит floor'ы всех "
+            "процессов в один файл, дозапись в который не атомарна"
+        )
     finally:
         manager.shutdown()
 

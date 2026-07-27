@@ -19,10 +19,12 @@
     каналов. Это и есть отличие варианта B от отклонённого варианта A
     (отдельный аварийный файл ПОВЕРХ обычного маршрута, вторая копия каждой
     ошибки).
-  * **Конфиго-независимо** — путь floor'а не берётся из ``config.channels``,
-    поэтому ни ``enabled: false``, ни ``logger.sink.disable`` его не гасят.
-    Каталог берётся оттуда же, откуда обычные логи (``log_directory`` / env),
-    но сам приёмник не описан в конфиге и не может быть из него снят.
+  * **Конфиго-независимо** — но только ФАКТ записи, не её местоположение, и
+    путать эти два утверждения нельзя (находка ревью Ф0.9). Приёмник не описан
+    в ``config.channels``, поэтому ни ``enabled: false``, ни
+    ``logger.sink.disable`` его не гасят. А вот КАТАЛОГ резолвится в том числе
+    по каналам конфига (см. ``LoggerCore._resolve_floor_path``): floor должен
+    лежать там же, где обычные логи, иначе его будут искать не там.
   * **Полная запись** — строка JSON со ВСЕМИ полями записи, включая ``extra``
     и многострочный traceback. Усечение запрещено требованием владельца:
     «упало» без «где и с чем» не отлаживается.
@@ -62,12 +64,23 @@ class ErrorFloor:
     ядру, а от потери питания floor не защищает и не обязан.
     """
 
-    def __init__(self, path: str) -> None:
+    #: Потолок файла-пола. Ретеншен (Ф0.7) пол НЕ подметает намеренно — он
+    #: последнее свидетельство о падении, и политика дискового места не имеет
+    #: права отменять политику сохранности улик. Но «не подметаем» не значит
+    #: «пусть растёт без предела»: при долгоживущем ``logger.sink.disable``
+    #: КАЖДАЯ ошибка идёт сюда, и файл, который никто не ротирует, повторил бы
+    #: историю ``messages.log`` (645 МБ незамеченными). Поэтому пол ротирует
+    #: себя сам, одним бэкапом.
+    _MAX_BYTES = 32 * 1024 * 1024
+
+    def __init__(self, path: str, max_bytes: int = _MAX_BYTES) -> None:
         self._path = path
+        self._max_bytes = max_bytes
         self._lock = threading.Lock()
         self._fh: Optional[Any] = None
         self._written: int = 0
         self._failures: int = 0
+        self._rotations: int = 0
 
     @property
     def path(self) -> str:
@@ -81,7 +94,12 @@ class ErrorFloor:
         ошибок не сработал столько-то раз. ``failures`` — не смогли записать
         даже в пол (дальше падать некуда, поэтому только счётчик).
         """
-        return {"path": self._path, "written": self._written, "failures": self._failures}
+        return {
+            "path": self._path,
+            "written": self._written,
+            "failures": self._failures,
+            "rotations": self._rotations,
+        }
 
     def write(self, record: Dict[str, Any]) -> bool:
         """Записать запись целиком. Возвращает True, если строка легла на диск."""
@@ -91,6 +109,7 @@ class ErrorFloor:
                     Path(self._path).parent.mkdir(parents=True, exist_ok=True)
                     self._fh = open(self._path, "a", encoding="utf-8")  # noqa: SIM115 — живёт до close()
                 line = json.dumps(record, ensure_ascii=False, default=str)
+                self._rotate_if_needed(len(line) + 1)
                 self._fh.write(line + "\n")
                 self._fh.flush()
                 self._written += 1
@@ -98,6 +117,37 @@ class ErrorFloor:
             except Exception:  # noqa: BLE001 — пол не имеет права ронять вызывающий код
                 self._failures += 1
                 return False
+
+    def _rotate_if_needed(self, incoming_bytes: int) -> None:
+        """Сдвинуть файл в ``.1``, если следующая строка перевалит за потолок.
+
+        Один бэкап, а не пять: пол — аварийный приёмник, и его ценность в
+        СВЕЖИХ записях о том, что маршрут сломан прямо сейчас. Держать
+        глубокую историю отказов ценой гигабайтов незачем.
+
+        Вызывается ПОД локом записи и только при открытом дескрипторе.
+        Любая ошибка ротации проглатывается сознательно: не сумели
+        подвинуть — продолжаем писать в текущий файл (fail-open). Потерять
+        запись об ошибке из-за неудавшейся уборки было бы хуже, чем
+        превысить потолок.
+        """
+        if self._max_bytes <= 0 or self._fh is None:
+            return
+        try:
+            if self._fh.tell() + incoming_bytes <= self._max_bytes:
+                return
+            self._fh.close()
+            self._fh = None
+            backup = Path(self._path).with_suffix(Path(self._path).suffix + ".1")
+            backup.unlink(missing_ok=True)
+            Path(self._path).rename(backup)
+            self._rotations += 1
+        except OSError:
+            pass  # nosec B110 — fail-open: пишем дальше в текущий файл
+        finally:
+            if self._fh is None:
+                # И после успешной ротации, и после сбоя нужен живой дескриптор.
+                self._fh = open(self._path, "a", encoding="utf-8")  # noqa: SIM115 — живёт до close()
 
     def close(self) -> None:
         with self._lock:

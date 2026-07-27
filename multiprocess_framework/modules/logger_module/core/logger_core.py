@@ -19,6 +19,7 @@ Task 5.14 (CRM-развязка):
 """
 
 import itertools
+import os
 import threading
 import time
 from pathlib import Path
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from multiprocessing import Process
 
 from ...channel_routing_module import ChannelRoutingManager, resolve_build_result
+from ...channel_routing_module.interfaces import channel_accepted
 from ...channel_routing_module.buffers.batch_buffer import BatchBuffer, BatchConfig as CRMBatchConfig
 from ..interfaces import ILoggerManager
 from ..configs.logger_manager_config import (
@@ -87,21 +89,11 @@ _CHANNEL_BACKPRESSURE_KEYS = (
 _ctx_key_counter = itertools.count()
 
 
-def _channel_accepted(result: Any) -> bool:
-    """Принял ли канал запись.
-
-    ``IChannel.write`` обязан возвращать ``{"status": "success"|"error", ...}``
-    и ловит свои ошибки САМ (см. ``LogChannel.write``) — исключение наружу не
-    летит. Значит «не бросил» не равно «записал»: без разбора статуса сломанный
-    приёмник считался бы рабочим, батч — доставленным, а floor ошибок не
-    срабатывал бы при живом, но нерабочем канале.
-
-    Каналы, не возвращающие статус (None / не-dict), считаются принявшими —
-    это прежний контракт, ломать его на ровном месте нельзя.
-    """
-    if isinstance(result, dict):
-        return result.get("status") != "error"
-    return True
+#: Разбор ответа канала поднят в общую базу (``channel_routing_module.interfaces``):
+#: пока предикат был приватным здесь, severity-путь ErrorManager его не звал —
+#: и закрытый приёмник считался записавшим. Псевдоним оставлен, чтобы не менять
+#: вызовы внутри модуля.
+_channel_accepted = channel_accepted
 
 
 class LoggerCore(ChannelRoutingManager, ILoggerManager):
@@ -178,6 +170,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # Сколько раз штатный маршрут ошибок не принял запись и сработал floor.
             # Ненулевое значение — сигнал «маршрут ошибок сломан», а не норма.
             "errors_to_floor": 0,
+            # Пол не смог записать — запись потеряна ПОЛНОСТЬЮ. Отдельно от
+            # errors_to_floor: «спасено» и «не спасено» нельзя складывать.
+            "errors_floor_write_failures": 0,
             # Ф0.4: запись адресована каналу, которого нет (опечатка в scopes,
             # канал снят logger.sink.disable, module-канал удалён). До этой правки
             # такая запись исчезала молча — ни счётчика, ни следа.
@@ -666,7 +661,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         if module in self._module_channels:
             channels = list(channels)
-            channels.append(f"module_{module}")
+            module_channel = f"module_{module}"
+            # Дедупликация обязательна, а не «на всякий случай»: когда у скоупа
+            # НЕТ явного списка каналов, fallback берёт весь реестр — а module-канал
+            # уже зарегистрирован в нём. Без проверки одна запись уходила в один и
+            # тот же файл дважды, что прямо нарушает инвариант Ф0.9 «одна ошибка —
+            # одна запись». В прод-дефолтах не стреляло (там скоупы со списками),
+            # найдено ревью Ф0.9 с воспроизведением.
+            if module_channel not in channels:
+                channels.append(module_channel)
 
         # Приоритет снизу вверх: форточка log_context → база процесса →
         # контекст потока → явный extra вызова. Каждый следующий слой знает
@@ -721,20 +724,49 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         floor в системный temp, тогда как сам ``errors.log`` лежит в каталоге логов —
         пол оказался бы не там, где его станут искать.
 
-        Поэтому: ``log_directory``, если задан; иначе каталог первого файлового
-        канала; иначе общий дефолт.
+        Поэтому: ``log_directory``, если задан; иначе каталог первого
+        ВКЛЮЧЁННОГО файлового канала; иначе общий дефолт.
+
+        Путь обязан быть ПРОЦЕССНЫМ, и это не косметика (блокер ревью Ф0.9,
+        воспроизведён). Прод отдаёт всем процессам один и тот же абсолютный
+        каталог логов, поэтому ветка «каталог файлового канала» сводила floor'ы
+        ВСЕХ процессов в один файл. ``open(path, "a")`` на Windows атомарной
+        дозаписи не даёт: 4 процесса × 300 записей давали ~9-11 % потерь и
+        битые строки JSONL — в приёмнике последней инстанции, ровно во время
+        системного шторма ошибок. Вторая половина того же дефекта: у ОДНОГО
+        процесса floor'ов получалось два в разных каталогах (логгерный — в
+        подпапке процесса, ошибочный — в корне), и в какой ляжет запись,
+        зависело от того, какой менеджер её потерял. Отсюда ``_floor_scope()``:
+        оба менеджера одного процесса дают один файл, разные процессы — разные.
+
+        Фильтр по ``enabled`` — из той же находки: выключенный канал это ровно
+        тот случай, ради которого floor существует, и он не должен ещё и
+        решать, куда floor ляжет.
         """
         if self.config.log_directory:
             return self._resolved_file_path(None, FLOOR_FILE_NAME)
 
         for channel_config in self.config.channels.values():
             raw = getattr(channel_config, "file_path", None)
-            if getattr(channel_config, "type", None) == "file" and raw:
-                parent = Path(raw).expanduser().parent
-                if parent.is_absolute():
-                    return str(parent / FLOOR_FILE_NAME)
+            if not raw or getattr(channel_config, "type", None) != "file":
+                continue
+            if not getattr(channel_config, "enabled", True):
+                continue
+            parent = Path(raw).expanduser().parent
+            if parent.is_absolute():
+                return str(parent / self._floor_scope() / FLOOR_FILE_NAME)
 
         return self._resolved_file_path(None, FLOOR_FILE_NAME)
+
+    def _floor_scope(self) -> str:
+        """Подкаталог, разводящий floor'ы разных процессов.
+
+        Имя процесса, если оно известно; иначе PID — он различает процессы
+        всегда, пусть и менее читаемо. Имя предпочтительнее: ``logs/camera/``
+        ищется глазами, ``logs/17324/`` — нет.
+        """
+        name = getattr(self.process, "name", None) if self.process is not None else None
+        return str(name) if name else f"pid_{os.getpid()}"
 
     def _write_error_record(self, record: LogRecord, channel_names: List[str]) -> None:
         """Синхронно записать error/critical; при нуле приёмников — в floor.
@@ -755,8 +787,31 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         if written == 0:
             # Ни одного живого приёмника: каналы выключены конфигом, сняты
             # logger.sink.disable или все write упали. Запись обязана уцелеть.
+            self._write_to_floor(record.to_dict())
+
+    def _write_to_floor(self, record_dict: Dict[str, Any]) -> None:
+        """Последняя попытка сохранить запись + ЧЕСТНЫЙ учёт её исхода.
+
+        ``errors_to_floor`` считает записи, реально легшие в пол, а не
+        переданные ему. Раньше счётчик инкрементировался ДО записи, а результат
+        ``ErrorFloor.write`` отбрасывался — и при отказе самого пола (нет прав,
+        каталог удалён, диск полон) запись исчезала полностью, а счётчик
+        уверял, что она спасена. Это класс «следствие без причины»: счётчик,
+        означающий «передано», хуже отсутствующего, потому что ему верят.
+        Найдено ревью Ф0.9.
+
+        Отказ пола уходит в stdlib-fallback уровнем CRITICAL: пол — последняя
+        инстанция, и его отказ уже нельзя рассказать через собственные каналы.
+        """
+        if self.error_floor.write(record_dict):
             self.stats["errors_to_floor"] += 1
-            self.error_floor.write(record.to_dict())
+            return
+        self.stats["errors_floor_write_failures"] += 1
+        self._fallback_log(
+            "CRITICAL",
+            "запись об ошибке потеряна полностью: ни один приёмник не принял её, "
+            "и пол ошибок тоже не смог записать (см. errors_floor_write_failures)",
+        )
 
     def _write_record_to_channels(self, record: LogRecord, channel_names: List[str]) -> int:
         """Записать запись напрямую в названные каналы (мимо буфера).
@@ -940,6 +995,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # выходил — «сколько ошибок не дошло ни до одного канала» нельзя было
             # спросить у живого процесса. Тот же класс, что потери буфера ниже.
             "errors_to_floor": self.stats["errors_to_floor"],
+            "errors_floor_write_failures": self.stats["errors_floor_write_failures"],
             "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
 

@@ -25,6 +25,7 @@ import traceback
 from typing import Optional, Any, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
+from ...channel_routing_module.interfaces import channel_accepted
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.log_types import LogRecord
 from ...logger_module.core.logger_core import LoggerCore
@@ -294,17 +295,27 @@ class ErrorManager(LoggerCore, IErrorManager):
                 pass
 
         ch = self._channel_registry.get(channel_name)
-        if ch is not None:
+        if ch is None:
+            # Ф0.4: имя не резолвится — учесть, а не потерять молча.
+            self._count_unresolved_channel(channel_name)
+        else:
             try:
-                ch.write(record_dict)
-                return
+                # Разбор СТАТУСА, а не факта «не бросил». Раньше здесь стояло
+                # `ch.write(...); return` — и закрытый канал (его закрывает
+                # штатный reconfigure, пока воркер пишет ошибку) отвечал
+                # {"status": "error"}, а мы уходили как после успеха: ошибка
+                # исчезала, floor не срабатывал, errors_to_floor оставался
+                # нулём. Ровно тот случай, ради которого floor и заводился.
+                # Блокер ревью Ф0.9, воспроизведён.
+                if channel_accepted(ch.write(record_dict)):
+                    return
             except Exception as e:
+                self._count_channel_write_error(channel_name)
                 self._fallback_log("ERROR", f"write to {channel_name} failed: {e}")
 
-        # Канал снят (logger.sink.disable), не создался или упал на записи —
-        # severity-маршрут конфиго-зависим целиком, поэтому пол обязателен.
-        self.stats["errors_to_floor"] += 1
-        self.error_floor.write(record_dict)
+        # Канал снят (logger.sink.disable), не создался, отбросил запись или
+        # упал — severity-маршрут конфиго-зависим целиком, поэтому пол обязателен.
+        self._write_to_floor(record_dict)
 
     def log_exception(
         self,

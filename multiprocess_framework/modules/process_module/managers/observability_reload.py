@@ -129,6 +129,7 @@ PLANE_COUNTER_KEYS: tuple = (
     "messages_skipped",
     "messages_batched",
     "errors_to_floor",
+    "errors_floor_write_failures",
     "error_floor",
     "metrics_count",
     "errors",
