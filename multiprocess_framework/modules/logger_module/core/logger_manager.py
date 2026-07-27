@@ -17,7 +17,11 @@ Task 5.14 (CRM-развязка):
 from typing import Any, Optional
 
 from ..configs.logger_manager_config import LoggerManagerConfig
-from .logger_core import LoggerCore, log_context  # noqa: F401 — re-export (стабильный публичный путь)
+from .logger_core import (  # noqa: F401 — re-export (стабильный публичный путь)
+    LoggerCore,
+    bump_observability_epoch,
+    log_context,
+)
 
 
 class LoggerManager(LoggerCore):
@@ -33,6 +37,10 @@ class LoggerManager(LoggerCore):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         LoggerManager._instance = self
+        # 2.2: связанные виды держат указатель на менеджер процесса. Смена
+        # синглтона обязана объявить их связки устаревшими — иначе вид продолжил
+        # бы писать в закрытый менеджер, а его записи исчезали бы молча.
+        bump_observability_epoch()
 
 
 # =========================================================================

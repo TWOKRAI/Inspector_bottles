@@ -232,23 +232,27 @@ class TestStdFacadeGatesBeforeFormatting:
         assert arg.str_calls == 1
         assert "итог: готово" in (tmp_path / "a.log").read_text(encoding="utf-8")
 
-    def test_module_still_reaches_manager(self, logger: LoggerManager, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Имя модуля не должно потеряться при переходе на позиционную передачу."""
-        seen: List[Any] = []
+    def test_module_still_reaches_manager(
+        self, logger: LoggerManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Имя модуля доезжает ДО ФАЙЛА, а аргументы склеиваются в менеджере.
+
+        Прежняя редакция ставила спай на ``logger.info`` — то есть сторожила
+        ИМЯ метода, а не свойство. 2.2 перевела вид на прямой ``log()``, и спай
+        замолчал, хотя имя модуля продолжало доезжать: тест «поймал» смену
+        внутреннего пути и не заметил бы настоящей потери имени, случись она
+        на другом маршруте. Правило проекта ровно об этом: утверждать надо
+        наблюдаемый эффект — байты в файле.
+        """
         monkeypatch.setattr(std_facade, "get_logger", lambda: logger)
-        original = logger.info
-
-        def _spy(message: Any, module: str = "main", *args: Any, **extra: Any) -> None:
-            seen.append((message, module, args))
-            return original(message, module, *args, **extra)
-
-        monkeypatch.setattr(logger, "info", _spy)
 
         StdLoggerFacade("trace_probe").info("x=%s", 1)
+        logger.flush()
 
-        assert seen == [("x=%s", "trace_probe", (1,))], (
-            "фасад обязан отдать шаблон и аргументы РАЗДЕЛЬНО, с именем модуля вторым"
-        )
+        line = (tmp_path / "a.log").read_text(encoding="utf-8").splitlines()[-1]
+        assert "trace_probe" in line, f"имя модуля не доехало до файла: {line!r}"
+        assert "x=1" in line, f"аргументы не склеились в менеджере: {line!r}"
+        assert "%s" not in line, f"шаблон остался несклеенным: {line!r}"
 
     def test_fallback_without_manager_still_formats(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture

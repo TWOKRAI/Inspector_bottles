@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,7 +18,39 @@ from multiprocess_framework.modules.logger_module.adapters.std_facade import (
     StdLoggerFacade,
     get_std_logger,
 )
+from multiprocess_framework.modules.logger_module.core.log_config import (
+    LoggerChannelSchema,
+    LoggerManagerConfig,
+    LoggerScopeSchema,
+    LogLevel,
+    LogScope,
+)
+from multiprocess_framework.modules.logger_module.core.logger_core import bump_observability_epoch
+from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager, get_logger
 from multiprocess_framework.modules.logger_module.utils import apply_format
+
+
+def _real_config(directory: "Path") -> LoggerManagerConfig:
+    """Настоящий менеджер с одним файловым каналом и без батчинга.
+
+    Нужен там, где проверка обязана идти по артефакту: фейк доказывает форму
+    вызова, файл — что запись доехала.
+    """
+    return LoggerManagerConfig(
+        app_name="std_facade",
+        log_directory=str(directory),
+        enable_batching=False,
+        modules={},
+        channels={
+            "system_file": LoggerChannelSchema(
+                name="system_file", type="file", enabled=True, file_path="system.log", rotate=False
+            )
+        },
+        scopes={
+            scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])
+            for scope in ("SYSTEM", "BUSINESS", "PERFORMANCE", "DEBUG")
+        },
+    )
 
 
 class _FakeLoggerManager:
@@ -33,6 +66,14 @@ class _FakeLoggerManager:
     def __init__(self) -> None:
         self.records: list[tuple[str, str, str]] = []
         self.raw: list[tuple[str, str, str, tuple]] = []
+        #: Пары (scope, level), с которыми пришёл связанный вид (2.2).
+        self.scopes: list[tuple[LogScope, LogLevel]] = []
+        #: Сколько раз запись пришла через удобный метод, а не через ``log()``.
+        self.used_convenience: int = 0
+
+    def _capture_convenience(self, level: str, message: str, module: str, args: tuple = ()) -> None:
+        self.used_convenience += 1
+        self._capture(level, message, module, args)
 
     def _capture(self, level: str, message: str, module: str, args: tuple = ()) -> None:
         # ``records`` хранит СКЛЕЕННЫЙ текст (как его увидит канал), ``raw`` —
@@ -42,26 +83,52 @@ class _FakeLoggerManager:
         self.raw.append((level, message, module, args))
 
     def debug(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
-        self._capture("debug", message, module, args)
+        self._capture_convenience("debug", message, module, args)
 
     def info(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
-        self._capture("info", message, module, args)
+        self._capture_convenience("info", message, module, args)
 
     def warning(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
-        self._capture("warning", message, module, args)
+        self._capture_convenience("warning", message, module, args)
 
     def error(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
-        self._capture("error", message, module, args)
+        self._capture_convenience("error", message, module, args)
 
     def critical(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
-        self._capture("critical", message, module, args)
+        self._capture_convenience("critical", message, module, args)
+
+    def log(
+        self,
+        scope: LogScope,
+        level: LogLevel,
+        message: str,
+        module: str = "main",
+        *args: Any,
+        **_extra: Any,
+    ) -> None:
+        """Путь, которым ходит связанный вид (2.2) — с парой (scope, level).
+
+        Удобные методы выше ОСТАВЛЕНЫ намеренно, хотя вид их больше не зовёт:
+        ``used_convenience`` ловит откат к ним, а вместе с ним и возврат
+        219 нс на запись. Убрать их — значит потерять этот сигнал: вид,
+        сползший обратно на ``debug()``, упал бы с ``AttributeError``, и
+        причина читалась бы как «фейк неполный», а не «регресс».
+        """
+        self.scopes.append((scope, level))
+        self._capture(level.value.lower(), message, module, args)
 
 
 @pytest.fixture
 def fake_lm(monkeypatch: pytest.MonkeyPatch) -> _FakeLoggerManager:
-    """Подменить get_logger() внутри фасада на фейковый менеджер."""
+    """Подменить get_logger() внутри фасада на фейковый менеджер.
+
+    2.2: вид связывается один раз и сверяется по эпохе — подмена ``get_logger``
+    сама по себе его больше не переубедит. Поднимаем эпоху, иначе фикстура
+    молча не действовала бы на вид, созданный в предыдущем тесте.
+    """
     lm = _FakeLoggerManager()
     monkeypatch.setattr(std_facade, "get_logger", lambda: lm)
+    bump_observability_epoch()
     return lm
 
 
@@ -69,6 +136,7 @@ def fake_lm(monkeypatch: pytest.MonkeyPatch) -> _FakeLoggerManager:
 def no_lm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Режим «LoggerManager не поднят»."""
     monkeypatch.setattr(std_facade, "get_logger", lambda: None)
+    bump_observability_epoch()
 
 
 class TestRoutingToLoggerManager:
@@ -138,18 +206,61 @@ class TestFallbackWithoutManager:
 
 
 class TestLazyResolve:
-    """Фасад создаётся до init_logging — связывание обязано быть ленивым."""
+    """Фасад создаётся до init_logging — связка обязана появиться позже.
 
-    def test_manager_appearing_later_is_picked_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        holder: dict[str, Any] = {"lm": None}
-        monkeypatch.setattr(std_facade, "get_logger", lambda: holder["lm"])
+    2.2 сменила механизм: раньше ``get_logger()` звался на КАЖДОЙ записи, теперь
+    вид связывается один раз и пересвязывается по эпохе наблюдаемости. Поэтому
+    проверка переехала с фейка на **реальный** ``LoggerManager``: подмена
+    ``get_logger`` доказывала бы, что эпоха поднимается, когда её поднял сам
+    тест, а нужно — что её поднимает продовый путь (``LoggerManager.__init__``).
+    """
+
+    def test_manager_appearing_later_is_picked_up(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(LoggerManager, "_instance", None)
+        bump_observability_epoch()
 
         facade = StdLoggerFacade("gui")  # создан, когда менеджера ещё нет
-        assert facade.warning("до init") is False
+        assert facade.warning("до init") is False, "без менеджера обязан быть фолбэк"
 
-        holder["lm"] = _FakeLoggerManager()
-        assert facade.warning("после init") is True
-        assert holder["lm"].records[0][1] == "после init"
+        logger = LoggerManager(config=_real_config(tmp_path))
+        try:
+            assert facade.warning("после init") is True, (
+                "вид не заметил появления менеджера — эпоха не поднялась в LoggerManager.__init__"
+            )
+        finally:
+            logger.shutdown()
+
+        # Артефакт, а не возврат True: «ушло в менеджер» и «легло в файл» —
+        # разные факты, и вся фаза стоит на том, что судить надо по второму.
+        written = (tmp_path / "system.log").read_text(encoding="utf-8")
+        assert "после init" in written
+        assert "до init" not in written, "фолбэк-запись не имела права попасть в файл менеджера"
+
+    def test_rebinds_after_the_manager_is_replaced(self, tmp_path: Path, monkeypatch) -> None:
+        """Смена процессного менеджера обязана переключить уже живой вид.
+
+        Без этого вид продолжил бы писать в закрытый менеджер — записи
+        исчезали бы молча, и ровно в тот момент, когда систему переконфигурируют
+        (switch рецепта, reconfigure), то есть когда логи нужнее всего.
+        """
+        monkeypatch.setattr(LoggerManager, "_instance", None)
+        bump_observability_epoch()
+
+        first = LoggerManager(config=_real_config(tmp_path / "первый"))
+        facade = StdLoggerFacade("gui")
+        facade.warning("в первый")
+        first.shutdown()
+
+        second = LoggerManager(config=_real_config(tmp_path / "второй"))
+        try:
+            facade.warning("во второй")
+        finally:
+            second.shutdown()
+
+        assert "в первый" in (tmp_path / "первый" / "system.log").read_text(encoding="utf-8")
+        written = (tmp_path / "второй" / "system.log").read_text(encoding="utf-8")
+        assert "во второй" in written, "вид остался связан с закрытым менеджером"
+        assert "в первый" not in written
 
 
 class TestExceptionAndLog:
@@ -181,6 +292,80 @@ class TestExceptionAndLog:
         StdLoggerFacade("gui").log("warninng", "опечатка")
 
         assert fake_lm.records[0] == ("info", "опечатка", "gui")
+
+
+class TestBoundView:
+    """2.2 — вид связан: зовёт ``log()`` напрямую и знает свою пару (scope, level)."""
+
+    def test_view_does_not_go_through_the_convenience_method(self, fake_lm: _FakeLoggerManager) -> None:
+        """Удобный метод стоит 219 нс на переупаковке — вид обязан его миновать.
+
+        Считается ФАКТ вызова, а не имя метода в коде: подмена ``debug`` на
+        эквивалент оставила бы проверку по имени зелёной, а цену — на месте.
+        """
+        facade = StdLoggerFacade("gui")
+        for level in ("debug", "info", "warning", "error", "critical"):
+            getattr(facade, level)("x")
+
+        assert fake_lm.used_convenience == 0, "вид сполз обратно на удобные методы менеджера"
+        assert len(fake_lm.scopes) == 5
+
+    def test_scope_agrees_with_what_the_real_manager_would_choose(self, tmp_path: Path, monkeypatch) -> None:
+        """Таблица вида согласна с ПОВЕДЕНИЕМ менеджера, а не с копией таблицы.
+
+        Вид резолвит «уровень → скоуп» сам, и это ровно та развилка, где
+        появляется второй гейт. Поэтому сверяется не с ``_LEVEL_DEFAULT_SCOPE``
+        (это была бы проверка таблицы против себя же), а с тем, что реально
+        передаёт в ``log()`` удобный метод настоящего ``LoggerManager``.
+        """
+        seen: list[tuple[LogScope, LogLevel]] = []
+
+        class _SpyManager(LoggerManager):
+            def log(self, scope, level, message, module="main", *args, **extra):  # type: ignore[override]
+                seen.append((scope, level))
+                return super().log(scope, level, message, module, *args, **extra)
+
+        monkeypatch.setattr(LoggerManager, "_instance", None)
+        bump_observability_epoch()
+        logger = _SpyManager(config=_real_config(tmp_path))
+        facade = StdLoggerFacade("gui")
+        try:
+            for level in ("debug", "info", "warning", "error", "critical"):
+                seen.clear()
+                getattr(logger, level)("через удобный метод")
+                by_manager = list(seen)
+
+                seen.clear()
+                getattr(facade, level)("через вид")
+                by_view = list(seen)
+
+                assert by_view == by_manager, (
+                    f"уровень {level!r}: вид выбрал {by_view}, менеджер — {by_manager}; "
+                    "таблица скоупов вида разошлась с поведением менеджера"
+                )
+        finally:
+            logger.shutdown()
+
+    def test_epoch_check_costs_nothing_when_nothing_changed(self, fake_lm: _FakeLoggerManager) -> None:
+        """Пересвязка происходит ОДИН раз, а не на каждой записи.
+
+        Иначе вид не «связанный», а прежний ленивый с лишним сравнением.
+        """
+        calls = {"n": 0}
+
+        def _counting_get_logger():
+            calls["n"] += 1
+            return fake_lm
+
+        std_facade.get_logger = _counting_get_logger  # type: ignore[assignment]
+        try:
+            facade = StdLoggerFacade("gui")
+            for _ in range(50):
+                facade.info("x")
+        finally:
+            std_facade.get_logger = get_logger  # type: ignore[assignment]
+
+        assert calls["n"] == 1, f"резолв менеджера произошёл {calls['n']} раз вместо одного"
 
 
 class TestFactory:

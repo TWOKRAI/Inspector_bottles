@@ -21,17 +21,30 @@
 второй раз, уже по другой причине. Здесь вместо этого работает stdlib-фолбэк:
 запись уходит в обычный ``logging``. Хуже, чем файл процесса, но не ноль.
 
-**Резолв ленивый.** ``get_logger()`` вызывается на каждой записи, а не при
-создании фасада: модули импортируются до ``init_logging()``, и связывание на
-импорте навсегда зафиксировало бы фолбэк.
+**Резолв СВЯЗАННЫЙ, а не ленивый (2.2).** Прежняя редакция звала ``get_logger()``
+на КАЖДОЙ записи — иначе связывание на импорте (модули грузятся до
+``init_logging()``) навсегда зафиксировало бы фолбэк. Теперь связка ставится
+один раз и обновляется по **эпохе наблюдаемости**
+(:data:`~..core.logger_core.OBSERVABILITY_EPOCH`): она растёт при создании
+процессного менеджера и при инвалидации кэша решений. Сравнение двух int'ов
+вместо вызова + чтения атрибута класса — та же схема, что ``Logger._cache`` в
+stdlib, чью семантику план и договорился копировать.
+
+Связка включает и **пару «уровень → скоуп»**: вид зовёт ``LoggerCore.log``
+напрямую, минуя удобные методы (``debug``/``info``/…). Замер 2026-07-27: сам
+удобный метод стоит **219 нс** — больше, чем гейт, — на переупаковке
+``*args``/``**extra``. Вид знает свой уровень с рождения, поэтому платить за
+разбор уровня на каждой записи ему незачем.
 """
 
 from __future__ import annotations
 
 import logging
 import traceback
-from typing import Any
+from typing import Any, Dict, Optional, Tuple
 
+from ..core.log_config import LogLevel, LogScope
+from ..core.logger_core import OBSERVABILITY_EPOCH, _LEVEL_DEFAULT_SCOPE
 from ..core.logger_manager import get_logger
 from ..utils import apply_format
 
@@ -39,6 +52,24 @@ __all__ = [
     "StdLoggerFacade",
     "get_std_logger",
 ]
+
+#: Уровень по имени метода → ``(scope, level)`` для прямого вызова ``log()``.
+#:
+#: Скоуп берётся из ``_LEVEL_DEFAULT_SCOPE`` — ТОЙ ЖЕ таблицы, по которой
+#: выбирают скоуп удобные методы менеджера и отвечает предикат
+#: ``is_enabled_for``. Своя копия соответствия здесь была бы вторым гейтом:
+#: ровно то, чего прежняя редакция этого файла избегала, отказываясь от
+#: собственного решения. Согласие с удобными методами закреплено тестом.
+_LEVEL_ROUTE: Dict[str, Tuple[LogScope, LogLevel]] = {
+    name.lower(): (_LEVEL_DEFAULT_SCOPE[level], level)
+    for name, level in (
+        ("debug", LogLevel.DEBUG),
+        ("info", LogLevel.INFO),
+        ("warning", LogLevel.WARNING),
+        ("error", LogLevel.ERROR),
+        ("critical", LogLevel.CRITICAL),
+    )
+}
 
 
 class StdLoggerFacade:
@@ -55,11 +86,15 @@ class StdLoggerFacade:
             По умолчанию ``mpf.<module>``.
     """
 
-    __slots__ = ("_module", "_fallback")
+    __slots__ = ("_module", "_fallback", "_writer", "_epoch")
 
     def __init__(self, module: str = "main", *, fallback_name: str | None = None) -> None:
         self._module = module
         self._fallback = logging.getLogger(fallback_name or f"mpf.{module}")
+        # Связка ставится ЛЕНИВО, но один раз: вид переживает импорт до
+        # init_logging(), а _bind() отработает на первой же записи.
+        self._writer: Optional[Any] = None
+        self._epoch: int = -1
 
     @property
     def module(self) -> str:
@@ -135,13 +170,33 @@ class StdLoggerFacade:
         Фолбэк форматирует сам: у stdlib-логгера свой ленивый ``%``, но его
         правило на кривом шаблоне другое (сообщение теряется), а фасад обещает
         его сохранить.
+
+        2.2: связка проверяется одним сравнением int'ов, а вызов идёт в
+        ``log()`` напрямую — см. шапку модуля. Гейта здесь по-прежнему НЕТ, и
+        это не оптимизация, которую забыли: короткое замыкание на стороне вида
+        перестало бы двигать ``messages_processed``/``messages_skipped`` в
+        менеджере, то есть купило бы наносекунды ценой правдивости счётчиков.
+        Гейт дешевеет там, где он живёт, а не обходится снаружи.
         """
-        lm = get_logger()
-        if lm is None:
+        if self._epoch != OBSERVABILITY_EPOCH[0]:
+            self._bind()
+        writer = self._writer
+        if writer is None:
             getattr(self._fallback, level)(apply_format(msg, args))
             return False
-        getattr(lm, level)(msg, self._module, *args)
+        scope, log_level = _LEVEL_ROUTE[level]
+        writer.log(scope, log_level, msg, self._module, *args)
         return True
+
+    def _bind(self) -> None:
+        """Пересвязаться с процессным менеджером и запомнить эпоху.
+
+        Отдельный метод, а не тело в ``_emit``: он выполняется единицы раз за
+        жизнь процесса, и держать его в горячем пути значило бы платить за
+        его байткод на каждой записи.
+        """
+        self._writer = get_logger()
+        self._epoch = OBSERVABILITY_EPOCH[0]
 
 
 _CACHE: dict[str, StdLoggerFacade] = {}
