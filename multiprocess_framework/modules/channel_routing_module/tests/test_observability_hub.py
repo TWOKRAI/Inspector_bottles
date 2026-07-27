@@ -184,6 +184,10 @@ class TestObservableMixinDropIn:
                     self,
                     managers={"logger": sink, "stats": sink, "error": sink},
                     config={"logger": True, "stats": True, "error": True},
+                    # Ф2.1: имя задано явно, чтобы проверка штампа ниже отличала
+                    # «имя источника» от дефолта "main" — с дефолтом тест был бы
+                    # зелён и при штампе константой.
+                    source_name="hub_dropin_user",
                 )
 
         return _Mgr(hub)
@@ -200,4 +204,8 @@ class TestObservableMixinDropIn:
         # КЛЮЧЕВОЕ: ровно ОДНА запись — track_error не свалился в fallback record_error
         assert len(errs) == 1
         assert errs[0]["error_type"] == "ValueError"
-        assert errs[0]["context"] == {"where": "unit"}
+        # Ф2.1: у слота 'error' сигнатура track_error(error, context) — места под
+        # module= нет, поэтому имя источника едет В КОНТЕКСТЕ (ErrorManager читает
+        # ровно ctx["module"]). Проверяются оба свойства сразу: контекст
+        # вызывающего доезжает целым И к нему добавлено имя источника.
+        assert errs[0]["context"] == {"where": "unit", "module": "hub_dropin_user"}

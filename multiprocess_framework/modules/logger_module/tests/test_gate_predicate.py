@@ -31,9 +31,16 @@ from multiprocess_framework.modules.channel_routing_module.levels import (
     UNKNOWN_RANK,
     rank_of,
 )
+from multiprocess_framework.modules.base_manager.core.base_manager import BaseManager
+from multiprocess_framework.modules.base_manager.mixins.observable_mixin import ObservableMixin
 from multiprocess_framework.modules.error_module import ErrorManager, ErrorManagerConfig
 from multiprocess_framework.modules.logger_module.configs.logger_manager_config import LoggerScopeSchema
-from multiprocess_framework.modules.logger_module.core.log_config import LogLevel, LogScope
+from multiprocess_framework.modules.logger_module.core.log_config import (
+    LoggerChannelSchema,
+    LoggerManagerConfig,
+    LogLevel,
+    LogScope,
+)
 from multiprocess_framework.modules.logger_module.core.logger_core import _LEVEL_DEFAULT_SCOPE
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 
@@ -303,3 +310,100 @@ class TestIsEnabledForAgreesWithRouting:
         """У SYSTEM порог WARNING, у BUSINESS — INFO; предикат обязан их различать."""
         assert logger.is_enabled_for("main", LogLevel.INFO, LogScope.SYSTEM) is False
         assert logger.is_enabled_for("main", LogLevel.INFO, LogScope.BUSINESS) is True
+
+
+# =============================================================================
+# Характеризация: whitelist `modules` после штампа Ф2.1 (находка ревью Н1)
+# =============================================================================
+
+
+class _StampedManager(BaseManager, ObservableMixin):
+    """Менеджер, чьи записи после Ф2.1 едут под собственным именем."""
+
+    def __init__(self, name: str, logger: Any) -> None:
+        BaseManager.__init__(self, name)
+        ObservableMixin.__init__(self, managers={"logger": logger})
+
+    def initialize(self) -> bool:
+        return True
+
+    def shutdown(self) -> bool:
+        return True
+
+
+def _whitelist_logger(tmp_path: Path, allowed: List[str]) -> LoggerManager:
+    """Логгер, у которого каждый scope пускает ТОЛЬКО перечисленные модули."""
+    return LoggerManager(
+        config=LoggerManagerConfig(
+            app_name="wl",
+            log_directory=str(tmp_path),
+            enable_batching=False,
+            modules={},
+            channels={"f": LoggerChannelSchema(name="f", type="file", enabled=True, file_path="s.log", rotate=False)},
+            scopes={
+                scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["f"], modules=list(allowed))
+                for scope in ("SYSTEM", "BUSINESS", "DEBUG")
+            },
+        )
+    )
+
+
+class TestWhitelistSemanticsAfterStamping:
+    """Ф2.1 сменила смысл поля `modules` в scope — и это надо было назвать вслух.
+
+    До штампа записи менеджеров приходили под ``module="main"`` и проходили
+    любой whitelist, где есть ``"main"``. После штампа они приходят под своим
+    именем — и тот же самый конфиг их глушит. Ни один конфиг репозитория
+    whitelist сегодня не задаёт, поэтому дефекта в проде нет; но это смена
+    семантики конфига, и она обязана быть закреплена тестом, а не памятью.
+
+    Тесты снимают ПОВЕДЕНИЕ как есть. Если 2.2 (иерархия имён) решит, что
+    whitelist должен понимать префиксы — эти тесты покраснеют, и это будет
+    правильный сигнал «семантику меняем осознанно», а не тихий дрейф.
+
+    Проверка идёт по ФАЙЛУ, а не по счётчику: счётчик «отклонено гейтом»
+    сказал бы то же самое и при исправной доставке.
+    """
+
+    def test_stamped_record_is_dropped_by_main_only_whitelist(self, tmp_path: Path) -> None:
+        """Воспроизведение находки: whitelist ["main"] глушит менеджерскую запись."""
+        logger = _whitelist_logger(tmp_path, allowed=["main"])
+        try:
+            logger.info("прямой вызов без миксина")
+            _StampedManager("router_manager", logger)._log_info("запись менеджера")
+        finally:
+            logger.shutdown()
+
+        text = (tmp_path / "s.log").read_text(encoding="utf-8")
+        assert "прямой вызов без миксина" in text, "запись под 'main' обязана пройти whitelist"
+        assert "запись менеджера" not in text, (
+            "характеризация: после Ф2.1 запись едет под 'router_manager' и whitelist "
+            "['main'] её отсекает — если это изменилось, семантику поменяли осознанно"
+        )
+
+    def test_whitelist_with_real_source_name_lets_record_through(self, tmp_path: Path) -> None:
+        """Обратная сторона: whitelist, знающий настоящее имя, запись пропускает.
+
+        Без этой половины первый тест зелен и при полностью сломанной записи.
+        """
+        logger = _whitelist_logger(tmp_path, allowed=["router_manager"])
+        try:
+            _StampedManager("router_manager", logger)._log_info("запись менеджера")
+        finally:
+            logger.shutdown()
+
+        assert "запись менеджера" in (tmp_path / "s.log").read_text(encoding="utf-8")
+
+    def test_whitelist_does_not_match_by_prefix_today(self, tmp_path: Path) -> None:
+        """Сегодня сравнение строгое по равенству — префикса ('router') мало.
+
+        Это и есть точка входа задачи 2.2: иерархия по точкам должна будет
+        решить, распространяется ли правило родителя на потомков.
+        """
+        logger = _whitelist_logger(tmp_path, allowed=["router"])
+        try:
+            _StampedManager("router_manager", logger)._log_info("запись менеджера")
+        finally:
+            logger.shutdown()
+
+        assert "запись менеджера" not in (tmp_path / "s.log").read_text(encoding="utf-8")

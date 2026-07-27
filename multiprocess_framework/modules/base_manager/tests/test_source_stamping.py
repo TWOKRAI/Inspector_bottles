@@ -18,7 +18,10 @@ pickle, штампует ли auto_proxy-путь). Артефакт на дис
 
 from __future__ import annotations
 
+import gc
 import pickle
+import sys
+import time
 from typing import Any, Dict, List, Tuple
 
 from multiprocess_framework.modules.base_manager.core.base_manager import BaseManager
@@ -270,3 +273,124 @@ def test_manager_name_survives_pickle() -> None:
     revived.register_manager("logger", slot)
     revived._log_info("после unpickle")
     assert slot.last_module == "shm_manager"
+
+
+# ---------------------------------------------------------------------------
+# Цена штампа (находка ревью Н2)
+# ---------------------------------------------------------------------------
+
+
+class _SilentSink:
+    """Приёмник, принимающий kwargs и ничего не делающий."""
+
+    def info(self, message: str, **kwargs: Any) -> None:
+        return None
+
+
+class _StampCostProbe(BaseManager, ObservableMixin):
+    """Пара методов-близнецов: со штампом (боевой) и без (как было до Ф2.1)."""
+
+    def __init__(self, name: str, sink: Any) -> None:
+        BaseManager.__init__(self, name)
+        ObservableMixin.__init__(self, managers={"logger": sink})
+
+    def initialize(self) -> bool:
+        return True
+
+    def shutdown(self) -> bool:
+        return True
+
+    def log_info_unstamped(self, message: str, **kwargs: Any) -> None:
+        """Дословно доФ2.1-тело ``_log_info`` — эталон для сравнения."""
+        self._call_manager("logger", "info", message, **kwargs)
+
+
+def _report(capsys: Any, line: str) -> None:
+    """Печать мимо capture, безопасная для консоли в cp1251.
+
+    Кодировка снимается ВНУТРИ ``capsys.disabled()``: у capture-объекта pytest
+    она всегда UTF-8, и чтение снаружи превращало защиту в тождество. Урок
+    второй итерации ревью Ф1, повторённый здесь целиком, а не сокращённо.
+    """
+    with capsys.disabled():
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+
+
+def _timed_pair(new_fn: Any, old_fn: Any, repeats: int) -> Tuple[float, float]:
+    """Секунд на вызов у обеих реализаций, замеряемых ВПЕРЕМЕЖКУ.
+
+    Последовательный замер сравнил бы не реализации, а два окна загрузки
+    машины — этот флейк уже ловили в Ф2.1.
+    """
+    best_new = best_old = None
+    for _ in range(3):
+        start = time.perf_counter()
+        for _ in range(repeats):
+            new_fn()
+        new_elapsed = time.perf_counter() - start
+
+        start = time.perf_counter()
+        for _ in range(repeats):
+            old_fn()
+        old_elapsed = time.perf_counter() - start
+
+        best_new = new_elapsed if best_new is None else min(best_new, new_elapsed)
+        best_old = old_elapsed if best_old is None else min(best_old, old_elapsed)
+    return best_new / repeats, best_old / repeats
+
+
+#: Потолок цены штампа. Замерено 2026-07-27 на штатной машине: +376 нс на
+#: пустом слоте, +531 нс на живом (числа ревьюера — +374/+716, сошлись).
+#: Потолок с ЧЕТЫРЁХКРАТНЫМ запасом — узкий допуск на бенче уже давал флейк, а
+#: сторожить надо не дрожание в 15 %, а класс регрессии «кто-то положил сюда
+#: PrivateAttr / цепочку getattr / сборку строки»: одно чтение PrivateAttr в
+#: Ф1.1 стоило 921 нс против 47 нс у обычного поля и мгновенно пробило бы этот
+#: потолок.
+STAMP_COST_CEILING_NS = 2000
+
+
+def test_stamp_cost_stays_within_ceiling(capsys: Any) -> None:
+    """Штамп не имеет права подорожать незаметно.
+
+    Проверяется РАЗНИЦА между боевым методом и его доФ2.1-близнецом, а не
+    абсолютное время: абсолют зависит от машины, разница — от кода.
+    """
+    probe = _StampCostProbe("router_manager", _SilentSink())
+    stamped, plain = _timed_pair(
+        lambda: probe._log_info("замер"),
+        lambda: probe.log_info_unstamped("замер"),
+        repeats=20_000,
+    )
+    cost_ns = (stamped - plain) * 1e9
+    _report(capsys, f"  цена штампа: {cost_ns:.0f} нс (потолок {STAMP_COST_CEILING_NS})")
+
+    assert cost_ns < STAMP_COST_CEILING_NS, (
+        f"штамп подорожал до {cost_ns:.0f} нс при потолке {STAMP_COST_CEILING_NS} — "
+        f"на горячем пути появилось что-то дороже двух чтений __dict__"
+    )
+
+
+def test_stamp_resolution_does_not_allocate_strings(capsys: Any) -> None:
+    """Резолв имени не строит строк: ни конкатенации, ни ``.upper()``, ни f-string.
+
+    Спай на самом имени — под запретом (он сторожил бы имя, а не свойство),
+    поэтому считается наблюдаемый эффект: сколько НОВЫХ строковых объектов
+    родилось за сто резолвов. Имя источника — уже существующая строка, значит
+    правильный ответ ноль.
+    """
+    probe = _StampCostProbe("router_manager", _SilentSink())
+    probe._observability_source()  # прогреть всё ленивое до замера
+
+    gc.collect()
+    before = len([o for o in gc.get_objects() if type(o) is str])
+    for _ in range(100):
+        probe._observability_source()
+    gc.collect()
+    after = len([o for o in gc.get_objects() if type(o) is str])
+
+    _report(capsys, f"  новых строк за 100 резолвов: {after - before}")
+    assert after - before <= 2, (
+        f"резолв имени порождает строки ({after - before} за 100 вызовов) — "
+        f"на горячем пути появилась сборка имени вместо чтения готового"
+    )
