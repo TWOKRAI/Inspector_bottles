@@ -12,14 +12,15 @@ from typing import Any, Dict, Optional, Union
 
 from multiprocess_framework.modules.shared_resources_module import SharedResourcesManager
 
-from .class_loader import _ProcessLogger, _load_process_class
+from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
+from .class_loader import _load_process_class
 from .bundle_builder import _build_shared_resources_from_bundle
 
 
 def _run_lifecycle(
     process_instance,
     stop_event: Optional[Event],
-    log: _ProcessLogger,
+    log: StdLoggerFacade,
     system_stop_event: Optional[Event] = None,
 ) -> None:
     """run() затем ожидание stop_event / system_stop_event / should_stop().
@@ -114,7 +115,9 @@ def run_process_function(
         (см. ProcessTreeGuard). Ставится только для оркестратора. Windows — no-op
         (там дерево держит Job Object).
     """
-    log = _ProcessLogger(process_name)
+    # 2.2: именованный вид вместо собственного _ProcessLogger. Имя процесса
+    # остаётся полем источника записи, а не только текстом сообщения (Ф2.1).
+    log = get_std_logger(process_name)
     process_instance = None
     shared_resources = None
 

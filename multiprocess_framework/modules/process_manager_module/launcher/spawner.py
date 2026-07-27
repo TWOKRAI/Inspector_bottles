@@ -9,7 +9,7 @@ from multiprocessing import Event, Process
 from typing import Any, Callable, Dict, Optional, Union
 
 from ...logger_module.utils import FallbackLogger
-from ..runner.class_loader import _ProcessLogger
+from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
 from ..runner.process_runner import run_process_function
 from ..platforms import get_platform_adapter
 from ...shared_resources_module import SharedResourcesManager
@@ -45,7 +45,7 @@ class ProcessSpawner:
         self._stop_event = Event()
         self._process: Optional[Process] = None
         self._shared_resources: Optional[SharedResourcesManager] = None
-        self._logger: Optional[_ProcessLogger] = None
+        self._logger: Optional[StdLoggerFacade] = None
         self._stop_timeout = stop_timeout
         self._on_shutdown = on_shutdown
         # Event для сигнализации готовности системы (ADR-116).
@@ -69,7 +69,7 @@ class ProcessSpawner:
         self._shared_resources = SharedResourcesManager(manager_name="shared_resources")
         self._shared_resources.initialize()
 
-        self._logger = _ProcessLogger("spawner")
+        self._logger = get_std_logger("spawner")
         self._guard = ProcessTreeGuard(logger=self._logger)
         # ДО спавна оркестратора (Windows: создать job — дети наследуют по job).
         self._guard.install()

@@ -174,15 +174,17 @@ def test_fallback_logger_writes_under_its_own_name(tmp_path: Path) -> None:
 
 
 def test_process_logger_fallback_branch_carries_process_name(tmp_path: Path) -> None:
-    """``_ProcessLogger`` без явного менеджера — та самая ветка, что работает
-    на живом прогоне (``process_runner`` создаёт его именно так)."""
-    from multiprocess_framework.modules.process_manager_module.runner.class_loader import (
-        _ProcessLogger,
-    )
+    """Логгер бутстрапа процесса пишет под именем процесса.
+
+    2.2: ``_ProcessLogger`` снят, его роль исполняет именованный вид. Проверка
+    осталась прежней по СУТИ — имя процесса в поле источника артефакта, — и
+    именно поэтому она пережила замену механизма, ничего не подправляя.
+    """
+    from multiprocess_framework.modules.logger_module.adapters.std_facade import StdLoggerFacade
 
     logger = LoggerManager(config=_config(tmp_path))
     try:
-        _ProcessLogger("camera_0").info("Process initialized")
+        StdLoggerFacade("camera_0").info("Process initialized")
     finally:
         logger.shutdown()
 
@@ -194,13 +196,11 @@ def test_process_logger_fallback_branch_carries_process_name(tmp_path: Path) -> 
 def test_process_logger_message_with_percent_survives(tmp_path: Path) -> None:
     """Текст приходит извне и может содержать ``%`` — он не должен ни падать,
     ни превращаться в мусор при склейке шаблона."""
-    from multiprocess_framework.modules.process_manager_module.runner.class_loader import (
-        _ProcessLogger,
-    )
+    from multiprocess_framework.modules.logger_module.adapters.std_facade import StdLoggerFacade
 
     logger = LoggerManager(config=_config(tmp_path))
     try:
-        _ProcessLogger("camera_0").warning("CPU 90% занято")
+        StdLoggerFacade("camera_0").warning("CPU 90% занято")
     finally:
         logger.shutdown()
 
