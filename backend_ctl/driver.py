@@ -44,6 +44,7 @@ from .endpoint_config import resolve_endpoint
 from .protocol import (  # noqa: F401 — re-export для back-compat шима
     Capabilities,
     MemoryStats,
+    ObservabilityCounters,
     ProcessCapabilities,
     QueueDepths,
     RouterStats,
@@ -414,6 +415,17 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
     def worker_status(self, process: str, **kw: Any) -> WorkerStatus:
         """Статус процесса и воркеров как :class:`WorkerStatus` (форма, не логика)."""
         return WorkerStatus.from_response(self.introspect_status(process, **kw))
+
+    def observability_counters(self, process: str, *, timeout: Optional[float] = None) -> ObservabilityCounters:
+        """Потери трёх плоскостей наблюдаемости как :class:`ObservabilityCounters` (2.V2).
+
+        Спрашивает у живого процесса ``introspect.observability`` и оставляет из
+        ответа то, что отвечает на один вопрос: **что уже потеряно**. Счётчики
+        логгера до этой обёртки наружу не выходили — их читал только тест, то есть
+        сигнал существовал и был недоступен там, где его спрашивают.
+        """
+        res = self.send_command(process, "introspect.observability", timeout=timeout)
+        return ObservabilityCounters.from_response(res)
 
     def introspect_capabilities(self, process: str, **kw: Any) -> Dict[str, Any]:
         """Карточка процесса (сырой dict): команды+descriptions, регистры, handlers."""

@@ -61,6 +61,27 @@ def _healthy_responses() -> Dict[str, Dict[str, Any]]:
             "shm_registry": {},
             "os": {"rss": 12345, "vms": 23456, "pid": 1},
         },
+        "introspect.observability": {"success": True, "process": "p", "effective": {}, "counters": _quiet_planes()},
+    }
+
+
+def _quiet_planes() -> Dict[str, Any]:
+    """Тишина в покое: все классы потери в нуле, ключи ПРИСУТСТВУЮТ (2.V2).
+
+    Ключи с нулями, а не пустая секция: «ключа нет» и «потерь нет» — разные
+    факты, и здоровый ответ обязан выглядеть как первый вариант, а не как
+    второй (контракт ``_loss_counters_snapshot``).
+    """
+    return {
+        plane: {
+            "unresolved_channel_records": 0,
+            "channel_write_errors": 0,
+            "channel_refused_records": 0,
+            "records_without_channels": 0,
+            "errors_to_floor": 0,
+            "buffer": {"pending": 0, "dropped": 0, "flush_failed": 0},
+        }
+        for plane in ("logger", "error", "stats")
     }
 
 
@@ -88,6 +109,9 @@ class TestOverviewShape:
             "introspect.router_stats",
             "introspect.queues",
             "introspect.memory",
+            # 2.V2: ручка существует с Ф0.3 (BuiltinCommands), сводка её только
+            # СПРАШИВАЕТ. Критерий B.3 — «ноль НОВЫХ IPC-команд», а не «ноль вызовов».
+            "introspect.observability",
         }
         assert set(sent) <= allowed
 
@@ -370,3 +394,183 @@ class TestOverviewResilience:
         third = d.system_overview()
         assert any(a["kind"] == "late_replies" for a in third["anomalies"]), "прирост обязан снова поднять аномалию"
         assert third["driver"]["deltas"]["late_replies"] == 3
+
+
+# =============================================================================
+# 2.V2 — тишина в покое как живой инвариант
+# =============================================================================
+
+
+class TestObservabilitySilence:
+    """Ненулевой класс потери наблюдаемости обязан быть виден ПЕРВОЙ командой сессии.
+
+    Резидуал P3 (свежий ErrorManager давал два ``unresolved_channel_records`` в
+    полном покое) прожил незамеченным всю Ф0 ровно потому, что спросить об этом
+    снаружи было нечем: счётчики читал только тест.
+    """
+
+    def test_quiet_process_raises_nothing(self, monkeypatch) -> None:
+        """Контроль к остальным: в тишине аномалий нет, а секция ЕСТЬ и пуста.
+
+        Без этого теста «аномалия найдена» ничего не стоит: детектор, который
+        ругается всегда, неотличим от сломанного.
+        """
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=_healthy_responses())
+        res = d.system_overview()
+        assert res["processes"]["cam"]["observability_losses"] == {}
+        assert not [a for a in res["anomalies"] if a["kind"].startswith("observability")]
+
+    def test_each_loss_class_is_named_with_its_plane(self, monkeypatch) -> None:
+        responses = _healthy_responses()
+        planes = _quiet_planes()
+        planes["logger"]["unresolved_channel_records"] = 3
+        planes["error"]["errors_to_floor"] = 1
+        planes["stats"]["buffer"]["dropped"] = 7
+        responses["introspect.observability"] = {"success": True, "counters": planes}
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+
+        losses = res["processes"]["cam"]["observability_losses"]
+        assert losses == {
+            "logger": {"unresolved_channel_records": 3},
+            "error": {"errors_to_floor": 1},
+            "stats": {"buffer.dropped": 7},
+        }
+        hits = [a for a in res["anomalies"] if a["kind"] == "observability_loss"]
+        assert len(hits) == 3, hits
+        details = " | ".join(a["detail"] for a in hits)
+        for expected in ("unresolved_channel_records=3", "errors_to_floor=1", "buffer.dropped=7"):
+            assert expected in details, details
+
+    def test_lifetime_value_keeps_flagging_unlike_driver_counters(self, monkeypatch) -> None:
+        """Потеря наблюдаемости — не шрам: она светится и во второй сводке.
+
+        Сознательно иначе, чем кумулятивные счётчики driver'а (Task 5.3): там
+        прирост отделяет свежую беду от старой, здесь «случилось давно» не делает
+        потерю записи приемлемой.
+        """
+        responses = _healthy_responses()
+        planes = _quiet_planes()
+        planes["logger"]["channel_write_errors"] = 2
+        responses["introspect.observability"] = {"success": True, "counters": planes}
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+
+        first = d.system_overview()
+        second = d.system_overview()
+        for res in (first, second):
+            assert any(a["kind"] == "observability_loss" for a in res["anomalies"])
+
+    def test_unavailable_handle_is_not_silence(self, monkeypatch) -> None:
+        """«Не спросили» обязано отличаться от «потерь нет».
+
+        Молчание при неответившей ручке делало бы процесс, которому команду не
+        задали, самым здоровым в сводке.
+        """
+        responses = _healthy_responses()
+        responses["introspect.observability"] = {"success": False, "error": "нет такой команды"}
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+
+        assert res["processes"]["cam"]["observability_losses"] is None
+        assert any(a["kind"] == "observability_unavailable" for a in res["anomalies"])
+
+    def test_answered_without_counters_section_is_a_shape_mismatch(self, monkeypatch) -> None:
+        """Ручка ответила, секции ``counters`` нет — расхождение формы, не тишина."""
+        responses = _healthy_responses()
+        responses["introspect.observability"] = {"success": True, "effective": {}}
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+
+        assert res["processes"]["cam"]["observability_losses"] == {}
+        assert any(a["kind"] == "counter_missing" and "observability" in a["detail"] for a in res["anomalies"]), res[
+            "anomalies"
+        ]
+
+    def test_loss_keys_match_the_real_publisher(self) -> None:
+        """Фейк выше проверяет ФОРМУ; этот тест связывает её с ЖИВЫМ публикатором.
+
+        Правило проекта: где командная поверхность тестируется на фейках, нужен
+        один тест на реальных объектах — иначе переименование счётчика во
+        фреймворке оставляет все тесты зелёными, а фича мертва. Ровно так уже
+        было: правило читало ``drops_count`` при реальном ``drops``.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from backend_ctl.protocol import OBSERVABILITY_BUFFER_LOSS_KEYS, OBSERVABILITY_LOSS_KEYS
+        from multiprocess_framework.modules.logger_module.core.log_config import LoggerManagerConfig
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            observability_counters,
+        )
+
+        tmp = Path(tempfile.mkdtemp())
+        logger = LoggerManager(config=LoggerManagerConfig(app_name="silence_probe", log_directory=str(tmp)))
+        try:
+            plane = observability_counters(logger=logger)["logger"]
+        finally:
+            logger.shutdown()
+
+        # Не «хотя бы один», а поимённо: плоскость логов обязана публиковать все
+        # ключи перечня. Плоскость статистики беднее (у её буфера нет ``dropped``),
+        # и это свойство плоскости, а не расхождение — поэтому судим по логгеру.
+        for key in OBSERVABILITY_LOSS_KEYS:
+            assert key in plane, f"логгер перестал публиковать {key!r} — детектор 2.V2 ослеп на этот класс"
+        for key in ("dropped", "flush_failed"):
+            assert key in OBSERVABILITY_BUFFER_LOSS_KEYS
+            assert key in plane["buffer"], f"буфер логгера перестал публиковать {key!r}"
+
+    def test_all_three_fresh_planes_are_silent_for_real(self) -> None:
+        """Приёмка 2.V2 на живых менеджерах: три плоскости в покое молчат.
+
+        Инвариант «тишина в покое» на РЕАЛЬНЫХ объектах, а не на подставном
+        ответе. Плоскость ошибок здесь не для симметрии: именно она и была
+        резидуалом P3 — свежий ``ErrorManager`` наследовал от конфига логов
+        скоупы со ссылками на каналы, которых у него нет, и давал два
+        ``unresolved_channel_records`` не сделав ничего. Сорвётся тест ровно так
+        же: чей-то дефолт снова начнёт слать записи в несуществующий канал.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from backend_ctl.protocol import ObservabilityCounters
+        from multiprocess_framework.modules.error_module.configs.error_manager_config import ErrorManagerConfig
+        from multiprocess_framework.modules.error_module.core.error_manager import ErrorManager
+        from multiprocess_framework.modules.logger_module.core.log_config import LoggerManagerConfig
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            observability_counters,
+        )
+        from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
+
+        tmp = Path(tempfile.mkdtemp())
+        logger = LoggerManager(config=LoggerManagerConfig(app_name="silence_probe", log_directory=str(tmp)))
+        errors = ErrorManager(
+            config=ErrorManagerConfig(
+                app_name="silence_probe",
+                critical_file_path=str(tmp / "critical.log"),
+                error_file_path=str(tmp / "errors.log"),
+                warnings_file_path=str(tmp / "warnings.log"),
+            )
+        )
+        errors.initialize()
+        stats = StatsManager()
+        stats.initialize()
+        try:
+            for manager in (logger, errors, stats):
+                manager.flush()
+            counters = observability_counters(logger=logger, error=errors, stats=stats)
+        finally:
+            errors.shutdown()
+            logger.shutdown()
+
+        # Все три секции обязаны присутствовать: пустой ``nonzero`` при пустом
+        # ``counters`` означал бы «никого не спросили», а не «все молчат».
+        assert set(counters) == {"logger", "error", "stats"}, counters
+        parsed = ObservabilityCounters.from_response({"success": True, "counters": counters})
+        assert parsed.nonzero == {}, f"свежие плоскости шумят в покое: {parsed.nonzero}"

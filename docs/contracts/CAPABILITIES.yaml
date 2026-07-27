@@ -72,6 +72,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -125,6 +130,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -136,6 +144,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -529,6 +540,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -582,6 +598,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -593,6 +612,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -939,6 +961,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -992,6 +1019,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -1003,6 +1033,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -1394,6 +1427,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -1447,6 +1485,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -1458,6 +1499,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -1749,6 +1793,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -1802,6 +1851,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -1813,6 +1865,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -2093,6 +2148,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -2146,6 +2206,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -2157,6 +2220,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -2437,6 +2503,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -2490,6 +2561,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -2501,6 +2575,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -2781,6 +2858,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -2834,6 +2916,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -2845,6 +2930,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -3125,6 +3213,11 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -3178,6 +3271,9 @@ processes:
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
@@ -3189,6 +3285,9 @@ processes:
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str

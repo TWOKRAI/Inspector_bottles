@@ -54,6 +54,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
@@ -132,6 +133,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
@@ -204,6 +206,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
@@ -292,6 +295,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
@@ -348,6 +352,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
@@ -398,6 +403,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
@@ -448,6 +454,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
@@ -498,6 +505,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
@@ -548,6 +556,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
 | `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |

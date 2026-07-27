@@ -21,6 +21,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+#: Классы потери наблюдаемости — ИМПОРТИРУЮТСЯ у публикатора, а не переписываются
+#: здесь. На этом проекте ровно этот класс уже стрелял: правило читало
+#: несуществующий ``drops_count`` при реальном ``drops``, и фича была мертва при
+#: 26 зелёных тестах на моке. Своя копия перечня расходится с публикатором молча.
+from multiprocess_framework.modules.channel_routing_module.core.channel_routing_manager import (
+    LOSS_COUNTER_KEYS,
+)
+
 #: Служебный ключ, которым :func:`unwrap` помечает «искомых ключей в ответе нет».
 #: Появляется ТОЛЬКО в возвращённой копии — исходный dict вызывающего не мутируется.
 UNWRAP_MISS = "_unwrap_miss"
@@ -293,6 +301,102 @@ class WorkerStatus:
         )
 
 
+#: Ключи плоскости, ненулевое значение которых в покое — повод смотреть.
+#: Сверх четырёх классов потери сюда входят пол ошибок (запись спасена, но
+#: ШТАТНЫЙ маршрут сломан), его собственные отказы, отброшенная консоль,
+#: несобравшееся сообщение и провалы ретеншена.
+#:
+#: Классы НЕ разделены на «потеря» и «деградация» намеренно: ``system_overview``
+#: по своему контракту выдаёт ПОДСКАЗКИ, а не вердикты, а раскладывать чужие
+#: счётчики по степеням тяжести, не воспроизведя их семантику, значило бы
+#: сочинить вердикт.
+OBSERVABILITY_LOSS_KEYS: tuple = LOSS_COUNTER_KEYS + (
+    "errors_to_floor",
+    "errors_floor_write_failures",
+    "console_writes_dropped",
+    "message_build_failures",
+    "retention_delete_failures",
+    "retention_compress_failures",
+)
+
+#: То же для секции ``buffer`` плоскости. Набор ключей у буфера логов и буфера
+#: статистики РАЗНЫЙ (у второго нет ``dropped`` вовсе), поэтому отсутствие ключа
+#: здесь — не расхождение формы, а свойство плоскости.
+OBSERVABILITY_BUFFER_LOSS_KEYS: tuple = (
+    "dropped",
+    "dropped_at_stop",
+    "enqueued_after_stop",
+    "flush_failed",
+    "flush_timeouts",
+    "flush_contract_violations",
+)
+
+
+@dataclass
+class ObservabilityCounters:
+    """Счётчики трёх плоскостей наблюдаемости процесса (introspect.observability).
+
+    ``planes`` — сырые секции ``{logger|error|stats: {...}}``; ``nonzero`` — то же,
+    отфильтрованное до ненулевых счётчиков потерь (ключи буфера идут с префиксом
+    ``buffer.``). Пустой ``nonzero`` при непустом ``planes`` читается как «тишина»
+    — ровно тот инвариант, ради которого задача 2.V2 и существует.
+
+    ``planes is None`` (и ``"counters"`` в ``missing``) — секции в ответе не было:
+    это НЕ «потерь нет». Различать обязательно, иначе процесс, у которого команду
+    вообще не спросили, выглядел бы здоровее всех.
+    """
+
+    ok: bool
+    process: Optional[str]
+    planes: Optional[Dict[str, Any]]
+    nonzero: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    missing: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_response(cls, res: Any) -> "ObservabilityCounters":
+        payload = _find_payload(res, "counters", "effective")
+        missing: List[str] = []
+        planes = _read_mapping(payload, "counters", missing)
+        return cls(
+            ok=_is_ok(res, payload),
+            process=payload.get("process") if isinstance(payload, dict) else None,
+            planes=planes,
+            nonzero=_nonzero_losses(planes),
+            missing=missing,
+            raw=res if isinstance(res, dict) else {},
+        )
+
+
+def _nonzero_losses(planes: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """Ненулевые счётчики потерь по плоскостям. Пусто = тишина.
+
+    Считаются только положительные int'ы: ``None`` («показания нет») порогом не
+    считается, а ``dropped_by_channel``/``unresolved_channels`` — разбивки-словари,
+    и они уже отражены своим числовым классом.
+    """
+    out: Dict[str, Dict[str, int]] = {}
+    if not isinstance(planes, dict):
+        return out
+    for plane, section in planes.items():
+        if not isinstance(section, dict):
+            continue
+        hits: Dict[str, int] = {}
+        for key in OBSERVABILITY_LOSS_KEYS:
+            value = section.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                hits[key] = value
+        buffer = section.get("buffer")
+        if isinstance(buffer, dict):
+            for key in OBSERVABILITY_BUFFER_LOSS_KEYS:
+                value = buffer.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                    hits[f"buffer.{key}"] = value
+        if hits:
+            out[plane] = hits
+    return out
+
+
 @dataclass
 class MemoryStats:
     """Инвентарь памяти процесса (introspect.memory): SHM / пул / очереди.
@@ -409,6 +513,9 @@ __all__ = [
     "QueueDepths",
     "WorkerStatus",
     "MemoryStats",
+    "ObservabilityCounters",
+    "OBSERVABILITY_LOSS_KEYS",
+    "OBSERVABILITY_BUFFER_LOSS_KEYS",
     "ProcessCapabilities",
     "Capabilities",
 ]
