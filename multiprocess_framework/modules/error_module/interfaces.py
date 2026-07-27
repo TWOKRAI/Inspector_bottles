@@ -27,6 +27,8 @@ error_module — специализация logger_module для обработ�
 
 from typing import Any, Dict, Optional, Union, Protocol, runtime_checkable
 
+from ..logger_module.utils import LogMessage
+
 
 @runtime_checkable
 class IErrorManager(Protocol):
@@ -59,8 +61,15 @@ class IErrorManager(Protocol):
     # =========================================================================
     # Основные методы логирования
     # =========================================================================
+    #
+    # Сигнатуры повторяют ``ILoggerManager`` (Ф1.4): ``message`` может быть
+    # ``Callable[[], str]``, ``*args`` — аргументы ``%``-формата, склейка
+    # происходит ПОСЛЕ гейта. Отставание этого контракта от родительского
+    # ломающего эффекта не давало (Protocol + наследование от LoggerCore), но
+    # читатель контракта плоскости ошибок не узнавал про работающую здесь
+    # возможность — находка ревью Ф1.
 
-    def error(self, message: str, module: str = "errors", **extra: Any) -> None:
+    def error(self, message: "LogMessage", module: str = "errors", *args: Any, **extra: Any) -> None:
         """Записать сообщение уровня ERROR.
 
         Args:
@@ -70,18 +79,18 @@ class IErrorManager(Protocol):
         """
         ...
 
-    def warning(self, message: str, module: str = "errors", **extra: Any) -> None:
+    def warning(self, message: "LogMessage", module: str = "errors", *args: Any, **extra: Any) -> None:
         """Записать предупреждение уровня WARNING.
 
         Используется для некритичных ошибок, которые нужно отслеживать.
         """
         ...
 
-    def critical(self, message: str, module: str = "errors", **extra: Any) -> None:
+    def critical(self, message: "LogMessage", module: str = "errors", *args: Any, **extra: Any) -> None:
         """Записать критическую ошибку. Немедленный flush батчинга."""
         ...
 
-    def info(self, message: str, module: str = "errors", **extra: Any) -> None:
+    def info(self, message: "LogMessage", module: str = "errors", *args: Any, **extra: Any) -> None:
         """Информационное сообщение (recovery, retry success, ...).
 
         Полезно для логирования восстановления после ошибки.

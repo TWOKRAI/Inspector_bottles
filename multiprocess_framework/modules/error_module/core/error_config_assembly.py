@@ -16,6 +16,19 @@ from typing import Any, Dict
 _FILE_MAX = 10 * 1024 * 1024
 _WARN_MAX = 5 * 1024 * 1024
 
+#: Формат severity-каналов — ОДИН на все три, и уровень в нём подставляется,
+#: а не зашит литералом.
+#:
+#: Литералы (``[CRITICAL]`` у critical_file, ``[WARNING]`` у warnings_file) были
+#: безобидны ровно до тех пор, пока каждый канал принимал только свой уровень.
+#: Ф1 достроила цепочку запасных маршрутов — и ERROR, попавший в ``critical.log``
+#: при снятом ``errors_file``, стал НЕОТЛИЧИМ от настоящего критикала
+#: (воспроизведено ревью: три записи разных уровней, все с меткой ``[CRITICAL]``).
+#: То есть починка «ошибка не должна прятаться в warnings.log» породила зеркальное
+#: «предупреждение выглядит критикалом», а ``critical.log`` — файл, по которому
+#: поднимают тревогу.
+_SEVERITY_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
 #: Скоупы плоскости ошибок (резидуал P3). Все выключены — и это не «лишь бы
 #: тише», а описание того, что плоскость делает: ErrorManager принимает только
 #: WARNING/ERROR/CRITICAL, и они идут severity-маршрутом, который скоуп не
@@ -75,7 +88,7 @@ def expand_error_manager_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "type": "file",
             "enabled": True,
             "file_path": critical,
-            "format": "%(asctime)s [CRITICAL] %(name)s: %(message)s",
+            "format": _SEVERITY_FORMAT,
             "max_size": _FILE_MAX,
             "backup_count": 10,
         },
@@ -83,7 +96,7 @@ def expand_error_manager_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "type": "file",
             "enabled": True,
             "file_path": err,
-            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            "format": _SEVERITY_FORMAT,
             "max_size": _FILE_MAX,
             "backup_count": 5,
         },
@@ -94,7 +107,7 @@ def expand_error_manager_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "type": "file",
             "enabled": True,
             "file_path": warnings,
-            "format": "%(asctime)s [WARNING] %(name)s: %(message)s",
+            "format": _SEVERITY_FORMAT,
             "max_size": _WARN_MAX,
             "backup_count": 3,
         }

@@ -21,6 +21,7 @@ Task 5.14 (CRM-развязка): ErrorManager наследует общий л�
 """
 
 import traceback
+from copy import deepcopy
 from typing import Optional, Any, List, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
@@ -49,7 +50,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
             "type": "file",
             "enabled": True,
             "file_path": "logs/critical.log",
-            "format": "%(asctime)s [CRITICAL] %(name)s: %(message)s",
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             "max_size": 10 * 1024 * 1024,
             "backup_count": 10,
         },
@@ -65,7 +66,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
             "type": "file",
             "enabled": True,
             "file_path": "logs/warnings.log",
-            "format": "%(asctime)s [WARNING] %(name)s: %(message)s",
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             "max_size": 5 * 1024 * 1024,
             "backup_count": 3,
         },
@@ -90,7 +91,11 @@ def _normalize_error_config(
         # (scopes/modules, резидуал P3) обязаны действовать и на ``config=None``,
         # иначе «дефолтный ErrorManager» и «ErrorManager из ErrorManagerConfig»
         # получаются разными менеджерами.
-        expanded = expand_error_manager_config(_DEFAULT_CONFIG)
+        # deepcopy: без него наружу уезжают ТЕ ЖЕ вложенные словари каналов
+        # ``_DEFAULT_CONFIG``, и правка одного конфига до валидации утекает во
+        # все последующие ``ErrorManager()``. Половина этой опасности была
+        # закрыта deepcopy'ем скоупов, вторая осталась — поймано ревью Ф1.
+        expanded = expand_error_manager_config(deepcopy(_DEFAULT_CONFIG))
         return manager_name, LoggerManagerConfig.model_validate(expanded), include_stacktrace
 
     if isinstance(config, LoggerManagerConfig):
@@ -195,12 +200,19 @@ class ErrorManager(LoggerCore, IErrorManager):
             self._last_applied_config = config
 
         # Маршруты строятся УЖЕ здесь, а не только в initialize(): между
-        # конструктором и initialize() менеджер обязан уметь записать ошибку.
-        # Раньше в этом промежутке `_level_to_channel` был пуст, и ERROR уходил
-        # scope-путём — в каналы логгера, которых у ErrorManager нет. С P3
-        # (скоупы плоскости ошибок выключены) тот же ERROR был бы просто
-        # отклонён гейтом, то есть починка одного резидуала породила бы дыру
-        # в инварианте 1. Вызов идемпотентен, в initialize() он остаётся.
+        # конструктором и initialize() менеджер обязан писать ошибку в СВОЙ
+        # файл, а не в приёмник последней инстанции.
+        #
+        # Прежняя редакция этого комментария утверждала, что без вызова ERROR
+        # «был бы отклонён гейтом молча» и инвариант 1 был бы пробит. Ревью Ф1
+        # это опровергло запуском: гейт severity-плоскости открыт по РАНГУ
+        # безусловно (см. `_is_gate_open`), поэтому запись не теряется — её
+        # ловит пол. Настоящее последствие мягче и всё равно нежелательно:
+        # `errors_to_floor` 0 → 1 при пустом `errors.log`, то есть ошибка
+        # уезжает в аварийный JSONL при живом штатном канале, а счётчик
+        # поднимает ложный сигнал «маршрут ошибок сломан».
+        #
+        # Вызов идемпотентен, в initialize() он остаётся.
         self._setup_level_routes()
 
     def initialize(self) -> bool:

@@ -23,7 +23,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from contextvars import ContextVar
 
 if TYPE_CHECKING:
@@ -177,7 +177,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._base_context: Dict[str, Any] = {}
         self._base_context_lock = threading.Lock()
 
-        self._decision_cache: Dict[str, bool] = {}
+        # Ключ — КОРТЕЖ с Ф1.2 (см. should_log). Аннотация ``Dict[str, bool]``
+        # пережила смену ключа и врала, пока её не поймало ревью.
+        self._decision_cache: Dict[Tuple[LogScope, LogLevel, str], bool] = {}
         self._cache_enabled = True
 
         # Пол ошибок (Ф0.9) — ленивый: резолвится на первой записи, ушедшей в floor.
@@ -200,6 +202,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 # Пол не смог записать — запись потеряна ПОЛНОСТЬЮ. Отдельно от
                 # errors_to_floor: «спасено» и «не спасено» нельзя складывать.
                 "errors_floor_write_failures": 0,
+                # Ф1.4: отложенное сообщение не собралось (callable бросил,
+                # __str__ упал). Запись при этом СОХРАНЕНА — с текстом об
+                # ошибке вместо содержимого, — но факт обязан быть виден:
+                # молчаливая подмена текста хуже, чем видимая.
+                "message_build_failures": 0,
                 # Ф0.7: результат чистки каталога логов (ключи — _RETENTION_STAT_KEYS).
                 # Отдельно «удалили» и «не смогли удалить»: на Windows занятый файл
                 # не удаляется, и молчащий ретеншен неотличим от работающего, если
@@ -800,7 +807,18 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # Строго ПОСЛЕ гейта: в этом весь смысл. И ровно один раз — запись
         # общая для всех каналов, поэтому число приёмников на цену не влияет.
         if not isinstance(message, str):
-            message = message() if callable(message) else str(message)
+            try:
+                message = message() if callable(message) else str(message)
+            except Exception as exc:  # noqa: BLE001 — сборка сообщения не имеет права уронить эмитента
+                # Ф1.4 переносит ДОРОГУЮ сборку внутрь логгера, а дорогая сборка
+                # — ровно то, что умеет падать. Без этой ветки исключение
+                # пробивалось в вызывающий код, и приложение падало на строчке
+                # логирования (воспроизведено ревью Ф1, итерация 2). Политика
+                # взята у соседнего пути: ``apply_format`` на кривом шаблоне
+                # тоже сохраняет запись, а не теряет её. Два соседних пути с
+                # противоположной политикой были бы худшим из вариантов.
+                message = f"<сборка сообщения упала: {exc!r}>"
+                self.stats["message_build_failures"] += 1
         if args:
             message = apply_format(message, args)
 
@@ -1139,6 +1157,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # спросить у живого процесса. Тот же класс, что потери буфера ниже.
             "errors_to_floor": self.stats["errors_to_floor"],
             "errors_floor_write_failures": self.stats["errors_floor_write_failures"],
+            "message_build_failures": self.stats["message_build_failures"],
             "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
 

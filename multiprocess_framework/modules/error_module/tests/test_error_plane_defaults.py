@@ -238,6 +238,43 @@ class TestSeverityRoutesFollowChannelChanges:
         finally:
             mgr.shutdown()
 
+    def test_fallback_record_keeps_its_own_level_label(self, tmp_path: Path) -> None:
+        """Запасной приёмник не имеет права переклеить уровень записи.
+
+        Формат ``critical_file`` был литералом ``[CRITICAL]`` — безобидным ровно
+        до тех пор, пока в файл писал только CRITICAL. Достроенная цепочка
+        запасных маршрутов сделала ERROR и WARNING в ``critical.log`` НЕОТЛИЧИМЫМИ
+        от настоящего критикала (воспроизведено ревью Ф1: три записи разных
+        уровней, все с меткой ``[CRITICAL]``). То есть починка «ошибка не должна
+        прятаться в warnings.log» породила зеркальное «предупреждение выглядит
+        критикалом» — в файле, по которому поднимают тревогу.
+
+        Проверяется МЕТКА, а не вхождение текста: соседний тест смотрел на
+        подстроку сообщения и этого поймать не мог.
+        """
+        mgr = _manager(tmp_path)
+        try:
+            assert mgr.set_sink_enabled("errors_file", False)
+            assert mgr.set_sink_enabled("warnings_file", False)
+            assert mgr.get_stats()["level_routes"] == {
+                "CRITICAL": "critical_file",
+                "ERROR": "critical_file",
+                "WARNING": "critical_file",
+            }, "предусловие: все три уровня свелись в один файл"
+
+            mgr.warning("это предупреждение", module="plane")
+            mgr.error("это ошибка", module="plane")
+            mgr.critical("это критикал", module="plane")
+            mgr.flush()
+
+            text = (tmp_path / "critical.log").read_text(encoding="utf-8")
+            labels = {line.split("]")[0].split("[")[-1] for line in text.splitlines() if "[" in line and "]" in line}
+            assert labels == {"WARNING", "ERROR", "CRITICAL"}, (
+                f"уровни в запасном файле склеились в {labels or 'ничто'} — тревога по critical.log станет ложной"
+            )
+        finally:
+            mgr.shutdown()
+
     def test_fallback_never_goes_down_in_severity(self, tmp_path: Path) -> None:
         """Запасной приёмник — всегда более важный файл, никогда менее важный.
 
@@ -285,12 +322,17 @@ class TestSeverityRoutesFollowChannelChanges:
     def test_error_before_initialize_still_reaches_its_channel(self, tmp_path: Path) -> None:
         """Между конструктором и ``initialize()`` ошибка обязана дойти (инвариант 1).
 
-        ``_setup_level_routes()`` зовётся уже в ``__init__`` — и это не украшение:
-        с выключенными скоупами плоскости ошибок (P3) ERROR в этом промежутке
-        ушёл бы scope-путём и был бы отклонён гейтом МОЛЧА. Восьмистрочный
-        комментарий у вызова обосновывал это инвариантом 1 и не был подкреплён
-        ничем: ревью Ф1 удалило вызов из ``__init__`` — 588 тестов остались
-        зелёными.
+        ``_setup_level_routes()`` зовётся уже в ``__init__``. Без него запись
+        НЕ теряется — гейт severity-плоскости открыт по рангу, и её ловит пол, —
+        но уезжает в аварийный JSONL при живом ``errors.log``, а
+        ``errors_to_floor`` поднимает ложный сигнал «маршрут ошибок сломан».
+        Ровно это и проверяется, в таком порядке: сначала СВОЙСТВО (файл + пол),
+        и только потом состав маршрутов как диагностика.
+
+        Первая редакция теста била по предусловию (``level_routes`` пусты), то
+        есть сторожила структуру, а не свойство; а её docstring вслед за
+        комментарием в коде утверждал про «отклонён гейтом МОЛЧА» — неверно.
+        Обе неточности сняты второй итерацией ревью Ф1 с воспроизведением.
         """
         mgr = ErrorManager(
             config=ErrorManagerConfig(
@@ -304,15 +346,17 @@ class TestSeverityRoutesFollowChannelChanges:
         )
         # ВНИМАНИЕ: initialize() намеренно НЕ вызывается.
         try:
-            assert mgr.get_stats()["level_routes"], "маршруты уровней пусты до initialize()"
-
             mgr.error("ошибка до initialize", module="plane")
 
-            assert mgr.get_stats()["messages_skipped"] == 0, (
-                "ошибка отклонена гейтом до initialize() — инвариант 1 пробит"
+            # СВОЙСТВО — первым: ошибка в своём файле, пол не тронут.
+            assert "ошибка до initialize" in (tmp_path / "errors.log").read_text(encoding="utf-8"), (
+                "ошибка не дошла до errors.log между конструктором и initialize()"
             )
-            assert "ошибка до initialize" in (tmp_path / "errors.log").read_text(encoding="utf-8")
-            assert mgr.get_stats()["errors_to_floor"] == 0, "запись ушла в пол при живом канале"
+            assert mgr.get_stats()["errors_to_floor"] == 0, (
+                "запись ушла в пол при живом канале — ложный сигнал «маршрут ошибок сломан»"
+            )
+            # Диагностика: почему свойство держится.
+            assert mgr.get_stats()["level_routes"].get("ERROR") == "errors_file"
         finally:
             mgr.shutdown()
 

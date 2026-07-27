@@ -102,6 +102,72 @@ class TestCallableMessage:
         assert "текст из callable" in (tmp_path / "a.log").read_text(encoding="utf-8")
 
 
+class TestMessageBuildFailure:
+    """Hazard самого механизма Ф1.4: дорогая сборка — это то, что умеет падать.
+
+    Авторские тесты на механизм, а не на контракт: смысл фичи — перенести
+    сборку сообщения ВНУТРЬ логгера, значит внутрь логгера переехало и её
+    падение. Первая редакция не ловила его вовсе, и исключение пробивалось в
+    вызывающий код — приложение падало на строчке логирования (найдено второй
+    итерацией ревью Ф1). Политика взята у соседнего пути ``apply_format``:
+    запись сохраняется, факт считается.
+    """
+
+    def test_raising_callable_does_not_escape(self, logger: LoggerManager) -> None:
+        def _boom() -> str:
+            raise RuntimeError("сборка упала")
+
+        before = logger.get_stats()["message_build_failures"]
+        logger.info(_boom, module="probe")  # НЕ должно бросить
+        after = logger.get_stats()
+
+        assert after["message_build_failures"] == before + 1
+        assert after["messages_skipped"] == logger.get_stats()["messages_skipped"]
+
+    def test_record_survives_with_a_visible_marker(self, logger: LoggerManager, tmp_path: Path) -> None:
+        """Запись не теряется: вместо текста — видимый след сбоя, а не тишина."""
+
+        def _boom() -> str:
+            raise RuntimeError("нет данных для строки")
+
+        logger.info(_boom, module="probe")
+        logger.flush()
+
+        text = (tmp_path / "a.log").read_text(encoding="utf-8")
+        assert "сборка сообщения упала" in text
+        assert "нет данных для строки" in text, "причина сбоя обязана попасть в запись"
+
+    def test_broken_str_on_non_callable_is_handled_too(self, logger: LoggerManager) -> None:
+        """Не-строка с падающим ``__str__`` — та же ветка, та же политика."""
+
+        class _Bad:
+            def __str__(self) -> str:
+                raise ValueError("__str__ упал")
+
+        before = logger.get_stats()["message_build_failures"]
+        logger.info(_Bad(), module="probe")
+
+        assert logger.get_stats()["message_build_failures"] == before + 1
+
+    def test_closed_gate_never_reaches_the_failure(self, logger: LoggerManager) -> None:
+        """Падающий callable при закрытом гейте не зовётся — счётчик молчит."""
+
+        def _boom() -> str:
+            raise RuntimeError("не должно быть вызвано")
+
+        before = logger.get_stats()["message_build_failures"]
+        logger.debug(_boom, module="probe")
+
+        assert logger.get_stats()["message_build_failures"] == before
+
+    def test_healthy_path_leaves_the_counter_at_zero(self, logger: LoggerManager) -> None:
+        """Страж от счётчика, который «работает» на всём подряд."""
+        logger.info(lambda: "нормальная строка", module="probe")
+        logger.info("обычная строка", module="probe")
+
+        assert logger.get_stats()["message_build_failures"] == 0
+
+
 class TestPercentArgs:
     def test_not_formatted_when_gate_closed(self, logger: LoggerManager) -> None:
         """1.4c — аргументы не приводятся к строке на отклонённой записи."""
