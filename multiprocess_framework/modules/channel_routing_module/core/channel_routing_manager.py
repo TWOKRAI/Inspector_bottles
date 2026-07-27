@@ -413,6 +413,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         channel = self._channel_registry.get(name)
         if channel is None:
             return False
+        self._on_channel_removed(channel)
         try:
             channel.close()
         except Exception as exc:  # noqa: BLE001 — закрытие best-effort, не должно валить disable
@@ -421,6 +422,19 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         if changed:
             self._on_channels_changed()
         return changed
+
+    def _on_channel_removed(self, channel: IChannel) -> None:
+        """Хук: КОНКРЕТНЫЙ канал покидает реестр (снят или пересобран).
+
+        Отличается от :meth:`_on_channels_changed` тем, что отдаёт сам уходящий
+        объект: наследнику может быть нужно забрать с него состояние, которое
+        иначе уйдёт вместе с ним. Реальный случай — счётчики потерь консоли
+        (R2): они живут на канале, а спрашивают их у менеджера, и снятие канала
+        обнуляло историю ровно в тот момент, когда её смотрят (во время
+        инцидента оператор как раз и жмёт ``sink.disable``).
+
+        База ничего не делает: не всякому каналу есть что отдавать.
+        """
 
     def _on_channels_changed(self) -> None:
         """Хук: состав каналов изменился в рантайме (Ф0.8).
@@ -551,6 +565,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
     def _close_all_channels(self) -> None:
         """Закрыть все каналы при shutdown."""
         for ch in self._channel_registry.clear():
+            self._on_channel_removed(ch)
             try:
                 ch.close()
             except Exception as e:

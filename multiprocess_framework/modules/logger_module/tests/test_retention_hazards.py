@@ -231,19 +231,23 @@ def test_disabled_retention_does_not_touch_the_filesystem(tmp_path: Path, monkey
     всех, кто фичу не включал.
     """
     _touch(tmp_path / "whatever.log", size_bytes=64, days_old=400)
-    walked: List[Any] = []
+    # Шпион стоит на ``os.stat`` — на ГРАНИЦЕ С ОС, а не на имени метода обхода.
+    # Прежняя версия следила за ``Path.rglob``, и ревью фазы это сломало: замена
+    # обхода на эквивалентный ``os.walk`` оставляла тест зелёным, хотя каталог
+    # обходился со stat на каждом файле — ровно та цена, от которой тест обязан
+    # защищать. Шпион на имя реализации охраняет имя, а не свойство.
+    stat_calls: List[Any] = []
+    original_stat = os.stat
 
-    original_rglob = Path.rglob
+    def _spy_stat(path, *args, **kwargs):  # noqa: ANN001 — сигнатура задана os.stat
+        stat_calls.append(path)
+        return original_stat(path, *args, **kwargs)
 
-    def _spy_rglob(self, pattern):  # noqa: ANN001 — сигнатура задана Path.rglob
-        walked.append(self)
-        return original_rglob(self, pattern)
-
-    monkeypatch.setattr(Path, "rglob", _spy_rglob)
+    monkeypatch.setattr(os, "stat", _spy_stat)
 
     enforce_log_retention(tmp_path)
 
-    assert walked == [], f"каталог обошли при выключенном ретеншене: {walked}"
+    assert stat_calls == [], f"файлы обошли со stat при выключенном ретеншене: {stat_calls[:5]}"
 
 
 # =============================================================================

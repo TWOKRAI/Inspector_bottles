@@ -181,6 +181,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # отказа статусом {"status": "error"} — тот учтён как flush_failed
             # буфера; здесь именно проглоченное исключение.
             "channel_write_errors": 0,
+            # Канал жив, но записи не принял (ответил status=error). Третий
+            # класс потери — отдельно от «канала нет» и «канал бросил»: они
+            # лечатся разным. Найдено ревью фазы: на прямом (небатченом) пути
+            # такой отказ не считал НИКТО.
+            "channel_refused_records": 0,
             # Ф0.7: результат чистки каталога логов (ключи — _RETENTION_STAT_KEYS).
             # Отдельно «удалили» и «не смогли удалить»: на Windows занятый файл
             # не удаляется, и молчащий ретеншен неотличим от работающего, если
@@ -192,8 +197,13 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # от self.stats: там только числа, здесь словари/множество.
         self._unresolved_channels: Dict[str, int] = {}
         self._channel_write_errors: Dict[str, int] = {}
+        self._channel_refused: Dict[str, int] = {}
         self._warned_unknown_channels: set = set()
         self._warned_write_error_channels: set = set()
+        self._warned_refused_channels: set = set()
+        # R2: счётчики потерь ушедших каналов. Живут на менеджере, потому что
+        # канал уносит свои с собой (см. _on_channel_removed).
+        self._absorbed_backpressure: Dict[str, int] = {}
         # Берётся ТОЛЬКО на пути потери (канала нет / write бросил), поэтому на
         # здоровом пути не стоит ничего. Без него два потока-эмитента и поток
         # таймера буфера теряют инкременты — счётчик потерь врал бы в меньшую
@@ -516,6 +526,23 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         """
         self._decision_cache.clear()
 
+    def _on_channel_removed(self, channel: Any) -> None:
+        """Забрать у уходящего канала его счётчики потерь (R2).
+
+        Иначе история теряется ровно в тот момент, когда её читают: разбирая
+        инцидент с консолью, оператор жмёт ``logger.sink.disable console`` — и
+        число отброшенных записей обнуляется вместе с каналом. Воспроизведено
+        ревью фазы: 7 → disable → 0.
+
+        Накопитель на менеджере складывается с живыми каналами в
+        :meth:`get_stats`, поэтому сумма монотонна и переживает и снятие
+        приёмника, и полный ``reconfigure``.
+        """
+        for key in _CHANNEL_BACKPRESSURE_KEYS:
+            value = getattr(channel, key, 0)
+            if value:
+                self._absorbed_backpressure[key] = self._absorbed_backpressure.get(key, 0) + value
+
     def _on_channels_changed(self) -> None:
         """Состав каналов изменился в рантайме → решение should_log больше не доверенное.
 
@@ -575,9 +602,13 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     def _count_channel_write_error(self, channel_name: str) -> None:
         """Учесть запись, потерянную из-за ИСКЛЮЧЕНИЯ в ``write()`` канала.
 
-        Отказ статусом (``{"status": "error"}``) сюда НЕ попадает: он честно
-        виден как разница «отдано минус принято» (``flush_failed`` буфера,
-        Ф0.3). Здесь — только то, что раньше молча съедал ``except: pass``.
+        Отказ статусом (``{"status": "error"}``) сюда НЕ попадает — у него свой
+        счётчик :meth:`_count_channel_refused`. Прежняя формулировка этого
+        docstring («отказ честно виден как разница отдано-минус-принято через
+        flush_failed буфера») была ВЕРНА ТОЛЬКО ДЛЯ БАТЧЕНОГО ПУТИ и оказалась
+        ровно тем неверным объяснением, из-за которого дыру на прямом пути
+        никто не искал: буфера там нет, а значит нет и разницы, которую можно
+        было бы увидеть.
         """
         with self._miss_lock:
             self.stats["channel_write_errors"] += 1
@@ -591,6 +622,30 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 "WARNING",
                 f"канал {channel_name!r} бросил исключение при записи — запись потеряна "
                 f"(дальше считаем молча, счётчик в get_stats['channel_write_errors_by_channel'])",
+            )
+
+    def _count_channel_refused(self, channel_name: str) -> None:
+        """Учесть запись, которую живой канал НЕ принял (ответил ``status=error``).
+
+        Третий, отдельный класс потери — рядом с «канала нет»
+        (``unresolved_channel_records``) и «канал бросил»
+        (``channel_write_errors``). Смешивать их нельзя: они лечатся разным.
+        «Канала нет» — опечатка в scopes или снятый sink; «бросил» — дефект
+        канала; «не принял» — сток жив, но отказывает (закрыт, переполнен,
+        консоль отброшена по пределу ожидания).
+        """
+        with self._miss_lock:
+            self.stats["channel_refused_records"] += 1
+            self._channel_refused[channel_name] = self._channel_refused.get(channel_name, 0) + 1
+            first_time = channel_name not in self._warned_refused_channels
+            if first_time:
+                self._warned_refused_channels.add(channel_name)
+
+        if first_time:
+            self._fallback_log(
+                "WARNING",
+                f"канал {channel_name!r} не принял запись (ответил отказом) — запись потеряна "
+                f"(дальше считаем молча, счётчик в get_stats['channel_refused_by_channel'])",
             )
 
     def _flush_batch(self, channel: str, batch: List[Dict]) -> int:
@@ -671,15 +726,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             if module_channel not in channels:
                 channels.append(module_channel)
 
-        # Приоритет снизу вверх: форточка log_context → база процесса →
-        # контекст потока → явный extra вызова. Каждый следующий слой знает
-        # больше про конкретную запись, поэтому и перекрывает предыдущий.
-        context = {
-            **log_context.get(),
-            **self._get_base_context(),
-            **self._get_thread_context(),
-            **extra,
-        }
+        context = self._build_context(extra)
 
         record = LogRecord(
             timestamp=time.time(),
@@ -813,14 +860,45 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "и пол ошибок тоже не смог записать (см. errors_floor_write_failures)",
         )
 
+    def _build_context(self, extra: Dict[str, Any]) -> Dict[str, Any]:
+        """Собрать ``extra`` записи из всех слоёв контекста — ЕДИНОЕ место сборки.
+
+        Приоритет снизу вверх: форточка ``log_context`` → база процесса
+        (:meth:`set_base_context`) → контекст потока (:meth:`push_context`) →
+        явный ``extra`` вызова. Каждый следующий слой знает больше про
+        конкретную запись, поэтому и перекрывает предыдущий.
+
+        Выделено в метод по находке ревью фазы (2026-07-27, воспроизведено
+        дважды двумя независимыми ревьюерами). Сборка была заинлайнена в
+        ``LoggerCore.log``, а severity-путь ``ErrorManager.log`` — полный
+        override — собирал свой ``extra`` руками и брал только потоковый слой.
+        Итог: на ГЛАВНОМ производственном пути ошибок терялись ``proc_name``
+        (ради которого Ф0.5 и вводила базу процесса) и вся форточка
+        ``log_context``. Класс дефекта — не разовый промах, а свойство
+        развилки: 0.4 зеркалили в двух местах, 0.9 в двух, tap'ы в двух, а
+        0.5 забыли. Пока развилка жива (её убирает Ф4.2), общее обязано
+        лежать в общем методе, а не копироваться.
+        """
+        return {
+            **log_context.get(),
+            **self._get_base_context(),
+            **self._get_thread_context(),
+            **extra,
+        }
+
     def _write_record_to_channels(self, record: LogRecord, channel_names: List[str]) -> int:
         """Записать запись напрямую в названные каналы (мимо буфера).
+
+        Принимает и ``LogRecord``, и уже готовый dict: severity-путь
+        ``ErrorManager`` строит запись сам и обязан идти сюда же, а не иметь
+        свою копию цикла (в его копии не считались ни отказ, ни отсутствие
+        канала — см. ``channel_refused_records``).
 
         Returns:
             Число каналов, принявших запись. Ноль означает «запись никуда не легла» —
             по этому признаку ``_write_error_record`` включает floor.
         """
-        record_dict = record.to_dict()
+        record_dict = record.to_dict() if isinstance(record, LogRecord) else record
         written = 0
         for ch_name in channel_names:
             ch = self._channel_registry.get(ch_name)
@@ -833,6 +911,16 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             try:
                 if _channel_accepted(ch.write(record_dict)):
                     written += 1
+                else:
+                    # Канал ЖИВ, но записи не принял (закрыт, консоль отброшена
+                    # по пределу ожидания R2, HTTP-сток ответил ошибкой). На
+                    # батченом пути такой отказ ловит flush_failed буфера, а на
+                    # прямом — не ловил НИКТО: для error/critical запись спасал
+                    # floor, а WARNING/INFO/DEBUG исчезали без единого следа.
+                    # Путь достижим из прод-конфига: enable_batching операбелен
+                    # из секции observability, то есть оператор мог выключить
+                    # батчинг и молча включить потери. Находка ревью фазы.
+                    self._count_channel_refused(ch_name)
             except Exception:  # noqa: BLE001 — сбой одного канала не должен съесть запись целиком; потеря учтена счётчиком
                 self._count_channel_write_error(ch_name)
         return written
@@ -1007,6 +1095,8 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             base_stats["unresolved_channels"] = dict(self._unresolved_channels)
             base_stats["channel_write_errors"] = self.stats["channel_write_errors"]
             base_stats["channel_write_errors_by_channel"] = dict(self._channel_write_errors)
+            base_stats["channel_refused_records"] = self.stats["channel_refused_records"]
+            base_stats["channel_refused_by_channel"] = dict(self._channel_refused)
             # Ф0.7: та же логика присутствия — ключи есть всегда, даже когда
             # ретеншен выключен. Нулевой ``retention_delete_failures`` при
             # ненулевом ``retention_files_deleted`` — «чистка работает»;
@@ -1014,12 +1104,22 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             for key in _RETENTION_STAT_KEYS:
                 base_stats[key] = self.stats[key]
 
-        # R2: обратное давление консоли живёт НА КАНАЛЕ (он один умеет измерить
-        # свою запись), но спрашивают о нём у менеджера. Суммируем по каналам
-        # вместо копии счётчика в менеджере: копия разъезжается при
-        # пересоздании канала, сумма — нет. Ключи присутствуют всегда, нулями.
+        # R2: обратное давление консоли измеряет КАНАЛ (только он видит свою
+        # запись), но спрашивают у менеджера — поэтому «живое с каналов» плюс
+        # «унесённое ушедшими каналами».
+        #
+        # Прежний комментарий здесь утверждал, что сумма по каналам, в отличие
+        # от копии счётчика, переживает пересоздание канала. Это НЕПРАВДА, и
+        # ревью фазы это воспроизвело: `console_writes_dropped=7` →
+        # `logger.sink.disable console` → readback 0. Канал уходит из реестра и
+        # уносит историю с собой — а `sink.disable`/`reconfigure` это ровно то,
+        # что делают ВО ВРЕМЯ инцидента, разбирая который эти числа и смотрят.
+        # Поэтому при снятии канала его счётчики переезжают в накопитель
+        # менеджера (см. `_absorb_channel_backpressure`), и наружу едет сумма
+        # «накоплено + живое». Ключи присутствуют всегда, нулями.
         for key in _CHANNEL_BACKPRESSURE_KEYS:
-            base_stats[key] = sum(getattr(ch, key, 0) for ch in self._channel_registry.all())
+            live = sum(getattr(ch, key, 0) for ch in self._channel_registry.all())
+            base_stats[key] = self._absorbed_backpressure.get(key, 0) + live
 
         if self._buffer:
             base_stats.update(

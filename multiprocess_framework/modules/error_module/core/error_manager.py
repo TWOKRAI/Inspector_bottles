@@ -255,7 +255,12 @@ class ErrorManager(LoggerCore, IErrorManager):
             scope=scope,
             message=message,
             module=module,
-            extra={**self._get_thread_context(), **extra},
+            # Общая сборка контекста, а не своя копия. Свою копия брала ТОЛЬКО
+            # потоковый слой — и главный производственный путь ошибок терял
+            # proc_name из базы процесса (ради которой Ф0.5 и делалась) и всю
+            # форточку log_context. Воспроизведено двумя независимыми
+            # ревьюерами фазы независимо друг от друга.
+            extra=self._build_context(extra),
         ).to_dict()
 
         # Tail логов (Task 1.5): severity-путь ErrorManager не зовёт super().log(),
@@ -273,12 +278,13 @@ class ErrorManager(LoggerCore, IErrorManager):
             self._buffer.enqueue(channel_name, record_dict)
             self.stats["messages_batched"] += 1
         else:
-            ch = self._channel_registry.get(channel_name)
-            if ch is not None:
-                try:
-                    ch.write(record_dict)
-                except Exception as e:
-                    self._fallback_log("ERROR", f"write to {channel_name} failed: {e}")
+            # Общий метод базы, а не своя копия цикла. В своей копии не считалось
+            # НИЧЕГО из трёх классов потери: канала нет — тихо; канал ответил
+            # отказом — тихо; канал бросил — только fallback-строка без счётчика.
+            # Путь достижим из прод-конфига (enable_batching операбелен из секции
+            # observability), то есть WARNING терялись молча по команде оператора.
+            # Находка ревью фазы, воспроизведена.
+            self._write_record_to_channels(record_dict, [channel_name])
 
     def _write_error_to_channel(self, channel_name: str, record_dict: Dict[str, Any]) -> None:
         """Синхронно записать error/critical в severity-канал; ноль → floor.
