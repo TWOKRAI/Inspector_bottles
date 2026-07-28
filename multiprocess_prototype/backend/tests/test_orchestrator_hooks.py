@@ -25,9 +25,9 @@ class _CaptureAssembler:
 
     last: dict = {}
 
-    def __init__(self, observability_dict: Any, log_dir: str = "logs", telemetry_dict: Any = None) -> None:
+    def __init__(self, observability_section: Any, log_dir: str = "logs", telemetry_dict: Any = None) -> None:
         _CaptureAssembler.last = {
-            "observability_dict": observability_dict,
+            "observability_section": observability_section,
             "log_dir": log_dir,
             "telemetry_dict": telemetry_dict,
         }

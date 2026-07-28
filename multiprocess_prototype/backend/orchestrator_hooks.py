@@ -47,8 +47,6 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
     # Lazy-импорты: prototype-символы, не нужные framework
     from pathlib import Path
 
-    from multiprocess_framework.modules.process_module.configs import expand_observability
-
     from multiprocess_prototype.backend.assembly import BlueprintAssembler, FullReplacePlanner
     from multiprocess_prototype.backend.assembly.normalize import normalize_blueprint
     from multiprocess_prototype.backend.config.schemas import SystemConfig
@@ -73,7 +71,9 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         discovered = app_discover(plugin_paths=plugin_paths, service_paths=[]).plugins_discovered
         orchestrator._log_info(f"[topology-engine] discover: {discovered} плагинов в PM-процессе")
 
-    obs_overlay = expand_observability(sys_config.observability.model_dump())
+    # Слой L1 — сырая секция system.yaml (exclude_unset: слой обязан уметь
+    # молчать, иначе рецепт нечем переопределять — см. launch.py, Task 5.12).
+    obs_section = sys_config.observability.model_dump(exclude_unset=True)
     log_dir = sys_config.system.log_dir or "logs"
 
     # PC 3.1 (hot-swap gap fix): прокинуть глобальный telemetry.publish в assembler —
@@ -85,7 +85,7 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
     telemetry_publish = sys_config.telemetry.publish
     telemetry_dict = telemetry_publish.model_dump() if telemetry_publish is not None else None
     assembler = BlueprintAssembler(
-        observability_dict=obs_overlay,
+        observability_section=obs_section,
         log_dir=log_dir,
         telemetry_dict=telemetry_dict,
     )

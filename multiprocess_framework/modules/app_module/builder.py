@@ -107,7 +107,7 @@ def default_blueprint_loader(manifest: "AppManifest") -> dict[str, Any]:
 def assemble_proc_dicts(
     blueprint: dict[str, Any],
     *,
-    observability_dict: dict[str, Any] | None = None,
+    observability_section: dict[str, Any] | None = None,
     log_dir: str = "logs",
 ) -> dict[str, dict[str, Any]]:
     """Universal-шов сборки: blueprint dict → ``{name: proc_dict}`` (E3/5.3, framework-only).
@@ -116,6 +116,14 @@ def assemble_proc_dicts(
     (per-category defaults применяются снаружи, если нужны):
     validate → infer_missing_inspectors → check → build_configs → log_dir →
     process → merge_managers → merge_with_defaults.
+
+    ``observability_section`` — СЫРАЯ секция слоя L1 (Task 5.12); слой L2 читается
+    из самого blueprint (``blueprint.observability``) и мержится поверх per-process.
+    Раскладка (``expand_observability``) делается здесь, а не снаружи: разложенный
+    снаружи L1 материализовал бы дефолты и стал бы неперебиваемым. Эта ветка —
+    generic-двойник прикладного ассемблера, и без слоёв здесь секция рецепта
+    молча не применялась бы ровно на тех приложениях, у которых своего
+    ассемблера нет.
 
     Raises:
         BlueprintError: ``SystemBlueprint.check`` вернул ошибки.
@@ -130,7 +138,16 @@ def assemble_proc_dicts(
     )
     from multiprocess_framework.modules.process_module.configs.managers_config import merge_managers
 
-    obs = observability_dict or {}
+    from multiprocess_framework.modules.process_module.configs.observability_config import (
+        expand_observability,
+    )
+    from multiprocess_framework.modules.process_module.configs.observability_layers import (
+        OVERRIDE_CONFIG_KEY,
+        ObservabilityLayers,
+        resolve_recipe_section,
+    )
+
+    app_layer = observability_section or {}
     topology = SystemBlueprint.model_validate(blueprint)
     topology.infer_missing_inspectors()
 
@@ -146,7 +163,20 @@ def assemble_proc_dicts(
     result: dict[str, dict[str, Any]] = {}
     for cfg in configs:
         name, proc_dict = process(cfg)
-        proc_dict["managers"] = merge_managers(proc_dict.get("managers", {}), obs)
+        obs_override = resolve_recipe_section(topology.observability, name)
+        layers = ObservabilityLayers(app=app_layer, recipe=obs_override)
+        resolved = layers.resolve()
+        # Оба слоя молчат → overlay НЕ накладывается вовсе. Это не микро-оптимизация:
+        # expand({}) — полный набор дефолтов L0, и он затёр бы уровень, пришедший
+        # в managers из INSPECTOR_LOG_LEVEL (managers_from_log_dir). Прежнее
+        # поведение этой ветки — «нет секции → managers не трогаем», сохраняем его.
+        if resolved:
+            proc_dict["managers"] = merge_managers(
+                proc_dict.get("managers", {}),
+                expand_observability(resolved),
+            )
+        if obs_override:
+            proc_dict["config"][OVERRIDE_CONFIG_KEY] = obs_override
         proc_dict = merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)
         result[name] = proc_dict
     return result
@@ -293,7 +323,9 @@ def _pickle_sanity(value: Any, *, hook_name: str) -> None:
     Raises:
         TypeError: значение не проходит ``pickle.dumps`` — сообщение называет хук.
     """
-    import pickle
+    # nosec B403 — только `dumps` собственного результата хука: проверка
+    # пиклябельности перед spawn, десериализации чужих данных здесь нет.
+    import pickle  # nosec B403
 
     try:
         pickle.dumps(value)

@@ -322,6 +322,21 @@ class SystemBlueprint(SchemaBase):
         FieldMeta("Связи", info="Межпроцессные связи между портами"),
     ] = []
 
+    # Task 5.12 — слой L2 «что верно для ЭТОГО конвейера».
+    # Форма: {"defaults": {...}, "processes": {"<имя>": {...}}} (короткая запись без
+    # defaults/processes трактуется как defaults целиком, см. resolve_recipe_section).
+    #
+    # Тип — СЫРОЙ dict, а не ObservabilityConfig, и это не лень: типизированная
+    # модель материализует дефолты, а слой обязан уметь МОЛЧАТЬ. После
+    # model_validate у рецепта появились бы все ключи схемы, «отсутствие =
+    # наследование снизу» исчезло бы, и любой рецепт стал бы владеть каждым
+    # ключом наблюдаемости. Валидация формы происходит ниже по потоку —
+    # в expand_observability, уже над РАЗРЕШЁННОЙ секцией.
+    observability: Annotated[
+        dict[str, Any] | None,
+        FieldMeta("Наблюдаемость рецепта", info="Слой L2: defaults + per-process переопределения"),
+    ] = None
+
     def infer_missing_inspectors(self) -> None:
         """Вывести inspector(join) из wires для процессов без явного inspector (Ф4.7).
 

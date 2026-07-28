@@ -28,6 +28,14 @@ from multiprocess_framework.modules.process_manager_module.launcher.schema impor
 from multiprocess_framework.modules.process_module.configs.managers_config import (
     merge_managers,
 )
+from multiprocess_framework.modules.process_module.configs.observability_config import (
+    expand_observability,
+)
+from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    OVERRIDE_CONFIG_KEY,
+    ObservabilityLayers,
+    resolve_recipe_section,
+)
 from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
     SystemBlueprint,
 )
@@ -50,13 +58,17 @@ class BlueprintAssembler:
     Параметры конструктора — контекст boot-сборки, которые нельзя вычислить
     из самого blueprint:
 
-    - ``observability_dict`` — уже развёрнутый overlay (``expand_observability``
-      делается снаружи). Применяется к ``proc_dict["managers"]`` каждого процесса.
+    - ``observability_section`` — СЫРАЯ секция ``observability`` из ``system.yaml``
+      (слой L1). Раскладка (``expand_observability``) делается ЗДЕСЬ и per-process,
+      поверх слоя L2 рецепта (``blueprint.observability``, Task 5.12). Сырой она
+      приходит намеренно: разложить L1 снаружи значило бы материализовать его
+      дефолты и лишить рецепт возможности их переопределить — слой, который
+      нельзя перебить, не слой.
     - ``log_dir`` — каталог логов, выставляется на ``cfg.log_dir`` если тот пуст
       (паритет с launch.py п.5: log_dir выставляется МЕЖДУ build_configs и process).
     - ``telemetry_dict`` (PC 1.3) — глобальный дефолт секции ``telemetry.publish``
       (``TelemetryPublishConfig``-форма: ``default_interval_sec`` + ``metrics``) ИЛИ
-      ``None``, если глобально не задан. **В отличие от** ``observability_dict`` —
+      ``None``, если глобально не задан. **В отличие от** ``observability_section`` —
       НЕ инжектится безусловно: ``proc_dict["config"]["telemetry"]`` появляется
       ТОЛЬКО когда телеметрия реально задана (этот параметр ИЛИ per-process
       ``blueprint.processes[].telemetry``). Нет ни того, ни другого → ключ
@@ -66,11 +78,11 @@ class BlueprintAssembler:
 
     def __init__(
         self,
-        observability_dict: dict[str, Any],
+        observability_section: dict[str, Any],
         log_dir: str = "logs",
         telemetry_dict: dict[str, Any] | None = None,
     ) -> None:
-        self._observability_dict = observability_dict
+        self._observability_section = observability_section or {}
         self._log_dir = log_dir
         self._telemetry_dict = telemetry_dict
 
@@ -86,7 +98,8 @@ class BlueprintAssembler:
         4. ``topology.build_configs()`` → список ``GenericProcessConfig``.
         5. Для каждого cfg: если ``cfg.log_dir`` пуст → ``cfg.log_dir = self._log_dir``.
         6. ``name, proc_dict = process(cfg)`` — framework-конвертер.
-        7. ``merge_managers(proc_dict["managers"], observability_dict)``.
+        7. ``merge_managers(proc_dict["managers"], expand_observability(L1 → L2))``
+           (Task 5.12) + сырая L2-дельта в ``config['observability_override']``.
         8. PC 1.3: ``proc_dict["config"]["telemetry"]`` — ТОЛЬКО если задано (глобально
            через ``telemetry_dict`` конструктора ИЛИ per-process
            ``blueprint.processes[].telemetry``), см. ``_resolve_telemetry``.
@@ -129,13 +142,28 @@ class BlueprintAssembler:
             if not cfg.log_dir:
                 cfg.log_dir = self._log_dir
 
+        # Task 5.12: слой L2 — сырая секция рецепта. None ≠ {}: «рецепт молчит»
+        # против «рецепт задал пустую секцию» (второе безвредно, но различие
+        # сохраняем — на нём держится provenance).
+        recipe_observability = topology.observability
+
         result: dict[str, dict[str, Any]] = {}
         for cfg in configs:
             name, proc_dict = process(cfg)
+            # Раскладка per-process: L1 (system.yaml) → L2 (рецепт: defaults +
+            # processes[name]). L0 подставит expand_observability валидацией.
+            obs_override = resolve_recipe_section(recipe_observability, name)
+            layers = ObservabilityLayers(app=self._observability_section, recipe=obs_override)
             proc_dict["managers"] = merge_managers(
                 proc_dict.get("managers", {}),
-                self._observability_dict,
+                expand_observability(layers.resolve()),
             )
+            # Сырая L2-дельта хранится ОТДЕЛЬНО (точный аналог telemetry_override):
+            # файловый фолбэк `config.reload` читает system.yaml и знает только L1 —
+            # без сохранённой дельты он пересобрал бы конфиг БЕЗ рецепта, и boot
+            # разошёлся бы с reload. Ключ появляется только у процессов с дельтой.
+            if obs_override:
+                proc_dict["config"][OVERRIDE_CONFIG_KEY] = obs_override
             override = per_process_telemetry.get(name)
             telemetry_section = self._resolve_telemetry(override)
             if telemetry_section is not None:

@@ -71,6 +71,17 @@ def unwrap_recipe(raw: dict) -> dict:
     # display_definitions — list[dict] (Dict-at-Boundary, НЕ Pydantic).
     if raw.get("displays"):
         bp["display_definitions"] = list(raw["displays"])
+    # Task 5.12: слой L2 живёт на ВЕРХНЕМ уровне рецепта — рядом с displays, а не
+    # внутри blueprint: человек пишет «наблюдаемость этого конвейера», а не «узел
+    # графа». Без подъёма секция молча терялась бы здесь, и рецепт выглядел бы
+    # настроенным, ничего не настраивая — ровно класс уже пойманной ловушки
+    # `inspector` под `metadata`. Вложенная (blueprint.observability) побеждает
+    # верхнеуровневую поключевым merge: правило «частное поверх общего» то же,
+    # что у всех остальных слоёв, и ни один ключ не пропадает молча.
+    if raw.get("observability") is not None:
+        from multiprocess_framework.modules.data_schema_module import deep_merge
+
+        bp["observability"] = deep_merge(raw["observability"] or {}, bp.get("observability") or {})
     return bp
 
 
@@ -143,7 +154,22 @@ def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:
         merged["display_definitions"] = merged_defs
     if merged_metadata:
         merged["metadata"] = merged_metadata
+    # Task 5.12: слой L2 суммируется как metadata — pipeline поверх фундамента.
+    # Без этой строки секция, поднятая unwrap_recipe, терялась бы ровно на
+    # паре «фундамент + pipeline», то есть на штатной раскладке прототипа.
+    merged_obs = _merge_observability(base_dict.get("observability"), pipeline_dict.get("observability"))
+    if merged_obs is not None:
+        merged["observability"] = merged_obs
     return merged
+
+
+def _merge_observability(base: dict | None, pipeline: dict | None) -> dict | None:
+    """Слить секции ``observability`` фундамента и pipeline (pipeline побеждает)."""
+    if base is None and pipeline is None:
+        return None
+    from multiprocess_framework.modules.data_schema_module import deep_merge
+
+    return deep_merge(base or {}, pipeline or {})
 
 
 def _resolve_pipeline(app: "AppManifest", override: str | None) -> Path:
@@ -315,7 +341,6 @@ class SystemBuilder:
         from multiprocess_framework.modules.process_manager_module.launcher import (
             assemble_launcher,
         )
-        from multiprocess_framework.modules.process_module.configs import expand_observability
         from multiprocess_prototype.backend.state.bootstrap import build_initial_state
         from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
 
@@ -355,10 +380,15 @@ class SystemBuilder:
 
         _os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
 
-        # Единая секция observability → overlay поверх дефолтных managers каждого
-        # процесса (Logger/Error/Stats). Фреймворк уже даёт полный набор менеджеров;
-        # overlay лишь применяет пользовательские значения из system.yaml.
-        obs_overlay = expand_observability(sys_config.observability.model_dump())
+        # Слой L1 — секция observability из system.yaml, СЫРАЯ. Раскладку делает
+        # assembler per-process, поверх слоя L2 рецепта (Task 5.12).
+        #
+        # `exclude_unset=True` — не оптимизация, а условие существования слоёв:
+        # полный model_dump() материализует ВСЕ дефолты схемы, и L1 начинает
+        # владеть каждым ключом наблюдаемости. Тогда «в рецепте нет — подтянется
+        # дефолтный» превращается в «дефолт фреймворка недостижим», а provenance
+        # никогда не отвечает `framework`. Слой обязан уметь молчать.
+        obs_section = sys_config.observability.model_dump(exclude_unset=True)
 
         # PC 1.3: глобальный дефолт telemetry.publish → assembler (per-process
         # override живёт в самом blueprint, assembler читает его сам). None, если
@@ -371,7 +401,7 @@ class SystemBuilder:
         # (validate → check → build_configs → log_dir → process → merge_managers →
         # merge_with_defaults).  Невалидный blueprint → BlueprintInvalid (не sys.exit).
         assembler = BlueprintAssembler(
-            observability_dict=obs_overlay,
+            observability_section=obs_section,
             log_dir=log_dir,
             telemetry_dict=telemetry_dict,
         )

@@ -26,6 +26,9 @@ from multiprocess_framework.modules.process_manager_module.launcher.schema impor
     DEFAULT_PROCESS_SCHEMA,
 )
 from multiprocess_framework.modules.process_module.configs import expand_observability
+from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    ObservabilityLayers,
+)
 from multiprocess_framework.modules.process_module.configs.managers_config import (
     merge_managers,
 )
@@ -89,7 +92,8 @@ _MULTI_PROCESS_BLUEPRINT: dict = {
 }
 
 # Observability overlay для тестов (типичная структура).
-_OBS_OVERLAY: dict = expand_observability({"log_level": "DEBUG"})
+_OBS_SECTION: dict = {"log_level": "DEBUG"}
+_OBS_OVERLAY: dict = expand_observability(_OBS_SECTION)
 
 
 def _build_reference_road_a(
@@ -137,7 +141,7 @@ class TestRoadAParity:
         reference = _build_reference_road_a(bp, _OBS_OVERLAY)
 
         bp2 = copy.deepcopy(_MINIMAL_BLUEPRINT)
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir="logs")
         actual = assembler.assemble(bp2)
 
         assert actual == reference
@@ -148,7 +152,7 @@ class TestRoadAParity:
         reference = _build_reference_road_a(bp, _OBS_OVERLAY)
 
         bp2 = copy.deepcopy(_MULTI_PROCESS_BLUEPRINT)
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir="logs")
         actual = assembler.assemble(bp2)
 
         assert actual == reference
@@ -164,20 +168,20 @@ class TestRoadAParity:
         reference = _build_reference_road_a(bp, _OBS_OVERLAY, log_dir=custom_log_dir)
 
         bp2 = copy.deepcopy(_MINIMAL_BLUEPRINT)
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir=custom_log_dir)
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir=custom_log_dir)
         actual = assembler.assemble(bp2)
 
         assert actual == reference
 
     def test_process_names_match(self) -> None:
         """Ключи результата == имена процессов из topology."""
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY)
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION)
         result = assembler.assemble(copy.deepcopy(_MULTI_PROCESS_BLUEPRINT))
         assert set(result.keys()) == {"camera_0", "processor", "renderer"}
 
     def test_merge_with_defaults_applied(self) -> None:
         """merge_with_defaults применён: обязательные ключи заполнены."""
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY)
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION)
         result = assembler.assemble(copy.deepcopy(_MINIMAL_BLUEPRINT))
 
         proc_dict = result["worker_a"]
@@ -186,8 +190,7 @@ class TestRoadAParity:
 
     def test_observability_overlay_applied(self) -> None:
         """Observability overlay применён к managers каждого процесса."""
-        obs = expand_observability({"log_level": "WARNING"})
-        assembler = BlueprintAssembler(observability_dict=obs)
+        assembler = BlueprintAssembler(observability_section={"log_level": "WARNING"})
         result = assembler.assemble(copy.deepcopy(_MINIMAL_BLUEPRINT))
 
         proc_dict = result["worker_a"]
@@ -209,14 +212,14 @@ class TestPurity:
         original = copy.deepcopy(_MINIMAL_BLUEPRINT)
         snapshot = copy.deepcopy(original)
 
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY)
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION)
         assembler.assemble(original)
 
         assert original == snapshot, "assemble мутировал входной dict"
 
     def test_deterministic(self) -> None:
         """Повторный вызов с тем же входом даёт идентичный результат."""
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY)
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION)
         result_1 = assembler.assemble(copy.deepcopy(_MINIMAL_BLUEPRINT))
         result_2 = assembler.assemble(copy.deepcopy(_MINIMAL_BLUEPRINT))
         assert result_1 == result_2
@@ -240,7 +243,7 @@ class TestValidation:
             ],
             "wires": [],
         }
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY)
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION)
         with pytest.raises(BlueprintInvalid) as exc_info:
             assembler.assemble(bp)
         assert len(exc_info.value.errors) > 0
@@ -256,7 +259,7 @@ class TestValidation:
             ],
             "wires": [],
         }
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY)
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION)
         with pytest.raises(BlueprintInvalid) as exc_info:
             assembler.assemble(bp)
         assert isinstance(exc_info.value.errors, list)
@@ -308,7 +311,7 @@ class TestTelemetryOverlay:
     def test_no_telemetry_anywhere_no_key_injected(self) -> None:
         """Нет telemetry_dict в конструкторе И нет per-process override → ключ 'telemetry'
         отсутствует НИ В ОДНОМ proc_dict (critical для PC 1.2: TelemetryGate=None)."""
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir="logs")
         result = assembler.assemble(copy.deepcopy(_MULTI_PROCESS_BLUEPRINT))
 
         for name, proc_dict in result.items():
@@ -319,7 +322,7 @@ class TestTelemetryOverlay:
     def test_global_default_applied_to_all_processes(self) -> None:
         """Глобальный telemetry_dict → ВСЕ proc_dict получают одинаковую секцию telemetry."""
         assembler = BlueprintAssembler(
-            observability_dict=_OBS_OVERLAY,
+            observability_section=_OBS_SECTION,
             log_dir="logs",
             telemetry_dict=_TELEMETRY_GLOBAL,
         )
@@ -332,7 +335,7 @@ class TestTelemetryOverlay:
         """Per-process override перекрывает ТОЛЬКО свою метрику; у других процессов —
         global без изменений (регресс-тест на merge-семантику)."""
         assembler = BlueprintAssembler(
-            observability_dict=_OBS_OVERLAY,
+            observability_section=_OBS_SECTION,
             log_dir="logs",
             telemetry_dict=_TELEMETRY_GLOBAL,
         )
@@ -352,7 +355,7 @@ class TestTelemetryOverlay:
     def test_per_process_only_no_global(self) -> None:
         """Нет глобального telemetry_dict, но у ОДНОГО процесса есть override →
         telemetry-ключ появляется ТОЛЬКО у него."""
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir="logs")
         result = assembler.assemble(copy.deepcopy(_TELEMETRY_OVERRIDE_BLUEPRINT))
 
         assert "telemetry" not in result["camera_0"]["config"]
@@ -363,7 +366,7 @@ class TestTelemetryOverlay:
         """Task 2.2: сырая per-process дельта рецепта → config['telemetry_override'] ТОЛЬКО
         у процессов с override (нужна config.reload из файла для восстановления overlay)."""
         assembler = BlueprintAssembler(
-            observability_dict=_OBS_OVERLAY,
+            observability_section=_OBS_SECTION,
             log_dir="logs",
             telemetry_dict=_TELEMETRY_GLOBAL,
         )
@@ -379,7 +382,7 @@ class TestTelemetryOverlay:
         """Только глобальный telemetry_dict (нет per-process) → telemetry_override нигде
         (характеризация: процессы без override — бит-в-бит прежний proc_dict)."""
         assembler = BlueprintAssembler(
-            observability_dict=_OBS_OVERLAY,
+            observability_section=_OBS_SECTION,
             log_dir="logs",
             telemetry_dict=_TELEMETRY_GLOBAL,
         )
@@ -396,7 +399,7 @@ class TestTelemetryOverlay:
         bp = copy.deepcopy(_MINIMAL_BLUEPRINT)
         bp["processes"][0]["telemetry"] = {}
         # Глобального telemetry_dict нет — заданность обеспечивает ТОЛЬКО пустой override.
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir="logs")
         result = assembler.assemble(bp)
 
         assert "telemetry" in result["worker_a"]["config"], (
@@ -410,7 +413,7 @@ class TestTelemetryOverlay:
         bp = copy.deepcopy(_MINIMAL_BLUEPRINT)
         bp["processes"][0]["telemetry"] = {"default_interval_sec": 5.0}
         assembler = BlueprintAssembler(
-            observability_dict=_OBS_OVERLAY,
+            observability_section=_OBS_SECTION,
             log_dir="logs",
             telemetry_dict=_TELEMETRY_GLOBAL,
         )
@@ -427,7 +430,7 @@ class TestTelemetryOverlay:
         snapshot = copy.deepcopy(original)
 
         assembler = BlueprintAssembler(
-            observability_dict=_OBS_OVERLAY,
+            observability_section=_OBS_SECTION,
             log_dir="logs",
             telemetry_dict=_TELEMETRY_GLOBAL,
         )
@@ -439,7 +442,7 @@ class TestTelemetryOverlay:
         """Повторные assemble() не мутируют _TELEMETRY_GLOBAL, переданный в конструктор."""
         snapshot = copy.deepcopy(_TELEMETRY_GLOBAL)
         assembler = BlueprintAssembler(
-            observability_dict=_OBS_OVERLAY,
+            observability_section=_OBS_SECTION,
             log_dir="logs",
             telemetry_dict=_TELEMETRY_GLOBAL,
         )
@@ -453,7 +456,7 @@ class TestTelemetryOverlay:
         отдаёт ту же секцию, что собрал assembler (путь, которым реально читает heartbeat,
         см. process_heartbeat.py::_build_telemetry_gate → get_config('telemetry'))."""
         assembler = BlueprintAssembler(
-            observability_dict=_OBS_OVERLAY,
+            observability_section=_OBS_SECTION,
             log_dir="logs",
             telemetry_dict=_TELEMETRY_GLOBAL,
         )
@@ -468,7 +471,7 @@ class TestTelemetryOverlay:
     def test_get_config_telemetry_none_when_not_configured(self) -> None:
         """Backward-compat через тот же путь: без секции нигде get_config('telemetry')
         отдаёт default (None) — heartbeat трактует это как «гейт неактивен»."""
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir="logs")
         result = assembler.assemble(copy.deepcopy(_MINIMAL_BLUEPRINT))
 
         handler = ProcessConfigHandler("worker_a", config=result["worker_a"]["config"])
@@ -609,7 +612,7 @@ class TestJoinFromWires:
         for cls in (_CircleDetector, _LineFilter, _OverlayDraw):
             PluginRegistry.register(name=cls.name, plugin_class=cls, category=cls.category)
 
-        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY)
+        assembler = BlueprintAssembler(observability_section=_OBS_SECTION)
         result = assembler.assemble(copy.deepcopy(_JOIN_BLUEPRINT))
 
         inspector = result["draw"]["config"]["inspector"]
@@ -617,3 +620,90 @@ class TestJoinFromWires:
         assert inspector["mode"] != "fanin"
         assert sorted(inspector["inputs"]) == ["frame", "overlay"]
         assert inspector["primary"] == "frame"
+
+
+# ---------------------------------------------------------------------------
+# Task 5.12 — слой L2 (рецепт) поверх L1 (system.yaml)
+# ---------------------------------------------------------------------------
+
+_L2_BLUEPRINT: dict = {
+    **_MULTI_PROCESS_BLUEPRINT,
+    "observability": {
+        "defaults": {"log_level": "WARNING"},
+        "processes": {"camera_0": {"channels": {"messages_file": {"enabled": False}}}},
+    },
+}
+
+
+class TestObservabilityLayers:
+    """L2 рецепта применяется к managers, хранится сырым и не задевает соседей."""
+
+    def test_recipe_defaults_beat_app_layer(self) -> None:
+        """L1 говорит DEBUG, рецепт — WARNING: у менеджеров должен оказаться WARNING."""
+        assembler = BlueprintAssembler(observability_section={"log_level": "DEBUG"}, log_dir="logs")
+        result = assembler.assemble(copy.deepcopy(_L2_BLUEPRINT))
+
+        for name in ("camera_0", "processor", "renderer"):
+            assert result[name]["managers"]["logger"]["default_level"] == "WARNING", name
+
+    def test_app_layer_survives_where_recipe_is_silent(self) -> None:
+        """Ключ, о котором рецепт молчит, наследуется снизу — а не пересобирается из L0."""
+        assembler = BlueprintAssembler(
+            observability_section={"log_level": "DEBUG", "enable_batching": False},
+            log_dir="logs",
+        )
+        result = assembler.assemble(copy.deepcopy(_L2_BLUEPRINT))
+
+        logger_cfg = result["processor"]["managers"]["logger"]
+        assert logger_cfg["default_level"] == "WARNING"  # рецепт
+        assert logger_cfg["enable_batching"] is False  # system.yaml, рецепт молчит
+
+    def test_per_process_override_does_not_touch_neighbours(self) -> None:
+        """Пара: правка camera_0 в рецепте — сосед бит-в-бит без неё."""
+        assembler = BlueprintAssembler(observability_section={}, log_dir="logs")
+        result = assembler.assemble(copy.deepcopy(_L2_BLUEPRINT))
+
+        camera_channels = result["camera_0"]["managers"]["logger"]["channels"]
+        assert camera_channels["messages_file"]["enabled"] is False
+
+        neighbour_channels = result["renderer"]["managers"]["logger"]["channels"]
+        assert neighbour_channels["messages_file"]["enabled"] is True
+
+    def test_raw_delta_stored_only_for_processes_the_recipe_mentions(self) -> None:
+        """Зеркало telemetry_override: сырая L2-дельта нужна файловому config.reload.
+
+        Без неё reload читает только system.yaml и пересобирает конфиг БЕЗ рецепта —
+        boot ≠ reload, и настройка конвейера молча исчезает при первой перезагрузке.
+        """
+        assembler = BlueprintAssembler(observability_section={}, log_dir="logs")
+        result = assembler.assemble(copy.deepcopy(_L2_BLUEPRINT))
+
+        assert result["camera_0"]["config"]["observability_override"] == {
+            "log_level": "WARNING",
+            "channels": {"messages_file": {"enabled": False}},
+        }
+        # defaults рецепта — тоже L2: он есть у всех процессов рецепта.
+        assert result["renderer"]["config"]["observability_override"] == {"log_level": "WARNING"}
+
+    def test_no_recipe_section_means_no_key_at_all(self) -> None:
+        """Рецепт без observability → процессы бит-в-бит прежние (ключа нет)."""
+        assembler = BlueprintAssembler(observability_section={"log_level": "DEBUG"}, log_dir="logs")
+        result = assembler.assemble(copy.deepcopy(_MULTI_PROCESS_BLUEPRINT))
+
+        for name, proc_dict in result.items():
+            assert "observability_override" not in proc_dict["config"], name
+            assert proc_dict["managers"]["logger"]["default_level"] == "DEBUG", name
+
+    def test_boot_result_equals_expand_of_resolved_layers(self) -> None:
+        """boot ≡ раскладка резолвнутых слоёв — якорь для пары «boot ≡ reload»."""
+        app = {"log_level": "DEBUG", "enable_batching": False}
+        assembler = BlueprintAssembler(observability_section=app, log_dir="logs")
+        result = assembler.assemble(copy.deepcopy(_L2_BLUEPRINT))
+
+        override = result["camera_0"]["config"]["observability_override"]
+        expected = expand_observability(ObservabilityLayers(app=app, recipe=override).resolve())
+        reference = merge_managers(
+            _build_reference_road_a(copy.deepcopy(_L2_BLUEPRINT), {})["camera_0"]["managers"],
+            expected,
+        )
+        assert result["camera_0"]["managers"]["logger"] == reference["logger"]
