@@ -263,3 +263,102 @@ class TestPlanesWithoutDeclarativeChannels:
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+class TestProvenanceInIntrospect:
+    """«Почему у меня INFO» — вопрос, на который ответ обязан быть в команде."""
+
+    @staticmethod
+    def _svc_with_layers(tmp_path):
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="prov", log_directory=str(tmp_path), enable_batching=False)
+        )
+        svc = _Svc(
+            logger,
+            config={
+                APP_CONFIG_KEY: {"enable_batching": False},
+                OVERRIDE_CONFIG_KEY: {"log_level": "WARNING"},
+                "observability_config_path": "system.yaml",
+            },
+        )
+        bc = BuiltinCommands(svc)
+        bc._register_introspect_commands()
+        bc._register_observability_commands()
+        return svc, logger
+
+    def test_all_four_layers_are_named(self, tmp_path) -> None:
+        svc, logger = self._svc_with_layers(tmp_path)
+        try:
+            svc.command_manager.handlers["logger.sink.disable"]({"sink": "messages_file"})
+            res = svc.command_manager.handlers["introspect.observability"]({})
+            prov = res["provenance"]
+
+            assert prov["enable_batching"] == {"layer": "app", "source": "system.yaml"}
+            assert prov["log_level"]["layer"] == "recipe"
+            assert prov["channels.messages_file.enabled"]["layer"] == "session"
+            # Ключ, которого не назвал никто — дефолт фреймворка, а не пустота.
+            assert prov["retention_days"] == {"layer": "framework", "source": "framework"}
+        finally:
+            logger.shutdown()
+
+    def test_materialized_channels_and_scopes_are_covered(self, tmp_path) -> None:
+        """Имена каналов/скоупов рождаются после раскладки — объяснение всё равно есть."""
+        svc, logger = self._svc_with_layers(tmp_path)
+        try:
+            res = svc.command_manager.handlers["introspect.observability"]({})
+            prov = res["provenance"]
+            live_channels = list(logger.config.channels)
+            live_scopes = list(logger.config.scopes)
+            assert live_channels and live_scopes
+            for name in live_channels:
+                assert f"channels.{name}.enabled" in prov, name
+            for name in live_scopes:
+                assert f"scopes.{name}.min_level" in prov, name
+        finally:
+            logger.shutdown()
+
+    def test_session_content_is_reported(self, tmp_path) -> None:
+        svc, logger = self._svc_with_layers(tmp_path)
+        try:
+            svc.command_manager.handlers["logger.sink.disable"]({"sink": "messages_file"})
+            res = svc.command_manager.handlers["introspect.observability"]({})
+            assert res["layers"]["session_keys"] == ["channels.messages_file.enabled"]
+            assert res["layers"]["app_source"] == "system.yaml"
+        finally:
+            logger.shutdown()
+
+    def test_introspect_does_not_mutate(self, tmp_path) -> None:
+        """Read-команда: два подряд вызова дают одно и то же и ничего не трогают."""
+        svc, logger = self._svc_with_layers(tmp_path)
+        try:
+            handlers = svc.command_manager.handlers
+            before = handlers["introspect.observability"]({})["effective"]
+            after = handlers["introspect.observability"]({})["effective"]
+            assert before == after
+            assert process_observability_layers(svc).session == {}
+        finally:
+            logger.shutdown()
+
+
+class TestSwitchClearsTheSession:
+    """switch = новый конвейер = новая сессия (иначе лоскутное состояние)."""
+
+    def test_session_clear_drops_everything_and_names_it(self, wired) -> None:
+        svc, handlers, _ = wired
+        handlers["logger.sink.disable"]({"sink": "messages_file"})
+        handlers["config.reload"]({"observability": {"log_level": "DEBUG"}})
+
+        res = handlers["config.reload"]({"observability_session_clear": True})
+        assert res["success"] is True
+        assert sorted(res["reset"]) == ["channels.messages_file.enabled", "log_level"]
+        assert res["session_keys"] == []
+        # И это не «забыли применить»: приёмник вернулся, уровень откатился.
+        assert "messages_file" in _active(svc)
+        assert res["effective"]["logger"]["default_level"] != "DEBUG"
+
+    def test_clear_on_an_empty_session_is_a_quiet_no_op(self, wired) -> None:
+        svc, handlers, _ = wired
+        res = handlers["config.reload"]({"observability_session_clear": True})
+        assert res["success"] is True
+        assert res["session_keys"] == []
+        assert "reset" not in res

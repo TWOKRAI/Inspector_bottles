@@ -718,3 +718,35 @@ class TestCmdTopologyApplyRouting:
         pm = make_pm()
         result = pm._cmd_topology_apply({})
         assert "error" in result
+
+
+class TestObservabilitySessionResetOnSwitch:
+    """Task 5.12: switch = новая сессия наблюдаемости у ВСЕХ, а не у пересозданных."""
+
+    def test_apply_reports_the_reset_and_clears_its_own_layer(self) -> None:
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            process_observability_layers,
+        )
+
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        layers = process_observability_layers(pm)
+        layers.session_set("log_level", "DEBUG")
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True
+        reset = result["observability_session_reset"]
+        # Свои ключи PM называет поимённо — он их знает.
+        assert reset["orchestrator"] == ["log_level"]
+        assert layers.session == {}
+        # Ключи детей PM не выдумывает: рассылка fire-and-forget, в ответе — охват.
+        assert "broadcast_reached" in reset
+
+    def test_reset_is_broadcast_to_children(self) -> None:
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        sent: list = []
+        pm._broadcast_command = lambda command, data, **kw: sent.append((command, data)) or 1
+
+        pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert ("config.reload", {"observability_session_clear": True}) in sent

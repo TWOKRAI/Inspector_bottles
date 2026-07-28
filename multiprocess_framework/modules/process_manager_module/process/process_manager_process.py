@@ -1374,6 +1374,45 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"_replay_telemetry_runtime_delta({reason}) упал: {exc}")
             return 0
 
+    def _reset_observability_sessions(self, reason: str) -> dict:
+        """Обнулить слой сессии наблюдаемости (L3) у себя и у всех живых детей.
+
+        Switch рецепта — это новый конвейер, а L3 отвечает на вопрос «что я кручу
+        руками ПРЯМО СЕЙЧАС». Пережившая switch ручка отвечала бы на него про
+        прошлый конвейер. Хуже того, пережила бы она НЕ у всех: protected-процессы
+        не перезапускаются и сохранили бы L3, пересозданные стартуют чистыми — и
+        ``introspect.observability`` соседей начал бы врать по-разному.
+
+        **Что здесь честно, а что нет.** Свои ключи PM называет поимённо — он их
+        знает. Ключи детей он НЕ собирает: ``_broadcast_command`` — fire-and-forget,
+        а собирать N ответов внутри ``topology.apply`` значит ждать в потоке, где
+        уже ловили дедлоки. Поэтому в ответе — охват рассылки, а не выдуманный
+        список: проверяемое утверждение «после switch у всех пусто» доказывается
+        опросом ``introspect.observability``, не эхом этой команды.
+        """
+        own: list = []
+        try:
+            from ...process_module.configs.observability_layers import (
+                process_observability_layers,
+            )
+
+            own = list(process_observability_layers(self).session_clear())
+        except Exception as exc:  # noqa: BLE001 — сброс не имеет права ронять switch
+            self._log_error(f"_reset_observability_sessions({reason}): свой L3 не сброшен: {exc}")
+
+        reached = 0
+        try:
+            reached = self._broadcast_command("config.reload", {"observability_session_clear": True})
+        except Exception as exc:  # noqa: BLE001
+            self._log_error(f"_reset_observability_sessions({reason}): рассылка не удалась: {exc}")
+
+        if own or reached:
+            self._log_info(
+                f"[observability] слой сессии сброшен ({reason}): свои ключи={own or '—'}, "
+                f"рассылка детям reached={reached}"
+            )
+        return {"orchestrator": own, "broadcast_reached": int(reached)}
+
     def _broadcast_command(self, command: str, data: dict, *, queue_type: str = "system") -> int:
         """Единый примитив рассылки command-билета всем детям (Ф3.1 / PC 3.3).
 
@@ -2377,6 +2416,13 @@ class ProcessManagerProcess(ProcessModule):
                 # Task 3.2: доиграть сохранённую runtime telemetry-дельту пересозданным
                 # детям — runtime-состояние publisher-gate ≡ до свитча (не boot-дефолт).
                 self._replay_telemetry_runtime_delta("topology.apply")
+                # Task 5.12: наблюдаемость — НАОБОРОТ. Телеметрия доигрывается (её
+                # runtime-дельта переживает switch намеренно), а слой сессии
+                # наблюдаемости обнуляется: switch = новый конвейер = новая сессия.
+                # Асимметрия осознанная — у телеметрии PM хранит дельту централизованно
+                # и может её честно восстановить всем, а L3 живёт у каждого процесса
+                # свой; «восстановить частично» дало бы лоскутное состояние.
+                response["observability_session_reset"] = self._reset_observability_sessions("topology.apply")
                 return response
 
             except Exception as exc:

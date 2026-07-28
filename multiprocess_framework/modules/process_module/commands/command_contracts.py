@@ -124,6 +124,8 @@ class ConfigReloadParams(BaseModel):
     telemetry_mode: Optional[str] = None
     # Task 5.12 — ключи, которые надо УДАЛИТЬ из слоя сессии (L3).
     observability_reset: Optional[List[str]] = None
+    # switch рецепта: обнулить слой сессии целиком (инициатор не знает его состава).
+    observability_session_clear: Optional[bool] = None
     path: Optional[str] = None
 
 

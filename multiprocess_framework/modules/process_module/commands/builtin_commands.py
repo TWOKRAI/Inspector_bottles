@@ -699,24 +699,39 @@ class BuiltinCommands:
           - ``effective`` — readback конфигурации (пороги скоупов, каталог, активные
             каналы). Та же функция, что отдаёт readback у ``config.reload``;
           - ``counters`` — потери: ``buffer.pending`` / ``buffer.dropped_by_channel``
-            (медленный сток) и ``errors_to_floor`` (ошибка не дошла ни до одного канала).
+            (медленный сток) и ``errors_to_floor`` (ошибка не дошла ни до одного канала);
+          - ``provenance`` (Task 5.12) — слой-победитель у КАЖДОГО действующего ключа:
+            ``framework`` | ``app`` | ``recipe`` | ``session``, с конкретным файлом-
+            источником там, где он известен. Четыре слоя без ответа на «почему у меня
+            INFO» превращают отладку в полдня — поэтому это не украшение секции, а
+            условие, при котором слои вообще имеет смысл вводить;
+          - ``layers`` — что именно держит сессия (L3) прямо сейчас.
 
-        Не мутирует состояние: только чтение живых менеджеров.
+        Не мутирует состояние: только чтение живых менеджеров и стека слоёв.
         """
+        from ..configs.observability_layers import process_observability_layers
         from ..managers.observability_reload import (
             observability_counters,
             observability_effective,
+            observability_provenance,
         )
 
         svc = self._services
         logger = getattr(svc, "logger_manager", None)
         error = getattr(svc, "error_manager", None)
         stats = getattr(svc, "stats_manager", None)
+        layers = process_observability_layers(svc)
         return {
             "success": True,
             "process": svc.name,
             "effective": observability_effective(logger=logger, error=error, stats=stats),
             "counters": observability_counters(logger=logger, error=error, stats=stats),
+            "provenance": observability_provenance(layers, logger=logger),
+            "layers": {
+                "session_keys": list(layers.session_keys()),
+                "app_source": layers.app_source,
+                "recipe_source": layers.recipe_source,
+            },
         }
 
     def _cmd_introspect_queues(self, data=None, **kwargs) -> dict:
@@ -1049,9 +1064,15 @@ class BuiltinCommands:
         telemetry_section = args.get("telemetry")  # PC 3.1 (inline)
         source = "inline"
         obs_reset = args.get("observability_reset") or []
+        # switch рецепта = новая сессия: L3 обязан обнулиться У ВСЕХ разом. Иначе
+        # выжившие (protected) процессы сохранят ручки, пересозданные — потеряют,
+        # и система окажется в лоскутном состоянии, где introspect соседей врёт
+        # по-разному. Отдельный флаг, а не «сбросить перечисленное»: инициатор
+        # switch не знает и не обязан знать, что именно держит каждый процесс.
+        obs_clear = bool(args.get("observability_session_clear"))
         # Сброс — тоже повод пересобрать: без этого «удали ключ» ничего бы не изменило
         # до следующего reload, то есть команда молча откладывала бы свой эффект.
-        obs_requested = isinstance(obs_section, dict) or bool(obs_reset)
+        obs_requested = isinstance(obs_section, dict) or bool(obs_reset) or obs_clear
 
         # Файловый фолбэк — только если НИ ОДНОЙ секции нет inline (прежнее поведение +
         # telemetry из того же файла).
@@ -1108,8 +1129,12 @@ class BuiltinCommands:
                 layers.app = dict(obs_section) if isinstance(obs_section, dict) else {}
                 layers.app_source = source
 
-            dropped = [key for key in obs_reset if layers.session_reset(str(key))]
-            unknown = [str(key) for key in obs_reset if str(key) not in dropped]
+            if obs_clear:
+                dropped = list(layers.session_clear())
+                unknown = []
+            else:
+                dropped = [key for key in obs_reset if layers.session_reset(str(key))]
+                unknown = [str(key) for key in obs_reset if str(key) not in dropped]
 
             _logger = getattr(svc, "logger_manager", None)
             _error = getattr(svc, "error_manager", None)

@@ -146,6 +146,42 @@ def observability_effective(
     return out
 
 
+def observability_provenance(layers: "ObservabilityLayers", *, logger: Any = None) -> Dict[str, Any]:
+    """Кто владеет каждым действующим ключом: ``{ключ: {layer, source}}``.
+
+    Имена каналов и скоупов берутся из ЖИВОГО конфига логгера, а не из раскладки
+    слоёв. Разница существенна: пока ни один слой не тронул ``console``/``file``,
+    ``expand_observability`` каналов не эмитит вовсе — объяснять было бы нечего,
+    хотя каналы работают. Провенанс обязан покрывать то, что действует, а не то,
+    что кто-то написал.
+
+    Сам ответ считается по СЫРЫМ секциям слоёв (см. ``ObservabilityLayers.provenance``):
+    после раскладки ключ из L0 неотличим от заданного явно.
+    """
+    view: Dict[str, Any] = {}
+    cfg = getattr(logger, "config", None)
+    if cfg is not None:
+        channels = getattr(cfg, "channels", None)
+        if isinstance(channels, dict):
+            view["channels"] = {
+                str(name): {
+                    "enabled": bool(getattr(ch, "enabled", True)),
+                    "type": str(getattr(ch, "type", "")),
+                }
+                for name, ch in channels.items()
+            }
+        scopes = getattr(cfg, "scopes", None)
+        if isinstance(scopes, dict):
+            view["scopes"] = {
+                str(name): {
+                    "enabled": bool(getattr(sc, "enabled", True)),
+                    "min_level": getattr(sc, "min_level", None),
+                }
+                for name, sc in scopes.items()
+            }
+    return layers.provenance(view)
+
+
 # Что пересылается из get_stats() менеджера наружу в introspect.observability.
 # Список ЖЁСТКИЙ намеренно (get_stats несёт и конфиг, и имена — наружу нужны
 # только счётчики), но именно поэтому он и есть отдельная точка забывания:
