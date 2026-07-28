@@ -177,3 +177,5 @@
 - [Форма доставки конфига различается](feedback_config_delivery_shape_differs.md) — оркестратор плоско, ребёнок весь proc_dict; get_config молчит у детей (умер telemetry_override)
 - [Merge меняет ФОРМУ, а не только значения](feedback_merge_changes_the_form.md) — машинная запись структурной формы глушила человеческие ключи короткой
 - [Слои конфига наблюдаемости (5.12)](project_observability_config_layers.md) — L0 фреймворк→L1 system.yaml→L2 рецепт+спутник→L3 сессия; reload ПЕРЕСОБИРАЕТ, а не мержит
+- [TTL слоя сессии (5.8)](project_observability_session_ttl.md) — L3 временный по построению, возврат тактом heartbeat; вечность только через persist
+- [Тест, переживший свой слом](feedback_test_survived_its_own_break.md) — гонка в два байткода + шов из своего потока сквозь RLock = проверял отсутствие защиты
