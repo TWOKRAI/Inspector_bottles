@@ -301,17 +301,26 @@ class TestProvenanceInIntrospect:
         finally:
             logger.shutdown()
 
-    def test_materialized_channels_and_scopes_are_covered(self, tmp_path) -> None:
-        """Имена каналов/скоупов рождаются после раскладки — объяснение всё равно есть."""
+    def test_every_live_channel_is_explained_including_module_ones(self, tmp_path) -> None:
+        """«Каждый действующий ключ» — это ВЕСЬ реестр каналов, а не секция `channels`.
+
+        Ревью 5.12 (замечание 4): ``module_*``-каналы рождаются из секции
+        ``modules`` и в ``config.channels`` не лежат — на девять живых каналов
+        из двенадцати provenance молчал, притом что приёмка требует объяснения
+        каждому. Источник истины — живой реестр.
+        """
         svc, logger = self._svc_with_layers(tmp_path)
         try:
             res = svc.command_manager.handlers["introspect.observability"]({})
             prov = res["provenance"]
-            live_channels = list(logger.config.channels)
+            active = res["effective"]["logger"]["channels_active"]
+            module_channels = [n for n in active if n.startswith("module_")]
+            assert module_channels, "ожидались module_*-каналы в живом реестре"
+            missing = [n for n in active if f"channels.{n}.enabled" not in prov]
+            assert not missing, f"без объяснения остались действующие каналы: {missing}"
+
             live_scopes = list(logger.config.scopes)
-            assert live_channels and live_scopes
-            for name in live_channels:
-                assert f"channels.{name}.enabled" in prov, name
+            assert live_scopes
             for name in live_scopes:
                 assert f"scopes.{name}.min_level" in prov, name
         finally:

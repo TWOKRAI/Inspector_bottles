@@ -1427,10 +1427,27 @@ class BuiltinCommands:
         layers.recipe = deep_merge(layers.recipe, session)
         layers.recipe_source = report["path"]
         layers.session = {}
+        # Ревью 5.12 (замечание 6): watcher слоя L2 поднимается только на boot и
+        # при switch, а спутника до первого «сохранить» не существует — значит
+        # правки только что созданного файла не подхватывались бы до следующего
+        # switch. Пере-вооружаем наблюдателя здесь; у процессов без него (все
+        # дети — watcher живёт на оркестраторе) метода нет, и это не отказ.
+        rearm = getattr(svc, "_start_recipe_observability_watcher", None)
+        watcher_rearmed = False
+        if callable(rearm):
+            try:
+                rearm(layers)
+                watcher_rearmed = True
+            except Exception as exc:  # noqa: BLE001 — файл записан, отказ вооружения не отменяет успех
+                svc._log_error(f"[observability] L2-watcher не пере-вооружён после сохранения: {exc}")
         return {
             **report,
             "process": svc.name,
             "session_keys": list(layers.session_keys()),
+            # Наблюдает ли кто-то за только что записанным файлом. False у детей —
+            # это норма (watcher один, на оркестраторе), но молчать об этом нельзя:
+            # иначе «правлю спутник, ничего не происходит» выясняется чтением кода.
+            "watcher_rearmed": watcher_rearmed,
         }
 
     def _record_sink_in_session(self, plane: str, name: str, enabled: bool) -> str | None:

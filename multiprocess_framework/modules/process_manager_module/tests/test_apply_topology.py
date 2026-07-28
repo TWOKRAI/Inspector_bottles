@@ -742,11 +742,72 @@ class TestObservabilitySessionResetOnSwitch:
         # Ключи детей PM не выдумывает: рассылка fire-and-forget, в ответе — охват.
         assert "broadcast_reached" in reset
 
-    def test_reset_is_broadcast_to_children(self) -> None:
+    def test_clear_envelope_leaves_pm_and_is_understood_by_a_real_child(self) -> None:
+        """Шов проверяется КОНВЕРТОМ и его действием, а не именем внутреннего метода.
+
+        Прежняя редакция подменяла ``_broadcast_command`` и сверяла вызов — такой
+        тест охраняет имя: переименование или смена маршрута оставили бы его
+        зелёным при мёртвой рассылке (ревью 5.12, замечание 7). Здесь ловим
+        сообщение на границе процесса (``communication.broadcast``) и скармливаем
+        его РЕАЛЬНОМУ обработчику ребёнка — доказывается, что отправленное будет
+        понято и сработает.
+        """
+        from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        from multiprocess_framework.modules.process_module.commands.builtin_commands import (
+            BuiltinCommands,
+        )
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            process_observability_layers,
+        )
+
         pm = make_pm({"w1": {"class": "m.W1"}})
-        sent: list = []
-        pm._broadcast_command = lambda command, data, **kw: sent.append((command, data)) or 1
+        envelopes: list = []
+        comm = MagicMock()
+        comm.broadcast = lambda msg, exclude_self=True: envelopes.append(msg) or 1
+        pm.communication = comm
 
         pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
 
-        assert ("config.reload", {"observability_session_clear": True}) in sent
+        clears = [
+            m
+            for m in envelopes
+            if m.get("type") == "command"
+            and m.get("command") == "config.reload"
+            and (m.get("data") or {}).get("observability_session_clear") is True
+        ]
+        assert clears, f"конверт сброса L3 не покинул PM; отправлено: {envelopes[:5]}"
+
+        # Плечо «ребёнок это поймёт»: тот же data в реальный обработчик.
+        class _Cm:
+            def __init__(self):
+                self.handlers = {}
+
+            def register_command(self, name, handler, metadata=None, tags=None):
+                self.handlers[name] = handler
+
+        class _Child:
+            def __init__(self, logger):
+                self.command_manager = _Cm()
+                self.name = "n1"
+                self.logger_manager = logger
+                self.error_manager = None
+                self.stats_manager = None
+
+            def get_config(self, key, default=None):
+                return default
+
+            def _log_debug(self, msg, **kw): ...
+            def _log_info(self, msg, **kw): ...
+
+        logger = LoggerManager(config=LoggerManagerConfig(app_name="clear_seam", enable_batching=False))
+        child = _Child(logger)
+        BuiltinCommands(child)._register_observability_commands()
+        try:
+            process_observability_layers(child).session_set("log_level", "DEBUG")
+            res = child.command_manager.handlers["config.reload"](clears[0]["data"])
+            assert res["success"] is True
+            assert res["reset"] == ["log_level"]
+            assert res["session_keys"] == []
+        finally:
+            logger.shutdown()

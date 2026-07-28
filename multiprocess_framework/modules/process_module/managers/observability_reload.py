@@ -171,6 +171,24 @@ def observability_provenance(layers: "ObservabilityLayers", *, logger: Any = Non
                 }
                 for name, ch in channels.items()
             }
+        # Каналы, порождённые секцией `modules` (``module_camera`` и соседи), в
+        # `config.channels` не лежат — а работают. Ревью 5.12 (замечание 4): их не
+        # было в ответе вовсе, то есть на девять живых каналов из двенадцати
+        # provenance молчал, притом что приёмка требует «каждый действующий ключ».
+        # Берём их из ЖИВОГО реестра — он и есть перечень действующих.
+        registry = getattr(logger, "_channel_registry", None)
+        names = getattr(registry, "names", None)
+        if callable(names):
+            try:
+                active = sorted(str(n) for n in names())
+            except Exception:  # noqa: BLE001 — readback best-effort
+                active = []
+            known = view.setdefault("channels", {})
+            for name in active:
+                # `type` намеренно пуст: тип module-канала не управляется оптовыми
+                # тогглами console/file, и приписывать ему их владельца было бы
+                # враньём — такой ключ честнее объяснить дефолтом фреймворка.
+                known.setdefault(name, {"enabled": True, "type": ""})
         scopes = getattr(cfg, "scopes", None)
         if isinstance(scopes, dict):
             view["scopes"] = {
@@ -390,8 +408,16 @@ def _remark_operator_disabled_sinks(logger: Any, layers: "ObservabilityLayers") 
     поднялся», а после пересборки поле опустело бы при выключенном канале — то
     есть ответ стал бы «канал не поднялся» на вопрос, где верно «я его снял».
 
-    Тихой потери здесь быть не может: канал выключен ТОЙ ЖЕ записью L3, из которой
-    собран конфиг, — он не в реестре, и вычитать из маршрута нечего.
+    **Где это НЕ так — названо, потому что проверено** (ревью 5.12, замечание 3):
+    для каналов из секции ``channels`` приёмник после пересборки действительно
+    отсутствует в реестре, и вычитать из маршрута нечего. Но ``module_*``-каналы
+    рождаются из секции ``modules``, которую ключ ``channels.<имя>.enabled`` не
+    выключает: воспроизведено — ``sink.disable module_camera`` → ``config.reload``
+    → канал ЖИВОЙ в реестре, а отметка на нём стоит, и маршрут его вычитает.
+    Для оператора это по-прежнему верный ответ («я его снял»), но держится
+    снятие ТОЛЬКО отметкой: любой путь ``reconfigure`` мимо
+    :func:`apply_observability_layers` воскресит такой канал молча.
+    Декларативное выключение module-каналов — задача 5.10 (симметрия namespace).
     """
     marks = getattr(logger, "_sinks_disabled_by_operator", None)
     if not isinstance(marks, set):

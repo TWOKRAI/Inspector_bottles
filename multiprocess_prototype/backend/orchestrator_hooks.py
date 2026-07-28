@@ -84,11 +84,27 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
     # assembler читает его независимо; здесь закрываем именно ГЛОБАЛЬНЫЙ дефолт.
     telemetry_publish = sys_config.telemetry.publish
     telemetry_dict = telemetry_publish.model_dump() if telemetry_publish is not None else None
-    assembler = BlueprintAssembler(
-        observability_section=obs_section,
-        log_dir=log_dir,
-        telemetry_dict=telemetry_dict,
-    )
+    app_config_path = str(orchestrator.get_config("observability_config_path") or "")
+
+    def _active_recipe_path() -> str:
+        """Адрес слоя L2 НА МОМЕНТ ЭТОЙ сборки (Task 5.12, блокер ревью 2).
+
+        Резолвится ПОКАЖДЫЙ вызов, а не один раз в конструкторе ассемблера:
+        ассемблер живёт всё время работы PM, а рецепт меняется каждым switch.
+        Зашитый в конструктор путь означал бы, что пересозданные процессы
+        получают адрес ПЕРВОГО рецепта — и сохранённый спутник нового молча
+        не применяется (та же живая находка «сохранить не сохраняет», только
+        воскрешённая для switch).
+
+        Свежее всего — манифест (``app.yaml: pipeline``): его пишет GUI при
+        активации рецепта. Фолбэк — boot-значение из orchestrator_config.
+        """
+        from_manifest = getattr(orchestrator, "_active_recipe_from_manifest", None)
+        if callable(from_manifest):
+            resolved = from_manifest()
+            if resolved:
+                return str(resolved)
+        return str(orchestrator.get_config("observability_recipe_path") or "")
 
     def _build_proc_dicts(bp: dict) -> dict[str, dict]:
         """unwrap рецепта v3 → normalize → assemble (единая сборка boot+switch).
@@ -97,7 +113,30 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         исходного blueprint), normalize_blueprint мутирует in-place →
         без deepcopy повторный switch накапливал бы side-effect на IPC-рецепте.
         """
-        return assembler.assemble(normalize_blueprint(copy.deepcopy(unwrap_recipe(bp)), sys_config))
+        recipe_path = _active_recipe_path()
+        topology = normalize_blueprint(copy.deepcopy(unwrap_recipe(bp)), sys_config)
+        # Спутник рецепта (machine-owned слой L2) — тем же способом, что boot.
+        if recipe_path:
+            from multiprocess_framework.modules.data_schema_module import deep_merge
+            from multiprocess_framework.modules.process_module.configs.observability_companion import (
+                load_companion,
+            )
+
+            try:
+                companion = load_companion(recipe_path)
+            except Exception as exc:  # noqa: BLE001 — битый спутник не валит switch
+                orchestrator._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
+                companion = {}
+            if companion:
+                topology["observability"] = deep_merge(topology.get("observability") or {}, companion)
+        assembler = BlueprintAssembler(
+            observability_section=obs_section,
+            log_dir=log_dir,
+            telemetry_dict=telemetry_dict,
+            recipe_path=recipe_path,
+            app_config_path=app_config_path,
+        )
+        return assembler.assemble(topology)
 
     # Планировщик (BaseManager + ObservableMixin)
     planner = FullReplacePlanner(

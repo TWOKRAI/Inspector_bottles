@@ -25,11 +25,20 @@ class _CaptureAssembler:
 
     last: dict = {}
 
-    def __init__(self, observability_section: Any, log_dir: str = "logs", telemetry_dict: Any = None) -> None:
+    def __init__(
+        self,
+        observability_section: Any,
+        log_dir: str = "logs",
+        telemetry_dict: Any = None,
+        recipe_path: str = "",
+        app_config_path: str = "",
+    ) -> None:
         _CaptureAssembler.last = {
             "observability_section": observability_section,
             "log_dir": log_dir,
             "telemetry_dict": telemetry_dict,
+            "recipe_path": recipe_path,
+            "app_config_path": app_config_path,
         }
 
     def assemble(self, blueprint_dict: dict) -> dict:
@@ -58,8 +67,9 @@ class _StubTopologyManager:
 class _StubOrchestrator:
     """Минимальный оркестратор для configure_topology_engine (duck-typed)."""
 
-    def __init__(self, sys_config_dict: dict) -> None:
+    def __init__(self, sys_config_dict: dict, extra_config: dict | None = None) -> None:
         self._sys_config_dict = sys_config_dict
+        self._extra_config = dict(extra_config or {})
         self._topology_manager = _StubTopologyManager()
         self._full_replace_planner = None
         self.logger_manager = None
@@ -67,9 +77,13 @@ class _StubOrchestrator:
         self.stats_manager = None
 
     def get_config(self, key: str, default: Any = None) -> Any:
-        return self._sys_config_dict if key == "sys_config" else default
+        if key == "sys_config":
+            return self._sys_config_dict
+        return self._extra_config.get(key, default)
 
     def _log_info(self, *a: Any, **k: Any) -> None: ...
+
+    def _log_error(self, *a: Any, **k: Any) -> None: ...
 
     # Провайдеры для планировщика (застаблены — не вызываются в тесте).
     def _get_protected_names(self) -> list: ...
@@ -84,6 +98,12 @@ def _patch_engine(monkeypatch) -> None:
     _CaptureAssembler.last = {}
 
 
+def _build(orch) -> None:
+    """Дёрнуть реальную сборку proc_dict'ов (Task 5.12: ассемблер строится ПОКАЖДЫЙ switch,
+    а не один раз в конструкторе — адрес рецепта меняется каждой заменой)."""
+    orch._full_replace_planner.kwargs["proc_dicts_fn"]({"processes": [], "wires": []})
+
+
 def test_hot_swap_forwards_global_telemetry(monkeypatch) -> None:
     """Глобальный telemetry.publish → assembler hot-swap получает его как telemetry_dict."""
     _patch_engine(monkeypatch)
@@ -96,6 +116,7 @@ def test_hot_swap_forwards_global_telemetry(monkeypatch) -> None:
     orch = _StubOrchestrator(sys_config.model_dump())
 
     configure_topology_engine(orch)
+    _build(orch)
 
     expected = sys_config.telemetry.publish.model_dump()
     assert _CaptureAssembler.last["telemetry_dict"] == expected
@@ -109,6 +130,7 @@ def test_hot_swap_no_telemetry_passes_none(monkeypatch) -> None:
     orch = _StubOrchestrator(sys_config.model_dump())
 
     configure_topology_engine(orch)
+    _build(orch)
 
     assert _CaptureAssembler.last["telemetry_dict"] is None
 
@@ -124,3 +146,41 @@ def test_hot_swap_configures_topology_manager(monkeypatch) -> None:
     assert orch._topology_manager.configured.get("diff_fn") is not None
     assert orch._topology_manager.configured.get("commands_fn") is not None
     assert orch._full_replace_planner is not None
+
+
+def test_hot_swap_forwards_layer_addresses(monkeypatch) -> None:
+    """Task 5.12 (блокер ревью 2): пересозданные switch'ем процессы обязаны получить
+    адреса слоёв — иначе сохранённый спутник им не применяется, `observability.persist`
+    на них отказывает, а provenance не может назвать источник."""
+    _patch_engine(monkeypatch)
+    sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
+    orch = _StubOrchestrator(
+        sys_config.model_dump(),
+        extra_config={
+            "observability_recipe_path": "recipes/demo.yaml",
+            "observability_config_path": "backend/config/system.yaml",
+        },
+    )
+
+    configure_topology_engine(orch)
+    _build(orch)
+
+    assert _CaptureAssembler.last["recipe_path"] == "recipes/demo.yaml"
+    assert _CaptureAssembler.last["app_config_path"] == "backend/config/system.yaml"
+
+
+def test_hot_swap_resolves_recipe_path_per_build(monkeypatch) -> None:
+    """Адрес рецепта резолвится на КАЖДУЮ сборку: ассемблер живёт всё время работы PM,
+    а рецепт меняется каждым switch — зашитый в конструктор путь остался бы от первого."""
+    _patch_engine(monkeypatch)
+    sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
+    orch = _StubOrchestrator(sys_config.model_dump(), extra_config={"observability_recipe_path": "recipes/a.yaml"})
+
+    configure_topology_engine(orch)
+    _build(orch)
+    assert _CaptureAssembler.last["recipe_path"] == "recipes/a.yaml"
+
+    # Рецепт сменился (switch) — следующая сборка обязана увидеть новый адрес.
+    orch._extra_config["observability_recipe_path"] = "recipes/b.yaml"
+    _build(orch)
+    assert _CaptureAssembler.last["recipe_path"] == "recipes/b.yaml"

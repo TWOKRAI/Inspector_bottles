@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from multiprocess_framework.modules.data_schema_module import deep_merge
 from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
@@ -370,3 +371,46 @@ class TestPersistedLayerSurvivesProcessRespawn:
             assert proc.errors, "битый спутник проглочен молча"
         finally:
             proc.logger_manager.shutdown()
+
+
+class TestShortFormRecipeSurvivesTheCompanion:
+    """Блокер ревью 5.12: первое «сохранить» молча стирало настройки рецепта.
+
+    Спутник ВСЕГДА пишется в форме ``processes:``. Пока `resolve_recipe_section`
+    переключалась на структурную ветку по одному лишь наличию этого ключа,
+    верхнеуровневые ключи рецепта короткой формы выбрасывались — у сохранившего
+    процесса частично, у соседей полностью. Триггер несвязанный (сохранение
+    ДРУГОЙ настройки), симптом нулевой.
+    """
+
+    def test_top_level_keys_survive_merge_with_a_companion(self) -> None:
+        recipe_section = {"log_level": "DEBUG", "console": False}
+        companion = {"processes": {"camera_0": {"channels": {"messages_file": {"enabled": False}}}}}
+        merged = deep_merge(recipe_section, companion)
+
+        camera = resolve_recipe_section(merged, "camera_0")
+        assert camera["log_level"] == "DEBUG", "настройка рецепта исчезла у сохранившего процесса"
+        assert camera["console"] is False
+        assert camera["channels"] == {"messages_file": {"enabled": False}}
+
+        # У соседа, которого спутник не называет, рецепт обязан остаться целым.
+        neighbour = resolve_recipe_section(merged, "seg")
+        assert neighbour == {"log_level": "DEBUG", "console": False}
+
+    def test_explicit_defaults_beat_inline_keys_of_the_same_section(self) -> None:
+        """Смешанная форма: явные defaults главнее верхнеуровневых остатков."""
+        section = {"log_level": "INFO", "defaults": {"log_level": "WARNING"}}
+        assert resolve_recipe_section(section, "any")["log_level"] == "WARNING"
+
+    def test_end_to_end_persist_keeps_the_short_form_recipe_effective(self, wired, recipe) -> None:
+        """Тот же путь целиком: рецепт короткой формы + реальный persist."""
+        svc, handlers, _ = wired
+        recipe_section = {"enable_batching": False}
+
+        handlers["config.reload"]({"observability": {"log_level": "DEBUG"}})
+        handlers["observability.persist"]({})
+
+        merged = deep_merge(recipe_section, load_companion(recipe))
+        resolved = resolve_recipe_section(merged, "seg")
+        assert resolved["enable_batching"] is False, "рецепт короткой формы стёрт спутником"
+        assert resolved["log_level"] == "DEBUG"

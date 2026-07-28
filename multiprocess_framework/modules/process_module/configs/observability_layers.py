@@ -74,20 +74,28 @@ def resolve_recipe_section(section: Any, process_name: str) -> Dict[str, Any]:
     мержится поверх. Процесс, не названный в ``processes``, получает только
     ``defaults`` — и правка соседа его не задевает.
 
-    Секция без ``defaults``/``processes`` трактуется как ``defaults`` целиком:
-    короткая форма для рецепта, у которого все процессы настроены одинаково.
+    Короткая форма (ключи прямо в секции, без ``defaults``) — это тоже
+    ``defaults``, и **она остаётся ими даже в присутствии ``processes``**.
+    Прежняя редакция переключалась на структурную ветку по наличию любого из
+    двух служебных ключей и молча выбрасывала верхнеуровневые. Ломалось это не
+    руками человека, а машиной: спутник ВСЕГДА пишется в форме ``processes:``,
+    и первый же ``observability.persist`` домерживал этот ключ в секцию рецепта
+    короткой формы — после чего её собственные настройки исчезали у ВСЕХ
+    процессов, а у соседей сохранившего — исчезало всё. Триггер несвязанный,
+    симптом нулевой. Найдено ревью 5.12 (Fable), блокер 1.
 
     Returns:
         Сырой dict (возможно пустой) — форма секции ``observability`` процесса.
     """
     if not isinstance(section, dict) or not section:
         return {}
-    if "defaults" not in section and "processes" not in section:
-        return dict(section)
-    defaults = section.get("defaults") or {}
+    declared = section.get("defaults")
+    declared = declared if isinstance(declared, dict) else {}
+    # Всё, что не служебные ключи — тоже defaults (короткая форма, возможно
+    # смешанная со структурной после merge).
+    inline = {k: v for k, v in section.items() if k not in ("defaults", "processes")}
+    defaults = deep_merge(inline, declared) if inline else declared
     per_process = (section.get("processes") or {}).get(process_name) or {}
-    if not isinstance(defaults, dict):
-        defaults = {}
     if not isinstance(per_process, dict):
         per_process = {}
     return deep_merge(defaults, per_process)
