@@ -101,6 +101,21 @@ class ObservabilityConfig(SchemaBase):
     console: Annotated[bool, FieldMeta("Включить консольный sink")] = True
     file: Annotated[bool, FieldMeta("Включить файловые sink-каналы (первичные)")] = True
 
+    # Task 5.12 — точечные переопределения ПОВЕРХ тогглов console/file.
+    # Тоггл — оптовая ручка «все файловые», а слои требуют адресной: «снять
+    # именно messages_file и пережить reload». Без этого поля рантайм-снятие
+    # приёмника не выразимо декларативно, и оно жило рантайм-множеством,
+    # которое пересборка не видела (блокер ревью 2.9). Форма — частичная:
+    # словарь мержится поверх раскрытых каналов, а не заменяет их.
+    channels: Annotated[
+        Dict[str, Dict[str, Any]],
+        FieldMeta("Переопределения отдельных каналов логгера ({имя: {enabled: false}})"),
+    ] = Field(default_factory=dict)
+    scopes: Annotated[
+        Dict[str, Dict[str, Any]],
+        FieldMeta("Переопределения отдельных скоупов логгера ({имя: {min_level: DEBUG}})"),
+    ] = Field(default_factory=dict)
+
     # Ф0.7. Ротация ограничивает каждый файл, но не их число — за 82 дня
     # накопилось 730 файлов / 291 МБ без единого удаления. Обе политики
     # выключены по умолчанию: включать чистку молча нельзя.
@@ -191,6 +206,18 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     # сам подставит дефолтные каналы (идентичный результат, меньше связности).
     if not (cfg.console and cfg.file):
         logger["channels"] = _toggled_logger_channels(cfg.console, cfg.file)
+    # Task 5.12: адресные переопределения каналов/скоупов кладём ЧАСТИЧНЫМ словарём.
+    # Он всегда попадает в deep-merge поверх полного набора (boot —
+    # `merge_managers(base_managers, overlay)`, reload — merge поверх живого/базы),
+    # поэтому неполная запись `{имя: {enabled: false}}` валидна: до Pydantic она
+    # доезжает уже слитой. Заменять весь набор здесь нельзя — это стёрло бы
+    # остальные каналы (ровно тот класс, что дал находку 2026-07-22 на каталоге).
+    if cfg.channels:
+        from ...data_schema_module import deep_merge
+
+        logger["channels"] = deep_merge(logger.get("channels") or {}, cfg.channels)
+    if cfg.scopes:
+        logger["scopes"] = {str(k): dict(v) for k, v in cfg.scopes.items()}
 
     error: Dict[str, Any] = {
         "default_level": cfg.errors.level,
