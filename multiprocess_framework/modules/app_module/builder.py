@@ -142,6 +142,7 @@ def assemble_proc_dicts(
         expand_observability,
     )
     from multiprocess_framework.modules.process_module.configs.observability_layers import (
+        APP_CONFIG_KEY,
         OVERRIDE_CONFIG_KEY,
         ObservabilityLayers,
         resolve_recipe_section,
@@ -177,6 +178,8 @@ def assemble_proc_dicts(
             )
         if obs_override:
             proc_dict["config"][OVERRIDE_CONFIG_KEY] = obs_override
+        if app_layer:
+            proc_dict["config"][APP_CONFIG_KEY] = dict(app_layer)
         proc_dict = merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)
         result[name] = proc_dict
     return result

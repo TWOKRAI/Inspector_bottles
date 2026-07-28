@@ -32,6 +32,7 @@ from multiprocess_framework.modules.process_module.configs.observability_config 
     expand_observability,
 )
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    APP_CONFIG_KEY,
     OVERRIDE_CONFIG_KEY,
     ObservabilityLayers,
     resolve_recipe_section,
@@ -164,6 +165,11 @@ class BlueprintAssembler:
             # разошёлся бы с reload. Ключ появляется только у процессов с дельтой.
             if obs_override:
                 proc_dict["config"][OVERRIDE_CONFIG_KEY] = obs_override
+            # Сырой L1 едет тем же способом и по той же причине: без него процесс
+            # не отличит «ключ из system.yaml» от «дефолт фреймворка», и ответ
+            # introspect.observability на «почему у меня INFO» стал бы выдумкой.
+            if self._observability_section:
+                proc_dict["config"][APP_CONFIG_KEY] = dict(self._observability_section)
             override = per_process_telemetry.get(name)
             telemetry_section = self._resolve_telemetry(override)
             if telemetry_section is not None:

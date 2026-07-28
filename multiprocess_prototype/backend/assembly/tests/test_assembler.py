@@ -27,6 +27,7 @@ from multiprocess_framework.modules.process_manager_module.launcher.schema impor
 )
 from multiprocess_framework.modules.process_module.configs import expand_observability
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    APP_CONFIG_KEY,
     ObservabilityLayers,
 )
 from multiprocess_framework.modules.process_module.configs.managers_config import (
@@ -100,6 +101,7 @@ def _build_reference_road_a(
     bp_dict: dict,
     obs_overlay: dict,
     log_dir: str = "logs",
+    obs_section: dict | None = None,
 ) -> dict[str, dict]:
     """Эталонная дорога A: СТАРЫЙ инлайн-чейн из ``SystemBuilder.build``.
 
@@ -121,6 +123,11 @@ def _build_reference_road_a(
     for cfg in configs:
         name, proc_dict = process(cfg)
         proc_dict["managers"] = merge_managers(proc_dict.get("managers", {}), obs_overlay)
+        # Task 5.12: сырой L1 — часть эталона, а не дрейф. Процесс обязан знать,
+        # какие ключи пришли из system.yaml: без этого provenance приписал бы их
+        # фреймворку. Ассемблер кладёт его ровно так же.
+        if obs_section:
+            proc_dict["config"][APP_CONFIG_KEY] = dict(obs_section)
         proc_dict = merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)
         result[name] = proc_dict
 
@@ -138,7 +145,7 @@ class TestRoadAParity:
     def test_minimal_blueprint_parity(self) -> None:
         """Минимальная топология: assembler == дорога A."""
         bp = copy.deepcopy(_MINIMAL_BLUEPRINT)
-        reference = _build_reference_road_a(bp, _OBS_OVERLAY)
+        reference = _build_reference_road_a(bp, _OBS_OVERLAY, obs_section=_OBS_SECTION)
 
         bp2 = copy.deepcopy(_MINIMAL_BLUEPRINT)
         assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir="logs")
@@ -149,7 +156,7 @@ class TestRoadAParity:
     def test_multi_process_parity(self) -> None:
         """Несколько процессов: assembler == дорога A."""
         bp = copy.deepcopy(_MULTI_PROCESS_BLUEPRINT)
-        reference = _build_reference_road_a(bp, _OBS_OVERLAY)
+        reference = _build_reference_road_a(bp, _OBS_OVERLAY, obs_section=_OBS_SECTION)
 
         bp2 = copy.deepcopy(_MULTI_PROCESS_BLUEPRINT)
         assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir="logs")
@@ -165,7 +172,7 @@ class TestRoadAParity:
         """
         custom_log_dir = str(tmp_path / "custom_logs")
         bp = copy.deepcopy(_MINIMAL_BLUEPRINT)
-        reference = _build_reference_road_a(bp, _OBS_OVERLAY, log_dir=custom_log_dir)
+        reference = _build_reference_road_a(bp, _OBS_OVERLAY, log_dir=custom_log_dir, obs_section=_OBS_SECTION)
 
         bp2 = copy.deepcopy(_MINIMAL_BLUEPRINT)
         assembler = BlueprintAssembler(observability_section=_OBS_SECTION, log_dir=custom_log_dir)

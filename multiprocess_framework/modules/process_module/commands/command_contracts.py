@@ -28,7 +28,7 @@ built-in команд безопасна без allow-исключений.
 from __future__ import annotations
 
 import typing
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel, ConfigDict
 
@@ -118,6 +118,12 @@ class ConfigReloadParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     observability: Optional[Dict[str, Any]] = None
+    # PC 3.1 — секцию telemetry команда принимает с тех пор, но в контракте её
+    # не было: при extra="forbid" warn-мидлварь ругалась на КАЖДЫЙ штатный вызов.
+    telemetry: Optional[Dict[str, Any]] = None
+    telemetry_mode: Optional[str] = None
+    # Task 5.12 — ключи, которые надо УДАЛИТЬ из слоя сессии (L3).
+    observability_reset: Optional[List[str]] = None
     path: Optional[str] = None
 
 

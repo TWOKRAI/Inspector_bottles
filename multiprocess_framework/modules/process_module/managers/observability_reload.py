@@ -17,6 +17,7 @@ Observability hot-reload: ConfigFileWatcher → reconfigure(Logger/Error/Stats).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
@@ -25,20 +26,42 @@ from ..configs.observability_config import expand_observability
 
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
+    from ..configs.observability_layers import ObservabilityLayers
 
 
-def _current_manager_config(manager: Any) -> Optional[Dict[str, Any]]:
-    """Живой конфиг менеджера как dict (база для merge) или None, если недоступен."""
-    cfg = getattr(manager, "config", None)
-    if cfg is None:
-        return None
-    dump = getattr(cfg, "model_dump", None)
-    if callable(dump):
-        try:
-            return dump()
-        except Exception:  # noqa: BLE001 — недампящийся конфиг: применяем без merge
-            return None
-    return dict(cfg) if isinstance(cfg, dict) else None
+def resolve_base_log_dir(explicit: Optional[str] = None) -> str:
+    """Каталог логов как МАШИННЫЙ контекст пересборки (Task 5.12).
+
+    Тот же резолв, что на boot (``ProcessLaunchConfig._resolve_log_dir``): явный
+    аргумент → ``INSPECTOR_LOG_DIR`` → ``MULTIPROCESS_LOG_DIR`` → ``logs``.
+
+    Живой конфиг логгера здесь СОЗНАТЕЛЬНО не читается. Он выглядит соблазнительно
+    («там же уже лежит резолвнутый путь»), но тогда удаление ``log_directory`` из
+    слоя перестало бы работать: пересборка подхватывала бы прежнее значение из
+    самой себя, и ровно у одного ключа наследование замолчало бы навсегда.
+    """
+    if explicit:
+        return str(explicit)
+    return os.environ.get("INSPECTOR_LOG_DIR") or os.environ.get("MULTIPROCESS_LOG_DIR") or "logs"
+
+
+def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
+    """Слой L0 в машинном контексте — та же база, из которой собирается boot.
+
+    ``managers_from_log_dir`` — единственный источник абсолютных путей файлов
+    (``messages.log``, ``errors.log``, ``critical.log``…). Пересборка стартует
+    ИМЕННО отсюда, поэтому частичная секция не может увести логи в чужой каталог
+    (живая находка 2026-07-22): каталог приходит не из применяемой секции, а из
+    машинного контекста, и переопределить его может только явный
+    ``log_directory`` слоя.
+    """
+    from ..configs.managers_config import (
+        ManagersConfig,
+        managers_from_log_dir,
+        managers_payload_for_proc,
+    )
+
+    return managers_payload_for_proc(managers_from_log_dir(resolve_base_log_dir(log_dir), model_cls=ManagersConfig))
 
 
 def _level_profile_scopes(level: str) -> Dict[str, Dict[str, Any]]:
@@ -242,62 +265,133 @@ def observability_counters(
     return out
 
 
+def apply_observability_layers(
+    layers: "ObservabilityLayers",
+    *,
+    logger: Any = None,
+    error: Any = None,
+    stats: Any = None,
+    log_dir: Optional[str] = None,
+    log_info: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Пересобрать конфиги менеджеров ИЗ СЛОЁВ и применить (Task 5.12).
+
+    ЕДИНСТВЕННОЕ место, где секция раскладывается (``expand_observability``) и
+    применяется (``reconfigure``). И hot-reload watcher (см.
+    :func:`make_observability_on_reload`), и IPC-команда ``config.reload`` зовут
+    именно её — поэтому файловый и IPC-пути НЕ конфликтуют.
+
+    **Семантика — ПЕРЕСБОРКА ИЗ ИСТОЧНИКОВ, и это разворот** прежней «дельты
+    поверх живого» (``deep_merge(живой конфиг, раскрытая секция)``). Причина
+    структурная, а не вкусовая: дельта **принципиально не умеет** выразить
+    «ключ удалён из слоя → вернись к нижнему» — удаления в дельте не существует.
+    Пока конфигом владел один источник, это было незаметно; с четырьмя слоями
+    «вернуть как было» стало основной операцией, и дельта её не поддерживает.
+
+    Порядок сборки::
+
+        base = managers_from_log_dir(машинный каталог логов)   # L0 + контекст машины
+        target = merge(base, expand(layers.resolve()))          # L1 → L2 → L3
+        профиль уровня, если log_level задан хоть одним слоем
+        точечные scopes-переопределения слоёв — последними
+
+    Находка 2026-07-22 («частичный reload уводил файлы логов в чужой каталог»)
+    держится теперь не merge'ем, а базой: ``log_directory`` приходит из машинного
+    контекста и переопределяется ТОЛЬКО явным ключом слоя. Пара на это — в
+    ``test_observability_reload_merge.py``.
+
+    None-менеджеры пропускаются (например error/stats отключены).
+
+    Returns:
+        Применённый конфиг ``{"logger": …, "error": …, "stats": …, "command": …}``.
+        Фактическое состояние менеджеров — :func:`observability_effective`.
+    """
+    from ...data_schema_module import deep_merge
+    from ..configs.managers_config import merge_managers
+
+    resolved = layers.resolve()
+    expanded = expand_observability(resolved)
+    base = base_managers_payload(log_dir)
+
+    explicit_level = resolved.get("log_level")
+    # scopes слоёв достаём ДО merge: профиль уровня переписывает набор целиком,
+    # и адресная правка обязана лечь ПОВЕРХ него, а не быть им стёртой.
+    scope_overrides = expanded["logger"].pop("scopes", None)
+
+    logger_cfg = merge_managers(base.get("logger", {}), expanded["logger"])
+    if explicit_level is not None:
+        logger_cfg["scopes"] = _level_profile_scopes(explicit_level)
+        logger_cfg["default_level"] = str(explicit_level).upper()
+    if scope_overrides:
+        logger_cfg["scopes"] = deep_merge(logger_cfg.get("scopes") or {}, scope_overrides)
+    expanded["logger"] = logger_cfg
+    expanded["error"] = merge_managers(base.get("error", {}), expanded["error"])
+    expanded["stats"] = merge_managers(base.get("stats", {}), expanded["stats"])
+
+    if logger is not None:
+        logger.reconfigure(expanded["logger"])
+        _remark_operator_disabled_sinks(logger, layers)
+    if error is not None:
+        error.reconfigure(expanded["error"])
+    if stats is not None:
+        stats.reconfigure(expanded["stats"])
+    if log_info is not None:
+        held = ", ".join(layers.session_keys()) or "—"
+        log_info(
+            f"[observability] пересобран из слоёв "
+            f"(log_level={expanded['logger'].get('default_level')}; держится сессией: {held})"
+        )
+    return expanded
+
+
+def _remark_operator_disabled_sinks(logger: Any, layers: "ObservabilityLayers") -> None:
+    """Вернуть отметку «снято оператором» тем приёмникам, которые держит L3.
+
+    ``reconfigure`` чистит множество целиком, и это правильно (блокер ревью 2.9:
+    отметка, пережившая пересборку, вычитала из маршрута ЖИВОЙ приёмник — тихая
+    потеря). Но приёмка 2.8 обещает отличать «я это выключил» от «канал не
+    поднялся», а после пересборки поле опустело бы при выключенном канале — то
+    есть ответ стал бы «канал не поднялся» на вопрос, где верно «я его снял».
+
+    Тихой потери здесь быть не может: канал выключен ТОЙ ЖЕ записью L3, из которой
+    собран конфиг, — он не в реестре, и вычитать из маршрута нечего.
+    """
+    marks = getattr(logger, "_sinks_disabled_by_operator", None)
+    if not isinstance(marks, set):
+        return
+    channels = (layers.session or {}).get("channels")
+    if not isinstance(channels, dict):
+        return
+    for name, body in channels.items():
+        if isinstance(body, dict) and body.get("enabled") is False:
+            marks.add(str(name))
+
+
 def apply_observability_reconfigure(
     section: Any,
     *,
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    log_dir: Optional[str] = None,
     log_info: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Применить секцию ``observability`` к менеджерам через ``reconfigure`` (единый путь).
+    """Голая секция ``observability`` — это стек, в котором сказал только L1.
 
-    ЕДИНСТВЕННОЕ место, где секция раскладывается (``expand_observability``) и
-    применяется (``reconfigure``). И hot-reload watcher (см.
-    :func:`make_observability_on_reload`), и IPC-команда ``config.reload`` (Ф1 Task 1.4)
-    зовут именно эту функцию — поэтому файловый и IPC-пути НЕ конфликтуют.
-
-    Семантика — ДЕЛЬТА ПОВЕРХ ЖИВОГО, не сброс: раскрытая секция мержится на
-    текущий конфиг каждого менеджера (``deep_merge``). Частичная секция
-    (``{"log_level": "DEBUG"}``) больше НЕ теряет ``log_directory``/каналы/скоупы,
-    молча пересобирая их из дефолтов (живая находка 2026-07-22: reload уводил
-    файлы логов в чужой каталог). Явный ``log_level`` дополнительно переписывает
-    пороги скоупов профилем :func:`_level_profile_scopes` — без этого смена уровня
-    была no-op'ом (``default_level`` — лишь fallback для отсутствующих скоупов).
-
-    None-менеджеры пропускаются (например error/stats отключены).
-
-    Returns:
-        Разложенный ПРИМЕНЁННЫЙ конфиг ``{"logger": {...}, "error": {...}, "stats": {...}}``
-        (после merge) — вызывающий может отдать наружу ``log_level`` (диагностика).
-        Фактическое состояние менеджеров — :func:`observability_effective`.
+    Тонкий фасад над :func:`apply_observability_layers`, а не второй механизм:
+    вызывающие, у которых слоёв нет (одиночный процесс, тесты, внешний инструмент
+    с готовой секцией), не обязаны собирать стек руками.
     """
-    from ...data_schema_module import deep_merge
+    from ..configs.observability_layers import ObservabilityLayers
 
-    expanded = expand_observability(section or {})
-    raw = section if isinstance(section, dict) else {}
-    explicit_level = raw.get("log_level")
-
-    def _merged(manager: Any, target: Dict[str, Any]) -> Dict[str, Any]:
-        current = _current_manager_config(manager)
-        return deep_merge(current, target) if current else target
-
-    if logger is not None:
-        logger_cfg = _merged(logger, expanded["logger"])
-        if explicit_level is not None:
-            logger_cfg["scopes"] = _level_profile_scopes(explicit_level)
-            logger_cfg["default_level"] = str(explicit_level).upper()
-        expanded["logger"] = logger_cfg
-        logger.reconfigure(logger_cfg)
-    if error is not None:
-        expanded["error"] = _merged(error, expanded["error"])
-        error.reconfigure(expanded["error"])
-    if stats is not None:
-        expanded["stats"] = _merged(stats, expanded["stats"])
-        stats.reconfigure(expanded["stats"])
-    if log_info is not None:
-        log_info(f"[observability] reconfigure применён (log_level={expanded['logger'].get('default_level')})")
-    return expanded
+    return apply_observability_layers(
+        ObservabilityLayers(app=dict(section) if isinstance(section, dict) else {}),
+        logger=logger,
+        error=error,
+        stats=stats,
+        log_dir=log_dir,
+        log_info=log_info,
+    )
 
 
 def make_observability_on_reload(

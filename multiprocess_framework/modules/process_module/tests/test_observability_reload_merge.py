@@ -9,11 +9,19 @@
      скоупов, а все стандартные скоупы всегда присутствуют → смена уровня была
      no-op (класс «сигнал не связан с реальностью»).
 
-Контракт после фикса:
-  - применение = deep_merge(живой конфиг менеджера, раскрытая секция);
+Контракт после Task 5.12 — **пересборка из слоёв**, а не дельта поверх живого:
+  - применение = merge(база машинного контекста, раскрытые слои L1→L2→L3);
+  - каталог логов приходит из ``managers_from_log_dir(машинный log_dir)`` и
+    переопределяется ТОЛЬКО явным ``log_directory`` слоя — находка 2026-07-22
+    передоказана здесь парой на новой семантике;
   - явный ``log_level`` переписывает пороги скоупов профилем (DEBUG → всё DEBUG +
     DEBUG-scope on; WARNING/ERROR → пороги подняты; INFO → штатный профиль);
   - ответ ``config.reload`` несёт ``effective`` — readback фактического состояния.
+
+Почему разворот: дельта не умеет выразить «ключ удалён из слоя → вернись к
+нижнему». Обратная сторона — живое состояние, которого нет ни в одном слое,
+пересборку НЕ переживает; это не потеря, а условие работы сброса (см.
+``test_live_scope_not_backed_by_any_layer_does_not_survive``).
 """
 
 from __future__ import annotations
@@ -50,16 +58,49 @@ class _FakeManagerWithConfig:
         return True
 
 
-class TestMergeOverCurrent:
-    def test_partial_section_preserves_log_directory(self) -> None:
-        """Плечо «не разрушает»: log_directory живого конфига переживает reload."""
-        logger = _FakeManagerWithConfig(
-            {"default_level": "INFO", "log_directory": "D:/logs/seg", "app_name": "inspector"}
-        )
-        apply_observability_reconfigure({"log_level": "DEBUG"}, logger=logger)
+class TestRebuildFromLayers:
+    """Находка 2026-07-22, передоказанная на семантике пересборки."""
+
+    def test_partial_section_keeps_logs_in_the_machine_directory(self, tmp_path) -> None:
+        """Плечо «не разрушает»: частичная секция не уводит логи в чужой каталог.
+
+        Держится это уже не merge'ем поверх живого, а базой: каталог приходит из
+        машинного контекста (``log_dir``), а применяемая секция про него молчит.
+        """
+        logger = _FakeManagerWithConfig({"default_level": "INFO", "log_directory": str(tmp_path)})
+        apply_observability_reconfigure({"log_level": "DEBUG"}, logger=logger, log_dir=str(tmp_path))
         applied = logger.calls[-1]
-        assert applied["log_directory"] == "D:/logs/seg", "merge потерял log_directory (сброс на дефолты)"
+        assert applied["log_directory"] == str(tmp_path), "пересборка увела логи из машинного каталога"
         assert applied["default_level"] == "DEBUG"
+        # Файлы плоскости ошибок — та же гарантия, второй менеджер.
+        error = _FakeManagerWithConfig({})
+        apply_observability_reconfigure({"log_level": "DEBUG"}, error=error, log_dir=str(tmp_path))
+        assert str(tmp_path) in error.calls[-1]["error_file_path"]
+
+    def test_explicit_log_directory_in_a_layer_wins_over_machine_context(self, tmp_path) -> None:
+        """Плечо «слой всё ещё главнее»: явный ключ переопределяет базу."""
+        custom = str(tmp_path / "chosen")
+        logger = _FakeManagerWithConfig({})
+        apply_observability_reconfigure(
+            {"log_level": "DEBUG", "log_directory": custom},
+            logger=logger,
+            log_dir=str(tmp_path),
+        )
+        assert logger.calls[-1]["log_directory"] == custom
+
+    def test_key_dropped_from_the_layer_falls_back_to_the_base(self, tmp_path) -> None:
+        """Собственно причина разворота: удаление ключа возвращает нижнее значение.
+
+        Дельта поверх живого этого не умеет — удаления в дельте не существует,
+        и прежний ``log_directory`` жил бы вечно.
+        """
+        custom = str(tmp_path / "chosen")
+        logger = _FakeManagerWithConfig({})
+        apply_observability_reconfigure({"log_directory": custom}, logger=logger, log_dir=str(tmp_path))
+        assert logger.calls[-1]["log_directory"] == custom
+
+        apply_observability_reconfigure({}, logger=logger, log_dir=str(tmp_path))
+        assert logger.calls[-1]["log_directory"] == str(tmp_path), "ключ удалён из слоя, а значение осталось"
 
     def test_no_config_manager_still_works(self) -> None:
         """Менеджер без .config (фейки/деградация) → применяется секция как есть."""
@@ -106,13 +147,41 @@ class TestLevelProfile:
         assert scopes["BUSINESS"]["min_level"] == "INFO"
         assert scopes["DEBUG"]["enabled"] is False
 
-    def test_section_without_level_does_not_touch_scopes(self) -> None:
-        """Секция без log_level (например только stats) — скоупы живого конфига не переписываются профилем."""
+    def test_section_without_level_does_not_apply_the_profile(self) -> None:
+        """Секция без log_level профиль НЕ включает: пороги остаются базовыми."""
+        logger = _FakeManagerWithConfig({})
+        apply_observability_reconfigure({"stats": {"enabled": False}}, logger=logger)
+        applied = logger.calls[-1]
+        # База (managers_from_log_dir) — настроенный профиль, не «всё DEBUG».
+        assert applied["scopes"]["SYSTEM"]["min_level"] == "WARNING"
+        assert applied["scopes"]["DEBUG"]["enabled"] is False
+
+    def test_live_scope_not_backed_by_any_layer_does_not_survive(self) -> None:
+        """Обратная сторона разворота — названа явно, а не обнаружена потом.
+
+        Порог, выставленный кем-то в живом конфиге и не записанный НИ В ОДИН слой,
+        пересборку не переживает. Это цена, которой куплен работающий сброс:
+        сохрани его — и «вернуть как было» перестало бы возвращать.
+        """
         current_scopes = {"SYSTEM": {"enabled": True, "min_level": "ERROR", "channels": [], "modules": []}}
         logger = _FakeManagerWithConfig({"default_level": "INFO", "scopes": current_scopes})
         apply_observability_reconfigure({"stats": {"enabled": False}}, logger=logger)
-        applied = logger.calls[-1]
-        assert applied["scopes"]["SYSTEM"]["min_level"] == "ERROR", "merge перезаписал живые scopes без запроса"
+        assert logger.calls[-1]["scopes"]["SYSTEM"]["min_level"] != "ERROR"
+
+    def test_scope_written_into_a_layer_survives_and_beats_the_profile(self) -> None:
+        """Пара к предыдущему: то же значение, но записанное СЛОЕМ, доживает.
+
+        И ложится ПОВЕРХ профиля уровня — адресная правка не должна стираться
+        оптовой ручкой, применённой в том же вызове.
+        """
+        logger = _FakeManagerWithConfig({})
+        apply_observability_reconfigure(
+            {"log_level": "DEBUG", "scopes": {"SYSTEM": {"min_level": "ERROR"}}},
+            logger=logger,
+        )
+        scopes = logger.calls[-1]["scopes"]
+        assert scopes["SYSTEM"]["min_level"] == "ERROR", "адресная правка стёрта профилем уровня"
+        assert scopes["BUSINESS"]["min_level"] == "DEBUG", "профиль уровня не применён к остальным"
 
 
 class TestEffectiveReadback:

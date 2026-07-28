@@ -1062,6 +1062,7 @@
       "observability": {
         "batch_max_pending": 10000,
         "batch_overflow_policy": "drop_oldest",
+        "channels": {},
         "commands": {
           "log_success": false
         },
@@ -1078,6 +1079,7 @@
         "log_level": "INFO",
         "retention_days": 0,
         "retention_total_mb": 0,
+        "scopes": {},
         "stats": {
           "aggregation_interval": 5.0,
           "enabled": true,
@@ -1117,6 +1119,22 @@
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
+        "observability_app": {
+          "console": true,
+          "enable_batching": true,
+          "errors": {
+            "enabled": true,
+            "include_stacktrace": true,
+            "level": "WARNING"
+          },
+          "file": true,
+          "log_level": "INFO",
+          "stats": {
+            "aggregation_interval": 5.0,
+            "enabled": true,
+            "log_level": "INFO"
+          }
+        },
         "plugins": [
           {
             "auto_start": true,
@@ -1187,36 +1205,42 @@
           "channels": {
             "console": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "console",
               "url": null
             },
             "messages_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
             },
             "system_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
@@ -1399,6 +1423,22 @@
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
+        "observability_app": {
+          "console": true,
+          "enable_batching": true,
+          "errors": {
+            "enabled": true,
+            "include_stacktrace": true,
+            "level": "WARNING"
+          },
+          "file": true,
+          "log_level": "INFO",
+          "stats": {
+            "aggregation_interval": 5.0,
+            "enabled": true,
+            "log_level": "INFO"
+          }
+        },
         "plugins": [
           {
             "category": "hub",
@@ -1477,36 +1517,42 @@
           "channels": {
             "console": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "console",
               "url": null
             },
             "messages_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
             },
             "system_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
@@ -1676,6 +1722,22 @@
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
+        "observability_app": {
+          "console": true,
+          "enable_batching": true,
+          "errors": {
+            "enabled": true,
+            "include_stacktrace": true,
+            "level": "WARNING"
+          },
+          "file": true,
+          "log_level": "INFO",
+          "stats": {
+            "aggregation_interval": 5.0,
+            "enabled": true,
+            "log_level": "INFO"
+          }
+        },
         "plugins": [],
         "queue_size": 64,
         "source_target_fps": 25.0
@@ -1719,36 +1781,42 @@
           "channels": {
             "console": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "console",
               "url": null
             },
             "messages_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
             },
             "system_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
@@ -1921,6 +1989,22 @@
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
+        "observability_app": {
+          "console": true,
+          "enable_batching": true,
+          "errors": {
+            "enabled": true,
+            "include_stacktrace": true,
+            "level": "WARNING"
+          },
+          "file": true,
+          "log_level": "INFO",
+          "stats": {
+            "aggregation_interval": 5.0,
+            "enabled": true,
+            "log_level": "INFO"
+          }
+        },
         "plugins": [
           {
             "category": "processing",
@@ -2058,36 +2142,42 @@
           "channels": {
             "console": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "console",
               "url": null
             },
             "messages_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
             },
             "system_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
@@ -2259,6 +2349,22 @@
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
+        "observability_app": {
+          "console": true,
+          "enable_batching": true,
+          "errors": {
+            "enabled": true,
+            "include_stacktrace": true,
+            "level": "WARNING"
+          },
+          "file": true,
+          "log_level": "INFO",
+          "stats": {
+            "aggregation_interval": 5.0,
+            "enabled": true,
+            "log_level": "INFO"
+          }
+        },
         "plugins": [
           {
             "category": "processing",
@@ -2355,36 +2461,42 @@
           "channels": {
             "console": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "console",
               "url": null
             },
             "messages_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
             },
             "system_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
@@ -2556,6 +2668,22 @@
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
+        "observability_app": {
+          "console": true,
+          "enable_batching": true,
+          "errors": {
+            "enabled": true,
+            "include_stacktrace": true,
+            "level": "WARNING"
+          },
+          "file": true,
+          "log_level": "INFO",
+          "stats": {
+            "aggregation_interval": 5.0,
+            "enabled": true,
+            "log_level": "INFO"
+          }
+        },
         "plugins": [
           {
             "category": "source",
@@ -3243,36 +3371,42 @@
           "channels": {
             "console": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "console",
               "url": null
             },
             "messages_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
             },
             "system_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
@@ -3445,6 +3579,22 @@
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
+        "observability_app": {
+          "console": true,
+          "enable_batching": true,
+          "errors": {
+            "enabled": true,
+            "include_stacktrace": true,
+            "level": "WARNING"
+          },
+          "file": true,
+          "log_level": "INFO",
+          "stats": {
+            "aggregation_interval": 5.0,
+            "enabled": true,
+            "log_level": "INFO"
+          }
+        },
         "plugins": [
           {
             "category": "processing",
@@ -3511,36 +3661,42 @@
           "channels": {
             "console": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "console",
               "url": null
             },
             "messages_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null
             },
             "system_file": {
               "backup_count": 5,
+              "capacity": null,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
               "headers": {},
               "max_size": 10485760,
               "name": "",
+              "owner": null,
               "rotate": true,
               "type": "file",
               "url": null

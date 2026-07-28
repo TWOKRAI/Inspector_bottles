@@ -1012,11 +1012,24 @@ class BuiltinCommands:
     def _cmd_config_reload(self, data=None, **kwargs) -> dict:
         """Перечитать/применить секции observability И/ИЛИ telemetry (Ф1 Task 1.4 + PC 3.1).
 
+        Task 5.12 — **у секции observability теперь есть слой-адресат**, и он разный
+        у двух намерений, которые исторически носила одна команда:
+
+          * **inline** ``data["observability"]`` = «примени вот это сейчас» — ручка
+            оператора, пишет в **L3 (сессия)**. Поэтому она переживает последующий
+            ``config.reload`` из файла: файл владеет L1, не L3. ``data["persist"]``
+            зарезервирован под запись в рецепт (задача 5.12.f) — по умолчанию
+            ``False``, потому что иначе отладочная сессия навсегда меняет рецепт;
+          * **файл** = «перечитай источники» — заменяет **L1**, оставляя L2 (дельта
+            рецепта) и L3 (сессию) на месте, и пересобирает конфиг из слоёв.
+
+        ``data["observability_reset"]`` — список ключей (``"log_level"``,
+        ``"channels.messages_file.enabled"``), которые надо УДАЛИТЬ из L3. Удалить,
+        а не присвоить прежнее значение: присвоение порвало бы связь с нижним слоем
+        навсегда — поменяется дефолт, а сессия продолжит держать старое число.
+
         Источник секций (по приоритету):
-          1. inline: ``data["observability"]`` и/или ``data["telemetry"]`` (dict) —
-             напр. ``{"observability": {"log_level": "DEBUG"}}`` (сменить уровень логгера)
-             или ``{"telemetry": {"publish": {"metrics": {"fps": {"enabled": false}}}}}``
-             (выключить метрику fps на лету через driver);
+          1. inline: ``data["observability"]`` и/или ``data["telemetry"]`` (dict);
           2. файл конфига по ``data["path"]`` / ``get_config("observability_config_path")``
              (тот же путь, что читает hot-reload watcher) — читаются ОБЕ секции.
 
@@ -1035,10 +1048,14 @@ class BuiltinCommands:
         obs_section = args.get("observability")
         telemetry_section = args.get("telemetry")  # PC 3.1 (inline)
         source = "inline"
+        obs_reset = args.get("observability_reset") or []
+        # Сброс — тоже повод пересобрать: без этого «удали ключ» ничего бы не изменило
+        # до следующего reload, то есть команда молча откладывала бы свой эффект.
+        obs_requested = isinstance(obs_section, dict) or bool(obs_reset)
 
         # Файловый фолбэк — только если НИ ОДНОЙ секции нет inline (прежнее поведение +
         # telemetry из того же файла).
-        if not isinstance(obs_section, dict) and not isinstance(telemetry_section, dict):
+        if not obs_requested and not isinstance(telemetry_section, dict):
             path = args.get("path") or (
                 svc.get_config("observability_config_path") if hasattr(svc, "get_config") else None
             )
@@ -1068,19 +1085,38 @@ class BuiltinCommands:
 
         result: dict = {"success": True, "process": svc.name, "source": source}
 
-        # --- observability (если задана inline или из файла) ---
-        if isinstance(obs_section, dict):
+        # --- observability (если задана inline, сброшена или прочитана из файла) ---
+        if obs_requested or (source != "inline" and isinstance(obs_section, dict)):
+            from ..configs.observability_layers import process_observability_layers
             from ..managers.observability_reload import (
-                apply_observability_reconfigure,
+                apply_observability_layers,
                 observability_effective,
             )
+
+            layers = process_observability_layers(svc)
+            if source == "inline":
+                # Ручка оператора пишет в СЕССИЮ (L3), не в L1: иначе следующий
+                # файловый reload молча стирал бы её — ровно та живая находка,
+                # ради которой заведена эта задача.
+                if isinstance(obs_section, dict):
+                    from ...data_schema_module import deep_merge
+
+                    layers.session = deep_merge(layers.session, obs_section)
+            else:
+                # Файл — источник L1. L2 (дельта рецепта) и L3 (сессия) остаются:
+                # файл про них ничего не знает и не имеет права их отменять.
+                layers.app = dict(obs_section) if isinstance(obs_section, dict) else {}
+                layers.app_source = source
+
+            dropped = [key for key in obs_reset if layers.session_reset(str(key))]
+            unknown = [str(key) for key in obs_reset if str(key) not in dropped]
 
             _logger = getattr(svc, "logger_manager", None)
             _error = getattr(svc, "error_manager", None)
             _stats = getattr(svc, "stats_manager", None)
             try:
-                expanded = apply_observability_reconfigure(
-                    obs_section,
+                expanded = apply_observability_layers(
+                    layers,
                     logger=_logger,
                     error=_error,
                     stats=_stats,
@@ -1089,6 +1125,15 @@ class BuiltinCommands:
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "reason": f"reconfigure failed: {exc}"}
             result["applied"] = {"log_level": expanded["logger"].get("default_level")}
+            # Что держится сессией — в ответе всегда: слой, о котором не сказано,
+            # через час выглядит как необъяснимое поведение процесса.
+            result["session_keys"] = list(layers.session_keys())
+            if dropped:
+                result["reset"] = dropped
+            if unknown:
+                # Молчаливый no-op на сбросе несуществующего ключа = оператор
+                # уверен, что вернул как было, а не вернул ничего.
+                result["reset_not_held"] = unknown
             # Readback: фактическое состояние менеджеров ПОСЛЕ применения — инициатор
             # видит эффект (пороги скоупов, каталог, активные каналы), а не эхо входа.
             result["effective"] = observability_effective(logger=_logger, error=_error, stats=_stats)
@@ -1274,6 +1319,11 @@ class BuiltinCommands:
         if callable(resolve_routes):
             routes = list(resolve_routes(name))
         ok = target.set_sink_enabled(name, enabled)
+        # Task 5.12: удачная правка записывается в слой L3, и только поэтому она
+        # переживает `config.reload`. До этого она жила рантайм-множеством, которое
+        # пересборка не видела: `sink.disable` → `config.reload` → канал снова
+        # активен, молча (воспроизведено на живом прогоне).
+        session_key = self._record_sink_in_session(plane, name, enabled) if ok else None
         # `enabled` = ДОСТИГНУТОЕ состояние, а не запрошенное (живая находка
         # 2026-07-28). Прежняя редакция эхом возвращала аргумент, и отказ выглядел
         # как `{"success": false, "enabled": true}` — оператор, читающий соседнее
@@ -1289,7 +1339,30 @@ class BuiltinCommands:
             "routes": routes,
             "manager": plane,
             "process": svc.name,
+            # Ключ слоя L3, которым правка закреплена, либо None. None означает
+            # «переживёт до первого reload и не дальше» — и это ОТВЕТ, а не
+            # умолчание: молчащее различие между двумя плоскостями оператор
+            # обнаружил бы только по пропавшей настройке.
+            "session_key": session_key,
+            "survives_reload": session_key is not None,
         }
+
+    def _record_sink_in_session(self, plane: str, name: str, enabled: bool) -> str | None:
+        """Записать снятие/возврат приёмника в слой L3. Возвращает ключ или None.
+
+        Декларативно выразима сегодня только плоскость логгера:
+        ``expand_observability`` кладёт ``channels`` под ``logger`` и больше никуда.
+        Для error/stats возвращается ``None`` — не «забыли», а «нечем записать»
+        до симметрии namespace (задача 5.10). Врать ``True`` здесь было бы хуже
+        отсутствия: оператор рассчитывал бы на настройку, которой нет.
+        """
+        if plane != "logger":
+            return None
+        from ..configs.observability_layers import process_observability_layers
+
+        key = f"channels.{name}.enabled"
+        process_observability_layers(self._services).session_set(key, bool(enabled))
+        return key
 
     def _cmd_logger_sink_tail(self, data=None, **kwargs) -> dict:
         """Прочитать хвост приёмника, хранящего записи у себя (2.9).

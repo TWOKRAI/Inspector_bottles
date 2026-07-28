@@ -55,6 +55,14 @@ LAYER_ORDER: Tuple[str, ...] = (LAYER_FRAMEWORK, LAYER_APP, LAYER_RECIPE, LAYER_
 #: (точный аналог ``telemetry_override``, см. assembler прототипа).
 OVERRIDE_CONFIG_KEY = "observability_override"
 
+#: Ключ сырой L1-секции в ``proc_dict["config"]``. Нужен ДО первого reload:
+#: без него процесс не знает, какие ключи пришли из ``system.yaml``, и
+#: provenance приписал бы их фреймворку — то есть соврал бы.
+APP_CONFIG_KEY = "observability_app"
+
+#: Атрибут, под которым стек живёт на объекте процесса.
+LAYERS_ATTR = "_observability_layers"
+
 
 def resolve_recipe_section(section: Any, process_name: str) -> Dict[str, Any]:
     """Сырая L2-дельта КОНКРЕТНОГО процесса из секции рецепта.
@@ -261,6 +269,42 @@ class ObservabilityLayers:
 
         # Уже объяснённое явными ключами не переписываем.
         return {k: v for k, v in out.items() if k not in explicit and k not in already}
+
+
+def process_observability_layers(svc: Any) -> ObservabilityLayers:
+    """Стек слоёв ЭТОГО процесса — один на процесс, создаётся лениво.
+
+    L1/L2 приезжают в ``proc_dict["config"]`` (ассемблер), L3 рождается пустым и
+    живёт до конца процесса. Кэш на объекте процесса, а не пересборка на каждый
+    вызов: L3 — это состояние, и пересоздавать его значило бы терять ручку
+    оператора при каждой команде.
+
+    Процесс без обоих ключей (тесты, одиночный запуск) получает пустой стек —
+    работоспособный, просто без объяснимого происхождения ключей.
+    """
+    existing = getattr(svc, LAYERS_ATTR, None)
+    if isinstance(existing, ObservabilityLayers):
+        return existing
+
+    get_config = getattr(svc, "get_config", None)
+    app: Dict[str, Any] = {}
+    recipe: Dict[str, Any] = {}
+    app_source = ""
+    if callable(get_config):
+        app = get_config(APP_CONFIG_KEY) or {}
+        recipe = get_config(OVERRIDE_CONFIG_KEY) or {}
+        app_source = str(get_config("observability_config_path") or "")
+    layers = ObservabilityLayers(
+        app=dict(app) if isinstance(app, dict) else {},
+        recipe=dict(recipe) if isinstance(recipe, dict) else {},
+        app_source=app_source,
+        recipe_source=str(getattr(svc, "_observability_recipe_source", "") or ""),
+    )
+    try:
+        setattr(svc, LAYERS_ATTR, layers)
+    except Exception:  # noqa: BLE001 — объект без сеттеров: работаем без кэша, но работаем
+        pass
+    return layers
 
 
 def _channel_toggle(channel_type: str) -> str:
