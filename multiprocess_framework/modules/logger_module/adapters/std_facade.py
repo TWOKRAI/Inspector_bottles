@@ -199,17 +199,23 @@ class StdLoggerFacade:
         self._epoch = OBSERVABILITY_EPOCH[0]
 
 
-_CACHE: dict[str, StdLoggerFacade] = {}
+_CACHE: dict[tuple[str, str | None], StdLoggerFacade] = {}
 
 
-def get_std_logger(module: str = "main") -> StdLoggerFacade:
-    """Вернуть (и закэшировать) фасад для указанного per-module файла.
+def get_std_logger(module: str = "main", *, fallback_name: str | None = None) -> StdLoggerFacade:
+    """Вернуть (и закэшировать) вид для указанного per-module файла.
 
-    Кэш — по имени модуля: фасады не держат состояния кроме имени, а стабильная
-    идентичность удобна в тестах (``assert a is b``).
+    Кэш — по ПАРЕ ``(module, fallback_name)``, а не по одному имени модуля
+    (2.2). Второй параметр появился, когда на этот вид переехал
+    ``FallbackLogger``: ему нужен stdlib-логгер с ТОЧНЫМ именем модуля
+    (``multiprocess_framework.modules...``), а не с префиксом ``mpf.``. Ключ по
+    одному ``module`` отдал бы второму вызывающему чужой фолбэк молча — и
+    записи ушли бы в stdlib-логгер с чужим именем ровно тогда, когда менеджера
+    нет, то есть когда разбираться труднее всего.
     """
-    facade = _CACHE.get(module)
+    key = (module, fallback_name)
+    facade = _CACHE.get(key)
     if facade is None:
-        facade = StdLoggerFacade(module)
-        _CACHE[module] = facade
+        facade = StdLoggerFacade(module, fallback_name=fallback_name)
+        _CACHE[key] = facade
     return facade

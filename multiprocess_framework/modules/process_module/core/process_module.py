@@ -310,7 +310,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self.queues,
             self.router_manager,
             self.shared_resources,
-            logger_callback=self._fallback_log,
+            logger_callback=self._log_callback,
         )
 
         # Регистрация очередей
@@ -526,8 +526,21 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
     # ========================================================================
 
-    def _fallback_log(self, level: str, msg: str, ctx: str = None):
-        """Fallback логирование через ObservableMixin."""
+    def _log_callback(self, level: str, msg: str, ctx: str = None):
+        """Колбэк логирования для ``ProcessCommunication`` (уровень строкой + контекст).
+
+        **Переименован из ``_fallback_log`` (2.2) — имя лгало.** «Fallback» на
+        этом проекте означает аварийный выход мимо сломанного маршрута
+        (``ChannelRoutingManager._fallback_log`` пишет в stdlib напрямую именно
+        поэтому). Здесь же запись идёт по ШТАТНОМУ пути — через
+        ``ObservableMixin._log_*``, со всеми гейтом, роутингом и учётом потерь.
+        Никакого запасного маршрута тут нет и не было.
+
+        Цена ложного имени не гипотетическая: разбирая, где у нас аварийные
+        выходы, легко посчитать этот метод вторым — и «слить копии», которых не
+        существует. Правило проекта прямое: уверенное неверное объяснение
+        переживает баг.
+        """
         log_fn = getattr(self, f"_log_{level.lower()}", self._log_info)
         log_fn(f"{ctx or self.name}: {msg}")
 
