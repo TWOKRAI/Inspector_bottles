@@ -470,11 +470,6 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         return self.router_manager
 
     @property
-    def logger_adapter(self):
-        """Доступ к logger_adapter через менеджера."""
-        return self.logger_manager.get_adapter() if self.logger_manager else None
-
-    @property
     def command_adapter(self):
         """Доступ к command_adapter через менеджера."""
         return self.command_manager.get_adapter() if self.command_manager else None

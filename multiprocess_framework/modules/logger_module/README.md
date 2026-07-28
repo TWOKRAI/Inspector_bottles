@@ -111,8 +111,7 @@ logger_module/
 │   └── log_channel.py        ← LogChannel(ILogChannel), FileChannel, ConsoleChannel, HttpChannel
 │
 ├── adapters/
-│   ├── logger_adapter.py     ← LoggerAdapter (для интеграции с процессами)
-│   └── std_facade.py         ← StdLoggerFacade / get_std_logger (мост из stdlib-стиля)
+│   └── std_facade.py         ← StdLoggerFacade / get_std_logger (единственный вид)
 │
 └── tests/
     └── test_logger_manager.py

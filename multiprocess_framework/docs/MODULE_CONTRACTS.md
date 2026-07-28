@@ -167,7 +167,7 @@
 - `LogScope(str, Enum)` — `SYSTEM/BUSINESS/PERFORMANCE/AUDIT/SECURITY/DEBUG`.
 - `LogLevel(str, Enum)` — `DEBUG/INFO/WARNING/ERROR/CRITICAL`.
 - `LogRecord` — dataclass.
-- `LoggerAdapter` — обёртка для multiprocess.
+- `StdLoggerFacade` / `get_std_logger(module)` — именованный **вид** поверх писателя (stdlib-подобный интерфейс). Адаптера у логгера нет: `LoggerAdapter` снят в 2.2 как без потребителей.
 - `get_logger(name)` — фабрика.
 - Каналы: `FileChannel`, `ConsoleChannel`, `HttpChannel`.
 
