@@ -129,6 +129,14 @@ class ConfigReloadParams(BaseModel):
     path: Optional[str] = None
 
 
+class ObservabilityPersistParams(BaseModel):
+    """Параметры ``observability.persist`` (Task 5.12: L3 → спутник рецепта)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    recipe_path: Optional[str] = None
+
+
 class LoggerSinkParams(BaseModel):
     """Параметры ``logger.sink.enable`` / ``logger.sink.disable``."""
 
@@ -215,6 +223,7 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     "introspect.observability": NoParams,
     # observability control plane (Ф1 Task 1.4/1.5, Ф5.20b)
     "config.reload": ConfigReloadParams,
+    "observability.persist": ObservabilityPersistParams,
     "logger.sink.enable": LoggerSinkParams,
     "logger.sink.disable": LoggerSinkParams,
     "log.tail.subscribe": LogTailSubscribeParams,

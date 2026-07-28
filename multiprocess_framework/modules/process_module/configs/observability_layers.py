@@ -60,6 +60,9 @@ OVERRIDE_CONFIG_KEY = "observability_override"
 #: provenance приписал бы их фреймворку — то есть соврал бы.
 APP_CONFIG_KEY = "observability_app"
 
+#: Ключ с путём к активному рецепту — адрес слоя L2 (рецепт + спутник рядом).
+RECIPE_PATH_CONFIG_KEY = "observability_recipe_path"
+
 #: Атрибут, под которым стек живёт на объекте процесса.
 LAYERS_ATTR = "_observability_layers"
 
@@ -290,15 +293,17 @@ def process_observability_layers(svc: Any) -> ObservabilityLayers:
     app: Dict[str, Any] = {}
     recipe: Dict[str, Any] = {}
     app_source = ""
+    recipe_source = ""
     if callable(get_config):
         app = get_config(APP_CONFIG_KEY) or {}
         recipe = get_config(OVERRIDE_CONFIG_KEY) or {}
         app_source = str(get_config("observability_config_path") or "")
+        recipe_source = str(get_config(RECIPE_PATH_CONFIG_KEY) or "")
     layers = ObservabilityLayers(
         app=dict(app) if isinstance(app, dict) else {},
         recipe=dict(recipe) if isinstance(recipe, dict) else {},
         app_source=app_source,
-        recipe_source=str(getattr(svc, "_observability_recipe_source", "") or ""),
+        recipe_source=recipe_source,
     )
     try:
         setattr(svc, LAYERS_ATTR, layers)

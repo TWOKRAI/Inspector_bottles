@@ -34,6 +34,7 @@ from multiprocess_framework.modules.process_module.configs.observability_config 
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
     APP_CONFIG_KEY,
     OVERRIDE_CONFIG_KEY,
+    RECIPE_PATH_CONFIG_KEY,
     ObservabilityLayers,
     resolve_recipe_section,
 )
@@ -82,8 +83,10 @@ class BlueprintAssembler:
         observability_section: dict[str, Any],
         log_dir: str = "logs",
         telemetry_dict: dict[str, Any] | None = None,
+        recipe_path: str = "",
     ) -> None:
         self._observability_section = observability_section or {}
+        self._recipe_path = recipe_path
         self._log_dir = log_dir
         self._telemetry_dict = telemetry_dict
 
@@ -170,6 +173,10 @@ class BlueprintAssembler:
             # introspect.observability на «почему у меня INFO» стал бы выдумкой.
             if self._observability_section:
                 proc_dict["config"][APP_CONFIG_KEY] = dict(self._observability_section)
+            # Адрес слоя L2: без него `observability.persist` в дочернем процессе
+            # не знает, куда сохранять, и «сохранить» превратилось бы в отказ.
+            if self._recipe_path:
+                proc_dict["config"][RECIPE_PATH_CONFIG_KEY] = self._recipe_path
             override = per_process_telemetry.get(name)
             telemetry_section = self._resolve_telemetry(override)
             if telemetry_section is not None:

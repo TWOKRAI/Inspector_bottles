@@ -532,7 +532,9 @@
         }
       }
     },
+    "manifest_path": "<ROOT>/multiprocess_prototype/app.yaml",
     "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
+    "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
     "replace_debounce_s": 1.0,
     "state_throttle_rules": {
       "processes.**.state.drops": 0.05,
@@ -645,6 +647,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "auto_start": false,
@@ -945,6 +948,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "category": "hub",
@@ -1262,6 +1266,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "category": "rendering",
@@ -1547,6 +1552,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [],
         "queue_size": 64,
         "source_target_fps": 25.0
@@ -1811,6 +1817,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "category": "processing",
@@ -2119,6 +2126,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "category": "filter",
@@ -2399,6 +2407,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "category": "processing",
@@ -2676,6 +2685,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "auto_start": true,
@@ -2986,6 +2996,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "category": "processing",
@@ -3314,6 +3325,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
           {
             "category": "processing",

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...config_module.core.config import Config
 from ..configs.observability_config import expand_observability
+from ..configs.observability_layers import LAYER_APP, LAYER_RECIPE
 
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
@@ -437,19 +438,37 @@ def make_observability_on_reload(
     stats: Any = None,
     section_key: str = "observability",
     log_info: Optional[Callable[[str], None]] = None,
+    layers: Optional["ObservabilityLayers"] = None,
+    layer: str = LAYER_APP,
+    process_name: str = "",
 ) -> Callable[[Config], None]:
-    """Собрать ``on_reload(config)`` callback: секция ``observability`` → reconfigure 3 менеджеров.
+    """Собрать ``on_reload(config)`` callback: файл → нужный СЛОЙ → пересборка.
 
     Использует ``on_reload`` ConfigFileWatcher'а напрямую (callback вызывается ПОСЛЕ
     ``Config.update``) — pub/sub по ключу не нужен (``update`` шлёт ``_notify("*")``).
-    Делегирует применение в :func:`apply_observability_reconfigure` — общий путь с
-    IPC ``config.reload`` (гарантия неконфликта watcher ↔ IPC).
+
+    Args:
+        layers: стек процесса. **Обязателен, если у процесса есть L2/L3.** Без него
+            файл трактуется как весь конфиг целиком, и правка ``system.yaml`` молча
+            снесла бы и дельту рецепта, и ручку оператора — то есть watcher оказался
+            бы способом обойти слои, ради которых всё и делалось.
+        layer: какой слой обновляет ЭТОТ файл — ``app`` (``system.yaml``) или
+            ``recipe`` (рецепт/спутник).
+        process_name: имя процесса для разрешения per-process секции рецепта
+            (``processes[<имя>]``); для слоя ``app`` не используется.
     """
+    from ..configs.observability_layers import ObservabilityLayers, resolve_recipe_section
+
+    stack = layers if layers is not None else ObservabilityLayers()
 
     def _on_reload(config: Config) -> None:
         section = config.get(section_key, {}) or {}
-        apply_observability_reconfigure(
-            section,
+        if layer == LAYER_RECIPE:
+            stack.recipe = resolve_recipe_section(section, process_name)
+        else:
+            stack.app = dict(section) if isinstance(section, dict) else {}
+        apply_observability_layers(
+            stack,
             logger=logger,
             error=error,
             stats=stats,
@@ -470,6 +489,9 @@ def start_observability_watcher(
     log_info: Optional[Callable[[str], None]] = None,
     log_error: Optional[Callable[[str], None]] = None,
     on_reload_extra: Optional[Callable[[Config], None]] = None,
+    layers: Optional["ObservabilityLayers"] = None,
+    layer: str = LAYER_APP,
+    process_name: str = "",
 ) -> Optional["ConfigFileWatcher"]:
     """Запустить watcher файла конфига, перестраивающий менеджеры наблюдаемости.
 
@@ -520,6 +542,9 @@ def start_observability_watcher(
         stats=stats,
         section_key=section_key,
         log_info=log_info,
+        layers=layers,
+        layer=layer,
+        process_name=process_name,
     )
     if on_reload_extra is not None:
         # Композиция: сначала observability-reconfigure, затем extra-колбэк (PC 3.1:

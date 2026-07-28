@@ -1007,6 +1007,11 @@ class BuiltinCommands:
                 "Снять подписку на tail логов процесса",
             ),
             (
+                "observability.persist",
+                self._cmd_observability_persist,
+                "Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)",
+            ),
+            (
                 "observability.tail.subscribe",
                 self._cmd_observability_tail_subscribe,
                 "Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)",
@@ -1370,6 +1375,55 @@ class BuiltinCommands:
             # обнаружил бы только по пропавшей настройке.
             "session_key": session_key,
             "survives_reload": session_key is not None,
+        }
+
+    def _cmd_observability_persist(self, data=None, **kwargs) -> dict:
+        """Закрепить рантайм-правки (L3) в спутнике рецепта — ОТДЕЛЬНОЕ явное действие.
+
+        Почему не «каждая ручка сразу пишет в рецепт», как звучало исходное
+        требование: тогда любая отладочная сессия навсегда меняет рецепт, и после
+        каждого захода в ``git diff`` мусор. Плюс за файлом следит watcher — запись
+        на каждое нажатие дала бы ещё и петлю применений поверх порчи файла.
+
+        Пишется **спутник** ``recipes/<имя>.observability.yaml``, а не сам рецепт:
+        «пишет человек» и «пишет машина» разведены по файлам, а не по аккуратности
+        сериализатора — она в этом проекте уже подводила (GUI-save стёр комментарии
+        ``system.yaml``). Файл человека не изменяется ни на байт.
+
+        После успешной записи ключи ПЕРЕЕЗЖАЮТ из L3 в L2 в памяти: действующее
+        состояние не меняется, но ``introspect.observability`` начинает честно
+        говорить ``recipe`` вместо ``session`` — иначе оператор видел бы «держится
+        сессией» у того, что уже сохранено, и сбросил бы это по ошибке.
+
+        Параметры: ``recipe_path`` (по умолчанию — из конфига процесса).
+        """
+        from ..configs.observability_companion import persist_session_to_companion
+        from ..configs.observability_layers import process_observability_layers
+
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        recipe_path = args.get("recipe_path") or (
+            svc.get_config("observability_recipe_path") if hasattr(svc, "get_config") else None
+        )
+        layers = process_observability_layers(svc)
+        session = dict(layers.session)
+
+        try:
+            report = persist_session_to_companion(recipe_path, svc.name, session)
+        except Exception as exc:  # noqa: BLE001 — «сохранить не сохранило» обязано быть слышно
+            return {"success": False, "process": svc.name, "reason": f"запись спутника не удалась: {exc}"}
+        if not report.get("success"):
+            return {**report, "process": svc.name}
+
+        from ...data_schema_module import deep_merge
+
+        layers.recipe = deep_merge(layers.recipe, session)
+        layers.recipe_source = report["path"]
+        layers.session = {}
+        return {
+            **report,
+            "process": svc.name,
+            "session_keys": list(layers.session_keys()),
         }
 
     def _record_sink_in_session(self, plane: str, name: str, enabled: bool) -> str | None:

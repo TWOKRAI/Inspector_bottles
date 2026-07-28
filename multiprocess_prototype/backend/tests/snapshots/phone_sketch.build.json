@@ -1022,7 +1022,9 @@
         }
       }
     },
+    "manifest_path": "<ROOT>/multiprocess_prototype/app.yaml",
     "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
+    "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
     "replace_debounce_s": 1.0,
     "state_throttle_rules": {
       "processes.**.state.drops": 0.05,
@@ -1135,6 +1137,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
         "plugins": [
           {
             "auto_start": true,
@@ -1439,6 +1442,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
         "plugins": [
           {
             "category": "hub",
@@ -1738,6 +1742,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
         "plugins": [],
         "queue_size": 64,
         "source_target_fps": 25.0
@@ -2005,6 +2010,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
         "plugins": [
           {
             "category": "processing",
@@ -2365,6 +2371,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
         "plugins": [
           {
             "category": "processing",
@@ -2684,6 +2691,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
         "plugins": [
           {
             "category": "source",
@@ -3595,6 +3603,7 @@
             "log_level": "INFO"
           }
         },
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
         "plugins": [
           {
             "category": "processing",

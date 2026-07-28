@@ -573,7 +573,17 @@ class ProcessManagerProcess(ProcessModule):
         td = args.get("topology_dict")
         if td is None:
             return {"error": "topology_dict required"}
-        return self.apply_topology(td)
+        result = self.apply_topology(td)
+        # Task 5.12: L2-watcher обязан переехать на спутник НОВОГО рецепта. Иначе
+        # правка нового файла молча не применяется, а правка старого — применяется,
+        # и оба симптома читаются как «hot-reload сломался».
+        retarget = getattr(self, "retarget_observability_recipe_watcher", None)
+        if callable(retarget) and result.get("success"):
+            try:
+                retarget(str(args.get("recipe_path") or ""))
+            except Exception as exc:  # noqa: BLE001 — ретаргет не должен ронять switch
+                self._log_error(f"[observability] ретаргет L2-watcher после switch не удался: {exc}")
+        return result
 
     def _cmd_topology_get(self, data=None, **kwargs) -> dict:
         """Получить текущую топологию.

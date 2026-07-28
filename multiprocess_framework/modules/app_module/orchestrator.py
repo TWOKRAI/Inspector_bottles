@@ -97,6 +97,13 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             except Exception as exc:  # noqa: BLE001 — shutdown best-effort
                 self._log_error(f"[observability] watcher stop: {exc}")
             self._observability_watcher = None
+        recipe_watcher = getattr(self, "_observability_recipe_watcher", None)
+        if recipe_watcher is not None:
+            try:
+                recipe_watcher.stop()
+            except Exception as exc:  # noqa: BLE001 — shutdown best-effort
+                self._log_error(f"[observability] L2-watcher stop: {exc}")
+            self._observability_recipe_watcher = None
         store_manager = getattr(self, "_state_store_manager", None)
         if store_manager is not None and hasattr(store_manager, "shutdown"):
             try:
@@ -151,6 +158,11 @@ class GenericProcessManagerApp(ProcessManagerProcess):
                     log_info=self._log_info,
                 )
 
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            process_observability_layers,
+        )
+
+        layers = process_observability_layers(self)
         self._observability_watcher = start_observability_watcher(
             config_path=config_path,
             logger=self.logger_manager,
@@ -159,7 +171,102 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             log_info=self._log_info,
             log_error=self._log_error,
             on_reload_extra=telemetry_on_reload,
+            layers=layers,
         )
+        # Task 5.12: ВТОРОЙ watcher — за слоем L2 (спутник рецепта). Не «переезд»
+        # с system.yaml, а добавление: в L1 живут машинные ключи (каталог логов,
+        # ретеншен), и убрать за ними наблюдение значило бы разменять одну живую
+        # ручку на другую. Каждый watcher владеет СВОИМ слоем и не знает о чужом.
+        self._start_recipe_observability_watcher(layers)
+
+    def _start_recipe_observability_watcher(self, layers: Any) -> None:
+        """Watcher за спутником рецепта (слой L2). Ретаргетится при switch."""
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            companion_path,
+        )
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            LAYER_RECIPE,
+            RECIPE_PATH_CONFIG_KEY,
+        )
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            start_observability_watcher,
+        )
+
+        # Активный рецепт: ретаргет (switch) кладёт его сюда, boot — в конфиг.
+        recipe_path = getattr(self, "_observability_recipe_path", "") or self.get_config(RECIPE_PATH_CONFIG_KEY) or ""
+        old = getattr(self, "_observability_recipe_watcher", None)
+        if old is not None:
+            try:
+                old.stop()
+            except Exception as exc:  # noqa: BLE001 — старый watcher не должен мешать новому
+                self._log_error(f"[observability] прежний L2-watcher не остановлен: {exc}")
+        self._observability_recipe_watcher = None
+        if not recipe_path:
+            return
+
+        path = companion_path(recipe_path)
+        if not path.exists():
+            # Спутника ещё нет — его создаёт первое «сохранить». Это НЕ ошибка,
+            # но и не тишина: без записи в лог «почему правка файла не подхватилась»
+            # выясняется чтением исходников.
+            self._log_info(f"[observability] спутник рецепта отсутствует, L2-watcher не поднят: {path}")
+            return
+        self._observability_recipe_watcher = start_observability_watcher(
+            config_path=path,
+            logger=self.logger_manager,
+            error=self.error_manager,
+            stats=self.stats_manager,
+            log_info=self._log_info,
+            log_error=self._log_error,
+            layers=layers,
+            layer=LAYER_RECIPE,
+            process_name=self.name,
+        )
+
+    def retarget_observability_recipe_watcher(self, recipe_path: str) -> None:
+        """Перевести L2-watcher на новый рецепт (switch).
+
+        Без ретаргета после switch watcher продолжал бы смотреть в спутник СТАРОГО
+        рецепта: правка нового файла не применялась бы, а правка старого — применялась,
+        и оба симптома выглядят как «hot-reload сломался».
+
+        Пустой ``recipe_path`` — не «оставить как было», а «активный рецепт неизвестен»:
+        источником становится манифест (``app.yaml: pipeline``), который GUI пишет при
+        активации рецепта. Оставить прежний путь было бы хуже молчания — watcher
+        продолжил бы применять чужой файл, выдавая это за работающий hot-reload.
+        """
+        if not recipe_path:
+            recipe_path = self._active_recipe_from_manifest()
+            if not recipe_path:
+                self._log_info(
+                    "[observability] switch без recipe_path и без манифеста — L2-watcher снят: "
+                    "адрес слоя рецепта неизвестен"
+                )
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            process_observability_layers,
+        )
+
+        self._observability_recipe_path = str(recipe_path or "")
+        self._start_recipe_observability_watcher(process_observability_layers(self))
+
+    def _active_recipe_from_manifest(self) -> str:
+        """Активный рецепт из манифеста (``app.yaml: pipeline``) — существующая истина.
+
+        Именно этот файл GUI обновляет при активации рецепта, и бэкенд читает его
+        на boot. Заводить второй канал для того же факта значило бы получить два
+        источника, которые однажды разойдутся.
+        """
+        manifest_path = self.get_config("manifest_path") or ""
+        if not manifest_path:
+            return ""
+        try:
+            from .store import ManifestStore
+
+            manifest = ManifestStore(manifest_path).load()
+            return str(getattr(manifest, "pipeline", "") or "")
+        except Exception as exc:  # noqa: BLE001 — нет манифеста → просто нет адреса
+            self._log_error(f"[observability] манифест не прочитан ({manifest_path}): {exc}")
+            return ""
 
     def _setup_state_store(self) -> None:
         """Создать реактивный StateStore из build-time хуков. Опционален.

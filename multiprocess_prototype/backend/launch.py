@@ -400,10 +400,25 @@ class SystemBuilder:
         # BlueprintAssembler: stateless сборщик — та же цепочка, что была инлайн
         # (validate → check → build_configs → log_dir → process → merge_managers →
         # merge_with_defaults).  Невалидный blueprint → BlueprintInvalid (не sys.exit).
+        # Task 5.12: спутник рецепта — machine-owned слой L2. Мержится ПОВЕРХ
+        # секции самого рецепта: спутник пишет пульт, и его правка новее той, что
+        # человек написал в рецепте руками.
+        recipe_path = str(self._topology_path) if self._topology_path else ""
+        if recipe_path:
+            from multiprocess_framework.modules.data_schema_module import deep_merge
+            from multiprocess_framework.modules.process_module.configs.observability_companion import (
+                load_companion,
+            )
+
+            companion = load_companion(recipe_path)
+            if companion:
+                bp_dict["observability"] = deep_merge(bp_dict.get("observability") or {}, companion)
+
         assembler = BlueprintAssembler(
             observability_section=obs_section,
             log_dir=log_dir,
             telemetry_dict=telemetry_dict,
+            recipe_path=recipe_path,
         )
         try:
             proc_dicts = assembler.assemble(bp_dict)
@@ -428,6 +443,13 @@ class SystemBuilder:
                 "backend_ctl": sys_config.backend_ctl.model_dump(),
                 # Путь к system.yaml для observability hot-reload watcher (P3.3).
                 "observability_config_path": str(self._system_path) if self._system_path else "",
+                # Task 5.12: активный рецепт — адрес слоя L2 (сам рецепт + спутник
+                # рядом). Нужен и watcher'у L2, и команде observability.persist.
+                "observability_recipe_path": recipe_path,
+                # Манифест — существующая истина «какой рецепт активен» (его пишет
+                # GUI при активации). Нужен для ретаргета L2-watcher после switch,
+                # когда инициатор не передал путь явно.
+                "manifest_path": str(self._manifest_path) if self._manifest_path else "",
                 # Дебаунс hot-swap: коалесинг повторных/наложенных кликов 3 точек входа
                 # (Recipes «Загрузить», Pipeline «Запустить»/«Перезапустить») → не «тасуем»
                 # процессы. Меряется от завершения предыдущей замены. 0 = выключено (тесты).
