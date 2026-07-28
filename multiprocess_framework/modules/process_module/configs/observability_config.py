@@ -46,6 +46,15 @@ class ObservabilityErrorsConfig(SchemaBase):
     level: Annotated[str, FieldMeta("Минимальный уровень ошибок")] = "WARNING"
     include_stacktrace: Annotated[bool, FieldMeta("Включать stacktrace")] = True
 
+    # Task 5.10.b — зеркало верхнеуровневого ``channels`` логгера. До неё
+    # плоскость ошибок была адресуема ТОЛЬКО рантаймом: `sink.disable
+    # manager=error` работал, но записать его было некуда, и любой
+    # `config.reload` молча воскрешал снятый `errors_file`.
+    channels: Annotated[
+        Dict[str, Dict[str, Any]],
+        FieldMeta("Переопределения отдельных каналов ошибок ({имя: {enabled: false}})"),
+    ] = Field(default_factory=dict)
+
 
 @register_schema("ObservabilityStatsConfig")
 class ObservabilityStatsConfig(SchemaBase):
@@ -57,6 +66,15 @@ class ObservabilityStatsConfig(SchemaBase):
         FieldMeta("Интервал агрегации, сек", min=0.1, max=60.0),
     ] = 5.0
     log_level: Annotated[str, FieldMeta("Уровень логирования метрик")] = "INFO"
+
+    # Task 5.10.b — то же зеркало для третьей плоскости. Служебные имена
+    # ``log_stats`` / ``file_stats`` описаний в ``channels`` не имеют (их
+    # собирают свои сборщики) — но ``{enabled: false}`` про них теперь читается
+    # (5.10.c): без этого ключ существовал бы, а гасил ровно ничего.
+    channels: Annotated[
+        Dict[str, Dict[str, Any]],
+        FieldMeta("Переопределения отдельных каналов статистики ({имя: {enabled: false}})"),
+    ] = Field(default_factory=dict)
 
 
 @register_schema("ObservabilityCommandsConfig")
@@ -246,6 +264,16 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         "aggregation_interval": cfg.stats.aggregation_interval,
         "log_level": cfg.stats.log_level,
     }
+
+    # Task 5.10.b: адресные переопределения каналов двух младших плоскостей —
+    # тем же ЧАСТИЧНЫМ словарём, что у логгера. Полное описание канала здесь не
+    # собирается сознательно: severity-каналы ошибок строит
+    # ``expand_error_manager_config``, а служебные каналы статистики — её
+    # собственные сборщики; наша запись обязана лечь поверх, а не вместо.
+    if cfg.errors.channels:
+        error["channels"] = {str(k): dict(v) for k, v in cfg.errors.channels.items()}
+    if cfg.stats.channels:
+        stats["channels"] = {str(k): dict(v) for k, v in cfg.stats.channels.items()}
 
     command: Dict[str, Any] = {
         "log_success": cfg.commands.log_success,

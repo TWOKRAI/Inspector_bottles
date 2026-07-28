@@ -24,6 +24,16 @@ _SINK_ADDRESSABLE_MANAGERS = {
     "stats": "stats_manager",
 }
 
+#: Плоскость → префикс ключа слоя L3 (Task 5.10.b). Повторяет путь секции в
+#: ``ObservabilityConfig``: логгер держит ``channels`` наверху, младшие
+#: плоскости — внутри своих секций. Одно снятие — одно написание, иначе сброс
+#: и ``persist`` адресовали бы не то, что видно в файле.
+_SINK_SESSION_PREFIX = {
+    "logger": "channels.",
+    "error": "errors.channels.",
+    "stats": "stats.channels.",
+}
+
 
 def _parse_ttl(args: dict) -> tuple[float | None, str | None]:
     """Разобрать параметр ``ttl`` команд наблюдаемости (Task 5.8).
@@ -1006,20 +1016,41 @@ class BuiltinCommands:
                 self._cmd_telemetry_reconfigure,
                 "Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)",
             ),
+            # Task 5.10.e: каноническое имя называет ОХВАТ. Команда адресует три
+            # плоскости параметром `manager` с Ф0.6, а имя всё это время
+            # называло одну — оператор искал ручку для ошибок под `error.*` и не
+            # находил. Старые имена оставлены живыми алиасами (ниже): они
+            # записаны в сохранённых сессиях драйвера и в MCP-инструментах, и
+            # ломать их ради красоты имени было бы ценой не по покупке.
+            (
+                "observability.sink.enable",
+                self._cmd_logger_sink_enable,
+                "Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)",
+            ),
+            (
+                "observability.sink.disable",
+                self._cmd_logger_sink_disable,
+                "Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)",
+            ),
+            (
+                "observability.sink.tail",
+                self._cmd_logger_sink_tail,
+                "Прочитать последние N записей приёмника, хранящего их у себя (type=memory)",
+            ),
             (
                 "logger.sink.enable",
                 self._cmd_logger_sink_enable,
-                "Включить sink логгера по имени (register_channel)",
+                "Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)",
             ),
             (
                 "logger.sink.disable",
                 self._cmd_logger_sink_disable,
-                "Выключить sink логгера по имени (unregister_channel)",
+                "Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)",
             ),
             (
                 "logger.sink.tail",
                 self._cmd_logger_sink_tail,
-                "Прочитать последние N записей приёмника, хранящего их у себя (type=memory)",
+                "Алиас observability.sink.tail (имя до 5.10)",
             ),
             (
                 "log.tail.subscribe",
@@ -1456,38 +1487,55 @@ class BuiltinCommands:
             "session_key": session_key,
             "survives_reload": session_key is not None,
         }
-        # Task 5.8: срок — только там, где есть чему жить. У плоскостей без
-        # ключа L3 (error/stats) правка не переживает и первого reload, и
-        # приписывать ей срок значило бы обещать возврат того, что и так уйдёт.
+        # Task 5.8: срок — только там, где есть чему жить.
         if session_key is not None:
             result.update(self._session_ttl_answer(session_key))
-        elif plane == "logger":
-            # Отказ «канал уже в этом состоянии» ничего не записывает, а значит и
-            # срок НЕ продлевает. Оператор, который звал команду именно ради
-            # продления, увидел бы success=false, состояние «как просил» — и не
-            # узнал бы, что через десять секунд всё вернётся. Называем остаток.
-            result.update(self._session_ttl_note(f"channels.{name}.enabled"))
+        else:
+            # Отказ «канал уже в этом состоянии» ничего не записывает. Task 5.10.d
+            # снимает отсюда прежнюю тупиковость: срок ПРОДЛЕВАЕТСЯ, если оператор
+            # прислал `ttl` явно, и только молчаливый повтор (без `ttl`) остаётся
+            # чистым no-op с названным остатком.
+            held = f"{_SINK_SESSION_PREFIX.get(plane, '')}{name}.enabled"
+            result.update(self._touch_or_report_ttl(held, ttl, requested="ttl" in args))
         return result
 
-    def _session_ttl_note(self, session_key: str) -> dict:
-        """Остаток срока по ключу, который команда НЕ трогала (Task 5.8).
+    def _touch_or_report_ttl(self, session_key: str, ttl: float | None, *, requested: bool) -> dict:
+        """Ответ про срок ключа, состояние которого команда не изменила.
 
-        Пусто, если сессия этого ключа не держит: поле-заглушка про несуществующий
-        срок читалось бы как «бессрочно», то есть как ответ.
+        Task 5.8 завела здесь честный отчёт («срок НЕ продлён, остаток такой-то»),
+        Task 5.10.d — сам путь продления. Различие намеренное и держится на
+        **явности запроса**, а не на факте правки:
+
+          * оператор прислал ``ttl`` — он просит именно срок, и повтор команды на
+            уже снятом приёмнике продлевает его. Иначе продление приходилось бы
+            выражать через ``config.reload``, то есть через другую команду с
+            другим синтаксисом — резидуал T3 из 5.8;
+          * ``ttl`` не прислан — это повтор по инерции, и молча передвигать чужой
+            дедлайн он не вправе: «включил DEBUG и забыл» вернулось бы через
+            заднюю дверь, стоит поставить такую команду в цикл опроса.
+
+        Пусто, если сессия ключа не держит: поле-заглушка про несуществующий срок
+        читалось бы как «бессрочно», то есть как ответ.
         """
         from ..configs.observability_layers import process_observability_layers
 
         layers = process_observability_layers(self._services)
-        if not layers.session_has_deadline(session_key):
-            return {}
-        return {
-            "session_key_held": session_key,
-            "expires_in_sec": layers.session_expires_in(session_key),
-            "ttl_hint": (
-                "команда ничего не изменила, поэтому срок НЕ продлён; "
-                "продлить — config.reload с секцией observability и ttl"
-            ),
-        }
+        with layers.lock:
+            if session_key not in layers.session_keys():
+                return {}
+            if not requested:
+                if not layers.session_has_deadline(session_key):
+                    return {}
+                return {
+                    "session_key_held": session_key,
+                    "expires_in_sec": layers.session_expires_in(session_key),
+                    "ttl_hint": ("команда ничего не изменила и срок НЕ продлён; продлить — та же команда с явным ttl"),
+                }
+            layers.session_touch((session_key,), ttl)
+            answer = self._session_ttl_answer(session_key)
+        answer["session_key_held"] = session_key
+        answer["ttl_extended"] = True
+        return answer
 
     def _session_ttl_answer(self, session_key: str) -> dict:
         """Поля ответа про срок жизни только что записанного ключа L3 (Task 5.8)."""
@@ -1604,19 +1652,22 @@ class BuiltinCommands:
     ) -> str | None:
         """Записать снятие/возврат приёмника в слой L3. Возвращает ключ или None.
 
-        Декларативно выразима сегодня только плоскость логгера:
-        ``expand_observability`` кладёт ``channels`` под ``logger`` и больше никуда.
-        Для error/stats возвращается ``None`` — не «забыли», а «нечем записать»
-        до симметрии namespace (задача 5.10). Врать ``True`` здесь было бы хуже
-        отсутствия: оператор рассчитывал бы на настройку, которой нет.
+        Task 5.10.b: декларативно выразимы ВСЕ ТРИ плоскости. До неё
+        ``expand_observability`` клал ``channels`` только под ``logger``, и на
+        двух плоскостях из трёх команда работала, а пережить `config.reload` не
+        могла — снятый `errors_file` воскресал молча. Путь ключа повторяет путь
+        секции конфига (``errors.channels…`` / ``stats.channels…``), чтобы у
+        одного снятия не завелось двух написаний: сброс, provenance и persist
+        адресуют ровно тот ключ, что виден в файле.
 
         ``ttl=None`` → действующая политика слоёв (Task 5.8), а не «навсегда».
         """
-        if plane != "logger":
+        prefix = _SINK_SESSION_PREFIX.get(plane)
+        if prefix is None:
             return None
         from ..configs.observability_layers import process_observability_layers
 
-        key = f"channels.{name}.enabled"
+        key = f"{prefix}{name}.enabled"
         process_observability_layers(self._services).session_set(key, bool(enabled), ttl)
         return key
 

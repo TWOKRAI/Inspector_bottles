@@ -76,6 +76,12 @@ from ..utils import LogMessage, apply_format
 #: `dict.get(key)` не отличил бы «отклонена» от «ещё не считали».
 _ROUTE_MISS = object()
 
+#: Префикс имён per-module каналов. Единственное написание связи «модуль
+#: ``camera`` ↔ канал ``module_camera``»: до 5.10.c литерал ``f"module_{name}"``
+#: жил только в сборщике, и снаружи (в конфиге, в команде ``sink.disable``) имя
+#: приходилось знать наизусть.
+MODULE_CHANNEL_PREFIX = "module_"
+
 #: Метки экземпляров менеджеров — ключ процессного реестра колец `memory`.
 #: Счётчик, а не ``id()``: адрес переиспользуется после сборки мусора, и новый
 #: менеджер унаследовал бы кольцо покойного.
@@ -395,11 +401,27 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         - modules: отдельные файлы для модулей (database, processor, frames и т.д.)
         """
         for channel_name, channel_config in self.config.channels.items():
+            # Task 5.10.c (резидуал R3 из 5.12): имена `module_*` в секции
+            # `channels` — ЗАПИСИ ОБ ОТМЕНЕ, а не описания каналов. Описание
+            # module-канала живёт в `modules` (там путь к файлу), а сюда его
+            # имя попадает единственным способом: командой `sink.disable
+            # module_camera`, которая пишет в слой `channels.<имя>.enabled`.
+            # Строить канал по такой записи нельзя — у неё нет `file_path`, и
+            # результатом был бы фантомный `module_camera.log` рядом с настоящим
+            # `camera.log`, открытый тем же процессом.
+            if str(channel_name).startswith(MODULE_CHANNEL_PREFIX):
+                continue
             if channel_config.enabled:
                 self._setup_channel(str(channel_name), channel_config)
 
         # Автосоздание каналов для модулей из config.modules
         for module_name, module_config in self.config.modules.items():
+            # …и здесь та же запись читается по назначению: до 5.10.c ключ
+            # `channels.module_camera.enabled=false` не гасил ничего, снятие
+            # держалось одной лишь отметкой оператора, и любой `reconfigure`
+            # мимо слоёв воскрешал канал молча (воспроизведено ревью 5.12).
+            if self._module_channel_disabled(str(module_name)):
+                continue
             if getattr(module_config, "enabled", True) and getattr(module_config, "file_path", None):
                 self._setup_module_channel(module_name, module_config)
 
@@ -522,6 +544,17 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         except Exception as e:
             self._fallback_log("ERROR", f"Failed to setup channel {channel_name}: {e}")
 
+    def _module_channel_disabled(self, module_name: str) -> bool:
+        """Снят ли module-канал записью ``channels.module_<имя>.enabled = false``.
+
+        Task 5.10.c. Имя канала (``module_camera``) и имя модуля (``camera``)
+        различаются — оператор и команда ``sink.disable`` знают ПЕРВОЕ, конфиг
+        хранит второе. Перевод делается здесь, в одном месте, чтобы у одного
+        снятия не завелось двух написаний.
+        """
+        override = self.config.channels.get(f"{MODULE_CHANNEL_PREFIX}{module_name}")
+        return override is not None and not getattr(override, "enabled", True)
+
     def _setup_module_channel(self, module_name: str, module_config: LoggerModuleSchema):
         """Создать файловый канал для module_* (из modules или enable_module_logging)."""
         path = self._resolved_file_path(
@@ -532,7 +565,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         backup_count = module_config.backup_count if module_config.backup_count is not None else 5
         rotate = module_config.rotate
         try:
-            ch_name = f"module_{module_name}"
+            ch_name = f"{MODULE_CHANNEL_PREFIX}{module_name}"
             channel_config = LoggerChannelSchema(
                 name=ch_name,
                 type="file",
@@ -1410,18 +1443,25 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         Сам toggle (закрыть/снять/зарегистрировать) живёт в базе: он одинаков
         у всех трёх плоскостей. Здесь только «откуда взять параметры».
         """
-        channel_config = self.config.channels.get(name)
-        if channel_config is not None:
-            self._setup_channel(str(name), channel_config)  # пересоздаёт + регистрирует
-            return self._channel_registry.get(name) is not None
-
         text = str(name)
-        if text.startswith("module_"):
-            module_name = text[len("module_") :]
+        # Порядок веток обратный «сначала channels» СОЗНАТЕЛЬНО (Task 5.10.c).
+        # С появлением декларативного снятия в `channels` заводится запись
+        # `module_camera: {enabled: false}` — без пути к файлу. Прежний порядок
+        # взял бы её за описание и построил фантомный `module_camera.log` рядом
+        # с настоящим `camera.log`, а настоящий канал так и не вернулся бы.
+        # Для module-имён источник параметров ровно один — секция `modules`.
+        if text.startswith(MODULE_CHANNEL_PREFIX):
+            module_name = text[len(MODULE_CHANNEL_PREFIX) :]
             module_config = self.config.modules.get(module_name)
             if module_config is not None:
                 self._setup_module_channel(module_name, module_config)
                 return self._channel_registry.get(name) is not None
+            return False
+
+        channel_config = self.config.channels.get(name)
+        if channel_config is not None:
+            self._setup_channel(str(name), channel_config)  # пересоздаёт + регистрирует
+            return self._channel_registry.get(name) is not None
 
         return False
 

@@ -421,11 +421,13 @@ def _rebuild_and_apply(
 
     if logger is not None:
         logger.reconfigure(expanded["logger"])
-        _remark_operator_disabled_sinks(logger, layers)
+        _remark_operator_disabled_sinks(logger, layers, ("channels",))
     if error is not None:
         error.reconfigure(expanded["error"])
+        _remark_operator_disabled_sinks(error, layers, ("errors", "channels"))
     if stats is not None:
         stats.reconfigure(expanded["stats"])
+        _remark_operator_disabled_sinks(stats, layers, ("stats", "channels"))
     if log_info is not None:
         held = ", ".join(layers.session_keys()) or "—"
         log_info(
@@ -435,7 +437,11 @@ def _rebuild_and_apply(
     return expanded
 
 
-def _remark_operator_disabled_sinks(logger: Any, layers: "ObservabilityLayers") -> None:
+def _remark_operator_disabled_sinks(
+    manager: Any,
+    layers: "ObservabilityLayers",
+    path: tuple[str, ...],
+) -> None:
     """Вернуть отметку «снято оператором» тем приёмникам, которые держит L3.
 
     ``reconfigure`` чистит множество целиком, и это правильно (блокер ревью 2.9:
@@ -444,24 +450,26 @@ def _remark_operator_disabled_sinks(logger: Any, layers: "ObservabilityLayers") 
     поднялся», а после пересборки поле опустело бы при выключенном канале — то
     есть ответ стал бы «канал не поднялся» на вопрос, где верно «я его снял».
 
-    **Где это НЕ так — названо, потому что проверено** (ревью 5.12, замечание 3):
-    для каналов из секции ``channels`` приёмник после пересборки действительно
-    отсутствует в реестре, и вычитать из маршрута нечего. Но ``module_*``-каналы
-    рождаются из секции ``modules``, которую ключ ``channels.<имя>.enabled`` не
-    выключает: воспроизведено — ``sink.disable module_camera`` → ``config.reload``
-    → канал ЖИВОЙ в реестре, а отметка на нём стоит, и маршрут его вычитает.
-    Для оператора это по-прежнему верный ответ («я его снял»), но держится
-    снятие ТОЛЬКО отметкой: любой путь ``reconfigure`` мимо
-    :func:`apply_observability_layers` воскресит такой канал молча.
-    Декларативное выключение module-каналов — задача 5.10 (симметрия namespace).
+    Task 5.10.b: зовётся для КАЖДОЙ из трёх плоскостей, ``path`` — путь до её
+    секции каналов в слое сессии. Раньше отметка возвращалась только логгеру, и
+    после пересборки ответ про снятый ``errors_file`` менял смысл на противоположный.
+
+    Task 5.10.c закрыла прежнее исключение: ``module_*``-каналы теперь гасятся
+    тем же ключом ``channels.<имя>.enabled`` (см. ``LoggerCore._setup_channels``),
+    поэтому после пересборки их в реестре нет — как и у остальных, и отметка
+    описывает то же самое состояние, а не прикрывает живой канал.
     """
-    marks = getattr(logger, "_sinks_disabled_by_operator", None)
+    marks = getattr(manager, "_sinks_disabled_by_operator", None)
     if not isinstance(marks, set):
         return
-    channels = (layers.session or {}).get("channels")
-    if not isinstance(channels, dict):
+    node: Any = layers.session or {}
+    for step in path:
+        if not isinstance(node, dict):
+            return
+        node = node.get(step)
+    if not isinstance(node, dict):
         return
-    for name, body in channels.items():
+    for name, body in node.items():
         if isinstance(body, dict) and body.get("enabled") is False:
             marks.add(str(name))
 

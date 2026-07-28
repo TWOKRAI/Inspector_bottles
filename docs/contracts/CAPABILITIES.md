@@ -63,10 +63,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `process.command` | Router endpoint: вложенная команда PM | system |
@@ -144,10 +147,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `pause_capture` |  |  |
@@ -219,10 +225,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `register_update` | GUI/процесс обновляет значение регистра | registers |
@@ -310,10 +319,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `register_update` | GUI/процесс обновляет значение регистра | registers |
@@ -369,10 +381,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `reset_metrics` |  | stats |
@@ -422,10 +437,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `reset_metrics` |  | stats |
@@ -475,10 +493,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `reset_metrics` |  | stats |
@@ -528,10 +549,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `reset_metrics` |  | stats |
@@ -581,10 +605,13 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
-| `logger.sink.disable` | Выключить sink логгера по имени (unregister_channel) | system |
-| `logger.sink.enable` | Включить sink логгера по имени (register_channel) | system |
-| `logger.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
 | `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `reset_metrics` |  | stats |

@@ -112,6 +112,21 @@ def expand_error_manager_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "backup_count": 3,
         }
 
+    # Task 5.10.a: слияние ГЛУБОКОЕ, а не поверхностное. Прежняя редакция
+    # (`{**severity_channels, **extra}`) заменяла описание канала ЦЕЛИКОМ, и
+    # частичная запись вида `{"errors_file": {"enabled": False}}` оставляла от
+    # канала ровно этот один ключ — воспроизведено: `{'enabled': False}` вместо
+    # шести полей, то есть без `type` и без `file_path`. Пока такую запись никто
+    # не делал, дефект был спящим; симметрия namespace (5.10.b) делает её
+    # штатным способом снять приёмник, и слияние обязано её пережить.
+    #
+    # Цена названа: одноимённый канал теперь ДОПОЛНЯЕТ severity-описание, а не
+    # вытесняет его. Полная подмена (например, `errors_file` типа console)
+    # сохранит ненужные `file_path`/`max_size` — они игнорируются сборщиком
+    # канала своего типа. Обратное поведение (вытеснение) стоило бы того, что
+    # частичную правку выразить нельзя вовсе.
+    from multiprocess_framework.modules.data_schema_module import deep_merge
+
     extra = dict(d.get("channels") or {})
-    d["channels"] = {**severity_channels, **extra}
+    d["channels"] = deep_merge(severity_channels, extra)
     return d

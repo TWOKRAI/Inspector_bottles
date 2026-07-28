@@ -142,7 +142,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -159,7 +159,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -176,7 +176,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -186,6 +186,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -643,7 +681,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -660,7 +698,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -677,7 +715,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -687,6 +725,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -1097,7 +1173,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -1114,7 +1190,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -1131,7 +1207,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -1141,6 +1217,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -1596,7 +1710,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -1613,7 +1727,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -1630,7 +1744,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -1640,6 +1754,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -1995,7 +2147,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -2012,7 +2164,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -2029,7 +2181,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -2039,6 +2191,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -2383,7 +2573,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -2400,7 +2590,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -2417,7 +2607,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -2427,6 +2617,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -2771,7 +2999,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -2788,7 +3016,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -2805,7 +3033,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -2815,6 +3043,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -3159,7 +3425,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -3176,7 +3442,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -3193,7 +3459,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -3203,6 +3469,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -3547,7 +3851,7 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
       - name: manager
@@ -3564,7 +3868,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.enable
       params_schema:
       - name: manager
@@ -3581,7 +3885,7 @@ processes:
         type: float
       tags:
       - system
-    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+    - description: Алиас observability.sink.tail (имя до 5.10)
       name: logger.sink.tail
       tags:
       - system
@@ -3591,6 +3895,44 @@ processes:
       - name: recipe_path
         required: false
         type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)

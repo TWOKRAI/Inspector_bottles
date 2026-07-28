@@ -274,26 +274,50 @@ class TestDeadlineIsReal:
         clock.advance(45)
         assert sweep_session_ttl(svc) is not None
 
-    def test_repeat_of_a_no_op_disable_does_not_extend_but_says_so(self, wired) -> None:
-        """Граница названа, а не оставлена на догадку.
+    def test_repeat_without_ttl_does_not_extend_but_says_so(self, wired) -> None:
+        """Повтор по инерции не двигает чужой дедлайн — и говорит об этом.
 
         ``sink.disable`` уже снятого приёмника отказывает («его и не было») и
-        потому ничего не записывает — то есть и срок не продлевает. Опасно тут
-        не само поведение, а молчание: оператор звал команду ИМЕННО ради
-        продления и ушёл бы с уверенностью, что продлил.
+        ничего не записывает. Если бы он при этом молча продлевал срок, такая
+        команда в цикле опроса держала бы правку вечно — «включил DEBUG и забыл»
+        через заднюю дверь. Опасно тут не поведение, а молчание: оператор ушёл
+        бы с догадкой вместо остатка.
+        """
+        svc, handlers, clock = wired
+        handlers["logger.sink.disable"]({"sink": "messages_file", "ttl": 60})
+        clock.advance(50)
+
+        res = handlers["logger.sink.disable"]({"sink": "messages_file"})
+        assert res["success"] is False
+        assert res["session_key_held"] == "channels.messages_file.enabled"
+        assert res["expires_in_sec"] == 10.0
+        assert "НЕ продлён" in res["ttl_hint"]
+        assert "ttl_extended" not in res
+
+        clock.advance(11)
+        assert sweep_session_ttl(svc) is not None, "срок всё-таки продлился вопреки отказу"
+
+    def test_repeat_with_explicit_ttl_extends_the_deadline(self, wired) -> None:
+        """Task 5.10.d (резидуал T3): продление — той же командой, а не другой.
+
+        Пара к предыдущему тесту: различие держится на ЯВНОСТИ ``ttl``, а не на
+        факте правки. До 5.10 продлить срок ручкой приёмника было нельзя вовсе —
+        только через ``config.reload`` с секцией, то есть через другой синтаксис
+        для того же намерения.
         """
         svc, handlers, clock = wired
         handlers["logger.sink.disable"]({"sink": "messages_file", "ttl": 60})
         clock.advance(50)
 
         res = handlers["logger.sink.disable"]({"sink": "messages_file", "ttl": 60})
-        assert res["success"] is False
-        assert res["session_key_held"] == "channels.messages_file.enabled"
-        assert res["expires_in_sec"] == 10.0
-        assert "НЕ продлён" in res["ttl_hint"]
+        assert res["success"] is False, "состояние не изменилось — это по-прежнему отказ"
+        assert res["ttl_extended"] is True
+        assert res["expires_in_sec"] == 60.0
 
-        clock.advance(11)
-        assert sweep_session_ttl(svc) is not None, "срок всё-таки продлился вопреки отказу"
+        clock.advance(11)  # 61с от первой правки: по старому сроку было бы истечение
+        assert sweep_session_ttl(svc) is None, "продление не сработало"
+        clock.advance(50)
+        assert sweep_session_ttl(svc) is not None, "продлённый срок так и не истёк"
 
     def test_ttl_of_one_key_does_not_extend_another(self, wired) -> None:
         """Срок ставится ключам ЭТОЙ команды: иначе свежая правка вечно продлевает забытую."""

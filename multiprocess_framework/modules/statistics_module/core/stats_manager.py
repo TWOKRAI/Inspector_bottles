@@ -136,11 +136,24 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     # SETUP КАНАЛОВ
     # =========================================================================
 
+    def _declaratively_disabled(self, name: str) -> bool:
+        """Сказано ли в конфиге ``channels.<имя>.enabled = false`` (Task 5.10.c).
+
+        Служебные каналы (:data:`STATS_LOG_CHANNEL`, :data:`STATS_FALLBACK_CHANNEL`)
+        описаний в ``channels`` не имеют — их собирают свои сборщики. Но
+        **запись про них** там законна и до 5.10 не читалась ничем: команда
+        ``sink.disable file_stats`` работала рантаймом, а её отражение в слое
+        конфига гасило ровно ничего, и первая же пересборка возвращала канал.
+        Тихий no-op на ключе, который выглядит рабочим, хуже отсутствия ключа.
+        """
+        params = (self._config_dict.get("channels") or {}).get(name)
+        return isinstance(params, dict) and params.get("enabled") is False
+
     def _setup_channels(self) -> None:
         """Создать и зарегистрировать каналы из конфига."""
         cfg = self._config_dict
 
-        if cfg.get("enable_logging", True):
+        if cfg.get("enable_logging", True) and not self._declaratively_disabled(STATS_LOG_CHANNEL):
             log_ch = self._build_log_channel()
             if log_ch is not None:
                 self.register_channel(log_ch)
@@ -157,9 +170,21 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
                 if file_ch is not None:
                     self.register_channel(file_ch)
 
-        # Fallback: всегда хотя бы один канал
+        # Fallback: всегда хотя бы один канал — КРОМЕ случая, когда оператор снял
+        # его явно. «Всегда есть куда писать» ценно как умолчание и вредно как
+        # запрет: без исключения снятие fallback'а не пережило бы ни одной
+        # пересборки, и ключ конфига врал бы. Молча остаться без приёмников
+        # плоскость при этом не может — говорим вслух аварийной функцией
+        # (собственные каналы и есть предмет претензии, писать в них нечем).
         if not self._channel_registry.names():
-            self.register_channel(self._build_fallback_channel())
+            if self._declaratively_disabled(STATS_FALLBACK_CHANNEL):
+                self._log_error(
+                    f"[{self.manager_name}] у плоскости статистики не осталось ни одного приёмника: "
+                    f"{STATS_FALLBACK_CHANNEL} снят конфигом (channels.{STATS_FALLBACK_CHANNEL}.enabled=false), "
+                    "остальные не поднялись — метрики никуда не пишутся"
+                )
+            else:
+                self.register_channel(self._build_fallback_channel())
 
     # --- сборщики каналов: по одному имени за раз ----------------------------
     # Вынесены из _setup_channels ради Ф0.6: set_sink_enabled(name, True) обязан

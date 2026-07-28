@@ -1088,6 +1088,7 @@
         "console": true,
         "enable_batching": true,
         "errors": {
+          "channels": {},
           "enabled": true,
           "include_stacktrace": true,
           "level": "WARNING"
@@ -1101,6 +1102,7 @@
         "session_ttl_sec": 300.0,
         "stats": {
           "aggregation_interval": 5.0,
+          "channels": {},
           "enabled": true,
           "log_level": "INFO"
         }

@@ -141,7 +141,7 @@ class ObservabilityPersistParams(BaseModel):
 
 
 class LoggerSinkParams(BaseModel):
-    """Параметры ``logger.sink.enable`` / ``logger.sink.disable``."""
+    """Параметры ``observability.sink.enable`` / ``.disable`` (и алиасов ``logger.sink.*``)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -229,6 +229,11 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     # observability control plane (Ф1 Task 1.4/1.5, Ф5.20b)
     "config.reload": ConfigReloadParams,
     "observability.persist": ObservabilityPersistParams,
+    # Task 5.10.e: каноническое имя и алиас судятся ОДНИМ контрактом. Разные
+    # схемы у двух имён одной команды означали бы, что через алиас проходит то,
+    # что канон отвергает — то есть контракт обходится сменой написания.
+    "observability.sink.enable": LoggerSinkParams,
+    "observability.sink.disable": LoggerSinkParams,
     "logger.sink.enable": LoggerSinkParams,
     "logger.sink.disable": LoggerSinkParams,
     "log.tail.subscribe": LogTailSubscribeParams,

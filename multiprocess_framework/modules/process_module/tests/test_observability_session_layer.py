@@ -238,8 +238,16 @@ class TestRecipeLayerSurvivesFileReload:
 
 
 class TestPlanesWithoutDeclarativeChannels:
-    def test_stats_sink_toggle_admits_it_will_not_survive(self, tmp_path) -> None:
-        """error/stats не выразимы в секции — ответ обязан это сказать, а не молчать."""
+    """Task 5.10.b перевернула этот класс: младшие плоскости стали выразимы.
+
+    До 5.10 тест закреплял ЧЕСТНОСТЬ отказа («не переживёт reload — и мы это
+    говорим»). Теперь закрепляется сама возможность: ключ есть, и он назван.
+    Класс оставлен на месте вместе с именем файла, чтобы в истории было видно,
+    что старая гарантия не потеряна, а заменена более сильной.
+    """
+
+    def test_stats_sink_toggle_is_recorded_in_the_session_layer(self, tmp_path) -> None:
+        """Плоскость статистики адресуема слоем — ответ называет ключ, а не None."""
         from multiprocess_framework.modules.statistics_module import StatsManager
 
         logger = LoggerManager(config=LoggerManagerConfig(app_name="planes", log_directory=str(tmp_path), modules={}))
@@ -254,10 +262,30 @@ class TestPlanesWithoutDeclarativeChannels:
             if not names:
                 pytest.skip("у StatsManager нет каналов в этой конфигурации")
             res = svc.command_manager.handlers["logger.sink.disable"]({"sink": names[0], "manager": "stats"})
-            assert res["session_key"] is None
-            assert res["survives_reload"] is False
+            assert res["session_key"] == f"stats.channels.{names[0]}.enabled"
+            assert res["survives_reload"] is True
         finally:
             stats.shutdown()
+            logger.shutdown()
+
+    def test_error_sink_toggle_is_recorded_under_its_own_section(self, tmp_path) -> None:
+        """Путь ключа повторяет путь секции конфига — иначе у снятия два написания."""
+        from multiprocess_framework.modules.error_module import ErrorManager
+
+        logger = LoggerManager(config=LoggerManagerConfig(app_name="planes", log_directory=str(tmp_path), modules={}))
+        error = ErrorManager(config={"error_file_path": str(tmp_path / "errors.log")})
+        error.initialize()
+        svc = _Svc(logger)
+        svc.error_manager = error
+        bc = BuiltinCommands(svc)
+        bc._register_observability_commands()
+        try:
+            res = svc.command_manager.handlers["logger.sink.disable"]({"sink": "errors_file", "manager": "error"})
+            assert res["success"] is True
+            assert res["session_key"] == "errors.channels.errors_file.enabled"
+            assert res["survives_reload"] is True
+        finally:
+            error.shutdown()
             logger.shutdown()
 
 
