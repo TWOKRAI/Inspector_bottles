@@ -170,6 +170,23 @@ class TestErrorPlaneSurvivesReload:
         handlers["config.reload"]({"observability": {}, "path": None})
         assert "errors_file" in getattr(svc.error_manager, "_sinks_disabled_by_operator")
 
+    def test_readback_names_what_the_operator_disabled(self, error_wired) -> None:
+        """Находка ЖИВОГО прогона: отметка ставилась, но наружу не отдавалась.
+
+        Команда отвечала `session_key: errors.channels.errors_file.enabled`, а
+        `introspect.observability` показывал по плоскости ошибок только уровень —
+        ни состава приёмников, ни снятого оператором. Два ответа об одном
+        состоянии противоречили друг другу, и правым выглядел readback.
+        """
+        svc, handlers, _ = error_wired
+        res = handlers["config.reload"]({"observability": {}, "path": None})
+        assert "errors_file" in res["effective"]["error"]["channels_active"]
+
+        handlers["observability.sink.disable"]({"sink": "errors_file", "manager": "error"})
+        res = handlers["config.reload"]({"observability": {}, "path": None})
+        assert res["effective"]["error"]["sinks_disabled_by_operator"] == ["errors_file"]
+        assert "errors_file" not in res["effective"]["error"]["channels_active"]
+
 
 # =============================================================================
 # A3 / R3 — module_*-каналы логгера

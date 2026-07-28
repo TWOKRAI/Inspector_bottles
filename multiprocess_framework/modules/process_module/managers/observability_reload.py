@@ -127,28 +127,47 @@ def observability_effective(
                 }
                 for k, v in scopes.items()
             }
-        registry = getattr(logger, "_channel_registry", None)
-        names = getattr(registry, "names", None)
-        if callable(names):
-            try:
-                section["channels_active"] = sorted(names())
-            except Exception:  # noqa: BLE001 — readback best-effort
-                pass
-        # 2.8: «снят оператором» — ОТДЕЛЬНОЕ поле, а не вывод из отсутствия в
-        # `channels_active`. Без него оператор не отличит «я это выключил» от
-        # «канал не поднялся» — а это разные диагнозы с разными действиями.
-        disabled = getattr(logger, "_sinks_disabled_by_operator", None)
-        if isinstance(disabled, set):
-            section["sinks_disabled_by_operator"] = sorted(disabled)
+        section.update(_sink_readback(logger))
         out["logger"] = section
     if error is not None and getattr(error, "config", None) is not None:
-        out["error"] = {"default_level": getattr(error.config, "default_level", None)}
+        out["error"] = {
+            "default_level": getattr(error.config, "default_level", None),
+            **_sink_readback(error),
+        }
     if stats is not None and getattr(stats, "config", None) is not None:
         sc = stats.config
         out["stats"] = {
             "enable_logging": getattr(sc, "enable_logging", None),
             "aggregation_interval": getattr(sc, "aggregation_interval", None),
+            **_sink_readback(stats),
         }
+    return out
+
+
+def _sink_readback(manager: Any) -> Dict[str, Any]:
+    """Активные приёмники плоскости и то, что снял оператор.
+
+    Task 5.10 (живая находка прогона): до неё эти два поля отдавались ТОЛЬКО
+    логгером, и на плоскостях ошибок и статистики оператор не мог ни увидеть
+    состав приёмников, ни отличить «я это выключил» от «канал не поднялся» —
+    а это разные диагнозы с разными действиями. Живьём выглядело так: команда
+    ответила `session_key: errors.channels.errors_file.enabled`, а readback
+    показывал `sinks_disabled_by_operator: []`, то есть противоречил ей.
+
+    Симметрия здесь не косметика: сама задача про то, что ответ одной команды
+    не должен зависеть от плоскости, к которой её адресовали.
+    """
+    out: Dict[str, Any] = {}
+    registry = getattr(manager, "_channel_registry", None)
+    names = getattr(registry, "names", None)
+    if callable(names):
+        try:
+            out["channels_active"] = sorted(names())
+        except Exception:  # noqa: BLE001 — readback best-effort
+            pass
+    disabled = getattr(manager, "_sinks_disabled_by_operator", None)
+    if isinstance(disabled, set):
+        out["sinks_disabled_by_operator"] = sorted(disabled)
     return out
 
 
