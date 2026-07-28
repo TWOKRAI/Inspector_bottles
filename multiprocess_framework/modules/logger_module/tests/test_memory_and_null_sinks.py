@@ -65,6 +65,23 @@ def _losses(mgr: LoggerManager) -> dict:
     return {key: stats.get(key, 0) for key in LOSS_COUNTER_KEYS}
 
 
+def _silence_warnings(caplog) -> list:
+    """Предупреждения о заглушенном маршруте — ОТ ОЖИДАЕМОГО ИСТОЧНИКА.
+
+    Проверять `caplog.text` мало (находка ревью 2.9, воспроизведена): `caplog`
+    перехватывает через хендлер на корневом логгере, поэтому WARNING долетает
+    независимо от имени эмитента, и параметр `logger=` у `at_level` остаётся
+    декоративным. Тест на тексте сторожил бы факт предупреждения где-нибудь в
+    иерархии, а не то, что его выдала аварийная функция — и уход записи под
+    чужое имя (регресс 2.2) прошёл бы незамеченным.
+    """
+    return [
+        record
+        for record in caplog.records
+        if record.name == _EMERGENCY_LOGGER and "null-приёмники" in record.getMessage()
+    ]
+
+
 # =============================================================================
 # Механизм расширения
 # =============================================================================
@@ -142,6 +159,20 @@ class TestMemoryChannel:
 
         assert ch.tail(1)[0]["message"] == "исходное"
 
+    def test_tail_hands_out_copies_not_the_rings_own_dicts(self) -> None:
+        """Читатель тут ВНЕШНИЙ, а кольцо — улика, которую разбирают.
+
+        Отдельно от копии на записи: та сторожит другую сторону, и правка чтения
+        держалась ни на чём — поймано слом-инъекцией по ревью.
+        """
+        ch = MemoryChannel(LoggerChannelSchema(name="mem", type="memory", capacity=4))
+        ch.write(_record("исходное"))
+
+        got = ch.tail(1)
+        got[0]["message"] = "ПОДМЕНЕНО"
+
+        assert ch.tail(1)[0]["message"] == "исходное"
+
     def test_eviction_is_not_a_loss(self, tmp_path) -> None:
         """Кольцо на 2 записи, отдано 5 — ни один класс потерь не растёт.
 
@@ -192,6 +223,171 @@ class TestMemoryChannel:
             mgr.shutdown()
 
 
+class TestTheRingOutlivesTheChannel:
+    """Находка ревью 2.9: `close()` стирал кольцо, и наблюдаемость съедала улики.
+
+    Класс тот же, что «7 → disable → 0», уже оплаченный проектом однажды:
+    оператор разбирает инцидент, трогает наблюдаемость — и смотреть становится
+    не на что. Ровно в сценарии, ради которого приёмник и вводился.
+    """
+
+    @staticmethod
+    def _mgr(tmp_path, capacity: int = 50):
+        return _manager(
+            tmp_path,
+            channels={"ring": LoggerChannelSchema(type="memory", capacity=capacity)},
+            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["ring"])},
+        )
+
+    def test_records_survive_config_reload(self, tmp_path) -> None:
+        mgr = self._mgr(tmp_path)
+        try:
+            mgr.info("до reload", module="m")
+            mgr.reconfigure(mgr.config.model_dump())
+            mgr.info("после reload", module="m")
+
+            assert [r["message"] for r in mgr.read_sink_tail("ring")["records"]] == [
+                "до reload",
+                "после reload",
+            ]
+        finally:
+            mgr.shutdown()
+
+    def test_records_survive_disable_and_enable(self, tmp_path) -> None:
+        mgr = self._mgr(tmp_path)
+        try:
+            mgr.info("до снятия", module="m")
+            assert mgr.set_sink_enabled("ring", False) is True
+            assert mgr.set_sink_enabled("ring", True) is True
+
+            assert [r["message"] for r in mgr.read_sink_tail("ring")["records"]] == ["до снятия"]
+        finally:
+            mgr.shutdown()
+
+    def test_a_capacity_change_keeps_the_tail_instead_of_wiping_it(self, tmp_path) -> None:
+        """Смена ёмкости — правка параметра, а не команда «забудь всё»."""
+        mgr = self._mgr(tmp_path, capacity=10)
+        try:
+            for i in range(4):
+                mgr.info(f"m{i}", module="m")
+            mgr.reconfigure(
+                mgr.config.model_copy(
+                    update={"channels": {"ring": LoggerChannelSchema(type="memory", capacity=2)}}
+                ).model_dump()
+            )
+
+            info = mgr.read_sink_tail("ring")
+            assert info["info"]["capacity"] == 2
+            assert [r["message"] for r in info["records"]] == ["m2", "m3"]
+        finally:
+            mgr.shutdown()
+
+    def test_the_ring_dies_with_its_manager(self, tmp_path) -> None:
+        """Переживать канал — да, менеджера — нет: реестр процессный, утечка реальна."""
+        first = self._mgr(tmp_path)
+        first.info("чужая запись", module="m")
+        first.shutdown()
+
+        second = self._mgr(tmp_path)
+        try:
+            assert second.read_sink_tail("ring")["records"] == []
+        finally:
+            second.shutdown()
+
+    def test_two_managers_do_not_share_a_ring_by_channel_name(self, tmp_path) -> None:
+        """Ключ — экземпляр менеджера, а не его имя (иначе соседи сливаются).
+
+        Поймано прогоном: два теста со своими менеджерами и каналом `mem`
+        разделили одно кольцо — `written` пришёл 10 вместо 4.
+        """
+        a = self._mgr(tmp_path / "a")
+        b = self._mgr(tmp_path / "b")
+        try:
+            a.info("от первого", module="m")
+            b.info("от второго", module="m")
+
+            assert [r["message"] for r in a.read_sink_tail("ring")["records"]] == ["от первого"]
+            assert [r["message"] for r in b.read_sink_tail("ring")["records"]] == ["от второго"]
+        finally:
+            a.shutdown()
+            b.shutdown()
+
+    def test_a_channel_without_an_owner_gets_a_private_ring(self) -> None:
+        """«Ничей» значит «мой», а не «общий для всех ничейных»."""
+        one = MemoryChannel(LoggerChannelSchema(name="mem", type="memory", capacity=5))
+        two = MemoryChannel(LoggerChannelSchema(name="mem", type="memory", capacity=5))
+        one.write(_record("только моё"))
+
+        assert two.tail() == []
+
+
+class TestOperatorMarkDoesNotOutliveTheConfig:
+    """Блокер ревью 2.9: отметка «снято оператором» переживала пересборку каналов.
+
+    2.8 чинила ложную тревогу и взамен завела ТИХУЮ ПОТЕРЮ — то есть ровно то,
+    ради чего написан весь план. Воспроизведение: `sink.disable a` → `reconfigure`
+    → канал `a` в реестре ЕСТЬ, запись до него НЕ доходит, все четыре класса
+    потерь — НУЛИ.
+    """
+
+    @staticmethod
+    def _mgr(tmp_path):
+        return _manager(
+            tmp_path,
+            channels={
+                "a": LoggerChannelSchema(type="file", file_path="a.log"),
+                "b": LoggerChannelSchema(type="file", file_path="b.log"),
+            },
+            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["a", "b"])},
+        )
+
+    def test_reload_returns_the_sink_to_the_route(self, tmp_path) -> None:
+        mgr = self._mgr(tmp_path)
+        try:
+            mgr.set_sink_enabled("a", False)
+            assert mgr._sinks_disabled_by_operator == {"a"}
+
+            mgr.reconfigure(mgr.config.model_dump())
+            assert mgr._sinks_disabled_by_operator == set()
+            assert mgr._channel_registry.get("a") is not None
+
+            mgr.info("после reload", module="m")
+            mgr.flush()
+            assert "после reload" in (tmp_path / "a.log").read_text(encoding="utf-8")
+            assert _losses(mgr) == dict.fromkeys(LOSS_COUNTER_KEYS, 0)
+        finally:
+            mgr.shutdown()
+
+    def test_the_error_plane_does_not_send_errors_to_the_floor_after_reload(self, tmp_path) -> None:
+        """У плоскости ошибок тот же корень бил больнее: ложный сигнал «маршрут сломан».
+
+        Маршрут схлопывался в пустой, ERROR уезжал в пол при ЖИВОМ `errors.log`,
+        и `errors_to_floor` 0 → 1 поднимал тревогу о поломке, которой нет.
+        """
+        from multiprocess_framework.modules.error_module.core.error_manager import ErrorManager
+
+        mgr = ErrorManager(
+            config={
+                "app_name": "err_reload",
+                "error_file_path": str(tmp_path / "errors.log"),
+                "critical_file_path": str(tmp_path / "critical.log"),
+                "enable_batching": False,
+            }
+        )
+        try:
+            mgr.set_sink_enabled("errors_file", False)
+            mgr.reconfigure(mgr._last_applied_config)
+            assert mgr._sinks_disabled_by_operator == set()
+
+            mgr.error("ошибка после reload", module="m")
+            mgr.flush()
+
+            assert mgr.get_stats().get("errors_to_floor", 0) == 0
+            assert "ошибка после reload" in (tmp_path / "errors.log").read_text(encoding="utf-8")
+        finally:
+            mgr.shutdown()
+
+
 # =============================================================================
 # «Никуда»
 # =============================================================================
@@ -230,9 +426,42 @@ class TestNullOnTheErrorPathIsAnnounced:
                 scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["nowhere"])},
             )
         try:
-            text = caplog.text
-            assert "SYSTEM" in text
-            assert "null" in text
+            warnings = _silence_warnings(caplog)
+            assert len(warnings) == 1, "ровно одно предупреждение от аварийной функции"
+            assert "SYSTEM" in warnings[0].getMessage()
+        finally:
+            mgr.shutdown()
+
+    def test_the_runtime_path_to_the_same_state_warns_too(self, tmp_path, caplog) -> None:
+        """Схлопнуть маршрут в «только null» можно и рантайм-командой (находка ревью).
+
+        Проверка стояла только на поднятии каналов, а 2.8 сама завела второй путь:
+        оператор снимает файловый приёмник, и в скоупе остаётся один `null`.
+        Наблюдалось так — предупреждений 0, `errors_to_floor` 0, все четыре класса
+        потерь 0, floor-файлов нет, а запись уровня ERROR исчезла бесследно.
+        Счётчики этого не видят по построению: `null` рапортует успех.
+        """
+        mgr = _manager(
+            tmp_path,
+            channels={
+                "nowhere": LoggerChannelSchema(type="null"),
+                "real": LoggerChannelSchema(type="file", file_path="real.log"),
+            },
+            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["real", "nowhere"])},
+        )
+        try:
+            with caplog.at_level(logging.WARNING, logger=_EMERGENCY_LOGGER):
+                assert not _silence_warnings(caplog), "до снятия тревожиться не о чем"
+                mgr.set_sink_enabled("real", False)
+                warnings = _silence_warnings(caplog)
+
+            assert len(warnings) == 1
+            assert "SYSTEM" in warnings[0].getMessage()
+
+            # И характеризация: тревога не про воображаемое — запись правда исчезает.
+            mgr.error("упало важное", module="m")
+            assert _losses(mgr) == dict.fromkeys(LOSS_COUNTER_KEYS, 0)
+            assert mgr.get_stats().get("errors_to_floor", 0) == 0
         finally:
             mgr.shutdown()
 
@@ -270,7 +499,7 @@ class TestNullOnTheErrorPathIsAnnounced:
                 scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["nowhere", "real"])},
             )
         try:
-            assert "null-приёмники" not in caplog.text
+            assert not _silence_warnings(caplog)
         finally:
             mgr.shutdown()
 
@@ -289,7 +518,7 @@ class TestNullOnTheErrorPathIsAnnounced:
                 scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["__опечатка__"])},
             )
         try:
-            assert "null-приёмники" not in caplog.text
+            assert not _silence_warnings(caplog)
         finally:
             mgr.shutdown()
 
@@ -314,7 +543,12 @@ class TestNullOnTheErrorPathIsAnnounced:
                 )
             )
         try:
-            assert "severity-маршрут ERROR" in caplog.text
+            warnings = [
+                record
+                for record in caplog.records
+                if record.name == _EMERGENCY_LOGGER and "severity-маршрут ERROR" in record.getMessage()
+            ]
+            assert warnings, "предупреждение обязано прийти от аварийной функции"
         finally:
             mgr.shutdown()
 

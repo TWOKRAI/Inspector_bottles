@@ -865,6 +865,119 @@ class FrameTraceChannel(LogChannel):
                 self._fh = None
 
 
+class _MemoryRing:
+    """Кольцо записей с историей счётчиков. Переживает канал, который его открыл.
+
+    Отдельный объект, а не поля канала: канал — вещь короткоживущая (пересоздаётся
+    на каждом ``reconfigure`` и на каждом ``sink.enable``), а улики обязаны жить
+    дольше. Лок держит СНИМОК согласованным — ``snapshot()`` отдаёт size, written
+    и evicted одним куском, а не тремя моментами времени.
+    """
+
+    __slots__ = ("_capacity", "_records", "_lock", "written", "evicted")
+
+    def __init__(self, capacity: int) -> None:
+        self._capacity = capacity
+        self._records: "deque[Dict[str, Any]]" = deque(maxlen=capacity)
+        self._lock = threading.Lock()
+        self.written = 0
+        self.evicted = 0
+
+    def resize(self, capacity: int) -> None:
+        """Сменить ёмкость, сохранив хвост. Счётчики — история, они не сбрасываются."""
+        if capacity == self._capacity:
+            return
+        with self._lock:
+            kept = list(self._records)[-capacity:]
+            # Урезание — это вытеснение по воле оператора, и оно считается так же.
+            self.evicted += max(0, len(self._records) - len(kept))
+            self._capacity = capacity
+            self._records = deque(kept, maxlen=capacity)
+
+    def append(self, record: Dict[str, Any]) -> None:
+        with self._lock:
+            if len(self._records) == self._capacity:
+                self.evicted += 1
+            # Мелкая копия верхнего уровня: словарь записи после write никем не
+            # переиспользуется, но кольцо переживает вызывающего, и разделять с
+            # ним изменяемый объект незачем. Вложенное (``extra``) остаётся общим.
+            self._records.append(dict(record))
+            self.written += 1
+
+    def tail(self, limit: Any = None) -> List[Dict[str, Any]]:
+        with self._lock:
+            items = list(self._records)
+        if limit is not None:
+            count = int(limit)
+            if count <= 0:
+                return []
+            items = items[-count:]
+        return [dict(item) for item in items]
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "capacity": self._capacity,
+                "size": len(self._records),
+                "written": self.written,
+                "evicted": self.evicted,
+            }
+
+
+#: Процессный реестр колец: (владелец, имя канала) → кольцо. Тот же приём, что у
+#: общего rotating-хэндлера по пути файла, и по той же причине: время жизни
+#: ресурса не совпадает со временем жизни канала-владельца.
+#:
+#: **Владелец — ЭКЗЕМПЛЯР менеджера, а не его имя.** Ключ по имени казался
+#: достаточным (в процессе один ``LoggerManager``), и сразу же дал протечку между
+#: соседями: два теста, поднявшие свои менеджеры с каналом ``mem``, разделили одно
+#: кольцо — ``written`` пришёл 10 вместо 4. В проде это край, но кольцо обязано
+#: переживать КАНАЛ, а не менеджера: умер менеджер — умерли и его улики.
+_memory_rings: Dict[Tuple[str, str], _MemoryRing] = {}
+_memory_rings_lock = threading.RLock()
+
+
+def acquire_memory_ring(owner: Any, name: Any, capacity: int) -> _MemoryRing:
+    """Вернуть кольцо канала, создав при первом обращении.
+
+    Ключ парный: у процесса две плоскости-брата, и одноимённые каналы логгера и
+    ошибок обязаны остаться разными кольцами. Смена ёмкости в конфиге применяется
+    к существующему кольцу с сохранением хвоста — reload параметра не должен
+    стирать историю.
+
+    **Без владельца кольцо ЧАСТНОЕ, а не общее.** Канал, созданный напрямую
+    (мимо менеджера, как в тестах), делить своё кольцо не с кем — «ничей»
+    означает «мой», а не «общий для всех ничейных». Прежняя редакция сводила их
+    всех в ключ ``("", name)``, и два независимых канала с именем ``mem``
+    оказывались одним кольцом.
+    """
+    if not owner:
+        return _MemoryRing(capacity)
+    key = (str(owner), str(name or ""))
+    with _memory_rings_lock:
+        ring = _memory_rings.get(key)
+        if ring is None:
+            ring = _memory_rings[key] = _MemoryRing(capacity)
+        else:
+            ring.resize(capacity)
+        return ring
+
+
+def drop_memory_rings(owner: Any) -> int:
+    """Забыть все кольца владельца. Возвращает число выброшенных.
+
+    Зовётся из ``shutdown`` менеджера: реестр процессный, и без этого кольца
+    умерших менеджеров жили бы до конца процесса. Не из ``close()`` канала —
+    именно там прежняя редакция и теряла улики на каждом ``config.reload``.
+    """
+    prefix = str(owner or "")
+    with _memory_rings_lock:
+        keys = [key for key in _memory_rings if key[0] == prefix]
+        for key in keys:
+            del _memory_rings[key]
+        return len(keys)
+
+
 class MemoryChannel(LogChannel):
     """Кольцо записей в памяти процесса, читаемое по запросу (2.9).
 
@@ -895,6 +1008,18 @@ class MemoryChannel(LogChannel):
     ``get_info`` и НЕ входит в ``LOSS_COUNTER_KEYS``: оператор, задавший
     ёмкость N, ровно это и заказал. Потерей была бы запись, не дошедшая до
     приёмника, — она считается там же, где и всегда.
+
+    **Кольцо переживает пересоздание канала** — оно живёт в процессном реестре
+    :data:`_memory_rings`, а не в объекте канала (находка ревью 2.9,
+    воспроизведена). Иначе фича теряется ровно в том сценарии, ради которого
+    вводилась: оператор разбирает инцидент, трогает наблюдаемость
+    (``config.reload``, ``sink.disable``/``enable``) — и улики исчезают. Это тот
+    же класс «7 → disable → 0», который уже стоил проекту отдельной починки
+    счётчиков; приём взят у соседа — общего rotating-хэндлера по пути файла.
+
+    Ключ реестра — ``(владелец, имя канала)``. Не одно имя: у процесса ДВЕ
+    плоскости-брата, и канал ``ring`` у логгера с ``ring`` у ошибок — разные
+    кольца. Владельца проставляет менеджер при создании канала.
     """
 
     #: Скромно намеренно: см. оговорку про ``extra`` в докстринге класса.
@@ -910,62 +1035,47 @@ class MemoryChannel(LogChannel):
             # в unresolved_channel_records, то есть отказ виден счётчиком.
             raise ValueError(f"capacity должна быть ≥ 1 (канал '{config.name}', получено {capacity})")
         self._capacity = int(capacity)
-        self._records: "deque[Dict[str, Any]]" = deque(maxlen=self._capacity)
-        # Лок держит СНИМОК согласованным: `get_info` отдаёт size, written и
-        # evicted одним куском, а не тремя моментами времени.
-        #
-        # Изначально он ставился под другим доводом — «`x += 1` из двух потоков
-        # теряет инкременты». Замер этого НЕ подтвердил: 12 потоков × 20000
-        # инкрементов при `switchinterval` 1e-9 на CPython 3.12 не потеряли ни
-        # одного, и слом-инъекция (лок снят) не убила ни одного теста. Довод
-        # снят как недоказанный, а не оставлен «на всякий случай»: уверенное
-        # неверное объяснение переживает правку и однажды применяется не туда.
-        # Под free-threaded сборкой, где GIL инкремент не сериализует, гонка
-        # вернётся — но это уже про будущую сборку, а не про сегодняшний замер.
-        self._lock = threading.Lock()
-        self.written = 0
-        self.evicted = 0
+        self._ring = acquire_memory_ring(config.owner, config.name, self._capacity)
+
+    @property
+    def written(self) -> int:
+        return self._ring.written
+
+    @property
+    def evicted(self) -> int:
+        return self._ring.evicted
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        with self._lock:
-            if len(self._records) == self._capacity:
-                self.evicted += 1
-            # Мелкая копия верхнего уровня: словарь записи после write никем не
-            # переиспользуется, но кольцо переживает вызывающего, и разделять с
-            # ним изменяемый объект незачем. Вложенное (``extra``) остаётся общим.
-            self._records.append(dict(record))
-            self.written += 1
+        self._ring.append(record)
         return {"status": "success", "channel": self.name}
 
     def tail(self, limit: Any = None) -> List[Dict[str, Any]]:
-        """Последние ``limit`` записей (все, если limit не задан), старые первыми."""
-        with self._lock:
-            items = list(self._records)
-        if limit is None:
-            return items
-        count = int(limit)
-        if count <= 0:
-            return []
-        return items[-count:]
+        """Последние ``limit`` записей (все, если limit не задан), старые первыми.
+
+        Копии, а не внутренние словари кольца (находка ревью 2.9, воспроизведена:
+        читатель менял ``tail(1)[0]["message"]`` — и менялось содержимое кольца).
+        На записи копия делается по тому же доводу, и на чтении он даже сильнее:
+        читатель тут ВНЕШНИЙ (команда, `backend_ctl`), а кольцо — улика, которую
+        разбирают. Тот же довод, что у возврата кортежа из `_effective_route`.
+        """
+        return self._ring.tail(limit)
 
     def get_info(self) -> Dict[str, Any]:
         info = super().get_info()
-        with self._lock:
-            info.update(
-                {
-                    "type": self.channel_type,
-                    "capacity": self._capacity,
-                    "size": len(self._records),
-                    "written": self.written,
-                    "evicted": self.evicted,
-                }
-            )
+        info.update(self._ring.snapshot())
+        info["type"] = self.channel_type
         return info
 
     def close(self) -> None:
-        """Освободить кольцо. Счётчики переживают закрытие — это история, а не состояние."""
-        with self._lock:
-            self._records.clear()
+        """Ничего не делает — и это осознанно.
+
+        Прежняя редакция чистила кольцо, и `config.reload` вместе с
+        `sink.disable` уничтожали единственное ретроспективное хранилище
+        процесса. Записи живут в процессном реестре и переживают канал; чистит
+        их только вытеснение по ёмкости (контракт кольца) и
+        :func:`drop_memory_ring` — явное «забудь», которого сегодня никто не
+        зовёт, кроме тестов.
+        """
 
 
 class NullChannel(LogChannel):

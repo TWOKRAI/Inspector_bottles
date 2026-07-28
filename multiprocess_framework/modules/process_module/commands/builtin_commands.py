@@ -24,6 +24,39 @@ _SINK_ADDRESSABLE_MANAGERS = {
     "stats": "stats_manager",
 }
 
+#: Что разрешено уехать через IPC как есть. Всё остальное — в ``repr``.
+_BOUNDARY_SCALARS = (str, int, float, bool, type(None))
+
+#: Насколько глубоко разбирать вложенность записи. Глубже — ``repr``: лог-запись
+#: не дерево, а плоский словарь с одним уровнем ``extra``, и неограниченная
+#: рекурсия по чужим данным дороже пользы.
+_BOUNDARY_MAX_DEPTH = 4
+
+
+def _boundary_safe(value: Any, depth: int = 0) -> Any:
+    """Привести значение к сериализуемому виду перед отправкой через IPC.
+
+    Находка ревью 2.9, воспроизведена: ``logger.sink.tail`` отдавал сырой
+    ``extra`` записи, и ОДНА запись с несериализуемым объектом
+    (``logger.info(..., lock=threading.Lock())``) роняла pickle всего ответа —
+    ``TypeError: cannot pickle '_thread.lock' object``. Оператор при этом видел
+    отказ транспорта, далеко от причины, и терял весь хвост, а не одно поле.
+
+    Публичный API логирования принимать объекты в ``extra`` не запрещает, и
+    запрещать поздно — значит чинить на границе, где правило и живёт («Dict at
+    Boundary»). Незнакомое значение заменяется на ``repr``: для разбора инцидента
+    строка полезнее отсутствующего ответа.
+    """
+    if isinstance(value, _BOUNDARY_SCALARS):
+        return value
+    if depth >= _BOUNDARY_MAX_DEPTH:
+        return repr(value)
+    if isinstance(value, dict):
+        return {str(key): _boundary_safe(item, depth + 1) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_boundary_safe(item, depth + 1) for item in value]
+    return repr(value)
+
 
 class BuiltinCommands:
     """Встроенные команды ProcessModule через IProcessServices.
@@ -1233,6 +1266,13 @@ class BuiltinCommands:
         target = getattr(svc, attr, None)
         if target is None or not hasattr(target, "set_sink_enabled"):
             return {"success": False, "reason": f"{attr} недоступен", "process": svc.name}
+
+        # Затронутые маршруты собираются ДО операции: после disable канала уже
+        # нет, и «что я сейчас погасил» стало бы неотвечаемым вопросом.
+        routes = []
+        resolve_routes = getattr(target, "routes_using_sink", None)
+        if callable(resolve_routes):
+            routes = list(resolve_routes(name))
         ok = target.set_sink_enabled(name, enabled)
         # `enabled` = ДОСТИГНУТОЕ состояние, а не запрошенное (живая находка
         # 2026-07-28). Прежняя редакция эхом возвращала аргумент, и отказ выглядел
@@ -1244,6 +1284,9 @@ class BuiltinCommands:
             "success": bool(ok),
             "sink": name,
             "enabled": bool(enabled and ok),
+            # Приёмка 2.8: назвать затронутое. Снятие приёмника вслепую
+            # обнаруживается по отсутствию логов, то есть позже всего.
+            "routes": routes,
             "manager": plane,
             "process": svc.name,
         }
@@ -1284,6 +1327,9 @@ class BuiltinCommands:
 
         limit = args.get("limit")
         result = target.read_sink_tail(name, limit)
+        records = result.get("records")
+        if records is not None:
+            result["records"] = [_boundary_safe(record) for record in records]
         result["manager"] = plane
         result["process"] = svc.name
         return result

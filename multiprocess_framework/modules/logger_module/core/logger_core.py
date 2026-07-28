@@ -43,7 +43,12 @@ from .log_config import LogLevel, LogScope
 from ...channel_routing_module.levels import is_error_level
 from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
 from .log_types import LogRecord
-from ..channels.log_channel import create_channel, enforce_log_retention, LogChannel
+from ..channels.log_channel import (
+    create_channel,
+    drop_memory_rings,
+    enforce_log_retention,
+    LogChannel,
+)
 from .log_paths import resolve_log_file_path
 from ..utils import LogMessage, apply_format
 
@@ -70,6 +75,11 @@ from ..utils import LogMessage, apply_format
 #: ЗАКОННОЕ закэшированное значение («запись отклонена гейтом»), и обычный
 #: `dict.get(key)` не отличил бы «отклонена» от «ещё не считали».
 _ROUTE_MISS = object()
+
+#: Метки экземпляров менеджеров — ключ процессного реестра колец `memory`.
+#: Счётчик, а не ``id()``: адрес переиспользуется после сборки мусора, и новый
+#: менеджер унаследовал бы кольцо покойного.
+_owner_seq = itertools.count(1)
 
 _seq_counter = itertools.count(1)
 
@@ -331,6 +341,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 except Exception as e:
                     self._fallback_log("ERROR", f"module channel close failed: {e}")
 
+            # Кольца `memory` переживают КАНАЛ намеренно, но не менеджера: реестр
+            # процессный, и без этой уборки они жили бы до конца процесса.
+            drop_memory_rings(getattr(self, "_channel_owner_token", None))
+
             self.is_initialized = False
             return True
         except Exception as e:
@@ -404,8 +418,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         «всё в порядке». Предупреждение идёт **аварийной функцией**, а не через
         собственные каналы: их состав ровно и есть предмет претензии.
 
-        Проверка одноразовая — на поднятии каналов. Рантайм-снятие приёмника
-        сюда не заходит; там та же ситуация видна счётчиками 2.8.
+        Зовётся на поднятии каналов И на каждом изменении их состава
+        (``_on_channels_changed``). Второе — не «заодно»: ровно там оператор
+        снимает файловый приёмник, оставляя скоуп с одним ``null``, и счётчики
+        этого не видят по построению (см. докстринг хука).
 
         Порога по ``min_level`` здесь НЕТ, и это не упущение: потолка у скоупа
         не бывает, поэтому ERROR доходит до любого — даже до того, чей
@@ -423,6 +439,22 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             if not names or not self._all_null_sinks(names):
                 continue
             self._warn_silenced_route(f"scope '{scope_name}' (min_level={scope.min_level})", names)
+
+    def routes_using_sink(self, name: str) -> List[str]:
+        """Скоупы, чей список каналов содержит это имя (плюс module-канал, если это он).
+
+        Скоуп без явного списка каналов адресует ВЕСЬ реестр — такой попадает в
+        ответ тоже, иначе «затронутых нет» читалось бы как «снятие безопасно».
+        """
+        target = str(name)
+        affected = []
+        for scope_name, scope in self.config.scopes.items():
+            if not getattr(scope, "enabled", True):
+                continue
+            names = list(getattr(scope, "channels", None) or ())
+            if not names or target in names:
+                affected.append(str(scope_name))
+        return sorted(affected)
 
     def _all_null_sinks(self, names: List[str]) -> bool:
         """Все ЖИВЫЕ каналы из списка — типа ``null``? Пустой живой набор → False.
@@ -456,12 +488,28 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             log_directory=log_dir,
         )
 
+    @property
+    def _channel_owner(self) -> str:
+        """Метка ЭТОГО экземпляра менеджера — ключ к ресурсам, переживающим канал.
+
+        Имени менеджера мало: два менеджера с одним именем в одном процессе
+        (тесты, а в проде — край) разделили бы одно кольцо ``memory``. Ленивая:
+        нужна только тому, у кого есть такой канал, а конструктор общий на всех.
+        """
+        token = getattr(self, "_channel_owner_token", None)
+        if token is None:
+            token = self._channel_owner_token = f"{self.manager_name}#{next(_owner_seq)}"
+        return token
+
     def _setup_channel(self, channel_name: str, channel_config: LoggerChannelSchema):
         try:
-            cfg = channel_config
+            # Владелец проставляется ВСЕГДА и здесь: канал, чей ресурс переживает
+            # его самого (кольцо `memory` в процессном реестре), обязан знать, чей
+            # он — иначе одноимённые каналы логгера и ошибок делили бы одно кольцо.
+            cfg = channel_config.model_copy(update={"owner": self._channel_owner})
             if channel_config.type == "file":
                 fb = f"logs/{channel_name}.log"
-                cfg = channel_config.model_copy(
+                cfg = cfg.model_copy(
                     update={
                         "file_path": self._resolved_file_path(
                             channel_config.file_path,
@@ -726,8 +774,20 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         Проверяемость — слом-инъекция H1 (снять ``_route_cache.clear()``) и пары
         в ``test_route_cache.py``.
+
+        **Плюс пересмотр «а не остался ли маршрут только в никуда» (находка
+        ревью 2.9, воспроизведена).** Проверка стояла ТОЛЬКО на поднятии каналов,
+        а 2.8 сама завела второй путь к вырожденному состоянию: оператор снимает
+        файловый приёмник, и в скоупе остаётся один ``null``. Наблюдалось так —
+        предупреждений 0, ``errors_to_floor`` 0, все четыре класса потерь 0,
+        floor-файлов нет, а запись уровня ERROR исчезла бесследно. Докстринг
+        проверки при этом утверждал, что рантайм-случай «виден счётчиками 2.8» —
+        видеть его там нечем по построению: ``null`` рапортует успех.
+        У плоскости ошибок этот путь был закрыт с самого начала
+        (``_setup_level_routes`` зовётся отсюда же), у логгера — нет.
         """
         self.invalidate_decision_cache()
+        self._warn_on_silenced_error_scopes()
 
     # =========================================================================
     # УЧЁТ ПОТЕРЬ НА СТЫКЕ «ИМЯ → КАНАЛ» (Ф0.4)

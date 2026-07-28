@@ -265,6 +265,17 @@ class ErrorManager(LoggerCore, IErrorManager):
 
         self._warn_on_silenced_severity_routes()
 
+    def routes_using_sink(self, name: str) -> List[str]:
+        """Уровни severity-карты, ведущие в этот приёмник.
+
+        Не скоупы: у этой плоскости приёмников в скоупах нет по определению (P3),
+        и ответ родителя перечислял бы маршруты, которых здесь не существует —
+        то есть врал бы оператору ровно в тот момент, когда он решает, снимать ли
+        канал.
+        """
+        target = str(name)
+        return sorted(f"severity:{level}" for level, channel in self._level_to_channel.items() if channel == target)
+
     def _warn_on_silenced_severity_routes(self) -> None:
         """Severity-приёмник, ведущий в «никуда» (2.9) — свой аналог проверки родителя.
 

@@ -268,6 +268,108 @@ class TestLoggerSinkTail:
             logger.shutdown()
 
 
+class TestSinkToggleNamesWhatItTouches:
+    """Приёмка 2.8: ответ обязан назвать затронутые маршруты.
+
+    Пункт был объявлен закрытым, а реализован не был — поймано ревью 2.9.
+    Снятие приёмника вслепую обнаруживается по отсутствию логов, то есть позже
+    всего и не тем, кто снимал.
+    """
+
+    def test_logger_answers_with_scopes(self, tmp_path) -> None:
+        from multiprocess_framework.modules.logger_module.configs import (
+            LoggerChannelSchema,
+            LoggerManagerConfig,
+            LoggerScopeSchema,
+        )
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
+        logger = LoggerManager(
+            config=LoggerManagerConfig(
+                app_name="routes",
+                log_directory=str(tmp_path),
+                enable_batching=False,
+                modules={},
+                channels={"a": LoggerChannelSchema(type="file", file_path="a.log")},
+                scopes={
+                    "SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["a"]),
+                    "BUSINESS": LoggerScopeSchema(min_level="INFO", channels=["другой"]),
+                },
+            )
+        )
+        try:
+            _svc, cm = _make(logger=logger)
+            res = cm.dispatch("logger.sink.disable", {"sink": "a"})
+            assert res["success"] is True
+            assert res["routes"] == ["SYSTEM"], "BUSINESS этот приёмник не адресует"
+        finally:
+            logger.shutdown()
+
+    def test_the_error_plane_answers_with_severity_levels(self, tmp_path) -> None:
+        """У плоскости ошибок маршрут не скоупный — перечислять скоупы значило бы врать."""
+        from multiprocess_framework.modules.error_module.core.error_manager import ErrorManager
+
+        errors = ErrorManager(
+            config={
+                "app_name": "routes_err",
+                "error_file_path": str(tmp_path / "errors.log"),
+                "critical_file_path": str(tmp_path / "critical.log"),
+                "enable_batching": False,
+            }
+        )
+        try:
+            _svc, cm = _make(logger=_FakeLogger())
+            _svc.error_manager = errors
+            res = cm.dispatch("logger.sink.disable", {"sink": "errors_file", "manager": "error"})
+            assert res["success"] is True
+            assert res["routes"] == ["severity:ERROR", "severity:WARNING"]
+        finally:
+            errors.shutdown()
+
+
+class TestTailCrossesTheProcessBoundary:
+    def test_an_unpicklable_extra_does_not_kill_the_whole_tail(self, tmp_path) -> None:
+        """Находка ревью 2.9: одна запись с объектом в `extra` роняла ВЕСЬ ответ.
+
+        `logger.sink.tail` едет обратно через очередь (pickle), а публичный API
+        логирования класть объекты в `extra` не запрещает. Наблюдалось так:
+        `TypeError: cannot pickle '_thread.lock' object` — оператор видел отказ
+        транспорта далеко от причины и терял хвост целиком, а не одно поле.
+        """
+        import pickle
+        import threading
+
+        from multiprocess_framework.modules.logger_module.configs import (
+            LoggerChannelSchema,
+            LoggerManagerConfig,
+            LoggerScopeSchema,
+        )
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
+        logger = LoggerManager(
+            config=LoggerManagerConfig(
+                app_name="boundary",
+                log_directory=str(tmp_path),
+                enable_batching=False,
+                modules={},
+                channels={"ring": LoggerChannelSchema(type="memory", capacity=10)},
+                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["ring"])},
+            )
+        )
+        try:
+            _svc, cm = _make(logger=logger)
+            logger.info("обычная", module="m")
+            logger.info("с локом", module="m", lock=threading.Lock())
+
+            res = cm.dispatch("logger.sink.tail", {"sink": "ring"})
+            assert res["success"] is True
+            assert [r["message"] for r in res["records"]] == ["обычная", "с локом"]
+            pickle.dumps(res)  # не должно бросить
+            assert "lock" in str(res["records"][1]["extra"])
+        finally:
+            logger.shutdown()
+
+
 class TestLogTail:
     def test_subscribe_installs_tap(self) -> None:
         logger = _FakeTapLogger()

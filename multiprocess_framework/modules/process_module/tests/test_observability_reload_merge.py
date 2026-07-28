@@ -224,3 +224,56 @@ class TestHealthReportLogEmission:
         res = handlers["health.report"]({"message": "smoke", "level": "LOUD"})
         assert res["success"] is False
         assert "level" in res["reason"]
+
+
+class TestDisabledSinksAreVisibleInReadback:
+    """Приёмка 2.8: readback обязан отличать «снят оператором» от «не доставляет».
+
+    Поле реализовано, но тестом покрыто НЕ было (находка ревью 2.9) — то есть
+    единственный способ увидеть рантайм-ручку снаружи держался ни на чём.
+    """
+
+    @staticmethod
+    def _logger(tmp_path):
+        from multiprocess_framework.modules.logger_module.configs import (
+            LoggerChannelSchema,
+            LoggerManagerConfig,
+            LoggerScopeSchema,
+        )
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
+        return LoggerManager(
+            config=LoggerManagerConfig(
+                app_name="readback",
+                log_directory=str(tmp_path),
+                enable_batching=False,
+                modules={},
+                channels={
+                    "a": LoggerChannelSchema(type="file", file_path="a.log"),
+                    "b": LoggerChannelSchema(type="file", file_path="b.log"),
+                },
+                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["a", "b"])},
+            )
+        )
+
+    def test_a_disabled_sink_shows_up_and_a_reload_clears_it(self, tmp_path) -> None:
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            observability_effective,
+        )
+
+        logger = self._logger(tmp_path)
+        try:
+            before = observability_effective(logger=logger, error=None, stats=None)["logger"]
+            assert before.get("sinks_disabled_by_operator", []) == []
+
+            logger.set_sink_enabled("a", False)
+            after = observability_effective(logger=logger, error=None, stats=None)["logger"]
+            assert after["sinks_disabled_by_operator"] == ["a"]
+            assert "a" not in after["channels_active"], "снятый приёмник не может быть активным"
+
+            logger.reconfigure(logger.config.model_dump())
+            restored = observability_effective(logger=logger, error=None, stats=None)["logger"]
+            assert restored["sinks_disabled_by_operator"] == []
+            assert "a" in restored["channels_active"]
+        finally:
+            logger.shutdown()
