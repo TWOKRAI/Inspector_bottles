@@ -1134,6 +1134,33 @@ class BuiltinCommands:
         # Сброс — тоже повод пересобрать: без этого «удали ключ» ничего бы не изменило
         # до следующего reload, то есть команда молча откладывала бы свой эффект.
         obs_requested = isinstance(obs_section, dict) or bool(obs_reset) or obs_clear
+        # Замечание 2 ревью 5.10: режим проверяется ЗДЕСЬ, до любой записи в слой.
+        # Прежде его судил только `_apply_telemetry_section`, а ветка observability
+        # вливала publish в слой раньше неё — и `telemetry_mode="bogus"` вместе с
+        # секцией observability проходил как успех. Task 1.2 finding-1 воскресала
+        # на одном пути из трёх, то есть отказ зависел от соседней секции.
+        telemetry_mode = str(args.get("telemetry_mode", "replace"))
+        if isinstance(telemetry_section, dict):
+            from ..managers.telemetry_reload import VALID_MODES
+
+            if telemetry_mode not in VALID_MODES:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "mode": telemetry_mode,
+                    "reason": f"неизвестный режим {telemetry_mode!r}; допустимы {'|'.join(VALID_MODES)}",
+                }
+            # Замечание 1 ревью 5.10, второй путь: срок без единого адресата в
+            # слоях (нет observability-секции и нет publish) молча пропадал бы.
+            if args.get("ttl") is not None and not obs_requested and "publish" not in telemetry_section:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "reason": (
+                        "ttl нечему адресовать: нет ни inline-секции observability, ни telemetry.publish; "
+                        "throttle — центральная политика оркестратора, срока у неё нет"
+                    ),
+                }
         # Task 5.8: срок жизни inline-правки. Проверяем до применения — команда с
         # опечаткой в ttl не имеет права применить секцию и «заодно» отказать.
         ttl, ttl_error = _parse_ttl(args)
@@ -1356,10 +1383,29 @@ class BuiltinCommands:
         if source != "inline":
             layers.app = deep_merge(layers.app or {}, {TELEMETRY_KEY: section})
             return None
+
+        incoming = list(flatten_section({TELEMETRY_KEY: section}).keys())
         current = layers.session.get(TELEMETRY_KEY)
-        merged = deep_merge(current if isinstance(current, dict) else {}, section) if mode == "merge" else section
-        layers.session = deep_merge(layers.session, {TELEMETRY_KEY: merged})
-        return layers.session_touch(list(flatten_section({TELEMETRY_KEY: merged}).keys()), ttl)
+        if mode == "merge":
+            merged = deep_merge(current if isinstance(current, dict) else {}, section)
+            layers.session = deep_merge(layers.session, {TELEMETRY_KEY: merged})
+        else:
+            # Замечание 3(а) ревью 5.10: `replace` ОБЯЗАН заменить поддерево
+            # сессии, а не лечь поверх него. Прежняя редакция звала тот же
+            # `deep_merge`, и прошлые правки выживали: `replace` с одним `fps`
+            # оставлял в гейте `latency` от предыдущей команды, а сессия держала
+            # оба ключа. То есть режим назывался «замена», а делал слияние.
+            if current:
+                layers.session_forget_expiry(flatten_section({TELEMETRY_KEY: current}).keys())
+            replaced = dict(layers.session)
+            replaced[TELEMETRY_KEY] = section
+            layers.session = replaced
+        # Замечание 3(б) ревью 5.10: срок ставится ключам ЭТОЙ правки, а не всему
+        # поддереву. Прежняя редакция брала ключи слитого результата, и `merge`
+        # продлевал жизнь чужим, давно забытым ручкам: правка `fps` с ttl=600
+        # растягивала до 600с срок `latency`, которому оставалось 2 секунды.
+        # «Включил и забыл» возвращалось через заднюю дверь внутри одной секции.
+        return layers.session_touch(incoming, ttl)
 
     def _resolve_store_throttle(self) -> Any:
         """Достать живой ``ThrottleMiddleware`` через StateStoreManager процесса-адресата.
@@ -1423,6 +1469,20 @@ class BuiltinCommands:
         ttl, ttl_error = _parse_ttl(args)
         if ttl_error is not None:
             return {"success": False, "process": svc.name, "reason": ttl_error}
+        # Замечание 1 ревью 5.10: срок применим только к publish — throttle в слоях
+        # не живёт (см. TELEMETRY_LAYERED_SUBSECTION). Прежняя редакция принимала
+        # `ttl` на throttle-only команде и МОЛЧА его теряла: тот же дефект, что
+        # закрыло замечание 2 ревью 5.8 на пути «файл + ttl», воскресший на соседнем
+        # пути. Отказ ДО применения — ничего не изменено.
+        if ttl is not None and "publish" not in section:
+            return {
+                "success": False,
+                "process": svc.name,
+                "reason": (
+                    "ttl применим только к под-секции publish (она живёт в слое сессии); "
+                    "throttle — центральная политика оркестратора, срока у неё нет"
+                ),
+            }
 
         try:
             applied, ttl_sec = self._apply_telemetry_section(section, source="inline", mode=mode, ttl=ttl)
@@ -1550,10 +1610,17 @@ class BuiltinCommands:
             # прислал `ttl` явно, и только молчаливый повтор (без `ttl`) остаётся
             # чистым no-op с названным остатком.
             held = f"{_SINK_SESSION_PREFIX.get(plane, '')}{name}.enabled"
-            result.update(self._touch_or_report_ttl(held, ttl, requested="ttl" in args))
+            result.update(self._touch_or_report_ttl(held, ttl, requested="ttl" in args, expected=enabled))
         return result
 
-    def _touch_or_report_ttl(self, session_key: str, ttl: float | None, *, requested: bool) -> dict:
+    def _touch_or_report_ttl(
+        self,
+        session_key: str,
+        ttl: float | None,
+        *,
+        requested: bool,
+        expected: bool | None = None,
+    ) -> dict:
         """Ответ про срок ключа, состояние которого команда не изменила.
 
         Task 5.8 завела здесь честный отчёт («срок НЕ продлён, остаток такой-то»),
@@ -1568,23 +1635,38 @@ class BuiltinCommands:
             дедлайн он не вправе: «включил DEBUG и забыл» вернулось бы через
             заднюю дверь, стоит поставить такую команду в цикл опроса.
 
+        ``expected`` — состояние, которого команда ДОБИВАЛАСЬ. Продлевать можно
+        только срок ТОГО ЖЕ состояния (замечание 4 ревью 5.10): живьём
+        ``sink.enable module_camera ttl=600`` на провалившемся возврате продлевал
+        срок записи **disable** с 30 до 600 секунд — оператор просил временно
+        вернуть канал, а команда в двадцать раз продлила его отсутствие и
+        рапортовала ``ttl_extended: true`` внутри ``success: false``.
+
         Пусто, если сессия ключа не держит: поле-заглушка про несуществующий срок
         читалось бы как «бессрочно», то есть как ответ.
         """
-        from ..configs.observability_layers import process_observability_layers
+        from ..configs.observability_layers import flatten_section, process_observability_layers
 
         layers = process_observability_layers(self._services)
         with layers.lock:
             if session_key not in layers.session_keys():
                 return {}
-            if not requested:
+            held_value = flatten_section(layers.session).get(session_key)
+            mismatch = expected is not None and bool(held_value) is not bool(expected)
+            if not requested or mismatch:
                 if not layers.session_has_deadline(session_key):
                     return {}
-                return {
+                note = {
                     "session_key_held": session_key,
                     "expires_in_sec": layers.session_expires_in(session_key),
                     "ttl_hint": ("команда ничего не изменила и срок НЕ продлён; продлить — та же команда с явным ttl"),
                 }
+                if mismatch:
+                    note["ttl_hint"] = (
+                        f"сессия держит противоположное состояние (enabled={bool(held_value)}), "
+                        "и срок этой записи НЕ продлён: продлевать можно только то, чего команда добилась"
+                    )
+                return note
             layers.session_touch((session_key,), ttl)
             answer = self._session_ttl_answer(session_key)
         answer["session_key_held"] = session_key

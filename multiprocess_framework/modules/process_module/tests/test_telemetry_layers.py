@@ -160,6 +160,70 @@ class TestThrottleStaysOutsideTheLayers:
         assert throttle.rules == {"a.b": 2.0}
 
 
+class TestReviewFindings:
+    """Четыре замечания ревью 5.10 — каждое со своей парой."""
+
+    def test_ttl_on_a_throttle_only_command_is_refused_not_swallowed(self, tmp_path) -> None:
+        """З-1: срок без адресата в слоях — отказ, а не тихая потеря.
+
+        Тот же дефект, что закрыло замечание 2 ревью 5.8 на пути «файл + ttl»,
+        воскрес на соседнем пути: команда отвечала успехом, правило применяла, а
+        срок исчезал без слова.
+        """
+        throttle = ThrottleMiddleware({})
+        svc, handlers, _, _ = _wired(tmp_path, throttle=throttle)
+        res = handlers["telemetry.reconfigure"]({"throttle": {"a.b": 2.0}, "ttl": 60})
+        assert res["success"] is False
+        assert "ttl" in res["reason"]
+        assert throttle.rules == {}, "правило применено вопреки отказу"
+
+    def test_unknown_mode_is_refused_on_the_observability_path_too(self, tmp_path) -> None:
+        """З-2: опечатка в режиме не должна проходить из-за соседней секции.
+
+        Отказ зависел от того, приехала ли рядом секция observability: ветка
+        наблюдаемости вливала publish в слой раньше валидации.
+        """
+        svc, handlers, _, _ = _wired(tmp_path)
+        res = handlers["config.reload"](
+            {
+                "observability": {"log_level": "DEBUG"},
+                "telemetry": {"publish": {"metrics": {"fps": {"interval_sec": 0.25}}}},
+                "telemetry_mode": "bogus",
+            }
+        )
+        assert res["success"] is False
+        assert "bogus" in res["reason"]
+        assert _fps_interval(svc) == 5.0, "секция применена вопреки отказу"
+
+    def test_replace_drops_the_previous_session_subtree(self, tmp_path) -> None:
+        """З-3(а): режим «замена» обязан заменять, а не ложиться поверх.
+
+        Прежняя редакция звала тот же deep_merge, и правка предыдущей команды
+        выживала: сессия держала оба ключа, гейт — обе метрики.
+        """
+        svc, handlers, _, _ = _wired(tmp_path)
+        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"latency_ms": {"enabled": False}}}})
+        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"fps": {"interval_sec": 0.5}}}})
+        held = list(process_observability_layers(svc).session_keys())
+        assert held == ["telemetry.publish.metrics.fps.interval_sec"], f"прошлая правка пережила замену: {held}"
+
+    def test_merge_does_not_extend_the_deadline_of_foreign_keys(self, tmp_path) -> None:
+        """З-3(б): срок ставится ключам ЭТОЙ правки.
+
+        Иначе «включил и забыл» возвращается через заднюю дверь внутри одной
+        секции: свежая правка вечно продлевает давно забытую соседнюю.
+        """
+        svc, handlers, clock, _ = _wired(tmp_path)
+        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"latency_ms": {"enabled": False}}}, "ttl": 10})
+        clock.advance(8)
+        handlers["telemetry.reconfigure"](
+            {"publish": {"metrics": {"fps": {"interval_sec": 0.5}}}, "telemetry_mode": "merge", "ttl": 600}
+        )
+        layers = process_observability_layers(svc)
+        assert layers.session_expires_in("telemetry.publish.metrics.latency_ms.enabled") == 2.0
+        assert layers.session_expires_in("telemetry.publish.metrics.fps.interval_sec") == 600.0
+
+
 class TestPlaneIsNotTouchedUntilALayerSpeaks:
     def test_observability_reload_alone_does_not_rebuild_the_gate(self, tmp_path) -> None:
         """Пока слои о телеметрии не сказали — плоскость чужая.

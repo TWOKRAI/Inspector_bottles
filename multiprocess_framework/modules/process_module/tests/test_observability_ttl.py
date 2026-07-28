@@ -319,6 +319,30 @@ class TestDeadlineIsReal:
         clock.advance(50)
         assert sweep_session_ttl(svc) is not None, "продлённый срок так и не истёк"
 
+    def test_failed_enable_does_not_extend_the_deadline_of_the_disable(self, wired) -> None:
+        """Замечание 4 ревью 5.10: продлевать можно только достигнутое состояние.
+
+        Живьём: `sink.disable module_camera ttl=30` (успех) → канал исчез из
+        конфига → `sink.enable module_camera ttl=600` (провал). Прежняя редакция
+        отвечала `ttl_extended: true` внутри `success: false` и растягивала срок
+        записи **disable** с 30 до 600 секунд. Оператор просил временно вернуть
+        приёмник, а команда в двадцать раз продлила его отсутствие.
+        """
+        svc, handlers, clock = wired
+        assert handlers["logger.sink.disable"]({"sink": "messages_file", "ttl": 30})["success"] is True
+        clock.advance(10)
+        # Приёмник, которого больше нет в конфиге, вернуть неоткуда — так и
+        # получается провал возврата (живьём это состояние после смены рецепта).
+        # Условие строится, а не выпрашивается у окружения: пропущенный тест
+        # ничего не доказывает.
+        svc.logger_manager.config.channels.pop("messages_file", None)
+
+        res = handlers["logger.sink.enable"]({"sink": "messages_file", "ttl": 600})
+        assert res["success"] is False, "возврат удался — сценарий не построен"
+        assert "ttl_extended" not in res
+        assert res["expires_in_sec"] == 20.0, "срок противоположной записи всё-таки сдвинут"
+        assert "противоположное состояние" in res["ttl_hint"]
+
     def test_ttl_of_one_key_does_not_extend_another(self, wired) -> None:
         """Срок ставится ключам ЭТОЙ команды: иначе свежая правка вечно продлевает забытую."""
         svc, handlers, clock = wired
