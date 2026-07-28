@@ -116,6 +116,8 @@ drain по heartbeat) подменяется **один слот — `stats`**. 
 | Реальное время (файлом) | hot-reload watcher секции `observability` (debounce, Option B, ADR-CRM-006) + `config.reload` → `apply_observability_reconfigure` с валидацией-до-применения и откатом (R9 ✅) | `observability_reload.py` (407 строк) | процесс; пороги по scope |
 | Реальное время (командой) | `logger.sink.enable/disable` с `manager=logger\|error\|stats` (whitelist, роутер НЕ адресуем) | `builtin_commands.py` | канал по имени |
 | Чтение без мутации | `introspect.observability` → `effective` + `counters` (все классы потерь) | там же (Ф0.3/Ф5.1) | процесс |
+| Чтение записей ретроспективно | `logger.sink.tail` — хвост приёмника, хранящего записи у себя (`type=memory`; 2.9 ✅) | `builtin_commands.py` → `CRM.read_sink_tail` | приёмник по имени |
+| Куда писать (помимо файла) | типы приёмников `memory` (кольцо в памяти процесса) и `null` (намеренно никуда) — конфигом, через `register_sink_factory` (2.9 ✅) | `logger_module/channels/log_channel.py` | канал по имени |
 | Телеметрия | publisher-gate: вкл/выкл + частота per-метрика (`GATED_METRICS`), GUI-секция, `telemetry_set/reconfigure` | `telemetry_publish_config.py` | группа метрик на процесс |
 | Сводка | `system_overview` → карточка `observability_losses`, аномалии `observability_loss` / `observability_unavailable` (2.V2 ✅) | backend_ctl | вся система |
 

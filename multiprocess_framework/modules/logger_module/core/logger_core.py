@@ -389,6 +389,59 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             if getattr(module_config, "enabled", True) and getattr(module_config, "file_path", None):
                 self._setup_module_channel(module_name, module_config)
 
+        self._warn_on_silenced_error_scopes()
+
+    def _warn_on_silenced_error_scopes(self) -> None:
+        """Сказать вслух про скоуп ошибок, ведущий ТОЛЬКО в «никуда» (2.9).
+
+        ``NullChannel`` рапортует успех, поэтому запись, ушедшая только туда,
+        для системы **доставлена**: пол ошибок её не подхватит (он ловит записи
+        БЕЗ каналов), ни один класс потерь не вырастет, счётчики будут чисты —
+        и ошибки исчезнут бесследно при полностью здоровой картине наблюдаемости.
+
+        Это законная конфигурация: бывает, что шум конкретного скоупа не нужен.
+        Запрещать нечего, но и молчать нельзя — молчание здесь неотличимо от
+        «всё в порядке». Предупреждение идёт **аварийной функцией**, а не через
+        собственные каналы: их состав ровно и есть предмет претензии.
+
+        Проверка одноразовая — на поднятии каналов. Рантайм-снятие приёмника
+        сюда не заходит; там та же ситуация видна счётчиками 2.8.
+
+        Порога по ``min_level`` здесь НЕТ, и это не упущение: потолка у скоупа
+        не бывает, поэтому ERROR доходит до любого — даже до того, чей
+        ``min_level`` стоит на ``CRITICAL``. Отсеять по порогу было бы нельзя
+        ни один.
+
+        Каждый наследник проверяет СВОЙ резолв: у скоупов плоскости ошибок
+        приёмников нет по определению, её severity-карту досматривает
+        ``ErrorManager``, расширяя этот метод.
+        """
+        for scope_name, scope in self.config.scopes.items():
+            if not getattr(scope, "enabled", True):
+                continue
+            names = list(getattr(scope, "channels", None) or ())
+            if not names or not self._all_null_sinks(names):
+                continue
+            self._warn_silenced_route(f"scope '{scope_name}' (min_level={scope.min_level})", names)
+
+    def _all_null_sinks(self, names: List[str]) -> bool:
+        """Все ЖИВЫЕ каналы из списка — типа ``null``? Пустой живой набор → False.
+
+        Пустой набор отдаётся как False намеренно: «приёмников нет» — это случай
+        пола ошибок и счётчиков потерь, он и так видим. Здесь речь только про
+        приёмник, который есть и рапортует успех.
+        """
+        live = [ch for ch in (self._resolve_channel(str(name)) for name in names) if ch is not None]
+        return bool(live) and all(getattr(ch, "channel_type", "") == "null" for ch in live)
+
+    def _warn_silenced_route(self, what: str, names: List[str]) -> None:
+        """Одно предупреждение о маршруте, ведущем только в «никуда»."""
+        self._fallback_log(
+            "WARNING",
+            f"{what} ведёт ТОЛЬКО в null-приёмники {names}: записи уровня ERROR будут "
+            f"отброшены молча — пол ошибок их не увидит, счётчики потерь останутся нулевыми",
+        )
+
     def _resolved_file_path(self, file_path: Optional[str], fallback: str) -> str:
         # Каждый процесс пишет в свою подпапку: logs/{process_name}/
         log_dir = self.config.log_directory

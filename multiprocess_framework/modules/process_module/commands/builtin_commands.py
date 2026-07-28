@@ -944,6 +944,11 @@ class BuiltinCommands:
                 "Выключить sink логгера по имени (unregister_channel)",
             ),
             (
+                "logger.sink.tail",
+                self._cmd_logger_sink_tail,
+                "Прочитать последние N записей приёмника, хранящего их у себя (type=memory)",
+            ),
+            (
                 "log.tail.subscribe",
                 self._cmd_log_tail_subscribe,
                 "Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)",
@@ -1242,6 +1247,46 @@ class BuiltinCommands:
             "manager": plane,
             "process": svc.name,
         }
+
+    def _cmd_logger_sink_tail(self, data=None, **kwargs) -> dict:
+        """Прочитать хвост приёмника, хранящего записи у себя (2.9).
+
+        Единственный способ достать записи процесса **ретроспективно**: живой
+        хвост (``log.tail.subscribe``) — подписка, и кто не подписался заранее,
+        прошлое не увидит; ``ObservabilityStore`` — уже диск.
+
+        Параметры: ``sink`` (имя, обяз.), ``limit`` (сколько последних; без него
+        — всё кольцо), ``manager``: ``logger`` (дефолт) | ``error`` | ``stats``.
+
+        Whitelist менеджеров — тот же и по той же причине, что у sink-control:
+        ``read_sink_tail`` поднят в ``ChannelRoutingManager``, а его унаследовал
+        и ``RouterManager``, который наблюдаемостью не является вовсе.
+        """
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        name = str(args.get("sink") or args.get("name") or "").strip()
+        if not name:
+            return {"success": False, "reason": "sink (имя канала) обязателен"}
+
+        plane = str(args.get("manager") or "logger").strip().lower()
+        attr = _SINK_ADDRESSABLE_MANAGERS.get(plane)
+        if attr is None:
+            allowed = "|".join(sorted(_SINK_ADDRESSABLE_MANAGERS))
+            return {
+                "success": False,
+                "reason": f"manager={plane!r} не адресуем командой sink-control; допустимы {allowed}",
+                "process": svc.name,
+            }
+
+        target = getattr(svc, attr, None)
+        if target is None or not hasattr(target, "read_sink_tail"):
+            return {"success": False, "reason": f"{attr} недоступен", "process": svc.name}
+
+        limit = args.get("limit")
+        result = target.read_sink_tail(name, limit)
+        result["manager"] = plane
+        result["process"] = svc.name
+        return result
 
     def _cmd_log_tail_subscribe(self, data=None, **kwargs) -> dict:
         """Подписать адрес на LogRecord'ы процесса с level ≥ порога (Ф1 Task 1.5).

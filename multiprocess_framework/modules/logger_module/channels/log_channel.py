@@ -13,6 +13,7 @@ import re
 import shutil
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -864,6 +865,142 @@ class FrameTraceChannel(LogChannel):
                 self._fh = None
 
 
+class MemoryChannel(LogChannel):
+    """Кольцо записей в памяти процесса, читаемое по запросу (2.9).
+
+    Приёмник для логов, которые нужны «если что» — при разборе инцидента через
+    ``backend_ctl``, — но не стоят файла на диске. Записи копятся в кольце
+    фиксированной ёмкости и отдаются командой ``logger.sink.tail``.
+
+    **Чем это НЕ является.** Рядом живут три похожих механизма, и путать их
+    дорого:
+
+    - ``ObservabilityHub`` / ``BoundedChannel`` — кольцо **транзитное**: владелец
+      дренирует его по heartbeat, к моменту запроса оно обычно пусто. И стоит
+      оно ВЫШЕ логгера, а не приёмником в нём;
+    - живой хвост ``backend_ctl`` (``log.tail.subscribe``) — **подписка** (push):
+      кто не подписался заранее, тот прошлое не увидит;
+    - ``ObservabilityStore`` — SQLite на **диске**.
+
+    Это кольцо — единственное место, где последние N записей лежат В ПАМЯТИ
+    процесса и достаются **ретроспективно**, без подписки и без диска.
+
+    **Ёмкость считает ЗАПИСИ, а не байты**, и это единственная граница. Запись
+    держит ссылку на свой ``extra``, а туда кладут что угодно — при большом
+    ``capacity`` кольцо способно удерживать в живых объекты, которые иначе
+    собрал бы GC. Дефолт поэтому скромный (:attr:`DEFAULT_CAPACITY`), а не
+    «побольше на всякий случай».
+
+    **Вытеснение старого — контракт кольца, а не потеря.** ``evicted`` живёт в
+    ``get_info`` и НЕ входит в ``LOSS_COUNTER_KEYS``: оператор, задавший
+    ёмкость N, ровно это и заказал. Потерей была бы запись, не дошедшая до
+    приёмника, — она считается там же, где и всегда.
+    """
+
+    #: Скромно намеренно: см. оговорку про ``extra`` в докстринге класса.
+    DEFAULT_CAPACITY = 500
+
+    def __init__(self, config: LoggerChannelSchema):
+        super().__init__(config)
+        capacity = config.capacity if config.capacity is not None else self.DEFAULT_CAPACITY
+        if capacity < 1:
+            # Не «молча выключить» и не «подставить дефолт»: и то, и другое
+            # превращает опечатку в конфиге в тихо пропавший лог. Исключение
+            # ловит _setup_channel → канал не создаётся → записи к нему уходят
+            # в unresolved_channel_records, то есть отказ виден счётчиком.
+            raise ValueError(f"capacity должна быть ≥ 1 (канал '{config.name}', получено {capacity})")
+        self._capacity = int(capacity)
+        self._records: "deque[Dict[str, Any]]" = deque(maxlen=self._capacity)
+        # Лок держит СНИМОК согласованным: `get_info` отдаёт size, written и
+        # evicted одним куском, а не тремя моментами времени.
+        #
+        # Изначально он ставился под другим доводом — «`x += 1` из двух потоков
+        # теряет инкременты». Замер этого НЕ подтвердил: 12 потоков × 20000
+        # инкрементов при `switchinterval` 1e-9 на CPython 3.12 не потеряли ни
+        # одного, и слом-инъекция (лок снят) не убила ни одного теста. Довод
+        # снят как недоказанный, а не оставлен «на всякий случай»: уверенное
+        # неверное объяснение переживает правку и однажды применяется не туда.
+        # Под free-threaded сборкой, где GIL инкремент не сериализует, гонка
+        # вернётся — но это уже про будущую сборку, а не про сегодняшний замер.
+        self._lock = threading.Lock()
+        self.written = 0
+        self.evicted = 0
+
+    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            if len(self._records) == self._capacity:
+                self.evicted += 1
+            # Мелкая копия верхнего уровня: словарь записи после write никем не
+            # переиспользуется, но кольцо переживает вызывающего, и разделять с
+            # ним изменяемый объект незачем. Вложенное (``extra``) остаётся общим.
+            self._records.append(dict(record))
+            self.written += 1
+        return {"status": "success", "channel": self.name}
+
+    def tail(self, limit: Any = None) -> List[Dict[str, Any]]:
+        """Последние ``limit`` записей (все, если limit не задан), старые первыми."""
+        with self._lock:
+            items = list(self._records)
+        if limit is None:
+            return items
+        count = int(limit)
+        if count <= 0:
+            return []
+        return items[-count:]
+
+    def get_info(self) -> Dict[str, Any]:
+        info = super().get_info()
+        with self._lock:
+            info.update(
+                {
+                    "type": self.channel_type,
+                    "capacity": self._capacity,
+                    "size": len(self._records),
+                    "written": self.written,
+                    "evicted": self.evicted,
+                }
+            )
+        return info
+
+    def close(self) -> None:
+        """Освободить кольцо. Счётчики переживают закрытие — это история, а не состояние."""
+        with self._lock:
+            self._records.clear()
+
+
+class NullChannel(LogChannel):
+    """Явный «никуда»: запись принята и выброшена (2.9).
+
+    Нужен, чтобы «этот лог мне не нужен» было ОТДЕЛЬНЫМ состоянием, а не
+    неотличимым от «приёмник сломался». Запись сюда — **доставка**
+    (``status=success``, ``written += 1``), а не потеря: оператор выбрал этот
+    приёмник явно, и раздувать ему класс потерь значит обесценить сам счётчик.
+
+    **Вырожденный случай назван прямо.** Скоуп уровня ERROR, маршрутизированный
+    ТОЛЬКО сюда, глушит пол ошибок: floor ловит запись, которой не досталось
+    НИ ОДНОГО канала, а здесь канал есть и он рапортует успех. Запрещать это
+    не нужно — бывает, что шум ошибок конкретного скоупа действительно не нужен,
+    — но конфигурация обязана сказать об этом вслух: предупреждение выдаёт
+    ``LoggerCore._warn_on_silenced_error_scopes`` при поднятии каналов.
+    """
+
+    def __init__(self, config: LoggerChannelSchema):
+        super().__init__(config)
+        self._lock = threading.Lock()
+        self.written = 0
+
+    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            self.written += 1
+        return {"status": "success", "channel": self.name}
+
+    def get_info(self) -> Dict[str, Any]:
+        info = super().get_info()
+        with self._lock:
+            info.update({"type": self.channel_type, "written": self.written})
+        return info
+
+
 # Реестр фабрик sink-каналов: type → класс канала.
 # Мутируемый: новые типы добавляются через register_sink_factory() без правки create_channel.
 _SINK_FACTORIES: Dict[str, type] = {
@@ -871,6 +1008,8 @@ _SINK_FACTORIES: Dict[str, type] = {
     "console": ConsoleChannel,
     "http": HttpChannel,
     "frame_trace": FrameTraceChannel,
+    "memory": MemoryChannel,
+    "null": NullChannel,
 }
 
 

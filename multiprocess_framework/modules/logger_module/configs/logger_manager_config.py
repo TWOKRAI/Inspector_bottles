@@ -44,6 +44,10 @@ class LoggerChannelSchema(SchemaBase):
     file_path: Optional[str] = None
     url: Optional[str] = None
     headers: Dict[str, str] = Field(default_factory=dict)
+    # Только для type="memory": сколько ЗАПИСЕЙ держит кольцо в памяти процесса.
+    # Отдельным полем, а не переиспользованием max_size: там байты, и 10 МБ,
+    # прочитанные как число записей, дали бы кольцо на 10 миллионов элементов.
+    capacity: Optional[int] = None
 
 
 class LoggerScopeSchema(SchemaBase):

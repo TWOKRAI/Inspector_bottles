@@ -108,7 +108,7 @@ logger_module/
 │   └── logger_manager_config.py  ← LoggerManagerConfig(ChannelRoutingConfig)
 │
 ├── channels/
-│   └── log_channel.py        ← LogChannel(ILogChannel), FileChannel, ConsoleChannel, HttpChannel
+│   └── log_channel.py        ← LogChannel(ILogChannel), File/Console/Http/FrameTrace/Memory/Null
 │
 ├── adapters/
 │   └── std_facade.py         ← StdLoggerFacade / get_std_logger (единственный вид)
@@ -383,9 +383,32 @@ class ILogChannel(IChannel):
 
 ### Встроенные каналы
 
-- `FileChannel` — запись в файл
-- `ConsoleChannel` — вывод на консоль
-- `HttpChannel` — отправка в удалённый сервис логирования
+| `type` в конфиге | Класс | Куда попадает запись |
+|---|---|---|
+| `file` | `FileChannel` | файл с ротацией |
+| `console` | `ConsoleChannel` | терминал |
+| `http` | `HttpChannel` | удалённый сервис логирования |
+| `frame_trace` | `FrameTraceChannel` | снимок одного кадра, файл перезаписывается |
+| `memory` | `MemoryChannel` | кольцо в памяти процесса, читается по запросу |
+| `null` | `NullChannel` | никуда — намеренно |
+
+**`memory` — единственное место, где последние N записей достаются
+РЕТРОСПЕКТИВНО.** Живой хвост (`log.tail.subscribe`) — подписка: кто не
+подписался заранее, прошлое не увидит; `ObservabilityHub` — транзитное кольцо,
+его дренирует владелец; `ObservabilityStore` — уже диск. Ёмкость (`capacity`,
+дефолт 500) считает **записи, а не байты**, и это единственная граница: запись
+держит свой `extra`, поэтому большое кольцо способно удерживать в живых чужие
+объекты. Читается командой `logger.sink.tail` (`sink`, `limit`, `manager`).
+Вытеснение старого — контракт кольца, а не потеря: `evicted` живёт в
+`get_info` и в `LOSS_COUNTER_KEYS` не входит.
+
+**`null` — доставка, а не потеря.** Оператор выбрал этот приёмник явно, и
+раздувать ему класс потерь значило бы обесценить счётчик. Обратная сторона
+названа вслух: скоуп (или severity-маршрут) уровня ERROR, ведущий ТОЛЬКО в
+`null`, глушит пол ошибок — запись «доставлена», floor молчит, счётчики чисты.
+Это законно, но конфигурация выдаёт WARNING при поднятии каналов
+(`LoggerCore._warn_on_silenced_error_scopes`, у плоскости ошибок —
+`ErrorManager._warn_on_silenced_severity_routes`).
 
 ### Кастомный канал
 

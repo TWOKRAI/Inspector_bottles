@@ -101,6 +101,7 @@ class TestRegistration:
             "config.reload",
             "logger.sink.enable",
             "logger.sink.disable",
+            "logger.sink.tail",
             "log.tail.subscribe",
             "log.tail.unsubscribe",
         ):
@@ -203,6 +204,68 @@ class TestLoggerSink:
             logger.shutdown()
 
         assert "канал вернулся" in (tmp_path / "trace.log").read_text(encoding="utf-8")
+
+
+class TestLoggerSinkTail:
+    """2.9: чтение хвоста приёмника, хранящего записи у себя.
+
+    Только на РЕАЛЬНОМ менеджере: на фейке проверялась бы связка «команда →
+    метод с таким именем», а не то, что записи действительно достаются из
+    живого процесса — ровно тот класс промаха, который выше стоил фазы
+    живого прогона.
+    """
+
+    @staticmethod
+    def _logger(tmp_path):
+        from multiprocess_framework.modules.logger_module.configs import (
+            LoggerChannelSchema,
+            LoggerManagerConfig,
+            LoggerScopeSchema,
+        )
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
+        return LoggerManager(
+            config=LoggerManagerConfig(
+                app_name="tail29",
+                log_directory=str(tmp_path),
+                enable_batching=False,
+                modules={},
+                channels={"mem": LoggerChannelSchema(type="memory", capacity=20)},
+                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["mem"])},
+            )
+        )
+
+    def test_command_returns_the_last_records_of_a_memory_sink(self, tmp_path) -> None:
+        logger = self._logger(tmp_path)
+        try:
+            _svc, cm = _make(logger=logger)
+            for i in range(5):
+                logger.info(f"m{i}", module="m")
+
+            res = cm.dispatch("logger.sink.tail", {"sink": "mem", "limit": 3})
+            assert res["success"] is True
+            assert [r["message"] for r in res["records"]] == ["m2", "m3", "m4"]
+            assert res["manager"] == "logger"
+        finally:
+            logger.shutdown()
+
+    def test_unknown_manager_is_refused_by_whitelist(self, tmp_path) -> None:
+        logger = self._logger(tmp_path)
+        try:
+            _svc, cm = _make(logger=logger)
+            res = cm.dispatch("logger.sink.tail", {"sink": "mem", "manager": "router"})
+            assert res["success"] is False
+            assert "router" in res["reason"]
+        finally:
+            logger.shutdown()
+
+    def test_missing_sink_name_is_error(self, tmp_path) -> None:
+        logger = self._logger(tmp_path)
+        try:
+            _svc, cm = _make(logger=logger)
+            assert cm.dispatch("logger.sink.tail", {})["success"] is False
+        finally:
+            logger.shutdown()
 
 
 class TestLogTail:

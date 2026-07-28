@@ -600,6 +600,47 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             self._on_channels_changed()
         return changed
 
+    def read_sink_tail(self, name: str, limit: Any = None) -> Dict[str, Any]:
+        """Прочитать хвост приёмника, который хранит записи у себя (2.9).
+
+        Хранят их не все и не обязаны: файл отдал запись ОС, консоль — терминалу,
+        «никуда» выбросило намеренно. Читаемость — свойство КАНАЛА, а не
+        менеджера, поэтому метод не знает про типы: он спрашивает у канала
+        ``tail()`` и честно отвечает отказом, если такого метода нет. Новый
+        приёмник, умеющий хранить, становится читаемым без правки этого кода.
+
+        Живёт в базе, а не у логгера: приёмник в памяти одинаково осмыслен
+        всем трём плоскостям — логам, ошибкам и статистике.
+
+        Returns:
+            ``{"success": True, "sink", "type", "records", "info"}`` либо
+            ``{"success": False, "reason": …}`` — имя неизвестно или приёмник
+            записей не хранит.
+        """
+        channel = self._resolve_channel(str(name))
+        if channel is None:
+            return {"success": False, "reason": f"приёмник '{name}' не найден у {self.manager_name}"}
+        tail = getattr(channel, "tail", None)
+        if not callable(tail):
+            kind = getattr(channel, "channel_type", "?")
+            return {
+                "success": False,
+                "reason": f"приёмник '{name}' типа '{kind}' не хранит записей — читать нечего",
+            }
+        records = tail(limit)
+        info = {}
+        try:
+            info = channel.get_info()
+        except Exception as exc:  # noqa: BLE001 — диагностика канала не должна ронять чтение
+            info = {"info_error": str(exc)}
+        return {
+            "success": True,
+            "sink": str(name),
+            "type": getattr(channel, "channel_type", "?"),
+            "records": list(records),
+            "info": info,
+        }
+
     def _forget_buffered_channel(self, name: str) -> None:
         """Снять рабочее состояние ушедшего канала с буфера (резидуал F6).
 

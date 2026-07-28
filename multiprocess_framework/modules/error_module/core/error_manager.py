@@ -25,7 +25,7 @@ from copy import deepcopy
 from typing import Optional, Any, List, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
-from ...channel_routing_module.levels import rank_of
+from ...channel_routing_module.levels import is_error_level, rank_of
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.logger_core import LoggerCore
 from ..configs.error_manager_config import ErrorManagerConfig
@@ -262,6 +262,26 @@ class ErrorManager(LoggerCore, IErrorManager):
             self._level_to_channel["WARNING"] = "errors_file"
         elif has_critical:
             self._level_to_channel["WARNING"] = "critical_file"
+
+        self._warn_on_silenced_severity_routes()
+
+    def _warn_on_silenced_severity_routes(self) -> None:
+        """Severity-приёмник, ведущий в «никуда» (2.9) — свой аналог проверки родителя.
+
+        Проверка родителя ходит по скоупам, а эта плоскость маршрутизирует
+        severity-картой: у её скоупов приёмников нет по определению (P3),
+        поэтому там смотреть не на что, и покрытие пришлось бы выдумать.
+        Здесь смотрим по своей карте — на том же наборе понятий, каким плоскость
+        реально решает, куда писать.
+
+        Стоит в конце ``_setup_level_routes``, а не в ``_setup_channels``:
+        карта строится ПОСЛЕ каналов, и в момент родительской проверки она
+        ещё пуста. Пересборка маршрутов повторит предупреждение — это верно:
+        конфигурация в этот момент заявлена заново.
+        """
+        for level, channel_name in sorted(self._level_to_channel.items()):
+            if is_error_level(level) and self._all_null_sinks([channel_name]):
+                self._warn_silenced_route(f"severity-маршрут {level}", [channel_name])
 
     def _validate_config(self, config: Dict[str, Any]) -> None:
         """R9: разобрать error-конфиг ДО закрытия каналов.
