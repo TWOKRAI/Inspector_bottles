@@ -354,6 +354,8 @@ def apply_observability_layers(
     log_info: Optional[Callable[[str], None]] = None,
     heartbeat: Any = None,
     telemetry_boot: Optional[Dict[str, Any]] = None,
+    store_throttle: Any = None,
+    boot_rules: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Пересобрать конфиги менеджеров ИЗ СЛОЁВ и применить (Task 5.12).
 
@@ -414,6 +416,8 @@ def apply_observability_layers(
             merge_managers=merge_managers,
             heartbeat=heartbeat,
             telemetry_boot=telemetry_boot,
+            store_throttle=store_throttle,
+            boot_rules=boot_rules,
         )
         # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
         # была вызвана. Иначе после неудачного возврата и последующего успешного
@@ -435,6 +439,8 @@ def _rebuild_and_apply(
     merge_managers: Callable[..., Any],
     heartbeat: Any = None,
     telemetry_boot: Optional[Dict[str, Any]] = None,
+    store_throttle: Any = None,
+    boot_rules: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Тело пересборки (вызывается под локом стека — см. вызывающего)."""
     resolved = layers.resolve()
@@ -476,6 +482,8 @@ def _rebuild_and_apply(
         layers=layers,
         boot=telemetry_boot,
         heartbeat=heartbeat,
+        store_throttle=store_throttle,
+        boot_rules=boot_rules,
         deep_merge=deep_merge,
         log_info=log_info,
     )
@@ -505,11 +513,20 @@ def telemetry_targets(svc: Any) -> Dict[str, Any]:
 
     Центрального троттла здесь нет намеренно — см. ``TELEMETRY_LAYERED_SUBSECTION``.
     """
+    from .telemetry_reload import resolve_store_throttle
+
     get_config = getattr(svc, "get_config", None)
     raw = get_config(TELEMETRY_KEY, None) if callable(get_config) else None
+    rules = get_config("state_throttle_rules", None) if callable(get_config) else None
     return {
         "heartbeat": getattr(svc, "_heartbeat", None),
         "telemetry_boot": dict(raw) if isinstance(raw, dict) else None,
+        # Task 5.10.g: получатель дельты троттла и её L0. Загрузочные правила
+        # лежат ОТДЕЛЬНЫМ ключом (`state_throttle_rules`) — тем же, что читает
+        # boot; без него истечение срока дельты снесло бы вообще все правила
+        # вместо возврата к загрузочным.
+        "store_throttle": resolve_store_throttle(svc),
+        "boot_rules": dict(rules) if isinstance(rules, dict) else None,
     }
 
 
@@ -518,6 +535,8 @@ def apply_telemetry_layers(
     *,
     heartbeat: Any = None,
     telemetry_boot: Optional[Dict[str, Any]] = None,
+    store_throttle: Any = None,
+    boot_rules: Optional[Dict[str, Any]] = None,
     log_info: Optional[Callable[[str], None]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Пересобрать ТОЛЬКО плоскость телеметрии из слоёв (Task 5.10.f).
@@ -536,6 +555,8 @@ def apply_telemetry_layers(
             layers=layers,
             boot=telemetry_boot,
             heartbeat=heartbeat,
+            store_throttle=store_throttle,
+            boot_rules=boot_rules,
             deep_merge=deep_merge,
             log_info=log_info,
         )
@@ -547,6 +568,8 @@ def _apply_telemetry_from_layers(
     layers: "ObservabilityLayers",
     boot: Optional[Dict[str, Any]],
     heartbeat: Any,
+    store_throttle: Any,
+    boot_rules: Optional[Dict[str, Any]],
     deep_merge: Callable[..., Any],
     log_info: Optional[Callable[[str], None]],
 ) -> Optional[Dict[str, Any]]:
@@ -568,8 +591,19 @@ def _apply_telemetry_from_layers(
     возвращается по сроку. Заменить L0 целиком по-прежнему можно — правкой
     файла, то есть слоем, который для этого и предназначен.
     """
+    applied: Dict[str, Any] = {}
+    throttle_applied = _apply_throttle_from_layers(
+        layered,
+        layers=layers,
+        boot_rules=boot_rules,
+        store_throttle=store_throttle,
+        log_info=log_info,
+    )
+    if throttle_applied is not None:
+        applied.update(throttle_applied)
+
     if heartbeat is None:
-        return None
+        return applied or None
     sub = TELEMETRY_LAYERED_SUBSECTION
     layered_sub = layered.get(sub) if isinstance(layered, dict) else None
     if layered_sub is not None:
@@ -578,7 +612,7 @@ def _apply_telemetry_from_layers(
         # Слои о publish-плоскости не сказали ни разу — не наша, не трогаем.
         # Иначе пересборка наблюдаемости клобберила бы гейт, собранный на старте
         # самим heartbeat'ом, и делала бы это на каждый reload.
-        return None
+        return applied or None
 
     boot_sub = (boot or {}).get(sub)
     # ``None`` — ЗАКОННОЕ загрузочное состояние («гейта нет»), и выразить его надо
@@ -588,13 +622,67 @@ def _apply_telemetry_from_layers(
 
     from .telemetry_reload import apply_telemetry_reconfigure
 
-    return apply_telemetry_reconfigure(
-        section,
-        mode="replace",
-        heartbeat=heartbeat,
-        store_throttle=None,  # центральный троттл в слоях не живёт (TELEMETRY_LAYERED_SUBSECTION)
-        log_info=log_info,
+    applied.update(
+        apply_telemetry_reconfigure(
+            section,
+            mode="replace",
+            heartbeat=heartbeat,
+            # Троттл применён выше, СВОИМ путём: он входит в слои одним
+            # непрозрачным листом, а не под-секцией (OPAQUE_LAYER_PATHS).
+            store_throttle=None,
+            log_info=log_info,
+        )
     )
+    return applied
+
+
+def _apply_throttle_from_layers(
+    layered: Any,
+    *,
+    layers: "ObservabilityLayers",
+    boot_rules: Optional[Dict[str, Any]],
+    store_throttle: Any,
+    log_info: Optional[Callable[[str], None]],
+) -> Optional[Dict[str, Any]]:
+    """Применить операторскую дельту троттла из слоя поверх загрузочных правил.
+
+    Task 5.10.g. Дельта живёт в L3 ОДНИМ листом ``telemetry.throttle`` — почему
+    именно так, объяснено у :data:`OPAQUE_LAYER_PATHS` (per-rule ключ сломан по
+    построению: точки внутри паттерна режутся как разделители пути).
+
+    Собирается из источников, а не накладывается на живое: ``boot_rules``
+    (та же ``state_throttle_rules``, что и на старте) + дельта, где ``None`` у
+    паттерна означает «правила нет» — родной маркер ``THROTTLE_REMOVE``
+    контракта задач 1.1/1.2, не тронутый ни строкой. Истечение срока снимает
+    лист целиком → остаются загрузочные правила, что совпадает с семантикой
+    задачи 2.1 («пустая секция → boot-дефолты») без единого исключения.
+    """
+    delta = layered.get("throttle") if isinstance(layered, dict) else None
+    if isinstance(delta, dict):
+        layers.throttle_owned = True
+    if not layers.throttle_owned:
+        # Слои дельты не держали ни разу — троттлом владеет файл и его watcher.
+        return None
+    if store_throttle is None:
+        # Получателя нет (обычный процесс, а не оркестратор) — и это ОТВЕТ, а не
+        # молчание: оператор, не увидевший поля, решил бы, что правило применено.
+        return {"throttle": False}
+
+    effective = dict(boot_rules or {})
+    for pattern, value in (delta or {}).items():
+        if value is None:  # THROTTLE_REMOVE: правило снято дельтой
+            effective.pop(str(pattern), None)
+        else:
+            effective[str(pattern)] = value
+    try:
+        store_throttle.set_rules(effective)
+    except Exception as exc:  # noqa: BLE001 — отчёт вызывающему, не падение пересборки
+        if log_info is not None:
+            log_info(f"[observability] троттл не применён из слоёв: {exc!r}")
+        return {"throttle": False}
+    if log_info is not None:
+        log_info(f"[observability] троттл собран из слоёв: правил {len(effective)}")
+    return {"throttle": True}
 
 
 def _remark_operator_disabled_sinks(

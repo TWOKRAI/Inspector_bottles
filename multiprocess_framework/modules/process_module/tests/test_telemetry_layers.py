@@ -130,24 +130,65 @@ class TestPublishReturnsByDeadline:
         assert "telemetry.publish.metrics.fps.interval_sec" in entry["keys"]
 
 
-class TestThrottleStaysOutsideTheLayers:
-    def test_throttle_is_applied_and_its_boundary_is_named(self, tmp_path) -> None:
-        """Граница названа полем ответа, а не умолчанием.
+class TestThrottleDeltaLivesAsOneLeaf:
+    """Task 5.10.g — дельта троттла в слоях, но ОДНИМ непрозрачным листом.
 
-        Молчащее различие двух плоскостей одной команды оператор обнаружил бы по
-        пропавшей настройке — то есть позже всего.
+    Класс перевёрнут решением по рекомендации ревью: до 5.10.g он закреплял
+    честность границы («в слоях не живёт — и мы это говорим»), теперь —
+    саму жизнь в слое. Форма выбрана не из вкуса: per-rule ключ там сломан по
+    построению, потому что точки внутри паттерна режутся как разделители пути
+    (см. ``OPAQUE_LAYER_PATHS`` и тест ``test_pattern_with_dots_stays_one_key``).
+    """
+
+    def test_delta_is_applied_over_boot_rules(self, tmp_path) -> None:
+        """Дельта собирается из ИСТОЧНИКОВ: загрузочные правила + правка."""
+        throttle = ThrottleMiddleware({"keep": 5.0})
+        svc, handlers, _, _ = _wired(tmp_path, throttle=throttle)
+        svc._config["state_throttle_rules"] = {"keep": 5.0}
+        res = handlers["telemetry.reconfigure"]({"throttle": {"a.b": 2.0}})
+        assert res["success"] is True
+        assert res["applied"]["throttle"] is True
+        assert res["survives_reload"] is True
+        assert throttle.rules == {"keep": 5.0, "a.b": 2.0}
+
+    def test_pattern_with_dots_stays_one_key(self, tmp_path) -> None:
+        """Ключ слоя ОДИН, каким бы ни был паттерн внутри.
+
+        Воспроизведение дефекта, ради которого лист непрозрачен: per-rule путь
+        `telemetry.throttle.processes.**.state.fps` резался по точкам, заводил в
+        слое вложенное дерево РЯДОМ с настоящим правилом, и сброс снимал дерево,
+        рапортуя успех, — правило при этом оставалось жить.
         """
         throttle = ThrottleMiddleware({})
         svc, handlers, _, _ = _wired(tmp_path, throttle=throttle)
-        res = handlers["telemetry.reconfigure"]({"throttle": {"a.b": 2.0}})
-        assert res["success"] is True
-        assert res["applied"] == {"throttle": True}
-        assert res["throttle_survives_reload"] is False
-        assert "ttl_sec" not in res, "срок обещан плоскости, которая в слоях не живёт"
-        assert throttle.rules == {"a.b": 2.0}
+        handlers["telemetry.reconfigure"]({"throttle": {"processes.**.state.fps": 2.0}})
+        assert list(process_observability_layers(svc).session_keys()) == ["telemetry.throttle"]
+        assert throttle.rules == {"processes.**.state.fps": 2.0}
 
-    def test_both_planes_in_one_command_answer_separately(self, tmp_path) -> None:
-        """Одна команда — два разных ответа про судьбу правки, и оба сказаны."""
+    def test_delta_expires_back_to_boot_rules(self, tmp_path) -> None:
+        """Единственная выгода переезда: срок и возврат к загрузочным правилам."""
+        throttle = ThrottleMiddleware({"keep": 5.0})
+        svc, handlers, clock, _ = _wired(tmp_path, throttle=throttle)
+        svc._config["state_throttle_rules"] = {"keep": 5.0}
+        res = handlers["telemetry.reconfigure"]({"throttle": {"a.b": 2.0}, "ttl": 30})
+        assert res["ttl_sec"] == 30.0
+        assert throttle.rules == {"keep": 5.0, "a.b": 2.0}
+
+        clock.advance(31)
+        entry = sweep_session_ttl(svc)
+        assert entry is not None and entry["keys"] == ["telemetry.throttle"]
+        assert throttle.rules == {"keep": 5.0}, "возврат не к загрузочным правилам"
+
+    def test_removal_marker_survives_the_move_to_layers(self, tmp_path) -> None:
+        """``None`` у паттерна по-прежнему означает «правила нет» (контракт Ф1)."""
+        throttle = ThrottleMiddleware({"keep": 5.0, "drop.me": 1.0})
+        svc, handlers, _, _ = _wired(tmp_path, throttle=throttle)
+        svc._config["state_throttle_rules"] = {"keep": 5.0, "drop.me": 1.0}
+        handlers["telemetry.reconfigure"]({"throttle": {"drop.me": None}})
+        assert throttle.rules == {"keep": 5.0}
+
+    def test_both_planes_in_one_command(self, tmp_path) -> None:
+        """Одна команда — обе плоскости, и обе под сроком."""
         throttle = ThrottleMiddleware({})
         svc, handlers, _, _ = _wired(tmp_path, throttle=throttle)
         res = handlers["telemetry.reconfigure"](
@@ -155,27 +196,34 @@ class TestThrottleStaysOutsideTheLayers:
         )
         assert res["success"] is True
         assert res["survives_reload"] is True
-        assert res["throttle_survives_reload"] is False
+        assert "точки" in res["throttle_ttl_scope"], "разница в гранулярности срока не названа"
         assert _fps_interval(svc) == 0.5
         assert throttle.rules == {"a.b": 2.0}
+
+    def test_no_receiver_is_an_answer_not_silence(self, tmp_path) -> None:
+        """Нет центрального троттла (обычный процесс) → это сказано, а не умолчано."""
+        svc, handlers, _, _ = _wired(tmp_path)  # без throttle
+        res = handlers["telemetry.reconfigure"]({"throttle": {"a.b": 2.0}})
+        assert res["applied"]["throttle"] is False
 
 
 class TestReviewFindings:
     """Четыре замечания ревью 5.10 — каждое со своей парой."""
 
-    def test_ttl_on_a_throttle_only_command_is_refused_not_swallowed(self, tmp_path) -> None:
-        """З-1: срок без адресата в слоях — отказ, а не тихая потеря.
+    def test_ttl_on_a_throttle_only_command_is_honoured_not_swallowed(self, tmp_path) -> None:
+        """З-1: срок не теряется молча.
 
-        Тот же дефект, что закрыло замечание 2 ревью 5.8 на пути «файл + ttl»,
-        воскрес на соседнем пути: команда отвечала успехом, правило применяла, а
-        срок исчезал без слова.
+        В редакции 5.10.f адресата у него не было, и правильным ответом был
+        отказ. С 5.10.g дельта троттла живёт в слое — и срок к ней применим;
+        проверяется то же самое свойство (срок не исчезает без слова), но теперь
+        его исполняют, а не отвергают.
         """
         throttle = ThrottleMiddleware({})
-        svc, handlers, _, _ = _wired(tmp_path, throttle=throttle)
+        svc, handlers, clock, _ = _wired(tmp_path, throttle=throttle)
         res = handlers["telemetry.reconfigure"]({"throttle": {"a.b": 2.0}, "ttl": 60})
-        assert res["success"] is False
-        assert "ttl" in res["reason"]
-        assert throttle.rules == {}, "правило применено вопреки отказу"
+        assert res["success"] is True
+        assert res["ttl_sec"] == 60.0
+        assert process_observability_layers(svc).session_expires_in("telemetry.throttle") == 60.0
 
     def test_unknown_mode_is_refused_on_the_observability_path_too(self, tmp_path) -> None:
         """З-2: опечатка в режиме не должна проходить из-за соседней секции.
