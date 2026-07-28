@@ -170,11 +170,26 @@ def test_unresolved_channel_counted_on_direct_path(tmp_path: Path) -> None:
         assert stats["unresolved_channels"] == {"ghost_channel": 5}
 
 
-def test_unresolved_after_sink_disabled(tmp_path: Path) -> None:
-    """Вариант из списка дефекта: канал БЫЛ, снят через ``logger.sink.disable`` в рантайме.
+def test_disabling_the_only_sink_is_still_a_loss(tmp_path: Path) -> None:
+    """Снят ЕДИНСТВЕННЫЙ приёмник скоупа — запись не легла никуда, это потеря.
 
-    ``set_sink_enabled(name, False)`` реально убирает канал из ``_channel_registry``
-    (см. ``test_sink_control.py``), поэтому сценарий тождественен «канал не резолвится».
+    **Переклассифицировано в 2.8** (прежнее имя — ``test_unresolved_after_sink_disabled``).
+    Прежняя редакция утверждала: «``set_sink_enabled(False)`` убирает канал из
+    реестра, поэтому сценарий тождественен „канал не резолвится“». Ровно это
+    отождествление 2.8 и отменяет — оно делало штатное действие оператора
+    неотличимым от опечатки в конфиге, и на живой системе (`disable` одного
+    приёмника из двух) 2.V2 поднимала аномалию `observability_loss` на пустом
+    месте.
+
+    Новая граница проходит не по «оператор снял», а по «легла ли запись хоть
+    куда-нибудь». Здесь приёмник был ОДИН — значит записи идти некуда, и это
+    потеря по существу, как бы оператор к ней ни пришёл. Меняется только КЛАСС:
+    ``records_without_channels`` вместо ``unresolved_channel_records``.
+    Оба в ``LOSS_COUNTER_KEYS``, оба всплывают в 2.V2 — видимость потери, ради
+    которой тест писался, сохранена целиком.
+
+    Парный случай «снят один из двух → потерь нет» живёт в
+    ``test_route_cache.py::TestOperatorDisabledSinkLeavesTheRoute``.
     """
     with _logger(tmp_path, enable_batching=True, scope_channels=["system_file"]) as manager:
         assert manager.set_sink_enabled("system_file", False) is True
@@ -184,8 +199,9 @@ def test_unresolved_after_sink_disabled(tmp_path: Path) -> None:
         manager.flush()
 
         stats = manager.get_stats()
-        assert stats["unresolved_channel_records"] == 4
-        assert stats["unresolved_channels"] == {"system_file": 4}
+        assert stats["records_without_channels"] == 4
+        assert stats["unresolved_channel_records"] == 0
+        assert stats["unresolved_channels"] == {}
 
 
 # =============================================================================

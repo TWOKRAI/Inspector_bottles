@@ -169,6 +169,15 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         # в опасную.
         self._miss_lock = threading.Lock()
 
+        # Имена приёмников, снятых ОПЕРАТОРОМ через control-plane (2.8).
+        # Влияет на МАРШРУТ, а не на учёт: счётчики потерь обязаны переживать
+        # снятие приёмника (см. `unregister_channel` — урок «7 → disable → 0»,
+        # ревью Ф0). До 2.8 снятое имя оставалось в маршруте (он берёт список
+        # из конфига скоупа), резолв падал, и штатное действие оператора
+        # выглядело потерей: 5 записей → 5 `unresolved_channel_records`,
+        # а 2.V2 поднимала по ним аномалию.
+        self._sinks_disabled_by_operator: set = set()
+
     # =========================================================================
     # ЖИЗНЕННЫЙ ЦИКЛ
     # =========================================================================
@@ -567,12 +576,19 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         if enabled:
             changed = self._recreate_channel(str(name))
             if changed:
+                # 2.8: снять отметку ДО инвалидации — иначе пересобранный
+                # маршрут закэшируется уже без этого приёмника, и «включил, а
+                # не пишется» стало бы зеркальным дефектом к исходному.
+                self._sinks_disabled_by_operator.discard(str(name))
                 self._on_channels_changed()
             return changed
 
         channel = self._channel_registry.get(name)
         if channel is None:
             return False
+        # 2.8: отметить НАМЕРЕНИЕ до снятия. Имя останется в списках скоупов
+        # (они из конфига), и без отметки маршрут продолжил бы его адресовать.
+        self._sinks_disabled_by_operator.add(str(name))
         self._on_channel_removed(channel)
         try:
             channel.close()

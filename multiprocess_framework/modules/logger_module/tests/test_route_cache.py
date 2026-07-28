@@ -164,3 +164,151 @@ class TestRouteCacheShape:
 
         assert "без кэша" in (tmp_path / "first.log").read_text(encoding="utf-8")
         assert logger._route_cache == {}, "с выключенным кэшем в него всё равно писали"
+
+
+class TestOperatorDisabledSinkLeavesTheRoute:
+    """2.8 — снятый оператором приёмник исчезает ИЗ МАРШРУТА, а не из учёта.
+
+    Дефект (воспроизведён на живой системе 2026-07-28): список приёмников
+    скоупа берётся из КОНФИГА, а `sink.disable` снимает канал только из
+    реестра. Имя оставалось в маршруте, резолв падал, и каждая запись после
+    штатного действия оператора считалась потерянной — 5 записей → 5
+    `unresolved_channel_records`, а 2.V2 поднимала по ним аномалию.
+
+    Отвергнутая альтернатива названа, чтобы к ней не вернулись: «выключать
+    счётчик вместе с каналом» (предложение владельца). Счётчики потерь обязаны
+    ПЕРЕЖИВАТЬ снятие приёмника — инцидент «7 → disable → 0» уже был
+    воспроизведён ревью Ф0: оператор разбирает поломку, жмёт disable, и история
+    отброшенных записей обнуляется вместе с каналом. Врёт не счётчик, а маршрут.
+    """
+
+    def test_disabling_one_of_two_sinks_is_not_a_loss(self, logger, tmp_path) -> None:
+        """Репро владельца целиком: пишет в два файла, один снят — потерь нет."""
+        logger.set_sink_enabled("second", False)
+        for i in range(5):
+            logger.info(f"запись {i}", module="приложение")
+        logger.flush()
+        stats = logger.get_stats()
+
+        assert stats["unresolved_channel_records"] == 0, stats.get("unresolved_channels")
+        assert stats["records_without_channels"] == 0
+        assert stats["channel_refused_records"] == 0
+        assert (tmp_path / "first.log").read_text(encoding="utf-8").count("запись") == 5
+
+    def test_a_typo_in_a_channel_name_is_still_a_loss(self, logger) -> None:
+        """Различение не маскирует настоящий дефект.
+
+        Имя, которого никто не снимал (опечатка в конфиге, не созданный канал),
+        обязано считаться потерей как прежде — иначе правка превратила бы
+        счётчик в бесполезный.
+        """
+        logger.config.scopes["BUSINESS"].channels = ["first", "такого_канала_нет"]
+        logger.invalidate_decision_cache()
+        logger.info("в никуда", module="приложение")
+        stats = logger.get_stats()
+
+        assert stats["unresolved_channel_records"] == 1
+        assert stats["unresolved_channels"] == {"такого_канала_нет": 1}
+
+    def test_counters_survive_the_disable(self, logger) -> None:
+        """История потерь переживает снятие приёмника — прямой страж инцидента «7 → 0».
+
+        Здесь проверяется именно то, ради чего предложение «выключать счётчик»
+        было отвергнуто: сначала накапливаем потерю на несуществующем имени,
+        затем снимаем ДРУГОЙ, живой приёмник — накопленное число обязано
+        остаться на месте.
+        """
+        logger.config.scopes["BUSINESS"].channels = ["first", "призрак"]
+        logger.invalidate_decision_cache()
+        for _ in range(7):
+            logger.info("к призраку", module="приложение")
+        assert logger.get_stats()["unresolved_channel_records"] == 7
+
+        logger.set_sink_enabled("first", False)
+        assert logger.get_stats()["unresolved_channel_records"] == 7, "история потерь обнулилась вместе с каналом"
+
+    def test_re_enabling_puts_the_sink_back_into_the_route(self, logger, tmp_path) -> None:
+        """Зеркальный дефект: «включил, а не пишется». Отметка обязана сниматься."""
+        logger.set_sink_enabled("second", False)
+        logger.info("пока снят", module="приложение")
+        logger.set_sink_enabled("second", True)
+        logger.info("снова пишем", module="приложение")
+        logger.flush()
+
+        second = (tmp_path / "second.log").read_text(encoding="utf-8")
+        assert "снова пишем" in second
+        assert "пока снят" not in second
+
+    def test_the_error_plane_never_had_this_defect(self, tmp_path) -> None:
+        """У плоскости ОШИБОК дефекта не было — и это установлено слом-инъекцией.
+
+        Первая редакция называлась «то же поведение на плоскости ошибок» и
+        утверждала, что без общего фильтра дефект остался бы жить у ошибок.
+        **Слом-инъекция это опровергла:** тест остался ЗЕЛЁНЫМ и при снятом
+        фильтре, и при неставящейся отметке — то есть охранял он не фильтр.
+
+        Настоящая причина: `ErrorManager._route` берёт приёмник из ЖИВОГО
+        реестра (`_level_to_channel` пересобирается на смену состава), а не из
+        статического списка конфига скоупа. Именно статический список и был
+        корнем дефекта — значит он логгер-специфичен.
+
+        Тест оставлен как характеризационный: он закрепляет, что плоскость
+        ошибок деградирует ИЗЯЩНО (снят `warnings_file` → WARNING едет в
+        `errors_file`), и предупредит, если severity-резолв однажды переведут
+        на конфиг и он унаследует ту же болезнь. Охраной фильтра он НЕ является,
+        и докстринг об этом говорит прямо, чтобы никто не решил обратное.
+        """
+        from multiprocess_framework.modules.error_module import ErrorManager, ErrorManagerConfig
+
+        mgr = ErrorManager(
+            manager_name="ошибки",
+            config=ErrorManagerConfig(
+                app_name="route_cache",
+                enable_batching=False,
+                default_level="WARNING",
+                critical_file_path=str(tmp_path / "critical.log"),
+                error_file_path=str(tmp_path / "errors.log"),
+                warnings_file_path=str(tmp_path / "warnings.log"),
+            ),
+        )
+        try:
+            assert mgr.set_sink_enabled("warnings_file", False) is True
+            mgr.warning("предупреждение в снятый приёмник", module="проба")
+            stats = mgr.get_stats()
+        finally:
+            mgr.shutdown()
+
+        assert stats["unresolved_channel_records"] == 0, "плоскость ошибок осталась со старым поведением"
+        assert stats["records_without_channels"] == 0
+        # Замер показал больше, чем ожидалось: плоскость ошибок деградирует
+        # ИЗЯЩНО. Сняли `warnings_file` — WARNING поехал в `errors_file`,
+        # ближайший живой severity-канал, то есть потери нет вовсе, а не
+        # «потеря своего класса», как предполагал первый вариант теста.
+        # Записываю факт, а не догадку.
+        assert "предупреждение в снятый приёмник" in (tmp_path / "errors.log").read_text(encoding="utf-8")
+
+    def test_records_already_in_the_buffer_are_still_accounted(self, tmp_path) -> None:
+        """Хвост: то, что попало в буфер ДО disable, честно уедет в потери.
+
+        Короткий ненулевой выхлоп сразу после снятия приёмника — не дефект
+        фикса, а следствие того, что буфер не забывает уже принятые записи
+        (он и не имеет права: молча выбросить их значило бы завести четвёртый,
+        никем не считаемый класс потери). Названо и закреплено здесь, иначе
+        первый живой прогон объявит фикс сломанным.
+        """
+        config = _config(tmp_path)
+        config.enable_batching = True
+        config.batch_size = 1000  # заведомо не сбросится сам
+        manager = LoggerManager(config=config)
+        try:
+            manager.info("до снятия", module="приложение")  # осела в буфере
+            manager.set_sink_enabled("second", False)
+            manager.flush()
+            stats = manager.get_stats()
+        finally:
+            manager.shutdown()
+
+        # Запись адресована приёмнику, снятому уже ПОСЛЕ её приёма буфером.
+        assert stats["batch_stats"]["flush_failed"] + stats["unresolved_channel_records"] >= 1, (
+            "хвост буфера исчез бесследно — это и был бы четвёртый несчитаемый класс"
+        )

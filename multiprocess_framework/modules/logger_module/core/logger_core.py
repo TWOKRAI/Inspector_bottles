@@ -656,20 +656,23 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     def _on_channels_changed(self) -> None:
         """Состав каналов изменился в рантайме → решение should_log больше не доверенное.
 
-        Ф0.8. **Сегодня это профилактика, а не починка симптома**, и врать об
-        этом нельзя: ``_should_log_direct`` считает решение только по
-        scope/level/module, состав каналов в него не входит — значит стейла
-        сейчас физически не бывает.
+        Ф0.8. **Хук стал НЕСУЩИМ (2.2-перф + 2.8) — прежняя редакция этого
+        докстринга больше не верна и оставлять её нельзя.** Она гласила:
+        «сегодня это профилактика, а не починка симптома… стейла физически не
+        бывает», потому что ``_should_log_direct`` смотрел только на
+        scope/level/module. С тех пор произошло два события:
 
-        Правка сделана до появления симптома потому, что Ф2.2 кладёт в то же
-        решение резолв ``effective_channels``. С этого момента ``logger.sink.disable``
-        начал бы оставлять кэш с ответом про уже снятый канал — и симптом был
-        бы не «лог не пишется», а «лог пишется в никуда», что ищется днями.
-        Дешевле поставить инвалидацию сейчас, чем вспоминать про неё потом.
+        * 2.2-перф завёл ``_route_cache`` — кэш РЕЗУЛЬТАТА маршрута, куда состав
+          приёмников входит напрямую;
+        * 2.8 добавил в резолв множество «снято оператором».
 
-        Проверяемость обеспечена тестом-симуляцией Ф2.2: наследник, чьё
-        ``_should_log_direct`` зависит от реестра каналов, без этого хука
-        отвечает старой правдой.
+        Теперь без этой инвалидации стейл наступает немедленно и симптом у него
+        ровно тот, который прежний текст называл гипотетическим: не «лог не
+        пишется», а «лог пишется в снятый канал» либо «перестал писаться в
+        живой» — неверный ОТВЕТ вместо отсутствия ответа, и ищется он днями.
+
+        Проверяемость — слом-инъекция H1 (снять ``_route_cache.clear()``) и пары
+        в ``test_route_cache.py``.
         """
         self.invalidate_decision_cache()
 
@@ -869,6 +872,34 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         return channels
 
+    def _effective_route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[Tuple[str, ...]]:
+        """Маршрут БЕЗ приёмников, снятых оператором (2.8).
+
+        **Стоит здесь, а не внутри `_route`, намеренно.** `ErrorManager`
+        переопределяет `_route` целиком (severity-путь не спрашивает скоуп), и
+        фильтр внутри родителя оставил бы дефект жить на плоскости ошибок —
+        это было бы четвёртое ручное зеркалирование того же класса, что уже
+        стоило фазе четырёх правок (см. докстринг `_route`). Здесь точка одна
+        и общая: `log()` наследуют оба менеджера.
+
+        Пустой кортеж — законный результат и НЕ то же самое, что `None`:
+        `None` значит «отклонена гейтом» (не потеря), а пустой кортеж —
+        «приёмников не осталось», и `log()` учтёт запись как
+        `records_without_channels`. Именно так снятие ЕДИНСТВЕННОГО приёмника
+        скоупа остаётся потерей: оператор неявно замолчал целый вид логов.
+
+        Возвращает кортеж, а не список: значение уходит в кэш и наружу, и
+        изменяемый список позволил бы одному вызывающему испортить маршрут
+        всем последующим записям.
+        """
+        resolved = self._route(scope, level, module)
+        if resolved is None:
+            return None
+        disabled = self._sinks_disabled_by_operator
+        if disabled:
+            return tuple(name for name in resolved if name not in disabled)
+        return tuple(resolved)
+
     def log(
         self,
         scope: LogScope,
@@ -909,11 +940,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             cache_key = (scope, level, module)
             channels = self._route_cache.get(cache_key, _ROUTE_MISS)
             if channels is _ROUTE_MISS:
-                resolved = self._route(scope, level, module)
-                channels = tuple(resolved) if resolved is not None else None
+                channels = self._effective_route(scope, level, module)
                 self._route_cache[cache_key] = channels
         else:
-            channels = self._route(scope, level, module)
+            channels = self._effective_route(scope, level, module)
 
         if channels is None:
             self.stats["messages_skipped"] += 1

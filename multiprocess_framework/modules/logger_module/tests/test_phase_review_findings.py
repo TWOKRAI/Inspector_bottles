@@ -141,7 +141,20 @@ def test_refused_warning_is_counted_on_the_direct_path(tmp_path: Path) -> None:
 
 
 def test_missing_channel_is_counted_on_the_direct_path(tmp_path: Path) -> None:
-    """Парная половина: канала нет — учитывается своим счётчиком, не общим."""
+    """Парная половина: приёмника нет — учитывается своим счётчиком, не общим.
+
+    **Переклассифицировано в 2.8.** Прежняя редакция снимала приёмник командой
+    и ждала `unresolved_channel_records`. С 2.8 снятый ОПЕРАТОРОМ приёмник
+    исключается из маршрута, поэтому запись, которой не осталось ни одного
+    приёмника, попадает в `records_without_channels` — другой класс той же
+    потери. Свойство, ради которого тест писался, сохранено дословно: запись,
+    не легшая никуда, **видна счётчиком, и счётчик именно свой**, а не общий
+    `channel_refused_records`.
+
+    Ветка «имя не резолвится, хотя никто его не снимал» (опечатка в конфиге)
+    по-прежнему даёт `unresolved_channel_records` — она проверяется
+    в `test_unknown_channel_accounting.py`.
+    """
     mgr = _unbatched_logger(tmp_path)
     try:
         mgr.set_sink_enabled("system_file", False)
@@ -150,7 +163,8 @@ def test_missing_channel_is_counted_on_the_direct_path(tmp_path: Path) -> None:
         mgr.warning("предупреждение в снятый канал", module="findings")
         after = mgr.get_stats()
 
-        assert after["unresolved_channel_records"] == before["unresolved_channel_records"] + 1
+        assert after["records_without_channels"] == before["records_without_channels"] + 1
+        assert after["unresolved_channel_records"] == before["unresolved_channel_records"]
         assert after["channel_refused_records"] == before["channel_refused_records"]
     finally:
         mgr.shutdown()

@@ -105,6 +105,12 @@ def observability_effective(
                 section["channels_active"] = sorted(names())
             except Exception:  # noqa: BLE001 — readback best-effort
                 pass
+        # 2.8: «снят оператором» — ОТДЕЛЬНОЕ поле, а не вывод из отсутствия в
+        # `channels_active`. Без него оператор не отличит «я это выключил» от
+        # «канал не поднялся» — а это разные диагнозы с разными действиями.
+        disabled = getattr(logger, "_sinks_disabled_by_operator", None)
+        if isinstance(disabled, set):
+            section["sinks_disabled_by_operator"] = sorted(disabled)
         out["logger"] = section
     if error is not None and getattr(error, "config", None) is not None:
         out["error"] = {"default_level": getattr(error.config, "default_level", None)}

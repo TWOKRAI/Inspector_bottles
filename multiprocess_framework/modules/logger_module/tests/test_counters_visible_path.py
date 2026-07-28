@@ -144,22 +144,30 @@ def test_dropped_by_channel_reaches_get_stats(tmp_path: Path) -> None:
             assert batch_stats["pending"]["system_file"] == 5
 
 
-def test_dead_sink_is_reported_as_flush_failed_not_as_delivered(tmp_path: Path) -> None:
-    """Сток не принял — это не «доставлено».
+def test_dead_sink_does_not_report_a_healthy_plane(tmp_path: Path) -> None:
+    """Приёмников не осталось — плоскость обязана сообщить о потере, а не молчать.
 
-    До правки: приёмники сняты, 51 запись числится доставленной, ноль байт на
-    диске, все счётчики молчат. Диагностическая команда рапортовала здоровую
-    плоскость при стопроцентной потере.
+    Дефект, ради которого тест написан: приёмники сняты, 51 запись числится
+    доставленной, ноль байт на диске, все счётчики молчат — команда рапортовала
+    здоровую плоскость при стопроцентной потере.
+
+    **Переклассифицировано в 2.8** (прежнее имя —
+    ``test_dead_sink_is_reported_as_flush_failed_not_as_delivered``). Снятый
+    ОПЕРАТОРОМ приёмник теперь исключается из маршрута, поэтому записи до
+    буфера не доходят и `flush_failed` вырасти не может; вместо него растёт
+    `records_without_channels` — приёмника не осталось ни одного. Проверяемое
+    свойство то же самое и проверяется прямее: **ни одна запись не числится
+    доставленной, и потеря видна счётчиком из ``LOSS_COUNTER_KEYS``.**
     """
     with _logger(tmp_path, max_pending=10_000) as manager:
         manager.set_sink_enabled("system_file", False)
         _overflow(manager, 50)
         manager.flush()
 
-        batch_stats = manager.get_stats()["batch_stats"]
-        assert batch_stats["total_flushed"] == 0
-        assert batch_stats["flush_failed"] == 50
-        assert batch_stats["flush_failed_by_channel"] == {"system_file": 50}
+        stats = manager.get_stats()
+        assert stats["batch_stats"]["total_flushed"] == 0, "запись числится доставленной при снятом приёмнике"
+        assert stats["records_without_channels"] == 50
+        assert stats["unresolved_channel_records"] == 0
 
 
 def test_healthy_logger_reports_zero_drops(tmp_path: Path) -> None:
