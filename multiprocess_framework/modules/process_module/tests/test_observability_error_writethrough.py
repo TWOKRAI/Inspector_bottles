@@ -146,21 +146,45 @@ def test_critical_via_logger_slot_write_through_before_drain(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_info_via_logger_slot_still_buffered_not_write_through(tmp_path):
-    """severity < ERROR (info) НЕ write-through: буферизуется в hub, tap молчит."""
+def test_info_via_logger_slot_is_write_through_too(tmp_path):
+    """severity < ERROR тоже write-through (2.2): hub-буфера для лога больше нет.
+
+    Инверсия прежнего теста. До 2026-07-28 здесь утверждалось обратное — info
+    буферизовалась в hub и доезжала до писателя только по такту heartbeat. Буфер
+    снят вместе с расщепителем: у лога один путь на все severity.
+    """
     logger = _real_logger("wt-logger-4")
     worker = WorkerManager("workers")
     hub, _adapter = wire_process_observability("cam0", worker, logger, None, None)
 
-    sink = _CollectSink()
-    logger.add_tap(sink, min_level="ERROR")
+    error_only = _CollectSink("error_only")
+    logger.add_tap(error_only, min_level="ERROR")
 
     worker._log_info("hello", module="cam0")
 
-    # Write-through НЕ случился: реальный logger (и его tap) не тронут до drain.
-    assert sink.records == []
-    # Запись лежит в hub log-буфере (уйдёт в стор как kind='log' из drain-петли).
-    drained = hub.drain_all()
-    assert len(drained["log"]) == 1
-    assert drained["log"][0]["severity"] == "info"
-    assert drained["log"][0]["message"] == "hello"
+    # tap с порогом ERROR по-прежнему молчит — но уже потому, что порог, а не буфер.
+    assert error_only.records == []
+    # В hub-буфере записи нет ни на одной severity.
+    assert hub.drain_all()["log"] == []
+
+
+def test_sub_error_log_reaches_a_log_tail_subscriber_live(tmp_path):
+    """Живой хвост sub-ERROR логов НЕ потерян со снятием hub-форварда.
+
+    Снимая лог-буфер, мы убрали и пачку `drained[KIND_LOG]`, которой раньше жил
+    live-хвост подписчиков. Утверждение «замена уже есть» проверяется здесь, а не
+    объявляется: `log.tail.subscribe` вешает tap прямо на `logger_manager` с уровнем
+    подписчика (`log_tail::{subscriber}`, Ф1.5). Раз запись доезжает до писателя
+    немедленно, tap видит её живьём — и видит РАНЬШЕ, чем раньше видел drain.
+    """
+    logger = _real_logger("wt-logger-5")
+    worker = WorkerManager("workers")
+    hub, _adapter = wire_process_observability("cam0", worker, logger, None, None)
+
+    tail = _CollectSink("log_tail::gui")
+    logger.add_tap(tail, min_level="INFO", name="log_tail::gui")
+
+    worker._log_info("кадр обработан", module="cam0")
+
+    assert [r["message"] for r in tail.records] == ["кадр обработан"]
+    assert hub.drain_all()["log"] == []  # и ровно один раз, не считая буфера

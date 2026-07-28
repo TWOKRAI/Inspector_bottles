@@ -6,26 +6,44 @@ Wiring ObservabilityHub в composition root процесса (Ф5.16).
 (ObservabilityHub из channel_routing, ObservabilityDrainAdapter). Владелец
 дренажа — ProcessModule (решение владельца 2026-07-09 §6.1, НЕ app_module).
 
-Модель дренажа (§6.1, инвариант 3; уточнение R1/R3 2026-07-10):
+Модель дренажа (§6.1, инвариант 3; **упрощена в 2.2, 2026-07-28**):
   - Один hub на процесс, тег = имя процесса.
   - Пилот — worker_module: его реестр слотов пуст (managers={}), поэтому
     подмена logger/stats на hub безопасна.
   - stats worker'а → hub (bounded-буфер) → drain по такту heartbeat в реальный
     StatsManager через ObservabilityDrainAdapter.
-  - logger-слот worker'а → _LoggerSlotSplitter (per-severity маршрутизация):
-      * info/warning/debug → hub-буфер → drain (как раньше);
-      * error/critical → write-through в РЕАЛЬНЫЙ logger_manager, минуя буфер —
-        симметрично error-слоту. Иначе была петля drain↔tap: drain пишет
-        error-лог в стор как kind='log', а adapter.apply_log переигрывает его в
-        logger_manager, где tap'ы (min ERROR) пишут ВТОРУЮ запись kind='error'
-        (R1 — дубль в сторе и обеих вкладках GUI). Плюс при SIGKILL буфер бы
-        потерялся (R3). Write-through: tap ловит ровно один раз живьём, drain
-        не переигрывает → одна запись, ноль потерь.
+  - **logger-слот worker'а — РЕАЛЬНЫЙ logger_manager, целиком.** Лога в hub-буфере
+    больше нет ни на одной severity.
   - error-слот worker'а (track_error) остаётся РЕАЛЬНЫМ error_manager —
     write-through: error/critical пишутся синхронно, минуя буфер, потому что
     auto-restart (Ф3.7) убивает процесс SIGKILL'ом, обходя finally/atexit.
-    Так же снимается конфликт «слот → ЛИБО sink, ЛИБО hub» (уточнён до
-    пер-severity: КАЖДАЯ severity уходит РОВНО в один приёмник).
+
+**Почему лог-буфер снят (2.2 — «писателей в пределе один»).** До 2026-07-28 здесь
+жил `_LoggerSlotSplitter` — per-severity маршрутизатор поверх слота: `error/critical`
+write-through в реальный логгер, ниже — в hub-буфер. Он появился как ЛЕКАРСТВО от двух
+воспроизведённых дефектов буферизации лога:
+
+  * **R1 (дубль):** drain клал error-лог в стор как `kind='log'`, а `adapter.apply_log`
+    переигрывал его в `logger_manager`, где tap (min ERROR) писал ВТОРУЮ запись
+    `kind='error'` — дубль в сторе и в обеих вкладках GUI;
+  * **R3 (потеря):** при SIGKILL недренированный буфер пропадал вместе с crash-логом.
+
+Снят сам буфер лога — и оба дефекта исчезают **по построению**, а не по договорённости:
+переигрывать нечего (`drained[KIND_LOG]` пуст всегда), терять при SIGKILL нечего
+(запись уже у писателя). Расщепитель был вторым местом, где решалась судьба лог-записи,
+то есть вторым маршрутизатором рядом с `LoggerCore`; после снятия точка одна.
+
+**Что при этом НЕ потеряно — и почему это проверено, а не заявлено.** Живой хвост
+sub-ERROR логов подписчикам (GUI, backend_ctl) раньше шёл пачкой из drain-петли. Ровно
+ту же роль уже играет `log.tail.subscribe` — tap прямо на `logger_manager` с уровнем от
+подписчика (`log_tail::{subscriber}`, Ф1.5). После снятия буфера записи доезжают до
+логгера СРАЗУ, поэтому этот tap видит их живьём и на своём уровне; hub-форвардер несёт
+теперь stats и error-хвост. Второй механизм доставки для лога был лишним.
+
+Цена: sub-ERROR лог воркера пишется синхронно в момент эмиссии, а не пачкой по
+heartbeat. Отклонённая гейтом запись стоит ~240 нс, вся плоскость на живой нагрузке
+(8 процессов × 21 Гц) — 0.03 % ядра, поэтому отсрочка записи ценой второго
+маршрутизатора не окупалась.
 
 Хелпер намеренно тонкий и без импорта самого ProcessModule — тестируется в
 изоляции (см. tests/test_observability_wiring.py).
@@ -69,77 +87,6 @@ def forward_tap_names(subscriber: str) -> Tuple[str, str, str]:
     return f"{base}::batch", f"{base}::error", f"{base}::logger_error"
 
 
-# Severity лог-канала, идущие write-through: симметрично error-слоту (Ф5.16),
-# пишутся в реальный logger_manager СРАЗУ (минуя hub-буфер) — tap'ы (store/forward,
-# min ERROR) ловят их ровно один раз живьём; drain их НЕ переигрывает (в буфере
-# их нет) → снят дубль log↔error и потеря crash-лога при SIGKILL (R1/R3, 2026-07-10).
-_WRITE_THROUGH_SEVERITIES = frozenset({"error", "critical"})
-
-
-class _LoggerSlotSplitter:
-    """Расщепитель logger-слота пилота по severity (композиция уровня 1).
-
-    Слот ``logger`` worker'а — не «чистый hub», а per-severity маршрутизатор:
-      - severity ≥ ERROR (error/critical) → write-through в реальный
-        ``logger_manager`` (tap'ы ловят живьём: стор пишет kind='error',
-        форвардер пушит один раз); в hub-буфер НЕ кладём — drain их не переигрывает;
-      - severity < ERROR (debug/info/warning) → hub-буфер (drain по heartbeat;
-        stat-паритет со старым путём: tap'ы min ERROR их не ловят → без дубля).
-
-    Уточняет инвариант Ф5.16 «слот → ЛИБО sink, ЛИБО hub» до пер-severity: КАЖДАЯ
-    severity уходит РОВНО в один приёмник (sink XOR буфер), пересечения нет.
-    Fallback: если ``logger_manager`` недоступен (None) или упал в write-through —
-    запись уходит в hub-буфер (не теряется молча: «терять можно, молчать нельзя»).
-
-    Реализует LoggerLike; неизвестные (не-log) атрибуты делегируются hub'у
-    (прозрачная замена). stats-слот остаётся «чистым» hub'ом — расщепляем только
-    logger, потому что дубль/потерю порождал именно error-severity лог-канала.
-    """
-
-    def __init__(self, hub: ObservabilityHub, logger: Optional[Any]) -> None:
-        self._hub = hub
-        self._logger = logger
-
-    def _route(self, severity: str, message: str, **kwargs: Any) -> None:
-        sev = severity.lower()
-        if sev in _WRITE_THROUGH_SEVERITIES and self._logger is not None:
-            try:
-                getattr(self._logger, sev)(message, **kwargs)
-                return
-            except Exception:  # noqa: BLE001 — write-through-сбой НЕ теряем молча
-                # Fallback: сложить в hub-буфер (drain переиграет позже), чтобы
-                # crash-лог не пропал при недоступном/упавшем logger_manager'е.
-                self._hub.log(sev, message, **kwargs)
-                return
-        self._hub.log(sev, message, **kwargs)
-
-    # LoggerLike: имена методов совпадают с вызовами ObservableMixin._log_*.
-    def log(self, level: str, message: str, **kwargs: Any) -> None:
-        self._route(level, message, **kwargs)
-
-    def debug(self, message: str, **kwargs: Any) -> None:
-        self._route("debug", message, **kwargs)
-
-    def info(self, message: str, **kwargs: Any) -> None:
-        self._route("info", message, **kwargs)
-
-    def warning(self, message: str, **kwargs: Any) -> None:
-        self._route("warning", message, **kwargs)
-
-    def error(self, message: str, **kwargs: Any) -> None:
-        self._route("error", message, **kwargs)
-
-    def critical(self, message: str, **kwargs: Any) -> None:
-        self._route("critical", message, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        # Прозрачность: любой не-log вызов (диагностика hub'а и т.п.) → hub.
-        # Приватные/дандер-имена не делегируем (иначе рекурсия до set _hub).
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(self.__dict__["_hub"], name)
-
-
 def wire_process_observability(
     process_name: str,
     worker_manager: Optional[Any],
@@ -159,8 +106,7 @@ def wire_process_observability(
         (hub, adapter) или (None, None) если worker_manager отсутствует.
 
     Post:
-        - worker.get_manager('logger') — _LoggerSlotSplitter(hub, logger):
-          error/critical → write-through в реальный logger; ниже → hub-буфер;
+        - worker.get_manager('logger') is logger  (write-through на ВСЕХ severity);
         - worker.get_manager('stats') is hub  (чистый буфер);
         - worker.get_manager('error') is error  (write-through, НЕ hub);
         - adapter сконфигурирован на реальные logger/stats/error.
@@ -172,10 +118,12 @@ def wire_process_observability(
     adapter = ObservabilityDrainAdapter(logger=logger, stats=stats, error=error)
 
     # stats worker'а → hub (буфер, drain по heartbeat).
-    # logger-слот → расщепитель: error/critical пишутся write-through в реальный
-    # logger_manager (tap ловит живьём, drain не переигрывает → без дубля/потери;
-    # R1/R3 2026-07-10), info/warning/debug буферизуются в hub как раньше.
-    worker_manager.register_manager("logger", _LoggerSlotSplitter(hub, logger))
+    # logger-слот → РЕАЛЬНЫЙ logger_manager целиком (2.2): лог-буфера больше нет,
+    # поэтому R1 (дубль через переигрывание) и R3 (потеря при SIGKILL) невозможны
+    # по построению — переигрывать и терять нечего. См. шапку модуля.
+    # Вырожденный случай logger=None: слотом остаётся hub — записи не исчезают
+    # молча, а копятся в bounded-канале со счётчиком потерь.
+    worker_manager.register_manager("logger", logger if logger is not None else hub)
     worker_manager.register_manager("stats", hub)
     # Write-through путь: error/critical (track_error) → реальный error_manager напрямую.
     if error is not None:
@@ -198,11 +146,13 @@ def drain_process_observability(
     (Ф5.20b). F1: ``forwarders`` — итерабл форвардеров (по одному на подписчика,
     фан-аут одной и той же пачки записей каждому) ИЛИ единственный callable
     (back-compat). Буфер дренируется РОВНО один раз независимо от числа подписчиков.
-    error-канал hub'а пуст (track_error идёт write-through мимо буфера);
-    error/critical ЛОГА тоже мимо буфера — расщепитель logger-слота пишет их
-    write-through (R1/R3), поэтому drained[KIND_LOG] содержит только severity <
-    ERROR. В стор и в GUI ошибки попадают отдельными tap'ами на error/logger-
-    менеджерах, НЕ отсюда — иначе дубль (R1) или потеря crash-лога (R3).
+
+    **После 2.2 у пилота в hub'е нет ЛОГА вообще** — ни одной severity: logger-слот
+    write-through в реальный менеджер, поэтому `drained[KIND_LOG]` пуст, а
+    `adapter.apply_log` для пилота не срабатывает. Ключ остаётся в контракте: hub —
+    примитив уровня 0, и лог в него может положить другой владелец. Ошибки попадают
+    в стор и в GUI отдельными tap'ами на error/logger-менеджерах, лог — tap'ом
+    `log.tail` на logger_manager, НЕ отсюда.
     Исключения глушим: дренаж телеметрии не должен ронять такт heartbeat
     (урок 2.1 — health self-publish не критичен).
     """
@@ -211,9 +161,9 @@ def drain_process_observability(
     drained = hub.drain_all()
     if adapter is not None:
         adapter.apply_drained(drained)
-    # log (severity < ERROR) + stats из hub'а — общий срез для стора и live-хвоста.
-    # error/critical сюда НЕ попадают: расщепитель logger-слота отправил их
-    # write-through, tap'ы на error/logger-менеджерах ловят их живьём (иначе дубль/потеря).
+    # stats из hub'а — общий срез для стора и live-хвоста. KIND_LOG у пилота пуст
+    # (logger-слот write-through), но ключ читаем: hub — примитив уровня 0, и лог
+    # в него вправе положить другой владелец. Пустой список безвреден.
     records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, [])
     if store is not None and records:
         try:
@@ -296,10 +246,10 @@ def wire_observability_store(
     """Создать персистентный стор и повесить store-tap на менеджеры ошибок (Ф5.20a).
 
     error/critical идут write-through в реальные менеджеры (Ф5.16 + R1/R3): через
-    error_manager (track_error) И через logger_manager (расщепитель logger-слота
-    пишет error/critical лог напрямую в logger_manager). tap ловит их у реального
-    sink'а и кладёт в стор (так вкладка «Ошибки» получает историю). log (severity
-    < ERROR) и stats пишутся в стор из drain-петли (см. drain_process_observability).
+    error_manager (track_error) И через logger_manager (logger-слот пилота — сам
+    реальный logger_manager, 2.2). tap ловит их у реального sink'а и кладёт в стор
+    (так вкладка «Ошибки» получает историю). stats пишутся в стор из drain-петли
+    (см. drain_process_observability); лог в стор из drain-петли больше не приходит.
 
     **Live-урок (2026-07-09):** ошибки приложения (напр. CapturePlugin через
     `ctx.log_error`) идут в logger_manager, НЕ в error_manager — tap только на
@@ -307,10 +257,11 @@ def wire_observability_store(
     уровне ERROR: и error_manager (write-through track_error/log_exception), и
     logger_manager (`logger.error`/`ctx.log_error`, а также error/critical
     logger-слота пилота). Оба пишут kind='error'; это разные менеджеры-инстансы.
-    **Ключ к отсутствию дублей (R1):** error-лог пилота приходит в logger_manager
-    РОВНО один раз — write-through, минуя hub-буфер, поэтому drain-адаптер его НЕ
-    переигрывает (раньше переигрывал → tap срабатывал дважды). Одна эмиссия →
-    одна запись у одного tap'а.
+    **Ключ к отсутствию дублей (R1):** лог пилота приходит в logger_manager РОВНО
+    один раз — hub-буфера для лога больше нет вообще (2.2), поэтому drain-адаптеру
+    нечего переигрывать (раньше переигрывал → tap срабатывал дважды). Одна эмиссия →
+    одна запись у одного tap'а, и это свойство теперь структурное, а не соглашение
+    о severity.
 
     Args:
         error_manager: реальный ErrorManager (LoggerCore с add_tap).

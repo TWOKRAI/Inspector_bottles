@@ -1,23 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-Тесты wiring'а ObservabilityHub в composition root процесса (Ф5.16).
+Тесты wiring'а ObservabilityHub в composition root процесса (Ф5.16 → 2.2).
 
-Контракт (решение владельца 2026-07-09 §6.1):
+Контракт (решение владельца 2026-07-09 §6.1, упрощён 2026-07-28):
   - hub — один на процесс, тег = имя процесса;
   - пилот — worker_module (пустой реестр слотов → безопасная подмена);
-  - stats worker'а → hub (буфер, drain по heartbeat);
-  - logger-слот worker'а → _LoggerSlotSplitter (уточнение R1/R3 2026-07-10):
-    info/warning/debug → hub-буфер; error/critical → write-through в реальный
-    logger_manager (иначе петля drain↔tap задваивала ошибку — R1);
+  - stats worker'а → hub (буфер, drain по такту heartbeat);
+  - **logger-слот worker'а → РЕАЛЬНЫЙ logger_manager, на всех severity.**
+    До 2.2 здесь стоял `_LoggerSlotSplitter`: error/critical write-through, ниже —
+    в hub-буфер. Расщепитель был лекарством от двух дефектов буферизации лога
+    (R1 — дубль через переигрывание drain'ом, R3 — потеря буфера при SIGKILL).
+    Снят вместе с причиной: без лог-буфера переигрывать и терять нечего;
   - error-слот worker'а → реальный error_manager (write-through, переживает
-    SIGKILL: инвариант 3, буфер не полагается на finally/atexit);
-  - контракт «слот менеджера → ЛИБО sink, ЛИБО hub, не оба» уточнён до
-    пер-severity: КАЖДАЯ severity уходит РОВНО в один приёмник (sink XOR буфер).
+    SIGKILL: инвариант 3, буфер не полагается на finally/atexit).
+
+Инвариант в его окончательном виде: **лог не попадает в hub-буфер НИКОГДА** —
+это структурное свойство, а не соглашение о том, какие severity write-through.
 """
 
+from ...channel_routing_module.observability import KIND_LOG
 from ...worker_module.core.worker_manager import WorkerManager
 from ..managers.observability_wiring import (
-    _LoggerSlotSplitter,
     drain_process_observability,
     wire_process_observability,
 )
@@ -49,16 +52,12 @@ def _wire():
 # ---------------------------------------------------------------------------
 
 
-def test_wire_injects_hub_into_stats_and_splitter_into_logger():
-    """stats-слот — чистый hub; logger-слот — расщепитель поверх того же hub'а
-    (R1/R3: info/warning/debug буферизуются в hub, error/critical — write-through)."""
-    worker, _, _, _, hub, _ = _wire()
+def test_wire_injects_hub_into_stats_and_real_logger_into_logger_slot():
+    """stats-слот — чистый hub; logger-слот — САМ реальный менеджер, без прослойки."""
+    worker, logger, _, _, hub, _ = _wire()
     assert worker.get_manager("stats") is hub
-    logger_slot = worker.get_manager("logger")
-    assert isinstance(logger_slot, _LoggerSlotSplitter)
-    # Не-error эмиссия оседает в буфере того же hub'а (буферизуемый путь сохранён).
-    worker._log_info("hi", module="w")
-    assert len(hub.get_channel("log").drain()) == 1
+    assert worker.get_manager("logger") is logger
+    assert worker.get_manager("logger") is not hub
 
 
 def test_wire_keeps_error_slot_write_through():
@@ -78,23 +77,80 @@ def test_hub_tagged_with_process_name():
     assert hub.module_name == "proc"
 
 
+def test_logger_slot_falls_back_to_hub_when_no_logger():
+    """Вырожденный случай: логгера нет → слотом остаётся hub.
+
+    Свойство «терять можно, молчать нельзя»: без этой ветки слот получил бы None и
+    записи воркера исчезли бы бесследно, вместо того чтобы копиться в bounded-канале
+    со счётчиком потерь.
+    """
+    worker = WorkerManager("workers")
+    hub, _ = wire_process_observability("proc", worker, None, None, None)
+    assert worker.get_manager("logger") is hub
+
+    worker._log_info("некуда писать", module="w")
+    assert len(hub.get_channel(KIND_LOG).drain()) == 1
+
+
 # ---------------------------------------------------------------------------
-# Буферизуемый путь log/stats + паритет через drain
+# Лог мимо буфера — структурное свойство (снятие R1/R3 по построению)
 # ---------------------------------------------------------------------------
 
 
-def test_worker_log_buffered_then_drained_to_real_logger():
-    worker, logger, _, _, hub, adapter = _wire()
+def test_worker_log_reaches_real_logger_without_any_drain():
+    """Лог воркера у писателя СРАЗУ, до всякого drain — и в буфере его нет.
+
+    Раньше эта запись жила в hub'е до такта heartbeat: при SIGKILL (auto-restart
+    Ф3.7 бьёт именно им) она пропадала вместе с буфером — это и есть R3.
+    """
+    worker, logger, _, _, hub, _ = _wire()
 
     worker._log_info("hello", module="w")
-    # До drain реальный logger НЕ тронут — запись в буфере hub'а.
-    assert logger.calls == []
+
+    assert any(c[0] == "info" and c[1][0] == "hello" for c in logger.calls)
+    assert hub.drain_all()[KIND_LOG] == []
+
+
+def test_no_severity_of_log_ever_enters_the_hub_buffer():
+    """НИ ОДНА severity лога не попадает в hub-буфер.
+
+    Именно эта строчка отличает новый контракт от старого: прежний инвариант был
+    пер-severity («ниже ERROR — в буфер, выше — write-through»), и его приходилось
+    держать в голове в трёх местах. Теперь буфера для лога нет вовсе.
+    """
+    worker, _, _, _, hub, _ = _wire()
+
+    for emit, text in (
+        (worker._log_debug, "d"),
+        (worker._log_info, "i"),
+        (worker._log_warning, "w"),
+        (worker._log_error, "e"),
+        (worker._log_critical, "c"),
+    ):
+        emit(text, module="w")
+
+    assert hub.drain_all()[KIND_LOG] == []
+
+
+def test_drain_does_not_replay_log_into_the_writer():
+    """R1 по построению: drain после эмиссии НЕ добавляет второй записи.
+
+    Прежний дефект: drain отдавал лог-запись адаптеру, тот переигрывал её в
+    logger_manager, где tap (min ERROR) писал ВТОРУЮ запись kind='error' — дубль в
+    сторе и в обеих вкладках GUI. Переигрывать больше нечего.
+    """
+    worker, logger, _, _, hub, adapter = _wire()
+
+    worker._log_error("e", module="w")
+    calls_before = len(logger.calls)
 
     drain_process_observability(hub, adapter)
-    assert any(c[0] == "info" and c[1][0] == "hello" for c in logger.calls)
+
+    assert len(logger.calls) == calls_before
 
 
 def test_worker_stat_buffered_then_drained():
+    """stats-слот остаётся буферизуемым — снятие лог-буфера его не касается."""
     worker, _, stats, _, hub, adapter = _wire()
     worker._record_metric("hits", 5)
     assert stats.calls == []
@@ -131,39 +187,33 @@ def test_worker_critical_error_write_through():
 
 
 # ---------------------------------------------------------------------------
-# Контракт: КАЖДАЯ severity → ЛИБО sink, ЛИБО hub, не оба (уточнён пер-severity)
+# Контракт-тест: буферизуется РОВНО одна плоскость из трёх
 # ---------------------------------------------------------------------------
 
 
-def test_each_severity_routed_to_exactly_one_receiver():
-    """Контракт-тест Ф5.16, уточнён R1/R3 (2026-07-10): исходный инвариант «слот →
-    ЛИБО sink, ЛИБО hub» огрублял logger-слот (одна ошибка задваивалась петлёй
-    drain↔tap — R1). Точный инвариант — пер-severity: КАЖДАЯ эмиссия уходит РОВНО
-    в один приёмник (реальный sink XOR hub-буфер), пересечения нет.
+def test_only_stats_is_buffered():
+    """Контракт Ф5.16 в редакции 2.2: из трёх плоскостей буфер остался у ОДНОЙ.
 
-    - stats-слот — чистый hub (буфер);
-    - error-слот (track_error) — реальный error_manager (write-through);
-    - logger-слот — расщепитель: severity<ERROR → hub-буфер, ≥ERROR → реальный
-      logger (write-through). Проверяем ПОВЕДЕНЧЕСКИ обе ветки на непересечение.
+    Исходная формулировка «слот → ЛИБО sink, ЛИБО hub» огрублялась дважды: сначала
+    её пришлось уточнить до пер-severity (R1 — дубль от петли drain↔tap), теперь она
+    вернулась к простому виду, потому что у лога буфера нет. Проверяем поведенчески:
+    лог и ошибка доезжают до своих менеджеров без drain, метрика — только после.
     """
-    worker, logger, stats, error, hub, _ = _wire()
+    worker, logger, stats, error, hub, adapter = _wire()
 
-    # stats — строго hub; error-слот — строго реальный sink (не hub).
-    assert worker.get_manager("stats") is hub
+    assert worker.get_manager("logger") is logger
     assert worker.get_manager("error") is error
-    assert worker.get_manager("error") is not hub
+    assert worker.get_manager("stats") is hub
 
-    # logger-слот — расщепитель, не сам hub и не сам реальный logger.
-    logger_slot = worker.get_manager("logger")
-    assert isinstance(logger_slot, _LoggerSlotSplitter)
-    assert logger_slot is not hub and logger_slot is not logger
-
-    # severity < ERROR → РОВНО в hub-буфер, реальный logger НЕ тронут.
     worker._log_info("i", module="w")
-    assert logger.calls == []
-    assert len(hub.get_channel("log").drain()) == 1
+    worker._track_error(ValueError("e"))
+    worker._record_metric("m", 1)
 
-    # severity ≥ ERROR → РОВНО в реальный logger (write-through), hub-буфер пуст.
-    worker._log_error("e", module="w")
-    assert any(c[0] == "error" and c[1][0] == "e" for c in logger.calls)
-    assert len(hub.get_channel("log").drain()) == 0
+    # Лог и ошибка — у своих менеджеров немедленно.
+    assert any(c[0] == "info" for c in logger.calls)
+    assert error.calls
+    # Метрика — ещё в буфере, менеджер не тронут.
+    assert stats.calls == []
+
+    drain_process_observability(hub, adapter)
+    assert any(c[1] and c[1][0] == "m" for c in stats.calls)
