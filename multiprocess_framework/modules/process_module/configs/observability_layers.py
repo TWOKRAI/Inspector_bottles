@@ -274,6 +274,34 @@ class ObservabilityLayers:
         return {k: v for k, v in out.items() if k not in explicit and k not in already}
 
 
+def read_process_config(svc: Any, key: str, default: Any = None) -> Any:
+    """Прочитать per-process ключ конфига независимо от того, КАК он доехал.
+
+    Оркестратор получает конфиг ПЛОСКИМ (``spawner`` мержит ``orchestrator_config``
+    в корень), а дочерний процесс — ВЕСЬ ``proc_dict`` (``process_runner`` отдаёт
+    ``custom["process_config"]``), поэтому его ключи лежат под ``config.``.
+    Один и тот же ``get_config("ключ")`` в первом случае работает, во втором молча
+    возвращает ``None``.
+
+    Найдено ЖИВЫМ прогоном 5.12: ``observability.persist`` на дочернем процессе
+    ответил «путь к рецепту неизвестен», хотя ключ лежал в его ``proc_dict``.
+    Тесты этого не видели — они подают ``svc`` с плоским словарём, то есть
+    доказывали фейк. Это же место объясняет, почему ``telemetry_override``
+    (та же форма чтения, находка C задачи 2.2) на детях не срабатывал.
+
+    Порядок намеренно «плоский → вложенный»: оркестратор не должен платить
+    лишним обходом, а совпадений имён между корнем proc_dict
+    (``class``/``queues``/``managers``) и секцией ``config`` нет.
+    """
+    get_config = getattr(svc, "get_config", None)
+    if not callable(get_config):
+        return default
+    value = get_config(key, None)
+    if value is None:
+        value = get_config(f"config.{key}", None)
+    return default if value is None else value
+
+
 def process_observability_layers(svc: Any) -> ObservabilityLayers:
     """Стек слоёв ЭТОГО процесса — один на процесс, создаётся лениво.
 
@@ -289,16 +317,10 @@ def process_observability_layers(svc: Any) -> ObservabilityLayers:
     if isinstance(existing, ObservabilityLayers):
         return existing
 
-    get_config = getattr(svc, "get_config", None)
-    app: Dict[str, Any] = {}
-    recipe: Dict[str, Any] = {}
-    app_source = ""
-    recipe_source = ""
-    if callable(get_config):
-        app = get_config(APP_CONFIG_KEY) or {}
-        recipe = get_config(OVERRIDE_CONFIG_KEY) or {}
-        app_source = str(get_config("observability_config_path") or "")
-        recipe_source = str(get_config(RECIPE_PATH_CONFIG_KEY) or "")
+    app = read_process_config(svc, APP_CONFIG_KEY) or {}
+    recipe = read_process_config(svc, OVERRIDE_CONFIG_KEY) or {}
+    app_source = str(read_process_config(svc, "observability_config_path") or "")
+    recipe_source = str(read_process_config(svc, RECIPE_PATH_CONFIG_KEY) or "")
     layers = ObservabilityLayers(
         app=dict(app) if isinstance(app, dict) else {},
         recipe=dict(recipe) if isinstance(recipe, dict) else {},

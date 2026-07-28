@@ -295,7 +295,10 @@ def make_pm(
     pm.stats_manager = MagicMock()
 
     # get_config
-    def _get_config(key: str):
+    # Сигнатура ОБЯЗАНА совпадать с реальной ProcessModule.get_config(key, default):
+    # однопараметрический фейк ронял вызывающих с TypeError вместо того, чтобы их
+    # проверять (найдено при вводе read_process_config, Task 5.12).
+    def _get_config(key: str, default=None):
         defaults = {
             "stop_process_timeout": 1.0,
             "shutdown_timeout": 1.0,
@@ -303,7 +306,7 @@ def make_pm(
             # сохранить карту ready в ответах apply_topology
             "start_ready_timeout_s": 0.05,
         }
-        return defaults.get(key)
+        return defaults.get(key, default)
 
     pm.get_config = _get_config
 

@@ -284,3 +284,89 @@ class TestWatcherOwnsExactlyOneLayer:
         assert layers.recipe == {"console": True, "log_level": "ERROR"}
         assert layers.app == {"log_level": "INFO"}
         assert layers.session == {"enable_batching": False}
+
+
+class TestPersistedLayerSurvivesProcessRespawn:
+    """Живая находка прогона 5.12: «сохранить» сохраняло на диск, но не в систему.
+
+    Спутник записан командой ``observability.persist``, а пересозданный процесс
+    стартовал из boot-``proc_dict`` и его не читал — уровень откатывался на первом
+    же рестарте. Пара доказана живьём: до фикса ``seg`` после restart отвечал
+    ``default_level=INFO``, после — ``DEBUG`` с provenance на спутник.
+    """
+
+    class _Proc:
+        """Процесс в форме, в какой конфиг реально доезжает до ребёнка (весь proc_dict)."""
+
+        def __init__(self, name, logger, proc_dict):
+            self.name = name
+            self.logger_manager = logger
+            self.error_manager = None
+            self.stats_manager = None
+            self._d = proc_dict
+            self.errors: List[str] = []
+
+        def get_config(self, key, default=None):
+            node = self._d
+            for part in key.split("."):
+                if not isinstance(node, dict) or part not in node:
+                    return default
+                node = node[part]
+            return node
+
+        def _log_error(self, msg, **kw):
+            self.errors.append(msg)
+
+        def _log_info(self, msg, **kw):
+            pass
+
+        _apply_persisted_observability_layer = __import__(
+            "multiprocess_framework.modules.process_module.core.process_module",
+            fromlist=["ProcessModule"],
+        ).ProcessModule._apply_persisted_observability_layer
+
+    def _proc(self, tmp_path, recipe):
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="respawn", log_directory=str(tmp_path), enable_batching=False)
+        )
+        return self._Proc("seg", logger, {"config": {RECIPE_PATH_CONFIG_KEY: str(recipe)}})
+
+    def test_companion_written_after_boot_is_applied_on_start(self, tmp_path, recipe) -> None:
+        write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+        proc = self._proc(tmp_path, recipe)
+        try:
+            assert proc.logger_manager.config.default_level != "DEBUG"
+            proc._apply_persisted_observability_layer()
+            assert proc.logger_manager.config.default_level == "DEBUG"
+            assert proc.errors == []
+        finally:
+            proc.logger_manager.shutdown()
+
+    def test_no_companion_leaves_boot_managers_untouched(self, tmp_path, recipe) -> None:
+        """Пересборка на старте — только когда спутник реально что-то говорит."""
+        proc = self._proc(tmp_path, recipe)
+        try:
+            before = proc.logger_manager.config.model_dump()
+            proc._apply_persisted_observability_layer()
+            assert proc.logger_manager.config.model_dump() == before
+        finally:
+            proc.logger_manager.shutdown()
+
+    def test_companion_for_another_process_is_not_applied(self, tmp_path, recipe) -> None:
+        write_companion(recipe, {"processes": {"other": {"log_level": "DEBUG"}}})
+        proc = self._proc(tmp_path, recipe)
+        try:
+            proc._apply_persisted_observability_layer()
+            assert proc.logger_manager.config.default_level != "DEBUG"
+        finally:
+            proc.logger_manager.shutdown()
+
+    def test_broken_companion_does_not_kill_the_start(self, tmp_path, recipe) -> None:
+        """Битый спутник — громкая запись в ошибки, но процесс стартует."""
+        companion_path(recipe).write_text("observability: [не словарь\n", encoding="utf-8")
+        proc = self._proc(tmp_path, recipe)
+        try:
+            proc._apply_persisted_observability_layer()
+            assert proc.errors, "битый спутник проглочен молча"
+        finally:
+            proc.logger_manager.shutdown()

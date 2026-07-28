@@ -20,6 +20,8 @@ from multiprocess_framework.modules.process_module.configs.observability_layers 
     LAYER_SESSION,
     ObservabilityLayers,
     flatten_section,
+    process_observability_layers,
+    read_process_config,
     resolve_recipe_section,
 )
 
@@ -235,3 +237,60 @@ class TestExpandHonoursPartialOverrides:
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+class TestConfigReadSurvivesBothDeliveryShapes:
+    """Живая находка 5.12: конфиг доезжает ДВУМЯ формами, и чтение обязано знать обе.
+
+    Оркестратор получает ключи ПЛОСКО (spawner мержит orchestrator_config в корень),
+    дочерний процесс — ВЕСЬ proc_dict (process_runner отдаёт custom['process_config']),
+    и там те же ключи лежат под ``config.``. Тесты подавали только плоскую форму —
+    то есть доказывали фейк: на живом ребёнке `observability.persist` ответил
+    «путь к рецепту неизвестен», хотя ключ лежал в его proc_dict.
+    """
+
+    class _FlatSvc:
+        def __init__(self, data):
+            self._d = data
+
+        def get_config(self, key, default=None):
+            node = self._d
+            for part in key.split("."):
+                if not isinstance(node, dict) or part not in node:
+                    return default
+                node = node[part]
+            return node
+
+    def test_flat_shape_orchestrator(self) -> None:
+        svc = self._FlatSvc({"observability_recipe_path": "recipes/demo.yaml"})
+        assert read_process_config(svc, "observability_recipe_path") == "recipes/demo.yaml"
+
+    def test_nested_shape_child_process(self) -> None:
+        svc = self._FlatSvc(
+            {
+                "class": "m.Seg",
+                "queues": {},
+                "managers": {},
+                "config": {"observability_recipe_path": "recipes/demo.yaml"},
+            }
+        )
+        assert read_process_config(svc, "observability_recipe_path") == "recipes/demo.yaml"
+
+    def test_missing_key_gives_the_default_in_both_shapes(self) -> None:
+        assert read_process_config(self._FlatSvc({}), "nope", "d") == "d"
+        assert read_process_config(self._FlatSvc({"config": {}}), "nope", "d") == "d"
+
+    def test_layers_are_seeded_from_the_nested_shape(self) -> None:
+        svc = self._FlatSvc(
+            {
+                "config": {
+                    "observability_app": {"log_level": "WARNING"},
+                    "observability_override": {"console": False},
+                    "observability_recipe_path": "recipes/demo.yaml",
+                }
+            }
+        )
+        layers = process_observability_layers(svc)
+        assert layers.app == {"log_level": "WARNING"}
+        assert layers.recipe == {"console": False}
+        assert layers.recipe_source == "recipes/demo.yaml"

@@ -84,9 +84,11 @@ class BlueprintAssembler:
         log_dir: str = "logs",
         telemetry_dict: dict[str, Any] | None = None,
         recipe_path: str = "",
+        app_config_path: str = "",
     ) -> None:
         self._observability_section = observability_section or {}
         self._recipe_path = recipe_path
+        self._app_config_path = app_config_path
         self._log_dir = log_dir
         self._telemetry_dict = telemetry_dict
 
@@ -177,6 +179,10 @@ class BlueprintAssembler:
             # не знает, куда сохранять, и «сохранить» превратилось бы в отказ.
             if self._recipe_path:
                 proc_dict["config"][RECIPE_PATH_CONFIG_KEY] = self._recipe_path
+            # Файл слоя L1 — чтобы provenance называл КОНКРЕТНЫЙ system.yaml, а не
+            # абстрактное «app» (живой прогон: у детей источник был пуст).
+            if self._app_config_path:
+                proc_dict["config"]["observability_config_path"] = self._app_config_path
             override = per_process_telemetry.get(name)
             telemetry_section = self._resolve_telemetry(override)
             if telemetry_section is not None:

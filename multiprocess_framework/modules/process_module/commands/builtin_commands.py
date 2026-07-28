@@ -1082,9 +1082,9 @@ class BuiltinCommands:
         # Файловый фолбэк — только если НИ ОДНОЙ секции нет inline (прежнее поведение +
         # telemetry из того же файла).
         if not obs_requested and not isinstance(telemetry_section, dict):
-            path = args.get("path") or (
-                svc.get_config("observability_config_path") if hasattr(svc, "get_config") else None
-            )
+            from ..configs.observability_layers import read_process_config
+
+            path = args.get("path") or read_process_config(svc, "observability_config_path")
             if not path:
                 return {"success": False, "reason": "нет секции observability/telemetry и пути к конфигу"}
             try:
@@ -1102,7 +1102,12 @@ class BuiltinCommands:
             # из сохранённой ассемблером сырой дельты (telemetry_override), иначе reload
             # молча терял бы per-process настройку метрик (boot ≠ reload).
             if isinstance(telemetry_section, dict):
-                override = svc.get_config("telemetry_override") if hasattr(svc, "get_config") else None
+                # Живая находка 5.12: на ДЕТЯХ конфиг едет целым proc_dict, и плоское
+                # чтение возвращало None — то есть починка находки C (задача 2.2)
+                # работала только на оркестраторе. Читаем тем же устойчивым способом.
+                from ..configs.observability_layers import read_process_config as _read_cfg
+
+                override = _read_cfg(svc, "telemetry_override")
                 if override:
                     from ...data_schema_module import deep_merge
 
@@ -1398,13 +1403,15 @@ class BuiltinCommands:
         Параметры: ``recipe_path`` (по умолчанию — из конфига процесса).
         """
         from ..configs.observability_companion import persist_session_to_companion
-        from ..configs.observability_layers import process_observability_layers
+        from ..configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+            process_observability_layers,
+            read_process_config,
+        )
 
         args = self._merge_args(data, kwargs)
         svc = self._services
-        recipe_path = args.get("recipe_path") or (
-            svc.get_config("observability_recipe_path") if hasattr(svc, "get_config") else None
-        )
+        recipe_path = args.get("recipe_path") or read_process_config(svc, RECIPE_PATH_CONFIG_KEY)
         layers = process_observability_layers(svc)
         session = dict(layers.session)
 

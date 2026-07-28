@@ -419,6 +419,7 @@ class SystemBuilder:
             log_dir=log_dir,
             telemetry_dict=telemetry_dict,
             recipe_path=recipe_path,
+            app_config_path=str(self._system_path) if self._system_path else "",
         )
         try:
             proc_dicts = assembler.assemble(bp_dict)
@@ -446,6 +447,9 @@ class SystemBuilder:
                 # Task 5.12: активный рецепт — адрес слоя L2 (сам рецепт + спутник
                 # рядом). Нужен и watcher'у L2, и команде observability.persist.
                 "observability_recipe_path": recipe_path,
+                # Сырой L1 и оркестратору: без него его provenance приписывал бы
+                # ключи system.yaml фреймворку (найдено живым прогоном 5.12).
+                "observability_app": dict(obs_section),
                 # Манифест — существующая истина «какой рецепт активен» (его пишет
                 # GUI при активации). Нужен для ретаргета L2-watcher после switch,
                 # когда инициатор не передал путь явно.

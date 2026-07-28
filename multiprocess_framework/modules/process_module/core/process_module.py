@@ -268,7 +268,61 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._process_managers.register_all(bundle, self)
         self._process_managers.attach_adapters(bundle, self)
         self._process_managers.connect_event_manager(self)
+        self._apply_persisted_observability_layer()
         self._wire_observability_hub()
+
+    def _apply_persisted_observability_layer(self) -> None:
+        """Подхватить спутник рецепта (слой L2), сохранённый ПОСЛЕ boot (Task 5.12).
+
+        Живая находка прогона 5.12: ``observability.persist`` записывал спутник,
+        но пересозданный процесс стартовал из boot-``proc_dict``, спутника не
+        читал — и сохранённая настройка откатывалась на первом же рестарте.
+        «Сохранить» сохраняло на диск, но не в систему: сигнал, не связанный
+        с реальностью.
+
+        Применяется ТОЛЬКО когда спутник реально что-то говорит про ЭТОТ процесс.
+        Условие не про экономию: без него каждый процесс на старте пересобирал бы
+        менеджеры из слоёв вместо готового ``proc_dict["managers"]`` — лишняя
+        пересборка на пути, который сегодня работает.
+        """
+        from ..configs.observability_companion import companion_path, load_companion
+        from ..configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+            process_observability_layers,
+            read_process_config,
+            resolve_recipe_section,
+        )
+
+        recipe_path = read_process_config(self, RECIPE_PATH_CONFIG_KEY)
+        if not recipe_path:
+            return
+        try:
+            persisted = resolve_recipe_section(load_companion(recipe_path), self.name)
+        except Exception as exc:  # noqa: BLE001 — битый спутник не имеет права ронять старт
+            self._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
+            return
+        if not persisted:
+            return
+
+        from ...data_schema_module import deep_merge
+        from ..managers.observability_reload import apply_observability_layers
+
+        layers = process_observability_layers(self)
+        # Спутник поверх boot-дельты рецепта: он новее — его писали уже после старта.
+        layers.recipe = deep_merge(layers.recipe, persisted)
+        # Источник называем конкретным файлом: при паре «рецепт + спутник» оператор
+        # иначе не знает, какой из двух править.
+        layers.recipe_source = str(companion_path(recipe_path))
+        try:
+            apply_observability_layers(
+                layers,
+                logger=self.logger_manager,
+                error=self.error_manager,
+                stats=self.stats_manager,
+                log_info=getattr(self, "_log_info", None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log_error(f"[observability] сохранённый слой рецепта не применён: {exc}")
 
     def _wire_observability_hub(self) -> None:
         """Ф5.16: создать hub наблюдаемости процесса и инъектировать его в слоты
