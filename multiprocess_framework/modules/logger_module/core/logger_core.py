@@ -611,11 +611,25 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         Накопитель на менеджере складывается с живыми каналами в
         :meth:`get_stats`, поэтому сумма монотонна и переживает и снятие
         приёмника, и полный ``reconfigure``.
+
+        **Заодно снимается module-канал со своей карты (живая находка 2026-07-28).**
+        ``disable_module_logging`` делает уборку правильно, а generic-путь
+        ``set_sink_enabled(enabled=False)`` знал только реестр — запись
+        оставалась в ``_module_channels``, откуда её продолжал доставать
+        :meth:`_resolve_channel`. Результат воспроизведён на стенде: после
+        ``logger.sink.disable module_trace`` пять записей модуля ушли в УЖЕ
+        ЗАКРЫТЫЙ канал и легли в ``channel_refused_records`` (5) — то есть
+        штатное «выключи мне этот лог» система показывала как потерю записей,
+        а 2.V2 подняла бы по ней аномалию ``observability_loss``.
         """
         for key in _CHANNEL_BACKPRESSURE_KEYS:
             value = getattr(channel, key, 0)
             if value:
                 self._absorbed_backpressure[key] = self._absorbed_backpressure.get(key, 0) + value
+
+        name = getattr(channel, "name", None)
+        if name and str(name).startswith("module_"):
+            self._module_channels.pop(str(name)[len("module_") :], None)
 
     def _on_channels_changed(self) -> None:
         """Состав каналов изменился в рантайме → решение should_log больше не доверенное.
@@ -1197,17 +1211,39 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         Пересоздаётся из ``self.config.channels[name]`` ДАЖЕ если там
         ``enabled=False``: включение через control-plane — явный override
-        оператора над конфигом. Канал, не описанный в конфиге, включить
-        неоткуда — параметры взять негде.
+        оператора над конфигом.
+
+        **Module-каналы ищутся во ВТОРОМ месте (живая находка 2026-07-28).**
+        Они описаны в ``config.modules``, а не в ``config.channels``, и прежняя
+        редакция смотрела только в первый словарь — то есть ручка была
+        ОДНОСТОРОННЕЙ: ``logger.sink.disable module_trace`` проходил, а обратный
+        ``enable`` возвращал ``success=false``, и канал не возвращался до
+        рестарта процесса. Воспроизведено вживую на camera_0. Прежний докстринг
+        объяснял отказ тем, что «параметры взять негде» — для module-каналов это
+        было неверно: параметры лежали рядом, и ``config.reload`` их оттуда
+        доставал, восстанавливая канал. То есть отказ был не пределом, а дырой.
+
+        Канал, поднятый ТОЛЬКО рантайм-вызовом ``enable_module_logging`` и не
+        описанный в конфиге, вернуть по-прежнему неоткуда — вот там параметров
+        действительно нет.
 
         Сам toggle (закрыть/снять/зарегистрировать) живёт в базе: он одинаков
         у всех трёх плоскостей. Здесь только «откуда взять параметры».
         """
         channel_config = self.config.channels.get(name)
-        if channel_config is None:
-            return False
-        self._setup_channel(str(name), channel_config)  # пересоздаёт + регистрирует
-        return self._channel_registry.get(name) is not None
+        if channel_config is not None:
+            self._setup_channel(str(name), channel_config)  # пересоздаёт + регистрирует
+            return self._channel_registry.get(name) is not None
+
+        text = str(name)
+        if text.startswith("module_"):
+            module_name = text[len("module_") :]
+            module_config = self.config.modules.get(module_name)
+            if module_config is not None:
+                self._setup_module_channel(module_name, module_config)
+                return self._channel_registry.get(name) is not None
+
+        return False
 
     # =========================================================================
     # СТАТИСТИКА

@@ -149,6 +149,61 @@ class TestLoggerSink:
         res = cm.dispatch("logger.sink.enable", {})
         assert res["success"] is False
 
+    def test_failed_enable_does_not_report_the_sink_as_enabled(self) -> None:
+        """Живая находка 2026-07-28: поле ``enabled`` эхом возвращало ЗАПРОШЕННОЕ.
+
+        Вживую это выглядело как ``{"success": false, "enabled": true}``: команда
+        честно сообщала об отказе, а соседнее поле рядом убеждало оператора, что
+        канал вернулся. Достигнутое состояние обязано совпадать с реальностью.
+        """
+
+        class _RefusingLogger(_FakeLogger):
+            def set_sink_enabled(self, name: str, enabled: bool) -> bool:
+                self.sink_calls.append((name, enabled))
+                return False  # включить не смогли
+
+        _svc, cm = _make(logger=_RefusingLogger())
+        res = cm.dispatch("logger.sink.enable", {"sink": "module_trace"})
+        assert res["success"] is False
+        assert res["enabled"] is False, "отказ включения не имеет права рапортовать enabled=true"
+
+    def test_module_sink_round_trip_on_a_REAL_logger(self, tmp_path) -> None:
+        """Тот же круг, но на НАСТОЯЩЕМ LoggerManager, а не на фейке.
+
+        Фейк выше доказывает обработчик, но не механизм: его ``set_sink_enabled``
+        возвращает True всегда, поэтому дефект «module-канал не включается
+        обратно» на нём был НЕВИДИМ и прожил до живого прогона. Этот тест
+        проводит команду до реального менеджера — и до файла.
+        """
+        from multiprocess_framework.modules.logger_module.configs import (
+            LoggerManagerConfig,
+            LoggerModuleSchema,
+        )
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
+        logger = LoggerManager(
+            config=LoggerManagerConfig(
+                app_name="real_round_trip",
+                log_directory=str(tmp_path),
+                enable_batching=False,
+                modules={"trace": LoggerModuleSchema(enabled=True, file_path="trace.log")},
+            )
+        )
+        try:
+            _svc, cm = _make(logger=logger)
+            off = cm.dispatch("logger.sink.disable", {"sink": "module_trace"})
+            assert off["success"] is True and off["enabled"] is False
+
+            on = cm.dispatch("logger.sink.enable", {"sink": "module_trace"})
+            assert on["success"] is True and on["enabled"] is True
+
+            logger.info("канал вернулся", module="trace")
+            logger.flush()
+        finally:
+            logger.shutdown()
+
+        assert "канал вернулся" in (tmp_path / "trace.log").read_text(encoding="utf-8")
+
 
 class TestLogTail:
     def test_subscribe_installs_tap(self) -> None:

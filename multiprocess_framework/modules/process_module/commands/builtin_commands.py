@@ -1229,10 +1229,16 @@ class BuiltinCommands:
         if target is None or not hasattr(target, "set_sink_enabled"):
             return {"success": False, "reason": f"{attr} недоступен", "process": svc.name}
         ok = target.set_sink_enabled(name, enabled)
+        # `enabled` = ДОСТИГНУТОЕ состояние, а не запрошенное (живая находка
+        # 2026-07-28). Прежняя редакция эхом возвращала аргумент, и отказ выглядел
+        # как `{"success": false, "enabled": true}` — оператор, читающий соседнее
+        # поле, оставался в уверенности, что канал вернулся. Провал enable
+        # означает «канала так и нет», провал disable — «его и не было»: в обоих
+        # случаях достигнутое состояние ложно.
         return {
             "success": bool(ok),
             "sink": name,
-            "enabled": enabled,
+            "enabled": bool(enabled and ok),
             "manager": plane,
             "process": svc.name,
         }
