@@ -66,6 +66,11 @@ from ..utils import LogMessage, apply_format
 #: ``next()`` на ``itertools.count`` — один вызов C-уровня, атомарный под GIL:
 #: двум потокам один номер не достанется. Отдельный лок здесь был бы дороже
 #: самой записи.
+#: Часовой промаха кэша маршрута. Отдельный объект нужен потому, что `None` —
+#: ЗАКОННОЕ закэшированное значение («запись отклонена гейтом»), и обычный
+#: `dict.get(key)` не отличил бы «отклонена» от «ещё не считали».
+_ROUTE_MISS = object()
+
 _seq_counter = itertools.count(1)
 
 
@@ -229,6 +234,19 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # Ключ — КОРТЕЖ с Ф1.2 (см. should_log). Аннотация ``Dict[str, bool]``
         # пережила смену ключа и врала, пока её не поймало ревью.
         self._decision_cache: Dict[Tuple[LogScope, LogLevel, str], bool] = {}
+
+        # 2.2-перф: кэш РЕЗУЛЬТАТА маршрута, а не решения гейта. Тот же ключ, но
+        # значение — кортеж имён приёмников либо None («отклонена»). Схлопывает
+        # три кадра (_route → _is_gate_open → should_log = 183 нс замером) в один
+        # поиск по словарю (54 нс). Кортеж, а не список: закэшированное значение
+        # отдаётся наружу, и изменяемый список позволил бы вызывающему испортить
+        # кэш всем последующим записям.
+        #
+        # Ключ тот же, что у `_decision_cache`, — две карты по одному ключу
+        # держатся сознательно: `should_log`/`is_enabled_for` спрашивают гейт
+        # ОТДЕЛЬНО от эмиссии (у ErrorManager severity-путь гейт не спрашивает
+        # вовсе), и вывести один ответ из другого нельзя.
+        self._route_cache: Dict[Tuple[LogScope, LogLevel, str], Optional[Tuple[str, ...]]] = {}
         self._cache_enabled = True
 
         # Пол ошибок (Ф0.9) — ленивый: резолвится на первой записи, ушедшей в floor.
@@ -598,6 +616,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         инвалидации одна, и вторую заводить нельзя — разъедутся.
         """
         self._decision_cache.clear()
+        # 2.2-перф: обе карты живут по одному ключу и обязаны стареть ВМЕСТЕ.
+        # Оставленный кэш маршрута хуже оставленного кэша гейта: симптом не
+        # «лог не пишется», а «лог пишется в снятый канал» — ищется днями.
+        self._route_cache.clear()
         bump_observability_epoch()
 
     def _on_channel_removed(self, channel: Any) -> None:
@@ -877,7 +899,22 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         """
         self.stats["messages_processed"] += 1
 
-        channels = self._route(scope, level, module)
+        # 2.2-перф: один поиск вместо трёх кадров. `_route` остаётся
+        # ЕДИНСТВЕННЫМ местом, где ответ ВЫЧИСЛЯЕТСЯ (инвариант Ф4.2 цел) —
+        # кэш лишь помнит уже вычисленный. Часовой `_ROUTE_MISS` обязателен:
+        # `None` здесь законное значение («отклонена гейтом»), и `.get(key)`
+        # не отличил бы его от промаха, пересчитывая отклонённые каждый раз —
+        # то есть ровно тот случай, ради которого кэш и заводится.
+        if self._cache_enabled:
+            cache_key = (scope, level, module)
+            channels = self._route_cache.get(cache_key, _ROUTE_MISS)
+            if channels is _ROUTE_MISS:
+                resolved = self._route(scope, level, module)
+                channels = tuple(resolved) if resolved is not None else None
+                self._route_cache[cache_key] = channels
+        else:
+            channels = self._route(scope, level, module)
+
         if channels is None:
             self.stats["messages_skipped"] += 1
             return
