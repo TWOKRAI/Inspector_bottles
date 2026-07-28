@@ -126,6 +126,9 @@ class ConfigReloadParams(BaseModel):
     observability_reset: Optional[List[str]] = None
     # switch рецепта: обнулить слой сессии целиком (инициатор не знает его состава).
     observability_session_clear: Optional[bool] = None
+    # Task 5.8 — срок жизни inline-правки, сек. Не задан → политика слоёв
+    # (``session_ttl_sec``, дефолт 300с); ``0`` → бессрочно, явным решением.
+    ttl: Optional[float] = None
     path: Optional[str] = None
 
 
@@ -147,6 +150,8 @@ class LoggerSinkParams(BaseModel):
     # Ф0.6: какую плоскость наблюдаемости адресуем — logger (дефолт) | error | stats.
     # Значения вне whitelist'а отвергает обработчик (роутер — транспорт, не плоскость).
     manager: Optional[str] = None
+    # Task 5.8 — срок жизни снятия/возврата приёмника, сек (0 — бессрочно).
+    ttl: Optional[float] = None
 
 
 class LogTailSubscribeParams(BaseModel):

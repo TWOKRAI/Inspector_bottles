@@ -33,12 +33,27 @@ INFO» у раскрытого конфига уже нельзя — поэто
       processes:
         camera_0:
           channels: {module_trace: {enabled: false}}
+
+**L3 временный по построению (Task 5.8).** Каждая запись сессии несёт срок
+(``session_ttl_sec``, дефолт 300с); по истечении ключ УДАЛЯЕТСЯ — и действующее
+значение уезжает за нижним слоем, как при явном сбросе. Второй политики нет:
+сделать правку постоянной можно ровно одним способом — ``observability.persist``
+(она переезжает в L2, а файл вечен по построению). Причина в резидуале R1 задачи
+5.12: до слоёв «включил DEBUG и забыл» стиралось любым ``config.reload``, а после
+5.12 ручка переживает reload — то есть живой инцидент «messages.log 645 МБ» стал
+ВЕРОЯТНЕЕ, а не менее вероятен.
+
+Сам возврат исполняет такт heartbeat (:mod:`..managers.observability_ttl`) —
+здесь только бухгалтерия сроков.
 """
 
 from __future__ import annotations
 
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, Iterable, Mapping, Optional, Tuple
 
 from ...data_schema_module import deep_merge
 
@@ -65,6 +80,20 @@ RECIPE_PATH_CONFIG_KEY = "observability_recipe_path"
 
 #: Атрибут, под которым стек живёт на объекте процесса.
 LAYERS_ATTR = "_observability_layers"
+
+#: Предел срока L3, сек — тот же, что объявляет поле схемы ``session_ttl_sec``.
+#: Сутки: дольше живущая «временная» правка — это уже решение уровня рецепта.
+MAX_SESSION_TTL_SEC = 86400.0
+
+#: Ключ политики срока жизни L3 в секции ``observability`` (Task 5.8).
+#: Живёт в тех же слоях, что и всё остальное: L1 задаёт машинную политику,
+#: L2 — политику конвейера. ``0`` = сроков нет (осознанный отказ от защиты).
+SESSION_TTL_KEY = "session_ttl_sec"
+
+#: Сколько последних авто-возвратов держим для readback ``introspect.observability``.
+#: Долговечная запись об этом — строка WARNING в логе (её пишет sweeper); кольцо
+#: отвечает на «что вернулось только что», не заменяя журнал.
+REVERT_HISTORY = 20
 
 
 def resolve_recipe_section(section: Any, process_name: str) -> Dict[str, Any]:
@@ -119,6 +148,15 @@ class ObservabilityLayers:
         app_source / recipe_source: файлы, давшие L1/L2 — наружу отдаётся
             КОНКРЕТНЫЙ файл, а не абстрактное имя слоя (иначе при паре
             «рецепт + спутник» оператор не знает, какой из двух править).
+        session_expiry: Task 5.8 — ``{ключ L3: монотонный дедлайн}``. Ключа нет =
+            срока нет (правка объявлена бессрочной явно).
+        session_reverts: кольцо последних авто-возвратов для readback.
+        rebuild_pending: пересборка после истечения срока не удалась — повторить
+            на следующем такте. Без флага ключ уже удалён из L3, а менеджеры
+            остались на старом конфиге, и расхождение было бы вечным и немым.
+        clock: монотонные часы КАК ЗАВИСИМОСТЬ ОБЪЕКТА. Глобальный патч
+            ``time.monotonic`` в тестах доедают чужие потоки — на этом проекте
+            уже ловили флейк в невиновном тесте.
     """
 
     app: Dict[str, Any] = field(default_factory=dict)
@@ -126,11 +164,42 @@ class ObservabilityLayers:
     session: Dict[str, Any] = field(default_factory=dict)
     app_source: str = ""
     recipe_source: str = ""
+    session_expiry: Dict[str, float] = field(default_factory=dict)
+    session_reverts: Deque[Dict[str, Any]] = field(default_factory=lambda: deque(maxlen=REVERT_HISTORY))
+    rebuild_pending: bool = False
+    clock: Callable[[], float] = time.monotonic
+    # Писателей у L3 стало ЧЕТЫРЕ: watcher L1, watcher L2, поток команд и (Task 5.8)
+    # такт heartbeat. Три первых были резидуалом R2 «не воспроизведено»; четвёртый
+    # ходит по тем же вложенным словарям регулярно и сам по себе, поэтому лок
+    # заводится здесь, а не откладывается: `session_set` создаёт ветку, `session_reset`
+    # её же подчищает — интерливинг этих двух обходов теряет запись молча.
+    _lock: Any = field(default_factory=threading.RLock, repr=False, compare=False)
+
+    @property
+    def lock(self) -> Any:
+        """Лок стека — держится и на время пересборки (см. ``apply_observability_layers``).
+
+        Одного лока на мутации мало: пересборка читает слои и применяет результат
+        двумя шагами, и две пересборки внахлёст могут закончиться тем, что последней
+        применится СТАРШАЯ по времени чтения — то есть отменит более свежую правку.
+        """
+        return self._lock
+
+    def __getstate__(self) -> Dict[str, Any]:
+        """Лок непиклим, а стек живёт на объекте процесса — снимаем его из снимка."""
+        state = dict(self.__dict__)
+        state.pop("_lock", None)
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
 
     def resolve(self) -> Dict[str, Any]:
         """Сырая секция ``observability`` после наложения L1 → L2 → L3."""
-        merged = deep_merge(self.app or {}, self.recipe or {})
-        return deep_merge(merged, self.session or {})
+        with self._lock:
+            merged = deep_merge(self.app or {}, self.recipe or {})
+            return deep_merge(merged, self.session or {})
 
     def raw_layers(self) -> Tuple[Tuple[str, Dict[str, Any], str], ...]:
         """``(имя слоя, сырая секция, источник)`` в порядке применения."""
@@ -142,17 +211,120 @@ class ObservabilityLayers:
 
     # ---------------------------------------------------------------- L3
 
-    def session_set(self, path: str, value: Any) -> None:
-        """Записать ключ в L3 (``"channels.messages_file.enabled"``)."""
-        node = self.session
-        parts = path.split(".")
-        for part in parts[:-1]:
-            child = node.get(part)
-            if not isinstance(child, dict):
-                child = {}
-                node[part] = child
-            node = child
-        node[parts[-1]] = value
+    def session_set(self, path: str, value: Any, ttl: Optional[float] = None) -> Optional[float]:
+        """Записать ключ в L3 (``"channels.messages_file.enabled"``) со сроком.
+
+        Args:
+            ttl: срок в секундах. ``None`` — взять действующую политику слоёв
+                (:meth:`effective_session_ttl`, дефолт 300с), а НЕ «навсегда»:
+                оператор, который забыл про DEBUG, забыл бы и про ``ttl``, и
+                опциональный срок не закрыл бы инцидент, ради которого заведён.
+                ``0`` — бессрочно, и это осознанное заявление вызывающего.
+
+        Returns:
+            Остаток срока в секундах или ``None``, если правка бессрочна.
+
+        Raises:
+            ValueError: отрицательный или нечисловой ``ttl`` — громкий отказ
+                вместо тихого «значит, навсегда».
+        """
+        with self._lock:
+            seconds = self.effective_session_ttl() if ttl is None else validate_ttl(ttl)
+            node = self.session
+            parts = path.split(".")
+            for part in parts[:-1]:
+                child = node.get(part)
+                if not isinstance(child, dict):
+                    child = {}
+                    node[part] = child
+                node = child
+            node[parts[-1]] = value
+            # Срок ПЕРЕУСТАНАВЛИВАЕТСЯ каждой записью, включая бессрочную: иначе
+            # повторная правка того же ключа наследовала бы дедлайн прошлой и
+            # возвращалась раньше, чем оператор просил в последний раз.
+            if seconds > 0:
+                self.session_expiry[path] = self.clock() + seconds
+                return seconds
+            self.session_expiry.pop(path, None)
+            return None
+
+    def session_touch(self, paths: Iterable[str], ttl: Optional[float] = None) -> Optional[float]:
+        """Проставить срок ключам, уже лежащим в L3 (Task 5.8).
+
+        Нужен там, где секция приезжает целиком (``config.reload`` с inline
+        ``observability``) и мержится одним ``deep_merge``: пере-записывать её
+        по листьям через :meth:`session_set` значило бы чуть иначе обрабатывать
+        пустые под-словари, то есть завести второй, слегка отличающийся merge.
+
+        Returns:
+            Проставленный срок в секундах или ``None`` (бессрочно).
+        """
+        with self._lock:
+            seconds = self.effective_session_ttl() if ttl is None else validate_ttl(ttl)
+            for path in paths:
+                if seconds > 0:
+                    self.session_expiry[path] = self.clock() + seconds
+                else:
+                    self.session_expiry.pop(path, None)
+            return seconds if seconds > 0 else None
+
+    def effective_session_ttl(self) -> float:
+        """Действующая политика срока L3, сек (``0`` — сроков нет).
+
+        Тот же резолв слоёв, что у любого другого ключа: L0 (300с) → L1 (машина)
+        → L2 (конвейер) → L3. Битое значение = дефолт L0, а не «навсегда»:
+        опечатка в конфиге не имеет права молча снимать защиту.
+        """
+        raw = self.resolve().get(SESSION_TTL_KEY)
+        if raw is None:
+            return _default_session_ttl()
+        try:
+            return validate_ttl(raw)
+        except ValueError:
+            return _default_session_ttl()
+
+    def session_expires_in(self, path: str, now: Optional[float] = None) -> Optional[float]:
+        """Остаток срока ключа, сек (``None`` — ключ бессрочен либо его нет)."""
+        with self._lock:
+            deadline = self.session_expiry.get(path)
+            if deadline is None:
+                return None
+            return round(deadline - (self.clock() if now is None else now), 1)
+
+    def session_has_deadline(self, path: str) -> bool:
+        """Есть ли у ключа срок (согласованное с локом чтение для ответов команд)."""
+        with self._lock:
+            return path in self.session_expiry
+
+    def session_ttl_view(self, now: Optional[float] = None) -> Dict[str, float]:
+        """``{ключ: остаток срока, сек}`` для readback. Отрицательное = срок вышел,
+        а возврат ещё не наступил (такт heartbeat не прошёл) — это ЧЕСТНЫЙ ответ,
+        и он же отличает «сейчас вернётся» от «уже вернулось»."""
+        with self._lock:
+            moment = self.clock() if now is None else now
+            return {key: round(deadline - moment, 1) for key, deadline in sorted(self.session_expiry.items())}
+
+    def expire_due(self, now: Optional[float] = None) -> Tuple[str, ...]:
+        """Удалить из L3 ключи, чей срок вышел. Возврат — что реально снято.
+
+        Ключ, которого в L3 уже нет (сохранён в L2 или сброшен руками), из учёта
+        сроков вычёркивается, но в возврат НЕ попадает: аудит обязан перечислять
+        действительно изменённое, иначе оператор ищет причину у правки, которой
+        не было. По той же причине истёкшая ВЕТКА перечисляется листьями
+        (:meth:`session_reset_keys`), а не своим путём.
+        """
+        with self._lock:
+            moment = self.clock() if now is None else now
+            removed: list = []
+            for key in sorted(k for k, deadline in self.session_expiry.items() if deadline <= moment):
+                self.session_expiry.pop(key, None)
+                removed.extend(self.session_reset_keys(key))
+            return tuple(removed)
+
+    def note_revert(self, entry: Mapping[str, Any]) -> None:
+        """Положить запись об авто-возврате в кольцо readback'а."""
+        with self._lock:
+            self.session_reverts.append(dict(entry))
 
     def session_reset(self, path: str) -> bool:
         """Удалить ключ из L3 — записать ОТСУТСТВИЕ, а не текущее значение.
@@ -164,37 +336,93 @@ class ObservabilityLayers:
         Returns:
             True, если ключ был и удалён; False — если его не было.
         """
-        parts = path.split(".")
-        stack = [self.session]
+        return bool(self.session_reset_keys(path))
+
+    def session_reset_keys(self, path: str) -> Tuple[str, ...]:
+        """То же, что :meth:`session_reset`, но возвращает СНЯТЫЕ ЛИСТЬЯ.
+
+        Путь может указывать на ветку (``scopes``), и тогда удаляется всё под
+        ней. Прежняя редакция отчитывалась запрошенным путём, а исчезали ещё и
+        соседи с собственными, ненаступившими сроками: отчёт называл одно,
+        происходило другое, а сроки-сироты оставались висеть в readback'е у
+        правок, которых больше нет. Замечание 3 ревью 5.8, воспроизведено.
+        """
+        with self._lock:
+            leaves = tuple(sorted(flatten_section(self._node_at(path)).keys())) if self._node_at(path) else ()
+            removed = tuple(f"{path}.{leaf}" for leaf in leaves) if leaves else (path,)
+            # Сроки снимаем ВСЕГДА и со всей ветки, даже если ключа уже не было:
+            # иначе срок переживёт свой ключ и всплывёт в readback'е как срок у
+            # правки, которой нет.
+            self.session_expiry.pop(path, None)
+            prefix = f"{path}."
+            for key in [k for k in self.session_expiry if k.startswith(prefix)]:
+                self.session_expiry.pop(key, None)
+            return removed if self._delete_path(path) else ()
+
+    def _node_at(self, path: str) -> Any:
+        """Непустой под-словарь по пути (``None``, если там лист или ничего)."""
         node: Any = self.session
-        for part in parts[:-1]:
-            node = node.get(part) if isinstance(node, dict) else None
+        for part in path.split("."):
             if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node if isinstance(node, dict) and node else None
+
+    def _delete_path(self, path: str) -> bool:
+        """Удалить путь из L3 вместе с опустевшими родителями. True — было что удалять."""
+        with self._lock:
+            parts = path.split(".")
+            stack = [self.session]
+            node: Any = self.session
+            for part in parts[:-1]:
+                node = node.get(part) if isinstance(node, dict) else None
+                if not isinstance(node, dict):
+                    return False
+                stack.append(node)
+            if not isinstance(node, dict) or parts[-1] not in node:
                 return False
-            stack.append(node)
-        if not isinstance(node, dict) or parts[-1] not in node:
-            return False
-        del node[parts[-1]]
-        # Подчистить опустевшие ветки: иначе `session` перестаёт быть честным
-        # ответом на «что держится сессией» — {"channels": {"a": {}}} читается
-        # как «канал a чем-то управляется», хотя не управляется ничем.
-        for parent, part in zip(reversed(stack[:-1]), reversed(parts[:-1])):
-            child = parent.get(part)
-            if isinstance(child, dict) and not child:
-                del parent[part]
-            else:
-                break
-        return True
+            del node[parts[-1]]
+            # Подчистить опустевшие ветки: иначе `session` перестаёт быть честным
+            # ответом на «что держится сессией» — {"channels": {"a": {}}} читается
+            # как «канал a чем-то управляется», хотя не управляется ничем.
+            for parent, part in zip(reversed(stack[:-1]), reversed(parts[:-1])):
+                child = parent.get(part)
+                if isinstance(child, dict) and not child:
+                    del parent[part]
+                else:
+                    break
+            return True
 
     def session_keys(self) -> Tuple[str, ...]:
-        """Плоский список ключей, которые сейчас держит L3 (для ответа команды)."""
-        return tuple(sorted(flatten_section(self.session or {}).keys()))
+        """Плоский список ключей, которые сейчас держит L3 (для ответа команды).
+
+        Под локом: обход дерева параллельно с чужой правкой — это не только
+        неверный ответ, но и «dictionary changed size during iteration» из
+        диагностической команды.
+        """
+        with self._lock:
+            return tuple(sorted(flatten_section(self.session or {}).keys()))
 
     def session_clear(self) -> Tuple[str, ...]:
         """Сбросить L3 целиком, вернув перечень сброшенных ключей."""
-        keys = self.session_keys()
-        self.session = {}
-        return keys
+        with self._lock:
+            keys = self.session_keys()
+            self.session = {}
+            # Сроки уходят вместе с ключами (switch = новая сессия). Оставленный
+            # срок ничего бы не вернул — возвращать уже нечего, — но показывал бы
+            # в readback'е несуществующую правку.
+            self.session_expiry.clear()
+            return keys
+
+    def session_forget_expiry(self, keys: Iterable[str]) -> Tuple[str, ...]:
+        """Снять сроки с ключей, переехавших из L3 в L2 (``observability.persist``).
+
+        Файл вечен по построению, и срок на нём — ложь. Возврат — с каких ключей
+        срок действительно снят: «сохранил, а оно всё равно откатилось» и
+        «сохранил, срок снят» обязаны различаться в ответе команды.
+        """
+        with self._lock:
+            return tuple(sorted(key for key in keys if self.session_expiry.pop(key, None) is not None))
 
     # -------------------------------------------------------- provenance
 
@@ -340,6 +568,48 @@ def process_observability_layers(svc: Any) -> ObservabilityLayers:
     except Exception:  # noqa: BLE001 — объект без сеттеров: работаем без кэша, но работаем
         pass
     return layers
+
+
+def validate_ttl(raw: Any) -> float:
+    """``raw`` → секунды. Отрицательное/нечисловое — ``ValueError``, не «навсегда».
+
+    Тихое приведение мусора к «бессрочно» дало бы худшую из возможных ошибок:
+    опечатка оператора выглядела бы как успех и снимала бы ровно ту защиту, ради
+    которой параметр введён.
+    """
+    if isinstance(raw, bool):  # bool — подкласс int, но `ttl=True` это не «1 секунда»
+        raise ValueError(f"ttl={raw!r} — не число секунд")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"ttl={raw!r} — не число секунд") from None
+    if value != value or value == float("inf"):  # NaN / inf
+        raise ValueError(f"ttl={raw!r} — не конечное число секунд")
+    if value < 0:
+        raise ValueError(f"ttl={raw!r} — срок не может быть отрицательным (0 = бессрочно)")
+    if value > MAX_SESSION_TTL_SEC:
+        # Поле схемы объявляет max=86400, но параметр команды и сырой ключ слоя
+        # шли мимо этой проверки: `ttl=10**9` принимался и означал «вечно» под
+        # видом срока. Advisory ревью 5.8 — граница одна на оба входа.
+        raise ValueError(f"ttl={raw!r} — больше предела {MAX_SESSION_TTL_SEC:.0f}с (0 = бессрочно явно)")
+    return value
+
+
+_DEFAULT_TTL_CACHE: Optional[float] = None
+
+
+def _default_session_ttl() -> float:
+    """Дефолт L0 — берётся из схемы, а не из литерала здесь.
+
+    Второй литерал стал бы вторым источником истины: поменяли бы поле схемы, а
+    ручка продолжила бы жить по старому числу.
+    """
+    global _DEFAULT_TTL_CACHE
+    if _DEFAULT_TTL_CACHE is None:
+        from .observability_config import ObservabilityConfig
+
+        _DEFAULT_TTL_CACHE = float(ObservabilityConfig().session_ttl_sec)
+    return _DEFAULT_TTL_CACHE
 
 
 def _channel_toggle(channel_type: str) -> str:

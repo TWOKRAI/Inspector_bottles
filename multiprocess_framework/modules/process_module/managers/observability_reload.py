@@ -364,6 +364,42 @@ def apply_observability_layers(
     from ...data_schema_module import deep_merge
     from ..configs.managers_config import merge_managers
 
+    # Task 5.8: пересборка идёт ПОД ЛОКОМ СТЕКА целиком. Писателей стало четыре
+    # (два watcher'а, поток команд, такт heartbeat), а между «прочитал слои» и
+    # «применил результат» два шага: без лока последней могла бы примениться
+    # пересборка, прочитавшая слои РАНЬШЕ, то есть отменить более свежую правку.
+    # RLock — потому что `_remark_operator_disabled_sinks` читает слои изнутри.
+    with layers.lock:
+        applied = _rebuild_and_apply(
+            layers,
+            logger=logger,
+            error=error,
+            stats=stats,
+            log_dir=log_dir,
+            log_info=log_info,
+            deep_merge=deep_merge,
+            merge_managers=merge_managers,
+        )
+        # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
+        # была вызвана. Иначе после неудачного возврата и последующего успешного
+        # `config.reload` такт делал бы лишнюю «повторную» пересборку и клал в
+        # кольцо аудита запись о возврате, которого не было (advisory ревью 5.8).
+        layers.rebuild_pending = False
+        return applied
+
+
+def _rebuild_and_apply(
+    layers: "ObservabilityLayers",
+    *,
+    logger: Any,
+    error: Any,
+    stats: Any,
+    log_dir: Optional[str],
+    log_info: Optional[Callable[[str], None]],
+    deep_merge: Callable[..., Any],
+    merge_managers: Callable[..., Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Тело пересборки (вызывается под локом стека — см. вызывающего)."""
     resolved = layers.resolve()
     expanded = expand_observability(resolved)
     base = base_managers_payload(log_dir)

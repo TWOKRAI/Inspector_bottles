@@ -48,6 +48,10 @@ class ProcessHeartbeat:
         # PC 1.2: publisher-gate телеметрии. None → гейт неактивен (нет секции
         # telemetry.publish в конфиге) → все метрики каждый тик (обратная совместимость).
         self._telemetry_gate: Any = None
+        # Task 5.8: запущен ли воркер такта. Единственный честный ответ на вопрос
+        # «сработает ли авто-возврат TTL» — подметальщик живёт на этом такте, и
+        # процесс без него срок принимает, но не исполняет.
+        self._started: bool = False
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -76,11 +80,22 @@ class ProcessHeartbeat:
             ThreadConfig(priority=ThreadPriority.BACKGROUND),
             auto_start=True,
         )
+        self._started = True
         _log = getattr(self._services, "log_debug", self._services.log_info)
         _log(
             f"Heartbeat воркер запущен (interval={interval}с)",
             module="heartbeat",
         )
+
+    def is_running(self) -> bool:
+        """Идёт ли такт (Task 5.8: от него зависит исполнение сроков L3).
+
+        Отвечает на «воркер создан», а не «поток прямо сейчас в цикле»: между
+        ними разница только на teardown, где спрашивать уже некому. Все ветки
+        раннего выхода :meth:`start` (интервал ≤ 0, нет worker_manager) оставляют
+        ``False`` — а именно они и означают процесс без авто-возврата.
+        """
+        return self._started
 
     def _loop(self, stop_event, pause_event) -> None:
         """Цикл: телеметрия по ``_telemetry_tick``, heartbeat-сообщение по ``heartbeat_interval``.
@@ -136,6 +151,11 @@ class ProcessHeartbeat:
                     # → реальные менеджеры адаптером. error/critical идут мимо буфера
                     # (write-through), здесь их нет. Прецедент — health self-publish 2.1.
                     self._drain_observability()
+
+                    # Task 5.8: вернуть рантайм-правки наблюдаемости, чей срок вышел.
+                    # Тот же такт и та же роль, что у дренажа выше: хозяйственное
+                    # дело процесса, которому не нужен собственный поток.
+                    self._sweep_observability_session()
 
                     # Ф7 G.9(a) H-ревью: pump scheduled-GC. Heartbeat — периодический
                     # BACKGROUND-тик вне hot-path кадра → законная «пауза» для явной сборки.
@@ -312,6 +332,25 @@ class ProcessHeartbeat:
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось слить observability-буфер: {exc}", module="heartbeat")
+
+    def _sweep_observability_session(self) -> None:
+        """Task 5.8: снять просроченные правки слоя L3 и пересобрать конфиг.
+
+        Сам ``sweep_session_ttl`` исключений не бросает (отказ пересборки — его
+        отчёт и повтор на следующем такте). Внешний ``except`` здесь — на
+        неожиданное, и он пишет ОШИБКУ, а не debug-строку: «возврат не сработал»
+        — это отказ защиты от инцидента 645 МБ, а не шум телеметрии.
+        """
+        try:
+            from ..managers.observability_ttl import sweep_session_ttl
+
+            sweep_session_ttl(self._services)
+        except Exception as exc:  # noqa: BLE001 — такт HB не роняем, но и не молчим
+            _log = getattr(self._services, "_log_error", None) or getattr(self._services, "log_error", None)
+            if not callable(_log):
+                _log = getattr(self._services, "log_info", None)
+            if callable(_log):
+                _log(f"[observability] подметальщик сроков L3 упал: {exc!r}", module="observability")
 
     def _build_telemetry_gate(self) -> Any:
         """Собрать ``TelemetryGate`` из секции ``telemetry.publish`` конфига процесса.

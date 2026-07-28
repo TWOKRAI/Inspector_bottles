@@ -1098,6 +1098,7 @@
         "retention_days": 0,
         "retention_total_mb": 0,
         "scopes": {},
+        "session_ttl_sec": 300.0,
         "stats": {
           "aggregation_interval": 5.0,
           "enabled": true,

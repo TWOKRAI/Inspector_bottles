@@ -116,6 +116,16 @@ class ObservabilityConfig(SchemaBase):
         FieldMeta("Переопределения отдельных скоупов логгера ({имя: {min_level: DEBUG}})"),
     ] = Field(default_factory=dict)
 
+    # Task 5.8 — срок жизни рантайм-правки (слой L3). Поле схемы, а не константа
+    # в коде: политика «сколько живёт ручка» машинно-специфична (на стенде час
+    # уместен, на линии — нет), а значит обязана задаваться теми же слоями, что
+    # и всё остальное. Раскладке в manager-конфиги НЕ подлежит — им про сессию
+    # знать нечего; ключ читает только бухгалтерия слоёв.
+    session_ttl_sec: Annotated[
+        float,
+        FieldMeta("Срок жизни рантайм-правки наблюдаемости, сек (0 — бессрочно)", min=0.0, max=86400.0),
+    ] = 300.0
+
     # Ф0.7. Ротация ограничивает каждый файл, но не их число — за 82 дня
     # накопилось 730 файлов / 291 МБ без единого удаления. Обе политики
     # выключены по умолчанию: включать чистку молча нельзя.
@@ -182,6 +192,10 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         (см. ``managers_config.merge_managers`` + ``ManagersConfig``) и читается
         ``CommandManager`` напрямую — под ``command`` нет отдельного manager-класса,
         поэтому валидировать через Pydantic-конфиг здесь нечего.
+
+        Ключ ``session_ttl_sec`` (Task 5.8) сюда НЕ раскладывается сознательно: это
+        политика слоя L3, а не параметр менеджера — её читает
+        ``ObservabilityLayers.effective_session_ttl``.
     """
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 

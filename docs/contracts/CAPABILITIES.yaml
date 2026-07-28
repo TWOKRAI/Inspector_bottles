@@ -22,9 +22,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -139,6 +154,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -151,6 +169,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
@@ -487,9 +520,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -607,6 +655,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -619,6 +670,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
@@ -860,9 +926,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -1028,6 +1109,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -1040,6 +1124,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
@@ -1377,9 +1476,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -1494,6 +1608,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -1506,6 +1623,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
@@ -1743,9 +1875,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -1860,6 +2007,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -1872,6 +2022,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
@@ -2098,9 +2263,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -2215,6 +2395,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -2227,6 +2410,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
@@ -2453,9 +2651,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -2570,6 +2783,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -2582,6 +2798,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
@@ -2808,9 +3039,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -2925,6 +3171,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -2937,6 +3186,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
@@ -3163,9 +3427,24 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -3280,6 +3559,9 @@ processes:
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
@@ -3292,6 +3574,21 @@ processes:
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
