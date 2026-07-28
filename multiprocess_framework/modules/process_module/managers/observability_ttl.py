@@ -88,7 +88,7 @@ def sweep_session_ttl(svc: Any) -> Optional[Dict[str, Any]]:
     if not expired and not layers.rebuild_pending:
         return None
 
-    from .observability_reload import apply_observability_layers
+    from .observability_reload import apply_observability_layers, telemetry_targets
 
     entry: Dict[str, Any] = {
         "at": time.time(),
@@ -105,6 +105,10 @@ def sweep_session_ttl(svc: Any) -> Optional[Dict[str, Any]]:
             error=getattr(svc, "error_manager", None),
             stats=getattr(svc, "stats_manager", None),
             log_info=None,  # своё сообщение ниже — оно про возврат, а не про пересборку
+            # Task 5.10.f: истечь может и ключ телеметрии. Не передай мы её
+            # получателей — возврат объявлялся бы, а гейт оставался на истёкшей
+            # правке: следствие без причины, худший из возможных исходов.
+            **telemetry_targets(svc),
         )
     except Exception as exc:  # noqa: BLE001 — отчёт, а не падение такта
         layers.rebuild_pending = True

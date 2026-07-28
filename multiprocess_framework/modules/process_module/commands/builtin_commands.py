@@ -1189,6 +1189,11 @@ class BuiltinCommands:
                     telemetry_section["publish"] = deep_merge(telemetry_section.get("publish") or {}, override)
 
         result: dict = {"success": True, "process": svc.name, "source": source}
+        # Секцию телеметрии в слой вливает РОВНО ОДНА из двух веток ниже. Флаг, а
+        # не «нет ли поля в ответе»: пустой результат применения — законный
+        # (получателей нет), и по его отсутствию вторая ветка влила бы ту же
+        # секцию повторно.
+        telemetry_layered = False
 
         # --- observability (если задана inline, сброшена или прочитана из файла) ---
         if obs_requested or (source != "inline" and isinstance(obs_section, dict)):
@@ -1196,6 +1201,7 @@ class BuiltinCommands:
             from ..managers.observability_reload import (
                 apply_observability_layers,
                 observability_effective,
+                telemetry_targets,
             )
 
             layers = process_observability_layers(svc)
@@ -1242,6 +1248,19 @@ class BuiltinCommands:
                         removed = layers.session_reset_keys(str(key))
                         (dropped.extend(removed) if removed else unknown.append(str(key)))
 
+                # Task 5.10.f: publish-плоскость въезжает в ТОТ ЖЕ слой, что и
+                # всё остальное, — иначе файл продолжал бы стирать ручку
+                # оператора. Само применение сделает пересборка ниже.
+                if isinstance(telemetry_section, dict) and "publish" in telemetry_section:
+                    result["telemetry_ttl_sec"] = self._merge_telemetry_layer(
+                        layers,
+                        {"publish": telemetry_section["publish"]},
+                        source=source,
+                        mode=str(args.get("telemetry_mode", "replace")),
+                        ttl=ttl,
+                    )
+                    telemetry_layered = True
+
                 try:
                     expanded = apply_observability_layers(
                         layers,
@@ -1249,9 +1268,12 @@ class BuiltinCommands:
                         error=_error,
                         stats=_stats,
                         log_info=getattr(svc, "_log_info", None),
+                        **telemetry_targets(svc),
                     )
                 except Exception as exc:  # noqa: BLE001
                     return {"success": False, "reason": f"reconfigure failed: {exc}"}
+                if expanded.get("telemetry") is not None:
+                    result["telemetry_applied"] = expanded["telemetry"]
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.
@@ -1272,40 +1294,72 @@ class BuiltinCommands:
 
             result["session_ttl"] = ttl_report(svc, layers)
 
-        # --- telemetry (PC 3.1: publisher-gate + центральный троттл) ---
+        # --- telemetry: throttle всегда напрямую; publish — только если его ещё
+        # не влила ветка observability выше (иначе секция легла бы в слой дважды) ---
         if isinstance(telemetry_section, dict):
-            from ..managers.telemetry_reload import apply_telemetry_reconfigure
-
-            # Task 2.1: из ФАЙЛА (декларативный источник) пустой throttle → boot-дефолты;
-            # inline (операторская правка) — как есть (throttle={} снимает всё явно).
-            default_throttle = (
-                svc.get_config("state_throttle_rules") if source != "inline" and hasattr(svc, "get_config") else None
-            )
-            try:
-                telemetry_applied = apply_telemetry_reconfigure(
-                    telemetry_section,
-                    mode=str(args.get("telemetry_mode", "replace")),  # Task 1.1: дельта-семантика
-                    heartbeat=getattr(svc, "_heartbeat", None),
-                    store_throttle=self._resolve_store_throttle(),
-                    default_throttle_rules=default_throttle,
-                    log_info=getattr(svc, "_log_info", None),
+            pending = dict(telemetry_section)
+            if telemetry_layered:
+                pending.pop("publish", None)
+            if pending:
+                # Task 2.1: из ФАЙЛА (декларативный источник) пустой throttle →
+                # boot-дефолты; inline (операторская правка) — как есть.
+                default_throttle = (
+                    svc.get_config("state_throttle_rules")
+                    if source != "inline" and hasattr(svc, "get_config")
+                    else None
                 )
-            except Exception as exc:  # noqa: BLE001
-                return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
-            # Task 1.2 finding-1: неизвестный mode → apply вернул error-dict и НИЧЕГО не
-            # применил. Ошибка не должна «хорониться» в telemetry_applied при success=True —
-            # поднимаем до success=False, чтобы инициатор (backend_ctl/GUI) её увидел.
-            if "error" in telemetry_applied:
-                return {
-                    "success": False,
-                    "process": svc.name,
-                    "source": source,
-                    "mode": telemetry_applied.get("mode"),
-                    "reason": telemetry_applied["error"],
-                }
-            result["telemetry_applied"] = telemetry_applied
+                try:
+                    applied, ttl_sec = self._apply_telemetry_section(
+                        pending,
+                        source=source,
+                        mode=str(args.get("telemetry_mode", "replace")),
+                        ttl=ttl,
+                        default_throttle=default_throttle,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
+                if "error" in applied:
+                    return {
+                        "success": False,
+                        "process": svc.name,
+                        "source": source,
+                        "mode": str(args.get("telemetry_mode", "replace")),
+                        "reason": applied["error"],
+                    }
+                if "publish" in pending:
+                    result["telemetry_ttl_sec"] = ttl_sec
+                merged = dict(result.get("telemetry_applied") or {})
+                merged.update(applied)
+                result["telemetry_applied"] = merged
 
         return result
+
+    def _merge_telemetry_layer(
+        self,
+        layers: Any,
+        section: dict,
+        *,
+        source: str,
+        mode: str,
+        ttl: float | None,
+    ) -> float | None:
+        """Влить секцию ``telemetry`` в СВОЙ слой (Task 5.10.f). Возвращает срок.
+
+        Адресат слоя — тот же, что у наблюдаемости, и по той же причине:
+        inline — ручка оператора (L3, со сроком), файл — источник L1 (бессрочный,
+        сроку неподвластный). До 5.10.f обе формы применялись к гейту напрямую,
+        и файл затирал ручку молча.
+        """
+        from ...data_schema_module import deep_merge
+        from ..configs.observability_layers import TELEMETRY_KEY, flatten_section
+
+        if source != "inline":
+            layers.app = deep_merge(layers.app or {}, {TELEMETRY_KEY: section})
+            return None
+        current = layers.session.get(TELEMETRY_KEY)
+        merged = deep_merge(current if isinstance(current, dict) else {}, section) if mode == "merge" else section
+        layers.session = deep_merge(layers.session, {TELEMETRY_KEY: merged})
+        return layers.session_touch(list(flatten_section({TELEMETRY_KEY: merged}).keys()), ttl)
 
     def _resolve_store_throttle(self) -> Any:
         """Достать живой ``ThrottleMiddleware`` через StateStoreManager процесса-адресата.
@@ -1364,30 +1418,30 @@ class BuiltinCommands:
         if not section:
             return {"success": False, "reason": "нужна хотя бы одна под-секция: publish и/или throttle"}
 
-        from ..managers.telemetry_reload import apply_telemetry_reconfigure
+        mode = str(args.get("telemetry_mode", "replace"))
+        # Task 5.10.f: срок проверяем ДО правки — как у остальных ручек (5.8).
+        ttl, ttl_error = _parse_ttl(args)
+        if ttl_error is not None:
+            return {"success": False, "process": svc.name, "reason": ttl_error}
 
         try:
-            applied = apply_telemetry_reconfigure(
-                section,
-                mode=str(args.get("telemetry_mode", "replace")),  # Task 1.1: дельта-семантика
-                heartbeat=getattr(svc, "_heartbeat", None),
-                store_throttle=self._resolve_store_throttle(),
-                log_info=getattr(svc, "_log_info", None),
-            )
+            applied, ttl_sec = self._apply_telemetry_section(section, source="inline", mode=mode, ttl=ttl)
         except Exception as exc:  # noqa: BLE001 — вернуть причину инициатору
             return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
-
-        # Task 1.2 finding-1: неизвестный mode → error-dict, НИЧЕГО не применено. Поднимаем
-        # до success=False (не хороним в applied), чтобы ошибка была видна инициатору.
         if "error" in applied:
-            return {
-                "success": False,
-                "process": svc.name,
-                "mode": applied.get("mode"),
-                "reason": applied["error"],
-            }
+            # Task 1.2 finding-1: неизвестный mode → НИЧЕГО не применено. Ошибка не
+            # должна хорониться в applied при success=True.
+            return {"success": False, "process": svc.name, "mode": mode, "reason": applied["error"]}
 
         result: dict = {"success": True, "process": svc.name, "applied": applied}
+        if "publish" in section:
+            # Срок и владение слоем — только у publish. Про throttle говорим прямо,
+            # а не умолчанием: молчащее различие двух плоскостей одной команды
+            # оператор обнаружил бы по пропавшей настройке, то есть позже всего.
+            result["ttl_sec"] = ttl_sec
+            result["survives_reload"] = True
+        if "throttle" in section:
+            result["throttle_survives_reload"] = False
         # Task 2.3: publisher-gate перестроен → отдать инициатору неизвестные ключи
         # metrics (опечатка), если они есть — видимая диагностика вместо тихого no-op.
         # Поле присутствует ТОЛЬКО при непустом наборе (пустой набор — как раньше).
@@ -1642,6 +1696,73 @@ class BuiltinCommands:
             # иначе «правлю спутник, ничего не происходит» выясняется чтением кода.
             "watcher_rearmed": watcher_rearmed,
         }
+
+    def _apply_telemetry_section(
+        self,
+        section: dict,
+        *,
+        source: str,
+        mode: str,
+        ttl: float | None,
+        default_throttle: Any = None,
+    ) -> tuple[dict, float | None]:
+        """Развести секцию ``telemetry`` по двум путям (Task 5.10.f).
+
+        ``publish`` — через слои: правка переживает ``config.reload`` и
+        возвращается по сроку. До 5.10.f она применялась к гейту напрямую, и
+        следствие было ровно тем же, что у логов до 5.12: файловый reload молча
+        стирал ручку оператора, а срока у неё не было вовсе — «включил все
+        метрики на каждый тик и забыл» оставалось открытым на четвёртой
+        плоскости, когда на первой уже было закрыто.
+
+        ``throttle`` — по-прежнему НАПРЯМУЮ, и это решение (см.
+        ``TELEMETRY_LAYERED_SUBSECTION``): один центральный ресурс оркестратора
+        со своей семантикой пустоты и своим маркером удаления правила. Ответ
+        обязан назвать эту границу — ``throttle_survives_reload: false``.
+
+        ``mode`` для publish управляет тем, как правка ВХОДИТ В СЛОЙ, а не тем,
+        как она ложится на гейт: к гейту результат всегда применяется собранным
+        из слоёв (дельта поверх живого не умеет выразить удаление, а удаление
+        здесь — основная операция).
+        """
+        from ..configs.observability_layers import process_observability_layers
+        from ..managers.observability_reload import apply_telemetry_layers, telemetry_targets
+        from ..managers.telemetry_reload import VALID_MODES, apply_telemetry_reconfigure
+
+        svc = self._services
+        if mode not in VALID_MODES:
+            # Отказ ДО записи в слой: иначе правка уже лежала бы в L3 и
+            # применилась бы следующей пересборкой — отказ был бы ложным.
+            return {"error": f"неизвестный режим {mode!r}; допустимы {'|'.join(VALID_MODES)}"}, None
+
+        applied: dict = {}
+        if "throttle" in section:
+            out = apply_telemetry_reconfigure(
+                {"throttle": section["throttle"]},
+                mode=mode,
+                store_throttle=self._resolve_store_throttle(),
+                default_throttle_rules=default_throttle,
+                log_info=getattr(svc, "_log_info", None),
+            )
+            if "error" in out:
+                return out, None
+            applied.update(out)
+
+        ttl_sec: float | None = None
+        if "publish" in section:
+            layers = process_observability_layers(svc)
+            with layers.lock:
+                ttl_sec = self._merge_telemetry_layer(
+                    layers,
+                    {"publish": section["publish"]},
+                    source=source,
+                    mode=mode,
+                    ttl=ttl,
+                )
+                out = apply_telemetry_layers(layers, log_info=getattr(svc, "_log_info", None), **telemetry_targets(svc))
+            if out:
+                applied.update(out)
+        return applied, ttl_sec
 
     def _record_sink_in_session(
         self,

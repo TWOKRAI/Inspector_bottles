@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...config_module.core.config import Config
 from ..configs.observability_config import expand_observability
-from ..configs.observability_layers import LAYER_APP, LAYER_RECIPE
+from ..configs.observability_layers import (
+    LAYER_APP,
+    LAYER_RECIPE,
+    TELEMETRY_KEY,
+    TELEMETRY_LAYERED_SUBSECTION,
+)
 
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
@@ -328,6 +333,8 @@ def apply_observability_layers(
     stats: Any = None,
     log_dir: Optional[str] = None,
     log_info: Optional[Callable[[str], None]] = None,
+    heartbeat: Any = None,
+    telemetry_boot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Пересобрать конфиги менеджеров ИЗ СЛОЁВ и применить (Task 5.12).
 
@@ -357,6 +364,13 @@ def apply_observability_layers(
 
     None-менеджеры пропускаются (например error/stats отключены).
 
+    Task 5.10.f — **четвёртая плоскость в том же стеке.** ``heartbeat`` /
+    ``heartbeat`` / ``telemetry_boot`` необязательны ровно так же, как
+    менеджеры: нет получателя — плоскость пропускается. ``telemetry_boot`` — это
+    L0 телеметрии (секция, с которой процесс поднялся); слои говорят ПОВЕРХ неё,
+    и именно поэтому истечение срока у ключа ``telemetry.*`` возвращает гейт к
+    загрузочному состоянию, а не оставляет его в последней правке.
+
     Returns:
         Применённый конфиг ``{"logger": …, "error": …, "stats": …, "command": …}``.
         Фактическое состояние менеджеров — :func:`observability_effective`.
@@ -379,6 +393,8 @@ def apply_observability_layers(
             log_info=log_info,
             deep_merge=deep_merge,
             merge_managers=merge_managers,
+            heartbeat=heartbeat,
+            telemetry_boot=telemetry_boot,
         )
         # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
         # была вызвана. Иначе после неудачного возврата и последующего успешного
@@ -398,9 +414,16 @@ def _rebuild_and_apply(
     log_info: Optional[Callable[[str], None]],
     deep_merge: Callable[..., Any],
     merge_managers: Callable[..., Any],
+    heartbeat: Any = None,
+    telemetry_boot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Тело пересборки (вызывается под локом стека — см. вызывающего)."""
     resolved = layers.resolve()
+    # Task 5.10.f: телеметрия живёт в ТОМ ЖЕ плоском namespace под своим
+    # префиксом, но раскладке в manager-конфиги не подлежит — у неё свои
+    # получатели. Снимаем её до `expand_observability`, иначе `ObservabilityConfig`
+    # отверг бы незнакомый ключ, и слой оказался бы невыразим.
+    telemetry_layered = resolved.pop(TELEMETRY_KEY, None)
     expanded = expand_observability(resolved)
     base = base_managers_payload(log_dir)
 
@@ -428,6 +451,18 @@ def _rebuild_and_apply(
     if stats is not None:
         stats.reconfigure(expanded["stats"])
         _remark_operator_disabled_sinks(stats, layers, ("stats", "channels"))
+
+    telemetry_applied = _apply_telemetry_from_layers(
+        telemetry_layered,
+        layers=layers,
+        boot=telemetry_boot,
+        heartbeat=heartbeat,
+        deep_merge=deep_merge,
+        log_info=log_info,
+    )
+    if telemetry_applied is not None:
+        expanded[TELEMETRY_KEY] = telemetry_applied
+
     if log_info is not None:
         held = ", ".join(layers.session_keys()) or "—"
         log_info(
@@ -435,6 +470,112 @@ def _rebuild_and_apply(
             f"(log_level={expanded['logger'].get('default_level')}; держится сессией: {held})"
         )
     return expanded
+
+
+def telemetry_targets(svc: Any) -> Dict[str, Any]:
+    """Получатель publish-плоскости и её L0 — одним резолвом для ВСЕХ пересборок.
+
+    Task 5.10.f. Тремя разными местами (``config.reload``, ``telemetry.reconfigure``,
+    такт подметальщика) достаётся одно и то же; разойдись они хоть в одном
+    аргументе — и возврат по сроку применялся бы не туда, куда правка.
+
+    ``telemetry_boot`` читается ТЕМ ЖЕ способом, что и на старте
+    (``ProcessHeartbeat._build_telemetry_gate`` → ``get_config("telemetry")``):
+    L0 обязан совпадать с тем, из чего собран загрузочный гейт, иначе «вернуть
+    как было» вернёт не то, что было.
+
+    Центрального троттла здесь нет намеренно — см. ``TELEMETRY_LAYERED_SUBSECTION``.
+    """
+    get_config = getattr(svc, "get_config", None)
+    raw = get_config(TELEMETRY_KEY, None) if callable(get_config) else None
+    return {
+        "heartbeat": getattr(svc, "_heartbeat", None),
+        "telemetry_boot": dict(raw) if isinstance(raw, dict) else None,
+    }
+
+
+def apply_telemetry_layers(
+    layers: "ObservabilityLayers",
+    *,
+    heartbeat: Any = None,
+    telemetry_boot: Optional[Dict[str, Any]] = None,
+    log_info: Optional[Callable[[str], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Пересобрать ТОЛЬКО плоскость телеметрии из слоёв (Task 5.10.f).
+
+    Отдельный вход, а не «позвать полную пересборку»: ``reconfigure`` менеджеров
+    закрывает и заново открывает файлы логов, и телеметрийная правка,
+    приходящая пачками, перетряхивала бы файловые приёмники ни за чем. Тело
+    применения — то же самое, что внутри :func:`apply_observability_layers`,
+    поэтому двух путей применения телеметрии не заводится.
+    """
+    from ...data_schema_module import deep_merge
+
+    with layers.lock:
+        return _apply_telemetry_from_layers(
+            layers.resolve().get(TELEMETRY_KEY),
+            layers=layers,
+            boot=telemetry_boot,
+            heartbeat=heartbeat,
+            deep_merge=deep_merge,
+            log_info=log_info,
+        )
+
+
+def _apply_telemetry_from_layers(
+    layered: Any,
+    *,
+    layers: "ObservabilityLayers",
+    boot: Optional[Dict[str, Any]],
+    heartbeat: Any,
+    deep_merge: Callable[..., Any],
+    log_info: Optional[Callable[[str], None]],
+) -> Optional[Dict[str, Any]]:
+    """Собрать секцию ``telemetry`` из L0+слоёв и применить к её получателям.
+
+    Task 5.10.f. Возвращает применённое или ``None``, если применять нечего.
+
+    Почему ``mode="replace"``, а не ``"merge"``: слои УЖЕ слиты — это и есть
+    результат, а не дельта. Merge поверх живого гейта вернул бы ровно ту
+    неспособность, ради устранения которой 5.12 развернула семантику: удаление
+    ключа из слоя не выразимо дельтой, и истёкшая правка телеметрии осталась бы
+    в гейте навсегда.
+
+    **Названная цена (семантика ``telemetry.reconfigure mode="replace"``
+    изменилась).** Раньше ``replace`` строил гейт из присланной секции ОДНОЙ, в
+    обход загрузочной. Теперь присланное — слой поверх L0, и метрики, которых
+    оператор не упомянул, продолжают жить по загрузочной настройке. Взамен
+    появилось то, чего не было: правка переживает ``config.reload`` и
+    возвращается по сроку. Заменить L0 целиком по-прежнему можно — правкой
+    файла, то есть слоем, который для этого и предназначен.
+    """
+    if heartbeat is None:
+        return None
+    sub = TELEMETRY_LAYERED_SUBSECTION
+    layered_sub = layered.get(sub) if isinstance(layered, dict) else None
+    if layered_sub is not None:
+        layers.telemetry_owned = True
+    if not layers.telemetry_owned:
+        # Слои о publish-плоскости не сказали ни разу — не наша, не трогаем.
+        # Иначе пересборка наблюдаемости клобберила бы гейт, собранный на старте
+        # самим heartbeat'ом, и делала бы это на каждый reload.
+        return None
+
+    boot_sub = (boot or {}).get(sub)
+    # ``None`` — ЗАКОННОЕ загрузочное состояние («гейта нет»), и выразить его надо
+    # явно: пустота читалась бы как «нечего применять», и истёкшая правка осталась
+    # бы в гейте навсегда — следствие без причины.
+    section: Dict[str, Any] = {sub: deep_merge(boot_sub, layered_sub) if isinstance(boot_sub, dict) else layered_sub}
+
+    from .telemetry_reload import apply_telemetry_reconfigure
+
+    return apply_telemetry_reconfigure(
+        section,
+        mode="replace",
+        heartbeat=heartbeat,
+        store_throttle=None,  # центральный троттл в слоях не живёт (TELEMETRY_LAYERED_SUBSECTION)
+        log_info=log_info,
+    )
 
 
 def _remark_operator_disabled_sinks(
