@@ -26,7 +26,7 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
-from typing import Iterator, List
+from typing import Dict, Iterator, List
 
 import pytest
 
@@ -258,6 +258,110 @@ class TestEmergencyLog:
             emergency_log("аварийный.путь", "варнинг", "опечатка в уровне")
 
         assert "опечатка в уровне" in caplog.text
+
+
+class TestSingleEmergencyExit:
+    """2.2: аварийный выход СВЕДЁН в одну реализацию, а не только объявлен таковым.
+
+    До 2026-07-28 их было два: эта функция (ноль production-вызовов) и живой
+    ``ChannelRoutingManager._fallback_log`` со своим ``logging.getLogger``. Теперь
+    метод менеджера — именованный вызов той же функции.
+
+    Тесты ниже проверяют СВОЙСТВА (куда попала запись, под каким именем, что не
+    упало), а не имя вызываемой функции: спай на имя охранял бы имя, а гарантия
+    испарилась бы при эквивалентной подмене.
+    """
+
+    def test_manager_emergency_goes_to_stdlib_under_its_own_name(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Имя stdlib-логгера прежнее — записи ищут именно там, где искали раньше."""
+        from multiprocess_framework.modules.channel_routing_module.core import channel_routing_manager as crm
+
+        manager = LoggerManager(manager_name="аварийный-менеджер")
+        try:
+            with caplog.at_level(logging.WARNING):
+                manager._fallback_log("ERROR", "маршрут недоступен", module="проба")
+        finally:
+            manager.shutdown()
+
+        matching = [r for r in caplog.records if "маршрут недоступен" in r.getMessage()]
+        assert matching, [r.getMessage() for r in caplog.records]
+        assert matching[0].name == crm.__name__
+        rendered = matching[0].getMessage()
+        assert "аварийный-менеджер" in rendered and "проба" in rendered
+
+    def test_manager_emergency_does_not_go_through_the_manager(self, tmp_path: Path) -> None:
+        """Живой писатель НЕ уводит аварийную запись в себя — иначе это рекурсия."""
+        logger = LoggerManager(config=_config(tmp_path))
+        try:
+            logger._fallback_log("ERROR", "сам себя не расскажет")
+        finally:
+            logger.shutdown()
+
+        written = (tmp_path / "system.log").read_text(encoding="utf-8")
+        assert "сам себя не расскажет" not in written
+
+    def test_manager_emergency_never_raises(self) -> None:
+        """Гарантия «не падать» перешла к функции — проверяем, что она не потерялась.
+
+        Раньше try/except был в самом методе. Ломаем то, что метод подставляет в
+        формат: объект, чей ``__str__`` бросает. Если делегирование однажды
+        заменят на прямой вызов stdlib, этот тест покраснеет.
+        """
+
+        class _Explosive:
+            def __str__(self) -> str:
+                raise RuntimeError("имя менеджера не рендерится")
+
+            __repr__ = __str__
+
+        manager = LoggerManager(manager_name="ок")
+        try:
+            manager.manager_name = _Explosive()  # type: ignore[assignment]
+            manager._fallback_log("ERROR", "сообщение")
+        finally:
+            manager.manager_name = "ок"  # type: ignore[assignment]
+            manager.shutdown()
+
+    def test_plane_has_exactly_two_direct_stdlib_writers(self) -> None:
+        """Страж против третьей копии: прямых обращений к stdlib в плоскости РОВНО два.
+
+        Оба — по устройству, и оба названы поимённо:
+
+          * ``_fallback.py`` — сама ``emergency_log``, единственный аварийный писатель;
+          * ``std_facade.py`` — вид пишет в stdlib, когда писателя ещё/уже нет.
+
+        Любой новый ``getLogger`` в logger/channel_routing/error/stats — это
+        возвращение писателя, которого только что сняли. Считаем по AST, а не
+        по тексту: упоминания в докстрингах и комментариях — не вызовы, и
+        текстовый поиск на них ложно срабатывал бы (в ``std_facade`` такое
+        упоминание есть). Номера строк не фиксируем — они меняются от любой
+        правки выше и красили бы тест без причины.
+        """
+        import ast
+
+        import multiprocess_framework.modules as modules_pkg
+
+        root = Path(modules_pkg.__file__).parent
+        planes = ("logger_module", "channel_routing_module", "error_module", "statistics_module")
+        sources = [root / "_fallback.py"]
+        for plane in planes:
+            sources.extend(p for p in (root / plane).rglob("*.py") if "tests" not in p.parts)
+
+        found: Dict[str, int] = {}
+        for path in sources:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            calls = sum(
+                1
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "getLogger"
+            )
+            if calls:
+                found[path.relative_to(root).as_posix()] = calls
+
+        assert found == {
+            "_fallback.py": 2,  # emergency_log: getLogger(name) + запасной .warning того же логгера
+            "logger_module/adapters/std_facade.py": 1,
+        }, f"прямые писатели в stdlib изменились: {found}"
 
 
 def test_no_writer_left_behind() -> None:

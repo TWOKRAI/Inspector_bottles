@@ -16,10 +16,10 @@ ChannelRoutingManager — базовый менеджер маршрутизац
   - StatsManager   — key=metric_name,  buffer=AggregationWindow, channels=IMetricChannel
 """
 
-import logging as _stdlib_logging
 import threading
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from ..._fallback import emergency_log
 from ...base_manager import BaseManager, ObservableMixin
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ..interfaces import IChannel, IBufferStrategy, IChannelRoutingManager, channel_accepted
@@ -27,9 +27,11 @@ from ..levels import level_rank
 from .channel_registry import ChannelRegistry
 from .config_normalizer import normalize_config
 
-#: Приёмник последней надежды. Именно stdlib, а не собственные каналы: сообщение
-#: о поломке маршрута наблюдаемости не имеет права идти по этому же маршруту.
-_fallback_logger = _stdlib_logging.getLogger(__name__)
+#: Имя stdlib-логгера аварийного выхода. Само письмо делает ``emergency_log`` —
+#: единственная реализация «пишем в stdlib напрямую, никогда через менеджер»
+#: (2.2). Имя оставлено ровно прежним (``__name__`` этого модуля), чтобы записи
+#: не уехали под другим именем: их ищут именно здесь.
+_EMERGENCY_NAME = __name__
 
 #: Четыре класса потери записи на стыке «менеджер → канал». Один список на
 #: объявление в ``self.stats``, на выдачу в ``get_stats`` и на реестр публикации
@@ -663,12 +665,15 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         До Ф0.6 был только у ``LoggerCore`` — сбой ``StatsManager`` при мёртвом
         логгере не оставлял следа вообще.
 
-        Падать здесь запрещено: это уже аварийный путь.
+        **Сам не пишет (2.2).** Это ИМЕНОВАННЫЙ вызов единственной аварийной
+        функции :func:`~..._fallback.emergency_log`: метод добавляет к сообщению
+        контекст менеджера и делегирует. Пока реализаций было две, «аварийный
+        выход один» оставалось заявлением — теперь у него один адрес.
+
+        Падать здесь запрещено: это уже аварийный путь (гарантия — внутри
+        ``emergency_log``, который глушит собственное исключение).
         """
-        try:
-            _fallback_logger.warning("[%s] [%s] [%s] %s", level, self.manager_name, module, message)
-        except Exception:  # nosec B110 — последний рубеж; исключение отсюда некуда деть
-            pass
+        emergency_log(_EMERGENCY_NAME, "WARNING", "[%s] [%s] [%s] %s", level, self.manager_name, module, message)
 
     # =========================================================================
     # TAP-ПРИЁМНИКИ (Ф0.6 — подъём из LoggerCore; Ф1 Task 1.5 по происхождению)

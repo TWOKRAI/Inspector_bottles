@@ -21,14 +21,21 @@ try:
 except ImportError:
     requests = None
 
+from ..._fallback import emergency_log
 from ..interfaces import ILogChannel
 from ..configs.logger_manager_config import LoggerChannelSchema
 
-# Отдельный stdlib-логгер для сообщений О САМОМ логировании (сбой ротации).
-# НЕ маршрутизируется через LoggerManager/каналы — тот механизм и есть то,
-# что может быть сломано в этот момент (циклическая зависимость). Тот же
-# приём, что _fallback_logger в core/logger_core.py (LoggerCore._fallback_log).
-_fallback_logger = logging.getLogger(__name__)
+# Сообщения О САМОМ логировании (сбой ротации, ретеншена, занятой консоли) НЕ
+# маршрутизируются через LoggerManager/каналы — тот механизм и есть то, что
+# сломано в этот момент. Пишет их единственная аварийная функция
+# ``emergency_log`` (2.2); здесь остаётся только ИМЯ, и оно прежнее (``__name__``
+# этого модуля), чтобы записи не уехали под чужим именем.
+_EMERGENCY_NAME = __name__
+
+
+def _warn(message: str, *args: Any) -> None:
+    """Аварийное предупреждение канала: stdlib напрямую, никогда через менеджер."""
+    emergency_log(_EMERGENCY_NAME, "WARNING", message, *args)
 
 
 class LogChannel(ILogChannel):
@@ -107,7 +114,7 @@ class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
             size_str = f"{size_bytes / (1024 * 1024):.1f} МБ"
         except OSError:
             size_str = "неизвестен"
-        _fallback_logger.warning(
+        _warn(
             "Ротация лог-файла '%s' не удалась %d раз(а) подряд (PermissionError — файл "
             "занят другим процессом): лимит max_size НЕ соблюдается, файл растёт "
             "неограниченно (текущий размер: %s)",
@@ -167,7 +174,7 @@ def acquire_shared_rotating_handler(
         handler = _shared_handlers.get(key)
         if handler is not None:
             if handler.maxBytes != max_bytes or handler.backupCount != backup_count:
-                _fallback_logger.warning(
+                _warn(
                     "Канал открывает уже используемый лог-файл '%s' с другими параметрами "
                     "ротации (max_size %d против %d, backup %d против %d): применяются "
                     "параметры первого зарегистрировавшего канала.",
@@ -281,7 +288,7 @@ def _warn_retention_failure(path: Any, action: str, exc: BaseException) -> None:
         if key in _retention_warned_paths or len(_retention_warned_paths) >= _RETENTION_WARNED_LIMIT:
             return
         _retention_warned_paths.add(key)
-    _fallback_logger.warning(
+    _warn(
         "Ретеншен логов: не удалось %s '%s' (%s: %s). Файл остаётся на диске, "
         "место не освобождено; повторные отказы по этому же файлу не сообщаются.",
         action,
@@ -743,7 +750,7 @@ class ConsoleChannel(LogChannel):
             if now - self._last_warning_ts < self._WARNING_INTERVAL_SEC:
                 return
             self._last_warning_ts = now
-        _fallback_logger.warning(
+        _warn(
             "Консольный канал '%s' не освободился за %.2f с — запись отброшена "
             "(всего отброшено: %d). Похоже, поток вывода перенаправлен туда, где его "
             "никто не читает: записи в консоль теряются, файловые каналы не затронуты.",
