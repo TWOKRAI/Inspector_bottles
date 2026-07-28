@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...config_module.core.config import Config
+from ..configs.observability_audit import ACTION_REBUILD
 from ..configs.observability_config import expand_observability
 from ..configs.observability_layers import (
     LAYER_APP,
@@ -356,6 +357,8 @@ def apply_observability_layers(
     telemetry_boot: Optional[Dict[str, Any]] = None,
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
+    origin: str,
+    record_rebuild: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
     """Пересобрать конфиги менеджеров ИЗ СЛОЁВ и применить (Task 5.12).
 
@@ -392,6 +395,20 @@ def apply_observability_layers(
     и именно поэтому истечение срока у ключа ``telemetry.*`` возвращает гейт к
     загрузочному состоянию, а не оставляет его в последней правке.
 
+    Task 5.9 — ``origin`` обязателен: пересборка есть момент, когда правка
+    ВСТУПАЕТ В СИЛУ, и запись о ней без указания механизма ответила бы «конфиг
+    поменялся сам». Провал пересборки пишется тем же путём с ``ok=false``:
+    молчащий отказ здесь — задокументированный на этом проекте класс «следствие
+    без причины».
+
+    ``record_rebuild=False`` — ровно ОДИН законный вызывающий: такт подметальщика
+    (:mod:`.observability_ttl`). Он пишет за весь такт одну запись ``expire``,
+    которая уже несёт исход пересборки (``ok`` / ``error`` / ``log_level``), и
+    вторая, generic, дублировала бы её. Замечание 4 ревью 5.9: на залипшем отказе
+    такт повторяется каждые ~5с, и две записи вместо одной выедали бы кольцо
+    вдвое быстрее — вытесняя как раз то, что нужно в инциденте («кто поставил
+    ключ»). Флаг назван узко и намеренно: «не пиши в аудит вообще» здесь нет.
+
     Returns:
         Применённый конфиг ``{"logger": …, "error": …, "stats": …, "command": …}``.
         Фактическое состояние менеджеров — :func:`observability_effective`.
@@ -404,27 +421,47 @@ def apply_observability_layers(
     # «применил результат» два шага: без лока последней могла бы примениться
     # пересборка, прочитавшая слои РАНЬШЕ, то есть отменить более свежую правку.
     # RLock — потому что `_remark_operator_disabled_sinks` читает слои изнутри.
-    with layers.lock:
-        applied = _rebuild_and_apply(
-            layers,
-            logger=logger,
-            error=error,
-            stats=stats,
-            log_dir=log_dir,
-            log_info=log_info,
-            deep_merge=deep_merge,
-            merge_managers=merge_managers,
-            heartbeat=heartbeat,
-            telemetry_boot=telemetry_boot,
-            store_throttle=store_throttle,
-            boot_rules=boot_rules,
-        )
-        # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
-        # была вызвана. Иначе после неудачного возврата и последующего успешного
-        # `config.reload` такт делал бы лишнюю «повторную» пересборку и клал в
-        # кольцо аудита запись о возврате, которого не было (advisory ревью 5.8).
-        layers.rebuild_pending = False
-        return applied
+    try:
+        with layers.lock:
+            applied = _rebuild_and_apply(
+                layers,
+                logger=logger,
+                error=error,
+                stats=stats,
+                log_dir=log_dir,
+                log_info=log_info,
+                deep_merge=deep_merge,
+                merge_managers=merge_managers,
+                heartbeat=heartbeat,
+                telemetry_boot=telemetry_boot,
+                store_throttle=store_throttle,
+                boot_rules=boot_rules,
+            )
+            # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
+            # была вызвана. Иначе после неудачного возврата и последующего успешного
+            # `config.reload` такт делал бы лишнюю «повторную» пересборку и клал в
+            # кольцо аудита запись о возврате, которого не было (advisory ревью 5.8).
+            layers.rebuild_pending = False
+            # Замечание 3 ревью 5.9, воспроизведено: содержимое записи снимается
+            # ПОД ЛОКОМ. Считанное после его снятия захватывало бы правку
+            # писателя, выигравшего гонку в этом окне, — и запись утверждала бы,
+            # что пересборка применила ключ, которого менеджеры не видели.
+            # Наружу выносится только сама запись: она делает файловое I/O.
+            snapshot_keys = layers.session_keys()
+            snapshot_level = applied.get("logger", {}).get("default_level")
+    except BaseException as exc:
+        # Запись, а не подавление: исключение уходит вызывающему ровно как раньше
+        # (подметальщик на нём ставит `rebuild_pending`). Аудит здесь лишь
+        # перестаёт быть слепым к самому опасному исходу — «правка принята, а
+        # конфиг остался прежним». Пишем УЖЕ ВНЕ лока: запись кладёт строку в
+        # журнал, и держать на время файлового I/O лок, которого ждут все четыре
+        # писателя, незачем — тем более на пути отказа.
+        if record_rebuild:
+            layers.audit.record(ACTION_REBUILD, origin=origin, ok=False, error=repr(exc))
+        raise
+    if record_rebuild:
+        layers.audit.record(ACTION_REBUILD, origin=origin, log_level=snapshot_level, keys=snapshot_keys)
+    return applied
 
 
 def _rebuild_and_apply(
@@ -538,6 +575,7 @@ def apply_telemetry_layers(
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
     log_info: Optional[Callable[[str], None]] = None,
+    origin: str,
 ) -> Optional[Dict[str, Any]]:
     """Пересобрать ТОЛЬКО плоскость телеметрии из слоёв (Task 5.10.f).
 
@@ -549,17 +587,26 @@ def apply_telemetry_layers(
     """
     from ...data_schema_module import deep_merge
 
-    with layers.lock:
-        return _apply_telemetry_from_layers(
-            layers.resolve().get(TELEMETRY_KEY),
-            layers=layers,
-            boot=telemetry_boot,
-            heartbeat=heartbeat,
-            store_throttle=store_throttle,
-            boot_rules=boot_rules,
-            deep_merge=deep_merge,
-            log_info=log_info,
-        )
+    try:
+        with layers.lock:
+            applied = _apply_telemetry_from_layers(
+                layers.resolve().get(TELEMETRY_KEY),
+                layers=layers,
+                boot=telemetry_boot,
+                heartbeat=heartbeat,
+                store_throttle=store_throttle,
+                boot_rules=boot_rules,
+                deep_merge=deep_merge,
+                log_info=log_info,
+            )
+    except BaseException as exc:
+        layers.audit.record(ACTION_REBUILD, origin=origin, ok=False, error=repr(exc), plane=TELEMETRY_KEY)
+        raise
+    # Task 5.9: плоскость названа в записи. Без неё «пересобрали» у телеметрии и
+    # «пересобрали» у логов выглядели бы одинаково, а трогают они разное — и
+    # оператор, ищущий, отчего перетряхнуло файлы логов, шёл бы не туда.
+    layers.audit.record(ACTION_REBUILD, origin=origin, plane=TELEMETRY_KEY, applied=applied)
+    return applied
 
 
 def _apply_telemetry_from_layers(
@@ -730,12 +777,18 @@ def apply_observability_reconfigure(
     stats: Any = None,
     log_dir: Optional[str] = None,
     log_info: Optional[Callable[[str], None]] = None,
+    origin: str = "reconfigure",
 ) -> Dict[str, Dict[str, Any]]:
     """Голая секция ``observability`` — это стек, в котором сказал только L1.
 
     Тонкий фасад над :func:`apply_observability_layers`, а не второй механизм:
     вызывающие, у которых слоёв нет (одиночный процесс, тесты, внешний инструмент
     с готовой секцией), не обязаны собирать стек руками.
+
+    ``origin`` здесь единственный с дефолтом — и это не послабление: стек тут
+    создаётся ПРЯМО В ВЫЗОВЕ и умирает вместе с ним, так что записывать некуда и
+    некому читать. Дефолт описывает ровно этот факт («секция применена мимо
+    стека процесса»), а не прячет незнание источника.
     """
     from ..configs.observability_layers import ObservabilityLayers
 
@@ -746,6 +799,7 @@ def apply_observability_reconfigure(
         stats=stats,
         log_dir=log_dir,
         log_info=log_info,
+        origin=origin,
     )
 
 
@@ -781,16 +835,21 @@ def make_observability_on_reload(
 
     def _on_reload(config: Config) -> None:
         section = config.get(section_key, {}) or {}
+        # Task 5.9: замена слоя идёт МЕТОДОМ, а не присваиванием поля — правка
+        # файла такая же смена наблюдаемости, как команда, и до этой задачи она
+        # не оставляла следа вовсе. Присваиванием перехватить её нечем.
+        origin = f"watcher:{layer}"
         if layer == LAYER_RECIPE:
-            stack.recipe = resolve_recipe_section(section, process_name)
+            stack.replace_layer(LAYER_RECIPE, resolve_recipe_section(section, process_name), origin=origin)
         else:
-            stack.app = dict(section) if isinstance(section, dict) else {}
+            stack.replace_layer(LAYER_APP, section if isinstance(section, dict) else {}, origin=origin)
         apply_observability_layers(
             stack,
             logger=logger,
             error=error,
             stats=stats,
             log_info=log_info,
+            origin=origin,
         )
 
     return _on_reload

@@ -1,5 +1,5 @@
 ---
-name: project-priority-product-over-engine
+name: project-priority-engine-first
 description: Owner's priority REVERSED 2026-07-26 — engine first, product runs in parallel as a test bed (was product over engine, 2026-05-29)
 metadata:
   type: project

@@ -90,14 +90,14 @@ class TestSessionLayer:
 
     def test_session_set_creates_nested_path(self) -> None:
         layers = ObservabilityLayers()
-        layers.session_set("channels.messages_file.enabled", False)
+        layers.session_set("channels.messages_file.enabled", False, origin="test")
         assert layers.session == {"channels": {"messages_file": {"enabled": False}}}
 
     def test_reset_removes_key_so_lower_layer_wins_again(self) -> None:
         layers = ObservabilityLayers(app={"log_level": "INFO"}, session={"log_level": "DEBUG"})
         assert layers.resolve()["log_level"] == "DEBUG"
 
-        assert layers.session_reset("log_level") is True
+        assert layers.session_reset("log_level", origin="test") is True
 
         # Ключ УДАЛЁН, а не переписан значением дефолта: меняем L1 —
         # действующее значение едет за ним. Присвоение «как было» дало бы INFO
@@ -108,30 +108,30 @@ class TestSessionLayer:
 
     def test_reset_prunes_emptied_branches(self) -> None:
         layers = ObservabilityLayers()
-        layers.session_set("channels.messages_file.enabled", False)
-        assert layers.session_reset("channels.messages_file.enabled") is True
+        layers.session_set("channels.messages_file.enabled", False, origin="test")
+        assert layers.session_reset("channels.messages_file.enabled", origin="test") is True
         # Пустая ветка читалась бы как «каналом что-то управляется».
         assert layers.session == {}
 
     def test_reset_keeps_siblings(self) -> None:
         layers = ObservabilityLayers()
-        layers.session_set("channels.a.enabled", False)
-        layers.session_set("channels.b.enabled", False)
-        layers.session_reset("channels.a.enabled")
+        layers.session_set("channels.a.enabled", False, origin="test")
+        layers.session_set("channels.b.enabled", False, origin="test")
+        layers.session_reset("channels.a.enabled", origin="test")
         assert layers.session == {"channels": {"b": {"enabled": False}}}
 
     def test_reset_of_absent_key_reports_false(self) -> None:
         layers = ObservabilityLayers()
-        assert layers.session_reset("log_level") is False
-        assert layers.session_reset("channels.nope.enabled") is False
+        assert layers.session_reset("log_level", origin="test") is False
+        assert layers.session_reset("channels.nope.enabled", origin="test") is False
 
     def test_session_keys_and_clear_report_what_was_held(self) -> None:
         layers = ObservabilityLayers()
-        layers.session_set("log_level", "DEBUG")
-        layers.session_set("channels.messages_file.enabled", False)
+        layers.session_set("log_level", "DEBUG", origin="test")
+        layers.session_set("channels.messages_file.enabled", False, origin="test")
         assert layers.session_keys() == ("channels.messages_file.enabled", "log_level")
 
-        dropped = layers.session_clear()
+        dropped = layers.session_clear(origin="test")
         assert dropped == ("channels.messages_file.enabled", "log_level")
         assert layers.session == {}
 

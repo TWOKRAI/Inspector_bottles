@@ -40,6 +40,11 @@ from typing import Any, Dict, List, Optional
 
 from ..configs.observability_layers import LAYERS_ATTR, ObservabilityLayers
 
+#: Механизм смены для аудита (Task 5.9). Такт подметальщика — единственный
+#: источник смен, за которым не стоит человек, и в разборе инцидента отличить
+#: «вернулось само по сроку» от «кто-то откатил» нужно первым делом.
+AUDIT_ORIGIN = "ttl-sweeper"
+
 
 def ttl_enforced(svc: Any) -> bool:
     """Есть ли у процесса живой подметальщик сроков (такт heartbeat)."""
@@ -109,19 +114,24 @@ def sweep_session_ttl(svc: Any) -> Optional[Dict[str, Any]]:
             # получателей — возврат объявлялся бы, а гейт оставался на истёкшей
             # правке: следствие без причины, худший из возможных исходов.
             **telemetry_targets(svc),
+            origin=AUDIT_ORIGIN,
+            # Запись за такт кладёт `note_revert` ниже: она несёт и снятые ключи,
+            # и исход пересборки. Generic-запись была бы вторым описанием того же
+            # факта — см. `record_rebuild` (замечание 4 ревью 5.9).
+            record_rebuild=False,
         )
     except Exception as exc:  # noqa: BLE001 — отчёт, а не падение такта
         layers.rebuild_pending = True
         entry["success"] = False
         entry["error"] = repr(exc)
-        layers.note_revert(entry)
+        layers.note_revert(entry, origin=AUDIT_ORIGIN)
         _announce_failure(svc, expired, exc)
         return entry
 
     layers.rebuild_pending = False
     entry["log_level"] = applied["logger"].get("default_level")
     entry["session_keys"] = list(layers.session_keys())
-    layers.note_revert(entry)
+    layers.note_revert(entry, origin=AUDIT_ORIGIN)
     if expired:
         _announce_revert(svc, expired, entry["log_level"], layers)
     return entry

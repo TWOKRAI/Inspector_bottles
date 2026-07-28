@@ -28,6 +28,16 @@ _SINK_ADDRESSABLE_MANAGERS = {
 #: ``ObservabilityConfig``: логгер держит ``channels`` наверху, младшие
 #: плоскости — внутри своих секций. Одно снятие — одно написание, иначе сброс
 #: и ``persist`` адресовали бы не то, что видно в файле.
+#: Механизм смены для аудита наблюдаемости (Task 5.9) — по одному на КОМАНДУ, а
+#: не одна строка «команда» на всех: в разборе инцидента первым делом отличают
+#: «оператор снял приёмник» от «switch унёс сессию целиком», а обе смены приходят
+#: через один и тот же обработчик.
+_ORIGIN_RELOAD = "command:config.reload"
+_ORIGIN_SWITCH = "switch:broadcast"
+_ORIGIN_SINK = "command:observability.sink"
+_ORIGIN_PERSIST = "command:observability.persist"
+_ORIGIN_TELEMETRY = "command:telemetry.reconfigure"
+
 _SINK_SESSION_PREFIX = {
     "logger": "channels.",
     "error": "errors.channels.",
@@ -734,9 +744,20 @@ class BuiltinCommands:
             источником там, где он известен. Четыре слоя без ответа на «почему у меня
             INFO» превращают отладку в полдня — поэтому это не украшение секции, а
             условие, при котором слои вообще имеет смысл вводить;
-          - ``layers`` — что именно держит сессия (L3) прямо сейчас.
+          - ``layers`` — что именно держит сессия (L3) прямо сейчас;
+          - ``audit`` (Task 5.9) — хвост смен наблюдаемости: *когда* и *чем*
+            (командой, правкой файла, подметальщиком, ``switch``), включая
+            неудавшиеся. Провенанс отвечает «каким слоём задан ключ», аудит —
+            «когда это сделали и что из этого не получилось»; без второго
+            вопроса первый не закрывает инцидент.
 
         Не мутирует состояние: только чтение живых менеджеров и стека слоёв.
+        Аудит эта команда, соответственно, не пополняет — читающая команда,
+        оставляющая след, сделала бы журнал шумом о самом себе.
+
+        ``audit_limit`` — сколько последних записей вернуть (по умолчанию 20:
+        ответ команды не должен раздуваться до всего кольца). ``dropped`` в
+        ответе отличает «аудит полон» от «смен не было».
         """
         from ..configs.observability_layers import process_observability_layers
         from ..managers.observability_reload import (
@@ -747,17 +768,23 @@ class BuiltinCommands:
 
         from ..managers.observability_ttl import ttl_report
 
+        args = self._merge_args(data, kwargs)
         svc = self._services
         logger = getattr(svc, "logger_manager", None)
         error = getattr(svc, "error_manager", None)
         stats = getattr(svc, "stats_manager", None)
         layers = process_observability_layers(svc)
+        try:
+            audit_limit = int(args.get("audit_limit", 20))
+        except (TypeError, ValueError):
+            audit_limit = 20
         return {
             "success": True,
             "process": svc.name,
             "effective": observability_effective(logger=logger, error=error, stats=stats),
             "counters": observability_counters(logger=logger, error=error, stats=stats),
             "provenance": observability_provenance(layers, logger=logger),
+            "audit": layers.audit.view(audit_limit),
             "layers": {
                 "session_keys": list(layers.session_keys()),
                 "app_source": layers.app_source,
@@ -1224,7 +1251,7 @@ class BuiltinCommands:
 
         # --- observability (если задана inline, сброшена или прочитана из файла) ---
         if obs_requested or (source != "inline" and isinstance(obs_section, dict)):
-            from ..configs.observability_layers import process_observability_layers
+            from ..configs.observability_layers import LAYER_APP, process_observability_layers
             from ..managers.observability_reload import (
                 apply_observability_layers,
                 observability_effective,
@@ -1251,20 +1278,22 @@ class BuiltinCommands:
                         from ...data_schema_module import deep_merge
                         from ..configs.observability_layers import flatten_section
 
+                        # Секция мержится целиком, минуя `session_set`: запись в
+                        # аудит за неё кладёт `session_touch` ниже — он и есть
+                        # место, где ключи этой правки перечисляются поимённо.
                         layers.session = deep_merge(layers.session, obs_section)
                         # Task 5.8: срок ставится КЛЮЧАМ ЭТОЙ правки, а не всей сессии —
                         # иначе одна команда продлевала бы жизнь чужим, давно забытым
                         # ручкам, и «включил DEBUG и забыл» вернулось бы через заднюю дверь.
-                        touched = layers.session_touch(flatten_section(obs_section).keys(), ttl)
+                        touched = layers.session_touch(flatten_section(obs_section).keys(), ttl, origin=_ORIGIN_RELOAD)
                         result["ttl_sec"] = touched
                 else:
                     # Файл — источник L1. L2 (дельта рецепта) и L3 (сессия) остаются:
                     # файл про них ничего не знает и не имеет права их отменять.
-                    layers.app = dict(obs_section) if isinstance(obs_section, dict) else {}
-                    layers.app_source = source
+                    layers.replace_layer(LAYER_APP, obs_section, source=source, origin=_ORIGIN_RELOAD)
 
                 if obs_clear:
-                    dropped = list(layers.session_clear())
+                    dropped = list(layers.session_clear(origin=_ORIGIN_SWITCH))
                     unknown = []
                 else:
                     dropped, unknown = [], []
@@ -1272,7 +1301,7 @@ class BuiltinCommands:
                         # Сброс ветки снимает ВСЕ листья под ней — перечисляем именно
                         # их, а не запрошенный путь: замечание 3 ревью 5.8, где отчёт
                         # называл `scopes`, а исчезал ещё и сосед под ним.
-                        removed = layers.session_reset_keys(str(key))
+                        removed = layers.session_reset_keys(str(key), origin=_ORIGIN_RELOAD)
                         (dropped.extend(removed) if removed else unknown.append(str(key)))
 
                 # Task 5.10.f/g: секция телеметрии въезжает в ТОТ ЖЕ слой, что и
@@ -1285,6 +1314,7 @@ class BuiltinCommands:
                         source=source,
                         mode=telemetry_mode,
                         ttl=ttl,
+                        origin=_ORIGIN_RELOAD,
                     )
                     telemetry_layered = True
 
@@ -1296,6 +1326,7 @@ class BuiltinCommands:
                         stats=_stats,
                         log_info=getattr(svc, "_log_info", None),
                         **telemetry_targets(svc),
+                        origin=_ORIGIN_SWITCH if obs_clear else _ORIGIN_RELOAD,
                     )
                 except Exception as exc:  # noqa: BLE001
                     return {"success": False, "reason": f"reconfigure failed: {exc}"}
@@ -1331,6 +1362,10 @@ class BuiltinCommands:
                     source=source,
                     mode=telemetry_mode,
                     ttl=ttl,
+                    # Замечание 1 ревью 5.9: обработчик зовут ДВОЕ, и зашитый
+                    # здесь `telemetry.reconfigure` подписывал бы `config.reload`
+                    # именем команды, которую никто не вызывал.
+                    origin=_ORIGIN_RELOAD,
                 )
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
@@ -1355,6 +1390,7 @@ class BuiltinCommands:
         source: str,
         mode: str,
         ttl: float | None,
+        origin: str,
     ) -> float | None:
         """Влить секцию ``telemetry`` в СВОЙ слой (Task 5.10.f/g). Возвращает срок.
 
@@ -1368,13 +1404,19 @@ class BuiltinCommands:
         не просил снять свою же дельту троттла.
         """
         from ...data_schema_module import deep_merge
-        from ..configs.observability_layers import TELEMETRY_KEY, flatten_section
+        from ..configs.observability_layers import LAYER_APP, TELEMETRY_KEY, flatten_section
 
         if source != "inline":
-            layers.app = deep_merge(layers.app or {}, {TELEMETRY_KEY: section})
+            layers.replace_layer(
+                LAYER_APP,
+                deep_merge(layers.app or {}, {TELEMETRY_KEY: section}),
+                source=source,
+                origin=origin,
+            )
             return None
 
         incoming = list(flatten_section({TELEMETRY_KEY: section}).keys())
+        removed: list[str] = []
         current = layers.session.get(TELEMETRY_KEY)
         current = dict(current) if isinstance(current, dict) else {}
         if mode == "merge":
@@ -1390,7 +1432,15 @@ class BuiltinCommands:
             for sub, value in section.items():
                 stale = current.get(sub)
                 if stale:
-                    layers.session_forget_expiry(flatten_section({f"{TELEMETRY_KEY}.{sub}": stale}).keys())
+                    gone = flatten_section({f"{TELEMETRY_KEY}.{sub}": stale}).keys()
+                    layers.session_forget_expiry(gone)
+                    # Замечание 2 ревью 5.9, воспроизведено: снятые `replace`-ом
+                    # листья исчезали из действующей наблюдаемости БЕЗ следа —
+                    # ручка оператора пропадала, а аудит показывал только новые
+                    # ключи. Перечисляем их в ТОЙ ЖЕ записи: снятие и постановка
+                    # здесь один факт, и разносить их по двум записям значило бы
+                    # заставить читателя сшивать их по времени.
+                    removed.extend(k for k in gone if k not in incoming)
                 merged[sub] = value
         replaced = dict(layers.session)
         replaced[TELEMETRY_KEY] = merged
@@ -1400,7 +1450,8 @@ class BuiltinCommands:
         # продлевал жизнь чужим, давно забытым ручкам: правка `fps` с ttl=600
         # растягивала до 600с срок `latency`, которому оставалось 2 секунды.
         # «Включил и забыл» возвращалось через заднюю дверь внутри одной секции.
-        return layers.session_touch(incoming, ttl)
+        left = layers.session_touch(incoming, ttl, origin=origin, removed=sorted(set(removed)))
+        return left
 
     def _resolve_store_throttle(self) -> Any:
         """Достать живой ``ThrottleMiddleware`` через StateStoreManager процесса-адресата.
@@ -1465,7 +1516,9 @@ class BuiltinCommands:
         if ttl_error is not None:
             return {"success": False, "process": svc.name, "reason": ttl_error}
         try:
-            applied, ttl_sec = self._apply_telemetry_section(section, source="inline", mode=mode, ttl=ttl)
+            applied, ttl_sec = self._apply_telemetry_section(
+                section, source="inline", mode=mode, ttl=ttl, origin=_ORIGIN_TELEMETRY
+            )
         except Exception as exc:  # noqa: BLE001 — вернуть причину инициатору
             return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
         if "error" in applied:
@@ -1647,7 +1700,7 @@ class BuiltinCommands:
                         "и срок этой записи НЕ продлён: продлевать можно только то, чего команда добилась"
                     )
                 return note
-            layers.session_touch((session_key,), ttl)
+            layers.session_touch((session_key,), ttl, origin=_ORIGIN_SINK)
             answer = self._session_ttl_answer(session_key)
         answer["session_key_held"] = session_key
         answer["ttl_extended"] = True
@@ -1709,7 +1762,8 @@ class BuiltinCommands:
         layers = process_observability_layers(svc)
 
         from ...data_schema_module import deep_merge
-        from ..configs.observability_layers import flatten_section
+        from ..configs.observability_audit import ACTION_PERSIST
+        from ..configs.observability_layers import LAYER_RECIPE, flatten_section
 
         # Блокер ревью 5.8: снимок → запись файла → переезд ключей → обнуление L3
         # держатся ОДНИМ критическим блоком. Иначе правка, сделанная между снимком
@@ -1730,9 +1784,18 @@ class BuiltinCommands:
             # пять минут откатилось» — ровно тот отказ, который выглядит как отказ
             # сохранения и уводит поиск не туда.
             ttl_cleared = list(layers.session_forget_expiry(flatten_section(session).keys()))
-            layers.recipe = deep_merge(layers.recipe, session)
-            layers.recipe_source = report["path"]
+            moved = sorted(flatten_section(session).keys())
+            layers.replace_layer(
+                LAYER_RECIPE,
+                deep_merge(layers.recipe, session),
+                source=report["path"],
+                origin=_ORIGIN_PERSIST,
+            )
             layers.session = {}
+        # Task 5.9: переезд L3 → L2 записывается ОДНОЙ записью и именно здесь —
+        # намерение известно только команде. `session_forget_expiry` сам не пишет:
+        # его зовут двое с разными намерениями, и общая запись соврала бы одному.
+        layers.audit.record(ACTION_PERSIST, origin=_ORIGIN_PERSIST, keys=moved, ttl_cleared=ttl_cleared)
         # Ревью 5.12 (замечание 6): watcher слоя L2 поднимается только на boot и
         # при switch, а спутника до первого «сохранить» не существует — значит
         # правки только что созданного файла не подхватывались бы до следующего
@@ -1766,6 +1829,7 @@ class BuiltinCommands:
         source: str,
         mode: str,
         ttl: float | None,
+        origin: str,
     ) -> tuple[dict, float | None]:
         """Влить секцию ``telemetry`` в слой и применить её оттуда (Task 5.10.f/g).
 
@@ -1803,11 +1867,12 @@ class BuiltinCommands:
         if layered:
             layers = process_observability_layers(svc)
             with layers.lock:
-                ttl_sec = self._merge_telemetry_layer(layers, layered, source=source, mode=mode, ttl=ttl)
+                ttl_sec = self._merge_telemetry_layer(layers, layered, source=source, mode=mode, ttl=ttl, origin=origin)
                 out = apply_telemetry_layers(
                     layers,
                     log_info=getattr(svc, "_log_info", None),
                     **telemetry_targets(svc),
+                    origin=origin,
                 )
             if out:
                 applied.update(out)
@@ -1838,7 +1903,7 @@ class BuiltinCommands:
         from ..configs.observability_layers import process_observability_layers
 
         key = f"{prefix}{name}.enabled"
-        process_observability_layers(self._services).session_set(key, bool(enabled), ttl)
+        process_observability_layers(self._services).session_set(key, bool(enabled), ttl, origin=_ORIGIN_SINK)
         return key
 
     def _cmd_logger_sink_tail(self, data=None, **kwargs) -> dict:

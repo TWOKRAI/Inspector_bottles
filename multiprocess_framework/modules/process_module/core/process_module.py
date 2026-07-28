@@ -287,6 +287,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         """
         from ..configs.observability_companion import companion_path, load_companion
         from ..configs.observability_layers import (
+            LAYER_RECIPE,
             RECIPE_PATH_CONFIG_KEY,
             process_observability_layers,
             read_process_config,
@@ -309,10 +310,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         layers = process_observability_layers(self)
         # Спутник поверх boot-дельты рецепта: он новее — его писали уже после старта.
-        layers.recipe = deep_merge(layers.recipe, persisted)
         # Источник называем конкретным файлом: при паре «рецепт + спутник» оператор
         # иначе не знает, какой из двух править.
-        layers.recipe_source = str(companion_path(recipe_path))
+        origin = "boot:companion"
+        layers.replace_layer(
+            LAYER_RECIPE,
+            deep_merge(layers.recipe, persisted),
+            source=str(companion_path(recipe_path)),
+            origin=origin,
+        )
         try:
             apply_observability_layers(
                 layers,
@@ -320,6 +326,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 error=self.error_manager,
                 stats=self.stats_manager,
                 log_info=getattr(self, "_log_info", None),
+                origin=origin,
             )
         except Exception as exc:  # noqa: BLE001
             self._log_error(f"[observability] сохранённый слой рецепта не применён: {exc}")

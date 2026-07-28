@@ -90,6 +90,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -629,6 +633,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -1121,6 +1129,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -1658,6 +1670,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2095,6 +2111,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2521,6 +2541,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2947,6 +2971,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -3373,6 +3401,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -3799,6 +3831,10 @@ processes:
     - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
         errors_to_floor)'
       name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на

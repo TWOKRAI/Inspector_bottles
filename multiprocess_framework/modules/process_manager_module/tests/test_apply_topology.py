@@ -730,7 +730,7 @@ class TestObservabilitySessionResetOnSwitch:
 
         pm = make_pm({"w1": {"class": "m.W1"}})
         layers = process_observability_layers(pm)
-        layers.session_set("log_level", "DEBUG")
+        layers.session_set("log_level", "DEBUG", origin="test")
 
         result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
 
@@ -804,7 +804,7 @@ class TestObservabilitySessionResetOnSwitch:
         child = _Child(logger)
         BuiltinCommands(child)._register_observability_commands()
         try:
-            process_observability_layers(child).session_set("log_level", "DEBUG")
+            process_observability_layers(child).session_set("log_level", "DEBUG", origin="test")
             res = child.command_manager.handlers["config.reload"](clears[0]["data"])
             assert res["success"] is True
             assert res["reset"] == ["log_level"]

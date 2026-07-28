@@ -400,10 +400,15 @@ class TestTheRevertIsAnnounced:
         warnings = svc.messages("WARNING")
         assert any("channels.messages_file.enabled" in m and "TTL" in m for m in warnings), warnings
 
+        # Task 5.9: кольцо возвратов стало ВЫБОРКОЙ из аудита, и форма записи
+        # сменилась вместе с переездом: `ok` вместо `success`, `ts` вместо `at`,
+        # плюс `origin`/`seq`. Два написания одного факта не заводятся даже ради
+        # совместимости поля.
         ring = list(process_observability_layers(svc).session_reverts)
         assert len(ring) == 1
         assert ring[0]["keys"] == ["channels.messages_file.enabled"]
-        assert ring[0]["success"] is True and ring[0]["reason"] == "ttl"
+        assert ring[0]["ok"] is True and ring[0]["reason"] == "ttl"
+        assert ring[0]["origin"] == "ttl-sweeper", "возврат по сроку обязан быть отличим от отката руками"
 
     def test_introspect_shows_deadlines_and_the_last_reverts(self, wired) -> None:
         """readback отвечает и «что висит», и «что уже вернулось»."""
@@ -628,10 +633,10 @@ class TestMechanismHazards:
             key = f"channels.ch{index}.enabled"
             try:
                 for _ in range(2000):
-                    layers.session_set(key, False, ttl=0)
+                    layers.session_set(key, False, ttl=0, origin="test")
                     if key not in layers.session_keys():
                         lost.append(key)
-                    layers.session_reset(key)
+                    layers.session_reset(key, origin="test")
             except BaseException as exc:  # noqa: BLE001 — гонка обязана всплыть тестом
                 errors.append(exc)
 
@@ -768,12 +773,12 @@ class TestMechanismHazards:
     def test_layers_survive_pickle(self, wired) -> None:
         """Стек живёт на объекте процесса — непиклимый лок сломал бы spawn."""
         layers = ObservabilityLayers(app={"log_level": "INFO"})
-        layers.session_set("log_level", "DEBUG", ttl=60)
+        layers.session_set("log_level", "DEBUG", ttl=60, origin="test")
         restored = pickle.loads(pickle.dumps(layers))
         assert restored.session == {"log_level": "DEBUG"}
         assert set(restored.session_expiry) == {"log_level"}
         # Лок пересоздан, а не потерян: иначе первая же правка в дочернем упала бы.
-        restored.session_set("log_level", "INFO", ttl=0)
+        restored.session_set("log_level", "INFO", ttl=0, origin="test")
         assert restored.session_ttl_view() == {}
 
     def test_real_heartbeat_tick_performs_the_revert(self, wired) -> None:

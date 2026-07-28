@@ -51,11 +51,20 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Deque, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 from ...data_schema_module import deep_merge
+from .observability_audit import (
+    ACTION_CLEAR,
+    ACTION_EXPIRE,
+    ACTION_LAYER,
+    ACTION_RESET,
+    ACTION_SET,
+    ACTION_TOUCH,
+    ObservabilityAudit,
+    make_audit_log,
+)
 
 # Имена слоёв — они же значения поля ``source`` в ответе introspect.observability.
 LAYER_FRAMEWORK = "framework"
@@ -134,10 +143,9 @@ TELEMETRY_THROTTLE_PATH = f"{TELEMETRY_KEY}.throttle"
 #: всю операторскую дельту.
 OPAQUE_LAYER_PATHS = frozenset({TELEMETRY_THROTTLE_PATH})
 
-#: Сколько последних авто-возвратов держим для readback ``introspect.observability``.
-#: Долговечная запись об этом — строка WARNING в логе (её пишет sweeper); кольцо
-#: отвечает на «что вернулось только что», не заменяя журнал.
-REVERT_HISTORY = 20
+#: Кольца возвратов больше нет (Task 5.9): возвраты — это записи аудита с
+#: ``action="expire"``, а ``session_reverts`` стал выборкой из него. Глубину
+#: задаёт ``observability_audit.AUDIT_HISTORY`` — одна на все виды смен.
 
 
 def resolve_recipe_section(section: Any, process_name: str) -> Dict[str, Any]:
@@ -194,7 +202,11 @@ class ObservabilityLayers:
             «рецепт + спутник» оператор не знает, какой из двух править).
         session_expiry: Task 5.8 — ``{ключ L3: монотонный дедлайн}``. Ключа нет =
             срока нет (правка объявлена бессрочной явно).
-        session_reverts: кольцо последних авто-возвратов для readback.
+        audit: Task 5.9 — кольцо смен наблюдаемости, ЕДИНСТВЕННЫЙ писатель.
+            Прежнее кольцо возвратов ``session_reverts`` стало выборкой из него
+            (см. одноимённое свойство): два кольца, хранящие пересекающиеся
+            факты, немедленно порождают вопрос «почему в одном есть, а в другом
+            нет».
         rebuild_pending: пересборка после истечения срока не удалась — повторить
             на следующем такте. Без флага ключ уже удалён из L3, а менеджеры
             остались на старом конфиге, и расхождение было бы вечным и немым.
@@ -209,7 +221,7 @@ class ObservabilityLayers:
     app_source: str = ""
     recipe_source: str = ""
     session_expiry: Dict[str, float] = field(default_factory=dict)
-    session_reverts: Deque[Dict[str, Any]] = field(default_factory=lambda: deque(maxlen=REVERT_HISTORY))
+    audit: ObservabilityAudit = field(default_factory=ObservabilityAudit)
     rebuild_pending: bool = False
     # Task 5.10.f: взяли ли слои плоскость телеметрии под своё владение. Липкий,
     # и это его смысл: истечение срока УДАЛЯЕТ ключ `telemetry.*` из L3, и без
@@ -268,7 +280,7 @@ class ObservabilityLayers:
 
     # ---------------------------------------------------------------- L3
 
-    def session_set(self, path: str, value: Any, ttl: Optional[float] = None) -> Optional[float]:
+    def session_set(self, path: str, value: Any, ttl: Optional[float] = None, *, origin: str) -> Optional[float]:
         """Записать ключ в L3 (``"channels.messages_file.enabled"``) со сроком.
 
         Args:
@@ -277,6 +289,9 @@ class ObservabilityLayers:
                 оператор, который забыл про DEBUG, забыл бы и про ``ttl``, и
                 опциональный срок не закрыл бы инцидент, ради которого заведён.
                 ``0`` — бессрочно, и это осознанное заявление вызывающего.
+            origin: Task 5.9 — механизм смены для аудита. **Обязателен** и не
+                имеет дефолта: дефолт был бы записью «источник неизвестен», то
+                есть ровно той ложью, которую аудит устраняет.
 
         Returns:
             Остаток срока в секундах или ``None``, если правка бессрочна.
@@ -301,11 +316,23 @@ class ObservabilityLayers:
             # возвращалась раньше, чем оператор просил в последний раз.
             if seconds > 0:
                 self.session_expiry[path] = self.clock() + seconds
-                return seconds
-            self.session_expiry.pop(path, None)
-            return None
+                left: Optional[float] = seconds
+            else:
+                self.session_expiry.pop(path, None)
+                left = None
+        # Запись — ВНЕ лока стека: она кладёт строку в журнал, а держать лок
+        # слоёв на время файлового I/O значило бы дать пересборке ждать диска.
+        self.audit.record(ACTION_SET, origin=origin, key=path, value=value, ttl_sec=left)
+        return left
 
-    def session_touch(self, paths: Iterable[str], ttl: Optional[float] = None) -> Optional[float]:
+    def session_touch(
+        self,
+        paths: Iterable[str],
+        ttl: Optional[float] = None,
+        *,
+        origin: str,
+        removed: Optional[Iterable[str]] = None,
+    ) -> Optional[float]:
         """Проставить срок ключам, уже лежащим в L3 (Task 5.8).
 
         Нужен там, где секция приезжает целиком (``config.reload`` с inline
@@ -313,17 +340,39 @@ class ObservabilityLayers:
         по листьям через :meth:`session_set` значило бы чуть иначе обрабатывать
         пустые под-словари, то есть завести второй, слегка отличающийся merge.
 
+        Args:
+            removed: ключи, которые вызывающий снял ТОЙ ЖЕ операцией
+                (``telemetry.reconfigure mode=replace`` выбрасывает стейл-листья
+                старой под-секции). Замечание 2 ревью 5.9: без них снятая ручка
+                исчезала из действующей наблюдаемости, а аудит показывал только
+                новые ключи — путь, меняющий состояние без следа. Одно поле в
+                той же записи, а не вторая запись: снятие и постановка здесь —
+                один факт, и разносить их значило бы заставить читателя сшивать
+                их по времени.
+
         Returns:
             Проставленный срок в секундах или ``None`` (бессрочно).
         """
         with self._lock:
             seconds = self.effective_session_ttl() if ttl is None else validate_ttl(ttl)
-            for path in paths:
+            touched = [str(path) for path in paths]
+            for path in touched:
                 if seconds > 0:
                     self.session_expiry[path] = self.clock() + seconds
                 else:
                     self.session_expiry.pop(path, None)
-            return seconds if seconds > 0 else None
+            left = seconds if seconds > 0 else None
+        # Task 5.9: именно эта запись описывает inline-секцию `config.reload` —
+        # она приезжает целиком и мержится одним `deep_merge`, минуя session_set,
+        # поэтому без записи здесь смена секцией была бы невидима в аудите.
+        self.audit.record(
+            ACTION_TOUCH,
+            origin=origin,
+            keys=touched,
+            ttl_sec=left,
+            removed=sorted({str(k) for k in removed}) if removed else None,
+        )
+        return left
 
     def effective_session_ttl(self) -> float:
         """Действующая политика срока L3, сек (``0`` — сроков нет).
@@ -368,22 +417,54 @@ class ObservabilityLayers:
         сроков вычёркивается, но в возврат НЕ попадает: аудит обязан перечислять
         действительно изменённое, иначе оператор ищет причину у правки, которой
         не было. По той же причине истёкшая ВЕТКА перечисляется листьями
-        (:meth:`session_reset_keys`), а не своим путём.
+        (:meth:`_reset_keys_unrecorded`), а не своим путём.
+
+        Task 5.9 — **единственная мутация L3, которая не пишет в аудит сама.**
+        Запись за весь такт кладёт подметальщик (:meth:`note_revert`): снятие
+        ключей и исход пересборки для оператора один факт, а исход известен
+        только после применения.
         """
         with self._lock:
             moment = self.clock() if now is None else now
             removed: list = []
             for key in sorted(k for k, deadline in self.session_expiry.items() if deadline <= moment):
                 self.session_expiry.pop(key, None)
-                removed.extend(self.session_reset_keys(key))
+                removed.extend(self._reset_keys_unrecorded(key))
             return tuple(removed)
 
-    def note_revert(self, entry: Mapping[str, Any]) -> None:
-        """Положить запись об авто-возврате в кольцо readback'а."""
-        with self._lock:
-            self.session_reverts.append(dict(entry))
+    @property
+    def session_reverts(self) -> Tuple[Dict[str, Any], ...]:
+        """Авто-возвраты — ВЫБОРКА из аудита, а не своё кольцо (Task 5.9).
 
-    def session_reset(self, path: str) -> bool:
+        Прежде это был отдельный deque. Два кольца, хранящие пересекающиеся
+        факты, немедленно порождают вопрос «почему в одном есть, а в другом
+        нет», и отвечать на него пришлось бы сравнением реализаций. Форма записи
+        изменилась вместе с переездом: ``ts``/``ok`` вместо ``at``/``success``,
+        плюс ``seq``, ``origin`` и ``action`` — два написания одного факта не
+        заводятся даже ради совместимости поля.
+        """
+        return tuple(self.audit.entries(action=ACTION_EXPIRE))
+
+    def note_revert(self, entry: Mapping[str, Any], *, origin: str) -> Dict[str, Any]:
+        """Записать в аудит итог одного такта подметальщика (Task 5.8 → 5.9).
+
+        Запись кладёт ПОДМЕТАЛЬЩИК, а не :meth:`expire_due`, и это единственное
+        исключение из правила «каждая мутация L3 пишет сама»: снятие ключей и
+        исход пересборки — один факт для оператора («правка больше не
+        действует»), а исход становится известен только после применения. Две
+        записи на такт заставляли бы читателя сшивать их по времени.
+        """
+        payload = dict(entry)
+        return self.audit.record(
+            ACTION_EXPIRE,
+            origin=origin,
+            keys=payload.pop("keys", ()) or (),
+            ok=bool(payload.pop("success", True)),
+            error=payload.pop("error", None),
+            **payload,
+        )
+
+    def session_reset(self, path: str, *, origin: str) -> bool:
         """Удалить ключ из L3 — записать ОТСУТСТВИЕ, а не текущее значение.
 
         Присвоение значения дефолта порвало бы связь с ним навсегда: поменяется
@@ -393,9 +474,9 @@ class ObservabilityLayers:
         Returns:
             True, если ключ был и удалён; False — если его не было.
         """
-        return bool(self.session_reset_keys(path))
+        return bool(self.session_reset_keys(path, origin=origin))
 
-    def session_reset_keys(self, path: str) -> Tuple[str, ...]:
+    def session_reset_keys(self, path: str, *, origin: str) -> Tuple[str, ...]:
         """То же, что :meth:`session_reset`, но возвращает СНЯТЫЕ ЛИСТЬЯ.
 
         Путь может указывать на ветку (``scopes``), и тогда удаляется всё под
@@ -403,6 +484,22 @@ class ObservabilityLayers:
         соседи с собственными, ненаступившими сроками: отчёт называл одно,
         происходило другое, а сроки-сироты оставались висеть в readback'е у
         правок, которых больше нет. Замечание 3 ревью 5.8, воспроизведено.
+        """
+        removed = self._reset_keys_unrecorded(path)
+        # Пустой результат — тоже смена, о которой стоит знать: «сбросил, а там
+        # ничего не было» и «сбросил, ключи ушли» — разные исходы одной команды,
+        # и по молчанию аудита их не различить.
+        self.audit.record(ACTION_RESET, origin=origin, key=path, keys=removed)
+        return removed
+
+    def _reset_keys_unrecorded(self, path: str) -> Tuple[str, ...]:
+        """Тело сброса без записи в аудит.
+
+        Отдельный метод, а не флаг-часовой у публичного: единственный, кому
+        нужна мутация без своей записи, — :meth:`expire_due`, и запись за весь
+        его такт кладёт подметальщик (см. :meth:`note_revert`). Флаг вида
+        ``record=False`` был бы лазейкой, которой рано или поздно
+        воспользовался бы кто-то ещё.
         """
         with self._lock:
             # Task 5.10.g: непрозрачный путь — сам себе лист, и перечислять его
@@ -466,7 +563,7 @@ class ObservabilityLayers:
         with self._lock:
             return tuple(sorted(flatten_section(self.session or {}).keys()))
 
-    def session_clear(self) -> Tuple[str, ...]:
+    def session_clear(self, *, origin: str) -> Tuple[str, ...]:
         """Сбросить L3 целиком, вернув перечень сброшенных ключей."""
         with self._lock:
             keys = self.session_keys()
@@ -475,7 +572,40 @@ class ObservabilityLayers:
             # срок ничего бы не вернул — возвращать уже нечего, — но показывал бы
             # в readback'е несуществующую правку.
             self.session_expiry.clear()
-            return keys
+        self.audit.record(ACTION_CLEAR, origin=origin, keys=keys)
+        return keys
+
+    def replace_layer(
+        self,
+        layer: str,
+        section: Optional[Dict[str, Any]],
+        *,
+        source: Optional[str] = None,
+        origin: str,
+    ) -> Tuple[str, ...]:
+        """Заменить сырую секцию слоя L1/L2 целиком (Task 5.9).
+
+        Метод, а не присваивание ``layers.app = ...``: смена файла — такая же
+        смена наблюдаемости, как команда, и до этой задачи она не оставляла
+        следа вовсе. Присваиванием поля перехватить её нечем.
+
+        Возвращает ключи НОВОЙ секции — то, что слой теперь заявляет. Разницу
+        со старой аудит не считает: сравнение двух сырых секций дало бы третье
+        написание того же факта, а «что действует» отвечает провенанс.
+        """
+        body = dict(section) if isinstance(section, dict) else {}
+        with self._lock:
+            if layer == LAYER_RECIPE:
+                self.recipe = body
+                if source is not None:
+                    self.recipe_source = source
+            else:
+                self.app = body
+                if source is not None:
+                    self.app_source = source
+            keys = tuple(sorted(flatten_section(body).keys()))
+        self.audit.record(ACTION_LAYER, origin=origin, key=layer, keys=keys, source=source or "")
+        return keys
 
     def session_forget_expiry(self, keys: Iterable[str]) -> Tuple[str, ...]:
         """Снять сроки с ключей, переехавших из L3 в L2 (``observability.persist``).
@@ -483,6 +613,12 @@ class ObservabilityLayers:
         Файл вечен по построению, и срок на нём — ложь. Возврат — с каких ключей
         срок действительно снят: «сохранил, а оно всё равно откатилось» и
         «сохранил, срок снят» обязаны различаться в ответе команды.
+
+        Task 5.9 — в аудит НЕ пишет, и это не пропуск: метод снимает дедлайны, а
+        не содержимое L3, и зовут его двое с разными намерениями (переезд в L2 и
+        зачистка устаревшей под-секции при ``replace``). Записывать оба одним
+        действием значило бы соврать одному из них; запись кладёт тот, кто знает
+        намерение, — команда.
         """
         with self._lock:
             return tuple(sorted(key for key in keys if self.session_expiry.pop(key, None) is not None))
@@ -626,6 +762,11 @@ def process_observability_layers(svc: Any) -> ObservabilityLayers:
         app_source=app_source,
         recipe_source=recipe_source,
     )
+    # Task 5.9: долговечный след аудита — журнал ЭТОГО процесса. Своего файла не
+    # заводится: журнал уже долговечен, уже ротируется и уже единственный писатель
+    # на диск. Процесс без журнала получает работающее кольцо без долговечности —
+    # и это видно по отсутствию строк, а не по молчанию поля.
+    layers.audit.log = make_audit_log(svc)
     try:
         setattr(svc, LAYERS_ATTR, layers)
     except Exception:  # noqa: BLE001 — объект без сеттеров: работаем без кэша, но работаем

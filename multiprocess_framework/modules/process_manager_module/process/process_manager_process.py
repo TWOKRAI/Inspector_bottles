@@ -1406,7 +1406,15 @@ class ProcessManagerProcess(ProcessModule):
                 process_observability_layers,
             )
 
-            own = list(process_observability_layers(self).session_clear())
+            # Task 5.9: `reason` в origin, а не «switch» литералом — сброс L3
+            # инициируют разные события (switch рецепта, пересборка топологии), и
+            # в разборе инцидента вопрос ровно этот: чем именно унесло ручки.
+            own = list(process_observability_layers(self).session_clear(origin=f"switch:{reason}"))
+            # Advisory A2 ревью 5.9: у детей та же смена подписана `switch:broadcast`
+            # (см. `_ORIGIN_SWITCH`) — оба написания начинаются с `switch:`, и
+            # grep по одному находит другое. Разными они остаются намеренно:
+            # оркестратор чистит СВОЙ слой, ребёнок — по рассылке, и в разборе
+            # «у кого не сбросилось» это первый различающий признак.
         except Exception as exc:  # noqa: BLE001 — сброс не имеет права ронять switch
             self._log_error(f"_reset_observability_sessions({reason}): свой L3 не сброшен: {exc}")
 

@@ -154,6 +154,21 @@ class LoggerSinkParams(BaseModel):
     ttl: Optional[float] = None
 
 
+class ObservabilityIntrospectParams(BaseModel):
+    """Параметры ``introspect.observability`` (Task 5.9).
+
+    Команда была ``NoParams``; аудит добавил ровно одну ручку — глубину хвоста.
+    Объявить её обязательно: ``extra="forbid"`` означает, что незадекларированный
+    параметр помечается ``unexpected`` warn-мидлварью, а в ``FW_CONTRACTS_STRICT``
+    сообщение дропается целиком — ручка была бы мертва при зелёных тестах.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Сколько последних записей аудита вернуть (дефолт 20; 0 — не возвращать).
+    audit_limit: Optional[int] = None
+
+
 class LogTailSubscribeParams(BaseModel):
     """Параметры ``log.tail.subscribe`` (Ф1 Task 1.5)."""
 
@@ -225,7 +240,7 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     "introspect.memory": NoParams,
     "introspect.capabilities": NoParams,
     "introspect.plugins": NoParams,
-    "introspect.observability": NoParams,
+    "introspect.observability": ObservabilityIntrospectParams,
     # observability control plane (Ф1 Task 1.4/1.5, Ф5.20b)
     "config.reload": ConfigReloadParams,
     "observability.persist": ObservabilityPersistParams,
