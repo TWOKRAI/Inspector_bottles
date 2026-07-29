@@ -1341,14 +1341,6 @@ class BuiltinCommands:
                     body = (
                         resolve_recipe_section(obs_recipe, svc.name) if isinstance(obs_recipe, dict) else layers.recipe
                     )
-                    result["recipe_layer"] = list(
-                        layers.replace_layer(
-                            LAYER_RECIPE,
-                            body,
-                            source=str(obs_recipe_path or "") or None,
-                            origin=_ORIGIN_SWITCH,
-                        )
-                    )
                     # Адрес рецепта — отдельный факт от содержимого слоя:
                     # `recipe_source` после первого `persist` указывает на
                     # СПУТНИК, а `observability.persist` спрашивает, где лежит
@@ -1371,6 +1363,35 @@ class BuiltinCommands:
                     # ключ въехал бы в базу и не исчез бы уже никогда.
                     if callable(update_config):
                         update_config(OVERRIDE_CONFIG_KEY, dict(body) if isinstance(body, dict) else {})
+
+                    # Резидуал 5.11-R2: слой собирается ТОЙ ЖЕ функцией, что на
+                    # boot — из дельты рецепта И спутника. Прежде switch клал
+                    # только дельту, и спутник НОВОГО рецепта переживший процесс
+                    # видел лишь после рестарта: два процесса одного конвейера
+                    # читали одну пару файлов по-разному, а разойтись им нельзя
+                    # («boot ≡ reload»). Адрес и база записаны выше — именно их
+                    # `compose_recipe_layer` и читает, поэтому порядок обязателен.
+                    from ..configs.observability_companion import compose_recipe_layer as _compose
+
+                    try:
+                        body, composed_source = _compose(svc)
+                    except Exception as exc:  # noqa: BLE001 — битый спутник не роняет switch
+                        composed_source = str(obs_recipe_path or "")
+                        log_error = getattr(svc, "_log_error", None)
+                        if callable(log_error):
+                            log_error(
+                                f"[observability] спутник нового рецепта не прочитан ({obs_recipe_path}): {exc} "
+                                "— слой собран без него",
+                                module="lifecycle",
+                            )
+                    result["recipe_layer"] = list(
+                        layers.replace_layer(
+                            LAYER_RECIPE,
+                            body,
+                            source=composed_source or str(obs_recipe_path or "") or None,
+                            origin=_ORIGIN_SWITCH,
+                        )
+                    )
 
                 # R4: перечитка слоя L2 с диска. Идёт ПОСЛЕ ветки switch'а и до
                 # сброса сессии — тот же порядок «слои снизу вверх», и та же одна

@@ -525,3 +525,105 @@ class TestLiveCompanionRefresh:
             assert process_observability_layers(svc).recipe == {"log_level": "WARNING"}
         finally:
             logger.shutdown()
+
+
+class _SvcRW(_Svc):
+    """Сервис, умеющий ПИСАТЬ конфиг — switch-ветка адрес и базу записывает."""
+
+    def update_config(self, key, value) -> None:
+        self._config[key] = value
+
+    def _log_error(self, msg, **kw):
+        self.log_calls.append(("ERROR", msg, kw))
+
+
+class TestSwitchReadsCompanionOfTheNewRecipe:
+    """Резидуал 5.11-R2: switch обязан собрать слой ИЗ ОБОИХ источников.
+
+    До фикса переживший switch процесс получал только дельту нового рецепта, а
+    спутник этого рецепта видел лишь после рестарта. То есть два процесса одного
+    конвейера — переживший и пересозданный — читали одну и ту же пару файлов
+    по-разному, пока кто-нибудь не перезапустится. Инвариант плана прямо это
+    запрещает: «boot ≡ reload», одна функция на оба пути.
+    """
+
+    @staticmethod
+    def _wire(tmp_path, recipe_name: str, section, companion_section=None):
+        recipe = tmp_path / recipe_name
+        recipe.write_text(_RECIPE_TEXT, encoding="utf-8")
+        if companion_section is not None:
+            write_companion(recipe, companion_section)
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="switch", log_directory=str(tmp_path), enable_batching=False)
+        )
+        svc = _SvcRW(logger, config={RECIPE_PATH_CONFIG_KEY: str(tmp_path / "old.yaml")})
+        BuiltinCommands(svc)._register_observability_commands()
+        return svc, svc.command_manager.handlers, recipe, logger, section
+
+    def test_companion_of_the_new_recipe_is_applied_on_switch(self, tmp_path) -> None:
+        """Пара: ключ есть только в спутнике нового рецепта → после switch он действует."""
+        svc, handlers, recipe, logger, section = self._wire(
+            tmp_path,
+            "new.yaml",
+            {"processes": {"seg": {"log_level": "WARNING"}}},
+            companion_section={"processes": {"seg": {"log_level": "DEBUG"}}},
+        )
+        try:
+            handlers["config.reload"]({"observability_recipe": section, "observability_recipe_path": str(recipe)})
+            layers = process_observability_layers(svc)
+            assert layers.recipe.get("log_level") == "DEBUG", (
+                f"спутник нового рецепта не применён на switch: {layers.recipe}"
+            )
+            assert layers.recipe_source == str(companion_path(recipe)), (
+                f"источник слоя обязан называть спутник: {layers.recipe_source}"
+            )
+        finally:
+            logger.shutdown()
+
+    def test_without_companion_switch_behaves_as_before(self, tmp_path) -> None:
+        """Спутника нет → слой ровно из дельты рецепта, источник — сам рецепт."""
+        svc, handlers, recipe, logger, section = self._wire(
+            tmp_path, "plain.yaml", {"processes": {"seg": {"log_level": "WARNING"}}}
+        )
+        try:
+            handlers["config.reload"]({"observability_recipe": section, "observability_recipe_path": str(recipe)})
+            layers = process_observability_layers(svc)
+            assert layers.recipe.get("log_level") == "WARNING"
+            assert layers.recipe_source == str(recipe)
+        finally:
+            logger.shutdown()
+
+    def test_companion_of_the_ABANDONED_recipe_does_not_leak(self, tmp_path) -> None:
+        """Спутник ПОКИНУТОГО рецепта не имеет права въехать в новый слой.
+
+        Соседняя развилка того же дефекта: собирать слой «из спутника» бесполезно,
+        если адрес к моменту сборки ещё указывает на прежний рецепт.
+        """
+        old = tmp_path / "old.yaml"
+        old.write_text(_RECIPE_TEXT, encoding="utf-8")
+        write_companion(old, {"processes": {"seg": {"log_level": "ERROR"}}})
+
+        svc, handlers, recipe, logger, section = self._wire(
+            tmp_path, "fresh.yaml", {"processes": {"seg": {"log_level": "WARNING"}}}
+        )
+        try:
+            handlers["config.reload"]({"observability_recipe": section, "observability_recipe_path": str(recipe)})
+            layers = process_observability_layers(svc)
+            assert layers.recipe.get("log_level") == "WARNING", (
+                f"ключ спутника ПОКИНУТОГО рецепта воскрес: {layers.recipe}"
+            )
+        finally:
+            logger.shutdown()
+
+    def test_broken_companion_does_not_break_the_switch(self, tmp_path) -> None:
+        """Битый спутник — громкая жалоба и слой без него, а не отказ switch'а."""
+        svc, handlers, recipe, logger, section = self._wire(
+            tmp_path, "broken.yaml", {"processes": {"seg": {"log_level": "WARNING"}}}
+        )
+        companion_path(recipe).write_text("{{{ не yaml", encoding="utf-8")
+        try:
+            res = handlers["config.reload"]({"observability_recipe": section, "observability_recipe_path": str(recipe)})
+            assert res.get("success") is not False, f"switch отказал из-за спутника: {res}"
+            assert any(lvl == "ERROR" for lvl, _m, _k in svc.log_calls), "битый спутник прошёл молча"
+        finally:
+            logger.shutdown()
