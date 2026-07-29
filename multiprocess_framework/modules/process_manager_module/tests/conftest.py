@@ -298,17 +298,29 @@ def make_pm(
     # Сигнатура ОБЯЗАНА совпадать с реальной ProcessModule.get_config(key, default):
     # однопараметрический фейк ронял вызывающих с TypeError вместо того, чтобы их
     # проверять (найдено при вводе read_process_config, Task 5.12).
+    values = {
+        "stop_process_timeout": 1.0,
+        "shutdown_timeout": 1.0,
+        # Быстрый readiness-барьер (Task 2.2): не замедлять сьют, но
+        # сохранить карту ready в ответах apply_topology
+        "start_ready_timeout_s": 0.05,
+    }
+
     def _get_config(key: str, default=None):
-        defaults = {
-            "stop_process_timeout": 1.0,
-            "shutdown_timeout": 1.0,
-            # Быстрый readiness-барьер (Task 2.2): не замедлять сьют, но
-            # сохранить карту ready в ответах apply_topology
-            "start_ready_timeout_s": 0.05,
-        }
-        return defaults.get(key, default)
+        return values.get(key, default)
+
+    # Task 5.11: конфиг фейка ПИШЕТСЯ, а не только читается. Настоящий
+    # ProcessModule умеет `update_config`, и на нём держится адрес рецепта
+    # (его пишет ретаргет, а читают ассемблер, `persist` и раздача слоя).
+    # Read-only фейк делал бы эту связку недоказуемой: тест проверял бы
+    # резолвер вместо того, кто ключ обновляет (та же дыра, что нашёл живой
+    # прогон R6).
+    def _update_config(key: str, value):
+        values[key] = value
+        return True
 
     pm.get_config = _get_config
+    pm.update_config = _update_config
 
     # TopologyManager с реальными сидами PM (как _setup_topology_manager)
     from ..process.topology_manager import TopologyManager

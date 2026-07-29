@@ -21,6 +21,7 @@ fake diff_fn/commands_fn, эмитящие 5-фазные команды.
 """
 
 import copy
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -428,7 +429,7 @@ class TestReadinessBarrier:
     def test_barrier_disabled_returns_empty_ready(self) -> None:
         """start_ready_timeout_s=0 → барьер выключен, ready пустой."""
         pm = make_pm({"old_w": {"class": "m.OW"}})
-        pm.get_config = lambda key: {
+        pm.get_config = lambda key, default=None: {
             "stop_process_timeout": 1.0,
             "start_ready_timeout_s": 0,
         }.get(key)
@@ -521,7 +522,7 @@ class TestBootReadyBarrier:
     def test_disabled_when_timeout_zero(self) -> None:
         """boot_ready_timeout_s=0 → барьер выключен, мгновенный возврат."""
         pm = make_pm({})
-        pm.get_config = lambda key: {"boot_ready_timeout_s": 0}.get(key)
+        pm.get_config = lambda key, default=None: {"boot_ready_timeout_s": 0}.get(key)
         pm._process_registry._processes["n1"] = MagicMock()  # не должен опрашиваться
         pm._wait_boot_ready()  # не бросает, не логирует not-ready
         pm._log_warning.assert_not_called()
@@ -533,7 +534,7 @@ class TestBootReadyBarrier:
         from .conftest import MockProcess
 
         pm = make_pm({})
-        pm.get_config = lambda key: {"boot_ready_timeout_s": 2.0}.get(key)
+        pm.get_config = lambda key, default=None: {"boot_ready_timeout_s": 2.0}.get(key)
         ev = Event()
         ev.set()
         pm._process_registry._processes["n1"] = MockProcess("n1", alive=True)
@@ -548,7 +549,7 @@ class TestBootReadyBarrier:
         from .conftest import MockProcess
 
         pm = make_pm({})
-        pm.get_config = lambda key: {"boot_ready_timeout_s": 0.2}.get(key)
+        pm.get_config = lambda key, default=None: {"boot_ready_timeout_s": 0.2}.get(key)
         pm._process_registry._processes["dead"] = MockProcess("dead", alive=False)
 
         pm._wait_boot_ready()
@@ -639,7 +640,7 @@ class TestApplyTopologyDebounce:
     def test_cooldown_rejects_rapid_second(self) -> None:
         """С replace_debounce_s>0 повторный запрос в окне -> debounced."""
         pm = make_pm({"w1": {"class": "m.W1"}})
-        pm.get_config = lambda key: {
+        pm.get_config = lambda key, default=None: {
             "stop_process_timeout": 1.0,
             "replace_debounce_s": 10.0,
         }.get(key)
@@ -1004,3 +1005,124 @@ class TestSwitchDeliversTheRecipeLayer:
             )
 
         assert pm.get_config(RECIPE_PATH_CONFIG_KEY) == str(tmp_path / "recipe_a.yaml")
+
+
+class TestSwitchSendsOneEnvelope:
+    """R6-E/R6-G (Task 5.11.d-e): один switch — один конверт, отказ — без ретаргета."""
+
+    @staticmethod
+    def _pm_recording(tmp_path):
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        envelopes: list = []
+        comm = MagicMock()
+        comm.broadcast = lambda msg, exclude_self=True: envelopes.append(msg) or 1
+        pm.communication = comm
+        return pm, envelopes
+
+    @staticmethod
+    def _reloads(envelopes):
+        return [m for m in envelopes if m.get("type") == "command" and m.get("command") == "config.reload"]
+
+    def test_one_switch_sends_exactly_one_config_reload(self, tmp_path) -> None:
+        """До 5.11 их было ДВА: сброс L3 и слой L2 ехали порознь — две полные
+        пересборки у каждого ребёнка и окно между ними, где сессия уже пуста, а
+        слой рецепта ещё прежний. Такого состояния не описывает ни один слой."""
+        pm, envelopes = self._pm_recording(tmp_path)
+
+        pm._cmd_topology_apply(
+            {
+                "topology_dict": {
+                    "processes": [{"process_name": "n1", "process_class": "m.N1"}],
+                    "observability": {"defaults": {"log_level": "ERROR"}},
+                },
+                "recipe_path": str(tmp_path / "recipe_b.yaml"),
+            }
+        )
+
+        reloads = self._reloads(envelopes)
+        assert len(reloads) == 1, f"на один switch ушло {len(reloads)} конвертов config.reload"
+        data = reloads[0]["data"]
+        # Оба намерения — в одном конверте: у ребёнка это ОДНА пересборка.
+        assert data["observability_session_clear"] is True
+        assert data["observability_recipe"] == {"defaults": {"log_level": "ERROR"}}
+        assert data["observability_recipe_path"] == str(tmp_path / "recipe_b.yaml")
+
+    def test_answer_names_what_was_handed_out(self, tmp_path) -> None:
+        """«Раздал» и «раздал ЭТО» — разные утверждения; проверяется второе."""
+        pm, _envelopes = self._pm_recording(tmp_path)
+
+        result = pm._cmd_topology_apply(
+            {
+                "topology_dict": {
+                    "processes": [{"process_name": "n1", "process_class": "m.N1"}],
+                    "observability": {"defaults": {"log_level": "ERROR"}},
+                },
+                "recipe_path": str(tmp_path / "recipe_b.yaml"),
+            }
+        )
+
+        reset = result["observability_session_reset"]
+        assert reset["recipe_path"] == str(tmp_path / "recipe_b.yaml")
+        assert reset["recipe_keys"] == ["defaults"]
+
+    def test_debounced_request_does_not_retarget_the_address(self, tmp_path) -> None:
+        """R6-G: отклонённый по cooldown запрос дёргал watcher парой stop/start
+        за замену, которой не было, — и на время окна называл источником слоя
+        рецепт, который так и не применился."""
+        pm, envelopes = self._pm_recording(tmp_path)
+        retargets: list = []
+        pm.retarget_observability_recipe_watcher = lambda path: retargets.append(path) or str(path)
+        pm._replace_in_progress = True  # идёт другая замена
+
+        result = pm._cmd_topology_apply(
+            {
+                "topology_dict": {"processes": [{"process_name": "n1", "process_class": "m.N1"}]},
+                "recipe_path": str(tmp_path / "recipe_b.yaml"),
+            }
+        )
+
+        assert result["debounced"] is True
+        assert retargets == [], f"ретаргет при отклонённом запросе: {retargets}"
+        assert self._reloads(envelopes) == []
+
+    def test_cooldown_rejection_also_skips_the_retarget(self, tmp_path) -> None:
+        pm, _envelopes = self._pm_recording(tmp_path)
+        retargets: list = []
+        pm.retarget_observability_recipe_watcher = lambda path: retargets.append(path) or str(path)
+        pm.get_config = lambda key, default=None: {
+            "stop_process_timeout": 1.0,
+            "replace_debounce_s": 10.0,
+            "start_ready_timeout_s": 0.05,
+        }.get(key, default)
+        pm._last_replace_ts = time.monotonic()  # только что была замена
+
+        result = pm._cmd_topology_apply(
+            {
+                "topology_dict": {"processes": [{"process_name": "n1", "process_class": "m.N1"}]},
+                "recipe_path": str(tmp_path / "recipe_b.yaml"),
+            }
+        )
+
+        assert result["debounced"] is True
+        assert retargets == []
+
+    def test_broken_address_read_does_not_roll_back_a_successful_switch(self, tmp_path) -> None:
+        """Наблюдаемость не имеет права откатить УСПЕШНО применённую топологию.
+
+        Найдено на прогоне 5.11: чтение адреса переехало на success-путь
+        `apply_topology`, и сломанный `get_config` ронял туда исключение —
+        живой switch откатывался из-за неудавшейся раздачи слоя.
+        """
+        pm, _envelopes = self._pm_recording(tmp_path)
+
+        def _hostile(key, default=None):
+            if key == "observability_recipe_path":
+                raise RuntimeError("конфиг недоступен")
+            return {"stop_process_timeout": 1.0, "start_ready_timeout_s": 0.05}.get(key, default)
+
+        pm.get_config = _hostile
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True
+        assert result["rolled_back"] is False

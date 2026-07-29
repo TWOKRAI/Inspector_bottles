@@ -583,6 +583,15 @@ class ProcessManagerProcess(ProcessModule):
         td = args.get("topology_dict")
         if td is None:
             return {"error": "topology_dict required"}
+        # R6-G: debounce судится ДО ретаргета. Прежде отклонённый по cooldown
+        # запрос успевал переставить адрес и откатить его обратно — то есть
+        # дёргал watcher парой stop/start за замену, которой не было. Проверка
+        # одна на два вызова (здесь и внутри `apply_topology`): второго
+        # механизма коалесинга не появляется, а решает по-прежнему владелец
+        # побочных эффектов — просто теперь мы не платим за его отказ.
+        debounced = self._topology_debounce_reject()
+        if debounced is not None:
+            return debounced
         # Task 5.12: L2-watcher обязан переехать на спутник НОВОГО рецепта. Иначе
         # правка нового файла молча не применяется, а правка старого — применяется,
         # и оба симптома читаются как «hot-reload сломался».
@@ -593,8 +602,12 @@ class ProcessManagerProcess(ProcessModule):
         # при активном `r6_b.yaml`. Откат при неудаче явный: адрес обязан
         # описывать ту топологию, которая на самом деле крутится.
         previous = self._observability_recipe_address()
-        resolved = self._retarget_recipe_address(str(args.get("recipe_path") or ""))
+        self._retarget_recipe_address(str(args.get("recipe_path") or ""))
         try:
+            # Слой рецепта раздаёт сам `apply_topology` — ОДНИМ конвертом вместе
+            # со сбросом сессии (R6-E). Адрес он берёт из конфига, куда его
+            # только что положил ретаргет: два аргумента одного факта разошлись
+            # бы ровно там, где `apply_topology` зовут в обход команды.
             result = self.apply_topology(td)
         except BaseException:
             # Ревью R6, находка 3: часть `apply_topology` живёт ВНЕ её внутреннего
@@ -603,22 +616,56 @@ class ProcessManagerProcess(ProcessModule):
             # описывать то, что на самом деле крутится.
             self._retarget_recipe_address(previous)
             raise
-        if result.get("success"):
-            # Ретаргет чинит ФАЙЛ, за которым смотрит оркестратор. Живые процессы
-            # при этом остаются на секции прежнего рецепта — им новый слой нужно
-            # довезти. Пересозданные получают его от ассемблера, но protected и
-            # не тронутые switch'ем — только отсюда.
-            result["observability_recipe_delivered"] = self._deliver_recipe_layer(td, resolved)
-        else:
+        if not result.get("success"):
             self._retarget_recipe_address(previous)
         return result
 
+    def _topology_debounce_reject(self) -> dict | None:
+        """Отказ debounce (in-flight guard + cooldown) или ``None``, если можно идти.
+
+        Единственная реализация коалесинга; зовут её двое — команда (до ретаргета,
+        R6-G) и сам ``apply_topology`` (он владелец побочных эффектов и обязан
+        держать инвариант даже при прямом вызове). Проверка идемпотентна и ничего
+        не меняет, поэтому двойной вызов безопасен: гонка между ними всё равно
+        разрешается второй проверкой, а адрес откатывает ветка неуспеха.
+        """
+        if getattr(self, "_replace_in_progress", False):
+            self._log_warning("apply_topology: замена уже выполняется — запрос пропущен (debounce)")
+            return {
+                "success": False,
+                "debounced": True,
+                "error": "замена уже выполняется",
+                "rolled_back": False,
+            }
+        cooldown = float(self.get_config("replace_debounce_s") or 0.0)
+        if cooldown > 0.0 and (time.monotonic() - getattr(self, "_last_replace_ts", 0.0)) < cooldown:
+            self._log_info("apply_topology: запрос в пределах cooldown — пропущен (debounce)")
+            return {
+                "success": False,
+                "debounced": True,
+                "error": "debounce cooldown",
+                "rolled_back": False,
+            }
+        return None
+
     def _observability_recipe_address(self) -> str:
-        """Действующий адрес рецепта (слой L2) — для отката при неудачном switch."""
+        """Действующий адрес рецепта (слой L2) — для отката и для конверта switch'а.
+
+        Чтение адреса не имеет права уронить УСПЕШНО применённую топологию: этот
+        вызов живёт на success-пути ``apply_topology``, и вылетевшее отсюда
+        исключение откатывало бы живой switch из-за неудавшейся наблюдаемости.
+        Пустая строка — честное «источник неизвестен», но молчать о ней нельзя.
+        """
         from ...process_module.configs.observability_layers import RECIPE_PATH_CONFIG_KEY
 
         get_config = getattr(self, "get_config", None)
-        return str(get_config(RECIPE_PATH_CONFIG_KEY, "") or "") if callable(get_config) else ""
+        if not callable(get_config):
+            return ""
+        try:
+            return str(get_config(RECIPE_PATH_CONFIG_KEY, "") or "")
+        except Exception as exc:  # noqa: BLE001 — см. докстринг
+            self._log_error(f"[observability] адрес рецепта не прочитан из конфига: {exc}")
+            return ""
 
     def _retarget_recipe_address(self, recipe_path: str) -> str:
         """Перевести адрес рецепта (и watcher за ним) — возвращает РЕЗОЛВНУТЫЙ путь.
@@ -627,18 +674,33 @@ class ProcessManagerProcess(ProcessModule):
         оркестратора, слой — про конфиг каждого процесса. Свяжи мы их, и
         потребитель framework без ``app_module`` (у него метода нет) молча
         остался бы на секции покинутого рецепта.
+
+        Task 5.11: без хука ``app_module`` адрес всё равно записывается в конфиг.
+        Он не собственность watcher'а — его читают ещё ассемблер на каждой сборке
+        и ``observability.persist``; оставь мы запись только внутри хука, PM без
+        app_module называл бы источником слоя покинутый рецепт, а раздача уезжала
+        бы по старому адресу.
         """
         retarget = getattr(self, "retarget_observability_recipe_watcher", None)
         if not callable(retarget):
-            return str(recipe_path or "")
+            resolved = str(recipe_path or "")
+            update_config = getattr(self, "update_config", None)
+            if callable(update_config):
+                from ...process_module.configs.observability_layers import RECIPE_PATH_CONFIG_KEY
+
+                try:
+                    update_config(RECIPE_PATH_CONFIG_KEY, resolved)
+                except Exception as exc:  # noqa: BLE001 — адрес не должен ронять switch
+                    self._log_error(f"[observability] адрес рецепта не записан в конфиг: {exc}")
+            return resolved
         try:
             return str(retarget(str(recipe_path or "")) or "")
         except Exception as exc:  # noqa: BLE001 — ретаргет не должен ронять switch
             self._log_error(f"[observability] ретаргет L2-watcher после switch не удался: {exc}")
             return str(recipe_path or "")
 
-    def _deliver_recipe_layer(self, topology_dict: dict, recipe_path: str) -> int:
-        """Раздать живым процессам слой L2 нового рецепта (адрес + сырая секция).
+    def _recipe_layer_payload(self, topology_dict: dict | None) -> dict:
+        """Ключи слоя L2 нового рецепта для конверта switch'а (адрес + сырая секция).
 
         Рассылается СЫРАЯ секция ``observability`` рецепта, а долька процесса
         резолвится у получателя тем же ``resolve_recipe_section``, что и на boot.
@@ -652,18 +714,13 @@ class ProcessManagerProcess(ProcessModule):
         одного дефекта стало бы два. Гэп записан резидуалом R6-C.
         """
         section = topology_dict.get("observability") if isinstance(topology_dict, dict) else None
-        payload = {
+        return {
             # Пустая секция едет как `{}`, а не пропускается: «новый рецепт про
             # наблюдаемость молчит» обязано СНЯТЬ прежний слой, иначе покинутый
             # рецепт продолжал бы действовать вечно.
             "observability_recipe": dict(section) if isinstance(section, dict) else {},
-            "observability_recipe_path": str(recipe_path or ""),
+            "observability_recipe_path": self._observability_recipe_address(),
         }
-        try:
-            return int(self._broadcast_command("config.reload", payload))
-        except Exception as exc:  # noqa: BLE001 — раздача не имеет права ронять switch
-            self._log_error(f"[observability] слой рецепта не роздан после switch: {exc}")
-            return 0
 
     def _cmd_topology_get(self, data=None, **kwargs) -> dict:
         """Получить текущую топологию.
@@ -1486,7 +1543,7 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"_replay_telemetry_runtime_delta({reason}) упал: {exc}")
             return 0
 
-    def _reset_observability_sessions(self, reason: str) -> dict:
+    def _reset_observability_sessions(self, reason: str, *, recipe: dict | None = None) -> dict:
         """Обнулить слой сессии наблюдаемости (L3) у себя и у всех живых детей.
 
         Switch рецепта — это новый конвейер, а L3 отвечает на вопрос «что я кручу
@@ -1543,18 +1600,33 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:  # noqa: BLE001 — сброс не имеет права ронять switch
             self._log_error(f"_reset_observability_sessions({reason}): свой L3 не сброшен: {exc}")
 
+        # R6-E: сброс L3 и новый слой L2 едут ОДНИМ конвертом. Двумя рассылками
+        # каждый ребёнок делал две полные пересборки на один switch, а между ними
+        # существовало окно, где сессия уже пуста, а слой рецепта ещё прежний —
+        # состояние, которого не описывает ни один слой. Обработчик ребёнка умеет
+        # оба ключа сразу и делает ОДНУ пересборку, порядок «снизу вверх» (слой
+        # рецепта въезжает до сброса сессии) держит он же.
+        payload: dict = {"observability_session_clear": True}
+        if recipe:
+            payload.update(recipe)
         reached = 0
         try:
-            reached = self._broadcast_command("config.reload", {"observability_session_clear": True})
+            reached = self._broadcast_command("config.reload", payload)
         except Exception as exc:  # noqa: BLE001
             self._log_error(f"_reset_observability_sessions({reason}): рассылка не удалась: {exc}")
 
         if own or reached:
             self._log_info(
                 f"[observability] слой сессии сброшен ({reason}): свои ключи={own or '—'}, "
-                f"рассылка детям reached={reached}"
+                f"рассылка детям reached={reached}, слой рецепта={'в том же конверте' if recipe else 'не менялся'}"
             )
-        return {"orchestrator": own, "broadcast_reached": int(reached)}
+        result = {"orchestrator": own, "broadcast_reached": int(reached)}
+        if recipe:
+            # Что именно уехало детям — в ответе: «раздал» и «раздал ЭТО» —
+            # разные утверждения, а проверяется потом второе.
+            result["recipe_path"] = recipe.get("observability_recipe_path", "")
+            result["recipe_keys"] = sorted(recipe.get("observability_recipe") or {})
+        return result
 
     def _broadcast_command(self, command: str, data: dict, *, queue_type: str = "system") -> int:
         """Единый примитив рассылки command-билета всем детям (Ф3.1 / PC 3.3).
@@ -2502,26 +2574,10 @@ class ProcessManagerProcess(ProcessModule):
             dict с ключами ``success``, ``rolled_back``, ``debounced``, ``error``
             и полями результата ``TopologyManager.apply``.
         """
-        # --- Debounce: in-flight guard ---
-        if getattr(self, "_replace_in_progress", False):
-            self._log_warning("apply_topology: замена уже выполняется — запрос пропущен (debounce)")
-            return {
-                "success": False,
-                "debounced": True,
-                "error": "замена уже выполняется",
-                "rolled_back": False,
-            }
-
-        # --- Debounce: cooldown ---
-        cooldown = float(self.get_config("replace_debounce_s") or 0.0)
-        if cooldown > 0.0 and (time.monotonic() - getattr(self, "_last_replace_ts", 0.0)) < cooldown:
-            self._log_info("apply_topology: запрос в пределах cooldown — пропущен (debounce)")
-            return {
-                "success": False,
-                "debounced": True,
-                "error": "debounce cooldown",
-                "rolled_back": False,
-            }
+        # --- Debounce: in-flight guard + cooldown (одна реализация, R6-G) ---
+        debounced = self._topology_debounce_reject()
+        if debounced is not None:
+            return debounced
 
         # --- Проверка конфигурации ---
         if self._topology_manager is None:
@@ -2643,7 +2699,15 @@ class ProcessManagerProcess(ProcessModule):
                 # Асимметрия осознанная — у телеметрии PM хранит дельту централизованно
                 # и может её честно восстановить всем, а L3 живёт у каждого процесса
                 # свой; «восстановить частично» дало бы лоскутное состояние.
-                response["observability_session_reset"] = self._reset_observability_sessions("topology.apply")
+                # R6-E: сброс сессии и слой нового рецепта — один конверт, одна
+                # пересборка у ребёнка. Адрес берётся из конфига (его положил
+                # ретаргет ДО сборки), а не приезжает вторым аргументом: при
+                # прямом вызове `apply_topology` второй аргумент разошёлся бы с
+                # тем, что реально записано в процессе.
+                response["observability_session_reset"] = self._reset_observability_sessions(
+                    "topology.apply",
+                    recipe=self._recipe_layer_payload(blueprint),
+                )
                 return response
 
             except Exception as exc:

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -260,3 +261,71 @@ class TestRetargetRecipeWatcherAddress:
 
         assert layers.recipe_source == "recipes/b.yaml"
         assert layers.recipe == {"log_level": "WARNING"}
+
+
+class TestRetargetIsOneCriticalBlock:
+    """R6-F (Task 5.11.e): адрес рецепта и источник слоя — ОДИН факт.
+
+    Прежде ключ конфига писался вне ``layers.lock``, а ``replace_layer`` — внутри.
+    Конкурентный ``introspect.observability``, попавший в зазор, видел новый
+    адрес при старом ``recipe_source`` и показывал их как два разных факта — то
+    есть отвечал на «где мой слой» двумя несовместимыми ответами подряд.
+    """
+
+    def test_concurrent_reader_never_sees_a_half_moved_address(self) -> None:
+        import threading
+
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            LAYER_RECIPE,
+            RECIPE_PATH_CONFIG_KEY,
+            process_observability_layers,
+        )
+
+        orch = _make_orchestrator({RECIPE_PATH_CONFIG_KEY: "recipes/a.yaml"})
+        orch.logger_manager = MagicMock()
+        orch.error_manager = MagicMock()
+        orch.stats_manager = MagicMock()
+        orch._log_info = MagicMock()
+        orch._log_error = MagicMock()
+        orch._observability_recipe_watcher = None
+        layers = process_observability_layers(orch)
+        layers.replace_layer(LAYER_RECIPE, {"log_level": "WARNING"}, source="recipes/a.yaml", origin="test")
+
+        reader_may_go = threading.Event()
+        seen: list[tuple] = []
+
+        def _reader():
+            """Читает пару (адрес конфига, источник слоя) — так же, как readback."""
+            reader_may_go.wait(2.0)
+            # Лок берётся ЯВНО: `introspect.observability` читает стек слоёв под
+            # ним же. Без лока тест проверял бы гонку, а не защиту от неё.
+            if not layers.lock.acquire(timeout=2.0):
+                seen.append(("НЕ ВЗЯЛ ЛОК", None))
+                return
+            try:
+                seen.append((orch.get_config(RECIPE_PATH_CONFIG_KEY), layers.recipe_source))
+            finally:
+                layers.lock.release()
+
+        reader = threading.Thread(target=_reader, daemon=True)
+        reader.start()
+
+        original_update = orch.update_config
+
+        def _slow_update(key, value):
+            """Шов ВНУТРИ критического блока: даём читателю реальный шанс влезть."""
+            result = original_update(key, value)
+            reader_may_go.set()
+            time.sleep(0.15)
+            return result
+
+        orch.update_config = _slow_update
+        orch.retarget_observability_recipe_watcher("recipes/b.yaml")
+
+        reader.join(timeout=3.0)
+        assert not reader.is_alive(), "читатель завис — критический блок не отпустил лок"
+        assert seen, "читатель не отработал"
+        address, source = seen[0]
+        assert (address, source) == ("recipes/b.yaml", "recipes/b.yaml"), (
+            f"читатель увидел половину переезда: адрес={address!r}, источник слоя={source!r}"
+        )

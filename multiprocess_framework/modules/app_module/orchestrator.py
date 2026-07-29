@@ -249,6 +249,7 @@ class GenericProcessManagerApp(ProcessManagerProcess):
         )
 
         self._observability_recipe_path = str(recipe_path or "")
+        layers = process_observability_layers(self)
         # R6 (живой switch, 2026-07-29): адрес рецепта читают ТРОЕ — watcher
         # (через атрибут выше), ассемблер на каждой сборке и `observability.persist`,
         # и последние двое читают КОНФИГ. Прежде ретаргет писал только атрибут,
@@ -256,18 +257,24 @@ class GenericProcessManagerApp(ProcessManagerProcess):
         # процессы следующей замены получали его же адрес. Тест `test_hot_swap_
         # resolves_recipe_path_per_build` это не ловил: он правил конфиг руками,
         # то есть доказывал резолвер, а не то, что кто-то этот ключ обновляет.
-        update_config = getattr(self, "update_config", None)
-        if callable(update_config):
-            update_config(RECIPE_PATH_CONFIG_KEY, self._observability_recipe_path)
-        layers = process_observability_layers(self)
-        # Адрес слоя, каким его показывает `introspect.observability`. Ключ конфига
-        # выше чинит запись (`persist`), а это — чтение: без него оркестратор
-        # оставался ЕДИНСТВЕННЫМ, кто после switch называл покинутый рецепт
-        # источником своего слоя (живьём: дети переехали на `r6_b.yaml`, PM
-        # продолжал показывать `r6_a.yaml`). Содержимое слоя не трогаем — его
-        # оркестратору не раздаёт и boot (см. `_deliver_recipe_layer`), и выдать
-        # его здесь значило бы развести switch со стартом.
+        #
+        # R6-F: запись конфига и подмена источника слоя — ОДИН критический блок.
+        # Прежде ключ конфига писался вне лока, а `replace_layer` — внутри:
+        # конкурентный `introspect.observability`, попавший в зазор, видел новый
+        # адрес рецепта при старом `recipe_source` и показывал их как разные
+        # факты. Это один факт, и наблюдаться он обязан целиком.
         with layers.lock:
+            update_config = getattr(self, "update_config", None)
+            if callable(update_config):
+                update_config(RECIPE_PATH_CONFIG_KEY, self._observability_recipe_path)
+            # Адрес слоя, каким его показывает `introspect.observability`. Ключ
+            # конфига выше чинит запись (`persist`), а это — чтение: без него
+            # оркестратор оставался ЕДИНСТВЕННЫМ, кто после switch называл
+            # покинутый рецепт источником своего слоя (живьём: дети переехали на
+            # `r6_b.yaml`, PM продолжал показывать `r6_a.yaml`). Содержимое слоя
+            # не трогаем — его оркестратору не раздаёт и boot (см.
+            # `_recipe_layer_payload`), и выдать его здесь значило бы развести
+            # switch со стартом.
             layers.replace_layer(
                 LAYER_RECIPE,
                 layers.recipe,
