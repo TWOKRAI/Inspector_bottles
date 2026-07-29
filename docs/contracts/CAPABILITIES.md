@@ -71,7 +71,9 @@ request-response (dict). События (push без request_id) читаютс�
 | `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
 | `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
 | `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
+| `observability.tail.subscribe_all` | Брокер (Task 5.11): подписать адрес на хвост ВСЕХ процессов одним вызовом; намерение переживает рестарт, switch и появление нового процесса. Записи идут напрямую подписчику — PM брокер, не транзит | system |
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
+| `observability.tail.unsubscribe_all` | Брокер: снять намерение подписчика и разослать снятие хвоста всем процессам | system |
 | `process.command` | Router endpoint: вложенная команда PM | system |
 | `process.create` | Создать процесс из inline-конфига | system |
 | `process.list` | Список всех процессов и статусов | system |

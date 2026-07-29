@@ -28,6 +28,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
@@ -244,8 +247,26 @@ processes:
         type: str
       tags:
       - system
+    - description: 'Брокер (Task 5.11): подписать адрес на хвост ВСЕХ процессов одним вызовом; намерение
+        переживает рестарт, switch и появление нового процесса. Записи идут напрямую подписчику — PM брокер,
+        не транзит'
+      name: observability.tail.subscribe_all
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Брокер: снять намерение подписчика и разослать снятие хвоста всем процессам'
+      name: observability.tail.unsubscribe_all
       params_schema:
       - name: subscriber
         required: false
@@ -574,6 +595,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
@@ -1028,6 +1052,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
@@ -1626,6 +1653,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
@@ -2073,6 +2103,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
@@ -2509,6 +2542,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
@@ -2945,6 +2981,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
@@ -3381,6 +3420,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
@@ -3817,6 +3859,9 @@ processes:
       - name: observability_recipe_path
         required: false
         type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
       - name: observability_reset
         required: false
         type: List
