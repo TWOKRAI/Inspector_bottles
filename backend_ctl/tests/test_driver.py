@@ -539,36 +539,41 @@ class TestSendRaceAndLateReplies:
         assert d.late_replies == 0
 
 
-class TestCloseStopsApplierThread:
-    """A.2: close() гасит applier-поток watch (иначе реконнект плодит зомби-потоки)."""
+class TestCloseClearsWatchState:
+    """A.2 после 5.11.h: гасить нечего — но состояние watch на закрытом сокете лгать не должно.
 
-    def test_close_joins_resub_applier(self) -> None:
+    Applier-поток переподписки снесён вместе с контуром (переподписывает брокер PM).
+    Осталась ровно одна обязанность close(): профиль не считается активным на
+    закрытом соединении, иначе default_tail_level/manifest отвечают про мёртвую сессию.
+    """
+
+    def test_close_marks_watch_inactive(self) -> None:
         d = BackendDriver()
         d._sock = _FakeSock()  # type: ignore[assignment]
         d._running = True
-        # Поднять watch-контур БЕЗ сети (как реконнект после replay durable-намерений).
-        d.resume_watch({"active": True, "patterns": ["processes.**"], "processes": []})
-        thread = d._watch._resub_thread
-        assert thread is not None and thread.is_alive()
+        d.resume_watch({"active": True, "patterns": ["processes.**"]})
+        assert d._watch._watch_active is True
 
         d.close()
 
-        thread.join(timeout=2.0)
-        assert not thread.is_alive(), "applier-поток backend-ctl-resub не погашен close()"
-        assert d._watch._resub_thread is None
+        assert d._watch._watch_active is False
         # Идемпотентность: повторный close не бросает.
         d.close()
 
-    def test_reconnect_cycles_do_not_leak_resub_threads(self) -> None:
-        # N реконнект-циклов (watch активен) → ни одного живого applier-потока после.
+    def test_no_applier_threads_exist_at_all(self) -> None:
+        """Контур не воскрешён: после N реконнект-циклов нет НИ ОДНОГО потока resub.
+
+        Проверяется не «поток погашен», а «потока не заводится»: вернуть applier
+        обратно — значит вернуть и дедлок-путь, вокруг которого он строился.
+        """
         d = BackendDriver()
         for _ in range(5):
             d._sock = _FakeSock()  # type: ignore[assignment]
             d._running = True
-            d.resume_watch({"active": True, "patterns": ["p.**"], "processes": []})
+            d.resume_watch({"active": True, "patterns": ["p.**"]})
             d.close()
-        alive = [t for t in threading.enumerate() if t.name == "backend-ctl-resub" and t.is_alive()]
-        assert alive == [], f"живые applier-потоки после реконнектов: {alive}"
+        alive = [t for t in threading.enumerate() if t.name == "backend-ctl-resub"]
+        assert alive == [], f"контур автоподписки воскрешён: {alive}"
 
 
 # --- Task 0.3: durable-подписки (реестр намерений + replay) ---
@@ -826,16 +831,30 @@ class TestWatchLikeGui:
         monkeypatch.setattr(d, "send_command", fake_send)
         return d, calls
 
-    def test_subscribes_all_patterns_and_all_processes(self, monkeypatch) -> None:
+    def test_subscribes_all_patterns_and_makes_one_broker_call(self, monkeypatch) -> None:
+        """5.11.h: хвост включается ОДНИМ вызовом брокеру, а не циклом по процессам.
+
+        Пара к прежнему поведению: было N вызовов ``observability.tail.subscribe``
+        (по одному на процесс, каждый — round-trip), стало ровно один
+        ``observability.tail.subscribe_all`` в адрес PM.
+        """
         d, calls = self._driver(monkeypatch)
         try:
             summary = d.watch_like_gui()
             state_subs = [args["pattern"] for t, c, args in calls if c == "state.subscribe"]
             assert set(state_subs) == set(GUI_DEFAULT_PATTERNS)
             assert len(state_subs) == len(GUI_DEFAULT_PATTERNS)
-            obs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
-            assert set(obs) == {"gui", "preprocessor", "camera_0"}
+
+            broker_calls = [(t, args) for t, c, args in calls if c == "observability.tail.subscribe_all"]
+            assert len(broker_calls) == 1, f"ожидался ОДИН вызов брокера, было: {broker_calls}"
+            assert broker_calls[0][0] == "ProcessManager"
+            assert broker_calls[0][1]["subscriber"] == d._subscriber
+
+            per_process = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
+            assert per_process == [], f"цикл подписок по процессам должен исчезнуть: {per_process}"
+
             assert summary["success"] is True
+            # Список процессов остаётся СПРАВКОЙ в сводке (кого накрыло сейчас).
             assert set(summary["processes"]) == {"gui", "preprocessor", "camera_0"}
             assert summary["tail_level"] == "WARNING"
         finally:
@@ -850,74 +869,51 @@ class TestWatchLikeGui:
         finally:
             d.unwatch()
 
-    def test_recovered_event_resubscribes_exactly_that_process(self, monkeypatch) -> None:
+    def test_driver_does_not_resubscribe_on_its_own(self, monkeypatch) -> None:
+        """5.11.h: переподписка — не забота драйвера. Ни одна дельта её не вызывает.
+
+        Прежде драйвер сам ловил ``supervisor.event == "recovered"``, снимал дедуп
+        и переподписывался через applier-поток. Триггер не покрывал ручной рестарт
+        и switch (там ``recovered`` не публикуется), поэтому драйвер молча оставался
+        без хвоста от новых инкарнаций. Теперь это делает брокер по шву инкарнации,
+        а драйвер обязан НЕ делать ничего — иначе появится вторая, неполная копия
+        механизма рядом с полной.
+        """
         d, calls = self._driver(monkeypatch)
         try:
             d.watch_like_gui()
             calls.clear()
-            # Синтетическое supervisor-recovered для camera_0 (новая инкарнация).
-            recovered = {
-                "command": "state.changed",
-                "data": {
-                    "deltas": [
-                        {"path": "processes.camera_0.supervisor.event", "new_value": "recovered", "old_value": "x"}
-                    ]
-                },
-            }
-            d.dispatch_raw(_line(recovered))
-            d._watch._resub_queue.join()  # дождаться применения намерения applier-потоком
-            resubs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
-            assert resubs == ["camera_0"], "переподписка ровно затронутого процесса, не других"
+            for delta in (
+                {"path": "processes.camera_0.supervisor.event", "new_value": "recovered", "old_value": "x"},
+                {"path": "processes.camera_0.status", "new_value": "running"},
+                {"path": "processes.detector.status", "new_value": "running"},  # новый процесс
+            ):
+                d.dispatch_raw(_line({"command": "state.changed", "data": {"deltas": [delta]}}))
+            time.sleep(0.2)  # дать бы применителю сработать — его не должно быть
+            assert calls == [], f"драйвер сам полез переподписываться: {calls}"
         finally:
             d.unwatch()
 
-    def test_non_recovered_delta_does_not_resubscribe_known_process(self, monkeypatch) -> None:
-        d, calls = self._driver(monkeypatch)
-        try:
-            d.watch_like_gui()
-            calls.clear()
-            # Обычная дельта уже подписанного процесса → без переподписки.
-            noise = {
-                "command": "state.changed",
-                "data": {"deltas": [{"path": "processes.camera_0.status", "new_value": "running"}]},
-            }
-            d.dispatch_raw(_line(noise))
-            d._watch._resub_queue.join()
-            assert not any(c == "observability.tail.subscribe" for _, c, _ in calls)
-        finally:
-            d.unwatch()
+    def test_unwatch_sends_one_unsubscribe_all(self, monkeypatch) -> None:
+        """Снятие — тоже одно намерение, а не цикл по запомненным именам.
 
-    def test_new_process_delta_subscribes_first_time(self, monkeypatch) -> None:
-        d, calls = self._driver(monkeypatch)
-        try:
-            d.watch_like_gui()
-            calls.clear()
-            # Появился НЕ виденный ранее процесс → первичная подписка (паритет активатора).
-            appeared = {
-                "command": "state.changed",
-                "data": {"deltas": [{"path": "processes.detector.status", "new_value": "running"}]},
-            }
-            d.dispatch_raw(_line(appeared))
-            d._watch._resub_queue.join()
-            resubs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
-            assert resubs == ["detector"]
-        finally:
-            d.unwatch()
-
-    def test_unwatch_untails_all_and_stops_thread(self, monkeypatch) -> None:
+        Список имён к моменту unwatch мог разойтись с реальностью (switch пересоздал
+        процессы), поэтому брокер снимает по НАМЕРЕНИЮ, а не по снимку.
+        """
         d, calls = self._driver(monkeypatch)
         d.watch_like_gui()
-        thread = d._watch._resub_thread
-        assert thread is not None and thread.is_alive()
         calls.clear()
+
         summary = d.unwatch()
-        untails = {t for t, c, _ in calls if c == "observability.tail.unsubscribe"}
-        assert untails == {"gui", "preprocessor", "camera_0"}
+
+        unsub = [(t, args) for t, c, args in calls if c == "observability.tail.unsubscribe_all"]
+        assert len(unsub) == 1 and unsub[0][0] == "ProcessManager"
+        assert unsub[0][1]["subscriber"] == d._subscriber
+        assert not any(c == "observability.tail.unsubscribe" for _, c, _ in calls), "цикл untail должен исчезнуть"
         assert summary["was_active"] is True
-        thread.join(timeout=2.0)
-        assert not thread.is_alive(), "applier-поток должен остановиться по sentinel"
         # Durable-намерения watch-паттернов сняты (реконнект их не воскресит).
         assert not any(i["command"] == "state.subscribe" for i in d.export_subscriptions())
+        assert not any(i["command"].startswith("observability.tail") for i in d.export_subscriptions())
 
     def test_unwatch_removes_custom_watch_patterns(self, monkeypatch) -> None:
         """unwatch снимает durable-намерения ИМЕННО тех паттернов, что включал
@@ -937,99 +933,50 @@ class TestWatchLikeGui:
             d.unwatch()
 
     def test_reentrant_watch_restarts_cleanly(self, monkeypatch) -> None:
-        d, _ = self._driver(monkeypatch)
+        """Повторный watch = снятие + свежий старт: ровно одно живое намерение."""
+        d, calls = self._driver(monkeypatch)
         try:
             d.watch_like_gui()
-            first = d._watch._resub_thread
+            calls.clear()
             d.watch_like_gui()  # повторный вызов → unwatch + свежий старт
-            assert d._watch._resub_thread is not first
+            assert [c for _, c, _ in calls].count("observability.tail.unsubscribe_all") == 1
+            assert [c for _, c, _ in calls].count("observability.tail.subscribe_all") == 1
             assert d._watch._watch_active is True
+            broker_intents = [i for i in d.export_subscriptions() if i["command"] == "observability.tail.subscribe_all"]
+            assert len(broker_intents) == 1, f"дубль намерения в durable-реестре: {broker_intents}"
         finally:
             d.unwatch()
 
 
-class TestWatchStartupWindow:
-    """F4: слушатель регистрируется ДО первичных подписок — recovered не теряется."""
+class TestNoSelfResubscriptionContour:
+    """5.11.h: контура автоподписки у драйвера нет — и это проверяется, а не подразумевается.
 
-    def test_recovered_during_startup_subscriptions_is_not_lost(self, monkeypatch) -> None:
-        # Регресс F4: раньше listener вешался ПОСЛЕДНИМ (после N×obs_tail до 5с), и
-        # recovered, прилетевший в это окно, терялся → процесс оставался без хвоста.
+    Вместе с контуром ушли два его собственных дефекта-класса: окно F4 (слушатель
+    вешался после N×obs_tail, и ``recovered`` в этом окне терялся) и гонка F3
+    (unwatch во время in-flight resub → воскресший форвардер). Оба существовали
+    только потому, что переподписку делал тот, у кого нет сигнала о новой
+    инкарнации. Тесты на них сняты вместе с механизмом; вместо них — сторож, что
+    механизм не вернулся.
+    """
+
+    def test_no_intent_queue_and_no_listener_state(self) -> None:
         d = BackendDriver()
-        calls: List[tuple] = []
-        injected = {"done": False}
+        for attr in ("_resub_queue", "_resub_thread", "_watch_subscribed", "_watch_listener"):
+            assert not hasattr(d._watch, attr), f"поле снесённого контура вернулось: {attr}"
 
-        def fake_send(target, command, args=None, *, timeout=None):
-            calls.append((target, command, args))
-            if command == "state.get_subtree":
-                return {"success": True, "result": {"subtree": {p: {} for p in ("gui", "preprocessor")}}}
-            # Во время СТАРТОВОЙ obs-подписки первого процесса впрыснуть recovered для
-            # процесса, которого нет в топологии — поймает только уже-активный listener.
-            if command == "observability.tail.subscribe" and target == "gui" and not injected["done"]:
-                injected["done"] = True
-                recovered = {
-                    "command": "state.changed",
-                    "data": {"deltas": [{"path": "processes.latecomer.supervisor.event", "new_value": "recovered"}]},
-                }
-                d.dispatch_raw(_line(recovered))
-            return {"success": True}
+    def test_watch_state_is_only_flags(self) -> None:
+        """У профиля осталось состояние-объявление, а не машина.
 
-        monkeypatch.setattr(d, "send_command", fake_send)
-        try:
-            d.watch_like_gui()
-            d._watch._resub_queue.join()  # дождаться применения намерения applier-потоком
-            obs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
-            assert "latecomer" in obs, "recovered в стартовом окне подхвачен (listener активен ДО подписок)"
-        finally:
-            d.unwatch()
-
-
-class TestWatchUnwatchRace:
-    """F3: unwatch во время медленного in-flight resub → нет воскресших форвардеров/намерений."""
-
-    def test_inflight_resub_self_heals_after_unwatch(self, monkeypatch) -> None:
+        Если здесь снова появится набор имён — значит вернулась и обязанность их
+        поддерживать в актуальности, то есть вторая копия работы брокера.
+        """
         d = BackendDriver()
-        calls: List[tuple] = []
-        release = threading.Event()
-        block = {"on": False}
-        entered = threading.Event()
-
-        def fake_send(target, command, args=None, *, timeout=None):
-            calls.append((target, command, args))
-            if command == "state.get_subtree":
-                return {"success": True, "result": {"subtree": {p: {} for p in ("gui", "camera_0")}}}
-            if command == "observability.tail.subscribe" and block["on"]:
-                entered.set()  # applier вошёл в in-flight resub
-                release.wait(timeout=5)  # имитируем долгий request() (до 5с)
-            return {"success": True}
-
-        monkeypatch.setattr(d, "send_command", fake_send)
-        d.watch_like_gui()
-        # После стартовой подписки camera_0 durable-намерение обязано существовать.
-        assert any(
-            i["command"] == "observability.tail.subscribe" and i["target"] == "camera_0"
-            for i in d.export_subscriptions()
-        )
-        block["on"] = True
-        # recovered → applier войдёт в observability_tail(camera_0) и заблокируется.
-        recovered = {
-            "command": "state.changed",
-            "data": {"deltas": [{"path": "processes.camera_0.supervisor.event", "new_value": "recovered"}]},
+        d.resume_watch({"active": True, "patterns": ["processes.**"], "tail_level": "ERROR"})
+        assert d.watch_manifest() == {
+            "active": True,
+            "patterns": ["processes.**"],
+            "tail_level": "ERROR",
         }
-        d.dispatch_raw(_line(recovered))
-        assert entered.wait(timeout=3), "applier должен войти в in-flight resub"
-
-        # unwatch в фоне (join заблокируется, пока applier висит в resub).
-        done = threading.Event()
-        threading.Thread(target=lambda: (d.unwatch(), done.set()), daemon=True).start()
-        time.sleep(0.05)  # дать unwatch снять _watch_active + начать join
-        release.set()  # отпустить in-flight resub — он завершится ПОСЛЕ untail-цикла
-        assert done.wait(timeout=5), "unwatch должен завершиться"
-        d._watch._resub_queue.join()  # applier само-исцелился и добрал sentinel
-
-        # Регресс F3: форвардер/намерение НЕ воскресли после teardown.
-        assert not any(i["command"] == "observability.tail.subscribe" for i in d.export_subscriptions()), (
-            "in-flight resub само-откатился (untail), durable-намерение не воскресло"
-        )
 
 
 class TestWatchDurability:
@@ -1057,17 +1004,22 @@ class TestWatchDurability:
             assert m["active"] is True
             assert set(m["patterns"]) == set(GUI_DEFAULT_PATTERNS)
             assert m["tail_level"] == "ERROR"
-            assert set(m["processes"]) == {"gui", "preprocessor", "camera_0"}
+            # 5.11.h: списка процессов в манифесте больше нет — подписка держится
+            # ОДНИМ намерением у брокера, а имена к реконнекту устаревают.
+            assert "processes" not in m
         finally:
             d.unwatch()
 
-    def test_resume_restores_loop_without_resubscribing(self, monkeypatch) -> None:
-        # Регресс F2: реконнект replay'ит серверные подписки, resume поднимает КОНТУР
-        # (listener + applier) БЕЗ повторных подписок — auto-resub оживает.
+    def test_resume_restores_state_without_resubscribing(self, monkeypatch) -> None:
+        """Реконнект: replay вернул серверные подписки, resume поднимает клиентское состояние.
+
+        Повторных подписок resume не шлёт — иначе на каждый реконнект приезжал бы
+        второй экземпляр намерения.
+        """
         d, calls = self._driver(monkeypatch)
         d.watch_like_gui()
         manifest = d.watch_manifest()
-        d.unwatch()  # эмулируем потерю контура на реконнекте
+        d.unwatch()  # эмулируем потерю профиля на реконнекте
         assert d._watch._watch_active is False
         calls.clear()
 
@@ -1075,17 +1027,11 @@ class TestWatchDurability:
         try:
             assert res["resumed"] is True
             assert d._watch._watch_active is True
-            assert d._watch._resub_thread is not None and d._watch._resub_thread.is_alive()
-            # resume НЕ шлёт повторных подписок (их вернул replay durable-намерений).
-            assert not any(c in ("state.subscribe", "observability.tail.subscribe") for _, c, _ in calls)
-            # Контур жив: recovered → переподписка (unwatch более НЕ no-op).
-            recovered = {
-                "command": "state.changed",
-                "data": {"deltas": [{"path": "processes.camera_0.supervisor.event", "new_value": "recovered"}]},
-            }
-            d.dispatch_raw(_line(recovered))
-            d._watch._resub_queue.join()
-            assert any(c == "observability.tail.subscribe" and t == "camera_0" for t, c, _ in calls)
+            assert calls == [], f"resume не должен слать команд: {calls}"
+            # Профиль снова управляем: unwatch — не no-op.
+            calls.clear()
+            d.unwatch()
+            assert any(c == "observability.tail.unsubscribe_all" for _, c, _ in calls)
         finally:
             d.unwatch()
 
@@ -1129,9 +1075,16 @@ class TestObservabilityContract:
 
 
 class TestWatchSelfSkip:
-    """F7: watch_like_gui не тейлит собственный процесс driver'а (убирает шум сводки)."""
+    """F7 после 5.11.h: фильтр «не тейлить себя» у драйвера СНЯТ — инвариант живёт у процесса.
 
-    def test_own_process_excluded_from_obs_tail(self, monkeypatch) -> None:
+    Раньше каждый потребитель пропускал себя сам: GUI — своим кодом, драйвер —
+    своим, а третий забыл бы. Task 5.11.c перенесла отказ в
+    ``subscribe_observability_tail`` самого процесса, где он громкий и с причиной
+    (петля). Здесь проверяется, что драйвер НЕ строит второй фильтр: он шлёт одно
+    намерение, а решение «себе не форвардить» принимает тот, кто это знает.
+    """
+
+    def test_driver_does_not_filter_itself_anymore(self, monkeypatch) -> None:
         d = BackendDriver()  # self._sender == "backend_ctl"
         calls: List[tuple] = []
 
@@ -1144,11 +1097,12 @@ class TestWatchSelfSkip:
 
         monkeypatch.setattr(d, "send_command", fake_send)
         try:
-            summary = d.watch_like_gui()
-            obs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
-            assert "backend_ctl" not in obs, "собственный процесс driver'а не тейлится"
-            assert "gui" in obs and "camera_0" in obs  # gui driver тейлить МОЖЕТ (оставлен)
-            assert "backend_ctl" not in summary["observability"]
+            d.watch_like_gui()
+            # Ни одной адресной подписки: перечисления топологии для подписки нет,
+            # значит нет и места, где «себя» надо было бы вычёркивать.
+            assert not any(c == "observability.tail.subscribe" for _, c, _ in calls)
+            broker = [args for _, c, args in calls if c == "observability.tail.subscribe_all"]
+            assert len(broker) == 1 and broker[0]["subscriber"] == d._subscriber
         finally:
             d.unwatch()
 

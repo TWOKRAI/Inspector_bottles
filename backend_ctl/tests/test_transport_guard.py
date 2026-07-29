@@ -185,11 +185,16 @@ class TestCatchesFromReaderThread:
             elapsed = result["elapsed"]
             assert elapsed < 0.5, f"guard не мгновенный: {elapsed:.3f}s (default_timeout=2.0s)"
 
-            # Текст называет паттерн (очередь + applier-поток), а не только запрет,
-            # и ссылается на живой образец WatchController.
+            # Текст называет ПАТТЕРН выхода (очередь + applier-поток), а не только
+            # запрет: сообщение «так нельзя» без «а как можно» стоит следующему
+            # столько же времени, сколько стоило первому.
+            #
+            # 5.11.h: ссылки на WatchController как на ЖИВОЙ образец больше нет —
+            # контур там снесён, переподписку делает брокер PM. Образец остался
+            # историческим, и текст это говорит прямо; сторожить имя класса значило
+            # бы требовать, чтобы код вечно содержал пример ради теста.
             assert response["error"] == _READER_THREAD_GUARD_ERROR
             error_text = response["error"].lower()
-            assert "watchcontroller" in error_text
             assert "watch.py" in error_text
             assert "applier" in error_text
             assert "queue" in error_text or "очеред" in error_text

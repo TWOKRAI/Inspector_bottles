@@ -1370,6 +1370,54 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         self._subscriptions.remove("observability.tail.subscribe", process, identity)
         return res
 
+    def observability_tail_all(
+        self,
+        *,
+        subscriber: Optional[str] = None,
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Подписаться на хвост наблюдаемости ВСЕХ процессов ОДНИМ вызовом (Task 5.11).
+
+        Намерение «хочу всё» записывается у оркестратора; он же разворачивает его в
+        ``observability.tail.subscribe`` на процессах и **сам переподписывает** свежие
+        инкарнации — у него единственного есть сигнал «поднялась новая». Записи при
+        этом идут адресным пушем НАПРЯМУЮ сюда: PM брокер, а не транзит.
+
+        Заменяет цикл ``_discover_processes`` → N × :meth:`observability_tail`, у
+        которого было два врождённых изъяна: N последовательных round-trip'ов на
+        старте и собственный контур переподписки, промахивавшийся мимо ручного
+        рестарта и switch (его триггером было supervisor-событие ``recovered``).
+
+        Durable-намерение регистрируется ОДНО (на PM), поэтому реконнект восстанавливает
+        подписку одним replay'ем вместо списка имён, который к тому моменту устаревал.
+
+        Returns:
+            Ответ брокера: ``success``, ``subscriber``, охват разворачивания.
+        """
+        args = {"subscriber": subscriber or self._subscriber}
+        res = _leaf_result(self.send_command(pm_name, "observability.tail.subscribe_all", args, timeout=timeout))
+        self._register_subscription("observability.tail.subscribe_all", pm_name, args, res)
+        return res
+
+    def observability_untail_all(
+        self,
+        *,
+        subscriber: Optional[str] = None,
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Снять намерение «хочу всё» и все развёрнутые из него хвосты (зеркало :meth:`observability_tail_all`).
+
+        Снимает намерение у брокера — тот сам рассылает ``unsubscribe`` процессам.
+        Durable-намерение вычищается здесь же, иначе реконнект воскресил бы снятую
+        подписку (ровно тот «полу-durable» класс, который ловили в F2).
+        """
+        identity = {"subscriber": subscriber or self._subscriber}
+        res = _leaf_result(self.send_command(pm_name, "observability.tail.unsubscribe_all", identity, timeout=timeout))
+        self._subscriptions.remove("observability.tail.subscribe_all", pm_name, identity)
+        return res
+
     def observability_records(
         self,
         events: Optional[List[Dict[str, Any]]] = None,
@@ -1572,8 +1620,3 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
     def resume_watch(self, manifest: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Восстановить watch-контур из манифеста после реконнекта (делегат)."""
         return self._watch.resume(manifest)
-
-    @property
-    def watch_resub_errors(self) -> int:
-        """Сколько авто-переподписок хвоста завершились ошибкой (диагностика, делегат)."""
-        return self._watch.resub_errors

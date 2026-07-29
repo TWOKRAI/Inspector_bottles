@@ -89,8 +89,7 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
         ``{"success": True, "processes": {name: {ok, status, workers, router,
         queues, memory_ok, hz, observability_losses, missing?}},
         "telemetry": {"fps": {path: value}},
-        "driver": {late_replies, event_errors, watch_resub_errors,
-        events_evicted}, "anomalies": [...], "anomaly_count": N}``. Пустая
+        "driver": {late_replies, event_errors, events_evicted}, "anomalies": [...], "anomaly_count": N}``. Пустая
         топология (бэкенд не прогрет) → ``processes == {}`` + hint.
 
         Счётчики в ``router`` могут быть ``None`` — «показания нет» (строгий край
@@ -298,7 +297,6 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
     totals = {
         "late_replies": drv.late_replies,
         "event_errors": drv.event_errors,
-        "watch_resub_errors": drv.watch_resub_errors,
     }
     seen = getattr(drv, "_overview_counters_seen", None) or {}
     deltas = {key: value - seen.get(key, 0) for key, value in totals.items()}
@@ -324,13 +322,6 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             {
                 "kind": "event_callback_errors",
                 "detail": f"event_errors +{deltas['event_errors']} (всего {totals['event_errors']})",
-            }
-        )
-    if deltas["watch_resub_errors"] > 0:
-        anomalies.append(
-            {
-                "kind": "watch_resub_errors",
-                "detail": f"watch_resub_errors +{deltas['watch_resub_errors']} (всего {totals['watch_resub_errors']})",
             }
         )
     for plane, evicted in events_evicted.items():
