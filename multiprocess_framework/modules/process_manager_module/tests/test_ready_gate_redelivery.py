@@ -159,13 +159,17 @@ class TestRedeliveryPolicy:
         pm, sent = _pm_with_children("camera_0")
         pm._process_registry._ready_events["camera_0"] = threading.Event()  # НЕ взводим
         pm.update_config("child_command_ready_timeout_s", 0)
-        before = threading.active_count()
+        # Считаем потоки ГЕЙТА по префиксу имени, а не общий active_count(): чужой
+        # поток (ожидатель соседнего теста, таймер) сдвигал бы счётчик и ронял тест
+        # на невиновном (замечание ревью Fable, находка 5).
+        before = {t for t in threading.enumerate() if t.name.startswith("ready-gate-")}
 
         pm._broadcast_command("routing.refresh", {"epoch": 7})
 
         time.sleep(0.3)
         assert _addressed(sent) == [], f"досылка при выключенном гейте: {sent}"
-        assert threading.active_count() == before, "заведён поток ожидания при выключенном гейте"
+        after = {t for t in threading.enumerate() if t.name.startswith("ready-gate-")}
+        assert after - before == set(), "заведён поток ожидания при выключенном гейте"
 
     def test_deadline_expiry_redelivers_anyway_and_says_so(self):
         """Не объявился за дедлайн → досылаем ВСЁ РАВНО, но громко.
@@ -309,3 +313,133 @@ class TestObservabilityReplayStillUsesTheSameGate:
         event.set()
 
         assert _wait_for(lambda: len(_addressed(sent)) >= 1), f"раздача не пришла после готовности: {sent}"
+
+
+class TestRedeliveryDoesNotDeliverThePast:
+    """Ревью Fable, находка 1: досылка не смеет привезти конверт ПОЗЖЕ свежего.
+
+    Репро ревьюера: switch A→B при не-готовом ребёнке планирует досылку конверта B
+    на ``ready_event`` инкарнации-1. Switch B→C пересоздаёт ребёнка — в реестре
+    НОВЫЙ event, старый умирает невзведённым. Свежий конверт C доставляется, а поток
+    досылки-B ждёт на мёртвом объекте весь дедлайн и «действует вслепую» — порядок
+    доставки получается ``['C', 'B']``. У ``routing.refresh`` есть страж по эпохе,
+    у ``config.reload`` и ``telemetry.reconfigure`` — нет, поэтому ребёнок
+    пересобирает слой ПОКИНУТОГО рецепта.
+
+    Идемпотентность от этого не спасает и никогда не спасала: дубль безвреден,
+    стейл-после-свежего — нет.
+    """
+
+    def test_stale_envelope_is_dropped_when_a_newer_broadcast_follows(self):
+        pm, sent = _pm_with_children("camera_0")
+        first_event = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = first_event
+        # Дедлайн КОРОТКИЙ и ждём мы ДОЛЬШЕ него. Первая версия теста ставила 3с и
+        # проверяла через 1с — устаревшая досылка просто не успевала приехать, и
+        # тест был зелёным даже без защиты. Поймано собственной слом-инъекцией RF1:
+        # тест, переживший свой слом, не существует.
+        pm.update_config("child_command_ready_timeout_s", 0.5)
+
+        pm._broadcast_command("config.reload", {"recipe": "B"})
+
+        # Пересоздание ребёнка: СВЕЖИЙ объект события, старый не взведут никогда —
+        # ожидатель конверта B обречён досидеть до дедлайна и «действовать вслепую».
+        second_event = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = second_event
+        pm._broadcast_command("config.reload", {"recipe": "C"})
+        second_event.set()
+
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) >= 1), f"свежая досылка не пришла: {sent}"
+        time.sleep(1.5)  # ЗАВЕДОМО дольше дедлайна: устаревшая досылка приехала бы
+
+        delivered = [row["data"]["recipe"] for row in _addressed(sent, "config.reload")]
+        assert delivered == ["C"], f"устаревший конверт доставлен: порядок {delivered}"
+
+    def test_stale_waiter_stops_early_instead_of_burning_the_deadline(self):
+        """Снятый по поколению поток уходит СРАЗУ, а не досиживает дедлайн.
+
+        Иначе каждый перекрытый switch оставляет по потоку на команду на ребёнка,
+        и все они висят на мёртвых событиях до истечения дедлайна.
+        """
+        pm, _sent = _pm_with_children("camera_0")
+        pm._process_registry._ready_events["camera_0"] = threading.Event()
+        pm.update_config("child_command_ready_timeout_s", 30.0)
+
+        # Считаем ТОЛЬКО потоки этого вызова: в suite живут ожидатели соседних
+        # тестов с длинными дедлайнами, и `enumerate()` целиком дал бы чужой поток
+        # (тест бы падал на невиновном — класс «глобальный патч часов = флейк»).
+        before = set(threading.enumerate())
+        pm._broadcast_command("config.reload", {"recipe": "B"})
+        gate_threads = [t for t in set(threading.enumerate()) - before if t.name.startswith("ready-gate-")]
+        assert gate_threads, "поток ожидания не заведён — тест не про то"
+
+        pm._process_registry._ready_events["camera_0"] = threading.Event()
+        pm._broadcast_command("config.reload", {"recipe": "C"})
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if not gate_threads[0].is_alive():
+                break
+            time.sleep(0.05)
+        assert not gate_threads[0].is_alive(), "устаревший ожидатель досиживает дедлайн (30с) вместо снятия"
+
+    def test_generations_are_per_command(self):
+        """Свежий refresh не отменяет досылку ещё актуального reload'а."""
+        pm, sent = _pm_with_children("camera_0")
+        event = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = event
+        pm.update_config("child_command_ready_timeout_s", 5.0)
+
+        pm._broadcast_command("config.reload", {"recipe": "B"})
+        pm._broadcast_command("routing.refresh", {"epoch": 9})
+        pm._broadcast_command("routing.refresh", {"epoch": 10})
+        event.set()
+
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) == 1), f"reload снят чужим поколением: {sent}"
+        refresh = [row["data"]["epoch"] for row in _addressed(sent, "routing.refresh")]
+        assert refresh == [10], f"досылка refresh должна быть только последней: {refresh}"
+
+
+class TestAddressedRestartPathIsGated:
+    """Ревью Fable, находка 2: адресные отправки restart-потока шли МИМО гейта.
+
+    Это тот самый процесс, которого только что перезапустили, — то есть ровно
+    сценарий из Why задачи R4. Компенсирующей рассылки за адресной telemetry-дельтой
+    нет: потеря тихая и постоянная, ребёнок остаётся на boot-конфиге.
+    """
+
+    def test_addressed_telemetry_replay_waits_for_readiness(self):
+        pm, sent = _pm_with_children("camera_0")
+        event = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = event
+        pm.update_config("child_command_ready_timeout_s", 10.0)
+        pm._telemetry_runtime_delta = {"publish": {"logs": False}, "mode": "replace"}
+
+        pm._replay_telemetry_runtime_delta("process.restart", target="camera_0")
+
+        assert _addressed(sent, "telemetry.reconfigure") == [], "адресная дельта ушла не-готовому немедленно"
+        event.set()
+        assert _wait_for(lambda: len(_addressed(sent, "telemetry.reconfigure")) == 1), f"дельта не пришла: {sent}"
+
+    def test_wire_reissue_waits_and_marks_active_only_after_send(self):
+        """Провод не объявляется активным по несостоявшемуся применению."""
+        pm, sent = _pm_with_children("camera_0")
+        event = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = event
+        pm.update_config("child_command_ready_timeout_s", 10.0)
+        pm._active_wires = {
+            "cam->proc": {
+                "source_process": "camera_0",
+                "target_process": "proc",
+                "status": "broken",
+                "shm_config": {"shm_name": "frames", "owner_process": "camera_0", "buffer_slots": 4},
+            }
+        }
+        pm.send_message = lambda target, msg: sent.append({"kind": "addressed", "target": target, **msg})
+
+        reissued = pm._reissue_wires_for("camera_0")
+
+        assert reissued == 0, "отложенный провод не должен считаться переигранным"
+        assert pm._active_wires["cam->proc"]["status"] == "broken", "статус active по неотправленной команде"
+        event.set()
+        assert _wait_for(lambda: pm._active_wires["cam->proc"]["status"] == "active"), "провод не переигран"

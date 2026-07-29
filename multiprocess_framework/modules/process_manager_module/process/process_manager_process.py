@@ -69,6 +69,10 @@ class ProcessManagerProcess(ProcessModule):
         self._routing_epoch: int = 0
         self._incarnations: dict[str, int] = {}
         self._routing_lock = threading.Lock()
+        # Поколения рассылок (R4/ревью-1): «этот конверт ещё последний?». Здесь же,
+        # а не только лениво, чтобы первое касание было заведомо однопоточным.
+        self.__dict__["_broadcast_generations_map"] = {}
+        self.__dict__["_broadcast_generations_lock_obj"] = threading.Lock()
         # Ф2 Task 2.1 (правда supervision): замена инстанса видима БЕЗ участия
         # incarnation. При reuse-очередей (дефолт) incarnation осознанно не растёт
         # (DECISIONS PMM:311-333), поэтому маркер «до/после рестарта» — пара
@@ -252,6 +256,12 @@ class ProcessManagerProcess(ProcessModule):
                 config=self.get_config("backend_ctl"),
                 log_info=self._log_info,
                 log_error=self._log_error,
+                # 5.11-R1: внешний подписчик адресуется как "<sender>.<session>" и
+                # умирает вместе с сокетом. Закрытие соединения — единственный сигнал
+                # об этом ПО ФАКТУ: имени старой сессии после реконнекта не знает уже
+                # никто, а шов инкарнации иначе воскрешал бы мёртвую подписку на
+                # каждом свежем процессе.
+                on_session_closed=self._forget_observability_session,
             )
 
             # Ф3.2: boot-барьер — дождаться self-reported ready стартованных детей
@@ -986,14 +996,42 @@ class ProcessManagerProcess(ProcessModule):
                     "role": role,
                 },
             }
-            try:
-                self.send_message(process_name, configure_cmd)
-                info["status"] = "active"
+            # Ревью Fable, находка 2: отправка шла НЕМЕДЛЕННО, сразу после барьера
+            # 0.5с, которого реальный инстанс не пробегает — конверт попадал в окно
+            # «message-loop крутится, команды не зарегистрированы» и выбрасывался.
+            # Статус при этом ставился `active` по факту доставки-в-очередь, то есть
+            # провод объявлялся живым по несостоявшемуся применению.
+            outcome = {"ok": False}
+
+            def _do(k=wire_key, i=info, r=role, cmd=configure_cmd, out=outcome):
+                out["ok"] = self._send_wire_configure(process_name, k, i, r, cmd)
+
+            deferred = self._run_when_child_ready(
+                process_name,
+                _do,
+                label="wire-reissue",
+                deadline_s=self._late_delivery_deadline() or 15.0,
+            )
+            # Счётчик считает ПЕРЕИГРАННЫЕ, а не запланированные. Отложенный провод
+            # сюда не попадает: его исход на этот момент неизвестен, а «раздал» и
+            # «применилось» — разные утверждения. Отложенный остаётся `broken` до
+            # фактической отправки — статус честен в каждый момент времени.
+            if not deferred and outcome["ok"]:
                 reissued += 1
-                self._log_info(f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})")
-            except Exception as exc:  # noqa: BLE001 — провод остаётся broken, lifecycle не роняем
-                self._log_error(f"wire re-issue '{wire_key}' в '{process_name}' не удался: {exc}")
         return reissued
+
+    def _send_wire_configure(
+        self, process_name: str, wire_key: str, info: dict, role: str, configure_cmd: dict
+    ) -> bool:
+        """Отправить wire.configure и пометить провод активным по факту отправки."""
+        try:
+            self.send_message(process_name, configure_cmd)
+            info["status"] = "active"
+            self._log_info(f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})")
+            return True
+        except Exception as exc:  # noqa: BLE001 — провод остаётся broken, lifecycle не роняем
+            self._log_error(f"wire re-issue '{wire_key}' в '{process_name}' не удался: {exc}")
+            return False
 
     # -------------------------------------------------------------------------
     # Protected / cleanup / rollback / snapshot — общие хелперы topology
@@ -1219,7 +1257,15 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"[ready-gate] ready_event '{name}' не прочитан: {exc}")
             return None
 
-    def _run_when_child_ready(self, name: str, action, *, label: str, deadline_s: float) -> bool:
+    def _run_when_child_ready(
+        self,
+        name: str,
+        action,
+        *,
+        label: str,
+        deadline_s: float,
+        still_relevant=None,
+    ) -> bool:
         """Выполнить действие над ребёнком тогда, когда он умеет его принять.
 
         Готов (или сигнала нет) → действие прямо здесь, синхронно. Не готов →
@@ -1228,30 +1274,81 @@ class ProcessManagerProcess(ProcessModule):
         message-loop (``mp.Event``) — тот же аргумент, которым обоснованы
         барьеры Ф3.2.
 
+        Args:
+            still_relevant: опциональная проверка «действие ещё имеет смысл».
+                Зовётся перед выполнением и во время ожидания. ``False`` → действие
+                снимается. Нужна там, где событие может стать НЕДОСТИЖИМЫМ: switch
+                пересоздаёт ребёнка вместе с его ``ready_event``, и ожидающий поток
+                остаётся на мёртвом объекте — дотягивает дедлайн и доставляет
+                конверт ПОЗЖЕ свежего (ревью Fable, находка 1).
+
         Returns:
-            ``True`` — действие отложено до готовности; ``False`` — выполнено сразу.
+            ``True`` — действие отложено до готовности; ``False`` — выполнено сразу
+            (или снято как неактуальное).
         """
+        if still_relevant is not None and not still_relevant():
+            return False
         event = self._child_ready_event(name)
         if event is None or event.is_set():
             action()
             return False
         threading.Thread(
             target=self._run_child_action_after_ready,
-            args=(name, action, label, event, deadline_s),
+            args=(name, action, label, event, deadline_s, still_relevant),
             name=f"ready-gate-{label}-{name}",
             daemon=True,
         ).start()
         return True
 
-    def _run_child_action_after_ready(self, name: str, action, label: str, event, deadline_s: float) -> None:
+    #: Шаг опроса ожидания готовности. Ждём НЕ одним ``event.wait(deadline)``, а
+    #: срезами: между срезами проверяется актуальность. Без этого поток, чьё
+    #: событие умерло вместе с прежней инкарнацией, висит весь дедлайн и в конце
+    #: доставляет прошлое в настоящее.
+    _READY_GATE_POLL_S = 0.25
+
+    def _run_child_action_after_ready(
+        self,
+        name: str,
+        action,
+        label: str,
+        event,
+        deadline_s: float,
+        still_relevant=None,
+    ) -> None:
         """Дождаться готовности инкарнации и выполнить действие (daemon-поток).
 
         По истечении дедлайна действуем ВСЁ РАВНО и громко: «процесс не
         объявился» — не повод молча пропустить команду, но и не повод сделать
         вид, что всё прошло штатно.
+
+        Действие, потерявшее актуальность (``still_relevant`` → ``False``),
+        снимается — но НЕ молча: снятая команда и потерянная команда снаружи
+        выглядят одинаково, а различать их приходится именно в разборе.
         """
         try:
-            if not event.wait(deadline_s):
+            deadline = time.monotonic() + deadline_s
+            ready = False
+            while True:
+                if still_relevant is not None and not still_relevant():
+                    self._log_info(
+                        f"[ready-gate:{label}] '{name}': досылка снята — конверт устарел "
+                        "(рассылка того же типа ушла позже)"
+                    )
+                    return
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                if event.wait(min(self._READY_GATE_POLL_S, remaining)):
+                    ready = True
+                    break
+            # Перепроверка ПОСЛЕ ожидания обязательна: конверт мог устареть ровно
+            # в тот момент, когда инкарнация объявилась (свежая рассылка той же
+            # команды приходит именно тогда). Без неё поток, дождавшийся события,
+            # доставлял прошлое — поймано собственным тестом поколений.
+            if still_relevant is not None and not still_relevant():
+                self._log_info(f"[ready-gate:{label}] '{name}': досылка снята (рассылка того же типа ушла позже)")
+                return
+            if not ready:
                 self._log_warning(
                     f"[ready-gate:{label}] '{name}' не объявил готовность за {deadline_s}s — "
                     "действую вслепую (команда может не застать обработчик)"
@@ -1639,7 +1736,19 @@ class ProcessManagerProcess(ProcessModule):
             payload["telemetry_mode"] = delta["mode"]
         try:
             if target is not None:
-                reached = 1 if self._send_child_command(target, "telemetry.reconfigure", payload) else 0
+                # Ревью Fable, находка 2: адресный путь шёл МИМО гейта готовности —
+                # ровно для того процесса, которого только что перезапустили, то есть
+                # для сценария из Why задачи R4. Компенсирующей рассылки за ним нет:
+                # потеря тихая и постоянная (ребёнок остаётся на boot-конфиге).
+                deferred = self._run_when_child_ready(
+                    target,
+                    lambda t=target, p=payload: self._send_child_command(t, "telemetry.reconfigure", p),
+                    label="telemetry-replay",
+                    deadline_s=self._late_delivery_deadline() or 15.0,
+                )
+                # Охват отложенной отправки неизвестен на этот момент — честнее
+                # вернуть 0, чем выдать намерение за доставку.
+                reached = 0 if deferred else 1
             else:
                 reached = self._broadcast_command("telemetry.reconfigure", payload)
             self._log_info(f"telemetry runtime-дельта доиграна ({reason}, target={target!r}): reached={reached}")
@@ -1786,6 +1895,41 @@ class ProcessManagerProcess(ProcessModule):
         self._redeliver_to_unready_children(command, data, queue_type=queue_type)
         return reached
 
+    def _next_broadcast_generation(self, command: str) -> int:
+        """Начать новое поколение рассылки команды и вернуть его номер.
+
+        Поколение — на КОМАНДУ, не общее: ``config.reload`` и ``routing.refresh``
+        живут своими жизнями, и свежий refresh не должен отменять досылку ещё
+        актуального reload'а.
+        """
+        with self._broadcast_generations_lock:
+            nxt = self._broadcast_generations.get(command, 0) + 1
+            self._broadcast_generations[command] = nxt
+            return nxt
+
+    def _broadcast_generation(self, command: str) -> int:
+        """Текущее (последнее) поколение рассылки команды."""
+        with self._broadcast_generations_lock:
+            return self._broadcast_generations.get(command, 0)
+
+    @property
+    def _broadcast_generations(self) -> dict:
+        """Ленивый реестр поколений (та же философия, что ``_ensure_routing_state``:
+        unit-тесты строят PM с no-op ``__init__``)."""
+        gens = self.__dict__.get("_broadcast_generations_map")
+        if gens is None:
+            gens = {}
+            self.__dict__["_broadcast_generations_map"] = gens
+        return gens
+
+    @property
+    def _broadcast_generations_lock(self) -> threading.Lock:
+        lock = self.__dict__.get("_broadcast_generations_lock_obj")
+        if lock is None:
+            lock = threading.Lock()
+            self.__dict__["_broadcast_generations_lock_obj"] = lock
+        return lock
+
     def _late_delivery_deadline(self) -> float:
         """Сколько ждать готовности ребёнка перед досылкой (``child_command_ready_timeout_s``).
 
@@ -1831,6 +1975,12 @@ class ProcessManagerProcess(ProcessModule):
         registry = getattr(self, "_process_registry", None)
         if registry is None:
             return []
+        # Поколение рассылки ЭТОЙ команды. Досылка обязана нести содержимое своего
+        # конверта — но только пока он последний: конверт switch'а A→B, доставленный
+        # после конверта B→C, пересобирает у ребёнка слой ПОКИНУТОГО рецепта.
+        # Идемпотентность тут не спасает: дубль безвреден, стейл-после-свежего нет
+        # (ревью Fable, находка 1 — воспроизведено двумя switch подряд).
+        generation = self._next_broadcast_generation(command)
         late: list[str] = []
         snapshot: dict | None = None
         for proc in list(getattr(registry, "os_processes", None) or []):
@@ -1851,6 +2001,7 @@ class ProcessManagerProcess(ProcessModule):
                 lambda n=name, d=snapshot: self._log_redelivery(n, command, d, queue_type=queue_type),
                 label=f"redeliver:{command}",
                 deadline_s=deadline,
+                still_relevant=lambda g=generation: self._broadcast_generation(command) == g,
             )
         if late:
             self._log_info(
@@ -1911,6 +2062,20 @@ class ProcessManagerProcess(ProcessModule):
             )
             self._observability_broker = broker
         return broker
+
+    def _forget_observability_session(self, session_id: str) -> None:
+        """Снять намерения подписчика закрытой сессии (5.11-R1, сигнал от SocketChannel).
+
+        Зовётся из read-потока канала. Ничего блокирующего здесь делать нельзя и не
+        нужно: снятие — это правка словаря брокера под его же локом.
+        """
+        broker = getattr(self, "_observability_broker", None)
+        if broker is None:
+            return  # брокера не заводили — снимать нечего
+        try:
+            broker.forget_session(session_id)
+        except Exception as exc:  # noqa: BLE001 — сигнал не имеет права ронять канал
+            self._log_error(f"[observability] снятие намерений сессии '{session_id}' упало: {exc}")
 
     def _cmd_observability_tail_subscribe_all(self, data=None, **kwargs) -> dict:
         """Подписать адрес на хвост ВСЕХ процессов одним вызовом (Task 5.11).

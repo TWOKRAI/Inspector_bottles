@@ -25,7 +25,7 @@ import threading
 
 import pytest
 
-from backend_ctl.driver import BackendDriver
+from backend_ctl.driver import BackendDriver, _leaf_result
 from backend_ctl.harness import BackendHarness
 
 _PORT = 8786
@@ -84,3 +84,16 @@ def test_live_reconnect_cycles_leak_nothing(applier_backend) -> None:
 
     alive = _resub_threads()
     assert alive == [], f"потоки автоподписки после реконнект-циклов: {alive}"
+
+    # Имя теста обещает «leak nothing» — значит и на СЕРВЕРНОЙ стороне тоже.
+    # Замечание ревью Fable (находка 4): прежняя версия сторожила только клиентские
+    # потоки, при этом сама оставляла по мёртвому намерению на каждый цикл. Теперь
+    # разрыв соединения снимает намерение (5.11-R1), и это здесь же и проверяется.
+    probe = BackendDriver(port=_PORT)
+    probe.connect()
+    try:
+        snap = _leaf_result(probe.send_command("ProcessManager", "introspect.observability", timeout=15.0))
+        broker = snap.get("broker") or {}
+        assert broker.get("count", 0) == 0, f"мёртвые намерения после реконнект-циклов: {broker}"
+    finally:
+        probe.close()

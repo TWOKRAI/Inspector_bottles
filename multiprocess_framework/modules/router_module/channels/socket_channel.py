@@ -43,6 +43,11 @@ class SocketChannel(MessageChannel):
         log_warning/log_error: инъекция логирования (или от RouterManager при регистрации).
         session_isolation: True → адресная доставка по session (D.1, Вариант A);
             False (default) → broadcast всем подключённым (back-compat).
+        on_session_closed: колбэк(session_id) при РАЗРЫВЕ соединения этой сессии.
+            Сигнал по факту, а не по догадке: подписчик, чей адрес построен из
+            session, умирает вместе с сокетом, и держатель подписок должен узнать
+            об этом от того, кто видел разрыв. Без такого сигнала мёртвые намерения
+            копятся линейно по реконнектам (5.11-R1).
     """
 
     def __init__(
@@ -54,8 +59,10 @@ class SocketChannel(MessageChannel):
         log_warning: Optional[Callable[[str], None]] = None,
         log_error: Optional[Callable[[str], None]] = None,
         session_isolation: bool = False,
+        on_session_closed: Optional[Callable[[str], None]] = None,
     ) -> None:
         super().__init__(log_warning=log_warning, log_error=log_error)
+        self._on_session_closed = on_session_closed
         self._name = name
         self._host = host
         self._port = port
@@ -313,10 +320,16 @@ class SocketChannel(MessageChannel):
             self._log_warning(f"[SocketChannel:{self._name}] non-dict message skipped")
             return
         self._rx += 1
-        if self._session_isolation:
-            sid = msg.get("session")
-            if sid:
-                self._bind_session(str(sid), client)
+        # Привязка session→сокет ведётся ВСЕГДА, а не только при session_isolation.
+        # У неё две роли, и это разные вопросы: «кому адресовать» (изоляция, гейт
+        # остаётся в send()) и «жив ли ещё этот адрес» (время жизни подписчика).
+        # Живой прогон 5.11-R1 поймал ровно это: при выключенной изоляции маппинг
+        # был пуст, разрыв соединения не порождал сигнала, и мёртвые намерения
+        # копились именно в ШТАТНОЙ конфигурации — то есть фикс существовал только
+        # в режиме, который по умолчанию не включён.
+        sid = msg.get("session")
+        if sid:
+            self._bind_session(str(sid), client)
         if self._on_inbound is None:
             return
         try:
@@ -350,6 +363,7 @@ class SocketChannel(MessageChannel):
         смерти сокета (read-loop exit, dead-on-send, close) сходятся сюда.
         """
         drop_ids = {id(c) for c in clients}
+        closed_sessions: List[str] = []
         with self._clients_lock:
             for c in clients:
                 if c in self._clients:
@@ -357,6 +371,17 @@ class SocketChannel(MessageChannel):
             if self._sessions:
                 for sid in [s for s, sock in self._sessions.items() if id(sock) in drop_ids]:
                     del self._sessions[sid]
+                    closed_sessions.append(sid)
+        # Оповещение — ВНЕ лока: обработчик может пойти в чужие структуры (реестр
+        # подписок), и держать на этом лок соединений значило бы связать две
+        # блокировки в порядке, о котором вторая сторона не знает.
+        for sid in closed_sessions:
+            if self._on_session_closed is None:
+                continue
+            try:
+                self._on_session_closed(sid)
+            except Exception as exc:  # noqa: BLE001 — обработчик не роняет канал
+                self._log_error(f"[SocketChannel:{self._name}] on_session_closed({sid}) упал: {exc}")
         for c in clients:
             try:
                 c.close()

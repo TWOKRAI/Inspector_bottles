@@ -107,11 +107,11 @@ def br6(text: str) -> str:
     return text.replace(
         """        threading.Thread(
             target=self._run_child_action_after_ready,
-            args=(name, action, label, event, deadline_s),
+            args=(name, action, label, event, deadline_s, still_relevant),
             name=f"ready-gate-{label}-{name}",
             daemon=True,
         ).start()""",
-        "        self._run_child_action_after_ready(name, action, label, event, deadline_s)  # BR6",
+        "        self._run_child_action_after_ready(name, action, label, event, deadline_s, still_relevant)  # BR6",
     )
 
 

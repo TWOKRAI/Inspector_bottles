@@ -539,3 +539,67 @@ def test_broker_commands_are_the_per_process_ones(command):
     """Брокер не заводит третьего имени: он разворачивает намерение в те самые
     команды, которыми подписка жила до него."""
     assert command in ("observability.tail.subscribe", "observability.tail.unsubscribe")
+
+
+class TestForgetSessionOnSocketClose:
+    """5.11-R1: подписчик умирает вместе со своим соединением — и брокер узнаёт об этом.
+
+    Живой замер ревью: три цикла «connect → watch_like_gui → close» оставляли ТРИ
+    мёртвых намерения, каждое развёрнуто на 8 процессов. Хуже, чем до брокера:
+    реконнект берёт новый session, поэтому старый адрес не знает уже никто (явный
+    ``unsubscribe_all`` снять его не может в принципе), а шов инкарнации честно
+    доигрывает мёртвые намерения КАЖДОМУ свежему процессу — подписка не затухает,
+    а воскресает.
+    """
+
+    @staticmethod
+    def _pm_with_comm():
+        return TestBrokerWiredIntoPM._pm_with_comm()
+
+    def test_session_close_drops_exactly_that_subscriber(self):
+        pm, _sent = self._pm_with_comm()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.aaa111"})
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.bbb222"})
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
+
+        pm._forget_observability_session("aaa111")
+
+        names = pm._observability_broker_obj().subscriber_names()
+        assert "backend_ctl.aaa111" not in names, "намерение мёртвой сессии пережило закрытие сокета"
+        assert set(names) == {"backend_ctl.bbb222", "gui"}, f"снято лишнее: {names}"
+
+    def test_reconnect_cycles_do_not_accumulate_intents(self):
+        """N циклов «подписался → соединение закрылось» → ноль намерений.
+
+        Пара к замеру ревью: было count=N, стало 0.
+        """
+        pm, _sent = self._pm_with_comm()
+        for i in range(5):
+            sid = f"sess{i}"
+            pm._cmd_observability_tail_subscribe_all({"subscriber": f"backend_ctl.{sid}"})
+            pm._forget_observability_session(sid)
+        assert pm._observability_broker_obj().subscriber_names() == []
+
+    def test_dead_subscriber_is_not_replayed_to_fresh_incarnations(self):
+        """Главное следствие: шов инкарнации не воскрешает снятую подписку."""
+        pm, sent = self._pm_with_comm()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.dead01"})
+        pm._forget_observability_session("dead01")
+        sent.clear()
+
+        pm._mark_instance_started("camera_1")
+
+        assert sent == [], f"мёртвое намерение доиграно свежей инкарнации: {sent}"
+
+    def test_unknown_session_is_a_quiet_noop(self):
+        pm, _sent = self._pm_with_comm()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
+        pm._forget_observability_session("никогда-не-существовала")
+        assert pm._observability_broker_obj().subscriber_names() == ["gui"]
+
+    def test_signal_never_breaks_the_channel(self):
+        """Колбэк зовут из read-потока канала: упасть он права не имеет."""
+        pm, _sent = self._pm_with_comm()
+        broker = pm._observability_broker_obj()
+        broker.forget_session = lambda _sid: (_ for _ in ()).throw(RuntimeError("boom"))
+        pm._forget_observability_session("aaa")  # не должно бросить

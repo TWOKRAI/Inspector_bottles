@@ -74,6 +74,7 @@ def setup_backend_ctl_channel(
     config: Optional[dict] = None,
     log_info: Optional[Any] = None,
     log_error: Optional[Any] = None,
+    on_session_closed: Optional[Any] = None,
 ) -> Optional[SocketChannel]:
     """Поднять SocketChannel и зарегистрировать в router (если гейт открыт).
 
@@ -82,6 +83,8 @@ def setup_backend_ctl_channel(
         host: bind-адрес; None → config.host или 127.0.0.1.
         port: порт; None → env BACKEND_CTL_PORT > config.port > DEFAULT_PORT.
         env: источник переменных окружения (для тестов); None → os.environ.
+        on_session_closed: колбэк(session_id) при разрыве соединения — держателю
+            подписок нужен сигнал о смерти внешнего подписчика по факту (5.11-R1).
         config: секция `backend_ctl` из system.yaml (`enabled`/`port`/`host`).
         log_info/log_error: опц. колбэки логирования.
 
@@ -108,6 +111,7 @@ def setup_backend_ctl_channel(
         port=resolved_port,
         on_inbound=adapter.on_inbound,
         session_isolation=session_isolation,
+        on_session_closed=on_session_closed,
     )
     router_manager.register_channel(channel)
     if not channel.start():

@@ -63,11 +63,11 @@ def rg4(text: str) -> str:
     return text.replace(
         """        threading.Thread(
             target=self._run_child_action_after_ready,
-            args=(name, action, label, event, deadline_s),
+            args=(name, action, label, event, deadline_s, still_relevant),
             name=f"ready-gate-{label}-{name}",
             daemon=True,
         ).start()""",
-        "        self._run_child_action_after_ready(name, action, label, event, deadline_s)  # RG4",
+        "        self._run_child_action_after_ready(name, action, label, event, deadline_s, still_relevant)  # RG4",
     )
 
 
@@ -122,6 +122,11 @@ EXPECTED: dict[str, set[str]] = {
         "test_routing_refresh_is_redelivered",
         "test_telemetry_reconfigure_is_redelivered",
         "test_config_reload_is_redelivered",
+        # Добавлены после фиксов ревью: тесты «досылка не везёт прошлое» тоже
+        # опираются на существование досылки — без неё им нечего сторожить.
+        "test_stale_envelope_is_dropped_when_a_newer_broadcast_follows",
+        "test_stale_waiter_stops_early_instead_of_burning_the_deadline",
+        "test_generations_are_per_command",
     },
     # Прогон 1 добавил сюда тест брокера 5.11: он считает конверты, а досылка
     # всем подряд даёт лишний. Прогноз был неполон — гарантия настоящая.
@@ -145,6 +150,13 @@ EXPECTED: dict[str, set[str]] = {
         "test_routing_refresh_is_redelivered",
         "test_telemetry_reconfigure_is_redelivered",
         "test_config_reload_is_redelivered",
+        # Добавлены после фиксов ревью: все они проверяют «до готовности — тишина»,
+        # а синхронное ожидание доставляет ДО возврата из вызова.
+        "test_stale_envelope_is_dropped_when_a_newer_broadcast_follows",
+        "test_stale_waiter_stops_early_instead_of_burning_the_deadline",
+        "test_generations_are_per_command",
+        "test_addressed_telemetry_replay_waits_for_readiness",
+        "test_wire_reissue_waits_and_marks_active_only_after_send",
     },
     "RG5 по дедлайну молчать": {
         "test_deadline_expiry_redelivers_anyway_and_says_so",
