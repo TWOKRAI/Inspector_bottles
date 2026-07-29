@@ -122,6 +122,30 @@ class TestProcessModule:
 
         assert process.config["key"] == "new_value"
 
+    def test_update_config_reaches_a_live_handler(self):
+        """R6: у настоящего процесса ``config_handler`` есть — и запись шла мимо.
+
+        ``Config.update`` принимает СЛОВАРЬ одним позиционным аргументом, а
+        ``update_config`` звал его парой ``(key, value)`` → ``TypeError`` у
+        любого процесса с обработчиком. Тест выше строит ``ProcessModule`` без
+        него и проверяет только ветку ``self.config``, поэтому дефект жил.
+
+        Читаем ТЕМ ЖЕ ``get_config``, каким читают потребители: он ходит в
+        обработчик, а не в ``self.config``, и запись «в один из двух» для них
+        неотличима от отсутствия записи.
+        """
+        from multiprocess_framework.modules.process_module.configs.process_config_handler import (
+            ProcessConfigHandler,
+        )
+
+        process = ProcessModule("test_process", config={"key": "value"})
+        process.config_handler = ProcessConfigHandler("test_process", config={"key": "value"})
+
+        process.update_config("key", "new_value")
+
+        assert process.get_config("key") == "new_value"
+        assert process.config["key"] == "new_value"
+
     def test_managers_property(self):
         """Тест свойства managers."""
         process = ProcessModule("test_process")

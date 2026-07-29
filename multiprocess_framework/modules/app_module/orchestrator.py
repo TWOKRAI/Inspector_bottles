@@ -223,8 +223,8 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             process_name=self.name,
         )
 
-    def retarget_observability_recipe_watcher(self, recipe_path: str) -> None:
-        """Перевести L2-watcher на новый рецепт (switch).
+    def retarget_observability_recipe_watcher(self, recipe_path: str) -> str:
+        """Перевести L2-watcher на новый рецепт (switch). Возвращает РЕЗОЛВНУТЫЙ адрес.
 
         Без ретаргета после switch watcher продолжал бы смотреть в спутник СТАРОГО
         рецепта: правка нового файла не применялась бы, а правка старого — применялась,
@@ -243,11 +243,39 @@ class GenericProcessManagerApp(ProcessManagerProcess):
                     "адрес слоя рецепта неизвестен"
                 )
         from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            LAYER_RECIPE,
+            RECIPE_PATH_CONFIG_KEY,
             process_observability_layers,
         )
 
         self._observability_recipe_path = str(recipe_path or "")
-        self._start_recipe_observability_watcher(process_observability_layers(self))
+        # R6 (живой switch, 2026-07-29): адрес рецепта читают ТРОЕ — watcher
+        # (через атрибут выше), ассемблер на каждой сборке и `observability.persist`,
+        # и последние двое читают КОНФИГ. Прежде ретаргет писал только атрибут,
+        # поэтому после switch «сохранить» уходило в спутник покинутого рецепта, а
+        # процессы следующей замены получали его же адрес. Тест `test_hot_swap_
+        # resolves_recipe_path_per_build` это не ловил: он правил конфиг руками,
+        # то есть доказывал резолвер, а не то, что кто-то этот ключ обновляет.
+        update_config = getattr(self, "update_config", None)
+        if callable(update_config):
+            update_config(RECIPE_PATH_CONFIG_KEY, self._observability_recipe_path)
+        layers = process_observability_layers(self)
+        # Адрес слоя, каким его показывает `introspect.observability`. Ключ конфига
+        # выше чинит запись (`persist`), а это — чтение: без него оркестратор
+        # оставался ЕДИНСТВЕННЫМ, кто после switch называл покинутый рецепт
+        # источником своего слоя (живьём: дети переехали на `r6_b.yaml`, PM
+        # продолжал показывать `r6_a.yaml`). Содержимое слоя не трогаем — его
+        # оркестратору не раздаёт и boot (см. `_deliver_recipe_layer`), и выдать
+        # его здесь значило бы развести switch со стартом.
+        with layers.lock:
+            layers.replace_layer(
+                LAYER_RECIPE,
+                layers.recipe,
+                source=self._observability_recipe_path,
+                origin="switch:retarget",
+            )
+        self._start_recipe_observability_watcher(layers)
+        return self._observability_recipe_path
 
     def _active_recipe_from_manifest(self) -> str:
         """Активный рецепт из манифеста (``app.yaml: pipeline``) — существующая истина.

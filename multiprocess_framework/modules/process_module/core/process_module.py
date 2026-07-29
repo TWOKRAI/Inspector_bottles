@@ -605,9 +605,18 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         return self.config_handler.get(key, default) if self.config_handler else self.config.get(key, default)
 
     def update_config(self, key: str, value: Any):
-        """Обновить значение конфигурации."""
+        """Обновить значение конфигурации.
+
+        ``set(key, value)``, а не ``update(key, value)``: у ``Config`` метод
+        ``update`` принимает СЛОВАРЬ и один позиционный аргумент, поэтому вызов
+        с парой валился ``TypeError`` — у любого процесса с живым
+        ``config_handler``, то есть у всех настоящих. Тест на метод был, но
+        строил ``ProcessModule`` без обработчика и проверял только ветку
+        ``self.config`` (R6, 2026-07-29: тот же класс, что «защита в базе мертва
+        у наследника»).
+        """
         if self.config_handler:
-            self.config_handler.update(key, value)
+            self.config_handler.set(key, value)
         self.config[key] = value
 
     # ========================================================================

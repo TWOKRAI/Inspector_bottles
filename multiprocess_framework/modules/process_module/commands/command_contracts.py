@@ -126,6 +126,13 @@ class ConfigReloadParams(BaseModel):
     observability_reset: Optional[List[str]] = None
     # switch рецепта: обнулить слой сессии целиком (инициатор не знает его состава).
     observability_session_clear: Optional[bool] = None
+    # R6 (живой switch): новый слой L2 целиком — СЫРАЯ секция рецепта и его адрес.
+    # Секция сырая, а не готовая долька процесса: резолв (`defaults` +
+    # `processes[<имя>]`) обязан идти ТЕМ ЖЕ кодом, что и на boot, иначе switch и
+    # старт разойдутся в трактовке одного файла. Пустая секция (`{}`) — законное
+    # «новый рецепт про наблюдаемость молчит», и она обязана СНЯТЬ прежний слой.
+    observability_recipe: Optional[Dict[str, Any]] = None
+    observability_recipe_path: Optional[str] = None
     # Task 5.8 — срок жизни inline-правки, сек. Не задан → политика слоёв
     # (``session_ttl_sec``, дефолт 300с); ``0`` → бессрочно, явным решением.
     ttl: Optional[float] = None

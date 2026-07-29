@@ -573,17 +573,87 @@ class ProcessManagerProcess(ProcessModule):
         td = args.get("topology_dict")
         if td is None:
             return {"error": "topology_dict required"}
-        result = self.apply_topology(td)
         # Task 5.12: L2-watcher обязан переехать на спутник НОВОГО рецепта. Иначе
         # правка нового файла молча не применяется, а правка старого — применяется,
         # и оба симптома читаются как «hot-reload сломался».
-        retarget = getattr(self, "retarget_observability_recipe_watcher", None)
-        if callable(retarget) and result.get("success"):
-            try:
-                retarget(str(args.get("recipe_path") or ""))
-            except Exception as exc:  # noqa: BLE001 — ретаргет не должен ронять switch
-                self._log_error(f"[observability] ретаргет L2-watcher после switch не удался: {exc}")
+        #
+        # R6 (живой switch, 2026-07-29): ретаргет идёт ДО сборки. Адрес рецепта
+        # ассемблер читает на КАЖДОЙ сборке, и пересозданные процессы уносили
+        # адрес покинутого рецепта — живьём новорождённые получали `r6_a.yaml`
+        # при активном `r6_b.yaml`. Откат при неудаче явный: адрес обязан
+        # описывать ту топологию, которая на самом деле крутится.
+        previous = self._observability_recipe_address()
+        resolved = self._retarget_recipe_address(str(args.get("recipe_path") or ""))
+        try:
+            result = self.apply_topology(td)
+        except BaseException:
+            # Ревью R6, находка 3: часть `apply_topology` живёт ВНЕ её внутреннего
+            # try, и вылетевшее оттуда исключение проносило адрес мимо ветки
+            # отката — новый рецепт при живой старой топологии. Адрес обязан
+            # описывать то, что на самом деле крутится.
+            self._retarget_recipe_address(previous)
+            raise
+        if result.get("success"):
+            # Ретаргет чинит ФАЙЛ, за которым смотрит оркестратор. Живые процессы
+            # при этом остаются на секции прежнего рецепта — им новый слой нужно
+            # довезти. Пересозданные получают его от ассемблера, но protected и
+            # не тронутые switch'ем — только отсюда.
+            result["observability_recipe_delivered"] = self._deliver_recipe_layer(td, resolved)
+        else:
+            self._retarget_recipe_address(previous)
         return result
+
+    def _observability_recipe_address(self) -> str:
+        """Действующий адрес рецепта (слой L2) — для отката при неудачном switch."""
+        from ...process_module.configs.observability_layers import RECIPE_PATH_CONFIG_KEY
+
+        get_config = getattr(self, "get_config", None)
+        return str(get_config(RECIPE_PATH_CONFIG_KEY, "") or "") if callable(get_config) else ""
+
+    def _retarget_recipe_address(self, recipe_path: str) -> str:
+        """Перевести адрес рецепта (и watcher за ним) — возвращает РЕЗОЛВНУТЫЙ путь.
+
+        Раздача слоя НЕ обусловлена наличием ретаргета: watcher — про файлы
+        оркестратора, слой — про конфиг каждого процесса. Свяжи мы их, и
+        потребитель framework без ``app_module`` (у него метода нет) молча
+        остался бы на секции покинутого рецепта.
+        """
+        retarget = getattr(self, "retarget_observability_recipe_watcher", None)
+        if not callable(retarget):
+            return str(recipe_path or "")
+        try:
+            return str(retarget(str(recipe_path or "")) or "")
+        except Exception as exc:  # noqa: BLE001 — ретаргет не должен ронять switch
+            self._log_error(f"[observability] ретаргет L2-watcher после switch не удался: {exc}")
+            return str(recipe_path or "")
+
+    def _deliver_recipe_layer(self, topology_dict: dict, recipe_path: str) -> int:
+        """Раздать живым процессам слой L2 нового рецепта (адрес + сырая секция).
+
+        Рассылается СЫРАЯ секция ``observability`` рецепта, а долька процесса
+        резолвится у получателя тем же ``resolve_recipe_section``, что и на boot.
+        Иначе switch и старт трактовали бы один файл по-разному — а это ровно тот
+        класс расхождения, который 5.12 закрывала как «boot ≡ reload».
+
+        Свой слой оркестратор здесь НЕ трогает: на boot ассемблер раскладывает
+        секцию рецепта по ДОЧЕРНИМ процессам, а оркестратору не отдаёт ничего
+        (живьём: дети получили ``WARNING`` рецепта, PM остался на ``INFO``).
+        Выдать её себе на switch значило бы развести switch и boot — вместо
+        одного дефекта стало бы два. Гэп записан резидуалом R6-C.
+        """
+        section = topology_dict.get("observability") if isinstance(topology_dict, dict) else None
+        payload = {
+            # Пустая секция едет как `{}`, а не пропускается: «новый рецепт про
+            # наблюдаемость молчит» обязано СНЯТЬ прежний слой, иначе покинутый
+            # рецепт продолжал бы действовать вечно.
+            "observability_recipe": dict(section) if isinstance(section, dict) else {},
+            "observability_recipe_path": str(recipe_path or ""),
+        }
+        try:
+            return int(self._broadcast_command("config.reload", payload))
+        except Exception as exc:  # noqa: BLE001 — раздача не имеет права ронять switch
+            self._log_error(f"[observability] слой рецепта не роздан после switch: {exc}")
+            return 0
 
     def _cmd_topology_get(self, data=None, **kwargs) -> dict:
         """Получить текущую топологию.
@@ -1405,11 +1475,34 @@ class ProcessManagerProcess(ProcessModule):
             from ...process_module.configs.observability_layers import (
                 process_observability_layers,
             )
+            from ...process_module.managers.observability_reload import (
+                apply_observability_layers,
+                telemetry_targets,
+            )
 
             # Task 5.9: `reason` в origin, а не «switch» литералом — сброс L3
             # инициируют разные события (switch рецепта, пересборка топологии), и
             # в разборе инцидента вопрос ровно этот: чем именно унесло ручки.
-            own = list(process_observability_layers(self).session_clear(origin=f"switch:{reason}"))
+            layers = process_observability_layers(self)
+            origin = f"switch:{reason}"
+            own = list(layers.session_clear(origin=origin))
+            # R6 (живой switch, 2026-07-29): снять ключ со слоя — половина дела.
+            # Без пересборки менеджеры остаются на СНЯТОМ значении, а readback
+            # честно отвечает «сессия пуста» — то есть провенанс и действующий
+            # конфиг расходятся, и расходятся молча. Живьём: PM после switch
+            # держал DEBUG при пустом L3, тогда как ребёнок (у него пересборку
+            # делает `config.reload`) вернулся на INFO. Асимметрия ровно та, от
+            # которой эта функция и должна была защищать.
+            if own:
+                apply_observability_layers(
+                    layers,
+                    logger=getattr(self, "logger_manager", None),
+                    error=getattr(self, "error_manager", None),
+                    stats=getattr(self, "stats_manager", None),
+                    log_info=None,  # своё сообщение об охвате ниже
+                    **telemetry_targets(self),
+                    origin=origin,
+                )
             # Advisory A2 ревью 5.9: у детей та же смена подписана `switch:broadcast`
             # (см. `_ORIGIN_SWITCH`) — оба написания начинаются с `switch:`, и
             # grep по одному находит другое. Разными они остаются намеренно:

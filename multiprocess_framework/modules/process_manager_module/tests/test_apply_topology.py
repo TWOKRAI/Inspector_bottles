@@ -23,6 +23,8 @@ fake diff_fn/commands_fn, эмитящие 5-фазные команды.
 import copy
 from unittest.mock import MagicMock
 
+import pytest
+
 from .conftest import make_pm, wire_planner
 
 
@@ -811,3 +813,194 @@ class TestObservabilitySessionResetOnSwitch:
             assert res["session_keys"] == []
         finally:
             logger.shutdown()
+
+
+class TestSwitchDeliversTheRecipeLayer:
+    """R6 (живой switch, 2026-07-29): что PM обязан сделать со слоями на замене.
+
+    Живьём вскрылись две асимметрии, обе — молчаливые:
+
+    * PM снимал СВОЙ слой сессии и не пересобирал конфиг: readback честно
+      отвечал «сессия пуста», а менеджеры продолжали работать на снятом
+      значении (`DEBUG` при пустом L3), тогда как ребёнок — у него пересборку
+      делает `config.reload` — возвращался на `INFO`;
+    * новый слой рецепта не доезжал до переживших switch процессов, и соседи
+      расходились в ответе на «что говорит активный рецепт».
+    """
+
+    def test_pm_rebuilds_its_own_config_after_clearing_the_session(self, tmp_path) -> None:
+        from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            process_observability_layers,
+        )
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            apply_observability_layers,
+            observability_effective,
+        )
+
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="pm_switch", log_directory=str(tmp_path), enable_batching=False)
+        )
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        pm.logger_manager = logger
+        try:
+            layers = process_observability_layers(pm)
+            layers.session_set("log_level", "DEBUG", origin="test")
+            apply_observability_layers(layers, logger=logger, origin="test")
+            assert observability_effective(logger=logger)["logger"]["default_level"] == "DEBUG"
+
+            pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+            assert layers.session == {}
+            # Проверяем ДЕЙСТВУЮЩИЙ конфиг, а не факт вызова пересборки: спай на
+            # имя остался бы зелёным при пересборке, которая ничего не применила.
+            assert observability_effective(logger=logger)["logger"]["default_level"] != "DEBUG"
+        finally:
+            logger.shutdown()
+
+    def test_recipe_layer_envelope_leaves_pm_and_a_real_child_applies_it(self, tmp_path) -> None:
+        """Шов — конверт и его ДЕЙСТВИЕ у настоящего получателя.
+
+        Тот же приём, что у сброса L3 (ревью 5.12, замечание 7): подмена
+        `_broadcast_command` охраняла бы имя метода, а не доставку.
+        """
+        from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        from multiprocess_framework.modules.process_module.commands.builtin_commands import (
+            BuiltinCommands,
+        )
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            OVERRIDE_CONFIG_KEY,
+            RECIPE_PATH_CONFIG_KEY,
+            read_process_config,
+        )
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            observability_effective,
+        )
+
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        envelopes: list = []
+        comm = MagicMock()
+        comm.broadcast = lambda msg, exclude_self=True: envelopes.append(msg) or 1
+        pm.communication = comm
+
+        pm._cmd_topology_apply(
+            {
+                "topology_dict": {
+                    "processes": [{"process_name": "n1", "process_class": "m.N1"}],
+                    "observability": {"defaults": {"log_level": "ERROR"}},
+                },
+                "recipe_path": str(tmp_path / "recipe_b.yaml"),
+            }
+        )
+
+        carried = [
+            m
+            for m in envelopes
+            if m.get("type") == "command"
+            and m.get("command") == "config.reload"
+            and (m.get("data") or {}).get("observability_recipe") is not None
+        ]
+        assert carried, f"конверт нового слоя рецепта не покинул PM; отправлено: {envelopes[:5]}"
+
+        class _Cm:
+            def __init__(self):
+                self.handlers = {}
+
+            def register_command(self, name, handler, metadata=None, tags=None):
+                self.handlers[name] = handler
+
+        class _Child:
+            def __init__(self, logger):
+                self.command_manager = _Cm()
+                self.name = "n1"
+                self.logger_manager = logger
+                self.error_manager = None
+                self.stats_manager = None
+                # Ребёнок поднят на СТАРОМ рецепте — иначе «переехал» недоказуемо.
+                self._config = {
+                    OVERRIDE_CONFIG_KEY: {"log_level": "WARNING"},
+                    RECIPE_PATH_CONFIG_KEY: str(tmp_path / "recipe_a.yaml"),
+                }
+
+            def get_config(self, key, default=None):
+                return self._config.get(key, default)
+
+            def update_config(self, key, value):
+                self._config[key] = value
+
+            def _log_debug(self, msg, **kw): ...
+            def _log_info(self, msg, **kw): ...
+
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="child_switch", log_directory=str(tmp_path), enable_batching=False)
+        )
+        child = _Child(logger)
+        BuiltinCommands(child)._register_observability_commands()
+        try:
+            res = child.command_manager.handlers["config.reload"](carried[0]["data"])
+            assert res["success"] is True
+            assert observability_effective(logger=logger)["logger"]["default_level"] == "ERROR"
+            assert read_process_config(child, RECIPE_PATH_CONFIG_KEY) == str(tmp_path / "recipe_b.yaml")
+        finally:
+            logger.shutdown()
+
+    def test_silent_new_recipe_still_sends_an_empty_section(self, tmp_path) -> None:
+        """Рецепт без секции `observability` обязан СНЯТЬ прежний слой у детей.
+
+        Ревью R6, находка 2: гарантия отправителя не существовала — инъекция
+        «при пустой секции рассылку пропустить» оставляла весь файл зелёным. У
+        получателя `{}` протестирован, у PM не был, то есть худший исход дефекта
+        C («покинутый рецепт действует вечно») чинился на одном конце провода.
+        """
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        envelopes: list = []
+        comm = MagicMock()
+        comm.broadcast = lambda msg, exclude_self=True: envelopes.append(msg) or 1
+        pm.communication = comm
+
+        pm._cmd_topology_apply(
+            {
+                "topology_dict": {"processes": [{"process_name": "n1", "process_class": "m.N1"}]},
+                "recipe_path": str(tmp_path / "recipe_b.yaml"),
+            }
+        )
+
+        carried = [
+            m
+            for m in envelopes
+            if m.get("type") == "command"
+            and m.get("command") == "config.reload"
+            and "observability_recipe" in (m.get("data") or {})
+        ]
+        assert carried, "молчащий рецепт не разослан — прежний слой остался бы действовать вечно"
+        assert carried[0]["data"]["observability_recipe"] == {}
+
+    def test_failed_apply_returns_the_address_to_the_running_recipe(self, tmp_path) -> None:
+        """Адрес обязан описывать ту топологию, которая на самом деле крутится.
+
+        Ревью R6, находка 3: исключение из `apply_topology` проносило адрес мимо
+        ветки отката.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        pm.config[RECIPE_PATH_CONFIG_KEY] = str(tmp_path / "recipe_a.yaml")
+        pm.get_config = lambda key, default=None: pm.config.get(key, default)
+        pm.retarget_observability_recipe_watcher = lambda path: (
+            pm.config.__setitem__(RECIPE_PATH_CONFIG_KEY, path) or path
+        )
+        pm.apply_topology = MagicMock(side_effect=RuntimeError("бум на фазе stop"))
+
+        with pytest.raises(RuntimeError):
+            pm._cmd_topology_apply(
+                {
+                    "topology_dict": {"processes": []},
+                    "recipe_path": str(tmp_path / "recipe_b.yaml"),
+                }
+            )
+
+        assert pm.get_config(RECIPE_PATH_CONFIG_KEY) == str(tmp_path / "recipe_a.yaml")

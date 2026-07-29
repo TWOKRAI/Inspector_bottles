@@ -187,3 +187,76 @@ class TestShutdownStopsStatePlane:
         monkeypatch.setattr(type(orch).__mro__[1], "shutdown", lambda self: True, raising=False)
 
         assert orch.shutdown() is True
+
+
+class TestRetargetRecipeWatcherAddress:
+    """R6 (живой switch, 2026-07-29): ретаргет обязан обновить АДРЕС рецепта.
+
+    Адрес читают трое: watcher (атрибут), ассемблер на каждой сборке и
+    ``observability.persist`` — и последние двое читают КОНФИГ. Пока ретаргет
+    писал только атрибут, «сохранить» после switch уходило в спутник рецепта,
+    с которого ушли, а следующая замена раздавала детям его же адрес.
+
+    Тестов у ретаргета не было вовсе с момента ввода (5.12); единственный
+    смежный (``test_hot_swap_resolves_recipe_path_per_build``) правил ключ
+    руками — то есть проверял резолвер, а не то, что этот ключ кто-то пишет.
+    """
+
+    @staticmethod
+    def _orch(config: dict) -> GenericProcessManagerApp:
+        orch = _make_orchestrator(config)
+        orch.logger_manager = MagicMock()
+        orch.error_manager = MagicMock()
+        orch.stats_manager = MagicMock()
+        orch._log_info = MagicMock()
+        orch._log_error = MagicMock()
+        orch._observability_recipe_watcher = None
+        return orch
+
+    def test_retarget_writes_the_address_into_config(self) -> None:
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        orch = self._orch({RECIPE_PATH_CONFIG_KEY: "recipes/a.yaml"})
+
+        returned = orch.retarget_observability_recipe_watcher("recipes/b.yaml")
+
+        assert returned == "recipes/b.yaml"
+        # Читателем выступает тот же способ чтения, что у ассемблера и persist.
+        assert orch.get_config(RECIPE_PATH_CONFIG_KEY) == "recipes/b.yaml"
+
+    def test_retarget_without_path_and_without_manifest_clears_the_address(self) -> None:
+        """Пустой адрес — не «оставить как было»: watcher продолжил бы применять
+        чужой файл, выдавая это за работающий hot-reload."""
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        orch = self._orch({RECIPE_PATH_CONFIG_KEY: "recipes/a.yaml"})
+
+        returned = orch.retarget_observability_recipe_watcher("")
+
+        assert returned == ""
+        assert orch.get_config(RECIPE_PATH_CONFIG_KEY) == ""
+
+    def test_retarget_repoints_the_layer_source_without_touching_content(self) -> None:
+        """Читатель (`introspect.observability`) и писатель (`persist`) обязаны
+        назвать ОДИН файл. Живьём после switch оркестратор остался единственным,
+        кто показывал источником покинутый рецепт, — при том что сохранял уже в
+        новый. Содержимое слоя ретаргет не меняет: его оркестратору не раздаёт и
+        boot, и выдача здесь развела бы switch со стартом."""
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            LAYER_RECIPE,
+            RECIPE_PATH_CONFIG_KEY,
+            process_observability_layers,
+        )
+
+        orch = self._orch({RECIPE_PATH_CONFIG_KEY: "recipes/a.yaml"})
+        layers = process_observability_layers(orch)
+        layers.replace_layer(LAYER_RECIPE, {"log_level": "WARNING"}, source="recipes/a.yaml", origin="test")
+
+        orch.retarget_observability_recipe_watcher("recipes/b.yaml")
+
+        assert layers.recipe_source == "recipes/b.yaml"
+        assert layers.recipe == {"log_level": "WARNING"}

@@ -1158,9 +1158,18 @@ class BuiltinCommands:
         # по-разному. Отдельный флаг, а не «сбросить перечисленное»: инициатор
         # switch не знает и не обязан знать, что именно держит каждый процесс.
         obs_clear = bool(args.get("observability_session_clear"))
+        # R6: switch несёт не только «забудь ручки», но и НОВЫЙ слой рецепта.
+        # Живьём (2026-07-29) без этого переживший switch protected-процесс
+        # продолжал крутить секцию ПРЕЖНЕГО рецепта, а пересозданный сосед —
+        # секцию текущего: соседи расходились в ответе на «что говорит активный
+        # рецепт». `None` = «switch про слой L2 молчит» (обычный reload), `{}` =
+        # «новый рецепт молчит про наблюдаемость» — и это разные вещи.
+        obs_recipe = args.get("observability_recipe")
+        obs_recipe_path = args.get("observability_recipe_path")
+        obs_recipe_given = isinstance(obs_recipe, dict) or bool(obs_recipe_path)
         # Сброс — тоже повод пересобрать: без этого «удали ключ» ничего бы не изменило
         # до следующего reload, то есть команда молча откладывала бы свой эффект.
-        obs_requested = isinstance(obs_section, dict) or bool(obs_reset) or obs_clear
+        obs_requested = isinstance(obs_section, dict) or bool(obs_reset) or obs_clear or obs_recipe_given
         # Замечание 2 ревью 5.10: режим проверяется ЗДЕСЬ, до любой записи в слой.
         # Прежде его судил только `_apply_telemetry_section`, а ветка observability
         # вливала publish в слой раньше неё — и `telemetry_mode="bogus"` вместе с
@@ -1291,6 +1300,43 @@ class BuiltinCommands:
                     # Файл — источник L1. L2 (дельта рецепта) и L3 (сессия) остаются:
                     # файл про них ничего не знает и не имеет права их отменять.
                     layers.replace_layer(LAYER_APP, obs_section, source=source, origin=_ORIGIN_RELOAD)
+
+                # R6: новый слой L2 въезжает ДО сброса сессии — порядок «слои
+                # снизу вверх». Пересборка ниже одна на оба изменения: два
+                # применения подряд дали бы промежуточный конфиг, которого ни
+                # один слой не описывает.
+                if obs_recipe_given:
+                    from ..configs.observability_layers import (
+                        LAYER_RECIPE,
+                        RECIPE_PATH_CONFIG_KEY,
+                        resolve_recipe_section,
+                    )
+
+                    # Содержимое слоя меняет ТОЛЬКО присланная секция. Адрес без
+                    # секции — это «рецепт переехал», а не «рецепт опустел»:
+                    # `resolve_recipe_section(None, …)` вернул бы `{}`, и одинокий
+                    # ретаргет молча стирал бы настройки конвейера (ревью R6,
+                    # находка 1: `config.reload` с одним путём уводил WARNING→INFO).
+                    body = (
+                        resolve_recipe_section(obs_recipe, svc.name) if isinstance(obs_recipe, dict) else layers.recipe
+                    )
+                    result["recipe_layer"] = list(
+                        layers.replace_layer(
+                            LAYER_RECIPE,
+                            body,
+                            source=str(obs_recipe_path or "") or None,
+                            origin=_ORIGIN_SWITCH,
+                        )
+                    )
+                    # Адрес рецепта — отдельный факт от содержимого слоя:
+                    # `recipe_source` после первого `persist` указывает на
+                    # СПУТНИК, а `observability.persist` спрашивает, где лежит
+                    # РЕЦЕПТ. Живьём (R6) без этой строки «сохранить» после
+                    # switch писало спутник рецепта, с которого ушли.
+                    update_config = getattr(svc, "update_config", None)
+                    if obs_recipe_path and callable(update_config):
+                        update_config(RECIPE_PATH_CONFIG_KEY, str(obs_recipe_path))
+                        result["recipe_path"] = str(obs_recipe_path)
 
                 if obs_clear:
                     dropped = list(layers.session_clear(origin=_ORIGIN_SWITCH))

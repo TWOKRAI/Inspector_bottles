@@ -22,6 +22,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
@@ -562,6 +568,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
@@ -1010,6 +1022,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
@@ -1602,6 +1620,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
@@ -2043,6 +2067,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
@@ -2473,6 +2503,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
@@ -2903,6 +2939,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
@@ -3333,6 +3375,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
@@ -3763,6 +3811,12 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
       - name: observability_reset
         required: false
         type: List
