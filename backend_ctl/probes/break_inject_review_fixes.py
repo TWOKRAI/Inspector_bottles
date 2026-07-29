@@ -46,9 +46,7 @@ def rf2(text: str) -> str:
     """Нет перепроверки ПОСЛЕ ожидания — дождавшийся поток везёт прошлое."""
     return text.replace(
         """            if still_relevant is not None and not still_relevant():
-                self._log_info(
-                    f"[ready-gate:{label}] '{name}': досылка снята (рассылка того же типа ушла позже)"
-                )
+                self._log_info(f"[ready-gate:{label}] '{name}': досылка снята (рассылка того же типа ушла позже)")
                 return
             if not ready:""",
         "            if not ready:",
