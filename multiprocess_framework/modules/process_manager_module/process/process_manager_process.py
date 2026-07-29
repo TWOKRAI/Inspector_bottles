@@ -717,11 +717,12 @@ class ProcessManagerProcess(ProcessModule):
         Иначе switch и старт трактовали бы один файл по-разному — а это ровно тот
         класс расхождения, который 5.12 закрывала как «boot ≡ reload».
 
-        Свой слой оркестратор здесь НЕ трогает: на boot ассемблер раскладывает
-        секцию рецепта по ДОЧЕРНИМ процессам, а оркестратору не отдаёт ничего
-        (живьём: дети получили ``WARNING`` рецепта, PM остался на ``INFO``).
-        Выдать её себе на switch значило бы развести switch и boot — вместо
-        одного дефекта стало бы два. Гэп записан резидуалом R6-C.
+        Свою дольку оркестратор берёт из ЭТОГО ЖЕ конверта — в
+        ``_reset_observability_sessions``, тем же ``resolve_recipe_section`` и по
+        собственному имени (Task 5.13). Прежняя редакция исключала себя, и это
+        было верно ровно до тех пор, пока boot тоже ничего ему не давал:
+        исключение держало switch и boot в согласии — оба молчали. Теперь оба
+        выдают, и согласие сохранено с другой стороны.
         """
         section = topology_dict.get("observability") if isinstance(topology_dict, dict) else None
         return {
@@ -1774,9 +1775,12 @@ class ProcessManagerProcess(ProcessModule):
         опросом ``introspect.observability``, не эхом этой команды.
         """
         own: list = []
+        own_recipe: dict | None = None
         try:
             from ...process_module.configs.observability_layers import (
+                LAYER_RECIPE,
                 process_observability_layers,
+                resolve_recipe_section,
             )
             from ...process_module.managers.observability_reload import (
                 apply_observability_layers,
@@ -1789,6 +1793,24 @@ class ProcessManagerProcess(ProcessModule):
             layers = process_observability_layers(self)
             origin = f"switch:{reason}"
             own = list(layers.session_clear(origin=origin))
+            # Task 5.13: свой слой L2 — из ТОГО ЖЕ конверта и ТЕМ ЖЕ резолвером,
+            # что у детей (`resolve_recipe_section` по собственному имени). До
+            # 5.13 оркестратор себе дольку не выдавал — сознательно, чтобы не
+            # развести switch и boot, потому что boot её тоже не выдавал. Теперь
+            # выдают оба, и исключение снято с ОБОИХ концов провода сразу.
+            #
+            # Место выбрано на ОБЩЕМ пути, а не внутри app_module-хука ретаргета:
+            # PM без этого хука идёт другой развилкой (`_retarget_recipe_address`),
+            # и правка там оставила бы такую сборку без слоя. Один код на обе
+            # развилки вместо двух похожих.
+            if recipe is not None:
+                own_recipe = resolve_recipe_section(recipe.get("observability_recipe"), self.name)
+                layers.replace_layer(
+                    LAYER_RECIPE,
+                    own_recipe,
+                    source=str(recipe.get("observability_recipe_path") or ""),
+                    origin=origin,
+                )
             # R6 (живой switch, 2026-07-29): снять ключ со слоя — половина дела.
             # Без пересборки менеджеры остаются на СНЯТОМ значении, а readback
             # честно отвечает «сессия пуста» — то есть провенанс и действующий
@@ -1796,7 +1818,10 @@ class ProcessManagerProcess(ProcessModule):
             # держал DEBUG при пустом L3, тогда как ребёнок (у него пересборку
             # делает `config.reload`) вернулся на INFO. Асимметрия ровно та, от
             # которой эта функция и должна была защищать.
-            if own:
+            # Пересборка нужна, если изменился ЛЮБОЙ слой: снятая ручка сессии
+            # или новый слой рецепта. Условие «только own» оставило бы switch без
+            # ручек молча неприменённым — рецепт сменился, менеджеры прежние.
+            if own or recipe is not None:
                 apply_observability_layers(
                     layers,
                     logger=getattr(self, "logger_manager", None),
@@ -1829,12 +1854,19 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:  # noqa: BLE001
             self._log_error(f"_reset_observability_sessions({reason}): рассылка не удалась: {exc}")
 
-        if own or reached:
+        if own or reached or own_recipe is not None:
             self._log_info(
                 f"[observability] слой сессии сброшен ({reason}): свои ключи={own or '—'}, "
+                f"свой слой рецепта={sorted(own_recipe) if own_recipe is not None else 'не менялся'}, "
                 f"рассылка детям reached={reached}, слой рецепта={'в том же конверте' if recipe else 'не менялся'}"
             )
         result = {"orchestrator": own, "broadcast_reached": int(reached)}
+        # Task 5.13: свой слой называется отдельно от детского. «Раздал всем» и
+        # «применил себе» — разные утверждения, и до 5.13 второе было ложным при
+        # истинном первом; слить их в одно поле значило бы снова сделать этот
+        # разрыв ненаблюдаемым.
+        if own_recipe is not None:
+            result["orchestrator_recipe_keys"] = sorted(own_recipe)
         # Что именно уехало детям — в ответе: «раздал» и «раздал ЭТО» — разные
         # утверждения, а проверяется потом второе. Читаем ИЗ КОНВЕРТА, а не из
         # аргумента (находка 3 ревью 5.11): по аргументу ответ называл слой даже

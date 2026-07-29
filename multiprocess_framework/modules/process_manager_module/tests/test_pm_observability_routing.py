@@ -23,16 +23,21 @@ A5  — boot ≡ switch: требует запуска реального PM п�
 A6  — effective.logger.log_directory указывает на каталог с реальными файлами:
       верифицируется live-прогоном (PM пишет файлы после реального старта).
 
-Сноска об A0
-~~~~~~~~~~~~
-Механизм boot сам по себе работает: когда PM-процесс получает APP_CONFIG_KEY
-в своём конфиге и его обработчик config.reload вызывается с ``{"observability": {}}``,
-PM корректно применяет L1. Дефект — в том, что реальный ProcessSpawner не
-вызывает этот обработчик во время инициализации PM. Починка потребует добавить
-вызов конфигурации наблюдаемости в PM.initialize() или в код подготовки PM-бандла.
-Это проверяется интеграционным или живым тестом, не unit-тестом изолированного хендлера.
+Сноска об A0 — что оказалось на самом деле
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Первая редакция этой сноски (написана тестировщиком до реализации) звучала так:
+«механизм boot работает, дефект в том, что ProcessSpawner не вызывает обработчик».
+Диагноз оказался ближе к истине, чем формулировка резидуала, но неполным.
 
-Все RED-тесты этого файла должны стать GREEN после правки.
+Реально: ассемблер строит ``proc_dict["managers"]`` из слоёв только ДОЧЕРНИМ
+процессам, а bundle оркестратора ключа ``managers`` не несёт вовсе — его логгер
+поднимался на голых дефолтах L0 (``default_level="INFO"``, ``log_directory=None``).
+Отсюда СРАЗУ два симптома, R6-C и R6-H, и воспроизводились они даже без рецепта.
+Починено в ``ProcessModule._apply_boot_observability_layers`` по структурному
+признаку «секция менеджеров пуста», а не по имени процесса.
+
+Все RED-тесты этого файла стали GREEN после правки; xfail-маркеры сняты по мере
+того, как strict=True сам требовал этого при каждом XPASS.
 """
 
 from __future__ import annotations
@@ -305,12 +310,6 @@ class TestSwitchDeliversRecipeToPm:
     config.reload детям, но не применяет L2 к PM самому себе.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Task 5.13 не реализована. strict=True намеренно: как только правка ляжет, "
-        "тест начнёт проходить, xfail станет ошибкой и потребует снять маркер — "
-        "красный контракт не сможет тихо остаться заглушкой.",
-    )
     def test_a1_switch_with_pm_named_in_recipe_updates_pm_level(self, pm_with_real_logger) -> None:
         """A1: switch с processes.ProcessManager.log_level=DEBUG → PM effective DEBUG.
 
@@ -333,12 +332,6 @@ class TestSwitchDeliversRecipeToPm:
             f"Ожидали DEBUG (из processes.ProcessManager), получили: {_level(pm)}"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Task 5.13 не реализована. strict=True намеренно: как только правка ляжет, "
-        "тест начнёт проходить, xfail станет ошибкой и потребует снять маркер — "
-        "красный контракт не сможет тихо остаться заглушкой.",
-    )
     def test_a2_switch_changes_pm_level_and_recipe_source(self, pm_with_real_logger, tmp_log) -> None:
         """A2: последовательный switch A→B меняет и уровень PM, и источник слоя.
 
@@ -378,12 +371,6 @@ class TestSwitchDeliversRecipeToPm:
             f"PM уровень не изменился между switch A и B: оба {level_a}. Источник слоя или уровень не обновляется."
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Task 5.13 не реализована. strict=True намеренно: как только правка ляжет, "
-        "тест начнёт проходить, xfail станет ошибкой и потребует снять маркер — "
-        "красный контракт не сможет тихо остаться заглушкой.",
-    )
     def test_a3_silent_recipe_removes_pm_l2(self, pm_with_real_logger) -> None:
         """A3: рецепт без observability снимает L2 у PM.
 
@@ -420,12 +407,6 @@ class TestSwitchDeliversRecipeToPm:
             f"L2 рецепта у PM не снят: {process_observability_layers(pm).recipe}"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Task 5.13 не реализована. strict=True намеренно: как только правка ляжет, "
-        "тест начнёт проходить, xfail станет ошибкой и потребует снять маркер — "
-        "красный контракт не сможет тихо остаться заглушкой.",
-    )
     def test_a1_recipe_layer_is_stored_in_pm_config(self, pm_with_real_logger) -> None:
         """A1 — слой L2 фиксируется в конфиге PM (не только в менеджере).
 
@@ -609,14 +590,21 @@ class TestBreakInjectionA11:
         # И то же правило НЕ задевает обычный процесс.
         assert resolve_recipe_section(section, "camera_0") == {"log_level": "DEBUG"}
 
-    def test_current_behavior_switch_does_not_deliver_to_pm(self, pm_with_real_logger) -> None:
-        """Документирует ТЕКУЩЕЕ неверное поведение: switch не доставляет L2 PM.
+    def test_switch_reports_own_layer_separately_from_broadcast(self, pm_with_real_logger) -> None:
+        """«Раздал детям» и «применил себе» — разные утверждения в ответе switch'а.
 
-        Инвертированный «маяк». Когда A1 будет исправлен, этот тест упадёт.
+        Пришёл на смену «маяку» `test_current_behavior_switch_does_not_deliver_to_pm`,
+        который был зелёным до правки Task 5.13 и красным после.
+
+        Стережёт ровно тот разрыв, которым дефект и жил: до 5.13 рассылка детям
+        шла успешно (`broadcast_reached` > 0) при том, что сам оркестратор своей
+        дольки не применял. Слей эти два факта в одно поле — и разрыв снова
+        станет ненаблюдаемым, а ответ команды будет отчитываться за намерение,
+        выдавая его за доставку.
         """
         pm, _ = pm_with_real_logger
 
-        pm.apply_topology(
+        resp = pm.apply_topology(
             {
                 "processes": [],
                 "wires": [],
@@ -624,9 +612,8 @@ class TestBreakInjectionA11:
             }
         )
 
-        current_level = _level(pm)
-        # Текущее поведение: PM не получает DEBUG (остаётся на WARNING от L1)
-        assert current_level != "DEBUG", (
-            "PM неожиданно получил DEBUG через switch. "
-            "Возможно, A1 уже исправлен — проверьте, что test_a1_switch... стал GREEN."
-        )
+        reset = (resp or {}).get("observability_session_reset") or {}
+        # Свой слой назван отдельным полем и содержит именно то, что применено.
+        assert reset.get("orchestrator_recipe_keys") == ["log_level"]
+        # И он ДЕЙСТВИТЕЛЬНО применён к живым менеджерам, а не только объявлен.
+        assert _level(pm) == "DEBUG"
