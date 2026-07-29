@@ -356,27 +356,86 @@ class TestRunProcessFunction:
                 assert mock_update.call_args[0][1] == "TestProcess"
                 assert mock_update.call_args[0][2] == "error"
 
-    def test_ready_event_set_on_successful_init(self) -> None:
-        """Ф3.2: ready_event из bundle custom выставляется после успешного initialize()."""
+    def test_ready_event_handed_to_process_not_set_by_runner(self) -> None:
+        """5.11: процесс, умеющий объявить готовность, получает event — runner его НЕ взводит.
+
+        Прежний контракт («set сразу после initialize()») живой прогон 2026-07-29
+        опроверг: message-loop поднимается ВНУТРИ initialize(), а команды процесса
+        регистрируются позже — в run(). Событие, взведённое здесь, означало
+        «инициализирован», но читалось всеми как «умеет принимать команды», и
+        адресованная в это окно команда терялась молча.
+        """
+        stop_event = Event()
+        stop_event.set()
+
+        ready_event = Event()
+        bundle = {"queues": {}, "config": {}, "custom": {"ready_event": ready_event}}
+        handed: list = []
+
+        class _AnnouncingProcess:
+            """Процесс, умеющий объявить готовность сам (как ProcessModule)."""
+
+            def initialize(self) -> bool:
+                return True
+
+            def attach_ready_event(self, event) -> None:
+                handed.append(event)
+
+            def run(self) -> None:
+                pass
+
+            def should_stop(self) -> bool:
+                return True
+
+            def shutdown(self) -> None:
+                pass
+
+        with patch(
+            "multiprocess_framework.modules.process_manager_module.runner.process_runner._load_process_class"
+        ) as mock_load:
+            mock_load.return_value = lambda **kwargs: _AnnouncingProcess()
+
+            run_process_function("fake.module.FakeClass", "TestProcess", stop_event, bundle)
+
+        assert handed == [ready_event], "event обязан быть ПЕРЕДАН процессу (attach_ready_event)"
+        assert not ready_event.is_set(), (
+            "runner не имеет права объявлять готовность за процесс: он не знает, зарегистрировал ли тот свои команды"
+        )
+
+    def test_ready_event_set_by_runner_when_process_cannot_announce(self) -> None:
+        """5.11: процесс БЕЗ attach_ready_event — прежний путь (runner взводит сам).
+
+        Молчание здесь лишило бы барьер PM раннего выхода вовсе: не-ProcessModule
+        (и старые классы) объявить себя не умеют, и «нет сигнала» для них норма,
+        а не отказ.
+        """
         stop_event = Event()
         stop_event.set()
 
         ready_event = Event()
         bundle = {"queues": {}, "config": {}, "custom": {"ready_event": ready_event}}
 
+        class _LegacyProcess:
+            def initialize(self) -> bool:
+                return True
+
+            def run(self) -> None:
+                pass
+
+            def should_stop(self) -> bool:
+                return True
+
+            def shutdown(self) -> None:
+                pass
+
         with patch(
             "multiprocess_framework.modules.process_manager_module.runner.process_runner._load_process_class"
         ) as mock_load:
-            mock_class = MagicMock()
-            mock_instance = MagicMock()
-            mock_instance.initialize.return_value = True
-            mock_instance.should_stop.return_value = True
-            mock_class.return_value = mock_instance
-            mock_load.return_value = mock_class
+            mock_load.return_value = lambda **kwargs: _LegacyProcess()
 
             run_process_function("fake.module.FakeClass", "TestProcess", stop_event, bundle)
 
-            assert ready_event.is_set(), "ready_event должен быть выставлен после успешного initialize()"
+        assert ready_event.is_set(), "процесс без attach_ready_event обязан получить готовность от runner'а"
 
     def test_ready_event_not_set_on_init_failure(self) -> None:
         """Ф3.2: провал initialize() → ready_event НЕ выставляется (ранний return)."""

@@ -344,6 +344,124 @@ class TestBrokerWiredIntoPM:
         assert pm._observability_broker_obj().subscriber_names() == ["gui"]
 
 
+class TestReplayWaitsForRealReadiness:
+    """Раздача не приезжает раньше, чем инкарнация умеет принять команду.
+
+    **Дефект найден живым прогоном 2026-07-29 (switch + ручной рестарт), не тестами
+    — и это ровно тот класс, ради которого живой прогон и держат.** Раздача уходила
+    сразу после ``process.start()``: message-loop ребёнка уже крутится (шаг 7
+    ``initialize``), а команды регистрируются позже, в ``run()``. Живой лог ребёнка:
+    ``No handler for key 'observability.tail.subscribe'`` — команда прочитана и
+    выброшена, отправитель (fire-and-forget) не узнал об этом никогда, хвост
+    подписчика пропал навсегда. У фейкового ребёнка хендлер есть всегда, поэтому
+    все 6000+ зелёных тестов дефект не видели.
+    """
+
+    @staticmethod
+    def _pm_with_comm(configs=None):
+        return TestBrokerWiredIntoPM._pm_with_comm(configs)
+
+    def _wait_for(self, predicate, timeout: float = 3.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.02)
+        return predicate()
+
+    def test_replay_held_back_until_the_instance_declares_readiness(self):
+        """Пара: пока событие не взведено — тишина; взвели — раздача пришла."""
+        pm, sent = self._pm_with_comm()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
+        sent.clear()
+        event = threading.Event()
+        pm._process_registry._ready_events["camera_1"] = event
+
+        pm._mark_instance_started("camera_1")
+
+        # До готовности — НИ ОДНОЙ отправки (иначе она уедет в окно «нет обработчика»).
+        time.sleep(0.3)
+        assert sent == [], f"раздача ушла до объявления готовности: {sent}"
+
+        event.set()
+
+        assert self._wait_for(lambda: len(sent) == 1), f"раздача не пришла после готовности: {sent}"
+        assert sent[0]["target"] == "camera_1" and sent[0]["command"] == SUBSCRIBE_COMMAND
+
+    def test_already_ready_instance_is_served_synchronously(self):
+        """Событие уже взведено → раздача идёт немедленно, без отложенного потока."""
+        pm, sent = self._pm_with_comm()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
+        sent.clear()
+        event = threading.Event()
+        event.set()
+        pm._process_registry._ready_events["camera_1"] = event
+
+        pm._mark_instance_started("camera_1")
+
+        assert len(sent) == 1 and sent[0]["target"] == "camera_1"
+
+    def test_no_ready_signal_at_all_keeps_the_old_behaviour(self):
+        """Реестр без ready_event (SRM-mode, старый bundle) → раздача сразу.
+
+        Хуже, чем с сигналом, но лучше, чем не раздать вовсе: молчание оставило бы
+        такого потребителя без хвоста навсегда.
+        """
+        pm, sent = self._pm_with_comm()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
+        sent.clear()
+
+        pm._mark_instance_started("camera_1")  # _ready_events пуст → None
+
+        assert len(sent) == 1 and sent[0]["target"] == "camera_1"
+
+    def test_deadline_expiry_still_delivers_and_says_so(self):
+        """Не объявился за дедлайн → раздаём всё равно, но ГРОМКО.
+
+        Молчаливый отказ здесь неотличим от «подписчик не подписывался».
+        """
+        pm, sent = self._pm_with_comm()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
+        sent.clear()
+        warnings: list = []
+        pm._log_warning = lambda msg, *a, **k: warnings.append(str(msg))
+        pm.update_config("observability_replay_ready_timeout_s", 0.2)
+        pm._process_registry._ready_events["camera_1"] = threading.Event()  # НЕ взводим
+
+        pm._mark_instance_started("camera_1")
+
+        assert self._wait_for(lambda: len(sent) == 1, timeout=3.0), "по дедлайну раздача не состоялась"
+        assert any("не объявил готовность" in w for w in warnings), f"дедлайн прошёл молча: {warnings}"
+
+    def test_no_subscribers_no_thread_and_no_send(self):
+        """Намерений нет → ни отправки, ни ожидания: цена не платится на КАЖДОМ старте."""
+        pm, sent = self._pm_with_comm()
+        pm._process_registry._ready_events["camera_1"] = threading.Event()  # НЕ взведено
+        before = threading.active_count()
+
+        pm._mark_instance_started("camera_1")
+
+        assert sent == []
+        assert threading.active_count() == before, "заведён поток ожидания при отсутствии подписчиков"
+
+    def test_seam_does_not_block_the_message_loop(self):
+        """Шов зовут из message_processor — ждать готовности синхронно нельзя.
+
+        Вызов гоняется в daemon-потоке с дедлайном join: регресс (синхронное
+        ожидание) ПАДАЕТ, а не вешает суиту.
+        """
+        pm, _sent = self._pm_with_comm()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
+        pm.update_config("observability_replay_ready_timeout_s", 30.0)
+        pm._process_registry._ready_events["camera_1"] = threading.Event()  # НЕ взводим
+
+        done = threading.Event()
+        t = threading.Thread(target=lambda: (pm._mark_instance_started("camera_1"), done.set()), daemon=True)
+        t.start()
+
+        assert done.wait(2.0), "шов заблокировался в ожидании готовности инкарнации"
+
+
 class TestNoWaiting:
     """Дедлок-путь автоподписки: PM не ждёт ответа ребёнка ни в одном хендлере."""
 

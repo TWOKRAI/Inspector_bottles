@@ -89,6 +89,55 @@ class TestProcessModule:
 
         assert process._stop_requested is True
 
+    def test_ready_announced_only_after_commands_registered(self):
+        """5.11: готовность объявляется, когда команды процесса УЖЕ зарегистрированы.
+
+        Живой прогон 2026-07-29: сигнал ставил runner сразу после ``initialize()``,
+        а команды регистрируются в ``run()``. Отправитель, поверивший сигналу, слал
+        команду в это окно, ребёнок ронял её (`No handler for key
+        'observability.tail.subscribe'`) — и хвост подписчика пропадал молча.
+
+        Проверяется СВОЙСТВО, а не имя вызова: в момент объявления команда,
+        ради которой сигнал и читают, обязана быть разрешима.
+        """
+        process = ProcessModule("test_process")
+        process.worker_manager = Mock()
+        process.update_process_state = Mock()
+        process.log = Mock()
+        process.shutdown = Mock(return_value=True)
+
+        registered: list = []
+        cm = Mock()
+        cm.register_command = Mock(side_effect=lambda name, *a, **k: registered.append(name))
+        process.command_manager = cm
+
+        registered_at_announce: list = []
+        event = Mock()
+        event.set = Mock(side_effect=lambda: registered_at_announce.append(list(registered)))
+        process.attach_ready_event(event)
+
+        process.run()
+        process.stop()
+
+        assert registered_at_announce, "готовность не объявлена вовсе — барьер PM ушёл бы в liveness-фолбэк"
+        assert "observability.tail.subscribe" in registered_at_announce[0], (
+            "в момент объявления готовности команда подписки ещё не зарегистрирована — "
+            f"сигнал снова опережает обработчик (было зарегистрировано: {len(registered_at_announce[0])})"
+        )
+
+    def test_ready_event_absent_is_not_an_error(self):
+        """Процесс без переданного события просто не объявляет готовность (SRM-mode)."""
+        process = ProcessModule("test_process")
+        process.worker_manager = Mock()
+        process.update_process_state = Mock()
+        process.log = Mock()
+        process.shutdown = Mock(return_value=True)
+
+        process.run()  # attach_ready_event не звали — падать не на чем
+        process.stop()
+
+        assert process.should_stop() is True
+
     def test_should_stop(self):
         """Тест проверки флага остановки."""
         process = ProcessModule("test_process")

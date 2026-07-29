@@ -191,19 +191,34 @@ def run_process_function(
                 _update_process_state(shared_resources, process_name, "error")
                 return
 
-        # Ф3.2 (self-reported ready): сигнализируем готовность СРАЗУ после успешного
-        # initialize(), ДО _run_lifecycle. Барьер PM (switch/boot) видит event
-        # немедленно и не ждёт весь settle-window. Event приходит через bundle
-        # custom (inheritance при spawn); в SRM-mode/старых bundle его нет —
-        # guard None, чистый фолбэк на death-watch (обратная совместимость).
+        # Ф3.2 (self-reported ready) + правка 5.11 (живой прогон 2026-07-29):
+        # готовность объявляет САМ процесс в конце run() — там, где он уже умеет
+        # принимать команды. Здесь событие только ПЕРЕДАЁТСЯ ему.
+        #
+        # Почему не как раньше («set сразу после initialize()»): message-loop
+        # поднимается ВНУТРИ initialize() (шаг 7), а команды процесса регистрируются
+        # позже, в run(). Кто верил прежнему сигналу, слал команду в это окно — и она
+        # молча терялась: живой лог ребёнка показывал `No handler for key
+        # 'observability.tail.subscribe'`, а отправитель (fire-and-forget) об этом
+        # не узнавал никогда.
+        #
+        # Процесс без ``attach_ready_event`` (не-ProcessModule, mock) объявить себя не
+        # умеет — за него сигналим здесь, по-старому: молчание лишило бы барьер
+        # раннего выхода вовсе. Event приходит через bundle custom (inheritance при
+        # spawn); в SRM-mode/старых bundle его нет — guard None, чистый death-watch.
         if isinstance(shared_resources_or_bundle, dict):
             ready_event = shared_resources_or_bundle.get("custom", {}).get("ready_event")
             if ready_event is not None:
+                attach = getattr(process_instance, "attach_ready_event", None)
                 try:
-                    ready_event.set()
-                    log.info("ready_event выставлен — инициализация завершена")
+                    if callable(attach):
+                        attach(ready_event)
+                        log.info("ready_event передан процессу — объявит готовность сам (после run())")
+                    else:
+                        ready_event.set()
+                        log.info("ready_event выставлен runner'ом — процесс не умеет объявлять готовность сам")
                 except Exception as ready_err:  # noqa: BLE001 — сигнал не критичен
-                    log.error(f"Не удалось выставить ready_event: {ready_err}")
+                    log.error(f"Не удалось передать/выставить ready_event: {ready_err}")
 
         # ОБЩИЙ system-wide stop приходит отдельным Process-аргументом (inheritance).
         # Fallback — атрибут на shared_resources (на случай SRM-mode без явного аргумента).

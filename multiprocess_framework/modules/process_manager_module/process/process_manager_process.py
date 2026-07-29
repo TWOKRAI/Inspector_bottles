@@ -1174,9 +1174,14 @@ class ProcessManagerProcess(ProcessModule):
         сходятся в этой точке — заводить шестое место «не забыть переподписать»
         значило бы построить ровно ту неполноту, которой болели оба потребителя
         (GUI-триггер ``recovered`` не покрывал ручной рестарт). Раздача адресная
-        и fire-and-forget: команда ложится в system-очередь инстанса и будет
-        прочитана, когда тот раскрутит цикл сообщений — ждать здесь нечего и
-        некого.
+        и fire-and-forget.
+
+        **Правка после живого прогона 2026-07-29.** Здесь стояло утверждение, что
+        команда «будет прочитана, когда инстанс раскрутит цикл сообщений — ждать
+        нечего и некого». Живьём она читалась раньше, чем инстанс регистрировал
+        команды, и молча терялась. Раздача ушла за readiness-гейт
+        (:meth:`_replay_observability_when_ready`); сам шов остаётся единственной
+        точкой всех путей старта.
 
         Защитный getattr — unit-тесты строят PM с no-op ``__init__``
         (та же философия, что ``_ensure_routing_state``).
@@ -1186,7 +1191,70 @@ class ProcessManagerProcess(ProcessModule):
             started = {}
             self._instance_started_at = started
         started[name] = time.time()
-        self._replay_observability_subscriptions("instance.started", target=name)
+        self._replay_observability_when_ready(name)
+
+    def _replay_observability_when_ready(self, name: str) -> None:
+        """Раздать намерения свежей инкарнации — но не раньше, чем она сможет их принять.
+
+        **Живой прогон 2026-07-29 (switch + ручной рестарт) — дефект, которого не
+        видел ни один из 6000+ зелёных тестов.** Раздача со шва приезжала ребёнку,
+        у которого message-loop уже крутится (шаг 7 ``initialize``), а команды ещё
+        не зарегистрированы (они регистрируются в ``run()``). Ребёнок писал
+        ``No handler for key 'observability.tail.subscribe'`` и ронял команду —
+        хвост подписчика пропадал НАВСЕГДА и молча: раздача fire-and-forget, ответа
+        никто не ждёт, повтора нет. В тестах дефект невидим по построению — у
+        фейкового ребёнка хендлер есть всегда.
+
+        Прежний докстринг шва утверждал обратное («будет прочитана, когда тот
+        раскрутит цикл сообщений — ждать здесь нечего и некого»). Сообщение
+        действительно читается — просто раньше, чем появляется тот, кто его поймёт.
+
+        Ждать синхронно нельзя: шов зовут из message_processor. Ждём в
+        daemon-потоке на ``ready_event`` — он живёт ВНЕ message-loop (mp.Event),
+        поэтому дедлок исключён тем же аргументом, что и у барьеров Ф3.2.
+        """
+        broker = getattr(self, "_observability_broker", None)
+        if broker is None or not broker.subscriber_names():
+            # Намерений нет — ни потока, ни раздачи: платить за них на КАЖДОМ
+            # старте процесса не за что.
+            return
+        event = None
+        get_ready_event = getattr(self._process_registry, "get_ready_event", None)
+        if callable(get_ready_event):
+            try:
+                event = get_ready_event(name)
+            except Exception as exc:  # noqa: BLE001 — отсутствие сигнала не повод падать
+                self._log_error(f"[observability] ready_event '{name}' не прочитан: {exc}")
+        if event is None or event.is_set():
+            # Нет сигнала (mock-реестр, старый bundle) — прежнее поведение: раздать
+            # сразу. Хуже, чем с сигналом, но лучше, чем не раздать вовсе.
+            self._replay_observability_subscriptions("instance.started", target=name)
+            return
+        threading.Thread(
+            target=self._replay_observability_after_ready,
+            args=(name, event),
+            name=f"obs-replay-{name}",
+            daemon=True,
+        ).start()
+
+    def _replay_observability_after_ready(self, name: str, event) -> None:
+        """Дождаться готовности инкарнации и раздать намерения (daemon-поток).
+
+        По истечении дедлайна раздаём ВСЁ РАВНО и громко: «процесс не объявился»
+        — не повод молча оставить подписчика без хвоста, но и не повод сделать вид,
+        что раздача прошла штатно.
+        """
+        timeout = self.get_config("observability_replay_ready_timeout_s")
+        deadline = 30.0 if timeout is None else float(timeout)
+        try:
+            if not event.wait(deadline):
+                self._log_warning(
+                    f"[observability] '{name}' не объявил готовность за {deadline}s — "
+                    "раздаю подписки вслепую (команда может не застать обработчик)"
+                )
+            self._replay_observability_subscriptions("instance.started", target=name)
+        except Exception as exc:  # noqa: BLE001 — поток обслуживания не роняет систему
+            self._log_error(f"[observability] отложенная раздача для '{name}' упала: {exc}")
 
     def _publish_process_identity(self, name: str) -> None:
         """Опубликовать ОС-идентичность процесса в StateStore: pid + актуальный config.

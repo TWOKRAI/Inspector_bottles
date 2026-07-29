@@ -719,6 +719,38 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # ЖИЗНЕННЫЙ ЦИКЛ (расширенные методы)
     # ========================================================================
 
+    def attach_ready_event(self, event) -> None:
+        """Принять от runner'а сигнал self-reported ready (Ф3.2) — объявит его сам процесс.
+
+        Ф3.2 выставлял событие в runner'е СРАЗУ после ``initialize()``. Живой
+        прогон 5.11 (2026-07-29, стенд switch+restart) показал, что это неправда:
+        message-loop поднимается на шаге 7 ``initialize()``, а команды процесса
+        регистрируются позже — в :meth:`run`. В это окно ребёнок читает адресованную
+        ему команду и роняет её (``No handler for key 'observability.tail.subscribe'``
+        в живом логе). Кто ориентировался на «готов», обращался к процессу, который
+        отвечать ещё не умеет.
+
+        Поэтому событие теперь ставит сам процесс — в точке, где он ДЕЙСТВИТЕЛЬНО
+        умеет принимать команды (конец :meth:`run`). Хранится через атрибут, а не
+        через ``__init__``: тесты строят модуль с no-op-инициализацией.
+        """
+        self._ready_event = event
+
+    def _announce_ready(self) -> None:
+        """Объявить готовность: команды зарегистрированы, воркеры и heartbeat живые.
+
+        Сбой сигнала не имеет права уронить старт: PM переживает отсутствие event'а
+        фолбэком по liveness. Но и молчать нельзя — иначе «процесс не объявился»
+        неотличимо от «объявился, а мы не увидели».
+        """
+        event = getattr(self, "_ready_event", None)
+        if event is None:
+            return
+        try:
+            event.set()
+        except Exception as exc:  # noqa: BLE001 — см. докстринг
+            self._log_error(f"ready_event процесса '{self.name}' не выставлен: {exc}", module="lifecycle")
+
     def run(self):
         """Запуск процесса — статус RUNNING, старт воркеров, heartbeat."""
         self.update_process_state(status=ProcessStatus.RUNNING.value)
@@ -751,6 +783,12 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._gc_discipline.freeze_after_startup()
 
         self._log_info(f"Process '{self.name}' started", module="lifecycle")
+        # Готовность объявляется ПОСЛЕДНИМ действием run(): к этой строке команды
+        # процесса зарегистрированы, воркеры и heartbeat подняты. Наследник с
+        # блокирующим run() (GuiProcess: Qt-loop) зовёт super().run() первым, поэтому
+        # объявление до него доходит — а вот перенос сигнала в runner ЗА run() его
+        # бы навсегда лишил готовности.
+        self._announce_ready()
 
     def stop(self):
         """Остановка процесса — статус STOPPING, остановка воркеров и shutdown."""
