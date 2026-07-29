@@ -187,3 +187,4 @@
 - [update_config мёртв при живом handler](feedback_config_update_dead_with_handler.md) — тест строил объект БЕЗ обработчика и проверял вторую ветку; читать тем же способом, что потребители
 - [Брокер подписки на наблюдаемость (5.11)](project_observability_subscription_broker.md) — намерение «хочу всё» у PM, переподписка на шве инкарнации; backend_ctl не мигрирован
 - [Побочный эффект не смеет откатить транзакцию](feedback_side_effect_must_not_undo_the_transaction.md) — раздача на success-пути в своём try, иначе наблюдаемость откатывает успешный switch
+- [Ревью ловит стык между своими же кусками](feedback_review_finds_the_seam_between_own_pieces.md) — каждый кусок верен, вместе дефект; инъекция ломает одну гарантию и стык не видит
