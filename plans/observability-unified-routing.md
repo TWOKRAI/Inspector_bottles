@@ -2907,6 +2907,33 @@ Config-only приложение получает наблюдаемость, **
 (`TestObservabilitySessionResetOnSwitch` и соседние) закрепляют текущее поведение и поедут.
 Это ожидаемо и **не** должно быть спутано со слом-инъекциями шага 8.
 
+#### Живая приёмка (2026-07-29) — ПРОЙДЕНА, 13/13
+
+Зонд: [`backend_ctl/probes/probe_5_13_orchestrator_layer.py`](../backend_ctl/probes/probe_5_13_orchestrator_layer.py),
+`exit=0`. Реальный headless-бэкенд, реальные switch'и.
+
+| Пара | Доказательство |
+|---|---|
+| **A0** | ручной прогон: `system.yaml: log_level: WARNING`, рецепт про наблюдаемость молчит → PM `effective.logger.default_level="WARNING"`, `provenance.log_level={layer: app}`. Аудит назвал хук: `{action: "rebuild", origin: "boot:layers", ok: true}`. Ребёнок — тоже `WARNING`, но `audit.entries=[]`: он не пересобирался, менеджеры пришли готовыми (ранний выход) |
+| **A1** | PM `default_level='ERROR'` из `processes.ProcessManager` |
+| **A11** | `defaults.log_level=DEBUG` → у PM `'ERROR'` (оптовый не дошёл), у `camera_0` `'DEBUG'` (дошёл). Обе половины |
+| **шаг 9** | `recipe_defaults_applied`: PM `False`, `camera_0` `True` |
+| **A6** | `log_directory='…\logs\prototype_2'`, файлов `*.log` = 467. Плюс ручная проверка: после старта PM записал в `ProcessManager/system.log` 2 строки, **обе `[WARNING]`, ни одной `[INFO]`** |
+| **A3** | switch на молчащий рецепт: `ERROR → WARNING` (слой L2 снят, падение на L1) |
+| **A2** | источник `_probe_5_13_loud.yaml → dualcam_synth.yaml`, уровень сменился вместе с ним |
+| **A5** | обратный switch на тот же рецепт: `effective.logger` поэлементно равен boot-снимку, **расхождений нет** |
+| — | ответ switch'а различает «раздал детям» (`broadcast_reached`) и «применил себе» (`orchestrator_recipe_keys`) |
+
+**Первая редакция зонда дала три ложных провала A5** — обратный switch отклонялся
+дебаунсом hot-swap (`{'debounced': True}`), то есть не состоялся вовсе. Проверка,
+принимающая неслучившееся действие за отрицательный результат, хуже отсутствующей:
+она обвиняет продукт. Исправлено паузой; причина записана в самом зонде.
+
+Не покрыто живьём: **A4, A7, A8, A10, A12, A13** — они доказаны pytest'ом
+(`test_pm_observability_routing.py`, `app_module/tests/test_orchestrator.py`),
+и живой стенд для них ничего не добавляет: адресация соседей, generic-дорога и
+единственность правила наблюдаемы без реального boot.
+
 #### Ревью по завершении — требование владельца 2026-07-29
 
 После **всех** шагов — независимое ревью Fable, **честное и жёсткое**, с акцентом
