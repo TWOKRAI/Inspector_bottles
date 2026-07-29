@@ -49,6 +49,7 @@ from multiprocess_framework.modules.process_module.commands.builtin_commands imp
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
     APP_CONFIG_KEY,
     RECIPE_PATH_CONFIG_KEY,
+    ORCHESTRATOR_PROCESS_NAME,
     process_observability_layers,
     resolve_recipe_section,
 )
@@ -207,12 +208,6 @@ class TestA11Asymmetry:
     A11-3 (isolation) GREEN — resolve_recipe_section уже корректен для детей.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Task 5.13 не реализована. strict=True намеренно: как только правка ляжет, "
-        "тест начнёт проходить, xfail станет ошибкой и потребует снять маркер — "
-        "красный контракт не сможет тихо остаться заглушкой.",
-    )
     def test_a11_1_defaults_only_recipe_does_not_touch_pm(self, pm_handler_svc) -> None:
         """A11 первая половина: defaults только → PM остаётся на L1, не ERROR.
 
@@ -278,12 +273,6 @@ class TestA11Asymmetry:
             f"Дочерний процесс не должен получать настройки оркестратора через processes."
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Task 5.13 не реализована. strict=True намеренно: как только правка ляжет, "
-        "тест начнёт проходить, xfail станет ошибкой и потребует снять маркер — "
-        "красный контракт не сможет тихо остаться заглушкой.",
-    )
     def test_a11_4_defaults_apply_to_children_not_pm(self) -> None:
         """A11 симметрия через resolve_recipe_section.
 
@@ -596,33 +585,29 @@ class TestBreakInjectionA11:
     В CI они будут зелёными только после исправления A11.
     """
 
-    def test_current_behavior_defaults_do_apply_to_pm_confirming_red(self, pm_handler_svc) -> None:
-        """Документирует ТЕКУЩЕЕ неверное поведение: defaults попадают в PM.
+    def test_defaults_reach_pm_only_with_explicit_override(self) -> None:
+        """Разницу делает ИМЕННО правило исключения, а не что-то по соседству.
 
-        Этот тест GREEN до правки и RED после — он инвертирован. Используется
-        как «маяк»: когда он упадёт, A11-1 должен стать зелёным.
+        Пришёл на смену «маяку» `test_current_behavior_defaults_do_apply_to_pm`,
+        который был зелёным до правки Task 5.13 и красным после — то есть
+        самоуничтожался в момент успеха и переставал что-либо стеречь.
+
+        Здесь тот же факт закреплён навсегда: одна и та же секция, один и тот же
+        адресат, различается только `include_defaults`. Если завтра `defaults`
+        перестанут доходить до PM по какой-то ПОСТОРОННЕЙ причине (сломался
+        merge, потерялась короткая форма), первая половина останется зелёной по
+        неверной причине — а вторая упадёт и назовёт это.
         """
-        svc = pm_handler_svc
-        recipe = {"defaults": {"log_level": "ERROR"}}
+        section = {"defaults": {"log_level": "ERROR"}, "processes": {"camera_0": {"log_level": "DEBUG"}}}
 
-        svc.command_manager.handlers["config.reload"](
-            {
-                "observability_recipe": recipe,
-                "observability_recipe_path": "/tmp/recipe.yaml",
-            }
-        )
-
-        # Текущее (неверное) поведение: PM становится ERROR из defaults
-        # После правки этот assert упадёт (правильно — дефект будет устранён)
-        current_level = _level(svc)
-        # Это НЕ assertion-тест: это документация текущего состояния
-        # Когда A11-1 станет GREEN (defaults не применяются), current_level будет WARNING
-        # а не ERROR, и ЭТОТ тест упадёт. Это задуманное поведение.
-        assert current_level == "ERROR", (
-            f"Ожидали текущее неверное поведение (ERROR из defaults), "
-            f"но получили {current_level}. "
-            f"Возможно, A11-1 уже исправлен — проверьте, что test_a11_1 стал GREEN."
-        )
+        # Правило действует: оптовый ключ до оркестратора не доходит.
+        assert resolve_recipe_section(section, ORCHESTRATOR_PROCESS_NAME) == {}
+        # Override возвращает прежнюю семантику — значит правило и есть разница.
+        assert resolve_recipe_section(section, ORCHESTRATOR_PROCESS_NAME, include_defaults=True) == {
+            "log_level": "ERROR"
+        }
+        # И то же правило НЕ задевает обычный процесс.
+        assert resolve_recipe_section(section, "camera_0") == {"log_level": "DEBUG"}
 
     def test_current_behavior_switch_does_not_deliver_to_pm(self, pm_with_real_logger) -> None:
         """Документирует ТЕКУЩЕЕ неверное поведение: switch не доставляет L2 PM.

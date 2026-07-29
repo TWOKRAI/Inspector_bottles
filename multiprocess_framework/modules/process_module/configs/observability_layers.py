@@ -87,6 +87,16 @@ APP_CONFIG_KEY = "observability_app"
 #: Ключ с путём к активному рецепту — адрес слоя L2 (рецепт + спутник рядом).
 RECIPE_PATH_CONFIG_KEY = "observability_recipe_path"
 
+#: Имя процесса-оркестратора — ЕДИНСТВЕННЫЙ литерал в системе (Task 5.13).
+#:
+#: Живёт здесь, в самом нижнем модуле, которому это имя нужно, а спавнер и
+#: остальные импортируют его отсюда. Обратное направление (константа у спавнера)
+#: дало бы цикл: ``process_module`` ниже ``process_manager_module``.
+#: До 5.13 имя было тремя расходящимися литералами — у спавнера (дважды) и
+#: дефолтом конструктора ``ProcessManagerProcess``; при этом оно уже входило в
+#: дисковый контракт (``observability.persist`` пишет спутник по ``svc.name``).
+ORCHESTRATOR_PROCESS_NAME = "ProcessManager"
+
 #: Атрибут, под которым стек живёт на объекте процесса.
 LAYERS_ATTR = "_observability_layers"
 
@@ -148,7 +158,12 @@ OPAQUE_LAYER_PATHS = frozenset({TELEMETRY_THROTTLE_PATH})
 #: задаёт ``observability_audit.AUDIT_HISTORY`` — одна на все виды смен.
 
 
-def resolve_recipe_section(section: Any, process_name: str) -> Dict[str, Any]:
+def resolve_recipe_section(
+    section: Any,
+    process_name: str,
+    *,
+    include_defaults: Optional[bool] = None,
+) -> Dict[str, Any]:
     """Сырая L2-дельта КОНКРЕТНОГО процесса из секции рецепта.
 
     ``defaults`` применяется всем процессам рецепта, ``processes[<имя>]``
@@ -165,20 +180,51 @@ def resolve_recipe_section(section: Any, process_name: str) -> Dict[str, Any]:
     процессов, а у соседей сохранившего — исчезало всё. Триггер несвязанный,
     симптом нулевой. Найдено ревью 5.12 (Fable), блокер 1.
 
+    **Исключение оркестратора (Task 5.13, решение владельца Р1).** Оптовый ключ
+    рецепта — ``defaults`` И короткая форма — на :data:`ORCHESTRATOR_PROCESS_NAME`
+    НЕ действует: он берёт только то, что названо его именем в ``processes``.
+    Рецепт описывает конвейер, а оркестратор — машина, на которой конвейер
+    исполняется; ``defaults: {log_level: ERROR}`` иначе гасил бы строки
+    нормального хода самого PM (охваты рассылок брокера, охват reset-рассылки,
+    дисковый след аудита смен) — то есть узнавалось бы это по отсутствию строк,
+    позже всего. Заглушить оркестратора можно, но лишь назвав его поимённо.
+
+    Исключение решается ЗДЕСЬ, а не параметром у вызывающих: call-sites пять
+    (два ассемблера, конверт switch, спутник, L2-watcher), три из них
+    исполняются внутри самого процесса. Правило, которое каждый обязан не
+    забыть передать, дало бы ``effective`` PM, зависящий от того, какой путь
+    стрелял последним.
+
+    Внимание: исключение накрывает **весь** ``defaults``, включая
+    не-глушащие ключи (``session_ttl_sec``, ``telemetry``). Это принятая цена
+    решения Р1, а не упущение: список «глушащих ключей» был бы вторым реестром
+    рядом с теми, что Ф8.1 собирается схлопывать.
+
+    Args:
+        section: секция ``observability`` рецепта или спутника (сырая).
+        process_name: имя процесса-адресата.
+        include_defaults: явный override правила выше. ``None`` — правило
+            действует (оркестратор без ``defaults``, остальные с ним). Нужен
+            тестам, чтобы проверять обе ветки, не подменяя имя процесса.
+
     Returns:
         Сырой dict (возможно пустой) — форма секции ``observability`` процесса.
     """
     if not isinstance(section, dict) or not section:
         return {}
+    per_process = (section.get("processes") or {}).get(process_name) or {}
+    if not isinstance(per_process, dict):
+        per_process = {}
+    if include_defaults is None:
+        include_defaults = process_name != ORCHESTRATOR_PROCESS_NAME
+    if not include_defaults:
+        return dict(per_process)
     declared = section.get("defaults")
     declared = declared if isinstance(declared, dict) else {}
     # Всё, что не служебные ключи — тоже defaults (короткая форма, возможно
     # смешанная со структурной после merge).
     inline = {k: v for k, v in section.items() if k not in ("defaults", "processes")}
     defaults = deep_merge(inline, declared) if inline else declared
-    per_process = (section.get("processes") or {}).get(process_name) or {}
-    if not isinstance(per_process, dict):
-        per_process = {}
     return deep_merge(defaults, per_process)
 
 
