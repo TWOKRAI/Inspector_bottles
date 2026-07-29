@@ -228,6 +228,56 @@ def resolve_recipe_section(
     return deep_merge(defaults, per_process)
 
 
+def orchestrator_observability_config(
+    *,
+    app_section: Any = None,
+    recipe_section: Any = None,
+    app_config_path: str = "",
+    recipe_path: str = "",
+) -> Dict[str, Any]:
+    """Ключи наблюдаемости оркестратора для ``orchestrator_config`` (Task 5.13).
+
+    Оркестратор спавнится мимо ассемблера proc_dict'ов, поэтому слои приезжают к
+    нему теми же ключами, но другим конвертом. Функция **одна на обе дороги** —
+    прототип (``backend/launch.py``) и generic (``app_module.SystemBuilder``):
+    третья копия правила раскладки разошлась бы с первыми двумя, а те две уже
+    разошлись однажды (ветка ``if resolved:`` есть в одной и нет в другой).
+
+    Секция ``managers`` здесь НЕ собирается — и это не пропуск. Её пересобирает
+    сам процесс на старте (``ProcessModule._apply_boot_observability_layers``) из
+    тех же слоёв и с базой из машинного каталога логов. Собрать её ещё и тут
+    значило бы завести второе место, где живёт одна и та же сборка, — то есть
+    ровно то, из-за чего этот дефект и появился.
+
+    Долька рецепта резолвится тем же :func:`resolve_recipe_section`, а значит
+    автоматически подчиняется решению Р1: оптовый ключ (``defaults`` и короткая
+    форма) до оркестратора не доходит, только названное его именем.
+
+    Args:
+        app_section: сырая секция ``observability`` приложения (слой L1).
+        recipe_section: сырая секция ``observability`` рецепта (слой L2), уже
+            смерженная со спутником, если он есть.
+        app_config_path: путь к файлу L1 — адрес слоя для ``provenance``.
+        recipe_path: путь к активному рецепту — адрес слоя L2, он же цель
+            ``observability.persist``.
+
+    Returns:
+        Ключи для ``orchestrator_config``. Пустые не кладутся: отсутствие ключа
+        и ключ с пустым значением различаются в ``provenance``.
+    """
+    out: Dict[str, Any] = {}
+    if isinstance(app_section, dict) and app_section:
+        out[APP_CONFIG_KEY] = dict(app_section)
+    own_slice = resolve_recipe_section(recipe_section, ORCHESTRATOR_PROCESS_NAME)
+    if own_slice:
+        out[OVERRIDE_CONFIG_KEY] = own_slice
+    if app_config_path:
+        out["observability_config_path"] = str(app_config_path)
+    if recipe_path:
+        out[RECIPE_PATH_CONFIG_KEY] = str(recipe_path)
+    return out
+
+
 @dataclass
 class ObservabilityLayers:
     """Стек сырых секций наблюдаемости одного процесса.

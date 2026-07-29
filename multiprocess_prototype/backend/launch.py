@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    orchestrator_observability_config,
+)
 from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 
 if TYPE_CHECKING:
@@ -442,14 +445,18 @@ class SystemBuilder:
                 "initial_state": initial_state,
                 "state_throttle_rules": throttle_rules,
                 "backend_ctl": sys_config.backend_ctl.model_dump(),
-                # Путь к system.yaml для observability hot-reload watcher (P3.3).
-                "observability_config_path": str(self._system_path) if self._system_path else "",
-                # Task 5.12: активный рецепт — адрес слоя L2 (сам рецепт + спутник
-                # рядом). Нужен и watcher'у L2, и команде observability.persist.
-                "observability_recipe_path": recipe_path,
-                # Сырой L1 и оркестратору: без него его provenance приписывал бы
-                # ключи system.yaml фреймворку (найдено живым прогоном 5.12).
-                "observability_app": dict(obs_section),
+                # Task 5.13: слои наблюдаемости оркестратора — общий шов с generic-дорогой.
+                # Здесь L1 (сырая секция system.yaml), адрес L1 для provenance, адрес L2
+                # (рецепт + спутник рядом, нужен watcher'у и observability.persist) и
+                # ДОЛЬКА рецепта, названная именем оркестратора. Последней до 5.13 не было
+                # вовсе: PM получал адрес слоя без содержимого. Раскладка живёт одной
+                # функцией на обе дороги — третья копия разошлась бы с первыми двумя.
+                **orchestrator_observability_config(
+                    app_section=obs_section,
+                    recipe_section=bp_dict.get("observability"),
+                    app_config_path=str(self._system_path) if self._system_path else "",
+                    recipe_path=recipe_path,
+                ),
                 # Манифест — существующая истина «какой рецепт активен» (его пишет
                 # GUI при активации). Нужен для ретаргета L2-watcher после switch,
                 # когда инициатор не передал путь явно.
