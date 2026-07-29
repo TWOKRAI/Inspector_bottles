@@ -759,7 +759,10 @@ class BuiltinCommands:
         ответ команды не должен раздуваться до всего кольца). ``dropped`` в
         ответе отличает «аудит полон» от «смен не было».
         """
-        from ..configs.observability_layers import process_observability_layers
+        from ..configs.observability_layers import (
+            process_observability_layers,
+            recipe_defaults_apply_to,
+        )
         from ..managers.observability_reload import (
             observability_counters,
             observability_effective,
@@ -801,6 +804,14 @@ class BuiltinCommands:
                 "session_keys": list(layers.session_keys()),
                 "app_source": layers.app_source,
                 "recipe_source": layers.recipe_source,
+                # Task 5.13: действует ли на ЭТОТ процесс оптовый ключ рецепта
+                # (`defaults` и короткая форма). У оркестратора — нет, и без
+                # этого поля `provenance` показывал бы у него `layer=app` там,
+                # где у соседа `layer=recipe`, не объясняя почему. Значение
+                # берётся из того же `recipe_defaults_apply_to`, которым правило
+                # и исполняется: два источника разошлись бы, и readback начал бы
+                # описывать не то, что происходит.
+                "recipe_defaults_applied": recipe_defaults_apply_to(svc.name),
                 # Task 5.8: сроки правок, действующая политика, идёт ли подметальщик
                 # и последние авто-возвраты. Без последнего пункта «а куда делся мой
                 # DEBUG» отвечается только чтением файла лога.

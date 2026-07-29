@@ -615,6 +615,39 @@ class TestBreakInjectionA11:
     В CI они будут зелёными только после исправления A11.
     """
 
+    def test_readback_explains_the_asymmetry(self, pm_handler_svc) -> None:
+        """Шаг 9: readback объясняет асимметрию, а не оставляет её догадкой.
+
+        Без этого поля `provenance` показывал бы у оркестратора `layer=app` там,
+        где у соседа `layer=recipe`, и на вопрос «почему у PM нет ключа» ответа
+        в ответе команды не было бы вовсе — правило жило бы только в голове
+        того, кто его принял.
+
+        Значение обязано браться из того же `recipe_defaults_apply_to`, которым
+        правило исполняется. Здесь это проверяется тем, что признак совпадает с
+        поведением резолвера на той же секции: разойдись они — readback описывал
+        бы не то, что происходит.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            recipe_defaults_apply_to,
+        )
+
+        # `introspect.observability` живёт в другом регистраторе, чем команды
+        # правки — читающая команда и пишущие разведены намеренно.
+        BuiltinCommands(pm_handler_svc)._register_introspect_commands()
+        resp = pm_handler_svc.command_manager.handlers["introspect.observability"]({})
+        flag = resp["layers"]["recipe_defaults_applied"]
+
+        assert flag is False, "у оркестратора оптовый ключ рецепта не действует"
+        assert flag is recipe_defaults_apply_to(pm_handler_svc.name)
+        # И признак не врёт: резолвер на той же секции ведёт себя так же.
+        section = {"defaults": {"log_level": "ERROR"}}
+        applied = bool(resolve_recipe_section(section, pm_handler_svc.name))
+        assert applied is flag
+        # У обычного процесса — противоположно, обе стороны пары.
+        assert recipe_defaults_apply_to("camera_0") is True
+        assert bool(resolve_recipe_section(section, "camera_0")) is True
+
     def test_defaults_reach_pm_only_with_explicit_override(self) -> None:
         """Разницу делает ИМЕННО правило исключения, а не что-то по соседству.
 

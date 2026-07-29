@@ -158,6 +158,21 @@ OPAQUE_LAYER_PATHS = frozenset({TELEMETRY_THROTTLE_PATH})
 #: задаёт ``observability_audit.AUDIT_HISTORY`` — одна на все виды смен.
 
 
+def recipe_defaults_apply_to(process_name: str) -> bool:
+    """Действует ли ОПТОВЫЙ ключ рецепта (``defaults`` и короткая форма) на процесс.
+
+    Единственное место, где живёт решение Р1 (Task 5.13). И правило резолва, и
+    признак в readback читают отсюда: разведи их — и оператору показывали бы
+    одно, а применялось бы другое, причём расхождение обнаружилось бы только
+    сравнением двух файлов кода.
+
+    Оркестратор исключён: рецепт описывает конвейер, а PM — машина, на которой
+    конвейер исполняется. Заглушить его можно, но лишь назвав поимённо в
+    ``processes``.
+    """
+    return process_name != ORCHESTRATOR_PROCESS_NAME
+
+
 def resolve_recipe_section(
     section: Any,
     process_name: str,
@@ -216,7 +231,7 @@ def resolve_recipe_section(
     if not isinstance(per_process, dict):
         per_process = {}
     if include_defaults is None:
-        include_defaults = process_name != ORCHESTRATOR_PROCESS_NAME
+        include_defaults = recipe_defaults_apply_to(process_name)
     if not include_defaults:
         return dict(per_process)
     declared = section.get("defaults")
