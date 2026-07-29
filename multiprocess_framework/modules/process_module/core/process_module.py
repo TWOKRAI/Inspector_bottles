@@ -285,27 +285,27 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         менеджеры из слоёв вместо готового ``proc_dict["managers"]`` — лишняя
         пересборка на пути, который сегодня работает.
         """
-        from ..configs.observability_companion import companion_path, load_companion
+        from ..configs.observability_companion import companion_path, compose_recipe_layer
         from ..configs.observability_layers import (
             LAYER_RECIPE,
             RECIPE_PATH_CONFIG_KEY,
             process_observability_layers,
             read_process_config,
-            resolve_recipe_section,
         )
 
         recipe_path = read_process_config(self, RECIPE_PATH_CONFIG_KEY)
         if not recipe_path:
             return
         try:
-            persisted = resolve_recipe_section(load_companion(recipe_path), self.name)
+            body, source = compose_recipe_layer(self)
         except Exception as exc:  # noqa: BLE001 — битый спутник не имеет права ронять старт
             self._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
             return
-        if not persisted:
+        # Спутник ничего не сказал про ЭТОТ процесс — слой уже собран ассемблером,
+        # пересобирать менеджеры не за чем (источник остался адресом рецепта).
+        if source != str(companion_path(recipe_path)):
             return
 
-        from ...data_schema_module import deep_merge
         from ..managers.observability_reload import apply_observability_layers
 
         layers = process_observability_layers(self)
@@ -313,12 +313,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Источник называем конкретным файлом: при паре «рецепт + спутник» оператор
         # иначе не знает, какой из двух править.
         origin = "boot:companion"
-        layers.replace_layer(
-            LAYER_RECIPE,
-            deep_merge(layers.recipe, persisted),
-            source=str(companion_path(recipe_path)),
-            origin=origin,
-        )
+        layers.replace_layer(LAYER_RECIPE, body, source=source, origin=origin)
         try:
             apply_observability_layers(
                 layers,

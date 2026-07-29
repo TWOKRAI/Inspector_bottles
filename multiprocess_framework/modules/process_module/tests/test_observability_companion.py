@@ -414,3 +414,114 @@ class TestShortFormRecipeSurvivesTheCompanion:
         resolved = resolve_recipe_section(merged, "seg")
         assert resolved["enable_batching"] is False, "рецепт короткой формы стёрт спутником"
         assert resolved["log_level"] == "DEBUG"
+
+
+class TestLiveCompanionRefresh:
+    """R4 (Task 5.11.f): правка спутника доезжает до ДЕТЕЙ, а не только до оркестратора.
+
+    Watcher за спутником живёт только у оркестратора — своих watcher'ов детям не
+    заводим. До 5.11 это означало, что правка файла применялась к менеджерам
+    оркестратора, а дети узнавали о ней лишь на следующем рестарте: пульт
+    показывал новое значение, писали процессы по-старому.
+    """
+
+    @staticmethod
+    def _svc(tmp_path, recipe, *, boot_delta=None):
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            OVERRIDE_CONFIG_KEY,
+        )
+
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="refresh", log_directory=str(tmp_path), enable_batching=False)
+        )
+        svc = _Svc(
+            logger,
+            config={
+                RECIPE_PATH_CONFIG_KEY: str(recipe),
+                OVERRIDE_CONFIG_KEY: dict(boot_delta or {}),
+            },
+        )
+        BuiltinCommands(svc)._register_observability_commands()
+        return svc, logger
+
+    def test_reload_flag_picks_up_the_edited_companion(self, tmp_path, recipe) -> None:
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            observability_effective,
+        )
+
+        svc, logger = self._svc(tmp_path, recipe, boot_delta={"log_level": "WARNING"})
+        try:
+            # Правка спутника «руками» (её и делает оператор через persist/редактор).
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+
+            res = svc.command_manager.handlers["config.reload"]({"observability_recipe_reload": True})
+
+            assert res["success"] is True
+            assert observability_effective(logger=logger)["logger"]["default_level"] == "DEBUG"
+            assert res["recipe_layer"] == ["log_level"]
+        finally:
+            logger.shutdown()
+
+    def test_reload_replaces_the_layer_so_a_removed_key_disappears(self, tmp_path, recipe) -> None:
+        """Домержи мы слой к текущему — снятый из спутника ключ не исчез бы никогда."""
+        svc, logger = self._svc(tmp_path, recipe)
+        try:
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+            svc.command_manager.handlers["config.reload"]({"observability_recipe_reload": True})
+            layers = process_observability_layers(svc)
+            assert layers.recipe == {"log_level": "DEBUG"}
+
+            # Оператор убрал ключ из спутника.
+            write_companion(recipe, {"processes": {"seg": {}}})
+            svc.command_manager.handlers["config.reload"]({"observability_recipe_reload": True})
+
+            assert layers.recipe == {}
+        finally:
+            logger.shutdown()
+
+    def test_boot_and_live_refresh_compose_the_same_layer(self, tmp_path, recipe) -> None:
+        """boot ≡ перечитка: одна функция на два пути, иначе старт и reload
+        трактовали бы одну и ту же пару файлов по-разному."""
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            compose_recipe_layer,
+        )
+
+        svc, logger = self._svc(tmp_path, recipe, boot_delta={"log_level": "WARNING", "log_directory": "/machine"})
+        try:
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+
+            body, source = compose_recipe_layer(svc)
+            svc.command_manager.handlers["config.reload"]({"observability_recipe_reload": True})
+            layers = process_observability_layers(svc)
+
+            # Спутник поверх дельты рецепта, машинный ключ рецепта уцелел.
+            assert body == {"log_level": "DEBUG", "log_directory": "/machine"}
+            assert layers.recipe == body
+            assert source == str(companion_path(recipe))
+        finally:
+            logger.shutdown()
+
+    def test_refresh_without_a_companion_keeps_the_recipe_delta(self, tmp_path, recipe) -> None:
+        """Спутника нет — это штатно (его создаёт первое «сохранить»), и слой
+        обязан остаться дельтой рецепта, а не опустеть."""
+        svc, logger = self._svc(tmp_path, recipe, boot_delta={"log_level": "WARNING"})
+        try:
+            res = svc.command_manager.handlers["config.reload"]({"observability_recipe_reload": True})
+
+            assert res["success"] is True
+            assert process_observability_layers(svc).recipe == {"log_level": "WARNING"}
+        finally:
+            logger.shutdown()
+
+    def test_broken_companion_is_a_loud_refusal_not_a_silent_empty_layer(self, tmp_path, recipe) -> None:
+        companion_path(recipe).write_text("observability: [не словарь, а список\n", encoding="utf-8")
+        svc, logger = self._svc(tmp_path, recipe, boot_delta={"log_level": "WARNING"})
+        try:
+            res = svc.command_manager.handlers["config.reload"]({"observability_recipe_reload": True})
+
+            assert res["success"] is False
+            assert "не перечитан" in res["reason"]
+            # Слой не тронут: полуприменённое состояние хуже отказа.
+            assert process_observability_layers(svc).recipe == {"log_level": "WARNING"}
+        finally:
+            logger.shutdown()

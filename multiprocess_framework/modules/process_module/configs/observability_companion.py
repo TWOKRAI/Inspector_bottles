@@ -130,6 +130,43 @@ def write_companion(
     return path, True
 
 
+def compose_recipe_layer(svc: Any) -> Tuple[Dict[str, Any], str]:
+    """Слой L2 процесса из ДВУХ его источников: дельта рецепта + спутник.
+
+    У слоя рецепта два хозяина: сам рецепт (его дольку ассемблер кладёт процессу
+    в конфиг на сборке) и спутник (его пишет ``observability.persist`` уже после
+    старта). Спутник ложится ПОВЕРХ — он новее.
+
+    Функция одна на два пути (boot и живая перечитка по команде) намеренно:
+    разойдись они, «перечитать» и «стартовать» трактовали бы одну и ту же пару
+    файлов по-разному — тот самый класс расхождения, который 5.12 закрывала как
+    «boot ≡ reload». Возвращается ПОЛНЫЙ слой, а не дельта: слой заменяется
+    целиком, иначе снятый из спутника ключ не исчез бы уже никогда.
+
+    Returns:
+        ``(тело слоя, источник)``. Источник — файл спутника, если он что-то
+        сказал про ЭТОТ процесс, иначе адрес рецепта: оператору нужно знать,
+        какой из двух файлов править.
+    """
+    from ..configs.observability_layers import (
+        OVERRIDE_CONFIG_KEY,
+        RECIPE_PATH_CONFIG_KEY,
+        read_process_config,
+        resolve_recipe_section,
+    )
+    from ...data_schema_module import deep_merge
+
+    recipe_path = read_process_config(svc, RECIPE_PATH_CONFIG_KEY) or ""
+    base = read_process_config(svc, OVERRIDE_CONFIG_KEY) or {}
+    base = dict(base) if isinstance(base, dict) else {}
+    if not recipe_path:
+        return base, ""
+    persisted = resolve_recipe_section(load_companion(recipe_path), getattr(svc, "name", ""))
+    if not persisted:
+        return base, str(recipe_path)
+    return deep_merge(base, persisted), str(companion_path(recipe_path))
+
+
 def persist_session_to_companion(
     recipe_path: Optional[str],
     process_name: str,

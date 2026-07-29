@@ -1179,9 +1179,17 @@ class BuiltinCommands:
         obs_recipe = args.get("observability_recipe")
         obs_recipe_path = args.get("observability_recipe_path")
         obs_recipe_given = isinstance(obs_recipe, dict) or bool(obs_recipe_path)
+        # R4 (Task 5.11.f): «перечитай слой L2 со СВОЕГО адреса» — зеркало файловой
+        # ветки для L1. Watcher за спутником живёт только у оркестратора (детям
+        # своих watcher'ов не заводим — один наблюдатель на файл), и до 5.11 правка
+        # спутника доезжала только до менеджеров оркестратора: дети узнавали о ней
+        # лишь на следующем рестарте. Тело слоя собирает ТА ЖЕ функция, что и boot.
+        obs_recipe_refresh = bool(args.get("observability_recipe_reload"))
         # Сброс — тоже повод пересобрать: без этого «удали ключ» ничего бы не изменило
         # до следующего reload, то есть команда молча откладывала бы свой эффект.
-        obs_requested = isinstance(obs_section, dict) or bool(obs_reset) or obs_clear or obs_recipe_given
+        obs_requested = (
+            isinstance(obs_section, dict) or bool(obs_reset) or obs_clear or obs_recipe_given or obs_recipe_refresh
+        )
         # Замечание 2 ревью 5.10: режим проверяется ЗДЕСЬ, до любой записи в слой.
         # Прежде его судил только `_apply_telemetry_section`, а ветка observability
         # вливала publish в слой раньше неё — и `telemetry_mode="bogus"` вместе с
@@ -1349,6 +1357,31 @@ class BuiltinCommands:
                     if obs_recipe_path and callable(update_config):
                         update_config(RECIPE_PATH_CONFIG_KEY, str(obs_recipe_path))
                         result["recipe_path"] = str(obs_recipe_path)
+
+                # R4: перечитка слоя L2 с диска. Идёт ПОСЛЕ ветки switch'а и до
+                # сброса сессии — тот же порядок «слои снизу вверх», и та же одна
+                # пересборка внизу. Слой ЗАМЕНЯЕТСЯ целиком: домержи мы его к
+                # текущему, снятый из спутника ключ не исчез бы уже никогда.
+                if obs_recipe_refresh:
+                    from ..configs.observability_companion import compose_recipe_layer
+                    from ..configs.observability_layers import LAYER_RECIPE as _LAYER_RECIPE
+
+                    try:
+                        body, source = compose_recipe_layer(svc)
+                    except Exception as exc:  # noqa: BLE001 — битый спутник не роняет reload
+                        return {
+                            "success": False,
+                            "process": svc.name,
+                            "reason": f"слой рецепта не перечитан: {exc}",
+                        }
+                    result["recipe_layer"] = list(
+                        layers.replace_layer(
+                            _LAYER_RECIPE,
+                            body,
+                            source=source or None,
+                            origin="reload:companion",
+                        )
+                    )
 
                 if obs_clear:
                     dropped = list(layers.session_clear(origin=_ORIGIN_SWITCH))

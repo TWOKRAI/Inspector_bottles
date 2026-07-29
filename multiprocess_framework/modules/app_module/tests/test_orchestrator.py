@@ -329,3 +329,101 @@ class TestRetargetIsOneCriticalBlock:
         assert (address, source) == ("recipes/b.yaml", "recipes/b.yaml"), (
             f"читатель увидел половину переезда: адрес={address!r}, источник слоя={source!r}"
         )
+
+
+class TestWatcherFansOutToChildren:
+    """R4 (Task 5.11.f): правка файла доезжает до ДЕТЕЙ, а не только до оркестратора.
+
+    Оба watcher'а живут только у оркестратора и до 5.11 применяли файл только к
+    его менеджерам: пульт показывал новое значение, а дети продолжали писать
+    по-старому до следующего рестарта. Своих watcher'ов детям не заводим — один
+    наблюдатель на файл, — поэтому раздача идёт рассылкой «перечитай свой
+    источник».
+    """
+
+    @staticmethod
+    def _orch(tmp_path, monkeypatch):
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        system_yaml = tmp_path / "system.yaml"
+        system_yaml.write_text("observability:\n  log_level: INFO\n", encoding="utf-8")
+        recipe = tmp_path / "demo.yaml"
+        recipe.write_text("name: demo\n", encoding="utf-8")
+        companion = recipe.with_name("demo.observability.yaml")
+        companion.write_text("observability:\n  defaults:\n    log_level: DEBUG\n", encoding="utf-8")
+
+        orch = _make_orchestrator(
+            {
+                "observability_config_path": str(system_yaml),
+                RECIPE_PATH_CONFIG_KEY: str(recipe),
+            }
+        )
+        orch.logger_manager = MagicMock()
+        orch.error_manager = MagicMock()
+        orch.stats_manager = MagicMock()
+        orch._log_info = MagicMock()
+        orch._log_error = MagicMock()
+        orch._observability_watcher = None
+        orch._observability_recipe_watcher = None
+
+        sent: list = []
+        orch._broadcast_command = lambda command, data, **kw: sent.append((command, dict(data))) or 3
+
+        # Перехват фабрики: нужен НЕ живой watchdog, а колбэк, который он позовёт.
+        started: list = []
+        import multiprocess_framework.modules.process_module.managers.observability_reload as reload_mod
+
+        monkeypatch.setattr(
+            reload_mod,
+            "start_observability_watcher",
+            lambda **kw: started.append(kw) or MagicMock(),
+        )
+        return orch, started, sent
+
+    def test_both_watchers_hand_the_edit_to_children(self, tmp_path, monkeypatch) -> None:
+        orch, started, sent = self._orch(tmp_path, monkeypatch)
+
+        orch._start_observability_watcher()
+
+        assert len(started) == 2, "подняты не оба watcher'а (L1 + L2)"
+        # Зовём то, что watchdog позвал бы при правке файла, и смотрим на ЭФФЕКТ.
+        for kw in started:
+            callback = kw.get("on_reload_extra")
+            assert callable(callback), "watcher поднят без раздачи детям"
+            callback(MagicMock())
+
+        commands = [c for c, _d in sent]
+        assert commands == ["config.reload", "config.reload"]
+        payloads = [d for _c, d in sent]
+        # L1 — «перечитай свой источник» (у ребёнка он может быть другим файлом),
+        # L2 — «пересобери слой рецепта со своего адреса».
+        assert {} in payloads
+        assert {"observability_recipe_reload": True} in payloads
+
+    def test_fan_out_failure_does_not_kill_hot_reload(self, tmp_path, monkeypatch) -> None:
+        orch, started, _sent = self._orch(tmp_path, monkeypatch)
+
+        def _dead(command, data, **kw):
+            raise RuntimeError("очередь закрыта")
+
+        orch._broadcast_command = _dead
+        orch._start_observability_watcher()
+
+        for kw in started:
+            kw["on_reload_extra"](MagicMock())  # не имеет права бросить
+
+        assert orch._log_error.called
+
+    def test_l1_fan_out_runs_after_the_telemetry_callback_not_instead_of_it(self, tmp_path, monkeypatch) -> None:
+        """Раздача — добавка к существующему extra-колбэку (центральный троттл),
+        а не его замена: иначе одна правка чинила бы одну плоскость и ломала другую."""
+        orch, started, sent = self._orch(tmp_path, monkeypatch)
+        order: list = []
+        orch._broadcast_command = lambda command, data, **kw: order.append("fan-out") or 1
+
+        extra = orch._compose_fan_out(lambda cfg: order.append("telemetry"), {}, "тест")
+        extra(MagicMock())
+
+        assert order == ["telemetry", "fan-out"]

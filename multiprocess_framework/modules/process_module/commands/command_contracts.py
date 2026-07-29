@@ -133,6 +133,10 @@ class ConfigReloadParams(BaseModel):
     # «новый рецепт про наблюдаемость молчит», и она обязана СНЯТЬ прежний слой.
     observability_recipe: Optional[Dict[str, Any]] = None
     observability_recipe_path: Optional[str] = None
+    # R4 (Task 5.11.f) — «перечитай слой L2 со своего адреса»: зеркало файловой
+    # ветки для L1. Секцию на проводе НЕ несёт: спутник лежит на диске, и читать
+    # его обязан тот же код, что на boot, иначе перечитка и старт разойдутся.
+    observability_recipe_reload: Optional[bool] = None
     # Task 5.8 — срок жизни inline-правки, сек. Не задан → политика слоёв
     # (``session_ttl_sec``, дефолт 300с); ``0`` → бессрочно, явным решением.
     ttl: Optional[float] = None

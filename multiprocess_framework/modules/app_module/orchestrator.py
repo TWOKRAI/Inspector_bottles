@@ -170,7 +170,7 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             stats=self.stats_manager,
             log_info=self._log_info,
             log_error=self._log_error,
-            on_reload_extra=telemetry_on_reload,
+            on_reload_extra=self._compose_fan_out(telemetry_on_reload, {}, "system-конфиг"),
             layers=layers,
         )
         # Task 5.12: ВТОРОЙ watcher — за слоем L2 (спутник рецепта). Не «переезд»
@@ -218,10 +218,44 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             stats=self.stats_manager,
             log_info=self._log_info,
             log_error=self._log_error,
+            on_reload_extra=self._compose_fan_out(None, {"observability_recipe_reload": True}, "спутник рецепта"),
             layers=layers,
             layer=LAYER_RECIPE,
             process_name=self.name,
         )
+
+    def _compose_fan_out(self, extra: Any, payload: dict, what: str) -> Any:
+        """Обернуть колбэк watcher'а раздачей правки ДЕТЯМ (R4, Task 5.11.f).
+
+        До 5.11 оба watcher'а применяли файл только к менеджерам ОРКЕСТРАТОРА:
+        правка `system.yaml` или спутника рецепта доезжала до детей лишь на их
+        следующем рестарте, а пульт при этом показывал новое значение — у
+        оркестратора. Своих watcher'ов детям не заводим (один наблюдатель на
+        файл, иначе N процессов дублируют чтение и расходятся в моменте), поэтому
+        раздача — рассылка «перечитай свой источник»:
+
+        * L1 — пустой конверт: ребёнок читает СВОЙ ``observability_config_path``
+          (у него он может отличаться), и той же веткой поднимает свою секцию
+          телеметрии — тем самым закрывается и остаток Task 3.2 плана
+          telemetry-coherence («watcher не фанит publish-плоскость детям»);
+        * L2 — ``observability_recipe_reload``: ребёнок пересобирает слой из
+          своей дельты рецепта и спутника ТЕМ ЖЕ кодом, что на boot.
+
+        Секция на проводе не едет ни в одном случае: файл на диске один, и
+        трактовать его обязан один код. Рассылка fire-and-forget и в отдельном
+        потоке watchdog'а — падение раздачи не имеет права убить hot-reload.
+        """
+
+        def _fan_out(config: Any, _extra=extra, _payload=dict(payload), _what=what) -> None:
+            if _extra is not None:
+                _extra(config)
+            try:
+                reached = self._broadcast_command("config.reload", dict(_payload))
+                self._log_info(f"[observability] правка ({_what}) роздана детям: reached={reached}")
+            except Exception as exc:  # noqa: BLE001 — раздача не роняет hot-reload
+                self._log_error(f"[observability] правка ({_what}) не роздана детям: {exc}")
+
+        return _fan_out
 
     def retarget_observability_recipe_watcher(self, recipe_path: str) -> str:
         """Перевести L2-watcher на новый рецепт (switch). Возвращает РЕЗОЛВНУТЫЙ адрес.
