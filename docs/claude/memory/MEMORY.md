@@ -185,3 +185,5 @@
 - [Шов обязан стрелять при ПОЛНОМ отпускании лока](feedback_seam_must_fire_on_full_release.md) — RLock: «вышли из with» ≠ «лок отпущен»; признак — ровно-N-секундный тайминг
 - [Switch раздаёт слой L2 (R6)](project_switch_delivers_layer.md) — адрес+содержимое всем пережившим; стенд обязан содержать protected-процесс, иначе раздача недоказуема
 - [update_config мёртв при живом handler](feedback_config_update_dead_with_handler.md) — тест строил объект БЕЗ обработчика и проверял вторую ветку; читать тем же способом, что потребители
+- [Брокер подписки на наблюдаемость (5.11)](project_observability_subscription_broker.md) — намерение «хочу всё» у PM, переподписка на шве инкарнации; backend_ctl не мигрирован
+- [Побочный эффект не смеет откатить транзакцию](feedback_side_effect_must_not_undo_the_transaction.md) — раздача на success-пути в своём try, иначе наблюдаемость откатывает успешный switch
