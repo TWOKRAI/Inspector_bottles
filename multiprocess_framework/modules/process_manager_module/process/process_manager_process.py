@@ -723,14 +723,44 @@ class ProcessManagerProcess(ProcessModule):
         было верно ровно до тех пор, пока boot тоже ничего ему не давал:
         исключение держало switch и boot в согласии — оба молчали. Теперь оба
         выдают, и согласие сохранено с другой стороны.
+
+        **Спутник домерживается ЗДЕСЬ (Task 5.13, шаг 6).** До этого он попадал в
+        слой только через пересборку proc_dict'ов (``_build_proc_dicts`` прототипа
+        мержит его в ``topology["observability"]``), а конверт вёз сырую секцию
+        рецепта. Расхождение было ненаблюдаемым, потому что пересоздаваемый
+        ребёнок получал спутник вторым путём — но два адресата второго пути не
+        имеют:
+
+        * **protected-процессы** не перезапускаются, и для них конверт —
+          единственный источник: сохранённая ``observability.persist`` настройка
+          после switch у них молча откатывалась;
+        * **сам оркестратор**, начиная с шага 5.
+
+        Мерж идёт тем же ``load_companion`` + ``deep_merge`` и в том же порядке
+        (спутник ПОВЕРХ рецепта — его писал пульт, он новее), что на boot и в
+        пересборке. Три места читают один файл одинаково; будь порядок здесь
+        обратным, «сохранить» отменялось бы switch'ем через раз.
         """
         section = topology_dict.get("observability") if isinstance(topology_dict, dict) else None
+        section = dict(section) if isinstance(section, dict) else {}
+        recipe_path = self._observability_recipe_address()
+        if recipe_path:
+            from ...data_schema_module import deep_merge
+            from ...process_module.configs.observability_companion import load_companion
+
+            try:
+                companion = load_companion(recipe_path)
+            except Exception as exc:  # noqa: BLE001 — битый спутник не имеет права ронять switch
+                self._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
+                companion = {}
+            if companion:
+                section = deep_merge(section, companion)
         return {
             # Пустая секция едет как `{}`, а не пропускается: «новый рецепт про
             # наблюдаемость молчит» обязано СНЯТЬ прежний слой, иначе покинутый
             # рецепт продолжал бы действовать вечно.
-            "observability_recipe": dict(section) if isinstance(section, dict) else {},
-            "observability_recipe_path": self._observability_recipe_address(),
+            "observability_recipe": section,
+            "observability_recipe_path": recipe_path,
         }
 
     def _cmd_topology_get(self, data=None, **kwargs) -> dict:

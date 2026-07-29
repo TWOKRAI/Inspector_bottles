@@ -332,6 +332,55 @@ class TestSwitchDeliversRecipeToPm:
             f"Ожидали DEBUG (из processes.ProcessManager), получили: {_level(pm)}"
         )
 
+    def test_a9_companion_rides_in_switch_envelope_and_beats_recipe(self, pm_with_real_logger, tmp_log) -> None:
+        """A9 (шаг 6): спутник едет в конверте switch'а и побеждает рецепт.
+
+        Авторский тест на опасность механизма, а не на критерий приёмки.
+
+        До шага 6 спутник попадал в слой только через пересборку proc_dict'ов, а
+        конверт вёз сырую секцию рецепта. Ненаблюдаемо это было потому, что
+        пересоздаваемый ребёнок получал спутник вторым путём. Двух адресатов
+        второго пути нет: protected-процессы (не перезапускаются) и сам
+        оркестратор — у них конверт единственный источник, и «сохранить» после
+        switch молча откатывалось.
+
+        Порядок проверяется явно: спутник ПОВЕРХ рецепта. Будь он обратным,
+        сохранённая настройка отменялась бы switch'ем через раз — то есть
+        зависела бы от того, что человек написал в рецепте руками.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            companion_path,
+        )
+
+        recipe = tmp_log / "r_companion.yaml"
+        recipe.write_text("processes: []\n", encoding="utf-8")
+        # Формат спутника: корневой ключ `observability`, внутри — та же форма,
+        # что у секции рецепта. Машина всегда пишет его в виде `processes:`.
+        companion_path(str(recipe)).write_text(
+            """observability:
+  processes:
+    ProcessManager:
+      log_level: ERROR
+""",
+            encoding="utf-8",
+        )
+        _, values = pm_with_real_logger
+        values[RECIPE_PATH_CONFIG_KEY] = str(recipe)
+        pm = pm_with_real_logger[0]
+
+        resp = pm.apply_topology(
+            {
+                "processes": [],
+                "wires": [],
+                # Рецепт говорит DEBUG, спутник — ERROR. Спутник новее: его пишет пульт.
+                "observability": {"processes": {"ProcessManager": {"log_level": "DEBUG"}}},
+            }
+        )
+
+        reset = (resp or {}).get("observability_session_reset") or {}
+        assert reset.get("orchestrator_recipe_keys") == ["log_level"]
+        assert _level(pm) == "ERROR", "спутник обязан побеждать рецепт — его писал пульт, он новее"
+
     def test_a2_switch_changes_pm_level_and_recipe_source(self, pm_with_real_logger, tmp_log) -> None:
         """A2: последовательный switch A→B меняет и уровень PM, и источник слоя.
 

@@ -115,6 +115,15 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         """
         recipe_path = _active_recipe_path()
         topology = normalize_blueprint(copy.deepcopy(unwrap_recipe(bp)), sys_config)
+        # Task 5.13, шаг 7 — что эта пересборка делает с долькой ОРКЕСТРАТОРА:
+        # ничего, и это решение, а не пропуск. Она возвращает proc_dict'ы ДЕТЕЙ,
+        # а свой слой оркестратор берёт из конверта switch'а
+        # (`_recipe_layer_payload` → `_reset_observability_sessions`). Выдай она
+        # дольку ещё и здесь — слой ставился бы дважды, из двух источников,
+        # и на первом же расхождении победил бы тот, кто пришёл последним.
+        # Согласованность держится тем, что оба пути мержат спутник из ОДНОГО
+        # файла и в одном порядке (спутник поверх рецепта).
+        #
         # Спутник рецепта (machine-owned слой L2) — тем же способом, что boot.
         if recipe_path:
             from multiprocess_framework.modules.data_schema_module import deep_merge
