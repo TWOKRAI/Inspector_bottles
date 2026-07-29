@@ -112,10 +112,93 @@ def _spec_with_hooks(tmp_path: Path, **overrides) -> AppSpec:
     kwargs = dict(
         manifest_path=_write_manifest(tmp_path),
         blueprint_loader=lambda manifest: {},
-        proc_dicts_builder=lambda blueprint: {},
+        proc_dicts_builder=lambda blueprint, **_ctx: {},
     )
     kwargs.update(overrides)
     return AppSpec(**kwargs)
+
+
+class TestObservabilityFromManifest:
+    """Task 5.13 / решение Р2 — слой L1 generic-дороги приезжает из манифеста.
+
+    До 5.13 `SystemBuilder` звал билдер одним аргументом, и на этой дороге ни
+    дети, ни оркестратор не получали ни L1, ни адресов слоёв. Поле `AppSpec`
+    было бы недостаточно: `run_app(path)` строит спеку с дефолтами, а
+    `minimal_app` её вовсе не конструирует — заполнять поле было бы некому.
+    """
+
+    @staticmethod
+    def _app_with_system(tmp_path: Path) -> Path:
+        """Приложение-конфиг: app.yaml называет system.yaml, Python не пишется."""
+        (tmp_path / "system.yaml").write_text(
+            """observability:
+  log_level: WARNING
+""",
+            encoding="utf-8",
+        )
+        p = tmp_path / "app.yaml"
+        p.write_text(
+            """name: T
+version: 1
+pipeline: pipeline.yaml
+system: system.yaml
+discovery:
+  auto_discover: false
+""",
+            encoding="utf-8",
+        )
+        return p
+
+    def test_l1_reaches_orchestrator_from_manifest(self, tmp_path: Path) -> None:
+        """A13: секция system.yaml доезжает до оркестратора вместе с адресами."""
+        spec = AppSpec(
+            manifest_path=self._app_with_system(tmp_path),
+            blueprint_loader=lambda manifest: {},
+            proc_dicts_builder=lambda blueprint, **_ctx: {},
+        )
+        cfg = build_app(spec)._orchestrator_config
+        assert cfg["observability_app"] == {"log_level": "WARNING"}
+        assert cfg["observability_config_path"].endswith("system.yaml")
+        assert cfg["observability_recipe_path"].endswith("pipeline.yaml")
+
+    def test_l1_reaches_children_builder(self, tmp_path: Path) -> None:
+        """Тот же контекст приезжает и в билдер proc_dict'ов — не только PM.
+
+        Половина A13, которую легко потерять: починив оркестратора, оставить
+        детей generic-дороги без L1 значило бы «дефект чинится на одном пути
+        из двух».
+        """
+        seen: dict = {}
+
+        def spy(blueprint, **ctx):
+            seen.update(ctx)
+            return {}
+
+        spec = AppSpec(
+            manifest_path=self._app_with_system(tmp_path),
+            blueprint_loader=lambda manifest: {},
+            proc_dicts_builder=spy,
+        )
+        build_app(spec)
+        assert seen["observability_section"] == {"log_level": "WARNING"}
+        assert seen["app_config_path"].endswith("system.yaml")
+        assert seen["recipe_path"].endswith("pipeline.yaml")
+
+    def test_appspec_override_wins_and_claims_no_file(self, tmp_path: Path) -> None:
+        """Override перебивает файл — и НЕ называет его своим источником.
+
+        Назвать адресом override'а `manifest.system` значило бы соврать в
+        provenance: оператор пошёл бы править файл, который ни на что не влияет.
+        """
+        spec = AppSpec(
+            manifest_path=self._app_with_system(tmp_path),
+            blueprint_loader=lambda manifest: {},
+            proc_dicts_builder=lambda blueprint, **_ctx: {},
+            observability_section={"log_level": "DEBUG"},
+        )
+        cfg = build_app(spec)._orchestrator_config
+        assert cfg["observability_app"] == {"log_level": "DEBUG"}
+        assert "observability_config_path" not in cfg
 
 
 class TestBuildGenericHookWiring:
@@ -141,9 +224,16 @@ class TestBuildGenericHookWiring:
         assert launcher._orchestrator_config["state_throttle_rules"] == {"a.*": {"interval_ms": 50}}
 
     def test_no_build_time_hooks_minimal_config(self, tmp_path: Path) -> None:
-        """Без хуков (minimal_app) — только пустой initial_state, без throttle."""
+        """Без хуков (minimal_app) — пустой initial_state, без throttle."""
         launcher = build_app(_spec_with_hooks(tmp_path))
-        assert launcher._orchestrator_config == {"initial_state": {}}
+        cfg = launcher._orchestrator_config
+        assert cfg["initial_state"] == {}
+        assert "state_throttle_rules" not in cfg
+        # Task 5.13: ключи наблюдаемости оркестратора хуками не управляются —
+        # они выводятся из манифеста. Здесь манифест не называет `system:`,
+        # поэтому едет только адрес слоя L2.
+        assert "observability_app" not in cfg
+        assert cfg["observability_recipe_path"].endswith("pipeline.yaml")
 
     def test_explicit_orchestrator_config_can_override(self, tmp_path: Path) -> None:
         """Явный orchestrator_config приложения применяется последним."""

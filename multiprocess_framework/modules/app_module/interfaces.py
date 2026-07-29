@@ -50,9 +50,25 @@ class ProcDictsBuilder(Protocol):
 
     Pre:  ``blueprint`` — валидный dict-контракт топологии.
     Post: dict готов к ``SystemLauncher.add_process`` (нормализован дефолтами).
+
+    **Task 5.13 — контекст наблюдаемости расширил сигнатуру.** Слой L1 и адреса
+    слоёв приходят параметрами, а не добываются билдером самостоятельно: иначе
+    каждая реализация искала бы их по-своему и они бы разошлись. Все параметры
+    keyword-only и с дефолтами, поэтому приложение, которому наблюдаемость не
+    нужна, пишет билдер ровно как раньше — но если оно их игнорирует **молча**,
+    его процессы останутся без L1. Именно поэтому они в контракте, а не
+    передаются украдкой одной лишь дефолтной реализации.
     """
 
-    def __call__(self, blueprint: Dict[str, Any]) -> Dict[str, Dict[str, Any]]: ...
+    def __call__(
+        self,
+        blueprint: Dict[str, Any],
+        *,
+        observability_section: Dict[str, Any] | None = None,
+        log_dir: str = "logs",
+        app_config_path: str = "",
+        recipe_path: str = "",
+    ) -> Dict[str, Dict[str, Any]]: ...
 
 
 @runtime_checkable
