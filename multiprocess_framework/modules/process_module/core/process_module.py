@@ -268,22 +268,38 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._process_managers.register_all(bundle, self)
         self._process_managers.attach_adapters(bundle, self)
         self._process_managers.connect_event_manager(self)
-        self._apply_persisted_observability_layer()
+        self._apply_boot_observability_layers()
         self._wire_observability_hub()
 
-    def _apply_persisted_observability_layer(self) -> None:
-        """Подхватить спутник рецепта (слой L2), сохранённый ПОСЛЕ boot (Task 5.12).
+    def _apply_boot_observability_layers(self) -> None:
+        """Применить стек слоёв на старте — там, где ассемблер этого не сделал.
 
-        Живая находка прогона 5.12: ``observability.persist`` записывал спутник,
-        но пересозданный процесс стартовал из boot-``proc_dict``, спутника не
-        читал — и сохранённая настройка откатывалась на первом же рестарте.
-        «Сохранить» сохраняло на диск, но не в систему: сигнал, не связанный
-        с реальностью.
+        Две причины пересобрать менеджеры из слоёв в момент boot, и обе про то,
+        что готового ответа у процесса нет:
 
-        Применяется ТОЛЬКО когда спутник реально что-то говорит про ЭТОТ процесс.
-        Условие не про экономию: без него каждый процесс на старте пересобирал бы
-        менеджеры из слоёв вместо готового ``proc_dict["managers"]`` — лишняя
-        пересборка на пути, который сегодня работает.
+        1. **Менеджеры не пришли готовыми** (Task 5.13). Ассемблер раскладывает
+           ``expand_observability(layers.resolve())`` в ``proc_dict["managers"]``
+           ДОЧЕРНИМ процессам. Оркестратор спавнится другим кодом, и в его bundle
+           ключа ``managers`` нет вовсе (``spawner.py``) — его ``LoggerManager``
+           строился из голых дефолтов L0, то есть ``default_level="INFO"`` и
+           ``log_directory=None``. Отсюда и «дети WARNING, PM INFO», и пустой
+           ``effective.logger.log_directory`` у оркестратора: **один корень, два
+           симптома** (резидуалы R6-C и R6-H). Воспроизводилось это и БЕЗ рецепта,
+           одним ``system.yaml: log_level: WARNING``.
+
+           Признак **структурный** — «секция менеджеров пуста», а не «имя равно
+           ProcessManager». Проверка по имени починила бы ровно одного адресата и
+           оставила бы дефект ждать следующего процесса, поднятого без готовой
+           секции; кроме того, имя — это контракт адресации, а не контракт сборки.
+
+        2. **Спутник рецепта говорит про ЭТОТ процесс** (Task 5.12). Живая
+           находка прогона 5.12: ``observability.persist`` записывал спутник, но
+           пересозданный процесс стартовал из boot-``proc_dict``, спутника не
+           читал — и сохранённая настройка откатывалась на первом же рестарте.
+           «Сохранить» сохраняло на диск, но не в систему.
+
+        Ни одна не выполняется → выходим. У ребёнка со свежим ``proc_dict``
+        пересборка была бы лишней работой на пути, который и так верен.
         """
         from ..configs.observability_companion import companion_path, compose_recipe_layer
         from ..configs.observability_layers import (
@@ -293,27 +309,35 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             read_process_config,
         )
 
-        recipe_path = read_process_config(self, RECIPE_PATH_CONFIG_KEY)
-        if not recipe_path:
-            return
+        # Пустая секция менеджеров = ассемблер этого процесса не касался.
         try:
-            body, source = compose_recipe_layer(self)
-        except Exception as exc:  # noqa: BLE001 — битый спутник не имеет права ронять старт
-            self._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
-            return
-        # Спутник ничего не сказал про ЭТОТ процесс — слой уже собран ассемблером,
-        # пересобирать менеджеры не за чем (источник остался адресом рецепта).
-        if source != str(companion_path(recipe_path)):
+            managers_ready = bool(self.config_handler.get_managers_config())
+        except Exception:  # noqa: BLE001 — нечитаемый конфиг не имеет права ронять старт
+            managers_ready = True
+
+        layers = process_observability_layers(self)
+        origin = "boot:layers"
+
+        recipe_path = read_process_config(self, RECIPE_PATH_CONFIG_KEY)
+        if recipe_path:
+            try:
+                body, source = compose_recipe_layer(self)
+            except Exception as exc:  # noqa: BLE001 — битый спутник не имеет права ронять старт
+                self._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
+                body, source = None, None
+            # Спутник поверх boot-дельты рецепта: он новее — его писали уже после
+            # старта. Источник называем конкретным файлом: при паре «рецепт +
+            # спутник» оператор иначе не знает, какой из двух править.
+            if source is not None and source == str(companion_path(recipe_path)):
+                origin = "boot:companion"
+                layers.replace_layer(LAYER_RECIPE, body, source=source, origin=origin)
+
+        # Слой уже разложен ассемблером, и спутник про этот процесс молчит.
+        if managers_ready and origin == "boot:layers":
             return
 
         from ..managers.observability_reload import apply_observability_layers
 
-        layers = process_observability_layers(self)
-        # Спутник поверх boot-дельты рецепта: он новее — его писали уже после старта.
-        # Источник называем конкретным файлом: при паре «рецепт + спутник» оператор
-        # иначе не знает, какой из двух править.
-        origin = "boot:companion"
-        layers.replace_layer(LAYER_RECIPE, body, source=source, origin=origin)
         try:
             apply_observability_layers(
                 layers,
@@ -324,7 +348,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 origin=origin,
             )
         except Exception as exc:  # noqa: BLE001
-            self._log_error(f"[observability] сохранённый слой рецепта не применён: {exc}")
+            self._log_error(f"[observability] слои наблюдаемости не применены на старте: {exc}")
 
     def _wire_observability_hub(self) -> None:
         """Ф5.16: создать hub наблюдаемости процесса и инъектировать его в слоты

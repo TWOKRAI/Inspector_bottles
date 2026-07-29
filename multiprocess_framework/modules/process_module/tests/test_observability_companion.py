@@ -321,10 +321,10 @@ class TestPersistedLayerSurvivesProcessRespawn:
         def _log_info(self, msg, **kw):
             pass
 
-        _apply_persisted_observability_layer = __import__(
+        _apply_boot_observability_layers = __import__(
             "multiprocess_framework.modules.process_module.core.process_module",
             fromlist=["ProcessModule"],
-        ).ProcessModule._apply_persisted_observability_layer
+        ).ProcessModule._apply_boot_observability_layers
 
     def _proc(self, tmp_path, recipe):
         logger = LoggerManager(
@@ -337,7 +337,7 @@ class TestPersistedLayerSurvivesProcessRespawn:
         proc = self._proc(tmp_path, recipe)
         try:
             assert proc.logger_manager.config.default_level != "DEBUG"
-            proc._apply_persisted_observability_layer()
+            proc._apply_boot_observability_layers()
             assert proc.logger_manager.config.default_level == "DEBUG"
             assert proc.errors == []
         finally:
@@ -348,7 +348,7 @@ class TestPersistedLayerSurvivesProcessRespawn:
         proc = self._proc(tmp_path, recipe)
         try:
             before = proc.logger_manager.config.model_dump()
-            proc._apply_persisted_observability_layer()
+            proc._apply_boot_observability_layers()
             assert proc.logger_manager.config.model_dump() == before
         finally:
             proc.logger_manager.shutdown()
@@ -357,7 +357,7 @@ class TestPersistedLayerSurvivesProcessRespawn:
         write_companion(recipe, {"processes": {"other": {"log_level": "DEBUG"}}})
         proc = self._proc(tmp_path, recipe)
         try:
-            proc._apply_persisted_observability_layer()
+            proc._apply_boot_observability_layers()
             assert proc.logger_manager.config.default_level != "DEBUG"
         finally:
             proc.logger_manager.shutdown()
@@ -367,7 +367,7 @@ class TestPersistedLayerSurvivesProcessRespawn:
         companion_path(recipe).write_text("observability: [не словарь\n", encoding="utf-8")
         proc = self._proc(tmp_path, recipe)
         try:
-            proc._apply_persisted_observability_layer()
+            proc._apply_boot_observability_layers()
             assert proc.errors, "битый спутник проглочен молча"
         finally:
             proc.logger_manager.shutdown()
