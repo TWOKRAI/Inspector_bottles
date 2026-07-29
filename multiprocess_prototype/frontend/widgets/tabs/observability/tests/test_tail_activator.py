@@ -82,18 +82,59 @@ def test_waits_for_the_first_process_delta():
     assert act.announced is False
 
 
-def test_transport_failure_does_not_turn_one_shot_into_a_retry_storm():
+class _RecordingLog:
+    """Журнал вместо реального логгера: копит (уровень, отформатированное сообщение)."""
+
+    def __init__(self) -> None:
+        self.lines: list[tuple] = []
+
+    def warning(self, msg, *args):
+        self.lines.append(("WARNING", msg % args if args else msg))
+
+    def error(self, msg, *args):
+        self.lines.append(("ERROR", msg % args if args else msg))
+
+
+def test_transport_failure_is_retried_and_never_silent():
+    """Находка 2 ревью 5.11: раньше пометка «объявлено» ставилась ДО отправки, а
+    исключение уходило в `except: pass` — один сбой оставлял GUI без хвоста
+    навсегда и молча. Теперь отказ громкий и повторяется до предела."""
     calls = {"n": 0}
+    log = _RecordingLog()
 
     def boom(*a, **k):
         calls["n"] += 1
         raise RuntimeError("router down")
 
-    act = ObservabilityTailActivator(boom, "gui")
+    act = ObservabilityTailActivator(boom, "gui", log=log)
 
-    act.on_state_delta(_delta("processes.cam.state.fps", 30))  # не должно бросить
-    act.on_state_delta(_delta("processes.cam.state.fps", 31))
-    act.on_state_delta(_delta("processes.det.state.fps", 31))
+    for i in range(10):
+        act.on_state_delta(_delta("processes.cam.state.fps", i))  # не должно бросить
 
-    assert calls["n"] == 1
-    assert act.announced is True
+    assert calls["n"] == 3, "повтор либо не случился, либо не ограничен"
+    assert act.announced is False, "провалившаяся отправка не имеет права считаться объявлением"
+    assert len(log.lines) == 3
+    # Последняя попытка называет последствие, а не только факт сбоя.
+    assert log.lines[-1][0] == "ERROR"
+    assert "живого хвоста" in log.lines[-1][1]
+
+
+def test_a_retry_after_a_hiccup_succeeds_and_stops():
+    """Транспорт моргнул на первой дельте — вторая доносит намерение."""
+    calls: list = []
+    state = {"fail": True}
+
+    def flaky(target, command, args):
+        if state["fail"]:
+            state["fail"] = False
+            raise RuntimeError("router down")
+        calls.append((target, command, args))
+
+    act = ObservabilityTailActivator(flaky, "gui", log=_RecordingLog())
+
+    act.on_state_delta(_delta("processes.cam.state.fps", 1))
+    act.on_state_delta(_delta("processes.cam.state.fps", 2))
+    act.on_state_delta(_delta("processes.cam.state.fps", 3))
+
+    assert calls == [("ProcessManager", SUBSCRIBE_ALL, {"subscriber": "gui"})]
+    assert act.announced is True and act.attempts == 2

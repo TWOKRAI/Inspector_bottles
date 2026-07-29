@@ -1328,6 +1328,7 @@ class BuiltinCommands:
                 if obs_recipe_given:
                     from ..configs.observability_layers import (
                         LAYER_RECIPE,
+                        OVERRIDE_CONFIG_KEY,
                         RECIPE_PATH_CONFIG_KEY,
                         resolve_recipe_section,
                     )
@@ -1357,6 +1358,19 @@ class BuiltinCommands:
                     if obs_recipe_path and callable(update_config):
                         update_config(RECIPE_PATH_CONFIG_KEY, str(obs_recipe_path))
                         result["recipe_path"] = str(obs_recipe_path)
+                    # Находка 1 ревью 5.11: вместе с адресом обязана переехать и
+                    # БАЗА слоя. `OVERRIDE_CONFIG_KEY` — долька L2 этого процесса,
+                    # и её читает `compose_recipe_layer`, когда слой пересобирают
+                    # с диска (R4). Оставь мы здесь дольку ПОКИНУТОГО рецепта —
+                    # первая же правка спутника нового воскресила бы ключи
+                    # старого: воспроизведено на пережившем switch процессе
+                    # (`log_level: WARNING` рецепта A всплыл при активном B,
+                    # который про наблюдаемость молчит). Инвариант простой:
+                    # ключ описывает ДЕЙСТВУЮЩУЮ дольку рецепта, всегда.
+                    # Спутник сюда не пишется намеренно — иначе снятый из него
+                    # ключ въехал бы в базу и не исчез бы уже никогда.
+                    if callable(update_config):
+                        update_config(OVERRIDE_CONFIG_KEY, dict(body) if isinstance(body, dict) else {})
 
                 # R4: перечитка слоя L2 с диска. Идёт ПОСЛЕ ветки switch'а и до
                 # сброса сессии — тот же порядок «слои снизу вверх», и та же одна

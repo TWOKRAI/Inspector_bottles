@@ -1621,11 +1621,14 @@ class ProcessManagerProcess(ProcessModule):
                 f"рассылка детям reached={reached}, слой рецепта={'в том же конверте' if recipe else 'не менялся'}"
             )
         result = {"orchestrator": own, "broadcast_reached": int(reached)}
-        if recipe:
-            # Что именно уехало детям — в ответе: «раздал» и «раздал ЭТО» —
-            # разные утверждения, а проверяется потом второе.
-            result["recipe_path"] = recipe.get("observability_recipe_path", "")
-            result["recipe_keys"] = sorted(recipe.get("observability_recipe") or {})
+        # Что именно уехало детям — в ответе: «раздал» и «раздал ЭТО» — разные
+        # утверждения, а проверяется потом второе. Читаем ИЗ КОНВЕРТА, а не из
+        # аргумента (находка 3 ревью 5.11): по аргументу ответ называл слой даже
+        # тогда, когда тот не попал в рассылку, — то есть отвечал за намерение,
+        # выдавая это за доставку.
+        if "observability_recipe" in payload:
+            result["recipe_path"] = payload.get("observability_recipe_path", "")
+            result["recipe_keys"] = sorted(payload.get("observability_recipe") or {})
         return result
 
     def _broadcast_command(self, command: str, data: dict, *, queue_type: str = "system") -> int:

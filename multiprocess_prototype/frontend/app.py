@@ -357,7 +357,16 @@ def run_gui(process: "GuiProcess") -> None:
     # и новая инкарнация молча оставалась без хвоста.
     from .widgets.tabs.observability import ObservabilityTailActivator
 
-    _obs_tail_activator = ObservabilityTailActivator(command_sender.send_command, process.name)
+    class _ActivatorLog:
+        """Отказ активации — в журнал ПРОЦЕССА, а не в голый logging (тот пуст)."""
+
+        def warning(self, message: str) -> None:
+            process._log_warning(message, module="observability")
+
+        def error(self, message: str) -> None:
+            process._log_error(message, module="observability")
+
+    _obs_tail_activator = ObservabilityTailActivator(command_sender.send_command, process.name, log=_ActivatorLog())
     process._bridge.add_state_listener(_obs_tail_activator.on_state_delta)
 
     # 3f. ServiceStateAdapter — подключить ПОСЛЕ bindings (proxy-aware step)

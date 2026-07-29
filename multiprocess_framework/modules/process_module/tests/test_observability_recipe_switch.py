@@ -243,3 +243,85 @@ class TestMechanismHazards:
         assert entries, "смена слоя рецепта не оставила следа в аудите"
         assert entries[-1]["origin"].startswith("switch:")
         assert entries[-1]["keys"] == ["log_level"]
+
+
+class TestSwitchMovesTheBaseNotOnlyTheAddress:
+    """Находка 1 ревью 5.11: вместе с адресом обязана переехать БАЗА слоя.
+
+    ``OVERRIDE_CONFIG_KEY`` — долька рецепта, принадлежащая ЭТОМУ процессу, и
+    именно её берёт `compose_recipe_layer`, когда слой пересобирают с диска (R4).
+    Пока switch правил только адрес, база оставалась долькой ПОКИНУТОГО рецепта —
+    и первая же правка спутника нового воскрешала ключи старого. Путь стал
+    достижим только в 5.11: до раздачи из watcher'а перечитывать было некому.
+    """
+
+    def test_survivor_does_not_resurrect_the_abandoned_recipe_on_refresh(self, child) -> None:
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            write_companion,
+        )
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            process_observability_layers,
+        )
+
+        svc, handlers, tmp_path = child
+        recipe_b = tmp_path / "recipe_b.yaml"
+        recipe_b.write_text("name: b\n", encoding="utf-8")
+
+        # Switch на рецепт B, который про наблюдаемость МОЛЧИТ: слой обязан сняться.
+        handlers["config.reload"](
+            {
+                "observability_recipe": {},
+                "observability_recipe_path": str(recipe_b),
+                "observability_session_clear": True,
+            }
+        )
+        layers = process_observability_layers(svc)
+        assert layers.recipe == {}
+
+        # Оператор правит спутник ДЕЙСТВУЮЩЕГО рецепта; watcher шлёт «перечитай».
+        write_companion(recipe_b, {"processes": {"seg": {"enable_batching": False}}})
+        handlers["config.reload"]({"observability_recipe_reload": True})
+
+        # До правки здесь всплывал `log_level: WARNING` — из рецепта A, с которого ушли.
+        assert layers.recipe == {"enable_batching": False}
+
+    def test_switch_writes_the_new_slice_into_the_config(self, child) -> None:
+        """Инвариант прямо: ключ описывает ДЕЙСТВУЮЩУЮ дольку, всегда."""
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            OVERRIDE_CONFIG_KEY as _KEY,
+        )
+
+        svc, handlers, tmp_path = child
+
+        handlers["config.reload"](
+            {
+                "observability_recipe": RECIPE_B,
+                "observability_recipe_path": str(tmp_path / "recipe_b.yaml"),
+            }
+        )
+
+        assert svc.get_config(_KEY) == {"log_level": "ERROR"}
+
+    def test_companion_never_leaks_into_the_base(self, child) -> None:
+        """Спутник в базу не пишется: иначе снятый из него ключ не исчез бы никогда."""
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            write_companion,
+        )
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            OVERRIDE_CONFIG_KEY as _KEY,
+            process_observability_layers,
+        )
+
+        svc, handlers, tmp_path = child
+        recipe_b = tmp_path / "recipe_b.yaml"
+        recipe_b.write_text("name: b\n", encoding="utf-8")
+        handlers["config.reload"]({"observability_recipe": {}, "observability_recipe_path": str(recipe_b)})
+
+        write_companion(recipe_b, {"processes": {"seg": {"log_level": "DEBUG"}}})
+        handlers["config.reload"]({"observability_recipe_reload": True})
+        assert svc.get_config(_KEY) == {}  # база чиста — в ней только рецепт
+
+        write_companion(recipe_b, {"processes": {"seg": {}}})  # оператор убрал ключ
+        handlers["config.reload"]({"observability_recipe_reload": True})
+
+        assert process_observability_layers(svc).recipe == {}
