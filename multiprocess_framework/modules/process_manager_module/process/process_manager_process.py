@@ -1193,6 +1193,73 @@ class ProcessManagerProcess(ProcessModule):
         started[name] = time.time()
         self._replay_observability_when_ready(name)
 
+    # -------------------------------------------------------------------------
+    # Readiness-гейт: «команда не раньше, чем инкарнация сможет её принять»
+    #
+    # Task 5.11 завела его для раздачи подписок, резидуал 5.11-R4 показал живьём
+    # ту же гонку на routing.refresh / config.reload / telemetry.reconfigure.
+    # Механизм здесь ОДИН на всех потребителей: копия на каждую команду — ровно
+    # тот способ, которым дефект уже воскресал на соседней развилке.
+    # -------------------------------------------------------------------------
+
+    def _child_ready_event(self, name: str):
+        """Event готовности ребёнка, либо ``None`` — сигнала нет.
+
+        ``None`` означает «спросить не у кого» (mock-реестр, старый bundle,
+        процесс не создавался), а НЕ «не готов»: потребители гейта в этом случае
+        действуют немедленно — прежнее поведение хуже, чем с сигналом, но лучше,
+        чем не действовать вовсе.
+        """
+        get_ready_event = getattr(self._process_registry, "get_ready_event", None)
+        if not callable(get_ready_event):
+            return None
+        try:
+            return get_ready_event(name)
+        except Exception as exc:  # noqa: BLE001 — отсутствие сигнала не повод падать
+            self._log_error(f"[ready-gate] ready_event '{name}' не прочитан: {exc}")
+            return None
+
+    def _run_when_child_ready(self, name: str, action, *, label: str, deadline_s: float) -> bool:
+        """Выполнить действие над ребёнком тогда, когда он умеет его принять.
+
+        Готов (или сигнала нет) → действие прямо здесь, синхронно. Не готов →
+        daemon-поток ждёт ``ready_event`` и выполняет после. Ждать синхронно
+        нельзя: гейт зовут из ``message_processor``, а событие живёт ВНЕ
+        message-loop (``mp.Event``) — тот же аргумент, которым обоснованы
+        барьеры Ф3.2.
+
+        Returns:
+            ``True`` — действие отложено до готовности; ``False`` — выполнено сразу.
+        """
+        event = self._child_ready_event(name)
+        if event is None or event.is_set():
+            action()
+            return False
+        threading.Thread(
+            target=self._run_child_action_after_ready,
+            args=(name, action, label, event, deadline_s),
+            name=f"ready-gate-{label}-{name}",
+            daemon=True,
+        ).start()
+        return True
+
+    def _run_child_action_after_ready(self, name: str, action, label: str, event, deadline_s: float) -> None:
+        """Дождаться готовности инкарнации и выполнить действие (daemon-поток).
+
+        По истечении дедлайна действуем ВСЁ РАВНО и громко: «процесс не
+        объявился» — не повод молча пропустить команду, но и не повод сделать
+        вид, что всё прошло штатно.
+        """
+        try:
+            if not event.wait(deadline_s):
+                self._log_warning(
+                    f"[ready-gate:{label}] '{name}' не объявил готовность за {deadline_s}s — "
+                    "действую вслепую (команда может не застать обработчик)"
+                )
+            action()
+        except Exception as exc:  # noqa: BLE001 — поток обслуживания не роняет систему
+            self._log_error(f"[ready-gate:{label}] отложенное действие для '{name}' упало: {exc}")
+
     def _replay_observability_when_ready(self, name: str) -> None:
         """Раздать намерения свежей инкарнации — но не раньше, чем она сможет их принять.
 
@@ -1209,52 +1276,22 @@ class ProcessManagerProcess(ProcessModule):
         раскрутит цикл сообщений — ждать здесь нечего и некого»). Сообщение
         действительно читается — просто раньше, чем появляется тот, кто его поймёт.
 
-        Ждать синхронно нельзя: шов зовут из message_processor. Ждём в
-        daemon-потоке на ``ready_event`` — он живёт ВНЕ message-loop (mp.Event),
-        поэтому дедлок исключён тем же аргументом, что и у барьеров Ф3.2.
+        Ждать синхронно нельзя: шов зовут из message_processor. Ожидание живёт в
+        общем примитиве :meth:`_run_when_child_ready` — том же, которым резидуал
+        5.11-R4 развёл рассылки switch'а. Своей копии ожидания здесь больше нет.
         """
         broker = getattr(self, "_observability_broker", None)
         if broker is None or not broker.subscriber_names():
             # Намерений нет — ни потока, ни раздачи: платить за них на КАЖДОМ
             # старте процесса не за что.
             return
-        event = None
-        get_ready_event = getattr(self._process_registry, "get_ready_event", None)
-        if callable(get_ready_event):
-            try:
-                event = get_ready_event(name)
-            except Exception as exc:  # noqa: BLE001 — отсутствие сигнала не повод падать
-                self._log_error(f"[observability] ready_event '{name}' не прочитан: {exc}")
-        if event is None or event.is_set():
-            # Нет сигнала (mock-реестр, старый bundle) — прежнее поведение: раздать
-            # сразу. Хуже, чем с сигналом, но лучше, чем не раздать вовсе.
-            self._replay_observability_subscriptions("instance.started", target=name)
-            return
-        threading.Thread(
-            target=self._replay_observability_after_ready,
-            args=(name, event),
-            name=f"obs-replay-{name}",
-            daemon=True,
-        ).start()
-
-    def _replay_observability_after_ready(self, name: str, event) -> None:
-        """Дождаться готовности инкарнации и раздать намерения (daemon-поток).
-
-        По истечении дедлайна раздаём ВСЁ РАВНО и громко: «процесс не объявился»
-        — не повод молча оставить подписчика без хвоста, но и не повод сделать вид,
-        что раздача прошла штатно.
-        """
         timeout = self.get_config("observability_replay_ready_timeout_s")
-        deadline = 30.0 if timeout is None else float(timeout)
-        try:
-            if not event.wait(deadline):
-                self._log_warning(
-                    f"[observability] '{name}' не объявил готовность за {deadline}s — "
-                    "раздаю подписки вслепую (команда может не застать обработчик)"
-                )
-            self._replay_observability_subscriptions("instance.started", target=name)
-        except Exception as exc:  # noqa: BLE001 — поток обслуживания не роняет систему
-            self._log_error(f"[observability] отложенная раздача для '{name}' упала: {exc}")
+        self._run_when_child_ready(
+            name,
+            lambda: self._replay_observability_subscriptions("instance.started", target=name),
+            label="observability",
+            deadline_s=30.0 if timeout is None else float(timeout),
+        )
 
     def _publish_process_identity(self, name: str) -> None:
         """Опубликовать ОС-идентичность процесса в StateStore: pid + актуальный config.
@@ -1713,8 +1750,27 @@ class ProcessManagerProcess(ProcessModule):
         телеметрии решает по-своему. ``communication`` недоступен (минимальный/тестовый
         PM) → 0 (тихий no-op).
 
+        **Резидуал 5.11-R4 — досылка не-готовым.** Ребёнок читает system-очередь с
+        шага 7 ``initialize()``, а команды регистрирует в ``run()``: попавшее в это
+        окно сообщение читается и выбрасывается (``No handler for key ...``), а
+        отправитель fire-and-forget об этом не узнаёт никогда. Живой лог switch'а
+        показал так и ``routing.refresh``, и ``config.reload``. Поэтому рассылка
+        идёт как прежде — всем и сразу, — а тем, кто на этот момент готовности не
+        объявил, тот же конверт досылается адресно за readiness-гейтом. Досылка
+        живёт ЗДЕСЬ, а не в трёх вызывающих: список «не забыть» из трёх пунктов —
+        ровно та форма, которой дефект уже воскресал на соседней развилке.
+
+        Все команды этого пути идемпотентны (``routing.refresh`` — guard по epoch,
+        ``config.reload`` — пересборка слоёв, ``telemetry.reconfigure`` —
+        replace/merge, ``observability.tail.*`` — идемпотентны по подписчику),
+        поэтому ребёнок, успевший стать готовым в зазоре, безопасно переживает
+        двойную доставку.
+
         Returns:
-            Число успешных доставок (охват) от ``comm.broadcast``.
+            Число успешных доставок (охват) от ``comm.broadcast`` — доставок В
+            ОЧЕРЕДЬ на момент рассылки. Досланные позже здесь НЕ учитываются:
+            «раздал» и «применилось» — разные утверждения, и складывать их в одно
+            число значило бы отвечать за второе, измерив первое.
         """
         comm = getattr(self, "communication", None)
         if comm is None:
@@ -1726,7 +1782,82 @@ class ProcessManagerProcess(ProcessModule):
             "queue_type": queue_type,
             "data": data,
         }
-        return int(comm.broadcast(msg, exclude_self=True))
+        reached = int(comm.broadcast(msg, exclude_self=True))
+        self._redeliver_to_unready_children(command, data, queue_type=queue_type)
+        return reached
+
+    def _late_delivery_deadline(self) -> float:
+        """Сколько ждать готовности ребёнка перед досылкой (``child_command_ready_timeout_s``).
+
+        Отдельный ключ от ``observability_replay_ready_timeout_s`` намеренно:
+        механизм ожидания один (:meth:`_run_when_child_ready`), а политика разная.
+        Раздача подписок может ждать долго — подписчик всё равно молчит, пока не
+        дождётся. Досылка lifecycle-команды ждать столько же не должна: рассылка
+        привязана к событию (switch, рестарт), и через минуту она уже про прошлое.
+        ``0`` → досылка выключена (аварийный откат к поведению до R4).
+        """
+        raw = self.get_config("child_command_ready_timeout_s")
+        return 15.0 if raw is None else float(raw)
+
+    def _log_redelivery(self, name: str, command: str, data: dict, *, queue_type: str) -> bool:
+        """Отправить досылку и сказать вслух, чем она кончилась.
+
+        Механизм, о котором нельзя спросить, через час неотличим от сломанного:
+        «запланировал» и «доставил» — разные утверждения, а без второго в логе
+        остаётся только намерение. Пара строк ЗАПЛАНИРОВАНА/ДОСТАВЛЕНА — то, по
+        чему живой прогон отличает работающую досылку от заведённого потока.
+        """
+        delivered = self._send_child_command(name, command, data, queue_type=queue_type)
+        if delivered:
+            self._log_info(f"[ready-gate] '{command}' → '{name}': досылка доставлена (инкарнация готова)")
+        else:
+            self._log_error(f"[ready-gate] '{command}' → '{name}': досылка НЕ доставлена — команда потеряна")
+        return delivered
+
+    def _redeliver_to_unready_children(self, command: str, data: dict, *, queue_type: str) -> list[str]:
+        """Досылать конверт тем детям, кто на момент рассылки ещё не готов её принять.
+
+        Отбор — по ``ready_event``: событие есть и НЕ взведено. Нет события
+        (mock-реестр, не-ProcessModule) → спрашивать не у кого, досылка не
+        заводится: гадать «наверное, не готов» значило бы слать вторую копию
+        всем и всегда.
+
+        Returns:
+            Имена, которым досылка запланирована (для лога и тестов).
+        """
+        deadline = self._late_delivery_deadline()
+        if deadline <= 0:
+            return []
+        registry = getattr(self, "_process_registry", None)
+        if registry is None:
+            return []
+        late: list[str] = []
+        snapshot: dict | None = None
+        for proc in list(getattr(registry, "os_processes", None) or []):
+            name = getattr(proc, "name", None)
+            if not name:
+                continue
+            event = self._child_ready_event(name)
+            if event is None or event.is_set():
+                continue
+            if snapshot is None:
+                # Досылка уходит секундами позже, а вызывающий волен переиспользовать
+                # свой payload (так делает fan-out телеметрии). Уезжает СНИМОК того,
+                # что реально ушло в рассылке, а не то, во что он превратился потом.
+                snapshot = copy.deepcopy(data)
+            late.append(name)
+            self._run_when_child_ready(
+                name,
+                lambda n=name, d=snapshot: self._log_redelivery(n, command, d, queue_type=queue_type),
+                label=f"redeliver:{command}",
+                deadline_s=deadline,
+            )
+        if late:
+            self._log_info(
+                f"[ready-gate] '{command}': досылка запланирована не-готовым {sorted(late)} "
+                f"(дедлайн {deadline}s) — рассылка их обработчика не застала бы"
+            )
+        return late
 
     def _send_child_command(self, target: str, command: str, data: dict, *, queue_type: str = "system") -> bool:
         """Адресная отправка command-билета ОДНОМУ ребёнку (аналог :meth:`_broadcast_command`).

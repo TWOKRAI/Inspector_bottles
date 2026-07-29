@@ -36,6 +36,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 os.environ["BACKEND_CTL"] = "1"
 
+# Консоль Windows отдаёт cp1251/cp866: '→' в заголовке фазы роняет весь прогон
+# UnicodeEncodeError'ом ПОСЕРЕДИНЕ стенда — то есть зонд убивает не проверка, а
+# печать про неё. Поток перенастраивается явно, до первой строки.
+for _stream in (sys.stdout, sys.stderr):
+    reconfigure = getattr(_stream, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(encoding="utf-8", errors="replace")
+
 from backend_ctl.driver import _leaf_result  # noqa: E402
 from backend_ctl.harness import BackendHarness  # noqa: E402
 
@@ -190,6 +198,30 @@ def main() -> int:
             "после ручного рестарта хвост НЕ потерян",
             f"записей от свежей инкарнации: {seen3.get('synthetic_source', 0)} (pid {before_pid}→{after_pid})",
         )
+
+        # ---------------- P5: резидуал 5.11-R4 — сверка routing-эпохи ----------
+        # Досылка за readiness-гейтом доказывается ИЗМЕРЕНИЕМ, а не выводом из
+        # числа строк «No handler» в логе. Рассылка `routing.refresh` на switch и
+        # рестарт приезжает свежей инкарнации в окно «message-loop крутится,
+        # команды не зарегистрированы» — и выбрасывается. Ребёнок применяет
+        # снимок в свою PSR-запись (`routing_epoch`), а PM держит авторитетную
+        # эпоху. Совпали — досланная копия дошла и применилась; отстала — команда
+        # потеряна, и это ровно то, что резидуал R4 описывает.
+        log("\n--- P5: routing.refresh пережил switch и рестарт (резидуал R4) ---")
+        # Ключ команды — `supervision.status` (через точку). Первый прогон читал
+        # `supervision_status` и получал epoch=None: зонд сравнивал число с
+        # «ничем» и честно падал. Ложный красный лучше ложного зелёного, но
+        # правильный ключ берётся из карты команд PM, а не из имени метода.
+        pm_epoch = _leaf_result(drv.send_command("ProcessManager", "supervision.status", timeout=15.0)).get("epoch")
+        for proc in ("synthetic_source", "consumer"):
+            stats = _leaf_result(drv.send_command(proc, "introspect.router_stats", timeout=15.0))
+            child_epoch = stats.get("routing_epoch")
+            applied = stats.get("routing_refresh_applied")
+            check(
+                child_epoch == pm_epoch,
+                f"'{proc}' применил актуальный routing-снимок",
+                f"эпоха ребёнка={child_epoch}, эпоха PM={pm_epoch}, применений={applied}",
+            )
 
         # ---------------- P4: пара — намерение снято → тишина ------------------
         log("\n--- P4: unsubscribe_all → рестарт → тишина ---")

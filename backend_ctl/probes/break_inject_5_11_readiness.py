@@ -76,10 +76,14 @@ def br3(text: str) -> str:
 
 
 def br4(text: str) -> str:
-    """По истечении дедлайна раздача НЕ идёт (молчаливый отказ)."""
+    """По истечении дедлайна раздача НЕ идёт (молчаливый отказ).
+
+    После резидуала 5.11-R4 ожидание живёт в общем ``_run_child_action_after_ready``:
+    заплата бьёт по нему, а гарантия у 5.11 и R4 теперь буквально одна.
+    """
     return text.replace(
-        '                    "раздаю подписки вслепую (команда может не застать обработчик)"\n                )',
-        '                    "раздаю подписки вслепую (команда может не застать обработчик)"\n'
+        '                    "действую вслепую (команда может не застать обработчик)"\n                )',
+        '                    "действую вслепую (команда может не застать обработчик)"\n'
         "                )\n                return  # BR4",
     )
 
@@ -96,15 +100,18 @@ def br5(text: str) -> str:
 
 
 def br6(text: str) -> str:
-    """Ожидание готовности синхронное — шов блокирует message-loop."""
+    """Ожидание готовности синхронное — шов блокирует message-loop.
+
+    Цель переехала в общий примитив (см. :func:`br4`).
+    """
     return text.replace(
         """        threading.Thread(
-            target=self._replay_observability_after_ready,
-            args=(name, event),
-            name=f"obs-replay-{name}",
+            target=self._run_child_action_after_ready,
+            args=(name, action, label, event, deadline_s),
+            name=f"ready-gate-{label}-{name}",
             daemon=True,
         ).start()""",
-        "        self._replay_observability_after_ready(name, event)  # BR6",
+        "        self._run_child_action_after_ready(name, action, label, event, deadline_s)  # BR6",
     )
 
 
