@@ -343,6 +343,16 @@ class ProcessManagerProcess(ProcessModule):
                 "Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), "
                 "throttle → центральный троттл оркестратора; cap-детекция на обоих путях",
             ),
+            "observability.tail.subscribe_all": (
+                self._cmd_observability_tail_subscribe_all,
+                "Брокер (Task 5.11): подписать адрес на хвост ВСЕХ процессов одним вызовом; "
+                "намерение переживает рестарт, switch и появление нового процесса. "
+                "Записи идут напрямую подписчику — PM брокер, не транзит",
+            ),
+            "observability.tail.unsubscribe_all": (
+                self._cmd_observability_tail_unsubscribe_all,
+                "Брокер: снять намерение подписчика и разослать снятие хвоста всем процессам",
+            ),
         }
 
         for cmd_name, (handler, description) in commands.items():
@@ -1047,6 +1057,15 @@ class ProcessManagerProcess(ProcessModule):
         # точка очистки (симметрия register/unregister): реестр+SHM+монитор+state.
         self._delete_process_state(name)
 
+        # Task 5.11: снятый с топологии процесс мог быть ПОДПИСЧИКОМ (GUI —
+        # обычный процесс системы). Намерение пережившего его брокера заставляло
+        # бы каждую новую инкарнацию форвардить записи в очередь мертвеца.
+        # Это единственный сигнал о смерти подписчика, который у оркестратора
+        # есть по факту, а не по догадке.
+        broker = getattr(self, "_observability_broker", None)
+        if broker is not None:
+            broker.forget_subscriber(name)
+
     def _state_op(self, handler_name: str, payload: dict, ctx: str) -> None:
         """Единый локальный путь мутации StateStore из PM (без IPC).
 
@@ -1085,11 +1104,23 @@ class ProcessManagerProcess(ProcessModule):
         )
 
     def _mark_instance_started(self, name: str) -> None:
-        """Запомнить момент запуска ИНСТАНСА процесса (Ф2 Task 2.1).
+        """Отметка старта ИНСТАНСА процесса + шов «поднялась свежая инкарнация».
 
-        Вызывается на всех путях старта (boot, start_process, restart, автостарт).
-        Вместе с pid из ОС даёт ответ на вопрос «это тот же инстанс или новый?»
-        даже когда incarnation не менялась (reuse-очередей).
+        Ф2 Task 2.1: вызывается на всех путях старта (boot, start_process,
+        restart, автостарт, пересоздание топологией). Вместе с pid из ОС даёт
+        ответ на вопрос «это тот же инстанс или новый?» даже когда incarnation не
+        менялась (reuse-очередей).
+
+        Task 5.11: **и по той же причине здесь висит переподписка на
+        наблюдаемость.** Свежая инкарнация стартует с пустым набором форвардеров,
+        то есть хвост подписчика на ней молча пропадает. Пять путей старта уже
+        сходятся в этой точке — заводить шестое место «не забыть переподписать»
+        значило бы построить ровно ту неполноту, которой болели оба потребителя
+        (GUI-триггер ``recovered`` не покрывал ручной рестарт). Раздача адресная
+        и fire-and-forget: команда ложится в system-очередь инстанса и будет
+        прочитана, когда тот раскрутит цикл сообщений — ждать здесь нечего и
+        некого.
+
         Защитный getattr — unit-тесты строят PM с no-op ``__init__``
         (та же философия, что ``_ensure_routing_state``).
         """
@@ -1098,6 +1129,7 @@ class ProcessManagerProcess(ProcessModule):
             started = {}
             self._instance_started_at = started
         started[name] = time.time()
+        self._replay_observability_subscriptions("instance.started", target=name)
 
     def _publish_process_identity(self, name: str) -> None:
         """Опубликовать ОС-идентичность процесса в StateStore: pid + актуальный config.
@@ -1577,6 +1609,84 @@ class ProcessManagerProcess(ProcessModule):
             "data": data,
         }
         return bool(comm.send_to_process(target, msg))
+
+    # -------------------------------------------------------------------------
+    # Брокер подписки на наблюдаемость (Task 5.11)
+    # -------------------------------------------------------------------------
+
+    def _observability_broker_obj(self):
+        """Ленивый брокер подписки (та же философия, что ``_ensure_routing_state``).
+
+        Строится на уже существующих примитивах рассылки: ``_broadcast_command``
+        (fan-out всем детям тем же путём, что routing.refresh — по СВЕЖИМ
+        очередям PM, значит долетает и до пересозданных switch'ем) и
+        ``_send_child_command`` (адресно одному). Свой хвост оркестратор ставит
+        тем же ``subscribe_observability_tail``, что и любой процесс.
+        """
+        broker = getattr(self, "_observability_broker", None)
+        if broker is None:
+            from .observability_broker import ObservabilitySubscriptionBroker
+
+            broker = ObservabilitySubscriptionBroker(
+                broadcast=lambda command, data: self._broadcast_command(command, data),
+                send_to=lambda target, command, data: self._send_child_command(target, command, data),
+                subscribe_self=getattr(self, "subscribe_observability_tail", None),
+                unsubscribe_self=getattr(self, "unsubscribe_observability_tail", None),
+                log_info=self._log_info,
+                log_error=self._log_error,
+            )
+            self._observability_broker = broker
+        return broker
+
+    def _cmd_observability_tail_subscribe_all(self, data=None, **kwargs) -> dict:
+        """Подписать адрес на хвост ВСЕХ процессов одним вызовом (Task 5.11).
+
+        До брокера потребитель сам опрашивал топологию, сам крутил цикл подписок
+        и сам ловил рестарты — каждый по-своему и каждый неполно (GUI не видел
+        ручного рестарта, драйвер получил дедлок автоподписки из reader-потока).
+        Здесь намерение записывается один раз, а разворачивает его тот, у кого
+        есть сигнал «поднялась свежая инкарнация», — оркестратор.
+
+        Параметры (data): ``subscriber`` (адрес получателя пушей, обяз.).
+        """
+        args = _merge_cmd_args(data, kwargs)
+        return self._observability_broker_obj().subscribe_all(str(args.get("subscriber") or ""))
+
+    def _cmd_observability_tail_unsubscribe_all(self, data=None, **kwargs) -> dict:
+        """Снять намерение подписчика и разослать снятие хвоста всем процессам.
+
+        ``subscriber`` обязателен: пустой адрес у процесса означает «снять всех»,
+        и та же вольность здесь снесла бы хвост соседнего потребителя.
+        """
+        args = _merge_cmd_args(data, kwargs)
+        return self._observability_broker_obj().unsubscribe_all(str(args.get("subscriber") or ""))
+
+    def observability_introspect_extra(self) -> dict:
+        """Хук ``introspect.observability``: секция брокера (Task 5.11).
+
+        Оркестраторская часть readback'а — единственное место, где видно,
+        КТО подписан на всё и доехала ли последняя раздача. Без неё «хвоста нет»
+        неотличимо от «намерение снято».
+        """
+        return {"broker": self._observability_broker_obj().snapshot()}
+
+    def _replay_observability_subscriptions(self, reason: str, *, target: str | None = None) -> dict:
+        """Доиграть намерения подписки (шов инкарнации / смена топологии).
+
+        Fire-and-forget по построению: PM не ждёт ответа ребёнка ни здесь, ни в
+        хендлере команды. Именно это, а не договорённость «не звать из такого-то
+        потока», делает дедлок-путь автоподписки невоспроизводимым.
+        """
+        broker = getattr(self, "_observability_broker", None)
+        if broker is None:
+            # Ни одного намерения не записано — строить брокер ради пустой
+            # раздачи значит платить на КАЖДОМ старте процесса.
+            return {"subscribers": [], "reached": 0}
+        try:
+            return broker.replay(target=target, reason=reason)
+        except Exception as exc:  # noqa: BLE001 — раздача не имеет права ронять старт
+            self._log_error(f"_replay_observability_subscriptions({reason}) упал: {exc}")
+            return {"subscribers": [], "reached": 0, "error": str(exc)}
 
     def _refresh_after_topology(self, reason: str, executed: list | None) -> int | None:
         """Если топология что-то исполнила (executed непуст) — bump epoch + broadcast.

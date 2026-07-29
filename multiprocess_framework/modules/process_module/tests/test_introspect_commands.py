@@ -634,3 +634,58 @@ class TestIntrospectObservability:
 
         assert first["counters"] == second["counters"]
         assert logger.get_stats_calls == 2  # только чтение, по разу на вызов
+
+
+# ====================================================================== #
+#  introspect.observability — оркестраторская добавка (Task 5.11)         #
+# ====================================================================== #
+
+
+class TestObservabilityIntrospectExtra:
+    """Хук ``observability_introspect_extra``: секция брокера доезжает до КОМАНДЫ.
+
+    Тест на самом хуке проверял бы только хук: переименуй ключ в команде — и он
+    остался бы зелёным, а readback брокера исчез бы («фейк-гарнесс доказывает
+    гарнесс»). Поэтому здесь дёргается зарегистрированный обработчик.
+    """
+
+    @staticmethod
+    def _handler(extra_fn=None):
+        svc = _FakeServices()
+        svc.logger_manager = None
+        svc.error_manager = None
+        svc.stats_manager = None
+        svc.get_config = lambda key, default=None: default
+        if extra_fn is not None:
+            svc.observability_introspect_extra = extra_fn
+        bc = BuiltinCommands(svc)
+        bc._register_introspect_commands()
+        return svc.command_manager.handlers["introspect.observability"]
+
+    def test_extra_section_reaches_the_command_answer(self) -> None:
+        handler = self._handler(lambda: {"broker": {"subscribers": [{"subscriber": "gui"}], "count": 1}})
+
+        res = handler({})
+
+        assert res["success"] is True
+        assert res["broker"]["count"] == 1
+        assert res["broker"]["subscribers"][0]["subscriber"] == "gui"
+
+    def test_process_without_the_hook_answers_exactly_as_before(self) -> None:
+        """Обычный процесс не платит за оркестраторскую добавку ни одним ключом."""
+        res = self._handler()({})
+
+        assert res["success"] is True
+        assert "broker" not in res
+        assert set(res) == {"success", "process", "effective", "counters", "provenance", "audit", "layers"}
+
+    def test_broken_hook_does_not_break_the_reading_command(self) -> None:
+        """Читающая команда не падает из-за добавки, но и не молчит о сбое."""
+
+        def _boom():
+            raise RuntimeError("брокер сломан")
+
+        res = self._handler(_boom)({})
+
+        assert res["success"] is True
+        assert "брокер сломан" in res["extra_error"]

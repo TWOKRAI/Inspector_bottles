@@ -170,3 +170,56 @@ class TestDrainForward:
         forwarder, _ = wire_observability_forward(router, "gui", "worker_module", None, None)
         drain_process_observability(hub, None, None, forwarder)
         assert router.sent == []  # пусто → нет пуша
+
+
+class TestNoSelfSubscription:
+    """Task 5.11: процесс не форвардит собственную наблюдаемость самому себе.
+
+    Инвариант живёт у процесса, а не у вызывающего: GUI фильтровал себя сам,
+    брокер фильтровал бы вторым местом, третий потребитель забыл бы. Брокер
+    рассылает ОДИН конверт всем сразу и адресно исключить себя не может —
+    отказ здесь его штатный ответ, поэтому он громкий и с причиной.
+    """
+
+    @staticmethod
+    def _process(name: str = "camera_0"):
+        from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+
+        proc = ProcessModule.__new__(ProcessModule)
+        proc.name = name
+        proc.router_manager = FakeRouter()
+        proc.logger_manager = None
+        proc.error_manager = None
+        proc._observability_hub = ObservabilityHub(name)
+        proc._observability_forwarders = {}
+        return proc
+
+    def test_subscribing_a_process_to_itself_is_refused_with_a_reason(self):
+        proc = self._process()
+
+        res = proc.subscribe_observability_tail("camera_0")
+
+        assert res["success"] is False
+        assert "петля" in res["reason"]
+        # Главное: форвардер НЕ встал — иначе каждая запись уезжала бы в свою
+        # же очередь, где о ней тоже можно было бы записать.
+        assert proc._observability_forwarders == {}
+
+    def test_a_foreign_subscriber_is_still_wired(self):
+        """Отказ адресный: сосед по-прежнему подписывается."""
+        proc = self._process()
+
+        res = proc.subscribe_observability_tail("gui")
+
+        assert res["success"] is True
+        assert list(proc._observability_forwarders) == ["gui"]
+
+    def test_refusal_happens_before_the_hub_check(self):
+        """Петля отвергается и у процесса БЕЗ hub'а — иначе причина отказа
+        зависела бы от наличия пилот-воркеров, а не от самой петли."""
+        proc = self._process()
+        proc._observability_hub = None
+
+        res = proc.subscribe_observability_tail("camera_0")
+
+        assert "петля" in res["reason"]

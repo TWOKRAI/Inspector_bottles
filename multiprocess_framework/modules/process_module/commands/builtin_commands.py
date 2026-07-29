@@ -778,6 +778,17 @@ class BuiltinCommands:
             audit_limit = int(args.get("audit_limit", 20))
         except (TypeError, ValueError):
             audit_limit = 20
+        # Task 5.11: оркестраторская добавка (секция брокера подписки). Хук, а не
+        # ветка «если это PM»: process_module не обязан знать, кто над ним, — тот
+        # же приём, что у `capabilities_extra`. Процесс без хука отдаёт прежний
+        # ответ бит-в-бит.
+        extra: dict = {}
+        extra_fn = getattr(svc, "observability_introspect_extra", None)
+        if callable(extra_fn):
+            try:
+                extra = dict(extra_fn() or {})
+            except Exception as exc:  # noqa: BLE001 — читающая команда не падает из-за добавки
+                extra = {"extra_error": str(exc)}
         return {
             "success": True,
             "process": svc.name,
@@ -785,6 +796,7 @@ class BuiltinCommands:
             "counters": observability_counters(logger=logger, error=error, stats=stats),
             "provenance": observability_provenance(layers, logger=logger),
             "audit": layers.audit.view(audit_limit),
+            **extra,
             "layers": {
                 "session_keys": list(layers.session_keys()),
                 "app_source": layers.app_source,

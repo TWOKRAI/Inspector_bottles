@@ -216,6 +216,20 @@ class ObservabilityTailUnsubscribeParams(BaseModel):
     subscriber: Optional[str] = None
 
 
+class ObservabilityTailBrokerParams(BaseModel):
+    """Параметры ``observability.tail.subscribe_all`` / ``.unsubscribe_all`` (Task 5.11).
+
+    Команды брокера живут на ОРКЕСТРАТОРЕ, но контракт объявляется здесь, вместе
+    со всеми остальными: два реестра имён одной плоскости однажды разойдутся, и
+    тогда через одно написание пройдёт то, что другое отвергает (урок 5.10.e).
+    Схема одна на обе команды — параметр у них ровно один и тот же.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    subscriber: Optional[str] = None
+
+
 class HealthReportParams(BaseModel):
     """Параметры ``health.report`` (диагностический впрыск health-события, Ф2 Task 2.1)."""
 
@@ -262,6 +276,9 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     "log.tail.unsubscribe": LogTailUnsubscribeParams,
     "observability.tail.subscribe": ObservabilityTailSubscribeParams,
     "observability.tail.unsubscribe": ObservabilityTailUnsubscribeParams,
+    # Task 5.11 — брокер подписки (обрабатывает оркестратор, судится общим реестром)
+    "observability.tail.subscribe_all": ObservabilityTailBrokerParams,
+    "observability.tail.unsubscribe_all": ObservabilityTailBrokerParams,
     # health (Ф2 Task 2.1)
     "health.report": HealthReportParams,
     "health.status": NoParams,
@@ -312,6 +329,7 @@ __all__ = [
     "LogTailSubscribeParams",
     "LogTailUnsubscribeParams",
     "ObservabilityTailSubscribeParams",
+    "ObservabilityTailBrokerParams",
     "HealthReportParams",
     "BUILTIN_COMMAND_CONTRACTS",
     "params_schema_of",
