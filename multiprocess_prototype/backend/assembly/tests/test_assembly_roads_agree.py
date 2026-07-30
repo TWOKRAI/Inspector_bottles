@@ -87,26 +87,42 @@ def _observability_view(proc_dict: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    "case, observability_section, recipe_observability",
+    "case, observability_section, recipe_observability, env_level",
     [
         # Штатный случай прототипа: L1 задан, рецепт молчит.
-        ("только L1", {"log_level": "WARNING"}, None),
+        ("только L1", {"log_level": "WARNING"}, None, None),
         # L2 оптом.
-        ("L1 + defaults рецепта", {"log_level": "WARNING"}, {"defaults": {"log_level": "DEBUG"}}),
+        ("L1 + defaults рецепта", {"log_level": "WARNING"}, {"defaults": {"log_level": "DEBUG"}}, None),
         # L2 поимённо: у соседа своё, у остальных — оптовое.
         (
             "L1 + per-process",
             {"log_level": "WARNING"},
             {"defaults": {"log_level": "INFO"}, "processes": {"camera_0": {"log_level": "ERROR"}}},
+            None,
         ),
         # Короткая форма — ключи прямо в секции.
-        ("короткая форма L2", {"log_level": "WARNING"}, {"log_level": "ERROR"}),
-        # ГЛАВНЫЙ случай: молчат ОБА слоя. Здесь дороги и расходились.
-        ("оба слоя молчат", None, None),
-        ("L1 пустой словарь", {}, {}),
+        ("короткая форма L2", {"log_level": "WARNING"}, {"log_level": "ERROR"}, None),
+        # Молчат оба слоя. БЕЗ env этот кейс слеп по построению — см. ниже.
+        ("оба слоя молчат", None, None, None),
+        ("L1 пустой словарь", {}, {}, None),
+        # ГЛАВНЫЙ случай: молчат оба слоя И уровень пришёл из окружения.
+        #
+        # Ревью итерации 2: без `env_level` предыдущие два кейса не различали
+        # исторического расхождения дорог. Причина — `expand_observability({})`
+        # поверх ПОЛНОЙ секции менеджеров совпадает с ней значение-в-значение,
+        # если ничто не пришло другим путём. Различие появляется ровно тогда,
+        # когда другой путь есть: `INSPECTOR_LOG_LEVEL` через
+        # `managers_from_log_dir`. Проверено инъекцией: с env матрица ловит
+        # безусловное наложение сама, без env — оставалась зелёной.
+        ("оба слоя молчат + уровень из окружения", None, None, "ERROR"),
+        ("короткая форма L2 + уровень из окружения", {}, {"log_level": "DEBUG"}, "ERROR"),
     ],
 )
-def test_both_roads_lay_out_observability_identically(case, observability_section, recipe_observability) -> None:
+def test_both_roads_lay_out_observability_identically(
+    case, observability_section, recipe_observability, env_level, monkeypatch
+) -> None:
+    if env_level:
+        monkeypatch.setenv("INSPECTOR_LOG_LEVEL", env_level)
     generic, applied = _both_roads(observability_section, recipe_observability)
 
     assert set(generic) == set(applied), f"[{case}] дороги собрали разный состав процессов"
