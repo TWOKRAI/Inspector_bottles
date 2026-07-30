@@ -73,6 +73,33 @@ with the guard fully removed), a flaky one, and one that hung the suite instead 
 The reviewer role delivered only once it was run synchronously against a narrow scope — and
 then it returned two blockers with reproductions.
 
+## ponytail — when the laziness ladder applies
+
+The `ponytail` skill (`.claude/plugins/ponytail/`) is installed **skills-only**: no
+SessionStart hook, so it never injects itself. Its own description says "use on ANY coding
+task", which in this repo would mean always-on with random timing — the boundary below
+replaces that. Deliberate: the measured win (JetBrains, 80 paired tasks) is −15% code /
+−10% cost on greenfield feature work, and this repo is mostly mechanism work on 27 existing
+modules, where the ladder's top rungs rarely fire.
+
+Run the ladder (`Skill: ponytail`) before writing, when the task is:
+- new code from scratch, a new module, a new widget, a new plugin;
+- adding a dependency, or picking between a library and stdlib/platform;
+- a request that smells speculative — "make it configurable/pluggable/generic for later".
+
+Skip it for: framework mechanism work (IPC, routing, locks, seqlock, observability layers),
+debugging, refactors that keep behaviour, docs, plans, ADRs.
+
+On demand regardless of the above: `ponytail-review` (diff), `ponytail-audit` (whole repo),
+`ponytail-debt` (harvest `ponytail:` comments).
+
+**Precedence — project rules win, without exception.** ponytail says "trivial one-liners
+need no test", "ONE runnable check, no frameworks", "fewest files possible", "code first,
+at most three short lines". Where that meets the rules above it loses: break-injection per
+claimed property, the three test-authorship roles, `README.md` + `STATUS.md` + `tests/` per
+module, `Why:`/`Layer:` trailers. ponytail governs **what gets built**, never what gets
+proven or documented.
+
 ## Language policy (STRICT)
 
 **All user-facing output MUST be in Russian. No exceptions.**
