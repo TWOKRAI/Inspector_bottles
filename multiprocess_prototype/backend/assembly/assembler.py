@@ -144,9 +144,17 @@ class BlueprintAssembler:
             if not cfg.log_dir:
                 cfg.log_dir = self._log_dir
 
-        # Task 5.12: слой L2 — сырая секция рецепта. None ≠ {}: «рецепт молчит»
-        # против «рецепт задал пустую секцию» (второе безвредно, но различие
-        # сохраняем — на нём держится provenance).
+        # Task 5.12: слой L2 — сырая секция рецепта.
+        #
+        # Прежняя редакция этого комментария утверждала «None ≠ {}, различие
+        # сохраняем — на нём держится provenance». Проверено при ревью 5.13:
+        # НЕ держится. Оба потребителя секции неразличимы на этой паре —
+        # `resolve_recipe_section(None, ...) == resolve_recipe_section({}, ...) == {}`,
+        # и `orchestrator_observability_config` в обоих случаях не кладёт дольку.
+        # Источник слоя берётся из `observability_recipe_path`, а не из того,
+        # пуста секция или отсутствует. Эквивалентность закреплена тестом
+        # `test_absent_and_empty_recipe_section_are_equivalent`, иначе она молча
+        # разойдётся и комментарий станет верным задним числом.
         recipe_observability = topology.observability
 
         result: dict[str, dict[str, Any]] = {}

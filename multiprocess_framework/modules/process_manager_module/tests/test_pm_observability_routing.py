@@ -728,6 +728,29 @@ class TestBreakInjectionA11:
         assert out[RECIPE_PATH_CONFIG_KEY] == "/rec/loud.yaml"
         assert out["observability_config_path"] == "/cfg/system.yaml"
 
+    def test_absent_and_empty_recipe_section_are_equivalent(self) -> None:
+        """«Рецепт молчит» (None) и «рецепт задал пустую секцию» ({}) — одно и то же.
+
+        Комментарий в прикладном ассемблере утверждал обратное («различие
+        сохраняем — на нём держится provenance»). Ревью 5.13 проверило: не
+        держится, оба потребителя секции неразличимы на этой паре, а источник
+        слоя берётся из отдельного ключа с путём. Комментарий исправлен, а
+        эквивалентность закреплена здесь — иначе она молча разойдётся, и ложное
+        утверждение станет верным задним числом.
+
+        Заодно это разрешает общему шву ``merge_companion_over`` возвращать ``{}``
+        там, где раньше ключ оставался отсутствующим: разницы нет ни для кого.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            orchestrator_observability_config,
+        )
+
+        for name in (ORCHESTRATOR_PROCESS_NAME, "camera_0"):
+            assert resolve_recipe_section(None, name) == resolve_recipe_section({}, name) == {}
+        assert orchestrator_observability_config(
+            recipe_section=None, recipe_path="/r/x.yaml"
+        ) == orchestrator_observability_config(recipe_section={}, recipe_path="/r/x.yaml")
+
     def test_orchestrator_config_omits_the_slice_when_recipe_is_silent_about_pm(self) -> None:
         """Вторая половина пары: рецепт, назвавший только соседей, дольки не даёт.
 
