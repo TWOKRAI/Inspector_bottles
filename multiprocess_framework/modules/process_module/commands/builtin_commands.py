@@ -1307,6 +1307,41 @@ class BuiltinCommands:
             _logger = getattr(svc, "logger_manager", None)
             _error = getattr(svc, "error_manager", None)
             _stats = getattr(svc, "stats_manager", None)
+
+            # Task 5.5: ссылки, за которыми нет приёмника. Ответ РАЗНЫЙ по месту, и
+            # это не вкус:
+            #   * inline — ручка оператора, имя написано руками → отказ ДО любой
+            #     записи в слой, состояние не изменилось. Узнать об опечатке через
+            #     час по отсутствию логов дороже, чем сейчас;
+            #   * файл/рецепт/switch → применить остальное и сказать ВСЛУХ. Отказ
+            #     здесь означал бы, что опечатка в спутнике валит switch рецепта.
+            # Известные имена считаются ДО применения: после него опечатка уже в
+            # конфиге, и «известное» включало бы её саму.
+            from ..configs.observability_refs import (
+                format_unknown_refs,
+                known_refs_from_managers,
+                unknown_observability_refs,
+            )
+
+            _unknown_refs: dict = {}
+            if isinstance(obs_section, dict) and obs_section:
+                _unknown_refs = unknown_observability_refs(
+                    obs_section,
+                    known_refs_from_managers(logger=_logger, error=_error, stats=_stats),
+                )
+            if _unknown_refs:
+                if source == "inline":
+                    return {
+                        "success": False,
+                        "process": svc.name,
+                        "reason": format_unknown_refs(_unknown_refs),
+                        "unknown_refs": _unknown_refs,
+                    }
+                log_error = getattr(svc, "_log_error", None)
+                if callable(log_error):
+                    log_error(format_unknown_refs(_unknown_refs, source=source), module="lifecycle")
+                result["unknown_refs"] = _unknown_refs
+
             # Блокер ревью 5.8: правка слоя и её применение — ОДИН критический
             # блок. Прежняя редакция считала `deep_merge(layers.session, ...)` и
             # присваивала результат вне лока; подметальщик, попавший в этот зазор,
