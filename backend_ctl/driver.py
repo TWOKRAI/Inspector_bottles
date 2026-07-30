@@ -51,6 +51,7 @@ from .protocol import (  # noqa: F401 — re-export для back-compat шима
     WorkerStatus,
     _find_payload,
     _leaf_result,
+    delivery_window,
     unwrap,
 )
 from .conditions import DEFAULT_AWAIT_TIMEOUT, await_condition as _await_condition
@@ -416,15 +417,28 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """Статус процесса и воркеров как :class:`WorkerStatus` (форма, не логика)."""
         return WorkerStatus.from_response(self.introspect_status(process, **kw))
 
-    def observability_counters(self, process: str, *, timeout: Optional[float] = None) -> ObservabilityCounters:
+    def observability_counters(
+        self,
+        process: str,
+        *,
+        flush: bool = False,
+        timeout: Optional[float] = None,
+    ) -> ObservabilityCounters:
         """Потери трёх плоскостей наблюдаемости как :class:`ObservabilityCounters` (2.V2).
 
         Спрашивает у живого процесса ``introspect.observability`` и оставляет из
         ответа то, что отвечает на один вопрос: **что уже потеряно**. Счётчики
         логгера до этой обёртки наружу не выходили — их читал только тест, то есть
         сигнал существовал и был недоступен там, где его спрашивают.
+
+        ``flush`` — попросить КОГЕРЕНТНЫЙ снимок (Task 5.7): счётчик «записано»
+        включит всё уже эмитированное, а не только доехавшее до такта батчинга.
+        Нужен тому, кто судит по дельте двух снимков; для разового «что потеряно»
+        не нужен и по умолчанию выключен, чтобы не менять политику батчинга
+        наблюдаемой системы.
         """
-        res = self.send_command(process, "introspect.observability", timeout=timeout)
+        args = {"flush": True} if flush else None
+        res = self.send_command(process, "introspect.observability", args, timeout=timeout)
         return ObservabilityCounters.from_response(res)
 
     def introspect_capabilities(self, process: str, **kw: Any) -> Dict[str, Any]:
@@ -710,6 +724,100 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         if path is not None:
             args["path"] = path
         return _leaf_result(self.send_command(process, "config.reload", args, timeout=timeout))
+
+    def config_reload_verified(
+        self,
+        process: str,
+        *,
+        observability: Optional[Dict[str, Any]] = None,
+        path: Optional[str] = None,
+        settle: float = 1.0,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Смена наблюдаемости с доказательством: значение ДЕЙСТВУЕТ и записи ИДУТ (Task 5.7).
+
+        Два утверждения намеренно РАЗНЫЕ, и ни одно не выводится из другого:
+
+        1. ``verdict`` — **значение действует**. Судит сам процесс (``config.reload``
+           сравнивает запрошенное с действующим в один момент) и отдаёт трёхзначно:
+           ``confirmed`` / ``failed`` / ``unverifiable``. Булева здесь нет
+           намеренно: первая редакция отвечала «подтверждено» при нуле
+           проверенных путей.
+        2. ``delivering`` / ``losing`` / ``silent_source`` — **записи идут**. Это
+           разница во времени, и знать её может только тот, кто делает два
+           замера. База отсчёта приезжает в ответе ``config.reload`` (снимок
+           снят ПОСЛЕ применения — окно начинается в момент смены), второй замер
+           берётся здесь через ``introspect.observability``.
+
+        Почему мало одного утверждения: ``verdict == "confirmed"`` означает
+        «уровень выставлен», а не «в файл что-то попало» — приёмник мог быть снят
+        соседней командой, и оператор ушёл бы с уверенностью, что включил
+        диагностику. Обратное тоже верно: записи могут идти при провалившемся
+        вердикте (идут по ПРЕЖНЕЙ раскладке).
+
+        ``settle`` — выдержка между замерами (сек). Ноль означает «замерь сразу»
+        и годится только тестам: живому процессу нужно время, чтобы хоть что-то
+        написать.
+
+        **Третий замер снимается всегда**, сразу за вторым и без паузы: его
+        прирост — цена самого опроса. Читающая команда идёт через диспетчер и
+        пишет записи о себе; замерено живьём (2026-07-30) — **~5.1 записи на один
+        опрос** на DEBUG. Без вычета ``delivering`` был бы истинным всегда,
+        включая молчащий источник, то есть сигнал, не связанный с реальностью.
+        Цена не предполагается нулевой, а измеряется.
+
+        Оба замера просят КОГЕРЕНТНЫЙ снимок (``flush=True``). Это не украшение:
+        счётчик считает записи в момент записи, а батчинг сдвигает его на такт
+        flush'а — без ``flush`` контрольный снимок отдавал ровно ноль при реальных
+        пяти записях, и вычет был бы фикцией.
+
+        Returns:
+            ``{success, process, verdict, verified, delivering, silent_source,
+            losing, written_delta, self_cost, written_net, loss_delta,
+            counters_reset, window_sec, written_by_channel, losses, reload}``.
+        """
+        import time
+
+        reload_reply = self.config_reload(process, observability=observability, path=path, timeout=timeout)
+        reply = reload_reply if isinstance(reload_reply, dict) else {}
+        verified = reply.get("verified")
+        if isinstance(verified, dict) and verified.get("verdict"):
+            verdict = str(verified.get("verdict"))
+            verdict_reason: Optional[str] = None
+        else:
+            # Файловый reload не несёт inline-секции, и сравнивать запрошенное не с
+            # чем: «запрос» тут — весь файл целиком. Отсутствие суждения называется
+            # вслух, а не выдаётся за подтверждение.
+            verdict = "unverifiable"
+            verdict_reason = "процесс не вынес суждения: config.reload без inline-секции observability"
+
+        baseline = reply.get("counters")
+        if settle > 0:
+            time.sleep(settle)
+        # `flush=True` у ОБОИХ замеров, иначе вычет цены опроса не работает:
+        # счётчик считает в момент записи, а батчинг сдвигает его на такт flush'а,
+        # и прирост, который контрольный снимок обязан увидеть, приезжает уже
+        # после него. Замерено живьём: без flush цена отдавала ноль при реальных
+        # ~5 записях на опрос.
+        after = self.observability_counters(process, flush=True, timeout=timeout).planes
+        control = self.observability_counters(process, flush=True, timeout=timeout).planes
+        window = delivery_window(baseline, after, control=control)
+        out: Dict[str, Any] = {
+            # `success` — про применение («команда не упала»), и он НЕ вердикт:
+            # слипнись они, различие «команда сломалась» / «команда ничего не
+            # изменила» исчезло бы вместе с возможностью его увидеть.
+            "success": bool(reply.get("success")),
+            "process": process,
+            "verdict": verdict,
+            "verified": verified if isinstance(verified, dict) else None,
+            "reload": reload_reply,
+        }
+        if verdict_reason:
+            out["verdict_reason"] = verdict_reason
+        if baseline is None:
+            out["baseline_missing"] = "в ответе config.reload нет секции counters — окно доставки не построено"
+        out.update(window.as_dict())
+        return out
 
     def logger_sink_enable(self, process: str, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
         """Включить sink логгера процесса по имени (register_channel)."""

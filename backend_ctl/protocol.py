@@ -26,7 +26,9 @@ from typing import Any, Dict, List, Optional
 #: несуществующий ``drops_count`` при реальном ``drops``, и фича была мертва при
 #: 26 зелёных тестах на моке. Своя копия перечня расходится с публикатором молча.
 from multiprocess_framework.modules.channel_routing_module.core.channel_routing_manager import (
+    DELIVERY_COUNTER_KEYS,
     LOSS_COUNTER_KEYS,
+    OBSERVED_AT_KEY,
 )
 
 #: Служебный ключ, которым :func:`unwrap` помечает «искомых ключей в ответе нет».
@@ -368,33 +370,267 @@ class ObservabilityCounters:
         )
 
 
+def _int_or_none(value: Any) -> Optional[int]:
+    """int, но не bool. ``True`` как счётчик — это ложь, арифметически незаметная."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _loss_items(section: Any) -> Dict[str, int]:
+    """Именованные счётчики потерь ОДНОЙ плоскости, включая нулевые.
+
+    Ключи буфера идут с префиксом ``buffer.``. Нулевые не выбрасываются: по
+    дельте между двумя снимками ноль — законное «не росло», и выброси мы его
+    здесь, отличить «не росло» от «ключа не было» стало бы нечем.
+    ``dropped_by_channel``/``unresolved_channels`` — разбивки-словари, они уже
+    отражены своим числовым классом.
+    """
+    if not isinstance(section, dict):
+        return {}
+    hits: Dict[str, int] = {}
+    for key in OBSERVABILITY_LOSS_KEYS:
+        value = _int_or_none(section.get(key))
+        if value is not None:
+            hits[key] = value
+    buffer = section.get("buffer")
+    if isinstance(buffer, dict):
+        for key in OBSERVABILITY_BUFFER_LOSS_KEYS:
+            value = _int_or_none(buffer.get(key))
+            if value is not None:
+                hits[f"buffer.{key}"] = value
+    return hits
+
+
 def _nonzero_losses(planes: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
     """Ненулевые счётчики потерь по плоскостям. Пусто = тишина.
 
     Считаются только положительные int'ы: ``None`` («показания нет») порогом не
-    считается, а ``dropped_by_channel``/``unresolved_channels`` — разбивки-словари,
-    и они уже отражены своим числовым классом.
+    считается.
     """
     out: Dict[str, Dict[str, int]] = {}
     if not isinstance(planes, dict):
         return out
     for plane, section in planes.items():
-        if not isinstance(section, dict):
-            continue
-        hits: Dict[str, int] = {}
-        for key in OBSERVABILITY_LOSS_KEYS:
-            value = section.get(key)
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-                hits[key] = value
-        buffer = section.get("buffer")
-        if isinstance(buffer, dict):
-            for key in OBSERVABILITY_BUFFER_LOSS_KEYS:
-                value = buffer.get(key)
-                if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-                    hits[f"buffer.{key}"] = value
+        hits = {key: value for key, value in _loss_items(section).items() if value > 0}
         if hits:
             out[plane] = hits
     return out
+
+
+#: Порядок предпочтения плоскостей при выборе часов окна. Метка ``observed_at``
+#: снимается каждым менеджером своими часами (одна и та же функция, но три
+#: независимых вызова), поэтому окно считается по ОДНОЙ плоскости — смешивать
+#: метки разных менеджеров значило бы получить длительность, которой не было ни у
+#: одного из них. Порядок фиксирован, чтобы ответ не зависел от порядка ключей в
+#: чужом словаре.
+_WINDOW_PLANE_ORDER: tuple = ("logger", "error", "stats")
+
+
+@dataclass
+class DeliveryWindow:
+    """Идут ли записи МЕЖДУ ДВУМЯ снимками счётчиков (Task 5.7, драйверная половина).
+
+    Один снимок отвечает «сколько записано с начала жизни процесса» — по нему
+    нельзя сказать, работает ли наблюдаемость СЕЙЧАС. Поток — это разница во
+    времени, и держать её может только тот, кто делает два замера.
+
+    Три состояния РАЗЛИЧИМЫ намеренно, и это не украшение:
+
+      * ``delivering`` — счётчик доставки вырос: записи доходят до приёмников;
+      * ``losing`` — выросли счётчики потерь: записи были и НЕ доехали. С
+        ``delivering`` не исключают друг друга (часть доехала, часть отброшена);
+      * ``silent_source`` — не выросло ничего: источник за окно не сказал ни
+        слова. Это **не** провал вердикта и не поломка — на процессе, который
+        молчит по делу, требовать записей нечего. Схлопни ``silent_source`` в
+        провал — и «ничего не писали» стало бы неотличимо от «пишем в никуда»,
+        то есть вернулся бы ровно тот класс, который задача закрывает.
+
+    ``self_cost`` — цена САМОГО опроса. Читающая команда идёт через диспетчер и
+    сама пишет записи; на процессе с включённым DEBUG этого хватало бы, чтобы
+    ``delivering`` был истинным ВСЕГДА, даже на молчащем источнике. Поэтому цена
+    не предполагается нулевой, а измеряется: два чтения подряд без паузы дают
+    прирост ровно одного опроса, и он вычитается (``written_net``).
+
+    ``counters_reset`` — второй снимок МЕНЬШЕ первого. Счётчики живут в объектах
+    менеджеров, а пересборка (чужой ``config.reload``, ``switch``) их обнуляет:
+    окно тогда недостоверно, и это отдельное состояние, а не «тишина».
+    """
+
+    delivering: bool
+    silent_source: bool
+    losing: bool
+    written_delta: int
+    self_cost: int
+    written_net: int
+    loss_delta: int
+    counters_reset: bool
+    window_sec: Optional[float] = None
+    by_channel: Dict[str, int] = field(default_factory=dict)
+    losses: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    missing: List[str] = field(default_factory=list)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Плоский dict для ответа наружу (Dict at Boundary)."""
+        return {
+            "delivering": self.delivering,
+            "silent_source": self.silent_source,
+            "losing": self.losing,
+            "written_delta": self.written_delta,
+            "self_cost": self.self_cost,
+            "written_net": self.written_net,
+            "loss_delta": self.loss_delta,
+            "counters_reset": self.counters_reset,
+            "window_sec": self.window_sec,
+            "written_by_channel": self.by_channel,
+            "losses": self.losses,
+            "missing": self.missing,
+        }
+
+
+def _written_total(planes: Any) -> Optional[int]:
+    """Сумма счётчиков доставки по всем плоскостям снимка.
+
+    ``None`` — ни одна плоскость счётчика не дала: это «показаний нет», и оно не
+    равно нулю. Ноль в такой позиции читался бы как «записей не было», то есть
+    ответом на вопрос, который никто не смог задать.
+    """
+    if not isinstance(planes, dict):
+        return None
+    total: Optional[int] = None
+    for section in planes.values():
+        if not isinstance(section, dict):
+            continue
+        for key in DELIVERY_COUNTER_KEYS:
+            value = _int_or_none(section.get(key))
+            if value is not None:
+                total = value if total is None else total + value
+    return total
+
+
+def _written_by_channel(planes: Any) -> Dict[str, int]:
+    """Разбивка доставки по приёмникам, суммарно по плоскостям."""
+    out: Dict[str, int] = {}
+    if not isinstance(planes, dict):
+        return out
+    for section in planes.values():
+        if not isinstance(section, dict):
+            continue
+        by_channel = section.get("channel_written_by_channel")
+        if not isinstance(by_channel, dict):
+            continue
+        for name, value in by_channel.items():
+            number = _int_or_none(value)
+            if number is not None:
+                out[str(name)] = out.get(str(name), 0) + number
+    return out
+
+
+def _loss_total(planes: Any) -> int:
+    """Сумма всех именованных счётчиков потерь снимка."""
+    if not isinstance(planes, dict):
+        return 0
+    return sum(sum(_loss_items(section).values()) for section in planes.values())
+
+
+def _window_seconds(before: Any, after: Any) -> Optional[float]:
+    """Длительность окна по метке ``observed_at`` ОДНОЙ плоскости (см. порядок выше)."""
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return None
+    planes = [name for name in _WINDOW_PLANE_ORDER if name in before and name in after]
+    planes += [name for name in after if name in before and name not in _WINDOW_PLANE_ORDER]
+    for name in planes:
+        first, second = before.get(name), after.get(name)
+        if not isinstance(first, dict) or not isinstance(second, dict):
+            continue
+        started, ended = first.get(OBSERVED_AT_KEY), second.get(OBSERVED_AT_KEY)
+        if isinstance(started, (int, float)) and isinstance(ended, (int, float)):
+            return float(ended) - float(started)
+    return None
+
+
+def delivery_window(before: Any, after: Any, *, control: Any = None) -> DeliveryWindow:
+    """Свести два (или три) снимка ``counters`` в вердикт о потоке записей.
+
+    Args:
+        before: снимок в момент смены — секция ``counters`` ответа ``config.reload``.
+        after: снимок после выдержки — секция ``counters`` ``introspect.observability``.
+        control: НЕОБЯЗАТЕЛЬНЫЙ третий снимок, снятый сразу за ``after`` без паузы.
+            Прирост ``after → control`` — цена одного опроса, она вычитается из
+            наблюдённой дельты. Без него цена считается нулевой, и это честно
+            только там, где опрос заведомо не пишет (уровень выше DEBUG).
+
+    Отсутствие показаний и ноль различаются: снимок без счётчика доставки даёт
+    ``missing``, а не «записей не было».
+    """
+    missing: List[str] = []
+    written_before = _written_total(before)
+    written_after = _written_total(after)
+    if written_before is None:
+        missing.append("before.channel_written_records")
+    if written_after is None:
+        missing.append("after.channel_written_records")
+
+    self_cost = 0
+    if control is not None:
+        written_control = _written_total(control)
+        if written_control is None:
+            missing.append("control.channel_written_records")
+        elif written_after is not None:
+            self_cost = max(0, written_control - written_after)
+
+    if written_before is None or written_after is None:
+        return DeliveryWindow(
+            delivering=False,
+            silent_source=False,
+            losing=False,
+            written_delta=0,
+            self_cost=self_cost,
+            written_net=0,
+            loss_delta=0,
+            counters_reset=False,
+            window_sec=_window_seconds(before, after),
+            by_channel={},
+            losses={},
+            missing=missing,
+        )
+
+    written_delta = written_after - written_before
+    loss_delta = _loss_total(after) - _loss_total(before)
+    reset = written_delta < 0 or loss_delta < 0
+    written_net = max(0, written_delta - self_cost)
+    losing = (not reset) and loss_delta > 0
+    delivering = (not reset) and written_net > 0
+    # Разбивка по приёмникам — только приросты: абсолютные числа второго снимка
+    # ответили бы на «сколько за всю жизнь», а спрашивают про окно.
+    by_before = _written_by_channel(before)
+    by_channel = {
+        name: value - by_before.get(name, 0)
+        for name, value in _written_by_channel(after).items()
+        if value - by_before.get(name, 0) > 0
+    }
+    losses_before = {plane: _loss_items(section) for plane, section in (before or {}).items()}
+    losses: Dict[str, Dict[str, int]] = {}
+    for plane, section in (after or {}).items():
+        base = losses_before.get(plane, {})
+        grown = {key: value - base.get(key, 0) for key, value in _loss_items(section).items()}
+        grown = {key: value for key, value in grown.items() if value > 0}
+        if grown:
+            losses[plane] = grown
+    return DeliveryWindow(
+        delivering=delivering,
+        silent_source=(not reset) and not delivering and loss_delta == 0,
+        losing=losing,
+        written_delta=written_delta,
+        self_cost=self_cost,
+        written_net=written_net,
+        loss_delta=loss_delta,
+        counters_reset=reset,
+        window_sec=_window_seconds(before, after),
+        by_channel=by_channel,
+        losses=losses,
+        missing=missing,
+    )
 
 
 @dataclass
@@ -514,6 +750,8 @@ __all__ = [
     "WorkerStatus",
     "MemoryStats",
     "ObservabilityCounters",
+    "DeliveryWindow",
+    "delivery_window",
     "OBSERVABILITY_LOSS_KEYS",
     "OBSERVABILITY_BUFFER_LOSS_KEYS",
     "ProcessCapabilities",

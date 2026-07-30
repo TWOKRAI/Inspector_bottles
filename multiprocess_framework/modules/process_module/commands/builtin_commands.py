@@ -796,7 +796,11 @@ class BuiltinCommands:
             "success": True,
             "process": svc.name,
             "effective": observability_effective(logger=logger, error=error, stats=stats),
-            "counters": observability_counters(logger=logger, error=error, stats=stats),
+            # `flush` (Task 5.7) — просьба о КОГЕРЕНТНОМ снимке: дожать буферы,
+            # чтобы «записано» включало всё уже эмитированное. По умолчанию
+            # выключен: панель GUI опрашивает эту команду постоянно, и flush на
+            # каждом опросе менял бы политику батчинга наблюдаемой системы.
+            "counters": observability_counters(logger=logger, error=error, stats=stats, flush=bool(args.get("flush"))),
             "provenance": observability_provenance(layers, logger=logger),
             "audit": layers.audit.view(audit_limit),
             **extra,
@@ -1294,6 +1298,7 @@ class BuiltinCommands:
             from ..configs.observability_layers import LAYER_APP, process_observability_layers
             from ..managers.observability_reload import (
                 apply_observability_layers,
+                observability_counters,
                 observability_effective,
                 telemetry_targets,
             )
@@ -1493,6 +1498,27 @@ class BuiltinCommands:
                 from ..managers.observability_reload import observability_verified
 
                 result["verified"] = observability_verified(obs_section, result["effective"])
+            # Task 5.7, вторая половина: БАЗА ОТСЧЁТА для «идут ли записи после
+            # смены». Судить о потоке команда не может — поток это разница во
+            # времени, а команда исполняется мгновенно; поэтому она отдаёт снимок
+            # счётчиков, а вердикт `delivering` выносит тот, кто делает второй
+            # замер (`BackendDriver.config_reload_verified`).
+            #
+            # Место снимка — ПОСЛЕ применения, и это обязательно: окно должно
+            # начинаться в момент смены. Возьми базу вызывающий сам до команды —
+            # в окно попали бы записи, сделанные ДО новой раскладки, то есть
+            # прежний уровень доказывал бы новый. Плюс лишний round-trip за
+            # данными, которые всё равно едут этим ответом.
+            #
+            # Форма — та же, что у `introspect.observability` (ключ `counters`),
+            # намеренно: второй снимок читается той же функцией, и разойтись
+            # формам двух снимков нечем.
+            #
+            # `flush=True` здесь НЕ опция: без него в окно наследуются записи
+            # самой этой команды (эмитированы до снимка, посчитаны после него —
+            # батчинг), и на молчащем процессе поток выглядел бы ненулевым.
+            # Замер цены одного опроса — в docstring `observability_counters`.
+            result["counters"] = observability_counters(logger=_logger, error=_error, stats=_stats, flush=True)
             # Task 5.8: сроки — в ответе КАЖДОГО reload, включая файловый. Файл L3 не
             # трогает, но именно после reload оператор и спрашивает «что у меня ещё
             # висит»; молчание здесь читалось бы как «ничего не висит».

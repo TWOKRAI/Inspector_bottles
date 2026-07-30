@@ -324,6 +324,19 @@ def _config_reload(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     )
 
 
+def _config_reload_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    kw: Dict[str, Any] = {}
+    if "settle" in args and args.get("settle") is not None:
+        kw["settle"] = float(args["settle"])
+    return drv.config_reload_verified(
+        args["process"],
+        observability=args.get("observability"),
+        path=args.get("path"),
+        **kw,
+        **_kw_timeout(args),
+    )
+
+
 def _logger_sink_enable(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.logger_sink_enable(args["process"], args["sink"], **_kw_timeout(args))
 
@@ -876,6 +889,31 @@ TOOLS: List[ToolSpec] = [
         _config_reload,
     ),
     ToolSpec(
+        "config_reload_verified",
+        "То же, что config_reload, но с ДОКАЗАТЕЛЬСТВОМ: verdict (значение действует: "
+        "confirmed|failed|unverifiable) + delivering/losing/silent_source (идут ли записи "
+        "после смены — по двум замерам счётчика доставки). Молчащий источник — отдельное "
+        "состояние, не провал.",
+        _obj(
+            {
+                "process": _PROCESS,
+                "observability": {
+                    "type": "object",
+                    "description": "Inline-override секции observability",
+                    "additionalProperties": True,
+                },
+                "path": {"type": "string", "description": "Путь к файлу конфига (вместо inline)"},
+                "settle": {
+                    "type": "number",
+                    "description": "Выдержка между замерами доставки, сек (по умолчанию 1.0)",
+                },
+                "timeout": _TIMEOUT,
+            },
+            ["process"],
+        ),
+        _config_reload_verified,
+    ),
+    ToolSpec(
         "logger_sink_enable",
         "Включить sink логгера процесса по имени.",
         _obj(
@@ -1163,6 +1201,9 @@ TOOL_SAFETY: Dict[str, str] = {
     "register_restore": SAFETY_WRITE,
     "register_confirm": SAFETY_WRITE,
     "config_reload": SAFETY_WRITE,
+    # Task 5.7: обёртка над тем же config.reload — класс тот же. Два лишних
+    # ЧТЕНИЯ счётчиков состояние не меняют и класс не понижают.
+    "config_reload_verified": SAFETY_WRITE,
     "logger_sink_enable": SAFETY_WRITE,
     "logger_sink_disable": SAFETY_WRITE,
     "telemetry_reconfigure": SAFETY_WRITE,
