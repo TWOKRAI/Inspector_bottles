@@ -17,6 +17,7 @@ ChannelRoutingManager — базовый менеджер маршрутизац
 """
 
 import threading
+import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ..._fallback import emergency_log
@@ -45,6 +46,16 @@ LOSS_COUNTER_KEYS = (
     "channel_refused_records",
     "records_without_channels",
 )
+
+#: Счётчики ДОСТАВКИ (Task 5.6). До них все счётчики считали только потери, и
+#: «уровень включён» было неотличимо от «записи доходят»: ноль потерь одинаково
+#: означает и здоровую систему, и систему, из которой ничего не выходит.
+DELIVERY_COUNTER_KEYS = ("channel_written_records",)
+
+#: Минимальный зазор между чтениями, при котором темп считается, сек. Короче —
+#: делитель близок к нулю, и темп получился бы фантастическим; отдаём прошлый
+#: посчитанный, а не мусор.
+RATE_MIN_INTERVAL_SEC = 0.5
 
 #: Маркер «config не удалось нормализовать». normalize_config на любом отказе
 #: возвращает копию default, поэтому отличить отказ от пустого dict можно только
@@ -151,7 +162,28 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         # видна наружу, а у статистики ``_do_flush`` ловил только исключение и
         # увеличивал безымянный ``_errors``. Инвариант «дроп допустим, невидимый
         # дроп — нет» работал для двух плоскостей из трёх.
-        self.stats: Dict[str, Any] = {key: 0 for key in LOSS_COUNTER_KEYS}
+        self.stats: Dict[str, Any] = {key: 0 for key in (*LOSS_COUNTER_KEYS, *DELIVERY_COUNTER_KEYS)}
+        # Task 5.6: доставка по приёмнику. Вариант A решения Р1 — ключ ИМЯ КАНАЛА,
+        # а не пара (источник, канал): приёмка «включён отличимо от доставляет»
+        # закрывается им целиком, а «какой МАРШРУТ молчит» — вопрос модели
+        # адресации (Ф2.2), и вводить понятие «маршрут» до решения по ней значило
+        # бы почти наверняка с ней разойтись.
+        self._written_by_channel: Dict[str, int] = {}
+        # Темп выводится ПРИ ЧТЕНИИ из монотонного счётчика — так же, как его
+        # выводит любой scraper поверх counter-метрики. Замер (решение Р2) показал,
+        # что оконный механизм на горячем пути стоил дороже самого учёта: часы и
+        # арифметика корзин выполнялись на КАЖДУЮ запись ради числа, которое
+        # спрашивают раз в секунды. Здесь на записи нет ни часов, ни делений.
+        #
+        # Побочная выгода: класс ошибки «после паузы всплыл прежний темп»
+        # перестаёт существовать — состояния окна, которое могло бы всплыть, нет.
+        self._rate_last_total: int = 0
+        self._rate_last_ts: Optional[float] = None
+        self._rate_last_value: float = 0.0
+        # Часы — ЗАВИСИМОСТЬ объекта, а не глобальный `time.monotonic`. Тест,
+        # патчащий модульные часы, доедает своим side_effect чужие потоки и
+        # роняет невиновный тест StopIteration'ом (урок проекта).
+        self._clock = time.monotonic
         # Разбивка по именам каналов + «кому уже сказали». Отдельно от stats:
         # там только числа, здесь словари и множества.
         self._unresolved_channels: Dict[str, int] = {}
@@ -545,10 +577,16 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         ровно те же ключи, а не свою копию перечня.
         """
         with self._miss_lock:
-            snapshot: Dict[str, Any] = {key: self.stats[key] for key in LOSS_COUNTER_KEYS}
+            snapshot: Dict[str, Any] = {key: self.stats[key] for key in (*LOSS_COUNTER_KEYS, *DELIVERY_COUNTER_KEYS)}
             snapshot["unresolved_channels"] = dict(self._unresolved_channels)
             snapshot["channel_write_errors_by_channel"] = dict(self._channel_write_errors)
             snapshot["channel_refused_by_channel"] = dict(self._channel_refused)
+            # Task 5.6: доставка рядом с потерями, под тем же lock-ом и в том же
+            # снимке. Врозь два ответа на «доходит ли» читались бы из разных
+            # моментов времени, и «потерь ноль при нуле доставок» выглядело бы
+            # здоровьем.
+            snapshot["channel_written_by_channel"] = dict(self._written_by_channel)
+            snapshot["observed_rate_per_sec"] = self._observed_rate_per_sec()
         return snapshot
 
     # =========================================================================
@@ -826,6 +864,64 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
                 f"get_stats['unresolved_channels'])",
             )
 
+    def _count_channel_written(self, names: List[str], count_each: int = 1) -> None:
+        """Учесть ДОСТАВЛЕННЫЕ записи: имена принявших каналов (Task 5.6).
+
+        Одна подпись на обе дороги записи: прямой путь отдаёт список принявших
+        каналов (по записи в каждый), батчевый — один канал с ``count_each=N``.
+        Две подписи были бы двумя способами сказать одно.
+
+        Список, а не словарь — ради цены: замер показал, что аллокация словаря на
+        КАЖДУЮ запись стоила дороже самого учёта. Lock берётся **один раз на
+        запись** (или на пачку), а не по разу на канал.
+
+        Это первое место, где наблюдаемость платит на ЗДОРОВОМ пути, а не на
+        аварийном: до 5.6 ``_miss_lock`` брался только при потере. Цена измерена
+        и записана в плане (решение Р2), а не объявлена «незначительной».
+
+        Темп (``observed_rate_per_sec``) считается тут же: держать второй механизм
+        со своим временем значило бы дать двум ответам на один вопрос право
+        расходиться.
+        """
+        if not names:
+            return
+        total = len(names) * count_each
+        by_channel = self._written_by_channel
+        with self._miss_lock:
+            self.stats["channel_written_records"] += total
+            for name in names:
+                by_channel[name] = by_channel.get(name, 0) + count_each
+
+    def _observed_rate_per_sec(self) -> float:
+        """Темп доставки между ДВУМЯ ПОСЛЕДНИМИ ЧТЕНИЯМИ, записей/с.
+
+        Вызывать под ``_miss_lock`` — метод мутирует базу отсчёта.
+
+        Почему при чтении, а не окном на записи: темп спрашивают раз в секунды, а
+        платить за него приходилось бы на каждой записи (замер Р2: часы и
+        арифметика корзин стоили дороже самого учёта). Счётчик монотонный, темп
+        производный — так же устроен любой scraper поверх counter-метрики.
+
+        Цена решения названа: первое чтение даёт ``0.0`` (базы отсчёта ещё нет), а
+        значение зависит от того, как часто спрашивают. Это честнее прежнего
+        варианта: фиксированное окно на записи создавало ВИД независимости от
+        частоты опроса, хотя после паузы отдавало устаревшее число.
+        """
+        now = self._clock()
+        total = self.stats["channel_written_records"]
+        if self._rate_last_ts is None:
+            self._rate_last_ts, self._rate_last_total = now, total
+            return 0.0
+        elapsed = now - self._rate_last_ts
+        if elapsed < RATE_MIN_INTERVAL_SEC:
+            # Слишком частый опрос: отдаём прошлое посчитанное, а не деление на
+            # почти ноль. База при этом НЕ сдвигается — иначе частый опрос сам
+            # обнулял бы темп, который измеряет.
+            return self._rate_last_value
+        self._rate_last_value = (total - self._rate_last_total) / elapsed
+        self._rate_last_ts, self._rate_last_total = now, total
+        return self._rate_last_value
+
     def _count_channel_write_error(self, channel_name: str) -> None:
         """Учесть запись, потерянную из-за ИСКЛЮЧЕНИЯ в ``write()`` канала.
 
@@ -913,6 +1009,11 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         """
         record_dict = record.to_dict() if hasattr(record, "to_dict") else record
         written = 0
+        # Task 5.6: копим принятое локально и учитываем ОДНИМ взятием lock-а на
+        # запись. По разу на канал означало бы N взятий там, где хватает одного.
+        # Список, а не словарь: замер показал, что словарь на каждую запись стоил
+        # дороже самого учёта (решение Р2).
+        accepted: List[str] = []
         for ch_name in channel_names:
             ch = self._resolve_channel(ch_name)
             if ch is None:
@@ -922,6 +1023,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             try:
                 if channel_accepted(ch.write(record_dict)):
                     written += 1
+                    accepted.append(ch_name)
                 else:
                     # Канал ЖИВ, но записи не принял (закрыт, консоль отброшена
                     # по пределу ожидания R2, HTTP-сток ответил ошибкой). На
@@ -934,6 +1036,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
                     self._count_channel_refused(ch_name)
             except Exception:  # noqa: BLE001 — сбой одного канала не должен съесть запись целиком; потеря учтена счётчиком
                 self._count_channel_write_error(ch_name)
+        self._count_channel_written(accepted)
         return written
 
     def _resolve_channel(self, name: str) -> Optional[IChannel]:

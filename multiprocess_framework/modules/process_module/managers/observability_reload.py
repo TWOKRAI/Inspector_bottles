@@ -263,6 +263,12 @@ PLANE_COUNTER_KEYS: tuple = (
     "channel_refused_by_channel",
     # Ф4.2 — приёмников у записи не было вовсе (четвёртый класс потери).
     "records_without_channels",
+    # Task 5.6 — ДОСТАВКА. Все счётчики выше считают потери, и «потерь ноль»
+    # одинаково означает здоровую систему и систему, из которой ничего не
+    # выходит. Без этих трёх ключей «включён» неотличимо от «доставляет».
+    "channel_written_records",
+    "channel_written_by_channel",
+    "observed_rate_per_sec",
     # Ф0.7 — чистка каталога логов: сколько удалено/сжато и сколько НЕ удалось.
     "retention_files_deleted",
     "retention_files_compressed",
