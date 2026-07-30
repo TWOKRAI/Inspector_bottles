@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from multiprocess_framework.modules.channel_routing_module.core.channel_routing_manager import (
-    RATE_MIN_INTERVAL_SEC,
     ChannelRoutingManager,
 )
 from multiprocess_framework.modules.channel_routing_module.interfaces import IChannel
@@ -124,12 +123,28 @@ class TestA1DeliveryIsCountedOnlyWhenItHappens:
         assert snap["unresolved_channels"] == {"ghost": 1}
 
 
-class TestA2ObservedRateDistinguishesSilence:
+def _rate(before: Dict[str, Any], after: Dict[str, Any]) -> float:
+    """Темп между двумя снимками — так его считает ПОТРЕБИТЕЛЬ.
+
+    Менеджер темпа не отдаёт: он отдаёт счётчик и момент снимка. Состояние держит
+    тот, кто опрашивает.
+    """
+    dt = after["observed_at"] - before["observed_at"]
+    return (after["channel_written_records"] - before["channel_written_records"]) / dt
+
+
+class TestA2DeliveryRateIsDerivableBySnapshots:
     """A2 (поглощённая 5.2): «уровень включён, записей ноль» ≠ «записи идут».
 
-    Темп производный от монотонного счётчика и считается ПРИ ЧТЕНИИ (решение Р2 —
-    замер показал, что окно на горячем пути стоило дороже самого учёта). Поэтому
-    первое чтение задаёт базу и честно отдаёт ноль, а различие видно со второго.
+    Различие даёт ПАРА снимков, а не готовое поле. Менеджер отдаёт монотонный
+    счётчик и момент чтения; частное берёт потребитель — так устроен любой scraper
+    поверх counter-метрики.
+
+    Так было не сразу. Первая редакция отдавала готовый `observed_rate_per_sec` и
+    держала ради него одну базу отсчёта на всех потребителей; в этой системе их
+    два (панель GUI и backend_ctl), и они портили показания друг другу. Ни один
+    тест этого не поймал: все читали в одиночку. Отсюда стражи ниже — включая тот,
+    что читает ДВАЖДЯ чужими глазами.
     """
 
     def _mgr_with_clock(self):
@@ -138,70 +153,73 @@ class TestA2ObservedRateDistinguishesSilence:
         mgr._clock = clock
         return mgr, clock
 
-    def test_first_read_sets_the_baseline_and_returns_zero(self) -> None:
-        mgr, _ = self._mgr_with_clock()
-        assert _snapshot(mgr)["observed_rate_per_sec"] == 0.0
-
-    def test_silence_between_reads_reads_as_zero(self) -> None:
-        """Ничего не писали между чтениями → ровно ноль, а не «прежний темп»."""
+    def test_snapshot_carries_counter_and_moment(self) -> None:
         mgr, clock = self._mgr_with_clock()
-        _snapshot(mgr)  # база
-        clock.now += 10.0
-        assert _snapshot(mgr)["observed_rate_per_sec"] == 0.0
+        snap = _snapshot(mgr)
+        assert snap["channel_written_records"] == 0
+        assert snap["observed_at"] == clock.now
 
-    def test_flow_between_reads_reads_as_positive_literal(self) -> None:
+    def test_silence_between_snapshots_is_zero_rate(self) -> None:
+        mgr, clock = self._mgr_with_clock()
+        first = _snapshot(mgr)
+        clock.now += 10.0
+        assert _rate(first, _snapshot(mgr)) == 0.0
+
+    def test_flow_between_snapshots_is_positive_literal(self) -> None:
         """Литерал, а не «поле присутствует»: 20 записей за 10с → 2.0/с."""
         mgr, clock = self._mgr_with_clock()
-        _snapshot(mgr)  # база
+        first = _snapshot(mgr)
         for _ in range(20):
             mgr._write_record_to_channels({"msg": "x"}, ["system_file"])
         clock.now += 10.0
-        assert _snapshot(mgr)["observed_rate_per_sec"] == 2.0
+        assert _rate(first, _snapshot(mgr)) == 2.0
 
-    def test_silence_after_flow_returns_to_zero(self) -> None:
-        """«Записи шли и перестали» отличимо от «записи идут».
+    def test_flow_then_silence_is_distinguishable(self) -> None:
+        """«Записи шли и перестали» отличимо от «записи идут» — та самая пара."""
+        mgr, clock = self._mgr_with_clock()
+        first = _snapshot(mgr)
+        for _ in range(20):
+            mgr._write_record_to_channels({"msg": "x"}, ["system_file"])
+        clock.now += 10.0
+        busy = _snapshot(mgr)
+        assert _rate(first, busy) == 2.0
+        clock.now += 10.0
+        assert _rate(busy, _snapshot(mgr)) == 0.0
 
-        Ровно та неотличимость, ради устранения которой задача и делается.
+    def test_two_independent_readers_do_not_corrupt_each_other(self) -> None:
+        """СТРАЖ на исправленный дефект: два потребителя не мешают друг другу.
+
+        Прежняя редакция держала одну базу отсчёта внутри менеджера и сдвигала её
+        на каждом чтении. Читатель B получал интервал «с последнего чтения A», то
+        есть число зависело от постороннего наблюдателя. Здесь A читает часто, B
+        редко — и B обязан увидеть СВОЙ интервал целиком.
         """
         mgr, clock = self._mgr_with_clock()
-        _snapshot(mgr)
-        for _ in range(20):
-            mgr._write_record_to_channels({"msg": "x"}, ["system_file"])
-        clock.now += 10.0
-        assert _snapshot(mgr)["observed_rate_per_sec"] == 2.0
-        clock.now += 10.0
-        assert _snapshot(mgr)["observed_rate_per_sec"] == 0.0, "молчание отдало прежний темп"
-
-    def test_rate_counts_only_the_interval_not_all_history(self) -> None:
-        """Второй интервал считается по своим записям, а не по всей истории."""
-        mgr, clock = self._mgr_with_clock()
-        _snapshot(mgr)
+        b_start = _snapshot(mgr)  # редкий читатель взял базу
         for _ in range(10):
-            mgr._write_record_to_channels({"msg": "a"}, ["system_file"])
-        clock.now += 10.0
-        assert _snapshot(mgr)["observed_rate_per_sec"] == 1.0
-        for _ in range(30):
-            mgr._write_record_to_channels({"msg": "b"}, ["system_file"])
-        clock.now += 10.0
-        # 30 за 10с, а не 40 за 20с.
-        assert _snapshot(mgr)["observed_rate_per_sec"] == 3.0
-
-    def test_too_frequent_read_does_not_zero_the_rate_it_measures(self) -> None:
-        """Частый опрос не обнуляет измеряемое.
-
-        Сдвигай базу при каждом чтении — и опрос дважды подряд показал бы ноль
-        просто потому, что между двумя чтениями ничего не успело произойти. То
-        есть инструмент наблюдения ломал бы наблюдаемое.
-        """
-        mgr, clock = self._mgr_with_clock()
-        _snapshot(mgr)
-        for _ in range(20):
             mgr._write_record_to_channels({"msg": "x"}, ["system_file"])
-        clock.now += 10.0
-        first = _snapshot(mgr)["observed_rate_per_sec"]
-        assert first == 2.0
-        clock.now += RATE_MIN_INTERVAL_SEC / 2  # слишком быстро
-        assert _snapshot(mgr)["observed_rate_per_sec"] == first
+        clock.now += 5.0
+        _snapshot(mgr)  # частый читатель A вклинился
+        _snapshot(mgr)  # и ещё раз
+        for _ in range(10):
+            mgr._write_record_to_channels({"msg": "x"}, ["system_file"])
+        clock.now += 5.0
+        _snapshot(mgr)  # A снова
+        b_end = _snapshot(mgr)  # редкий читатель B закрывает свой интервал
+        # 20 записей за 10 секунд — независимо от того, сколько раз читал A.
+        assert _rate(b_start, b_end) == 2.0
+
+    def test_repeated_snapshots_do_not_change_the_counter(self) -> None:
+        """Чтение не мутирует наблюдаемое.
+
+        Вторая половина стража выше: если снимок сдвигает состояние, «два
+        независимых читателя» можно было бы получить и случайно.
+        """
+        mgr, _ = self._mgr_with_clock()
+        for _ in range(7):
+            mgr._write_record_to_channels({"msg": "x"}, ["system_file"])
+        totals = [_snapshot(mgr)["channel_written_records"] for _ in range(4)]
+        assert totals == [7, 7, 7, 7], f"чтение изменило счётчик: {totals}"
 
     def test_no_clock_call_on_the_write_path(self) -> None:
         """Горячий путь не спрашивает часы вовсе (решение Р2 — цена).
@@ -272,5 +290,5 @@ class TestCountersArePublishedOutward:
             PLANE_COUNTER_KEYS,
         )
 
-        for key in ("channel_written_records", "channel_written_by_channel", "observed_rate_per_sec"):
+        for key in ("channel_written_records", "channel_written_by_channel", "observed_at"):
             assert key in PLANE_COUNTER_KEYS, f"{key} не публикуется наружу"

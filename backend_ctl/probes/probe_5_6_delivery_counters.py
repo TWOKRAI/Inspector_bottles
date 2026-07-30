@@ -12,10 +12,10 @@
     B1  у живого процесса ``channel_written_records`` > 0 — записи доходят,
         и это ВИДНО снаружи, а не только в get_stats() для тестов.
     B2  разбивка по каналам непуста и называет конкретные приёмники.
-    B3  ``observed_rate_per_sec`` со второго чтения даёт положительное число на
-        системе, которая пишет. Первое чтение задаёт базу и честно отдаёт ноль —
-        это цена решения Р2 (темп производный), и она проверяется, а не
-        замалчивается.
+    B3  темп, посчитанный ЗОНДОМ по двум снимкам, положителен на пишущей системе.
+        Менеджер темпа не отдаёт — он отдаёт счётчик и ``observed_at``, частное
+        берёт потребитель. Зонд здесь и есть потребитель, то есть проверяется
+        ровно тот путь, которым числом будут пользоваться GUI и backend_ctl.
     B4  потери и доставка живут в ОДНОМ снимке: «потерь ноль при нуле доставок»
         не должно читаться здоровьем. Проверяется тем, что оба класса ключей
         присутствуют в одном ответе.
@@ -106,7 +106,7 @@ def main() -> int:
         )
 
         loss_keys = {"unresolved_channel_records", "channel_write_errors", "channel_refused_records"}
-        delivery_keys = {"channel_written_records", "channel_written_by_channel", "observed_rate_per_sec"}
+        delivery_keys = {"channel_written_records", "channel_written_by_channel", "observed_at"}
         check(
             loss_keys <= set(pm) and delivery_keys <= set(pm),
             "B4: потери и доставка в ОДНОМ снимке",
@@ -121,18 +121,21 @@ def main() -> int:
             f"{alive}",
         )
 
-        log("\n--- B3: темп со второго чтения ---")
-        # Первое чтение выше задало базу. Даём системе поработать и читаем снова:
-        # темп производный от счётчика, поэтому положительное число может дать
-        # только ВТОРОЕ чтение — это цена решения Р2, и она названа в приёмке.
+        log("\n--- B3: темп выводит потребитель по двум снимкам ---")
         time.sleep(3.0)
         second = counters(obs(drv, "ProcessManager"))
-        rate = second.get("observed_rate_per_sec")
         grew = (second.get("channel_written_records") or 0) - (written or 0)
+        elapsed = (second.get("observed_at") or 0) - (pm.get("observed_at") or 0)
+        rate = grew / elapsed if elapsed > 0 else None
         check(
-            isinstance(rate, (int, float)) and rate > 0,
-            "B3: observed_rate_per_sec > 0 на пишущей системе",
-            f"observed_rate_per_sec={rate!r}, записей за интервал={grew}",
+            elapsed > 0,
+            "B3: метка времени снимка растёт между чтениями",
+            f"observed_at: {pm.get('observed_at')!r} -> {second.get('observed_at')!r} (Δ={elapsed:.3f}с)",
+        )
+        check(
+            rate is not None and rate > 0,
+            "B3: темп, посчитанный потребителем, > 0 на пишущей системе",
+            f"{grew} записей / {elapsed:.3f}с = {rate!r} записей/с",
         )
         # Вторая половина пары: темп не выдуман — он согласуется с приростом.
         check(
