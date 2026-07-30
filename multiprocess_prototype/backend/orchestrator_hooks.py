@@ -126,18 +126,13 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         #
         # Спутник рецепта (machine-owned слой L2) — тем же способом, что boot.
         if recipe_path:
-            from multiprocess_framework.modules.data_schema_module import deep_merge
             from multiprocess_framework.modules.process_module.configs.observability_companion import (
-                load_companion,
+                merge_companion_over,
             )
 
-            try:
-                companion = load_companion(recipe_path)
-            except Exception as exc:  # noqa: BLE001 — битый спутник не валит switch
-                orchestrator._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
-                companion = {}
-            if companion:
-                topology["observability"] = deep_merge(topology.get("observability") or {}, companion)
+            topology["observability"] = merge_companion_over(
+                topology.get("observability"), recipe_path, on_error=orchestrator._log_error
+            )
         assembler = BlueprintAssembler(
             observability_section=obs_section,
             log_dir=log_dir,

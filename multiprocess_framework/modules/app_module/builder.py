@@ -143,16 +143,12 @@ def assemble_proc_dicts(
     from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
         SystemBlueprint,
     )
-    from multiprocess_framework.modules.process_module.configs.managers_config import merge_managers
-
-    from multiprocess_framework.modules.process_module.configs.observability_config import (
-        expand_observability,
-    )
     from multiprocess_framework.modules.process_module.configs.observability_layers import (
         APP_CONFIG_KEY,
         OVERRIDE_CONFIG_KEY,
         RECIPE_PATH_CONFIG_KEY,
         ObservabilityLayers,
+        apply_layers_to_proc_dict,
         resolve_recipe_section,
     )
 
@@ -174,16 +170,10 @@ def assemble_proc_dicts(
         name, proc_dict = process(cfg)
         obs_override = resolve_recipe_section(topology.observability, name)
         layers = ObservabilityLayers(app=app_layer, recipe=obs_override)
-        resolved = layers.resolve()
-        # Оба слоя молчат → overlay НЕ накладывается вовсе. Это не микро-оптимизация:
-        # expand({}) — полный набор дефолтов L0, и он затёр бы уровень, пришедший
-        # в managers из INSPECTOR_LOG_LEVEL (managers_from_log_dir). Прежнее
-        # поведение этой ветки — «нет секции → managers не трогаем», сохраняем его.
-        if resolved:
-            proc_dict["managers"] = merge_managers(
-                proc_dict.get("managers", {}),
-                expand_observability(resolved),
-            )
+        # Раскладка «слои → менеджеры» общая с прикладным ассемблером (ревью 5.13):
+        # молчание слоёв не создаёт секцию и не затирает уровень, пришедший другим
+        # путём (INSPECTOR_LOG_LEVEL через managers_from_log_dir).
+        apply_layers_to_proc_dict(proc_dict, layers)
         if obs_override:
             proc_dict["config"][OVERRIDE_CONFIG_KEY] = obs_override
         if app_layer:

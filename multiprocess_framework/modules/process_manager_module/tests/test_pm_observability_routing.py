@@ -511,28 +511,34 @@ class TestA4Isolation:
         assert pm_slice != camera_slice, "Дольки PM и camera_0 совпали — утечка"
 
     def test_a4_switch_neighbor_change_does_not_affect_pm(self, pm_with_real_logger) -> None:
-        """A4: switch, меняющий только camera_0, не трогает PM.
+        """A4: switch, меняющий только camera_0, не переносит его настройку на PM.
 
-        Сейчас КРАСНЫЙ для обоих switch (PM не получает свой L2).
-        После правки: первый switch устанавливает PM=WARNING, второй не трогает PM.
+        Ревью 5.13 нашло здесь ВАКУУМНОЕ предусловие: первый switch ставил PM на
+        WARNING, и ровно WARNING даёт L1 этой фикстуры. То есть предусловие
+        проходило и при полностью неработающей доставке слоя — оно ничего не
+        различало. Поэтому первый switch теперь ставит ERROR (≠ L1), и обе
+        половины стали содержательными:
+
+        * предусловие ERROR доказывает, что слой ДОЕХАЛ;
+        * итог WARNING доказывает, что молчащий про PM рецепт СНЯЛ слой (A3),
+          а DEBUG соседа на PM не перетёк.
         """
         pm, _ = pm_with_real_logger
 
-        # Switch A: PM=WARNING, camera_0=INFO
+        # Switch A: PM=ERROR (отличается от L1=WARNING), camera_0=INFO
         pm.apply_topology(
             {
                 "processes": [],
                 "wires": [],
                 "observability": {
                     "processes": {
-                        "ProcessManager": {"log_level": "WARNING"},
+                        "ProcessManager": {"log_level": "ERROR"},
                         "camera_0": {"log_level": "INFO"},
                     }
                 },
             }
         )
-        # Предусловие: PM на WARNING
-        assert _level(pm) == "WARNING", f"A4 предусловие: PM не на WARNING после первого switch. Уровень: {_level(pm)}"
+        assert _level(pm) == "ERROR", f"A4 предусловие: слой PM не доехал первым switch'ем. Уровень: {_level(pm)}"
 
         # Switch B: только camera_0 меняется, PM.processes не указан
         pm.apply_topology(
@@ -546,8 +552,9 @@ class TestA4Isolation:
                 },
             }
         )
-        # PM должен остаться на WARNING
-        assert _level(pm) == "WARNING", f"A4: switch на camera_0 задел PM. Ожидали WARNING, получили: {_level(pm)}"
+        # Слой PM снят → падение на L1. Не ERROR (покинутый рецепт не живёт вечно)
+        # и не DEBUG (настройка соседа осталась у соседа).
+        assert _level(pm) == "WARNING", f"A4: switch на camera_0 задел PM. Ожидали L1=WARNING, получили: {_level(pm)}"
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +678,72 @@ class TestBreakInjectionA11:
         }
         # И то же правило НЕ задевает обычный процесс.
         assert resolve_recipe_section(section, "camera_0") == {"log_level": "DEBUG"}
+
+    def test_short_form_defaults_also_stop_at_the_orchestrator(self) -> None:
+        """Р1 действует и на КОРОТКУЮ форму — ключи прямо в секции, без ``defaults``.
+
+        Ревью 5.13: обе половины правила проверялись только на полной форме, и
+        слом-инъекция, снимавшая исключение ровно для короткой, оставляла набор
+        зелёным. А это тот самый путь, на котором человек уверен, что накрыл всех:
+        короткая форма — это те же ``defaults``, только без служебного ключа.
+
+        Пара обязательна: без второй половины тест был бы зелёным и у реализации
+        «короткая форма не работает ни для кого».
+        """
+        # Короткая форма в чистом виде.
+        assert resolve_recipe_section({"log_level": "ERROR"}, ORCHESTRATOR_PROCESS_NAME) == {}
+        assert resolve_recipe_section({"log_level": "ERROR"}, "camera_0") == {"log_level": "ERROR"}
+
+        # Короткая форма рядом с `processes` — она остаётся defaults'ами.
+        mixed = {"log_level": "ERROR", "processes": {"ProcessManager": {"console": False}}}
+        assert resolve_recipe_section(mixed, ORCHESTRATOR_PROCESS_NAME) == {"console": False}
+        assert resolve_recipe_section(mixed, "camera_0") == {"log_level": "ERROR"}
+
+    def test_orchestrator_config_carries_the_slice_not_just_the_address(self) -> None:
+        """Шаг 3: bundle оркестратора несёт СОДЕРЖИМОЕ дольки, а не только адрес.
+
+        Ревью 5.13: свойство держалось живым зондом вне CI. Снятие доставки
+        (`out[OVERRIDE_CONFIG_KEY]`) оставляло 6301 + 685 тестов зелёными — то
+        есть до этого теста половина корневой правки не существовала.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            APP_CONFIG_KEY,
+            OVERRIDE_CONFIG_KEY,
+            RECIPE_PATH_CONFIG_KEY,
+            orchestrator_observability_config,
+        )
+
+        out = orchestrator_observability_config(
+            app_section={"log_level": "WARNING"},
+            recipe_section={
+                "defaults": {"log_level": "DEBUG"},
+                "processes": {ORCHESTRATOR_PROCESS_NAME: {"log_level": "ERROR"}},
+            },
+            app_config_path="/cfg/system.yaml",
+            recipe_path="/rec/loud.yaml",
+        )
+
+        assert out[APP_CONFIG_KEY] == {"log_level": "WARNING"}, "L1 не доехал"
+        assert out[OVERRIDE_CONFIG_KEY] == {"log_level": "ERROR"}, "долька рецепта не доехала (только адрес)"
+        assert out[RECIPE_PATH_CONFIG_KEY] == "/rec/loud.yaml"
+        assert out["observability_config_path"] == "/cfg/system.yaml"
+
+    def test_orchestrator_config_omits_the_slice_when_recipe_is_silent_about_pm(self) -> None:
+        """Вторая половина пары: рецепт, назвавший только соседей, дольки не даёт.
+
+        Без неё тест выше был бы зелёным и у реализации «класть под этот ключ
+        что угодно, лишь бы непустое».
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            OVERRIDE_CONFIG_KEY,
+            orchestrator_observability_config,
+        )
+
+        out = orchestrator_observability_config(
+            recipe_section={"defaults": {"log_level": "DEBUG"}, "processes": {"camera_0": {"log_level": "INFO"}}},
+            recipe_path="/rec/quiet.yaml",
+        )
+        assert OVERRIDE_CONFIG_KEY not in out, "оптовый ключ соседей приехал оркестратору как своя долька"
 
     def test_switch_reports_own_layer_separately_from_broadcast(self, pm_with_real_logger) -> None:
         """«Раздал детям» и «применил себе» — разные утверждения в ответе switch'а.

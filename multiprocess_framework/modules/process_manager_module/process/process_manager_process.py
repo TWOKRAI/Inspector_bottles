@@ -17,6 +17,7 @@ from typing import Any
 from ...config_module.feature_flags import is_enabled
 from ...console_module import ConsoleManager
 from ...process_module import ProcessModule
+from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
 from ...shared_resources_module import QueueRegistry
 from ..core.process_priority import ProcessPriority
 from ..core.process_registry import ProcessRegistry
@@ -52,7 +53,7 @@ class ProcessManagerProcess(ProcessModule):
 
     def __init__(
         self,
-        name: str = "ProcessManager",
+        name: str = ORCHESTRATOR_PROCESS_NAME,
         shared_resources=None,
         config: dict[str, Any] | None = None,
     ) -> None:
@@ -736,25 +737,18 @@ class ProcessManagerProcess(ProcessModule):
           после switch у них молча откатывалась;
         * **сам оркестратор**, начиная с шага 5.
 
-        Мерж идёт тем же ``load_companion`` + ``deep_merge`` и в том же порядке
-        (спутник ПОВЕРХ рецепта — его писал пульт, он новее), что на boot и в
-        пересборке. Три места читают один файл одинаково; будь порядок здесь
-        обратным, «сохранить» отменялось бы switch'ем через раз.
+        Мерж идёт общим швом ``merge_companion_over`` — тем же, что на boot и в
+        пересборке, и в том же порядке (спутник ПОВЕРХ рецепта: его писал пульт,
+        он новее). До ревью 5.13 это были три копии правила, уже разошедшиеся
+        обработкой битого файла; теперь различие политики отказа — параметр шва,
+        а не расхождение реализаций.
         """
-        section = topology_dict.get("observability") if isinstance(topology_dict, dict) else None
-        section = dict(section) if isinstance(section, dict) else {}
-        recipe_path = self._observability_recipe_address()
-        if recipe_path:
-            from ...data_schema_module import deep_merge
-            from ...process_module.configs.observability_companion import load_companion
+        from ...process_module.configs.observability_companion import merge_companion_over
 
-            try:
-                companion = load_companion(recipe_path)
-            except Exception as exc:  # noqa: BLE001 — битый спутник не имеет права ронять switch
-                self._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
-                companion = {}
-            if companion:
-                section = deep_merge(section, companion)
+        section = topology_dict.get("observability") if isinstance(topology_dict, dict) else None
+        recipe_path = self._observability_recipe_address()
+        # Битый спутник не имеет права ронять switch — в отличие от boot.
+        section = merge_companion_over(section, recipe_path, on_error=self._log_error)
         return {
             # Пустая секция едет как `{}`, а не пропускается: «новый рецепт про
             # наблюдаемость молчит» обязано СНЯТЬ прежний слой, иначе покинутый

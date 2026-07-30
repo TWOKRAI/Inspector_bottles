@@ -300,11 +300,17 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         Ни одна не выполняется → выходим. У ребёнка со свежим ``proc_dict``
         пересборка была бы лишней работой на пути, который и так верен.
+
+        **Инвариант (ревью 5.13):** пустая секция менеджеров разрешает пересборку
+        только вместе с непустыми слоями. Молчащие слои не дают повода трогать
+        менеджеры НИКОМУ — ни ассемблеру, ни этому месту; правило одно и живёт в
+        :func:`~..configs.observability_layers.layers_are_silent`.
         """
         from ..configs.observability_companion import companion_path, compose_recipe_layer
         from ..configs.observability_layers import (
             LAYER_RECIPE,
             RECIPE_PATH_CONFIG_KEY,
+            layers_are_silent,
             process_observability_layers,
             read_process_config,
         )
@@ -312,7 +318,11 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Пустая секция менеджеров = ассемблер этого процесса не касался.
         try:
             managers_ready = bool(self.config_handler.get_managers_config())
-        except Exception:  # noqa: BLE001 — нечитаемый конфиг не имеет права ронять старт
+        except Exception as exc:  # noqa: BLE001 — нечитаемый конфиг не имеет права ронять старт
+            # Отказ здесь ЗНАЧИМ: он выбирает консервативную ветку («менеджеры
+            # готовы») и тем самым отменяет пересборку. Проглоти его молча — и
+            # процесс поднялся бы на дефолтах L0, а причина осталась бы без следа.
+            self._log_error(f"[observability] секция менеджеров не прочитана, пересборка на старте пропущена: {exc}")
             managers_ready = True
 
         layers = process_observability_layers(self)
@@ -332,8 +342,16 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 origin = "boot:companion"
                 layers.replace_layer(LAYER_RECIPE, body, source=source, origin=origin)
 
-        # Слой уже разложен ассемблером, и спутник про этот процесс молчит.
-        if managers_ready and origin == "boot:layers":
+        # Выходим в двух случаях: слой уже разложен ассемблером (и спутник про этот
+        # процесс молчит) — либо слои молчат сами, и накладывать нечего.
+        #
+        # Вторая половина условия — ревью 5.13. «Секция менеджеров пуста» читалось
+        # как «менеджеры не настроены», а это не следует: во фреймворке-конструкторе
+        # встройщик вправе собрать LoggerManager программно и не заводить секцию
+        # вовсе. Пересборка из молчащих слоёв дала бы ему голые дефолты L0 —
+        # то есть тихо отменила бы его настройку. Молчание слоёв означает
+        # «решает нижний», см. `layers_are_silent`.
+        if origin == "boot:layers" and (managers_ready or layers_are_silent(layers)):
             return
 
         from ..managers.observability_reload import apply_observability_layers

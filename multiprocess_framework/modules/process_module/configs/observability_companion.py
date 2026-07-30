@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 #: Суффикс спутника. Именно ``.observability.yaml``, а не ``.obs.yml``:
 #: имя файла — единственная подсказка человеку, кто его хозяин.
@@ -62,6 +62,48 @@ def load_companion(recipe_path: str | os.PathLike[str]) -> Dict[str, Any]:
         return {}
     section = loaded.get("observability")
     return section if isinstance(section, dict) else {}
+
+
+def merge_companion_over(
+    section: Optional[Dict[str, Any]],
+    recipe_path: Optional[str | os.PathLike[str]],
+    *,
+    on_error: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Домержить спутник ПОВЕРХ секции наблюдаемости рецепта.
+
+    Порядок — спутник сверху, и он не обсуждается на каждом вызове: спутник пишет
+    пульт, его правка новее той, что человек написал в рецепте руками. Будь порядок
+    где-то обратным, «сохранить» отменялось бы switch'ем через раз.
+
+    До ревью 5.13 это правило жило ТРЕМЯ копиями (boot прототипа, пересборка
+    proc_dict'ов, конверт switch'а), и они уже разошлись обработкой битого файла:
+    две глушили исключение в лог, третья роняла старт. Разными были и следствия —
+    на boot отказ уместен, на switch он снёс бы работающую систему, — поэтому
+    политика стала ПАРАМЕТРОМ, а не расхождением:
+
+    * ``on_error=None`` — исключение пробрасывается (boot: стартовать без
+      сохранённых настроек хуже, чем отказать);
+    * ``on_error=callable`` — сообщение уходит вызывающему, мерж продолжается без
+      спутника (switch: битый спутник не имеет права ронять живую систему).
+
+    Гранулярность здесь — СЕКЦИЯ целиком (до resolve по именам). Вторая, по-процессная,
+    живёт в :func:`compose_recipe_layer` этого же модуля; порядок у них общий и
+    назван один раз — здесь.
+    """
+    from ...data_schema_module import deep_merge
+
+    base = dict(section) if isinstance(section, dict) else {}
+    if not recipe_path:
+        return base
+    try:
+        companion = load_companion(recipe_path)
+    except Exception as exc:  # noqa: BLE001 — политику решает вызывающий, см. докстринг
+        if on_error is None:
+            raise
+        on_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
+        return base
+    return deep_merge(base, companion) if companion else base
 
 
 def build_companion_section(

@@ -408,14 +408,13 @@ class SystemBuilder:
         # человек написал в рецепте руками.
         recipe_path = str(self._topology_path) if self._topology_path else ""
         if recipe_path:
-            from multiprocess_framework.modules.data_schema_module import deep_merge
             from multiprocess_framework.modules.process_module.configs.observability_companion import (
-                load_companion,
+                merge_companion_over,
             )
 
-            companion = load_companion(recipe_path)
-            if companion:
-                bp_dict["observability"] = deep_merge(bp_dict.get("observability") or {}, companion)
+            # on_error не передаём намеренно: на boot битый спутник обязан
+            # отказать, а не стартовать без сохранённых настроек молча.
+            bp_dict["observability"] = merge_companion_over(bp_dict.get("observability"), recipe_path)
 
         assembler = BlueprintAssembler(
             observability_section=obs_section,

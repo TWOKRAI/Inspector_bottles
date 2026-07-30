@@ -296,6 +296,19 @@ class TestPersistedLayerSurvivesProcessRespawn:
     ``default_level=INFO``, после — ``DEBUG`` с provenance на спутник.
     """
 
+    class _ManagersSection:
+        """Секция менеджеров ребёнка — её разложил ассемблер, она непуста.
+
+        Появилась при ревью 5.13: фейк без ``config_handler`` вообще заставлял
+        механизм уходить в ветку «секцию прочитать не удалось». Ветка
+        консервативная, тесты проходили — но проверяли они процесс, какого
+        в системе не бывает: у настоящего ребёнка handler есть всегда.
+        """
+
+        @staticmethod
+        def get_managers_config():
+            return {"logger": {"default_level": "INFO"}}
+
     class _Proc:
         """Процесс в форме, в какой конфиг реально доезжает до ребёнка (весь proc_dict)."""
 
@@ -304,6 +317,7 @@ class TestPersistedLayerSurvivesProcessRespawn:
             self.logger_manager = logger
             self.error_manager = None
             self.stats_manager = None
+            self.config_handler = TestPersistedLayerSurvivesProcessRespawn._ManagersSection()
             self._d = proc_dict
             self.errors: List[str] = []
 

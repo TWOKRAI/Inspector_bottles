@@ -18,7 +18,9 @@ from .observability_layers import (
     ORCHESTRATOR_PROCESS_NAME,
     OVERRIDE_CONFIG_KEY,
     ObservabilityLayers,
+    apply_layers_to_proc_dict,
     flatten_section,
+    layers_are_silent,
     resolve_recipe_section,
 )
 from .process_config_handler import ProcessConfigHandler
@@ -40,7 +42,9 @@ __all__ = [
     "LAYER_ORDER",
     "ORCHESTRATOR_PROCESS_NAME",
     "OVERRIDE_CONFIG_KEY",
+    "apply_layers_to_proc_dict",
     "flatten_section",
+    "layers_are_silent",
     "resolve_recipe_section",
     "ProcessConfigHandler",
     "ProcessLaunchConfig",

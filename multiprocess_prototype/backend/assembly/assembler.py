@@ -25,17 +25,12 @@ from multiprocess_framework.modules.data_schema_module.core.helpers import (
 from multiprocess_framework.modules.process_manager_module.launcher.schema import (
     DEFAULT_PROCESS_SCHEMA,
 )
-from multiprocess_framework.modules.process_module.configs.managers_config import (
-    merge_managers,
-)
-from multiprocess_framework.modules.process_module.configs.observability_config import (
-    expand_observability,
-)
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
     APP_CONFIG_KEY,
     OVERRIDE_CONFIG_KEY,
     RECIPE_PATH_CONFIG_KEY,
     ObservabilityLayers,
+    apply_layers_to_proc_dict,
     resolve_recipe_section,
 )
 from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
@@ -104,8 +99,9 @@ class BlueprintAssembler:
         4. ``topology.build_configs()`` → список ``GenericProcessConfig``.
         5. Для каждого cfg: если ``cfg.log_dir`` пуст → ``cfg.log_dir = self._log_dir``.
         6. ``name, proc_dict = process(cfg)`` — framework-конвертер.
-        7. ``merge_managers(proc_dict["managers"], expand_observability(L1 → L2))``
-           (Task 5.12) + сырая L2-дельта в ``config['observability_override']``.
+        7. ``apply_layers_to_proc_dict(proc_dict, L1 → L2)`` (Task 5.12; общий шов с
+           generic-дорогой после ревью 5.13 — молчащие слои секцию не создают) +
+           сырая L2-дельта в ``config['observability_override']``.
         8. PC 1.3: ``proc_dict["config"]["telemetry"]`` — ТОЛЬКО если задано (глобально
            через ``telemetry_dict`` конструктора ИЛИ per-process
            ``blueprint.processes[].telemetry``), см. ``_resolve_telemetry``.
@@ -160,10 +156,11 @@ class BlueprintAssembler:
             # processes[name]). L0 подставит expand_observability валидацией.
             obs_override = resolve_recipe_section(recipe_observability, name)
             layers = ObservabilityLayers(app=self._observability_section, recipe=obs_override)
-            proc_dict["managers"] = merge_managers(
-                proc_dict.get("managers", {}),
-                expand_observability(layers.resolve()),
-            )
+            # Раскладка «слои → менеджеры» общая с generic-дорогой (ревью 5.13).
+            # Прежде здесь накладывалось БЕЗУСЛОВНО: у процесса с молчащими слоями
+            # появлялась секция из голых дефолтов L0. Расхождение было латентным —
+            # в прототипе system.yaml всегда несёт секцию observability.
+            apply_layers_to_proc_dict(proc_dict, layers)
             # Сырая L2-дельта хранится ОТДЕЛЬНО (точный аналог telemetry_override):
             # файловый фолбэк `config.reload` читает system.yaml и знает только L1 —
             # без сохранённой дельты он пересобрал бы конфиг БЕЗ рецепта, и boot
