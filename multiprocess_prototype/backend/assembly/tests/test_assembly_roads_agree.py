@@ -163,3 +163,66 @@ def test_declared_layer_reaches_managers_on_either_road() -> None:
         for name, proc_dict in road.items():
             level = proc_dict["managers"]["logger"]["default_level"]
             assert level == "ERROR", f"{road_name}/{name}: L1 не доехал, уровень {level!r}"
+
+
+class TestBothRoadsRefuseAnUnknownProcessName:
+    """Task 5.5 (A4): опечатка в ``observability.processes`` громкая на ОБЕИХ дорогах.
+
+    Проверка живёт в ``SystemBlueprint.check()``, который зовут оба сборщика, —
+    поэтому паритет здесь не «повторили в двух местах», а «механизм один». Тест
+    всё равно проверяет обе: расхождение уже случалось именно на том, что одна
+    дорога звала общий код, а вторая шла своим путём (находка ревью 5.13).
+
+    Почему отказ, а не громкая строка: `observability.processes` и список
+    процессов лежат в ОДНОМ документе рецепта — несовпадение может быть только
+    опечаткой. Секции из `system.yaml` и спутника авторятся отдельно, и там путь
+    мягкий (`unknown_refs` в ответе `config.reload`).
+    """
+
+    _TYPO = {"defaults": {"log_level": "INFO"}, "processes": {"camera_9": {"log_level": "DEBUG"}}}
+
+    def test_generic_road_refuses(self) -> None:
+        from multiprocess_framework.modules.app_module.builder import BlueprintError
+
+        with pytest.raises(BlueprintError) as exc:
+            _both_roads({"log_level": "WARNING"}, self._TYPO)
+        text = str(exc.value)
+        assert "camera_9" in text
+        # Сообщение обязано быть действующим: назвать доступные имена, иначе
+        # оператор знает только «не так», но не «как».
+        assert "camera_0" in text and "processor" in text, text
+
+    def test_applied_road_refuses(self) -> None:
+        from multiprocess_prototype.backend.assembly.assembler import BlueprintInvalid
+
+        bp = copy.deepcopy(_BLUEPRINT)
+        bp["observability"] = self._TYPO
+        with pytest.raises(BlueprintInvalid) as exc:
+            BlueprintAssembler(
+                observability_section={"log_level": "WARNING"},
+                log_dir="logs/x",
+                telemetry_dict=None,
+                recipe_path="/rec/demo.yaml",
+                app_config_path="/cfg/system.yaml",
+            ).assemble(bp)
+        assert "camera_9" in str(exc.value)
+
+    def test_orchestrator_is_a_legitimate_address(self) -> None:
+        """Капкан 5.13: оркестратор адресуем секцией, но в `processes` рецепта его нет.
+
+        Забудь мы его в известных именах — собственная фича 5.13 (`ProcessManager`
+        получает свою секцию) отвергалась бы как опечатка на ОБЕИХ дорогах.
+        """
+        section = {"processes": {"ProcessManager": {"log_level": "DEBUG"}}}
+        generic, applied = _both_roads({"log_level": "WARNING"}, section)
+        assert generic and applied
+
+    def test_known_names_pass_on_both_roads(self) -> None:
+        """Вторая половина пары: без неё зелена реализация «отказывать всегда»."""
+        section = {"processes": {"camera_0": {"log_level": "DEBUG"}, "processor": {"log_level": "ERROR"}}}
+        generic, applied = _both_roads({"log_level": "WARNING"}, section)
+        assert set(generic) == set(applied)
+
+    def test_short_form_without_processes_is_not_judged(self) -> None:
+        generic, applied = _both_roads({"log_level": "WARNING"}, {"log_level": "DEBUG"})
+        assert generic and applied

@@ -510,6 +510,40 @@ class SystemBlueprint(SchemaBase):
             process_names.add(proc.process_name)
         return errors
 
+    def _unknown_observability_processes(self) -> list[str]:
+        """Имя в ``observability.processes``, которого нет в рецепте (Task 5.5, шаг 10 из 5.13).
+
+        **Почему именно здесь, а не громкой строкой при сборке.** Дилемма «чем быть
+        громким, когда логгера ещё нет» снимается тем, что проверка не нуждается в
+        логгере: `observability.processes` и список процессов лежат в ОДНОМ
+        документе, значит несовпадение — опечатка, а не расхождение источников, и
+        это ровно тот класс, для которого валидация чертежа и существует (дубли
+        имён, неподключённые обязательные входы). Оба сборщика зовут ``check()`` и
+        падают на его ошибках — механизм уже есть, второго не вводим.
+
+        Отсюда же граница: секцию из ``system.yaml`` (L1) и из спутника рецепта
+        здесь НЕ судим. Они авторятся отдельно от списка процессов, и там имя
+        «лишнего» процесса — законное переиспользование между рецептами; для них
+        путь мягкий (громкая строка + ``unknown_refs`` в ответе ``config.reload``).
+
+        Оркестратор входит в известные имена **обязательно**: с задачи 5.13 он
+        адресуем секцией наравне с детьми, но в ``self.processes`` его нет —
+        забудь мы это, и собственная фича 5.13 отвергалась бы как опечатка.
+        """
+        from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
+        from ...process_module.configs.observability_refs import unknown_recipe_processes
+
+        known = {proc.process_name for proc in self.processes} | {ORCHESTRATOR_PROCESS_NAME}
+        orphans = unknown_recipe_processes(self.observability, known)
+        if not orphans:
+            return []
+        available = ", ".join(sorted(known))
+        return [
+            f"observability.processes: процесса '{name}' в рецепте нет — исправь имя или удали запись "
+            f"(есть: {available})"
+            for name in orphans
+        ]
+
     def check_structure(self) -> list[str]:
         """Публичный gate структурной валидации (RS-5, C-4): дубли имён + циклы.
 
@@ -566,6 +600,7 @@ class SystemBlueprint(SchemaBase):
             Список ошибок. Пустой = всё ОК.
         """
         errors: list[str] = list(self._duplicate_process_names())
+        errors.extend(self._unknown_observability_processes())
 
         # Раздельные карты входов и выходов — плагин может иметь
         # одноимённые input/output порты (e.g. "frame" → "frame")
