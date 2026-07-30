@@ -145,6 +145,92 @@ def observability_effective(
     return out
 
 
+def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[str, Any]:
+    """Сравнить ЗАПРОШЕННОЕ с ДЕЙСТВУЮЩИМ и назвать расхождения поимённо (Task 5.7).
+
+    До этого ``config.reload`` возвращал ``effective`` (readback уже был в ответе)
+    и ставил ``success: True`` по факту «применение не упало». Запроси ключ,
+    перебитый вышестоящим слоем, или **опечатку** — ответ был тем же успехом.
+    Данные для суждения лежали в ответе, суждения не было.
+
+    Три различимых исхода, а не два — потому что «не проверено» и «проверено и
+    сошлось» смешивать нельзя:
+
+    * ``mismatches`` — путь есть в readback и значение НЕ совпало. Настоящий провал;
+    * ``unknown_keys`` — ключ не выжил в round-trip через схему, то есть его нет в
+      контракте вовсе (``log_levl`` вместо ``log_level``, ``errors.lvl``). Сегодня
+      такой ключ проглатывался молча;
+    * ``unverifiable`` — запрос изменил путь, которого readback не отдаёт
+      (``observability_effective`` показывает подмножество полей). Зачесть его в
+      успех значило бы объявить проверенным то, что не проверялось.
+
+    **Вердикт трёхзначный, а не булев** — ``confirmed`` | ``failed`` |
+    ``unverifiable``. Первая редакция отдавала ``verified: true`` при
+    ``checked: 0``, то есть «подтверждено» там, где не проверено ничего: запрос
+    менял только пути, которых readback не отдаёт. Булево поле здесь врало бы в
+    обе стороны — ``true`` читалось бы подтверждением, ``false`` провалом, а
+    правда третья. Урок проекта («полуудача — отдельным полем, вердикт по одному
+    маркеру врёт») применён буквально.
+
+    Незнакомые ключи ловятся round-trip'ом через ту же схему, из которой считается
+    раскладка, а не отдельной таблицей соответствий: вторая таблица разошлась бы
+    с первой на первом же новом поле. По той же причине ожидаемое считается
+    ``expand_observability`` — единственной точкой раскладки (якорь ADR-CRM-006), —
+    а не своим переводом «ключ конфига → поле менеджера». Перевод здесь неочевиден:
+    ``log_level`` действует как ``logger.default_level``, и своя копия этого знания
+    была бы вторым местом, где оно живёт.
+    """
+    from ..configs.observability_config import ObservabilityConfig, expand_observability
+    from ..configs.observability_layers import flatten_section
+
+    section = requested if isinstance(requested, dict) else {}
+    flat_request = flatten_section(section)
+
+    # Неизвестные ключи = не выжившие в round-trip через схему. Ключ, заданный
+    # значением по умолчанию, выживает — поэтому «совпал с дефолтом» и «опечатка»
+    # не путаются.
+    try:
+        survived = ObservabilityConfig.model_validate(section).model_dump(exclude_unset=True)
+    except Exception:  # noqa: BLE001 — невалидную секцию судит применение, не вердикт
+        survived = section
+    unknown = sorted(set(flat_request) - set(flatten_section(survived)))
+
+    baseline = flatten_section(expand_observability({}))
+    expected = flatten_section(expand_observability(survived))
+    flat_effective = flatten_section(effective if isinstance(effective, dict) else {})
+
+    mismatches: list = []
+    unverifiable: list = []
+    checked = 0
+    for path, want in expected.items():
+        if baseline.get(path) == want:
+            continue  # запрос этот путь не менял
+        if path not in flat_effective:
+            unverifiable.append(path)
+            continue
+        checked += 1
+        got = flat_effective[path]
+        if got != want:
+            mismatches.append({"key": path, "expected": want, "actual": got})
+
+    if mismatches or unknown:
+        verdict = "failed"
+    elif checked:
+        verdict = "confirmed"
+    else:
+        # Ни расхождений, ни проверенных путей: подтверждать нечем. Сюда попадает
+        # и запрос, не изменивший ничего вовсе, и запрос, изменивший только
+        # непроверяемое readback'ом.
+        verdict = "unverifiable"
+    return {
+        "verdict": verdict,
+        "checked": checked,
+        "mismatches": mismatches,
+        "unknown_keys": unknown,
+        "unverifiable": sorted(unverifiable),
+    }
+
+
 def _sink_readback(manager: Any) -> Dict[str, Any]:
     """Активные приёмники плоскости и то, что снял оператор.
 

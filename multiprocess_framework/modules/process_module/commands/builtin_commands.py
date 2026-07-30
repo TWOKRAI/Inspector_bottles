@@ -1482,6 +1482,17 @@ class BuiltinCommands:
             # Readback: фактическое состояние менеджеров ПОСЛЕ применения — инициатор
             # видит эффект (пороги скоупов, каталог, активные каналы), а не эхо входа.
             result["effective"] = observability_effective(logger=_logger, error=_error, stats=_stats)
+            # Task 5.7: судить, а не только показывать. Readback лежал в ответе, но
+            # `success` означал «применение не упало» — запрошенный ключ, перебитый
+            # вышестоящим слоем, и ОПЕЧАТКА в имени давали тот же успех.
+            #
+            # `success` и `verified` намеренно РАЗНЫЕ поля: «команда сломалась» и
+            # «команда ничего не изменила» — разные диагнозы, и слипнись они,
+            # различие исчезло бы вместе с возможностью его увидеть.
+            if isinstance(obs_section, dict):
+                from ..managers.observability_reload import observability_verified
+
+                result["verified"] = observability_verified(obs_section, result["effective"])
             # Task 5.8: сроки — в ответе КАЖДОГО reload, включая файловый. Файл L3 не
             # трогает, но именно после reload оператор и спрашивает «что у меня ещё
             # висит»; молчание здесь читалось бы как «ничего не висит».
