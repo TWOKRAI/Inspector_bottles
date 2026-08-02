@@ -1951,22 +1951,69 @@ class ProcessManagerProcess(ProcessModule):
         self._redeliver_to_unready_children(command, data, queue_type=queue_type)
         return reached
 
-    def _next_broadcast_generation(self, command: str) -> int:
-        """Начать новое поколение рассылки команды и вернуть его номер.
+    #: Дорожка поколений для конверта БЕЗ содержимого. Пустой ``config.reload`` —
+    #: не «ничего», а самостоятельное намерение «перечитай свой источник»
+    #: (фан-аут watcher'а L1, ``app_module/orchestrator.py``). Своя дорожка ему
+    #: нужна в обе стороны: без неё он либо гасит чужие конверты (дефект ФР-1),
+    #: либо перестаёт гасить сам себя и копится дублями.
+    _EMPTY_ENVELOPE_KEY = "\x00empty"
 
-        Поколение — на КОМАНДУ, не общее: ``config.reload`` и ``routing.refresh``
-        живут своими жизнями, и свежий refresh не должен отменять досылку ещё
-        актуального reload'а.
+    @staticmethod
+    def _envelope_content_keys(data) -> tuple[str, ...]:
+        """Из чего состоит конверт — верхнеуровневые ключи его payload'а.
+
+        Гранулярность по КЛЮЧАМ, а не по значениям — намеренно: «свежее того же
+        рода» — про то, какие ручки конверт трогает, а не какие значения везёт.
+        По значениям каждый switch оказался бы «новым родом» и не гасил бы
+        предыдущий, то есть стейл-после-свежего вернулся бы с другой стороны.
         """
-        with self._broadcast_generations_lock:
-            nxt = self._broadcast_generations.get(command, 0) + 1
-            self._broadcast_generations[command] = nxt
-            return nxt
+        if isinstance(data, dict) and data:
+            return tuple(sorted(str(key) for key in data))
+        return (ProcessManagerProcess._EMPTY_ENVELOPE_KEY,)
 
-    def _broadcast_generation(self, command: str) -> int:
-        """Текущее (последнее) поколение рассылки команды."""
+    def _next_broadcast_generation(self, command: str, data) -> dict:
+        """Начать новое поколение рассылки и вернуть отметки поколений её содержимого.
+
+        Дорожка поколений — на пару ``(команда, ключ содержимого)``, а не на одно
+        лишь имя команды (ФР-1 сквозного ревью Ф5, находка B-4-1). Имя команды
+        одно, а конверты под ним разные: конверт switch'а едет как
+        ``config.reload`` с ключами ``observability_session_clear`` /
+        ``observability_recipe`` / ``observability_recipe_path``, а фан-аут
+        watcher'а — как тот же ``config.reload`` с ПУСТЫМ payload'ом. На общей
+        дорожке поздний пустой конверт получал более свежее поколение и гасил
+        досылку switch-конверта, содержимого которого сам не нёс: protected-процесс,
+        рестартующий в момент switch, навсегда оставался на слое покинутого рецепта.
+
+        Returns:
+            ``{(команда, ключ): номер}`` — отметка для :meth:`_broadcast_envelope_relevant`.
+        """
+        marks: dict = {}
         with self._broadcast_generations_lock:
-            return self._broadcast_generations.get(command, 0)
+            for key in self._envelope_content_keys(data):
+                lane = (command, key)
+                nxt = self._broadcast_generations.get(lane, 0) + 1
+                self._broadcast_generations[lane] = nxt
+                marks[lane] = nxt
+        return marks
+
+    def _broadcast_envelope_relevant(self, marks: dict) -> bool:
+        """Конверт ещё актуален, пока ХОТЬ ОДНА его ручка не перекрыта свежей рассылкой.
+
+        Правило «any», а не «all», потому что снимать досылку имеет право только
+        тот, кто везёт то же самое: конверт из двух ключей, перекрытый рассылкой
+        по одному из них, во второй половине остаётся единственным носителем
+        содержимого. «all» здесь означало бы «частичное перекрытие считаем полным»
+        — ровно та потеря содержимого, ради которой дорожки и разделены.
+
+        Обратная сторона осознанная: богатый конверт переживает бедный и приедет
+        после него. Это дубль (безвредный — все команды этого пути идемпотентны),
+        а не стейл-после-свежего: перекрытые ключи у него уже сняты, неперекрытые
+        свежее ничем не заменены.
+        """
+        if not marks:  # отметок нет — гасить нечем, конверт считается актуальным
+            return True
+        with self._broadcast_generations_lock:
+            return any(self._broadcast_generations.get(lane, 0) == generation for lane, generation in marks.items())
 
     @property
     def _broadcast_generations(self) -> dict:
@@ -2031,12 +2078,15 @@ class ProcessManagerProcess(ProcessModule):
         registry = getattr(self, "_process_registry", None)
         if registry is None:
             return []
-        # Поколение рассылки ЭТОЙ команды. Досылка обязана нести содержимое своего
+        # Поколение рассылки ЭТОГО конверта. Досылка обязана нести содержимое своего
         # конверта — но только пока он последний: конверт switch'а A→B, доставленный
         # после конверта B→C, пересобирает у ребёнка слой ПОКИНУТОГО рецепта.
         # Идемпотентность тут не спасает: дубль безвреден, стейл-после-свежего нет
         # (ревью Fable, находка 1 — воспроизведено двумя switch подряд).
-        generation = self._next_broadcast_generation(command)
+        # «Последний» считается по СОДЕРЖИМОМУ, а не по имени команды (ФР-1): под
+        # одним `config.reload` едут и конверт switch'а, и пустой фан-аут watcher'а,
+        # и второй гасил первый, ничего взамен не привозя.
+        marks = self._next_broadcast_generation(command, data)
         late: list[str] = []
         snapshot: dict | None = None
         for proc in list(getattr(registry, "os_processes", None) or []):
@@ -2057,7 +2107,7 @@ class ProcessManagerProcess(ProcessModule):
                 lambda n=name, d=snapshot: self._log_redelivery(n, command, d, queue_type=queue_type),
                 label=f"redeliver:{command}",
                 deadline_s=deadline,
-                still_relevant=lambda g=generation: self._broadcast_generation(command) == g,
+                still_relevant=lambda m=marks: self._broadcast_envelope_relevant(m),
             )
         if late:
             self._log_info(

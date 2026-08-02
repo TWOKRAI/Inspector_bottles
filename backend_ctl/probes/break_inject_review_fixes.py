@@ -35,9 +35,14 @@ TESTS = [
 
 
 def rf1(text: str) -> str:
-    """Поколения нет — досылка не знает, что её конверт устарел (находка 1)."""
+    """Поколения нет — досылка не знает, что её конверт устарел (находка 1).
+
+    Снимается ИМЕННО аргумент, а не одна из проверок: у ``still_relevant`` три
+    точки исполнения (вход, срезы цикла, пост-ожидание), и частичная инъекция
+    даёт ложный «зелёный» — урок I-7 сквозного ревью Ф5.
+    """
     return text.replace(
-        "                still_relevant=lambda g=generation: self._broadcast_generation(command) == g,\n",
+        "                still_relevant=lambda m=marks: self._broadcast_envelope_relevant(m),\n",
         "",
     )
 
@@ -108,6 +113,30 @@ def rf7(text: str) -> str:
     )
 
 
+def rf8(text: str) -> str:
+    """ФР-1: дорожка поколений снова по ИМЕНИ команды — конверты одной команды слиты."""
+    return text.replace(
+        "            return tuple(sorted(str(key) for key in data))",
+        "            return (ProcessManagerProcess._EMPTY_ENVELOPE_KEY,)  # RF8",
+    )
+
+
+def rf9(text: str) -> str:
+    """ФР-1: у пустого конверта нет своей дорожки — он не гасит даже сам себя."""
+    return text.replace(
+        "        return (ProcessManagerProcess._EMPTY_ENVELOPE_KEY,)\n",
+        "        return ()  # RF9\n",
+    )
+
+
+def rf10(text: str) -> str:
+    """ФР-1: частичное перекрытие считается полным (``any`` → ``all``)."""
+    return text.replace(
+        "            return any(self._broadcast_generations.get(lane, 0) == generation for lane, generation in marks.items())",  # noqa: E501
+        "            return all(self._broadcast_generations.get(lane, 0) == generation for lane, generation in marks.items())  # RF10",  # noqa: E501
+    )
+
+
 INJECTIONS = [
     ("RF1 поколения рассылки нет", PM, rf1),
     ("RF2 нет перепроверки после ожидания", PM, rf2),
@@ -116,19 +145,34 @@ INJECTIONS = [
     ("RF5 forget_session не снимает", BROKER, rf5),
     ("RF6 привязка сессии только при изоляции", SOCK, rf6),
     ("RF7 канал молчит о закрытии сессии", SOCK, rf7),
+    ("RF8 дорожка поколений снова по имени команды", PM, rf8),
+    ("RF9 у пустого конверта нет своей дорожки", PM, rf9),
+    ("RF10 частичное перекрытие считается полным", PM, rf10),
 ]
 
 # Прогноз ДО прогона.
 EXPECTED: dict[str, set[str]] = {
+    # ФР-1 расширил набор: снятие актуальности сторожат уже не 3, а 7 тестов.
+    # Переживают ровно те два, где ОБА конверта актуальны по построению —
+    # проверка снятия к ним просто не применяется.
     "RF1 поколения рассылки нет": {
         "test_stale_envelope_is_dropped_when_a_newer_broadcast_follows",
         "test_stale_waiter_stops_early_instead_of_burning_the_deadline",
-        "test_generations_are_per_command",
+        "test_a_fresher_broadcast_of_another_command_does_not_cancel_this_one",
+        "test_two_empty_envelopes_still_collapse_to_the_last_one",
+        "test_two_switch_envelopes_still_collapse_to_the_last_one",
+        "test_a_covering_envelope_cancels_the_bare_pending_one",
+        "test_concurrent_broadcasts_of_the_same_content_collapse_to_one",
     },
     # Дождавшийся поток везёт прошлое; ожидатель на МЁРТВОМ событии уходит по
-    # проверке внутри цикла, поэтому два «стейл»-теста переживают.
+    # проверке внутри цикла, поэтому два «стейл»-теста переживают. Умирают те,
+    # где событие ВЗВОДИТСЯ и снятие может сработать только пост-проверкой.
     "RF2 нет перепроверки после ожидания": {
-        "test_generations_are_per_command",
+        "test_a_fresher_broadcast_of_another_command_does_not_cancel_this_one",
+        "test_two_empty_envelopes_still_collapse_to_the_last_one",
+        "test_two_switch_envelopes_still_collapse_to_the_last_one",
+        "test_a_covering_envelope_cancels_the_bare_pending_one",
+        "test_concurrent_broadcasts_of_the_same_content_collapse_to_one",
     },
     "RF3 адресный telemetry мимо гейта": {
         "test_addressed_telemetry_replay_waits_for_readiness",
@@ -150,6 +194,22 @@ EXPECTED: dict[str, set[str]] = {
         "test_closed_session_is_reported_once",
         "test_signal_fires_in_the_DEFAULT_mode_too",
     },
+    # Ровно дефект ФР-1: конверты одной команды снова на общей дорожке. Умирают
+    # два теста — репро находки и его зеркало (бедный конверт гасит богатый).
+    # Все «одинаковое содержимое гасится» переживают: там дорожка и так одна.
+    "RF8 дорожка поколений снова по имени команды": {
+        "test_a_later_empty_envelope_does_not_cancel_the_switch_envelope",
+        "test_a_partial_envelope_does_not_cancel_the_richer_pending_one",
+    },
+    # Пустой конверт перестаёт гасить себя (и гаситься) — умирает ровно тот тест,
+    # что сторожит «стейл для ОДИНАКОВОГО содержимого по-прежнему снимается».
+    "RF9 у пустого конверта нет своей дорожки": {
+        "test_two_empty_envelopes_still_collapse_to_the_last_one",
+    },
+    # `all` вместо `any`: конверт, перекрытый по ОДНОМУ ключу, снимается целиком.
+    "RF10 частичное перекрытие считается полным": {
+        "test_a_partial_envelope_does_not_cancel_the_richer_pending_one",
+    },
 }
 
 
@@ -168,9 +228,15 @@ def run_tests() -> tuple[int, set[str]]:
     return proc.returncode, failed
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    # Фильтр по ID (``... RF8 RF9``) — чтобы правка одной гарантии не требовала
+    # часового прогона всех инъекций. Без аргументов гоняются все. Сверка по
+    # ПЕРВОМУ слову, а не по префиксу: «RF1» иначе цепляло бы и «RF10».
+    wanted = set(argv or [])
     mismatches = 0
     for title, path, patch in INJECTIONS:
+        if wanted and title.split(maxsplit=1)[0] not in wanted:
+            continue
         backup = path.with_suffix(path.suffix + ".bak")
         shutil.copy2(path, backup)
         try:
@@ -202,4 +268,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

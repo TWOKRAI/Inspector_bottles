@@ -383,8 +383,23 @@ class TestRedeliveryDoesNotDeliverThePast:
             time.sleep(0.05)
         assert not gate_threads[0].is_alive(), "устаревший ожидатель досиживает дедлайн (30с) вместо снятия"
 
-    def test_generations_are_per_command(self):
-        """Свежий refresh не отменяет досылку ещё актуального reload'а."""
+    def test_a_fresher_broadcast_of_another_command_does_not_cancel_this_one(self):
+        """Свежий refresh не отменяет досылку ещё актуального reload'а.
+
+        **Тест переписан осознанно (ФР-1, находка B-4-1 сквозного ревью Ф5).** До
+        фикса он назывался ``test_generations_are_per_command`` и закреплял
+        гранулярность «поколение = имя команды» — то самое, что и было дефектом:
+        под одним ``config.reload`` едут конверты разного содержания, и поздний
+        пустой гасил содержательный. Дорожка поколений теперь — пара
+        ``(команда, ключ содержимого)``, и имя команды осталось её ПЕРВОЙ
+        половиной. Этот тест сторожит ровно её: рассылка другой команды не имеет
+        права снимать чужую досылку. Вторую половину (содержимое) сторожат
+        :class:`TestGenerationsFollowTheEnvelopeNotTheCommandName`.
+
+        Проверка «refresh доставлен только последний» оставлена намеренно: она
+        показывает, что разделение дорожек не превратилось в «ничего никогда не
+        гасится» — внутри одной пары (команда, содержимое) стейл по-прежнему снят.
+        """
         pm, sent = _pm_with_children("camera_0")
         event = threading.Event()
         pm._process_registry._ready_events["camera_0"] = event
@@ -398,6 +413,182 @@ class TestRedeliveryDoesNotDeliverThePast:
         assert _wait_for(lambda: len(_addressed(sent, "config.reload")) == 1), f"reload снят чужим поколением: {sent}"
         refresh = [row["data"]["epoch"] for row in _addressed(sent, "routing.refresh")]
         assert refresh == [10], f"досылка refresh должна быть только последней: {refresh}"
+
+
+#: Конверт switch'а — ровно тот, что собирает `_reset_observability_sessions`
+#: (сброс L3 + слой L2 одним сообщением). Ключи, а не значения, и есть «род
+#: содержимого», по которому теперь ведутся поколения.
+_SWITCH_ENVELOPE = {
+    "observability_session_clear": True,
+    "observability_recipe": {"defaults": {"logger": {"default_level": "WARNING"}}},
+    "observability_recipe_path": "recipes/new.yaml",
+}
+
+
+class TestGenerationsFollowTheEnvelopeNotTheCommandName:
+    """ФР-1 (находка B-4-1): досылка не имеет права потерять СОДЕРЖИМОЕ.
+
+    Класс дефекта — «связка двух порознь верных правок». Поколения досылки
+    (правка 1) считались на имя команды; конверт switch'а и фан-аут watcher'а
+    (правка 2) поехали под одним именем ``config.reload`` с разным содержимым.
+    Порознь обе верны, вместе — поздний ПУСТОЙ конверт получал более свежее
+    поколение и гасил досылку switch-конверта, содержимого которого сам не нёс.
+    Следствие живьём: protected-процесс, рестартующий в момент switch, навсегда
+    остаётся на слое и адресе ПОКИНУТОГО рецепта.
+
+    Дорожка поколений теперь — пара ``(команда, ключ содержимого)``; конверт
+    актуален, пока хоть одна его ручка не перекрыта (правило «any», см.
+    ``_broadcast_envelope_relevant``).
+    """
+
+    def _pm(self):
+        """Дедлайн КОРОТКИЙ, а проверяем ДОЛЬШЕ него.
+
+        Урок собственной слом-инъекции RF1: при длинном дедлайне снятая досылка
+        просто не успевает приехать, и тест зелен даже без защиты. Здесь наоборот
+        — всё, что не снято, обязано приехать в пределах ожидания, а всё, что
+        снято, имело полную возможность приехать и не приехало.
+        """
+        pm, sent = _pm_with_children("camera_0")
+        event = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = event
+        pm.update_config("child_command_ready_timeout_s", 0.5)
+        return pm, sent, event
+
+    def test_a_later_empty_envelope_does_not_cancel_the_switch_envelope(self):
+        """Репро ФР-1 целиком: пустой ``config.reload`` не гасит конверт switch'а.
+
+        Ровно последовательность живого switch'а: ``_reset_observability_sessions``
+        шлёт конверт со слоем L2, а следом (или почти следом) watcher'ский фан-аут
+        L1 шлёт ту же команду с пустым payload'ом.
+        """
+        pm, sent, event = self._pm()
+
+        pm._broadcast_command("config.reload", dict(_SWITCH_ENVELOPE))
+        pm._broadcast_command("config.reload", {})
+        event.set()
+
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) >= 1), f"досылки нет вовсе: {sent}"
+        time.sleep(1.0)  # заведомо дольше дедлайна: всё, что не снято, уже приехало
+        payloads = [row["data"] for row in _addressed(sent, "config.reload")]
+        assert any("observability_recipe" in p for p in payloads), (
+            f"конверт switch со слоем L2 снят поздним пустым reload'ом: {payloads}"
+        )
+        # Пустой конверт — самостоятельное намерение «перечитай свой источник»,
+        # и он тоже обязан доехать: разные роды содержимого друг друга не гасят.
+        assert any(p == {} for p in payloads), f"пустой конверт пропал: {payloads}"
+
+    def test_two_empty_envelopes_still_collapse_to_the_last_one(self):
+        """Стейл-после-свежего для ОДИНАКОВОГО содержимого по-прежнему гасится.
+
+        Пустой конверт — не «нет содержимого», а свой род со своей дорожкой
+        (``_EMPTY_ENVELOPE_KEY``). Без него разделение дорожек означало бы
+        «пустые не гасят даже друг друга», и каждый тик watcher'а копил бы по
+        досылке на ребёнка.
+        """
+        pm, sent, event = self._pm()
+
+        pm._broadcast_command("config.reload", {})
+        pm._broadcast_command("config.reload", {})
+        event.set()
+
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) >= 1), f"досылки нет: {sent}"
+        time.sleep(1.0)
+        rows = _addressed(sent, "config.reload")
+        assert len(rows) == 1, f"два пустых конверта дали две досылки: {rows}"
+
+    def test_two_switch_envelopes_still_collapse_to_the_last_one(self):
+        """Switch A→B, перекрытый switch'ем B→C: доезжает только C.
+
+        Тот самый сценарий находки 1 предыдущего ревью — он обязан пережить
+        разделение дорожек, иначе ФР-1 чинился бы ценой воскрешения находки 1.
+        """
+        pm, sent, event = self._pm()
+        first = dict(_SWITCH_ENVELOPE, observability_recipe_path="recipes/B.yaml")
+        second = dict(_SWITCH_ENVELOPE, observability_recipe_path="recipes/C.yaml")
+
+        pm._broadcast_command("config.reload", first)
+        pm._broadcast_command("config.reload", second)
+        event.set()
+
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) >= 1), f"досылки нет: {sent}"
+        time.sleep(1.0)
+        paths = [row["data"]["observability_recipe_path"] for row in _addressed(sent, "config.reload")]
+        assert paths == ["recipes/C.yaml"], f"конверт покинутого рецепта доставлен: {paths}"
+
+    def test_a_covering_envelope_cancels_the_bare_pending_one(self):
+        """Свежий конверт, ВКЛЮЧАЮЩИЙ содержимое отложенного, снимает его.
+
+        Отложен голый сброс сессии; следом уезжает конверт switch'а, который тот
+        же сброс несёт в себе — везти его вторым сообщением уже не за чем. Это и
+        есть смысл дорожек по ключам: перекрытие считается по содержимому, а не
+        по совпадению payload'ов целиком.
+        """
+        pm, sent, event = self._pm()
+
+        pm._broadcast_command("config.reload", {"observability_session_clear": True})
+        pm._broadcast_command("config.reload", dict(_SWITCH_ENVELOPE))
+        event.set()
+
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) >= 1), f"досылки нет: {sent}"
+        time.sleep(1.0)
+        rows = _addressed(sent, "config.reload")
+        assert len(rows) == 1, f"перекрытый голый конверт доставлен вторым сообщением: {[r['data'] for r in rows]}"
+        assert "observability_recipe" in rows[0]["data"]
+
+    def test_a_partial_envelope_does_not_cancel_the_richer_pending_one(self):
+        """Обратный порядок: бедный конверт НЕ снимает богатый — он его не заменяет.
+
+        Правило «any» вслух: перекрыт только ``observability_session_clear``, а
+        слой рецепта бедный конверт не везёт. Снять богатый значило бы объявить
+        частичное перекрытие полным — то же самое, чем ФР-1 и был. Цена —
+        безвредный дубль сброса сессии (все команды этого пути идемпотентны).
+        """
+        pm, sent, event = self._pm()
+
+        pm._broadcast_command("config.reload", dict(_SWITCH_ENVELOPE))
+        pm._broadcast_command("config.reload", {"observability_session_clear": True})
+        event.set()
+
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) >= 2, timeout=3.0), (
+            f"богатый конверт снят бедным — слой L2 потерян: {[r['data'] for r in _addressed(sent, 'config.reload')]}"
+        )
+        payloads = [row["data"] for row in _addressed(sent, "config.reload")]
+        assert any("observability_recipe" in p for p in payloads), f"слой L2 не доехал: {payloads}"
+
+    def test_concurrent_broadcasts_of_the_same_content_collapse_to_one(self):
+        """Дорожки поколений живут под локом: гонка рассылок не даёт лишних досылок.
+
+        Hazard именно этой конструкции: раньше поколение было одним числом на
+        команду, теперь это словарь отметок, который строится циклом. Инкремент
+        без лока дал бы двум потокам одинаковый номер — и оба конверта считали бы
+        себя последними. Проверяется наблюдаемо: 12 одинаковых по содержимому
+        рассылок из 4 потоков → РОВНО одна досылка.
+        """
+        pm, sent, event = self._pm()
+        pm.update_config("child_command_ready_timeout_s", 5.0)
+        errors: list[BaseException] = []
+
+        def _spam():
+            try:
+                for _ in range(3):
+                    pm._broadcast_command("config.reload", dict(_SWITCH_ENVELOPE))
+            except BaseException as exc:  # noqa: BLE001 — падение потока обязано стать красным тестом
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_spam, daemon=True) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(3.0)
+            assert not thread.is_alive(), "рассылка заблокировалась под локом поколений"
+        assert not errors, f"рассылка упала в потоке: {errors}"
+
+        event.set()
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) >= 1), f"досылки нет: {sent}"
+        time.sleep(1.0)
+        rows = _addressed(sent, "config.reload")
+        assert len(rows) == 1, f"гонка поколений дала {len(rows)} досылок вместо одной"
 
 
 class TestAddressedRestartPathIsGated:
