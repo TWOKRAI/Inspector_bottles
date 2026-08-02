@@ -35,7 +35,6 @@ heartbeat_interval`` (по умолчанию +5с). Для защиты от з
 
 from __future__ import annotations
 
-import time
 from typing import Any, Dict, List, Optional
 
 from ..configs.observability_layers import LAYERS_ATTR, ObservabilityLayers
@@ -96,7 +95,11 @@ def sweep_session_ttl(svc: Any) -> Optional[Dict[str, Any]]:
     from .observability_reload import apply_observability_layers, telemetry_targets
 
     entry: Dict[str, Any] = {
-        "at": time.time(),
+        # Своей отметки времени тут нет намеренно (A-A6-1): аудит ставит `ts` сам,
+        # а второй timestamp в теле записи делал бы КАЖДЫЙ такт повтора уникальным
+        # — схлопывание залипшего отказа не сработало бы ни разу. Читателей у
+        # прежнего поля `at` не было ни одного (проверено grep'ом), так что это
+        # снятие дубля, а не потеря.
         "keys": expired,
         # Повтор после неудачи отличается от свежего истечения: без причины в
         # записи «ключей ноль, а возврат был» читается как сбой учёта.

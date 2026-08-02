@@ -492,3 +492,102 @@ class TestTheJournalLine:
         handlers["config.reload"]({"observability": {"log_level": "DEBUG"}})
 
         assert _actions(process_observability_layers(svc)) == [ACTION_TOUCH, ACTION_REBUILD]
+
+
+class TestStuckFailureDoesNotEatTheRing:
+    """A-A6-1 (корзина 2 п.5): залипший отказ пересборки прятал истину.
+
+    Подметальщик повторяет попытку каждый такт (~5 с), и каждая писала свою
+    запись: кольцо на 100 выедалось за ~8.3 минуты. `session_reverts` и
+    `ttl_report` — выборки из ТОГО ЖЕ кольца, поэтому в инциденте становились
+    невидимы и авто-возвраты, и авторство ключей: следствие вытесняло причину.
+
+    Схлопывание — только ПОДРЯД идущих одинаковых записей: между ними ничего не
+    произошло, значит это одно длящееся условие, а не история. Разбавь их чужой
+    записью — и схлопывание обязано прекратиться, иначе оно переставит историю.
+    """
+
+    def _fail(self, audit: ObservabilityAudit) -> None:
+        audit.record(ACTION_EXPIRE, origin="ttl-sweeper", keys=[], ok=False, error="boom", reason="retry")
+
+    def test_repeats_collapse_into_one_entry_with_a_counter(self) -> None:
+        audit = ObservabilityAudit()
+        for _ in range(100):
+            self._fail(audit)
+        assert len(audit.entries()) == 1, "повторы одного условия не схлопнулись"
+        assert audit.entries()[0]["repeats"] == 100
+
+    def test_the_real_revert_survives_a_hundred_retries(self) -> None:
+        """Ровно репро ревьюера: настоящий возврат обязан остаться видимым."""
+        audit = ObservabilityAudit()
+        audit.record(ACTION_EXPIRE, origin="ttl-sweeper", keys=["log_level"], ok=True, reason="ttl")
+        for _ in range(100):
+            self._fail(audit)
+        visible = [e for e in audit.entries(action=ACTION_EXPIRE) if e.get("ok")]
+        assert len(visible) == 1, f"настоящий возврат вытеснен отказами: {audit.entries()}"
+
+    def test_authorship_of_keys_survives_too(self) -> None:
+        """Записи ДРУГОГО вида (кто менял ключи) кольцо тоже обязано сохранить."""
+        audit = ObservabilityAudit()
+        audit.record(ACTION_SET, origin="command:config.reload", key="log_level", value="DEBUG")
+        for _ in range(100):
+            self._fail(audit)
+        assert len(audit.entries(action=ACTION_SET)) == 1
+
+    def test_nothing_was_dropped_so_the_counter_says_so(self) -> None:
+        """`dropped()` = seq − len(ring): схлопывание не имеет права врать о вытеснении.
+
+        Считай схлопнутый повтор новым `seq` — и `dropped()` отрапортовал бы
+        сотню вытесненных записей, которых не было.
+        """
+        audit = ObservabilityAudit()
+        for _ in range(100):
+            self._fail(audit)
+        assert audit.dropped() == 0
+        # Проверяется именно `seq`, а не только `dropped()`: на ровно сотне
+        # записей кольцо ещё не переполнено, и `dropped()` отдал бы ноль и без
+        # схлопывания — тест был бы зелёным ни от чего.
+        assert audit.seq == 1, "схлопнутый повтор посчитан новой записью кольца"
+
+    def test_an_interleaved_entry_stops_the_collapse(self) -> None:
+        """Не подряд — не одно условие: между повторами что-то произошло."""
+        audit = ObservabilityAudit()
+        self._fail(audit)
+        audit.record(ACTION_SET, origin="op", key="log_level", value="DEBUG")
+        self._fail(audit)
+        assert len(audit.entries(action=ACTION_EXPIRE)) == 2
+
+    def test_a_different_error_is_a_different_condition(self) -> None:
+        """Сменился текст отказа — сменилось условие, слипаться им нельзя."""
+        audit = ObservabilityAudit()
+        self._fail(audit)
+        audit.record(ACTION_EXPIRE, origin="ttl-sweeper", keys=[], ok=False, error="другое", reason="retry")
+        assert len(audit.entries()) == 2
+
+    def test_same_key_with_a_different_value_is_not_a_repeat(self) -> None:
+        """Контроль на пере-схлопывание: две РАЗНЫЕ правки одного ключа — две записи.
+
+        Слипнись они — аудит потерял бы вторую правку, и оператор читал бы в
+        истории значение, которого больше нет. Это было бы хуже исходного дефекта.
+        """
+        audit = ObservabilityAudit()
+        audit.record(ACTION_SET, origin="op", key="log_level", value="DEBUG")
+        audit.record(ACTION_SET, origin="op", key="log_level", value="ERROR")
+        assert len(audit.entries()) == 2
+        assert [e["value"] for e in audit.entries()] == ["DEBUG", "ERROR"]
+
+    def test_first_occurrence_detail_is_kept_and_last_seen_is_recorded(self) -> None:
+        """Держим ПЕРВОЕ вхождение (когда началось) + отметку последнего.
+
+        Для длящегося отказа информативно именно начало; «когда видели в
+        последний раз» несёт `last_ts`.
+        """
+        ticks = iter([10.0, 11.0, 12.0])
+        audit = ObservabilityAudit(clock=lambda: next(ticks))
+        self._fail(audit)
+        self._fail(audit)
+        self._fail(audit)
+        entry = audit.entries()[0]
+        assert entry["ts"] == 10.0
+        assert entry["last_ts"] == 12.0
+        assert entry["repeats"] == 3

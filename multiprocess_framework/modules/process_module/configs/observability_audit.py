@@ -97,6 +97,29 @@ def _clip(value: Any) -> Any:
     return {"_truncated": True, "size": len(text), "head": text[:_VALUE_CAP]}
 
 
+#: Поля, принадлежащие САМОМУ аудиту, а не описываемой смене: они меняются от
+#: вхождения к вхождению по построению и в сравнении условий не участвуют.
+#: ``log_failed`` дописывается уже после публикации (``_announce``), поэтому тоже
+#: здесь — иначе повтор перестал бы схлопываться ровно тогда, когда сломался ещё
+#: и журнал.
+_AUDIT_OWNED_FIELDS = frozenset({"seq", "ts", "repeats", "last_ts", "log_failed"})
+
+
+def _same_condition(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    """Описывают ли две записи ОДНО И ТО ЖЕ условие (A-A6-1).
+
+    Сравниваются все поля, кроме принадлежащих самому аудиту
+    (:data:`_AUDIT_OWNED_FIELDS`). Сравнение полное, а не по выбранным ключам, и
+    это осознанно: перечень «значимых» полей пришлось бы держать в аудите, то есть
+    аудит знал бы про поля своих писателей — и первое же новое поле схлопывалось
+    бы молча. Полное сравнение ошибается в безопасную сторону: лишнее различие
+    схлопывание просто прекращает.
+    """
+    if left.keys() - _AUDIT_OWNED_FIELDS != right.keys() - _AUDIT_OWNED_FIELDS:
+        return False
+    return all(left[name] == right[name] for name in left.keys() - _AUDIT_OWNED_FIELDS)
+
+
 @dataclass
 class ObservabilityAudit:
     """Кольцо смен наблюдаемости одного процесса — единственный писатель.
@@ -184,11 +207,29 @@ class ObservabilityAudit:
                 entry[name] = _clip(item)
 
         with self._lock:
+            last = self.ring[-1] if self.ring else None
+            if last is not None and _same_condition(last, entry):
+                # Схлопывание ПОДРЯД идущих одинаковых записей (A-A6-1). Повтор —
+                # не новая смена, а то же условие, всё ещё длящееся: подметальщик
+                # повторяет попытку каждый такт, и сотня отказов выедала кольцо за
+                # ~8 минут, унося с собой причину. Держим ПЕРВОЕ вхождение (когда
+                # началось) и отмечаем последнее.
+                last["repeats"] = int(last.get("repeats", 1)) + 1
+                last["last_ts"] = self.clock()
+                # `seq` НЕ растёт: он считает записи кольца, и на нём держится
+                # `dropped()` = seq − len(ring). Считай повтор новым seq — и
+                # счётчик отрапортовал бы вытеснение, которого не было, то есть
+                # соврал бы ровно там, где заведён, чтобы не врать.
+                return dict(last)
             self.seq += 1
             entry["seq"] = self.seq
             entry["ts"] = self.clock()
             self.ring.append(entry)
 
+        # Повтор в журнал не пишется: он и есть тот самый поток строк, ради
+        # которого схлопывание заведено. Первое вхождение объявлено громко, а
+        # то, что условие ещё держится, видно счётчиком `repeats` в readback'е
+        # `introspect.observability`.
         self._announce(entry)
         return entry
 

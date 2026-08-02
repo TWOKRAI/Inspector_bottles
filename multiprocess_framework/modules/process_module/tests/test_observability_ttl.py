@@ -25,6 +25,10 @@ import pytest
 from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
+from multiprocess_framework.modules.process_module.configs.observability_audit import (
+    ACTION_EXPIRE,
+    ACTION_SET,
+)
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
     ObservabilityLayers,
     process_observability_layers,
@@ -812,3 +816,66 @@ class TestMechanismHazards:
         assert not worker.is_alive(), "heartbeat не остановился по stop_event"
         assert "messages_file" in _active(svc), "такт heartbeat не вернул просроченную правку"
         assert svc.sent, "такт не дошёл до отправки heartbeat — цикл не крутился"
+
+
+class TestStuckRebuildDoesNotEatTheAuditRing:
+    """A-A6-1 на ПРОДАКШН-пути: залипший отказ пересборки не выедает кольцо.
+
+    Проверяется настоящим `sweep_session_ttl`, а не имитацией его записи: репро
+    ревьюера строило запись руками и несло собственную отметку времени, из-за
+    чего два такта повтора никогда не были одинаковыми. Именно эта отметка и
+    снята — но доказывать это обязан тот код, который поедет в прод (урок «тест
+    на фейковой обвязке доказывает обвязку»).
+    """
+
+    def test_a_hundred_failing_ticks_leave_the_real_revert_visible(self, wired) -> None:
+        svc, handlers, clock = wired
+        handlers["logger.sink.disable"]({"sink": "messages_file", "ttl": 10})
+        clock.advance(11)
+
+        def _fail(payload):
+            raise RuntimeError("reconfigure упал")
+
+        svc.logger_manager.reconfigure = _fail
+        for _ in range(100):
+            report = sweep_session_ttl(svc)
+            assert report is not None and report["success"] is False
+
+        audit = process_observability_layers(svc).audit
+        failures = [e for e in audit.entries(action=ACTION_EXPIRE) if not e.get("ok")]
+        # Две, а не одна, и это ПРАВИЛЬНО: первый такт несёт истёкшие ключи
+        # («снятие не доехало до менеджеров»), а повторы идут с пустыми
+        # («пересобрать всё ещё не удаётся») — разные факты для читателя.
+        # Схлопывается ровно повторяющееся.
+        assert len(failures) == 2, f"сто отказов легли {len(failures)} записями"
+        assert failures[0]["keys"] == ["channels.messages_file.enabled"]
+        assert failures[0].get("repeats") is None, "первый отказ не повтор"
+        assert failures[1]["keys"] == [] and failures[1]["repeats"] == 99
+        assert audit.dropped() == 0, "схлопывание сообщило о вытеснении, которого не было"
+        # Причина (кто и когда трогал ключ) обязана пережить следствие
+        assert audit.entries(action=ACTION_SET), "авторство ключей вытеснено отказами"
+
+    def test_the_recovering_tick_is_its_own_entry(self, wired) -> None:
+        """Контроль: успех после сотни отказов — отдельная запись, не 101-й повтор."""
+        svc, handlers, clock = wired
+        handlers["logger.sink.disable"]({"sink": "messages_file", "ttl": 10})
+        clock.advance(11)
+
+        broken = svc.logger_manager.reconfigure
+
+        def _fail(payload):
+            raise RuntimeError("reconfigure упал")
+
+        svc.logger_manager.reconfigure = _fail
+        for _ in range(100):
+            sweep_session_ttl(svc)
+        svc.logger_manager.reconfigure = broken
+        recovered = sweep_session_ttl(svc)
+
+        assert recovered is not None and recovered["success"] is True
+        audit = process_observability_layers(svc).audit
+        expires = audit.entries(action=ACTION_EXPIRE)
+        assert [e.get("ok") for e in expires][-1] is True, expires
+        # Успех не приклеился к схлопнутой серии отказов: условие сменилось.
+        assert expires[-1].get("repeats") is None
+        assert len([e for e in expires if not e.get("ok")]) == 2
