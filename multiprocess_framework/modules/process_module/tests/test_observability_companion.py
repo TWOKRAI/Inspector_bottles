@@ -505,7 +505,7 @@ class TestLiveCompanionRefresh:
         try:
             write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
 
-            body, source = compose_recipe_layer(svc)
+            body, source, _refs = compose_recipe_layer(svc)
             svc.command_manager.handlers["config.reload"]({"observability_recipe_reload": True})
             layers = process_observability_layers(svc)
 

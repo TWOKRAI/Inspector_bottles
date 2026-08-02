@@ -331,7 +331,12 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         recipe_path = read_process_config(self, RECIPE_PATH_CONFIG_KEY)
         if recipe_path:
             try:
-                body, source = compose_recipe_layer(self)
+                # ФР-2: третье значение — ссылки без приёмника; `compose_recipe_layer`
+                # их уже назвала в журнале. Boot ими не распоряжается (отвечать
+                # некому — команды не было), но молчать про них он больше не может:
+                # именно этой дорогой опечатка, сохранённая в спутник, въезжала в
+                # систему на каждом старте как законный ключ.
+                body, source, _ = compose_recipe_layer(self)
             except Exception as exc:  # noqa: BLE001 — битый спутник не имеет права ронять старт
                 self._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
                 body, source = None, None

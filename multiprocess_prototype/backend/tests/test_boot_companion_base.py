@@ -101,7 +101,7 @@ def test_live_companion_still_wins_on_boot(recipe) -> None:
     write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
 
     config = _build_seg_config(recipe)
-    body, source = compose_recipe_layer(_Svc("seg", config))
+    body, source, _refs = compose_recipe_layer(_Svc("seg", config))
 
     assert body == {"log_level": "DEBUG"}, f"живой спутник не применён на boot: {body}"
     assert source == str(companion_path(recipe))

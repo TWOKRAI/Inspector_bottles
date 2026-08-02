@@ -189,7 +189,7 @@ def compose_over_base(
     return deep_merge(body, persisted), str(companion_path(recipe_path))
 
 
-def compose_recipe_layer(svc: Any) -> Tuple[Dict[str, Any], str]:
+def compose_recipe_layer(svc: Any) -> Tuple[Dict[str, Any], str, Dict[str, list]]:
     """Слой L2 процесса из ДВУХ его источников: дельта рецепта + спутник.
 
     У слоя рецепта два хозяина: сам рецепт (его дольку ассемблер кладёт процессу
@@ -207,20 +207,38 @@ def compose_recipe_layer(svc: Any) -> Tuple[Dict[str, Any], str]:
     приезжает не конфигом, а конвертом switch'а: третьей реализации мержа быть
     не должно, а «прочитать откуда» у них честно разное.
 
+    **ФР-2: здесь же проверяются ссылки без приёмника.** Место выбрано не по
+    удобству. Ровно три дороги кладут тело в слой L2 у живого процесса — конверт
+    switch'а, перечитка спутника по команде и boot, — и все три собирают это тело
+    ЭТОЙ функцией. Поставь проверку у каждой из них — их станет четыре на
+    следующей правке, и одна снова окажется тихой (ровно так и появился ФР-2:
+    проверка стояла на двух дорогах из пяти). Проверка здесь означает, что
+    собрать слой L2, не узнав про сироты, больше нельзя.
+
+    Отказа тут нет и быть не может: эта функция работает и на boot, и на switch,
+    где падение из-за опечатки в machine-owned файле дороже самой опечатки.
+    Громкая строка пишется внутри (см. ``report_unknown_refs``), список — наружу.
+
     Returns:
-        ``(тело слоя, источник)`` — см. :func:`compose_over_base`.
+        ``(тело слоя, источник, сироты)``. Первые два — см.
+        :func:`compose_over_base`; третий пуст, когда все ссылки разрешимы.
     """
     from ..configs.observability_layers import (
         OVERRIDE_CONFIG_KEY,
         RECIPE_PATH_CONFIG_KEY,
         read_process_config,
     )
+    from ..configs.observability_refs import report_unknown_refs
 
-    return compose_over_base(
+    body, source = compose_over_base(
         read_process_config(svc, OVERRIDE_CONFIG_KEY) or {},
         read_process_config(svc, RECIPE_PATH_CONFIG_KEY) or "",
         getattr(svc, "name", ""),
     )
+    # Проверяется СОБРАННОЕ тело, а не спутник отдельно: в слой въезжает именно
+    # оно, и опечатка в рецепте ничем не лучше опечатки в спутнике. Источник в
+    # строке называет файл, который вероятнее правит человек.
+    return body, source, report_unknown_refs(svc, body, source=source)
 
 
 def persist_session_to_companion(

@@ -1794,22 +1794,32 @@ class ProcessManagerProcess(ProcessModule):
         Отказ здесь значим — без строки в логе «сохранённая настройка не применилась»
         выясняется сравнением файлов.
 
+        **ФР-2: ссылки без приёмника проверяются и здесь.** Дети собирают свой слой
+        ``compose_recipe_layer``, и проверка живёт внутри неё; оркестратор идёт мимо
+        (база у него из конверта, не из конфига), поэтому правило зовётся явно — то
+        же самое, из ``observability_refs``. Оставь мы эту развилку без него, опечатка
+        в спутнике была бы громкой у всех детей и тихой у одного PM — и «у кого
+        сломалось» решалось бы тем, чей журнал открыли первым.
+
         Returns:
             ``(тело слоя, источник)``. Источник — конкретный файл (спутник или
             рецепт): при паре оператор иначе не знает, какой из двух править.
         """
         from ...process_module.configs.observability_companion import compose_over_base
         from ...process_module.configs.observability_layers import resolve_recipe_section
+        from ...process_module.configs.observability_refs import report_unknown_refs
 
         base = resolve_recipe_section(recipe.get("observability_recipe"), self.name)
         recipe_path = str(recipe.get("observability_recipe_path") or "")
         try:
-            return compose_over_base(base, recipe_path, self.name)
+            body, source = compose_over_base(base, recipe_path, self.name)
         except Exception as exc:  # noqa: BLE001 — битый спутник не роняет switch
             self._log_error(
                 f"[observability] спутник нового рецепта не прочитан ({recipe_path}): {exc} — свой слой без него"
             )
-            return base, recipe_path
+            body, source = base, recipe_path
+        report_unknown_refs(self, body, source=source)
+        return body, source
 
     def _reset_observability_sessions(self, reason: str, *, recipe: dict | None = None) -> dict:
         """Обнулить слой сессии наблюдаемости (L3) у себя и у всех живых детей.

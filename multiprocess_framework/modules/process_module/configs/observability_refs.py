@@ -20,9 +20,18 @@
 * ``processes.<имя>`` — имени нет в топологии (шаг 10 задачи 5.13). Судить может
   только сборщик: процесс знает лишь себя.
 
-Модуль чистый: ни менеджеров, ни I/O — на входе dict и известные имена, на выходе
-имена-сироты. Решение, что с ними делать (отказать или сказать вслух), принимает
-вызывающий: у ручки оператора и у файла рецепта эти ответы РАЗНЫЕ.
+Ядро модуля чистое: ни менеджеров, ни I/O — на входе dict и известные имена, на
+выходе имена-сироты. Решение, что с ними делать (отказать или сказать вслух),
+принимает вызывающий: у ручки оператора и у файла рецепта эти ответы РАЗНЫЕ.
+
+**ФР-2.** Поверх ядра лежат две функции-правила — :func:`unknown_refs_for` и
+:func:`report_unknown_refs`. Они существуют потому, что «посчитать известные имена
+и сказать вслух» было написано ровно в одном месте (ветка inline/файл команды
+``config.reload``), а тело в слой L2 кладут ПЯТЬ дорог. Три из них — конверт
+switch'а, перечитка спутника и boot — проходили мимо проверки молча, и законный
+ключ на снятый канал, записанный ``observability.persist`` в спутник, въезжал на
+следующем старте увековеченной опечаткой. Правило теперь одно на все дороги: где
+считать известные имена и что говорить — здесь, а не у каждого вызывающего.
 """
 
 from __future__ import annotations
@@ -154,3 +163,65 @@ def format_unknown_refs(refs: Mapping[str, Iterable[str]], *, source: Optional[s
     parts = "; ".join(f"{path}: {', '.join(sorted(names))}" for path, names in sorted(refs.items()) if names)
     where = f" ({source})" if source else ""
     return f"[observability] ссылки без приёмника{where} — ключ есть, эффекта нет: {parts}"
+
+
+def unknown_refs_for(svc: Any, section: Any) -> Dict[str, List[str]]:
+    """Сироты секции для ЖИВОГО процесса: каталог имён берётся с его менеджеров.
+
+    Единственное место, где считается «что этот процесс знает». До ФР-2 расчёт
+    жил внутри ветки ``config.reload``, и остальные дороги слоя L2 его просто не
+    звали — то есть проверка была свойством ОДНОЙ дороги, а не свойством слоя.
+
+    **Пустой каталог = молчание, а не «всё сироты».** Каталога нет у процесса,
+    которому менеджеров не собирали вовсе (встройщик вправе так сделать, см.
+    ``layers_are_silent``); сравнение с пустым множеством объявило бы опечаткой
+    каждое имя подряд — самый громкий из возможных способов не сказать ничего.
+    """
+    if not isinstance(section, Mapping) or not section:
+        return {}
+    known = known_refs_from_managers(
+        logger=getattr(svc, "logger_manager", None),
+        error=getattr(svc, "error_manager", None),
+        stats=getattr(svc, "stats_manager", None),
+    )
+    if not any(known.values()):
+        return {}
+    return unknown_observability_refs(section, known)
+
+
+def report_unknown_refs(svc: Any, section: Any, *, source: str = "") -> Dict[str, List[str]]:
+    """Громкая половина правила: посчитать сироты и НАЗВАТЬ их в журнале.
+
+    Политика «сказать, но не отказать» — та же, что у файловой дороги L1, и по той
+    же причине: отказ означал бы, что опечатка в спутнике валит switch рецепта или
+    старт процесса. Тихий ключ дешевле упавшей системы, но только если он тихий
+    ровно в конфиге, а не в журнале.
+
+    Отказывает ровно одна дорога — inline-ручка оператора; она зовёт
+    :func:`unknown_refs_for` напрямую и решает сама.
+
+    Returns:
+        Те же сироты, что и :func:`unknown_refs_for`, — вызывающий кладёт их в
+        свой ответ. Журнал видит оператор процесса, ответ — инициатор команды, и
+        это разные люди в разное время.
+    """
+    refs = unknown_refs_for(svc, section)
+    if refs:
+        log_error = getattr(svc, "_log_error", None)
+        if callable(log_error):
+            log_error(format_unknown_refs(refs, source=source or None), module="lifecycle")
+    return refs
+
+
+def merge_unknown_refs(*reports: Mapping[str, Iterable[str]]) -> Dict[str, List[str]]:
+    """Сложить отчёты нескольких дорог одной команды в один (пути — объединением).
+
+    Один ``config.reload`` может нести и inline-секцию, и конверт switch'а: два
+    разных тела, две проверки. Перезапиши второй отчёт первый — ответ назвал бы
+    половину опечаток, и именно ту половину, которую вызывающий не выбирал.
+    """
+    out: Dict[str, List[str]] = {}
+    for report in reports:
+        for path, names in (report or {}).items():
+            out[path] = sorted(set(out.get(path, [])) | {str(n) for n in names})
+    return out

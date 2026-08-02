@@ -1317,30 +1317,32 @@ class BuiltinCommands:
             #     здесь означал бы, что опечатка в спутнике валит switch рецепта.
             # Известные имена считаются ДО применения: после него опечатка уже в
             # конфиге, и «известное» включало бы её саму.
+            #
+            # ФР-2: и расчёт сирот, и громкая строка теперь живут в
+            # `observability_refs` — здесь остаётся только выбор политики. Прежде
+            # они были написаны ЗДЕСЬ, и потому существовали лишь на этой дороге:
+            # соседние ветки того же обработчика (конверт switch'а, перечитка
+            # спутника) клали тело в слой молча.
             from ..configs.observability_refs import (
                 format_unknown_refs,
-                known_refs_from_managers,
-                unknown_observability_refs,
+                merge_unknown_refs,
+                report_unknown_refs,
+                unknown_refs_for,
             )
 
-            _unknown_refs: dict = {}
-            if isinstance(obs_section, dict) and obs_section:
-                _unknown_refs = unknown_observability_refs(
-                    obs_section,
-                    known_refs_from_managers(logger=_logger, error=_error, stats=_stats),
-                )
-            if _unknown_refs:
-                if source == "inline":
+            if source == "inline":
+                _unknown_refs = unknown_refs_for(svc, obs_section)
+                if _unknown_refs:
                     return {
                         "success": False,
                         "process": svc.name,
                         "reason": format_unknown_refs(_unknown_refs),
                         "unknown_refs": _unknown_refs,
                     }
-                log_error = getattr(svc, "_log_error", None)
-                if callable(log_error):
-                    log_error(format_unknown_refs(_unknown_refs, source=source), module="lifecycle")
-                result["unknown_refs"] = _unknown_refs
+            else:
+                _unknown_refs = report_unknown_refs(svc, obs_section, source=source)
+                if _unknown_refs:
+                    result["unknown_refs"] = _unknown_refs
 
             # Блокер ревью 5.8: правка слоя и её применение — ОДИН критический
             # блок. Прежняя редакция считала `deep_merge(layers.session, ...)` и
@@ -1433,7 +1435,12 @@ class BuiltinCommands:
                     from ..configs.observability_companion import compose_recipe_layer as _compose
 
                     try:
-                        body, composed_source = _compose(svc)
+                        # ФР-2: третьим значением едут сироты — их посчитала и
+                        # назвала вслух сама `compose_recipe_layer`. До ФР-2 эта
+                        # дорога клала тело в слой молча, и опечатка, записанная
+                        # в спутник командой `observability.persist`, доезжала до
+                        # менеджеров как законный ключ.
+                        body, composed_source, _recipe_refs = _compose(svc)
                     except Exception as exc:  # noqa: BLE001 — битый спутник не роняет switch
                         composed_source = str(obs_recipe_path or "")
                         log_error = getattr(svc, "_log_error", None)
@@ -1443,6 +1450,13 @@ class BuiltinCommands:
                                 "— слой собран без него",
                                 module="lifecycle",
                             )
+                        # Спутник не прочитан — но в слой всё равно едет долька
+                        # рецепта, и её ссылки проверены быть обязаны: иначе
+                        # «битый спутник» становился бы способом внести опечатку
+                        # молча.
+                        _recipe_refs = report_unknown_refs(svc, body, source=composed_source)
+                    if _recipe_refs:
+                        result["unknown_refs"] = merge_unknown_refs(result.get("unknown_refs") or {}, _recipe_refs)
                     result["recipe_layer"] = list(
                         layers.replace_layer(
                             LAYER_RECIPE,
@@ -1461,13 +1475,18 @@ class BuiltinCommands:
                     from ..configs.observability_layers import LAYER_RECIPE as _LAYER_RECIPE
 
                     try:
-                        body, source = compose_recipe_layer(svc)
+                        # ФР-2: сироты считает та же `compose_recipe_layer` —
+                        # перечитка спутника ничем не отличается от boot'а, и
+                        # трактовать одну пару файлов двумя способами нельзя.
+                        body, source, _refresh_refs = compose_recipe_layer(svc)
                     except Exception as exc:  # noqa: BLE001 — битый спутник не роняет reload
                         return {
                             "success": False,
                             "process": svc.name,
                             "reason": f"слой рецепта не перечитан: {exc}",
                         }
+                    if _refresh_refs:
+                        result["unknown_refs"] = merge_unknown_refs(result.get("unknown_refs") or {}, _refresh_refs)
                     result["recipe_layer"] = list(
                         layers.replace_layer(
                             _LAYER_RECIPE,

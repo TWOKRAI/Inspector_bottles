@@ -912,3 +912,39 @@ class TestCompanionStaysOutOfTheSwitchEnvelope:
         # это выясняется сравнением файлов. `_log_error` у make_pm — MagicMock.
         said = " | ".join(str(c.args[0]) for c in pm._log_error.call_args_list if c.args)
         assert "спутник" in said, f"битый спутник прошёл молча: {said!r}"
+
+    def test_typo_in_the_orchestrators_own_layer_is_loud(self, pm_with_real_logger, tmp_path) -> None:
+        """ФР-2, четвёртая дорога: свой слой L2 оркестратор тоже проверяет.
+
+        Дети собирают слой ``compose_recipe_layer``, и проверка живёт внутри неё;
+        PM идёт мимо (база у него из конверта, а не из конфига). Оставь мы эту
+        развилку без правила — одна и та же опечатка спутника была бы громкой у
+        всех детей и тихой у одного оркестратора, и «у кого сломалось» решалось
+        бы тем, чей журнал открыли первым.
+        """
+        pm, values = pm_with_real_logger
+        recipe = self._recipe_with_companion(
+            tmp_path,
+            {"processes": {ORCHESTRATOR_PROCESS_NAME: {"channels": {"messages_fil": {"enabled": False}}}}},
+        )
+        values[RECIPE_PATH_CONFIG_KEY] = str(recipe)
+
+        resp = pm.apply_topology({"processes": [], "wires": [], "observability": self._SECTION})
+
+        assert (resp or {}).get("success") is not False, f"switch отказал из-за опечатки: {resp}"
+        assert _level(pm) == "ERROR", "законная часть слоя не применилась"
+        said = " | ".join(str(c.args[0]) for c in pm._log_error.call_args_list if c.args)
+        assert "messages_fil" in said, f"опечатка своего слоя прошла молча: {said!r}"
+
+    def test_clean_own_layer_leaves_no_line(self, pm_with_real_logger, tmp_path) -> None:
+        """Вторая половина пары: без опечатки оркестратор молчит."""
+        pm, values = pm_with_real_logger
+        recipe = self._recipe_with_companion(
+            tmp_path, {"processes": {ORCHESTRATOR_PROCESS_NAME: {"log_level": "DEBUG"}}}
+        )
+        values[RECIPE_PATH_CONFIG_KEY] = str(recipe)
+
+        pm.apply_topology({"processes": [], "wires": [], "observability": self._SECTION})
+
+        said = " | ".join(str(c.args[0]) for c in pm._log_error.call_args_list if c.args)
+        assert "ссылки без приёмника" not in said, f"громкая строка на чистом слое: {said!r}"

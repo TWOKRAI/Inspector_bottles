@@ -324,3 +324,350 @@ class TestFileReloadSpeaksInsteadOfRefusing:
             assert svc.errors == [], svc.errors
         finally:
             logger.shutdown()
+
+
+# --------------------------------------------------------------------------
+# ФР-2: ПЯТЬ дорог в слой L2, и громкой была не каждая
+# --------------------------------------------------------------------------
+#
+# Находка C-4-1 сквозного ревью Ф5. Проверка ссылок стояла на двух дорогах —
+# inline (отказ) и файл L1 (громко), — а тело в слой кладут пять. Тихими были:
+# конверт switch'а, перечитка спутника по команде и подхват спутника на boot.
+# Связка с `observability.persist` замыкала круг: законный ключ на СНЯТЫЙ канал
+# сохранялся в спутник и на следующем старте въезжал тихой дорогой — опечатка,
+# увековеченная машиной.
+#
+# Тесты ниже перенесены из репро, которым дефект был подтверждён, и дополнены
+# вторыми половинами пар: без них зелёной была бы и реализация «говорить всегда».
+
+
+def _recipe_with_companion(tmp_path, companion_section):
+    """Рецепт + спутник рядом. Спутник пишется ТЕМ ЖЕ кодом, что `persist`."""
+    from multiprocess_framework.modules.process_module.configs.observability_companion import write_companion
+
+    recipe = tmp_path / "line.yaml"
+    recipe.write_text("processes: {}\n", encoding="utf-8")
+    write_companion(recipe, companion_section)
+    return recipe
+
+
+class TestSwitchEnvelopeRoad:
+    """Дорога 1: конверт switch'а кладёт дольку рецепта в слой L2."""
+
+    def test_typo_in_the_envelope_is_loud_and_reported(self, tmp_path) -> None:
+        svc, logger, reload_cmd = _reload_command(tmp_path)
+        recipe = tmp_path / "line.yaml"
+        recipe.write_text("processes: {}\n", encoding="utf-8")
+        try:
+            res = reload_cmd(
+                {
+                    "observability_recipe": {"channels": {"messages_fil": {"enabled": False}}},
+                    "observability_recipe_path": str(recipe),
+                }
+            )
+            assert res["success"] is True, res
+            assert res["unknown_refs"] == {"channels": ["messages_fil"]}
+            assert any("messages_fil" in line for line in svc.errors), svc.errors
+        finally:
+            logger.shutdown()
+
+    def test_clean_envelope_leaves_no_line(self, tmp_path) -> None:
+        """Вторая половина пары: иначе «громко всегда» прошло бы за починку."""
+        svc, logger, reload_cmd = _reload_command(tmp_path)
+        recipe = tmp_path / "line.yaml"
+        recipe.write_text("processes: {}\n", encoding="utf-8")
+        try:
+            res = reload_cmd(
+                {
+                    "observability_recipe": {"channels": {"messages_file": {"enabled": False}}},
+                    "observability_recipe_path": str(recipe),
+                }
+            )
+            assert res["success"] is True, res
+            assert "unknown_refs" not in res
+            assert svc.errors == [], svc.errors
+        finally:
+            logger.shutdown()
+
+    def test_typo_does_not_stop_the_switch(self, tmp_path) -> None:
+        """Hazard: политика — «сказать», а не «отказать».
+
+        Отказ здесь означал бы, что опечатка в machine-owned спутнике валит switch
+        рецепта: система встаёт из-за ключа, который сам по себе безвреден. Слой
+        обязан въехать целиком, а законная часть — примениться.
+        """
+        svc, logger, reload_cmd = _reload_command(tmp_path)
+        recipe = tmp_path / "line.yaml"
+        recipe.write_text("processes: {}\n", encoding="utf-8")
+        try:
+            res = reload_cmd(
+                {
+                    "observability_recipe": {
+                        "log_level": "WARNING",
+                        "channels": {"messages_fil": {"enabled": False}},
+                    },
+                    "observability_recipe_path": str(recipe),
+                }
+            )
+            assert res["success"] is True, res
+            assert res["applied"]["log_level"] == "WARNING", "законная часть конверта не применена"
+            assert logger.config.default_level == "WARNING"
+            assert "channels.messages_fil.enabled" in res["recipe_layer"], "слой не въехал из-за опечатки"
+        finally:
+            logger.shutdown()
+
+
+class TestCompanionRefreshRoad:
+    """Дорога 2: перечитка слоя L2 со своего адреса (`observability_recipe_reload`).
+
+    Так до ребёнка доезжает правка спутника — оркестратор рассылает «перечитай»,
+    секция по проводу не едет.
+    """
+
+    def test_typo_on_refresh_is_loud_and_reported(self, tmp_path) -> None:
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        svc, logger, reload_cmd = _reload_command(tmp_path)
+        recipe = _recipe_with_companion(
+            tmp_path, {"processes": {"refs_probe": {"channels": {"messages_fil": {"enabled": False}}}}}
+        )
+        try:
+            svc.update_config(RECIPE_PATH_CONFIG_KEY, str(recipe))
+            res = reload_cmd({"observability_recipe_reload": True})
+            assert res["success"] is True, res
+            assert res["unknown_refs"] == {"channels": ["messages_fil"]}
+            assert any("messages_fil" in line for line in svc.errors), svc.errors
+        finally:
+            logger.shutdown()
+
+    def test_clean_refresh_leaves_no_line(self, tmp_path) -> None:
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        svc, logger, reload_cmd = _reload_command(tmp_path)
+        recipe = _recipe_with_companion(tmp_path, {"processes": {"refs_probe": {"log_level": "WARNING"}}})
+        try:
+            svc.update_config(RECIPE_PATH_CONFIG_KEY, str(recipe))
+            res = reload_cmd({"observability_recipe_reload": True})
+            assert res["success"] is True, res
+            assert "unknown_refs" not in res
+            assert svc.errors == [], svc.errors
+        finally:
+            logger.shutdown()
+
+    def test_refresh_does_not_rewrite_the_companion(self, tmp_path) -> None:
+        """Hazard: громкая строка не имеет права разбудить watcher.
+
+        За спутником следит наблюдатель, и запись в файл (даже с тем же
+        содержимым) — это новый mtime, то есть «файл изменился → перечитай →
+        снова пожаловались → …». Петля выглядела бы как зависший hot-reload.
+        Проверяем ФАЙЛ, а не намерение: жалоба уходит в журнал ошибок, спутник
+        остаётся байт в байт прежним.
+
+        Опечатка взята в плоскости ОШИБОК, а менеджера ошибок у этого процесса
+        нет: такое имя не поглощается каталогом при применении (см.
+        ``test_a_named_channel_joins_the_catalogue``) и потому остаётся сиротой на
+        каждой перечитке. Иначе тест «три перечитки — три строки» был бы зелёным
+        и у реализации, которая молчит начиная со второй.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_companion import companion_path
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        svc, logger, reload_cmd = _reload_command(tmp_path)
+        recipe = _recipe_with_companion(
+            tmp_path,
+            {"processes": {"refs_probe": {"errors": {"channels": {"errors_fil": {"enabled": False}}}}}},
+        )
+        path = companion_path(recipe)
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+        try:
+            svc.update_config(RECIPE_PATH_CONFIG_KEY, str(recipe))
+            for _ in range(3):
+                res = reload_cmd({"observability_recipe_reload": True})
+                assert res["unknown_refs"] == {"errors.channels": ["errors_fil"]}, res
+            assert (path.read_bytes(), path.stat().st_mtime_ns) == before, "жалоба тронула наблюдаемый файл"
+            assert len(svc.errors) == 3, f"ожидалась ровно одна строка на перечитку: {svc.errors}"
+        finally:
+            logger.shutdown()
+
+    def test_validation_belongs_to_the_road_not_to_the_rebuild(self, tmp_path) -> None:
+        """Hazard: считать сироты на КАЖДОЙ пересборке — значит залить журнал.
+
+        Слой L2 с опечаткой живёт до следующего switch'а, а пересборка случается
+        от любой ручки оператора. Привяжись проверка к пересборке (например,
+        встань она внутри `apply_observability_layers`), одна и та же опечатка
+        печаталась бы снова и снова, и громкость выродилась бы в фон.
+
+        Опечатка — снова в плоскости ошибок (менеджера нет): имя, которое НЕ
+        уходит в каталог, продолжало бы называться на каждой пересборке, если бы
+        проверка была привязана к ней. Возьми мы канал логгера, тест был бы
+        зелёным и у неверной реализации — по совсем другой причине.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        svc, logger, reload_cmd = _reload_command(tmp_path)
+        recipe = _recipe_with_companion(
+            tmp_path,
+            {"processes": {"refs_probe": {"errors": {"channels": {"errors_fil": {"enabled": False}}}}}},
+        )
+        try:
+            svc.update_config(RECIPE_PATH_CONFIG_KEY, str(recipe))
+            reload_cmd({"observability_recipe_reload": True})
+            assert len(svc.errors) == 1, svc.errors
+            # Ручка оператора: полная пересборка, слой L2 с опечаткой на месте.
+            res = reload_cmd({"observability": {"log_level": "DEBUG"}})
+            assert res["success"] is True, res
+            assert len(svc.errors) == 1, f"опечатка слоя названа повторно на пересборке: {svc.errors}"
+        finally:
+            logger.shutdown()
+
+    def test_a_named_channel_joins_the_catalogue(self, tmp_path) -> None:
+        """Названный однажды канал становится ИЗВЕСТНЫМ — и второй раз молчит.
+
+        Не решение этой задачи, а следствие правила «каталог = реестр ∪ конфиг»
+        (``known_refs_from_managers``), и оно одинаково на всех дорогах. Применение
+        слоя вливает ``channels.messages_fil`` в конфиг логгера, и на следующей
+        перечитке имя уже своё. Записано тестом, потому что иначе выглядит как
+        отказ проверки: тот же файл, та же команда, а строки нет.
+
+        Практического ущерба нет — процесс называет опечатку при КАЖДОМ старте
+        (у свежего процесса конфиг чист), а именно этой дорогой она и въезжала.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        svc, logger, reload_cmd = _reload_command(tmp_path)
+        recipe = _recipe_with_companion(
+            tmp_path, {"processes": {"refs_probe": {"channels": {"messages_fil": {"enabled": False}}}}}
+        )
+        try:
+            svc.update_config(RECIPE_PATH_CONFIG_KEY, str(recipe))
+            first = reload_cmd({"observability_recipe_reload": True})
+            second = reload_cmd({"observability_recipe_reload": True})
+            assert first["unknown_refs"] == {"channels": ["messages_fil"]}
+            assert "unknown_refs" not in second, second
+            assert len(svc.errors) == 1, svc.errors
+        finally:
+            logger.shutdown()
+
+
+class TestPersistThenBootRoad:
+    """Дорога 3: подхват спутника на boot — та, что увековечивала опечатку.
+
+    Связка целиком: `observability.persist` записал ключ на снятый канал в
+    спутник → процесс перезапустился → boot подхватил файл. Ключ законен по форме
+    и бессмыслен по существу, а сказать о нём было некому: команды нет, ответа
+    нет, оставался только журнал — и он молчал.
+    """
+
+    def _proc(self, tmp_path, flat_config):
+        from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="boot_refs", log_directory=str(tmp_path), enable_batching=False)
+        )
+
+        class _Handler:
+            # Пусто = ассемблер этого процесса не касался → boot раскладывает слои.
+            def get_managers_config(self) -> Dict[str, Any]:
+                return {}
+
+        class _Proc:
+            name = "refs_probe"
+            logger_manager = logger
+            error_manager = None
+            stats_manager = None
+            config_handler = _Handler()
+
+            def __init__(self) -> None:
+                self.errors: List[str] = []
+
+            def get_config(self, key: str, default: Any = None) -> Any:
+                return flat_config.get(key, default)
+
+            def _log_error(self, msg: str, **kw: Any) -> None:
+                self.errors.append(str(msg))
+
+            def _log_info(self, msg: str, **kw: Any) -> None:
+                pass
+
+            _apply_boot_observability_layers = ProcessModule._apply_boot_observability_layers
+
+        return _Proc(), logger
+
+    def test_persisted_typo_is_loud_on_the_next_boot(self, tmp_path) -> None:
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            persist_session_to_companion,
+        )
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        recipe = tmp_path / "line.yaml"
+        recipe.write_text("processes: {}\n", encoding="utf-8")
+        # Ровно то, что делает `observability.persist`: слой сессии → спутник.
+        report = persist_session_to_companion(
+            str(recipe),
+            "refs_probe",
+            {"log_level": "WARNING", "channels": {"messages_fil": {"enabled": False}}},
+        )
+        assert report["success"] is True, report
+
+        proc, logger = self._proc(tmp_path, {RECIPE_PATH_CONFIG_KEY: str(recipe)})
+        try:
+            proc._apply_boot_observability_layers()
+            assert any("messages_fil" in line for line in proc.errors), proc.errors
+            assert logger.config.default_level == "WARNING", "законная часть спутника не применилась"
+        finally:
+            logger.shutdown()
+
+    def test_clean_companion_boots_silently(self, tmp_path) -> None:
+        """Вторая половина: спутник без опечатки поднимает процесс молча."""
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            persist_session_to_companion,
+        )
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+        )
+
+        recipe = tmp_path / "line.yaml"
+        recipe.write_text("processes: {}\n", encoding="utf-8")
+        persist_session_to_companion(str(recipe), "refs_probe", {"log_level": "WARNING"})
+
+        proc, logger = self._proc(tmp_path, {RECIPE_PATH_CONFIG_KEY: str(recipe)})
+        try:
+            proc._apply_boot_observability_layers()
+            assert proc.errors == [], proc.errors
+            assert logger.config.default_level == "WARNING"
+        finally:
+            logger.shutdown()
+
+
+class TestEmptyCatalogueIsSilent:
+    """Hazard: сравнение с пустым каталогом объявило бы сиротой каждое имя.
+
+    Каталога нет у процесса, которому менеджеров не собирали вовсе — встройщик
+    фреймворка вправе так сделать (тот же случай, что стережёт `layers_are_silent`).
+    Самый громкий из возможных способов не сказать ничего.
+    """
+
+    def test_process_without_managers_reports_nothing(self) -> None:
+        from multiprocess_framework.modules.process_module.configs.observability_refs import unknown_refs_for
+
+        class _Bare:
+            name = "bare"
+            logger_manager = None
+            error_manager = None
+            stats_manager = None
+
+        assert unknown_refs_for(_Bare(), {"channels": {"messages_fil": {"enabled": False}}}) == {}
