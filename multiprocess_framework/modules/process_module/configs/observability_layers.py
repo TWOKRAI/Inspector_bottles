@@ -213,11 +213,13 @@ def resolve_recipe_section(
     дисковый след аудита смен) — то есть узнавалось бы это по отсутствию строк,
     позже всего. Заглушить оркестратора можно, но лишь назвав его поимённо.
 
-    Исключение решается ЗДЕСЬ, а не параметром у вызывающих: call-sites пять
-    (два ассемблера, конверт switch, спутник, L2-watcher), три из них
-    исполняются внутри самого процесса. Правило, которое каждый обязан не
-    забыть передать, дало бы ``effective`` PM, зависящий от того, какой путь
-    стрелял последним.
+    Исключение решается ЗДЕСЬ, а не параметром у вызывающих: call-sites СЕМЬ —
+    два ассемблера (generic ``app_module.builder`` и прикладной), конверт switch,
+    спутник, L2-watcher, ``orchestrator_observability_config`` и сам PM, — и
+    четыре из них исполняются внутри процесса-получателя. Правило, которое каждый
+    обязан не забыть передать, дало бы ``effective`` PM, зависящий от того, какой
+    путь стрелял последним. (Ревью корзины 2: здесь стояло «пять», перечень отстал
+    от кода на две дороги — счёт сверен по вызовам, а не по памяти.)
 
     Внимание: исключение накрывает **весь** ``defaults``, включая
     не-глушащие ключи (``session_ttl_sec``, ``telemetry``). Это принятая цена
@@ -248,8 +250,15 @@ def resolve_recipe_section(
     # Всё, что не служебные ключи — тоже defaults (короткая форма, возможно
     # смешанная со структурной после merge).
     inline = {k: v for k, v in section.items() if k not in ("defaults", "processes")}
+    # `inline` и `declared` — ОДИН уровень (оба «defaults» этой секции), поэтому
+    # здесь канонический мерж: владение — отношение между РАЗНЫМИ этажами, а внутри
+    # одного этажа объявлять «моё» не у кого. А вот ниже этажи разные.
     defaults = deep_merge(inline, declared) if inline else declared
-    return deep_merge(defaults, per_process)
+    # Правило Г3 (корзина 2.1): `processes[<имя>]` — ЧАСТНОЕ поверх ОБЩЕГО, ровно то
+    # же отношение, что между слоями. Канонический `deep_merge` здесь означал, что
+    # «заглушить у одного процесса» (`scopes: {}` при непустом `defaults`) не
+    # работало: ключи defaults воскресали, а команда молчала об этом.
+    return layer_merge(defaults, per_process)
 
 
 def orchestrator_observability_config(
@@ -1074,7 +1083,12 @@ def flatten_section(section: Any, prefix: str = "") -> Dict[str, Any]:
     return out
 
 
-def layer_merge(base: Dict[str, Any], overlay: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def layer_merge(
+    base: Dict[str, Any],
+    overlay: Optional[Dict[str, Any]],
+    *,
+    prefix: str = "",
+) -> Dict[str, Any]:
     """Наложить слой ``overlay`` на ``base`` по правилу Г3 (решение владельца 2026-08-02).
 
     Отличие от канонического ``deep_merge`` ровно одно и намеренное: **непустой
@@ -1095,13 +1109,29 @@ def layer_merge(base: Dict[str, Any], overlay: Optional[Dict[str, Any]]) -> Dict
     Верхнеуровневый пустой ``overlay`` (весь слой пуст) по-прежнему наследует —
     это «слой молчит» (:func:`layers_are_silent`), а не «слой владеет пустотой»:
     пустой namespace нельзя объявить владением, потому что владеть в нём нечем.
+
+    **Непрозрачные пути (:data:`OPAQUE_LAYER_PATHS`) — листья и здесь.** Спуска в
+    них нет: значение верхнего слоя заменяет нижнее ЦЕЛИКОМ. Без этого мерж
+    расходился с двумя другими обходами того же дерева — ``flatten_section`` и
+    ``_overlay_owner`` знают про непрозрачность с 5.10.g, а мерж не знал. Цена
+    расхождения не теоретическая (ревью корзины 2, находка Ф-3): дельта троттла
+    верхнего слоя сливалась с нижней ПО КЛЮЧАМ, то есть правило, которое оператор
+    снял, продолжало действовать, — а provenance при этом называл верхний слой
+    владельцем листа целиком. Два ответа об одном ключе, снова расходящиеся.
+
+    Args:
+        prefix: путь до ``base``/``overlay`` в дереве секции (``"telemetry."`` и
+            т.п.). Нужен только для сверки с :data:`OPAQUE_LAYER_PATHS`; все
+            сегодняшние вызывающие мержат от корня секции и его не передают.
     """
     result = copy.deepcopy(base)
     if not overlay:
         return result
     for key, value in overlay.items():
-        if isinstance(value, dict) and value and isinstance(result.get(key), dict):
-            result[key] = layer_merge(result[key], value)
+        path = f"{prefix}{key}"
+        recurse = isinstance(value, dict) and value and path not in OPAQUE_LAYER_PATHS
+        if recurse and isinstance(result.get(key), dict):
+            result[key] = layer_merge(result[key], value, prefix=f"{path}.")
         else:
             result[key] = copy.deepcopy(value)
     return result

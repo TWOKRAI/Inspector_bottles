@@ -29,6 +29,7 @@ from ..configs.observability_layers import (
     LAYER_RECIPE,
     TELEMETRY_KEY,
     TELEMETRY_LAYERED_SUBSECTION,
+    layer_merge,
 )
 
 if TYPE_CHECKING:
@@ -648,7 +649,6 @@ def _rebuild_and_apply(
         heartbeat=heartbeat,
         store_throttle=store_throttle,
         boot_rules=boot_rules,
-        deep_merge=deep_merge,
         log_info=log_info,
     )
     if telemetry_applied is not None:
@@ -712,8 +712,6 @@ def apply_telemetry_layers(
     применения — то же самое, что внутри :func:`apply_observability_layers`,
     поэтому двух путей применения телеметрии не заводится.
     """
-    from ...data_schema_module import deep_merge
-
     try:
         with layers.lock:
             applied = _apply_telemetry_from_layers(
@@ -723,7 +721,6 @@ def apply_telemetry_layers(
                 heartbeat=heartbeat,
                 store_throttle=store_throttle,
                 boot_rules=boot_rules,
-                deep_merge=deep_merge,
                 log_info=log_info,
             )
     except BaseException as exc:
@@ -744,7 +741,6 @@ def _apply_telemetry_from_layers(
     heartbeat: Any,
     store_throttle: Any,
     boot_rules: Optional[Dict[str, Any]],
-    deep_merge: Callable[..., Any],
     log_info: Optional[Callable[[str], None]],
 ) -> Optional[Dict[str, Any]]:
     """Собрать секцию ``telemetry`` из L0+слоёв и применить к её получателям.
@@ -810,11 +806,20 @@ def _apply_telemetry_from_layers(
     boot_sub = (boot or {}).get(sub)
     if has_sub:
         # Слои владеют publish. `null` = явное «гейта нет» → уедет как None
-        # (снятие), непустой словарь — слоем поверх загрузочного boot.
+        # (снятие), НЕПУСТОЙ словарь — слоем поверх загрузочного boot.
+        #
+        # Корзина 2.1, шов, не названный ревью: слово «непустой» тут появилось не
+        # ради стиля. `deep_merge(boot_sub, {})` возвращал boot — то есть
+        # `publish: {}` («считать нечего, и это моё решение») читалось как
+        # «слои промолчали», и загрузочный набор метрик оживал. Ключ ЕСТЬ —
+        # значит слои владеют, что бы в нём ни лежало: правило Г3, ровно то же,
+        # которым эта функция уже различает `null` и отсутствие (A-A1-1 выше).
+        # Мерж непустого — `layer_merge`: вложенное `{"metrics": {}}` обязано
+        # владеть по той же причине, что и верхнее.
         if layered_sub is None:
             merged_sub: Any = None
-        elif isinstance(boot_sub, dict) and isinstance(layered_sub, dict):
-            merged_sub = deep_merge(boot_sub, layered_sub)
+        elif isinstance(boot_sub, dict) and isinstance(layered_sub, dict) and layered_sub:
+            merged_sub = layer_merge(boot_sub, layered_sub, prefix=f"{TELEMETRY_KEY}.{sub}.")
         else:
             merged_sub = layered_sub
     else:

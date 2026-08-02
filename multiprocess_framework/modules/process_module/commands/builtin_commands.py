@@ -1386,17 +1386,36 @@ class BuiltinCommands:
                     # файловый reload молча стирал бы её — ровно та живая находка,
                     # ради которой заведена эта задача.
                     if isinstance(obs_section, dict):
-                        from ...data_schema_module import deep_merge
-                        from ..configs.observability_layers import flatten_section
+                        from ..configs.observability_layers import flatten_section, layer_merge
 
                         # Секция мержится целиком, минуя `session_set`: запись в
                         # аудит за неё кладёт `session_touch` ниже — он и есть
                         # место, где ключи этой правки перечисляются поимённо.
-                        layers.session = deep_merge(layers.session, obs_section)
+                        # Мерж — `layer_merge` (правило Г3): присланная дельта новее
+                        # того, что уже в сессии, и её `{}` — владение. С каноном
+                        # оператор не мог СНЯТЬ то, что сам же поставил минуту назад:
+                        # `{"scopes": {}}` молча наследовал прошлую правку.
+                        held = set(flatten_section(layers.session).keys())
+                        layers.session = layer_merge(layers.session, obs_section)
+                        # Владение пустотой РОНЯЕТ листья сессии — путь, которого при
+                        # каноническом мерже не существовало (тот только добавлял), и
+                        # потому сроки за ним не убирались. Найдено гейтом корзины 2.1:
+                        # снятый ключ уносил своё значение, но оставлял свой дедлайн, и
+                        # readback обещал оператору возврат правки, которой больше нет.
+                        # Приём тот же, что на пути `telemetry replace` выше: снять
+                        # сроки и назвать снятое В ТОЙ ЖЕ записи аудита.
+                        shadowed = sorted(held - set(flatten_section(layers.session).keys()))
+                        if shadowed:
+                            layers.session_forget_expiry(shadowed)
                         # Task 5.8: срок ставится КЛЮЧАМ ЭТОЙ правки, а не всей сессии —
                         # иначе одна команда продлевала бы жизнь чужим, давно забытым
                         # ручкам, и «включил DEBUG и забыл» вернулось бы через заднюю дверь.
-                        touched = layers.session_touch(flatten_section(obs_section).keys(), ttl, origin=_ORIGIN_RELOAD)
+                        touched = layers.session_touch(
+                            flatten_section(obs_section).keys(),
+                            ttl,
+                            origin=_ORIGIN_RELOAD,
+                            removed=shadowed or None,
+                        )
                         result["ttl_sec"] = touched
                 else:
                     # Файл — источник L1. L2 (дельта рецепта) и L3 (сессия) остаются:
@@ -2026,9 +2045,8 @@ class BuiltinCommands:
         recipe_path = args.get("recipe_path") or read_process_config(svc, RECIPE_PATH_CONFIG_KEY)
         layers = process_observability_layers(svc)
 
-        from ...data_schema_module import deep_merge
         from ..configs.observability_audit import ACTION_PERSIST
-        from ..configs.observability_layers import LAYER_RECIPE, flatten_section
+        from ..configs.observability_layers import LAYER_RECIPE, flatten_section, layer_merge
 
         # Блокер ревью 5.8: снимок → запись файла → переезд ключей → обнуление L3
         # держатся ОДНИМ критическим блоком. Иначе правка, сделанная между снимком
@@ -2050,9 +2068,13 @@ class BuiltinCommands:
             # сохранения и уводит поиск не туда.
             ttl_cleared = list(layers.session_forget_expiry(flatten_section(session).keys()))
             moved = sorted(flatten_section(session).keys())
+            # Мерж — `layer_merge` (правило Г3), а не канон: сессия НОВЕЕ рецепта,
+            # и её `{}` — владение. С каноническим переезд L3→L2 воскрешал ключи
+            # рецепта прямо в памяти, то есть «сохранить» МЕНЯЛО действующее
+            # состояние, обещая обратное (ревью корзины 2, находка Ф-1).
             layers.replace_layer(
                 LAYER_RECIPE,
-                deep_merge(layers.recipe, session),
+                layer_merge(layers.recipe, session),
                 source=report["path"],
                 origin=_ORIGIN_PERSIST,
             )

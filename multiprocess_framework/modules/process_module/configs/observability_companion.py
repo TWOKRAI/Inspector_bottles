@@ -81,12 +81,18 @@ def build_companion_section(
     Правка ОДНОГО процесса не имеет права переписать соседей — поэтому дельта
     кладётся в ``processes[<имя>]``, а не в ``defaults``: ``defaults`` — то, что
     человек решил про весь конвейер, и машине там не место.
+
+    Мерж — :func:`~.observability_layers.layer_merge` (правило Г3), а не канон:
+    ``delta`` НОВЕЕ того, что уже лежит в спутнике, и её ``{}`` — решение
+    оператора, а не пустое место. С каноническим мержем второе «сохранить» после
+    «снять всё» записывало бы обратно ключи первого — то есть команда отвечала бы
+    success, сохранив не то, что показывала (ревью корзины 2, находка Ф-1).
     """
-    from ...data_schema_module import deep_merge
+    from .observability_layers import layer_merge
 
     section = dict(current or {})
     processes = dict(section.get("processes") or {})
-    processes[process_name] = deep_merge(processes.get(process_name) or {}, delta)
+    processes[process_name] = layer_merge(processes.get(process_name) or {}, delta)
     section["processes"] = processes
     return section
 
@@ -157,6 +163,13 @@ def compose_over_base(
     (``observability.persist``), его правка новее той, что человек написал в
     рецепте руками. Будь порядок обратным, «сохранить» отменялось бы switch'ем.
 
+    Раз «новее поверх старше» — то и мерж тот же, что между слоями:
+    :func:`~.observability_layers.layer_merge` (правило Г3). Каноническим здесь он
+    быть не мог по построению: сохранённое оператором ``scopes: {}`` означает
+    «приёмников нет, и это моё решение», а ``deep_merge`` читал его как «спутник
+    промолчал» — и после рестарта возвращал ветку рецепта. Симптом ровно тот,
+    из-за которого затевалась фаза: команда ответила success, а состояние другое.
+
     Гранулярность — УЖЕ РАЗРЕШЁННАЯ per-process долька с обеих сторон: и база, и
     спутник резолвятся по имени процесса одним и тем же
     :func:`~.observability_layers.resolve_recipe_section`. Прежняя секционная
@@ -177,8 +190,7 @@ def compose_over_base(
         сказал про ЭТОТ процесс, иначе адрес рецепта: оператору нужно знать,
         какой из двух файлов править.
     """
-    from ..configs.observability_layers import resolve_recipe_section
-    from ...data_schema_module import deep_merge
+    from ..configs.observability_layers import layer_merge, resolve_recipe_section
 
     body = dict(base) if isinstance(base, dict) else {}
     if not recipe_path:
@@ -186,7 +198,7 @@ def compose_over_base(
     persisted = resolve_recipe_section(load_companion(recipe_path), process_name)
     if not persisted:
         return body, str(recipe_path)
-    return deep_merge(body, persisted), str(companion_path(recipe_path))
+    return layer_merge(body, persisted), str(companion_path(recipe_path))
 
 
 def compose_recipe_layer(svc: Any) -> Tuple[Dict[str, Any], str, Dict[str, list]]:
