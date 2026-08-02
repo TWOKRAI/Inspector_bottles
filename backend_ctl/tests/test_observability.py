@@ -21,7 +21,7 @@ from backend_ctl.tests.conftest import page_events as _page
 def test_config_reload_changes_log_level_live(headless_backend) -> None:
     """1.4: driver.config_reload меняет уровень логгера процесса на лету.
 
-    Inline-override {log_level: DEBUG} идёт через тот же apply_observability_reconfigure,
+    Inline-override {log_level: DEBUG} идёт через тот же слоистый путь apply_observability_layers,
     что и hot-reload watcher (единый reconfigure — конфликта нет). Ответ содержит
     применённый уровень.
     """

@@ -4,7 +4,7 @@
 Реализация ADR-CRM-006 п.3 поверх готовых reconfigure/sink-реестра. Проверяем:
   - команды регистрируются в CommandManager с описанием (для контактной книжки 1.9);
   - config.reload с inline-override меняет уровень логгера через reconfigure (тот же
-    путь, что hot-reload watcher — apply_observability_reconfigure);
+    путь, что hot-reload watcher — apply_observability_layers);
   - logger.sink.enable|disable делегируют в LoggerManager.set_sink_enabled.
 """
 

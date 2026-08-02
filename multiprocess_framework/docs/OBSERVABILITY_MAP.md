@@ -113,7 +113,7 @@ drain по heartbeat) подменяется **один слот — `stats`**. 
 |---|---|---|---|
 | До запуска (дефолты фреймворка) | `LoggerManagerConfig`: `channels` / `scopes` / `modules` / `default_level` / батчинг / ретеншен | `logger_module/configs/logger_manager_config.py` | scope × module (плоско; иерархия — Ф2.2) |
 | До запуска (постоянные правки приложения) | секция `observability` в `system.yaml` прототипа | `multiprocess_prototype/configs/` | процесс |
-| Реальное время (файлом) | hot-reload watcher секции `observability` (debounce, Option B, ADR-CRM-006) + `config.reload` → `apply_observability_reconfigure` с валидацией-до-применения и откатом (R9 ✅) | `observability_reload.py` (407 строк) | процесс; пороги по scope |
+| Реальное время (файлом) | hot-reload watcher секции `observability` (debounce, Option B, ADR-CRM-006) + `config.reload` → `apply_observability_layers` (пересборка из слоёв L1→L2→L3) с валидацией-до-применения и откатом (R9 ✅) | `observability_reload.py` (407 строк) | процесс; пороги по scope |
 | Реальное время (командой) | `logger.sink.enable/disable` с `manager=logger\|error\|stats` (whitelist, роутер НЕ адресуем) | `builtin_commands.py` | канал по имени |
 | Чтение без мутации | `introspect.observability` → `effective` + `counters` (все классы потерь) | там же (Ф0.3/Ф5.1) | процесс |
 | Чтение записей ретроспективно | `logger.sink.tail` — хвост приёмника, хранящего записи у себя (`type=memory`; 2.9 ✅) | `builtin_commands.py` → `CRM.read_sink_tail` | приёмник по имени |

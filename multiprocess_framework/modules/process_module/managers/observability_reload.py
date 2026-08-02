@@ -925,40 +925,6 @@ def _remark_operator_disabled_sinks(
             marks.add(str(name))
 
 
-def apply_observability_reconfigure(
-    section: Any,
-    *,
-    logger: Any = None,
-    error: Any = None,
-    stats: Any = None,
-    log_dir: Optional[str] = None,
-    log_info: Optional[Callable[[str], None]] = None,
-    origin: str = "reconfigure",
-) -> Dict[str, Dict[str, Any]]:
-    """Голая секция ``observability`` — это стек, в котором сказал только L1.
-
-    Тонкий фасад над :func:`apply_observability_layers`, а не второй механизм:
-    вызывающие, у которых слоёв нет (одиночный процесс, тесты, внешний инструмент
-    с готовой секцией), не обязаны собирать стек руками.
-
-    ``origin`` здесь единственный с дефолтом — и это не послабление: стек тут
-    создаётся ПРЯМО В ВЫЗОВЕ и умирает вместе с ним, так что записывать некуда и
-    некому читать. Дефолт описывает ровно этот факт («секция применена мимо
-    стека процесса»), а не прячет незнание источника.
-    """
-    from ..configs.observability_layers import ObservabilityLayers
-
-    return apply_observability_layers(
-        ObservabilityLayers(app=dict(section) if isinstance(section, dict) else {}),
-        logger=logger,
-        error=error,
-        stats=stats,
-        log_dir=log_dir,
-        log_info=log_info,
-        origin=origin,
-    )
-
-
 def make_observability_on_reload(
     *,
     logger: Any = None,

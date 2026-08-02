@@ -36,8 +36,31 @@ from multiprocess_framework.modules.logger_module.core.log_config import (
 )
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.process_module.managers.observability_reload import (
-    apply_observability_reconfigure,
+    apply_observability_layers,
 )
+from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    ObservabilityLayers,
+)
+
+
+def _apply_section(section, **kwargs):
+    """Применить голую секцию ``observability`` — одноэтажный стек «сказал только L1».
+
+    Раньше это была функция фреймворка ``apply_observability_reconfigure``. Продакшн-
+    вызывающих у неё не было НИ ОДНОГО (ревью Ф5, корзина 2 п.10): поверхность
+    выглядела входом в применение, обслуживала только эти тесты — и питала докстринги,
+    утверждавшие, будто через неё идёт ``config.reload``. Помощник переехал туда, где
+    живут его вызывающие; продакшн-путь (``apply_observability_layers`` со стеком
+    процесса) тесты зовут напрямую.
+    """
+    # `origin` здесь с дефолтом — и это не послабление дисциплины аудита: стек
+    # создаётся ПРЯМО В ВЫЗОВЕ и умирает вместе с ним, записывать некуда и некому
+    # читать. Дефолт описывает ровно этот факт, а не прячет незнание источника.
+    kwargs.setdefault("origin", "reconfigure")
+    return apply_observability_layers(
+        ObservabilityLayers(app=dict(section) if isinstance(section, dict) else {}),
+        **kwargs,
+    )
 
 
 def _logger(tmp_path: Path) -> LoggerManager:
@@ -79,7 +102,7 @@ def test_rejected_observability_reload_keeps_channels(tmp_path: Path) -> None:
         assert before, "предусловие: у менеджера есть каналы"
 
         with pytest.raises(Exception):
-            apply_observability_reconfigure(
+            _apply_section(
                 {"log_level": "DEBUG", "batch_overflow_policy": "drop_middle"},
                 logger=mgr,
             )
@@ -100,11 +123,11 @@ def test_valid_observability_reload_still_applies(tmp_path: Path) -> None:
     """Парная половина: страж выше не должен держаться на том, что reload не работает.
 
     Без этой проверки предыдущий тест зеленел бы и в случае, когда
-    ``apply_observability_reconfigure`` вообще перестала что-либо применять.
+    ``_apply_section`` вообще перестала что-либо применять.
     """
     mgr = _logger(tmp_path)
     try:
-        apply_observability_reconfigure(
+        _apply_section(
             {"batch_max_pending": 42, "batch_overflow_policy": "drop_newest"},
             logger=mgr,
         )

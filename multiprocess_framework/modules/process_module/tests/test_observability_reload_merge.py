@@ -29,9 +29,32 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from multiprocess_framework.modules.process_module.managers.observability_reload import (
-    apply_observability_reconfigure,
+    apply_observability_layers,
     observability_effective,
 )
+from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    ObservabilityLayers,
+)
+
+
+def _apply_section(section, **kwargs):
+    """Применить голую секцию ``observability`` — одноэтажный стек «сказал только L1».
+
+    Раньше это была функция фреймворка ``apply_observability_reconfigure``. Продакшн-
+    вызывающих у неё не было НИ ОДНОГО (ревью Ф5, корзина 2 п.10): поверхность
+    выглядела входом в применение, обслуживала только эти тесты — и питала докстринги,
+    утверждавшие, будто через неё идёт ``config.reload``. Помощник переехал туда, где
+    живут его вызывающие; продакшн-путь (``apply_observability_layers`` со стеком
+    процесса) тесты зовут напрямую.
+    """
+    # `origin` здесь с дефолтом — и это не послабление дисциплины аудита: стек
+    # создаётся ПРЯМО В ВЫЗОВЕ и умирает вместе с ним, записывать некуда и некому
+    # читать. Дефолт описывает ровно этот факт, а не прячет незнание источника.
+    kwargs.setdefault("origin", "reconfigure")
+    return apply_observability_layers(
+        ObservabilityLayers(app=dict(section) if isinstance(section, dict) else {}),
+        **kwargs,
+    )
 
 
 class _CfgDump:
@@ -68,20 +91,20 @@ class TestRebuildFromLayers:
         машинного контекста (``log_dir``), а применяемая секция про него молчит.
         """
         logger = _FakeManagerWithConfig({"default_level": "INFO", "log_directory": str(tmp_path)})
-        apply_observability_reconfigure({"log_level": "DEBUG"}, logger=logger, log_dir=str(tmp_path))
+        _apply_section({"log_level": "DEBUG"}, logger=logger, log_dir=str(tmp_path))
         applied = logger.calls[-1]
         assert applied["log_directory"] == str(tmp_path), "пересборка увела логи из машинного каталога"
         assert applied["default_level"] == "DEBUG"
         # Файлы плоскости ошибок — та же гарантия, второй менеджер.
         error = _FakeManagerWithConfig({})
-        apply_observability_reconfigure({"log_level": "DEBUG"}, error=error, log_dir=str(tmp_path))
+        _apply_section({"log_level": "DEBUG"}, error=error, log_dir=str(tmp_path))
         assert str(tmp_path) in error.calls[-1]["error_file_path"]
 
     def test_explicit_log_directory_in_a_layer_wins_over_machine_context(self, tmp_path) -> None:
         """Плечо «слой всё ещё главнее»: явный ключ переопределяет базу."""
         custom = str(tmp_path / "chosen")
         logger = _FakeManagerWithConfig({})
-        apply_observability_reconfigure(
+        _apply_section(
             {"log_level": "DEBUG", "log_directory": custom},
             logger=logger,
             log_dir=str(tmp_path),
@@ -96,10 +119,10 @@ class TestRebuildFromLayers:
         """
         custom = str(tmp_path / "chosen")
         logger = _FakeManagerWithConfig({})
-        apply_observability_reconfigure({"log_directory": custom}, logger=logger, log_dir=str(tmp_path))
+        _apply_section({"log_directory": custom}, logger=logger, log_dir=str(tmp_path))
         assert logger.calls[-1]["log_directory"] == custom
 
-        apply_observability_reconfigure({}, logger=logger, log_dir=str(tmp_path))
+        _apply_section({}, logger=logger, log_dir=str(tmp_path))
         assert logger.calls[-1]["log_directory"] == str(tmp_path), "ключ удалён из слоя, а значение осталось"
 
     def test_no_config_manager_still_works(self) -> None:
@@ -114,7 +137,7 @@ class TestRebuildFromLayers:
                 return True
 
         logger = _Bare()
-        apply_observability_reconfigure({"log_level": "WARNING"}, logger=logger)
+        _apply_section({"log_level": "WARNING"}, logger=logger)
         assert logger.calls[-1]["default_level"] == "WARNING"
 
 
@@ -122,7 +145,7 @@ class TestLevelProfile:
     def test_debug_opens_all_scopes(self) -> None:
         """Плечо ON: log_level=DEBUG → все скоупы DEBUG, DEBUG-scope включён."""
         logger = _FakeManagerWithConfig({"default_level": "INFO"})
-        apply_observability_reconfigure({"log_level": "DEBUG"}, logger=logger)
+        _apply_section({"log_level": "DEBUG"}, logger=logger)
         scopes = logger.calls[-1]["scopes"]
         assert scopes, "профиль уровня не собрал scopes — уровень остаётся мёртвым параметром"
         for name, sc in scopes.items():
@@ -132,7 +155,7 @@ class TestLevelProfile:
     def test_warning_raises_thresholds_keeps_debug_scope_off(self) -> None:
         """Плечо OFF: log_level=WARNING → пороги подняты, DEBUG-scope выключен."""
         logger = _FakeManagerWithConfig({"default_level": "DEBUG"})
-        apply_observability_reconfigure({"log_level": "WARNING"}, logger=logger)
+        _apply_section({"log_level": "WARNING"}, logger=logger)
         scopes = logger.calls[-1]["scopes"]
         for name in ("SYSTEM", "BUSINESS", "PERFORMANCE"):
             assert scopes[name]["min_level"] == "WARNING", f"скоуп {name} не поднят до WARNING"
@@ -141,7 +164,7 @@ class TestLevelProfile:
     def test_info_restores_tuned_defaults(self) -> None:
         """Возврат на INFO → штатный настроенный профиль (SYSTEM=WARNING и т.д.)."""
         logger = _FakeManagerWithConfig({"default_level": "DEBUG"})
-        apply_observability_reconfigure({"log_level": "INFO"}, logger=logger)
+        _apply_section({"log_level": "INFO"}, logger=logger)
         scopes = logger.calls[-1]["scopes"]
         assert scopes["SYSTEM"]["min_level"] == "WARNING"
         assert scopes["BUSINESS"]["min_level"] == "INFO"
@@ -150,7 +173,7 @@ class TestLevelProfile:
     def test_section_without_level_does_not_apply_the_profile(self) -> None:
         """Секция без log_level профиль НЕ включает: пороги остаются базовыми."""
         logger = _FakeManagerWithConfig({})
-        apply_observability_reconfigure({"stats": {"enabled": False}}, logger=logger)
+        _apply_section({"stats": {"enabled": False}}, logger=logger)
         applied = logger.calls[-1]
         # База (managers_from_log_dir) — настроенный профиль, не «всё DEBUG».
         assert applied["scopes"]["SYSTEM"]["min_level"] == "WARNING"
@@ -165,7 +188,7 @@ class TestLevelProfile:
         """
         current_scopes = {"SYSTEM": {"enabled": True, "min_level": "ERROR", "channels": [], "modules": []}}
         logger = _FakeManagerWithConfig({"default_level": "INFO", "scopes": current_scopes})
-        apply_observability_reconfigure({"stats": {"enabled": False}}, logger=logger)
+        _apply_section({"stats": {"enabled": False}}, logger=logger)
         assert logger.calls[-1]["scopes"]["SYSTEM"]["min_level"] != "ERROR"
 
     def test_scope_written_into_a_layer_survives_and_beats_the_profile(self) -> None:
@@ -175,7 +198,7 @@ class TestLevelProfile:
         оптовой ручкой, применённой в том же вызове.
         """
         logger = _FakeManagerWithConfig({})
-        apply_observability_reconfigure(
+        _apply_section(
             {"log_level": "DEBUG", "scopes": {"SYSTEM": {"min_level": "ERROR"}}},
             logger=logger,
         )
@@ -192,7 +215,7 @@ class TestEffectiveReadback:
         logger = LoggerManager(manager_name="TestLoggerEffective")
         logger.initialize()
         try:
-            apply_observability_reconfigure({"log_level": "DEBUG"}, logger=logger)
+            _apply_section({"log_level": "DEBUG"}, logger=logger)
             eff = observability_effective(logger=logger)
             assert eff["logger"]["default_level"] == "DEBUG"
             assert eff["logger"]["scopes"]["DEBUG"]["enabled"] is True
@@ -212,9 +235,9 @@ class TestEffectiveReadback:
         logger = LoggerManager(manager_name="TestLoggerPairOff")
         logger.initialize()
         try:
-            apply_observability_reconfigure({"log_level": "DEBUG"}, logger=logger)
+            _apply_section({"log_level": "DEBUG"}, logger=logger)
             assert logger.should_log(LogScope.BUSINESS, LogLevel.DEBUG, "probe") is True
-            apply_observability_reconfigure({"log_level": "WARNING"}, logger=logger)
+            _apply_section({"log_level": "WARNING"}, logger=logger)
             assert logger.should_log(LogScope.BUSINESS, LogLevel.DEBUG, "probe") is False
             assert logger.should_log(LogScope.BUSINESS, LogLevel.INFO, "probe") is False
             assert logger.should_log(LogScope.BUSINESS, LogLevel.WARNING, "probe") is True

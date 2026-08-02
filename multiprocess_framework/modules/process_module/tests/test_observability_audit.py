@@ -591,3 +591,45 @@ class TestStuckFailureDoesNotEatTheRing:
         assert entry["ts"] == 10.0
         assert entry["last_ts"] == 12.0
         assert entry["repeats"] == 3
+
+
+class TestReservedPersistIsRefusedLoudly:
+    """Корзина 2 п.10: `persist` в config.reload — костыль-ловушка.
+
+    Флаг зарезервирован докстрингом под «записать в рецепт» и не реализован:
+    рантайм принимал его МОЛЧА и игнорировал. Оператор уходил с уверенностью,
+    что правка постоянная, а она лежала в L3 со сроком 300 с и исчезала сама.
+    Ложный сигнал хуже отсутствующего: постоянная запись есть, но делает её
+    другая команда — `observability.persist`.
+
+    Отказ обязан быть ДО любой записи в слой: «отказано, но всё-таки записано»
+    — это второй костыль поверх первого.
+    """
+
+    def test_persist_true_is_refused_and_names_the_real_way(self, svc, handlers) -> None:
+        result = handlers["config.reload"]({"observability": {"log_level": "DEBUG"}, "persist": True})
+        assert result["success"] is False, result
+        assert "observability.persist" in str(result.get("reason", "")), result
+
+    def test_refusal_leaves_no_trace_in_the_session_layer(self, svc, handlers) -> None:
+        """Отказ не должен ничего записать: иначе он врёт в другую сторону."""
+        layers = process_observability_layers(svc)
+        before = dict(layers.session)
+        handlers["config.reload"]({"observability": {"log_level": "DEBUG"}, "persist": True})
+        assert layers.session == before, f"отказ всё-таки записал в L3: {layers.session}"
+
+    def test_refusal_leaves_no_trace_in_the_audit(self, svc, handlers) -> None:
+        layers = process_observability_layers(svc)
+        before = len(layers.audit.entries())
+        handlers["config.reload"]({"observability": {"log_level": "DEBUG"}, "persist": True})
+        assert len(layers.audit.entries()) == before
+
+    def test_persist_false_still_applies_as_before(self, svc, handlers) -> None:
+        """Контроль: явный False — не отказ, обычная сессионная правка."""
+        result = handlers["config.reload"]({"observability": {"log_level": "DEBUG"}, "persist": False})
+        assert result["success"] is True, result
+        assert process_observability_layers(svc).session.get("log_level") == "DEBUG"
+
+    def test_absent_persist_still_applies_as_before(self, svc, handlers) -> None:
+        result = handlers["config.reload"]({"observability": {"log_level": "DEBUG"}})
+        assert result["success"] is True, result
