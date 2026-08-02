@@ -764,6 +764,22 @@ def _apply_telemetry_from_layers(
     появилось то, чего не было: правка переживает ``config.reload`` и
     возвращается по сроку. Заменить L0 целиком по-прежнему можно — правкой
     файла, то есть слоем, который для этого и предназначен.
+
+    **Различение «ключа нет» ↔ «явный ``publish: null``» (A-A1-1).** ``.get(sub)``
+    отдавал ``None`` в обоих случаях, и слоистый путь расходился с прямым: прямой
+    ``telemetry.reconfigure`` при ``publish=None`` честно шлёт ``(None,'replace')``
+    (снимает гейт), а слоистый делал ``deep_merge(boot, None) == boot`` — то есть
+    пересобирал к загрузочному ВМЕСТО выключения. Теперь владение и значение
+    берутся по ПРИСУТСТВИЮ ключа (``sub in layered``), а не по «значение не None»:
+
+    * ключ ЕСТЬ → слои владеют плоскостью, что бы в нём ни лежало (правило Г3
+      «ключ есть → владею»). ``publish: null`` — это явное «гейта нет», и он
+      уезжает получателю как ``None`` (снятие гейта), совпадая с прямым путём;
+      непустой словарь ложится слоем поверх ``boot``;
+    * ключа НЕТ, но плоскость уже во владении (липкий ``telemetry_owned`` после
+      прошлой правки или её истечения) → возврат к загрузочному ``boot``. Именно
+      это отличает «оператор снял ключ» (вернись к boot) от «оператор выключил
+      явным null» (сними гейт) — два разных исхода, которые ``.get`` сливал.
     """
     applied: Dict[str, Any] = {}
     throttle_applied = _apply_throttle_from_layers(
@@ -779,8 +795,11 @@ def _apply_telemetry_from_layers(
     if heartbeat is None:
         return applied or None
     sub = TELEMETRY_LAYERED_SUBSECTION
+    # Владение — по ПРИСУТСТВИЮ ключа, а не по «значение не None»: явный
+    # `publish: null` присутствует и означает «выключить», а не «слои молчат».
+    has_sub = isinstance(layered, dict) and sub in layered
     layered_sub = layered.get(sub) if isinstance(layered, dict) else None
-    if layered_sub is not None:
+    if has_sub:
         layers.telemetry_owned = True
     if not layers.telemetry_owned:
         # Слои о publish-плоскости не сказали ни разу — не наша, не трогаем.
@@ -789,10 +808,20 @@ def _apply_telemetry_from_layers(
         return applied or None
 
     boot_sub = (boot or {}).get(sub)
-    # ``None`` — ЗАКОННОЕ загрузочное состояние («гейта нет»), и выразить его надо
-    # явно: пустота читалась бы как «нечего применять», и истёкшая правка осталась
-    # бы в гейте навсегда — следствие без причины.
-    section: Dict[str, Any] = {sub: deep_merge(boot_sub, layered_sub) if isinstance(boot_sub, dict) else layered_sub}
+    if has_sub:
+        # Слои владеют publish. `null` = явное «гейта нет» → уедет как None
+        # (снятие), непустой словарь — слоем поверх загрузочного boot.
+        if layered_sub is None:
+            merged_sub: Any = None
+        elif isinstance(boot_sub, dict) and isinstance(layered_sub, dict):
+            merged_sub = deep_merge(boot_sub, layered_sub)
+        else:
+            merged_sub = layered_sub
+    else:
+        # Ключа в слоях нет, но плоскость owned (истекла правка / липкий флаг):
+        # вернуть к загрузочному. ``None`` boot тоже законен — «гейта не было».
+        merged_sub = boot_sub
+    section: Dict[str, Any] = {sub: merged_sub}
 
     from .telemetry_reload import apply_telemetry_reconfigure
 
