@@ -166,6 +166,58 @@ class TestBrokerMechanics:
         assert b.forget_subscriber("gui") is False
         assert b.subscriber_names() == []
 
+    def test_forget_subscriber_fans_out_unsubscribe_to_children(self):
+        """B-5-1 (вторая половина): снятое намерение снимает и форвардеры на детях.
+
+        До фикса ``forget_subscriber`` чистил только реестр PM, а форвардеры на
+        детях оставались сиротами — вечно пушили записи мёртвому адресу (relay-шум
+        на хаб). ``unsubscribe_all`` рассылку делает; реактивное снятие обязано
+        так же.
+        """
+        t = _Transport()
+        b = _broker(t)
+        b.subscribe_all("gui")
+        t.sent.clear()  # отсечь раздачу подписки — интересует только снятие
+
+        assert b.forget_subscriber("gui") is True
+
+        assert t.sent, "forget_subscriber промолчал детям — форвардер остался сиротой"
+        assert all(row[2] == UNSUBSCRIBE_COMMAND for row in t.sent), f"снятие не unsubscribe: {t.sent}"
+        assert any(row[0] == "broadcast" and row[3]["subscriber"] == "gui" for row in t.sent), (
+            f"unsubscribe не разослан детям веером для 'gui': {t.sent}"
+        )
+
+    def test_forget_subscriber_of_unknown_name_stays_silent(self):
+        """Не держали намерение — нечего и снимать: детей не тревожим."""
+        t = _Transport()
+        b = _broker(t)
+        assert b.forget_subscriber("никогда") is False
+        assert t.sent == [], f"снятие несуществующего намерения разослано детям: {t.sent}"
+
+    def test_forget_session_fans_out_unsubscribe_for_each_doomed_address(self):
+        """5.11-R1 + B-5-1: закрытие сессии снимает форвардеры её адресов на детях."""
+        t = _Transport()
+        b = _broker(t)
+        b.subscribe_all("backend_ctl.aaa")
+        b.subscribe_all("backend_ctl.bbb")
+        b.subscribe_all("gui")
+        t.sent.clear()
+
+        doomed = b.forget_session("aaa")
+
+        assert doomed == ["backend_ctl.aaa"]
+        unsub_targets = sorted(row[3]["subscriber"] for row in t.sent if row[2] == UNSUBSCRIBE_COMMAND)
+        assert unsub_targets == ["backend_ctl.aaa"], f"снят не тот адрес (или не снят вовсе): {t.sent}"
+
+    def test_forget_session_without_matches_stays_silent(self):
+        """Ни одного адреса сессии — ни одной отправки детям (пустой doomed)."""
+        t = _Transport()
+        b = _broker(t)
+        b.subscribe_all("gui")
+        t.sent.clear()
+        assert b.forget_session("никогда") == []
+        assert t.sent == [], f"снятие пустой сессии разослано детям: {t.sent}"
+
     def test_transport_failure_is_reported_not_swallowed_and_not_raised(self):
         """Провал раздачи — обслуживание, а не lifecycle: не роняет, но и не молчит."""
         errors: list[str] = []

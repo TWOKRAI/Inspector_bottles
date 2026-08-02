@@ -136,8 +136,15 @@ class ObservabilitySubscriptionBroker:
             return False
         with self._lock:
             dropped = self._subscribers.pop(key, None) is not None
-        if dropped and self._log_info:
-            self._log_info(f"[observability] брокер: намерение '{key}' снято — процесс-подписчик убран с топологии")
+        if dropped:
+            # B-5-1 (вторая половина): снятое намерение обязано снять и форвардеры
+            # на детях — так же, как это делает unsubscribe_all. Иначе на каждом
+            # ребёнке остаётся форвардер-сирота, вечно пушащий записи мёртвому
+            # адресу (relay-шум на хаб). Реактивное снятие (процесс ушёл с
+            # топологии) молчать о себе детям не имеет права.
+            self._fan_out(key, UNSUBSCRIBE_COMMAND, reason=REASON_COMMAND)
+            if self._log_info:
+                self._log_info(f"[observability] брокер: намерение '{key}' снято — процесс-подписчик убран с топологии")
         return dropped
 
     def forget_session(self, session_id: str) -> list:
@@ -165,6 +172,12 @@ class ObservabilitySubscriptionBroker:
             doomed = [name for name in self._subscribers if name.endswith(suffix)]
             for name in doomed:
                 self._subscribers.pop(name, None)
+        # Снять форвардеры мёртвого адреса на детях (симметрично forget_subscriber
+        # и unsubscribe_all). Рассылка ВНЕ лока: forget_session зовут из read-потока
+        # канала, а fan-out — fire-and-forget (broadcast не ждёт ответа ребёнка),
+        # поэтому канал не блокируется.
+        for name in doomed:
+            self._fan_out(name, UNSUBSCRIBE_COMMAND, reason=REASON_COMMAND)
         if doomed and self._log_info:
             self._log_info(f"[observability] брокер: намерения {doomed} сняты — соединение сессии '{sid}' закрыто")
         return doomed

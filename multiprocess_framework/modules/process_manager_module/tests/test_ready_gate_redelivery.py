@@ -355,33 +355,60 @@ class TestRedeliveryDoesNotDeliverThePast:
         delivered = [row["data"]["recipe"] for row in _addressed(sent, "config.reload")]
         assert delivered == ["C"], f"устаревший конверт доставлен: порядок {delivered}"
 
-    def test_stale_waiter_stops_early_instead_of_burning_the_deadline(self):
-        """Снятый по поколению поток уходит СРАЗУ, а не досиживает дедлайн.
+    def test_stale_item_is_dropped_early_instead_of_burning_the_deadline(self):
+        """Устаревший конверт снимается СРАЗУ, а не досиживает дедлайн.
 
-        Иначе каждый перекрытый switch оставляет по потоку на команду на ребёнка,
-        и все они висят на мёртвых событиях до истечения дедлайна.
+        **Свойство, а не поток (B-5-1).** До перехода на очередь-на-адресата у
+        каждого конверта был свой поток, и тест ловил ЕГО смерть. Теперь адресата
+        обслуживает единственный воркер: устаревший конверт он снимает и идёт к
+        следующему, поток не умирает. Наблюдаемое свойство то же — стейл не жжёт
+        дедлайн, — и проверяется наблюдаемо: superseding-конверт C доезжает
+        задолго до 30с-дедлайна отложенного B. Если снятие по поколению убрать, B
+        досидит E1 (никогда не взводится) все 30с, и C не приедет за отведённые 3с.
         """
-        pm, _sent = _pm_with_children("camera_0")
-        pm._process_registry._ready_events["camera_0"] = threading.Event()
+        pm, sent = _pm_with_children("camera_0")
+        e1 = threading.Event()  # событие инкарнации B — НИКОГДА не взводится
+        pm._process_registry._ready_events["camera_0"] = e1
         pm.update_config("child_command_ready_timeout_s", 30.0)
 
-        # Считаем ТОЛЬКО потоки этого вызова: в suite живут ожидатели соседних
-        # тестов с длинными дедлайнами, и `enumerate()` целиком дал бы чужой поток
-        # (тест бы падал на невиновном — класс «глобальный патч часов = флейк»).
-        before = set(threading.enumerate())
-        pm._broadcast_command("config.reload", {"recipe": "B"})
-        gate_threads = [t for t in set(threading.enumerate()) - before if t.name.startswith("ready-gate-")]
-        assert gate_threads, "поток ожидания не заведён — тест не про то"
+        pm._broadcast_command("config.reload", {"recipe": "B"})  # воркер встаёт на E1 за B
 
-        pm._process_registry._ready_events["camera_0"] = threading.Event()
-        pm._broadcast_command("config.reload", {"recipe": "C"})
+        # Свежая инкарнация. Событие взводим ПОСЛЕ рассылки C: пока оно не взведено,
+        # `_redeliver_to_unready_children` считает ребёнка не-готовым и досылает C
+        # (за взведённым событием он бы решил «готов» и досылку не завёл вовсе).
+        e2 = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = e2
+        pm._broadcast_command("config.reload", {"recipe": "C"})  # бьёт поколение B, встаёт за B
+        e2.set()  # теперь C может доехать, как только воркер снимет устаревший B
 
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            if not gate_threads[0].is_alive():
-                break
-            time.sleep(0.05)
-        assert not gate_threads[0].is_alive(), "устаревший ожидатель досиживает дедлайн (30с) вместо снятия"
+        assert _wait_for(lambda: len(_addressed(sent, "config.reload")) >= 1, timeout=3.0), (
+            "C не доехал за 3с — устаревший B (на мёртвом E1) жжёт 30с-дедлайн и держит очередь"
+        )
+        delivered = [row["data"]["recipe"] for row in _addressed(sent, "config.reload")]
+        assert delivered == ["C"], f"устаревший B доставлен вместо снятия: порядок {delivered}"
+
+    def test_one_worker_per_addressee_not_one_per_envelope(self):
+        """Один адресат — один воркер, сколько бы РАЗНЫХ конвертов ни ждало.
+
+        До B-5-1 каждый не-готовый конверт поднимал свой daemon-поток. Конверты
+        РАЗНЫХ команд (разные дорожки поколений) друг друга не гасят, поэтому все
+        потоки висели бы на мёртвом событии до дедлайна — по потоку на конверт.
+        Очередь-на-адресата держит РОВНО один воркер на имя. Команды намеренно
+        разные: одинаковые снялись бы по поколению и не различили бы две модели.
+        """
+        pm, _sent = _pm_with_children("camera_0")
+        pm._process_registry._ready_events["camera_0"] = threading.Event()  # не взводим
+        pm.update_config("child_command_ready_timeout_s", 30.0)
+
+        before = {t for t in threading.enumerate() if t.name == "ready-gate-camera_0"}
+        pm._broadcast_command("routing.refresh", {"epoch": 1})
+        pm._broadcast_command("config.reload", {"observability_recipe_path": "R"})
+        pm._broadcast_command("telemetry.reconfigure", {"mode": "merge"})
+        pm._broadcast_command("observability.tail.subscribe", {"subscriber": "S"})
+        pm._broadcast_command("observability.tail.unsubscribe", {"subscriber": "S"})
+        time.sleep(0.3)
+        mine = [t for t in threading.enumerate() if t.name == "ready-gate-camera_0" and t not in before]
+        assert len(mine) == 1, f"пять РАЗНЫХ конвертов подняли {len(mine)} воркеров вместо одного"
 
     def test_a_fresher_broadcast_of_another_command_does_not_cancel_this_one(self):
         """Свежий refresh не отменяет досылку ещё актуального reload'а.
@@ -589,6 +616,104 @@ class TestGenerationsFollowTheEnvelopeNotTheCommandName:
         time.sleep(1.0)
         rows = _addressed(sent, "config.reload")
         assert len(rows) == 1, f"гонка поколений дала {len(rows)} досылок вместо одной"
+
+
+class TestRedeliveryPreservesOrderPerAddressee:
+    """B-5-1 сквозного ревью Ф5: досылки одному адресату упорядочены по построению.
+
+    Разные команды намерения (``subscribe`` + ``unsubscribe``) — разные поколения,
+    обе досылки актуальны и доживают до готовности. До фикса каждая жила в
+    НЕЗАВИСИМОМ daemon-потоке без упорядочивания: репро ревьюера дал 17/30
+    прогонов с инверсией (``unsubscribe`` первым → форвардер-сирота на ребёнке).
+    Очередь-на-адресата держит порядок для ЛЮБОЙ пары команд — свойство места, а
+    не частный случай пары sub/unsub.
+
+    Порядок доказывается ПОВТОРАМИ: одиночный зелёный прогон гонку не опроверг бы.
+    """
+
+    def test_subscribe_then_unsubscribe_arrive_in_that_order(self):
+        """Репро ревьюера как постоянный тест: subscribe перед unsubscribe, всегда."""
+        for round_no in range(30):
+            pm, sent = _pm_with_children("camera_0")
+            event = threading.Event()
+            pm._process_registry._ready_events["camera_0"] = event
+            pm.update_config("child_command_ready_timeout_s", 5.0)
+
+            pm._broadcast_command("observability.tail.subscribe", {"subscriber": "S1"})
+            pm._broadcast_command("observability.tail.unsubscribe", {"subscriber": "S1"})
+            event.set()
+
+            assert _wait_for(lambda: len(_addressed(sent)) >= 2, timeout=3.0), (
+                f"раунд {round_no}: обе досылки не приехали: {sent}"
+            )
+            order = [row["command"] for row in _addressed(sent)]
+            assert order == ["observability.tail.subscribe", "observability.tail.unsubscribe"], (
+                f"раунд {round_no}: инверсия порядка досылки: {order}"
+            )
+
+    def test_any_two_commands_to_one_child_keep_enqueue_order(self):
+        """Порядок держится для ПРОИЗВОЛЬНОЙ пары команд, не только sub/unsub.
+
+        Заведись третья команда намерения — класс воскрес бы ровно там, будь фикс
+        частным случаем (урок ``feedback_defect_fixed_on_one_path_only``). Здесь
+        пара несмежных команд с разными поколениями: обе актуальны, порядок держит
+        место (очередь), а не совпадение с sub/unsub.
+        """
+        for round_no in range(20):
+            pm, sent = _pm_with_children("camera_0")
+            event = threading.Event()
+            pm._process_registry._ready_events["camera_0"] = event
+            pm.update_config("child_command_ready_timeout_s", 5.0)
+
+            pm._broadcast_command("routing.refresh", {"epoch": 1})
+            pm._broadcast_command("telemetry.reconfigure", {"mode": "merge"})
+            event.set()
+
+            assert _wait_for(lambda: len(_addressed(sent)) >= 2, timeout=3.0), (
+                f"раунд {round_no}: обе досылки не приехали: {sent}"
+            )
+            order = [row["command"] for row in _addressed(sent)]
+            assert order == ["routing.refresh", "telemetry.reconfigure"], (
+                f"раунд {round_no}: инверсия порядка досылки: {order}"
+            )
+
+    def test_action_queued_while_busy_survives_a_vanished_ready_event(self):
+        """Шов самой очереди: в неё попадает действие БЕЗ сигнала готовности.
+
+        До очереди отсутствие сигнала означало «выполняй немедленно» — ветка
+        ``event is None`` уходила в синхронный вызов и до ожидания не доживала.
+        Очередь завела путь, которого раньше не существовало: пока воркер адресата
+        занят, следующее действие встаёт в очередь ДАЖЕ если его сигнал ``None``
+        (иначе оно обогнало бы очередь и вернуло ровно ту гонку, ради которой
+        очередь и заведена). Дренаж же ждал сигнал безусловно — то есть на ``None``
+        падал в ``except``, писал одну строку и **ронял действие**.
+
+        Проверяется на самом примитиве, а не через ``_broadcast_command``: тот
+        отбирает не-готовых детей ДО гейта и ребёнка без сигнала в гейт не заводит
+        вовсе. Через него дефект не воспроизводится — и это ровно та ошибка, из-за
+        которой первая редакция теста была красной по неверной причине. Реальные
+        вызывающие с этим путём — те, кто зовёт гейт напрямую (раздача намерений
+        на шве инкарнации, адресные досылки switch'а): сигнал ребёнка может стать
+        недостижим между двумя действиями, потому что switch пересоздаёт ребёнка
+        вместе с его ``ready_event``.
+        """
+        pm, _sent = _pm_with_children("camera_0")
+        event = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = event
+        done: list[str] = []
+
+        first = pm._run_when_child_ready("camera_0", lambda: done.append("first"), label="a", deadline_s=5.0)
+        assert first is True, "первое действие обязано встать в очередь (ребёнок не готов)"
+
+        # switch пересоздал ребёнка: прежней записи готовности в реестре больше нет
+        pm._process_registry._ready_events.pop("camera_0", None)
+        second = pm._run_when_child_ready("camera_0", lambda: done.append("second"), label="b", deadline_s=5.0)
+        assert second is True, "воркер занят — действие обязано встать в очередь, а не обогнать её"
+
+        event.set()
+        assert _wait_for(lambda: done == ["first", "second"], timeout=3.0), (
+            f"действие без сигнала готовности потеряно очередью: {done}"
+        )
 
 
 class TestAddressedRestartPathIsGated:

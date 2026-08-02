@@ -12,6 +12,7 @@ import copy
 import os
 import threading
 import time
+from collections import deque
 from typing import Any
 
 from ...config_module.feature_flags import is_enabled
@@ -1291,6 +1292,37 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"[ready-gate] ready_event '{name}' не прочитан: {exc}")
             return None
 
+    @property
+    def _child_action_pipelines(self) -> dict:
+        """Ленивый реестр очередей досылки на адресата (та же философия, что
+        ``_broadcast_generations``: unit-тесты строят PM с no-op ``__init__``).
+
+        ``имя ребёнка → deque отложенных действий``. Один ключ — одна очередь,
+        один воркер, порядок FIFO. Так досылки ОДНОМУ адресату упорядочены между
+        собой ПО ПОСТРОЕНИЮ, а не двумя daemon-потоками с гонкой (B-5-1)."""
+        pipes = self.__dict__.get("_child_action_pipelines_map")
+        if pipes is None:
+            pipes = {}
+            self.__dict__["_child_action_pipelines_map"] = pipes
+        return pipes
+
+    @property
+    def _child_action_running(self) -> set:
+        """Имена, у которых прямо сейчас крутится воркер-дренаж очереди."""
+        running = self.__dict__.get("_child_action_running_set")
+        if running is None:
+            running = set()
+            self.__dict__["_child_action_running_set"] = running
+        return running
+
+    @property
+    def _child_action_lock(self) -> threading.Lock:
+        lock = self.__dict__.get("_child_action_lock_obj")
+        if lock is None:
+            lock = threading.Lock()
+            self.__dict__["_child_action_lock_obj"] = lock
+        return lock
+
     def _run_when_child_ready(
         self,
         name: str,
@@ -1302,37 +1334,84 @@ class ProcessManagerProcess(ProcessModule):
     ) -> bool:
         """Выполнить действие над ребёнком тогда, когда он умеет его принять.
 
-        Готов (или сигнала нет) → действие прямо здесь, синхронно. Не готов →
-        daemon-поток ждёт ``ready_event`` и выполняет после. Ждать синхронно
-        нельзя: гейт зовут из ``message_processor``, а событие живёт ВНЕ
-        message-loop (``mp.Event``) — тот же аргумент, которым обоснованы
-        барьеры Ф3.2.
+        Готов, сигнала нет И очередь этого адресата пуста → действие прямо здесь,
+        синхронно (порядок тривиален — впереди никого). Иначе действие встаёт в
+        FIFO-очередь ЭТОГО ребёнка, а единственный воркер-дренаж выполняет её по
+        порядку после готовности. Ждать синхронно нельзя: гейт зовут из
+        ``message_processor``, а событие живёт ВНЕ message-loop (``mp.Event``) —
+        тот же аргумент, которым обоснованы барьеры Ф3.2.
+
+        **Почему очередь, а не поток-на-действие (B-5-1 сквозного ревью Ф5).**
+        Раньше каждое не-готовое действие поднимало свой daemon-поток, и два
+        действия одному ребёнку (``subscribe`` + ``unsubscribe`` разных команд,
+        или switch-конверты) доживали до готовности в НЕЗАВИСИМЫХ потоках без
+        всякого упорядочивания: репро ревьюера дал 17/30 прогонов с инверсией —
+        ``unsubscribe`` доставлялся ПЕРВЫМ, и на ребёнке оставался форвардер-сирота,
+        вечно пушащий записи мёртвому адресу. Очередь на адресата держит порядок
+        для ЛЮБОЙ пары команд, включая будущие — это не частный случай «пара
+        sub/unsub», а свойство места (урок ``feedback_defect_fixed_on_one_path_only``).
 
         Args:
             still_relevant: опциональная проверка «действие ещё имеет смысл».
-                Зовётся перед выполнением и во время ожидания. ``False`` → действие
-                снимается. Нужна там, где событие может стать НЕДОСТИЖИМЫМ: switch
-                пересоздаёт ребёнка вместе с его ``ready_event``, и ожидающий поток
-                остаётся на мёртвом объекте — дотягивает дедлайн и доставляет
+                Зовётся перед постановкой и во время ожидания/дренажа. ``False`` →
+                действие снимается (но НЕ роняет очередь — воркер идёт к
+                следующему). Нужна там, где событие может стать НЕДОСТИЖИМЫМ: switch
+                пересоздаёт ребёнка вместе с его ``ready_event``, и ожидание
+                остаётся на мёртвом объекте — иначе дотянуло бы дедлайн и доставило
                 конверт ПОЗЖЕ свежего (ревью Fable, находка 1).
 
         Returns:
-            ``True`` — действие отложено до готовности; ``False`` — выполнено сразу
-            (или снято как неактуальное).
+            ``True`` — действие поставлено в очередь до готовности; ``False`` —
+            выполнено сразу (или снято как неактуальное).
         """
         if still_relevant is not None and not still_relevant():
             return False
         event = self._child_ready_event(name)
-        if event is None or event.is_set():
+        start_worker = False
+        with self._child_action_lock:
+            # «Впереди никого» = воркер этого адресата НЕ крутится. Пока он крутится,
+            # синхронный обгон реинтродуцировал бы гонку (действие уехало бы мимо
+            # очереди), поэтому busy → строго в очередь, даже если событие уже взведено.
+            busy = name in self._child_action_running
+            deliver_now = not busy and (event is None or event.is_set())
+            if not deliver_now:
+                self._child_action_pipelines.setdefault(name, deque()).append(
+                    (action, label, event, deadline_s, still_relevant)
+                )
+                if name not in self._child_action_running:
+                    self._child_action_running.add(name)
+                    start_worker = True
+        if deliver_now:
             action()
             return False
-        threading.Thread(
-            target=self._run_child_action_after_ready,
-            args=(name, action, label, event, deadline_s, still_relevant),
-            name=f"ready-gate-{label}-{name}",
-            daemon=True,
-        ).start()
+        if start_worker:
+            threading.Thread(
+                target=self._drain_child_actions,
+                args=(name,),
+                name=f"ready-gate-{name}",
+                daemon=True,
+            ).start()
         return True
+
+    def _drain_child_actions(self, name: str) -> None:
+        """Единственный воркер адресата: выполнять его отложенные действия по порядку.
+
+        FIFO по построению: один поток на ключ (гарантирует множество
+        ``_child_action_running`` под локом), поэтому порядок доставки = порядок
+        постановки. Действие обрабатывается ВНЕ лока (ожидание готовности может
+        блокировать), а опустошение очереди и снятие флага — под локом, чтобы
+        параллельная постановка либо попала в живую очередь, либо честно завела
+        новый воркер (без потерянного пробуждения).
+        """
+        while True:
+            with self._child_action_lock:
+                queue = self._child_action_pipelines.get(name)
+                if not queue:
+                    self._child_action_running.discard(name)
+                    self._child_action_pipelines.pop(name, None)
+                    return
+                action, label, event, deadline_s, still_relevant = queue.popleft()
+            self._run_child_action_after_ready(name, action, label, event, deadline_s, still_relevant)
 
     #: Шаг опроса ожидания готовности. Ждём НЕ одним ``event.wait(deadline)``, а
     #: срезами: между срезами проверяется актуальность. Без этого поток, чьё
@@ -1361,8 +1440,16 @@ class ProcessManagerProcess(ProcessModule):
         """
         try:
             deadline = time.monotonic() + deadline_s
-            ready = False
-            while True:
+            # Сигнала готовности нет — ждать нечего и некого: та же семантика, что
+            # у синхронной ветки :meth:`_run_when_child_ready`. В очередь такое
+            # действие попадает не затем, чтобы чего-то ждать, а затем, чтобы не
+            # обогнать уже стоящие в ней (B-5-1) — путь, которого до очереди не
+            # существовало. Без этой ветки ``event.wait`` на ``None`` падал в
+            # ``except`` ниже, и действие ТЕРЯЛОСЬ, оставив одну строку в логе:
+            # шов, созданный самой очередью. Достижим на switch — ребёнок
+            # пересоздан, и его запись готовности сменилась между двумя досылками.
+            ready = event is None
+            while not ready:
                 if still_relevant is not None and not still_relevant():
                     self._log_info(
                         f"[ready-gate:{label}] '{name}': досылка снята — конверт устарел "

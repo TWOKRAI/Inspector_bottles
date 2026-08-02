@@ -137,6 +137,85 @@ def rf10(text: str) -> str:
     )
 
 
+def rf11(text: str) -> str:
+    """B-5-1: очередь-на-адресата снова становится потоком-на-действие — гонка порядка.
+
+    Одна точка правила — маршрутизация в ``_run_when_child_ready``: все четыре
+    вызывающих гейт идут через неё, поэтому одной инъекции хватает, чтобы снять
+    упорядочивание для ЛЮБОЙ пары команд. Возврат к независимым daemon-потокам
+    (модель до фикса): два действия одному ребёнку доживают до готовности без
+    очереди и гонят порядок доставки.
+    """
+    return text.replace(
+        """            busy = name in self._child_action_running
+            deliver_now = not busy and (event is None or event.is_set())
+            if not deliver_now:
+                self._child_action_pipelines.setdefault(name, deque()).append(
+                    (action, label, event, deadline_s, still_relevant)
+                )
+                if name not in self._child_action_running:
+                    self._child_action_running.add(name)
+                    start_worker = True
+        if deliver_now:
+            action()
+            return False
+        if start_worker:
+            threading.Thread(
+                target=self._drain_child_actions,
+                args=(name,),
+                name=f"ready-gate-{name}",
+                daemon=True,
+            ).start()
+        return True""",
+        """            busy = name in self._child_action_running  # noqa: F841
+            deliver_now = not busy and (event is None or event.is_set())  # noqa: F841
+        # RF11: поток-на-действие вместо очереди-на-адресата — гонка порядка
+        if event is None or event.is_set():
+            action()
+            return False
+        threading.Thread(
+            target=self._run_child_action_after_ready,
+            args=(name, action, label, event, deadline_s, still_relevant),
+            name=f"ready-gate-{name}",
+            daemon=True,
+        ).start()
+        return True""",
+    )
+
+
+def rf12(text: str) -> str:
+    """B-5-1: forget_subscriber снова молчит детям — форвардер-сирота на каждом ребёнке."""
+    return text.replace(
+        "            self._fan_out(key, UNSUBSCRIBE_COMMAND, reason=REASON_COMMAND)\n",
+        "",
+    )
+
+
+def rf13(text: str) -> str:
+    """B-5-1: forget_session снова молчит детям — форвардеры мёртвой сессии живут."""
+    return text.replace(
+        """        for name in doomed:
+            self._fan_out(name, UNSUBSCRIBE_COMMAND, reason=REASON_COMMAND)""",
+        """        for name in []:  # RF13: снятие не рассылается детям
+            self._fan_out(name, UNSUBSCRIBE_COMMAND, reason=REASON_COMMAND)""",
+    )
+
+
+def rf14(text: str) -> str:
+    """Шов очереди: дренаж снова ждёт сигнал безусловно — действие с ``None`` теряется.
+
+    Очередь завела путь, которого до неё не существовало: действие без сигнала
+    готовности попадает в очередь (чтобы не обогнать её), а дренаж звал
+    ``event.wait`` на ``None`` — падал в ``except`` и ронял действие, оставив одну
+    строку в логе. Класс — «проглоченный сбой»: снаружи одна команда доехала,
+    вторая исчезла.
+    """
+    return text.replace(
+        "            ready = event is None\n            while not ready:",
+        "            ready = False  # RF14: дренаж снова ждёт сигнал безусловно\n            while not ready:",
+    )
+
+
 INJECTIONS = [
     ("RF1 поколения рассылки нет", PM, rf1),
     ("RF2 нет перепроверки после ожидания", PM, rf2),
@@ -148,6 +227,10 @@ INJECTIONS = [
     ("RF8 дорожка поколений снова по имени команды", PM, rf8),
     ("RF9 у пустого конверта нет своей дорожки", PM, rf9),
     ("RF10 частичное перекрытие считается полным", PM, rf10),
+    ("RF11 очередь-на-адресата снова поток-на-действие", PM, rf11),
+    ("RF12 forget_subscriber не рассылает снятие", BROKER, rf12),
+    ("RF13 forget_session не рассылает снятие", BROKER, rf13),
+    ("RF14 дренаж очереди ждёт сигнал безусловно", PM, rf14),
 ]
 
 # Прогноз ДО прогона.
@@ -157,7 +240,7 @@ EXPECTED: dict[str, set[str]] = {
     # проверка снятия к ним просто не применяется.
     "RF1 поколения рассылки нет": {
         "test_stale_envelope_is_dropped_when_a_newer_broadcast_follows",
-        "test_stale_waiter_stops_early_instead_of_burning_the_deadline",
+        "test_stale_item_is_dropped_early_instead_of_burning_the_deadline",
         "test_a_fresher_broadcast_of_another_command_does_not_cancel_this_one",
         "test_two_empty_envelopes_still_collapse_to_the_last_one",
         "test_two_switch_envelopes_still_collapse_to_the_last_one",
@@ -167,8 +250,15 @@ EXPECTED: dict[str, set[str]] = {
     # Дождавшийся поток везёт прошлое; ожидатель на МЁРТВОМ событии уходит по
     # проверке внутри цикла, поэтому два «стейл»-теста переживают. Умирают те,
     # где событие ВЗВОДИТСЯ и снятие может сработать только пост-проверкой.
+    # Правка ожидания 2026-08-02 (после B-5-1): из набора УБРАН
+    # `test_a_fresher_broadcast_of_another_command_does_not_cancel_this_one`.
+    # Причина проверена запуском, а не выведена: очередь-на-адресата сериализовала
+    # три рассылки ОДНОМУ ребёнку, и снятие стейла в этом сценарии теперь
+    # срабатывает уже проверкой ПРИ ИЗВЛЕЧЕНИИ из очереди — то есть две проверки
+    # стали взаимозаменяемы здесь. Тест не вакуумный: при снятии ОБЕИХ проверок он
+    # падает (замерено). Остальные четыре по-прежнему держатся именно на
+    # пост-проверке, поэтому она load-bearing и не удаляется.
     "RF2 нет перепроверки после ожидания": {
-        "test_a_fresher_broadcast_of_another_command_does_not_cancel_this_one",
         "test_two_empty_envelopes_still_collapse_to_the_last_one",
         "test_two_switch_envelopes_still_collapse_to_the_last_one",
         "test_a_covering_envelope_cancels_the_bare_pending_one",
@@ -184,6 +274,8 @@ EXPECTED: dict[str, set[str]] = {
         "test_session_close_drops_exactly_that_subscriber",
         "test_reconnect_cycles_do_not_accumulate_intents",
         "test_dead_subscriber_is_not_replayed_to_fresh_incarnations",
+        # B-5-1: раз doomed пуст (ранний return []), фан-аут снятия детям не идёт.
+        "test_forget_session_fans_out_unsubscribe_for_each_doomed_address",
     },
     # Тесты канала с isolation=True переживают — их привязка работает; умирает
     # ровно тот, что проверяет ДЕФОЛТНЫЙ режим (дыра, найденная живым прогоном).
@@ -209,6 +301,27 @@ EXPECTED: dict[str, set[str]] = {
     # `all` вместо `any`: конверт, перекрытый по ОДНОМУ ключу, снимается целиком.
     "RF10 частичное перекрытие считается полным": {
         "test_a_partial_envelope_does_not_cancel_the_richer_pending_one",
+    },
+    # B-5-1: возврат к потоку-на-действие. Детерминированно умирает тест «один
+    # адресат — один воркер» (5 потоков вместо 1); тесты порядка умирают по гонке
+    # (30/20 раундов, P выживания ~10⁻¹¹). ФР-1 collapse-тесты переживают: снятие
+    # по поколению работает и в отдельном потоке (модель ДО B-5-1 такой и была).
+    "RF14 дренаж очереди ждёт сигнал безусловно": {
+        "test_action_queued_while_busy_survives_a_vanished_ready_event",
+    },
+    "RF11 очередь-на-адресата снова поток-на-действие": {
+        "test_subscribe_then_unsubscribe_arrive_in_that_order",
+        "test_any_two_commands_to_one_child_keep_enqueue_order",
+        "test_one_worker_per_addressee_not_one_per_envelope",
+        # Шов самой очереди: без неё действие с `event is None` уходит синхронно и
+        # в очередь не попадает вовсе — страж этого пути обязан умирать вместе с ней.
+        "test_action_queued_while_busy_survives_a_vanished_ready_event",
+    },
+    "RF12 forget_subscriber не рассылает снятие": {
+        "test_forget_subscriber_fans_out_unsubscribe_to_children",
+    },
+    "RF13 forget_session не рассылает снятие": {
+        "test_forget_session_fans_out_unsubscribe_for_each_doomed_address",
     },
 }
 
