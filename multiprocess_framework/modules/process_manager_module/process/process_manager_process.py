@@ -272,12 +272,22 @@ class ProcessManagerProcess(ProcessModule):
             # навсегда) + WARNING со списком не-ready.
             self._wait_boot_ready()
 
-            # Сигнализируем SystemLauncher, что инициализация завершена (ADR-116).
-            # К этому моменту: все дочерние процессы spawned, started и (Ф3.2)
-            # сообщили о готовности либо истёк boot_ready_timeout_s.
+            # Готовность оркестратора для SystemLauncher (ADR-116) объявляется ТЕМ ЖЕ
+            # примитивом, что и у детей: _announce_ready() ПОСЛЕДНЕЙ строкой run() —
+            # там, где BuiltinCommands (introspect.capabilities/status, router.relay)
+            # уже зарегистрированы. B-1-1 сквозного ревью Ф5: раньше внешний сигнал
+            # взводился ЗДЕСЬ, в конце initialize(), тогда как эти команды
+            # регистрируются позже, в ProcessModule.run() (шаг после initialize).
+            # Наблюдатель (launcher/harness), доверившись раннему сигналу, слал
+            # introspect.capabilities в окно без обработчика («No handler for key
+            # 'introspect.capabilities'» в живом логе boot) и получал ok=False —
+            # окно длиной со спавн детей и boot-барьер (до 5с). Один механизм
+            # готовности на все процессы, включая оркестратор: событие ПЕРЕДаётся
+            # через тот же attach_ready_event, что у детей, а взводит его сам PM в
+            # точке, где действительно умеет отвечать. Ранний .set() здесь снят.
             if self._system_ready_event is not None:
-                self._system_ready_event.set()
-                self._log_info("system_ready_event выставлен — система готова")
+                self.attach_ready_event(self._system_ready_event)
+                self._log_info("готовность будет объявлена в конце run() — после регистрации команд PM")
 
             return True
         except Exception as exc:
@@ -3309,8 +3319,10 @@ class ProcessManagerProcess(ProcessModule):
     def _wait_boot_ready(self) -> None:
         """Ф3.2: boot-барьер — дождаться ready всех стартованных на boot детей.
 
-        Вызывается в ``initialize()`` PM (initialize-поток, НЕ message_processor)
-        ПЕРЕД ``_system_ready_event.set()``. Ждёт до ``boot_ready_timeout_s``
+        Вызывается в ``initialize()`` PM (initialize-поток, НЕ message_processor),
+        ПЕРЕД тем как готовность будет объявлена в конце ``run()`` (B-1-1: сигнал
+        ``system_ready_event`` взводит сам PM через ``_announce_ready``, а не эта
+        фаза). Ждёт до ``boot_ready_timeout_s``
         (дефолт 5.0с; 0 → барьер выключен). По таймауту система стартует ВСЁ
         РАВНО (boot не блокировать навсегда) — не-ready логируются WARNING'ом.
         Медленный ребёнок (ML-веса) не ломает boot: liveness-фолбэк → ready.
