@@ -11,6 +11,7 @@ from multiprocess_framework.modules.process_module.configs import (
     ObservabilityConfig,
     expand_observability,
 )
+from multiprocess_framework.modules.process_module.configs.managers_config import merge_managers
 from multiprocess_framework.modules.logger_module.configs.logger_manager_config import (
     LoggerManagerConfig,
 )
@@ -147,3 +148,48 @@ class TestBufferCeilingIsOperable:
         result = expand_observability({"batch_max_pending": 7})
         assert LoggerManagerConfig(**result["logger"]).batch_max_pending == 7
         assert ErrorManagerConfig(**result["error"]).batch_max_pending == 7
+
+
+class TestMachineContextIsOverriddenOnlyByAnExplicitKey:
+    """A-A4-2 (корзина 2 п.7): частичный слой не имеет права затирать env-уровень.
+
+    Правило ADR-PM-020 — «молчание слоёв означает „решает нижний“» — было
+    реализовано для секции ЦЕЛИКОМ (`layers_are_silent`) и для одного ключа
+    (`log_directory` эмитится только явный), но не для `log_level`: expand
+    материализовал дефолт L0 `INFO` ВСЕГДА. Достаточно было одного ключа
+    `channels.*` в любом слое, чтобы уровень из `INSPECTOR_LOG_LEVEL` молча
+    вернулся к дефолту. Здесь то же правило доводится до уровня ключа.
+    """
+
+    def test_absent_log_level_is_not_emitted(self) -> None:
+        """Симметрия с `log_directory`: не задано → downstream-дефолт, а не L0 поверх."""
+        out = expand_observability({"channels": {"messages_file": {"enabled": False}}})
+        assert "default_level" not in out["logger"], out["logger"]
+
+    def test_explicit_log_level_is_emitted(self) -> None:
+        """Контроль: явный ключ по-прежнему доезжает — иначе слой перестал бы работать."""
+        out = expand_observability({"log_level": "WARNING"})
+        assert out["logger"]["default_level"] == "WARNING"
+
+    def test_explicit_level_equal_to_the_l0_default_still_counts(self) -> None:
+        """«Задано явно» и «не задано» различимы, даже когда значение совпало с дефолтом.
+
+        Слить их — значит потерять намерение оператора, записавшего INFO руками
+        поверх DEBUG из окружения (то же основание, что в ограничении ADR-PM-020).
+        """
+        out = expand_observability({"log_level": "INFO"})
+        assert out["logger"]["default_level"] == "INFO"
+
+    def test_partial_layer_does_not_clobber_the_env_level_in_the_merge(self) -> None:
+        """Репро R7 ревьюера на продакшн-форме: overlay поверх базы из окружения."""
+        base = {"logger": {"default_level": "DEBUG", "log_directory": "X:/logs"}}
+        overlay = expand_observability({"channels": {"messages_file": {"enabled": False}}})
+        merged = merge_managers(base, {"logger": overlay["logger"]})
+        assert merged["logger"]["default_level"] == "DEBUG", "частичный слой вернул уровень окружения к дефолту L0"
+
+    def test_an_explicit_level_in_the_layer_does_override_the_env(self) -> None:
+        """Пара к предыдущему: слой, который ДЕЙСТВИТЕЛЬНО задаёт уровень, обязан победить."""
+        base = {"logger": {"default_level": "DEBUG", "log_directory": "X:/logs"}}
+        overlay = expand_observability({"log_level": "ERROR"})
+        merged = merge_managers(base, {"logger": overlay["logger"]})
+        assert merged["logger"]["default_level"] == "ERROR"

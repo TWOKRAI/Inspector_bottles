@@ -218,7 +218,6 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 
     logger: Dict[str, Any] = {
-        "default_level": cfg.log_level,
         "enable_batching": cfg.enable_batching,
         "batch_max_pending": cfg.batch_max_pending,
         "batch_overflow_policy": cfg.batch_overflow_policy,
@@ -234,6 +233,18 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     # «не задано → использовать downstream-дефолт».
     if cfg.log_directory is not None:
         logger["log_directory"] = cfg.log_directory
+    # default_level — ТО ЖЕ ПРАВИЛО, доведённое до уровня ключа (A-A4-2 ревью Ф5).
+    # ADR-PM-020 объявил «молчание слоёв означает „решает нижний“», но проверял
+    # молчание СЕКЦИИ целиком: достаточно было одного ключа `channels.*` в любом
+    # слое, чтобы секция перестала быть молчащей — и материализованный дефолт L0
+    # `INFO` лёг поверх уровня из `INSPECTOR_LOG_LEVEL`, который к этому моменту
+    # уже стоял в базе (`managers_from_log_dir`). Машинный контекст переопределяется
+    # только ЯВНЫМ ключом, и «явно» здесь не выводится из значения: у уровня нет
+    # свободного `None`, как у каталога, поэтому спрашиваем Pydantic, приезжал ли
+    # ключ вообще. Значение, совпавшее с дефолтом L0, остаётся явным — намерение
+    # оператора, написавшего INFO поверх DEBUG, не то же самое, что молчание.
+    if "log_level" in cfg.model_fields_set:
+        logger["default_level"] = cfg.log_level
     # Тогглы применяем только если что-то выключено — иначе LoggerManagerConfig
     # сам подставит дефолтные каналы (идентичный результат, меньше связности).
     if not (cfg.console and cfg.file):
