@@ -429,8 +429,10 @@ class ObservabilityLayers:
 
         Raises:
             ValueError: отрицательный или нечисловой ``ttl`` — громкий отказ
-                вместо тихого «значит, навсегда».
+                вместо тихого «значит, навсегда»; ЛИБО путь ведёт ВНУТРЬ
+                непрозрачного листа (R3b, см. :func:`_reject_path_inside_opaque`).
         """
+        _reject_path_inside_opaque(path)
         with self._lock:
             seconds = self.effective_session_ttl() if ttl is None else validate_ttl(ttl)
             node = self.session
@@ -633,14 +635,22 @@ class ObservabilityLayers:
         воспользовался бы кто-то ещё.
         """
         with self._lock:
+            node = self._node_at(path)
             # Task 5.10.g: непрозрачный путь — сам себе лист, и перечислять его
             # содержимое нельзя: имена внутри (паттерны троттла) содержат точки,
             # и отчёт назвал бы ключи, которых в namespace не существует.
-            if path in OPAQUE_LAYER_PATHS:
+            #
+            # A-A1-2 (воскрешение 5.10.g на развилке сброса РОДИТЕЛЯ): flatten
+            # получает ПОЛНЫЙ префикс пути — иначе, спускаясь от `telemetry` к
+            # `telemetry.throttle`, он не узнавал бы непрозрачный лист по его
+            # абсолютному имени и разрезал бы паттерны с точками на несуществующие
+            # ключи (`telemetry.throttle.processes.**.state.fps`). С префиксом лист
+            # виден как один атомарный ключ на ЛЮБОЙ глубине сброса.
+            if path in OPAQUE_LAYER_PATHS or not node:
                 leaves: tuple = ()
             else:
-                leaves = tuple(sorted(flatten_section(self._node_at(path)).keys())) if self._node_at(path) else ()
-            removed = tuple(f"{path}.{leaf}" for leaf in leaves) if leaves else (path,)
+                leaves = tuple(sorted(flatten_section(node, prefix=f"{path}.").keys()))
+            removed = leaves if leaves else (path,)
             # Сроки снимаем ВСЕГДА и со всей ветки, даже если ключа уже не было:
             # иначе срок переживёт свой ключ и всплывёт в readback'е как срок у
             # правки, которой нет.
@@ -1002,6 +1012,31 @@ def _default_session_ttl() -> float:
 
         _DEFAULT_TTL_CACHE = float(ObservabilityConfig().session_ttl_sec)
     return _DEFAULT_TTL_CACHE
+
+
+def _reject_path_inside_opaque(path: str) -> None:
+    """Запрет на дотированный путь ВНУТРЬ непрозрачного листа (R3b, A-A1-2).
+
+    Непрозрачный лист (``telemetry.throttle``) хранит правила ПЛОСКИМ словарём, где
+    имена-паттерны сами содержат точки. Путь вида
+    ``telemetry.throttle.processes.**.state.fps``, разрезанный :meth:`session_set`
+    по точкам, завёл бы в слое вложенное дерево РЯДОМ с настоящим правилом — ровно
+    тот дефект, ради которого лист и объявлен непрозрачным
+    (:data:`OPAQUE_LAYER_PATHS`). Владеть таким листом можно ТОЛЬКО целиком:
+    ``session_set("telemetry.throttle", {...})``.
+
+    Production-вызывающих такого пути нет (операторские команды кладут дельту
+    троттла листом целиком), но грабля латентна — закрываем громким отказом на
+    входе, а не тихой порчей структуры слоя. Строгое ``startswith(opaque + ".")``:
+    сам путь ``telemetry.throttle`` разрешён (владение листом), запрещён только
+    спуск ГЛУБЖЕ него.
+    """
+    for opaque in OPAQUE_LAYER_PATHS:
+        if path.startswith(f"{opaque}."):
+            raise ValueError(
+                f"путь {path!r} ведёт ВНУТРЬ непрозрачного листа {opaque!r}: "
+                f"владеть им можно только целиком — session_set({opaque!r}, {{...}})"
+            )
 
 
 def _channel_toggle(channel_type: str) -> str:
