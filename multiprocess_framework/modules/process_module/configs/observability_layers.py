@@ -453,6 +453,7 @@ class ObservabilityLayers:
                     node[part] = child
                 node = child
             node[parts[-1]] = value
+            orphans = self._forget_expiry_of_replaced(path)
             # Срок ПЕРЕУСТАНАВЛИВАЕТСЯ каждой записью, включая бессрочную: иначе
             # повторная правка того же ключа наследовала бы дедлайн прошлой и
             # возвращалась раньше, чем оператор просил в последний раз.
@@ -464,8 +465,58 @@ class ObservabilityLayers:
                 left = None
         # Запись — ВНЕ лока стека: она кладёт строку в журнал, а держать лок
         # слоёв на время файлового I/O значило бы дать пересборке ждать диска.
-        self.audit.record(ACTION_SET, origin=origin, key=path, value=value, ttl_sec=left)
+        self.audit.record(
+            ACTION_SET,
+            origin=origin,
+            key=path,
+            value=value,
+            ttl_sec=left,
+            # Снятое ЭТОЙ записью названо в ТОЙ ЖЕ записи: снятие и постановка —
+            # один факт для читателя, разносить их значило бы заставить его
+            # сшивать журнал по времени (то же решение, что в `session_touch`).
+            removed=list(orphans) or None,
+        )
         return left
+
+    def _forget_expiry_of_replaced(self, path: str) -> Tuple[str, ...]:
+        """Снять сроки, которые запись по ``path`` сделала беспредметными (корзина 2.2).
+
+        Два вида, и оба — про ЧУЖУЮ правку, а не про свою:
+
+        * **Предки.** Срок на ``channels`` ставила команда, писавшая туда своё
+          значение (например ``{}`` — владение пустотой по правилу Г3). Запись в
+          ``channels.messages_file.enabled`` это значение ЗАМЕНИЛА, и прежний срок
+          теперь накрывает содержимое, которого его автор не писал. Найдено
+          независимым ревью корзины 2.1 и воспроизведено: правка, объявленная
+          оператором БЕССРОЧНОЙ (``ttl=0``, ответ ``ttl_sec: None``), сносилась
+          подметальщиком по чужому дедлайну, а аудит записывал это штатным
+          авто-возвратом. Принцип «срок ставится ключам ЭТОЙ правки» (Task 5.8)
+          симметричен: чужая правка не имеет права и УБИВАТЬ ключ.
+        * **Потомки, переставшие существовать.** Запись листа поверх ветки
+          (``scopes`` ← скаляр/``{}``) уносит ключи под ней; их сроки иначе
+          пережили бы свои ключи и всплыли бы в readback'е.
+
+        Потомок, который ПОСЛЕ записи всё ещё лист сессии, свой срок сохраняет:
+        ``session_set("scopes", {"DEBUG": …})`` не отменяет собственный дедлайн
+        ``scopes.DEBUG.enabled`` — ключ на месте, и обещание про него честно.
+
+        Returns:
+            Снятые ключи, отсортированные (для записи в аудит).
+        """
+        leaves = set(flatten_section(self.session).keys())
+        doomed = set()
+        parts = path.split(".")
+        for depth in range(1, len(parts)):
+            ancestor = ".".join(parts[:depth])
+            if ancestor in self.session_expiry:
+                doomed.add(ancestor)
+        prefix = f"{path}."
+        for key in self.session_expiry:
+            if key.startswith(prefix) and key not in leaves:
+                doomed.add(key)
+        for key in doomed:
+            self.session_expiry.pop(key, None)
+        return tuple(sorted(doomed))
 
     def session_touch(
         self,
@@ -1062,6 +1113,25 @@ def _channel_toggle(channel_type: str) -> str:
     return ""
 
 
+def _is_layer_leaf(value: Any, path: str) -> bool:
+    """Лист ли это для бухгалтерии слоёв — ОДНО определение на все обходы дерева.
+
+    Листом считается всё, во что спускаться нельзя или незачем: не-словарь,
+    пустой словарь (``{}`` — владение пустотой, правило Г3) и любой путь из
+    :data:`OPAQUE_LAYER_PATHS`, каким бы ни было его содержимое.
+
+    Заведено корзиной 2.2 по замечанию независимого ревью: тот же предикат стоял
+    БУКВА В БУКВУ в трёх обходах (:func:`flatten_section`, :func:`layer_merge`,
+    :func:`_overlay_owner`), и расхождение между ними — вопрос времени, а не
+    вероятности. Расхождение ровно этого рода уже стреляло дважды: resolve против
+    provenance (A-A4-1) и мерж против плющения (находка Ф-3). Второй непрозрачный
+    путь — а константа объявлена ``frozenset``, то есть он предусмотрен — был бы
+    третьим случаем. Обходы остаются РАЗНЫМИ (они строят разные результаты:
+    слитый dict, плоскую карту, дерево владельцев), общим стало решение.
+    """
+    return not (isinstance(value, dict) and value and path not in OPAQUE_LAYER_PATHS)
+
+
 def flatten_section(section: Any, prefix: str = "") -> Dict[str, Any]:
     """Вложенный dict → ``{"a.b.c": значение}`` по листьям.
 
@@ -1076,10 +1146,10 @@ def flatten_section(section: Any, prefix: str = "") -> Dict[str, Any]:
         return out
     for key, value in section.items():
         path = f"{prefix}{key}"
-        if isinstance(value, dict) and value and path not in OPAQUE_LAYER_PATHS:
-            out.update(flatten_section(value, prefix=f"{path}."))
-        else:
+        if _is_layer_leaf(value, path):
             out[path] = value
+        else:
+            out.update(flatten_section(value, prefix=f"{path}."))
     return out
 
 
@@ -1120,17 +1190,24 @@ def layer_merge(
     владельцем листа целиком. Два ответа об одном ключе, снова расходящиеся.
 
     Args:
-        prefix: путь до ``base``/``overlay`` в дереве секции (``"telemetry."`` и
-            т.п.). Нужен только для сверки с :data:`OPAQUE_LAYER_PATHS`; все
-            сегодняшние вызывающие мержат от корня секции и его не передают.
+        prefix: путь до ``base``/``overlay`` в дереве секции. Нужен только для
+            сверки с :data:`OPAQUE_LAYER_PATHS`. Мержащие от КОРНЯ секции его не
+            передают; единственный вызывающий, который передаёт, —
+            ``_apply_telemetry_from_layers`` (``"telemetry.publish."``), и под этим
+            префиксом сверка холостая: непрозрачных путей внутри ``publish`` нет
+            по построению — их имена не содержат точек, ради чего разведение с
+            ``throttle`` и заводилось. Передаётся он там не «на всякий случай», а
+            чтобы вложенный мерж не начал считать пути от чужого корня, если
+            непрозрачный путь под ``publish`` когда-нибудь появится.
+            *(Ревью корзины 2.1: здесь стояло «все сегодняшние вызывающие его не
+            передают» — утверждение опровергал тот же коммит.)*
     """
     result = copy.deepcopy(base)
     if not overlay:
         return result
     for key, value in overlay.items():
         path = f"{prefix}{key}"
-        recurse = isinstance(value, dict) and value and path not in OPAQUE_LAYER_PATHS
-        if recurse and isinstance(result.get(key), dict):
+        if not _is_layer_leaf(value, path) and isinstance(result.get(key), dict):
             result[key] = layer_merge(result[key], value, prefix=f"{path}.")
         else:
             result[key] = copy.deepcopy(value)
@@ -1154,14 +1231,14 @@ def _overlay_owner(
         return
     for key, value in section.items():
         path = f"{prefix}{key}"
-        if isinstance(value, dict) and value and path not in OPAQUE_LAYER_PATHS:
+        if _is_layer_leaf(value, path):
+            tree[key] = owner  # лист владеет: заменяет поддерево нижнего слоя
+        else:
             node = tree.get(key)
             if not isinstance(node, dict):
                 node = {}
                 tree[key] = node
             _overlay_owner(node, value, owner, prefix=f"{path}.")
-        else:
-            tree[key] = owner  # лист владеет: заменяет поддерево нижнего слоя
 
 
 def _flatten_owner_tree(tree: Dict[str, Any], prefix: str = "") -> Dict[str, Tuple[str, str]]:

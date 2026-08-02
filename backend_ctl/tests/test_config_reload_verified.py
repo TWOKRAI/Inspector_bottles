@@ -229,18 +229,42 @@ class TestNoShowingIsNotZero:
     def test_total_losses_going_backwards_is_a_reset_even_without_a_named_plane(self) -> None:
         """Пояс к per-plane признаку: суммарные потери НАЗАД — тоже сдвиг базы.
 
-        Плоскость может исчезнуть из снимка не целиком, а лишь потерять секцию
-        потерь — тогда виновника поимённо не назвать, а сумма всё равно уехала
-        вниз. Без пояса `losing` считался бы «не теряем», то есть отсутствие
+        Вход подобран так, что `_reset_planes` ОБЯЗАН промолчать: плоскость с
+        одними потерями (без счётчика доставки) исчезает из второго снимка —
+        сравнивать ей нечего, виновника поимённо не назвать. Сумма при этом уехала
+        вниз, и без пояса ответ читался бы как «не теряем», то есть отсутствие
         данных выдавалось бы за благополучие.
+
+        Первая редакция этого теста была ВАКУУМНОЙ (найдено независимым ревью,
+        воспроизведено снятием пояса — тест оставался зелёным): её вход давал
+        `reset_planes == ['logger']`, то есть срабатывал соседний per-plane
+        признак, а пояс не проверялся вовсе. Отсюда `assert reset_planes == []`
+        ниже — он и делает проверку про пояс, а не про соседа.
         """
         w = delivery_window(
-            {"logger": _plane(10, channel_refused_records=50)},
+            {"logger": _plane(10), "stats": {"observed_at": 100.0, "channel_refused_records": 50}},
             {"logger": _plane(20, at=101.0)},
         )
+        assert w.reset_planes == [], "вход не тот: сработал per-plane признак, пояс снова не проверяется"
         assert w.loss_delta < 0, "контроль: сумма потерь действительно уехала назад"
         assert w.counters_reset is True
         assert (w.delivering, w.losing, w.silent_source) == (False, False, False)
+
+    def test_losses_are_reported_even_without_a_delivery_counter(self) -> None:
+        """Ранняя ветка больше не выдумывает нули: потери видны и без счётчика доставки.
+
+        Ревью корзины 2.2: `loss_delta=0`, `losses={}` возвращались рядом с честным
+        `missing`, который называет ТОЛЬКО счётчики доставки. На входе «потери
+        5 → 99, счётчика доставки нет» ответ читался как «ничего не теряем».
+        """
+        w = delivery_window(
+            {"logger": {"observed_at": 100.0, "channel_refused_records": 5}},
+            {"logger": {"observed_at": 101.0, "channel_refused_records": 99}},
+        )
+        assert w.missing, "контроль: ветка та самая — суммарного счётчика доставки нет"
+        assert w.loss_delta == 94, f"потери не посчитаны: {w.loss_delta}"
+        assert w.losses == {"logger": {"channel_refused_records": 94}}
+        assert w.losing is True, "потери есть, а вердикт молчит"
 
     def test_self_cost_larger_than_the_whole_window_is_not_silence(self) -> None:
         """C-2-1: чужой писатель в зазоре after→control съедает вычетом чужую работу.

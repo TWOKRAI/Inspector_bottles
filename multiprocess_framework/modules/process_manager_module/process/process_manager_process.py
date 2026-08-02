@@ -1282,15 +1282,32 @@ class ProcessManagerProcess(ProcessModule):
         процесс не создавался), а НЕ «не готов»: потребители гейта в этом случае
         действуют немедленно — прежнее поведение хуже, чем с сигналом, но лучше,
         чем не действовать вовсе.
+
+        Отказ реестра логируется ОДИН РАЗ на имя, а не на каждое чтение (ревью
+        корзины 2.1). До корзины 2.1 реестр читался один раз на действие, и
+        отдельной ручки не требовалось; теперь его перечитывает ожидающий воркер
+        каждые 0.25с, и при недоступном реестре одно действие с дедлайном 30с дало
+        бы ~120 одинаковых строк — а очередь адресата умножила бы это на число
+        досылок. Диагностика, глушащая собственный журнал, — тот же класс, что
+        инцидент 645 МБ, ради которого затевалась фаза. Флага «уже писали» хватает:
+        удачное чтение его снимает, поэтому мигающий реестр снова будет слышен.
         """
         get_ready_event = getattr(self._process_registry, "get_ready_event", None)
         if not callable(get_ready_event):
             return None
+        muted = getattr(self, "_ready_event_read_failed", None)
+        if muted is None:
+            muted = set()
+            self._ready_event_read_failed = muted
         try:
-            return get_ready_event(name)
+            event = get_ready_event(name)
         except Exception as exc:  # noqa: BLE001 — отсутствие сигнала не повод падать
-            self._log_error(f"[ready-gate] ready_event '{name}' не прочитан: {exc}")
+            if name not in muted:
+                muted.add(name)
+                self._log_error(f"[ready-gate] ready_event '{name}' не прочитан: {exc} (дальше молча)")
             return None
+        muted.discard(name)
+        return event
 
     @property
     def _child_action_pipelines(self) -> dict:

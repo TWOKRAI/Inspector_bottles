@@ -316,6 +316,60 @@ class TestOwnershipOfTheInlineDelta:
         assert layers.resolve()["log_level"] == "ERROR"
 
 
+class TestDeadlineOfAnotherEditDoesNotKillMine:
+    """Корзина 2.2: бухгалтерия сроков переехала В СЛОЙ, потому что писателей четыре.
+
+    Правило Г3 сделало «владеть пустотой» штатным действием оператора, и сразу
+    открылась пара: команда A ставит `channels: {}` со сроком, команда B пишет в
+    ту же ветку СВОЙ ключ и объявляет его БЕССРОЧНЫМ (`ttl=0`) — а подметальщик
+    сносит его по сроку команды A и записывает это штатным авто-возвратом.
+    Найдено независимым ревью корзины 2.1, воспроизведено на продакшн-командах.
+
+    Принцип Task 5.8 «срок ставится ключам ЭТОЙ правки» симметричен: чужая правка
+    не имеет права и УБИВАТЬ ключ. Поэтому снятие живёт не в обработчике команды
+    (их четыре, и следующий забудет), а в `ObservabilityLayers.session_set`.
+    """
+
+    def test_a_branch_deadline_does_not_outlive_the_value_it_was_set_on(self, wired) -> None:
+        svc, handlers, _recipe = wired
+        handlers["config.reload"]({"observability": {"channels": {}}, "ttl": 600})
+        layers = process_observability_layers(svc)
+        assert layers.session_ttl_view() == {"channels": 600.0}, "контроль: срок на ветке поставлен"
+
+        # Другая продакшн-команда правит ТУ ЖЕ ветку и объявляет правку бессрочной.
+        res = handlers["logger.sink.disable"]({"sink": "messages_file", "ttl": 0})
+        assert res.get("success") is not False, f"команда снятия приёмника отказала: {res}"
+
+        assert layers.session_ttl_view() == {}, (
+            f"бессрочная правка осталась под чужим сроком: {layers.session_ttl_view()}"
+        )
+        assert "channels.messages_file.enabled" in layers.session_keys()
+
+    def test_a_leaf_keeps_its_own_deadline_when_the_branch_is_rewritten(self) -> None:
+        """Контроль: снимается ЧУЖОЙ срок, а не всякий. Свой ключ остаётся со своим."""
+        layers = ObservabilityLayers()
+        layers.session_set("scopes.DEBUG.enabled", True, 600, origin="op")
+        layers.session_set("scopes", {"DEBUG": {"enabled": True}}, 10, origin="op")
+        assert layers.session_ttl_view() == {"scopes": 10.0, "scopes.DEBUG.enabled": 600.0}, (
+            "срок листа снят, хотя сам лист на месте — снятие слишком широкое"
+        )
+
+    def test_a_leaf_written_over_a_branch_takes_its_orphans_along(self) -> None:
+        """Лист поверх ветки уносит ключи под ней — их сроки обязаны уйти следом."""
+        layers = ObservabilityLayers()
+        layers.session_set("scopes.DEBUG.enabled", True, 600, origin="op")
+        layers.session_set("scopes", {}, 10, origin="op")
+        assert layers.session_ttl_view() == {"scopes": 10.0}, f"срок пережил свой ключ: {layers.session_ttl_view()}"
+
+    def test_the_removal_is_named_in_the_audit(self) -> None:
+        """Снятое названо в ТОЙ ЖЕ записи: путь, меняющий состояние без следа, запрещён."""
+        layers = ObservabilityLayers()
+        layers.session_set("channels", {}, 600, origin="op")
+        layers.session_set("channels.messages_file.enabled", False, 0, origin="op2")
+        sets = [e for e in layers.audit.entries() if e.get("action") == "set"]
+        assert sets[-1].get("removed") == ["channels"], f"снятый чужой срок не назван: {sets[-1]}"
+
+
 class _CaptureHeartbeat:
     """Ловит `reconfigure_telemetry(section, mode=...)` — что уехало получателю."""
 
@@ -354,6 +408,41 @@ class TestOwnershipOverTelemetryBoot:
         hb = _CaptureHeartbeat()
         self._apply(layers, hb)
         assert _publish_sent(hb)["metrics"] == {}, f"метрика boot выжила: {_publish_sent(hb)}"
+
+    def test_empty_throttle_delta_is_not_ownership_and_that_is_deliberate(self) -> None:
+        """Асимметрия с `publish` ЗАКРЕПЛЕНА как решение, а не оставлена случайной.
+
+        `publish: {}` — владение (метрики boot сняты), `throttle: {}` — «дельта
+        пуста», загрузочные правила остаются. Природа значений разная: секция ↔
+        дельта со своим маркером снятия. Названо ревью корзины 2.2; если кто-то
+        решит выровнять — пусть сначала уронит этот тест и объяснит, что стало со
+        сроком (истёкшая дельта обязана возвращать boot-правила).
+        """
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            _apply_throttle_from_layers,
+        )
+
+        class _Store:
+            def __init__(self) -> None:
+                self.rules: Any = None
+
+            def set_rules(self, rules) -> None:
+                self.rules = dict(rules)
+
+        boot = {"processes.**.state.fps": 1.0}
+        store = _Store()
+        layers = ObservabilityLayers()
+        _apply_throttle_from_layers(
+            {"throttle": {}},
+            layers=layers,
+            boot_rules=boot,
+            store_throttle=store,
+            log_info=None,
+        )
+        assert store.rules == boot, (
+            f"пустая ДЕЛЬТА троттла снесла загрузочные правила: {store.rules} — "
+            "семантика срока сломана (истёкшая дельта обязана возвращать boot)"
+        )
 
     def test_non_empty_publish_still_merges_over_boot(self) -> None:
         """Контроль: непустая правка по-прежнему ложится ПОВЕРХ boot, не заменяя его."""

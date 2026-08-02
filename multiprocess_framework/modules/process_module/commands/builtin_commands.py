@@ -1688,12 +1688,20 @@ class BuiltinCommands:
         не просил снять свою же дельту троттла.
         """
         from ...data_schema_module import deep_merge
-        from ..configs.observability_layers import LAYER_APP, TELEMETRY_KEY, flatten_section
+        from ..configs.observability_layers import LAYER_APP, TELEMETRY_KEY, flatten_section, layer_merge
 
         if source != "inline":
+            # Шов седьмой (найден независимым ревью корзины 2.1). Здесь СВЕЖИЙ файл
+            # ложится на действующий слой L1 — то же отношение «новее поверх
+            # старше», что и между этажами, значит и правило Г3 то же. С каноном
+            # `publish: {}` из файла не владел, и одно и то же значение вело себя
+            # по-разному в зависимости от двери: через `config.reload` inline —
+            # владело, через файл — нет. Накопления при этом нет только когда рядом
+            # приехала секция `observability` (её `replace_layer` идёт выше); файл
+            # с одной лишь секцией `telemetry` шёл сюда поверх прежнего L1.
             layers.replace_layer(
                 LAYER_APP,
-                deep_merge(layers.app or {}, {TELEMETRY_KEY: section}),
+                layer_merge(layers.app or {}, {TELEMETRY_KEY: section}),
                 source=source,
                 origin=origin,
             )

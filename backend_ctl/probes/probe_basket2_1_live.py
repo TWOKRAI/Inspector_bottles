@@ -79,7 +79,17 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
+#: Сколько проверок обязано ИСПОЛНИТЬСЯ. Зонд, у которого сценарии вышли рано,
+#: печатал бы «все пройдены» с нулём доказательств — ревью корзины 2.1 поймало
+#: это на арифметике: в исходнике 16 вызовов `check`, а отчёт называл 14 (число
+#: механически перенесли из зонда корзины 2). Расхождение с этим числом — FAIL
+#: сам по себе, даже когда всё исполненное зелено.
+EXPECTED_CHECKS = 16
+EXECUTED: list[str] = []
+
+
 def check(ok: bool, title: str, evidence: str) -> None:
+    EXECUTED.append(title)
     log(f"  [{'PASS' if ok else 'FAIL'}] {title}\n         {evidence}")
     if not ok:
         FAILURES.append(f"{title}: {evidence}")
@@ -348,12 +358,18 @@ def main(argv: list[str] | None = None) -> int:
     log("\n" + "=" * 70)
     for line in SKIPPED:
         log(f"  [SKIP] {line}")
+    passed = len(EXECUTED) - len(FAILURES)
+    log(f"  исполнено проверок: {len(EXECUTED)} из {EXPECTED_CHECKS} ожидаемых; пройдено {passed}")
+    shortfall = EXPECTED_CHECKS - len(EXECUTED)
+    if shortfall and not SKIPPED:
+        log(f"\nЖИВАЯ ПРИЁМКА КОРЗИНЫ 2.1: ПРОВАЛ — {shortfall} проверок не исполнились и не объявлены SKIP")
+        return 1
     if FAILURES:
-        log(f"\nЖИВАЯ ПРИЁМКА КОРЗИНЫ 2.1: ПРОВАЛ — {len(FAILURES)} проверок")
+        log(f"\nЖИВАЯ ПРИЁМКА КОРЗИНЫ 2.1: ПРОВАЛ — {len(FAILURES)} из {len(EXECUTED)} проверок")
         for f in FAILURES:
             log(f"  - {f}")
         return 1
-    log("\nЖИВАЯ ПРИЁМКА КОРЗИНЫ 2.1: ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ")
+    log(f"\nЖИВАЯ ПРИЁМКА КОРЗИНЫ 2.1: ПРОЙДЕНО {passed}/{len(EXECUTED)}")
     return 0
 
 

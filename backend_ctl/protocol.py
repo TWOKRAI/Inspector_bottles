@@ -640,44 +640,19 @@ def delivery_window(before: Any, after: Any, *, control: Any = None) -> Delivery
             self_cost = max(0, written_control - written_after)
 
     reset_planes = _reset_planes(before, after)
-
-    if written_before is None or written_after is None:
-        return DeliveryWindow(
-            delivering=False,
-            silent_source=False,
-            losing=False,
-            written_delta=0,
-            self_cost=self_cost,
-            written_net=0,
-            loss_delta=0,
-            # Ревью корзины 2 (Ф-4): здесь стояло жёсткое `False` рядом с
-            # непустым `reset_planes` — два поля одного ответа противоречили друг
-            # другу, и читатель, спрашивающий «база уезжала?», получал «нет» при
-            # уехавшей базе. Отсутствие СУММАРНОГО счётчика не отменяет того, что
-            # по конкретной плоскости перезапуск виден.
-            counters_reset=bool(reset_planes),
-            window_sec=_window_seconds(before, after),
-            by_channel={},
-            losses={},
-            missing=missing,
-            reset_planes=reset_planes,
-        )
-
-    written_delta = written_after - written_before
+    # Потери и разбивка по приёмникам НЕ зависят от счётчика доставки, поэтому
+    # считаются ДО развилки «показаний нет» и одним кодом на обе ветки. Ревью
+    # корзины 2.2: прежде ранняя ветка отдавала `loss_delta=0`, `losses={}` —
+    # выдуманные нули рядом с честным `missing`, который называл только счётчики
+    # доставки. На входе «потери 5 → 99, суммарного счётчика доставки нет» ответ
+    # читался как «ничего не теряем», то есть отсутствие данных выдавалось за
+    # благополучие — ровно тот класс, который вся эта функция и устраняет.
     loss_delta = _loss_total(after) - _loss_total(before)
     # Пояс к per-plane признаку: суммарные потери, УЕХАВШИЕ НАЗАД, — это тоже
     # перезапуск базы, даже если ни одна плоскость поимённо его не показала
-    # (плоскость могла исчезнуть из снимка целиком). Ревью корзины 2, Ф-4:
-    # без этого пояса `losing` считался бы по отрицательной дельте как «не
-    # теряем», то есть отсутствие данных выдавалось бы за благополучие.
+    # (плоскость без счётчика доставки могла исчезнуть из снимка целиком —
+    # `_reset_planes` про такую промолчит, ей нечего сравнивать).
     reset = bool(reset_planes) or loss_delta < 0
-    written_net = max(0, written_delta - self_cost)
-    # Вычет съел больше, чем показало всё окно: в зазоре писал кто-то ещё, и
-    # арифметика цены недостоверна. Тишину в этом случае не утверждаем (см.
-    # докстринг DeliveryWindow, граница эксклюзивного окна).
-    cost_exceeds_window = written_delta > 0 and self_cost > written_delta
-    losing = (not reset) and loss_delta > 0
-    delivering = (not reset) and written_net > 0
     # Разбивка по приёмникам — только приросты: абсолютные числа второго снимка
     # ответили бы на «сколько за всю жизнь», а спрашивают про окно.
     by_before = _written_by_channel(before)
@@ -694,6 +669,38 @@ def delivery_window(before: Any, after: Any, *, control: Any = None) -> Delivery
         grown = {key: value for key, value in grown.items() if value > 0}
         if grown:
             losses[plane] = grown
+
+    if written_before is None or written_after is None:
+        return DeliveryWindow(
+            delivering=False,
+            # Ревью корзины 2 (Ф-4): `counters_reset` здесь стоял жёстким `False`
+            # рядом с непустым `reset_planes` — два поля одного ответа
+            # противоречили друг другу, и читатель, спрашивающий «база уезжала?»,
+            # получал «нет» при уехавшей базе.
+            silent_source=False,
+            # Потери видны и без счётчика доставки: молчать о них здесь значило бы
+            # ответить «не теряем» там, где потери просто не спрашивали.
+            losing=(not reset) and loss_delta > 0,
+            written_delta=0,
+            self_cost=self_cost,
+            written_net=0,
+            loss_delta=loss_delta,
+            counters_reset=reset,
+            window_sec=_window_seconds(before, after),
+            by_channel=by_channel,
+            losses=losses,
+            missing=missing,
+            reset_planes=reset_planes,
+        )
+
+    written_delta = written_after - written_before
+    written_net = max(0, written_delta - self_cost)
+    # Вычет съел больше, чем показало всё окно: в зазоре писал кто-то ещё, и
+    # арифметика цены недостоверна. Тишину в этом случае не утверждаем (см.
+    # докстринг DeliveryWindow, граница эксклюзивного окна).
+    cost_exceeds_window = written_delta > 0 and self_cost > written_delta
+    losing = (not reset) and loss_delta > 0
+    delivering = (not reset) and written_net > 0
     return DeliveryWindow(
         delivering=delivering,
         silent_source=(not reset) and not delivering and loss_delta == 0 and not cost_exceeds_window,

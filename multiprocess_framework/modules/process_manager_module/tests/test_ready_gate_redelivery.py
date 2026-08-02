@@ -809,6 +809,37 @@ class TestDeadEventDoesNotHoldTheHeadOfTheQueue:
         assert fired == [False], "действие выполнилось только когда взвели мёртвый объект — подмены не было"
         worker.join(timeout=2.0)
 
+    def test_a_broken_registry_is_reported_once_per_name_not_per_poll(self):
+        """Диагностика не имеет права глушить собственный журнал.
+
+        Реестр читается каждые 0.25с, дедлайны в проде 15с и 30с: строка на
+        КАЖДОЕ чтение дала бы ~120 одинаковых строк на одно действие, умноженных
+        на длину очереди адресата. Пара к этому — мигающий реестр снова слышен
+        (удачное чтение снимает глушение).
+        """
+        pm, _sent = _pm_with_children("camera_0")
+        errors: list = []
+        pm._log_error = lambda msg, **kw: errors.append(msg)
+
+        broken = True
+
+        class _Reg:
+            def get_ready_event(self, name):
+                if broken:
+                    raise RuntimeError("реестр недоступен")
+                return threading.Event()
+
+        pm._process_registry = _Reg()
+        for _ in range(20):
+            assert pm._child_ready_event("camera_0") is None
+        assert len(errors) == 1, f"строк об одном и том же отказе: {len(errors)}"
+
+        broken = False
+        assert pm._child_ready_event("camera_0") is not None
+        broken = True
+        pm._child_ready_event("camera_0")
+        assert len(errors) == 2, "после успешного чтения отказ снова обязан быть слышен"
+
     def test_a_live_event_is_not_swapped_out_from_under_the_worker(self):
         """Контроль: пока инкарнация та же, перечитывание реестра ничего не меняет."""
         pm, _sent = _pm_with_children("camera_0")
