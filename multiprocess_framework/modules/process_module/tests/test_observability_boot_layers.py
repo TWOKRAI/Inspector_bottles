@@ -199,13 +199,16 @@ class TestLayersAreSilentRule:
         assert proc_dict["managers"]["logger"]["default_level"] == "DEBUG"
 
 
-class TestCompanionMergeSeam:
-    """Общий шов ``merge_companion_over`` — политика отказа как параметр.
+class TestCompanionOverlaySeam:
+    """Общий шов ``compose_over_base`` — спутник ложится ПОВЕРХ дольки рецепта.
 
-    До ревью правило жило тремя копиями, и они уже разошлись обработкой битого
-    файла: две глушили исключение, третья роняла старт. Разными были и уместные
-    следствия, поэтому здесь проверяется, что ОБА поведения доступны и что
-    порядок мержа у них общий.
+    Пришёл на смену ``TestCompanionMergeSeam`` вместе с ФР-3. Прежний шов
+    (``merge_companion_over``) мержил спутник в СЕКЦИЮ рецепта — то есть в базу
+    слоя, которую процесс кладёт себе в конфиг и переживает. Слой заменяется
+    целиком, база — нет, поэтому снятый из спутника ключ жил вечно на прикладной
+    дороге и честно исчезал на generic. Шов удалён вместе с дефектом; здесь
+    стережётся то, что от него осталось верного: направление «спутник сверху» и
+    сохранность ключей рецепта, о которых спутник молчит.
     """
 
     @pytest.fixture()
@@ -214,45 +217,60 @@ class TestCompanionMergeSeam:
         path.write_text("name: demo\n", encoding="utf-8")
         return path
 
-    def test_companion_wins_over_recipe_section(self, recipe) -> None:
+    def test_companion_wins_over_the_recipe_slice(self, recipe) -> None:
         from multiprocess_framework.modules.process_module.configs.observability_companion import (
-            merge_companion_over,
+            companion_path,
+            compose_over_base,
+            write_companion,
+        )
+
+        write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+        body, source = compose_over_base({"log_level": "INFO", "console": True}, recipe, "seg")
+        assert body["log_level"] == "DEBUG", "спутник новее — он сверху"
+        assert body["console"] is True, "ключи рецепта, о которых спутник молчит, живы"
+        assert source == str(companion_path(recipe)), "источником обязан называться спутник"
+
+    def test_companion_defaults_also_win_over_the_recipe_slice(self, recipe) -> None:
+        """Ручная правка спутника (``defaults``) — тоже сверху.
+
+        Вторая половина ФР-3: у прежнего секционного шва здесь побеждал
+        ``processes[<имя>]`` рецепта, потому что мерж шёл ДО резолва. То есть
+        направление «спутник сверху» на той дороге не держалось вовсе — и это
+        было невидимо, пока спутник писала только машина (она пишет
+        ``processes:``).
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            compose_over_base,
             write_companion,
         )
 
         write_companion(recipe, {"defaults": {"log_level": "DEBUG"}})
-        merged = merge_companion_over({"defaults": {"log_level": "INFO", "console": True}}, recipe)
-        assert merged["defaults"]["log_level"] == "DEBUG", "спутник новее — он сверху"
-        assert merged["defaults"]["console"] is True, "ключи рецепта, о которых спутник молчит, живы"
+        body, _ = compose_over_base({"log_level": "INFO"}, recipe, "seg")
+        assert body["log_level"] == "DEBUG"
 
-    def test_no_recipe_path_returns_section_unchanged(self) -> None:
+    def test_no_recipe_path_returns_the_base_unchanged(self) -> None:
         from multiprocess_framework.modules.process_module.configs.observability_companion import (
-            merge_companion_over,
+            compose_over_base,
         )
 
-        section = {"log_level": "INFO"}
-        assert merge_companion_over(section, "") == section
+        base = {"log_level": "INFO"}
+        assert compose_over_base(base, "", "seg") == (base, "")
 
-    def test_broken_companion_raises_without_handler(self, recipe) -> None:
-        """Boot: стартовать без сохранённых настроек хуже, чем отказать."""
+    def test_absent_companion_keeps_the_recipe_slice(self, recipe) -> None:
+        """Спутника нет — штатное состояние, слой равен дольке рецепта."""
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            compose_over_base,
+        )
+
+        assert compose_over_base({"log_level": "INFO"}, recipe, "seg") == ({"log_level": "INFO"}, str(recipe))
+
+    def test_broken_companion_raises_so_the_caller_picks_the_policy(self, recipe) -> None:
+        """Шов не решает за вызывающего: на boot уместен отказ, на switch — жалоба."""
         from multiprocess_framework.modules.process_module.configs.observability_companion import (
             companion_path,
-            merge_companion_over,
+            compose_over_base,
         )
 
         companion_path(recipe).write_text("observability: [не словарь\n", encoding="utf-8")
         with pytest.raises(Exception):
-            merge_companion_over({}, recipe)
-
-    def test_broken_companion_is_reported_with_handler(self, recipe) -> None:
-        """Switch: битый спутник не имеет права ронять живую систему."""
-        from multiprocess_framework.modules.process_module.configs.observability_companion import (
-            companion_path,
-            merge_companion_over,
-        )
-
-        companion_path(recipe).write_text("observability: [не словарь\n", encoding="utf-8")
-        seen: List[str] = []
-        merged = merge_companion_over({"log_level": "INFO"}, recipe, on_error=seen.append)
-        assert merged == {"log_level": "INFO"}, "секция рецепта уцелела"
-        assert seen and "спутник" in seen[0]
+            compose_over_base({}, recipe, "seg")

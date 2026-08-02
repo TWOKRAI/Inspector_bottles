@@ -27,6 +27,7 @@ from multiprocess_framework.modules.process_module.configs.observability_compani
     write_companion,
 )
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    OVERRIDE_CONFIG_KEY,
     RECIPE_PATH_CONFIG_KEY,
     ObservabilityLayers,
     process_observability_layers,
@@ -639,5 +640,171 @@ class TestSwitchReadsCompanionOfTheNewRecipe:
             res = handlers["config.reload"]({"observability_recipe": section, "observability_recipe_path": str(recipe)})
             assert res.get("success") is not False, f"switch отказал из-за спутника: {res}"
             assert any(lvl == "ERROR" for lvl, _m, _k in svc.log_calls), "битый спутник прошёл молча"
+        finally:
+            logger.shutdown()
+
+
+class TestCompanionNeverEntersTheLayerBase:
+    """ФР-3 (находка X2-1 сквозного ревью Ф5): спутник живёт ПОВЕРХ базы, не в ней.
+
+    Дефект класса «чинится на одном пути из двух». Слой L2 собирается из БАЗЫ
+    (то, что сказал рецепт) и спутника. Слой заменяется целиком, а база — нет:
+    она едет процессу в ``proc_dict["config"][observability_override]`` и живёт
+    там между пересборками. Прикладная дорога домерживала спутник в базу ещё до
+    резолва (boot ``launch.py``, пересборка ``orchestrator_hooks``, конверт
+    switch'а PM), generic-дорога (``app_module.SystemBuilder``) — нет. Отсюда
+    два поведения одной системы: снятый из спутника ключ на прототипе жил
+    вечно, на generic честно возвращался к значению рецепта.
+
+    **Функциональный инвариант ФР-3:** пока спутник ЖИВ, финальный слой не
+    меняется (спутник всё равно ложится сверху). Меняется только судьба
+    УДАЛЁННЫХ из спутника ключей — поэтому пары тестов ниже проверяют обе
+    половины: и что живой спутник по-прежнему побеждает, и что снятый исчезает.
+    """
+
+    _RECIPE_SECTION = {"processes": {"seg": {"log_level": "WARNING"}}}
+
+    @staticmethod
+    def _svc(tmp_path, name="road.yaml"):
+        """Процесс с адресом рецепта и ПУСТОЙ базой — как после сборки без слоя."""
+        recipe = tmp_path / name
+        recipe.write_text(_RECIPE_TEXT, encoding="utf-8")
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="frq3", log_directory=str(tmp_path), enable_batching=False)
+        )
+        svc = _SvcRW(logger, config={RECIPE_PATH_CONFIG_KEY: str(recipe)})
+        BuiltinCommands(svc)._register_observability_commands()
+        return svc, svc.command_manager.handlers, recipe, logger
+
+    def _switch(self, handlers, recipe):
+        """Конверт switch'а — ровно тот, что собирает ``_recipe_layer_payload``:
+        СЫРАЯ секция рецепта, спутника в ней нет."""
+        return handlers["config.reload"](
+            {"observability_recipe": self._RECIPE_SECTION, "observability_recipe_path": str(recipe)}
+        )
+
+    # ------------------------------------------------------------------ дорога switch'а
+
+    def test_switch_writes_the_recipe_slice_into_the_base_without_the_companion(self, tmp_path) -> None:
+        """База в конфиге процесса = долька РЕЦЕПТА, буквально.
+
+        Литерал, а не сверка с чем-нибудь производным от кода: сверка «база ==
+        то, что положил switch» согласна с любой реализацией, включая ту, что
+        кладёт туда спутника.
+        """
+        svc, handlers, recipe, logger = self._svc(tmp_path)
+        try:
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+            self._switch(handlers, recipe)
+
+            assert svc.get_config(OVERRIDE_CONFIG_KEY) == {"log_level": "WARNING"}, (
+                f"спутник въехал в базу слоя: {svc.get_config(OVERRIDE_CONFIG_KEY)}"
+            )
+        finally:
+            logger.shutdown()
+
+    def test_live_companion_still_wins_after_the_base_was_cleaned(self, tmp_path) -> None:
+        """Вторая половина пары: чистая база не отменяет спутника.
+
+        Без неё тест выше зелен и у реализации «спутник вообще не применять» —
+        то есть страж стерёг бы отсутствие механизма.
+        """
+        svc, handlers, recipe, logger = self._svc(tmp_path)
+        try:
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+            self._switch(handlers, recipe)
+
+            layers = process_observability_layers(svc)
+            assert layers.recipe == {"log_level": "DEBUG"}, f"живой спутник не применён: {layers.recipe}"
+            assert layers.recipe_source == str(companion_path(recipe))
+        finally:
+            logger.shutdown()
+
+    def test_key_removed_from_the_companion_returns_to_the_recipe(self, tmp_path) -> None:
+        """ГЛАВНОЕ утверждение ФР-3 — ровно сценарий 2 репро X2-1.
+
+        Форма важна: база пишется ОДИН раз (switch, спутник ещё жив), а слой
+        потом пересобирается БЕЗ новой базы — так работает раздача правки
+        спутника (watcher оркестратора шлёт детям ``observability_recipe_reload``,
+        секция по проводу не едет). Пересобери мы базу заново, дефект бы не
+        проявился: он живёт именно в том, что база ПЕРЕЖИВАЕТ пересборку слоя.
+        Это и делало его невидимым — пока спутник жив, оба поведения совпадают.
+        """
+        svc, handlers, recipe, logger = self._svc(tmp_path)
+        try:
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+            self._switch(handlers, recipe)
+            assert process_observability_layers(svc).recipe == {"log_level": "DEBUG"}
+
+            # Оператор снял ключ из спутника (или persist переписал секцию без него).
+            write_companion(recipe, {"processes": {"seg": {}}})
+            handlers["config.reload"]({"observability_recipe_reload": True})
+
+            assert process_observability_layers(svc).recipe == {"log_level": "WARNING"}, (
+                "снятый из спутника ключ воскрес из базы слоя"
+            )
+        finally:
+            logger.shutdown()
+
+    def test_repeated_switch_does_not_stack_the_companion_into_the_base(self, tmp_path) -> None:
+        """Опасность конструкции: наложение спутника исполняется на КАЖДОМ switch'е.
+
+        Пиши мы результат наложения обратно в базу — второй switch подавал бы
+        спутника уже дважды, и снятие ключа перестало бы работать начиная со
+        второго раза (то есть дефект вернулся бы, но с задержкой в один switch).
+        """
+        svc, handlers, recipe, logger = self._svc(tmp_path)
+        try:
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+            for _ in range(3):
+                self._switch(handlers, recipe)
+                assert svc.get_config(OVERRIDE_CONFIG_KEY) == {"log_level": "WARNING"}
+                assert process_observability_layers(svc).recipe == {"log_level": "DEBUG"}
+        finally:
+            logger.shutdown()
+
+    # ------------------------------------------------------------------- дорога boot
+
+    def test_key_removed_from_the_companion_returns_to_the_recipe_on_boot(self, tmp_path) -> None:
+        """То же утверждение на дороге сборки: база приезжает из ассемблера.
+
+        Ассемблеры (обе дороги) кладут в ``observability_override`` дольку
+        рецепта — спутника они не читают вовсе. Здесь эта база подана напрямую,
+        а слой собирает та же ``compose_recipe_layer``, что и на старте процесса.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            compose_recipe_layer,
+        )
+
+        recipe = tmp_path / "boot.yaml"
+        recipe.write_text(_RECIPE_TEXT, encoding="utf-8")
+        base = resolve_recipe_section(self._RECIPE_SECTION, "seg")
+        logger = LoggerManager(
+            config=LoggerManagerConfig(app_name="frq3boot", log_directory=str(tmp_path), enable_batching=False)
+        )
+        svc = _Svc(logger, config={RECIPE_PATH_CONFIG_KEY: str(recipe), OVERRIDE_CONFIG_KEY: base})
+        try:
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+            assert compose_recipe_layer(svc)[0] == {"log_level": "DEBUG"}
+
+            write_companion(recipe, {"processes": {"seg": {}}})
+            assert compose_recipe_layer(svc)[0] == {"log_level": "WARNING"}, (
+                "снятый из спутника ключ воскрес из базы слоя"
+            )
+        finally:
+            logger.shutdown()
+
+    def test_both_roads_start_from_the_same_base(self, tmp_path) -> None:
+        """Дороги сходятся: база switch'а совпадает с базой сборки, ключ в ключ.
+
+        До ФР-3 они расходились ровно здесь — и расхождение баз было ЕДИНСТВЕННЫМ
+        наблюдаемым признаком дефекта, пока спутник жив.
+        """
+        svc, handlers, recipe, logger = self._svc(tmp_path)
+        try:
+            write_companion(recipe, {"processes": {"seg": {"log_level": "DEBUG"}}})
+            self._switch(handlers, recipe)
+
+            assert svc.get_config(OVERRIDE_CONFIG_KEY) == resolve_recipe_section(self._RECIPE_SECTION, "seg")
         finally:
             logger.shutdown()

@@ -13,6 +13,13 @@
 (``defaults`` + ``processes[<имя>]``), поэтому загрузка не требует отдельной
 ветки: он читается тем же ``resolve_recipe_section``.
 
+**Спутник не входит в БАЗУ слоя L2 (ФР-3).** База — долька самого рецепта; её
+собирают ассемблеры, конверт switch'а и ``orchestrator_observability_config``,
+и все они спутника не читают. Наложение живёт ровно в одном месте —
+:func:`compose_over_base`, и оно исполняется последним у каждого потребителя.
+Причина в том, что слой заменяется целиком, а база — нет: попади спутник в
+базу, снятый из него ключ остался бы в конфиге процесса навсегда.
+
 Запись атомарная (tmp рядом + ``os.replace``) и идемпотентная: одинаковое
 содержимое файл не трогает вовсе. Идемпотентность здесь не оптимизация — за
 файлом следит watcher, и запись, меняющая mtime без изменения содержимого,
@@ -23,7 +30,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 #: Суффикс спутника. Именно ``.observability.yaml``, а не ``.obs.yml``:
 #: имя файла — единственная подсказка человеку, кто его хозяин.
@@ -62,54 +69,6 @@ def load_companion(recipe_path: str | os.PathLike[str]) -> Dict[str, Any]:
         return {}
     section = loaded.get("observability")
     return section if isinstance(section, dict) else {}
-
-
-def merge_companion_over(
-    section: Optional[Dict[str, Any]],
-    recipe_path: Optional[str | os.PathLike[str]],
-    *,
-    on_error: Optional[Callable[[str], None]] = None,
-) -> Dict[str, Any]:
-    """Домержить спутник ПОВЕРХ секции наблюдаемости рецепта.
-
-    Порядок — спутник сверху, и он не обсуждается на каждом вызове: спутник пишет
-    пульт, его правка новее той, что человек написал в рецепте руками. Будь порядок
-    где-то обратным, «сохранить» отменялось бы switch'ем через раз.
-
-    До ревью 5.13 это правило жило ТРЕМЯ копиями (boot прототипа, пересборка
-    proc_dict'ов, конверт switch'а), и они уже разошлись обработкой битого файла:
-    две глушили исключение в лог, третья роняла старт. Разными были и следствия —
-    на boot отказ уместен, на switch он снёс бы работающую систему, — поэтому
-    политика стала ПАРАМЕТРОМ, а не расхождением:
-
-    * ``on_error=None`` — исключение пробрасывается (boot: стартовать без
-      сохранённых настроек хуже, чем отказать);
-    * ``on_error=callable`` — сообщение уходит вызывающему, мерж продолжается без
-      спутника (switch: битый спутник не имеет права ронять живую систему).
-
-    Гранулярность здесь — СЕКЦИЯ целиком (до resolve по именам). Вторая, по-процессная,
-    живёт в :func:`compose_recipe_layer` этого же модуля.
-
-    **Реализаций порядка две, не одна** (уточнено ревью итерации 2): свести их в одну
-    нельзя — они работают над разными данными (сырая секция против уже разрешённой
-    per-process дельты). Общее у них только направление «спутник сверху», и держится
-    оно не одним кодом, а соседством в этом модуле плюс стражами: перевёрнутый порядок
-    здесь роняет юнит-тест шва и тест конверта switch'а, в ``compose_recipe_layer`` —
-    три companion-теста. Утверждать «правило живёт в одном месте» было бы неправдой.
-    """
-    from ...data_schema_module import deep_merge
-
-    base = dict(section) if isinstance(section, dict) else {}
-    if not recipe_path:
-        return base
-    try:
-        companion = load_companion(recipe_path)
-    except Exception as exc:  # noqa: BLE001 — политику решает вызывающий, см. докстринг
-        if on_error is None:
-            raise
-        on_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
-        return base
-    return deep_merge(base, companion) if companion else base
 
 
 def build_companion_section(
@@ -178,6 +137,58 @@ def write_companion(
     return path, True
 
 
+def compose_over_base(
+    base: Optional[Dict[str, Any]],
+    recipe_path: Optional[str | os.PathLike[str]],
+    process_name: str,
+) -> Tuple[Dict[str, Any], str]:
+    """Слой L2 = БАЗА (долька рецепта) + спутник ПОВЕРХ. Единственная реализация.
+
+    **Спутник входит в слой L2 только здесь (ФР-3).** База — это то, что сказал
+    сам рецепт: её собирают ассемблеры (``proc_dict["config"]``), конверт switch'а
+    и ``orchestrator_observability_config``, и ни один из них спутника не знает.
+    До ФР-3 прикладная дорога домерживала спутник в базу ещё ДО резолва, и
+    расхождение было не косметическим: слой заменяется целиком, но БАЗА живёт
+    в конфиге процесса — снятый из спутника ключ оставался в ней навсегда и
+    воскресал при каждой пересборке. На generic-дороге тот же ключ честно
+    исчезал (возврат к рецепту). Один дефект, две разные системы.
+
+    Порядок «спутник сверху» не обсуждается: спутник пишет пульт
+    (``observability.persist``), его правка новее той, что человек написал в
+    рецепте руками. Будь порядок обратным, «сохранить» отменялось бы switch'ем.
+
+    Гранулярность — УЖЕ РАЗРЕШЁННАЯ per-process долька с обеих сторон: и база, и
+    спутник резолвятся по имени процесса одним и тем же
+    :func:`~.observability_layers.resolve_recipe_section`. Прежняя секционная
+    гранулярность (мерж до резолва) давала ещё и второе, тихое расхождение:
+    ``defaults`` спутника проигрывал ``processes[<имя>]`` рецепта, то есть
+    направление «спутник сверху» на той дороге НЕ держалось.
+
+    Исключения (битый спутник) пробрасываются: политику отказа решает вызывающий —
+    на boot уместен отказ, на switch он снёс бы работающую систему.
+
+    Args:
+        base: долька рецепта для ЭТОГО процесса (сырая, уже разрешённая).
+        recipe_path: адрес рецепта; спутник лежит рядом с ним.
+        process_name: имя процесса-адресата — по нему резолвится спутник.
+
+    Returns:
+        ``(тело слоя, источник)``. Источник — файл спутника, если он что-то
+        сказал про ЭТОТ процесс, иначе адрес рецепта: оператору нужно знать,
+        какой из двух файлов править.
+    """
+    from ..configs.observability_layers import resolve_recipe_section
+    from ...data_schema_module import deep_merge
+
+    body = dict(base) if isinstance(base, dict) else {}
+    if not recipe_path:
+        return body, ""
+    persisted = resolve_recipe_section(load_companion(recipe_path), process_name)
+    if not persisted:
+        return body, str(recipe_path)
+    return deep_merge(body, persisted), str(companion_path(recipe_path))
+
+
 def compose_recipe_layer(svc: Any) -> Tuple[Dict[str, Any], str]:
     """Слой L2 процесса из ДВУХ его источников: дельта рецепта + спутник.
 
@@ -191,28 +202,25 @@ def compose_recipe_layer(svc: Any) -> Tuple[Dict[str, Any], str]:
     «boot ≡ reload». Возвращается ПОЛНЫЙ слой, а не дельта: слой заменяется
     целиком, иначе снятый из спутника ключ не исчез бы уже никогда.
 
+    Здесь только ЧТЕНИЕ базы из конфига процесса; сам мерж — в
+    :func:`compose_over_base`. Разделены они потому, что у оркестратора база
+    приезжает не конфигом, а конвертом switch'а: третьей реализации мержа быть
+    не должно, а «прочитать откуда» у них честно разное.
+
     Returns:
-        ``(тело слоя, источник)``. Источник — файл спутника, если он что-то
-        сказал про ЭТОТ процесс, иначе адрес рецепта: оператору нужно знать,
-        какой из двух файлов править.
+        ``(тело слоя, источник)`` — см. :func:`compose_over_base`.
     """
     from ..configs.observability_layers import (
         OVERRIDE_CONFIG_KEY,
         RECIPE_PATH_CONFIG_KEY,
         read_process_config,
-        resolve_recipe_section,
     )
-    from ...data_schema_module import deep_merge
 
-    recipe_path = read_process_config(svc, RECIPE_PATH_CONFIG_KEY) or ""
-    base = read_process_config(svc, OVERRIDE_CONFIG_KEY) or {}
-    base = dict(base) if isinstance(base, dict) else {}
-    if not recipe_path:
-        return base, ""
-    persisted = resolve_recipe_section(load_companion(recipe_path), getattr(svc, "name", ""))
-    if not persisted:
-        return base, str(recipe_path)
-    return deep_merge(base, persisted), str(companion_path(recipe_path))
+    return compose_over_base(
+        read_process_config(svc, OVERRIDE_CONFIG_KEY) or {},
+        read_process_config(svc, RECIPE_PATH_CONFIG_KEY) or "",
+        getattr(svc, "name", ""),
+    )
 
 
 def persist_session_to_companion(

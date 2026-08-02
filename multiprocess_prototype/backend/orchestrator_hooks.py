@@ -121,18 +121,16 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         # (`_recipe_layer_payload` → `_reset_observability_sessions`). Выдай она
         # дольку ещё и здесь — слой ставился бы дважды, из двух источников,
         # и на первом же расхождении победил бы тот, кто пришёл последним.
-        # Согласованность держится тем, что оба пути мержат спутник из ОДНОГО
-        # файла и в одном порядке (спутник поверх рецепта).
+        # Согласованность держится тем, что спутник у обоих путей кладётся
+        # ПОСЛЕДНИМ и одним кодом (`compose_over_base`), из одного файла.
         #
-        # Спутник рецепта (machine-owned слой L2) — тем же способом, что boot.
-        if recipe_path:
-            from multiprocess_framework.modules.process_module.configs.observability_companion import (
-                merge_companion_over,
-            )
-
-            topology["observability"] = merge_companion_over(
-                topology.get("observability"), recipe_path, on_error=orchestrator._log_error
-            )
+        # ФР-3: спутник в `topology["observability"]` не домерживается — как и на
+        # boot (`launch.py`). Эта секция становится БАЗОЙ слоя в конфиге каждого
+        # пересобранного процесса, а базу процесс переживает; спутник же обязан
+        # оставаться снимаемым — иначе снятый из него ключ воскресал бы вечно.
+        # Пересозданный процесс читает спутник сам, на старте
+        # (`ProcessModule._apply_boot_observability_layers`), переживший —
+        # в ветке switch'а `config.reload`.
         assembler = BlueprintAssembler(
             observability_section=obs_section,
             log_dir=log_dir,

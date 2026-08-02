@@ -41,7 +41,12 @@ class _CaptureAssembler:
             "app_config_path": app_config_path,
         }
 
+    #: Blueprint, поданный в assemble() — нужен ФР-3: секция ``observability``
+    #: этого словаря становится БАЗОЙ слоя L2 у каждого пересобранного процесса.
+    last_blueprint: dict = {}
+
     def assemble(self, blueprint_dict: dict) -> dict:
+        _CaptureAssembler.last_blueprint = blueprint_dict
         return {}
 
 
@@ -96,6 +101,7 @@ def _patch_engine(monkeypatch) -> None:
     monkeypatch.setattr(assembly_pkg, "BlueprintAssembler", _CaptureAssembler)
     monkeypatch.setattr(assembly_pkg, "FullReplacePlanner", _StubPlanner)
     _CaptureAssembler.last = {}
+    _CaptureAssembler.last_blueprint = {}
 
 
 def _build(orch) -> None:
@@ -184,3 +190,60 @@ def test_hot_swap_resolves_recipe_path_per_build(monkeypatch) -> None:
     orch._extra_config["observability_recipe_path"] = "recipes/b.yaml"
     _build(orch)
     assert _CaptureAssembler.last["recipe_path"] == "recipes/b.yaml"
+
+
+class TestCompanionStaysOutOfTheRebuiltBase:
+    """ФР-3: пересборка switch'а не мержит спутника в секцию наблюдаемости.
+
+    Секция ``topology["observability"]``, которую хук отдаёт ассемблеру, — это
+    БАЗА слоя L2 в конфиге каждого пересобранного процесса. Слой заменяется
+    целиком, база — нет: домерженный сюда спутник означал бы, что снятый из него
+    ключ не исчезнет уже никогда. Спутник процесс читает сам, на старте
+    (``ProcessModule._apply_boot_observability_layers``).
+
+    Соседняя развилка того же дефекта — конверт switch'а в PM
+    (``_recipe_layer_payload``) и boot прототипа (``launch.py``); дефект этого
+    класса дважды воскресал ровно потому, что чинился на одной развилке.
+    """
+
+    _SECTION = {"processes": {"seg": {"log_level": "WARNING"}}}
+
+    @staticmethod
+    def _recipe(tmp_path, companion_section):
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            write_companion,
+        )
+
+        recipe = tmp_path / "hot.yaml"
+        recipe.write_text("name: demo\n", encoding="utf-8")
+        write_companion(recipe, companion_section)
+        return recipe
+
+    def _build_with(self, monkeypatch, tmp_path, companion_section):
+        _patch_engine(monkeypatch)
+        recipe = self._recipe(tmp_path, companion_section)
+        sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
+        orch = _StubOrchestrator(sys_config.model_dump(), extra_config={"observability_recipe_path": str(recipe)})
+        configure_topology_engine(orch)
+        orch._full_replace_planner.kwargs["proc_dicts_fn"](
+            {"processes": [], "wires": [], "observability": dict(self._SECTION)}
+        )
+        return recipe
+
+    def test_rebuilt_base_carries_the_recipe_section_verbatim(self, monkeypatch, tmp_path) -> None:
+        """Литерал: секция для ассемблера равна секции рецепта, ключ в ключ."""
+        self._build_with(monkeypatch, tmp_path, {"processes": {"seg": {"log_level": "DEBUG"}}})
+
+        got = _CaptureAssembler.last_blueprint.get("observability")
+        assert got == self._SECTION, f"спутник въехал в базу слоя пересобранных процессов: {got}"
+
+    def test_the_recipe_address_still_reaches_the_assembler(self, monkeypatch, tmp_path) -> None:
+        """Вторая половина пары: адрес спутника доехать ОБЯЗАН.
+
+        Без неё тест выше зелен и у реализации «не давать процессам ни адреса,
+        ни секции» — то есть спутник перестал бы применяться вовсе, а страж
+        стерёг бы это как успех.
+        """
+        recipe = self._build_with(monkeypatch, tmp_path, {"processes": {"seg": {"log_level": "DEBUG"}}})
+
+        assert _CaptureAssembler.last["recipe_path"] == str(recipe)

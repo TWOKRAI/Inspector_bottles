@@ -725,30 +725,29 @@ class ProcessManagerProcess(ProcessModule):
         исключение держало switch и boot в согласии — оба молчали. Теперь оба
         выдают, и согласие сохранено с другой стороны.
 
-        **Спутник домерживается ЗДЕСЬ (Task 5.13, шаг 6).** До этого он попадал в
-        слой только через пересборку proc_dict'ов (``_build_proc_dicts`` прототипа
-        мержит его в ``topology["observability"]``), а конверт вёз сырую секцию
-        рецепта. Расхождение было ненаблюдаемым, потому что пересоздаваемый
-        ребёнок получал спутник вторым путём — но два адресата второго пути не
-        имеют:
+        **Спутник в конверт НЕ кладётся (ФР-3).** Task 5.13 (шаг 6) домерживала
+        его здесь — и это чинило настоящий дефект (protected-процесс терял после
+        switch сохранённую ``observability.persist`` настройку), но чинило не с
+        той стороны. Конверт задаёт получателю БАЗУ слоя, а базу получатель
+        кладёт себе в конфиг (``OVERRIDE_CONFIG_KEY``) и переживает с ней
+        пересборки. Слой заменяется целиком, база — нет: спутник в базе означал,
+        что снятый из него ключ не исчезнет уже никогда.
 
-        * **protected-процессы** не перезапускаются, и для них конверт —
-          единственный источник: сохранённая ``observability.persist`` настройка
-          после switch у них молча откатывалась;
-        * **сам оркестратор**, начиная с шага 5.
-
-        Мерж идёт общим швом ``merge_companion_over`` — тем же, что на boot и в
-        пересборке, и в том же порядке (спутник ПОВЕРХ рецепта: его писал пульт,
-        он новее). До ревью 5.13 это были три копии правила, уже разошедшиеся
-        обработкой битого файла; теперь различие политики отказа — параметр шва,
-        а не расхождение реализаций.
+        Настоящий адресат обоих случаев — ``compose_over_base``, и он исполняется
+        у получателя ПОСЛЕ записи базы (см. ветку switch'а в
+        ``builtin_commands._cmd_config_reload``), у оркестратора — в
+        ``_reset_observability_sessions``. Спутник читается из ОДНОГО файла одним
+        кодом, а на проводе едет только то, что сказал сам рецепт.
         """
-        from ...process_module.configs.observability_companion import merge_companion_over
-
         section = topology_dict.get("observability") if isinstance(topology_dict, dict) else None
+        # Нормализация к dict — не косметика: получатель различает `None`
+        # («рецепт переехал, слой не трогать») и `{}` («новый рецепт про
+        # наблюдаемость молчит» → снять прежний слой). До ФР-3 её делал
+        # `merge_companion_over` побочным эффектом своего `base`; убрав мерж,
+        # нормализацию пришлось назвать явно — иначе молчащий рецепт перестал
+        # бы снимать слой покинутого, и тот действовал бы вечно.
+        section = dict(section) if isinstance(section, dict) else {}
         recipe_path = self._observability_recipe_address()
-        # Битый спутник не имеет права ронять switch — в отличие от boot.
-        section = merge_companion_over(section, recipe_path, on_error=self._log_error)
         return {
             # Пустая секция едет как `{}`, а не пропускается: «новый рецепт про
             # наблюдаемость молчит» обязано СНЯТЬ прежний слой, иначе покинутый
@@ -1782,6 +1781,36 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"_replay_telemetry_runtime_delta({reason}) упал: {exc}")
             return 0
 
+    def _compose_own_recipe_layer(self, recipe: dict) -> tuple[dict, str]:
+        """Свой слой L2 из конверта switch'а: долька рецепта + спутник ПОВЕРХ (ФР-3).
+
+        Конверт везёт только то, что сказал сам рецепт (см. ``_recipe_layer_payload``),
+        поэтому спутник оркестратор кладёт себе сам — тем же ``compose_over_base``,
+        которым это делают дети и boot. Раньше спутник приезжал уже вмерженным в
+        конверт, и слой получался тот же — но ценой того, что база слоя несла
+        спутника, а снятый из него ключ жил вечно.
+
+        Битый спутник не имеет права уронить switch: жалуемся и берём базу как есть.
+        Отказ здесь значим — без строки в логе «сохранённая настройка не применилась»
+        выясняется сравнением файлов.
+
+        Returns:
+            ``(тело слоя, источник)``. Источник — конкретный файл (спутник или
+            рецепт): при паре оператор иначе не знает, какой из двух править.
+        """
+        from ...process_module.configs.observability_companion import compose_over_base
+        from ...process_module.configs.observability_layers import resolve_recipe_section
+
+        base = resolve_recipe_section(recipe.get("observability_recipe"), self.name)
+        recipe_path = str(recipe.get("observability_recipe_path") or "")
+        try:
+            return compose_over_base(base, recipe_path, self.name)
+        except Exception as exc:  # noqa: BLE001 — битый спутник не роняет switch
+            self._log_error(
+                f"[observability] спутник нового рецепта не прочитан ({recipe_path}): {exc} — свой слой без него"
+            )
+            return base, recipe_path
+
     def _reset_observability_sessions(self, reason: str, *, recipe: dict | None = None) -> dict:
         """Обнулить слой сессии наблюдаемости (L3) у себя и у всех живых детей.
 
@@ -1804,7 +1833,6 @@ class ProcessManagerProcess(ProcessModule):
             from ...process_module.configs.observability_layers import (
                 LAYER_RECIPE,
                 process_observability_layers,
-                resolve_recipe_section,
             )
             from ...process_module.managers.observability_reload import (
                 apply_observability_layers,
@@ -1828,11 +1856,11 @@ class ProcessManagerProcess(ProcessModule):
             # и правка там оставила бы такую сборку без слоя. Один код на обе
             # развилки вместо двух похожих.
             if recipe is not None:
-                own_recipe = resolve_recipe_section(recipe.get("observability_recipe"), self.name)
+                own_recipe, own_source = self._compose_own_recipe_layer(recipe)
                 layers.replace_layer(
                     LAYER_RECIPE,
                     own_recipe,
-                    source=str(recipe.get("observability_recipe_path") or ""),
+                    source=own_source,
                     origin=origin,
                 )
             # R6 (живой switch, 2026-07-29): снять ключ со слоя — половина дела.

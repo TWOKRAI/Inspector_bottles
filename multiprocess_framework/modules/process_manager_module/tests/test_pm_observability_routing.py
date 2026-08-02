@@ -332,17 +332,23 @@ class TestSwitchDeliversRecipeToPm:
             f"Ожидали DEBUG (из processes.ProcessManager), получили: {_level(pm)}"
         )
 
-    def test_a9_companion_rides_in_switch_envelope_and_beats_recipe(self, pm_with_real_logger, tmp_log) -> None:
-        """A9 (шаг 6): спутник едет в конверте switch'а и побеждает рецепт.
+    def test_a9_companion_beats_the_recipe_for_the_orchestrator_on_switch(self, pm_with_real_logger, tmp_log) -> None:
+        """A9 (шаг 6): после switch спутник побеждает рецепт и у оркестратора.
 
         Авторский тест на опасность механизма, а не на критерий приёмки.
 
-        До шага 6 спутник попадал в слой только через пересборку proc_dict'ов, а
-        конверт вёз сырую секцию рецепта. Ненаблюдаемо это было потому, что
-        пересоздаваемый ребёнок получал спутник вторым путём. Двух адресатов
-        второго пути нет: protected-процессы (не перезапускаются) и сам
-        оркестратор — у них конверт единственный источник, и «сохранить» после
-        switch молча откатывалось.
+        До шага 6 спутник попадал в слой только через пересборку proc_dict'ов.
+        Ненаблюдаемо это было потому, что пересоздаваемый ребёнок получал спутник
+        вторым путём. Двух адресатов второго пути нет: protected-процессы (не
+        перезапускаются) и сам оркестратор — у них после switch «сохранить»
+        молча откатывалось.
+
+        **Механизм сменился в ФР-3, свойство — нет.** Прежнее имя теста говорило
+        «спутник едет в конверте switch'а»; с ФР-3 конверт везёт только рецепт, а
+        спутник кладёт себе сам получатель (у оркестратора —
+        ``_compose_own_recipe_layer``). Конверт задавал БАЗУ слоя, а база живёт
+        дольше слоя — спутник в ней означал, что снятый из него ключ не исчезнет
+        уже никогда.
 
         Порядок проверяется явно: спутник ПОВЕРХ рецепта. Будь он обратным,
         сохранённая настройка отменялась бы switch'ем через раз — то есть
@@ -738,8 +744,8 @@ class TestBreakInjectionA11:
         эквивалентность закреплена здесь — иначе она молча разойдётся, и ложное
         утверждение станет верным задним числом.
 
-        Заодно это разрешает общему шву ``merge_companion_over`` возвращать ``{}``
-        там, где раньше ключ оставался отсутствующим: разницы нет ни для кого.
+        Заодно это разрешает сборщикам базы отдавать ``{}`` там, где раньше ключ
+        оставался отсутствующим: разницы нет ни для кого.
         """
         from multiprocess_framework.modules.process_module.configs.observability_layers import (
             orchestrator_observability_config,
@@ -795,3 +801,114 @@ class TestBreakInjectionA11:
         assert reset.get("orchestrator_recipe_keys") == ["log_level"]
         # И он ДЕЙСТВИТЕЛЬНО применён к живым менеджерам, а не только объявлен.
         assert _level(pm) == "DEBUG"
+
+
+# ---------------------------------------------------------------------------
+# ФР-3 — спутник не въезжает в БАЗУ слоя L2 (находка X2-1 сквозного ревью Ф5)
+# ---------------------------------------------------------------------------
+
+
+class TestCompanionStaysOutOfTheSwitchEnvelope:
+    """Конверт switch'а везёт РЕЦЕПТ, спутник кладёт получатель (ФР-3).
+
+    До ФР-3 ``_recipe_layer_payload`` домерживал спутника в секцию конверта.
+    Получатель пишет эту секцию себе в БАЗУ слоя (``observability_override``) и
+    живёт с ней между пересборками — а слой заменяется целиком. Значит спутник
+    в конверте означал: снятый из спутника ключ не исчезнет уже никогда.
+    Generic-дорога сборки спутника не мержила и тот же ключ теряла честно —
+    один дефект, две разные системы.
+    """
+
+    _SECTION = {"processes": {ORCHESTRATOR_PROCESS_NAME: {"log_level": "ERROR"}}}
+
+    @staticmethod
+    def _recipe_with_companion(tmp_path, companion_section):
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            write_companion,
+        )
+
+        recipe = tmp_path / "switch.yaml"
+        recipe.write_text("name: demo\n", encoding="utf-8")
+        if companion_section is not None:
+            write_companion(recipe, companion_section)
+        return recipe
+
+    def test_envelope_carries_the_recipe_section_verbatim(self, pm_with_real_logger, tmp_path) -> None:
+        """Литерал: секция конверта равна секции рецепта, ключ в ключ."""
+        pm, values = pm_with_real_logger
+        recipe = self._recipe_with_companion(
+            tmp_path, {"processes": {ORCHESTRATOR_PROCESS_NAME: {"log_level": "DEBUG"}}}
+        )
+        values[RECIPE_PATH_CONFIG_KEY] = str(recipe)
+
+        payload = pm._recipe_layer_payload({"observability": self._SECTION})
+
+        assert payload["observability_recipe"] == self._SECTION, (
+            f"спутник въехал в конверт (а значит и в базу слоя у получателя): {payload['observability_recipe']}"
+        )
+        assert payload["observability_recipe_path"] == str(recipe)
+
+    def test_orchestrator_still_applies_the_companion_to_its_own_layer(self, pm_with_real_logger, tmp_path) -> None:
+        """Вторая половина пары: чистый конверт не отменяет спутника у PM.
+
+        Без неё тест выше зелен и у реализации «спутник вообще не применять» —
+        то есть страж стерёг бы отсутствие механизма. Спутник теперь кладёт сам
+        оркестратор (``_compose_own_recipe_layer``), тем же кодом, что и дети.
+        """
+        pm, values = pm_with_real_logger
+        recipe = self._recipe_with_companion(
+            tmp_path, {"processes": {ORCHESTRATOR_PROCESS_NAME: {"log_level": "DEBUG"}}}
+        )
+        values[RECIPE_PATH_CONFIG_KEY] = str(recipe)
+
+        pm.apply_topology({"processes": [], "wires": [], "observability": self._SECTION})
+
+        assert _level(pm) == "DEBUG", f"спутник рецепта не применён к оркестратору: {_level(pm)}"
+
+    def test_key_removed_from_the_companion_returns_the_orchestrator_to_the_recipe(
+        self, pm_with_real_logger, tmp_path
+    ) -> None:
+        """ГЛАВНОЕ утверждение ФР-3 для оркестратора: снятый ключ исчезает.
+
+        До ФР-3 он оставался в базе (её PM тоже переживает) и воскресал бы при
+        каждой следующей сборке слоя.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            write_companion,
+        )
+
+        pm, values = pm_with_real_logger
+        recipe = self._recipe_with_companion(
+            tmp_path, {"processes": {ORCHESTRATOR_PROCESS_NAME: {"log_level": "DEBUG"}}}
+        )
+        values[RECIPE_PATH_CONFIG_KEY] = str(recipe)
+
+        pm.apply_topology({"processes": [], "wires": [], "observability": self._SECTION})
+        assert _level(pm) == "DEBUG"
+
+        # Оператор снял ключ из спутника.
+        write_companion(recipe, {"processes": {ORCHESTRATOR_PROCESS_NAME: {}}})
+        pm.apply_topology({"processes": [], "wires": [], "observability": self._SECTION})
+
+        assert _level(pm) == "ERROR", f"снятый из спутника ключ воскрес у оркестратора: {_level(pm)}"
+        assert process_observability_layers(pm).recipe == {"log_level": "ERROR"}
+
+    def test_broken_companion_does_not_break_the_orchestrator_switch(self, pm_with_real_logger, tmp_path) -> None:
+        """Битый спутник — жалоба и слой из одного рецепта, а не упавший switch."""
+        from multiprocess_framework.modules.process_module.configs.observability_companion import (
+            companion_path,
+        )
+
+        pm, values = pm_with_real_logger
+        recipe = self._recipe_with_companion(tmp_path, None)
+        companion_path(recipe).write_text("observability: [не словарь\n", encoding="utf-8")
+        values[RECIPE_PATH_CONFIG_KEY] = str(recipe)
+
+        resp = pm.apply_topology({"processes": [], "wires": [], "observability": self._SECTION})
+
+        assert (resp or {}).get("success") is not False, f"switch отказал из-за спутника: {resp}"
+        assert _level(pm) == "ERROR", "слой рецепта не применён после битого спутника"
+        # Отказ обязан быть слышен: без строки «сохранённая настройка не применилась»
+        # это выясняется сравнением файлов. `_log_error` у make_pm — MagicMock.
+        said = " | ".join(str(c.args[0]) for c in pm._log_error.call_args_list if c.args)
+        assert "спутник" in said, f"битый спутник прошёл молча: {said!r}"

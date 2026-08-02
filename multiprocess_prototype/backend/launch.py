@@ -403,18 +403,26 @@ class SystemBuilder:
         # BlueprintAssembler: stateless сборщик — та же цепочка, что была инлайн
         # (validate → check → build_configs → log_dir → process → merge_managers →
         # merge_with_defaults).  Невалидный blueprint → BlueprintInvalid (не sys.exit).
-        # Task 5.12: спутник рецепта — machine-owned слой L2. Мержится ПОВЕРХ
-        # секции самого рецепта: спутник пишет пульт, и его правка новее той, что
-        # человек написал в рецепте руками.
+        #
+        # ФР-3: спутник рецепта (machine-owned слой L2) в СЕКЦИЮ здесь НЕ мержится.
+        # Секция становится базой слоя у каждого процесса (`observability_override`)
+        # и живёт в его конфиге; спутник кладёт поверх `compose_over_base` — уже на
+        # процессе и последним. Домержи мы его сюда (так было до ФР-3), снятый из
+        # спутника ключ остался бы в базе навсегда, тогда как generic-дорога
+        # (`app_module.SystemBuilder`, она спутника не мержит) честно возвращала бы
+        # значение рецепта. Один дефект — две разные системы.
+        #
+        # Читаем спутник всё же здесь, и только ради ОТКАЗА: на boot битый файл
+        # обязан уронить старт, а не стартовать без сохранённых настроек. Каждый
+        # процесс дальше глотает эту ошибку в лог (падать на старте из-за спутника
+        # ему нельзя), поэтому громким отказ остаётся ровно в одной точке — этой.
         recipe_path = str(self._topology_path) if self._topology_path else ""
         if recipe_path:
             from multiprocess_framework.modules.process_module.configs.observability_companion import (
-                merge_companion_over,
+                load_companion,
             )
 
-            # on_error не передаём намеренно: на boot битый спутник обязан
-            # отказать, а не стартовать без сохранённых настроек молча.
-            bp_dict["observability"] = merge_companion_over(bp_dict.get("observability"), recipe_path)
+            load_companion(recipe_path)
 
         assembler = BlueprintAssembler(
             observability_section=obs_section,
