@@ -49,6 +49,7 @@ INFO» у раскрытого конфига уже нельзя — поэто
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from dataclasses import dataclass, field
@@ -389,10 +390,16 @@ class ObservabilityLayers:
         self._lock = threading.RLock()
 
     def resolve(self) -> Dict[str, Any]:
-        """Сырая секция ``observability`` после наложения L1 → L2 → L3."""
+        """Сырая секция ``observability`` после наложения L1 → L2 → L3.
+
+        Наложение — :func:`layer_merge`, а не канонический ``deep_merge``: пустой
+        словарь верхнего слоя ВЛАДЕЕТ (решение владельца Г3), а не сливается в
+        no-op. Это же правило различения использует :meth:`provenance` — resolve и
+        объяснение не могут разойтись, потому что делят один примитив.
+        """
         with self._lock:
-            merged = deep_merge(self.app or {}, self.recipe or {})
-            return deep_merge(merged, self.session or {})
+            merged = layer_merge(self.app or {}, self.recipe or {})
+            return layer_merge(merged, self.session or {})
 
     def raw_layers(self) -> Tuple[Tuple[str, Dict[str, Any], str], ...]:
         """``(имя слоя, сырая секция, источник)`` в порядке применения."""
@@ -763,10 +770,7 @@ class ObservabilityLayers:
             ``channels.<имя>.enabled``), потому что править оператор будет
             именно их, а не имена полей manager-конфига.
         """
-        explicit: Dict[str, Tuple[str, str]] = {}
-        for layer, section, source in self.raw_layers():
-            for key in flatten_section(section):
-                explicit[key] = (layer, source or layer)
+        explicit: Dict[str, Tuple[str, str]] = self._provenance_leaves()
 
         out: Dict[str, Dict[str, str]] = {}
 
@@ -831,6 +835,21 @@ class ObservabilityLayers:
 
         # Уже объяснённое явными ключами не переписываем.
         return {k: v for k, v in out.items() if k not in explicit and k not in already}
+
+    def _provenance_leaves(self) -> Dict[str, Tuple[str, str]]:
+        """``{ключ: (слой, источник)}`` — владелец каждого ЯВНОГО листа слоёв.
+
+        Считается тем же наложением, что и :meth:`resolve` (:func:`_overlay_owner`
+        зеркалит :func:`layer_merge`): слой, объявивший ветку листом — пустым
+        ``{}`` или скаляром, — затеняет ключи нижних слоёв под этой веткой. Прежняя
+        редакция плющила каждый слой независимо (``flatten_section`` по слою) и
+        верхний ``scopes: {}`` не затенял нижний ``scopes.SYSTEM.min_level``:
+        provenance называл слой у ключа, которого в resolve уже нет (A-A4-1).
+        """
+        tree: Dict[str, Any] = {}
+        for layer, section, source in self.raw_layers():
+            _overlay_owner(tree, section, (layer, source or layer))
+        return _flatten_owner_tree(tree)
 
 
 def read_process_config(svc: Any, key: str, default: Any = None) -> Any:
@@ -1010,6 +1029,78 @@ def flatten_section(section: Any, prefix: str = "") -> Dict[str, Any]:
         path = f"{prefix}{key}"
         if isinstance(value, dict) and value and path not in OPAQUE_LAYER_PATHS:
             out.update(flatten_section(value, prefix=f"{path}."))
+        else:
+            out[path] = value
+    return out
+
+
+def layer_merge(base: Dict[str, Any], overlay: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Наложить слой ``overlay`` на ``base`` по правилу Г3 (решение владельца 2026-08-02).
+
+    Отличие от канонического ``deep_merge`` ровно одно и намеренное: **непустой
+    ключ верхнего слоя ВЛАДЕЕТ, включая пустой словарь**. Правило целиком: нет
+    ключа → наследую нижний; ключ есть, что бы в нём ни лежало (скаляр, список,
+    ``null``, ``{}``) → владею. Единственный способ сказать «наследую» — отсутствие
+    ключа; ``{}`` остаётся за «здесь пусто, и это моё решение» (законная настройка
+    «в этом рецепте приёмников нет»).
+
+    Рекурсия — только в НЕПУСТОЙ словарь поверх словаря: тогда владение адресное,
+    по-ключевое (``errors: {level: ERROR}`` не сносит ``include_stacktrace`` соседа).
+    ``deep_merge`` рекурсировал и в пустой overlay-словарь, где ``if not overlay:
+    return base`` возвращал нижний — из-за чего resolve отдавал значение нижнего
+    слоя, а provenance (через ``flatten_section``, где ``{}`` — лист) называл
+    верхний: расхождение A-A4-1. Здесь resolve и provenance пользуются ОДНИМ
+    правилом различения (см. :meth:`ObservabilityLayers._provenance_leaves`).
+
+    Верхнеуровневый пустой ``overlay`` (весь слой пуст) по-прежнему наследует —
+    это «слой молчит» (:func:`layers_are_silent`), а не «слой владеет пустотой»:
+    пустой namespace нельзя объявить владением, потому что владеть в нём нечем.
+    """
+    result = copy.deepcopy(base)
+    if not overlay:
+        return result
+    for key, value in overlay.items():
+        if isinstance(value, dict) and value and isinstance(result.get(key), dict):
+            result[key] = layer_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+def _overlay_owner(
+    tree: Dict[str, Any],
+    section: Any,
+    owner: Tuple[str, str],
+    prefix: str = "",
+) -> None:
+    """Наложить владельца ``owner`` на дерево провенанса ТЕМ ЖЕ правилом, что :func:`layer_merge`.
+
+    Лист (скаляр/список/``null``/``{}``/непрозрачный путь) ЗАМЕНЯЕТ поддерево нижнего
+    слоя владельцем — так пустой ``scopes: {}`` наверху затеняет ``scopes.SYSTEM.*``
+    снизу, в точности как это делает resolve. Без этого провенанс называл бы слой у
+    ключа, которого в resolve уже нет (A-A4-1).
+    """
+    if not isinstance(section, dict):
+        return
+    for key, value in section.items():
+        path = f"{prefix}{key}"
+        if isinstance(value, dict) and value and path not in OPAQUE_LAYER_PATHS:
+            node = tree.get(key)
+            if not isinstance(node, dict):
+                node = {}
+                tree[key] = node
+            _overlay_owner(node, value, owner, prefix=f"{path}.")
+        else:
+            tree[key] = owner  # лист владеет: заменяет поддерево нижнего слоя
+
+
+def _flatten_owner_tree(tree: Dict[str, Any], prefix: str = "") -> Dict[str, Tuple[str, str]]:
+    """Дерево владельцев → ``{"a.b.c": (layer, source)}``. Кортеж-владелец — лист."""
+    out: Dict[str, Tuple[str, str]] = {}
+    for key, value in tree.items():
+        path = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(_flatten_owner_tree(value, prefix=f"{path}."))
         else:
             out[path] = value
     return out
