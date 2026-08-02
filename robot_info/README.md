@@ -12,12 +12,21 @@
 | [SOFTWARE_STACK.md](SOFTWARE_STACK.md) | Софт на каждом уровне (ОС, фреймворки, модели) |
 | [SOFTWARE_ARCHITECTURE.md](SOFTWARE_ARCHITECTURE.md) | Архитектура ПО: единый фреймворк на всех уровнях + клиенты (ПК, телефон) |
 | [TODO.md](TODO.md) | Что нужно докупить, решить, исследовать |
+| [ASSISTANT_VISION.md](ASSISTANT_VISION.md) | Настольный голосовой ассистент («Jarvis») — концепция, сценарии, MCP-архитектура, стол как интерактивная поверхность |
 
 ### Аналитика выбора компонентов
 
 | Файл | Содержание |
 |------|-----------|
-| [ANALYSIS_MCU.md](ANALYSIS_MCU.md) | Подробный анализ MCU: ESP32-S3, STM32, Teensy, ROS Board |
+| [Analysis/ANALYSIS_MCU.md](Analysis/ANALYSIS_MCU.md) | MCU: ESP32-S3, STM32, Teensy, ROS Board |
+| [Analysis/ANALYSIS_DEPTH_CAMERA.md](Analysis/ANALYSIS_DEPTH_CAMERA.md) | Depth-камера: Orbbec 335/335L/336/336L/Astra, RealSense, OAK-D. Расчёт точности на близкой дистанции, сценарий 3D-инспекции |
+| [Analysis/ANALYSIS_POWER.md](Analysis/ANALYSIS_POWER.md) | Питание и охлаждение: энергобюджет, шина 12 В против 24 В, выбор БП, вентиляторы, тепловые зоны |
+| [Analysis/ANALYSIS_NETWORK.md](Analysis/ANALYSIS_NETWORK.md) | Внутренняя сеть: гигабит, магнетики, выбор свитча, DHCP/NTP, верификация |
+
+> В аналитических документах используется разметка достоверности:
+> **[П]** проверено по источнику · **[Р]** расчёт с явными допущениями · **[О]** оценка,
+> не измерено. Разделение введено 2026-08-02 — чтобы через полгода было видно,
+> что факт, а что суждение.
 
 ## Конфигурация в двух словах
 
