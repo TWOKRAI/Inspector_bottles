@@ -150,6 +150,96 @@ class TestNoShowingIsNotZero:
         assert w.counters_reset is True
         assert (w.delivering, w.silent_source, w.losing) == (False, False, False)
 
+    def test_partial_reset_of_one_plane_is_not_hidden_by_a_growing_neighbour(self) -> None:
+        """C-3-1: пересобрана ОДНА плоскость, соседняя выросла — сумма это скрывает.
+
+        Счётчики живут в объектах менеджеров, а менеджер у каждой плоскости свой:
+        пересборка обнуляет ровно одну. Судить по сумме — это вердикт по одному
+        маркеру: logger 500→0 и stats 100→700 дают прирост +100, и окно объявляется
+        достоверным при сдвинутой базе. Прод-триггер: авто-рестарт процесса внутри
+        settle-окна `config_reload_verified`.
+        """
+        w = delivery_window(
+            {"logger": _plane(500), "stats": _plane(100)},
+            {"logger": _plane(0, at=101.0), "stats": _plane(700, at=101.0)},
+        )
+        assert w.counters_reset is True
+        assert w.reset_planes == ["logger"], "плоскость-виновник названа, а не только факт"
+        assert (w.delivering, w.silent_source, w.losing) == (False, False, False)
+
+    def test_growth_in_every_plane_is_not_a_reset(self) -> None:
+        """Контроль на вакуумность: детектор, срабатывающий всегда, не доказывает ничего."""
+        w = delivery_window(
+            {"logger": _plane(500), "stats": _plane(100)},
+            {"logger": _plane(510, at=101.0), "stats": _plane(700, at=101.0)},
+        )
+        assert w.counters_reset is False
+        assert w.reset_planes == []
+        assert w.delivering is True
+
+    def test_plane_that_stopped_reporting_is_a_reset(self) -> None:
+        """Плоскость была в первом снимке и пропала во втором: база сдвинута молча.
+
+        Её вклад исчезает из суммы — ровно тот же сдвиг базы, что и обнуление,
+        только без отрицательной дельты, по которой его ловили раньше.
+        """
+        w = delivery_window(
+            {"logger": _plane(500), "stats": _plane(100)},
+            {"stats": _plane(700, at=101.0)},
+        )
+        assert w.counters_reset is True
+        assert w.reset_planes == ["logger"]
+
+    def test_loss_counter_going_backwards_in_one_plane_is_detected(self) -> None:
+        """То же правило для потерь: рост соседней плоскости не отменяет обнуления."""
+        w = delivery_window(
+            {"logger": _plane(10, channel_refused_records=50), "stats": _plane(10)},
+            {
+                "logger": _plane(20, at=101.0, channel_refused_records=0),
+                "stats": _plane(20, at=101.0, channel_refused_records=90),
+            },
+        )
+        assert w.counters_reset is True
+        assert w.reset_planes == ["logger"]
+
+    def test_self_cost_larger_than_the_whole_window_is_not_silence(self) -> None:
+        """C-2-1: чужой писатель в зазоре after→control съедает вычетом чужую работу.
+
+        `self_cost` меряется зазором и вычитается как «цена своего опроса» — это
+        верно ровно в ЭКСКЛЮЗИВНОМ окне. Второй клиент (или GUI-панель, ~5 записей
+        на опрос на DEBUG) кладёт свои записи в тот же зазор, и вычет обнуляет
+        реально написанное: источник написал 10, вычлось 20 → `silent_source`.
+        «Пишем» прочиталось бы как «молчим» — ровно тот класс, который 5.7 закрывала.
+
+        Арифметика вычета тут заведомо недостоверна, и вердикт обязан сказать это
+        вслух, а не выдать уверенную тишину.
+        """
+        w = delivery_window(
+            {"logger": _plane(100)},
+            {"logger": _plane(110, at=101.0)},
+            control={"logger": _plane(130, at=101.1)},
+        )
+        assert w.self_cost == 20
+        assert w.written_delta == 10
+        assert w.cost_exceeds_window is True
+        assert w.silent_source is False, "тишина НЕ установлена — вычет съел больше окна"
+        assert (w.delivering, w.losing) == (False, False)
+
+    def test_cost_equal_to_the_window_is_honest_silence(self) -> None:
+        """Контроль: молчащий источник и цена опроса совпадают — это НЕ спорное окно.
+
+        Схлопни этот случай в `cost_exceeds_window` — и молчание по делу снова стало
+        бы неотличимо от поломки.
+        """
+        w = delivery_window(
+            {"logger": _plane(100)},
+            {"logger": _plane(105, at=101.0)},
+            control={"logger": _plane(110, at=101.1)},
+        )
+        assert (w.self_cost, w.written_delta) == (5, 5)
+        assert w.cost_exceeds_window is False
+        assert w.silent_source is True
+
     def test_window_seconds_absent_when_no_timestamps(self) -> None:
         w = delivery_window({"logger": {"channel_written_records": 1}}, {"logger": {"channel_written_records": 2}})
         assert w.window_sec is None

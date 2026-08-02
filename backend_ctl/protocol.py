@@ -452,9 +452,25 @@ class DeliveryWindow:
     не предполагается нулевой, а измеряется: два чтения подряд без паузы дают
     прирост ровно одного опроса, и он вычитается (``written_net``).
 
-    ``counters_reset`` — второй снимок МЕНЬШЕ первого. Счётчики живут в объектах
-    менеджеров, а пересборка (чужой ``config.reload``, ``switch``) их обнуляет:
-    окно тогда недостоверно, и это отдельное состояние, а не «тишина».
+    **Граница вычета названа прямо: он верен в ЭКСКЛЮЗИВНОМ окне.** Зазор
+    ``after → control`` приписывается своему опросу целиком, поэтому чужой писатель
+    в этом зазоре (второй клиент драйвера, GUI-панель — на DEBUG это ≈5 записей на
+    опрос) вычитается как своя цена. Честного разделения «мои записи / чужие» здесь
+    нет: счётчик считает записи, а не их авторов. Что сделано вместо этого —
+    ``cost_exceeds_window``: если вычет оказался БОЛЬШЕ всего окна при непустом
+    окне, арифметика заведомо недостоверна, и тогда ``silent_source`` не
+    выставляется. Уверенная тишина на пишущем источнике — это ровно тот класс,
+    который задача 5.7 закрывала; лучше сказать «не установлено», чем сказать
+    неверно. Механизм честного вычета по авторству — резидуал (корзина 3).
+
+    ``counters_reset`` — база сдвинулась между снимками, окно недостоверно, и это
+    отдельное состояние, а не «тишина». Счётчики живут в объектах менеджеров, а
+    менеджер у каждой плоскости СВОЙ: пересборка (чужой ``config.reload``,
+    ``switch``, авто-рестарт внутри выдержки) обнуляет ровно одну плоскость.
+    Поэтому сдвиг ищется **поплоскостно**, а не по сумме: сумма, в которой одна
+    плоскость обнулилась, а соседняя выросла, растёт — и окно объявлялось бы
+    достоверным при сдвинутой базе. ``reset_planes`` называет виновных поимённо:
+    вердикт «база уехала» без адреса нечинибелен.
     """
 
     delivering: bool
@@ -469,6 +485,8 @@ class DeliveryWindow:
     by_channel: Dict[str, int] = field(default_factory=dict)
     losses: Dict[str, Dict[str, int]] = field(default_factory=dict)
     missing: List[str] = field(default_factory=list)
+    reset_planes: List[str] = field(default_factory=list)
+    cost_exceeds_window: bool = False
 
     def as_dict(self) -> Dict[str, Any]:
         """Плоский dict для ответа наружу (Dict at Boundary)."""
@@ -481,6 +499,8 @@ class DeliveryWindow:
             "written_net": self.written_net,
             "loss_delta": self.loss_delta,
             "counters_reset": self.counters_reset,
+            "reset_planes": self.reset_planes,
+            "cost_exceeds_window": self.cost_exceeds_window,
             "window_sec": self.window_sec,
             "written_by_channel": self.by_channel,
             "losses": self.losses,
@@ -533,6 +553,46 @@ def _loss_total(planes: Any) -> int:
     return sum(sum(_loss_items(section).values()) for section in planes.values())
 
 
+def _reset_planes(before: Any, after: Any) -> List[str]:
+    """Плоскости, чья база уехала между снимками — поимённо, в порядке первого снимка.
+
+    Судить о сдвиге базы по СУММЕ нельзя: менеджер у каждой плоскости свой, и
+    пересборка обнуляет ровно одну. Обнулившийся logger при выросшем stats даёт
+    растущую сумму — сдвиг становится невидим ровно там, где он и происходит
+    (авто-рестарт процесса внутри выдержки `config_reload_verified`).
+
+    Сдвигом считается любое из трёх, и все три — одно обстоятельство «мерить нечем»:
+
+      * счётчик доставки плоскости уменьшился;
+      * суммарные потери плоскости уменьшились;
+      * плоскость показывала число в первом снимке и перестала во втором (её
+        вклад молча исчезает из суммы — тот же сдвиг, только без отрицательной
+        дельты, по которой его ловили раньше).
+
+    Появление НОВОЙ плоскости сдвигом не считается: её вклад до окна был нулевым,
+    прирост честен.
+    """
+    out: List[str] = []
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return out
+    for name, first in before.items():
+        if not isinstance(first, dict):
+            continue
+        second = after.get(name)
+        written_before = _written_total({name: first})
+        if not isinstance(second, dict):
+            if written_before is not None:
+                out.append(str(name))
+            continue
+        written_after = _written_total({name: second})
+        if written_before is not None and (written_after is None or written_after < written_before):
+            out.append(str(name))
+            continue
+        if sum(_loss_items(second).values()) < sum(_loss_items(first).values()):
+            out.append(str(name))
+    return out
+
+
 def _window_seconds(before: Any, after: Any) -> Optional[float]:
     """Длительность окна по метке ``observed_at`` ОДНОЙ плоскости (см. порядок выше)."""
     if not isinstance(before, dict) or not isinstance(after, dict):
@@ -579,6 +639,8 @@ def delivery_window(before: Any, after: Any, *, control: Any = None) -> Delivery
         elif written_after is not None:
             self_cost = max(0, written_control - written_after)
 
+    reset_planes = _reset_planes(before, after)
+
     if written_before is None or written_after is None:
         return DeliveryWindow(
             delivering=False,
@@ -593,12 +655,17 @@ def delivery_window(before: Any, after: Any, *, control: Any = None) -> Delivery
             by_channel={},
             losses={},
             missing=missing,
+            reset_planes=reset_planes,
         )
 
     written_delta = written_after - written_before
     loss_delta = _loss_total(after) - _loss_total(before)
-    reset = written_delta < 0 or loss_delta < 0
+    reset = bool(reset_planes)
     written_net = max(0, written_delta - self_cost)
+    # Вычет съел больше, чем показало всё окно: в зазоре писал кто-то ещё, и
+    # арифметика цены недостоверна. Тишину в этом случае не утверждаем (см.
+    # докстринг DeliveryWindow, граница эксклюзивного окна).
+    cost_exceeds_window = written_delta > 0 and self_cost > written_delta
     losing = (not reset) and loss_delta > 0
     delivering = (not reset) and written_net > 0
     # Разбивка по приёмникам — только приросты: абсолютные числа второго снимка
@@ -619,7 +686,7 @@ def delivery_window(before: Any, after: Any, *, control: Any = None) -> Delivery
             losses[plane] = grown
     return DeliveryWindow(
         delivering=delivering,
-        silent_source=(not reset) and not delivering and loss_delta == 0,
+        silent_source=(not reset) and not delivering and loss_delta == 0 and not cost_exceeds_window,
         losing=losing,
         written_delta=written_delta,
         self_cost=self_cost,
@@ -630,6 +697,8 @@ def delivery_window(before: Any, after: Any, *, control: Any = None) -> Delivery
         by_channel=by_channel,
         losses=losses,
         missing=missing,
+        reset_planes=reset_planes,
+        cost_exceeds_window=cost_exceeds_window,
     )
 
 

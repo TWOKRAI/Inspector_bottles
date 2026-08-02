@@ -771,10 +771,17 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         flush'а — без ``flush`` контрольный снимок отдавал ровно ноль при реальных
         пяти записях, и вычет был бы фикцией.
 
+        **Вычет верен в ЭКСКЛЮЗИВНОМ окне** (BCTL-ADR-009): зазор между вторым и
+        третьим замером приписывается своему опросу целиком, поэтому второй клиент
+        или GUI-панель, пишущие в тот же зазор, вычитаются как своя цена. Когда
+        вычет съедает больше, чем показало всё окно, арифметика недостоверна —
+        ``cost_exceeds_window``, и тишина тогда НЕ утверждается.
+
         Returns:
             ``{success, process, verdict, verified, delivering, silent_source,
             losing, written_delta, self_cost, written_net, loss_delta,
-            counters_reset, window_sec, written_by_channel, losses, reload}``.
+            counters_reset, reset_planes, cost_exceeds_window, window_sec,
+            written_by_channel, losses, reload}``.
         """
         import time
 
