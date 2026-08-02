@@ -650,7 +650,12 @@ def delivery_window(before: Any, after: Any, *, control: Any = None) -> Delivery
             self_cost=self_cost,
             written_net=0,
             loss_delta=0,
-            counters_reset=False,
+            # Ревью корзины 2 (Ф-4): здесь стояло жёсткое `False` рядом с
+            # непустым `reset_planes` — два поля одного ответа противоречили друг
+            # другу, и читатель, спрашивающий «база уезжала?», получал «нет» при
+            # уехавшей базе. Отсутствие СУММАРНОГО счётчика не отменяет того, что
+            # по конкретной плоскости перезапуск виден.
+            counters_reset=bool(reset_planes),
             window_sec=_window_seconds(before, after),
             by_channel={},
             losses={},
@@ -660,7 +665,12 @@ def delivery_window(before: Any, after: Any, *, control: Any = None) -> Delivery
 
     written_delta = written_after - written_before
     loss_delta = _loss_total(after) - _loss_total(before)
-    reset = bool(reset_planes)
+    # Пояс к per-plane признаку: суммарные потери, УЕХАВШИЕ НАЗАД, — это тоже
+    # перезапуск базы, даже если ни одна плоскость поимённо его не показала
+    # (плоскость могла исчезнуть из снимка целиком). Ревью корзины 2, Ф-4:
+    # без этого пояса `losing` считался бы по отрицательной дельте как «не
+    # теряем», то есть отсутствие данных выдавалось бы за благополучие.
+    reset = bool(reset_planes) or loss_delta < 0
     written_net = max(0, written_delta - self_cost)
     # Вычет съел больше, чем показало всё окно: в зазоре писал кто-то ещё, и
     # арифметика цены недостоверна. Тишину в этом случае не утверждаем (см.

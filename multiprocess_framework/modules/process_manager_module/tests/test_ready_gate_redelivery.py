@@ -759,3 +759,73 @@ class TestAddressedRestartPathIsGated:
         assert pm._active_wires["cam->proc"]["status"] == "broken", "статус active по неотправленной команде"
         event.set()
         assert _wait_for(lambda: pm._active_wires["cam->proc"]["status"] == "active"), "провод не переигран"
+
+
+class TestDeadEventDoesNotHoldTheHeadOfTheQueue:
+    """Ф-7 ревью корзины 2: мёртвое событие держало голову очереди весь дедлайн.
+
+    ADR-PMM-024 утверждал обратное — «head-of-line blocking мёртвого события не
+    держит очередь весь дедлайн». Утверждение было ложным, и ложным опасно: оно
+    объясняло сценарий, которого механизм не покрывал. Снятие по поколению
+    (`still_relevant`) убирает УСТАРЕВШИЙ конверт, а тут конверт актуален —
+    свежей рассылки не было, — просто ребёнка пересоздали вместе с его
+    ``ready_event``, и объект, который держит поток, не взведёт уже никто.
+
+    Проверяется свойство, а не время: действие обязано выполниться, ПОКА мёртвое
+    событие так и не взведено. Прогон — в daemon-потоке с дедлайном join: тест,
+    который вместо падения ВИСНЕТ, хуже отсутствующего.
+    """
+
+    def test_the_worker_switches_to_the_event_of_the_new_incarnation(self):
+        pm, _sent = _pm_with_children("camera_0")
+        dead = threading.Event()  # инкарнация, которой больше нет — не взведётся никогда
+        fresh = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = dead
+
+        fired: list = []
+        done = threading.Event()
+
+        def action() -> None:
+            fired.append(dead.is_set())
+            done.set()
+
+        worker = threading.Thread(
+            target=pm._run_child_action_after_ready,
+            args=("camera_0", action, "test", dead, 30.0, None),
+            daemon=True,
+        )
+        worker.start()
+        # Дать воркеру уйти в ожидание НА МЁРТВОМ объекте, и только потом подменить
+        # запись реестра: иначе он подхватил бы свежую с первого же среза, и
+        # проверялась бы не подмена, а обычный путь.
+        time.sleep(0.4)
+        pm._process_registry._ready_events["camera_0"] = fresh
+        fresh.set()
+
+        assert done.wait(5.0), (
+            "действие не выполнено за 5с при дедлайне 30с — воркер висит на мёртвом событии, "
+            "а за ним стоит вся очередь этого адресата"
+        )
+        assert fired == [False], "действие выполнилось только когда взвели мёртвый объект — подмены не было"
+        worker.join(timeout=2.0)
+
+    def test_a_live_event_is_not_swapped_out_from_under_the_worker(self):
+        """Контроль: пока инкарнация та же, перечитывание реестра ничего не меняет."""
+        pm, _sent = _pm_with_children("camera_0")
+        event = threading.Event()
+        pm._process_registry._ready_events["camera_0"] = event
+
+        fired: list = []
+        done = threading.Event()
+
+        worker = threading.Thread(
+            target=pm._run_child_action_after_ready,
+            args=("camera_0", lambda: (fired.append(True), done.set()), "test", event, 30.0, None),
+            daemon=True,
+        )
+        worker.start()
+        time.sleep(0.4)
+        assert not fired, "действие выполнено ДО готовности — гейт снят вовсе"
+        event.set()
+        assert done.wait(5.0), "действие не пришло по объявленной готовности"
+        worker.join(timeout=2.0)

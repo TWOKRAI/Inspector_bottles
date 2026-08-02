@@ -202,6 +202,46 @@ class TestNoShowingIsNotZero:
         assert w.counters_reset is True
         assert w.reset_planes == ["logger"]
 
+    def test_missing_total_does_not_deny_a_reset_it_can_see(self) -> None:
+        """Ф-4 ревью корзины 2: два поля одного ответа не имеют права спорить.
+
+        Ранняя ветка «нет суммарного счётчика» возвращала ``counters_reset=False``
+        РЯДОМ с непустым ``reset_planes``: читатель, спрашивающий «база уезжала?»,
+        получал «нет» при уехавшей базе. Отсутствие суммы не отменяет того, что по
+        конкретной плоскости перезапуск виден.
+        """
+        # Счётчика доставки нет НИ В ОДНОМ снимке (ранняя ветка), но потери
+        # плоскости уехали вниз — база сдвинулась, и это видно поимённо.
+        w = delivery_window(
+            {"logger": {"observed_at": 100.0, "channel_refused_records": 50}},
+            {"logger": {"observed_at": 101.0, "channel_refused_records": 0}},
+        )
+        assert w.missing, "контроль: ветка та самая — суммарного счётчика нет"
+        assert w.reset_planes == ["logger"]
+        assert w.counters_reset is True, "ответ противоречит сам себе: reset_planes есть, а reset=False"
+
+    def test_missing_total_without_a_reset_stays_honest(self) -> None:
+        """Контроль на вакуумность: без признаков перезапуска флаг не поднимается."""
+        w = delivery_window({"stats": {"observed_at": 100.0}}, {"stats": {"observed_at": 101.0}})
+        assert w.missing
+        assert (w.reset_planes, w.counters_reset) == ([], False)
+
+    def test_total_losses_going_backwards_is_a_reset_even_without_a_named_plane(self) -> None:
+        """Пояс к per-plane признаку: суммарные потери НАЗАД — тоже сдвиг базы.
+
+        Плоскость может исчезнуть из снимка не целиком, а лишь потерять секцию
+        потерь — тогда виновника поимённо не назвать, а сумма всё равно уехала
+        вниз. Без пояса `losing` считался бы «не теряем», то есть отсутствие
+        данных выдавалось бы за благополучие.
+        """
+        w = delivery_window(
+            {"logger": _plane(10, channel_refused_records=50)},
+            {"logger": _plane(20, at=101.0)},
+        )
+        assert w.loss_delta < 0, "контроль: сумма потерь действительно уехала назад"
+        assert w.counters_reset is True
+        assert (w.delivering, w.losing, w.silent_source) == (False, False, False)
+
     def test_self_cost_larger_than_the_whole_window_is_not_silence(self) -> None:
         """C-2-1: чужой писатель в зазоре after→control съедает вычетом чужую работу.
 

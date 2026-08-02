@@ -351,6 +351,94 @@ class TestProcessManagerProcessBuiltinCommands:
             pmp._register_builtin_commands()  # не должен падать
 
 
+class TestOrchestratorReadySignalIsHonest:
+    """B-1-1 сквозного ревью Ф5 — детерминированная пара к живому наблюдению.
+
+    Дефект: внешний сигнал готовности взводился в КОНЦЕ ``initialize()``, а
+    ``introspect.capabilities`` регистрируется позже — в ``ProcessModule.run()``.
+    Наблюдатель (launcher/harness), поверивший сигналу, слал команду в окно без
+    обработчика и получал ``No handler for key 'introspect.capabilities'`` — окно
+    длиной со спавн детей и boot-барьер, до 5 секунд.
+
+    Ревью корзины 2 (Ф-6) отметило, что доказательство было ТОЛЬКО живым: зонд
+    успевал спросить и получал ответ — но успевал он по времени, а не по
+    построению, и на медленной машине такой «зелёный» ничего не значит. Пара
+    ниже времени не знает вовсе: проверяется, что ``initialize()`` события НЕ
+    взводит (а лишь передаёт его процессу), и что к моменту взвода команда уже
+    разрешима.
+    """
+
+    def _bare_pm(self, event):
+        pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+        pmp.name = "ProcessManager"
+        pmp.shared_resources = None
+        pmp.config = {}
+        pmp.command_manager = MagicMock()
+        pmp.router_manager = MagicMock()
+        pmp._process_monitor = MagicMock()
+        pmp._system_ready_event = event
+        pmp._backend_ctl_channel = None
+        return pmp
+
+    def test_initialize_hands_the_event_over_instead_of_setting_it(self) -> None:
+        """Ключевая половина: к концу ``initialize()`` готовность НЕ объявлена."""
+        event = Event()
+        pmp = self._bare_pm(event)
+        with (
+            patch.object(ProcessModule, "initialize", return_value=True),
+            patch.object(ProcessManagerProcess, "_setup_console_manager"),
+            patch.object(ProcessManagerProcess, "_setup_topology_manager"),
+            patch.object(ProcessManagerProcess, "_setup_state_store"),
+            patch.object(ProcessManagerProcess, "_register_builtin_commands"),
+            patch.object(ProcessManagerProcess, "_log_active_feature_flags"),
+            patch.object(ProcessManagerProcess, "_wait_boot_ready"),
+            patch.object(ProcessManagerProcess, "get_config", return_value=None),
+            patch(
+                "multiprocess_framework.modules.process_manager_module.process."
+                "process_manager_process.setup_backend_ctl_channel",
+                return_value=None,
+            ),
+        ):
+            assert pmp.initialize() is True
+
+        assert not event.is_set(), (
+            "готовность объявлена в конце initialize() — команды ProcessModule.run() "
+            "ещё не зарегистрированы, и наблюдатель попадёт в окно без обработчика"
+        )
+        assert pmp._ready_event is event, "событие не передано процессу — объявлять его будет некому"
+
+    def test_the_event_is_announced_when_capabilities_already_answer(self) -> None:
+        """Вторая половина пары: взвод происходит ПОСЛЕ регистрации команд.
+
+        Без неё первая доказывала бы лишь «сигнала нет», что одинаково верно и
+        для системы, которая не объявляет готовность никогда.
+        """
+        registered: list = []
+        cm = MagicMock()
+        cm.register_command = MagicMock(side_effect=lambda name, *a, **k: registered.append(name))
+
+        seen_at_announce: list = []
+        event = MagicMock()
+        event.set = MagicMock(side_effect=lambda: seen_at_announce.append(list(registered)))
+
+        process = ProcessModule("ProcessManager")
+        process.command_manager = cm
+        process.worker_manager = MagicMock()
+        process.update_process_state = MagicMock()
+        process.log = MagicMock()
+        process.shutdown = MagicMock(return_value=True)
+        process.attach_ready_event(event)
+
+        process.run()
+        process.stop()
+
+        assert seen_at_announce, "готовность не объявлена вовсе"
+        assert "introspect.capabilities" in seen_at_announce[0], (
+            "в момент объявления готовности не зарегистрирована ровно та команда, "
+            f"на которой ловили дефект живьём (зарегистрировано: {len(seen_at_announce[0])})"
+        )
+
+
 class TestProcessCommandResponse:
     """_handle_process_command делегирует ответ дженерик reply_to_request
     (absorb bespoke-reply, ADR-COMM-005). Адресация/correlation — внутри
