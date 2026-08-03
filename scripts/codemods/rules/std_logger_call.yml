@@ -1,0 +1,41 @@
+# Ф6.2 — миграция голого stdlib-логгера на вид LoggerManager.
+#
+# Конвенция (Ф6.0, решение Р-А) — единственная форма аргумента: __name__.
+# Обоснование и именованные исключения:
+#   multiprocess_framework/modules/logger_module/README.md, раздел
+#   «Конвенция имени — __name__, а не корзина».
+#
+# Правил два, потому что правка состоит из двух независимых узлов AST:
+# сам вызов и импорт рядом с ним. Одним `fix` их не связать — ast-grep
+# переписывает узел, а не файл.
+
+id: std-logger-call
+language: python
+severity: warning
+message: >-
+  Голый logging.getLogger(__name__) пишет в никуда: у stdlib-root в процессах
+  фреймворка нет хендлеров. Заменить на get_std_logger(__name__).
+note: Ф6.2, plans/observability-unified-routing.md
+files:
+  - multiprocess_prototype/**/*.py
+  - multiprocess_framework/**/*.py
+  - Services/**/*.py
+  - Plugins/**/*.py
+ignores:
+  # --- Тесты: stdlib-логгер там ПРЕДМЕТ теста, а не способ логировать.
+  #     Директорией, а не поимённо (условие приёмки 6.2).
+  - "**/tests/**"
+  # --- Сам модуль логгера: мигрировать его на себя же нельзя.
+  - "**/modules/logger_module/**"
+  # --- Исключения-по-устройству (Ф6.5, каждое с причиной).
+  #     Аварийный выход фреймворка мимо менеджеров:
+  - "**/modules/_fallback.py"
+  #     ObservableMixin._note_manager_call_failure — сознательно мимо
+  #     отказавшего менеджера, иначе отказ логгера логировался бы логгером:
+  - "**/modules/base_manager/mixins/observable_mixin.py"
+  #     Модули НИЖЕ слоя логгера: их импортирует сам logger_module,
+  #     обратная зависимость дала бы цикл на импорте:
+  - "**/modules/config_module/**"
+rule:
+  pattern: logging.getLogger(__name__)
+fix: get_std_logger(__name__)

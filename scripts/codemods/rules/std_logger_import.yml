@@ -1,0 +1,43 @@
+# Ф6.2 — миграция голого stdlib-логгера на вид LoggerManager.
+#
+# Конвенция (Ф6.0, решение Р-А) — единственная форма аргумента: __name__.
+# Обоснование и именованные исключения:
+#   multiprocess_framework/modules/logger_module/README.md, раздел
+#   «Конвенция имени — __name__, а не корзина».
+#
+# Правил два, потому что правка состоит из двух независимых узлов AST:
+# сам вызов и импорт рядом с ним. Одним `fix` их не связать — ast-grep
+# переписывает узел, а не файл.
+
+id: std-logger-import
+language: python
+severity: warning
+message: >-
+  Файл переезжает на get_std_logger — импорт вида добавляется рядом с
+  `import logging`; сам `import logging` остаётся, если используется ещё
+  где-то (снимает потом `ruff --select F401 --fix`).
+note: Ф6.2, plans/observability-unified-routing.md
+files:
+  - multiprocess_prototype/**/*.py
+  - multiprocess_framework/**/*.py
+  - Services/**/*.py
+  - Plugins/**/*.py
+ignores:
+  - "**/tests/**"
+  - "**/modules/logger_module/**"
+  - "**/modules/_fallback.py"
+  - "**/modules/base_manager/mixins/observable_mixin.py"
+  - "**/modules/config_module/**"
+rule:
+  pattern: import logging
+  # Условие «в этом же файле есть мигрируемый вызов» — иначе импорт вида
+  # уехал бы в 133 файла вместо 107, и большая часть осталась бы неиспользованной.
+  inside:
+    kind: module
+    has:
+      stopBy: end
+      pattern: logging.getLogger(__name__)
+fix: |-
+  import logging
+
+  from multiprocess_framework.modules.logger_module import get_std_logger
