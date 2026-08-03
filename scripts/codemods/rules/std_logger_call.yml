@@ -27,15 +27,20 @@ ignores:
   - "**/tests/**"
   # --- Сам модуль логгера: мигрировать его на себя же нельзя.
   - "**/modules/logger_module/**"
-  # --- Исключения-по-устройству (Ф6.5, каждое с причиной).
+  # --- Исключения-по-устройству (Ф6.5). Каждое ПРОВЕРЕНО пробой импорта,
+  #     а не выведено из рассуждения о слоях — обоснование построчно в
+  #     WHITELIST_6_5.md.
   #     Аварийный выход фреймворка мимо менеджеров:
   - "**/modules/_fallback.py"
   #     ObservableMixin._note_manager_call_failure — сознательно мимо
-  #     отказавшего менеджера, иначе отказ логгера логировался бы логгером:
+  #     отказавшего менеджера; проба даёт цикл на partially initialized
+  #     base_manager:
   - "**/modules/base_manager/mixins/observable_mixin.py"
-  #     Модули НИЖЕ слоя логгера: их импортирует сам logger_module,
-  #     обратная зависимость дала бы цикл на импорте:
-  - "**/modules/config_module/**"
+  #     Ниже слоя логгера: logger_module импортирует data_schema_module,
+  #     обратная зависимость даёт цикл (проба: SchemaBase из partially
+  #     initialized модуля):
+  - "**/modules/data_schema_module/registry/discovery.py"
+  - "**/modules/data_schema_module/registry/process_registry.py"
 rule:
   pattern: logging.getLogger(__name__)
 fix: get_std_logger(__name__)

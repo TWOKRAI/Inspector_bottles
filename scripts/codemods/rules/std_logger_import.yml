@@ -23,11 +23,14 @@ files:
   - Services/**/*.py
   - Plugins/**/*.py
 ignores:
+  # Тот же состав, что у std-logger-call — расхождение дало бы файл с
+  # переписанным вызовом и без импорта вида (NameError в рантайме).
   - "**/tests/**"
   - "**/modules/logger_module/**"
   - "**/modules/_fallback.py"
   - "**/modules/base_manager/mixins/observable_mixin.py"
-  - "**/modules/config_module/**"
+  - "**/modules/data_schema_module/registry/discovery.py"
+  - "**/modules/data_schema_module/registry/process_registry.py"
 rule:
   pattern: import logging
   # Условие «в этом же файле есть мигрируемый вызов» — иначе импорт вида
