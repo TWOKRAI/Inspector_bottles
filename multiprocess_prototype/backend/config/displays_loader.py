@@ -11,7 +11,8 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from pathlib import Path
 
 import yaml
@@ -20,7 +21,7 @@ from pydantic import ValidationError
 from multiprocess_framework.modules.display_module import DisplayEntry, DisplayRegistry
 from multiprocess_prototype.backend.config.schemas import DisplayEntrySchema, DisplaysConfig  # noqa: F401
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 
 def load_displays_config(path: Path) -> DisplaysConfig:

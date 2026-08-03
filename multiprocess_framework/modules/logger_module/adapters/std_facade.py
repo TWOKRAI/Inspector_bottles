@@ -376,12 +376,21 @@ class StdLoggerFacade:
             # ``extra={"module": …}`` уронил бы его ``KeyError``'ом. Фолбэк —
             # аварийный режим, ронять из него вызывающего нельзя.
             text = apply_format(msg, args)
+            if extra:
+                text = f"{text} | {extra}"
+            # Буфер (6.4а) держит ТОЛЬКО строки, поэтому traceback в него
+            # вклеивается текстом. В stdlib он уходит штатным ``exc_info`` —
+            # иначе запись приезжает без ``record.exc_info`` и всякий, кто
+            # разбирает её структурно (caplog, обработчик с форматтером),
+            # видит ошибку без причины. Так было с 4473d393 по Ф6.2: 6.1
+            # отдавал exc_info штатно, 6.4а свернул его в текст заодно с
+            # буфером. Поймано вторым потребителем — тестами config_module,
+            # которые приехали на фасад кодмодом.
+            buffered = text
             if exc is not None:
                 rendered = "".join(traceback.format_exception(*exc)).rstrip()
                 if rendered:
-                    text = f"{text}\n{rendered}"
-            if extra:
-                text = f"{text} | {extra}"
+                    buffered = f"{text}\n{rendered}"
             # Ф6.4а: запись КОПИТСЯ, а не только уходит в stdlib. Сам
             # stdlib-путь оставлен намеренно: если менеджер в этом процессе не
             # поднимут никогда (утилита, тест, аварийный сценарий), буфер так и
@@ -389,8 +398,8 @@ class StdLoggerFacade:
             # Дубля в проде не будет: у stdlib-root в процессах фреймворка
             # хендлеров нет, поэтому «второй адрес» существует только там, где
             # его настроили осознанно.
-            _buffer_early(level, text, self._module)
-            getattr(self._fallback, level)(text)
+            _buffer_early(level, buffered, self._module)
+            getattr(self._fallback, level)(text, exc_info=exc)
             return False
         scope, log_level = _LEVEL_ROUTE[level]
         if exc is None and not extra:

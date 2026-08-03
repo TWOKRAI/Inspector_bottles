@@ -27,7 +27,8 @@ Qt-free: принимает callable ``send_command(target, command, args)`` —
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any, Callable, Dict, Optional
 
 #: Команда брокера на оркестраторе (Task 5.11): «подпиши меня на хвост ВСЕХ».
@@ -64,7 +65,7 @@ class ObservabilityTailActivator:
         """
         self._send = send_command
         self._gui_name = gui_name
-        self._log = log if log is not None else logging.getLogger(__name__)
+        self._log = log if log is not None else get_std_logger(__name__)
         self._announced = False
         self._attempts = 0
 

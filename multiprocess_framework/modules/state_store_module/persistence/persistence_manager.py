@@ -12,7 +12,8 @@ ADR-SS-011 (2026-05-07): file_mapping и предикаты пропуска/н�
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -23,7 +24,7 @@ from ..core.delta import Delta
 from ..core.tree_store import TreeStore
 from ..middleware.base import StateMiddleware
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +126,7 @@ class PersistenceManager:
         self._debounce_seconds = debounce_seconds
         self._file_mapping: dict[str, str] = dict(file_mapping or {})
         # Обратный маппинг для save: filename → prefix
-        self._reverse_mapping: dict[str, str] = {
-            fname: prefix for prefix, fname in self._file_mapping.items()
-        }
+        self._reverse_mapping: dict[str, str] = {fname: prefix for prefix, fname in self._file_mapping.items()}
         self._skip = skip_predicate
         self._immediate = immediate_predicate
 

@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import threading
 import time
 from pathlib import Path
@@ -32,7 +33,7 @@ from .registers import MLInferenceRegisters
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_MODELS_DIR = _PROJECT_ROOT / "data" / "models"
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Кириллица в overlay: cv2.putText (Hershey) не рисует кириллицу → '???'.
 # Рисуем через PIL TTF. Шрифт грузится один раз (ленивая инициализация).

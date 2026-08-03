@@ -174,10 +174,13 @@ class _PluginRegistry:
             Количество новых зарегистрированных плагинов.
         """
         import importlib
-        import logging
         from pathlib import Path
 
-        logger = logging.getLogger(__name__)
+        # Импорт вида — локальный, как и остальные в этом методе: файл сознательно
+        # держит модульный уровень пустым (только typing + .manifest).
+        from multiprocess_framework.modules.logger_module import get_std_logger
+
+        logger = get_std_logger(__name__)
         count_before = len(self._plugins)
 
         for dir_path in plugin_dirs:

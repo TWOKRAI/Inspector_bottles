@@ -25,7 +25,8 @@ Refs: plans/displays-in-recipe/plan.md, Task 4.1
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Any, Optional
 
 from PySide6.QtCore import Qt, Signal, Slot
@@ -38,7 +39,7 @@ from multiprocess_prototype.frontend.widgets.displays.render_pipeline import run
 if TYPE_CHECKING:
     from multiprocess_framework.modules.router_module import RouterManager
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 # Дефолтные render-параметры — поведение как в предыдущей версии (contain + no transforms)
 _DEFAULT_RENDER_PARAMS: dict[str, Any] = {

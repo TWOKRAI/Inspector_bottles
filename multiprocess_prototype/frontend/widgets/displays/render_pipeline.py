@@ -21,13 +21,14 @@ Refs: plans/displays-in-recipe/plan.md, Task 4.1
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any
 
 import cv2
 import numpy as np
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

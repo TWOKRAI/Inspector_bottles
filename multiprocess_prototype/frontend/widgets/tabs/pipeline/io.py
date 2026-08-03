@@ -22,12 +22,13 @@ gui_positions — dict вида:
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import warnings
 
 from .model import PipelineModel
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 def graph_to_blueprint(

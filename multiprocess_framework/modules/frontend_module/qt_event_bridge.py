@@ -37,7 +37,8 @@ Stability: lite
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from collections.abc import Callable
 
 from PySide6.QtCore import (
@@ -51,7 +52,7 @@ from PySide6.QtWidgets import QApplication
 
 from multiprocess_framework.modules.event_module import EventBus, Subscription
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 
 def _is_main_thread() -> bool:

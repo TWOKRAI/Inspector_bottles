@@ -208,6 +208,57 @@ class TestFallbackWithoutManager:
         assert emitted_to_manager is False, "без менеджера возвращаем False — запись ушла в фолбэк"
         assert "расхождение конфига и рантайма" in caplog.text
 
+    def test_fallback_hands_stdlib_a_structured_exception(self, no_lm: None, caplog: pytest.LogCaptureFixture) -> None:
+        """Фолбэк обязан отдавать ``exc_info`` штатным путём stdlib, не текстом.
+
+        Хазард пути: буфер ранних записей (6.4а) принимает только готовую
+        строку, поэтому соблазн — свернуть traceback в текст и отдать stdlib
+        то же самое. Тогда ``record.exc_info`` пуст, и всякий потребитель,
+        который разбирает запись структурно (caplog, форматтер обработчика,
+        Sentry-подобный сборщик), видит ошибку без причины. Ровно это и
+        случилось между 4473d393 и Ф6.2.
+        """
+        facade = StdLoggerFacade("gui")
+
+        with caplog.at_level(logging.ERROR, logger="mpf.gui"):
+            try:
+                raise ValueError("бум из фолбэка")
+            except ValueError:
+                facade.exception("операция упала")
+
+        record = caplog.records[0]
+        assert record.exc_info is not None, "traceback пришёл в stdlib текстом, а не exc_info"
+        assert record.exc_info[1].args == ("бум из фолбэка",)
+        assert "Traceback" not in record.getMessage(), (
+            "traceback склеен в текст И отдан через exc_info — он напечатается дважды"
+        )
+
+    def test_fallback_buffers_the_traceback_as_text(self, no_lm: None) -> None:
+        """Буфер ранних записей строковый — traceback обязан быть ВНУТРИ строки.
+
+        Парная половина к тесту выше: exc_info живёт до конца кадра, а буфер
+        сливается позже, уже в другом кадре. Держать в буфере ссылку на
+        исключение нельзя, значит текст обязан нести traceback сам.
+        """
+        std_facade.reset_early_buffer()
+        facade = StdLoggerFacade("gui")
+        try:
+            raise ValueError("бум в буфер")
+        except ValueError:
+            facade.exception("упало до менеджера")
+
+        drained: list[tuple[str, str, str]] = []
+
+        class _Writer:
+            def log(self, _scope: str, level: int, msg: object, module: str, *a: object) -> None:
+                drained.append((str(level), str(msg), module))
+
+        std_facade._drain_early(_Writer())
+        assert drained, "буфер пуст — ранняя запись потеряна"
+        text = drained[0][1]
+        assert "упало до менеджера" in text
+        assert "ValueError: бум в буфер" in text, "traceback не доехал до буфера"
+
     def test_fallback_logger_name_is_derived_from_module(self, no_lm: None) -> None:
         assert StdLoggerFacade("camera")._fallback.name == "mpf.camera"
 

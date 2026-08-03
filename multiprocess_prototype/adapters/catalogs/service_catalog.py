@@ -27,7 +27,8 @@ Lifecycle-логика повторяет паттерн ServicesPresenter
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any
 
 from multiprocess_framework.modules.service_module.interfaces import ServiceLifecycle
@@ -41,7 +42,7 @@ from multiprocess_prototype.domain.protocols.service_catalog import (
     ServiceSpec,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 def _entry_to_spec(entry: ServiceEntry) -> ServiceSpec:

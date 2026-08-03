@@ -49,7 +49,8 @@ Refs: plans/displays-in-recipe/plan.md Task 5.2
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -75,7 +76,7 @@ from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout i
 
 from .presenter import DisplaysPresenter
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Допустимые форматы пикселей
 _PIXEL_FORMATS = ["BGR", "RGB", "GRAY", "RGBA"]

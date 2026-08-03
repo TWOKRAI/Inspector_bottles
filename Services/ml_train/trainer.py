@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import copy
 import json
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import math
 import time
 from dataclasses import dataclass
@@ -33,7 +34,7 @@ from Services.ml_train.config import TrainConfig
 from Services.ml_train.data import DataBundle, build_dataloaders
 from Services.ml_train.models import MultiHeadModel, build_model
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 @dataclass

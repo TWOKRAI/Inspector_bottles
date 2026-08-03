@@ -14,7 +14,8 @@ Thread safety: enqueue вызывается из GUI-потока, flush -- из
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import threading
 from typing import TYPE_CHECKING
 
@@ -24,7 +25,7 @@ from .repository import ActionLogRepository
 if TYPE_CHECKING:
     from .rotation import ActionLogRotation
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class ActionLogWriter:

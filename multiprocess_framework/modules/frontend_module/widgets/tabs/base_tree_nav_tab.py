@@ -26,7 +26,8 @@ tree-навигацию по ``list[SectionSpec]``:
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Any, Callable
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
@@ -53,7 +54,7 @@ if TYPE_CHECKING:
     from .section_spec import SectionSpec
     from .tab_layout_protocol import TabLayoutProtocol, UndoRedoController
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class BaseTreeNavTab(BaseColumnarTab):

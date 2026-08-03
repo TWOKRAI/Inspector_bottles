@@ -29,7 +29,8 @@ Refs: plans/2026-05-27_cross-tab-architecture/phase-c-adapters.md (Task C.6)
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from collections.abc import Callable
 
 from multiprocess_prototype.domain.commands import ProjectCommand, SetPluginConfig
@@ -41,7 +42,7 @@ from multiprocess_prototype.domain.protocols import TopologyRepository
 from .history import ProjectHistory
 from .project_holder import ProjectHolder  # re-export для backward-compat
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 def _fmt_value(value: object) -> str:

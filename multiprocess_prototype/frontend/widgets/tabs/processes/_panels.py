@@ -18,7 +18,8 @@ Task E.2: панели принимают ``bindings`` (GuiStateBindings) нап
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -64,7 +65,7 @@ if TYPE_CHECKING:
 
     from .presenter import ProcessesPresenter
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 # Колонки таблицы «Все процессы»
 _ALL_TABLE_COLUMNS = ["Имя", "Категория", "Статус", "Циклов/с", "Плагины"]

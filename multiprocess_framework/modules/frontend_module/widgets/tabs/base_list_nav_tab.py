@@ -22,7 +22,8 @@ content-виджетов.
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Callable
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
 
     from .tab_layout_protocol import TabLayoutProtocol
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class BaseListNavTab(BaseColumnarTab):

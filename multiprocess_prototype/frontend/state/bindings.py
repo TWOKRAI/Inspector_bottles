@@ -10,7 +10,8 @@ GuiStateBindings регистрирует обратные вызовы чере
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, TYPE_CHECKING, runtime_checkable
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 
 # Несовместимость виджета со значением — ожидаемая ситуация (не валим GUI), но по
 # правилу 5 не глушим молча: логируем на debug, чтобы видеть при отладке биндингов.
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 
 @runtime_checkable

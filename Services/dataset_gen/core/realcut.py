@@ -17,12 +17,13 @@ dataset_gen: поворот на GT-угол, композиция на фон, 
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 import cv2
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Каноничные углы съёмки, приводимые к вертикали без интерполяции (кратны 90°).
 # Угол в имени файла = поворот буквы CCW (как метка); привести к 0° = повернуть

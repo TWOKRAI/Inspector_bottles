@@ -9,7 +9,8 @@ Generic-механика (перенесена из прототипа, NEW-D1).
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Callable, Optional
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
@@ -19,7 +20,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QWidget,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class LazyTab(QWidget):

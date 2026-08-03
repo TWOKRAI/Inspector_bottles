@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import copy
 import importlib
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from multiprocess_framework.modules.process_module.plugins import (
@@ -30,7 +31,7 @@ from multiprocess_framework.modules.process_module.generic import frame_trace
 
 from .registers import ChainExecutorRegisters
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 @register_plugin(

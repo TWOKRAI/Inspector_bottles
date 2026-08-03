@@ -19,7 +19,8 @@ Pure-Python: модуль работает без PySide6.
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Optional
 
 from .mvp_pattern import TabPresenterBase, TView, TUi
@@ -27,7 +28,7 @@ from .mvp_pattern import TabPresenterBase, TView, TUi
 if TYPE_CHECKING:
     from .section_protocol import SectionProtocol
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class TreeNavTabPresenter(TabPresenterBase[TView, TUi]):

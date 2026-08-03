@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """NodeMoveHandler — apply/revert перемещения ноды (GUI-only, без IPC)."""
+
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.actions_module.schemas import Action
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class NodeMoveHandler:

@@ -1,13 +1,13 @@
 """ImagePanelPresenter — управляет набором DisplaySlot'ов."""
 
-import logging
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 import numpy as np
 from PySide6.QtGui import QImage, QPixmap
 
 from .display_slot import DisplaySlot
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class ImagePanelPresenter:

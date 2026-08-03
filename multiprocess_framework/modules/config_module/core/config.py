@@ -9,7 +9,8 @@ Config — runtime-контейнер данных одной конфигура
 from __future__ import annotations
 
 import copy
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import os
 from threading import RLock
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -20,7 +21,7 @@ from multiprocess_framework.modules.data_schema_module.core.helpers import merge
 # доступа к logger_manager), поэтому падение подписчика логируется стандартным
 # logging (идиома уже используется в модулях без ObservableMixin, см. например
 # shared_resources_module/buffers/cleanup.py) — лучше, чем немой except (A-9).
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class Config:

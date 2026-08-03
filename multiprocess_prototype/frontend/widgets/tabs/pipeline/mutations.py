@@ -25,7 +25,8 @@ Qt-зависимость: контроллер Qt-free по прямым имп
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Any, Callable
 
 from multiprocess_prototype.domain.commands import (
@@ -51,7 +52,7 @@ if TYPE_CHECKING:
     from .layout_controller import LayoutController
     from .model import PipelineModel
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class PipelineMutations:

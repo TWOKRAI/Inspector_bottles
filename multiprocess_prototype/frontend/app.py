@@ -635,9 +635,9 @@ def run_gui(process: "GuiProcess") -> None:
 
     def _on_plugin_config_changed(event: PluginConfigChanged) -> None:
         """Live field-write: domain → GUI RegistersManager + register_update IPC."""
-        import logging as _logging
+        from multiprocess_framework.modules.logger_module import get_std_logger
 
-        _log = _logging.getLogger(__name__)
+        _log = get_std_logger(__name__)
 
         # Адрес плагина: register_name = plugin_name по (process, plugin_index).
         # Fallback на process_name — legacy 1:1 (process == plugin == register).

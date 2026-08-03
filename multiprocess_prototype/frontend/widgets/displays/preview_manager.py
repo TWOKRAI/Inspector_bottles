@@ -16,14 +16,15 @@ Refs: plans/displays-in-recipe/plan.md Task 2.3
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.router_module import RouterManager
     from multiprocess_prototype.frontend.widgets.displays.preview_window import PreviewWindow
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 
 class PreviewWindowManager:

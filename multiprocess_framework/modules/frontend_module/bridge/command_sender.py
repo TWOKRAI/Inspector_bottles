@@ -6,7 +6,8 @@ v2 (Phase 12): debounce для slider dragging, send_field_command, send_action_
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
@@ -15,7 +16,7 @@ from multiprocess_framework.modules.message_module import (
     build_system_command_message,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 __all__ = [
     "IProcess",

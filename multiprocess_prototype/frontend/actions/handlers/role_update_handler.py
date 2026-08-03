@@ -8,16 +8,18 @@
 Не требует IRegistersManagerGui — rm может быть None.
 Логируется через AuditMiddleware автоматически (PR4 Group B).
 """
+
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.actions_module.schemas import Action
     from Services.auth.interfaces import IAuthManager
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class RoleUpdateHandler:
@@ -51,7 +53,8 @@ class RoleUpdateHandler:
         except Exception as exc:
             logger.warning(
                 "role_update apply failed: role=%r → %s",
-                role_name, exc,
+                role_name,
+                exc,
             )
 
     def revert(self, action: "Action", rm: Any) -> None:
@@ -73,5 +76,6 @@ class RoleUpdateHandler:
         except Exception as exc:
             logger.warning(
                 "role_update revert failed: role=%r → %s",
-                role_name, exc,
+                role_name,
+                exc,
             )

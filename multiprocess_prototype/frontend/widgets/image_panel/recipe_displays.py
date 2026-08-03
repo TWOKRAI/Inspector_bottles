@@ -28,9 +28,10 @@ Pure Python, без Qt. Превращает raw-dict активного рец�
 
 from __future__ import annotations
 
-import logging
 
-logger = logging.getLogger(__name__)
+from multiprocess_framework.modules.logger_module import get_std_logger
+
+logger = get_std_logger(__name__)
 
 
 def build_panel_displays(recipe: dict | None) -> list[dict]:

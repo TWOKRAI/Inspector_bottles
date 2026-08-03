@@ -22,9 +22,11 @@ Refs: plans/displays-in-recipe/plan.md
 from __future__ import annotations
 
 import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Путь к директории рецептов относительно этого файла:
 # migrations/ -> recipes/ (родитель двух уровней)

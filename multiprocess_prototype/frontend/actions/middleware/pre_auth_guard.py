@@ -7,9 +7,11 @@
 Определение WriteAction: action блокируется, если action.undoable == True
 ИЛИ если action.action_type входит в WRITE_ACTION_TYPES.
 """
+
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING
 
 from multiprocess_framework.modules.actions_module.schemas import Action
@@ -25,17 +27,19 @@ from multiprocess_prototype.frontend.actions.action_types import (
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.auth_state import AuthState
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Типы действий, считающиеся мутацией (блокируются без авторизации)
-WRITE_ACTION_TYPES: frozenset[str] = frozenset({
-    FIELD_SET,
-    RECIPE_APPLY,
-    PROCESS_ADD,
-    PROCESS_REMOVE,
-    WIRE_ADD,
-    WIRE_REMOVE,
-})
+WRITE_ACTION_TYPES: frozenset[str] = frozenset(
+    {
+        FIELD_SET,
+        RECIPE_APPLY,
+        PROCESS_ADD,
+        PROCESS_REMOVE,
+        WIRE_ADD,
+        WIRE_REMOVE,
+    }
+)
 
 
 class PreAuthGuard:
@@ -71,9 +75,7 @@ class PreAuthGuard:
         from PySide6.QtWidgets import QApplication, QMessageBox
 
         description = action.description or action.action_type
-        logger.info(
-            "Действие заблокировано (требуется авторизация): %s", description
-        )
+        logger.info("Действие заблокировано (требуется авторизация): %s", description)
         parent = QApplication.activeWindow() if QApplication.instance() else None
         QMessageBox.information(
             parent,

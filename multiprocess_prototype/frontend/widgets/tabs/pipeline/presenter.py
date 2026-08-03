@@ -11,7 +11,8 @@ Signal suppression предотвращает циклы при programmatic upd
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, ContextManager, Iterator
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from .graph.graph_scene import GraphScene
     from .inspector.inspector_panel import NodeInspectorPanel
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class PipelinePresenter:
