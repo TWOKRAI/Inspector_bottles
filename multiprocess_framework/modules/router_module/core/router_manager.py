@@ -34,6 +34,17 @@ if TYPE_CHECKING:
     from ...message_module import Message
 
 
+class RouterSendError(Exception):
+    """Отправка не состоялась — повод для плоскости ошибок, а не только счётчика.
+
+    Ф6.7. Ошибки роутера, у которых нет исходного исключения (маршрут не
+    нашёлся, доставка провалилась), до этой правки существовали только как
+    прирост числа ``errors``. ``_track_error`` требует объект исключения, и
+    заворачивать причину в общий ``Exception`` значило бы слить их в одну кучу
+    с чужими: у ErrorManager тип — часть адреса записи.
+    """
+
+
 class _PendingRequest:
     """Слот ожидания ответа на синхронный request (P0.5).
 
@@ -146,6 +157,23 @@ class RouterManager(ChannelRoutingManager):
             "sent_ok": 0,
             "received": 0,
             "errors": 0,
+            # Ф6.7 (находка Н-1 живого прогона 2026-08-03). До этой правки
+            # ``errors`` был ОДНИМ числом на три разных случая, и живой прогон
+            # это доказал: 45 ошибок за 7.7 мин на трёх процессах, ни строки в
+            # логах, и по счётчикам нельзя было сказать, что именно случилось.
+            # Три ключа — три разных диагноза и три разных действия:
+            #   errors_no_route         — адресата не нашли вовсе (опечатка в
+            #                             имени канала/процесса, не поднятая
+            #                             топология): чинить конфигурацию;
+            #   errors_delivery_failed  — адресат найден, доставка провалилась
+            #                             (очередь мертва/полна, канал вернул
+            #                             error): чинить пропускную способность;
+            #   errors_exception        — исключение на пути отправки: чинить код.
+            # Сумма трёх равна приросту ``errors`` — общий счётчик остаётся
+            # совместимым и продолжает работать как раньше.
+            "errors_no_route": 0,
+            "errors_delivery_failed": 0,
+            "errors_exception": 0,
             "middleware_dropped": 0,
             # Ф4.2 (fencing-token): сколько входящих отброшено fence-фильтром как
             # stale (epoch отправителя < известного получателю). Подмножество
@@ -205,12 +233,63 @@ class RouterManager(ChannelRoutingManager):
         self._pending_requests: Dict[str, _PendingRequest] = {}
         self._pending_lock = threading.Lock()
 
+        # Ф6.7: троттлинг записей об ошибках отправки — по причине, а не общий.
+        # Отдельное окно на причину: шторм «нет маршрута» не имеет права
+        # заглушить редкое «исключение», иначе диагностика теряет как раз тот
+        # случай, ради которого её и читают.
+        self._send_error_last_log: Dict[str, float] = {}
+        self._send_error_suppressed: Dict[str, int] = {}
+
     def _inc_stat(self, key: str, value: int = 1) -> None:
         # get(key, 0): счётчики с разбивкой по kind (``sent_via_channel.data`` и т.п.)
         # заводятся на лету — состав kind'ов зависит от топологии и не может быть
         # перечислен в _stats заранее. Для статических ключей поведение прежнее.
         with self._stats_lock:
             self._stats[key] = self._stats.get(key, 0) + value
+
+    #: Не чаще одной записи об ошибке отправки НА ПРИЧИНУ за это окно (сек).
+    #: Троттлинг по времени, а не «каждая N-я»: живой прогон дал 45 ошибок за
+    #: 7.7 мин на трёх процессах, но темп зависит от нагрузки, и порог по счёту
+    #: при шторме дал бы несколько записей в секунду — вторая беда того же рода,
+    #: что раздула messages.log до 645 МБ. Окно = образец из
+    #: ``shared_resources_module/queues/core/manager.py``.
+    _SEND_ERROR_LOG_INTERVAL_SEC = 5.0
+
+    def _report_send_error(self, reason: str, detail: str, error: Optional[Exception] = None) -> None:
+        """Учесть ошибку отправки и — троттлированно — сказать о ней вслух.
+
+        Ф6.7, находка Н-1. Ветка «no channel resolved» инкрементила ``errors``
+        и возвращала error-dict — без единой записи и без ``_track_error``.
+        Итог на живом прогоне: 45 потерянных data-сообщений (≈0.37 %), которых
+        не видела ни плоскость логов, ни плоскость ошибок; узнать о них можно
+        было только вычитанием счётчиков вручную.
+
+        Что троттлируется, а что нет — граница проведена сознательно:
+
+        * **счётчики полные** (``errors`` + пер-причинный) — арифметика обязана
+          сходиться, иначе «0.37 % теряется» не посчитать;
+        * **запись и ``_track_error`` — троттлированы** одним окном, и число
+          подавленных названо в самой записи. Плоскость ошибок не батчится
+          (пол ошибок пишет синхронно), поэтому нетроттлированный
+          ``_track_error`` под штормом сам стал бы источником объёма.
+        """
+        self._inc_stat("errors")
+        self._inc_stat(f"errors_{reason}")
+        now = time.monotonic()
+        with self._stats_lock:
+            last = self._send_error_last_log.get(reason, 0.0)
+            if last and now - last < self._SEND_ERROR_LOG_INTERVAL_SEC:
+                self._send_error_suppressed[reason] = self._send_error_suppressed.get(reason, 0) + 1
+                return
+            suppressed = self._send_error_suppressed.pop(reason, 0)
+            self._send_error_last_log[reason] = now
+        total = self._stats.get(f"errors_{reason}", 0)
+        tail = f"; подавлено с прошлой записи: {suppressed}" if suppressed else ""
+        self._log_error(f"send [{reason}] {detail} (errors_{reason}={total}{tail})")
+        self._track_error(
+            error if error is not None else RouterSendError(f"[{reason}] {detail}"),
+            {"reason": reason, "suppressed_since_last": suppressed},
+        )
 
     def _count_door(self, door: str, msg_dict: Dict[str, Any]) -> None:
         """Учесть, какой «дверью» ушло сообщение, + разбивка по kind.
@@ -342,28 +421,44 @@ class RouterManager(ChannelRoutingManager):
                 # когда channel/route не резолвится (раньше здесь был silent drop) —
                 # реализует Message(targets=[...]) → RouterManager → доставлено,
                 # не ломая существующие channel-маршруты.
-                delivered = self._deliver_by_targets(processed)
+                delivered, attempted = self._deliver_by_targets(processed)
                 if delivered is not None:
                     self._count_door("sent_via_targets", processed)
                     return delivered
-                self._inc_stat("errors")
-                return {
-                    "status": "error",
-                    "reason": (
-                        f"no channel resolved for "
-                        f"channel={processed.get('channel')!r} "
-                        f"command={processed.get('command')!r} "
-                        f"type={processed.get('type')!r}"
-                    ),
-                }
+                # Ф6.7: два неразличимых прежде случая. ``attempted`` — сколько
+                # валидных адресатов было, кому пытались положить в очередь.
+                # Ноль означает «адреса не было вовсе», ненулевое — «адрес был,
+                # доставка провалилась». Раньше и то и другое давало одинаковый
+                # +1 к ``errors`` и одинаковый текст, то есть разбор упирался в
+                # чтение кода.
+                address = (
+                    f"channel={processed.get('channel')!r} "
+                    f"command={processed.get('command')!r} "
+                    f"type={processed.get('type')!r}"
+                )
+                if attempted:
+                    reason_key = "delivery_failed"
+                    detail = (
+                        f"ни один из {attempted} адресатов не принял: {address} targets={processed.get('targets')!r}"
+                    )
+                else:
+                    reason_key = "no_route"
+                    detail = f"адресат не найден: {address}"
+                self._report_send_error(reason_key, detail)
+                return {"status": "error", "reason": f"no channel resolved for {address}"}
 
             self._count_door("sent_via_channel", processed)
 
             if len(channels) == 1:
                 result = channels[0].send(processed)
                 if isinstance(result, dict) and result.get("status") == "error":
-                    self._inc_stat("errors")
-                    self._log_debug(f"channel '{channels[0].name}' error: {result.get('reason')}")
+                    # Ф6.7: было ``_log_debug`` — то есть при выключенном DEBUG
+                    # (боевой дефолт) отказ канала не оставлял НИКАКОГО следа,
+                    # только +1 к общему ``errors``.
+                    self._report_send_error(
+                        "delivery_failed",
+                        f"канал '{channels[0].name}' вернул ошибку: {result.get('reason')!r}",
+                    )
                 else:
                     self._inc_stat("sent_ok")
                 return result
@@ -374,15 +469,17 @@ class RouterManager(ChannelRoutingManager):
                 r = ch.send(processed)
                 results.append({"channel": ch.name, **r})
                 if isinstance(r, dict) and r.get("status") == "error":
-                    self._inc_stat("errors")
+                    self._report_send_error(
+                        "delivery_failed",
+                        f"канал '{ch.name}' вернул ошибку в broadcast: {r.get('reason')!r}",
+                    )
                     all_ok = False
             if all_ok:
                 self._inc_stat("sent_ok")
             return {"status": "success", "broadcast": True, "results": results}
 
         except Exception as e:
-            self._inc_stat("errors")
-            self._log_error(f"_do_send exception: {e}")
+            self._report_send_error("exception", f"_do_send: {e}", error=e)
             return {"status": "error", "reason": str(e)}
 
     @staticmethod
@@ -413,7 +510,7 @@ class RouterManager(ChannelRoutingManager):
             return explicit
         return "system" if msg_dict.get("type") in ("command", "system") else "data"
 
-    def _deliver_by_targets(self, msg_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _deliver_by_targets(self, msg_dict: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], int]:
         """Адресная доставка по msg["targets"] через общий queue_registry.
 
         "Адресная книга" оркестратора: queue_registry динамически хранит очереди
@@ -438,10 +535,17 @@ class RouterManager(ChannelRoutingManager):
         Выбор очереди — :meth:`_select_queue_type`.
 
         Returns:
-            dict-результат, если хотя бы один валидный таргет был найден адресом
-            (после фильтрации пустых/broadcast/невалидных); None — если targets
-            пуст, queue_registry недоступен или ВСЕ таргеты отфильтрованы (нечего
-            было пытаться доставить — вызывающий формирует обычную ошибку).
+            Пара ``(результат, attempted)``.
+
+            Первый элемент — dict-результат, если доставлено хотя бы одному
+            валидному таргету; ``None`` — если targets пуст, queue_registry
+            недоступен, все таргеты отфильтрованы или ни один не принял.
+
+            Второй — сколько валидных адресатов было (после фильтрации
+            broadcast/невалидных). Ф6.7: без него вызывающий не отличал «адреса
+            не было» от «адрес был, доставка провалилась» — оба случая давали
+            одинаковый ``None`` и сливались в один счётчик ``errors``. Число, а
+            не флаг, потому что оно же идёт в текст записи: «ни один из N».
 
             A-2 (bug-hunt 2026-07-20 §5): при ЧАСТИЧНОМ fan-out (доставлено не всем
             валидным таргетам) статус — ``"partial"``, не ``"success"``. Раньше
@@ -452,10 +556,10 @@ class RouterManager(ChannelRoutingManager):
         """
         targets = msg_dict.get("targets")
         if not targets:
-            return None
+            return None, 0
         qr = self.queue_registry
         if qr is None:
-            return None
+            return None, 0
 
         qtype = self._select_queue_type(msg_dict)
 
@@ -528,7 +632,7 @@ class RouterManager(ChannelRoutingManager):
                 self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc}")
 
         if delivered == 0:
-            return None
+            return None, attempted
         if delivered < attempted:
             # A-2: часть валидных таргетов НЕ получила сообщение — честный статус
             # вместо молчаливого "success". Соседний _resolve_kind_channels
@@ -537,9 +641,9 @@ class RouterManager(ChannelRoutingManager):
             # ретраить с нуля вредно), но status отличим от полного success.
             self._inc_stat("sent_ok")
             self._log_warning(f"_deliver_by_targets: частичный fan-out — доставлено {delivered}/{attempted} таргетам")
-            return {"status": "partial", "delivered_by_targets": delivered, "targets_total": attempted}
+            return {"status": "partial", "delivered_by_targets": delivered, "targets_total": attempted}, attempted
         self._inc_stat("sent_ok")
-        return {"status": "success", "delivered_by_targets": delivered, "targets_total": attempted}
+        return {"status": "success", "delivered_by_targets": delivered, "targets_total": attempted}, attempted
 
     def _on_frame_evicted(self, evicted_item: Any, reader_process: str) -> None:
         """LIVE-2 (release-on-evict): кадровое сообщение вытеснено из ПОЛНОЙ data-очереди
