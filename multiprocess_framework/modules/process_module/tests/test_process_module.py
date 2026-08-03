@@ -3,6 +3,7 @@
 """
 
 from unittest.mock import Mock
+from multiprocess_framework.modules.base_manager.types.process_status import ProcessStatus
 from multiprocess_framework.modules.process_module import ProcessModule
 
 
@@ -124,6 +125,62 @@ class TestProcessModule:
             "в момент объявления готовности команда подписки ещё не зарегистрирована — "
             f"сигнал снова опережает обработчик (было зарегистрировано: {len(registered_at_announce[0])})"
         )
+
+    def test_running_status_is_not_announced_before_commands_are_registered(self):
+        """6.4б: статус RUNNING не имеет права опережать регистрацию команд.
+
+        Находка Н-5б живого прогона 2026-08-03: ``run()`` выставлял ``RUNNING``
+        ПЕРВОЙ строкой, а ``BuiltinCommands.register()`` шёл ниже. В это окно
+        ``system_overview`` видел процесс «running» и получал по нему
+        ``introspect_failed`` на четырёх ручках. Окно уже чинили однажды через
+        ``attach_ready_event``, но на одном пути из трёх: сигнал стал честным,
+        статус продолжал врать.
+
+        Проверяется ПОРЯДОК как свойство: сколько команд было зарегистрировано
+        к моменту, когда статус стал RUNNING.
+        """
+        process = ProcessModule("test_process")
+        process.worker_manager = Mock()
+        process.log = Mock()
+        process.shutdown = Mock(return_value=True)
+
+        registered: list = []
+        cm = Mock()
+        cm.register_command = Mock(side_effect=lambda name, *a, **k: registered.append(name))
+        process.command_manager = cm
+
+        registered_at_running: list = []
+
+        def _capture_state(**kwargs):
+            if kwargs.get("status") == ProcessStatus.RUNNING.value:
+                registered_at_running.append(list(registered))
+
+        process.update_process_state = Mock(side_effect=_capture_state)
+
+        process.run()
+        process.stop()
+
+        assert registered_at_running, "статус RUNNING не выставлен вовсе"
+        assert "observability.tail.subscribe" in registered_at_running[0], (
+            "процесс объявил себя RUNNING до регистрации команд — снаружи это «работает», "
+            f"а на introspect.* он отвечает «нет хендлера» (зарегистрировано было: "
+            f"{len(registered_at_running[0])})"
+        )
+
+    def test_status_before_run_is_not_running(self):
+        """Вторая половина пары: до ``run()`` процесс НЕ объявляет себя работающим.
+
+        Дефолт ``"running"`` стоял прямо в ``__init__`` — то есть свежесозданный
+        объект, у которого ещё не было ни ``initialize()``, ни воркеров, ни
+        команд, рапортовал в heartbeat «работаю». Без этой половины первый тест
+        зелен и на коде, где статус выставляется в конструкторе и больше нигде.
+        """
+        process = ProcessModule("test_process")
+
+        assert process._current_process_status != ProcessStatus.RUNNING.value, (
+            "процесс объявляет себя работающим из конструктора"
+        )
+        assert process._current_process_status == ProcessStatus.INITIALIZING.value
 
     def test_ready_event_absent_is_not_an_error(self):
         """Процесс без переданного события просто не объявляет готовность (SRM-mode)."""

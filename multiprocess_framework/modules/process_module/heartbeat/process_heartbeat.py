@@ -239,7 +239,11 @@ class ProcessHeartbeat:
             "command": "heartbeat",
             "sender": self._services.name,
             "timestamp": time.time(),
-            "status": getattr(self._services, "_current_process_status", "running"),
+            # Ф6.4б: фолбэк был ``"running"`` — третье место, где отсутствие
+            # знания подменялось утверждением «работает». Соседний
+            # ``introspect.status`` в тех же условиях отвечает ``"unknown"``;
+            # два разных ответа на один вопрос — хуже, чем один незнающий.
+            "status": getattr(self._services, "_current_process_status", "unknown"),
         }
         if getattr(self._services, "worker_manager", None):
             for w in workers.values():

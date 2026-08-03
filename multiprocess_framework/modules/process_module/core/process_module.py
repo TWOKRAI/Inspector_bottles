@@ -88,9 +88,18 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         self._stop_requested = False
 
-        # Текущий статус процесса для трансляции в heartbeat
-        # Обновляется командами worker.pause_all / worker.resume_all
-        self._current_process_status: str = "running"
+        # Текущий статус процесса для трансляции в heartbeat.
+        # Обновляется командами worker.pause_all / worker.resume_all и концом run().
+        #
+        # Ф6.4б (находка Н-5б живого прогона 2026-08-03). Здесь стоял литерал
+        # ``"running"`` — то есть процесс объявлял себя работающим ИЗ
+        # КОНСТРУКТОРА, до initialize(), до старта воркеров и до регистрации
+        # команд. Наблюдалось снаружи: ``system_overview`` через ~10 с получал
+        # ``introspect_failed`` по четырём ручкам процесса, который по статусу
+        # был «running». Окно уже чинили однажды (``attach_ready_event``), но
+        # на ОДНОМ пути из трёх: ready_event стал честным, а статус продолжал
+        # врать.
+        self._current_process_status: str = ProcessStatus.INITIALIZING.value
 
         # Менеджеры (создаются в initialize() через ManagersBundle, ADR-PM-009)
         self.worker_manager = None
@@ -799,9 +808,18 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self._log_error(f"ready_event процесса '{self.name}' не выставлен: {exc}", module="lifecycle")
 
     def run(self):
-        """Запуск процесса — статус RUNNING, старт воркеров, heartbeat."""
-        self.update_process_state(status=ProcessStatus.RUNNING.value)
+        """Запуск процесса — старт воркеров, команды, heartbeat, затем RUNNING.
 
+        Ф6.4б: ``RUNNING`` выставляется ПОСЛЕДНИМ, вместе с объявлением
+        готовности, а не первой строкой. Раньше статус менялся здесь, а
+        ``BuiltinCommands.register()`` шёл ниже — в это окно процесс по статусу
+        уже работал, а на ``introspect.*`` отвечал «нет хендлера». Один момент
+        истины вместо двух: статус и ``ready_event`` меняются в одной точке,
+        поэтому разъехаться не могут.
+
+        До этой точки статус остаётся тем, что выставил ``initialize()``
+        (``READY`` — «поднят, но ещё не обслуживает»), и это правда.
+        """
         if self.worker_manager:
             self.worker_manager.start_all_workers()
 
@@ -835,6 +853,12 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # блокирующим run() (GuiProcess: Qt-loop) зовёт super().run() первым, поэтому
         # объявление до него доходит — а вот перенос сигнала в runner ЗА run() его
         # бы навсегда лишил готовности.
+        #
+        # Ф6.4б: обе плоскости статуса меняются ЗДЕСЬ же, рядом с сигналом
+        # готовности. Разнести их — значит завести два ответа на один вопрос
+        # «процесс работает?», и живой прогон показал, чем это кончается.
+        self.update_process_state(status=ProcessStatus.RUNNING.value)
+        self._current_process_status = ProcessStatus.RUNNING.value
         self._announce_ready()
 
     def stop(self):
