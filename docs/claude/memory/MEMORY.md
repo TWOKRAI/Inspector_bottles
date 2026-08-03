@@ -203,3 +203,4 @@
 - [Дельта, а не размер файла](feedback_measure_delta_not_file_size.md) — «изменён в окне» ≠ «записан в окне»; база Ф6 = 5.4 МБ/час
 - [Второй потребитель вскрывает дефект](feedback_second_consumer_reveals_the_defect.md) — зелено поодиночке, красно вместе = дефект общего состояния
 - [mp.Queue асинхронна в тестах](feedback_mp_queue_is_async_in_tests.md) — учёт мерить на stdlib queue.Queue
+- [Ф6.х корзина ревью ЗАКРЫТА](project_f6x_review_basket.md) — форвардер tail жив (level задаёт подписчик); make gate видит fw-suite; 5-й случай тестов-невидимок
