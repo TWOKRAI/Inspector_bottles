@@ -7,7 +7,11 @@
 
 from __future__ import annotations
 
+import gc
 import logging
+import sys
+import threading
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +83,13 @@ class _FakeLoggerManager:
         # ``records`` хранит СКЛЕЕННЫЙ текст (как его увидит канал), ``raw`` —
         # то, что фасад передал на самом деле. Первое удобно проверять, второе
         # доказывает, что фасад ничего не склеил заранее.
-        self.records.append((level, apply_format(message, args), module))
+        #
+        # Отложенное сообщение (``Callable``) резолвится здесь, как это делает
+        # настоящий ``LoggerCore.log`` — после гейта и ровно один раз. Без этого
+        # фейк складывал бы в ``records`` само замыкание, и любая проверка
+        # текста на пути ``exc_info`` (6.1) сравнивала бы строку с функцией.
+        resolved = message() if callable(message) else message
+        self.records.append((level, apply_format(resolved, args), module))
         self.raw.append((level, message, module, args))
 
     def debug(self, message: str, module: str = "main", *args: Any, **_extra: Any) -> None:
@@ -366,6 +376,225 @@ class TestBoundView:
             std_facade.get_logger = get_logger  # type: ignore[assignment]
 
         assert calls["n"] == 1, f"резолв менеджера произошёл {calls['n']} раз вместо одного"
+
+
+class TestExcInfoHazards:
+    """6.1, тесты АВТОРА: опасные места самого механизма отложенного traceback'а.
+
+    Контрактные проверки (принимает ли фасад ``exc_info``/``extra``, что видно в
+    тексте) живут в ``test_std_facade_kwargs.py`` и написаны независимо. Здесь —
+    только то, что видно изнутри устройства: захват разъехался с рендером во
+    времени, и у этого разъезда четыре способа сломаться.
+    """
+
+    def test_traceback_survives_rendering_after_the_except_block_ended(self, fake_lm: _FakeLoggerManager) -> None:
+        """Главный хазард: рендер идёт ПОЗЖЕ, а ``sys.exc_info()`` к тому моменту пуст.
+
+        Отложенность и означает, что сообщение соберут не в кадре ``except``.
+        Фейк здесь нарочно откладывает вызов ``message()`` до выхода из
+        обработчика — если бы фасад захватывал исключение лениво (внутри
+        замыкания), traceback пропал бы именно так, а не в тесте, где всё
+        происходит на одной строке.
+        """
+        pending: list = []
+        fake_lm.log = lambda scope, level, message, module="main", *a, **k: pending.append(message)  # type: ignore[assignment]
+
+        facade = StdLoggerFacade("gui")
+        try:
+            raise ValueError("бум из except")
+        except ValueError:
+            facade.error("операция упала", exc_info=True)
+
+        assert sys.exc_info()[0] is None, "тест обязан рендерить УЖЕ вне обработчика"
+        text = pending[0]() if callable(pending[0]) else pending[0]
+        assert "ValueError: бум из except" in text, (
+            "захват exc_info оказался ленивым: к моменту рендера исключение уже размотано"
+        )
+
+    def test_thread_without_its_own_exception_does_not_borrow_a_foreign_one(self, fake_lm: _FakeLoggerManager) -> None:
+        """``sys.exc_info()`` — состояние ПОТОКА, и чужое исключение брать нельзя.
+
+        Пока главный поток стоит в ``except``, рабочий поток пишет свою запись с
+        ``exc_info=True``. Своего исключения у него нет — значит и traceback'а
+        быть не должно. Иначе запись обвинила бы посторонний код.
+        """
+        facade = StdLoggerFacade("gui")
+        done = threading.Event()
+
+        def _worker() -> None:
+            facade.warning("из чужого потока", exc_info=True)
+            done.set()
+
+        try:
+            raise RuntimeError("исключение главного потока")
+        except RuntimeError:
+            thread = threading.Thread(target=_worker, daemon=True)
+            thread.start()
+            assert done.wait(timeout=5.0), "поток не дошёл до записи — тест обязан падать, а не висеть"
+            thread.join(timeout=5.0)
+
+        text = fake_lm.records[0][1]
+        assert text == "из чужого потока", f"поток подобрал чужое исключение: {text!r}"
+
+    def test_percent_in_traceback_does_not_corrupt_the_text(self, fake_lm: _FakeLoggerManager) -> None:
+        """Traceback содержит исходник — а в нём бывают свои ``%``.
+
+        Порядок «сначала ``%``-формат, потом склейка с traceback'ом» выбран
+        именно поэтому. Обратный порядок прошёлся бы ``%`` по тексту
+        исключения: аргументов не хватило бы, и ``apply_format`` отдал бы
+        шаблон целиком — то есть запись потеряла бы подставленные значения.
+        """
+        facade = StdLoggerFacade("gui")
+        try:
+            raise ValueError("прогресс 50%s и ещё %d")
+        except ValueError:
+            facade.error("код %s", 42, exc_info=True)
+
+        text = fake_lm.records[0][1]
+        assert "код 42" in text, f"аргумент не подставился: {text!r}"
+        assert "прогресс 50%s и ещё %d" in text, f"текст исключения покорёжен: {text!r}"
+
+    def test_view_does_not_retain_the_exception_after_the_record(self, fake_lm: _FakeLoggerManager) -> None:
+        """Замыкание держит кадры стека — но только на время вызова ``log()``.
+
+        Traceback тянет за собой локальные переменные всех кадров: кадры GUI,
+        массивы numpy, объекты Qt. Если бы вид сохранил замыкание (кэш
+        «последней ошибки», ссылка на вызов), каждая ошибка удерживала бы этот
+        хвост до следующей — утечка того же класса, что и в Ф0.3.
+        """
+
+        class _Tracked(Exception):
+            """Своё исключение: на встроенный ``ValueError`` weakref не ставится."""
+
+        # Приёмник СРАЗУ резолвит сообщение и хранит только текст — как
+        # настоящий менеджер, у которого в ``LogRecord`` лежит строка. Дубль из
+        # фикстуры сохраняет ещё и сам объект сообщения (``raw``), то есть
+        # замыкание, и тест мерил бы удержание фейком, а не видом.
+        texts: list[str] = []
+        fake_lm.log = lambda scope, level, message, module="main", *a, **k: texts.append(  # type: ignore[assignment]
+            message() if callable(message) else message
+        )
+
+        facade = StdLoggerFacade("gui")
+        try:
+            raise _Tracked("временное")
+        except _Tracked as caught:
+            facade.error("упало", exc_info=True)
+            ref = weakref.ref(caught)
+
+        gc.collect()
+        assert ref() is None, "вид удержал исключение вместе со всеми кадрами стека"
+
+    def test_reserved_extra_key_does_not_raise_from_inside_except(self, fake_lm: _FakeLoggerManager) -> None:
+        """``extra={"module": …}`` — столкновение с позиционным именем ``log()``.
+
+        Без разведения это ``TypeError: got multiple values for argument
+        'module'``, брошенный ИЗ обработчика ошибки: исходное исключение
+        подменяется отказом логгера. Ровно тот класс, ради которого 6.1 стоит
+        гейтом перед кодмодом.
+        """
+        seen: dict = {}
+        fake_lm.log = lambda scope, level, message, module="main", *a, **k: seen.update(k)  # type: ignore[assignment]
+
+        facade = StdLoggerFacade("gui")
+        try:
+            raise ValueError("исходное")
+        except ValueError:
+            facade.error("упало", extra={"module": "чужое", "trace_id": "abc"})
+
+        assert seen["trace_id"] == "abc", "обычный ключ не доехал"
+        assert seen["module_"] == "чужое", f"столкнувшийся ключ потерян: {seen!r}"
+
+    def test_fallback_survives_reserved_extra_key(self, no_lm: None, caplog: pytest.LogCaptureFixture) -> None:
+        """У stdlib свой список зарезервированных имён — фолбэк тоже не имеет права падать.
+
+        ``logging`` кидает ``KeyError`` на ``extra={"message": …}``. Фолбэк
+        работает ровно тогда, когда менеджера нет (ранний старт, авария), —
+        уронить в этот момент вызывающего значит потерять и исходную ошибку.
+        """
+        with caplog.at_level("WARNING"):
+            assert StdLoggerFacade("gui").warning("шаблон", extra={"message": "x"}) is False
+
+        assert "шаблон" in caplog.text
+
+
+class TestDeferredTracebackCost:
+    """Отложенность как ЦЕНА, а не как текст: пара «гейт закрыт / гейт открыт».
+
+    Проверка идёт по наблюдаемому эффекту — исключение считает, сколько раз его
+    превращали в строку. Шпион на имя ``traceback.format_exception`` сторожил бы
+    имя функции: замена на ``TracebackException`` оставила бы его зелёным, а
+    цену — на месте.
+    """
+
+    class _CountingError(Exception):
+        calls = 0
+
+        def __str__(self) -> str:
+            type(self).calls += 1
+            return "дорогое исключение"
+
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        TestDeferredTracebackCost._CountingError.calls = 0
+        yield
+
+    def _manager(self, tmp_path: Path) -> LoggerManager:
+        mgr = LoggerManager(
+            manager_name="DeferProbe",
+            config={
+                "app_name": "defer",
+                "log_directory": str(tmp_path),
+                "enable_batching": False,
+                "modules": {},
+                "channels": {"a": {"type": "file", "enabled": True, "file_path": str(tmp_path / "a.log")}},
+                "scopes": {
+                    "SYSTEM": {"enabled": True, "min_level": "WARNING", "channels": ["a"]},
+                    "DEBUG": {"enabled": False, "min_level": "DEBUG", "channels": ["a"]},
+                },
+            },
+        )
+        mgr.initialize()
+        return mgr
+
+    def test_rejected_record_does_not_render_the_traceback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Гейт закрыт (DEBUG выключен) — ``format_exception`` не звался ни разу."""
+        mgr = self._manager(tmp_path)
+        monkeypatch.setattr(std_facade, "get_logger", lambda: mgr)
+        bump_observability_epoch()
+        try:
+            try:
+                raise self._CountingError()
+            except self._CountingError:
+                StdLoggerFacade("probe").debug("отклонённая", exc_info=True)
+        finally:
+            mgr.shutdown()
+
+        assert self._CountingError.calls == 0, "traceback собран ДО гейта — отложенность 6.1 не работает"
+
+    def test_accepted_record_does_render_the_traceback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Вторая половина пары: при открытом гейте рендер обязан произойти.
+
+        Без неё первый тест зелен и на фасаде, который ``exc_info`` просто
+        игнорирует, — «молчащий детектор не доказывает».
+        """
+        mgr = self._manager(tmp_path)
+        monkeypatch.setattr(std_facade, "get_logger", lambda: mgr)
+        bump_observability_epoch()
+        try:
+            try:
+                raise self._CountingError()
+            except self._CountingError:
+                StdLoggerFacade("probe").warning("принятая", exc_info=True)
+            mgr.flush()
+        finally:
+            mgr.shutdown()
+
+        assert self._CountingError.calls > 0, "traceback не собран и на принятой записи"
+        written = (tmp_path / "a.log").read_text(encoding="utf-8")
+        assert "дорогое исключение" in written, f"traceback не доехал до файла: {written!r}"
 
 
 class TestFactory:

@@ -35,13 +35,35 @@ stdlib, чью семантику план и договорился копир�
 удобный метод стоит **219 нс** — больше, чем гейт, — на переупаковке
 ``*args``/``**extra``. Вид знает свой уровень с рождения, поэтому платить за
 разбор уровня на каждой записи ему незачем.
+
+**Ключевые слова stdlib (Ф6.1).** Мигрируемый код зовёт логгер не только
+позиционно: живых вызовов ``exc_info=True`` — девять, и все они стоят ВНУТРИ
+``except``-блоков. Не приняв ключевое слово, фасад кидал бы
+``TypeError: unexpected keyword argument`` из обработчика ошибки, подменяя
+собой исходное исключение. Поэтому:
+
+* ``exc_info`` — **захват синхронный, рендер отложенный**. Кортеж
+  ``sys.exc_info()`` берётся здесь же, в кадре ``except`` (он живёт ровно
+  пока стек не размотан и через границу потока флаг проносить нельзя), а
+  ``format_exception`` вызывается уже за гейтом — внутри отложенного
+  сообщения. Прежняя редакция ``exception()`` собирала traceback ПЕРВОЙ
+  строкой (``format_exc()`` до ``_emit``) — то есть платила полную цену за
+  запись, которую гейт тут же отбрасывал. Наследовать этот паттерн на девять
+  новых точек значило бы создать трату миграцией, а не унаследовать её:
+  stdlib сегодня гейтит по effective level ДО обращения к ``exc_info``, и
+  эти точки не стоят ничего.
+* ``extra`` — проходит насквозь в ``LoggerCore.log(**extra)``, цена нулевая.
+* ``stacklevel`` — **не поддерживается**. Ноль вызовов в коде, и до Ф3
+  (словарь полей записи) его некуда положить. Передача упадёт с ``TypeError``
+  на месте вызова — громко и сразу, а не молчаливым игнорированием.
 """
 
 from __future__ import annotations
 
 import logging
+import sys
 import traceback
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 from ..core.log_config import LogLevel, LogScope
 from ..core.logger_core import OBSERVABILITY_EPOCH, _LEVEL_DEFAULT_SCOPE
@@ -70,6 +92,69 @@ _LEVEL_ROUTE: Dict[str, Tuple[LogScope, LogLevel]] = {
         ("critical", LogLevel.CRITICAL),
     )
 }
+
+#: Имена позиционных параметров ``LoggerCore.log`` — ключи ``extra`` с такими
+#: именами уехали бы вторым значением того же аргумента и дали бы
+#: ``TypeError: got multiple values for argument`` (6.1). Ронять вызывающего
+#: из-за имени ключа нельзя — это ровно тот отказ внутри ``except``, ради
+#: которого задача и делается, — поэтому столкнувшийся ключ переименовывается
+#: с подчёркиванием на конце, а не выбрасывается: потерять значение молча хуже,
+#: чем отдать его под чуть другим именем.
+_RESERVED_EXTRA_KEYS = frozenset(("scope", "level", "message", "module"))
+
+#: Что принимает ``exc_info``: как в stdlib — флаг, исключение или готовый кортеж.
+ExcInfo = Union[bool, BaseException, Tuple[Any, Any, Any], None]
+
+
+def _resolve_exc_info(value: ExcInfo) -> Optional[Tuple[Any, Any, Any]]:
+    """Привести ``exc_info`` к кортежу — СИНХРОННО, в кадре вызывающего.
+
+    Отложить сюда нечего: ``sys.exc_info()`` отдаёт активное исключение потока
+    и обнуляется, как только ``except``-блок закончился. Отложенный захват
+    вернул бы ``(None, None, None)`` — или, хуже, чужое исключение, если к
+    моменту сборки поток успел обработать другое.
+    """
+    if value is True:
+        current = sys.exc_info()
+        return current if current[0] is not None else None
+    if isinstance(value, BaseException):
+        return (type(value), value, value.__traceback__)
+    if isinstance(value, tuple) and len(value) == 3 and value[0] is not None:
+        return value
+    return None
+
+
+def _with_traceback(msg: str, args: tuple[Any, ...], exc: Tuple[Any, Any, Any]) -> Callable[[], str]:
+    """Отложенное сообщение «текст + traceback» — собирается ЗА гейтом.
+
+    Здесь же применяется и ``%``-формат: отдать менеджеру шаблон отдельно от
+    аргументов не выйдет, потому что ``%`` применяется ПОСЛЕ вызова callable и
+    прошёлся бы уже по склейке с traceback'ом. А в traceback'е есть строки
+    исходника — то есть свои ``%``, — и склейка испортила бы текст.
+
+    Замыкание держит ссылку на кортеж исключения (а через traceback — на
+    кадры и их локальные переменные), но ровно на время вызова ``log()``:
+    сообщение вызывают внутри него, дальше замыкание никто не хранит.
+    """
+
+    def build() -> str:
+        text = apply_format(msg, args) if args else msg
+        rendered = "".join(traceback.format_exception(*exc)).rstrip()
+        return f"{text}\n{rendered}" if rendered else text
+
+    return build
+
+
+def _sanitize_extra(extra: Dict[str, Any]) -> Dict[str, Any]:
+    """Развести ``extra`` с позиционными именами ``LoggerCore.log``.
+
+    Проверка стоит ровно там, где ``extra`` действительно передан: у
+    подавляющего большинства точек его нет, и платить за пересборку словаря
+    им незачем. Пересборка — только при реальном столкновении.
+    """
+    if _RESERVED_EXTRA_KEYS.isdisjoint(extra):
+        return extra
+    return {(f"{key}_" if key in _RESERVED_EXTRA_KEYS else key): value for key, value in extra.items()}
 
 
 class StdLoggerFacade:
@@ -103,34 +188,39 @@ class StdLoggerFacade:
 
     # --- stdlib-совместимая поверхность ---
 
-    def debug(self, msg: str, *args: Any) -> bool:
-        return self._emit("debug", msg, args)
+    def debug(self, msg: str, *args: Any, exc_info: ExcInfo = None, extra: Optional[Dict[str, Any]] = None) -> bool:
+        return self._emit("debug", msg, args, exc_info, extra)
 
-    def info(self, msg: str, *args: Any) -> bool:
-        return self._emit("info", msg, args)
+    def info(self, msg: str, *args: Any, exc_info: ExcInfo = None, extra: Optional[Dict[str, Any]] = None) -> bool:
+        return self._emit("info", msg, args, exc_info, extra)
 
-    def warning(self, msg: str, *args: Any) -> bool:
-        return self._emit("warning", msg, args)
+    def warning(self, msg: str, *args: Any, exc_info: ExcInfo = None, extra: Optional[Dict[str, Any]] = None) -> bool:
+        return self._emit("warning", msg, args, exc_info, extra)
 
-    def error(self, msg: str, *args: Any) -> bool:
-        return self._emit("error", msg, args)
+    def error(self, msg: str, *args: Any, exc_info: ExcInfo = None, extra: Optional[Dict[str, Any]] = None) -> bool:
+        return self._emit("error", msg, args, exc_info, extra)
 
-    def critical(self, msg: str, *args: Any) -> bool:
-        return self._emit("critical", msg, args)
+    def critical(self, msg: str, *args: Any, exc_info: ExcInfo = None, extra: Optional[Dict[str, Any]] = None) -> bool:
+        return self._emit("critical", msg, args, exc_info, extra)
 
-    def exception(self, msg: str, *args: Any) -> bool:
+    def exception(self, msg: str, *args: Any, exc_info: ExcInfo = True, extra: Optional[Dict[str, Any]] = None) -> bool:
         """Как stdlib: ERROR + текущий traceback.
 
-        У ``LoggerManager`` нет параметра ``exc_info``, поэтому traceback
-        дописывается в текст сообщения — иначе он бы просто пропал.
+        ``exc_info=True`` по умолчанию — ровно то, чем ``exception()`` отличается
+        от ``error()``. Собственной сборки traceback'а у метода больше нет: она
+        шла ДО гейта и стоила ``format_exc()`` на каждой записи, включая
+        отклонённые. Теперь это общий отложенный путь ``_emit``.
         """
-        text = self._format(msg, args)
-        tb = traceback.format_exc()
-        if tb and not tb.startswith("NoneType"):
-            text = f"{text}\n{tb.rstrip()}"
-        return self._emit("error", text, ())
+        return self._emit("error", msg, args, exc_info, extra)
 
-    def log(self, level: str, msg: str, *args: Any) -> bool:
+    def log(
+        self,
+        level: str,
+        msg: str,
+        *args: Any,
+        exc_info: ExcInfo = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Запись с уровнем, заданным строкой (``"warning"``, ``"error"``…).
 
         Неизвестный уровень трактуется как ``info`` — потерять сообщение из-за
@@ -139,7 +229,7 @@ class StdLoggerFacade:
         name = level.lower()
         if name not in ("debug", "info", "warning", "error", "critical"):
             name = "info"
-        return self._emit(name, msg, args)
+        return self._emit(name, msg, args, exc_info, extra)
 
     # --- Internal ---
 
@@ -152,7 +242,14 @@ class StdLoggerFacade:
         """
         return apply_format(msg, args)
 
-    def _emit(self, level: str, msg: str, args: tuple[Any, ...]) -> bool:
+    def _emit(
+        self,
+        level: str,
+        msg: str,
+        args: tuple[Any, ...],
+        exc_info: ExcInfo = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Записать. Returns: True если ушло в LoggerManager, False — в фолбэк.
 
         Ф1.5: ``msg % args`` здесь БОЛЬШЕ НЕ ВЫПОЛНЯЕТСЯ. Шаблон и аргументы
@@ -177,15 +274,37 @@ class StdLoggerFacade:
         перестало бы двигать ``messages_processed``/``messages_skipped`` в
         менеджере, то есть купило бы наносекунды ценой правдивости счётчиков.
         Гейт дешевеет там, где он живёт, а не обходится снаружи.
+
+        6.1: ``exc_info`` захватывается ЗДЕСЬ (кадр ``except`` ещё жив), а
+        рендерится в отложенном сообщении — за гейтом. Быстрый путь «ни
+        exc_info, ни extra» остался прежним вызовом без единой лишней проверки
+        сверх двух ``if``: 361 точка миграции ходит именно им.
         """
         if self._epoch != OBSERVABILITY_EPOCH[0]:
             self._bind()
         writer = self._writer
+        exc = _resolve_exc_info(exc_info) if exc_info else None
         if writer is None:
-            getattr(self._fallback, level)(apply_format(msg, args))
+            # Фолбэк отдаёт exc_info штатным путём stdlib, а ``extra`` —
+            # текстом: у stdlib зарезервированы имена атрибутов LogRecord, и
+            # ``extra={"module": …}`` уронил бы его ``KeyError``'ом. Фолбэк —
+            # аварийный режим, ронять из него вызывающего нельзя.
+            text = apply_format(msg, args)
+            if extra:
+                text = f"{text} | {extra}"
+            getattr(self._fallback, level)(text, exc_info=exc)
             return False
         scope, log_level = _LEVEL_ROUTE[level]
-        writer.log(scope, log_level, msg, self._module, *args)
+        if exc is None and not extra:
+            writer.log(scope, log_level, msg, self._module, *args)
+            return True
+        kwargs = _sanitize_extra(extra) if extra else {}
+        if exc is None:
+            writer.log(scope, log_level, msg, self._module, *args, **kwargs)
+        else:
+            # Аргументы уже внутри отложенного сообщения — второй раз их
+            # передавать нельзя, иначе ``%`` применится к склейке с traceback'ом.
+            writer.log(scope, log_level, _with_traceback(msg, args, exc), self._module, **kwargs)
         return True
 
     def _bind(self) -> None:
