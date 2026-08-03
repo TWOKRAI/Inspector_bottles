@@ -41,6 +41,11 @@ class LoggerManager(LoggerCore):
         # синглтона обязана объявить их связки устаревшими — иначе вид продолжил
         # бы писать в закрытый менеджер, а его записи исчезали бы молча.
         bump_observability_epoch()
+        # Ф6.х.2: новый менеджер — раннее накопление снова законно.
+        # Импорт ленивый: std_facade импортирует этот модуль (get_logger).
+        from ..adapters.std_facade import reopen_early_buffer
+
+        reopen_early_buffer()
 
     def shutdown(self) -> bool:
         """Закрыться и снять себя с ``_instance`` (Ф6.8).
@@ -64,6 +69,13 @@ class LoggerManager(LoggerCore):
             # устаревшими, чтобы следующая запись ушла в stdlib-фолбэк,
             # а не в закрытые каналы.
             bump_observability_epoch()
+            # Ф6.х.2 (решение владельца): после штатного снятия менеджера буфер
+            # ранних записей ЗАКРЫВАЕТСЯ — записи процесса, пережившего
+            # shutdown() логгера, дропаются со счётчиком, а не копятся навсегда
+            # и не утекают «стартовыми» в следующий менеджер.
+            from ..adapters.std_facade import close_early_buffer
+
+            close_early_buffer()
         return result
 
 

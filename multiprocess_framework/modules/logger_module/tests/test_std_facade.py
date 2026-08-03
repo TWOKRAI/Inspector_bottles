@@ -829,6 +829,90 @@ class TestEarlyBuffer:
         assert "единственная ранняя" not in written, "ранние записи слились повторно"
 
 
+class TestBufferAfterShutdown:
+    """Ф6.х.2 — жизнь буфера ПОСЛЕ штатного снятия менеджера.
+
+    Решение владельца (2026-08-03): дропать со счётчиком. До правки фасады
+    после ``shutdown()`` снова копили в ``_EARLY`` до 500 строк навсегда
+    (признака «менеджер жил» не существовало), а при повторном подъёме чужие
+    «поздние» записи легли бы в файл нового менеджера «стартовыми».
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(LoggerManager, "_instance", None)
+        std_facade.reset_early_buffer()
+        bump_observability_epoch()
+        yield
+        std_facade.reset_early_buffer()
+
+    def test_records_after_shutdown_are_dropped_with_a_counter(self, tmp_path: Path) -> None:
+        """Копилка навсегда не возвращается: pending не растёт, потеря сосчитана."""
+        manager = LoggerManager(config=_real_config(tmp_path))
+        manager.shutdown()
+
+        facade = StdLoggerFacade("gui")
+        for i in range(3):
+            facade.warning("поздняя %d", i)
+
+        stats = std_facade.early_buffer_stats()
+        assert stats["closed"] is True, "shutdown() не закрыл буфер"
+        assert stats["pending"] == 0, f"буфер копит после shutdown: {stats}"
+        assert stats["dropped"] == 3, f"потеря не сосчитана: {stats}"
+
+    def test_new_manager_reopens_accumulation_and_keeps_the_loss(self, tmp_path: Path) -> None:
+        """Новый менеджер — накопление снова законно; счётчик потерь переживает подъём."""
+        first = LoggerManager(config=_real_config(tmp_path / "первый"))
+        first.shutdown()
+        StdLoggerFacade("gui").warning("между менеджерами")
+
+        second = LoggerManager(config=_real_config(tmp_path / "второй"))
+        try:
+            stats = std_facade.early_buffer_stats()
+            assert stats["closed"] is False, "новый менеджер не открыл буфер"
+            assert stats["dropped"] == 1, "потеря между менеджерами обязана пережить повторный подъём"
+        finally:
+            second.shutdown()
+
+    def test_pending_leftover_at_shutdown_becomes_counted_loss(self, tmp_path: Path) -> None:
+        """Не слитый к shutdown остаток — потеря со счётчиком, а не вечное ожидание.
+
+        Остаток возможен, только если за жизнь менеджера ни один фасад не
+        связывался: запись легла до подъёма, слива не случилось.
+        """
+        StdLoggerFacade("gui").warning("ранняя, которую никто не слил")
+
+        manager = LoggerManager(config=_real_config(tmp_path))
+        manager.shutdown()
+
+        stats = std_facade.early_buffer_stats()
+        assert stats["pending"] == 0
+        assert stats["dropped"] == 1
+
+    def test_drain_failure_is_a_counted_loss_not_an_exception(self) -> None:
+        """Ф6.х.2 (вторая половина): падение писателя при сливе не выходит наружу.
+
+        Слив выполняется в кадре первой записи после связывания — нередко это
+        ``facade.error()`` внутри чужого ``except``. Исключение отсюда заместило
+        бы исходную ошибку вызывающего — класс отказа, от которого защищалась
+        6.1. Вызов ``_drain_early`` прямой: писатель, падающий на каждом
+        ``log()``, уронил бы и саму запись-триггер, то есть честного сквозного
+        пути для ИЗОЛИРОВАННОЙ проверки слива не существует.
+        """
+        StdLoggerFacade("gui").warning("ранняя 1")
+        StdLoggerFacade("gui").warning("ранняя 2")
+
+        class _ExplodingWriter:
+            def log(self, *args: Any, **kwargs: Any) -> None:
+                raise RuntimeError("канал упал")
+
+        std_facade._drain_early(_ExplodingWriter())  # не должен поднять
+
+        stats = std_facade.early_buffer_stats()
+        assert stats["pending"] == 0
+        assert stats["dropped"] == 2, f"потеря слива не сосчитана: {stats}"
+
+
 class TestFactory:
     def test_same_module_returns_same_instance(self) -> None:
         assert get_std_logger("gui") is get_std_logger("gui")

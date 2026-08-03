@@ -76,6 +76,8 @@ __all__ = [
     "get_std_logger",
     "early_buffer_stats",
     "reset_early_buffer",
+    "close_early_buffer",
+    "reopen_early_buffer",
 ]
 
 #: Уровень по имени метода → ``(scope, level)`` для прямого вызова ``log()``.
@@ -161,23 +163,58 @@ EARLY_BUFFER_LIMIT = 500
 _EARLY: List[Tuple[str, str, str]] = []
 _EARLY_LOCK = threading.Lock()
 _EARLY_DROPPED = [0]
+#: Ф6.х.2: менеджер в этом процессе ЖИЛ и был штатно снят. После этого буфер
+#: закрыт: записи не копятся (решение владельца — дропать со счётчиком), иначе
+#: процесс, переживший shutdown() логгера, держал бы до 500 строк навсегда,
+#: а при повторном подъёме менеджера чужие «поздние» записи легли бы в его
+#: файл «стартовыми». Флаг, а не вторая эпоха: эпохе безразлично «почему»,
+#: буферу — нет.
+_EARLY_CLOSED = [False]
 
 
 def early_buffer_stats() -> Dict[str, int]:
-    """Сколько ранних записей ждёт слива и сколько выброшено потолком.
+    """Сколько ранних записей ждёт слива, сколько выброшено и закрыт ли буфер.
 
     Публичная функция, а не приватное поле: «молчащий детектор не доказывает» —
     у потерь обязан быть адрес, по которому их видно снаружи.
     """
     with _EARLY_LOCK:
-        return {"pending": len(_EARLY), "dropped": _EARLY_DROPPED[0]}
+        return {
+            "pending": len(_EARLY),
+            "dropped": _EARLY_DROPPED[0],
+            "closed": _EARLY_CLOSED[0],
+        }
 
 
 def reset_early_buffer() -> None:
-    """Очистить буфер и счётчик — для тестов и для повторного подъёма процесса."""
+    """Очистить буфер, счётчик и признак закрытия — для тестов и повторного подъёма."""
     with _EARLY_LOCK:
         _EARLY.clear()
         _EARLY_DROPPED[0] = 0
+        _EARLY_CLOSED[0] = False
+
+
+def close_early_buffer() -> None:
+    """``LoggerManager.shutdown()``: буфер закрывается, остаток — в счётчик потерь.
+
+    Остаток здесь возможен только если за всю жизнь менеджера ни один фасад не
+    связался (иначе слив уже случился при первом ``_bind``); такие записи не
+    сольются уже никогда — честнее посчитать их потерянными сразу.
+    """
+    with _EARLY_LOCK:
+        _EARLY_DROPPED[0] += len(_EARLY)
+        _EARLY.clear()
+        _EARLY_CLOSED[0] = True
+
+
+def reopen_early_buffer() -> None:
+    """``LoggerManager.__init__``: новый менеджер — накопление снова законно.
+
+    Счётчик потерь НЕ обнуляется: выброшенное между менеджерами — реальная
+    потеря, и её след обязан пережить повторный подъём.
+    """
+    with _EARLY_LOCK:
+        _EARLY_CLOSED[0] = False
 
 
 def _buffer_early(level: str, text: str, module: str) -> None:
@@ -194,7 +231,9 @@ def _buffer_early(level: str, text: str, module: str) -> None:
     собирается для stdlib-фолбэка, — и лишней цены не появляется вовсе.
     """
     with _EARLY_LOCK:
-        if len(_EARLY) >= EARLY_BUFFER_LIMIT:
+        if _EARLY_CLOSED[0] or len(_EARLY) >= EARLY_BUFFER_LIMIT:
+            # Закрытый буфер и переполненный считаются одним счётчиком: и там и
+            # там запись сделана и не доедет, а адрес потери — один и тот же.
             _EARLY_DROPPED[0] += 1
             return
         _EARLY.append((level, text, module))
@@ -215,20 +254,38 @@ def _drain_early(writer: Any) -> None:
         _EARLY.clear()
         dropped = _EARLY_DROPPED[0]
         _EARLY_DROPPED[0] = 0
+    # Ф6.х.2: слив происходит в кадре ПЕРВОЙ записи после связывания — нередко
+    # это ``facade.error()`` внутри чужого ``except``. Падение писателя здесь
+    # обязано остаться потерей со счётчиком, а не вторым исключением из
+    # обработчика ошибок (ровно класс отказа, от которого защищалась 6.1).
+    failed = 0
     for level, text, module in pending:
         scope, log_level = _LEVEL_ROUTE[level]
-        writer.log(scope, log_level, text, module)
-    if dropped:
+        try:
+            writer.log(scope, log_level, text, module)
+        except Exception:  # noqa: BLE001 — чужой код каналов/файлов
+            failed += 1
+    if failed:
+        with _EARLY_LOCK:
+            _EARLY_DROPPED[0] += failed
+    if dropped or failed:
         # Потеря названа вслух и там же, куда ушли выжившие записи: счётчик,
         # который никто не читает, не отличается от отсутствующего.
+        pieces = []
+        if dropped:
+            pieces.append(f"выброшено {dropped} записей (потолок {EARLY_BUFFER_LIMIT})")
+        if failed:
+            pieces.append(f"потеряно на падении писателя при сливе {failed}")
         scope, log_level = _LEVEL_ROUTE["warning"]
-        writer.log(
-            scope,
-            log_level,
-            f"буфер ранних записей переполнен: выброшено {dropped} записей "
-            f"(потолок {EARLY_BUFFER_LIMIT}) — они сделаны до подъёма LoggerManager",
-            "logger_module",
-        )
+        try:
+            writer.log(
+                scope,
+                log_level,
+                "буфер ранних записей: " + "; ".join(pieces) + " — записи сделаны до подъёма LoggerManager",
+                "logger_module",
+            )
+        except Exception:  # noqa: BLE001 — писатель мёртв совсем; потеря уже в счётчике
+            pass
 
 
 def _sanitize_extra(extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -318,15 +375,6 @@ class StdLoggerFacade:
         return self._emit(name, msg, args, exc_info, extra)
 
     # --- Internal ---
-
-    @staticmethod
-    def _format(msg: str, args: tuple[Any, ...]) -> str:
-        """Совместимость: правило форматирования переехало в ``logger_module.utils``.
-
-        Метод оставлен потому, что ``exception()`` форматирует ДО эмиссии
-        осознанно — ему нужен готовый текст, чтобы дописать traceback.
-        """
-        return apply_format(msg, args)
 
     def _emit(
         self,
