@@ -14,6 +14,7 @@ from .configs import (
     LoggerChannelSchema,
     LoggerManagerConfig,
     LoggerModuleSchema,
+    LoggerRuleSchema,
     LoggerScopeSchema,
 )
 from .core.log_config import LogLevel, LogScope
@@ -42,6 +43,7 @@ __all__ = [
     "LoggerChannelSchema",
     "LoggerScopeSchema",
     "LoggerModuleSchema",
+    "LoggerRuleSchema",
     "LogLevel",
     "LogScope",
     "LogChannel",

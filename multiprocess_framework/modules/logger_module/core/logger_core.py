@@ -23,7 +23,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 from contextvars import ContextVar
 
 if TYPE_CHECKING:
@@ -40,7 +40,8 @@ from ..configs.logger_manager_config import (
     LoggerScopeSchema,
 )
 from .log_config import LogLevel, LogScope
-from ...channel_routing_module.levels import is_error_level
+from .name_hierarchy import NameHierarchy
+from ...channel_routing_module.levels import UNKNOWN_RANK, is_error_level, rank_of
 from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
 from .log_types import LogRecord
 from ..channels.log_channel import (
@@ -244,6 +245,12 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         # Module-specific channels (separate from main registry)
         self._module_channels: Dict[str, LogChannel] = {}
+
+        # Ф2.2: дерево правил по имени источника. Заводится ДО первой записи и
+        # пересобирается там же, где каналы (``_apply_log_config_rebuild``), —
+        # своей точки пересборки у него нет намеренно: правила приезжают тем же
+        # конфигом, что каналы, и разъехаться они не имеют права.
+        self._name_hierarchy = NameHierarchy(log_config.loggers)
 
         # Ф0.5: контекст в двух слоях. База — факт про процесс целиком, видна
         # всем потокам; стек push_context — факт про текущую работу текущего
@@ -799,6 +806,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # 2. Применить новый конфиг.
         self.config = log_config
         self.app_name = self.config.app_name
+        # Ф2.2: дерево правил ПЕРЕСОБИРАЕТСЯ, а не правится на месте. Мутация
+        # живой таблицы оставила бы правила, которых в новом конфиге больше нет
+        # (тот же класс, что воскресающий после reload канал из 5.12), —
+        # и «снял правило конфигом, а оно действует» искалось бы днями.
+        self._name_hierarchy = NameHierarchy(self.config.loggers)
 
         # 3. Остановить старый батчер перед пересозданием (если запущен).
         if self._buffer is not None:
@@ -846,6 +858,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # Оставленный кэш маршрута хуже оставленного кэша гейта: симптом не
         # «лог не пишется», а «лог пишется в снятый канал» — ищется днями.
         self._route_cache.clear()
+        # Ф2.2: третья карта того же возраста. **Сегодня этот вызов избыточен, и
+        # это сказано прямо, а не выдано за защиту**: резолв имени — чистая
+        # функция от таблицы правил, таблица меняется только с конфигом, а на
+        # пересборке объект дерева заменяется целиком (кэш и так пуст).
+        # Избыточным он перестанет быть ровно тогда, когда правило начнёт
+        # зависеть от живого состояния приёмников; ставится здесь, потому что
+        # точка старения всех карт обязана остаться ОДНА (урок 0.8: вторая
+        # точка инвалидации разъезжается с первой).
+        self._name_hierarchy.clear_cache()
         bump_observability_epoch()
 
     def _on_channel_removed(self, channel: Any) -> None:
@@ -1006,7 +1027,76 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._decision_cache[cache_key] = result
         return result
 
+    def effective_level(self, name: str) -> Optional[str]:
+        """Порог, который правило иерархии назначило источнику ``name`` (Ф2.2).
+
+        Резолв идёт вверх по точкам до первого правила, задавшего уровень:
+        ``vision.capture.hikvision`` → ``vision.capture`` → ``vision`` → корень
+        (пустая строка).
+
+        Returns:
+            Имя уровня либо ``None`` — «ни одно правило про этот источник
+            уровня не задаёт».
+
+        **Что метод НЕ обещает: что запись такого уровня будет записана.** Он
+        отвечает про одну ось решения, а не про судьбу записи: приёмник может
+        быть снят оператором, а плоскость ошибок ходит своим severity-путём.
+        Оговорка стоит здесь потому, что соседний предикат ``is_enabled_for``
+        уже один раз обещал больше, чем делал, и ревью Ф1 сняло это запуском.
+        """
+        return self._name_hierarchy.level(name)
+
+    def effective_channels(self, name: str) -> Optional[Tuple[str, ...]]:
+        """Приёмники, назначенные источнику ``name`` правилом иерархии (Ф2.2).
+
+        Returns:
+            Кортеж имён — возможно **пустой** («приёмников нет, и это
+            объявлено») — либо ``None``: правил про приёмники этого источника
+            нет, набор берёт скоуп.
+
+        Ось резолвится независимо от уровня: правило может задать порог и
+        промолчать про приёмники — тогда приёмники придут с более короткого
+        префикса. Список снятых оператором приёмников здесь НЕ применяется: он
+        живёт в ``_effective_route``, общем для обеих плоскостей.
+        """
+        return self._name_hierarchy.channels(name)
+
     def _should_log_direct(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+        """Решение гейта без кэша. **Правило имени сильнее скоупа** (Ф2.2).
+
+        Решение владельца 2026-08-03: когда про запись говорят обе оси, порог
+        задаёт самое длинное совпавшее правило имени, а скоуп остаётся
+        поставщиком набора приёмников по умолчанию. Это единственный расклад,
+        при котором «включить DEBUG одному файлу» не требует открыть шлюз всему
+        скоупу — то есть ровно то, ради чего фаза делается.
+
+        **Правило имени перекрывает и ``enabled``, и whitelist ``modules``
+        скоупа — намеренно, и вот почему это названо вслух.** Скоуп ``DEBUG`` в
+        дефолтах выключен (``enabled=False``, иначе пер-кадровый firehose), и
+        трактовка «выключенный скоуп сильнее» сделала бы главную ручку фазы
+        мёртвой в дефолтной поставке — то есть работающей на тестах и
+        бесполезной live. Цена решения: опечатка в префиксе правила способна
+        разбудить выключенный скоуп для поддерева. Осознанно принято; страж —
+        пара тестов «правило будит выключенный скоуп» / «без правила выключенный
+        скоуп молчит».
+
+        Когда правило молчит (``None``), решение принимает скоуп — байт-в-байт
+        как до Ф2.2. Пустая таблица правил (дефолт) в эту ветку не заходит
+        вовсе.
+        """
+        if self._name_hierarchy:
+            rule_level = self._name_hierarchy.level(module)
+            if rule_level is not None:
+                min_rank = rank_of(rule_level)
+                rank = rank_of(level)
+                # Незнакомый уровень ПРОПУСКАЕТ запись — та же политика, что у
+                # ``LoggerScopeSchema.should_log``. Две соседние ветки одного
+                # решения с противоположной политикой были бы худшим вариантом:
+                # опечатка в имени уровня означала бы тишину в одном месте и
+                # firehose в другом.
+                if min_rank == UNKNOWN_RANK or rank == UNKNOWN_RANK:
+                    return True
+                return rank >= min_rank
         scope_config = self._scope_schema(scope)
         return scope_config.should_log(level, module)
 
@@ -1078,8 +1168,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             scope = _LEVEL_DEFAULT_SCOPE.get(level, LogScope.SYSTEM)
         return self._is_gate_open(scope, level, name)
 
-    def _route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[List[str]]:
+    def _route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[Sequence[str]]:
         """Куда пойдёт запись — и пойдёт ли вообще. ``None`` = отклонена гейтом.
+
+        Возврат — ``Sequence``, а не ``List``: правило иерархии (Ф2.2) отдаёт
+        уже готовый кортеж из своего кэша, и материализация его в список стоила
+        бы аллокации на каждом промахе кэша маршрута ради одной лишь буквы в
+        аннотации. Единственный потребитель — ``_effective_route`` — приводит
+        результат к кортежу сам.
 
         **Единственная точка расширения эмиссии (Ф4.2).** Наследник, у которого
         другой резолв приёмников, переопределяет ЭТОТ метод, а не ``log()``:
@@ -1099,8 +1195,17 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         if not self._is_gate_open(scope, level, module):
             return None
 
-        scope_config = self._scope_schema(scope)
-        channels = scope_config.channels or self._channel_registry.names()
+        # Ф2.2: приёмники сперва спрашиваются у иерархии имён. Пустой кортеж от
+        # правила — законный ответ («приёмников нет, объявлено»), и подменять
+        # его набором скоупа нельзя: ``or`` здесь съел бы объявленную пустоту,
+        # то есть правило «этому поддереву — никуда» молча не работало бы.
+        # Поэтому сравнение именно с ``None``.
+        named = self._name_hierarchy.channels(module) if self._name_hierarchy else None
+        if named is not None:
+            channels: Any = named
+        else:
+            scope_config = self._scope_schema(scope)
+            channels = scope_config.channels or self._channel_registry.names()
 
         if module in self._module_channels:
             channels = list(channels)

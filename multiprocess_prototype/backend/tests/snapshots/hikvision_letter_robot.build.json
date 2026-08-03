@@ -609,6 +609,7 @@
         "file": true,
         "log_directory": null,
         "log_level": "INFO",
+        "loggers": {},
         "retention_days": 7,
         "retention_sweep_interval_sec": 3600.0,
         "retention_total_mb": 200,
@@ -787,6 +788,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -1113,6 +1115,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -1414,6 +1417,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -1684,6 +1688,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -1995,6 +2000,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -2282,6 +2288,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -2564,6 +2571,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -2864,6 +2872,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -3212,6 +3221,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {
@@ -3556,6 +3566,7 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "loggers": {},
           "manager_name": "LoggerManager",
           "modules": {
             "camera": {

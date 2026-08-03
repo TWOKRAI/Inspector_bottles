@@ -144,6 +144,18 @@ class ObservabilityConfig(SchemaBase):
         FieldMeta("Переопределения отдельных скоупов логгера ({имя: {min_level: DEBUG}})"),
     ] = Field(default_factory=dict)
 
+    # Ф2.2 — вторая ось адресации: правило по иерархическому имени источника.
+    # Скоуп остаётся оптовой ручкой («весь BUSINESS тише»), а эта — адресной:
+    # ключ — любой префикс имени (``multiprocess_framework.modules.router_module``),
+    # действует самое длинное совпадение. Без неё «включить DEBUG одному файлу»
+    # выражалось только через порог всего скоупа, а раскладка по файлам не
+    # выражалась вовсе: на живом прогоне 2026-08-03 из 384 per-module файлов
+    # непустыми были 4, и все четыре — по совпадению имени процесса с ключом.
+    loggers: Annotated[
+        Dict[str, Dict[str, Any]],
+        FieldMeta("Правила по имени источника ({префикс: {level: DEBUG, channels: [...]}})"),
+    ] = Field(default_factory=dict)
+
     # Task 5.8 — срок жизни рантайм-правки (слой L3). Поле схемы, а не константа
     # в коде: политика «сколько живёт ручка» машинно-специфична (на стенде час
     # уместен, на линии — нет), а значит обязана задаваться теми же слоями, что
@@ -280,6 +292,12 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         logger["channels"] = deep_merge(logger.get("channels") or {}, cfg.channels)
     if cfg.scopes:
         logger["scopes"] = {str(k): dict(v) for k, v in cfg.scopes.items()}
+    # Ф2.2 — тем же способом, что скоупы: раскладываем только когда секция
+    # реально что-то сказала. Пустой словарь наверх не эмитим сознательно —
+    # он был бы «слой объявил пустоту» по правилу Г3 и стирал бы правила,
+    # заданные ниже (ровно тот класс, что дал находку на каталоге каналов).
+    if cfg.loggers:
+        logger["loggers"] = {str(k): dict(v) for k, v in cfg.loggers.items()}
 
     error: Dict[str, Any] = {
         "default_level": cfg.errors.level,

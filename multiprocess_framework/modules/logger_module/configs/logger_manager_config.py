@@ -111,6 +111,42 @@ class LoggerScopeSchema(SchemaBase):
         return True
 
 
+class LoggerRuleSchema(SchemaBase):
+    """Правило по иерархическому имени источника (Ф2.2).
+
+    Ключ в :attr:`LoggerManagerConfig.loggers` — префикс имени источника
+    (``multiprocess_framework.modules.router_module``), корень — пустая строка.
+    Действует по самому длинному совпавшему префиксу; разбор — в
+    :class:`~..core.name_hierarchy.NameHierarchy`.
+
+    Оба поля **необязательны и резолвятся независимо**: ``None`` значит «это
+    правило про такую-то ось молчит, наследую с более короткого префикса».
+    Отличать молчание от объявленной пустоты обязательно — ``channels: []``
+    значит «приёмников нет, и это решение», а не «наследую» (то же правило, что
+    решение Г3 для слоёв конфига).
+    """
+
+    level: Annotated[
+        Optional[str],
+        FieldMeta("Порог для поддерева (None — наследовать)"),
+    ] = None
+    channels: Annotated[
+        Optional[List[str]],
+        FieldMeta("Приёмники для поддерева (None — наследовать, [] — приёмников нет)"),
+    ] = None
+
+    @field_validator("level")
+    @classmethod
+    def _normalize_level(cls, value: Optional[str]) -> Optional[str]:
+        """Канон один раз — на границе конфига, как у ``LoggerScopeSchema.min_level``.
+
+        Иначе сравнение рангов на горячем пути платило бы ``.upper()`` за каждую
+        запись, а ``model_dump`` отдавал бы пульту неканоничное значение — и
+        readback расходился бы с тем, что стоит в гейте.
+        """
+        return value.upper() if isinstance(value, str) else value
+
+
 class LoggerModuleSchema(SchemaBase):
     """Per-module file logging (router_messages, processor, …)."""
 
@@ -239,6 +275,19 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             min_level="DEBUG",
         ),
     }
+
+    loggers: Annotated[
+        Dict[str, LoggerRuleSchema],
+        FieldMeta("Правила по иерархическому имени источника (префикс → уровень/приёмники)"),
+    ] = {}
+    """Ф2.2. Пусто по умолчанию — и это часть контракта, а не «ещё не заполнили».
+
+    Пока таблица пуста, гейт и маршрут работают ровно как до Ф2.2: решение
+    принимает скоуп. Прикладные правила живут в конфиге приложения
+    (``system.yaml`` прототипа), фреймворк несёт только механизм — требование
+    2.6 «нулей прикладных имён во фреймворке» начинает соблюдаться сразу, а не
+    чинится потом.
+    """
 
     channels: Annotated[
         Dict[str, LoggerChannelSchema],
