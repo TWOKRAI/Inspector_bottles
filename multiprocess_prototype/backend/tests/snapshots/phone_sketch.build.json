@@ -1033,6 +1033,9 @@
       },
       "file": true,
       "log_level": "INFO",
+      "retention_days": 7,
+      "retention_sweep_interval_sec": 3600.0,
+      "retention_total_mb": 200,
       "stats": {
         "aggregation_interval": 5.0,
         "enabled": true,
@@ -1096,8 +1099,9 @@
         "file": true,
         "log_directory": null,
         "log_level": "INFO",
-        "retention_days": 0,
-        "retention_total_mb": 0,
+        "retention_days": 7,
+        "retention_sweep_interval_sec": 3600.0,
+        "retention_total_mb": 200,
         "scopes": {},
         "session_ttl_sec": 300.0,
         "stats": {
@@ -1150,6 +1154,9 @@
           },
           "file": true,
           "log_level": "INFO",
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "stats": {
             "aggregation_interval": 5.0,
             "enabled": true,
@@ -1348,8 +1355,9 @@
               "rotate": true
             }
           },
-          "retention_days": 0,
-          "retention_total_mb": 0,
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -1456,6 +1464,9 @@
           },
           "file": true,
           "log_level": "INFO",
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "stats": {
             "aggregation_interval": 5.0,
             "enabled": true,
@@ -1662,8 +1673,9 @@
               "rotate": true
             }
           },
-          "retention_days": 0,
-          "retention_total_mb": 0,
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -1757,6 +1769,9 @@
           },
           "file": true,
           "log_level": "INFO",
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "stats": {
             "aggregation_interval": 5.0,
             "enabled": true,
@@ -1928,8 +1943,9 @@
               "rotate": true
             }
           },
-          "retention_days": 0,
-          "retention_total_mb": 0,
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -2026,6 +2042,9 @@
           },
           "file": true,
           "log_level": "INFO",
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "stats": {
             "aggregation_interval": 5.0,
             "enabled": true,
@@ -2291,8 +2310,9 @@
               "rotate": true
             }
           },
-          "retention_days": 0,
-          "retention_total_mb": 0,
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -2388,6 +2408,9 @@
           },
           "file": true,
           "log_level": "INFO",
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "stats": {
             "aggregation_interval": 5.0,
             "enabled": true,
@@ -2612,8 +2635,9 @@
               "rotate": true
             }
           },
-          "retention_days": 0,
-          "retention_total_mb": 0,
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -2709,6 +2733,9 @@
           },
           "file": true,
           "log_level": "INFO",
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "stats": {
             "aggregation_interval": 5.0,
             "enabled": true,
@@ -3524,8 +3551,9 @@
               "rotate": true
             }
           },
-          "retention_days": 0,
-          "retention_total_mb": 0,
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -3622,6 +3650,9 @@
           },
           "file": true,
           "log_level": "INFO",
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "stats": {
             "aggregation_interval": 5.0,
             "enabled": true,
@@ -3816,8 +3847,9 @@
               "rotate": true
             }
           },
-          "retention_days": 0,
-          "retention_total_mb": 0,
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
           "scopes": {
             "BUSINESS": {
               "channels": [
