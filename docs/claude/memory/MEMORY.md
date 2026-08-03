@@ -199,3 +199,5 @@
 - [Сквозное ревью Ф5](project_f5_cross_review.md) — 7.5/10, 3 блокера ФР-1/2/3 до гейта; отчёт docs/reviews/2026-08-01
 - [Инъекция покрывает ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) — частичная = ложный B1; стреляло дважды (I-F, I-7)
 - [Дельта, а не размер файла](feedback_measure_delta_not_file_size.md) — «изменён в окне» ≠ «записан в окне»; база Ф6 = 5.4 МБ/час
+- [Второй потребитель вскрывает дефект](feedback_second_consumer_reveals_the_defect.md) — зелено поодиночке, красно вместе = дефект общего состояния
+- [mp.Queue асинхронна в тестах](feedback_mp_queue_is_async_in_tests.md) — учёт мерить на stdlib queue.Queue
