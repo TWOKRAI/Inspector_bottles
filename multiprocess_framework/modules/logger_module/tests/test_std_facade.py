@@ -242,9 +242,20 @@ class TestLazyResolve:
 
         # Артефакт, а не возврат True: «ушло в менеджер» и «легло в файл» —
         # разные факты, и вся фаза стоит на том, что судить надо по второму.
+        #
+        # Ф6.4а ПЕРЕВЕРНУЛА второе утверждение сознательно. Прежняя редакция
+        # требовала, чтобы «до init» в файл НЕ попало: тогда ранняя запись была
+        # обречена, и единственной защитой было не смешивать её с настоящими.
+        # Теперь ранние записи копятся и сливаются при связывании — попадание в
+        # файл и есть смысл задачи (решение Р-Г). Порядок тоже проверяется:
+        # ранняя обязана лечь ПЕРЕД той, ради которой связывание случилось,
+        # иначе стартовый след читается задом наперёд.
         written = (tmp_path / "system.log").read_text(encoding="utf-8")
         assert "после init" in written
-        assert "до init" not in written, "фолбэк-запись не имела права попасть в файл менеджера"
+        assert "до init" in written, "ранняя запись не слилась в менеджер — буфер 6.4а не работает"
+        assert written.index("до init") < written.index("после init"), (
+            "ранняя запись легла ПОСЛЕ поздней — слив идёт не в том порядке"
+        )
 
     def test_rebinds_after_the_manager_is_replaced(self, tmp_path: Path, monkeypatch) -> None:
         """Смена процессного менеджера обязана переключить уже живой вид.
@@ -627,6 +638,144 @@ class TestDeferredTracebackCost:
         assert self._CountingError.calls > 0, "traceback не собран и на принятой записи"
         written = (tmp_path / "a.log").read_text(encoding="utf-8")
         assert "дорогое исключение" in written, f"traceback не доехал до файла: {written!r}"
+
+
+class TestEarlyBuffer:
+    """Ф6.4а — записи до подъёма менеджера не теряются, но и не тянут за собой хвост.
+
+    Два требования, каждое ломается отдельно:
+
+      1. текст собирается НЕМЕДЛЕННО при постановке в буфер, не при сливе:
+         ленивый ``%`` держал бы ссылки на аргументы (виджеты Qt, кадры numpy)
+         до момента связывания — утечка класса Ф0.3 плюс риск падения на
+         ``__str__`` уже удалённого C++-объекта;
+      2. у буфера есть потолок И видимый счётчик выброшенного — «молчащий
+         детектор не доказывает».
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(LoggerManager, "_instance", None)
+        std_facade.reset_early_buffer()
+        bump_observability_epoch()
+        yield
+        std_facade.reset_early_buffer()
+
+    def test_argument_mutated_after_the_call_keeps_its_value_at_call_time(self, tmp_path: Path) -> None:
+        """Требование 1 — значение НА МОМЕНТ ВЫЗОВА, а не на момент слива."""
+
+        class _Mutable:
+            def __init__(self) -> None:
+                self.value = "исходное"
+
+            def __str__(self) -> str:
+                return self.value
+
+        arg = _Mutable()
+        StdLoggerFacade("gui").warning("состояние: %s", arg)
+        arg.value = "изменённое ПОСЛЕ вызова"
+
+        logger = LoggerManager(config=_real_config(tmp_path))
+        try:
+            StdLoggerFacade("gui").warning("после init")
+        finally:
+            logger.shutdown()
+
+        written = (tmp_path / "system.log").read_text(encoding="utf-8")
+        assert "состояние: исходное" in written, (
+            f"текст собран при СЛИВЕ, а не при вызове — буфер держал ссылку на аргумент: {written!r}"
+        )
+        assert "изменённое ПОСЛЕ вызова" not in written
+
+    def test_buffer_does_not_retain_the_argument_object(self, tmp_path: Path) -> None:
+        """Та же гарантия с другой стороны: объект аргумента освобождается сразу.
+
+        Проверка текста ловит подмену значения, эта — саму утечку: виджет,
+        удерживаемый буфером до подъёма менеджера, живёт неопределённо долго,
+        и это ровно то, чем Ф0.3 отличалась от «потолок стоит, значит всё ок».
+        """
+
+        class _Tracked:
+            def __str__(self) -> str:
+                return "аргумент"
+
+        arg = _Tracked()
+        ref = weakref.ref(arg)
+        StdLoggerFacade("gui").warning("держим: %s", arg)
+        del arg
+        gc.collect()
+
+        assert ref() is None, "буфер удержал объект аргумента до момента слива"
+
+    def test_ceiling_holds_and_the_loss_is_counted(self) -> None:
+        """Требование 2 (первая половина) — буфер не растёт без предела."""
+        facade = StdLoggerFacade("gui")
+        overflow = 7
+        for i in range(std_facade.EARLY_BUFFER_LIMIT + overflow):
+            facade.warning("запись %d", i)
+
+        stats = std_facade.early_buffer_stats()
+        assert stats["pending"] == std_facade.EARLY_BUFFER_LIMIT, f"потолок не держит: в буфере {stats['pending']}"
+        assert stats["dropped"] == overflow, f"выброшенное посчитано неверно: {stats}"
+
+    def test_dropped_count_is_announced_where_the_survivors_went(self, tmp_path: Path) -> None:
+        """Требование 2 (вторая половина) — потеря НАЗВАНА, а не только сосчитана.
+
+        Счётчик, который никто не читает, не отличается от отсутствующего:
+        разбирающий смотрит в файл процесса, а не в атрибут модуля.
+        """
+        facade = StdLoggerFacade("gui")
+        for i in range(std_facade.EARLY_BUFFER_LIMIT + 3):
+            facade.warning("запись %d", i)
+
+        logger = LoggerManager(config=_real_config(tmp_path))
+        try:
+            facade.warning("после init")
+        finally:
+            logger.shutdown()
+
+        written = (tmp_path / "system.log").read_text(encoding="utf-8")
+        assert "выброшено 3" in written, f"о выброшенных записях не сказано ни слова: {written[-500:]!r}"
+
+    def test_nothing_is_announced_when_nothing_was_dropped(self, tmp_path: Path) -> None:
+        """Пара к предыдущему: без переполнения предупреждения быть не должно.
+
+        Иначе «переполнено» звучало бы на каждом старте и перестало бы значить
+        хоть что-нибудь.
+        """
+        StdLoggerFacade("gui").warning("одна ранняя запись")
+
+        logger = LoggerManager(config=_real_config(tmp_path))
+        try:
+            StdLoggerFacade("gui").warning("после init")
+        finally:
+            logger.shutdown()
+
+        written = (tmp_path / "system.log").read_text(encoding="utf-8")
+        assert "выброшено" not in written, f"ложная тревога о переполнении: {written!r}"
+        assert "одна ранняя запись" in written
+
+    def test_buffer_is_drained_once(self, tmp_path: Path) -> None:
+        """Слив однократный: второй менеджер не получает копию тех же записей.
+
+        Буфер процессный, а связываний за жизнь процесса несколько (reload,
+        switch рецепта). Повторный слив дал бы дубли стартового следа в каждом
+        последующем файле — и тем громче, чем чаще система переконфигурируется.
+        """
+        StdLoggerFacade("gui").warning("единственная ранняя")
+
+        first = LoggerManager(config=_real_config(tmp_path / "первый"))
+        StdLoggerFacade("gui").warning("в первый")
+        first.shutdown()
+
+        second = LoggerManager(config=_real_config(tmp_path / "второй"))
+        try:
+            StdLoggerFacade("gui").warning("во второй")
+        finally:
+            second.shutdown()
+
+        written = (tmp_path / "второй" / "system.log").read_text(encoding="utf-8")
+        assert "единственная ранняя" not in written, "ранние записи слились повторно"
 
 
 class TestFactory:

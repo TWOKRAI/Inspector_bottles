@@ -4,11 +4,32 @@ Pytest: логи по умолчанию не пишутся в дерево и�
 
 Каталог задаётся через MULTIPROCESS_LOG_DIR (см. logger_module.core.log_paths).
 """
+
 from __future__ import annotations
 
 import os
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_early_log_buffer() -> None:
+    """Ф6.4а: буфер ранних записей — ПРОЦЕССНОЕ состояние, и оно течёт между тестами.
+
+    В проде это ровно то, что нужно: одна жизнь процесса — один старт, один
+    слив. В прогоне процесс общий на тысячи тестов, поэтому запись, сделанная
+    без менеджера в одном тесте, сливалась в первый же менеджер СЛЕДУЮЩЕГО и
+    становилась там первой строкой файла (поймано тремя красными в
+    ``test_fallback_handle`` и ``test_source_stamp_artifact``).
+
+    Сброс до и после: «до» защищает тест от предшественника, «после» — от
+    самого себя, если он упал на середине.
+    """
+    from .logger_module.adapters.std_facade import reset_early_buffer
+
+    reset_early_buffer()
+    yield
+    reset_early_buffer()
 
 
 @pytest.fixture(scope="session", autouse=True)

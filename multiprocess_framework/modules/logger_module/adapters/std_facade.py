@@ -62,8 +62,9 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 import traceback
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from ..core.log_config import LogLevel, LogScope
 from ..core.logger_core import OBSERVABILITY_EPOCH, _LEVEL_DEFAULT_SCOPE
@@ -73,6 +74,8 @@ from ..utils import apply_format
 __all__ = [
     "StdLoggerFacade",
     "get_std_logger",
+    "early_buffer_stats",
+    "reset_early_buffer",
 ]
 
 #: Уровень по имени метода → ``(scope, level)`` для прямого вызова ``log()``.
@@ -143,6 +146,89 @@ def _with_traceback(msg: str, args: tuple[Any, ...], exc: Tuple[Any, Any, Any]) 
         return f"{text}\n{rendered}" if rendered else text
 
     return build
+
+
+#: Потолок буфера ранних записей (Ф6.4а). Записи хранятся УЖЕ СОБРАННЫМИ
+#: строками, поэтому 500 штук — единицы сотен килобайт в худшем случае.
+#: Константа, а не флаг: включать/выключать тут нечего, а «настроить потолок»
+#: до сих пор никому не понадобилось (правило «фичи до доказательства»).
+EARLY_BUFFER_LIMIT = 500
+
+#: Ранние записи: сделанные ДО того, как в процессе появился ``LoggerManager``.
+#: Виджеты GUI логируют на импорте модуля, то есть заведомо раньше — и раньше
+#: эти записи уходили в stdlib-логгер без хендлеров, то есть в никуда.
+#: Кортеж ``(level, готовый_текст, module)``: см. ``_buffer_early``.
+_EARLY: List[Tuple[str, str, str]] = []
+_EARLY_LOCK = threading.Lock()
+_EARLY_DROPPED = [0]
+
+
+def early_buffer_stats() -> Dict[str, int]:
+    """Сколько ранних записей ждёт слива и сколько выброшено потолком.
+
+    Публичная функция, а не приватное поле: «молчащий детектор не доказывает» —
+    у потерь обязан быть адрес, по которому их видно снаружи.
+    """
+    with _EARLY_LOCK:
+        return {"pending": len(_EARLY), "dropped": _EARLY_DROPPED[0]}
+
+
+def reset_early_buffer() -> None:
+    """Очистить буфер и счётчик — для тестов и для повторного подъёма процесса."""
+    with _EARLY_LOCK:
+        _EARLY.clear()
+        _EARLY_DROPPED[0] = 0
+
+
+def _buffer_early(level: str, text: str, module: str) -> None:
+    """Положить раннюю запись в буфер. Принимает ТОЛЬКО готовую строку.
+
+    Сигнатура — часть гарантии, а не удобство. Шаблон с аргументами сюда
+    передать нельзя: ленивый ``%`` держал бы ссылки на аргументы до момента
+    связывания — виджеты Qt, кадры numpy, куски рецепта. Это утечка того же
+    класса, что Ф0.3 (потолок стоял на деке, а память росла в другом месте),
+    плюс прямой риск падения на ``__str__`` уже удалённого C++-объекта Qt в
+    момент слива, то есть в середине штатного подъёма процесса.
+
+    Поэтому сборка происходит у вызывающего (``_emit``), где текст всё равно
+    собирается для stdlib-фолбэка, — и лишней цены не появляется вовсе.
+    """
+    with _EARLY_LOCK:
+        if len(_EARLY) >= EARLY_BUFFER_LIMIT:
+            _EARLY_DROPPED[0] += 1
+            return
+        _EARLY.append((level, text, module))
+
+
+def _drain_early(writer: Any) -> None:
+    """Слить накопленное в появившийся менеджер — по порядку и ровно один раз.
+
+    Слив идёт ВНЕ лока: ``writer.log`` — чужой код (каналы, файлы, консоль), и
+    держать на нём процессный лок значило бы сериализовать через него весь
+    ранний старт. Список забирается под локом и обнуляется, поэтому второй
+    поток, вошедший следом, увидит пустой буфер и не сольёт то же самое дважды.
+    """
+    with _EARLY_LOCK:
+        if not _EARLY:
+            return
+        pending = list(_EARLY)
+        _EARLY.clear()
+        dropped = _EARLY_DROPPED[0]
+        _EARLY_DROPPED[0] = 0
+    for level, text, module in pending:
+        scope, log_level = _LEVEL_ROUTE[level]
+        writer.log(scope, log_level, text, module)
+    if dropped:
+        # Потеря названа вслух и там же, куда ушли выжившие записи: счётчик,
+        # который никто не читает, не отличается от отсутствующего.
+        scope, log_level = _LEVEL_ROUTE["warning"]
+        writer.log(
+            scope,
+            log_level,
+            f"буфер ранних записей переполнен: выброшено {dropped} записей "
+            f"(потолок {EARLY_BUFFER_LIMIT}) — они сделаны до подъёма LoggerManager",
+            "logger_module",
+        )
 
 
 def _sanitize_extra(extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -290,9 +376,21 @@ class StdLoggerFacade:
             # ``extra={"module": …}`` уронил бы его ``KeyError``'ом. Фолбэк —
             # аварийный режим, ронять из него вызывающего нельзя.
             text = apply_format(msg, args)
+            if exc is not None:
+                rendered = "".join(traceback.format_exception(*exc)).rstrip()
+                if rendered:
+                    text = f"{text}\n{rendered}"
             if extra:
                 text = f"{text} | {extra}"
-            getattr(self._fallback, level)(text, exc_info=exc)
+            # Ф6.4а: запись КОПИТСЯ, а не только уходит в stdlib. Сам
+            # stdlib-путь оставлен намеренно: если менеджер в этом процессе не
+            # поднимут никогда (утилита, тест, аварийный сценарий), буфер так и
+            # не сольётся, и след в stderr — единственное, что останется.
+            # Дубля в проде не будет: у stdlib-root в процессах фреймворка
+            # хендлеров нет, поэтому «второй адрес» существует только там, где
+            # его настроили осознанно.
+            _buffer_early(level, text, self._module)
+            getattr(self._fallback, level)(text)
             return False
         scope, log_level = _LEVEL_ROUTE[level]
         if exc is None and not extra:
@@ -313,9 +411,17 @@ class StdLoggerFacade:
         Отдельный метод, а не тело в ``_emit``: он выполняется единицы раз за
         жизнь процесса, и держать его в горячем пути значило бы платить за
         его байткод на каждой записи.
+
+        Ф6.4а: связывание — единственный момент, когда становится известно, что
+        менеджер появился. Здесь и сливается всё, что накопилось до него.
+        Порядок обязателен: сначала ранние записи, потом та, ради которой
+        связывание и произошло, — иначе стартовый след ложится в файл
+        задом наперёд.
         """
         self._writer = get_logger()
         self._epoch = OBSERVABILITY_EPOCH[0]
+        if self._writer is not None and _EARLY:
+            _drain_early(self._writer)
 
 
 _CACHE: dict[tuple[str, str | None], StdLoggerFacade] = {}
