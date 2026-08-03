@@ -1108,6 +1108,7 @@
           "aggregation_interval": 5.0,
           "channels": {},
           "enabled": true,
+          "flush_interval": 10.0,
           "log_level": "INFO"
         }
       },
