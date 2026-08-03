@@ -7,12 +7,12 @@ QueueRegistry делегирует хранение в PSR.
 Pickle-safe: Queue ссылки живут в ProcessData (pickle-safe).
 """
 
-import logging
 import time
 from multiprocessing import Queue
 from typing import Any, Dict, List, Optional
 
 from ....base_manager import BaseManager, ObservableMixin
+from ....logger_module import get_std_logger
 from ..interfaces import IQueueRegistry
 from ...mixins import ManagerStatsMixin
 from ...qos import qos_for
@@ -24,15 +24,28 @@ except ImportError:
 
 from queue import Full
 
-# Отдельный stdlib-логгер для сообщений о БЕЗВОЗВРАТНОЙ потере груза.
-# Штатная плоскость (self._log_*) здесь молчит по построению: ни один продовый
-# вызов SharedResourcesManager(...) не передаёт logger (spawner.py, bundle_builder.py,
-# process_runner.py — все три без него), поэтому ManagerRegistry пуст и
-# _call_manager('logger', ...) тихо возвращает None. Плюс ObservableMixin.__getstate__
-# выкидывает _registry при pickle, так что даже переданный logger не пережил бы spawn.
-# Итог до этой правки: 26 тысяч событий потери → 0 строк во всём logs/.
-# Тот же приём, что _fallback_logger в logger_module (log_channel.py / logger_core.py).
-_fallback_logger = logging.getLogger(__name__)
+# Вид на процессный LoggerManager для сообщений о потере груза (Ф6.8).
+#
+# Штатная плоскость (``self._log_*``) здесь молчит ПО ПОСТРОЕНИЮ: ни один
+# продовый вызов ``SharedResourcesManager(...)`` не передаёт logger
+# (spawner.py, bundle_builder.py, process_runner.py — все три без него),
+# поэтому ManagerRegistry пуст и ``_call_manager('logger', …)`` тихо возвращает
+# None. Плюс ``ObservableMixin.__getstate__`` выкидывает ``_registry`` при
+# pickle — даже переданный logger не пережил бы spawn.
+#
+# Раньше здесь стоял ``logging.getLogger(__name__)``, и это был ВТОРОЙ мёртвый
+# путь: у stdlib-root в процессах фреймворка нет ни одного хендлера. Итог,
+# измеренный живьём: 26 тысяч событий потери и 246 вытеснений кадров → 0 строк
+# во всём ``logs/``. Детектор существовал и не срабатывал никогда.
+#
+# Вид ``get_std_logger`` решает обе беды сразу: он не пиклится (создаётся на
+# импорте в КАЖДОМ процессе) и связывается с процессным ``LoggerManager``
+# лениво, на первой записи, — то есть уже после ``init_logging()``.
+#
+# ``fallback_name=__name__`` — чтобы в режиме «менеджера нет» запись уходила в
+# stdlib-логгер с ТОЧНЫМ именем модуля, а не с префиксом ``mpf.``: иначе адрес
+# записи менялся бы в зависимости от того, поднят ли менеджер.
+_loss_logger = get_std_logger(__name__, fallback_name=__name__)
 
 
 class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMixin):
@@ -229,7 +242,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             return False
         self._count_sender(process_name, queue_type, message, "put")
         try:
-            evicted = self.remove_old_if_full(queue, queue_type)
+            evicted = self.remove_old_if_full(queue, queue_type, victim_process=process_name)
             if evicted is not None and on_evict is not None:
                 try:
                     on_evict(evicted, process_name)
@@ -353,7 +366,12 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             self._log_error(f"clear_queue() failed: {e}")
             self._stats["errors"] += 1
 
-    def remove_old_if_full(self, queue: Queue, queue_type: Optional[str] = None) -> Optional[Any]:
+    def remove_old_if_full(
+        self,
+        queue: Queue,
+        queue_type: Optional[str] = None,
+        victim_process: Optional[str] = None,
+    ) -> Optional[Any]:
         """Освободить место в полной очереди перед put (QoS-профиль, Ф7 G.4.a).
 
         Решение «ронять или нет» берётся из ЕДИНОГО QoS-профиля класса груза
@@ -372,12 +390,22 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         throttled-WARNING — всегда-on телеметрия (по образцу G.3, поведение drop не
         меняют). Для system/data вердикт профиля идентичен хардкоду — флип безопасен.
 
+        Args:
+            victim_process: чью очередь вытесняем (Ф6.8). Счётчик ``data_evicted``
+                живёт у ОТПРАВИТЕЛЯ, а вытесняется чужая очередь — очередь
+                ПОЛУЧАТЕЛЯ. Из-за этого «246 вытеснений у points» на живом
+                прогоне читалось ровно наоборот: как будто переполнялась очередь
+                самого points, тогда как points переполнял очередь потребителя.
+                Имя жертвы попадает и в пер-жертвенный счётчик, и в текст
+                WARNING'а — без него запись не отвечает на вопрос «где затор».
+
         Returns:
             вытесненный элемент (drop_oldest сработал) или ``None`` (очередь не полна,
             never-drop заблокировал вытеснение, либо очередь опустела гонкой). Вызывающий
             (``send_to_queue``) отдаёт его в ``on_evict``-хук — LIVE-2: у вытесненного
             кадра есть незакрытый займ SHM-кольца, который иначе не отпустит никто.
         """
+        victim = f"{victim_process}.{queue_type}" if victim_process else f"?.{queue_type}"
         if not queue.full():
             return None
         # process_data.QUEUE_SYSTEM == "system" — каноническое имя system-очереди.
@@ -386,10 +414,14 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             now = time.monotonic()
             if now - self._system_evict_last_log >= self._system_evict_log_window:
                 self._system_evict_last_log = now
-                self._log_error(
-                    "system-очередь переполнена — вытеснение заблокировано "
-                    f"(system_evict_blocked={self._stats['system_evict_blocked']}); "
-                    "system-команда может быть потеряна при put"
+                # Ф6.8: мимо ``self._log_error`` по той же причине, что и
+                # ``_report_never_drop_loss`` — штатная плоскость у этого
+                # менеджера не подключена ни в одном процессе.
+                _loss_logger.error(
+                    "system-очередь '%s' переполнена — вытеснение заблокировано "
+                    "(system_evict_blocked=%d); system-команда может быть потеряна при put",
+                    victim,
+                    self._stats["system_evict_blocked"],
                 )
             return None
         try:
@@ -398,13 +430,22 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             return None
         # drop_oldest сработал — громкий счётчик (раньше молчал) + throttled WARNING.
         self._stats["data_evicted"] += 1
+        # Ф6.8: разбивка по ЖЕРТВЕ. Общий ``data_evicted`` остаётся (его читают
+        # heartbeat и introspect), но он отвечает «сколько», а не «где» —
+        # а разбор затора начинается со второго вопроса. Кардинальность
+        # ограничена топологией: имён процессов единицы.
+        key = f"data_evicted.{victim}"
+        self._stats[key] = self._stats.get(key, 0) + 1
         now = time.monotonic()
         if now - self._data_evict_last_log >= self._data_evict_log_window:
             self._data_evict_last_log = now
-            self._log_warning(
-                f"data-очередь '{queue_type}' переполнена — вытеснен старый элемент "
-                f"(drop_oldest; data_evicted={self._stats['data_evicted']}); "
-                "устойчивая перегрузка = теряем кадры, чинить пропускную способность"
+            _loss_logger.warning(
+                "переполнена data-очередь ПОЛУЧАТЕЛЯ '%s' — вытеснен старый элемент "
+                "(drop_oldest; вытеснено в неё %d, всего этим процессом %d); "
+                "устойчивая перегрузка = теряем кадры, чинить пропускную способность",
+                victim,
+                self._stats[key],
+                self._stats["data_evicted"],
             )
         return evicted
 
@@ -424,7 +465,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         """Троттлированный отчёт о безвозвратно потерянном never-drop грузе.
 
         Почему мимо ``self._log_error``: штатная плоскость логов у QueueRegistry
-        не подключена ни в одном процессе (см. ``_fallback_logger``), и запись
+        не подключена ни в одном процессе (см. ``_loss_logger``), и запись
         просто исчезала. Почему с именем получателя: без него запись не отвечает
         на главный вопрос разбора — КОМУ не доехало; счётчики этого не знают.
         """
@@ -440,7 +481,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             size = queue.qsize()
         except (NotImplementedError, OSError, AttributeError):
             size = -1  # qsize недоступен (macOS) — не повод молчать о потере
-        _fallback_logger.error(
+        _loss_logger.error(
             "ПОТЕРЯ СООБЩЕНИЯ: очередь '%s' процесса-получателя '%s' переполнена "
             "(размер %s), вытеснение запрещено QoS-профилем (never-drop) — "
             "сообщение отброшено БЕЗВОЗВРАТНО и не будет доставлено. "

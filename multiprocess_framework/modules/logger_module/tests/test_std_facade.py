@@ -272,6 +272,38 @@ class TestLazyResolve:
         assert "во второй" in written, "вид остался связан с закрытым менеджером"
         assert "в первый" not in written
 
+    def test_closed_manager_stops_being_the_process_logger(
+        self, tmp_path: Path, monkeypatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Закрытый менеджер обязан ОТЦЕПИТЬСЯ, а не остаться синглтоном (Ф6.8).
+
+        До правки ``LoggerManager._instance`` переживал собственный
+        ``shutdown()``: ``get_logger()`` продолжал отдавать труп, и всё, что
+        писало через связанный вид, уходило в закрытые каналы — молча. Пока на
+        виде жили два вызывающих, это не всплывало; переезд ``QueueRegistry`` на
+        вид (6.8) сделал дефект наблюдаемым — записи о потере кадров начали
+        исчезать в прогоне, где до этого успел закрыться чужой менеджер.
+
+        Пара: пока менеджер жив — пишем в файл; после ``shutdown`` — в
+        stdlib-фолбэк, но НЕ в никуда.
+        """
+        monkeypatch.setattr(LoggerManager, "_instance", None)
+        bump_observability_epoch()
+
+        manager = LoggerManager(config=_real_config(tmp_path))
+        facade = StdLoggerFacade("gui")
+        assert facade.warning("при живом менеджере") is True
+        manager.shutdown()
+
+        assert get_logger() is None, "закрытый менеджер остался процессным логгером"
+        with caplog.at_level("WARNING"):
+            assert facade.warning("после закрытия") is False, "вид всё ещё пишет в закрытый менеджер"
+        assert "после закрытия" in caplog.text, "запись после закрытия исчезла совсем"
+
+        written = (tmp_path / "system.log").read_text(encoding="utf-8")
+        assert "при живом менеджере" in written
+        assert "после закрытия" not in written
+
 
 class TestExceptionAndLog:
     def test_exception_appends_traceback(self, fake_lm: _FakeLoggerManager) -> None:
