@@ -18,7 +18,7 @@ from ...command_module.configs.command_manager_config import CommandManagerConfi
 from ...console_module.configs.console_config import ConsoleConfig
 from ...data_schema_module import SchemaBase
 from ...error_module.configs.error_manager_config import ErrorManagerConfig
-from ...logger_module.configs.logger_manager_config import LoggerManagerConfig
+from ...logger_module.configs.logger_manager_config import LoggerManagerConfig, LoggerScopeSchema
 from ...router_module.configs.router_manager_config import RouterManagerConfig
 from ...statistics_module.configs.stats_config import StatsManagerConfig
 
@@ -75,6 +75,52 @@ def _default_console() -> ConsoleConfig:
 TManagersConfig = TypeVar("TManagersConfig", bound="ManagersConfig")
 
 
+def level_profile_scopes(level: str) -> dict[str, dict[str, Any]]:
+    """Scopes-профиль под глобальный ``log_level`` — ОДИН на оба пути (Ф2.3a).
+
+    ``default_level`` сам по себе не фильтрует: решение принимает ``min_level``
+    КАЖДОГО скоупа, а все стандартные скоупы всегда присутствуют в конфиге —
+    поэтому смена уровня переписывает их пороги:
+
+      - ``INFO``  — штатный настроенный профиль (SYSTEM=WARNING на консоль,
+        BUSINESS/PERFORMANCE=INFO, DEBUG-скоуп выключен);
+      - ``DEBUG`` — все скоупы на DEBUG + DEBUG-скоуп включается (firehose осознанно);
+      - ``WARNING``/``ERROR``/``CRITICAL`` — пороги всех скоупов поднимаются до уровня
+        (DEBUG-скоуп остаётся выключенным).
+
+    **Живёт здесь, а не рядом с пересборкой, потому что копий было две и они
+    расходились.** Воспроизведено 2026-08-03: при ``INSPECTOR_LOG_LEVEL=DEBUG``
+    стартовый путь опускал ОДИН скоуп из четырёх (SYSTEM оставался WARNING,
+    PERFORMANCE — INFO, DEBUG-скоуп выключенным), а тот же ``DEBUG`` через
+    ``config.reload`` опускал все четыре и будил выключенный. Одна ручка значила
+    разное в зависимости от того, как её задали, — корень находки
+    «``config_reload`` врёт про ``log_level``». Теперь профиль один, и путь
+    пересборки импортирует его отсюда.
+
+    **Изменение живого поведения, названное вслух:** ``INSPECTOR_LOG_LEVEL=DEBUG``
+    на старте теперь открывает и SYSTEM (то есть консоль), чего раньше не делал.
+    Это ровно то, что та же величина уже делала через ``config.reload``;
+    унификация идёт на семантику пересборки, потому что обратная («уровень
+    трогает один скоуп из четырёх») настройкой не является.
+
+    Ф2.3b (после 2.4/2.5) заменит профиль корневым правилом иерархии — тогда
+    переписывания потомков не станет вовсе. Сейчас это невозможно без разворота
+    приоритета «адресная правка скоупа vs оптовая ручка»: правило имени сильнее
+    скоупа (Р-2.2-А), и корневое правило перебило бы точечный ``scopes.X``.
+    """
+    lvl = str(level).upper()
+    scopes: dict[str, dict[str, Any]] = {}
+    for name, sc in LoggerManagerConfig().scopes.items():
+        d = sc.model_dump()
+        if lvl == "DEBUG":
+            d["min_level"] = "DEBUG"
+            d["enabled"] = True
+        elif lvl != "INFO":
+            d["min_level"] = lvl
+        scopes[str(name)] = d
+    return scopes
+
+
 class ManagersConfig(SchemaBase):
     """Корневая схема конфигурации менеджеров процесса."""
 
@@ -96,7 +142,12 @@ class ManagersConfig(SchemaBase):
         log_dir: str,
         log_level: str | None = None,
     ) -> TManagersConfig:
-        """Собрать конфиг: дефолты LoggerManagerConfig + log_directory и уровень BUSINESS = log_level."""
+        """Собрать конфиг: дефолты LoggerManagerConfig + log_directory и профиль уровня log_level.
+
+        Ф2.3a: раньше уровень доставался ровно скоупу BUSINESS — то есть три
+        скоупа из четырёх настройку игнорировали. Теперь применяется тот же
+        профиль, что и на пересборке (:func:`level_profile_scopes`).
+        """
         return managers_from_log_dir(log_dir, log_level, model_cls=cls)
 
 
@@ -132,9 +183,15 @@ def managers_from_log_dir(
             "log_directory": log_dir_s,
         }
     )
-    scopes = dict(base_logger.scopes)
-    if "BUSINESS" in scopes:
-        scopes["BUSINESS"] = scopes["BUSINESS"].model_copy(update={"min_level": level})
+    # Ф2.3a: тот же профиль, что применяет пересборка. Прежде здесь правился
+    # ровно один скоуп (BUSINESS) — см. :func:`level_profile_scopes` про то,
+    # почему копий было две и чем это стоило.
+    #
+    # ``model_validate``, а не подстановка словарей: ``model_copy(update=…)``
+    # НЕ валидирует и положил бы dict вместо схемы — гейт читает атрибуты, и
+    # порог молча перестал бы действовать. Класс ошибки уже пойман в этой же
+    # фазе, на правилах иерархии.
+    scopes = {name: LoggerScopeSchema.model_validate(data) for name, data in level_profile_scopes(level).items()}
     logger = base_logger.model_copy(update={"scopes": scopes})
     error = ErrorManagerConfig(
         error_file_path=os.path.join(log_dir_s, "errors.log"),

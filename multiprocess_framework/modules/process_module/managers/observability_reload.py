@@ -91,31 +91,21 @@ def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
 
 
 def _level_profile_scopes(level: str) -> Dict[str, Dict[str, Any]]:
-    """Scopes-профиль под глобальный ``log_level`` (иначе уровень — мёртвый параметр).
+    """Профиль уровня — **вид на общую функцию**, а не вторая её реализация (Ф2.3a).
 
-    ``default_level`` сам по себе НЕ фильтрует: решение принимает ``min_level``
-    КАЖДОГО скоупа, а все стандартные скоупы всегда присутствуют в конфиге —
-    поэтому смена уровня обязана переписывать их пороги:
+    Тело переехало в :func:`..configs.managers_config.level_profile_scopes`,
+    туда же, где живёт стартовая сборка. Пока копий было две, одна и та же
+    величина значила разное: старт опускал один скоуп из четырёх, пересборка —
+    все четыре. Имя оставлено здесь ради вызывающего внутри модуля; знание —
+    в одном месте.
 
-      - ``INFO``  — штатный настроенный профиль (дефолты LoggerManagerConfig:
-        SYSTEM=WARNING на консоль, BUSINESS/PERFORMANCE=INFO, DEBUG-scope выключен);
-      - ``DEBUG`` — все скоупы на DEBUG + DEBUG-scope включается (firehose осознанно);
-      - ``WARNING``/``ERROR``/``CRITICAL`` — пороги всех скоупов поднимаются до уровня
-        (DEBUG-scope остаётся выключенным).
+    Импорт ленивый: ``managers_config`` тянет конфиги всех менеджеров, а этот
+    модуль грузится на пути пересборки, где лишний импорт на старте не нужен
+    (та же причина, что у ``base_managers_payload``).
     """
-    from ...logger_module.configs.logger_manager_config import LoggerManagerConfig
+    from ..configs.managers_config import level_profile_scopes
 
-    lvl = str(level).upper()
-    scopes: Dict[str, Dict[str, Any]] = {}
-    for name, sc in LoggerManagerConfig().scopes.items():
-        d = sc.model_dump()
-        if lvl == "DEBUG":
-            d["min_level"] = "DEBUG"
-            d["enabled"] = True
-        elif lvl != "INFO":
-            d["min_level"] = lvl
-        scopes[name] = d
-    return scopes
+    return level_profile_scopes(level)
 
 
 def observability_effective(

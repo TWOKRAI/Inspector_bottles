@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import pytest
+
 from multiprocess_framework.modules.process_module.managers.observability_reload import (
     apply_observability_layers,
     observability_effective,
@@ -205,6 +207,76 @@ class TestLevelProfile:
         scopes = logger.calls[-1]["scopes"]
         assert scopes["SYSTEM"]["min_level"] == "ERROR", "адресная правка стёрта профилем уровня"
         assert scopes["BUSINESS"]["min_level"] == "DEBUG", "профиль уровня не применён к остальным"
+
+
+class TestOneProfileForBothPaths:
+    """Ф2.3a — ``log_level`` значит ОДНО И ТО ЖЕ на старте и на пересборке.
+
+    Дефект был воспроизведён, а не выведен из кода (2026-08-03): при
+    ``INSPECTOR_LOG_LEVEL=DEBUG`` стартовая сборка опускала ОДИН скоуп из
+    четырёх (SYSTEM оставался WARNING, PERFORMANCE — INFO, DEBUG-скоуп
+    выключенным), а тот же ``DEBUG`` через ``config.reload`` опускал все четыре
+    и будил выключенный. Одна ручка — два смысла, в зависимости от того, как её
+    задали.
+
+    Сравниваются ДВА ПУТИ между собой, а не путь с константой: константа
+    зафиксировала бы сегодняшний профиль и молчала бы ровно про то, что
+    сломалось, — про их расхождение.
+    """
+
+    @pytest.mark.parametrize("level", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    def test_boot_and_reload_agree_on_every_level(self, tmp_path, level: str) -> None:
+        from multiprocess_framework.modules.process_module.configs.managers_config import (
+            ManagersConfig,
+            managers_from_log_dir,
+        )
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            _level_profile_scopes,
+        )
+
+        boot = {
+            str(name): (sc.min_level, sc.enabled)
+            for name, sc in managers_from_log_dir(str(tmp_path), level, model_cls=ManagersConfig).logger.scopes.items()
+        }
+        reload_ = {str(name): (sc["min_level"], sc["enabled"]) for name, sc in _level_profile_scopes(level).items()}
+        assert boot == reload_, f"старт и пересборка разошлись на log_level={level}"
+
+    def test_boot_no_longer_ignores_the_level_on_three_scopes_of_four(self, tmp_path) -> None:
+        """Характеризация ИЗМЕНЁННОГО поведения — прямо, а не умолчанием.
+
+        До Ф2.3a стартовый путь при ``DEBUG`` оставлял SYSTEM на WARNING,
+        PERFORMANCE на INFO и DEBUG-скоуп выключенным. Теперь настройку слышат
+        все четыре — в том числе SYSTEM, то есть **консоль становится
+        болтливой**, чего на старте раньше не было. Это осознанная унификация на
+        семантику пересборки, и здесь она записана как факт, а не как побочный
+        эффект.
+        """
+        from multiprocess_framework.modules.process_module.configs.managers_config import (
+            ManagersConfig,
+            managers_from_log_dir,
+        )
+
+        scopes = managers_from_log_dir(str(tmp_path), "DEBUG", model_cls=ManagersConfig).logger.scopes
+        assert scopes["SYSTEM"].min_level == "DEBUG"
+        assert scopes["PERFORMANCE"].min_level == "DEBUG"
+        assert scopes["DEBUG"].enabled is True
+
+    def test_boot_scopes_are_schema_objects_not_dicts(self, tmp_path) -> None:
+        """Профиль кладётся ВАЛИДИРОВАННЫМ, иначе порог молча не действует.
+
+        ``model_copy(update=…)`` не валидирует: словарь на месте схемы прошёл бы
+        сборку молча, а гейт читает атрибуты — и ``min_level`` перестал бы
+        существовать. Тот же класс ошибки уже пойман в этой фазе на правилах
+        иерархии, поэтому здесь стоит страж, а не надежда.
+        """
+        from multiprocess_framework.modules.process_module.configs.managers_config import (
+            ManagersConfig,
+            managers_from_log_dir,
+        )
+        from multiprocess_framework.modules.logger_module.configs import LoggerScopeSchema
+
+        scopes = managers_from_log_dir(str(tmp_path), "WARNING", model_cls=ManagersConfig).logger.scopes
+        assert all(isinstance(sc, LoggerScopeSchema) for sc in scopes.values())
 
 
 class TestEffectiveReadback:
