@@ -22,8 +22,9 @@ from multiprocess_framework.modules.process_module.configs.observability_config 
 )
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
     LAYER_APP,
-    ObservabilityLayers,
+    process_observability_layers,
 )
+from multiprocess_prototype.backend.assembly.assembler import BlueprintAssembler
 
 SYSTEM_YAML = Path(__file__).resolve().parents[1] / "config" / "system.yaml"
 
@@ -31,6 +32,25 @@ SYSTEM_YAML = Path(__file__).resolve().parents[1] / "config" / "system.yaml"
 def _app_section() -> dict:
     raw = yaml.safe_load(SYSTEM_YAML.read_text(encoding="utf-8"))
     return raw.get("observability") or {}
+
+
+class _ChildLikeSvc:
+    """Форма доставки ДОЧЕРНЕГО процесса: весь ``proc_dict``, ключи под ``config.``.
+
+    Именно на этой форме ловился фейк (см. докстринг ``read_process_config``):
+    тесты с плоским словарём доказывали не то, что видит ребёнок.
+    """
+
+    def __init__(self, proc_dict: dict) -> None:
+        self._proc = proc_dict
+
+    def get_config(self, key: str, default=None):
+        node = self._proc
+        for part in key.split("."):
+            if not isinstance(node, dict) or part not in node:
+                return default
+            node = node[part]
+        return node
 
 
 class TestRetentionOwnedByApp:
@@ -42,13 +62,43 @@ class TestRetentionOwnedByApp:
         assert section.get("retention_total_mb", 0) > 0, "retention_total_mb остался выключенным"
 
     def test_provenance_names_the_app_layer(self) -> None:
-        """Провенанс обязан назвать app — иначе владелец ищет причину не в том файле."""
-        layers = ObservabilityLayers(app=_app_section(), app_source="backend/config/system.yaml")
-        prov = layers.provenance()
+        """Провенанс через ОБА прод-шва — ассемблер кладёт путь, ребёнок его читает.
 
+        Прежняя редакция (поймано ревью 2026-08-03) конструировала
+        ``ObservabilityLayers(app_source=...)`` сама и проверяла собственный
+        аргумент — вакуум: прод несёт источник строковым ключом
+        ``observability_config_path`` (``assembler.py``, шов «если задан
+        app_config_path»), а провенанс собирает ДОЧЕРНИЙ процесс из этого ключа
+        (``process_observability_layers``). Слом прокладки в ассемблере
+        оставлял тот тест зелёным.
+        """
+        blueprint = {
+            "name": "prov",
+            "processes": [
+                {"process_name": "camera_0", "process_class": "some.module.CameraApp", "plugins": []},
+            ],
+            "wires": [],
+        }
+        assembled = BlueprintAssembler(
+            observability_section=_app_section(),
+            log_dir="logs/x",
+            telemetry_dict=None,
+            recipe_path="",
+            app_config_path=str(SYSTEM_YAML),
+        ).assemble(blueprint)
+        proc_dict = assembled["camera_0"]
+
+        # Шов 1: ассемблер положил адрес слоя L1 в конфиг процесса.
+        assert proc_dict["config"]["observability_config_path"] == str(SYSTEM_YAML)
+
+        # Шов 2: ребёнок читает тот же ключ, и провенанс называет слой И файл.
+        layers = process_observability_layers(_ChildLikeSvc(proc_dict))
+        prov = layers.provenance()
         for key in ("retention_days", "retention_total_mb"):
             assert prov[key]["layer"] == LAYER_APP, f"{key} приписан слою {prov[key]}"
-            assert prov[key]["source"] == "backend/config/system.yaml"
+            assert prov[key]["source"] == str(SYSTEM_YAML), (
+                "источник обязан быть тем самым файлом, который положил ассемблер"
+            )
 
     def test_values_reach_the_logger_manager_config(self) -> None:
         """Слой без раскладки — половина пути: значения обязаны доехать до менеджера.

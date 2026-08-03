@@ -155,14 +155,18 @@ def test_base_context_survives_concurrent_writes_and_reads(tmp_path: Path) -> No
                 errors.append(exc)
 
         w = threading.Thread(target=writer, daemon=True)
-        readers = [threading.Thread(target=reader) for _ in range(8)]
+        # Ф6.х.1б: daemon + join с дедлайном — зависший reader обязан уронить
+        # тест, а не повесить весь прогон (правило «тест, способный зависнуть,
+        # хуже отсутствующего»).
+        readers = [threading.Thread(target=reader, daemon=True) for _ in range(8)]
         w.start()
         for t in readers:
             t.start()
         for t in readers:
-            t.join()
+            t.join(timeout=60)
         stop.set()
         w.join(timeout=2)
+        assert not any(t.is_alive() for t in readers), "reader не уложился в дедлайн — гонка зависла"
 
         assert not errors, f"чтение базы упало: {errors[:1]}"
         extras = _extras(cap, "unit")
@@ -240,9 +244,10 @@ def test_unpopped_context_persists_on_a_reused_thread(tmp_path: Path) -> None:
             mgr.info("работа второй задачи", module="unit")
             results.append(_extras(cap, "unit")[-1].get("task"))
 
-        worker = threading.Thread(target=lambda: (task_one(), task_two()))
+        worker = threading.Thread(target=lambda: (task_one(), task_two()), daemon=True)
         worker.start()
-        worker.join()
+        worker.join(timeout=30)
+        assert not worker.is_alive(), "worker не уложился в дедлайн — тест обязан падать, а не висеть"
 
         assert results == ["первая"], (
             "ожидается ПРОТЕЧКА в рамках одного потока — контекст привязан к потоку, "

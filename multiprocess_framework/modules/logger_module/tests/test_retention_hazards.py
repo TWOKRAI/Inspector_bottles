@@ -493,11 +493,13 @@ def test_concurrent_sweeps_do_not_report_false_failures(tmp_path: Path) -> None:
         except BaseException as exc:  # noqa: BLE001 — тест ловит любой отказ
             errors.append(exc)
 
-    threads = [threading.Thread(target=_sweep) for _ in range(4)]
+    # Ф6.х.1б: daemon + дедлайн — зависший sweep роняет тест, а не прогон.
+    threads = [threading.Thread(target=_sweep, daemon=True) for _ in range(4)]
     for t in threads:
         t.start()
     for t in threads:
-        t.join()
+        t.join(timeout=60)
+    assert not any(t.is_alive() for t in threads), "параллельный sweep не уложился в дедлайн"
 
     assert not errors, f"параллельный sweep упал: {errors[:1]}"
     assert not list(tmp_path.glob("old_*.log")), "старые файлы обязаны быть удалены"

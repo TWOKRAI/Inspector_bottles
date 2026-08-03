@@ -112,16 +112,19 @@ def test_concurrent_emitters_lose_no_increment(manager) -> None:
     barrier = threading.Barrier(threads_count)
 
     def worker(idx: int) -> None:
-        barrier.wait()  # старт одновременный — иначе гонки может не случиться вовсе
+        # Ф6.х.1б: таймаут на барьере — смерть одного потока до барьера не
+        # должна вешать остальных навечно (BrokenBarrierError уронит всех).
+        barrier.wait(timeout=30)  # старт одновременный — иначе гонки может не случиться вовсе
         for i in range(per_thread):
             manager.info("гонка", module="unit")
 
     with _hostile_scheduler():
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(threads_count)]
+        threads = [threading.Thread(target=worker, args=(i,), daemon=True) for i in range(threads_count)]
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            t.join(timeout=120)
+        assert not any(t.is_alive() for t in threads), "эмитенты не уложились в дедлайн — гонка зависла"
 
     stats = manager.get_stats()
     expected = threads_count * per_thread
@@ -150,14 +153,15 @@ def test_one_warning_survives_the_race(manager, caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="multiprocess_framework"), _hostile_scheduler():
 
         def worker() -> None:
-            barrier.wait()
+            barrier.wait(timeout=30)  # Ф6.х.1б: см. соседний тест
             manager.info("одновременная запись", module="unit")
 
-        threads = [threading.Thread(target=worker) for _ in range(threads_count)]
+        threads = [threading.Thread(target=worker, daemon=True) for _ in range(threads_count)]
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            t.join(timeout=60)
+        assert not any(t.is_alive() for t in threads), "потоки не уложились в дедлайн — гонка зависла"
 
         ghost_warnings = [r for r in caplog.records if "ghost" in r.getMessage()]
         assert len(ghost_warnings) == 1, f"предупреждений {len(ghost_warnings)}, ожидалось одно"
