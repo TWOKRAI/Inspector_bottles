@@ -194,3 +194,8 @@
 - [Ревью спеки требует независимого агента](feedback_spec_review_needs_independent_agent.md) — автор находит карту, форму задачи находит только чужой
 - [Одиночное чтение не видит общей базы](feedback_single_reader_test_misses_multi_reader_defect.md) — 15 тестов и зонд читали в одиночку; два потребителя портили темп друг другу
 - [Предсказание инъекций — после всех тестов](feedback_predict_injections_after_writing_tests.md) — 3 расхождения из 7 из-за арифметики по неполному файлу
+- [uv sync сносит необъявленное](feedback_uv_sync_prunes_venv.md) — 27 пакетов за запуск; cv2 умирает с opencv-contrib; ходить через --inexact
+- [venv заблокирован MCP-сервером](project_venv_locked_by_mcp.md) — backend_ctl держит numpy .pyd, Claude Code респавнит; лечится закрытием VS Code, не kill по PID
+- [Сквозное ревью Ф5](project_f5_cross_review.md) — 7.5/10, 3 блокера ФР-1/2/3 до гейта; отчёт docs/reviews/2026-08-01
+- [Инъекция покрывает ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) — частичная = ложный B1; стреляло дважды (I-F, I-7)
+- [Дельта, а не размер файла](feedback_measure_delta_not_file_size.md) — «изменён в окне» ≠ «записан в окне»; база Ф6 = 5.4 МБ/час
