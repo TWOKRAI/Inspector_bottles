@@ -39,8 +39,9 @@ Claim Check: пиксели (numpy) едут в OS SHM, по очереди — 
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Callable, Dict, Optional
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 # Размер LRU-кэша SHM-handles читателя (обычно 1–3 живых имени; запас на realloc/switch).
 _HANDLE_CACHE_CAP = 8
@@ -910,8 +911,6 @@ class FrameShmMiddleware:
                     # M2c: torn/in-progress → штатный drop (счётчик, агрегируется в get_stats).
                     self.frame_torn_reads += 1
             except Exception as exc:
-                logging.getLogger("FrameShmMiddleware").warning(
-                    "SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name
-                )
+                get_std_logger(__name__).warning("SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name)
 
         return msg
