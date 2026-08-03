@@ -167,6 +167,27 @@ class TestProcessModule:
             f"{len(registered_at_running[0])})"
         )
 
+    def test_initialize_moves_both_status_planes_to_ready(self):
+        """Ф6.х.7г: ``initialize()`` двигает ОБЕ плоскости статуса, не только PSR.
+
+        Прежде PSR получал ``ready``, а ``_current_process_status`` оставался
+        ``initializing`` до конца ``run()`` — heartbeat и introspect всё окно
+        (у ``GuiProcess`` — вся жизнь Qt-loop) давали два разных ответа на один
+        вопрос «процесс готов?».
+        """
+        process = ProcessModule("test_process")
+        captured: list = []
+        process.update_process_state = Mock(side_effect=lambda **kw: captured.append(kw.get("status")))
+
+        try:
+            assert process.initialize() is True, "initialize() не прошёл на пустом конфиге"
+            assert ProcessStatus.READY.value in captured, "PSR не получил ready"
+            assert process._current_process_status == ProcessStatus.READY.value, (
+                f"вторая плоскость отстала: {process._current_process_status!r}"
+            )
+        finally:
+            process.shutdown()
+
     def test_status_before_run_is_not_running(self):
         """Вторая половина пары: до ``run()`` процесс НЕ объявляет себя работающим.
 

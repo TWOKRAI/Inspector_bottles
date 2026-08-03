@@ -43,6 +43,10 @@ from typing import Any, Callable, Dict, Optional
 
 from multiprocess_framework.modules.logger_module import get_std_logger
 
+# Ф6.х.7в: модульный логгер по конвенции 6.0 (вызов get_std_logger внутри
+# except был отклонением, найденным ревью в файле-образце миграции).
+_log = get_std_logger(__name__)
+
 # Размер LRU-кэша SHM-handles читателя (обычно 1–3 живых имени; запас на realloc/switch).
 _HANDLE_CACHE_CAP = 8
 # Throttle громкого WARNING про pickle-fallback (счётчик — всегда, лог — раз в N кадров).
@@ -911,6 +915,6 @@ class FrameShmMiddleware:
                     # M2c: torn/in-progress → штатный drop (счётчик, агрегируется в get_stats).
                     self.frame_torn_reads += 1
             except Exception as exc:
-                get_std_logger(__name__).warning("SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name)
+                _log.warning("SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name)
 
         return msg

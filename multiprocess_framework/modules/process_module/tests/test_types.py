@@ -19,6 +19,9 @@ class TestProcessStatus:
             "initializing",
             "ready",
             "running",
+            # Ф6.х.7г: paused существовал в рантайме (worker.pause_all) голым
+            # литералом — внесён в единый enum (ADR-117 суперсет).
+            "paused",
             "stopping",
             "stopped",
             "error",

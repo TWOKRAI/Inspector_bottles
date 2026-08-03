@@ -180,8 +180,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             # 7. Системные потоки (message_processor) — после воркеров
             self._init_system_threads()
 
-            # 8. Обновляем статус на "ready"
+            # 8. Обновляем статус на "ready" — ОБЕ плоскости разом (Ф6.х.7г):
+            # прежде PSR получал ready, а _current_process_status оставался
+            # initializing до конца run() — heartbeat и introspect всё окно
+            # (у GuiProcess — вся жизнь Qt-loop) давали два разных ответа на
+            # один вопрос. Правило то же, что у перехода в RUNNING (:857-859).
             self.update_process_state(status=ProcessStatus.READY.value)
+            self._current_process_status = ProcessStatus.READY.value
 
             # 9. Контекст логирования (proc_name в extra для логов).
             #    Ф0.5: именно БАЗА процесса, а не push_context. proc_name — факт

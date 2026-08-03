@@ -218,8 +218,25 @@ def persist_pipeline_choice(manifest_path: Path, override: str) -> str:
 
     Returns:
         Строка, записанная (или уже бывшая) в ``pipeline:`` — для логов.
+
+    Raises:
+        FileNotFoundError: рецепт не существует — манифест НЕ трогается
+            (Ф6.х.6: прежде persist шёл ДО проверки, и опечатка в CLI ломала
+            и следующий запуск без аргументов — ``app.yaml`` уже указывал на
+            битый путь).
     """
     value = _manifest_pipeline_value(override)
+
+    # Ф6.х.6: валидация ДО записи. Резолв — по правилу самого манифеста:
+    # относительный путь считается от каталога app.yaml, абсолютный — как есть.
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = manifest_path.parent / candidate
+    if not candidate.is_file():
+        raise FileNotFoundError(
+            f"рецепт не найден: {candidate} — манифест не изменён "
+            f"(проверьте имя: run.py <recipe> ищет recipes/<recipe>.yaml)"
+        )
 
     # NEW-1 (Ф5.11): запись через ManifestStore — единственная точка read/write
     # app.yaml, сериализованная межпроцессным локом (закрывает гонку backend↔GUI:

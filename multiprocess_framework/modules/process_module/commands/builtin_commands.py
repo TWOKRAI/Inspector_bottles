@@ -149,20 +149,27 @@ class BuiltinCommands:
             if not services.worker_manager:
                 return {"success": False, "reason": "worker_manager недоступен"}
             services.worker_manager.pause_all_workers(exclude_system=True)
-            # Обновляем статус — он попадёт в следующий heartbeat
-            services._current_process_status = "paused"
+            # Ф6.х.7г: обе плоскости статуса разом (heartbeat И PSR) + enum
+            # вместо голого литерала — правило перехода в RUNNING (run()).
+            from multiprocess_framework.modules.base_manager.types import ProcessStatus
+
+            services.update_process_state(status=ProcessStatus.PAUSED.value)
+            services._current_process_status = ProcessStatus.PAUSED.value
             services._log_info(f"Процесс '{services.name}' переведён в паузу", module="lifecycle")
-            return {"success": True, "status": "paused"}
+            return {"success": True, "status": ProcessStatus.PAUSED.value}
 
         def resume_all_handler(data=None, **kwargs) -> dict:
             """Возобновить все прикладные воркеры."""
             if not services.worker_manager:
                 return {"success": False, "reason": "worker_manager недоступен"}
             services.worker_manager.resume_all_workers(exclude_system=True)
-            # Возвращаем статус "running"
-            services._current_process_status = "running"
+            # Ф6.х.7г: см. pause_all_handler — обе плоскости, enum.
+            from multiprocess_framework.modules.base_manager.types import ProcessStatus
+
+            services.update_process_state(status=ProcessStatus.RUNNING.value)
+            services._current_process_status = ProcessStatus.RUNNING.value
             services._log_info(f"Процесс '{services.name}' возобновлён", module="lifecycle")
-            return {"success": True, "status": "running"}
+            return {"success": True, "status": ProcessStatus.RUNNING.value}
 
         cm.register_command(
             "worker.pause_all",

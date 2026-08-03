@@ -59,6 +59,40 @@ def test_stats_dict_validates() -> None:
     assert cfg.enable_logging is False
 
 
+class TestStatsFlushIntervalIsOperable:
+    """Ф6.х.8 — ручка «реже» для snapshot-записей реально доезжает до менеджера.
+
+    Реальный период записи = ``max(flush_interval, aggregation_interval)``
+    (``stats_manager.py``); прежде ``flush_interval`` фасадом не прокидывался
+    вовсе — менеджер всегда брал дефолт 10.0, и «реже» было невыразимо из
+    конфига (только бинарный «выкл» для источника 64 % объёма логов).
+    """
+
+    def test_default_is_emitted_and_unchanged(self) -> None:
+        """Литерал 10.0: дефолтный темп НЕ меняется до Ф7 (замеры сопоставимы)."""
+        out = expand_observability({})
+        assert out["stats"]["flush_interval"] == 10.0
+
+    def test_explicit_value_validates_for_the_manager_config(self) -> None:
+        out = expand_observability({"stats": {"flush_interval": 60.0}})
+        assert out["stats"]["flush_interval"] == 60.0
+        cfg = StatsManagerConfig.model_validate(out["stats"])
+        assert cfg.flush_interval == 60.0
+
+    def test_manager_window_respects_the_handle(self) -> None:
+        """Сквозняк до окна: StatsManager строит период из max(flush, agg)."""
+        from multiprocess_framework.modules.statistics_module.core.stats_manager import (
+            StatsManager,
+        )
+
+        out = expand_observability({"stats": {"flush_interval": 60.0}})
+        mgr = StatsManager(manager_name="FlushProbe", config=out["stats"])
+        try:
+            assert mgr._buffer._flush_interval == 60.0, "ручка не доехала до окна — max() снова съел настройку"
+        finally:
+            mgr.shutdown()
+
+
 def test_default_section_creates_error_manager_config() -> None:
     """Пустая секция всё равно даёт валидный непустой error-dict."""
     out = expand_observability(None)

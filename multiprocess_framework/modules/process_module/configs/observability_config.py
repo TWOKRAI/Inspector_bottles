@@ -65,6 +65,16 @@ class ObservabilityStatsConfig(SchemaBase):
         float,
         FieldMeta("Интервал агрегации, сек", min=0.1, max=60.0),
     ] = 5.0
+    # Ф6.х.8 (решение владельца 2026-08-03): ручка «реже» для snapshot-записей.
+    # Реальный период записи в каналы = max(flush_interval, aggregation_interval)
+    # (stats_manager.py) — прежде flush_interval фасадом не прокидывался вовсе,
+    # и «тише 10 с» было невыразимо из конфига, только бинарный «выкл».
+    # Дефолт 10.0 НЕ меняется: объём по умолчанию не трогаем до Ф7 (замеры
+    # остаются сопоставимыми). Один источник давал 64 % объёма логов (замер #3).
+    flush_interval: Annotated[
+        float,
+        FieldMeta("Интервал записи snapshot'ов в каналы, сек", min=1.0, max=300.0),
+    ] = 10.0
     log_level: Annotated[str, FieldMeta("Уровень логирования метрик")] = "INFO"
 
     # Task 5.10.b — то же зеркало для третьей плоскости. Служебные имена
@@ -282,6 +292,9 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     stats: Dict[str, Any] = {
         "enable_logging": cfg.stats.enabled,
         "aggregation_interval": cfg.stats.aggregation_interval,
+        # Ф6.х.8: без прокида этой ручки менеджер всегда брал дефолт 10.0, и
+        # max(flush_interval, aggregation_interval) съедал любую настройку темпа.
+        "flush_interval": cfg.stats.flush_interval,
         "log_level": cfg.stats.log_level,
     }
 

@@ -283,7 +283,9 @@ class RouterManager(ChannelRoutingManager):
                 return
             suppressed = self._send_error_suppressed.pop(reason, 0)
             self._send_error_last_log[reason] = now
-        total = self._stats.get(f"errors_{reason}", 0)
+            # Ф6.х.7б: чтение под тем же локом, что и инкремент (_inc_stat) —
+            # вне лока число в тексте записи могло отстать от своего момента.
+            total = self._stats.get(f"errors_{reason}", 0)
         tail = f"; подавлено с прошлой записи: {suppressed}" if suppressed else ""
         self._log_error(f"send [{reason}] {detail} (errors_{reason}={total}{tail})")
         self._track_error(
