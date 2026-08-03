@@ -229,6 +229,13 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self.config = log_config
         self.app_name = log_config.app_name
 
+        # Ф6.9: поля подметальщика заводятся ДО каналов и первого свипа.
+        # ``_apply_log_config_rebuild`` (наследник зовёт его из своего
+        # ``_rebuild_from_config``) трогает их первым делом, и порядок
+        # инициализации не должен зависеть от того, кто наследник.
+        self._retention_stop = threading.Event()
+        self._retention_thread: Optional[threading.Thread] = None
+
         # R9: в базу ушло config=None (свой конфиг логгер резолвит сам), поэтому
         # слепок для отката база выставить не может — без этой строки второй
         # рубеж reconfigure у логгера и ошибок МЁРТВ: откатываться не к чему, и
@@ -308,6 +315,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # который подняли с настроенным ретеншеном и ни разу не переконфигурировали,
         # обязан чистить за собой — иначе чистка зависела бы от факта reload'а.
         self._enforce_retention()
+        self._start_retention_sweeper()
 
     # =========================================================================
     # ЖИЗНЕННЫЙ ЦИКЛ
@@ -330,6 +338,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
     def shutdown(self) -> bool:
         try:
+            # Свип останавливается ПЕРВЫМ: он ходит по тому же каталогу, куда
+            # сейчас будут дописывать и который потом закроют. Обход, начатый
+            # после закрытия каналов, увидел бы уже неактивные файлы активными
+            # (список берётся из живых реестров) — и наоборот.
+            self._stop_retention_sweeper()
             self.info("LoggerManager shutting down", module="logger_manager")
             self.flush()
             if self._buffer:
@@ -639,11 +652,83 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # уровень (``<корень>/logs/…``) и мели бы мы не тот каталог.
         return str(Path(self._resolved_file_path(None, "retention.probe")).parent)
 
+    def _retention_is_on(self) -> bool:
+        """Включён ли ретеншен хоть одной политикой.
+
+        Тот же предикат, что и ранний выход ``_enforce_retention`` — но
+        нужен отдельно: по нему решается, поднимать ли фоновый поток. Держать
+        поток, который просыпается раз в час только чтобы выйти по первому
+        ``if``, — ровно тот «механизм, живущий сам для себя», который эта
+        задача и убирает.
+        """
+        cfg = self.config
+        return cfg.retention_days > 0 or cfg.retention_total_mb > 0 or bool(cfg.compress_rotated)
+
+    def _start_retention_sweeper(self) -> None:
+        """Поднять фоновый свип, если он вообще имеет смысл.
+
+        Ф6.9. До этой правки свип звался только на старте и на
+        ``reconfigure``: на стенде, работающем сутками без единого reload'а,
+        настроенный ретеншен не подметал НИ РАЗУ — а именно там он и нужен.
+        Живая находка Н-3 (2026-08-03): 471 МБ в ``logs/`` и ноль удалений.
+
+        Поток не поднимается, если ретеншен выключен или интервал нулевой:
+        в дефолтной конфигурации фреймворка (обе политики = 0) поведение
+        остаётся бит-в-бит прежним, без единого лишнего потока на процесс.
+        """
+        interval = float(getattr(self.config, "retention_sweep_interval_sec", 0.0) or 0.0)
+        if interval <= 0 or not self._retention_is_on():
+            return
+        self._retention_stop.clear()
+        thread = threading.Thread(
+            target=self._retention_loop,
+            args=(interval,),
+            name=f"{self.manager_name}-retention",
+            daemon=True,
+        )
+        self._retention_thread = thread
+        thread.start()
+
+    def _retention_loop(self, interval: float) -> None:
+        """Просыпаться по таймеру и мести, пока не попросят остановиться.
+
+        Ожидание — на ``Event``, а не ``sleep``: остановка обязана быть
+        немедленной, иначе ``shutdown`` ждал бы до конца интервала (час).
+
+        Исключение здесь ловится, хотя ``_enforce_retention`` ловит своё:
+        снаружи остаётся учёт статистики под локом. Поток, умерший молча, —
+        это «выключено по построению» во второй раз, только теперь ещё и
+        незаметно.
+        """
+        while not self._retention_stop.wait(interval):
+            try:
+                self._enforce_retention()
+            except Exception as e:  # noqa: BLE001 — фоновый поток не имеет права умереть молча
+                self._fallback_log("ERROR", f"periodic retention sweep failed: {e}")
+
+    def _stop_retention_sweeper(self) -> None:
+        """Остановить свип и дождаться его — с крайним сроком.
+
+        ``join`` с дедлайном, а не бессрочный: поток может стоять в середине
+        обхода каталога, и вечное ожидание превратило бы остановку процесса в
+        зависание (у проекта это уже было — 5-секундный ханг graceful-stop).
+        Поток демонский, поэтому истёкший дедлайн не держит интерпретатор; но
+        факт называется вслух, а не проглатывается.
+        """
+        self._retention_stop.set()
+        thread = self._retention_thread
+        self._retention_thread = None
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                self._fallback_log("ERROR", "retention sweeper did not stop within 5s")
+
     def _enforce_retention(self) -> None:
         """Прогнать чистку каталога логов по текущему конфигу и учесть результат.
 
-        Вызывается на старте и на каждом ``reconfigure``. Обе политики
-        выключены по умолчанию — тогда это ранний выход без единого stat.
+        Вызывается на старте, на каждом ``reconfigure`` и — с Ф6.9 — фоновым
+        подметальщиком по таймеру. Обе политики выключены по умолчанию — тогда
+        это ранний выход без единого stat.
         """
         cfg = self.config
         if cfg.retention_days <= 0 and cfg.retention_total_mb <= 0 and not cfg.compress_rotated:
@@ -735,7 +820,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # 6. Применить ретеншен из нового конфига (Ф0.7). Порядок обязателен:
         # ПОСЛЕ пересоздания каналов, иначе список активных файлов был бы от
         # старого состава и sweep удалил бы файл только что открытого канала.
+        #
+        # Ф6.9: подметальщик перезапускается по НОВОМУ конфигу — старый поток
+        # держал бы прежний интервал и продолжал бы мести после того, как
+        # ретеншен выключили. Остановка идёт до свипа, чтобы фоновый обход не
+        # шёл одновременно с этим, синхронным.
+        self._stop_retention_sweeper()
         self._enforce_retention()
+        self._start_retention_sweeper()
 
     def invalidate_decision_cache(self) -> None:
         """Очистить кэш решений should_log.

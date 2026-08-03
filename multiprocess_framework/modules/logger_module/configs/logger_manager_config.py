@@ -169,6 +169,18 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         bool,
         FieldMeta("Сжимать ротированные бэкапы (foo.log.1 → foo.log.1.gz)"),
     ] = False
+    # Ф6.9. Свип звали только на старте и на reconfigure — на стенде 24/7
+    # настроенный ретеншен подметал бы лишь при рестарте, то есть никогда.
+    # Поток поднимается ТОЛЬКО если ретеншен реально включён: при выключенных
+    # политиках интервал ничего не стоит и ничего не запускает.
+    retention_sweep_interval_sec: Annotated[
+        float,
+        FieldMeta(
+            "Период фонового свипа ретеншена, сек (0 — только старт и reconfigure)",
+            min=0.0,
+            max=86400.0,
+        ),
+    ] = 3600.0
 
     modules: Annotated[
         Dict[str, LoggerModuleSchema],

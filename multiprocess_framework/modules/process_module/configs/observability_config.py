@@ -159,6 +159,14 @@ class ObservabilityConfig(SchemaBase):
         bool,
         FieldMeta("Сжимать ротированные бэкапы (foo.log.1 → foo.log.1.gz)"),
     ] = False
+    # Ф6.9. Свип звался только на старте и на reconfigure — на стенде 24/7
+    # настроенный ретеншен подметал бы только при рестарте. Поток поднимается
+    # ТОЛЬКО если ретеншен реально включён, поэтому дефолт здесь ничего не
+    # включает сам по себе.
+    retention_sweep_interval_sec: Annotated[
+        float,
+        FieldMeta("Период фонового свипа ретеншена, сек (0 — только старт и reconfigure)", min=0.0, max=86400.0),
+    ] = 3600.0
 
     errors: Annotated[
         ObservabilityErrorsConfig,
@@ -227,6 +235,7 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         "retention_days": cfg.retention_days,
         "retention_total_mb": cfg.retention_total_mb,
         "compress_rotated": cfg.compress_rotated,
+        "retention_sweep_interval_sec": cfg.retention_sweep_interval_sec,
     }
     # log_directory эмитим ТОЛЬКО если задан явно: при overlay-merge поверх дефолтов
     # None затёр бы уже резолвнутый абсолютный путь (managers_from_log_dir). None =
