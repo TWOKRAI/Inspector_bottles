@@ -7,6 +7,7 @@
 """
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -30,13 +31,22 @@ def rpc(proc, method, params, req_id):
             return msg
 
 
+#: Куда складывать stderr бинаря qex (RUST_LOG его наполняет). Раньше здесь стоял
+#: DEVNULL — и 15 отказов подряд 2026-08-03 показали только вердикт обёртки
+#: «timeout» без единой подробности, тогда как причина называется именно тут.
+#: Свой файл на попытку: иначе следующая затрёт лог упавшей.
+LOG_DIR = os.path.join(PROJECT, "logs", "qex_reindex")
+
+
 def attempt(n):
+    os.makedirs(LOG_DIR, exist_ok=True)
+    err = open(os.path.join(LOG_DIR, f"attempt_{n:02d}.log"), "w", encoding="utf-8")
     proc = subprocess.Popen(
         ["uv", "run", "--no-sync", "--", "python", ".claude/plugins/mcp-qex/qex-launcher.py"],
         cwd=PROJECT,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=err,
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -70,6 +80,7 @@ def attempt(n):
         except Exception:
             pass
         proc.wait(timeout=30)
+        err.close()
 
 
 for i in range(1, MAX_ATTEMPTS + 1):
