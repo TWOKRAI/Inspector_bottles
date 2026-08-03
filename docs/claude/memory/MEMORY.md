@@ -204,3 +204,4 @@
 - [Второй потребитель вскрывает дефект](feedback_second_consumer_reveals_the_defect.md) — зелено поодиночке, красно вместе = дефект общего состояния
 - [mp.Queue асинхронна в тестах](feedback_mp_queue_is_async_in_tests.md) — учёт мерить на stdlib queue.Queue
 - [Ф6.х корзина ревью ЗАКРЫТА](project_f6x_review_basket.md) — форвардер tail жив (level задаёт подписчик); make gate видит fw-suite; 5-й случай тестов-невидимок
+- [model_copy не валидирует](feedback_model_copy_does_not_validate.md) — dict вместо схемы молча = «настройки нет»
