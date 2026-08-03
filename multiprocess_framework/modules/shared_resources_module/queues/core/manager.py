@@ -24,14 +24,19 @@ except ImportError:
 
 from queue import Full
 
-# Вид на процессный LoggerManager для сообщений о потере груза (Ф6.8).
+# Вид на процессный LoggerManager — ЕДИНСТВЕННЫЙ живой лог-канал этого файла
+# (Ф6.8 — детекторы потерь; Ф6.х.3 — весь остальной класс).
 #
 # Штатная плоскость (``self._log_*``) здесь молчит ПО ПОСТРОЕНИЮ: ни один
 # продовый вызов ``SharedResourcesManager(...)`` не передаёт logger
 # (spawner.py, bundle_builder.py, process_runner.py — все три без него),
 # поэтому ManagerRegistry пуст и ``_call_manager('logger', …)`` тихо возвращает
 # None. Плюс ``ObservableMixin.__getstate__`` выкидывает ``_registry`` при
-# pickle — даже переданный logger не пережил бы spawn.
+# pickle — даже переданный logger не пережил бы spawn. Ф6.8 оживила этим видом
+# только детекторы потерь; ревью 2026-08-03 нашло в том же классе ещё 12 точек
+# на мёртвой плоскости (`initialize failed`, `send_to_queue failed`,
+# `Queue not found`…) — Ф6.х.3 перевела их сюда же. ``self._log_*`` в этом
+# файле больше не зовётся: полкласса слышно, полкласса нет — хуже, чем ничего.
 #
 # Раньше здесь стоял ``logging.getLogger(__name__)``, и это был ВТОРОЙ мёртвый
 # путь: у stdlib-root в процессах фреймворка нет ни одного хендлера. Итог,
@@ -107,6 +112,11 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         # Throttle громкого WARNING про drop_oldest из data-очереди (тот же приём).
         self._data_evict_log_window: float = 5.0
         self._data_evict_last_log: float = 0.0
+        # Ф6.х.3: throttle WARNING «Queue not found» — send_to_queue это hot-path,
+        # отсутствующая очередь в окне teardown стреляла бы покадрово. Счётчик
+        # ``queue_missing`` растёт всегда, запись — раз в окно.
+        self._queue_missing_log_window: float = 5.0
+        self._queue_missing_last_log: float = 0.0
         # Учёт безвозвратных потерь never-drop груза (см. _report_never_drop_loss).
         # Копится всегда, пишется в лог раз в окно; _since_log нужен, чтобы
         # троттлированная запись честно называла ТЕМП потери, а не только факт.
@@ -140,19 +150,19 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
     def initialize(self) -> bool:
         try:
             self.is_initialized = True
-            self._log_info(f"QueueRegistry '{self.manager_name}' initialized")
+            _loss_logger.info("QueueRegistry '%s' initialized", self.manager_name)
             return True
         except Exception as e:
-            self._log_error(f"QueueRegistry.initialize() failed: {e}")
+            _loss_logger.error("QueueRegistry.initialize() failed: %s", e)
             return False
 
     def shutdown(self) -> bool:
         try:
             self.is_initialized = False
-            self._log_info("QueueRegistry shutdown completed")
+            _loss_logger.info("QueueRegistry shutdown completed")
             return True
         except Exception as e:
-            self._log_error(f"QueueRegistry.shutdown() failed: {e}")
+            _loss_logger.error("QueueRegistry.shutdown() failed: %s", e)
             return False
 
     # =========================================================================
@@ -173,7 +183,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 queues[queue_type] = Queue(maxsize=maxsize)
                 self._stats["created"] += 1
         except Exception as e:
-            self._log_error(f"create_queues() failed: {e}")
+            _loss_logger.error("create_queues() failed: %s", e)
             self._stats["errors"] += 1
         return queues
 
@@ -188,10 +198,10 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             if self._process_state_registry:
                 for queue_type, queue in queues.items():
                     self._process_state_registry.add_queue(process_name, queue_type, queue)
-            self._log_debug(f"Registered {len(queues)} queues for '{process_name}'")
+            _loss_logger.debug("Registered %d queues for '%s'", len(queues), process_name)
             return True
         except Exception as e:
-            self._log_error(f"register_process_queues('{process_name}') failed: {e}")
+            _loss_logger.error("register_process_queues('%s') failed: %s", process_name, e)
             self._stats["errors"] += 1
             return False
 
@@ -238,7 +248,18 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         flags-off пути (on_evict=None) поведение бит-в-бит прежнее."""
         queue = self.get_queue(process_name, queue_type)
         if queue is None:
-            self._log_warning(f"Queue '{queue_type}' not found for '{process_name}'")
+            # Ф6.х.3: счётчик — всегда, запись — раз в окно (hot-path; в окне
+            # teardown отсутствующая очередь стреляла бы покадрово).
+            self._stats["queue_missing"] = self._stats.get("queue_missing", 0) + 1
+            now = time.monotonic()
+            if now - self._queue_missing_last_log >= self._queue_missing_log_window:
+                self._queue_missing_last_log = now
+                _loss_logger.warning(
+                    "Queue '%s' not found for '%s' (queue_missing=%d) — груз не доставлен",
+                    queue_type,
+                    process_name,
+                    self._stats["queue_missing"],
+                )
             return False
         self._count_sender(process_name, queue_type, message, "put")
         try:
@@ -247,7 +268,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 try:
                     on_evict(evicted, process_name)
                 except Exception as e:  # noqa: BLE001 — хук наблюдаемости не роняет доставку
-                    self._log_error(f"send_to_queue on_evict hook failed: {e}")
+                    _loss_logger.error("send_to_queue on_evict hook failed: %s", e)
             if timeout > 0:
                 queue.put(message, timeout=timeout)
             else:
@@ -263,7 +284,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 # Ф4 Task 4.3: потеря записывается ТОМУ ЖЕ отправителю — иначе видно
                 # «очередь теряет», но не видно, чей груз пропадает.
                 self._count_sender(process_name, queue_type, message, "lost")
-            self._log_error(f"send_to_queue('{process_name}', '{queue_type}') failed: {e}")
+            _loss_logger.error("send_to_queue('%s', '%s') failed: %s", process_name, queue_type, e)
             self._stats["errors"] += 1
             return False
 
@@ -281,7 +302,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         except Empty:
             return None
         except Exception as e:
-            self._log_error(f"receive_from_queue('{process_name}', '{queue_type}') failed: {e}")
+            _loss_logger.error("receive_from_queue('%s', '%s') failed: %s", process_name, queue_type, e)
             self._stats["errors"] += 1
             return None
 
@@ -363,7 +384,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             for item in saved:
                 queue.put(item)
         except Exception as e:
-            self._log_error(f"clear_queue() failed: {e}")
+            _loss_logger.error("clear_queue() failed: %s", e)
             self._stats["errors"] += 1
 
     def remove_old_if_full(
