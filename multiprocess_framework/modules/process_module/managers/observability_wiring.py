@@ -186,6 +186,7 @@ def wire_observability_forward(
     sender: str,
     logger_manager: Optional[Any] = None,
     error_manager: Optional[Any] = None,
+    min_level: str = "ERROR",
 ) -> Tuple[Callable[[List[dict]], None], list]:
     """Собрать live-форвардер hub→подписчик и повесить error-tap'ы (Ф5.20b).
 
@@ -200,11 +201,23 @@ def wire_observability_forward(
     поэтому форвардеры разных подписчиков (GUI + backend_ctl) сосуществуют на одном
     процессе и не перетирают друг друга (раньше был единственный слот на процесс).
 
+    Ф6.х.5 (корневая причина З-1): порог tap'ов был захардкожен ``"ERROR"`` без
+    ручки — аудит-записи (INFO) не проходили никогда, а batch-путь структурно
+    пуст (см. ниже), то есть подписка «успешна», а событий ноль. Уровень теперь
+    задаёт подписчик — тем же правом, что у ``log.tail.subscribe``.
+
+    **Честно про batch-половину:** в проде hub наполняет только stats-слот, и его
+    единственный владелец (``WorkerManager``) метрик не эмитит — ``forwarder``
+    сегодня не вызывается ни разу, stats-плоскость хвоста пуста. Расширение
+    владельцев hub'а — решение Ф8.3 (охват hub'а), не этой правки.
+
     Args:
         router: живой RouterManager процесса (``send_async``). None → forwarder-no-op.
         subscriber: адрес GUI-процесса (``targets=[subscriber]``).
         sender: имя процесса-источника.
         logger_manager/error_manager: менеджеры с ``add_tap`` (error-хвост).
+        min_level: порог tap'ов на logger/error менеджерах (дефолт ERROR —
+            прежнее поведение; INFO/DEBUG открывает живой хвост).
 
     Returns:
         (forwarder, taps) — forwarder: Callable для drain-петли; taps: список
@@ -222,7 +235,7 @@ def wire_observability_forward(
         if mgr is None or not hasattr(mgr, "add_tap"):
             continue
         channel = RecordForwardChannel(router=router, subscriber=subscriber, sender=sender, name=tap_name)
-        mgr.add_tap(channel, min_level="ERROR", name=tap_name)
+        mgr.add_tap(channel, min_level=min_level, name=tap_name)
         taps.append((mgr, tap_name))
     return forwarder, taps
 

@@ -2324,7 +2324,9 @@ class BuiltinCommands:
         ``command="observability.record"`` на подписчика. Живой хвост вкладок
         Логи/Ошибки/Статистика (Ф5.19). Идемпотентно по подписчику.
 
-        Параметры (data): ``subscriber`` (адрес GUI-процесса, обяз.).
+        Параметры (data): ``subscriber`` (адрес GUI-процесса, обяз.), ``level``
+        (порог tap'ов, по умолчанию "ERROR" — Ф6.х.5: прежде порог был захардкожен
+        в проводке, и хвост молчал на здоровом стенде).
         """
         args = self._merge_args(data, kwargs)
         svc = self._services
@@ -2333,7 +2335,8 @@ class BuiltinCommands:
             return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
         if not hasattr(svc, "subscribe_observability_tail"):
             return {"success": False, "reason": "процесс не поддерживает observability-tail"}
-        return svc.subscribe_observability_tail(subscriber)
+        level = str(args.get("level") or "ERROR").upper()
+        return svc.subscribe_observability_tail(subscriber, level=level)
 
     def _cmd_observability_tail_unsubscribe(self, data=None, **kwargs) -> dict:
         """Снять подписку на live-хвост наблюдаемости (форвардер + error-tap'ы), F1: per-subscriber.

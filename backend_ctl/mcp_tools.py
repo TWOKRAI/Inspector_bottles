@@ -283,7 +283,7 @@ def _log_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _observability_tail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return drv.observability_tail(args["process"], **_kw_timeout(args))
+    return drv.observability_tail(args["process"], level=args.get("level"), **_kw_timeout(args))
 
 
 def _observability_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -798,8 +798,16 @@ TOOLS: List[ToolSpec] = [
         "observability_tail",
         "Подписаться на live-хвост наблюдаемости процесса: ЛОГИ+ОШИБКИ+СТАТИСТИКА "
         "(богаче log_tail — три плоскости). Записи едут push'ем (command='observability.record', "
-        "поле kind=log|error|stats) в событийный канал — читать инструментом events. Создаёт подписку.",
-        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        "поле kind=log|error|stats) в событийный канал — читать инструментом events. Создаёт подписку. "
+        "level задаёт порог tap'ов (дефолт ERROR; живой хвост на здоровом стенде — level=INFO).",
+        _obj(
+            {
+                "process": _PROCESS,
+                "level": {"type": "string", "description": "Минимальный уровень tap'ов (по умолчанию ERROR)"},
+                "timeout": _TIMEOUT,
+            },
+            ["process"],
+        ),
         _observability_tail,
     ),
     ToolSpec(

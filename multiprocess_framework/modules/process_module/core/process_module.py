@@ -916,7 +916,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             unwire_observability_forward(taps)
         self._observability_forwarders = {}
 
-    def subscribe_observability_tail(self, subscriber: str) -> dict:
+    def subscribe_observability_tail(self, subscriber: str, level: str = "ERROR") -> dict:
         """Ф5.20b: подписать адрес на live-хвост записей наблюдаемости (F1: per-subscriber).
 
         Ставит форвардер (drain log/stats) + error-tap'ы (write-through) на push
@@ -955,17 +955,39 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         prev = self._observability_forwarders.get(subscriber)
         if prev is not None:
             unwire_observability_forward(prev[1])
+        # Ф6.х.5: уровень задаёт подписчик (как у log.tail) — прежде порог был
+        # захардкожен ERROR внутри проводки, и хвост молчал на здоровом стенде.
+        min_level = str(level or "ERROR").upper()
         forwarder, taps = wire_observability_forward(
             self.router_manager,
             subscriber,
             self.name,
             self.logger_manager,
             self.error_manager,
+            min_level=min_level,
         )
         # Атомарный rebind, не in-place set: heartbeat-drain итерирует .values() в
         # другом потоке — смена размера dict во время итерации дала бы RuntimeError.
         self._observability_forwarders = {**self._observability_forwarders, subscriber: (forwarder, taps)}
-        return {"success": True, "process": self.name, "subscriber": subscriber}
+        # Ф6.х.5: ответ громкий, как у log.tail — tap'ы, менеджеры, порог.
+        # Молча-пустой список tap'ов и был лицом дефекта З-1: подписка
+        # «успешна», а слушать некому.
+        tap_names = [name for _mgr, name in taps]
+        managers = [getattr(m, "manager_name", m.__class__.__name__) for m, _n in taps]
+        if not taps:
+            self._log_warning(
+                f"observability.tail: подписка '{subscriber}' принята, но tap'ов ноль — "
+                "live-хвоста не будет (менеджеры без add_tap?)",
+                module="observability",
+            )
+        return {
+            "success": True,
+            "process": self.name,
+            "subscriber": subscriber,
+            "min_level": min_level,
+            "taps": tap_names,
+            "managers": managers,
+        }
 
     def unsubscribe_observability_tail(self, subscriber: Optional[str] = None) -> dict:
         """Ф5.20b: снять подписку на live-хвост (форвардер + error-tap'ы), F1: per-subscriber.

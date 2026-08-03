@@ -1435,6 +1435,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         process: str,
         *,
         subscriber: Optional[str] = None,
+        level: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Подписаться на live-хвост наблюдаемости процесса (логи+ошибки+статистика).
@@ -1455,12 +1456,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             process: имя процесса-источника (должен поддерживать observability-hub;
                 процесс без него вернёт ``success=False`` — честно, не бросок).
             subscriber: адрес получателя пушей (по умолчанию адрес driver'а).
+            level: порог tap'ов (Ф6.х.5; по умолчанию ERROR — прежнее поведение).
+                На здоровом стенде ERROR-записей нет: живой хвост открывает
+                ``level="INFO"``. stats-плоскость хвоста сегодня пуста
+                структурно (hub без владельцев-эмитентов) — решение Ф8.3.
             timeout: таймаут ожидания подтверждения подписки.
 
         Returns:
-            dict результата подписки (``success`` + детали процесса).
+            dict результата подписки (``success`` + ``taps``/``managers``/``min_level``).
         """
-        args = {"subscriber": subscriber or self._subscriber}
+        args: Dict[str, Any] = {"subscriber": subscriber or self._subscriber}
+        if level:
+            args["level"] = str(level).upper()
         res = _leaf_result(self.send_command(process, "observability.tail.subscribe", args, timeout=timeout))
         self._register_subscription("observability.tail.subscribe", process, args, res)
         return res

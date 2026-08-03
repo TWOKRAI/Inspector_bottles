@@ -12,7 +12,12 @@ DataReceiverBridge.dispatch(data_type="observability_record").
 Симметрия со стором (Ф5.20a):
   - log/stats — пачкой из drain-петли (``push_batch``), уже в display-виде;
   - error/critical — по одной у tap'а на logger/error менеджерах (``write`` —
-    IChannel: LogRecord-dict → display), min_level=ERROR.
+    IChannel: LogRecord-dict → display), min_level задаёт подписчик (Ф6.х.5;
+    дефолт ERROR — прежний захардкоженный порог был половиной дефекта З-1).
+
+Ф6.х.5, честно про batch-путь: в проде hub наполняет только stats-слот, и его
+единственный владелец (WorkerManager) метрик не эмитит — push_batch сегодня не
+вызывается, stats-плоскость хвоста структурно пуста. Охват hub'а — решение Ф8.3.
 
 Канал duck-typed: НЕ импортирует logger_module/router (только IChannel + router с
 ``send_async``); Dict at Boundary — наружу едет чистый pickle-safe dict.
