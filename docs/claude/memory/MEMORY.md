@@ -186,6 +186,7 @@
 - [Switch раздаёт слой L2 (R6)](project_switch_delivers_layer.md) — адрес+содержимое всем пережившим; стенд обязан содержать protected-процесс, иначе раздача недоказуема
 - [update_config мёртв при живом handler](feedback_config_update_dead_with_handler.md) — тест строил объект БЕЗ обработчика и проверял вторую ветку; читать тем же способом, что потребители
 - [Брокер подписки на наблюдаемость (5.11)](project_observability_subscription_broker.md) — намерение «хочу всё» у PM, переподписка на шве инкарнации; backend_ctl не мигрирован
+- [Ф6: миграция stdlib-логгера](project_observability_stdlib_migration.md) — 100 файлов на вид; объём НЕ вырос (5.4→4.78 МБ/час); 64% объёма даёт один источник stats
 - [Побочный эффект не смеет откатить транзакцию](feedback_side_effect_must_not_undo_the_transaction.md) — раздача на success-пути в своём try, иначе наблюдаемость откатывает успешный switch
 - [Ревью ловит стык между своими же кусками](feedback_review_finds_the_seam_between_own_pieces.md) — каждый кусок верен, вместе дефект; инъекция ломает одну гарантию и стык не видит
 - [Сигнал «готов» означал меньше, чем читали](feedback_ready_signal_meant_less_than_read.md) — ready=«инициализирован», а команда в окно до регистрации обработчика теряется молча
