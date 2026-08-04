@@ -1263,6 +1263,20 @@
               "type": "file",
               "url": null
             },
+            "performance_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "enabled": true,
+              "file_path": "performance.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "owner": null,
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -1381,7 +1395,7 @@
             },
             "PERFORMANCE": {
               "channels": [
-                "system_file"
+                "performance_file"
               ],
               "enabled": true,
               "min_level": "INFO",
@@ -1582,6 +1596,20 @@
               "type": "file",
               "url": null
             },
+            "performance_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "enabled": true,
+              "file_path": "performance.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "owner": null,
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -1700,7 +1728,7 @@
             },
             "PERFORMANCE": {
               "channels": [
-                "system_file"
+                "performance_file"
               ],
               "enabled": true,
               "min_level": "INFO",
@@ -1853,6 +1881,20 @@
               "type": "file",
               "url": null
             },
+            "performance_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "enabled": true,
+              "file_path": "performance.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "owner": null,
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -1971,7 +2013,7 @@
             },
             "PERFORMANCE": {
               "channels": [
-                "system_file"
+                "performance_file"
               ],
               "enabled": true,
               "min_level": "INFO",
@@ -2221,6 +2263,20 @@
               "type": "file",
               "url": null
             },
+            "performance_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "enabled": true,
+              "file_path": "performance.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "owner": null,
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -2339,7 +2395,7 @@
             },
             "PERFORMANCE": {
               "channels": [
-                "system_file"
+                "performance_file"
               ],
               "enabled": true,
               "min_level": "INFO",
@@ -2547,6 +2603,20 @@
               "type": "file",
               "url": null
             },
+            "performance_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "enabled": true,
+              "file_path": "performance.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "owner": null,
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -2665,7 +2735,7 @@
             },
             "PERFORMANCE": {
               "channels": [
-                "system_file"
+                "performance_file"
               ],
               "enabled": true,
               "min_level": "INFO",
@@ -3464,6 +3534,20 @@
               "type": "file",
               "url": null
             },
+            "performance_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "enabled": true,
+              "file_path": "performance.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "owner": null,
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -3582,7 +3666,7 @@
             },
             "PERFORMANCE": {
               "channels": [
-                "system_file"
+                "performance_file"
               ],
               "enabled": true,
               "min_level": "INFO",
@@ -3761,6 +3845,20 @@
               "type": "file",
               "url": null
             },
+            "performance_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "enabled": true,
+              "file_path": "performance.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "owner": null,
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -3879,7 +3977,7 @@
             },
             "PERFORMANCE": {
               "channels": [
-                "system_file"
+                "performance_file"
               ],
               "enabled": true,
               "min_level": "INFO",

@@ -309,6 +309,32 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             backup_count=5,
             format=_STD_FMT,
         ),
+        # Ф2.6. Снапшот метрик — ЕДИНСТВЕННЫЙ писатель скоупа PERFORMANCE
+        # (`statistics_module/channels/log_stats_channel.py`, проверено грепом:
+        # прямых `log(LogScope.PERFORMANCE, …)` в проде нет), и он же самый
+        # тяжёлый источник в системе. Замер 2026-08-03: 5.27 МБ из 9.38 МБ
+        # `system.log` у ProcessManager (56%), 2.33 из 8.88 у gui (26%), 2.08 из
+        # 8.63 у region_splitter (24%). Одна строка снапшота весит ~7 КБ —
+        # список метрик, отрендеренный в текст.
+        #
+        # Свой файл, а не правило иерархии: у скоупа один писатель, значит
+        # адресовать его отдельным механизмом незачем — ручка «какому скоупу
+        # какие приёмники» существует с самого начала и уже оттестирована.
+        # Найдено ревью решений Ф2.6: главный выигрыш фазы брался без нового
+        # механизма, а мы собирались платить за него таблицей правил.
+        #
+        # Суммарная запись на диск при этом НЕ уменьшается ни на байт — те же
+        # МБ, только в другом файле. Сокращение объёма (сэмплинг, перевод
+        # снапшота из логов в телеметрию) — отдельная задача, и приёмку
+        # «system.log похудел» нельзя засчитывать как «логов стало меньше».
+        "performance_file": LoggerChannelSchema(
+            type="file",
+            enabled=True,
+            file_path="performance.log",
+            max_size=_FILE_MAX,
+            backup_count=5,
+            format=_STD_FMT,
+        ),
         "console": LoggerChannelSchema(
             type="console",
             enabled=True,
@@ -333,10 +359,15 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             # терминал. В stdout остаётся лишь SYSTEM WARNING+ через свой scope.
             channels=["system_file", "messages_file"],
         ),
+        # Ф2.6: свой файл вместо system_file — обоснование у канала
+        # `performance_file` выше. Изменение живого поведения названо вслух:
+        # снапшоты метрик ПЕРЕСТАЮТ попадать в `system.log`. Это перенос, а не
+        # дублирование, и выбран он сознательно — иначе разгрузки не случится
+        # вовсе. Закреплено характеризационным тестом, а не оставлено умолчанием.
         "PERFORMANCE": LoggerScopeSchema(
             enabled=True,
             min_level=_LEVEL_ORDER[1],
-            channels=["system_file"],
+            channels=["performance_file"],
         ),
         # DEBUG-scope по умолчанию ВЫКЛЮЧЕН: на DEBUG в system_file лился пер-кадровый
         # firehose (периодический TRACE-лог PipelineExecutor — снят в Ф7 G.1,
