@@ -1207,6 +1207,24 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             scope_config = self._scope_schema(scope)
             channels = scope_config.channels or self._channel_registry.names()
 
+        # Ф2.6 (Р-2.6-Ж): добавки поверх унаследованного набора. Стоит ПОСЛЕ выбора
+        # базы намеренно — добавка складывается и с набором правила, и с набором
+        # скоупа, иначе «свой файл И общий» выражалось бы только там, где правило
+        # приёмники уже задало, то есть ровно не в том случае, ради которого
+        # операция заведена.
+        #
+        # Дедупликация обязательна по той же причине, что ниже у module-канала:
+        # приёмник, названный и базой, и добавкой, принял бы ОДНУ запись ДВАЖДЫ —
+        # прямое нарушение инварианта Ф0.9 «одна ошибка — одна запись».
+        if self._name_hierarchy:
+            extra = self._name_hierarchy.channels_extra(module)
+            if extra:
+                merged = list(channels)
+                for channel_name in extra:
+                    if channel_name not in merged:
+                        merged.append(channel_name)
+                channels = merged
+
         if module in self._module_channels:
             channels = list(channels)
             module_channel = f"module_{module}"

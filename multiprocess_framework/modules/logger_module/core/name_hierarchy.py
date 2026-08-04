@@ -68,12 +68,13 @@ class NameHierarchy:
     и самый честный способ это гарантировать — не входить в новый код вовсе.
     """
 
-    __slots__ = ("_rules", "_level_cache", "_channels_cache")
+    __slots__ = ("_rules", "_level_cache", "_channels_cache", "_extra_cache")
 
     def __init__(self, rules: Optional[Mapping[str, object]] = None) -> None:
         self._rules: Dict[str, object] = dict(rules or {})
         self._level_cache: Dict[str, Optional[str]] = {}
         self._channels_cache: Dict[str, Optional[Tuple[str, ...]]] = {}
+        self._extra_cache: Dict[str, Tuple[str, ...]] = {}
 
     def __bool__(self) -> bool:
         return bool(self._rules)
@@ -120,6 +121,35 @@ class NameHierarchy:
         self._channels_cache[name] = resolved
         return resolved
 
+    def channels_extra(self, name: str) -> Tuple[str, ...]:
+        """Приёмники, ДОБАВЛЯЕМЫЕ к унаследованным (Ф2.6, Р-2.6-Ж).
+
+        Returns:
+            Кортеж имён — возможно пустой. ``None`` здесь не возвращается
+            намеренно: «добавить нечего» и «ключ не задан» — одно и то же, а
+            различать их значило бы завести отмену добавок предков, то есть
+            третью операцию на оси.
+
+        **Накапливается по всей ветке, а не по длиннейшему префиксу.** Это
+        единственное место, где резолв ведёт себя иначе, чем :meth:`channels`, и
+        различие содержательное: добавка — операция, а не значение. Если бы
+        побеждал длиннейший префикс, объявление ``channels_extra`` у листа молча
+        отменяло бы добавку, заданную у пакета, — ровно тот дефект, ради которого
+        уровень и приёмники резолвятся независимо.
+
+        Порядок — от корня к листу: общие приёмники раньше частных, и он
+        устойчив (иначе один и тот же маршрут выглядел бы по-разному в readback
+        пульта от запуска к запуску). Дубли снимаются: два правила на ветке могут
+        назвать один приёмник, а запись, ушедшая в один файл дважды, нарушает
+        инвариант «одна ошибка — одна запись» (Ф0.9).
+        """
+        cached = self._extra_cache.get(name, _MISS)
+        if cached is not _MISS:
+            return cached  # type: ignore[return-value]
+        resolved = self._walk_extra(name)
+        self._extra_cache[name] = resolved
+        return resolved
+
     def clear_cache(self) -> None:
         """Забыть резолв. Зовётся из единственной точки инвалидации менеджера.
 
@@ -130,6 +160,7 @@ class NameHierarchy:
         """
         self._level_cache.clear()
         self._channels_cache.clear()
+        self._extra_cache.clear()
 
     # --- Internal ---
 
@@ -158,6 +189,28 @@ class NameHierarchy:
             if not node:
                 return None
             node = node.rpartition(".")[0]
+
+    def _walk_extra(self, name: str) -> Tuple[str, ...]:
+        """Собрать добавки со ВСЕЙ ветки: лист → корень, отдать корень → лист."""
+        node = name
+        rules = self._rules
+        collected: list = []
+        while True:
+            rule = rules.get(node)
+            if rule is not None:
+                value = getattr(rule, "channels_extra", None)
+                if value:
+                    collected.append(tuple(value))
+            if not node:
+                break
+            node = node.rpartition(".")[0]
+        if not collected:
+            return ()
+        seen: Dict[str, None] = {}
+        for group in reversed(collected):
+            for channel in group:
+                seen.setdefault(channel, None)
+        return tuple(seen)
 
 
 #: Часовой промаха кэша. ``None`` — законное значение обеих карт («правило
