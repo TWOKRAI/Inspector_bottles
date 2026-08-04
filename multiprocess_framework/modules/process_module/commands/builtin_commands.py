@@ -808,10 +808,23 @@ class BuiltinCommands:
                 extra = dict(extra_fn() or {})
             except Exception as exc:  # noqa: BLE001 — читающая команда не падает из-за добавки
                 extra = {"extra_error": str(exc)}
+        # Ф2.6, шаг 6: разбор конкретного имени по запросу. Секция появляется ТОЛЬКО
+        # когда её попросили: панель GUI дёргает эту команду постоянно, и разбор на
+        # каждом опросе раздувал бы ответ ради данных, которых никто не читает.
+        # Принимается и одно имя, и список — оператор чаще сравнивает два соседних
+        # источника, чем смотрит один.
+        resolved: dict = {}
+        asked = args.get("resolve")
+        if asked is not None and callable(getattr(logger, "resolve_rule", None)):
+            names = [asked] if isinstance(asked, str) else list(asked)
+            for candidate in names:
+                resolved[str(candidate)] = logger.resolve_rule(str(candidate))
+
         return {
             "success": True,
             "process": svc.name,
             "effective": observability_effective(logger=logger, error=error, stats=stats),
+            **({"resolve": resolved} if resolved else {}),
             # `flush` (Task 5.7) — просьба о КОГЕРЕНТНОМ снимке: дожать буферы,
             # чтобы «записано» включало всё уже эмитированное. По умолчанию
             # выключен: панель GUI опрашивает эту команду постоянно, и flush на

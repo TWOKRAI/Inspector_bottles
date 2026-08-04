@@ -137,6 +137,14 @@ def observability_effective(
                 }
                 for k, v in scopes.items()
             }
+        # Ф2.6: таблица правил по имени источника. Раньше наружу не выходила вовсе —
+        # `effective_*` жили в коде с 2.2, а посмотреть на них было нечем, и живой
+        # прогон проверялся размерами файлов на глаз. Пустой словарь отдаётся, а не
+        # опускается: «правил нет» — это ответ, и его отсутствие отправило бы искать
+        # поломку доставки там, где просто ничего не настроено.
+        rules_fn = getattr(logger, "rules_table", None)
+        if callable(rules_fn):
+            section["loggers"] = rules_fn()
         section.update(_sink_readback(logger))
         out["logger"] = section
     if error is not None and getattr(error, "config", None) is not None:

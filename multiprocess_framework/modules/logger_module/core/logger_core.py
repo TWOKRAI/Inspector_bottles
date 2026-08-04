@@ -1061,6 +1061,52 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         """
         return self._name_hierarchy.channels(name)
 
+    def resolve_rule(self, name: str) -> Dict[str, Any]:
+        """Полный разбор имени для пульта: что действует и **какое правило победило**.
+
+        Ф2.6, шаг 6. Соседи выше отвечают ЗНАЧЕНИЕМ, но молчат про происхождение —
+        а на живом стенде вопрос звучит иначе: «почему у этого источника такой
+        порог и кто его задал». Без ответа четыре слоя настройки и дерево правил
+        превращают разбор в чтение конфигов глазами.
+
+        Отвечает на ЛЮБОЕ имя, включая то, под которым ещё никто не писал: это
+        вопрос-гипотеза («если напишу правило вот так — что получится»), а не
+        разбор случившегося. Образец — ``GET /actuator/loggers/{name}``.
+
+        Возвращает плоский ``dict``: ответ уходит на пульт через IPC.
+
+        **Что метод не обещает — того же, чего не обещает** :meth:`effective_level`:
+        это разбор ОДНОЙ оси решения, а не судьба записи. Приёмник может быть снят
+        оператором (``_effective_route``), а плоскость ошибок ходит своим
+        severity-путём и иерархию не спрашивает вовсе.
+        """
+        return self._name_hierarchy.resolve(name)
+
+    def rules_table(self) -> Dict[str, Dict[str, Any]]:
+        """Таблица правил как она задана — readback для пульта (Ф2.6, шаг 6).
+
+        Отличается от :meth:`resolve_rule` тем же, чем ``configuredLevel`` от
+        ``effectiveLevel`` в Spring: здесь — что написано, там — что из этого
+        вышло для конкретного имени. Оба нужны: расхождение между ними и есть
+        «правило написано, но не действует».
+
+        Пустая таблица отдаётся пустым словарём, а не опускается: «правил нет» —
+        это ответ, и молчание вместо него отправило бы оператора искать поломку
+        доставки там, где просто ничего не настроено.
+        """
+        table: Dict[str, Dict[str, Any]] = {}
+        for key, rule in self._name_hierarchy.rules.items():
+            table[str(key)] = {
+                "level": getattr(rule, "level", None),
+                "channels": list(getattr(rule, "channels", None) or [])
+                if getattr(rule, "channels", None) is not None
+                else None,
+                "channels_extra": list(getattr(rule, "channels_extra", None) or [])
+                if getattr(rule, "channels_extra", None) is not None
+                else None,
+            }
+        return table
+
     def _should_log_direct(self, scope: LogScope, level: LogLevel, module: str) -> bool:
         """Решение гейта без кэша. **Правило имени сильнее скоупа** (Ф2.2).
 
