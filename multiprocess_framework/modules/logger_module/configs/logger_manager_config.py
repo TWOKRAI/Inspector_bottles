@@ -7,7 +7,7 @@ LoggerManagerConfig — SchemaBase / ChannelRoutingConfig для LoggerManager.
 
 from __future__ import annotations
 
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from pydantic import Field, field_validator
 
@@ -386,6 +386,29 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             channels=["system_file"],
         ),
     }
+
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def _normalize_scope_keys(cls, value: Any) -> Any:
+        """Ф2.4: имя группы — ОДНО написание, канон заглавными (Р-2.4-А).
+
+        Приведение стоит здесь, а не на пути записи: ``.upper()`` в
+        ``_scope_schema`` стоил бы аллокации на каждом промахе кэша, а канон
+        нужен ровно один раз — когда конфиг собирают.
+
+        Без этого валидатора слой приложения с ключом ``system:`` не
+        переопределял бы дефолтный ``SYSTEM``, а ложился бы РЯДОМ с ним:
+        ``deep_merge`` слоёв работает по ключу словаря, и два написания дали бы
+        два скоупа, один из которых недостижим (``log()`` спрашивает канон).
+        Тихое «настройка не подействовала» — тот же класс, что уже стоил фазе
+        288 пустых файлов.
+
+        ``mode="before"`` обязателен: ключи надо поправить ДО того, как Pydantic
+        разложит значения по ``LoggerScopeSchema``.
+        """
+        if not isinstance(value, dict):
+            return value
+        return {(k.upper() if isinstance(k, str) else k): v for k, v in value.items()}
 
     @field_validator("batch_overflow_policy")
     @classmethod

@@ -164,7 +164,7 @@
 - `ILogChannel(IChannel)`.
 - `LoggerManager(ChannelRoutingManager)` — `info/debug/warning/error/critical/<scope>` + `should_log(level, scope)`.
 - `LoggerManagerConfig(SchemaBase)` — каналы, scopes, modules.
-- `LogScope(str, Enum)` — `SYSTEM/BUSINESS/PERFORMANCE/AUDIT/SECURITY/DEBUG`.
+- `LogScope` — преднастроенные СТРОКИ `SYSTEM/BUSINESS/PERFORMANCE/AUDIT/SECURITY/DEBUG` (Ф2.4; не enum — `log()` принимает любую строку, новая группа заводится конфигом). Перечень дефолтов — `PRESET_SCOPES`, валидацией по нему пользоваться нельзя.
 - `LogLevel(str, Enum)` — `DEBUG/INFO/WARNING/ERROR/CRITICAL`.
 - `LogRecord` — dataclass.
 - `StdLoggerFacade` / `get_std_logger(module)` — именованный **вид** поверх писателя (stdlib-подобный интерфейс). Адаптера у логгера нет: `LoggerAdapter` снят в 2.2 как без потребителей.

@@ -40,6 +40,7 @@ from multiprocess_framework.modules.logger_module.core.log_config import (
     LoggerManagerConfig,
     LogLevel,
     LogScope,
+    PRESET_SCOPES,
 )
 from multiprocess_framework.modules.logger_module.core.logger_core import _LEVEL_DEFAULT_SCOPE
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
@@ -161,7 +162,7 @@ class TestDecisionCacheKey:
         assert not any(isinstance(key, str) for key in keys)
 
     def test_cache_answers_the_same_as_direct(self, logger: Any) -> None:
-        combos = list(itertools.product(LogScope, LogLevel, ("main", "camera", "gui")))
+        combos = list(itertools.product(PRESET_SCOPES, LogLevel, ("main", "camera", "gui")))
         logger.invalidate_decision_cache()
         cached = [logger.should_log(s, lv, m) for s, lv, m in combos]
         direct = [logger._should_log_direct(s, lv, m) for s, lv, m in combos]
@@ -212,7 +213,7 @@ class TestIsEnabledForAgreesWithRouting:
     def test_grid_logger(self, logger: Any) -> None:
         mismatches = [
             (scope, level, module)
-            for scope, level, module in itertools.product(LogScope, LogLevel, _MODULES)
+            for scope, level, module in itertools.product(PRESET_SCOPES, LogLevel, _MODULES)
             if logger.is_enabled_for(module, level, scope) is not (logger._route(scope, level, module) is not None)
         ]
         assert mismatches == []
@@ -222,7 +223,7 @@ class TestIsEnabledForAgreesWithRouting:
         try:
             mismatches = [
                 (scope, level, module)
-                for scope, level, module in itertools.product(LogScope, LogLevel, _MODULES)
+                for scope, level, module in itertools.product(PRESET_SCOPES, LogLevel, _MODULES)
                 if mgr.is_enabled_for(module, level, scope) is not (mgr._route(scope, level, module) is not None)
             ]
             assert mismatches == []
@@ -242,7 +243,7 @@ class TestIsEnabledForAgreesWithRouting:
 
             mismatches = [
                 (scope, level, module)
-                for scope, level, module in itertools.product(LogScope, LogLevel, _MODULES)
+                for scope, level, module in itertools.product(PRESET_SCOPES, LogLevel, _MODULES)
                 if mgr.is_enabled_for(module, level, scope) is not (mgr._route(scope, level, module) is not None)
             ]
             assert mismatches == []

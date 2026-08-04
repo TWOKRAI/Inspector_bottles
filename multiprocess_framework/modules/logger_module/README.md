@@ -103,7 +103,7 @@ logger_module/
 │   ├── logger_manager.py     ← LoggerManager(ChannelRoutingManager, ILoggerManager)
 │   ├── log_types.py          ← LogRecord (dataclass)
 │   ├── log_config.py         ← реэкспорт LoggerManagerConfig, LogLevel, LogScope
-│   └── log_enums.py          ← LogLevel, LogScope (enum)
+│   └── log_enums.py          ← LogLevel (enum), LogScope (строковые константы, Ф2.4)
 ├── configs/
 │   └── logger_manager_config.py  ← LoggerManagerConfig(ChannelRoutingConfig)
 │
@@ -259,6 +259,33 @@ logger.log(
     retry_count=3,
 )
 ```
+
+### Своя группа логов (Ф2.4) — без единой правки фреймворка
+
+`scope` — обычная **строка**, а `LogScope` лишь набор преднастроенных констант.
+Новая группа заводится конфигом приложения и сразу получает свой порог и свои
+приёмники:
+
+```yaml
+# system.yaml приложения
+observability:
+  scopes:
+    КОНВЕЙЕР: { enabled: true, min_level: WARNING, channels: [цех_file] }
+```
+
+```python
+logger.log("КОНВЕЙЕР", LogLevel.ERROR, "деталь не прошла контроль", "мод")
+```
+
+Ключ конфига, константа и значение `scope` в записи — **одна строка**; регистр
+приводится к заглавным на границе конфига, поэтому `конвейер:` в YAML попадёт в
+ту же группу, а не заведёт вторую, недостижимую.
+
+Группа, в которую пишут, но которой в конфиге нет, — законное состояние (ещё не
+объявили), но **не молчаливое**: логгер один раз на имя говорит вслух через
+аварийный выход и называет фактический маршрут, а список таких имён отдаёт
+`unknown_scopes()` и readback `introspect.observability` →
+`effective.logger.unknown_scopes`.
 
 ### Контекстное логирование
 
@@ -688,7 +715,7 @@ config = LoggerManagerConfig.model_validate({
 router.register_message_handler(
     key="log",
     handler=lambda msg: logger.log(
-        scope=LogScope[msg.get("metadata", {}).get("scope", "BUSINESS").upper()],
+        scope=msg.get("metadata", {}).get("scope", LogScope.BUSINESS).upper(),
         level=LogLevel[msg.get("level", "INFO").upper()],
         message=msg.get("message", ""),
         module=msg.get("module", "unknown"),

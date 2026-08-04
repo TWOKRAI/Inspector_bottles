@@ -16,7 +16,7 @@ from .configs import (
     LoggerRuleSchema,
     LoggerScopeSchema,
 )
-from .core.log_config import LogLevel, LogScope
+from .core.log_config import PRESET_SCOPES, LogLevel, LogScope, ScopeName
 from .core.logger_manager import LoggerManager, get_logger, init_logging, shutdown_logging
 from .channels.log_channel import (
     LogChannel,
@@ -44,6 +44,8 @@ __all__ = [
     "LoggerRuleSchema",
     "LogLevel",
     "LogScope",
+    "ScopeName",
+    "PRESET_SCOPES",
     "LogChannel",
     "FileChannel",
     "ConsoleChannel",

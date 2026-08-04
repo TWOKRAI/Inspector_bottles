@@ -66,7 +66,7 @@ import threading
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from ..core.log_config import LogLevel, LogScope
+from ..core.log_config import LogLevel, ScopeName
 from ..core.logger_core import OBSERVABILITY_EPOCH, _LEVEL_DEFAULT_SCOPE
 from ..core.logger_manager import get_logger
 from ..utils import apply_format
@@ -87,7 +87,7 @@ __all__ = [
 #: ``is_enabled_for``. Своя копия соответствия здесь была бы вторым гейтом:
 #: ровно то, чего прежняя редакция этого файла избегала, отказываясь от
 #: собственного решения. Согласие с удобными методами закреплено тестом.
-_LEVEL_ROUTE: Dict[str, Tuple[LogScope, LogLevel]] = {
+_LEVEL_ROUTE: Dict[str, Tuple[ScopeName, LogLevel]] = {
     name.lower(): (_LEVEL_DEFAULT_SCOPE[level], level)
     for name, level in (
         ("debug", LogLevel.DEBUG),

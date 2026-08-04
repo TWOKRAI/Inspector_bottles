@@ -38,7 +38,7 @@ from ..configs.logger_manager_config import (
     LoggerManagerConfig,
     LoggerScopeSchema,
 )
-from .log_config import LogLevel, LogScope
+from .log_config import LogLevel, LogScope, ScopeName
 from .name_hierarchy import NameHierarchy
 from ...channel_routing_module.levels import UNKNOWN_RANK, is_error_level, rank_of
 from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
@@ -253,9 +253,18 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._base_context: Dict[str, Any] = {}
         self._base_context_lock = threading.Lock()
 
+        # Ф2.4: имена скоупов, которых в конфиге нет, а записи в них были.
+        # Список, а не множество: порядок появления — часть ответа («что
+        # случилось раньше»), а размер ограничен числом РАЗНЫХ имён, то есть
+        # опечатками в коде, а не потоком записей. Свой lock, а не общий с
+        # контекстом: он берётся один раз на новое имя и не имеет права
+        # встретиться на пути записи с чужим локом (правило Ф0.5).
+        self._unknown_scopes: List[str] = []
+        self._unknown_scopes_lock = threading.Lock()
+
         # Ключ — КОРТЕЖ с Ф1.2 (см. should_log). Аннотация ``Dict[str, bool]``
         # пережила смену ключа и врала, пока её не поймало ревью.
-        self._decision_cache: Dict[Tuple[LogScope, LogLevel, str], bool] = {}
+        self._decision_cache: Dict[Tuple[ScopeName, LogLevel, str], bool] = {}
 
         # 2.2-перф: кэш РЕЗУЛЬТАТА маршрута, а не решения гейта. Тот же ключ, но
         # значение — кортеж имён приёмников либо None («отклонена»). Схлопывает
@@ -268,7 +277,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # держатся сознательно: `should_log`/`is_enabled_for` спрашивают гейт
         # ОТДЕЛЬНО от эмиссии (у ErrorManager severity-путь гейт не спрашивает
         # вовсе), и вывести один ответ из другого нельзя.
-        self._route_cache: Dict[Tuple[LogScope, LogLevel, str], Optional[Tuple[str, ...]]] = {}
+        self._route_cache: Dict[Tuple[ScopeName, LogLevel, str], Optional[Tuple[str, ...]]] = {}
         self._cache_enabled = True
 
         # Пол ошибок (Ф0.9) — ленивый: резолвится на первой записи, ушедшей в floor.
@@ -393,17 +402,80 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             return LoggerManagerConfig.model_validate(cfg_dict) if cfg_dict else LoggerManagerConfig()
         return LoggerManagerConfig()
 
-    def _scope_schema(self, scope: LogScope) -> LoggerScopeSchema:
-        """Скоуп из конфига или fallback (логика рядом с потребителем, не на схеме)."""
-        key = scope.name
-        if key in self.config.scopes:
-            return self.config.scopes[key]
+    def _scope_schema(self, scope: ScopeName) -> LoggerScopeSchema:
+        """Скоуп из конфига или запасная ветка (логика рядом с потребителем, не на схеме).
+
+        Ф2.4: ключ — сама строка скоупа, без ``.name``. Одно написание на всё
+        (Р-2.4-А), поэтому промежуточного превращения больше нет; регистр
+        приводится валидатором на границе конфига, а не здесь — ``.upper()`` на
+        этом пути стоил бы аллокации на каждом промахе кэша.
+
+        **Запасная ветка молчит здесь намеренно** — говорит о ней
+        :meth:`_check_scope_declared` с пути записи. Разница не косметическая:
+        сюда доходит не всякая запись в незаявленную группу. Когда обе оси
+        решения забирает правило имени (Ф2.2), этот метод не зовётся вовсе — а
+        группы в конфиге всё равно нет. Поймано тестом readback'а, а не
+        рассуждением: первая редакция 2.4 ставила сигнал именно здесь и молчала
+        на конфиге прототипа, где правила задают приёмники двум источникам.
+        После 2.3b (корневое правило) сигнал замолчал бы вообще везде.
+        """
+        schema = self.config.scopes.get(scope)
+        if schema is not None:
+            return schema
         ch = list(self.config.channels.keys())[:1] if self.config.channels else []
         return LoggerScopeSchema(
             enabled=True,
             min_level=self.config.default_level,
             channels=ch,
         )
+
+    def _check_scope_declared(self, scope: ScopeName, channels: Optional[Tuple[str, ...]]) -> None:
+        """Сказать вслух про группу без объявления — ОДИН раз на имя (Р-2.4-Б).
+
+        Зовётся с ПРОМАХА кэша маршрута, то есть один раз на новую тройку
+        «скоуп-уровень-источник», а не на запись: на попадании в кэш цена ноль.
+
+        Форма — детектор Р-2.6-Е: якорь событийный (первая запись под этим
+        именем), сигнал самоочищается (второй раз не повторяется) и называет не
+        только проблему, но и **куда запись при этом ушла** — иначе
+        предупреждение заставляет искать записи там, где их нет. Маршрут берётся
+        фактический, уже посчитанный: он честен независимо от того, кто его
+        решил — запасная ветка скоупа или правило имени.
+
+        Идёт аварийным выходом, а не своими каналами: претензия ровно к тому,
+        какие каналы запись получила, и писать её тем же маршрутом значило бы
+        доверять предмету спора.
+
+        Не потеря и потому не счётчик потерь: запись доставлена, просто не туда,
+        куда думал автор. Четыре класса ``LOSS_COUNTER_KEYS`` лечатся разным, и
+        пятый, означающий «всё дошло», размыл бы их (правило заведено в Ф0.4).
+        Наружу имена уходят списком в :meth:`unknown_scopes`.
+        """
+        if scope in self.config.scopes:
+            return
+        with self._unknown_scopes_lock:
+            if scope in self._unknown_scopes:
+                return
+            self._unknown_scopes.append(scope)
+        where = "отклонена гейтом" if channels is None else f"идут в {list(channels)}"
+        self._fallback_log(
+            "WARNING",
+            f"группа логов '{scope}' в конфиге не объявлена: записи {where}. Это опечатка "
+            f"в имени либо ещё не заведённая группа — объяви её в observability.scopes",
+        )
+
+    def unknown_scopes(self) -> List[str]:
+        """Имена скоупов, которых в конфиге нет, а записи в них были (Ф2.4).
+
+        Ответ на вопрос, который до Ф2.4 задать было нечем: readback
+        ``introspect.observability.logger.scopes`` показывает ОБЪЯВЛЕННЫЕ группы,
+        то есть ровно то множество, в котором незаведённой группы по определению
+        нет. Соседний ``sources`` (2.6) устроен так же и по той же причине.
+
+        Порядок — появления, не сортированный: он говорит, что случилось раньше.
+        """
+        with self._unknown_scopes_lock:
+            return list(self._unknown_scopes)
 
     def _setup_channels(self):
         """Создать каналы из конфига и зарегистрировать в CRM registry.
@@ -891,7 +963,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # ОСНОВНОЙ API ЛОГИРОВАНИЯ
     # =========================================================================
 
-    def should_log(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+    def should_log(self, scope: ScopeName, level: LogLevel, module: str) -> bool:
         """Решение гейта с кэшем. Ф1.2: ключ — КОРТЕЖ, а не f-string.
 
         Прежний ключ ``f"{scope.value}:{level.value}:{module}"`` аллоцировал
@@ -1043,7 +1115,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             }
         return table
 
-    def _should_log_direct(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+    def _should_log_direct(self, scope: ScopeName, level: LogLevel, module: str) -> bool:
         """Решение гейта без кэша. **Правило имени сильнее скоупа** (Ф2.2).
 
         Решение владельца 2026-08-03: когда про запись говорят обе оси, порог
@@ -1082,7 +1154,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         scope_config = self._scope_schema(scope)
         return scope_config.should_log(level, module)
 
-    def _is_gate_open(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+    def _is_gate_open(self, scope: ScopeName, level: LogLevel, module: str) -> bool:
         """Пройдёт ли запись гейт — ЕДИНСТВЕННОЕ место, где это решается.
 
         Хук, а не прямой вызов ``should_log`` из двух мест: у наследника решение
@@ -1111,7 +1183,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self,
         name: str,
         level: LogLevel,
-        scope: Optional[LogScope] = None,
+        scope: Optional[ScopeName] = None,
     ) -> bool:
         """Дешёвый публичный предикат «эта запись ПРОЙДЁТ ГЕЙТ?» (Ф1.3).
 
@@ -1150,7 +1222,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             scope = _LEVEL_DEFAULT_SCOPE.get(level, LogScope.SYSTEM)
         return self._is_gate_open(scope, level, name)
 
-    def _route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[Sequence[str]]:
+    def _route(self, scope: ScopeName, level: LogLevel, module: str) -> Optional[Sequence[str]]:
         """Куда пойдёт запись — и пойдёт ли вообще. ``None`` = отклонена гейтом.
 
         Возврат — ``Sequence``, а не ``List``: правило иерархии (Ф2.2) отдаёт
@@ -1209,7 +1281,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         return channels
 
-    def _effective_route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[Tuple[str, ...]]:
+    def _effective_route(self, scope: ScopeName, level: LogLevel, module: str) -> Optional[Tuple[str, ...]]:
         """Маршрут БЕЗ приёмников, снятых оператором (2.8).
 
         **Стоит здесь, а не внутри `_route`, намеренно.** `ErrorManager`
@@ -1239,7 +1311,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
     def log(
         self,
-        scope: LogScope,
+        scope: ScopeName,
         level: LogLevel,
         message: "LogMessage",
         module: str = "main",
@@ -1279,8 +1351,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             if channels is _ROUTE_MISS:
                 channels = self._effective_route(scope, level, module)
                 self._route_cache[cache_key] = channels
+                self._check_scope_declared(scope, channels)
         else:
             channels = self._effective_route(scope, level, module)
+            self._check_scope_declared(scope, channels)
 
         if channels is None:
             self.stats["messages_skipped"] += 1

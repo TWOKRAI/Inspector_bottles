@@ -8,6 +8,8 @@ from .logger_manager import LoggerManager
 from .log_config import (
     LogLevel,
     LogScope,
+    ScopeName,
+    PRESET_SCOPES,
     LoggerChannelSchema,
     LoggerManagerConfig,
     LoggerRuleSchema,
@@ -24,5 +26,7 @@ __all__ = [
     "LoggerRuleSchema",
     "LogLevel",
     "LogScope",
+    "ScopeName",
+    "PRESET_SCOPES",
     "LogRecord",
 ]

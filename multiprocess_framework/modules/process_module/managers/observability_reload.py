@@ -151,6 +151,13 @@ def observability_effective(
         sources_fn = getattr(logger, "seen_sources", None)
         if callable(sources_fn):
             section["sources"] = sources_fn()
+        # Ф2.4: имена групп, в которые ПИСАЛИ, но которых в конфиге нет. Соседний
+        # `scopes` выше показывает объявленные — то есть ровно то множество, в
+        # котором незаведённой группы нет по определению. Пустой список отдаётся,
+        # а не опускается: «таких нет» — это ответ.
+        unknown_fn = getattr(logger, "unknown_scopes", None)
+        if callable(unknown_fn):
+            section["unknown_scopes"] = unknown_fn()
         section.update(_sink_readback(logger))
         section.update(_idle_sinks(logger))
         out["logger"] = section

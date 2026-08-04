@@ -218,3 +218,26 @@ class TestOutputIsSafeToSend:
                 assert value is None or isinstance(value, str), repr(value)
 
         _check(payload)
+
+
+class TestUnknownScopesAreVisibleFromThePult:
+    """Ф2.4 — группы, в которые ПИСАЛИ, но которых в конфиге нет.
+
+    Соседняя секция ``scopes`` показывает объявленные, то есть ровно то
+    множество, в котором незаведённой группы нет по определению. Без этой
+    ручки живой прогон 2.4 проверялся бы тем же способом, каким три месяца не
+    замечали 288 пустых файлов, — глазами по каталогу.
+    """
+
+    def test_written_but_undeclared_group_shows_up(self, logger: Any) -> None:
+        from multiprocess_framework.modules.logger_module.core.log_config import LogLevel
+
+        logger.log("КОНВЕЙЕР", LogLevel.ERROR, "деталь", "мод")
+        section = observability_effective(logger=logger)["logger"]
+
+        assert section["unknown_scopes"] == ["КОНВЕЙЕР"]
+        assert "КОНВЕЙЕР" not in section["scopes"], "объявленной она при этом не стала"
+
+    def test_key_is_present_even_when_empty(self, logger: Any) -> None:
+        """«Таких нет» — это ответ; отсутствие ключа отправило бы искать поломку readback."""
+        assert observability_effective(logger=logger)["logger"]["unknown_scopes"] == []

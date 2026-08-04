@@ -26,7 +26,7 @@ from typing import Optional, Any, List, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
 from ...channel_routing_module.levels import is_error_level, rank_of
-from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
+from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, ScopeName
 from ...logger_module.core.logger_core import LoggerCore
 from ..configs.error_manager_config import ErrorManagerConfig
 from ..interfaces import IErrorManager
@@ -342,7 +342,7 @@ class ErrorManager(LoggerCore, IErrorManager):
         super()._on_channels_changed()
         self._setup_level_routes()
 
-    def _is_gate_open(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+    def _is_gate_open(self, scope: ScopeName, level: LogLevel, module: str) -> bool:
         """Severity-плоскость открыта всегда; остальное решает скоуп (Ф1.3).
 
         Условие — «уровень принадлежит плоскости ошибок», а НЕ «для уровня
@@ -359,7 +359,7 @@ class ErrorManager(LoggerCore, IErrorManager):
             return True
         return super()._is_gate_open(scope, level, module)
 
-    def _route(self, scope: LogScope, level: LogLevel, module: str) -> Optional[List[str]]:
+    def _route(self, scope: ScopeName, level: LogLevel, module: str) -> Optional[List[str]]:
         """WARNING/ERROR/CRITICAL → один канал по уровню; остальное — родителю.
 
         **Ф4.2: это ВСЯ разница между двумя путями эмиссии.** Раньше здесь жил

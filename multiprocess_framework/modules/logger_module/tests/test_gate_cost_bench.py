@@ -76,8 +76,10 @@ class _LegacyGate:
     def _direct(self, level: LogLevel, module: str) -> bool:
         return self.schema.should_log(level, module)
 
-    def should_log(self, scope: LogScope, level: LogLevel, module: str) -> bool:
-        key = f"{scope.value}:{level.value}:{module}"
+    def should_log(self, scope: str, level: LogLevel, module: str) -> bool:
+        # Ф2.4: скоуп приезжает строкой. Эталон продолжает делать то, что делал
+        # «до Ф1» — СКЛЕИВАТЬ ключ; в этом и была его цена, а не в `.value`.
+        key = f"{scope}:{level.value}:{module}"
         if key in self.cache:
             return self.cache[key]
         result = self._direct(level, module)
@@ -491,3 +493,79 @@ class TestGateKeyHashIsIdentity:
         restored = pickle.loads(pickle.dumps(payload))  # nosec B301 — свои же байты, см. выше
         assert restored[LogLevel.ERROR] == "err"
         assert restored[LogScope.BUSINESS] == "biz"
+
+
+# =============================================================================
+# 2.4 — скоуп строкой вместо enum'а
+# =============================================================================
+
+
+class _IdentityHashScope(Enum):
+    """Двойник ПРЕЖНЕГО ``LogScope``: enum с хэшем по identity — эталон «до 2.4».
+
+    Сравнивать надо именно с ним, а не со штатным ``Enum.__hash__``: до 2.4
+    скоуп уже был ускорен (``_IDENTITY_HASH``), и замер против медленного
+    варианта показал бы выигрыш, которого правка не делала.
+    """
+
+    SYSTEM = "system"
+    DEBUG = "debug"
+
+    __hash__ = object.__hash__
+
+
+class TestScopeAsStringIsNotMoreExpensive:
+    """Р-2.4-В: замена enum'а строкой не подняла цену ключа кэша.
+
+    Утверждение «хэш строки CPython кэширует в объекте» проверяется ЗАМЕРОМ, а
+    не докстрингом: прежняя редакция соседнего объяснения уверенно описывала
+    хэш enum'ов неправильно, и цена той ошибки была семикратной.
+    """
+
+    #: Допуск ШИРОКИЙ, и это не послабление. Замер дал паритет (53 против 52 нс),
+    #: то есть фактический запас — проценты, а при таком запасе порог 1.10
+    #: сторожит шум машины: на пяти прогонах подряд он мигнул один раз, причём
+    #: на инъекции, к нему отношения не имевшей. Ровно тот же случай уже разобран
+    #: у ``SCHEMA_TOLERANCE`` выше, и вывод тот же — здесь сторожится не
+    #: микро-выигрыш (его нет и не обещано), а МАТЕРИАЛЬНЫЙ регресс: пересборка
+    #: или нормализация строки на каждом поиске дала бы кратную разницу.
+    TOLERANCE = 1.5
+
+    def test_string_key_lookup_is_not_slower_than_the_enum_key(self, capsys) -> None:
+        new_key = (LogScope.DEBUG, LogLevel.DEBUG, "bench_mod")
+        old_key = (_IdentityHashScope.DEBUG, LogLevel.DEBUG, "bench_mod")
+        assert isinstance(new_key[0], str), "предусловие: скоуп уже строка"
+        new_map = {new_key: True}
+        old_map = {old_key: True}
+
+        new, old = _timed_pair(lambda: new_map.get(new_key), lambda: old_map.get(old_key), 200_000)
+        _report(
+            capsys,
+            f"  ключ кэша, скоуп строкой: {new * 1e9:.0f} нс; скоуп enum'ом (было): {old * 1e9:.0f} нс",
+        )
+        assert new <= old * self.TOLERANCE, (
+            f"строка в ключе оказалась дороже enum'а: {new * 1e9:.0f} нс против {old * 1e9:.0f} нс"
+        )
+
+    def test_the_hot_path_does_not_normalize_the_scope(self, logger: LoggerManager) -> None:
+        """Приведение регистра стоит на ГРАНИЦЕ конфига, а не на пути записи.
+
+        Свойство наблюдаемое, а не имя метода: строка-шпион едет скоупом через
+        настоящий ``log()`` и считает ``.upper()`` на себе. Спай на имя
+        сторожил бы имя; этот ловит операцию, где бы её ни позвали — в
+        ``_scope_schema``, в ``log()`` или в резолве маршрута.
+
+        Ноль здесь значит «канон уже пришёл каноничным», и это и есть решение
+        Р-2.4-А: аллокация на запись ради регистра — цена, которую платить не за
+        что, когда конфиг собран один раз.
+        """
+
+        class _Probe(_CountingStr):
+            calls = 0
+
+        scope = _Probe("BUSINESS")
+        for _ in range(100):
+            logger.log(scope, LogLevel.INFO, "принятая", "bench_mod")
+        logger.flush()
+
+        assert _Probe.calls == 0, f"скоуп нормализуется на пути записи: {_Probe.calls} вызовов .upper()"

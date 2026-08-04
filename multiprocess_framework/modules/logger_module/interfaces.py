@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional
 
 from ..base_manager.interfaces import IBaseManager
 from ..channel_routing_module.interfaces import IChannel
-from .core.log_config import LogLevel, LogScope
+from .core.log_config import LogLevel, LogScope, ScopeName
 from .utils import LogMessage
 
 
@@ -79,7 +79,7 @@ class ILoggerManager(IBaseManager, ABC):
     @abstractmethod
     def log(
         self,
-        scope: LogScope,
+        scope: ScopeName,
         level: LogLevel,
         message: "LogMessage",
         module: str = "main",
@@ -210,7 +210,7 @@ class ILoggerManager(IBaseManager, ABC):
         """
 
     @abstractmethod
-    def should_log(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+    def should_log(self, scope: ScopeName, level: LogLevel, module: str) -> bool:
         """Проверить, нужно ли логировать это сообщение (кэшированная проверка).
 
         Используется внутренне, но полезен для внешних валидаций производительности.
@@ -225,7 +225,7 @@ class ILoggerManager(IBaseManager, ABC):
         self,
         name: str,
         level: LogLevel,
-        scope: Optional[LogScope] = None,
+        scope: Optional[ScopeName] = None,
     ) -> bool:
         """Пройдёт ли такая запись ГЕЙТ (Ф1.3).
 
@@ -257,6 +257,7 @@ class ILoggerManager(IBaseManager, ABC):
 __all__ = [
     "LogLevel",
     "LogScope",
+    "ScopeName",
     "ILogChannel",
     "ILoggerManager",
 ]

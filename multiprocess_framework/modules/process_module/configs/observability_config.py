@@ -209,6 +209,26 @@ class ObservabilityConfig(SchemaBase):
         """Отказ на границе конфига — до того, как правка коснётся менеджеров."""
         return validate_overflow_policy(value)
 
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def _normalize_scope_keys(cls, value: Any) -> Any:
+        """Ф2.4: канон имени группы — заглавными, и приводится ЗДЕСЬ ТОЖЕ.
+
+        Копия правила у ``LoggerManagerConfig`` его не покрывает: слои
+        наблюдаемости мержатся между собой (``deep_merge``) ДО того, как
+        результат доедет до конфига менеджера, и ключ ``system:`` из
+        ``system.yaml`` лёг бы рядом с ``SYSTEM`` из дефолта, а не поверх него.
+        До менеджера доехали бы ОБА, и настройка «сделать SYSTEM тише» тихо не
+        сработала бы.
+
+        Это второе место, а не вторая реализация: правило одно («канон
+        заглавными»), а точки его применения — две, потому что и границ конфига
+        две. Разъехаться им нечем — приведение регистра целиком в одну строку.
+        """
+        if not isinstance(value, dict):
+            return value
+        return {(k.upper() if isinstance(k, str) else k): v for k, v in value.items()}
+
 
 def _toggled_logger_channels(console: bool, file: bool) -> Dict[str, Dict[str, Any]]:
     """Дефолтные каналы LoggerManagerConfig с переключённым ``enabled`` по типу.

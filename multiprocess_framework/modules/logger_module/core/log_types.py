@@ -4,7 +4,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from .log_config import LogLevel, LogScope
+from .log_config import LogLevel, ScopeName
 
 
 @dataclass
@@ -17,7 +17,7 @@ class LogRecord:
 
     timestamp: float
     level: LogLevel
-    scope: LogScope
+    scope: ScopeName
     message: str
     module: str
     extra: Dict[str, Any]
@@ -34,7 +34,12 @@ class LogRecord:
         return {
             "timestamp": self.timestamp,
             "level": self.level.value,  # str: "ERROR", "INFO", ...
-            "scope": self.scope.value,  # str: "system", "business", ...
+            # Ф2.4: скоуп уже строка, и та же самая, что стоит ключом в конфиге.
+            # До Ф2.4 здесь ехало `scope.value` — ВТОРОЕ написание того же имени
+            # (`PERFORMANCE` в конфиге, `perf` в записи). Читателей у поля в
+            # проде не было ни одного, поэтому сведение к одному написанию
+            # обошлось без слоя совместимости (решение Р-2.4-А).
+            "scope": self.scope,
             "message": self.message,
             "module": self.module,
             "extra": self.extra,
