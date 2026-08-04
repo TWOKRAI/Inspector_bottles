@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -161,3 +162,122 @@ class TestDeclaredRuleIsTheBottomLayer:
         declare_log_source("пакет.обычный", owner="пакет.interfaces")
 
         assert "loggers" not in expand_observability({})["logger"]
+
+
+class TestLayerOverridesByAxisNotWholesale:
+    """Ф2.х (Н1): правило приложения перекрывает объявленное ПО ОСЯМ.
+
+    «Две оси резолвятся независимо» — аксиома дерева (Ф2.2); шов слоёв обязан
+    говорить на том же языке. Находка ревью Ф2: `{**declared, **layered}`
+    замещал запись целиком, и приложение, правившее только `level`, молча
+    стирало `channels`, объявленные модулем.
+    """
+
+    def test_app_overriding_level_keeps_the_declared_channels(self, чистый_реестр: Any) -> None:
+        """Репро находки: правка одной оси не имеет права стереть соседнюю."""
+        from multiprocess_framework.modules.process_module.configs.observability_config import (
+            expand_observability,
+        )
+
+        declare_log_source(
+            "пакет.шумный",
+            owner="пакет.interfaces",
+            rule=LoggerRuleSchema(level="ERROR", channels=["busy_file"]),
+        )
+
+        expanded = expand_observability({"loggers": {"пакет.шумный": {"level": "DEBUG"}}})
+        rule = expanded["logger"]["loggers"]["пакет.шумный"]
+
+        assert rule["level"] == "DEBUG", "ось level — за приложением"
+        assert rule["channels"] == ["busy_file"], "ось channels модуля обязана уцелеть"
+
+    def test_app_erases_channels_explicitly_with_an_empty_list(self, чистый_реестр: Any) -> None:
+        """Пара: стирание оси осталось выразимым — но ЯВНО, штатным `[]` (Г3)."""
+        from multiprocess_framework.modules.process_module.configs.observability_config import (
+            expand_observability,
+        )
+
+        declare_log_source(
+            "пакет.шумный",
+            owner="пакет.interfaces",
+            rule=LoggerRuleSchema(level="ERROR", channels=["busy_file"]),
+        )
+
+        expanded = expand_observability({"loggers": {"пакет.шумный": {"channels": []}}})
+        rule = expanded["logger"]["loggers"]["пакет.шумный"]
+
+        assert rule["channels"] == [], "`[]` — решение, а не молчание"
+        assert rule["level"] == "ERROR", "нетронутая ось наследуется от модуля"
+
+    def test_declared_silence_does_not_materialize_keys(self, чистый_реестр: Any) -> None:
+        """Объявление претендует только на оси, про которые модуль сказал.
+
+        Материализованный `channels: None` был бы словом слоя там, где модуль
+        молчал, — ровно класс «молчание ≠ пустота», из-за которого ключи
+        наверх не эмитятся (ADR-PM-020).
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_config import (
+            expand_observability,
+        )
+
+        declare_log_source("пакет.тихий", owner="пакет.interfaces", rule=LoggerRuleSchema(level="ERROR"))
+
+        rule = expand_observability({})["logger"]["loggers"]["пакет.тихий"]
+
+        assert rule == {"level": "ERROR"}, "молчащие оси не становятся ключами"
+
+
+class TestRuleShapeIsCheckedAtTheBorder:
+    """Ф2.х (Н3): форма правила проверяется на границе реестра, не в сборке.
+
+    Находка ревью Ф2: правило-словарь принималось молча и падало позже в
+    `expand_observability` — AttributeError без имени виновника, далеко от
+    объявившего модуля (класс «model_copy не валидирует», третий заход).
+    """
+
+    def test_a_dict_rule_is_refused_naming_the_owner(self, чистый_реестр: Any) -> None:
+        with pytest.raises(ValueError, match="мой.interfaces"):
+            declare_log_source("пакет.имя", owner="мой.interfaces", rule={"level": "INFO"})
+
+    def test_a_schema_rule_is_accepted(self, чистый_реестр: Any) -> None:
+        """Пара: настоящая схема проходит той же дверью."""
+        declare_log_source("пакет.имя", owner="мой.interfaces", rule=LoggerRuleSchema(level="INFO"))
+
+        assert list(declared_rules()) == ["пакет.имя"]
+
+
+class TestLateRuleDeclarationIsAudible:
+    """Ф2.х (Н2): правило, объявленное ПОСЛЕ снимка, слышно.
+
+    Boot-конфиг детям собирает ассемблер в РОДИТЕЛЕ, пересборку — сам ребёнок;
+    оба берут снимок `declared_rules()` на момент чтения. Правило позднего
+    импорта (плагин) в уже собранные конфиги не попало — молчать об этом
+    значило бы «правило написано, а не действует» без единого сигнала.
+    """
+
+    def test_a_rule_declared_after_the_snapshot_is_announced(self, чистый_реестр: Any, caplog: Any) -> None:
+        declared_rules()  # снимок взят — так делает сборка конфига
+
+        with caplog.at_level(logging.WARNING):
+            declare_log_source("поздний.модуль", owner="поздний.interfaces", rule=LoggerRuleSchema(level="ERROR"))
+
+        жалобы = [r.getMessage() for r in caplog.records if "поздний.модуль" in r.getMessage()]
+        assert len(жалобы) == 1, caplog.records
+        assert "ПОСЛЕ сборки" in жалобы[0]
+
+    def test_a_name_only_declaration_after_the_snapshot_is_silent(self, чистый_реестр: Any, caplog: Any) -> None:
+        """Пара: каталог имён читается живьём (readback), опаздывать ему нечем."""
+        declared_rules()
+
+        with caplog.at_level(logging.WARNING):
+            declare_log_source("поздний.молчун", owner="поздний.interfaces")
+
+        assert [r for r in caplog.records if "поздний.молчун" in r.getMessage()] == []
+
+    def test_a_rule_declared_before_the_snapshot_is_silent(self, чистый_реестр: Any, caplog: Any) -> None:
+        """Пара: штатный порядок (импорт → сборка) не шумит."""
+        with caplog.at_level(logging.WARNING):
+            declare_log_source("ранний.модуль", owner="ранний.interfaces", rule=LoggerRuleSchema(level="ERROR"))
+            declared_rules()
+
+        assert [r for r in caplog.records if "ранний.модуль" in r.getMessage()] == []

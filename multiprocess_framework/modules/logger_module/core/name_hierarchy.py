@@ -51,6 +51,12 @@ __all__ = ["NameHierarchy", "ROOT_NAME"]
 #: которых не нашлось более длинного совпадения.
 ROOT_NAME = ""
 
+#: Ф2.х (Н5): потолок кэшей резолва. Ключ — имя источника, а имя приходит с
+#: call-site и бывает динамическим (проба ревью Ф2: 3000 разных имён — 3000
+#: записей в карте, потолка не было; класс Ф0.3/F6). На переполнении карта
+#: чистится целиком: кэш — мемо чистой функции, сброс корректность не трогает.
+_RESOLVE_CACHE_CEILING = 4096
+
 
 class NameHierarchy:
     """Таблица правил «префикс имени → уровень/приёмники» с кэшем резолва.
@@ -134,6 +140,8 @@ class NameHierarchy:
         if cached is not _MISS:
             return cached  # type: ignore[return-value]
         resolved = self._walk_level(name)
+        if len(self._level_cache) >= _RESOLVE_CACHE_CEILING:
+            self._level_cache.clear()
         self._level_cache[name] = resolved
         return resolved
 
@@ -153,6 +161,8 @@ class NameHierarchy:
         if cached is not _MISS:
             return cached  # type: ignore[return-value]
         resolved = self._walk_channels(name)
+        if len(self._channels_cache) >= _RESOLVE_CACHE_CEILING:
+            self._channels_cache.clear()
         self._channels_cache[name] = resolved
         return resolved
 
@@ -182,6 +192,8 @@ class NameHierarchy:
         if cached is not _MISS:
             return cached  # type: ignore[return-value]
         resolved = self._walk_extra(name)
+        if len(self._extra_cache) >= _RESOLVE_CACHE_CEILING:
+            self._extra_cache.clear()
         self._extra_cache[name] = resolved
         return resolved
 
@@ -362,6 +374,21 @@ def _expand_groups(
         rule = rules.get(label)
         if rule is None:
             continue  # ярлык объявлен, но правила на него нет — законно и тихо
+        # Ф2.х (Н4): ярлык, совпавший с началом ДРУГОГО правила, — почти наверняка
+        # не ярлык, а узел дерева в голове оператора: правило под ним станет
+        # правилом группы, а поддерево `label.*` его не унаследует. Р-2.5-Г
+        # запретил точку В ярлыке ради однозначности longest-prefix; одно-
+        # сегментная коллизия статически не запрещаема (ярлык и префикс живут в
+        # разных секциях конфига), поэтому она хотя бы громкая. Поведение не
+        # меняется — побеждает трактовка «ярлык», как и раньше.
+        if complain is not None:
+            shadowed = sorted(k for k in rules if k.startswith(label + "."))
+            if shadowed:
+                complain(
+                    f"ярлык '{label}' совпадает с началом правил {shadowed}: правило под "
+                    f"'{label}' раскрыто как правило ГРУППЫ, поддерево '{label}.*' его не "
+                    f"наследует. Если имелся в виду узел дерева — переименуй ярлык"
+                )
         for member in groups[label]:
             if member in rules:
                 continue  # собственное правило члена сильнее (Р-2.5-Б)

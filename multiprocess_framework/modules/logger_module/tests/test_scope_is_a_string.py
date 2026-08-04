@@ -239,6 +239,40 @@ class TestUnknownScopeIsAudible:
         assert stats["records_without_channels"] == 0
 
 
+class TestUnknownScopeDetectorIsBounded:
+    """Ф2.х (Н5): детектор насыщаем — поимённый учёт не растёт без предела.
+
+    Проба ревью Ф2: после 2.4 скоуп — произвольная строка с call-site, и
+    динамическое имя (f-string с id задачи) давало 3000 имён в списке при
+    O(n)-скане под локом — класс Ф0.3/F6, «рост без предела по оси имён».
+    """
+
+    def test_the_detector_saturates_with_one_final_complaint(self, logger: Any, caplog) -> None:
+        from multiprocess_framework.modules.logger_module.core.logger_core import (
+            _UNKNOWN_SCOPES_CEILING,
+        )
+
+        лишних = 10
+        with caplog.at_level(logging.WARNING):
+            for i in range(_UNKNOWN_SCOPES_CEILING + лишних):
+                logger.log(f"ЗАДАЧА_{i}", LogLevel.INFO, "запись", "мод")
+            logger.flush()
+
+        имена = logger.unknown_scopes()
+        assert len(имена) == _UNKNOWN_SCOPES_CEILING, "поимённый учёт упирается в потолок"
+        assert f"ЗАДАЧА_{_UNKNOWN_SCOPES_CEILING}" not in имена, "имя за потолком не записывается"
+        насыщение = [r.getMessage() for r in caplog.records if "насыщен" in r.getMessage()]
+        assert len(насыщение) == 1, "жалоба на насыщение — ровно одна, а не по разу на имя"
+
+    def test_below_the_ceiling_every_name_is_still_recorded(self, logger: Any) -> None:
+        """Пара: потолок не съедает обычный случай — считанные опечатки видны все."""
+        for name in ("ОПЕЧАТКА_А", "ОПЕЧАТКА_Б"):
+            logger.log(name, LogLevel.INFO, "запись", "мод")
+        logger.flush()
+
+        assert logger.unknown_scopes() == ["ОПЕЧАТКА_А", "ОПЕЧАТКА_Б"]
+
+
 class TestPresetsWithoutConfigKeepBehaving:
     """Характеризация: ``AUDIT``/``SECURITY`` не объявлены в дефолтах С САМОГО НАЧАЛА.
 

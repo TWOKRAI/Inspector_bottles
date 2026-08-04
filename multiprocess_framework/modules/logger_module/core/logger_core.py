@@ -76,6 +76,21 @@ from ..utils import LogMessage, apply_format
 #: `dict.get(key)` не отличил бы «отклонена» от «ещё не считали».
 _ROUTE_MISS = object()
 
+#: Ф2.х (Н5): потолок карт решений/маршрута. После 2.4 ось `scope` — произвольная
+#: строка с call-site, то есть ключ ``(scope, level, module)`` растёт без предела
+#: на динамических именах (проба ревью: 3000 имён → 3000 записей в каждой карте;
+#: класс Ф0.3/F6 — «безлимитный рост по оси имён»). На переполнении карта
+#: ЧИСТИТСЯ целиком: кэш — мемо, а не состояние, корректность от сброса не
+#: страдает, а честный LRU стоил бы порядка на горячем пути. Запас кратный:
+#: боевой прогон webcam_sketch держит десятки имён источников и четыре скоупа.
+_DECISION_CACHE_CEILING = 4096
+
+#: Ф2.х (Н5): потолок ПОИМЁННОГО учёта незнакомых скоупов. Выше — насыщение с
+#: одной финальной жалобой (см. ``_check_scope_declared``): больше разных имён —
+#: это уже динамическая строка в ``scope``, и перечислять её значения поимённо
+#: значило бы расти без предела там, где детектор жалуется на чужой рост.
+_UNKNOWN_SCOPES_CEILING = 64
+
 #: Метки экземпляров менеджеров — ключ процессного реестра колец `memory`.
 #: Счётчик, а не ``id()``: адрес переиспользуется после сборки мусора, и новый
 #: менеджер унаследовал бы кольцо покойного.
@@ -258,12 +273,17 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._base_context_lock = threading.Lock()
 
         # Ф2.4: имена скоупов, которых в конфиге нет, а записи в них были.
-        # Список, а не множество: порядок появления — часть ответа («что
-        # случилось раньше»), а размер ограничен числом РАЗНЫХ имён, то есть
-        # опечатками в коде, а не потоком записей. Свой lock, а не общий с
-        # контекстом: он берётся один раз на новое имя и не имеет права
-        # встретиться на пути записи с чужим локом (правило Ф0.5).
-        self._unknown_scopes: List[str] = []
+        # Словарь-как-упорядоченное-множество: порядок появления — часть ответа
+        # («что случилось раньше»), членство — O(1). Прежняя редакция держала
+        # список и объясняла его «размер ограничен опечатками» — опровергнуто
+        # пробой ревю Ф2: после 2.4 скоуп — произвольная строка с call-site, и
+        # динамическое имя (f-string с id) растило список без предела при O(n)
+        # скане под локом (класс Ф0.3/F6). Теперь есть потолок и насыщение —
+        # Ф2.х (Н5). Свой lock, а не общий с контекстом: он берётся один раз на
+        # новое имя и не имеет права встретиться на пути записи с чужим локом
+        # (правило Ф0.5).
+        self._unknown_scopes: Dict[str, None] = {}
+        self._unknown_scopes_saturated = False
         self._unknown_scopes_lock = threading.Lock()
 
         # Ключ — КОРТЕЖ с Ф1.2 (см. should_log). Аннотация ``Dict[str, bool]``
@@ -474,13 +494,34 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         куда думал автор. Четыре класса ``LOSS_COUNTER_KEYS`` лечатся разным, и
         пятый, означающий «всё дошло», размыл бы их (правило заведено в Ф0.4).
         Наружу имена уходят списком в :meth:`unknown_scopes`.
+
+        **Детектор насыщаем** (Ф2.х, Н5): после ``_UNKNOWN_SCOPES_CEILING``
+        разных имён новые не записываются, и об этом сказано ОДИН раз. Больше
+        потолка разных незнакомых имён — это уже не опечатки, а динамические
+        имена в ``scope``; перечислять их поимённо значило бы расти без предела
+        ровно там, где детектор жалуется на чужой рост.
         """
         if scope in self.config.scopes:
             return
         with self._unknown_scopes_lock:
             if scope in self._unknown_scopes:
                 return
-            self._unknown_scopes.append(scope)
+            if len(self._unknown_scopes) >= _UNKNOWN_SCOPES_CEILING:
+                if self._unknown_scopes_saturated:
+                    return
+                self._unknown_scopes_saturated = True
+                saturated = True
+            else:
+                self._unknown_scopes[scope] = None
+                saturated = False
+        if saturated:
+            self._fallback_log(
+                "WARNING",
+                f"незнакомых групп логов больше {_UNKNOWN_SCOPES_CEILING} — детектор насыщен, "
+                f"дальнейшие имена не записываются. Столько разных имён — почти наверняка "
+                f"динамическая строка в scope; scope — это ГРУППА, переменное кладут в module/extra",
+            )
+            return
         where = "отклонена гейтом" if channels is None else f"идут в {list(channels)}"
         self._fallback_log(
             "WARNING",
@@ -1022,6 +1063,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         if cached is not None:
             return cached
         result = self._should_log_direct(scope, level, module)
+        # Ф2.х (Н5): потолок. Сброс, а не отказ от записи: пришедший ключ —
+        # самый горячий из известных прямо сейчас, терять его глупее всего.
+        if len(self._decision_cache) >= _DECISION_CACHE_CEILING:
+            self._decision_cache.clear()
         self._decision_cache[cache_key] = result
         return result
 
@@ -1378,6 +1423,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             channels = self._route_cache.get(cache_key, _ROUTE_MISS)
             if channels is _ROUTE_MISS:
                 channels = self._effective_route(scope, level, module)
+                # Ф2.х (Н5): потолок — тот же, что у карты решений (ключ общий).
+                if len(self._route_cache) >= _DECISION_CACHE_CEILING:
+                    self._route_cache.clear()
                 self._route_cache[cache_key] = channels
                 self._check_scope_declared(scope, channels)
         else:

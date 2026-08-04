@@ -333,9 +333,20 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     # приоритет; переставь его — и правка в `system.yaml` перестанет действовать,
     # оставаясь видимой в файле (тихий отказ того же класса, что уже стоил фазе
     # 288 пустых файлов).
-    declared = {name: rule.model_dump() for name, rule in declared_rules().items()}
+    # Ф2.х (Н1): правило приложения перекрывает объявленное ПО ОСЯМ, а не целиком.
+    # `{**declared, **layered}` замещал запись по ключу: приложение, правившее
+    # ТОЛЬКО `level`, молча стирало `channels`, объявленные модулем, — а «две оси
+    # резолвятся независимо» это аксиома дерева (Ф2.2), и шов слоёв обязан
+    # говорить на том же языке. Явное стирание оси осталось выразимым штатно:
+    # `channels: []` — «приёмников нет, и это решение» (Г3).
+    # `exclude_none=True` — объявление претендует только на оси, про которые
+    # модуль реально сказал; молчание не материализуется ключом.
+    declared = {name: rule.model_dump(exclude_none=True) for name, rule in declared_rules().items()}
     layered = {str(k): dict(v) for k, v in cfg.loggers.items()} if cfg.loggers else {}
-    merged = {**declared, **layered}
+    merged: Dict[str, Any] = dict(declared)
+    for name, rule in layered.items():
+        base = merged.get(name)
+        merged[name] = {**base, **rule} if base else rule
     if merged:
         logger["loggers"] = merged
 

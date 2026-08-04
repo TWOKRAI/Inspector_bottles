@@ -151,6 +151,41 @@ class TestConflictIsLoudAndDeterministic:
         assert heard == []
 
 
+class TestLabelShadowingASubtreeIsAudible:
+    """Ф2.х (Н4): ярлык, совпавший с началом другого правила, — громко.
+
+    Находка ревью Ф2: `rules={"camera": …}` + `groups={"camera": [...]}` молча
+    превращали правило поддерева в правило группы — `camera.driver` переставал
+    наследовать, жалоб ноль. Р-2.5-Г запретил точку В ярлыке; одно-сегментная
+    коллизия статически не запрещаема (ярлык и префикс живут в разных секциях),
+    поэтому она хотя бы слышна. Поведение прежнее: побеждает трактовка «ярлык».
+    """
+
+    def test_the_shadow_is_named_with_the_shadowed_rules(self) -> None:
+        heard: list = []
+        tree = NameHierarchy(
+            {"камера": _Rule(level="DEBUG"), "камера.драйвер": _Rule(level="INFO")},
+            {"камера": ("другой.модуль",)},
+            complain=heard.append,
+        )
+
+        assert len(heard) == 1, heard
+        assert "камера.драйвер" in heard[0], "жалоба обязана назвать затенённое правило"
+        assert tree.level("камера.прочее") is None, "поведение не меняется: ярлык не префикс"
+        assert tree.level("другой.модуль") == "DEBUG", "раскрытие группы живо"
+
+    def test_a_label_without_a_subtree_stays_silent(self) -> None:
+        """Пара: обычное употребление ярлыка (правило на ярлык) не шумит."""
+        heard: list = []
+        NameHierarchy(
+            {"камера": _Rule(level="DEBUG")},
+            {"камера": ("другой.модуль",)},
+            complain=heard.append,
+        )
+
+        assert heard == []
+
+
 class TestDottedLabelIsRefused:
     """Р-2.5-Г: отказ на границе конфига, а не предупреждение."""
 

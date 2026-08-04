@@ -228,3 +228,42 @@ class TestLevelNormalisation:
         """``None`` — не строка и не имеет права стать ею: это «молчу»."""
         assert LoggerRuleSchema().level is None
         assert LoggerRuleSchema().channels is None
+
+
+class TestResolveCachesAreBounded:
+    """Ф2.х (Н5): кэши резолва не растут без предела по оси имён.
+
+    Ключ кэша — имя источника с call-site, то есть потенциально динамическая
+    строка (проба ревью Ф2: 3000 имён → 3000 записей, потолка не было).
+    На переполнении карта чистится: резолв — чистая функция от таблицы, сброс
+    мемо не меняет ни одного ответа — и это вторая половина пары.
+    """
+
+    def test_each_cache_holds_at_most_the_ceiling(self) -> None:
+        from multiprocess_framework.modules.logger_module.core.name_hierarchy import (
+            _RESOLVE_CACHE_CEILING,
+        )
+
+        tree = NameHierarchy({ROOT_NAME: LoggerRuleSchema(level="INFO", channels=["общий"], channels_extra=["хвост"])})
+        for i in range(_RESOLVE_CACHE_CEILING + 50):
+            имя = f"динамика.{i}"
+            tree.level(имя)
+            tree.channels(имя)
+            tree.channels_extra(имя)
+
+        assert len(tree._level_cache) <= _RESOLVE_CACHE_CEILING
+        assert len(tree._channels_cache) <= _RESOLVE_CACHE_CEILING
+        assert len(tree._extra_cache) <= _RESOLVE_CACHE_CEILING
+
+    def test_the_answer_survives_the_overflow(self) -> None:
+        """Пара: после сброса тот же вопрос получает тот же ответ."""
+        from multiprocess_framework.modules.logger_module.core.name_hierarchy import (
+            _RESOLVE_CACHE_CEILING,
+        )
+
+        tree = NameHierarchy({"пакет": LoggerRuleSchema(level="ERROR")})
+        до = tree.level("пакет.якорь")
+        for i in range(_RESOLVE_CACHE_CEILING + 1):
+            tree.level(f"динамика.{i}")
+
+        assert tree.level("пакет.якорь") == до == "ERROR"

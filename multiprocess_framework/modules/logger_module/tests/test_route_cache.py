@@ -328,3 +328,39 @@ class TestOperatorDisabledSinkLeavesTheRoute:
         assert stats["batch_stats"]["flush_failed"] + stats["unresolved_channel_records"] >= 1, (
             "хвост буфера исчез бесследно — это и был бы четвёртый несчитаемый класс"
         )
+
+
+class TestCachesAreBounded:
+    """Ф2.х (Н5): у карт решений и маршрута есть потолок.
+
+    Проба ревью Ф2: после 2.4 ось `scope` — произвольная строка с call-site, и
+    ключ «скоуп-уровень-источник» рос без предела на динамических именах (3000
+    имён → 3000 записей в каждой карте). Класс Ф0.3/F6. На переполнении карта
+    чистится целиком: кэш — мемо, корректность от сброса не зависит, и ровно это
+    вторая половина пары.
+    """
+
+    def test_both_maps_hold_at_most_the_ceiling(self, logger) -> None:
+        from multiprocess_framework.modules.logger_module.core.logger_core import (
+            _DECISION_CACHE_CEILING,
+        )
+
+        for i in range(_DECISION_CACHE_CEILING + 50):
+            logger.should_log("SYSTEM", LogLevel.WARNING, f"мод_{i}")
+            # DEBUG-скоуп выключен: маршрут кэшируется (None), диск не платится.
+            logger.log("DEBUG", LogLevel.DEBUG, "запись", f"мод_{i}")
+
+        assert len(logger._decision_cache) <= _DECISION_CACHE_CEILING
+        assert len(logger._route_cache) <= _DECISION_CACHE_CEILING
+
+    def test_the_answer_survives_the_overflow(self, logger) -> None:
+        """Пара к потолку: сброс карты не меняет ни одного ответа."""
+        from multiprocess_framework.modules.logger_module.core.logger_core import (
+            _DECISION_CACHE_CEILING,
+        )
+
+        до = logger.should_log("SYSTEM", LogLevel.WARNING, "мод_якорь")
+        for i in range(_DECISION_CACHE_CEILING + 1):
+            logger.should_log("SYSTEM", LogLevel.WARNING, f"мод_{i}")
+
+        assert logger.should_log("SYSTEM", LogLevel.WARNING, "мод_якорь") is до is True
