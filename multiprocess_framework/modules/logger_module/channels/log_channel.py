@@ -14,8 +14,9 @@ import shutil
 import threading
 import time
 from collections import deque
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     import requests
@@ -533,7 +534,64 @@ SEAL_LINE_RE = r"^#(\d+) "
 SEAL_ABSENT = "#- "
 
 
-class SealFormatter(logging.Formatter):
+@lru_cache(maxsize=512)
+def abbreviate_source(name: str, limit: int) -> str:
+    """Сжать иерархическое имя источника под потолок — правило ``%logger{N}`` logback.
+
+    Ведущие сегменты сжимаются до первой буквы слева направо, пока имя не влезет;
+    **последний сегмент не трогается никогда** — он и несёт смысл
+    (``multiprocess_framework.modules.dispatch_module`` → ``m.m.dispatch_module``).
+
+    Односегментное имя возвращается как есть, даже если длиннее потолка: сжать
+    ``command_manager`` до ``c`` значило бы уничтожить его, а не сократить.
+
+    Кэш обязателен, а не «для скорости»: функция стоит на пути КАЖДОЙ записи, а
+    различных имён в процессе — десятки. Потолок 512 с запасом покрывает и
+    мигрированные ``__name__`` (116 файлов после Ф6), и имена процессов.
+    """
+    if limit <= 0 or len(name) <= limit:
+        return name
+    parts = name.split(".")
+    if len(parts) == 1:
+        return name
+    for index in range(len(parts) - 1):
+        parts[index] = parts[index][:1]
+        candidate = ".".join(parts)
+        if len(candidate) <= limit:
+            return candidate
+    return ".".join(parts)
+
+
+class _SourceAbbreviatingFormatter(logging.Formatter):
+    """Общий предок форматтеров: печатает имя источника в сокращённом виде.
+
+    Сокращение живёт ЗДЕСЬ, а не в ``LoggerCore``, намеренно: полное имя обязано
+    доехать до правил маршрутизации и до пульта в целости, укорачивается только
+    ТО, ЧТО ВИДИТ ГЛАЗ. Сделай наоборот — и префиксный резолв начнёт получать
+    ``m.m.dispatch_module``, то есть правило, написанное по-человечески, молча
+    перестанет совпадать.
+
+    Запись мутируется на месте: ``LogRecord`` создаётся заново на каждый
+    ``write()`` и уходит ровно в один хэндлер — общих владельцев у неё нет.
+
+    **Ловушка, названная вслух:** у общего ротатора (несколько каналов на один
+    путь) форматтер выставляет ТОЛЬКО первый владелец пути. Значит два канала на
+    один файл с разным ``name_max_len`` дадут вид, заданный тем, кто успел
+    раньше. Это не новая беда — так же ведёт себя и ``format``, — но теперь у неё
+    появился второй повод, и молчать о нём нельзя.
+    """
+
+    def __init__(self, fmt: Optional[str] = None, name_max_len: int = 0):
+        super().__init__(fmt)
+        self._name_max_len = int(name_max_len or 0)
+
+    def format(self, record: logging.LogRecord) -> str:
+        if self._name_max_len > 0:
+            record.name = abbreviate_source(record.name, self._name_max_len)
+        return super().format(record)
+
+
+class SealFormatter(_SourceAbbreviatingFormatter):
     """Формат канала + пломба, которую строка формата отменить не может.
 
     Пломба не поле ``%(seq)s`` намеренно. Формат канала операбелен из конфига и
@@ -557,7 +615,7 @@ class FileChannel(LogChannel):
         self.file_path = Path(config.file_path or f"logs/{config.name}.log")
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        formatter = SealFormatter(config.format)
+        formatter = SealFormatter(config.format, name_max_len=getattr(config, "name_max_len", 0))
         if getattr(config, "rotate", True):
             # Общий хэндлер на путь: несколько каналов на один файл делят один
             # ротатор (иначе конкуренция fd ломает ротацию на Windows — см. реестр
@@ -671,7 +729,7 @@ class ConsoleChannel(LogChannel):
     def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
         self.handler = logging.StreamHandler()
-        formatter = logging.Formatter(config.format)
+        formatter = _SourceAbbreviatingFormatter(config.format, name_max_len=getattr(config, "name_max_len", 0))
         self.handler.setFormatter(formatter)
 
         self._write_lock = threading.Lock()

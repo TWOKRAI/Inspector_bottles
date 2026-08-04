@@ -22,6 +22,27 @@ from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ..log_enums import LogLevel
 
 _STD_FMT = "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s"
+#: Ф2.6. Потолок длины имени источника в выводе фреймворковых каналов.
+#: Полное точечное имя продолжает жить в записи и в правилах; укорачивается
+#: только то, что видит глаз.
+#:
+#: Значение выбрано ЗАМЕРОМ, а не копированием дефолта logback (``%logger{36}``):
+#: у нас общий префикс пакета длиннее, и 36 его почти не сжимает. Прирост веса
+#: логов от перехода на точечные имена, по строкам прогона 2026-08-03:
+#:
+#: ===========  ==============  ===============  ======
+#: потолок      ProcessManager  region_splitter  gui
+#: ===========  ==============  ===============  ======
+#: 0 (полное)   +9.27%          +16.38%          +4.74%
+#: **20**       **+1.20%**      **+3.04%**       **+1.46%**
+#: 24           +2.01%          +4.50%           +1.60%
+#: 36           +2.92%          +6.00%           +2.19%
+#: ===========  ==============  ===============  ======
+#:
+#: 20 — колено: ниже него выигрыш не растёт, выше цена удваивается. Даёт
+#: ``m.m.dispatch_module`` (19 символов против 46 полного и 10 у прежнего
+#: плоского ``dispatcher``).
+_NAME_MAX_LEN = 20
 _FILE_MAX = 10 * 1024 * 1024
 
 #: Порядок уровней — из общего дома трёх плоскостей, а не своей копией.
@@ -38,6 +59,23 @@ class LoggerChannelSchema(SchemaBase):
     type: str = "file"
     enabled: bool = True
     format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    #: Ф2.6. Потолок длины имени источника В ВЫВОДЕ; 0 — печатать полностью.
+    #:
+    #: Развязывает две разные задачи, которые до сих пор решались одной строкой:
+    #: конфиг и правила адресуют ПОЛНОЕ точечное имя (иначе префиксный резолв
+    #: не работает), а в файл пишется сокращённое — иначе каждая строка растёт на
+    #: длину пакета. Замер на прогоне 2026-08-03: переход трёх шумных источников
+    #: на точечные имена БЕЗ сокращения дал бы +4.7…16.4% к весу ``system.log``,
+    #: то есть фаза, которая борется за объём, добавила бы объёма.
+    #:
+    #: Правило сокращения — как ``%logger{N}`` в logback: ведущие сегменты
+    #: сжимаются до первой буквы, последний не трогается никогда
+    #: (``multiprocess_framework.modules.dispatch_module`` → ``m.m.dispatch_module``).
+    #:
+    #: Дефолт 0 выбран сознательно: молча менять вид КАЖДОЙ строки лога у всех,
+    #: кто соберёт менеджер сам, — не настройка. Фреймворковые каналы включают
+    #: сокращение явно, ниже.
+    name_max_len: int = 0
     max_size: int = 10 * 1024 * 1024
     backup_count: int = 5
     rotate: bool = True
@@ -300,6 +338,7 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             max_size=_FILE_MAX,
             backup_count=5,
             format=_STD_FMT,
+            name_max_len=_NAME_MAX_LEN,
         ),
         "messages_file": LoggerChannelSchema(
             type="file",
@@ -308,6 +347,7 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             max_size=_FILE_MAX,
             backup_count=5,
             format=_STD_FMT,
+            name_max_len=_NAME_MAX_LEN,
         ),
         # Ф2.6. Снапшот метрик — ЕДИНСТВЕННЫЙ писатель скоупа PERFORMANCE
         # (`statistics_module/channels/log_stats_channel.py`, проверено грепом:
@@ -334,11 +374,13 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             max_size=_FILE_MAX,
             backup_count=5,
             format=_STD_FMT,
+            name_max_len=_NAME_MAX_LEN,
         ),
         "console": LoggerChannelSchema(
             type="console",
             enabled=True,
             format=_STD_FMT,
+            name_max_len=_NAME_MAX_LEN,
         ),
     }
 

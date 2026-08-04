@@ -18,7 +18,19 @@ from ..channel_routing_module.interfaces import IChannelRoutingManager
 #: именем занимали 54.9% веса ``system.log`` у ProcessManager и 23–26% у остальных
 #: процессов. Правило маршрутизации для неё — первое, ради чего заводился механизм
 #: Ф2.2, поэтому имя обязано быть ссылкой, а не второй копией строки.
-LOG_SOURCE = "stats"
+#:
+#: **Значение — точечное имя пакета, а не короткий ярлык** (Р-2.6-Д, правка после
+#: ревью решений). Плоское имя — лист без поддерева: правило по префиксу на нём не
+#: работает, и каждый новый файл модуля пришлось бы заводить в конфиге руками.
+#: Точечное имя даёт обратное — правило ``multiprocess_framework.modules`` действует
+#: на всё поддерево, а новый файл наследует его без единой правки. Так же выводят имя
+#: логгера stdlib (``getLogger(__name__)``), logback (FQCN), .NET (``ILogger<T>``) и
+#: OTel (``InstrumentationScope.name``); короткие ручки в индустрии существуют, но как
+#: алиас КОНФИГА (Spring ``logging.group``) — у нас это задача 2.5, а не личность записи.
+#:
+#: В файл имя пишется сокращённым (``LoggerChannelSchema.name_max_len``): без этого
+#: переход дал бы +4.7…16.4% к весу логов — замер там же.
+LOG_SOURCE = "multiprocess_framework.modules.statistics_module"
 
 
 class IStatsManager(IChannelRoutingManager, ABC):

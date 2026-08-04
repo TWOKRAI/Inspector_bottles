@@ -87,18 +87,18 @@ class TestStampComesFromTheDeclaration:
         manager = CommandManager(manager_name="cm", managers={"logger": logger})
         manager.register_command("проба", lambda **_: None)
 
-        assert "command_manager" in _sources(logger)
+        assert "multiprocess_framework.modules.command_module" in _sources(logger)
 
     def test_dispatcher_stamps_dispatcher(self, logger: Any) -> None:
         dispatcher = Dispatcher(manager_name="dp", managers={"logger": logger})
         dispatcher.register_handler("проба", lambda **_: None)
 
-        assert "dispatcher" in _sources(logger)
+        assert "multiprocess_framework.modules.dispatch_module" in _sources(logger)
 
     def test_stats_channel_stamps_stats(self, logger: Any) -> None:
         LogStatsChannel(logger_manager=logger, name="log_stats").write(_snapshot())
 
-        assert "stats" in _sources(logger)
+        assert "multiprocess_framework.modules.statistics_module" in _sources(logger)
 
 
 class TestConstantsHoldTheAddressedNames:
@@ -110,9 +110,9 @@ class TestConstantsHoldTheAddressedNames:
     """
 
     def test_declared_values(self) -> None:
-        assert COMMAND_SOURCE == "command_manager"
-        assert DISPATCH_SOURCE == "dispatcher"
-        assert STATS_SOURCE == "stats"
+        assert COMMAND_SOURCE == "multiprocess_framework.modules.command_module"
+        assert DISPATCH_SOURCE == "multiprocess_framework.modules.dispatch_module"
+        assert STATS_SOURCE == "multiprocess_framework.modules.statistics_module"
 
     def test_declarations_do_not_collide(self) -> None:
         """Три имени различны — иначе два модуля делили бы одно правило молча."""
