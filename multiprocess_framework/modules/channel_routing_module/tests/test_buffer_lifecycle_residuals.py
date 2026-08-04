@@ -144,42 +144,12 @@ class TestForgetChannel:
         buf, _ = _collecting_buffer(max_size=10)
         assert buf.forget_channel("никогда-не-было") is False
 
-    def test_manager_forgets_the_channel_it_removed(self, tmp_path) -> None:
-        """Уборка подключена к МЕНЕДЖЕРУ, а не только доступна как метод.
-
-        Без этого теста ``forget_channel`` мог бы остаться идеально рабочим и
-        никем не вызываемым — ровно тот класс, что ``flush_failed`` в реестре
-        счётчиков (F5): запись есть, публикатора нет.
-        """
-        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
-
-        mgr = LoggerManager(
-            manager_name="ForgetProbe",
-            config={
-                "app_name": "forget",
-                "log_directory": str(tmp_path),
-                "enable_batching": True,
-                "modules": {},
-                "channels": {
-                    "sink": {"type": "file", "enabled": True, "file_path": str(tmp_path / "s.log")},
-                },
-                "scopes": {"BUSINESS": {"enabled": True, "min_level": "INFO", "channels": ["sink"]}},
-            },
-        )
-        mgr.initialize()
-        try:
-            mgr.enable_module_logging("ephemeral")
-            mgr.info("запись", module="ephemeral")
-            assert "module_ephemeral" in mgr._buffer.stats["pending"], "предусловие: имя попало в буфер"
-
-            mgr.flush()
-            mgr.disable_module_logging("ephemeral")
-
-            assert "module_ephemeral" not in mgr._buffer.stats["pending"], (
-                "имя снятого канала осталось в буфере навсегда"
-            )
-        finally:
-            mgr.shutdown()
+    # Ф2.6: тест «менеджер забывает снятый им канал» снят вместе с механизмом
+    # per-module файлов — он ходил через `disable_module_logging`, а тот звал
+    # уборку СВОИМ вызовом из `logger_core`, минуя CRM-ветку. Второго пути
+    # уборки больше нет: остался один, и его сторожит соседний тест ниже
+    # (`set_sink_enabled(..., False)` в базе). Это ровно тот случай, когда
+    # свойство исчезло вместе с причиной, а не осталось непроверенным.
 
     def test_sink_disable_forgets_the_channel_too(self, tmp_path) -> None:
         """ВТОРОЙ путь уборки — ``set_sink_enabled(..., False)`` в базе CRM.
@@ -187,8 +157,10 @@ class TestForgetChannel:
         Найдено ревью Ф1: этот путь назван первым и в docstring, и в README, и
         в плане, а сторожил его ноль тестов — удаление вызова из
         ``ChannelRoutingManager.set_sink_enabled`` оставляло 588 тестов
-        зелёными. Соседний тест ходит через ``disable_module_logging``, а тот
-        зовёт уборку СВОИМ вызовом из ``logger_core`` и CRM-ветку не задевает.
+        зелёными. До Ф2.6 рядом жил второй тест — через
+        ``disable_module_logging``, который звал уборку своим вызовом из
+        ``logger_core`` и CRM-ветку не задевал; после сноса per-module файлов
+        путь уборки остался ОДИН, и это единственный сторож.
         """
         from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 

@@ -329,21 +329,26 @@ class TestProvenanceInIntrospect:
         finally:
             logger.shutdown()
 
-    def test_every_live_channel_is_explained_including_module_ones(self, tmp_path) -> None:
+    def test_every_live_channel_is_explained(self, tmp_path) -> None:
         """«Каждый действующий ключ» — это ВЕСЬ реестр каналов, а не секция `channels`.
 
-        Ревью 5.12 (замечание 4): ``module_*``-каналы рождаются из секции
-        ``modules`` и в ``config.channels`` не лежат — на девять живых каналов
-        из двенадцати provenance молчал, притом что приёмка требует объяснения
-        каждому. Источник истины — живой реестр.
+        Ревью 5.12 (замечание 4): provenance молчал про девять живых каналов из
+        двенадцати, притом что приёмка требует объяснения КАЖДОМУ. Источник
+        истины — живой реестр, а не описания в конфиге.
+
+        **Переклассифицирован в Ф2.6.** Расхождение «реестр шире секции» давали
+        именно ``module_*``-каналы: они рождались из секции ``modules`` и в
+        ``config.channels`` не лежали. Механизм снят, и сегодня расходиться
+        нечему — но требование осталось прежним и проверяется тем же способом:
+        каждый канал ИЗ РЕЕСТРА обязан быть объяснён. Тест ловит любой будущий
+        источник каналов мимо секции, а не только снятый.
         """
         svc, logger = self._svc_with_layers(tmp_path)
         try:
             res = svc.command_manager.handlers["introspect.observability"]({})
             prov = res["provenance"]
             active = res["effective"]["logger"]["channels_active"]
-            module_channels = [n for n in active if n.startswith("module_")]
-            assert module_channels, "ожидались module_*-каналы в живом реестре"
+            assert active, "ожидались живые каналы в реестре"
             missing = [n for n in active if f"channels.{n}.enabled" not in prov]
             assert not missing, f"без объяснения остались действующие каналы: {missing}"
 

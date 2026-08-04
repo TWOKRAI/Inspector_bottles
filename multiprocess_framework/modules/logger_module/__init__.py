@@ -13,7 +13,6 @@ Logger Module (Refactored) - Модуль системы логирования.
 from .configs import (
     LoggerChannelSchema,
     LoggerManagerConfig,
-    LoggerModuleSchema,
     LoggerRuleSchema,
     LoggerScopeSchema,
 )
@@ -42,7 +41,6 @@ __all__ = [
     "LoggerManagerConfig",
     "LoggerChannelSchema",
     "LoggerScopeSchema",
-    "LoggerModuleSchema",
     "LoggerRuleSchema",
     "LogLevel",
     "LogScope",

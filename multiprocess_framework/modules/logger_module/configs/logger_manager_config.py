@@ -218,17 +218,6 @@ class LoggerRuleSchema(SchemaBase):
         return value.upper() if isinstance(value, str) else value
 
 
-class LoggerModuleSchema(SchemaBase):
-    """Per-module file logging (router_messages, processor, …)."""
-
-    enabled: bool = True
-    file_path: Optional[str] = None
-    min_level: str = "DEBUG"
-    max_size: Optional[int] = None
-    backup_count: Optional[int] = None
-    rotate: bool = True
-
-
 @register_schema("LoggerManagerConfig")
 class LoggerManagerConfig(ChannelRoutingConfig):
     """Конфигурация LoggerManager: каналы, scopes, modules."""
@@ -288,64 +277,6 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             max=86400.0,
         ),
     ] = 3600.0
-
-    modules: Annotated[
-        Dict[str, LoggerModuleSchema],
-        FieldMeta("Per-module файлы"),
-    ] = {
-        "router_messages": LoggerModuleSchema(
-            enabled=True,
-            file_path="messages.log",
-            # INFO, не DEBUG: на DEBUG router_messages писал маршрут КАЖДОГО кадра
-            # (data X -> [Y]) → messages.log распухал на ~МБ/сек. Для отладки роутинга
-            # временно вернуть "DEBUG".
-            min_level="INFO",
-        ),
-        "database": LoggerModuleSchema(
-            enabled=True,
-            file_path="database.log",
-            min_level="INFO",
-        ),
-        "processor": LoggerModuleSchema(
-            enabled=True,
-            file_path="processor.log",
-            min_level="INFO",
-        ),
-        "processor_frames": LoggerModuleSchema(
-            enabled=True,
-            file_path="frames.log",
-            min_level="DEBUG",
-            rotate=False,
-        ),
-        "camera": LoggerModuleSchema(
-            enabled=True,
-            file_path="camera.log",
-            min_level="INFO",
-        ),
-        "renderer": LoggerModuleSchema(
-            enabled=True,
-            file_path="renderer.log",
-            min_level="INFO",
-        ),
-        "robot": LoggerModuleSchema(
-            enabled=True,
-            file_path="robot.log",
-            min_level="INFO",
-        ),
-        "gui": LoggerModuleSchema(
-            enabled=True,
-            file_path="gui.log",
-            min_level="INFO",
-        ),
-        # trace — отдельный файл для диагностики cross-layer цепочек.
-        # Логи с module="trace" уходят сюда (плюс в scope-каналы:
-        # system_file/messages_file/console).
-        "trace": LoggerModuleSchema(
-            enabled=True,
-            file_path="trace.log",
-            min_level="DEBUG",
-        ),
-    }
 
     loggers: Annotated[
         Dict[str, LoggerRuleSchema],

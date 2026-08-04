@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
@@ -28,7 +27,6 @@ from multiprocess_framework.modules.error_module.core.error_config_assembly impo
 )
 from multiprocess_framework.modules.logger_module.configs import (
     LoggerManagerConfig,
-    LoggerModuleSchema,
 )
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
@@ -189,87 +187,26 @@ class TestErrorPlaneSurvivesReload:
 
 
 # =============================================================================
-# A3 / R3 — module_*-каналы логгера
+# A3 / R3 — СНЯТО в Ф2.6 вместе с механизмом per-module файлов
 # =============================================================================
-
-
-@pytest.fixture
-def module_wired(tmp_path, monkeypatch):
-    """Логгер с per-module каналом ``camera`` и живыми командами.
-
-    Каталог — через env по той же причине, что у ``error_wired``: пересборка
-    берёт набор модулей и путей из машинного контекста, а не из живого конфига.
-    ``camera`` есть и в дефолтном наборе ``managers_from_log_dir``, поэтому
-    канал переживает пересборку и пара «снял → вернул» проверяема.
-    """
-    monkeypatch.setenv("INSPECTOR_LOG_DIR", str(tmp_path))
-    logger = LoggerManager(
-        config=LoggerManagerConfig(
-            app_name="mod",
-            log_directory=str(tmp_path),
-            enable_batching=False,
-            modules={"camera": LoggerModuleSchema(enabled=True, file_path=str(tmp_path / "camera.log"))},
-        )
-    )
-    svc = _Svc(logger)
-    bc = BuiltinCommands(svc)
-    bc._register_observability_commands()
-    try:
-        yield svc, svc.command_manager.handlers, tmp_path
-    finally:
-        logger.shutdown()
-
-
-class TestModuleChannelsJoinTheNamespace:
-    def test_module_channel_stays_disabled_after_reload(self, module_wired) -> None:
-        """Резидуал R3: ключ ``channels.module_camera.enabled`` теперь ГАСИТ канал.
-
-        До 5.10.c снятие держалось одной лишь отметкой оператора, а канал после
-        пересборки был живым в реестре — воспроизведено ревью 5.12.
-        """
-        svc, handlers, _ = module_wired
-        assert "module_camera" in _names(svc.logger_manager)
-
-        handlers["logger.sink.disable"]({"sink": "module_camera"})
-        assert "module_camera" not in _names(svc.logger_manager)
-
-        handlers["config.reload"]({"observability": {}, "path": None})
-        assert "module_camera" not in _names(svc.logger_manager), "module-канал воскрес после пересборки"
-
-    def test_the_disable_record_does_not_create_a_phantom_file(self, module_wired) -> None:
-        """Запись об отмене — не описание канала.
-
-        Прочитанная как описание, она построила бы файловый канал БЕЗ пути, и
-        рядом с настоящим ``camera.log`` завёлся бы ``module_camera.log``,
-        открытый тем же процессом.
-        """
-        svc, handlers, tmp_path = module_wired
-        handlers["logger.sink.disable"]({"sink": "module_camera"})
-        handlers["config.reload"]({"observability": {}, "path": None})
-        # Опасен не сам факт записи, а её ВОЗВРАТ в `true`: с `enabled: false`
-        # первый цикл пропустил бы запись и по прежнему коду. Фантом рождается
-        # ровно здесь — на пересборке ПОСЛЕ возврата приёмника.
-        handlers["logger.sink.enable"]({"sink": "module_camera"})
-        handlers["config.reload"]({"observability": {}, "path": None})
-
-        phantoms = [p.name for p in Path(tmp_path).rglob("module_camera*")]
-        assert phantoms == [], f"построен фантомный файл: {phantoms}"
-        assert "module_camera" in _names(svc.logger_manager), "настоящий канал не вернулся"
-
-    def test_re_enable_restores_the_real_channel_with_its_path(self, module_wired) -> None:
-        """Пара: вернули — и запись идёт в настоящий ``camera.log``."""
-        svc, handlers, tmp_path = module_wired
-        handlers["logger.sink.disable"]({"sink": "module_camera"})
-        handlers["config.reload"]({"observability": {}, "path": None})
-
-        res = handlers["logger.sink.enable"]({"sink": "module_camera"})
-        assert res["success"] is True
-        assert "module_camera" in _names(svc.logger_manager)
-
-        svc.logger_manager.info("живой module-канал", module="camera")
-        svc.logger_manager.flush()
-        assert "живой module-канал" in (tmp_path / "camera.log").read_text(encoding="utf-8", errors="replace")
-
+#
+# Здесь жили три теста про `module_*`-каналы логгера: декларативное снятие ключом
+# `channels.module_camera.enabled=false`, отсутствие фантомного файла и возврат
+# настоящего канала с его путём. Все три сторожили механизм, которого больше нет.
+#
+# **Свойства не потеряны, а переехали вместе с механизмом:**
+#
+# * симметрия «снял ключом — вернул командой» для ОБЫЧНЫХ каналов остаётся выше
+#   (`TestLoggerChannels`, `TestErrorChannels`) — она и была общим правилом;
+# * ловушка «запись об отмене прочитана как описание канала → фантомный файл»
+#   исчезла по построению: она существовала ровно потому, что у per-module
+#   каналов описание жило в ОДНОЙ секции (`modules`), а отметка о снятии — в
+#   ДРУГОЙ (`channels`). Одна секция — двух написаний нет;
+# * «канал переживает пересборку» проверялось на ключе `camera`, который приезжал
+#   из дефолта фреймворка. Дефолт убран (девять ключей доставляли ноль записей —
+#   замер в схеме), и воспроизвести условие было бы нечем: секции `modules` в
+#   `observability` никогда не существовало, то есть приложение этот механизм
+#   настроить не могло в принципе.
 
 # =============================================================================
 # A4 — служебные каналы плоскости статистики

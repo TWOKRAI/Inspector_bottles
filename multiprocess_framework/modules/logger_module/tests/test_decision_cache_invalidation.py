@@ -6,7 +6,7 @@
 Контекст дефекта: should_log(scope, level, module) кэширует решение "писать
 ли запись" по ключу (scope, level, module). Config-reload (reconfigure())
 уже инвалидирует этот кэш. Runtime-смена состава каналов —
-set_sink_enabled(), enable_module_logging(), disable_module_logging() —
+set_sink_enabled() —
 СЕГОДНЯ кэш не трогает.
 
 ВАЖНО — почему наивный тест здесь ничего бы не доказал:
@@ -174,43 +174,12 @@ class TestDirectRecomputeAfterRuntimeToggle:
         finally:
             mgr.shutdown()
 
-    def test_enable_module_logging_invalidates(self) -> None:
-        """Не вакуумный тест: без инвалидации второй should_log(...) с теми же
-        аргументами обслужился бы из кэша, и direct_calls не вырос бы.
-        Ожидается RED сейчас."""
-        mgr = _CountingLoggerManager(manager_name="CountEnableModule")
-        mgr.initialize()
-        try:
-            mgr.should_log(_SCOPE, _LEVEL, _MODULE)
-            assert mgr.calls_for(_SCOPE, _LEVEL, _MODULE) == 1
-
-            mgr.enable_module_logging("probe_module")
-            mgr.should_log(_SCOPE, _LEVEL, _MODULE)
-            assert mgr.calls_for(_SCOPE, _LEVEL, _MODULE) == 2, (
-                "enable_module_logging обязан инвалидировать decision cache"
-            )
-        finally:
-            mgr.shutdown()
-
-    def test_disable_module_logging_invalidates(self) -> None:
-        """Аналогично — выключение модульного логирования обязано сбрасывать
-        закэшированное решение так же, как это уже делает reconfigure().
-        Ожидается RED сейчас."""
-        mgr = _CountingLoggerManager(manager_name="CountDisableModule")
-        mgr.initialize()
-        try:
-            mgr.enable_module_logging("probe_module")
-            mgr.should_log(_SCOPE, _LEVEL, _MODULE)
-            calls_after_enable = mgr.calls_for(_SCOPE, _LEVEL, _MODULE)
-            assert calls_after_enable >= 1
-
-            mgr.disable_module_logging("probe_module")
-            mgr.should_log(_SCOPE, _LEVEL, _MODULE)
-            assert mgr.calls_for(_SCOPE, _LEVEL, _MODULE) == calls_after_enable + 1, (
-                "disable_module_logging обязан инвалидировать decision cache"
-            )
-        finally:
-            mgr.shutdown()
+    # Ф2.6: пара `enable_module_logging` / `disable_module_logging` снята вместе
+    # с механизмом per-module файлов. Свойство, которое эти два теста сторожили —
+    # «рантайм-смена состава каналов инвалидирует кэш решений» — остаётся
+    # покрытым парой `test_set_sink_enabled_*` выше: это тот же рычаг, тот же
+    # хук `_on_channels_changed` и тот же способ проверки (счётчик прямых
+    # пересчётов). Отдельного входа у снятой пары не было.
 
 
 class TestFailedToggleContract:

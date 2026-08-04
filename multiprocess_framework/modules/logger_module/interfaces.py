@@ -151,22 +151,7 @@ class ILoggerManager(IBaseManager, ABC):
     # =========================================================================
 
     @abstractmethod
-    def enable_module_logging(self, module_name: str, file_path: Optional[str] = None) -> None:
-        """Включить отдельный файл логирования для модуля.
-
-        Args:
-            module_name: Имя модуля (будет ключом канала).
-            file_path:   Путь к файлу. По умолчанию logs/{module_name}.log.
-        """
-
     @abstractmethod
-    def disable_module_logging(self, module_name: str) -> None:
-        """Выключить отдельный файл логирования для модуля."""
-
-    # =========================================================================
-    # Контекстное логирование
-    # =========================================================================
-
     @abstractmethod
     def push_context(self, **context_vars: Any) -> None:
         """Добавить поля в контекст ТЕКУЩЕГО потока (и текущего asyncio-таска).

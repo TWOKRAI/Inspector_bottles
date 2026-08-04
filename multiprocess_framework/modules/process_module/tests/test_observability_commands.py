@@ -168,17 +168,24 @@ class TestLoggerSink:
         assert res["success"] is False
         assert res["enabled"] is False, "отказ включения не имеет права рапортовать enabled=true"
 
-    def test_module_sink_round_trip_on_a_REAL_logger(self, tmp_path) -> None:
+    def test_sink_round_trip_on_a_REAL_logger(self, tmp_path) -> None:
         """Тот же круг, но на НАСТОЯЩЕМ LoggerManager, а не на фейке.
 
         Фейк выше доказывает обработчик, но не механизм: его ``set_sink_enabled``
-        возвращает True всегда, поэтому дефект «module-канал не включается
-        обратно» на нём был НЕВИДИМ и прожил до живого прогона. Этот тест
-        проводит команду до реального менеджера — и до файла.
+        возвращает True всегда, поэтому дефект «канал не включается обратно» на
+        нём был НЕВИДИМ и прожил до живого прогона. Этот тест проводит команду до
+        реального менеджера — и до файла.
+
+        **Переклассифицирован в Ф2.6.** Круг проверялся на per-module канале,
+        потому что односторонней была именно эта ветка: описание жило в секции
+        ``modules``, а команда искала его в ``channels``. Механизм снят, ветка
+        одна — свойство «команда доходит до реального файла» осталось несущим и
+        проверяется на обычном приёмнике.
         """
         from multiprocess_framework.modules.logger_module.configs import (
+            LoggerChannelSchema,
             LoggerManagerConfig,
-            LoggerModuleSchema,
+            LoggerScopeSchema,
         )
         from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 
@@ -187,15 +194,18 @@ class TestLoggerSink:
                 app_name="real_round_trip",
                 log_directory=str(tmp_path),
                 enable_batching=False,
-                modules={"trace": LoggerModuleSchema(enabled=True, file_path="trace.log")},
+                channels={
+                    "trace_file": LoggerChannelSchema(type="file", enabled=True, file_path="trace.log", rotate=False)
+                },
+                scopes={"BUSINESS": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["trace_file"])},
             )
         )
         try:
             _svc, cm = _make(logger=logger)
-            off = cm.dispatch("logger.sink.disable", {"sink": "module_trace"})
+            off = cm.dispatch("logger.sink.disable", {"sink": "trace_file"})
             assert off["success"] is True and off["enabled"] is False
 
-            on = cm.dispatch("logger.sink.enable", {"sink": "module_trace"})
+            on = cm.dispatch("logger.sink.enable", {"sink": "trace_file"})
             assert on["success"] is True and on["enabled"] is True
 
             logger.info("канал вернулся", module="trace")

@@ -5,8 +5,6 @@
 
 import logging
 import logging.handlers
-import tempfile
-import os
 
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.logger_module.core.log_config import (
@@ -82,59 +80,62 @@ class TestLoggerManager:
         manager.shutdown()
         assert manager.is_initialized is False
 
-    def test_module_rotate_false_uses_file_handler(self, tmp_path):
-        """Без ротации — FileHandler (избегаем os.rename на Windows для частых логов)."""
+    def test_rotate_false_uses_file_handler(self, tmp_path):
+        """Без ротации — FileHandler (избегаем os.rename на Windows для частых логов).
+
+        **Переклассифицирован в Ф2.6.** Свойство принадлежит файловому каналу, а
+        не снятому механизму per-module файлов: раньше единственным способом
+        задать ``rotate: false`` из конфига была секция ``modules``, теперь —
+        обычный канал.
+        """
         log_file = tmp_path / "frames.log"
         cfg = LoggerManagerConfig.model_validate(
             {
                 "enable_batching": False,
-                "modules": {
-                    "processor_frames": {
+                "channels": {
+                    "frames_file": {
+                        "type": "file",
                         "enabled": True,
                         "file_path": str(log_file),
-                        "min_level": "DEBUG",
                         "rotate": False,
                     }
                 },
+                "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["frames_file"]}},
             }
         )
         manager = LoggerManager(manager_name="TestLogger", config=cfg)
         manager.initialize()
-        ch = manager._module_channels["processor_frames"]
+        ch = manager._channel_registry.get("frames_file")
         assert ch.handler.__class__ is logging.FileHandler
         assert not isinstance(ch.handler, logging.handlers.RotatingFileHandler)
         manager.shutdown()
 
-    def test_module_channel(self):
-        """Тест создания канала для модуля."""
-        manager = LoggerManager(manager_name="TestLogger")
+    def test_channel_created_from_config_receives_records(self, tmp_path):
+        """Канал, объявленный конфигом, реально принимает запись.
+
+        **Переклассифицирован в Ф2.6.** Прежняя редакция поднимала канал
+        рантайм-вызовом ``enable_module_logging`` — этой ручки больше нет, и
+        рантайм-эквивалент ей теперь ровно один: объявить приёмник и правило.
+        Проверяется тот же наблюдаемый факт: файл создан и в нём есть запись.
+        """
+        log_file = tmp_path / "модуль.log"
+        cfg = LoggerManagerConfig.model_validate(
+            {
+                "enable_batching": False,
+                "channels": {"mod_file": {"type": "file", "enabled": True, "file_path": str(log_file)}},
+                "scopes": {"BUSINESS": {"enabled": True, "min_level": "DEBUG", "channels": ["mod_file"]}},
+                "loggers": {"test_module": {"channels_extra": ["mod_file"]}},
+            }
+        )
+        manager = LoggerManager(manager_name="TestLogger", config=cfg)
         manager.initialize()
-
-        # Создаем временный файл для модуля
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
-            temp_path = f.name
-
         try:
-            # Используем правильное имя метода
-            manager.enable_module_logging("test_module", file_path=temp_path)
             manager.info("Module message", module="test_module")
-
-            # Проверяем что файл создан
-            assert os.path.exists(temp_path)
-
-            # Закрываем все хендлеры перед удалением файла (важно для Windows)
-            manager.shutdown()
+            manager.flush()
+            assert log_file.exists()
+            assert "Module message" in log_file.read_text(encoding="utf-8", errors="replace")
         finally:
-            # Небольшая задержка для Windows (файл может быть еще открыт)
-            import time
-
-            time.sleep(0.1)
-            if os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except PermissionError:
-                    # На Windows файл может быть еще занят, игнорируем ошибку
-                    pass
+            manager.shutdown()
 
     def test_config_update(self):
         """Тест обновления конфигурации."""

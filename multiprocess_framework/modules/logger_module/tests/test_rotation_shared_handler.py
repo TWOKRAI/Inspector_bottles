@@ -197,24 +197,49 @@ class TestSharedHandlerRegistry:
 
 
 class TestRealAssemblyNoCollision:
-    """Реальная сборка LoggerManager: messages_file и router_messages делят хэндлер."""
+    """Реальная сборка: два канала на ОДИН путь делят один rotating-хэндлер."""
 
-    def test_messages_channels_share_one_handler(self, tmp_path) -> None:
+    def test_two_channels_on_one_path_share_one_handler(self, tmp_path) -> None:
+        """Свойство несущее, а не косметическое.
+
+        Два дескриптора на один файл ломают ротацию на Windows: ``doRollover``
+        закрывает СВОЙ поток и делает ``os.rename``, который падает WinError 32,
+        пока второй хэндлер держит свой fd. Ротация не срабатывает НИКОГДА —
+        так ``messages.log`` дорос до 645 МБ при лимите 60.
+
+        **Переклассифицирован в Ф2.6.** Раньше пара бралась готовой из дефолта
+        фреймворка: scope-канал ``messages_file`` и per-module ``router_messages``
+        указывали на один ``messages.log``. Механизм per-module файлов снят, и
+        тест сам объявляет пару — так он сторожит свойство, а не поставку.
+        """
+        from multiprocess_framework.modules.logger_module.configs import (
+            LoggerChannelSchema,
+            LoggerManagerConfig,
+            LoggerScopeSchema,
+        )
         from multiprocess_framework.modules.logger_module.core.logger_core import LoggerCore
 
+        shared = "общий.log"
         mgr = LoggerCore(
             manager_name="LoggerManager",
-            config={"log_directory": str(tmp_path), "enable_batching": False},
+            config=LoggerManagerConfig(
+                app_name="collision",
+                log_directory=str(tmp_path),
+                enable_batching=False,
+                channels={
+                    "первый": LoggerChannelSchema(type="file", enabled=True, file_path=shared),
+                    "второй": LoggerChannelSchema(type="file", enabled=True, file_path=shared),
+                },
+                scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["первый", "второй"])},
+            ),
         )
         try:
-            scope_ch = mgr._channel_registry.get("messages_file")
-            module_ch = mgr._module_channels.get("router_messages")
-            assert scope_ch is not None, "scope-канал messages_file должен существовать"
-            assert module_ch is not None, "module-канал router_messages должен существовать"
-            # Оба указывают на messages.log → должны делить ОДИН rotating-хэндлер.
-            assert _handler_key(scope_ch.handler.baseFilename) == _handler_key(module_ch.handler.baseFilename), (
+            first = mgr._channel_registry.get("первый")
+            second = mgr._channel_registry.get("второй")
+            assert first is not None and second is not None, "оба канала обязаны существовать"
+            assert _handler_key(first.handler.baseFilename) == _handler_key(second.handler.baseFilename), (
                 "оба канала обязаны резолвиться в один и тот же файл"
             )
-            assert scope_ch.handler is module_ch.handler, "коллизия пути обязана делить один хэндлер (один fd)"
+            assert first.handler is second.handler, "коллизия пути обязана делить один хэндлер (один fd)"
         finally:
             mgr.shutdown()

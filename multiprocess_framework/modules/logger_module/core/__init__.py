@@ -10,7 +10,6 @@ from .log_config import (
     LogScope,
     LoggerChannelSchema,
     LoggerManagerConfig,
-    LoggerModuleSchema,
     LoggerRuleSchema,
     LoggerScopeSchema,
 )
@@ -22,7 +21,6 @@ __all__ = [
     "LoggerManagerConfig",
     "LoggerChannelSchema",
     "LoggerScopeSchema",
-    "LoggerModuleSchema",
     "LoggerRuleSchema",
     "LogLevel",
     "LogScope",

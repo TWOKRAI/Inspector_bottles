@@ -23,10 +23,10 @@ import pytest
 from multiprocess_framework.modules.logger_module.configs import (
     LoggerChannelSchema,
     LoggerManagerConfig,
-    LoggerModuleSchema,
     LoggerScopeSchema,
 )
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+from multiprocess_framework.modules.logger_module.channels.log_channel import create_channel
 from multiprocess_framework.modules.logger_module.log_enums import LogLevel, LogScope
 
 
@@ -35,7 +35,6 @@ def _config(directory: Path) -> LoggerManagerConfig:
         app_name="route_cache",
         log_directory=str(directory),
         enable_batching=False,
-        modules={"trace": LoggerModuleSchema(enabled=True, file_path="trace.log")},
         channels={
             "first": LoggerChannelSchema(name="first", type="file", enabled=True, file_path="first.log", rotate=False),
             "second": LoggerChannelSchema(
@@ -60,22 +59,39 @@ def logger(tmp_path: Path):
 class TestRouteCacheStaleness:
     """Устаревший кэш маршрута = неверный ответ. Каждая пара — про один триггер."""
 
-    def test_module_channel_appears_after_it_was_cached_without_it(self, logger, tmp_path) -> None:
-        """Появление module-канала меняет маршрут УЖЕ закэшированного модуля.
+    def test_new_channel_appears_after_the_route_was_cached_without_it(self, logger, tmp_path) -> None:
+        """Появление приёмника меняет маршрут УЖЕ закэшированного источника.
 
-        `_route` дописывает `module_<имя>`, когда модуль есть в карте
-        module-каналов, — то есть состав этой карты входит в закэшированное
-        значение наравне с реестром.
+        **Переклассифицирован в Ф2.6, свойство сохранено.** Раньше триггером был
+        per-module канал: `_route` дописывал `module_<имя>`, и состав той карты
+        входил в закэшированное значение наравне с реестром. Механизм снят, но
+        свойство осталось несущим и лишь сменило вход — теперь состав маршрута
+        меняет правило по имени и его приёмник. Устаревший кэш даёт тот же
+        симптом: приёмник есть, а записи в него не идут до перезапуска.
         """
-        logger.info("до module-канала", module="новый")
+        logger.info("до появления приёмника", module="новый")
         logger.flush()
         assert not (tmp_path / "новый.log").exists()
 
-        logger.enable_module_logging("новый", file_path="новый.log")
-        logger.info("после module-канала", module="новый")
+        logger.register_channel(
+            create_channel(
+                "новый_файл",
+                LoggerChannelSchema(
+                    name="новый_файл",
+                    type="file",
+                    enabled=True,
+                    file_path=str(tmp_path / "новый.log"),
+                    rotate=False,
+                ),
+            )
+        )
+        logger.config.scopes["BUSINESS"].channels.append("новый_файл")
+        logger.invalidate_decision_cache()
+
+        logger.info("после появления приёмника", module="новый")
         logger.flush()
 
-        assert "после module-канала" in (tmp_path / "новый.log").read_text(encoding="utf-8")
+        assert "после появления приёмника" in (tmp_path / "новый.log").read_text(encoding="utf-8")
 
     def test_reconfigure_invalidates_the_route(self, logger, tmp_path) -> None:
         """Смена порога скоупа отменяет закэшированный маршрут.

@@ -108,22 +108,23 @@ class TestErrorPlaneIsQuietAtRest:
             assert [s.enabled for s in mgr.config.scopes.values()] == [False] * len(mgr.config.scopes), (
                 "дефолтный ErrorManager получил ЧУЖИЕ (логгерные) скоупы"
             )
-            assert mgr.config.modules == {}
         finally:
             mgr.shutdown()
 
-    def test_no_module_channels_are_opened(self, tmp_path: Path) -> None:
-        """Плоскость ошибок не открывает per-module файлы логгера.
+    def test_no_foreign_files_are_opened(self, tmp_path: Path) -> None:
+        """Плоскость ошибок не открывает чужих файлов.
 
         Проверка по ДИСКУ, а не по реестру: цена дефекта была именно в файлах —
         второй открытый хэндл на тот же ротируемый файл, что держит логгер.
+
+        **Переклассифицирован в Ф2.6.** Прежняя редакция называла конкретного
+        нарушителя (per-module файлы логгера) и заглядывала в снятый счётчик
+        ``module_channels_count``. Механизма нет, а свойство шире исходного
+        повода и осталось несущим: плоскость ошибок владеет ровно тремя своими
+        файлами и ничем больше.
         """
         mgr = _manager(tmp_path)
         try:
-            names = sorted(mgr._channel_registry.names())
-            assert [n for n in names if n.startswith("module_")] == []
-            assert mgr.get_stats()["module_channels_count"] == 0
-
             unexpected = sorted(
                 p.name for p in tmp_path.glob("*.log") if p.name not in {"critical.log", "errors.log", "warnings.log"}
             )
@@ -154,11 +155,6 @@ class TestErrorPlaneIsQuietAtRest:
         mine = {"BUSINESS": {"enabled": True, "min_level": "INFO", "channels": ["errors_file"]}}
         expanded = expand_error_manager_config({"scopes": mine})
         assert expanded["scopes"] == mine
-
-    def test_explicit_modules_win_over_the_default(self) -> None:
-        mine = {"audit": {"enabled": True, "file_path": "audit.log"}}
-        expanded = expand_error_manager_config({"modules": mine})
-        assert expanded["modules"] == mine
 
 
 # =============================================================================

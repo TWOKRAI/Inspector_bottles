@@ -32,7 +32,9 @@ from multiprocess_framework.modules.logger_module.core.log_config import (
     LoggerScopeSchema,
     LogScope,
 )
+from multiprocess_framework.modules.logger_module.configs import LoggerRuleSchema
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+from multiprocess_framework.modules.logger_module.core.name_hierarchy import NameHierarchy
 
 
 class _SpyChannel(IChannel):
@@ -261,54 +263,35 @@ def test_custom_routing_counts_unresolved(tmp_path: Path) -> None:
         mgr.shutdown()
 
 
-def test_module_channel_dedup_survives(tmp_path: Path) -> None:
-    """Дедупликация module-канала уехала в ``_route`` и обязана работать там.
+def test_extra_channel_dedup_survives(tmp_path: Path) -> None:
+    """Дедупликация приёмников живёт в ``_route`` и обязана работать там.
 
-    Инвариант Ф0.9 «одна запись — одна копия»: без дедупликации запись при
-    скоупе без явного списка каналов легла бы в module-файл дважды.
+    Инвариант Ф0.9 «одна запись — одна копия». **Переклассифицирован в Ф2.6:**
+    раньше вторую копию давал per-module канал — при скоупе без явного списка
+    fallback брал весь реестр, где module-канал уже лежал, и его дописывали
+    вторым. Механизм снят, сложение осталось (``channels_extra``), и ловушка
+    воспроизводится дословно: добавка называет приёмник, который уже пришёл из
+    fallback'а.
     """
     mgr = _logger(tmp_path)
     try:
         mgr.config.scopes["SYSTEM"].channels = []
-        mgr.invalidate_decision_cache()
-        mgr.enable_module_logging("proba")
-        spy = _SpyChannel("module_proba")
-        mgr._channel_registry.unregister("module_proba")
+        spy = _SpyChannel("проба_файл")
         mgr._channel_registry.register(spy)
-        mgr._module_channels["proba"] = spy  # type: ignore[assignment]
+        mgr._name_hierarchy = NameHierarchy({"proba": LoggerRuleSchema(channels_extra=["проба_файл"])})
+        mgr.invalidate_decision_cache()
 
         mgr.log(LogScope.SYSTEM, LogLevel.INFO, "одна запись", module="proba")
 
-        assert len(spy.written) == 1, f"запись легла в module-канал {len(spy.written)} раз(а)"
+        assert len(spy.written) == 1, f"запись легла в приёмник {len(spy.written)} раз(а)"
     finally:
         mgr.shutdown()
 
 
-def test_module_channel_outside_registry_still_receives(tmp_path: Path) -> None:
-    """P5: module-канал вне реестра — хук резолва, а не «на всякий случай».
-
-    Два хранилища каналов у логгера расходятся штатно: generic-выключение
-    приёмника (``set_sink_enabled``, база Ф0.6) снимает канал из РЕЕСТРА, а
-    словарь ``_module_channels`` его сохраняет. Общий писатель поднят в базу,
-    которая знает только реестр, — без хука ``_resolve_channel`` записи
-    module-каналов в этом состоянии перестали бы доходить, и потеря выглядела бы
-    «законной»: счётчик unresolved растёт, значит система честна. Она была бы
-    честна насчёт неправильного.
-    """
-    mgr = _logger(tmp_path)
-    try:
-        mgr.enable_module_logging("proba")
-        spy = _SpyChannel("module_proba")
-        mgr._module_channels["proba"] = spy  # type: ignore[assignment]
-        mgr._channel_registry.unregister("module_proba")
-        assert "module_proba" not in mgr._channel_registry.names(), "предусловие: канала нет в реестре"
-
-        before_unresolved = mgr.stats["unresolved_channel_records"]
-        mgr.log(LogScope.SYSTEM, LogLevel.INFO, "запись в module-канал", module="proba")
-
-        assert [r["message"] for r in spy.written] == ["запись в module-канал"], (
-            "запись не дошла до module-канала вне реестра"
-        )
-        assert mgr.stats["unresolved_channel_records"] == before_unresolved, "живой канал засчитан как несуществующий"
-    finally:
-        mgr.shutdown()
+# Ф2.6: тест «module-канал вне реестра всё равно принимает» снят вместе с
+# механизмом. Он сторожил хук ``_resolve_channel``, существовавший ровно потому,
+# что у логгера было ДВА хранилища каналов: generic-выключение приёмника снимало
+# канал из реестра, а второй словарь его сохранял. Хранилище теперь одно, и
+# расходиться нечему — свойство исчезло вместе с причиной, а не осталось
+# непроверенным. Само выключение приёмника и его учёт покрыты
+# ``test_sink_control.py`` и ``test_unknown_channel_accounting.py``.

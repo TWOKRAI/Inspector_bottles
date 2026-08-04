@@ -36,7 +36,6 @@ from ..interfaces import ILoggerManager
 from ..configs.logger_manager_config import (
     LoggerChannelSchema,
     LoggerManagerConfig,
-    LoggerModuleSchema,
     LoggerScopeSchema,
 )
 from .log_config import LogLevel, LogScope
@@ -76,12 +75,6 @@ from ..utils import LogMessage, apply_format
 #: ЗАКОННОЕ закэшированное значение («запись отклонена гейтом»), и обычный
 #: `dict.get(key)` не отличил бы «отклонена» от «ещё не считали».
 _ROUTE_MISS = object()
-
-#: Префикс имён per-module каналов. Единственное написание связи «модуль
-#: ``camera`` ↔ канал ``module_camera``»: до 5.10.c литерал ``f"module_{name}"``
-#: жил только в сборщике, и снаружи (в конфиге, в команде ``sink.disable``) имя
-#: приходилось знать наизусть.
-MODULE_CHANNEL_PREFIX = "module_"
 
 #: Метки экземпляров менеджеров — ключ процессного реестра колец `memory`.
 #: Счётчик, а не ``id()``: адрес переиспользуется после сборки мусора, и новый
@@ -244,7 +237,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._last_applied_config = log_config
 
         # Module-specific channels (separate from main registry)
-        self._module_channels: Dict[str, LogChannel] = {}
 
         # Ф2.2: дерево правил по имени источника. Заводится ДО первой записи и
         # пересобирается там же, где каналы (``_apply_log_config_rebuild``), —
@@ -290,7 +282,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 "messages_processed": 0,
                 "messages_skipped": 0,
                 "messages_batched": 0,
-                "module_files_created": 0,
                 # Сколько раз штатный маршрут ошибок не принял запись и сработал
                 # floor. Ненулевое значение — сигнал «маршрут ошибок сломан», а
                 # не норма. У статистики аналога нет: там нет записи, которую
@@ -366,11 +357,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                     channel.close()
                 except Exception as e:
                     self._fallback_log("ERROR", f"channel close failed: {e}")
-            for channel in list(self._module_channels.values()):
-                try:
-                    channel.close()
-                except Exception as e:
-                    self._fallback_log("ERROR", f"module channel close failed: {e}")
 
             # Кольца `memory` переживают КАНАЛ намеренно, но не менеджера: реестр
             # процессный, и без этой уборки они жили бы до конца процесса.
@@ -426,29 +412,8 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         - modules: отдельные файлы для модулей (database, processor, frames и т.д.)
         """
         for channel_name, channel_config in self.config.channels.items():
-            # Task 5.10.c (резидуал R3 из 5.12): имена `module_*` в секции
-            # `channels` — ЗАПИСИ ОБ ОТМЕНЕ, а не описания каналов. Описание
-            # module-канала живёт в `modules` (там путь к файлу), а сюда его
-            # имя попадает единственным способом: командой `sink.disable
-            # module_camera`, которая пишет в слой `channels.<имя>.enabled`.
-            # Строить канал по такой записи нельзя — у неё нет `file_path`, и
-            # результатом был бы фантомный `module_camera.log` рядом с настоящим
-            # `camera.log`, открытый тем же процессом.
-            if str(channel_name).startswith(MODULE_CHANNEL_PREFIX):
-                continue
             if channel_config.enabled:
                 self._setup_channel(str(channel_name), channel_config)
-
-        # Автосоздание каналов для модулей из config.modules
-        for module_name, module_config in self.config.modules.items():
-            # …и здесь та же запись читается по назначению: до 5.10.c ключ
-            # `channels.module_camera.enabled=false` не гасил ничего, снятие
-            # держалось одной лишь отметкой оператора, и любой `reconfigure`
-            # мимо слоёв воскрешал канал молча (воспроизведено ревью 5.12).
-            if self._module_channel_disabled(str(module_name)):
-                continue
-            if getattr(module_config, "enabled", True) and getattr(module_config, "file_path", None):
-                self._setup_module_channel(module_name, module_config)
 
         self._warn_on_silenced_error_scopes()
 
@@ -569,49 +534,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         except Exception as e:
             self._fallback_log("ERROR", f"Failed to setup channel {channel_name}: {e}")
 
-    def _module_channel_disabled(self, module_name: str) -> bool:
-        """Снят ли module-канал записью ``channels.module_<имя>.enabled = false``.
-
-        Task 5.10.c. Имя канала (``module_camera``) и имя модуля (``camera``)
-        различаются — оператор и команда ``sink.disable`` знают ПЕРВОЕ, конфиг
-        хранит второе. Перевод делается здесь, в одном месте, чтобы у одного
-        снятия не завелось двух написаний.
-        """
-        override = self.config.channels.get(f"{MODULE_CHANNEL_PREFIX}{module_name}")
-        return override is not None and not getattr(override, "enabled", True)
-
-    def _setup_module_channel(self, module_name: str, module_config: LoggerModuleSchema):
-        """Создать файловый канал для module_* (из modules или enable_module_logging)."""
-        path = self._resolved_file_path(
-            module_config.file_path,
-            f"logs/{module_name}.log",
-        )
-        max_size = module_config.max_size if module_config.max_size is not None else 10 * 1024 * 1024
-        backup_count = module_config.backup_count if module_config.backup_count is not None else 5
-        rotate = module_config.rotate
-        try:
-            ch_name = f"{MODULE_CHANNEL_PREFIX}{module_name}"
-            channel_config = LoggerChannelSchema(
-                name=ch_name,
-                type="file",
-                enabled=True,
-                file_path=path,
-                format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-                max_size=max_size,
-                backup_count=backup_count,
-                rotate=rotate,
-            )
-            channel = create_channel(ch_name, channel_config)
-            self._module_channels[module_name] = channel
-            self._channel_registry.register(channel)
-            self.stats["module_files_created"] += 1
-            self.debug(
-                f"Module channel created: {module_name} -> {path}",
-                module="logger_manager",
-            )
-        except Exception as e:
-            self._fallback_log("ERROR", f"Failed to setup module channel {module_name}: {e}")
-
     def _setup_batcher(self):
         """Настроить BatchBuffer из CRM если батчинг включён."""
         if self.config.enable_batching:
@@ -640,13 +562,12 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     def _open_log_file_paths(self) -> List[str]:
         """Пути, в которые прямо сейчас пишут каналы этого менеджера.
 
-        Их sweep не трогает никогда. Собираются из обоих мест: реестр CRM и
-        отдельный словарь ``_module_channels`` — module-каналы лежат и там, и
-        там, но полагаться на это нельзя (``disable_module_logging`` снимает
-        только из реестра).
+        Их sweep не трогает никогда. Источник ровно один — реестр CRM.
+        До Ф2.6 их было два: per-module каналы жили ещё и в отдельном словаре,
+        и полагаться на их присутствие в реестре было нельзя.
         """
         paths: List[str] = []
-        for channel in list(self._channel_registry.all()) + list(self._module_channels.values()):
+        for channel in list(self._channel_registry.all()):
             file_path = getattr(channel, "file_path", None)
             if file_path:
                 paths.append(str(file_path))
@@ -780,9 +701,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         """Хук CRM.reconfigure: пересобрать каналы из нового конфига + сбросить кэш.
 
         Базовый ``reconfigure`` уже сделал flush() и ``_close_all_channels()``
-        (очистил реестр CRM). Но LoggerManager держит отдельный словарь
-        ``_module_channels`` со ссылками на те же канал-объекты — их тоже надо
-        закрыть и очистить, иначе ``_setup_channels`` создаст дубли.
+        (очистил реестр CRM). До Ф2.6 здесь требовалась вторая уборка: логгер
+        держал per-module каналы отдельным словарём, и без неё ``_setup_channels``
+        создавал дубли. Второго места больше нет.
 
         Повторяем именно логику ``_setup_channels`` (каналы регистрируются прямо
         в ``_channel_registry.register``, без route в Dispatcher — в отличие от
@@ -801,13 +722,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         CRM через ``_close_all_channels()``.
         """
         # 1. Закрыть и очистить module-каналы (их ещё нет в очищенном реестре).
-        for channel in list(self._module_channels.values()):
-            try:
-                channel.close()
-            except Exception as e:
-                self._fallback_log("ERROR", f"module channel close failed: {e}")
-        self._module_channels.clear()
-
         # 2. Применить новый конфиг.
         self.config = log_config
         self.app_name = self.config.app_name
@@ -886,24 +800,18 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         :meth:`get_stats`, поэтому сумма монотонна и переживает и снятие
         приёмника, и полный ``reconfigure``.
 
-        **Заодно снимается module-канал со своей карты (живая находка 2026-07-28).**
-        ``disable_module_logging`` делает уборку правильно, а generic-путь
-        ``set_sink_enabled(enabled=False)`` знал только реестр — запись
-        оставалась в ``_module_channels``, откуда её продолжал доставать
-        :meth:`_resolve_channel`. Результат воспроизведён на стенде: после
-        ``logger.sink.disable module_trace`` пять записей модуля ушли в УЖЕ
-        ЗАКРЫТЫЙ канал и легли в ``channel_refused_records`` (5) — то есть
-        штатное «выключи мне этот лог» система показывала как потерю записей,
-        а 2.V2 подняла бы по ней аномалию ``observability_loss``.
+        **Ф2.6: вторая карта каналов убрана вместе с механизмом per-module
+        файлов.** Здесь же снималась запись из неё — живая находка 2026-07-28:
+        ``set_sink_enabled(enabled=False)`` знал только реестр, запись оставалась
+        во втором словаре, и после ``logger.sink.disable module_trace`` пять
+        записей ушли в УЖЕ ЗАКРЫТЫЙ канал (``channel_refused_records`` = 5).
+        Штатное «выключи мне этот лог» выглядело потерей записей. Теперь карта
+        одна, и этот класс дефекта невозможен: снимать нечего.
         """
         for key in _CHANNEL_BACKPRESSURE_KEYS:
             value = getattr(channel, key, 0)
             if value:
                 self._absorbed_backpressure[key] = self._absorbed_backpressure.get(key, 0) + value
-
-        name = getattr(channel, "name", None)
-        if name and str(name).startswith("module_"):
-            self._module_channels.pop(str(name)[len("module_") :], None)
 
     def _on_channels_changed(self) -> None:
         """Состав каналов изменился в рантайме → решение should_log больше не доверенное.
@@ -944,19 +852,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # УЧЁТ ПОТЕРЬ НА СТЫКЕ «ИМЯ → КАНАЛ» (Ф0.4)
     # =========================================================================
 
-    def _resolve_channel(self, name: str) -> Optional[Any]:
-        """Плюс module-каналы к реестру базы.
-
-        Они лежат отдельным словарём ``_module_channels`` и в реестре есть не
-        всегда (``disable_module_logging`` снимает только из реестра). Без этого
-        хука подъём писателя в базу молча потерял бы записи module-каналов —
-        и потерял бы их «законно», через счётчик unresolved.
-        """
-        channel = self._channel_registry.get(name)
-        if channel is None:
-            channel = self._module_channels.get(name.replace("module_", "", 1))
-        return channel
-
     def _flush_batch(self, channel: str, batch: List[Dict]) -> int:
         """Callback для BatchBuffer — записать пачку в канал.
 
@@ -970,8 +865,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         относит на ``flush_failed_by_channel``.
         """
         ch = self._channel_registry.get(channel)
-        if ch is None:
-            ch = self._module_channels.get(channel.replace("module_", "", 1))
         if ch is None:
             # Канала нет — вся пачка потеряна. Не событие «ничего не произошло».
             # Ф0.4: считаем ПОКАЗАПИСНО (не «одна пачка»), иначе размер потери
@@ -1313,18 +1206,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                     if channel_name not in merged:
                         merged.append(channel_name)
                 channels = merged
-
-        if module in self._module_channels:
-            channels = list(channels)
-            module_channel = f"module_{module}"
-            # Дедупликация обязательна, а не «на всякий случай»: когда у скоупа
-            # НЕТ явного списка каналов, fallback берёт весь реестр — а module-канал
-            # уже зарегистрирован в нём. Без проверки одна запись уходила в один и
-            # тот же файл дважды, что прямо нарушает инвариант Ф0.9 «одна ошибка —
-            # одна запись». В прод-дефолтах не стреляло (там скоупы со списками),
-            # найдено ревью Ф0.9 с воспроизведением.
-            if module_channel not in channels:
-                channels.append(module_channel)
 
         return channels
 
@@ -1700,29 +1581,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     def critical(self, message: LogMessage, module: str = "main", *args: Any, **extra):
         self.log(LogScope.SYSTEM, LogLevel.CRITICAL, message, module, *args, **extra)
 
-    # =========================================================================
-    # УПРАВЛЕНИЕ МОДУЛЯМИ
-    # =========================================================================
+        # =========================================================================
+        # УПРАВЛЕНИЕ МОДУЛЯМИ
+        # =========================================================================
 
-    def enable_module_logging(self, module_name: str, file_path: Optional[str] = None):
-        self._setup_module_channel(module_name, LoggerModuleSchema(enabled=True, file_path=file_path))
-        # Ф0.8: module-канал — такая же часть состава каналов, как sink.
-        self._on_channels_changed()
-
-    def disable_module_logging(self, module_name: str):
-        if module_name not in self._module_channels:
-            return
-        channel = self._module_channels[module_name]
-        try:
-            channel.close()
-        except Exception:  # nosec B110 — закрытие канала best-effort, ошибка не должна валить disable
-            pass
-        self._channel_registry.unregister(f"module_{module_name}")
-        del self._module_channels[module_name]
-        # F6: module-каналы — как раз тот случай, ради которого уборка и нужна:
-        # их состав меняется в рантайме, и имя каждого навсегда оседало в
-        # словарях буфера.
-        self._forget_buffered_channel(f"module_{module_name}")
         self._on_channels_changed()
 
     # =========================================================================
@@ -1736,38 +1598,17 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         ``enabled=False``: включение через control-plane — явный override
         оператора над конфигом.
 
-        **Module-каналы ищутся во ВТОРОМ месте (живая находка 2026-07-28).**
-        Они описаны в ``config.modules``, а не в ``config.channels``, и прежняя
-        редакция смотрела только в первый словарь — то есть ручка была
-        ОДНОСТОРОННЕЙ: ``logger.sink.disable module_trace`` проходил, а обратный
-        ``enable`` возвращал ``success=false``, и канал не возвращался до
-        рестарта процесса. Воспроизведено вживую на camera_0. Прежний докстринг
-        объяснял отказ тем, что «параметры взять негде» — для module-каналов это
-        было неверно: параметры лежали рядом, и ``config.reload`` их оттуда
-        доставал, восстанавливая канал. То есть отказ был не пределом, а дырой.
-
-        Канал, поднятый ТОЛЬКО рантайм-вызовом ``enable_module_logging`` и не
-        описанный в конфиге, вернуть по-прежнему неоткуда — вот там параметров
-        действительно нет.
+        **Ф2.6: второе место, где искались параметры, убрано.** До неё
+        per-module каналы описывались секцией ``modules``, а не ``channels``, и
+        ручка была ОДНОСТОРОННЕЙ: ``sink.disable`` проходил, а обратный
+        ``enable`` возвращал ``success=false`` до перезапуска процесса
+        (воспроизведено вживую на camera_0). Вместе с механизмом ушёл и порядок
+        ветвления, который приходилось держать обратным, чтобы запись об отмене
+        не была прочитана как описание канала и не породила фантомный файл.
 
         Сам toggle (закрыть/снять/зарегистрировать) живёт в базе: он одинаков
         у всех трёх плоскостей. Здесь только «откуда взять параметры».
         """
-        text = str(name)
-        # Порядок веток обратный «сначала channels» СОЗНАТЕЛЬНО (Task 5.10.c).
-        # С появлением декларативного снятия в `channels` заводится запись
-        # `module_camera: {enabled: false}` — без пути к файлу. Прежний порядок
-        # взял бы её за описание и построил фантомный `module_camera.log` рядом
-        # с настоящим `camera.log`, а настоящий канал так и не вернулся бы.
-        # Для module-имён источник параметров ровно один — секция `modules`.
-        if text.startswith(MODULE_CHANNEL_PREFIX):
-            module_name = text[len(MODULE_CHANNEL_PREFIX) :]
-            module_config = self.config.modules.get(module_name)
-            if module_config is not None:
-                self._setup_module_channel(module_name, module_config)
-                return self._channel_registry.get(name) is not None
-            return False
-
         channel_config = self.config.channels.get(name)
         if channel_config is not None:
             self._setup_channel(str(name), channel_config)  # пересоздаёт + регистрирует
@@ -1785,8 +1626,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "messages_processed": self.stats["messages_processed"],
             "messages_skipped": self.stats["messages_skipped"],
             "channels_count": len(self._channel_registry),
-            "module_channels_count": len(self._module_channels),
-            "module_files_created": self.stats["module_files_created"],
             "batching_enabled": self.config.enable_batching,
             # Ф0.3: до этой правки счётчик жил только в self.stats и наружу не
             # выходил — «сколько ошибок не дошло ни до одного канала» нельзя было

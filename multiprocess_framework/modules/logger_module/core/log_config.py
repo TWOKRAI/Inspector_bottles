@@ -9,7 +9,6 @@ from ..log_enums import LogLevel, LogScope
 from ..configs.logger_manager_config import (
     LoggerChannelSchema,
     LoggerManagerConfig,
-    LoggerModuleSchema,
     LoggerRuleSchema,
     LoggerScopeSchema,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "LogScope",
     "LoggerChannelSchema",
     "LoggerManagerConfig",
-    "LoggerModuleSchema",
     "LoggerRuleSchema",
     "LoggerScopeSchema",
 ]

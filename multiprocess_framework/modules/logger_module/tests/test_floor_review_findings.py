@@ -36,7 +36,6 @@ from multiprocess_framework.modules.logger_module.core.error_floor import reset_
 from multiprocess_framework.modules.logger_module.core.log_config import (
     LoggerChannelSchema,
     LoggerManagerConfig,
-    LoggerModuleSchema,
     LoggerScopeSchema,
 )
 from multiprocess_framework.modules.logger_module.channels.log_channel import LogChannel
@@ -310,12 +309,17 @@ def test_disabled_channel_does_not_choose_the_floor_location(tmp_path: Path) -> 
 
 
 def test_no_duplicate_when_scope_has_no_explicit_channels(tmp_path: Path) -> None:
-    """Пустой ``scope.channels`` + module-канал не дают ДВУХ копий записи.
+    """Пустой ``scope.channels`` + добавка правила не дают ДВУХ копий записи.
 
-    При пустом списке fallback берёт весь реестр каналов — а module-канал уже
-    зарегистрирован в нём, и его добавляли вторым. Инвариант Ф0.9 «одна ошибка
-    = одна запись» ломался; в прод-дефолтах не стреляло только потому, что там
-    у скоупов явные списки.
+    **Переклассифицирован в Ф2.6, свойство сохранено дословно.** Опасность
+    исходно нашли на per-module канале: при пустом списке скоупа fallback берёт
+    ВЕСЬ реестр, module-канал в нём уже есть, и его дописывали вторым — одна
+    ошибка ложилась в файл дважды. Механизм per-module файлов снят, но сложение
+    осталось: ``channels_extra`` добавляет приёмник к унаследованному набору, и
+    ровно та же ловушка воспроизводится, когда набор пришёл из fallback'а.
+
+    В прод-дефолтах не стреляло и тогда, и сейчас — только потому, что у скоупов
+    есть явные списки. Тест держит именно вырожденный путь.
     """
     mgr = LoggerManager(
         manager_name="DupProbe",
@@ -323,11 +327,12 @@ def test_no_duplicate_when_scope_has_no_explicit_channels(tmp_path: Path) -> Non
             app_name="floor_findings",
             log_directory=str(tmp_path),
             enable_batching=False,
-            modules={
-                "database": LoggerModuleSchema(enabled=True, file_path="database.log", min_level="DEBUG"),
+            channels={
+                "database_file": LoggerChannelSchema(type="file", enabled=True, file_path="database.log", rotate=False),
             },
-            channels={},
+            # Пустой список — тот самый вырожденный случай: набор берётся из реестра.
             scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=[])},
+            loggers={"database": {"channels_extra": ["database_file"]}},
         ),
         process=_FakeProcess("dup_probe"),
     )

@@ -534,6 +534,20 @@
     },
     "manifest_path": "<ROOT>/multiprocess_prototype/app.yaml",
     "observability_app": {
+      "channels": {
+        "busy_file": {
+          "file_path": "busy.log",
+          "type": "file"
+        },
+        "gui_file": {
+          "file_path": "gui.log",
+          "type": "file"
+        },
+        "trace_file": {
+          "file_path": "trace.log",
+          "type": "file"
+        }
+      },
       "console": true,
       "enable_batching": true,
       "errors": {
@@ -543,6 +557,28 @@
       },
       "file": true,
       "log_level": "INFO",
+      "loggers": {
+        "gui": {
+          "channels_extra": [
+            "gui_file"
+          ]
+        },
+        "multiprocess_framework.modules.command_module": {
+          "channels": [
+            "busy_file"
+          ]
+        },
+        "multiprocess_framework.modules.dispatch_module": {
+          "channels": [
+            "busy_file"
+          ]
+        },
+        "trace": {
+          "channels_extra": [
+            "trace_file"
+          ]
+        }
+      },
       "retention_days": 7,
       "retention_sweep_interval_sec": 3600.0,
       "retention_total_mb": 200,
@@ -593,7 +629,20 @@
       "observability": {
         "batch_max_pending": 10000,
         "batch_overflow_policy": "drop_oldest",
-        "channels": {},
+        "channels": {
+          "busy_file": {
+            "file_path": "busy.log",
+            "type": "file"
+          },
+          "gui_file": {
+            "file_path": "gui.log",
+            "type": "file"
+          },
+          "trace_file": {
+            "file_path": "trace.log",
+            "type": "file"
+          }
+        },
         "commands": {
           "log_success": false
         },
@@ -609,7 +658,28 @@
         "file": true,
         "log_directory": null,
         "log_level": "INFO",
-        "loggers": {},
+        "loggers": {
+          "gui": {
+            "channels_extra": [
+              "gui_file"
+            ]
+          },
+          "multiprocess_framework.modules.command_module": {
+            "channels": [
+              "busy_file"
+            ]
+          },
+          "multiprocess_framework.modules.dispatch_module": {
+            "channels": [
+              "busy_file"
+            ]
+          },
+          "trace": {
+            "channels_extra": [
+              "trace_file"
+            ]
+          }
+        },
         "retention_days": 7,
         "retention_sweep_interval_sec": 3600.0,
         "retention_total_mb": 200,
@@ -657,6 +727,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -666,6 +750,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -741,6 +847,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -755,6 +865,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -800,88 +914,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -982,6 +1047,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -991,6 +1070,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -1086,6 +1187,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -1100,6 +1205,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -1145,88 +1254,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -1324,6 +1384,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -1333,6 +1407,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -1406,6 +1502,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -1420,6 +1520,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -1465,88 +1569,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -1634,6 +1689,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -1643,6 +1712,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -1695,6 +1786,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -1709,6 +1804,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -1754,88 +1853,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -1923,6 +1973,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -1932,6 +1996,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -2025,6 +2111,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -2039,6 +2129,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -2084,88 +2178,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -2256,6 +2301,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -2265,6 +2324,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -2331,6 +2412,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -2345,6 +2430,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -2390,88 +2479,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -2561,6 +2601,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -2570,6 +2624,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -2632,6 +2708,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -2646,6 +2726,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -2691,88 +2775,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -2863,6 +2898,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -2872,6 +2921,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -2951,6 +3022,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -2965,6 +3040,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -3010,88 +3089,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -3198,6 +3228,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -3207,6 +3251,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -3318,6 +3384,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -3332,6 +3402,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -3377,88 +3451,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -3551,6 +3576,20 @@
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
+            }
+          },
           "console": true,
           "enable_batching": true,
           "errors": {
@@ -3560,6 +3599,28 @@
           },
           "file": true,
           "log_level": "INFO",
+          "loggers": {
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            }
+          },
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
@@ -3681,6 +3742,10 @@
           "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "type": "file"
+            },
             "console": {
               "backup_count": 5,
               "capacity": null,
@@ -3695,6 +3760,10 @@
               "rotate": true,
               "type": "console",
               "url": null
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "type": "file"
             },
             "messages_file": {
               "backup_count": 5,
@@ -3740,88 +3809,39 @@
               "rotate": true,
               "type": "file",
               "url": null
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "type": "file"
             }
           },
           "compress_rotated": false,
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
-          "loggers": {},
-          "manager_name": "LoggerManager",
-          "modules": {
-            "camera": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "camera.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "database": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "database.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
+          "loggers": {
             "gui": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "gui.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+              "channels_extra": [
+                "gui_file"
+              ]
             },
-            "processor": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "processor.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.command_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
-            "processor_frames": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "frames.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": false
-            },
-            "renderer": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "renderer.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "robot": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "robot.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
-            },
-            "router_messages": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "messages.log",
-              "max_size": null,
-              "min_level": "INFO",
-              "rotate": true
+            "multiprocess_framework.modules.dispatch_module": {
+              "channels": [
+                "busy_file"
+              ]
             },
             "trace": {
-              "backup_count": null,
-              "enabled": true,
-              "file_path": "trace.log",
-              "max_size": null,
-              "min_level": "DEBUG",
-              "rotate": true
+              "channels_extra": [
+                "trace_file"
+              ]
             }
           },
+          "manager_name": "LoggerManager",
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
