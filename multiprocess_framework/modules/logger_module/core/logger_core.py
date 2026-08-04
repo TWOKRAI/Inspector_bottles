@@ -352,6 +352,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             self._stop_retention_sweeper()
             self.info("LoggerManager shutting down", module="logger_manager")
             self.flush()
+            # Ф2.6: жалоба на молчавшие приёмники. Здесь, а не только в базе:
+            # этот shutdown — полный override, базовый не вызывается вовсе
+            # (мёртвый диспетчер, §11.16). Хук только в базе не сработал бы
+            # на ГЛАВНОЙ плоскости — поймано тестом. Повтор защищён флагом.
+            self._warn_about_idle_sinks()
             if self._buffer:
                 self._buffer.stop()
             # _dispatcher.shutdown() не вызываем — он мёртв в LoggerManager (§11.16, см. initialize).

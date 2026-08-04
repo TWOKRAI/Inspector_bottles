@@ -152,11 +152,13 @@ def observability_effective(
         if callable(sources_fn):
             section["sources"] = sources_fn()
         section.update(_sink_readback(logger))
+        section.update(_idle_sinks(logger))
         out["logger"] = section
     if error is not None and getattr(error, "config", None) is not None:
         out["error"] = {
             "default_level": getattr(error.config, "default_level", None),
             **_sink_readback(error),
+            **_idle_sinks(error),
         }
     if stats is not None and getattr(stats, "config", None) is not None:
         sc = stats.config
@@ -164,6 +166,7 @@ def observability_effective(
             "enable_logging": getattr(sc, "enable_logging", None),
             "aggregation_interval": getattr(sc, "aggregation_interval", None),
             **_sink_readback(stats),
+            **_idle_sinks(stats),
         }
     return out
 
@@ -252,6 +255,18 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
         "unknown_keys": unknown,
         "unverifiable": sorted(unverifiable),
     }
+
+
+def _idle_sinks(manager: Any) -> Dict[str, Any]:
+    """Ф2.6: приёмники, объявленные и не принявшие ничего.
+
+    Отдаётся у ВСЕХ трёх плоскостей, а не только у логгера: детектор живёт в общей
+    базе менеджеров, и молчащий приёмник ошибок — такой же симптом, как молчащий
+    файл логов. Ключ присутствует всегда, пустой список — законный ответ «все
+    приёмники что-то приняли».
+    """
+    fn = getattr(manager, "idle_sinks", None)
+    return {"idle_sinks": fn()} if callable(fn) else {}
 
 
 def _sink_readback(manager: Any) -> Dict[str, Any]:
