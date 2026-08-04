@@ -12,6 +12,7 @@ state bootstrap) останется здесь.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,34 @@ _ORCHESTRATOR_CLASS_PATH = "multiprocess_prototype.orchestrator.ProcessManagerPr
 # ---------------------------------------------------------------------------
 # Чистые помощники работы с топологиями
 # ---------------------------------------------------------------------------
+
+
+def _env_log_dir_override(env: "dict | Any") -> "str | None":
+    """Волеизъявление оператора про корень логов; порядок ключей — как у ``log_paths``."""
+    return env.get("MULTIPROCESS_LOG_DIR") or env.get("INSPECTOR_LOG_DIR")
+
+
+#: Снято ОДИН раз при импорте, а не читается живьём на каждом build().
+#: Причина: ``build()`` сам пишет резолвнутый АБСОЛЮТНЫЙ путь в
+#: ``INSPECTOR_LOG_DIR`` (setdefault — для hot-swap и детей), и живое чтение env
+#: на втором build() того же процесса принимало бы СВОЮ ЖЕ запись за волю
+#: оператора. Поймано характеризацией сборки: снапшот менялся от того, какой
+#: build в процессе был первым. env фиксируется на старте процесса — снимок при
+#: импорте и есть то, что задал оператор.
+_ENV_LOG_DIR_OVERRIDE: "str | None" = _env_log_dir_override(os.environ)
+
+
+def resolve_log_dir_root(system_log_dir: "str | None") -> str:
+    """Корень дерева логов: env главнее yaml, yaml главнее дефолта (Ф2.х, Н6).
+
+    До этой правки env читали только PM (``managers_from_log_dir``) и fallback
+    горячей замены, а дети получали ``system.log_dir`` из yaml через ассемблер:
+    запуск с ``INSPECTOR_LOG_DIR`` раскалывал дерево логов на ДВА корня —
+    воспроизведено live-прогоном 2026-08-04 (PM в env-каталоге, дети в
+    ``logs/prototype_2``). env-переопределение на то и переопределение, что
+    слышат его все.
+    """
+    return _ENV_LOG_DIR_OVERRIDE or system_log_dir or "logs"
 
 
 def unwrap_recipe(raw: dict) -> dict:
@@ -390,15 +419,14 @@ class SystemBuilder:
         # (fallback на хардкод-дефолты внутри build_throttle_rules, если пусто).
         throttle_rules = build_throttle_rules(sys_config)
 
-        log_dir = sys_config.system.log_dir or "logs"
+        log_dir = resolve_log_dir_root(sys_config.system.log_dir)
 
         # Зафиксировать log_dir в env: дочерние процессы наследуют его (spawn), и при
         # ГОРЯЧЕЙ замене рецепта процессы, у которых cfg.log_dir пуст, резолвят его
         # через INSPECTOR_LOG_DIR (process_launch_config._resolve_log_dir) → пишут
-        # в ту же папку, а не в ./logs (fallback).
-        import os as _os
-
-        _os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
+        # в ту же папку, а не в ./logs (fallback). Обратного влияния на build() нет:
+        # env-переопределение снято при импорте (см. _ENV_LOG_DIR_OVERRIDE).
+        os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
 
         # Слой L1 — секция observability из system.yaml, СЫРАЯ. Раскладку делает
         # assembler per-process, поверх слоя L2 рецепта (Task 5.12).
