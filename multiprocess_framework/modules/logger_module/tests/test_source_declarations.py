@@ -1,0 +1,163 @@
+# -*- coding: utf-8 -*-
+"""Ф2.7 — объявление источника рядом с модулем становится активным.
+
+План: plans/observability-unified-routing.md, задача 2.7.
+
+Ф2.6 положила имя константой `LOG_SOURCE` в `interfaces.py`, но объявление осталось
+пассивным: узнать «какие имена вообще объявлены» можно было только грепом, а
+правило-дефолт модуля пришлось бы писать в центральный конфиг. Здесь модуль зовёт
+`declare_log_source` рядом со своей константой — и каталог наполняется импортом.
+
+Резидуал 2.6 («два объявления на один префикс — конфликтовать нечему, потому что
+объявления никуда не собираются») закрывается здесь же: теперь есть чему конфликтовать,
+и конфликт — отказ, а не выбор по порядку импортов.
+
+Независимый `tester` не вызывался — инструментальный запрет на субагентов в сессии.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from multiprocess_framework.modules.log_declarations import (
+    declare_log_source,
+    declared_rules,
+    declared_sources,
+    forget_declarations,
+)
+from multiprocess_framework.modules.logger_module.configs import LoggerRuleSchema
+
+
+@pytest.fixture()
+def чистый_реестр() -> Any:
+    """Свой реестр на тест: иначе порядок тестов начал бы значить.
+
+    Восстановление обязательно — реестр процессный, и оставленная запись сломала бы
+    соседний тест, который про неё ничего не знает.
+    """
+    было = {name: (owner, None) for name, owner in declared_sources().items()}
+    правила = declared_rules()
+    forget_declarations()
+    yield
+    forget_declarations()
+    for name, (owner, _r) in было.items():
+        declare_log_source(name, owner=owner, rule=правила.get(name))
+
+
+class TestModuleBringsItsNameAlong:
+    """Каталог наполняется импортом — центральных правок ноль."""
+
+    def test_real_modules_declared_themselves(self) -> None:
+        """Живая проводка, а не фейк: три настоящих модуля уже в каталоге.
+
+        Тест на фейковом реестре доказал бы реестр. Здесь проверяется, что
+        объявление реально стоит в `interfaces.py` и срабатывает на импорте —
+        то есть что механизм подключён, а не просто написан.
+        """
+        каталог = declared_sources()
+
+        for имя in (
+            "multiprocess_framework.modules.command_module",
+            "multiprocess_framework.modules.dispatch_module",
+            "multiprocess_framework.modules.statistics_module",
+        ):
+            assert имя in каталог, каталог
+            assert каталог[имя].endswith("interfaces"), "владелец — файл объявления"
+
+    def test_catalogue_answers_before_anyone_wrote(self, чистый_реестр: Any) -> None:
+        """Отличие от `seen_sources`: там кто ПИСАЛ, здесь кто МОЖЕТ.
+
+        Источник, у которого всё гасится порогом, в журнале не появится вовсе —
+        а разбирают обычно именно его («почему от него пусто»).
+        """
+        declare_log_source("пакет.молчун", owner="пакет.interfaces")
+
+        assert declared_sources() == {"пакет.молчун": "пакет.interfaces"}
+
+    def test_declaration_returns_the_name(self, чистый_реестр: Any) -> None:
+        """Объявление пишется одной строкой рядом с константой, а не двумя."""
+        assert declare_log_source("пакет.имя", owner="пакет.interfaces") == "пакет.имя"
+
+
+class TestConflictIsRefusedNotResolved:
+    """Резидуал 2.6: два объявления на один префикс — громко."""
+
+    def test_two_owners_on_one_name_are_refused(self, чистый_реестр: Any) -> None:
+        declare_log_source("общее.имя", owner="первый.interfaces")
+
+        with pytest.raises(ValueError, match="первый.interfaces"):
+            declare_log_source("общее.имя", owner="второй.interfaces")
+
+    def test_the_same_owner_may_re_declare(self, чистый_реестр: Any) -> None:
+        """Повторный импорт того же модуля — не конфликт.
+
+        Модуль переимпортируют (reload в тестах, spawn дочернего процесса), и
+        падать на этом нельзя: иначе механизм ломал бы штатный запуск системы.
+        """
+        declare_log_source("своё.имя", owner="мой.interfaces")
+        declare_log_source("своё.имя", owner="мой.interfaces")
+
+        assert declared_sources() == {"своё.имя": "мой.interfaces"}
+
+    def test_the_same_owner_with_a_different_rule_is_refused(self, чистый_реестр: Any) -> None:
+        """Иначе «правило поменялось при переимпорте» прошло бы молча."""
+        declare_log_source("своё.имя", owner="мой.interfaces", rule=LoggerRuleSchema(level="INFO"))
+
+        with pytest.raises(ValueError):
+            declare_log_source("своё.имя", owner="мой.interfaces", rule=LoggerRuleSchema(level="DEBUG"))
+
+    def test_an_equal_rule_re_declared_passes(self, чистый_реестр: Any) -> None:
+        """Пара к предыдущему: сравнение по СОДЕРЖИМОМУ, не по identity.
+
+        Повторный импорт создаёт новый объект схемы с теми же полями. Сравнение по
+        identity объявило бы конфликт там, где его нет, — то есть уронило бы
+        процесс на совершенно законном reload.
+        """
+        declare_log_source("своё.имя", owner="мой.interfaces", rule=LoggerRuleSchema(level="INFO"))
+        declare_log_source("своё.имя", owner="мой.interfaces", rule=LoggerRuleSchema(level="INFO"))
+
+        assert list(declared_rules()) == ["своё.имя"]
+
+
+class TestDeclaredRuleIsTheBottomLayer:
+    """Модуль знает про себя, но последнее слово — за тем, кто систему собирает."""
+
+    def test_declared_rule_acts_without_touching_the_central_config(self, чистый_реестр: Any) -> None:
+        from multiprocess_framework.modules.process_module.configs.observability_config import (
+            expand_observability,
+        )
+
+        declare_log_source("пакет.шумный", owner="пакет.interfaces", rule=LoggerRuleSchema(level="ERROR"))
+
+        expanded = expand_observability({})
+
+        assert expanded["logger"]["loggers"]["пакет.шумный"]["level"] == "ERROR"
+
+    def test_the_application_overrides_the_declaration(self, чистый_реестр: Any) -> None:
+        """Пара: объявление — слой ПОД конфигом приложения, а не поверх него.
+
+        Переставь порядок — и правка в `system.yaml` перестанет действовать,
+        оставаясь видимой в файле. Тихий отказ того же класса, что дал 288 пустых
+        файлов: работает не так, а не ломается.
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_config import (
+            expand_observability,
+        )
+
+        declare_log_source("пакет.шумный", owner="пакет.interfaces", rule=LoggerRuleSchema(level="ERROR"))
+
+        expanded = expand_observability({"loggers": {"пакет.шумный": {"level": "DEBUG"}}})
+
+        assert expanded["logger"]["loggers"]["пакет.шумный"]["level"] == "DEBUG"
+
+    def test_a_declaration_without_a_rule_adds_nothing(self, чистый_реестр: Any) -> None:
+        """Имя объявляют почти все, порог — только тот, кому есть что сказать."""
+        from multiprocess_framework.modules.process_module.configs.observability_config import (
+            expand_observability,
+        )
+
+        declare_log_source("пакет.обычный", owner="пакет.interfaces")
+
+        assert "loggers" not in expand_observability({})["logger"]

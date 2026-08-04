@@ -36,6 +36,7 @@ from ...channel_routing_module.buffers.batch_buffer import (
     validate_overflow_policy,
 )
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
+from ...log_declarations import declared_rules
 
 
 @register_schema("ObservabilityErrorsConfig")
@@ -327,8 +328,16 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     # реально что-то сказала. Пустой словарь наверх не эмитим сознательно —
     # он был бы «слой объявил пустоту» по правилу Г3 и стирал бы правила,
     # заданные ниже (ровно тот класс, что дал находку на каталоге каналов).
-    if cfg.loggers:
-        logger["loggers"] = {str(k): dict(v) for k, v in cfg.loggers.items()}
+    # Ф2.7 — объявления модулей идут ПОД конфигом приложения: модуль знает про себя,
+    # но последнее слово за тем, кто систему собирает. Порядок распаковки и есть
+    # приоритет; переставь его — и правка в `system.yaml` перестанет действовать,
+    # оставаясь видимой в файле (тихий отказ того же класса, что уже стоил фазе
+    # 288 пустых файлов).
+    declared = {name: rule.model_dump() for name, rule in declared_rules().items()}
+    layered = {str(k): dict(v) for k, v in cfg.loggers.items()} if cfg.loggers else {}
+    merged = {**declared, **layered}
+    if merged:
+        logger["loggers"] = merged
 
     error: Dict[str, Any] = {
         "default_level": cfg.errors.level,

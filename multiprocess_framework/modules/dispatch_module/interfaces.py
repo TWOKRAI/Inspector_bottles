@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable, Optional, List
 
 from .types.types import DispatchStrategy
+from ..log_declarations import declare_log_source
 
 #: Имя источника, которым модуль штампует свои записи (Ф2.6, решение Р-2.6-В).
 #: Четырнадцать литералов ``"dispatcher"`` внутри ``core/dispatcher.py`` заменены
@@ -24,7 +25,13 @@ from .types.types import DispatchStrategy
 #:
 #: В файл имя пишется сокращённым (``LoggerChannelSchema.name_max_len``): без этого
 #: переход дал бы +4.7…16.4% к весу логов — замер там же.
-LOG_SOURCE = "multiprocess_framework.modules.dispatch_module"
+LOG_SOURCE = declare_log_source(
+    "multiprocess_framework.modules.dispatch_module",
+    owner=__name__,
+)
+"""Ф2.7: объявление активное — имя попадает в каталог источников процесса
+(``declared_sources``), то есть видно ДО первой записи. Два модуля с одним
+именем — отказ на импорте, а не молчаливый выбор по порядку импортов."""
 
 
 class IDispatcher(ABC):

@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 from ..channel_routing_module.interfaces import IChannelRoutingManager
+from ..log_declarations import declare_log_source
 
 #: Имя источника, которым модуль штампует свои записи (Ф2.6, решение Р-2.6-В).
 #:
@@ -30,7 +31,13 @@ from ..channel_routing_module.interfaces import IChannelRoutingManager
 #:
 #: В файл имя пишется сокращённым (``LoggerChannelSchema.name_max_len``): без этого
 #: переход дал бы +4.7…16.4% к весу логов — замер там же.
-LOG_SOURCE = "multiprocess_framework.modules.statistics_module"
+LOG_SOURCE = declare_log_source(
+    "multiprocess_framework.modules.statistics_module",
+    owner=__name__,
+)
+"""Ф2.7: объявление активное — имя попадает в каталог источников процесса
+(``declared_sources``), то есть видно ДО первой записи. Два модуля с одним
+именем — отказ на импорте, а не молчаливый выбор по порядку импортов."""
 
 
 class IStatsManager(IChannelRoutingManager, ABC):

@@ -151,6 +151,12 @@ def observability_effective(
         groups_fn = getattr(logger, "logger_groups", None)
         if callable(groups_fn):
             section["groups"] = groups_fn()
+        # Ф2.7: каталог объявленных источников — что МОЖЕТ писать, в отличие от
+        # `sources` (что уже писало). Источник, у которого всё гасится порогом, в
+        # журнале не появится вовсе, а разбирают обычно именно его.
+        from ...log_declarations import declared_sources
+
+        section["declared_sources"] = declared_sources()
         # Ф2.6, шаг 4: какие имена источников вообще писали. Разбор `resolve` требует
         # знать имя заранее, а на стенде вопрос обратный — и до сих пор ответом был
         # только греп по файлу лога, то есть лишь про тех, чьи записи куда-то доехали.
