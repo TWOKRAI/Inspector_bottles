@@ -145,6 +145,12 @@ def observability_effective(
         rules_fn = getattr(logger, "rules_table", None)
         if callable(rules_fn):
             section["loggers"] = rules_fn()
+        # Ф2.6, шаг 4: какие имена источников вообще писали. Разбор `resolve` требует
+        # знать имя заранее, а на стенде вопрос обратный — и до сих пор ответом был
+        # только греп по файлу лога, то есть лишь про тех, чьи записи куда-то доехали.
+        sources_fn = getattr(logger, "seen_sources", None)
+        if callable(sources_fn):
+            section["sources"] = sources_fn()
         section.update(_sink_readback(logger))
         out["logger"] = section
     if error is not None and getattr(error, "config", None) is not None:
