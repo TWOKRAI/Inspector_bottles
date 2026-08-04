@@ -162,6 +162,74 @@ class NameHierarchy:
         self._channels_cache.clear()
         self._extra_cache.clear()
 
+    def resolve(self, name: str) -> Dict[str, object]:
+        """Полный разбор имени для пульта: что действует и **какое правило победило**.
+
+        Образец — ``GET /actuator/loggers/{name}`` в Spring Boot: ответ даётся на
+        ЛЮБОЕ введённое имя, в том числе на то, под которым ещё никто не писал.
+        Это отличает вопрос-гипотезу («если я напишу правило вот так, что получится?»)
+        от разбора уже случившегося, и закрывает резидуал 2.2 №4: ``effective_*``
+        существовали в коде, а ручки посмотреть на них не было.
+
+        Возвращается **словарь**, а не объект: ответ уходит через IPC на пульт, а
+        между процессами ходит только ``dict`` (правило проекта «Dict at Boundary»).
+
+        Ключи происхождения различают три разных «ничего»:
+
+        * ``None`` — про эту ось не сказало ни одно правило на ветке;
+        * ``""`` — сказало правило КОРНЯ (корень и есть пустая строка);
+        * иначе — сам победивший префикс.
+
+        Путать первое со вторым нельзя: «никто не настраивал» и «настроено глобально»
+        приводят к одному значению, но чинятся по-разному.
+
+        **Диагностический путь, не горячий.** Кэша нет намеренно: пульт спрашивает
+        редко, а третья карта того же возраста — это третья причина для рассинхрона
+        при старении. Согласие с горячими :meth:`level`/:meth:`channels`/
+        :meth:`channels_extra` закреплено тестом: readback, расходящийся с гейтом,
+        хуже отсутствующего — по нему принимают решения.
+        """
+        chain: list = []
+        node = name
+        while True:
+            if node in self._rules:
+                chain.append(node)
+            if not node:
+                break
+            node = node.rpartition(".")[0]
+
+        level: Optional[str] = None
+        level_from: Optional[str] = None
+        channels: Optional[Tuple[str, ...]] = None
+        channels_from: Optional[str] = None
+        extra_from: list = []
+
+        for key in chain:
+            rule = self._rules[key]
+            if level is None:
+                value = getattr(rule, "level", None)
+                if value is not None:
+                    level, level_from = value, key
+            if channels is None:
+                value = getattr(rule, "channels", None)
+                if value is not None:
+                    channels, channels_from = tuple(value), key
+            if getattr(rule, "channels_extra", None):
+                extra_from.append(key)
+
+        return {
+            "name": name,
+            "level": level,
+            "level_from": level_from,
+            "channels": list(channels) if channels is not None else None,
+            "channels_from": channels_from,
+            "channels_extra": list(self.channels_extra(name)),
+            # Корень→лист, как и сами добавки: порядок вклада обязан читаться так же,
+            # как порядок приёмников, иначе оператор сверяет два разных направления.
+            "extra_from": list(reversed(extra_from)),
+            "matched_rules": chain,
+        }
+
     # --- Internal ---
 
     def _walk_level(self, name: str) -> Optional[str]:
