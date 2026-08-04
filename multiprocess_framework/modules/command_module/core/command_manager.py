@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ...base_manager import BaseManager, ObservableMixin
 
-from ..interfaces import ICommandManager
+from ..interfaces import LOG_SOURCE, ICommandManager
 
 
 class CommandManager(BaseManager, ObservableMixin, ICommandManager):
@@ -189,7 +189,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
 
             manager.register_command("greet", greet_handler)
         """
-        self._log_debug(f"Registering command: {command_name}", module="command_manager")
+        self._log_debug(f"Registering command: {command_name}", module=LOG_SOURCE)
         self._record_metric("command_manager.command.registration.attempts", tags={"command": command_name})
 
         result = self.dispatcher.register_handler(
@@ -203,10 +203,10 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         )
 
         if result:
-            self._log_info(f"Command '{command_name}' registered successfully", module="command_manager")
+            self._log_info(f"Command '{command_name}' registered successfully", module=LOG_SOURCE)
             self._record_metric("command_manager.command.registration.success", tags={"command": command_name})
         else:
-            self._log_warning(f"Failed to register command '{command_name}'", module="command_manager")
+            self._log_warning(f"Failed to register command '{command_name}'", module=LOG_SOURCE)
             self._record_metric("command_manager.command.registration.failed", tags={"command": command_name})
 
         return result
@@ -232,7 +232,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         start_time = time.time()
         command_name = message.get("command", "unknown")
 
-        self._log_debug(f"Handling command: {command_name}", module="command_manager", command=command_name)
+        self._log_debug(f"Handling command: {command_name}", module=LOG_SOURCE, command=command_name)
         self._record_metric("command_manager.command.execution.attempts", tags={"command": command_name})
 
         result = self.dispatcher.dispatch(message, key_field="command", data_field="data")
@@ -241,7 +241,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         if isinstance(result, dict) and result.get("status") == "error":
             self._log_warning(
                 f"Command '{command_name}' failed: {result.get('reason') or result.get('error')}",
-                module="command_manager",
+                module=LOG_SOURCE,
             )
             self._record_metric("command_manager.command.execution.errors", tags={"command": command_name})
         else:
@@ -254,7 +254,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             if self._log_success_enabled:
                 self._log_info(
                     f"Command '{command_name}' executed successfully in {duration:.3f}s",
-                    module="command_manager",
+                    module=LOG_SOURCE,
                 )
             self._record_metric("command_manager.command.execution.success", tags={"command": command_name})
 

@@ -11,6 +11,15 @@ from typing import Any, Dict, Optional
 
 from ..channel_routing_module.interfaces import IChannelRoutingManager
 
+#: Имя источника, которым модуль штампует свои записи (Ф2.6, решение Р-2.6-В).
+#:
+#: Точка штампа ровно одна (``channels/log_stats_channel.py``), но именно она даёт
+#: **самый тяжёлый поток логов в системе**: на прогоне 2026-08-03 записи под этим
+#: именем занимали 54.9% веса ``system.log`` у ProcessManager и 23–26% у остальных
+#: процессов. Правило маршрутизации для неё — первое, ради чего заводился механизм
+#: Ф2.2, поэтому имя обязано быть ссылкой, а не второй копией строки.
+LOG_SOURCE = "stats"
+
 
 class IStatsManager(IChannelRoutingManager, ABC):
     """Контракт менеджера статистики и метрик.

@@ -8,6 +8,7 @@ LogStatsChannel — канал вывода метрик в LoggerManager.
 from typing import Any, Dict
 
 from ...channel_routing_module.interfaces import IChannel
+from ..interfaces import LOG_SOURCE
 
 
 class LogStatsChannel(IChannel):
@@ -53,7 +54,7 @@ class LogStatsChannel(IChannel):
             from ...logger_module.core.log_config import LogLevel
 
             log_level = getattr(LogLevel, self._level_str, LogLevel.INFO)
-            self._logger.performance(log_level, msg, module="stats")
+            self._logger.performance(log_level, msg, module=LOG_SOURCE)
 
             return {"status": "success", "channel": self.name}
         except Exception as e:

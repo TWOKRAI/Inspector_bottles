@@ -9,6 +9,11 @@ from typing import Dict, Any, Callable, Optional, List
 
 from .types.types import DispatchStrategy
 
+#: Имя источника, которым модуль штампует свои записи (Ф2.6, решение Р-2.6-В).
+#: Четырнадцать литералов ``"dispatcher"`` внутри ``core/dispatcher.py`` заменены
+#: ссылкой сюда — см. пояснение в ``command_module/interfaces.py``.
+LOG_SOURCE = "dispatcher"
+
 
 class IDispatcher(ABC):
     """
