@@ -328,21 +328,21 @@ def test_no_duplicate_when_scope_has_no_explicit_channels(tmp_path: Path) -> Non
             log_directory=str(tmp_path),
             enable_batching=False,
             channels={
-                "database_file": LoggerChannelSchema(type="file", enabled=True, file_path="database.log", rotate=False),
+                "проба_файл": LoggerChannelSchema(type="file", enabled=True, file_path="проба.log", rotate=False),
             },
             # Пустой список — тот самый вырожденный случай: набор берётся из реестра.
             scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=[])},
-            loggers={"database": {"channels_extra": ["database_file"]}},
+            loggers={"проба": {"channels_extra": ["проба_файл"]}},
         ),
         process=_FakeProcess("dup_probe"),
     )
     mgr.initialize()
     try:
         marker = "DUP-MARKER-уникальная-строка"
-        mgr.error(marker, module="database")
+        mgr.error(marker, module="проба")
         mgr.flush()
 
-        content = (tmp_path / "dup_probe" / "database.log").read_text(encoding="utf-8", errors="replace")
+        content = (tmp_path / "dup_probe" / "проба.log").read_text(encoding="utf-8", errors="replace")
         assert content.count(marker) == 1, (
             f"одна ошибка легла в файл {content.count(marker)} раз(а) — инвариант «одна запись» нарушен"
         )

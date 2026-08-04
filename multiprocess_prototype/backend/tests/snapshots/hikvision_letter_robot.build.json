@@ -537,14 +537,17 @@
       "channels": {
         "busy_file": {
           "file_path": "busy.log",
+          "name_max_len": 20,
           "type": "file"
         },
         "gui_file": {
           "file_path": "gui.log",
+          "name_max_len": 20,
           "type": "file"
         },
         "trace_file": {
           "file_path": "trace.log",
+          "name_max_len": 20,
           "type": "file"
         }
       },
@@ -632,14 +635,17 @@
         "channels": {
           "busy_file": {
             "file_path": "busy.log",
+            "name_max_len": 20,
             "type": "file"
           },
           "gui_file": {
             "file_path": "gui.log",
+            "name_max_len": 20,
             "type": "file"
           },
           "trace_file": {
             "file_path": "trace.log",
+            "name_max_len": 20,
             "type": "file"
           }
         },
@@ -730,14 +736,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -849,6 +858,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -868,6 +878,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -917,6 +928,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -1050,14 +1062,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -1189,6 +1204,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -1208,6 +1224,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -1257,6 +1274,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -1387,14 +1405,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -1504,6 +1525,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -1523,6 +1545,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -1572,6 +1595,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -1692,14 +1716,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -1788,6 +1815,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -1807,6 +1835,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -1856,6 +1885,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -1976,14 +2006,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -2113,6 +2146,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -2132,6 +2166,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -2181,6 +2216,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -2304,14 +2340,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -2414,6 +2453,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -2433,6 +2473,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -2482,6 +2523,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -2604,14 +2646,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -2710,6 +2755,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -2729,6 +2775,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -2778,6 +2825,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -2901,14 +2949,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -3024,6 +3075,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -3043,6 +3095,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -3092,6 +3145,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -3231,14 +3285,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -3386,6 +3443,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -3405,6 +3463,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -3454,6 +3513,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -3579,14 +3639,17 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
@@ -3744,6 +3807,7 @@
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "console": {
@@ -3763,6 +3827,7 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
               "type": "file"
             },
             "messages_file": {
@@ -3812,6 +3877,7 @@
             },
             "trace_file": {
               "file_path": "trace.log",
+              "name_max_len": 20,
               "type": "file"
             }
           },
