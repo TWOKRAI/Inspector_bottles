@@ -209,3 +209,6 @@
 - [Сигнал в одной ветке слепнет](feedback_signal_placed_in_a_branch_goes_blind.md) — ставить туда, где известен фактический результат
 - [Негодная инъекция != вакуумный тест](feedback_broken_injection_is_not_a_vacuous_test.md) — сломанный импорт даёт ERROR, а не FAILED
 - [Кэш прячет однократность](feedback_cache_hides_the_once_only_property.md) — варьировать вход по ключу кэша
+- [Ф2 закрыта (кроме 2.3b)](project_f2_closed_2026_08.md) — три оси адресации; дальше Ф3/Ф4/Ф6
+- [Посылка плана устаревает](feedback_a_plans_premise_expires.md) — блокер отложенной задачи воспроизводить, а не сверять номера
+- [Ноль красных = лишний слой](feedback_zero_reds_can_mean_a_useless_layer.md) — третья гипотеза: код дублирует гарантию ниже
