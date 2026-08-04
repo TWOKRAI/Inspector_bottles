@@ -560,25 +560,27 @@
       },
       "file": true,
       "log_level": "INFO",
+      "logger_groups": {
+        "служебное": [
+          "multiprocess_framework.modules.command_module",
+          "multiprocess_framework.modules.dispatch_module",
+          "multiprocess_framework.modules.shared_resources_module.queues"
+        ]
+      },
       "loggers": {
         "gui": {
           "channels_extra": [
             "gui_file"
           ]
         },
-        "multiprocess_framework.modules.command_module": {
-          "channels": [
-            "busy_file"
-          ]
-        },
-        "multiprocess_framework.modules.dispatch_module": {
-          "channels": [
-            "busy_file"
-          ]
-        },
         "trace": {
           "channels_extra": [
             "trace_file"
+          ]
+        },
+        "служебное": {
+          "channels": [
+            "busy_file"
           ]
         }
       },
@@ -664,25 +666,27 @@
         "file": true,
         "log_directory": null,
         "log_level": "INFO",
+        "logger_groups": {
+          "служебное": [
+            "multiprocess_framework.modules.command_module",
+            "multiprocess_framework.modules.dispatch_module",
+            "multiprocess_framework.modules.shared_resources_module.queues"
+          ]
+        },
         "loggers": {
           "gui": {
             "channels_extra": [
               "gui_file"
             ]
           },
-          "multiprocess_framework.modules.command_module": {
-            "channels": [
-              "busy_file"
-            ]
-          },
-          "multiprocess_framework.modules.dispatch_module": {
-            "channels": [
-              "busy_file"
-            ]
-          },
           "trace": {
             "channels_extra": [
               "trace_file"
+            ]
+          },
+          "служебное": {
+            "channels": [
+              "busy_file"
             ]
           }
         },
@@ -759,25 +763,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -936,25 +942,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -1085,25 +1093,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -1282,25 +1292,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -1428,25 +1440,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -1603,25 +1617,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -1739,25 +1755,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -1893,25 +1911,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -2029,25 +2049,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -2224,25 +2246,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -2363,25 +2387,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -2531,25 +2557,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -2669,25 +2697,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -2833,25 +2863,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -2972,25 +3004,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -3153,25 +3187,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -3308,25 +3344,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -3521,25 +3559,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -3662,25 +3702,27 @@
           },
           "file": true,
           "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },
@@ -3885,25 +3927,27 @@
           "default_level": "INFO",
           "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
           "loggers": {
             "gui": {
               "channels_extra": [
                 "gui_file"
               ]
             },
-            "multiprocess_framework.modules.command_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
-            "multiprocess_framework.modules.dispatch_module": {
-              "channels": [
-                "busy_file"
-              ]
-            },
             "trace": {
               "channels_extra": [
                 "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
               ]
             }
           },

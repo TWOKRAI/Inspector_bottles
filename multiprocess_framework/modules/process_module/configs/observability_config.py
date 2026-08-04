@@ -26,7 +26,7 @@ per-module логов.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from pydantic import Field, field_validator
 
@@ -154,6 +154,15 @@ class ObservabilityConfig(SchemaBase):
     loggers: Annotated[
         Dict[str, Dict[str, Any]],
         FieldMeta("Правила по имени источника ({префикс: {level: DEBUG, channels: [...]}})"),
+    ] = Field(default_factory=dict)
+
+    # Ф2.5 — ярлык набора источников (модель `logging.group.*` Spring Boot).
+    # Без него «этим трём тише» переписывается покомпонентно: в конфиге прототипа
+    # после 2.6 стояли ДВЕ правки с одинаковым телом, а набор «служебная болтовня»
+    # существовал только в голове оператора.
+    logger_groups: Annotated[
+        Dict[str, List[str]],
+        FieldMeta("Ярлыки источников ({имя_группы: [префикс, ...]})"),
     ] = Field(default_factory=dict)
 
     # Task 5.8 — срок жизни рантайм-правки (слой L3). Поле схемы, а не константа
@@ -312,6 +321,8 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         logger["channels"] = deep_merge(logger.get("channels") or {}, cfg.channels)
     if cfg.scopes:
         logger["scopes"] = {str(k): dict(v) for k, v in cfg.scopes.items()}
+    if cfg.logger_groups:
+        logger["logger_groups"] = {str(k): list(v) for k, v in cfg.logger_groups.items()}
     # Ф2.2 — тем же способом, что скоупы: раскладываем только когда секция
     # реально что-то сказала. Пустой словарь наверх не эмитим сознательно —
     # он был бы «слой объявил пустоту» по правилу Г3 и стирал бы правила,

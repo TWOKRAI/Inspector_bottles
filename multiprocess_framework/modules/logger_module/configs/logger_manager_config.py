@@ -291,6 +291,23 @@ class LoggerManagerConfig(ChannelRoutingConfig):
     чинится потом.
     """
 
+    logger_groups: Annotated[
+        Dict[str, List[str]],
+        FieldMeta("Ярлыки: имя группы → список префиксов источников"),
+    ] = {}
+    """Ф2.5. Ярлык набора источников — модель ``logging.group.*`` Spring Boot.
+
+    Правило, написанное под ключом-ярлыком в :attr:`loggers`, раскрывается в
+    правила по каждому члену при сборке дерева. Ярлык сам префиксом не
+    становится, резолв о нём не знает, горячий путь не платит ничего.
+
+    **Пусто по умолчанию, и это часть контракта** — как и ``loggers``. Состав
+    групп решает приложение: фреймворк несёт механизм, а «что считать служебной
+    болтовнёй» — вопрос той системы, которую собирают (Р-2.5-Д). Spring везёт
+    готовые ``web``/``sql``, но у него один известный набор пакетов, а здесь
+    приложение может не подключать половину модулей вовсе.
+    """
+
     channels: Annotated[
         Dict[str, LoggerChannelSchema],
         FieldMeta("Каналы: имя → параметры"),
@@ -386,6 +403,24 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             channels=["system_file"],
         ),
     }
+
+    @field_validator("logger_groups")
+    @classmethod
+    def _reject_dotted_group_names(cls, value: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        """Ф2.5 (Р-2.5-Г): ярлык с точкой отвергается на границе конфига.
+
+        Отказ, а не предупреждение: у такого конфига нет правильного прочтения.
+        Имя ``a.b`` было бы одновременно алиасом и узлом дерева, и «самое длинное
+        совпадение» перестало бы быть однозначным — а на этом свойстве держится
+        весь резолв Ф2.2.
+        """
+        dotted = sorted(name for name in value if "." in str(name))
+        if dotted:
+            raise ValueError(
+                f"имя группы не может содержать точку: {dotted}. Точка — разделитель уровней "
+                f"иерархии имён, и ярлык с точкой неотличим от префикса источника"
+            )
+        return value
 
     @field_validator("scopes", mode="before")
     @classmethod

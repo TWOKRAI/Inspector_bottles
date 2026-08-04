@@ -205,3 +205,7 @@
 - [mp.Queue асинхронна в тестах](feedback_mp_queue_is_async_in_tests.md) — учёт мерить на stdlib queue.Queue
 - [Ф6.х корзина ревью ЗАКРЫТА](project_f6x_review_basket.md) — форвардер tail жив (level задаёт подписчик); make gate видит fw-suite; 5-й случай тестов-невидимок
 - [model_copy не валидирует](feedback_model_copy_does_not_validate.md) — dict вместо схемы молча = «настройки нет»
+- [Ф2.4: скоуп — строка](project_f2_4_scope_is_a_string.md) — группа из конфига; остаток фазы 2 и три пробела
+- [Сигнал в одной ветке слепнет](feedback_signal_placed_in_a_branch_goes_blind.md) — ставить туда, где известен фактический результат
+- [Негодная инъекция != вакуумный тест](feedback_broken_injection_is_not_a_vacuous_test.md) — сломанный импорт даёт ERROR, а не FAILED
+- [Кэш прячет однократность](feedback_cache_hides_the_once_only_property.md) — варьировать вход по ключу кэша

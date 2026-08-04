@@ -242,7 +242,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # пересобирается там же, где каналы (``_apply_log_config_rebuild``), —
         # своей точки пересборки у него нет намеренно: правила приезжают тем же
         # конфигом, что каналы, и разъехаться они не имеют права.
-        self._name_hierarchy = NameHierarchy(log_config.loggers)
+        self._name_hierarchy = NameHierarchy(
+            log_config.loggers,
+            getattr(log_config, "logger_groups", None),
+            complain=self._complain_about_groups,
+        )
 
         # Ф0.5: контекст в двух слоях. База — факт про процесс целиком, видна
         # всем потокам; стек push_context — факт про текущую работу текущего
@@ -428,6 +432,26 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             min_level=self.config.default_level,
             channels=ch,
         )
+
+    def _complain_about_groups(self, message: str) -> None:
+        """Жалоба раскрытия ярлыков — аварийным выходом (Ф2.5, Р-2.5-В).
+
+        Зовётся ТОЛЬКО при сборке дерева, то есть на старте и на пересборке, а не
+        на записи. Аварийный выход, а не свои каналы, по той же причине, что у
+        соседей: раскрытие правил решает в том числе, какие каналы у записи
+        будут, и жаловаться на это тем же маршрутом значило бы доверять предмету
+        спора. К тому же на старте дерево собирается ДО каналов.
+        """
+        self._fallback_log("WARNING", f"[группы] {message}")
+
+    def logger_groups(self) -> Dict[str, List[str]]:
+        """Ярлыки как их объявили — для readback пульта (Ф2.5).
+
+        Отдаёт ОБЪЯВЛЕННОЕ, а рядом ``rules_table()`` показывает раскрытое.
+        Расхождение между ними и есть «ярлык написан, а не действует»: член,
+        у которого нашлось собственное правило, в раскрытии не появится.
+        """
+        return {label: list(members) for label, members in self._name_hierarchy.groups.items()}
 
     def _check_scope_declared(self, scope: ScopeName, channels: Optional[Tuple[str, ...]]) -> None:
         """Сказать вслух про группу без объявления — ОДИН раз на имя (Р-2.4-Б).
@@ -801,7 +825,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # живой таблицы оставила бы правила, которых в новом конфиге больше нет
         # (тот же класс, что воскресающий после reload канал из 5.12), —
         # и «снял правило конфигом, а оно действует» искалось бы днями.
-        self._name_hierarchy = NameHierarchy(self.config.loggers)
+        self._name_hierarchy = NameHierarchy(
+            self.config.loggers,
+            getattr(self.config, "logger_groups", None),
+            complain=self._complain_about_groups,
+        )
 
         # 3. Остановить старый батчер перед пересозданием (если запущен).
         if self._buffer is not None:

@@ -68,10 +68,26 @@ class NameHierarchy:
     и самый честный способ это гарантировать — не входить в новый код вовсе.
     """
 
-    __slots__ = ("_rules", "_level_cache", "_channels_cache", "_extra_cache")
+    __slots__ = (
+        "_rules",
+        "_level_cache",
+        "_channels_cache",
+        "_extra_cache",
+        "_groups",
+        "_via_group",
+    )
 
-    def __init__(self, rules: Optional[Mapping[str, object]] = None) -> None:
-        self._rules: Dict[str, object] = dict(rules or {})
+    def __init__(
+        self,
+        rules: Optional[Mapping[str, object]] = None,
+        groups: Optional[Mapping[str, object]] = None,
+        *,
+        complain: Optional[object] = None,
+    ) -> None:
+        self._groups: Dict[str, Tuple[str, ...]] = {
+            str(label): tuple(str(m) for m in (members or ())) for label, members in (groups or {}).items()
+        }
+        self._rules, self._via_group = _expand_groups(dict(rules or {}), self._groups, complain)
         self._level_cache: Dict[str, Optional[str]] = {}
         self._channels_cache: Dict[str, Optional[Tuple[str, ...]]] = {}
         self._extra_cache: Dict[str, Tuple[str, ...]] = {}
@@ -84,8 +100,27 @@ class NameHierarchy:
 
     @property
     def rules(self) -> Dict[str, object]:
-        """Копия таблицы правил — для интроспекции и readback пульта."""
+        """Копия таблицы правил — для интроспекции и readback пульта.
+
+        Таблица уже **раскрытая** (Ф2.5): правило, написанное на ярлык, лежит
+        здесь по каждому члену группы. Это и есть то, что действует, — а
+        написанное человеком показывает :attr:`groups` рядом.
+        """
         return dict(self._rules)
+
+    @property
+    def groups(self) -> Dict[str, Tuple[str, ...]]:
+        """Ярлыки как их объявили: ``имя → префиксы`` (Ф2.5)."""
+        return dict(self._groups)
+
+    def group_of(self, prefix: str) -> Optional[str]:
+        """Ярлык, через который правило доехало до префикса, либо ``None``.
+
+        Нужен провенансу: без него readback показал бы ``level_from`` = член
+        группы, хотя написан был ярлык, — и оператор искал бы в конфиге строку,
+        которой там нет.
+        """
+        return self._via_group.get(prefix)
 
     def level(self, name: str) -> Optional[str]:
         """Уровень от самого длинного правила, которое про него говорит.
@@ -221,8 +256,13 @@ class NameHierarchy:
             "name": name,
             "level": level,
             "level_from": level_from,
+            # Ф2.5: через какой ЯРЛЫК правило доехало. `level_from` называет член
+            # группы (по нему и шёл резолв), а в конфиге написан ярлык — без этой
+            # пары провенанс отправлял бы искать несуществующую строку.
+            "level_via_group": self._via_group.get(level_from) if level_from is not None else None,
             "channels": list(channels) if channels is not None else None,
             "channels_from": channels_from,
+            "channels_via_group": self._via_group.get(channels_from) if channels_from is not None else None,
             "channels_extra": list(self.channels_extra(name)),
             # Корень→лист, как и сами добавки: порядок вклада обязан читаться так же,
             # как порядок приёмников, иначе оператор сверяет два разных направления.
@@ -279,6 +319,69 @@ class NameHierarchy:
             for channel in group:
                 seen.setdefault(channel, None)
         return tuple(seen)
+
+
+def _expand_groups(
+    rules: Dict[str, object],
+    groups: Dict[str, Tuple[str, ...]],
+    complain: Optional[object] = None,
+) -> Tuple[Dict[str, object], Dict[str, str]]:
+    """Раскрыть правила, написанные на ярлык, в правила по каждому члену (Ф2.5).
+
+    Модель — ``logging.group.*`` в Spring Boot: ярлык это **алиас набора
+    префиксов**, а не новый уровень дерева. Поэтому резолв о группах не знает
+    вовсе и не платит за них ничего: раскрытие происходит ОДИН раз, при сборке
+    дерева, а дальше работает та же ходьба по точкам.
+
+    Ярлык сам по себе префиксом НЕ становится. Иначе одно имя было бы
+    одновременно алиасом и узлом дерева, и «самое длинное совпадение» перестало
+    бы быть однозначным.
+
+    Returns:
+        Пара «раскрытая таблица, карта ``префикс → ярлык``». Вторая нужна
+        провенансу: ``level_from`` покажет члена, а человек писал ярлык.
+
+    Два правила приоритета, оба следствие одного соотношения «адресное сильнее
+    оптового» (то же, что у скоупа и правила имени, Р-2.2-А):
+
+    * собственное правило члена **сильнее** раскрытия — молча, это не конфликт;
+    * два ярлыка на один префикс — **конфликт**, и он громкий: побеждает первый
+      по сортировке, а не первый в словаре. Порядок ключей словаря — это порядок
+      строк в YAML, и молчаливое разрешение сделало бы поведение зависимым от
+      того, что оператор считает косметикой.
+    """
+    if not groups:
+        return rules, {}
+
+    expanded = dict(rules)
+    via: Dict[str, str] = {}
+    claimed: Dict[str, str] = {}
+    # Сортировка — не вкусовщина: она делает победителя конфликта не зависящим ни
+    # от порядка строк в конфиге, ни от порядка вставки в словарь.
+    for label in sorted(groups):
+        rule = rules.get(label)
+        if rule is None:
+            continue  # ярлык объявлен, но правила на него нет — законно и тихо
+        for member in groups[label]:
+            if member in rules:
+                continue  # собственное правило члена сильнее (Р-2.5-Б)
+            owner = claimed.get(member)
+            if owner is not None:
+                if complain is not None:
+                    complain(
+                        f"источник '{member}' назван двумя группами — '{owner}' и '{label}'; "
+                        f"действует правило группы '{owner}' (первая по сортировке). "
+                        f"Убери имя из одной из групп, иначе смысл конфига зависит от порядка строк"
+                    )
+                continue
+            claimed[member] = label
+            expanded[member] = rule
+            via[member] = label
+    # Ярлык уходит из таблицы: он не префикс, и оставленный ключ ловил бы источник
+    # с таким же именем — ровно та коллизия имён, что уже стреляла в 2.6 (`gui`).
+    for label in groups:
+        expanded.pop(label, None)
+    return expanded, via
 
 
 #: Часовой промаха кэша. ``None`` — законное значение обеих карт («правило
