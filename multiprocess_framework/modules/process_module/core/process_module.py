@@ -6,7 +6,8 @@
 """
 
 import importlib
-from typing import TYPE_CHECKING, Any, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from ...state_store_module.interfaces import IStateProxy
@@ -197,7 +198,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             #    не доехал — запись потеряла бы имя процесса.
             logger = self.get_manager("logger")
             if logger and hasattr(logger, "set_base_context"):
-                logger.set_base_context(proc_name=self.name)
+                logger.set_base_context(**self._build_resource())
 
             # 10. Регистрация state.changed handler (ADR-SS-006) — только в
             #     success-пути. Раньше вызов стоял в finally и при исключении
@@ -434,6 +435,72 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Регистрация очередей
         self.communication.register_process_queues()
         self.communication.register_router_channels()
+
+    def _build_resource(self) -> Dict[str, Any]:
+        """``Resource`` процесса (Ф3.5) — то, что одинаково у ВСЕХ его записей.
+
+        Понятие из словаря OTel: набор атрибутов, описывающих того, кто породил
+        телеметрию. Собирается **один раз** — база контекста логгера ставится на
+        инициализации и дальше не пересчитывается ни на запись, ни на кадр.
+
+        Поля и почему именно они:
+
+        * ``proc_name`` — было с Ф0.5, ради него база и заводилась;
+        * ``fw_version`` — версия фреймворка. Взята
+          ``multiprocess_framework.__version__``, а НЕ версия из ``pyproject``:
+          в записи нужен тот код, который её породил. Версии в проекте две и они
+          расходятся (2.0.0 против 0.1.0) — это отдельный долг, но выбирать
+          между ними в момент записи нельзя, выбор сделан здесь и назван;
+        * ``incarnation`` — **самое ценное поле набора**. После перезапуска
+          процесса его записи неотличимы от записей прежнего инстанса: имя то
+          же, файл тот же, время растёт монотонно. Инкарнация их разделяет.
+          Свою инкарнацию процесс НЕ бампит (``routing.refresh`` пропускает
+          собственное имя и следит за соседями), она проставлена при рождении —
+          значит снимок на инициализации не устаревает по построению;
+        * ``recipe`` — имя (не путь) активного рецепта. Отвечает на «каким
+          конвейером это порождено», когда записи нескольких прогонов лежат в
+          одном каталоге.
+
+        **Недостающее поле пропускается, а не заполняется словом «unknown»:**
+        отсутствие ключа честно значит «не знаем», а строка-заглушка выглядела
+        бы как знание. Ни одна ветка не вправе уронить инициализацию процесса —
+        Resource это украшение записи, а не работа.
+
+        **Цена в объёме — ноль на файлах.** Файловые каналы ``extra`` не
+        рендерят (берут оттуда только ``proc_name``), поэтому вес ``system.log``
+        не меняется; платят только IPC, стор и кольца памяти, а они на порядок
+        меньше.
+        """
+        resource: Dict[str, Any] = {"proc_name": self.name}
+
+        try:
+            from multiprocess_framework import __version__ as _fw_version
+
+            resource["fw_version"] = _fw_version
+        except Exception:  # noqa: BLE001 — версия не стоит падения процесса
+            pass
+
+        try:
+            psr = getattr(self.shared_resources, "process_state_registry", None)
+            data = psr.get_process_data(self.name) if psr is not None else None
+            meta = getattr(data, "metadata", None)
+            if isinstance(meta, dict) and "routing_incarnation" in meta:
+                resource["incarnation"] = int(meta.get("routing_incarnation", 0) or 0)
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            from ..configs.observability_layers import RECIPE_PATH_CONFIG_KEY
+
+            recipe_path = str(self.get_config(RECIPE_PATH_CONFIG_KEY) or "")
+            if recipe_path:
+                # Имя, а не путь: путь длинный, машинно-специфичный и в каждой
+                # записи бесполезен — различать прогоны достаточно именем.
+                resource["recipe"] = Path(recipe_path).stem
+        except Exception:  # noqa: BLE001
+            pass
+
+        return resource
 
     def _init_state_proxy(self) -> None:
         """Авто-регистрация handler'а state.changed (ADR-SS-006).
