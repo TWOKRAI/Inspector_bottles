@@ -1,7 +1,7 @@
 ---
 name: manager
 description: Planning manager. Receives a phase from Director, decomposes it into subtasks with complexity levels, and writes a detailed spec. Does NOT write code.
-model: claude-opus-4-8
+model: opus
 memory: project
 ---
 

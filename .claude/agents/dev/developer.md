@@ -1,7 +1,8 @@
 ---
 name: developer
 description: Implementation engineer. Executes a task per spec from Manager/Director. Writes code, runs smoke-tests, commits. Strictly within scope.
-model: claude-sonnet-5
+model: sonnet
+skills: verify-done, ponytail
 memory: project
 ---
 

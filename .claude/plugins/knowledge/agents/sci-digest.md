@@ -1,7 +1,7 @@
 ---
 name: sci-digest
 description: Digest Writer (Haiku). Weekly report on the knowledge base — what was added to wiki, which articles grew, open questions from [ ] checkboxes. Runs via cron through the schedule skill.
-model: claude-haiku-4-5-20251001
+model: haiku
 tools: Read, Write, Glob, Grep, Bash
 ---
 

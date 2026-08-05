@@ -1,7 +1,7 @@
 ---
 name: sci-compressor
 description: Compressor (Haiku). Auto-generates Level 3 (knowledge/wiki-llm/) from Level 2 (knowledge/wiki/). Compresses articles ~800 words → ~80 words, preserving navigational assertions + [?DETAILS] markers for gaps. NEVER edited manually.
-model: claude-haiku-4-5-20251001
+model: haiku
 tools: Read, Write, Glob, Bash
 ---
 

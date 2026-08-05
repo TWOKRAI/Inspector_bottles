@@ -5,7 +5,7 @@ description: >
   codegraph_explore, dead/dup/CRAP signals. Produces integration.md report.
   Does NOT write code. Hard-blocks on new dependency cycles, god-node growth,
   or coverage drop > 5%. Advisory-only when MCP unavailable.
-model: claude-opus-4-8
+model: opus
 tools: Read, Glob, Grep, Bash, mcp__sentrux__dsm, mcp__sentrux__scan
 ---
 

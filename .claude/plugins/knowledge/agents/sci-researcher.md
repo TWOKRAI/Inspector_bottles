@@ -1,7 +1,7 @@
 ---
 name: sci-researcher
 description: Researcher of the Science Team (Opus). Use for deep questions about the knowledge base, cross-analysis of sources, finding connections between articles, and surfacing insights. Call when the user asks a question about knowledge base topics or wants to deeply study a concept.
-model: claude-opus-4-8
+model: opus
 tools: Read, Glob, Grep, WebFetch, mcp__qex__search_code, mcp__context7__query-docs
 ---
 

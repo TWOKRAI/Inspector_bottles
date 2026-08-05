@@ -45,6 +45,9 @@ Rules:
 - **A review verdict without a reproduction is advisory only.** Findings must carry
   input → observed output. Reviewers work **synchronously** — no background offload,
   no long waits; on a hang, skip that check and say so, but always issue the verdict.
+  Since Claude Code 2.1.212 subagents are **background by default**, so synchronous is
+  no longer what you get by omission — pass `run_in_background: false` explicitly for
+  `reviewer` and `tester`. See "Subagents are background by default" below.
 - A test that derives its expected value from the code under test agrees with any answer,
   including "nothing". Write the literal, and check the constant separately.
 - **A spy on an implementation API name guards the name, not the property.** Assert the
@@ -72,6 +75,22 @@ task 0.7 alone exposed **three defective tests of the author's own** — a vacuo
 with the guard fully removed), a flaky one, and one that hung the suite instead of failing.
 The reviewer role delivered only once it was run synchronously against a narrow scope — and
 then it returned two blockers with reproductions.
+
+## Subagents are background by default (Claude Code 2.1.212+, STRICT)
+
+Upgraded 2026-08-05, 2.1.152 → 2.1.222. Three defaults changed underneath the rules above,
+and each one fails **silently** — nothing errors, the guarantee just stops holding.
+
+| New default | What it breaks here | What to do |
+|---|---|---|
+| Subagents run in the **background** unless told otherwise | "Reviewers work synchronously" becomes a wish; the verdict arrives after the turn that needed it | Pass `run_in_background: false` for `reviewer`, `tester`, and any live-run check |
+| A finished background agent **commits, pushes, and opens a draft PR** on its own — it no longer asks | Commits without `Why:`/`Layer:` trailers, pushes not gated by `/dev:ship`, plan checkboxes out of sync | Say so in the agent's prompt: diagnose and report only, never commit or push. `reviewer` and `investigator` do not write code — that already covers them; `developer`/`teamlead` need it said |
+| Nested subagents up to **depth 3** (was 1) | Director → Manager → Developer now really nests, so the 2-iteration failure-recovery limit can be spent three levels down without surfacing | Escalation still surfaces to the top on the 3rd iteration — state the limit in the spec handed down, not only at the top level |
+
+Also gone: the `/agents` wizard (2.1.200) and `ultraplan` (2.1.222). Permission mode
+"Default" is now called "Manual". `/review` is a fast single-pass PR review; `/code-review`
+is the multi-agent one and it **runs in the background** since 2.1.218 — for a verdict this
+project's rules will accept, drive `reviewer` directly instead.
 
 ## ponytail — when the laziness ladder applies
 
@@ -121,7 +140,9 @@ proven or documented.
 
 Full list in the corresponding mode file. Key commands (46 total in 7 namespaces):
 
-- **Dev:** `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/adr`, `/plan-status`
+- **Dev:** `/dev:plan`, `/dev:implement`, `/dev:test`, `/dev:review`, `/dev:debug`, `/dev:ship`, `/dev:pipeline`, `/dev:adr`, `/dev:plan-status`
+  (bare `/plan` and `/review` are Claude Code built-ins — plan mode and PR review; the
+  global agent-launching copies moved to `/ko:plan` and `/ko:review` on 2026-08-05)
 - **Spec:** `/spec`, `/spec-sync`
 - **Quality:** `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/doctor`, `/lint-agents`, `/lint-settings`
 - **Analysis:** `/channel-map`, `/message-contracts`, `/todo-inventory`, `/graph-slice`

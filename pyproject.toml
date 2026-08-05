@@ -158,6 +158,10 @@ testpaths = [
     # вердикта, вычет цены опроса, «тишина ≠ провал». Именно такие проверки гниют
     # незаметно, а цена — 0.2 с.
     "backend_ctl/tests/test_config_reload_verified.py",
+    # 2026-08-05: гейт «последние модели всегда» для .claude/agents и плагинных
+    # агентов. Линтер про устаревшую модель отдаёт WARNING (exit 2) — `make gate`
+    # смотрит exit 0/1 и предупреждение проезжает молча. Цена — 0.3 с.
+    ".claude/plugins/core/tests",
 ]
 norecursedirs = [".git", "__pycache__", ".venv"]
 python_files = ["test_*.py"]

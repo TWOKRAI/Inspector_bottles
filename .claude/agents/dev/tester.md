@@ -1,7 +1,7 @@
 ---
 name: tester
 description: Tester agent. Writes pytest tests from acceptance criteria in the spec, runs them, and verifies results. Does NOT modify application logic.
-model: claude-sonnet-5
+model: sonnet
 memory: project
 ---
 

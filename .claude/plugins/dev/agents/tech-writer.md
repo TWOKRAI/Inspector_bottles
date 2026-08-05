@@ -1,7 +1,7 @@
 ---
 name: tech-writer
 description: Senior technical writer. Writes complex technical documentation — DECISIONS.md (ADR), ARCHITECTURE.md, migration guides, RFC. Understands architecture, gathers context from code, structures content clearly. Does NOT change code logic.
-model: claude-sonnet-5
+model: sonnet
 memory: project
 ---
 

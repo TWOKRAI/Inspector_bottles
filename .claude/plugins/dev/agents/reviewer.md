@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Code reviewer (Opus) with domain specializations. Reviews PRs — spec compliance, architecture, security (folds in the former dedicated security-review pass — five classes, secrets audit), IPC routing, concurrency / thread-safety. Issues concrete fix requests or approval. Does NOT write code. Maximum 2 iterations — escalates to teamlead on the 3rd.
-model: claude-opus-4-8
+model: opus
 tools: Read, Glob, Grep, Bash, mcp__qex__search_code, mcp__qex__get_indexing_status, mcp__sentrux__check_rules, mcp__sentrux__dsm, mcp__sentrux__test_gaps, mcp__sentrux__scan, mcp__graphify__get_node, mcp__graphify__get_neighbors, mcp__graphify__query_graph, mcp__graphify__shortest_path, mcp__graphify__get_pr_impact, mcp__graphify__graph_stats, mcp__graphify__god_nodes, mcp__serena__find_symbol, mcp__serena__find_referencing_symbols, mcp__serena__find_implementations, mcp__serena__get_symbols_overview, mcp__serena__find_declaration
 ---
 
