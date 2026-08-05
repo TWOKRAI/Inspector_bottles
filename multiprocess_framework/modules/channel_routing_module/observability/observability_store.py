@@ -51,6 +51,24 @@ def resolve_default_db_path() -> str:
     return os.path.join(log_dir, "observability.db")
 
 
+def _column_or(row: sqlite3.Row, name: str, default: Any) -> Any:
+    """Значение колонки, ``default`` вместо NULL.
+
+    NULL достижим и штатен: у строк, записанных до Ф3.6, отметки приёма нет и
+    быть не может (её ставит чужой процесс — Ф3.4), а число важности им
+    засыпает миграция.
+
+    **Обработки «колонки нет вовсе» здесь НЕТ намеренно.** Она была написана и
+    снята: слом-инъекция показала, что ветка недостижима — соединение открывает
+    :meth:`ObservabilityStore._init_schema`, а он доливает колонки ALTER'ом ДО
+    первого чтения. Код, дублирующий гарантию, лежащую ниже, не защищает, а
+    прячет: если гарантия однажды сломается, тихий ``default`` скажет «нет
+    данных» вместо громкого отказа.
+    """
+    value = row[name]
+    return default if value is None else value
+
+
 def _row_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
     """Нормализовать hub-запись в строку таблицы (kind/process/module/ts/severity/message/extra).
 
@@ -64,6 +82,11 @@ def _row_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "module": d["module"],
         "ts": d["ts"],
         "severity": d["severity"],
+        # Ф3.6: число и отметка приёма берутся из ТОГО ЖЕ нормализатора, а не
+        # считаются здесь заново — второй способ вычисления разошёлся бы с
+        # живым хвостом молча.
+        "severity_number": d.get("severity_number", 0),
+        "observed_ts": d.get("observed_ts"),
         "message": d["message"],
         "extra": json.dumps(d["extra"], ensure_ascii=False, default=str),
     }
@@ -118,8 +141,56 @@ class ObservabilityStore:
                 """
             )
             self._migrate_add_process()
+            self._migrate_add_severity_number()
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_records_kind_id ON records(kind, id)")
+            # Ф3.6: индекс под пороговый запрос «всё от WARNING и выше». Без него
+            # выигрыш числа перед membership-фильтром по строкам был бы только
+            # выразительным, но не быстрым.
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_records_severity_number ON records(severity_number, id)")
             self._conn.commit()
+
+    def _migrate_add_severity_number(self) -> None:
+        """Аддитивная миграция Ф3.6: ``severity_number`` + ``observed_ts``.
+
+        По образцу :meth:`_migrate_add_process`: колонки доливаются ALTER'ом,
+        идемпотентно, старый файл открывается без потерь.
+
+        **Старые строки ЗАСЫПАЮТСЯ, а не остаются NULL** — и это не украшение.
+        Пороговый запрос ``severity_number >= 13`` строки с NULL не вернёт, то
+        есть вся история до миграции молча исчезла бы из ответа на «покажи всё
+        от WARNING и выше». Тихая потеря истории — ровно то, что фаза запрещает.
+        Засыпка делается из УЖЕ ХРАНЯЩЕГОСЯ текста уровня, одним UPDATE, один
+        раз за жизнь файла.
+
+        Строки статистики засыпаются нулём (``UNSPECIFIED``) по ``kind``, а не по
+        неудаче сопоставления: в их колонке ``severity`` лежит ``metric_type``,
+        и это не уровень, а другой словарь.
+        """
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(records)")}
+        added = False
+        if "severity_number" not in cols:
+            self._conn.execute("ALTER TABLE records ADD COLUMN severity_number INTEGER")
+            added = True
+        if "observed_ts" not in cols:
+            self._conn.execute("ALTER TABLE records ADD COLUMN observed_ts REAL")
+        if added:
+            # Литералы, а не подстановка из SEVERITY_NUMBERS: SQL-выражение —
+            # второе место, где числа встречаются, и расхождение с таблицей
+            # ловит тест (см. test_backfill_matches_the_live_table).
+            self._conn.execute(
+                """
+                UPDATE records SET severity_number = CASE
+                    WHEN kind = 'stats'   THEN 0
+                    WHEN severity = 'debug'    THEN 5
+                    WHEN severity = 'info'     THEN 9
+                    WHEN severity = 'warning'  THEN 13
+                    WHEN severity = 'error'    THEN 17
+                    WHEN severity = 'critical' THEN 21
+                    ELSE 0
+                END
+                WHERE severity_number IS NULL
+                """
+            )
 
     def _migrate_add_process(self) -> None:
         """Аддитивная миграция: колонка ``process`` в старых БД (5.21 (c)).
@@ -147,8 +218,10 @@ class ObservabilityStore:
         with self._lock:
             try:
                 self._conn.executemany(
-                    "INSERT INTO records (kind, process, module, ts, severity, message, extra) "
-                    "VALUES (:kind, :process, :module, :ts, :severity, :message, :extra)",
+                    "INSERT INTO records "
+                    "(kind, process, module, ts, severity, severity_number, observed_ts, message, extra) "
+                    "VALUES (:kind, :process, :module, :ts, :severity, :severity_number, "
+                    ":observed_ts, :message, :extra)",
                     rows,
                 )
                 self._conn.commit()
@@ -169,6 +242,7 @@ class ObservabilityStore:
         kind: Optional[str] = None,
         module: Optional[str] = None,
         severity_in: Optional[List[str]] = None,
+        min_severity: Optional[int] = None,
         offset: int = 0,
         limit: int = 100,
         newest_first: bool = True,
@@ -200,12 +274,25 @@ class ObservabilityStore:
             placeholders = ",".join("?" for _ in severity_in)
             clauses.append(f"severity IN ({placeholders})")
             params.extend(s.lower() for s in severity_in)
+        if min_severity is not None:
+            # Ф3.6: ПОРОГ, а не членство. Раньше «покажи всё от WARNING и выше»
+            # выражалось только перечислением уровней вручную, и новый уровень
+            # в такой список никто бы не добавил.
+            clauses.append("severity_number >= ?")
+            params.append(int(min_severity))
 
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         order = "DESC" if newest_first else "ASC"
+        # Подстановки в SQL ниже НЕ пользовательские: `where` собран из
+        # ЛИТЕРАЛЬНЫХ кусков выше, `order` принимает два значения из bool.
+        # Все значения фильтров (kind/module/severity/min_severity/limit/offset)
+        # уходят через `?`-плейсхолдеры в `params`. Предупреждение было в этом
+        # файле и до Ф3.6 — хук сканирует только изменённые файлы, поэтому
+        # всплыло при первой же правке стора.
         sql = (
-            f"SELECT id, kind, process, module, ts, severity, message, extra FROM records"
-            f"{where} ORDER BY id {order} LIMIT ? OFFSET ?"
+            "SELECT id, kind, process, module, ts, severity, severity_number, observed_ts, "
+            "message, extra FROM records"
+            f"{where} ORDER BY id {order} LIMIT ? OFFSET ?"  # nosec B608
         )
         params.extend([int(limit), int(offset)])
 
@@ -251,6 +338,10 @@ class ObservabilityStore:
             "module": row["module"],
             "ts": row["ts"],
             "severity": row["severity"],
+            # Дореформенные строки читаются: колонки нет → 0 (UNSPECIFIED), то
+            # есть «важность неизвестна», а не «самый низкий уровень».
+            "severity_number": _column_or(row, "severity_number", 0),
+            "observed_ts": _column_or(row, "observed_ts", None),
             "message": row["message"],
             "extra": extra,
         }

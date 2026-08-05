@@ -29,16 +29,43 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from ..levels import UNKNOWN_SEVERITY, UNSPECIFIED, severity_of
 from .observability_hub import KIND_STATS
 
 KIND_ERROR = "error"  # локальная константа (не тянем observability_store → без цикла store↔display)
 
-_ENVELOPE_KEYS = ("kind", "module", "process", "ts", "severity", "message")
+_ENVELOPE_KEYS = ("kind", "module", "process", "ts", "severity", "message", "observed_ts")
+#: ``observed_ts`` в конверте, а не в ``extra`` (Ф3.6): иначе отметка приёма
+#: уезжала бы в JSON-мешок, и пороговый/свежестный запрос по ней в сторе
+#: пришлось бы делать разбором JSON вместо колонки.
 
 
 #: Ключ отметки ПРИЁМА записи наблюдателем (Ф3.4). Рядом с ``ts`` и по тому же
 #: сокращению — одно написание на display-вид, а не ``ts`` + ``observed_timestamp``.
 OBSERVED_TS_KEY = "observed_ts"
+
+
+def severity_number_for(kind: str, severity: str) -> int:
+    """``SeverityNumber`` строки display-вида (Ф3.6).
+
+    Выводится, а не хранится вторым источником правды: таблица чисел одна на
+    весь слой (:data:`..levels.SEVERITY_NUMBERS`), здесь только применение.
+
+    **У плоскости статистики оси важности нет вовсе**, и число берётся по
+    ``kind``, а НЕ по неудаче ранжирования: в колонке ``severity`` у stats лежит
+    ``metric_type`` (``gauge``/``counter``), и «не отранжировалось» там значит
+    «это не уровень», а у лога — «опечатка в имени уровня». Считай мы их одним
+    способом, метрика и опечатка стали бы неразличимы (:data:`..levels.UNSPECIFIED`
+    ровно для первого случая и заведён).
+
+    Считается в ЕДИНОМ нормализаторе, а не в сторе: форма живого хвоста и формa
+    истории обязаны совпадать по построению — иначе вкладка знала бы два формата,
+    и пороговый фильтр работал бы на одной половине данных.
+    """
+    if kind == KIND_STATS:
+        return UNSPECIFIED
+    number = severity_of(severity)
+    return UNSPECIFIED if number == UNKNOWN_SEVERITY else number
 
 
 def stamp_observed(records: Any, now: float) -> Any:
@@ -109,15 +136,23 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
         message = record.get("message", "")
         extra = {k: v for k, v in record.items() if k not in _ENVELOPE_KEYS}
 
-    return {
+    display = {
         "kind": kind,
         "process": proc,
         "module": module,
         "ts": ts,
         "severity": severity,
+        "severity_number": severity_number_for(kind, severity),
         "message": message,
         "extra": extra,
     }
+    # Отметка приёма ставится ЧУЖИМ процессом (Ф3.4) и потому есть не всегда.
+    # Ключ добавляется только когда она реально была: постоянный ``None`` весил
+    # бы в каждой живой записи и читался бы как «принято в 1970».
+    observed = record.get(OBSERVED_TS_KEY)
+    if observed:
+        display[OBSERVED_TS_KEY] = observed
+    return display
 
 
 def log_record_to_display(record_dict: Dict[str, Any], kind: str = KIND_ERROR, process: str = "") -> Dict[str, Any]:
@@ -132,12 +167,16 @@ def log_record_to_display(record_dict: Dict[str, Any], kind: str = KIND_ERROR, p
             ``module`` LogRecord (подробное имя источника) — хуже, но не пусто.
     """
     module = record_dict.get("module", "")
+    severity = str(record_dict.get("level", "")).lower()
     return {
         "kind": kind,
         "process": process or module,
         "module": module,
         "ts": float(record_dict.get("timestamp", 0.0) or 0.0),
-        "severity": str(record_dict.get("level", "")).lower(),
+        "severity": severity,
+        # Ф3.6: оба нормализатора дают ОДНУ форму — иначе пороговый фильтр
+        # работал бы на половине данных (error-tap идёт этой дорогой).
+        "severity_number": severity_number_for(kind, severity),
         "message": record_dict.get("message", ""),
         # extra под ключом "context" — паритет с историей: StoreTapChannel кладёт
         # LogRecord.extra в "context", и стор сохраняет его как {"context": {...}}.
