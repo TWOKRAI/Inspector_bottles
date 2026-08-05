@@ -17,11 +17,43 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any, Dict
 
 import pytest
 
+from multiprocess_framework import version as fw_version_module
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+from multiprocess_framework.version import __version__, code_version
+
+
+def _git_head_or_skip() -> str:
+    """Хеш HEAD, спрошенный НЕЗАВИСИМО от проверяемого кода.
+
+    Без git пропуск, а не зелёный прогон: зелень без оракула означала бы
+    «проверить нечем», и это должно быть видно в отчёте.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short=8", "HEAD"],
+            cwd=str(fw_version_module._PACKAGE_DIR),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):  # pragma: no cover — среда без git
+        pytest.skip("git недоступен — независимого оракула версии нет")
+    if result.returncode != 0:  # pragma: no cover — копия без .git
+        pytest.skip("каталог не является git-репозиторием — независимого оракула версии нет")
+    return result.stdout.strip()
+
+
+@pytest.fixture(autouse=True)
+def _reset_version_cache():
+    """Кэш версии живёт на модуле — между тестами он обязан быть чистым."""
+    fw_version_module._cached_code_version = None
+    yield
+    fw_version_module._cached_code_version = None
 
 
 class _FakeProcessData:
@@ -82,16 +114,127 @@ class TestResourceContent:
         assert after["incarnation"] == 1
         assert before["incarnation"] != after["incarnation"]
 
-    def test_version_is_the_framework_one(self) -> None:
-        """Версий в проекте две и они расходятся; в записи — версия КОДА.
+    def test_version_names_the_commit_that_produced_the_record(self) -> None:
+        """В записи — идентичность КОДА, а не рукописная константа (Н-5).
 
-        ``pyproject`` описывает дистрибутив (0.1.0), ``__version__`` — фреймворк
-        (2.0.0). Выбор сделан один раз здесь; тест сторожит, что он не съедет
-        молча на другую.
+        Оракул независимый: хеш спрашивается у git отдельным вызовом, а не
+        берётся из проверяемой функции — иначе тест согласился бы с любым
+        ответом, включая «версия не менялась четыре месяца».
+
+        До решения владельца 2026-08-05 здесь стояло сравнение с
+        ``__version__``: оно было зелёным и ровно поэтому бесполезным —
+        константа не двигалась сквозь ``state_store``, ``chain`` и всю
+        переделку наблюдаемости, и записи разных срезов дерева были
+        неотличимы.
         """
-        from multiprocess_framework import __version__
+        head = _git_head_or_skip()
 
-        assert _process()._build_resource()["fw_version"] == __version__
+        fw_version = _process()._build_resource()["fw_version"]
+
+        assert head in fw_version, f"запись не называет коммит, который её породил: {fw_version!r}"
+        assert fw_version.startswith(__version__), (
+            f"семантическая часть версии потеряна: {fw_version!r} — по ней читают линию релиза"
+        )
+
+
+class TestCodeVersionMapping:
+    """Как ответ git превращается в версию записи (Н-5, решение владельца 2026-08-05).
+
+    Отображение проверяется на подставленном ответе, а не на живом дереве:
+    «грязное» состояние репозитория тестом не управляемо, а гарантия
+    «грязь названа» нужна ровно тогда, когда она есть.
+    """
+
+    def test_clean_tree_gives_semantic_version_plus_commit(self, monkeypatch) -> None:
+        monkeypatch.setattr(fw_version_module, "_git_describe", lambda: "9950851b")
+        assert code_version() == "2.0.0+9950851b"
+
+    def test_dirty_tree_is_named(self, monkeypatch) -> None:
+        """Без суффикса хеш ВРЁТ о том, какой код выполнялся."""
+        monkeypatch.setattr(fw_version_module, "_git_describe", lambda: "9950851b-dirty")
+        assert code_version() == "2.0.0+9950851b.dirty"
+
+    def test_tagged_tree_keeps_the_whole_description(self, monkeypatch) -> None:
+        monkeypatch.setattr(fw_version_module, "_git_describe", lambda: "v2.1.0-3-g9950851b")
+        assert code_version() == "2.0.0+v2.1.0.3.g9950851b"
+
+    def test_no_git_falls_back_to_the_bare_constant(self, monkeypatch) -> None:
+        """Отсутствие идентичности видно по самому значению — заглушки нет."""
+        monkeypatch.setattr(fw_version_module, "_git_describe", lambda: "")
+        assert code_version() == "2.0.0"
+
+
+class TestGitIsAskedOnceAndNeverBreaksTheProcess:
+    def test_git_is_asked_once_per_process(self, monkeypatch) -> None:
+        """35 мс однократно на старте — это цена решения; 35 мс на запись — нет."""
+        calls: list[list[str]] = []
+
+        def _spy(argv, **kwargs):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout="9950851b\n", stderr="")
+
+        monkeypatch.setattr(fw_version_module.subprocess, "run", _spy)
+
+        first = code_version()
+        for _ in range(50):
+            code_version()
+
+        assert first == "2.0.0+9950851b"
+        assert len(calls) == 1, f"git спрошен {len(calls)} раз вместо одного — кэш не держит"
+
+    def test_git_is_asked_about_dirtiness_and_about_the_right_tree(self, monkeypatch) -> None:
+        """Утверждение на ГРАНИЦЕ ОС: что именно спрошено у git.
+
+        Отображение ``-dirty`` → ``.dirty`` проверено выше на подставленном
+        ответе, но если из argv убрать ``--dirty``, git такого ответа просто
+        никогда не даст — и все те тесты останутся зелёными. Здесь стережётся
+        сам вопрос, а не перевод ответа. По той же причине проверяется ``cwd``:
+        рабочий каталог воркера может быть любым, а спрашивать надо про дерево
+        фреймворка.
+        """
+        seen: Dict[str, Any] = {}
+
+        def _spy(argv, **kwargs):
+            seen["argv"] = argv
+            seen["cwd"] = kwargs.get("cwd")
+            seen["timeout"] = kwargs.get("timeout")
+            return subprocess.CompletedProcess(argv, 0, stdout="9950851b\n", stderr="")
+
+        monkeypatch.setattr(fw_version_module.subprocess, "run", _spy)
+        code_version()
+
+        assert "--dirty" in seen["argv"], f"о грязи дерева не спрошено — суффикс не появится никогда: {seen['argv']}"
+        assert seen["cwd"] == str(fw_version_module._PACKAGE_DIR), (
+            "git спрошен про чужое дерево — рабочий каталог процесса тут ни при чём"
+        )
+        # Ревью Fable: снятие timeout оставляло все тесты зелёными — соседний
+        # `test_hanging_git...` сам поднимает TimeoutExpired, то есть сторожит
+        # ветку обработки, а не механизм, который её порождает. Без срока
+        # зависший git подвесил бы инициализацию процесса.
+        assert seen["timeout"], "у вызова git нет срока — зависший git подвесит инициализацию процесса"
+
+    def test_missing_git_binary_does_not_raise(self, monkeypatch) -> None:
+        def _boom(argv, **kwargs):
+            raise FileNotFoundError("git не установлен")
+
+        monkeypatch.setattr(fw_version_module.subprocess, "run", _boom)
+        assert code_version() == "2.0.0"
+
+    def test_non_zero_exit_does_not_raise(self, monkeypatch) -> None:
+        """Развёрнутая копия без ``.git``: git отвечает, но отказом."""
+
+        def _fail(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 128, stdout="", stderr="not a git repository")
+
+        monkeypatch.setattr(fw_version_module.subprocess, "run", _fail)
+        assert code_version() == "2.0.0"
+
+    def test_hanging_git_does_not_hang_the_process(self, monkeypatch) -> None:
+        def _hang(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, 5)
+
+        monkeypatch.setattr(fw_version_module.subprocess, "run", _hang)
+        assert code_version() == "2.0.0"
 
 
 class TestMissingPiecesAreOmittedNotFaked:

@@ -52,6 +52,13 @@ from queue import Full
 # записи менялся бы в зависимости от того, поднят ли менеджер.
 _loss_logger = get_std_logger(__name__, fallback_name=__name__)
 
+# Исключения в этом файле форматируются через ``%r``, а не ``%s``. Причина
+# измерена ревью Ф3 (Б-6, 2026-08-05) на живом шторме: ``queue.Full``
+# поднимается БЕЗ аргументов, поэтому ``%s`` давал строку
+# ``send_to_queue('gui', 'system') failed:`` и пустоту после двоеточия —
+# следствие без причины, класс «проглоченный сбой». ``%r`` печатает
+# ``Full()``: класс назван всегда, текст добавляется когда он есть.
+
 
 class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMixin):
     """
@@ -153,7 +160,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             _loss_logger.info("QueueRegistry '%s' initialized", self.manager_name)
             return True
         except Exception as e:
-            _loss_logger.error("QueueRegistry.initialize() failed: %s", e)
+            _loss_logger.error("QueueRegistry.initialize() failed: %r", e)
             return False
 
     def shutdown(self) -> bool:
@@ -162,7 +169,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             _loss_logger.info("QueueRegistry shutdown completed")
             return True
         except Exception as e:
-            _loss_logger.error("QueueRegistry.shutdown() failed: %s", e)
+            _loss_logger.error("QueueRegistry.shutdown() failed: %r", e)
             return False
 
     # =========================================================================
@@ -183,7 +190,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 queues[queue_type] = Queue(maxsize=maxsize)
                 self._stats["created"] += 1
         except Exception as e:
-            _loss_logger.error("create_queues() failed: %s", e)
+            _loss_logger.error("create_queues() failed: %r", e)
             self._stats["errors"] += 1
         return queues
 
@@ -201,7 +208,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             _loss_logger.debug("Registered %d queues for '%s'", len(queues), process_name)
             return True
         except Exception as e:
-            _loss_logger.error("register_process_queues('%s') failed: %s", process_name, e)
+            _loss_logger.error("register_process_queues('%s') failed: %r", process_name, e)
             self._stats["errors"] += 1
             return False
 
@@ -268,7 +275,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 try:
                     on_evict(evicted, process_name)
                 except Exception as e:  # noqa: BLE001 — хук наблюдаемости не роняет доставку
-                    _loss_logger.error("send_to_queue on_evict hook failed: %s", e)
+                    _loss_logger.error("send_to_queue on_evict hook failed: %r", e)
             if timeout > 0:
                 queue.put(message, timeout=timeout)
             else:
@@ -284,7 +291,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 # Ф4 Task 4.3: потеря записывается ТОМУ ЖЕ отправителю — иначе видно
                 # «очередь теряет», но не видно, чей груз пропадает.
                 self._count_sender(process_name, queue_type, message, "lost")
-            _loss_logger.error("send_to_queue('%s', '%s') failed: %s", process_name, queue_type, e)
+            _loss_logger.error("send_to_queue('%s', '%s') failed: %r", process_name, queue_type, e)
             self._stats["errors"] += 1
             return False
 
@@ -302,7 +309,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         except Empty:
             return None
         except Exception as e:
-            _loss_logger.error("receive_from_queue('%s', '%s') failed: %s", process_name, queue_type, e)
+            _loss_logger.error("receive_from_queue('%s', '%s') failed: %r", process_name, queue_type, e)
             self._stats["errors"] += 1
             return None
 
@@ -384,7 +391,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             for item in saved:
                 queue.put(item)
         except Exception as e:
-            _loss_logger.error("clear_queue() failed: %s", e)
+            _loss_logger.error("clear_queue() failed: %r", e)
             self._stats["errors"] += 1
 
     def remove_old_if_full(

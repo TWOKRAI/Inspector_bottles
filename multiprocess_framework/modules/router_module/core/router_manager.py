@@ -631,7 +631,10 @@ class RouterManager(ChannelRoutingManager):
                 if ok:
                     delivered += 1
             except Exception as exc:
-                self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc}")
+                # ``!r``, а не ``{exc}``: исключения транспорта (``queue.Full``)
+                # приходят без аргументов, и запись превращалась в «failed:» без
+                # причины — ревью Ф3, Б-6.
+                self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc!r}")
 
         if delivered == 0:
             return None, attempted
@@ -696,7 +699,7 @@ class RouterManager(ChannelRoutingManager):
             # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
             qr.send_to_queue(owner, "system", release_msg)
         except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
-            self._log_debug(f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc}")
+            self._log_debug(f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc!r}")
 
     def _queue_absent(self, process: str, qtype: str) -> bool:
         """True, если у процесса нет очереди `(process, qtype)` в queue_registry.
@@ -716,7 +719,7 @@ class RouterManager(ChannelRoutingManager):
         try:
             return get_queue(process, qtype) is None
         except Exception as exc:  # noqa: BLE001 — реестр не должен ронять доставку
-            self._log_debug(f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc}")
+            self._log_debug(f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc!r}")
             return True
 
     def _relay_via_hub(self, ticket: Dict[str, Any]) -> bool:
@@ -746,7 +749,7 @@ class RouterManager(ChannelRoutingManager):
                 )
                 return True
         except Exception as exc:  # noqa: BLE001 — relay не должен ронять доставку
-            self._log_debug(f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc}")
+            self._log_debug(f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc!r}")
         return False
 
     def _deliver_via_channel(self, channel: IMessageChannel, process: str, ticket: Dict[str, Any]) -> bool:

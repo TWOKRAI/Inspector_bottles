@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from queue import Queue
+from queue import Full, Queue
 from typing import Any, Dict
 
 import pytest
@@ -99,3 +99,64 @@ class TestFailurePathsAreAudible:
         written = log_file.read_text(encoding="utf-8")
         assert "receive_from_queue('gui', 'data') failed" in written, f"сбой чтения проглочен: {written!r}"
         assert "транспорт сломан" in written
+
+
+class _SilentlyFullQueue(Queue):
+    """Очередь, падающая исключением БЕЗ текста — как настоящая ``mp.Queue``.
+
+    ``queue.Full`` штатно поднимается без аргументов, поэтому ``str(exc)`` у неё
+    пустая строка. Это не выдумка теста: именно так выглядел живой шторм.
+    """
+
+    def put_nowait(self, item):  # type: ignore[override]
+        raise Full()
+
+    def full(self):  # type: ignore[override]
+        return False  # мимо ветки drop_oldest — интересует именно путь исключения
+
+
+class _SilentlyFullRegistry(QueueRegistry):
+    def get_queue(self, process_name: str, queue_type: str):  # type: ignore[override]
+        return _SilentlyFullQueue()
+
+
+class _SilentlyExplodingQueue(Queue):
+    def get_nowait(self):  # type: ignore[override]
+        raise RuntimeError()
+
+
+class _SilentlyExplodingReadRegistry(QueueRegistry):
+    def get_queue(self, process_name: str, queue_type: str):  # type: ignore[override]
+        return _SilentlyExplodingQueue()
+
+
+class TestFailureNamesItsCause:
+    """Ревью Ф3 (Б-6, 2026-08-05): в живом шторме строка выглядела так —
+
+    ``send_to_queue('gui', 'system') failed:`` и НИЧЕГО после двоеточия.
+
+    Причина: ``%s`` от исключения без аргументов даёт пустую строку. Оператор
+    видел следствие («не доставлено») без причины — класс «проглоченный сбой»:
+    хуже, чем отсутствие записи, потому что запись есть и она пустая.
+    Гарантия: сбой обязан назвать СВОЙ КЛАСС даже когда текста у него нет.
+    """
+
+    def test_send_failure_without_text_still_names_the_class(self, logger_to_file) -> None:
+        _, log_file = logger_to_file
+        reg = _SilentlyFullRegistry(manager_name="Plane")
+
+        assert reg.send_to_queue("gui", "data", {"x": 1}) is False
+
+        written = log_file.read_text(encoding="utf-8")
+        assert "send_to_queue('gui', 'data') failed" in written, f"сбой отправки проглочен: {written!r}"
+        assert "Full" in written, f"причина сбоя не названа — следствие без причины: {written!r}"
+
+    def test_receive_failure_without_text_still_names_the_class(self, logger_to_file) -> None:
+        _, log_file = logger_to_file
+        reg = _SilentlyExplodingReadRegistry(manager_name="Plane")
+
+        assert reg.receive_from_queue("gui", "data") is None
+
+        written = log_file.read_text(encoding="utf-8")
+        assert "receive_from_queue('gui', 'data') failed" in written, f"сбой чтения проглочен: {written!r}"
+        assert "RuntimeError" in written, f"причина сбоя не названа — следствие без причины: {written!r}"
