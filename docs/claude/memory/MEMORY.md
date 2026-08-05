@@ -220,4 +220,5 @@
 - [Алиас держит объект живым](feedback_alias_keeps_the_object_alive.md) — grep по методу не видит присваивания; владение отдать единственному потребителю
 - [Названный механизм — не обязательство](feedback_named_mechanism_is_not_a_commitment.md) — проверка политикой отказа механизма
 - [Цена хука на горячем пути](feedback_hot_path_hook_must_be_priced.md) — мерить дельтой против цены самой эмиссии
-- [Ф4 процессоры ЗАКРЫТА](project_f4_processors_closed.md) — contextualize + редакция секретов всегда включена (ADR-LOG-006)
+- [Ф4 процессоры ЗАКРЫТА](project_f4_processors_closed.md) — contextualize + редакция секретов всегда включена (ADR-LOG-006); хвост Б-1/2/3 закрыт
+- [Снос оставляет хвост у соседа](feedback_removal_leaves_a_tail_in_the_neighbour.md) — дифф не видит, цена удобного метода видит
