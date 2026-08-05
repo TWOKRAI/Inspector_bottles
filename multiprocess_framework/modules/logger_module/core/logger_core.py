@@ -43,6 +43,7 @@ from .name_hierarchy import NameHierarchy
 from ...channel_routing_module.levels import UNKNOWN_SEVERITY, is_error_level, severity_of
 from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
 from .log_types import LogRecord, Processor
+from .redaction import SecretRedactor
 from ..channels.log_channel import (
     create_channel,
     drop_memory_rings,
@@ -353,6 +354,18 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         # Ф4.1: цепочка процессоров. Кортеж, а не список — см. add_processor.
         self._processors: Tuple[Processor, ...] = ()
+
+        # Ф4.5: редакция секретов включена ПО ПОСТРОЕНИЮ, и именно здесь.
+        #
+        # Три причины, и ни одна не про удобство. (1) Цепочка живёт на
+        # ЭКЗЕМПЛЯРЕ, а менеджеров в процессе минимум два — регистрация в общем
+        # предке достаётся обоим, включая severity-путь, по которому и едут
+        # трейсбеки. (2) Конструктор, а не проводка после boot: запись,
+        # эмитированная в окне загрузки, — обычная запись, и «редакция ещё не
+        # встала» означало бы секрет в файле. (3) Первым в цепочке: всё, что
+        # добавят позже (сэмплинг Ф7.1), обязано видеть уже замаскированное.
+        self._redactor = SecretRedactor()
+        self._processors = (self._redactor,)
 
         # Только СВОИ счётчики: четыре класса потери на стыке «менеджер → канал»
         # объявлены в базе (LOSS_COUNTER_KEYS) и общие для трёх плоскостей —
@@ -1929,6 +1942,12 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "message_build_failures": self.stats["message_build_failures"],
             "records_dropped_by_processor": self.stats["records_dropped_by_processor"],
             "processor_failures": self.stats["processor_failures"],
+            # Ф4.5: без этих двух редакция ненаблюдаема — «ни одного секрета не
+            # было» и «редактор не звался вовсе» дают одинаковые логи. Второй
+            # ключ отдельно: сбой редакции означает запись с маркером вместо
+            # содержимого (fail-closed), и молча так терять текст нельзя.
+            "records_redacted": self._redactor.records_redacted,
+            "redaction_failures": self._redactor.redaction_failures,
             "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
 
