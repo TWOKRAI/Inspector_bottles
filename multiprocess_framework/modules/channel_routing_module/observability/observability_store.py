@@ -159,38 +159,47 @@ class ObservabilityStore:
         Пороговый запрос ``severity_number >= 13`` строки с NULL не вернёт, то
         есть вся история до миграции молча исчезла бы из ответа на «покажи всё
         от WARNING и выше». Тихая потеря истории — ровно то, что фаза запрещает.
-        Засыпка делается из УЖЕ ХРАНЯЩЕГОСЯ текста уровня, одним UPDATE, один
-        раз за жизнь файла.
+        Засыпка делается из УЖЕ ХРАНЯЩЕГОСЯ текста уровня, одним UPDATE — на
+        КАЖДОМ открытии, идемпотентно (``WHERE severity_number IS NULL``): гейт
+        «только при добавлении колонки» терял историю навсегда при падении
+        между ALTER'ом и засыпкой (см. комментарий в теле).
 
         Строки статистики засыпаются нулём (``UNSPECIFIED``) по ``kind``, а не по
         неудаче сопоставления: в их колонке ``severity`` лежит ``metric_type``,
         и это не уровень, а другой словарь.
         """
         cols = {row[1] for row in self._conn.execute("PRAGMA table_info(records)")}
-        added = False
         if "severity_number" not in cols:
             self._conn.execute("ALTER TABLE records ADD COLUMN severity_number INTEGER")
-            added = True
         if "observed_ts" not in cols:
             self._conn.execute("ALTER TABLE records ADD COLUMN observed_ts REAL")
-        if added:
-            # Литералы, а не подстановка из SEVERITY_NUMBERS: SQL-выражение —
-            # второе место, где числа встречаются, и расхождение с таблицей
-            # ловит тест (см. test_backfill_matches_the_live_table).
-            self._conn.execute(
-                """
-                UPDATE records SET severity_number = CASE
-                    WHEN kind = 'stats'   THEN 0
-                    WHEN severity = 'debug'    THEN 5
-                    WHEN severity = 'info'     THEN 9
-                    WHEN severity = 'warning'  THEN 13
-                    WHEN severity = 'error'    THEN 17
-                    WHEN severity = 'critical' THEN 21
-                    ELSE 0
-                END
-                WHERE severity_number IS NULL
-                """
-            )
+        # Засыпка БЕЗУСЛОВНАЯ (идемпотентность даёт WHERE severity_number IS
+        # NULL), а не под гейтом «колонку добавили только что». Гейт держался
+        # на допущении, что колонка и числа появляются атомарно, — а sqlite3
+        # в legacy-режиме коммитит DDL сразу, UPDATE же ехал в транзакции до
+        # ``commit()``. Падение в этом окне оставляло файл «колонка есть,
+        # числа NULL» НАВСЕГДА: при следующем открытии гейт видел колонку и
+        # засыпку пропускал — дореформенная история молча выпадала из
+        # порогового запроса. Репродукция — ревью Ф3 (2026-08-05). На
+        # здоровом файле UPDATE — дешёвый no-op по индексу severity_number.
+        #
+        # Литералы, а не подстановка из SEVERITY_NUMBERS: SQL-выражение —
+        # второе место, где числа встречаются, и расхождение с таблицей
+        # ловит тест (см. test_backfill_matches_the_live_table).
+        self._conn.execute(
+            """
+            UPDATE records SET severity_number = CASE
+                WHEN kind = 'stats'   THEN 0
+                WHEN severity = 'debug'    THEN 5
+                WHEN severity = 'info'     THEN 9
+                WHEN severity = 'warning'  THEN 13
+                WHEN severity = 'error'    THEN 17
+                WHEN severity = 'critical' THEN 21
+                ELSE 0
+            END
+            WHERE severity_number IS NULL
+            """
+        )
 
     def _migrate_add_process(self) -> None:
         """Аддитивная миграция: колонка ``process`` в старых БД (5.21 (c)).

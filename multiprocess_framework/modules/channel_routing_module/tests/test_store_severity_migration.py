@@ -258,3 +258,33 @@ class TestLiveAndHistoryShareTheShape:
         assert severity_number_for("stats", "gauge") == 0
         assert severity_number_for("log", "ОПЕЧАТКА") == 0
         assert severity_number_for("log", "warning") == 13
+
+
+class TestPartialMigrationWindow:
+    """Падение между ALTER'ом и UPDATE-засыпкой не должно терять историю навсегда.
+
+    Найдено ревью Ф3 (2026-08-05) репродукцией: sqlite3 в legacy-режиме коммитит
+    DDL сразу (ALTER — вне транзакции), а засыпка ехала в транзакции до
+    ``commit()``. Падение в этом окне оставляло файл в состоянии «колонка есть,
+    числа NULL», и гейт ``if added:`` при следующем открытии больше НИКОГДА не
+    засыпал: ``added=False`` — дореформенная история молча выпадала из
+    порогового запроса. Ровно та тихая потеря, которую миграция запрещает.
+    """
+
+    def test_crash_after_alter_still_backfills_on_next_open(self, tmp_path: Any) -> None:
+        db = str(tmp_path / "old.db")
+        _legacy_db(db, [_row("log", "error", "беда"), _row("log", "warning"), _row("stats", "gauge")])
+        # Состояние диска после падения: колонка добавлена (DDL закоммичен),
+        # засыпки не было (UPDATE потерян вместе с транзакцией).
+        conn = sqlite3.connect(db)
+        conn.execute("ALTER TABLE records ADD COLUMN severity_number INTEGER")
+        conn.commit()
+        conn.close()
+
+        store = ObservabilityStore(db)
+        try:
+            hits = [r["message"] for r in store.list_records(min_severity=SEVERITY_NUMBERS["WARNING"])]
+            assert "беда" in hits, "история после частичной миграции молча выпала из порогового запроса"
+            assert len(hits) == 2, hits
+        finally:
+            store.close()

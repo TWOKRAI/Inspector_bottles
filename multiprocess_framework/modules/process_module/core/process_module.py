@@ -490,9 +490,16 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             pass
 
         try:
-            from ..configs.observability_layers import RECIPE_PATH_CONFIG_KEY
+            from ..configs.observability_layers import RECIPE_PATH_CONFIG_KEY, read_process_config
 
-            recipe_path = str(self.get_config(RECIPE_PATH_CONFIG_KEY) or "")
+            # Через read_process_config, НЕ через голый get_config: оркестратор
+            # получает конфиг плоским, а ребёнок — весь proc_dict, где ключи
+            # ассемблера лежат под "config." — голое чтение на живом стенде
+            # молча теряло поле recipe во всех записях (live webcam_sketch,
+            # ревью Ф3). Класс уже был записан после 5.12 («форма доставки
+            # конфига различается»), и хелпер для него уже существовал —
+            # повторное изобретение здесь его обошло.
+            recipe_path = str(read_process_config(self, RECIPE_PATH_CONFIG_KEY) or "")
             if recipe_path:
                 # Имя, а не путь: путь длинный, машинно-специфичный и в каждой
                 # записи бесполезен — различать прогоны достаточно именем.

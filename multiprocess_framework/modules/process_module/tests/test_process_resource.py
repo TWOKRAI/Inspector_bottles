@@ -229,3 +229,44 @@ def test_resource_field_names_are_stable(field: str) -> None:
         config={"observability_recipe_path": "r/x.yaml"},
     )._build_resource()
     assert field in resource
+
+
+class TestConfigDeliveryShapes:
+    """Ключ рецепта обязан находиться в ОБЕИХ формах доставки конфига.
+
+    Live-прогон webcam_sketch (ревью Ф3, 2026-08-05): ассемблер кладёт
+    ``observability_recipe_path`` ВНУТРЬ ``proc_dict["config"]``, а ребёнок
+    получает конфигом весь proc_dict — прикладные ключи у него лежат под
+    ``config.<ключ>``. Плоскую форму видят PM-оркестратор и тестовый харнес;
+    код, читавший только её, на живом стенде молча терял поле ``recipe`` во
+    всех записях. Класс уже записан в памяти проекта после 5.12 («форма
+    доставки конфига различается», хелпер ``read_process_config``) — и
+    повторился здесь, потому что харнес Ф3.5 пинил только плоскую форму.
+
+    Вложенная форма проверяется на НАСТОЯЩЕМ ``Config`` в роли
+    ``config_handler`` (dot-notation — его свойство): фейковый словарь с
+    самодельной точечной адресацией доказывал бы фейк, а не проводку.
+    """
+
+    def test_recipe_is_found_in_the_nested_live_shape(self) -> None:
+        from multiprocess_framework.modules.config_module import Config
+
+        proc = _process()
+        proc.config_handler = Config(
+            initial_data={"config": {"observability_recipe_path": "recipes/webcam_sketch.yaml"}}
+        )
+        assert proc._build_resource().get("recipe") == "webcam_sketch", (
+            "живая форма доставки (ключ внутри proc_dict['config']) осталась без имени рецепта"
+        )
+
+    def test_flat_shape_still_wins_when_both_present(self) -> None:
+        from multiprocess_framework.modules.config_module import Config
+
+        proc = _process()
+        proc.config_handler = Config(
+            initial_data={
+                "observability_recipe_path": "recipes/flat.yaml",
+                "config": {"observability_recipe_path": "recipes/nested.yaml"},
+            }
+        )
+        assert proc._build_resource().get("recipe") == "flat"
