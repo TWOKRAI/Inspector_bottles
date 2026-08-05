@@ -12,6 +12,9 @@ from __future__ import annotations
 import sys
 import time
 
+from multiprocess_framework.modules.channel_routing_module.observability.record_display import (
+    stamp_observed,
+)
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPriority
@@ -165,6 +168,13 @@ class GuiProcess(ProcessModule):
             records = [single] if single is not None else []
         if not records:
             return
+        # Ф3.4: отметка приёма ставится ЗДЕСЬ — в первой точке, где запись
+        # увидел чужой процесс. Раньше по дороге её ставить некому: у эмитента
+        # она совпала бы с `ts` и не несла бы ни бита. Разность `observed_ts -
+        # ts` = задержка плоскости наблюдаемости, и без неё «хвост застрял»
+        # неотличимо от «ничего не происходит»: записи приедут со старыми, но
+        # честными `ts`.
+        stamp_observed(records, time.time())
         self._bridge.dispatch(
             {
                 "data_type": "observability_record",
