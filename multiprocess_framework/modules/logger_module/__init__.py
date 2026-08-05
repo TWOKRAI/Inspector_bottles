@@ -17,7 +17,13 @@ from .configs import (
     LoggerScopeSchema,
 )
 from .core.log_config import PRESET_SCOPES, LogLevel, LogScope, ScopeName
-from .core.logger_manager import LoggerManager, get_logger, init_logging, shutdown_logging
+from .core.logger_manager import (
+    LoggerManager,
+    contextualize,
+    get_logger,
+    init_logging,
+    shutdown_logging,
+)
 from .channels.log_channel import (
     LogChannel,
     FileChannel,
@@ -77,6 +83,10 @@ __all__ = [
     "get_logger",
     "init_logging",
     "shutdown_logging",
+    # Ф4.3: наружу отдана безопасная дверь к форточке контекста, а не сама
+    # переменная — два правила её применения (пересоздавать значение целиком,
+    # возвращать по токену) руками нарушаются тихо.
+    "contextualize",
 ]
 
 __version__ = "2.0.0"

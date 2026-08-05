@@ -149,13 +149,12 @@ def log_correlation(items):
     (``SourceProducer``). Одна точка постановки накрыла бы записи только своего
     потока, а выглядела бы как сквозная корреляция.
 
-    Значение форточки **пересоздаётся целиком**, а не мутируется: словарь общий
-    для потоков, и правка на месте видна всем сразу — тот же довод, что у
-    ``_context_stacks``.
-
-    Возврат — по токену в ``finally``: вложенность и исключения обязаны
-    восстанавливать ровно прежнее значение, иначе след одного кадра протёк бы в
-    записи следующего.
+    Постановка и возврат — на ``contextualize`` логгера (Ф4.3): оба правила
+    безопасной работы с форточкой (пересоздавать значение целиком, а не
+    мутировать общий словарь; возвращать по токену в ``finally``, чтобы
+    вложенность и исключения восстанавливали ровно прежнее значение) живут
+    теперь в одном месте, а не переписываются каждым, кому понадобилась
+    корреляция.
 
     Args:
         items: кадр (dict) или пачка (list). Без ``trace_id`` или со
@@ -165,13 +164,10 @@ def log_correlation(items):
     if not trace_id:
         yield
         return
-    from ...logger_module.core.logger_core import log_context
+    from ...logger_module.core.logger_core import contextualize
 
-    token = log_context.set({**log_context.get(), "trace_id": trace_id})
-    try:
+    with contextualize(trace_id=trace_id):
         yield
-    finally:
-        log_context.reset(token)
 
 
 def stamp_send(item: dict, node: str) -> None:

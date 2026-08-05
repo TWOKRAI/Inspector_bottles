@@ -20,6 +20,7 @@ from ..configs.logger_manager_config import LoggerManagerConfig
 from .logger_core import (  # noqa: F401 — re-export (стабильный публичный путь)
     LoggerCore,
     bump_observability_epoch,
+    contextualize,
     log_context,
 )
 
