@@ -4,25 +4,28 @@ ChannelRoutingManager — базовый менеджер маршрутизац
 
 Устраняет дублирование между RouterManager, LoggerManager и ErrorManager:
   - ChannelRegistry          (thread-safe хранилище каналов)
-  - Dispatcher               (маршрутизация ключ → обработчик)
   - IBufferStrategy          (опциональная буферизация)
   - normalize_config()       (Dict at Boundary)
+  - учёт потерь и доставки   (четыре класса, один список ключей)
 
 Наследники настраивают, но не переписывают:
-  - RouterManager  — key=command/type, buffer=AsyncSenderBuffer, channels=IMessageChannel
-  - LoggerCore     — key=level/scope,  buffer=BatchBuffer,       channels=ILogChannel
+  - RouterManager  — buffer=AsyncSenderBuffer, channels=IMessageChannel
+  - LoggerCore     — buffer=BatchBuffer,       channels=ILogChannel
                      (LoggerManager = LoggerCore + process-singleton)
   - ErrorManager   — брат LoggerManager (общий предок LoggerCore), + severity routing
-  - StatsManager   — key=metric_name,  buffer=AggregationWindow, channels=IMetricChannel
+  - StatsManager   — buffer=AggregationWindow, channels=IMetricChannel
+
+``Dispatcher`` (маршрутизация ключ → обработчик) из этого списка убран в Ф4.6:
+слот жил в базе, наполнялся на каждой регистрации канала и не использовался
+ни одним из четырёх наследников. Каждый маршрутизирует своим живым путём.
 """
 
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from ..._fallback import emergency_log
 from ...base_manager import BaseManager, ObservableMixin
-from ...dispatch_module import Dispatcher, DispatchStrategy
 from ..interfaces import IChannel, IBufferStrategy, IChannelRoutingManager, channel_accepted
 from ..levels import record_severity, threshold_severity
 from .channel_registry import ChannelRegistry
@@ -75,18 +78,34 @@ _UNNORMALIZABLE = "__crm_unnormalizable__"
 
 
 class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager):
-    """Базовый менеджер маршрутизации: канальный реестр + диспетчер + буфер.
+    """Базовый менеджер маршрутизации: канальный реестр + буфер.
 
     Общие методы (пишутся один раз, используются всеми наследниками):
         register_channel()      — thread-safe регистрация канала
         unregister_channel()    — thread-safe удаление канала
         get_channel()           — получить канал по имени
         get_all_channels()      — список всех каналов
-        register_route()        — зарегистрировать правило маршрутизации
-        register_broadcast()    — отправить в несколько каналов
-        route()                 — маршрутизировать данные к каналу
         flush()                 — принудительный сброс буфера
-        get_stats()             — статистика (каналы, буфер, роутинг)
+        get_stats()             — статистика (каналы, буфер, потери)
+
+    **Чего здесь БОЛЬШЕ НЕТ и почему (Ф4.6, 2026-08-05).** У базы был второй,
+    key-based механизм маршрутизации: слот ``_dispatcher`` (``Dispatcher`` из
+    ``dispatch_module``), методы ``register_route`` / ``register_broadcast`` /
+    ``route`` и регистрация КАЖДОГО канала обработчиком под ключом = имя канала.
+    Снесён целиком: во всём репозитории через него не проходило ни одной
+    продовой записи — единственными вызывающими ``route()`` были его же тесты.
+
+    Постановка задачи считала слот мёртвым только у ``LoggerManager`` и
+    ``ErrorManager``; проверка кодом показала, что он мёртв у **всех четырёх**
+    наследников, включая ``RouterManager`` — тот перекрывает ``register_route``
+    и работает через собственный ``channel_dispatcher``, а к базовому слоту не
+    обращается. Доставка везде идёт другим путём (резолв scope → каналы у
+    логгера, kind-каналы у роутера), и именно он живой.
+
+    Почему снос, а не «оживить»: Ф4 вводит **цепочку процессоров**, и оставить
+    рядом второй, никем не используемый механизм маршрутизации значило бы
+    построить ровно ту двусмысленность, которую фаза убирает. Цепочка
+    процессоров ≠ key-based Dispatcher.
 
     Типичное использование (наследование):
         class LoggerManager(ChannelRoutingManager):
@@ -95,7 +114,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
                     "LoggerManager",
                     config=config,
                     buffer_strategy=BatchBuffer(flush_fn=self._do_batch_flush),
-                    dispatcher_key_field="level",
                 )
             def initialize(self) -> bool:
                 result = super().initialize()
@@ -108,8 +126,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         manager_name: str,
         config: Optional[Union[Dict[str, Any], Any]] = None,
         buffer_strategy: Optional[IBufferStrategy] = None,
-        dispatcher_key_field: str = "type",
-        dispatcher_strategy: Optional[DispatchStrategy] = None,
         managers: Optional[Dict[str, Any]] = None,
         process: Optional[Any] = None,
         observable_config: Optional[Dict[str, Any]] = None,
@@ -121,8 +137,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             manager_name:         Уникальное имя менеджера
             config:               None | dict | RegisterBase (normalize_config обработает)
             buffer_strategy:      Стратегия буферизации. None = прямой write()
-            dispatcher_key_field: Поле в data для ключа маршрутизации (по умолчанию "type")
-            dispatcher_strategy:  Стратегия Dispatcher по умолчанию (EXACT_MATCH, PATTERN и т.д.)
             managers:             Словарь менеджеров для ObservableMixin
             process:              Ссылка на родительский процесс
             observable_config:    Конфиг для ObservableMixin (enable/disable managers)
@@ -145,7 +159,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         # dict: наследники строятся именно из него (ErrorManager теряет
         # include_stacktrace на dict-форме LoggerManagerConfig).
         self._last_applied_config: Optional[Union[Dict[str, Any], Any]] = config
-        self._key_field = dispatcher_key_field
         self._buffer = buffer_strategy
 
         self._channel_registry = ChannelRegistry(
@@ -154,19 +167,10 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             log_debug=self._log_debug,
         )
 
-        self._dispatcher = Dispatcher(
-            f"{manager_name}_dispatcher",
-            process=process,
-            default_strategy=dispatcher_strategy or DispatchStrategy.EXACT_MATCH,
-        )
-
         # Tap-приёмники (Ф0.6 — подъём из LoggerCore). Живут ОТДЕЛЬНО от
         # _channel_registry: reconfigure() их не сбрасывает, подписка на tail
         # переживает hot-reload. {имя: (IChannel, min_rank)}.
         self._tap_sinks: Dict[str, tuple] = {}
-
-        self._routed: int = 0
-        self._errors: int = 0
 
         # P5: учёт потерь — общее хозяйство ТРЁХ плоскостей, а не логгера.
         # До подъёма он жил в LoggerCore: у логов и ошибок потеря была названа и
@@ -227,11 +231,10 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
     def initialize(self) -> bool:
         """Инициализировать менеджер и все его компоненты.
 
-        Вызывает initialize() у Dispatcher и start() у буфера (если есть).
-        Наследники должны вызывать super().initialize() в начале своего initialize().
+        Вызывает start() у буфера (если есть). Наследники должны вызывать
+        super().initialize() в начале своего initialize().
         """
         try:
-            self._dispatcher.initialize()
             if self._buffer:
                 self._buffer.start()
             self.is_initialized = True
@@ -459,7 +462,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             pass
 
     def shutdown(self) -> bool:
-        """Корректное завершение: flush → stop buffer → close channels → shutdown dispatcher."""
+        """Корректное завершение: flush → stop buffer → close channels."""
         try:
             self._log_info(f"[{self.manager_name}] shutting down")
             self.flush()
@@ -470,7 +473,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             if self._buffer:
                 self._buffer.stop()
             self._close_all_channels()
-            self._dispatcher.shutdown()
             self.is_initialized = False
             return True
         except Exception as e:
@@ -482,18 +484,16 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
     # =========================================================================
 
     def register_channel(self, channel: IChannel) -> bool:
-        """Зарегистрировать канал.
+        """Зарегистрировать канал в реестре.
 
-        Сохраняет канал в реестре и регистрирует его write() (или buffered write)
-        как обработчик в Dispatcher под ключом = channel.name.
+        Раньше здесь же канал регистрировался обработчиком в мёртвом
+        ``Dispatcher`` под ключом = имя канала — работа на каждую регистрацию
+        ради пути, по которому не проходило ни одной записи (Ф4.6).
 
         Returns:
             True если канал зарегистрирован успешно
         """
-        if not self._channel_registry.register(channel):
-            return False
-        self._register_channel_handler(channel)
-        return True
+        return self._channel_registry.register(channel)
 
     def unregister_channel(self, name: str) -> bool:
         """Удалить канал по имени.
@@ -510,121 +510,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
     def get_all_channels(self) -> List[IChannel]:
         """Список всех зарегистрированных каналов."""
         return self._channel_registry.all()
-
-    # =========================================================================
-    # МАРШРУТИЗАЦИЯ  (IChannelRoutingManager)
-    # =========================================================================
-
-    def register_route(
-        self,
-        key: str,
-        channel_name: str,
-        strategy: Any = None,
-        efficiency: int = 0,
-        tags: Optional[List[str]] = None,
-    ) -> bool:
-        """Зарегистрировать правило маршрутизации: ключ → канал.
-
-        После регистрации route(data) с data[key_field]==key будет писать в channel_name.
-
-        Args:
-            key:          Значение ключа для маршрутизации (напр. "INFO", "error")
-            channel_name: Имя целевого канала (должен быть зарегистрирован)
-            strategy:     DispatchStrategy (EXACT, PATTERN, CHAIN, FALLBACK)
-            efficiency:   Приоритет (чем выше — тем предпочтительнее при конкурентных правилах)
-            tags:         Теги для фильтрации/диагностики
-
-        Returns:
-            True если правило зарегистрировано
-        """
-        ch = self._channel_registry.get(channel_name)
-        if ch is None:
-            self._log_warning(f"[{self.manager_name}] register_route: channel '{channel_name}' not found")
-            return False
-
-        handler = self._make_handler(channel_name, ch)
-        return self._dispatcher.register_handler(
-            key,
-            handler,
-            expects_full_message=True,
-            efficiency=efficiency,
-            tags=tags or [],
-            strategy=strategy,
-        )
-
-    def register_broadcast(
-        self,
-        key: str,
-        channel_names: List[str],
-        tags: Optional[List[str]] = None,
-    ) -> bool:
-        """Зарегистрировать широковещательный маршрут: ключ → несколько каналов.
-
-        Args:
-            key:           Значение ключа для маршрутизации
-            channel_names: Список имён целевых каналов
-            tags:          Теги для фильтрации/диагностики
-
-        Returns:
-            True если все каналы найдены и маршрут зарегистрирован
-        """
-        channels: List[IChannel] = []
-        for name in channel_names:
-            ch = self._channel_registry.get(name)
-            if ch is None:
-                self._log_warning(f"[{self.manager_name}] register_broadcast: channel '{name}' not found")
-                return False
-            channels.append(ch)
-
-        def _broadcast_handler(data: Dict[str, Any]) -> Dict[str, Any]:
-            results = []
-            for ch_name, ch in zip(channel_names, channels):
-                try:
-                    if self._buffer is not None:
-                        self._buffer.enqueue(ch_name, data)
-                        results.append({"channel": ch_name, "status": "queued"})
-                    else:
-                        res = ch.write(data)
-                        results.append(res)
-                except Exception as e:
-                    results.append({"channel": ch_name, "status": "error", "error": str(e)})
-            return {"status": "broadcast", "results": results}
-
-        return self._dispatcher.register_handler(
-            key,
-            _broadcast_handler,
-            expects_full_message=True,
-            tags=tags or [],
-        )
-
-    def route(
-        self,
-        data: Dict[str, Any],
-        key_field: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Маршрутизировать данные к подходящему каналу.
-
-        Извлекает ключ из data[key_field] и вызывает соответствующий обработчик
-        через Dispatcher. Результат возвращается напрямую.
-
-        Args:
-            data:      Словарь с данными (должен содержать поле key_field)
-            key_field: Поле для извлечения ключа. None → self._key_field
-
-        Returns:
-            {"status": "success"|"error"|"unhandled", ...}
-        """
-        kf = key_field or self._key_field
-        try:
-            result = self._dispatcher.dispatch(data, key_field=kf)
-            self._routed += 1
-            if isinstance(result, dict):
-                return result
-            return {"status": "success"}
-        except Exception as e:
-            self._errors += 1
-            self._log_error(f"[{self.manager_name}] route error: {e}")
-            return {"status": "error", "error": str(e)}
 
     # =========================================================================
     # БУФЕРИЗАЦИЯ  (IChannelRoutingManager)
@@ -647,9 +532,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
                 "channel_count": len(self._channel_registry),
                 "channels": self._channel_registry.names(),
                 "channel_info": self._channel_registry.get_info(),
-                "routed": self._routed,
-                "errors": self._errors,
-                "key_field": self._key_field,
             }
         )
         if self._buffer is not None:
@@ -1157,37 +1039,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
     # =========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ (для использования наследниками)
     # =========================================================================
-
-    def _make_handler(
-        self,
-        channel_name: str,
-        channel: IChannel,
-    ) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
-        """Создать обработчик для канала (с учётом буфера).
-
-        Если buffer_strategy != None → enqueue в буфер.
-        Иначе → прямой вызов channel.write().
-        """
-        if self._buffer is not None:
-            buf = self._buffer
-            ch_name = channel_name
-
-            def _buffered(data: Dict[str, Any], *, _buf=buf, _name=ch_name) -> Dict[str, Any]:
-                _buf.enqueue(_name, data)
-                return {"status": "queued", "channel": _name}
-
-            return _buffered
-        else:
-            return channel.write
-
-    def _register_channel_handler(self, channel: IChannel) -> None:
-        """Зарегистрировать обработчик канала в Dispatcher под ключом = channel.name."""
-        handler = self._make_handler(channel.name, channel)
-        self._dispatcher.register_handler(
-            channel.name,
-            handler,
-            expects_full_message=True,
-        )
 
     def _close_all_channels(self) -> None:
         """Закрыть все каналы при shutdown / перед пересборкой из конфига.

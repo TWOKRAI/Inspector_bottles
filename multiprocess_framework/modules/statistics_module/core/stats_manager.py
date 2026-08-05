@@ -83,7 +83,6 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             manager_name=manager_name,
             config=config,
             buffer_strategy=buffer,
-            dispatcher_key_field="type",
             managers=managers,
             process=process,
             **kwargs,
@@ -99,10 +98,10 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     # =========================================================================
 
     def initialize(self) -> bool:
-        """Инициализация: dispatcher + каналы + старт flush-таймера."""
+        """Инициализация: каналы + старт flush-таймера."""
         try:
-            # Инициализируем dispatcher, НЕ стартуем буфер — делаем это после каналов.
-            self._dispatcher.initialize()
+            # Порядок важен: сперва каналы, буфер — после них.
+            # (Ф4.6: здесь же инициализировался мёртвый CRM-диспетчер; снят.)
             self._setup_channels()
             if self._buffer:
                 self._buffer.start()
@@ -114,7 +113,7 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             return False
 
     # shutdown() наследуется от ChannelRoutingManager:
-    # flush() → buffer.stop() (финальный flush) → _close_all_channels() → dispatcher.shutdown()
+    # flush() → buffer.stop() (финальный flush) → _close_all_channels()
 
     def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
         """Хук CRM.reconfigure: пересоздать каналы агрегации из нового конфига.

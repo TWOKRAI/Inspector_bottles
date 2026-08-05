@@ -13,7 +13,6 @@ Task 5.14 (CRM-развязка):
 Наследование от ChannelRoutingManager:
   - self._channel_registry  — thread-safe хранилище каналов (IChannel)
   - self._buffer            — BatchBuffer для пакетной записи
-  - self._dispatcher        — Dispatcher (базовый, для level-based routing в ErrorManager)
 
 Публичный API не изменён (info, error, log, flush, get_stats и т.д.).
 """
@@ -197,7 +196,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     Использует от ChannelRoutingManager:
       - self._channel_registry  — thread-safe хранилище каналов (IChannel)
       - self._buffer            — BatchBuffer для пакетной записи
-      - self._dispatcher        — Dispatcher (базовый, для level-based routing в ErrorManager)
 
     Специфика:
       - LoggerManagerConfig    — конфигурация областей/уровней/каналов (SchemaBase)
@@ -228,7 +226,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             process=process,
             config=None,
             buffer_strategy=None,
-            dispatcher_key_field="level",
             managers=managers,
             auto_proxy=kwargs.get("auto_proxy", True),
         )
@@ -354,10 +351,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
     def initialize(self) -> bool:
         try:
-            # _dispatcher (унаследован от ChannelRoutingManager) в LoggerManager мёртв:
-            # ни одного register_handler/dispatch — логирование идёт через CRM-каналы +
-            # BatchBuffer. Его no-op lifecycle не вызываем (план comm-system §11.16).
-            # Инстанс остаётся в базе (его использует ErrorManager) — базу не трогаем.
+            # Ф4.6: _dispatcher больше нет и в самой базе. Он был мёртв не только
+            # здесь — у всех четырёх наследников; комментарий «его использует
+            # ErrorManager» был ложным и держал слот живым на бумаге.
             if self._buffer:
                 self._buffer.start()
             self.is_initialized = True
@@ -378,12 +374,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             self.flush()
             # Ф2.6: жалоба на молчавшие приёмники. Здесь, а не только в базе:
             # этот shutdown — полный override, базовый не вызывается вовсе
-            # (мёртвый диспетчер, §11.16). Хук только в базе не сработал бы
+            # (Ф4.6: диспетчера в базе больше нет вовсе). Хук только в базе не сработал бы
             # на ГЛАВНОЙ плоскости — поймано тестом. Повтор защищён флагом.
             self._warn_about_idle_sinks()
             if self._buffer:
                 self._buffer.stop()
-            # _dispatcher.shutdown() не вызываем — он мёртв в LoggerManager (§11.16, см. initialize).
 
             for channel in self._channel_registry.clear():
                 try:

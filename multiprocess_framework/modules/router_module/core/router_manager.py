@@ -107,8 +107,6 @@ class RouterManager(ChannelRoutingManager):
             process=process,
             config=None,
             buffer_strategy=None,  # AsyncSender handles buffering (not CRM buffer)
-            dispatcher_key_field="command",
-            dispatcher_strategy=dispatch_strategy,
             managers=managers,
             observable_config=kwargs.pop("observable_config", None),
             auto_proxy=kwargs.pop("auto_proxy", True),
@@ -145,7 +143,20 @@ class RouterManager(ChannelRoutingManager):
 
         self._send_mw = MiddlewarePipeline("send", log_warning=self._log_warning)
         self._recv_mw = MiddlewarePipeline("receive", log_warning=self._log_warning)
-        self.channel_dispatcher = self._dispatcher
+        # Ф4.6: диспетчер теперь СВОЙ, а не алиас базового слота.
+        #
+        # Раньше здесь стояло ``self.channel_dispatcher = self._dispatcher`` —
+        # объект создавала база ``ChannelRoutingManager`` для всех четырёх
+        # наследников, и пользовался им ровно один: этот. Трём остальным он
+        # доставался мёртвым, но выглядел общим механизмом, а имя ``register_route``
+        # у базы и у роутера означало РАЗНОЕ (база писала в канал напрямую, роутер
+        # возвращает имя канала). Имя объекта оставлено прежним, чтобы записи и
+        # статистика не уехали под другим адресом.
+        self.channel_dispatcher = Dispatcher(
+            f"{manager_name}_dispatcher",
+            process=process,
+            default_strategy=dispatch_strategy,
+        )
         self.event_dispatcher = Dispatcher(
             f"{manager_name}_event_dispatcher",
             process=process,
@@ -354,7 +365,7 @@ class RouterManager(ChannelRoutingManager):
 
     def initialize(self) -> bool:
         try:
-            self._dispatcher.initialize()
+            self.channel_dispatcher.initialize()
             self.event_dispatcher.initialize()
             self._sender.start()
             self.is_initialized = True
@@ -377,7 +388,7 @@ class RouterManager(ChannelRoutingManager):
                 except Exception:  # nosec B110 — best-effort остановка канала при shutdown
                     pass
 
-            self._dispatcher.shutdown()
+            self.channel_dispatcher.shutdown()
             self.event_dispatcher.shutdown()
             self.is_initialized = False
             self._log_info("RouterManager shutdown completed")

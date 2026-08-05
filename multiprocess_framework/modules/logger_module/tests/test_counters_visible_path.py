@@ -351,12 +351,10 @@ def test_every_manager_counter_is_published_or_declared_unpublished(make_manager
             "manager_name",
             "process_name",
             "is_initialized",
-            "key_field",
             "channels",
             "channel_count",
             "channel_info",
             "adapters",
-            "routed",
             "router",
             # Список имён метрик статистики: содержимое плоскости, а не её
             # здоровье; едет наружу telemetry-ручками.

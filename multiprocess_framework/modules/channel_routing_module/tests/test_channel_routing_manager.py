@@ -2,8 +2,14 @@
 """
 Тесты ChannelRoutingManager.
 
-Проверяет: initialize/shutdown, register_channel, route, register_route,
-register_broadcast, buffer integration, get_stats.
+Проверяет: initialize/shutdown, register_channel, buffer integration, get_stats.
+
+**Ф4.6 (2026-08-05): блок TestRouting удалён вместе с проверяемым API.**
+``route`` / ``register_route`` / ``register_broadcast`` снесены из базы: во всём
+репозитории их звали ТОЛЬКО эти тесты — продовой записи через них не проходило
+ни одной. Тесты буфера ехали тем же мёртвым путём, поэтому переписаны на живой
+шов «буфер ↔ ``flush()`` менеджера»: именно он остался в базе и именно им
+пользуются все четыре наследника.
 """
 
 import time
@@ -127,115 +133,54 @@ class TestChannelManagement:
 
 
 # ---------------------------------------------------------------------------
-# Tests: routing (no buffer)
-# ---------------------------------------------------------------------------
-
-
-class TestRouting:
-    def test_route_to_channel_by_name(self):
-        mgr = _manager(dispatcher_key_field="type")
-        ch = _MockChannel("console")
-        mgr.register_channel(ch)
-        # channel name is the default handler key
-        result = mgr.route({"type": "console", "msg": "hello"})
-        assert result.get("status") == "success"
-        assert len(ch.written) == 1
-
-    def test_register_route(self):
-        mgr = _manager(dispatcher_key_field="level")
-        ch = _MockChannel("file")
-        mgr.register_channel(ch)
-        assert mgr.register_route("INFO", "file")
-        mgr.route({"level": "INFO", "message": "test"})
-        assert len(ch.written) == 1
-
-    def test_register_route_missing_channel(self):
-        mgr = _manager()
-        assert not mgr.register_route("key", "nonexistent")
-
-    def test_route_unknown_key_returns_error_or_unhandled(self):
-        mgr = _manager(dispatcher_key_field="type")
-        result = mgr.route({"type": "unknown"})
-        # Dispatcher returns error dict for unknown key
-        assert isinstance(result, dict)
-
-    def test_register_broadcast(self):
-        mgr = _manager(dispatcher_key_field="type")
-        ch_a = _MockChannel("a")
-        ch_b = _MockChannel("b")
-        mgr.register_channel(ch_a)
-        mgr.register_channel(ch_b)
-        assert mgr.register_broadcast("ALL", ["a", "b"])
-        mgr.route({"type": "ALL", "data": "x"})
-        assert len(ch_a.written) == 1
-        assert len(ch_b.written) == 1
-
-    def test_register_broadcast_missing_channel(self):
-        mgr = _manager()
-        mgr.register_channel(_MockChannel("exists"))
-        assert not mgr.register_broadcast("key", ["exists", "missing"])
-
-    def test_custom_key_field_override(self):
-        mgr = _manager(dispatcher_key_field="type")
-        ch = _MockChannel("console")
-        mgr.register_channel(ch)
-        mgr.register_route("debug", "console")
-        mgr.route({"type": "debug", "msg": "dbg"})
-        assert len(ch.written) == 1
-
-    def test_route_key_field_per_call(self):
-        mgr = _manager(dispatcher_key_field="type")
-        ch = _MockChannel("console")
-        mgr.register_channel(ch)
-        mgr.register_route("console", "console")
-        mgr.route({"type": "wrong", "channel": "console"}, key_field="channel")
-        assert len(ch.written) == 1
-
-
-# ---------------------------------------------------------------------------
 # Tests: buffer integration
 # ---------------------------------------------------------------------------
 
 
 class TestBufferIntegration:
-    def test_direct_buffer_immediate_write(self):
+    """Шов «менеджер ↔ буфер»: постановка в очередь и сброс по flush()."""
+
+    def test_direct_buffer_writes_immediately(self):
         written = []
         buf = DirectBuffer(send_fn=lambda ch, data: written.append((ch, data)))
         mgr = _manager(buffer_strategy=buf)
-        ch = _MockChannel("ch")
-        mgr.register_channel(ch)
-        mgr.route({"type": "ch", "x": 1})
-        assert len(written) == 1
-        assert written[0] == ("ch", {"type": "ch", "x": 1})
+        mgr.register_channel(_MockChannel("ch"))
 
-    def test_batch_buffer_flush(self):
+        buf.enqueue("ch", {"x": 1})
+
+        assert written == [("ch", {"x": 1})]
+
+    def test_manager_flush_drains_the_batch_buffer(self):
+        """``flush()`` менеджера обязан дойти до буфера — иначе хвост теряется молча."""
         flushed = {}
 
         def _flush(ch, batch):
             flushed.setdefault(ch, []).extend(batch)
 
-        config = BatchConfig(max_size=1000, flush_interval=60.0)
-        buf = BatchBuffer(flush_fn=_flush, config=config)
+        buf = BatchBuffer(flush_fn=_flush, config=BatchConfig(max_size=1000, flush_interval=60.0))
         mgr = _manager(buffer_strategy=buf)
-        ch = _MockChannel("ch")
-        mgr.register_channel(ch)
-        mgr.register_route("INFO", "ch")
-        mgr.route({"type": "INFO", "msg": "a"})
-        mgr.route({"type": "INFO", "msg": "b"})
-        assert len(flushed.get("ch", [])) == 0  # not flushed yet
+        mgr.register_channel(_MockChannel("ch"))
+
+        buf.enqueue("ch", {"msg": "a"})
+        buf.enqueue("ch", {"msg": "b"})
+        assert len(flushed.get("ch", [])) == 0, "пачка ушла до flush — интервал не соблюдён"
+
         mgr.flush()
+
         assert len(flushed.get("ch", [])) == 2
 
-    def test_async_sender_buffer(self):
+    def test_async_sender_buffer_delivers(self):
         received = []
         buf = AsyncSenderBuffer(send_fn=lambda ch, data: received.append((ch, data)))
         mgr = _manager(buffer_strategy=buf)
-        ch = _MockChannel("ch")
-        mgr.register_channel(ch)
-        mgr.register_route("ev", "ch")
-        mgr.route({"type": "ev", "n": 1})
-        mgr.route({"type": "ev", "n": 2})
-        time.sleep(0.3)
+        mgr.register_channel(_MockChannel("ch"))
+
+        buf.enqueue("ch", {"n": 1})
+        buf.enqueue("ch", {"n": 2})
+
+        deadline = time.monotonic() + 2.0
+        while len(received) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert len(received) == 2
         mgr.shutdown()
 
@@ -312,14 +257,6 @@ class TestStats:
         assert set(s["channels"]) == {"a", "b"}
         assert s["channel_count"] == 2
 
-    def test_stats_includes_routing_counters(self):
-        mgr = _manager(dispatcher_key_field="type")
-        ch = _MockChannel("ch")
-        mgr.register_channel(ch)
-        mgr.route({"type": "ch"})
-        s = mgr.get_stats()
-        assert s["routed"] == 1
-
     def test_stats_includes_buffer_when_set(self):
         buf = DirectBuffer(send_fn=lambda ch, data: None)
         mgr = _manager(buffer_strategy=buf)
@@ -331,3 +268,45 @@ class TestStats:
         mgr = _manager()
         s = mgr.get_stats()
         assert "buffer" not in s
+
+
+# ---------------------------------------------------------------------------
+# Tests: база не владеет диспетчером (Ф4.6)
+# ---------------------------------------------------------------------------
+
+
+class TestBaseOwnsNoDispatcher:
+    """Страж против воскрешения key-based диспетчера в базе.
+
+    Слот жил в ``ChannelRoutingManager`` и доставался всем четырём наследникам.
+    Пользовался им ровно один — ``RouterManager``, и то через алиас
+    ``self.channel_dispatcher = self._dispatcher``; остальным трём он приезжал
+    мёртвым, но выглядел общим механизмом. Ф4 вводит цепочку процессоров, и
+    второй, никем не используемый механизм маршрутизации рядом с ней —
+    приглашение перепутать их.
+
+    Проверяется ОТСУТСТВИЕ, а не поведение: у отсутствия нет своего вызова,
+    поэтому иначе оно не стережётся ничем и вернётся первым же рефакторингом.
+    """
+
+    def test_manager_has_no_dispatcher_slot(self):
+        assert not hasattr(_manager(), "_dispatcher"), (
+            "в базе снова появился key-based диспетчер — у Ф4 должен остаться один механизм"
+        )
+
+    def test_key_based_routing_api_is_gone(self):
+        mgr = _manager()
+        for name in ("route", "register_route", "register_broadcast"):
+            assert not hasattr(mgr, name), f"метод {name}() вернулся в базу"
+
+    def test_router_owns_its_own_dispatcher(self):
+        """У роутера диспетчер СВОЙ — и он не приезжает из базы.
+
+        Ровно этот шов сломался при сносе: снятие слота из базы обнулило
+        живой ``channel_dispatcher`` роутера, потому что тот был его алиасом.
+        """
+        from ...router_module.core.router_manager import RouterManager
+
+        router = RouterManager(manager_name="GuardRouter")
+        assert router.channel_dispatcher is not None, "живой диспетчер роутера пропал"
+        assert not hasattr(router, "_dispatcher"), "роутер снова получает диспетчер из базы, а не создаёт свой"
