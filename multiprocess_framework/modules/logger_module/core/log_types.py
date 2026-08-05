@@ -2,7 +2,7 @@
 """Типы данных для logger_module."""
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 from .log_config import LogLevel, ScopeName
 
@@ -112,3 +112,21 @@ class LogRecord:
             "extra": self.extra,
             "seq": self.seq,
         }
+
+
+#: Процессор записи (Ф4.1) — перехватчик между сборкой словаря и доставкой.
+#:
+#: Контракт ровно как у ``logging.Filter`` в 3.12, и намеренно: чужая семантика,
+#: которую не надо объяснять читателю.
+#:
+#: * вернул **тот же** словарь — запись едет дальше как есть;
+#: * вернул **новый** словарь — он заменяет прежний для ВСЕХ приёмников;
+#: * вернул ``None`` — запись поглощена (законная потеря, считается в
+#:   ``records_dropped_by_processor``);
+#: * **бросил** — запись всё равно доставляется, отказ считается и слышен
+#:   (``processor_failures``): перехватчик не вправе терять то, что ему дали
+#:   посмотреть.
+#:
+#: Аргументы — ``(scope, level, record_dict)``: скоуп и уровень уже прошли гейт,
+#: поэтому процессор видит только те записи, которые в самом деле поедут.
+Processor = Callable[[str, Any, Dict[str, Any]], Optional[Dict[str, Any]]]

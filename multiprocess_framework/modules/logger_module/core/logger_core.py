@@ -41,7 +41,7 @@ from .log_config import LogLevel, LogScope, ScopeName
 from .name_hierarchy import NameHierarchy
 from ...channel_routing_module.levels import UNKNOWN_SEVERITY, is_error_level, severity_of
 from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
-from .log_types import LogRecord
+from .log_types import LogRecord, Processor
 from ..channels.log_channel import (
     create_channel,
     drop_memory_rings,
@@ -304,6 +304,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # Пол ошибок (Ф0.9) — ленивый: резолвится на первой записи, ушедшей в floor.
         self._error_floor: Optional[ErrorFloor] = None
 
+        # Ф4.1: цепочка процессоров. Кортеж, а не список — см. add_processor.
+        self._processors: Tuple[Processor, ...] = ()
+
         # Только СВОИ счётчики: четыре класса потери на стыке «менеджер → канал»
         # объявлены в базе (LOSS_COUNTER_KEYS) и общие для трёх плоскостей —
         # поэтому update(), а не присваивание: оно стёрло бы их.
@@ -325,6 +328,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 # ошибке вместо содержимого, — но факт обязан быть виден:
                 # молчаливая подмена текста хуже, чем видимая.
                 "message_build_failures": 0,
+                # Ф4.1: запись НАМЕРЕННО поглощена процессором (вернул None).
+                # Это законная потеря — сэмплинг Ф7.1 ради неё и заводится, —
+                # но «терять можно, молчать нельзя»: без счётчика «уровень
+                # включён, а записей нет» неотличимо от сломанного маршрута.
+                "records_dropped_by_processor": 0,
+                # Ф4.1: процессор БРОСИЛ. Запись при этом продолжает путь —
+                # перехватчик не имеет права её потерять, — но отказ обязан
+                # быть слышен: молчащий процессор выглядит как работающий.
+                "processor_failures": 0,
                 # Ф0.7: результат чистки каталога логов (ключи — _RETENTION_STAT_KEYS).
                 # Отдельно «удалили» и «не смогли удалить»: на Windows занятый файл
                 # не удаляется, и молчащий ретеншен неотличим от работающего, если
@@ -1464,29 +1476,55 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             seq=_next_seq(),
         )
 
-        # Гейт по наличию tap'ов до ``to_dict()``: сборка словаря ради пустой
-        # рассылки — цена на каждой записи. У severity-пути эта проверка была,
-        # у общего не было; слияние сохраняет дешёвую.
+        # Ф4.1: словарь собирается ОДИН раз на запись и дальше едет им.
+        #
+        # До цепочки ``to_dict()`` звался по разу на tap И по разу на КАЖДЫЙ
+        # канал в батч-цикле: на трёх каналах с одним tap'ом — четыре сборки
+        # одного и того же содержимого (числа сняты характеризацией до правки).
+        # Запись общая для всех приёмников по построению, поэтому число
+        # приёмников на цену сборки влиять не вправе.
+        record_dict = record.to_dict()
+
+        processed = self._run_processors(scope, level, record_dict)
+        if processed is None:
+            self.stats["records_dropped_by_processor"] += 1
+            return
+        record_dict = processed
+
+        # Гейт по наличию tap'ов сохранён, хотя словарь уже собран: сам обход
+        # tap'ов и вычисление severity — тоже цена на каждой записи.
+        #
+        # Порядок «процессоры → tap'ы» не косметика: tap уходит оператору и в
+        # backend_ctl, и редакция секретов (4.5) обязана застать запись ДО него.
+        # Иначе замаскированным оказался бы только файл.
         if self._tap_sinks:
-            self._emit_to_taps(record.to_dict(), level)
+            self._emit_to_taps(record_dict, level)
 
         if is_error_level(level):
             # Ф0.9 (floor, вариант B): error/critical НЕ буферизуются. Пачку целевых
             # каналов сбрасываем первой — иначе запись легла бы на диск раньше
             # предшествовавших ей INFO, и контекст перед падением потерял бы порядок.
             # Пустой список приёмников сюда тоже приходит — и floor его ловит.
-            self._write_error_record(record, channels)
+            self._write_error_record(record_dict, channels)
         elif not channels:
             # Ни одного приёмника: запись потеряна, но НЕ молча. Раньше этот
             # случай проваливался в ветку буфера, ничего не клал и всё равно
             # инкрементировал messages_batched — счётчик врал в сторону «ушло».
             self._count_records_without_channels(level)
         elif self._buffer:
+            # Ф4.1: словарь ОДИН на все каналы. Прежний ``record.to_dict()``
+            # внутри цикла давал каждому каналу свою копию — и это была не
+            # изоляция, а побочный эффект сборки: копию никто не запрашивал.
+            # Общий словарь безопасен, потому что запись после процессоров
+            # **только читают**: каналы форматируют и пишут, а изменение
+            # display-вида (``stamp_observed``) происходит уже на приёмной
+            # стороне, за IPC, на своей копии. Разделяемая мутация здесь была бы
+            # дефектом канала, и стережёт её отдельный тест.
             for ch_name in channels:
-                self._buffer.enqueue(ch_name, record.to_dict())
+                self._buffer.enqueue(ch_name, record_dict)
             self.stats["messages_batched"] += 1
         else:
-            self._write_record_to_channels(record, channels)
+            self._write_record_to_channels(record_dict, channels)
 
     # =========================================================================
     # FLOOR ОШИБОК (Ф0.9, вариант B — инвариант 1 плана observability-unified-routing)
@@ -1552,7 +1590,71 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         name = getattr(self.process, "name", None) if self.process is not None else None
         return str(name) if name else f"pid_{os.getpid()}"
 
-    def _write_error_record(self, record: LogRecord, channel_names: List[str]) -> None:
+    # =========================================================================
+    # ЦЕПОЧКА ПРОЦЕССОРОВ (Ф4.1)
+    # =========================================================================
+
+    def add_processor(self, processor: Processor) -> None:
+        """Добавить процессор в конец цепочки.
+
+        Порядок значим: процессоры видят запись в том порядке, в каком добавлены,
+        и каждый следующий получает результат предыдущего.
+
+        Список хранится **кортежем и заменяется целиком**, а не мутируется:
+        ``log()`` зовут из многих потоков, и читатель обязан получить либо
+        прежнюю цепочку, либо новую, но никогда — половину. Это тот же приём,
+        что у tap'ов (снимок вместо блокировки): запись не должна ждать лока
+        ради операции, которая случается раз в жизни процесса.
+        """
+        self._processors = (*self._processors, processor)
+
+    def remove_processor(self, processor: Processor) -> bool:
+        """Убрать процессор. ``False`` — если его в цепочке не было."""
+        remaining = tuple(p for p in self._processors if p is not processor)
+        if len(remaining) == len(self._processors):
+            return False
+        self._processors = remaining
+        return True
+
+    def _run_processors(
+        self,
+        scope: ScopeName,
+        level: LogLevel,
+        record_dict: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Провести запись через цепочку. ``None`` = поглощена процессором.
+
+        Две политики, и обе выбраны сознательно:
+
+        * **процессор вернул ``None``** — запись поглощена НАМЕРЕННО (ради этого
+          заводится сэмплинг Ф7.1). Законная потеря, но считаемая:
+          ``records_dropped_by_processor``;
+        * **процессор БРОСИЛ** — запись продолжает путь, отказ считается и
+          слышен. Перехватчик не вправе терять то, что ему дали посмотреть:
+          дефект в редакции секретов не должен превращаться в исчезновение
+          логов. Та же политика, что у упавшей сборки сообщения выше.
+
+        Цена на пустой цепочке — один проход по пустому кортежу; отдельного
+        гейта ``if self._processors`` нет намеренно: он стоил бы столько же.
+        """
+        for processor in self._processors:
+            try:
+                result = processor(scope, level, record_dict)
+            except Exception as exc:  # noqa: BLE001 — перехватчик не роняет эмитента
+                self.stats["processor_failures"] += 1
+                self._fallback_log(
+                    "ERROR",
+                    f"процессор {getattr(processor, '__name__', processor)!r} бросил "
+                    f"{exc!r} — запись доставлена без его правки "
+                    f"(см. processor_failures)",
+                )
+                continue
+            if result is None:
+                return None
+            record_dict = result
+        return record_dict
+
+    def _write_error_record(self, record_dict: Dict[str, Any], channel_names: List[str]) -> None:
         """Синхронно записать error/critical; при нуле приёмников — в floor.
 
         Инвариант «одно место, без дублей»: floor пишет ТОЛЬКО когда обычный
@@ -1567,11 +1669,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 except Exception:  # nosec B110 — сбой сброса не должен съесть саму ошибку
                     pass
 
-        written = self._write_record_to_channels(record, channel_names)
+        written = self._write_record_to_channels(record_dict, channel_names)
         if written == 0:
             # Ни одного живого приёмника: каналы выключены конфигом, сняты
             # logger.sink.disable или все write упали. Запись обязана уцелеть.
-            self._write_to_floor(record.to_dict())
+            self._write_to_floor(record_dict)
 
     def _write_to_floor(self, record_dict: Dict[str, Any]) -> None:
         """Последняя попытка сохранить запись + ЧЕСТНЫЙ учёт её исхода.
@@ -1778,6 +1880,8 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "errors_to_floor": self.stats["errors_to_floor"],
             "errors_floor_write_failures": self.stats["errors_floor_write_failures"],
             "message_build_failures": self.stats["message_build_failures"],
+            "records_dropped_by_processor": self.stats["records_dropped_by_processor"],
+            "processor_failures": self.stats["processor_failures"],
             "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
 

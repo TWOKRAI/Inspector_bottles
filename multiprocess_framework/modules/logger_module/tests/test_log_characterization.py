@@ -10,10 +10,16 @@ Vision §4 требует снимать поведение до перестр�
 из пунктов, тест правится вместе с кодом и в коммите называется причина; если
 пункт падает неожиданно — это регресс.
 
-Отдельно снят **число вызовов ``to_dict()`` на одну запись**: это единственный
+Отдельно снято **число вызовов ``to_dict()`` на одну запись**: это единственный
 измеримый критерий приёмки 4.1 («один раз на запись независимо от числа
-каналов»). База зафиксирована ниже литералом, а не выражением от числа каналов:
-формула согласилась бы с любым ответом, включая нынешний.
+каналов»). Числа зафиксированы литералами, а не выражением от числа каналов:
+формула согласилась бы с любым ответом.
+
+**Что изменилось вместе с 4.1 и почему** (класс тестов «база сдвинулась» —
+правится вместе с кодом, с названной причиной): цена записи была 2 при одном
+tap'е и 3 в батч-цикле на трёх каналах, стала **1** в обоих случаях. Остальные
+двенадцать пунктов характеризации переехали через перестройку без правки —
+поведение доставки не изменилось, изменилась только цена.
 """
 
 from __future__ import annotations
@@ -214,22 +220,29 @@ class TestSerializationCost:
             f"без буфера и без tap'ов запись сериализуется {counter[0]} раз — база характеризации сдвинулась"
         )
 
-    def test_baseline_cost_with_taps_attached(self, logger_with_spies, monkeypatch) -> None:
-        """Tap добавляет СВОЮ сериализацию — вот она, вторая сборка того же словаря."""
+    def test_tap_does_not_add_a_second_serialization(self, logger_with_spies, monkeypatch) -> None:
+        """ПОСЛЕ Ф4.1: tap едет тем же словарём.
+
+        База до правки была **2**: tap собирал свою копию того же содержимого.
+        Число изменено вместе с кодом сознательно — это и есть 4.1.
+        """
         mgr, _ = logger_with_spies
         mgr.add_tap(_SpyChannel("tap"), min_level="DEBUG", name="tap")
         counter = self._count_to_dict(monkeypatch)
 
         mgr.log("SYSTEM", LogLevel.INFO, "стоимость с tap", "mod")
 
-        assert counter[0] == 2, f"с одним tap'ом запись сериализуется {counter[0]} раз — база характеризации сдвинулась"
+        assert counter[0] == 1, (
+            f"с одним tap'ом запись сериализуется {counter[0]} раз — цепочка обязана собирать словарь один раз"
+        )
 
-    def test_baseline_cost_in_the_batch_loop(self, monkeypatch) -> None:
-        """ГЛАВНОЕ число фазы: в батч-цикле словарь собирается ПО РАЗУ НА КАНАЛ.
+    def test_batch_loop_serializes_once_regardless_of_channel_count(self, monkeypatch) -> None:
+        """ГЛАВНОЕ число фазы — приёмка 4.1 буквально.
 
-        Ради этого 4.1 и заводилась («``to_dict()`` один раз на запись
-        независимо от числа каналов»). Три канала — три сериализации одного и
-        того же содержимого.
+        База до правки была **3** при трёх каналах: словарь собирался ПО РАЗУ
+        НА КАНАЛ. Стало **1** — число приёмников на цену сборки не влияет.
+        Литерал, а не ``len(channels)``: формула согласилась бы и с прежним
+        поведением, и с любым другим.
         """
         config = {
             "app_name": "characterization",
@@ -246,7 +259,118 @@ class TestSerializationCost:
 
         mgr.log("SYSTEM", LogLevel.INFO, "батч", "mod")
 
-        assert counter[0] == 3, (
+        assert counter[0] == 1, (
             f"в батч-цикле запись сериализуется {counter[0]} раз при трёх каналах — база характеризации сдвинулась"
         )
         mgr.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Ф4.1: цепочка процессоров — опасности механизма (авторские тесты)
+# ---------------------------------------------------------------------------
+
+
+class TestProcessorChain:
+    """Не «работает ли цепочка», а «что она делает, когда идёт не так».
+
+    Три опасности, которые видны только изнутри механизма: перехватчик,
+    сломавшийся на горячем пути; законная потеря, ставшая невидимой; и общий
+    словарь, который теперь получают ВСЕ приёмники разом.
+    """
+
+    def test_processor_sees_the_record_and_can_replace_it(self, logger_with_spies) -> None:
+        mgr, spies = logger_with_spies
+
+        def _redact(scope, level, rec):
+            return {**rec, "message": "***"}
+
+        mgr.add_processor(_redact)
+        mgr.log("SYSTEM", LogLevel.INFO, "секрет", "mod")
+
+        assert spies[0].written[0]["message"] == "***"
+
+    def test_order_is_the_order_of_addition(self, logger_with_spies) -> None:
+        mgr, spies = logger_with_spies
+        mgr.add_processor(lambda s, lv, r: {**r, "message": r["message"] + "-первый"})
+        mgr.add_processor(lambda s, lv, r: {**r, "message": r["message"] + "-второй"})
+
+        mgr.log("SYSTEM", LogLevel.INFO, "запись", "mod")
+
+        assert spies[0].written[0]["message"] == "запись-первый-второй"
+
+    def test_none_absorbs_the_record_and_the_loss_is_counted(self, logger_with_spies) -> None:
+        """Законная потеря обязана быть видимой — иначе она неотличима от сбоя."""
+        mgr, spies = logger_with_spies
+        before = mgr.stats["records_dropped_by_processor"]
+
+        mgr.add_processor(lambda s, lv, r: None)
+        mgr.log("SYSTEM", LogLevel.INFO, "поглощаемая", "mod")
+
+        assert spies[0].written == []
+        assert mgr.stats["records_dropped_by_processor"] == before + 1
+
+    def test_broken_processor_does_not_swallow_the_record(self, logger_with_spies) -> None:
+        """Перехватчик не вправе терять то, что ему дали посмотреть."""
+        mgr, spies = logger_with_spies
+
+        def _boom(scope, level, rec):
+            raise RuntimeError("процессор развалился")
+
+        mgr.add_processor(_boom)
+        mgr.log("SYSTEM", LogLevel.INFO, "уцелевшая", "mod")
+
+        assert len(spies[0].written) == 1
+        assert spies[0].written[0]["message"] == "уцелевшая"
+        assert mgr.stats["processor_failures"] == 1
+
+    def test_broken_processor_does_not_stop_the_next_one(self, logger_with_spies) -> None:
+        mgr, spies = logger_with_spies
+
+        def _boom(scope, level, rec):
+            raise RuntimeError("первый упал")
+
+        mgr.add_processor(_boom)
+        mgr.add_processor(lambda s, lv, r: {**r, "message": "второй отработал"})
+        mgr.log("SYSTEM", LogLevel.INFO, "исходная", "mod")
+
+        assert spies[0].written[0]["message"] == "второй отработал"
+
+    def test_taps_see_the_processed_record_not_the_original(self, logger_with_spies) -> None:
+        """Редакция секретов обязана застать запись ДО tap'а: tap уходит оператору."""
+        mgr, _ = logger_with_spies
+        tap = _SpyChannel("tap")
+        mgr.add_tap(tap, min_level="DEBUG", name="tap")
+        mgr.add_processor(lambda s, lv, r: {**r, "message": "***"})
+
+        mgr.log("SYSTEM", LogLevel.INFO, "пароль=hunter2", "mod")
+
+        assert tap.written[0]["message"] == "***", "tap увидел незамаскированную запись"
+
+    def test_removing_a_processor_takes_it_out_of_the_chain(self, logger_with_spies) -> None:
+        mgr, spies = logger_with_spies
+
+        def _mark(scope, level, rec):
+            return {**rec, "message": "помечено"}
+
+        mgr.add_processor(_mark)
+        assert mgr.remove_processor(_mark) is True
+        assert mgr.remove_processor(_mark) is False, "повторное снятие обязано отвечать False"
+
+        mgr.log("SYSTEM", LogLevel.INFO, "чистая", "mod")
+
+        assert spies[0].written[0]["message"] == "чистая"
+
+    def test_all_channels_receive_equal_content_from_the_shared_dict(self, logger_with_spies) -> None:
+        """Словарь теперь ОДИН на все каналы — содержимое обязано совпадать.
+
+        До 4.1 каждый канал получал свою копию как побочный эффект сборки.
+        Копию никто не запрашивал, но если какой-то канал начнёт мутировать
+        запись, соседи увидят чужую правку — вот проверка этого шва.
+        """
+        mgr, spies = logger_with_spies
+
+        mgr.log("SYSTEM", LogLevel.INFO, "общая", "mod")
+
+        payloads = [spy.written[0] for spy in spies]
+        assert payloads[0] == payloads[1] == payloads[2]
+        assert payloads[0]["message"] == "общая"
