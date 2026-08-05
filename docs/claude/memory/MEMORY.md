@@ -217,3 +217,4 @@
 - [Ф3: внешнее ревью 8/10](project_f3_external_review.md) — Б-1/2/7 fixed; Б-3/4/8 → 5.2; рестарт сломан live; шторм измерен
 - [Тест, поднимающий ошибку сам](feedback_test_raising_the_error_itself_guards_the_branch.md) — сторожит except, а не механизм; проверять параметр на границе ОС
 - [fw_version из git](project_fw_version_from_git.md) — 2.0.0+hash[.dirty]; пределы: вложенный репо, frozen-сборка; nosec последним на строке
+- [Алиас держит объект живым](feedback_alias_keeps_the_object_alive.md) — grep по методу не видит присваивания; владение отдать единственному потребителю
