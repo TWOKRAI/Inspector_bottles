@@ -16,8 +16,8 @@ Display-вид: ``{kind, process, module, ts, severity, message, extra(dict)}``
   - LogRecord-dict (error-tap):       {timestamp, level, scope, message, module, extra}
 
 **Поле ``process`` (5.21 (c)):** hub тегирует запись ``module`` = именем ПРОЦЕССА
-(hub — один на процесс), а error write-through несёт ``module`` = fine-grained
-scope логгера (напр. ``CapturePlugin``/``main``). Чтобы вкладка всегда показывала
+(hub — один на процесс), а error write-through несёт ``module`` = подробным именем
+ИСТОЧНИКА (напр. ``CapturePlugin``/``main``). Чтобы вкладка всегда показывала
 процесс-источник (``camera_0``), процесс проставляет форвардер/tap (знает
 ``sender``); при отсутствии — падаем на ``module``.
 
@@ -81,7 +81,7 @@ def log_record_to_display(record_dict: Dict[str, Any], kind: str = KIND_ERROR, p
 
     Args:
         process: имя процесса-источника (tap знает ``sender``); пусто → падаем на
-            ``module`` LogRecord (fine-grained scope) — хуже, но не пусто.
+            ``module`` LogRecord (подробное имя источника) — хуже, но не пусто.
     """
     module = record_dict.get("module", "")
     return {

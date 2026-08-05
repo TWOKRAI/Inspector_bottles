@@ -281,7 +281,8 @@ def wire_observability_store(
         logger_manager: реальный LoggerManager (LoggerCore с add_tap).
         db_path: путь к SQLite-файлу стора. None → resolve_default_db_path().
         process: имя процесса-источника (5.21 (c)) — tap проставит колонку
-            ``process`` в стор-записи (иначе виден только scope логгера).
+            ``process`` в стор-записи (иначе виден только ``module`` — имя
+            источника внутри процесса).
 
     Returns:
         (store, taps) — taps: список (manager, tap_name) для unwire.

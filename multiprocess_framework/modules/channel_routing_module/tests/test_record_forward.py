@@ -75,7 +75,7 @@ def test_log_record_dict_to_display_defaults_error():
     # extra под "context" — паритет со стором (StoreTapChannel → _row_from_record).
     assert d == {
         "kind": "error",
-        "process": "camera_0",  # 5.21 (c): процесс-источник, не scope логгера
+        "process": "camera_0",  # 5.21 (c): процесс-источник, не имя источника внутри процесса
         "module": "cam",
         "ts": 3.0,
         "severity": "critical",
