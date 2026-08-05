@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from typing import Any, Dict
 
@@ -104,6 +105,25 @@ class TestResourceContent:
         assert resource["incarnation"] == 3
         assert resource["recipe"] == "dualcam_synth", "в записи должно ехать имя рецепта, а не путь"
         assert resource["fw_version"], "версия фреймворка не собрана"
+
+    def test_pid_is_this_process_not_its_parent(self) -> None:
+        """Ф4.4: ``pid`` — единственное, что осталось от «процессора обогащения».
+
+        Оракул — сама ОС: ``os.getpid()`` спрашивается тестом отдельно. Поле
+        отвечает на вопрос, на который инкарнация не отвечает: инкарнация
+        различает ИНСТАНСЫ по логике фреймворка, а pid — единственный ключ,
+        по которому запись сшивается с внешним миром (диспетчер задач, дамп,
+        вывод сторонней утилиты).
+
+        Опасность, ради которой тест и написан: набор собирается на
+        инициализации, и если сборку когда-нибудь перенесут в родителя
+        (ассемблер), pid станет РОДИТЕЛЬСКИМ — одинаковым у всех процессов и
+        правдоподобным настолько, что заметить это будет нечем.
+        """
+        resource = _process()._build_resource()
+
+        assert resource["pid"] == os.getpid()
+        assert isinstance(resource["pid"], int), "pid обязан быть числом — по нему сравнивают, а не показывают"
 
     def test_incarnation_comes_from_the_registry_not_from_thin_air(self) -> None:
         """Без инкарнации записи ДО и ПОСЛЕ перезапуска неотличимы — вот её цена."""
