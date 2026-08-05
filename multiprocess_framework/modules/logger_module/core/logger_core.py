@@ -1888,12 +1888,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     def critical(self, message: LogMessage, module: str = "main", *args: Any, **extra):
         self.log(LogScope.SYSTEM, LogLevel.CRITICAL, message, module, *args, **extra)
 
-        # =========================================================================
-        # УПРАВЛЕНИЕ МОДУЛЯМИ
-        # =========================================================================
-
-        self._on_channels_changed()
-
     # =========================================================================
     # SINK CONTROL PLANE — хук базы (Ф0.6)
     # =========================================================================
