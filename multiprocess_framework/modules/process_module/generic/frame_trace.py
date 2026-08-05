@@ -49,6 +49,7 @@ import functools
 import os
 import time
 import uuid
+from contextlib import contextmanager
 
 # Читается один раз при импорте. Дочерние spawn-процессы наследуют env.
 # Тесты могут переопределить: frame_trace._ENABLED = True.
@@ -105,6 +106,72 @@ def ensure_trace_id(item: dict) -> str:
         trace_id = new_trace_id()
         item["trace_id"] = trace_id
     return trace_id
+
+
+def _single_trace_id(items) -> str:
+    """``trace_id`` пачки, если он у неё ОДИН. Иначе — пусто.
+
+    Пачка приходит из fan-in и почти всегда состоит из одного кадра, но
+    структурно это список. Смешанная пачка не имеет одного следа, и приписать
+    ей чей-то чужой было бы хуже, чем не приписать ничего: корреляция,
+    указывающая не туда, врёт увереннее, чем её отсутствие.
+    """
+    if isinstance(items, dict):
+        items = (items,)
+    found = ""
+    for item in items or ():
+        if not isinstance(item, dict):
+            continue
+        trace_id = item.get("trace_id") or ""
+        if not trace_id:
+            continue
+        if found and trace_id != found:
+            return ""
+        found = trace_id
+    return found
+
+
+@contextmanager
+def log_correlation(items):
+    """На время обработки кадра положить его ``trace_id`` в каждую запись лога.
+
+    Ф3.3. Механизма не заводит: ``log_context`` — публичная «форточка»
+    контекста логгера, и всё положенное в неё попадает в ``extra`` записи на
+    ОБОИХ путях эмиссии (обычном и severity), потому что слои контекста
+    сливаются в одном месте (``LoggerCore._build_context``). Поэтому ни один
+    call-site логирования не правится — ровно то свойство, которого требует
+    Ф4.4, и оно достаётся здесь даром.
+
+    **Ставить надо в каждом потоке отдельно, и это не дублирование.**
+    ``ContextVar`` не пересекает границу потока, а кадр в процессе проходит
+    через два-три РАЗНЫХ потока: приём (``DataReceiver``), обработка
+    (``PipelineExecutor.run_loop`` — свой LOOP-воркер за очередью) и рождение
+    (``SourceProducer``). Одна точка постановки накрыла бы записи только своего
+    потока, а выглядела бы как сквозная корреляция.
+
+    Значение форточки **пересоздаётся целиком**, а не мутируется: словарь общий
+    для потоков, и правка на месте видна всем сразу — тот же довод, что у
+    ``_context_stacks``.
+
+    Возврат — по токену в ``finally``: вложенность и исключения обязаны
+    восстанавливать ровно прежнее значение, иначе след одного кадра протёк бы в
+    записи следующего.
+
+    Args:
+        items: кадр (dict) или пачка (list). Без ``trace_id`` или со
+            смешанными — тихий no-op, форточка не трогается вовсе.
+    """
+    trace_id = _single_trace_id(items)
+    if not trace_id:
+        yield
+        return
+    from ...logger_module.core.logger_core import log_context
+
+    token = log_context.set({**log_context.get(), "trace_id": trace_id})
+    try:
+        yield
+    finally:
+        log_context.reset(token)
 
 
 def stamp_send(item: dict, node: str) -> None:

@@ -185,11 +185,15 @@ class DataReceiver:
             # Построить item из msg
             item = self._build_item(msg)
 
-            # frame-trace: время передачи от предыдущего узла к этому.
-            frame_trace.record_transport(item, self._node)
+            # Ф3.3: приём идёт в СВОЁМ потоке, и его записи (восстановление из
+            # SHM, отказы fan-in) без этого остались бы без следа кадра —
+            # ContextVar границу потока не пересекает.
+            with frame_trace.log_correlation(item):
+                # frame-trace: время передачи от предыдущего узла к этому.
+                frame_trace.record_transport(item, self._node)
 
-            # Передать в InspectorManager
-            self._inspector.on_item(item)
+                # Передать в InspectorManager
+                self._inspector.on_item(item)
 
             # Полный цикл обработки одного сообщения → телеметрия.
             self._cycle_metrics.record(time.perf_counter() - t_start)
