@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ...state_store_module.interfaces import IStateProxy
 
 from ...base_manager import BaseManager, ObservableMixin
+from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 from ..communication import ProcessCommunication
 
 # Публичные контракты и типы
@@ -957,7 +958,17 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             unwire_observability_forward(prev[1])
         # Ф6.х.5: уровень задаёт подписчик (как у log.tail) — прежде порог был
         # захардкожен ERROR внутри проводки, и хвост молчал на здоровом стенде.
-        min_level = str(level or "ERROR").upper()
+        # Ф3.1: и проверяется он здесь же — второй путь той же поверхности.
+        # Без проверки опечатка в имени уровня давала порог «пропускать всё» при
+        # успешном ответе с эхом запрошенного порога.
+        min_level = normalize_level_name(level or "ERROR")
+        if min_level is None:
+            return {
+                "success": False,
+                "process": self.name,
+                "subscriber": subscriber,
+                "reason": f"неизвестный level '{level}' ({'|'.join(LEVEL_ORDER)})",
+            }
         forwarder, taps = wire_observability_forward(
             self.router_manager,
             subscriber,

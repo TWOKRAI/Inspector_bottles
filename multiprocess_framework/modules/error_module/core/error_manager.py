@@ -25,7 +25,7 @@ from copy import deepcopy
 from typing import Optional, Any, List, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
-from ...channel_routing_module.levels import is_error_level, rank_of
+from ...channel_routing_module.levels import is_error_level, severity_of
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, ScopeName
 from ...logger_module.core.logger_core import LoggerCore
 from ..configs.error_manager_config import ErrorManagerConfig
@@ -37,7 +37,7 @@ from .error_config_assembly import expand_error_manager_config
 #: ``_setup_level_routes`` строит маршрут и для него, и именно WARNING+ ходят
 #: severity-путём мимо гейта скоупа. Число берётся из общего реестра рангов —
 #: своя константа здесь разъехалась бы с ``_setup_level_routes`` молча.
-_SEVERITY_PLANE_RANK = rank_of("WARNING")
+_SEVERITY_PLANE_SEVERITY = severity_of("WARNING")
 
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "errors",
@@ -355,7 +355,7 @@ class ErrorManager(LoggerCore, IErrorManager):
         Сетка ``test_gate_predicate.py`` проверяет их согласие на каждой паре
         scope×level×module, поэтому расхождение не может проехать молча.
         """
-        if rank_of(level) >= _SEVERITY_PLANE_RANK:
+        if severity_of(level) >= _SEVERITY_PLANE_SEVERITY:
             return True
         return super()._is_gate_open(scope, level, module)
 
@@ -379,7 +379,7 @@ class ErrorManager(LoggerCore, IErrorManager):
         if channel_name is not None:
             return [channel_name]
 
-        if rank_of(level) >= _SEVERITY_PLANE_RANK:
+        if severity_of(level) >= _SEVERITY_PLANE_SEVERITY:
             # Уровень плоскости ошибок, но живого приёмника не осталось (все
             # severity-каналы сняты). Пустой список, а НЕ путь родителя: у
             # скоупов плоскости ошибок приёмников нет по определению (P3), и

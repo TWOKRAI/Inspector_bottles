@@ -24,7 +24,7 @@ from ..._fallback import emergency_log
 from ...base_manager import BaseManager, ObservableMixin
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ..interfaces import IChannel, IBufferStrategy, IChannelRoutingManager, channel_accepted
-from ..levels import level_rank
+from ..levels import record_severity, threshold_severity
 from .channel_registry import ChannelRegistry
 from .config_normalizer import normalize_config
 
@@ -896,14 +896,22 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             channel: приёмник (``write(dict)``), напр. RouterPushChannel.
             min_level: порог (``LogLevel`` или строка "ERROR"); ниже — не доставляем.
                        У плоскостей без уровней (статистика) порог не мешает:
-                       записи без уровня получают ранг 0 и проходят при "DEBUG".
+                       запись без уровня считается самой низкой по важности
+                       (:func:`record_severity`) и проходит при "DEBUG".
+                       Непонятое имя порога — fail-open, «пропускать всё»
+                       (:func:`threshold_severity`): тишина от опечатки была бы
+                       невидимой потерей.
             name: имя tap'а (хэндл для remove); по умолчанию ``channel.name``.
 
         Returns:
             Имя tap'а.
         """
         tap_name = name or getattr(channel, "name", None) or f"tap_{len(self._tap_sinks)}"
-        self._tap_sinks[tap_name] = (channel, level_rank(min_level))
+        # Позиция ПОРОГА — свой дефолт непонятого имени, отличный от позиции
+        # записи (Ф3.1): здесь «не понял» значит «пропускать всё», а у записи —
+        # «самый низкий уровень». До Ф3.1 обе позиции обслуживала одна функция,
+        # и держалось это на совпадении «0 = DEBUG», исчезнувшем с DEBUG=5.
+        self._tap_sinks[tap_name] = (channel, threshold_severity(min_level))
         return tap_name
 
     def remove_tap(self, name: str) -> bool:
@@ -1135,9 +1143,12 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         """
         if not self._tap_sinks:
             return
-        rank = level_rank(level)
-        for channel, min_rank in list(self._tap_sinks.values()):
-            if rank >= min_rank:
+        # Позиция ЗАПИСИ: уровня может не быть вовсе (плоскость статистики) или
+        # он может быть не опознан — и то, и другое считается самым низким
+        # уровнем, а не нулём. См. :func:`record_severity`.
+        severity = record_severity(level)
+        for channel, min_severity in list(self._tap_sinks.values()):
+            if severity >= min_severity:
                 try:
                     channel.write(record_dict)
                 except Exception:  # nosec B110 — tail не должен влиять на наблюдаемое

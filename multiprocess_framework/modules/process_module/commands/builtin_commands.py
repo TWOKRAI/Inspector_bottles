@@ -2279,7 +2279,23 @@ class BuiltinCommands:
         subscriber = str(args.get("subscriber") or "").strip()
         if not subscriber:
             return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
-        level = str(args.get("level") or "ERROR").upper()
+        # Ф3.1: имя уровня проверяется, а не только поднимается в регистр.
+        # Прежде опечатка (или каноничное чужое "FATAL") давала порог «пропускать
+        # всё» при ответе success=true с эхом запрошенного уровня — подписчик
+        # получал firehose и был уверен, что подписан на ошибки. Образец отказа —
+        # `health.report` ниже; расхождение двух команд одной поверхности было
+        # тем самым «дефектом на одном пути из трёх».
+        from multiprocess_framework.modules.channel_routing_module.levels import (
+            LEVEL_ORDER,
+            normalize_level_name,
+        )
+
+        level = normalize_level_name(args.get("level") or "ERROR")
+        if level is None:
+            return {
+                "success": False,
+                "reason": f"неизвестный level '{args.get('level')}' ({'|'.join(LEVEL_ORDER)})",
+            }
         command = str(args.get("command") or "log.record")
 
         router = getattr(svc, "router_manager", None)

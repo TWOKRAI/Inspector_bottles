@@ -40,7 +40,7 @@ from ..configs.logger_manager_config import (
 )
 from .log_config import LogLevel, LogScope, ScopeName
 from .name_hierarchy import NameHierarchy
-from ...channel_routing_module.levels import UNKNOWN_RANK, is_error_level, rank_of
+from ...channel_routing_module.levels import UNKNOWN_SEVERITY, is_error_level, severity_of
 from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
 from .log_types import LogRecord
 from ..channels.log_channel import (
@@ -1214,16 +1214,16 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         if self._name_hierarchy:
             rule_level = self._name_hierarchy.level(module)
             if rule_level is not None:
-                min_rank = rank_of(rule_level)
-                rank = rank_of(level)
+                min_severity = severity_of(rule_level)
+                severity = severity_of(level)
                 # Незнакомый уровень ПРОПУСКАЕТ запись — та же политика, что у
                 # ``LoggerScopeSchema.should_log``. Две соседние ветки одного
                 # решения с противоположной политикой были бы худшим вариантом:
                 # опечатка в имени уровня означала бы тишину в одном месте и
                 # firehose в другом.
-                if min_rank == UNKNOWN_RANK or rank == UNKNOWN_RANK:
+                if min_severity == UNKNOWN_SEVERITY or severity == UNKNOWN_SEVERITY:
                     return True
-                return rank >= min_rank
+                return severity >= min_severity
         scope_config = self._scope_schema(scope)
         return scope_config.should_log(level, module)
 

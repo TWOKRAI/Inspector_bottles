@@ -116,6 +116,32 @@ class TestLevelOpensTheTail:
         assert res["taps"], "в ответе нет tap'ов — подписчику нечем понять, слушает ли кто-то"
         assert res["managers"], "в ответе нет менеджеров-носителей tap'ов"
 
+    def test_unknown_level_is_refused_instead_of_becoming_a_firehose(self, process_with_tail: Any) -> None:
+        """Ф3.1: непонятое имя порога отвергается, а не открывает шлюз.
+
+        До правки такой запрос отвечал ``success=true`` и эхом запрошенного
+        уровня, а порог при этом получался «пропускать всё»: подписчик уходил
+        уверенным, что подписан на ошибки, и получал каждую запись. Это второй
+        путь входа имени уровня (первый — конфиг); чинить один из двух значило
+        бы оставить дефект живым на соседней развилке.
+        """
+        process, _router, _logger = process_with_tail
+
+        res = process.subscribe_observability_tail("backend_ctl.probe", level="ERROR!")
+
+        assert res["success"] is False
+        assert "ERROR!" in res["reason"]
+        assert not process._observability_forwarders, "отвергнутая подписка не должна оставлять проводку"
+
+    def test_foreign_spelling_of_a_level_is_accepted(self, process_with_tail: Any) -> None:
+        """``WARN``/``FATAL`` — каноничные имена OTel, а не опечатки."""
+        process, _router, _logger = process_with_tail
+
+        res = process.subscribe_observability_tail("backend_ctl.probe", level="warn")
+
+        assert res["success"] is True
+        assert res["min_level"] == "WARNING"
+
 
 class TestCommandSeamPassesLevel:
     def test_command_handler_forwards_level_to_the_process(self) -> None:

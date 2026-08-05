@@ -27,9 +27,15 @@ from typing import Any, Dict, List
 import pytest
 
 from multiprocess_framework.modules.channel_routing_module.levels import (
-    LEVEL_RANKS,
-    UNKNOWN_RANK,
-    rank_of,
+    ERROR_SEVERITY,
+    SEVERITY_NUMBERS,
+    UNKNOWN_SEVERITY,
+    UNSPECIFIED,
+    is_error_level,
+    normalize_level_name,
+    record_severity,
+    severity_of,
+    threshold_severity,
 )
 from multiprocess_framework.modules.base_manager.core.base_manager import BaseManager
 from multiprocess_framework.modules.base_manager.mixins.observable_mixin import ObservableMixin
@@ -53,29 +59,62 @@ from multiprocess_framework.modules.logger_module.core.logger_manager import Log
 
 class TestLevelRanks:
     def test_order_is_the_canonical_one(self) -> None:
-        assert [rank_of(name) for name in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")] == [
-            0,
-            1,
-            2,
-            3,
-            4,
+        """Ф3.1: числа — словаря OTel, а не свои 0…4. Литералы обязательны.
+
+        Прежнее ожидание выводилось из ``enumerate`` и потому соглашалось с
+        ЛЮБОЙ нумерацией, включая сломанную: теста на смену чисел не было.
+        """
+        assert [severity_of(name) for name in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")] == [
+            5,
+            9,
+            13,
+            17,
+            21,
         ]
 
-    def test_unknown_level_is_not_zero(self) -> None:
-        """Незнакомый уровень отличим от DEBUG.
+    def test_unknown_level_is_distinguishable_from_debug(self) -> None:
+        """Незнакомый уровень отличим и от DEBUG, и от «уровня нет вовсе».
 
-        Если бы неизвестное возвращало 0, опечатка в имени уровня делала бы
-        запись «тише DEBUG» — то есть молча отфильтрованной.
+        Если бы неизвестное совпадало с самым низким уровнем, опечатка в имени
+        делала бы запись молча отфильтрованной. ``UNSPECIFIED`` (0) — третье
+        состояние: у плоскости статистики оси важности нет вообще.
         """
-        assert rank_of("VERBOSE") == UNKNOWN_RANK
-        assert rank_of("DEBUG") != UNKNOWN_RANK
+        assert severity_of("VERBOSE") == UNKNOWN_SEVERITY
+        assert severity_of("DEBUG") != UNKNOWN_SEVERITY
+        assert UNKNOWN_SEVERITY != UNSPECIFIED
 
     def test_case_and_enum_are_both_accepted(self) -> None:
-        assert rank_of("warning") == rank_of("WARNING") == rank_of(LogLevel.WARNING)
+        assert severity_of("warning") == severity_of("WARNING") == severity_of(LogLevel.WARNING)
 
-    def test_ranks_table_matches_level_order(self) -> None:
-        """Реестр рангов и порядок уровней — один источник, а не две копии."""
-        assert LEVEL_RANKS == {name: i for i, name in enumerate(("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"))}
+    def test_error_boundary_is_the_otel_one(self) -> None:
+        """Инвариант «≥ 17 = ошибка» стал буквальным, а не совпадением."""
+        assert ERROR_SEVERITY == 17
+        assert is_error_level("WARNING") is False
+        assert is_error_level("ERROR") is True
+
+    def test_aliases_are_not_in_the_hot_table(self) -> None:
+        """Алиасы живут на границе, а не в словаре горячего пути.
+
+        Ключ ``WARN`` в таблице легализовал бы неканоничное имя мимо валидации
+        границы и сломал бы всё производное от неё (перебор дал бы семь имён).
+        """
+        assert set(SEVERITY_NUMBERS) == {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        assert normalize_level_name("warn") == "WARNING"
+        assert normalize_level_name("FATAL") == "CRITICAL"
+        assert normalize_level_name("WARNIGN") is None
+
+    def test_record_and_threshold_positions_have_opposite_defaults(self) -> None:
+        """Ф3.1: два дефолта «не понял» — по одному на позицию.
+
+        До переномерации обе позиции обслуживала одна функция, и годилось это
+        только потому, что 0 был числом DEBUG. Совпадение исчезло с DEBUG=5:
+        у записи «не понял» = самый низкий уровень (доставить как DEBUG),
+        у порога «не понял» = пропускать всё (fail-open, иначе опечатка = тишина).
+        """
+        assert record_severity("VERBOSE") == 5
+        assert record_severity(None) == 5
+        assert threshold_severity("VERBOSE") == 0
+        assert threshold_severity(None) == 0
 
 
 class TestScopeGateCharacterization:
@@ -102,14 +141,32 @@ class TestScopeGateCharacterization:
         assert scope.should_log(LogLevel.INFO, "any") is False
         assert scope.should_log(LogLevel.ERROR, "any") is True
 
-    def test_unknown_min_level_passes_everything_including_module_filter(self) -> None:
-        """Странность прежней реализации, сохранённая осознанно.
+    def test_unknown_min_level_is_refused_at_the_boundary(self) -> None:
+        """Ф3.1: незнакомый порог до гейта больше НЕ доезжает.
 
-        ``ValueError`` из ``index()`` возвращал ``True`` ДО проверки модулей —
-        значит незнакомый порог отключал и фильтр модулей тоже. Поведение
-        сохранено: менять его молча, попутно с оптимизацией, нельзя.
+        Прежде здесь была характеризация странности: ``ValueError`` из
+        ``index()`` возвращал ``True`` ДО проверки модулей, то есть незнакомый
+        порог отключал заодно и фильтр модулей. Странность была сохранена
+        осознанно — её нельзя было менять попутно с оптимизацией Ф1.1.
+
+        Теперь её чинит отдельная задача, и чинит на входе: имя проверяется в
+        валидаторе схемы. Сам гейт по-прежнему fail-open (проверяется ниже
+        через ``model_construct``, обходящий валидацию) — это последний рубеж
+        для программного вызова, а не первый.
         """
-        scope = LoggerScopeSchema(enabled=True, min_level="ОПЕЧАТКА", modules=["camera"])
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="неизвестный уровень"):
+            LoggerScopeSchema(enabled=True, min_level="ОПЕЧАТКА", modules=["camera"])
+
+    def test_gate_stays_fail_open_when_validation_is_bypassed(self) -> None:
+        """Рубеж горячего пути: минуя валидацию, незнакомый порог пропускает всё.
+
+        Fail-closed здесь означал бы тишину от опечатки — невидимую потерю,
+        запрещённую инвариантом 2 плана. Фильтр модулей тоже отключается, как
+        и прежде: это ровно та же ветка.
+        """
+        scope = LoggerScopeSchema.model_construct(enabled=True, min_level="ОПЕЧАТКА", modules=["camera"])
         assert scope.should_log(LogLevel.DEBUG, "gui") is True
 
     def test_precomputed_threshold_follows_field_assignment(self) -> None:

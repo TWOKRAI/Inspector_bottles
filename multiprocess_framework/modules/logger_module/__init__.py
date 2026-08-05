@@ -28,7 +28,14 @@ from .channels.log_channel import (
     get_registered_sink_types,
 )
 from .channels.router_push_channel import RouterPushChannel
-from ..channel_routing_module.levels import ERROR_RANK, LEVEL_ORDER, is_error_level, level_rank
+from ..channel_routing_module.levels import (
+    ERROR_SEVERITY,
+    LEVEL_ORDER,
+    SEVERITY_NUMBERS,
+    is_error_level,
+    record_severity,
+    severity_of,
+)
 
 # Ранги переехали в общую базу (Ф0.6/R6); здесь остаются в публичном экспорте
 # logger_module — исторические потребители не обязаны знать о переезде.
@@ -55,8 +62,10 @@ __all__ = [
     "get_registered_sink_types",
     "RouterPushChannel",
     "LEVEL_ORDER",
-    "level_rank",
-    "ERROR_RANK",
+    "record_severity",
+    "severity_of",
+    "SEVERITY_NUMBERS",
+    "ERROR_SEVERITY",
     "is_error_level",
     "ErrorFloor",
     "get_error_floor",

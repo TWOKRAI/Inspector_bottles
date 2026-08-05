@@ -239,7 +239,7 @@ class TestGateDoesNotAllocatePerDecision:
         schema = LoggerScopeSchema(enabled=True, min_level="WARNING")
         assert schema.should_log(LogLevel.INFO, "bench_mod") is False
 
-        monkeypatch.setattr(cfg, "LEVEL_RANKS", {"INFO": 9, "WARNING": 2})
+        monkeypatch.setattr(cfg, "SEVERITY_NUMBERS", {"INFO": 21, "WARNING": 9})
         assert schema.should_log(LogLevel.INFO, "bench_mod") is True
 
     def test_cached_manager_path_does_not_retain_memory(self, logger: LoggerManager) -> None:

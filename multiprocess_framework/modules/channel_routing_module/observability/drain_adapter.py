@@ -51,6 +51,7 @@ Sink'и передаются в конструктор, вызовы идут п
 
 from typing import Any, Dict, List, Optional
 
+from ..levels import LEVEL_ORDER
 from .observability_hub import (
     KIND_ERROR,
     KIND_LOG,
@@ -60,8 +61,13 @@ from .observability_hub import (
     METRIC_TIMING,
 )
 
-# Разрешённые severity-имена методов на Logger/Error sink'ах.
-_LOG_SEVERITIES = frozenset({"debug", "info", "warning", "error", "critical"})
+# Разрешённые severity-имена методов на Logger/Error sink'ах — ВЫВЕДЕНЫ из
+# общего порядка уровней, а не своей копией списка (Ф3.1). Копия здесь уже
+# была: новый уровень требовал правки в двух местах, и расхождение
+# проявилось бы тем, что запись законного уровня молча переписывается в
+# 'info' ниже по коду. Имена методов на sink'ах строчные (PEP8) — это
+# написание вызова, а не второй словарь уровней.
+_LOG_SEVERITIES = frozenset(name.lower() for name in LEVEL_ORDER)
 
 
 class ObservabilityDrainAdapter:

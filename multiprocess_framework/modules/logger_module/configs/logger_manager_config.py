@@ -17,7 +17,12 @@ from ...channel_routing_module.buffers.batch_buffer import (
     DEFAULT_OVERFLOW_POLICY,
     validate_overflow_policy,
 )
-from ...channel_routing_module.levels import LEVEL_ORDER, LEVEL_RANKS, UNKNOWN_RANK
+from ...channel_routing_module.levels import (
+    LEVEL_ORDER,
+    SEVERITY_NUMBERS,
+    UNKNOWN_SEVERITY,
+    normalize_level_name,
+)
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ..log_enums import LogLevel
 
@@ -97,7 +102,9 @@ class LoggerScopeSchema(SchemaBase):
     """Скоуп логирования (ключи SYSTEM, BUSINESS, …)."""
 
     enabled: bool = True
-    min_level: str = _LEVEL_ORDER[1]  # INFO
+    # Литерал, а не ``_LEVEL_ORDER[1]``: дефолт, выведенный из индекса кортежа,
+    # молча сменился бы при вставке нового имени в начало порядка (Ф3.1).
+    min_level: str = "INFO"
     channels: List[str] = Field(default_factory=list)
     modules: List[str] = Field(default_factory=list)
 
@@ -115,8 +122,27 @@ class LoggerScopeSchema(SchemaBase):
         Pydantic-модели читается через ``__getattr__``, и замер показал **921 нс
         против 47 нс** у обычного поля — «оптимизация» через ``PrivateAttr``
         делала гейт впятеро ДОРОЖЕ прежнего. Поймано бенчем Ф1.6, а не глазом.
+
+        **Ф3.1 — здесь же имя и ПРОВЕРЯЕТСЯ.** До этого валидатор только
+        поднимал регистр, и неопознанное имя доезжало до горячего пути, где
+        ``should_log`` честно пропускал всё. Воспроизведено: ``min_level='WARN'``
+        → ``should_log(DEBUG)`` = ``True``, то есть порог «предупреждения и выше»
+        оборачивался firehose, молча. ``WARN`` при этом не опечатка, а каноничное
+        имя OTel — поэтому чужие написания раскрываются алиасами, а вот
+        действительно неизвестное имя отвергается.
+
+        Отказ безопасен по построению: ``reconfigure`` разбирает конфиг ДО
+        разрушения реестра (R9), поэтому отвергнутый порог оставляет менеджер с
+        прежним рабочим набором каналов, а не с пустым.
         """
-        return value.upper() if isinstance(value, str) else value
+        if not isinstance(value, str):
+            return value
+        canonical = normalize_level_name(value)
+        if canonical is None:
+            raise ValueError(
+                f"неизвестный уровень '{value}' в min_level (известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+            )
+        return canonical
 
     def should_log(self, level: LogLevel, module: str) -> bool:
         """Пройдёт ли запись гейт скоупа. Горячий путь — без аллокаций.
@@ -133,13 +159,13 @@ class LoggerScopeSchema(SchemaBase):
         """
         if not self.enabled:
             return False
-        min_rank = LEVEL_RANKS.get(self.min_level, UNKNOWN_RANK)
-        if min_rank == UNKNOWN_RANK:
+        min_severity = SEVERITY_NUMBERS.get(self.min_level, UNKNOWN_SEVERITY)
+        if min_severity == UNKNOWN_SEVERITY:
             return True
-        rank = LEVEL_RANKS.get(level.value, UNKNOWN_RANK)
-        if rank == UNKNOWN_RANK:
+        severity = SEVERITY_NUMBERS.get(level.value, UNKNOWN_SEVERITY)
+        if severity == UNKNOWN_SEVERITY:
             return True
-        if rank < min_rank:
+        if severity < min_severity:
             return False
         # Список, а не frozenset: он почти всегда пуст, а его материализация в
         # множество жила бы в приватном атрибуте — то есть на дорогом пути.
@@ -376,7 +402,7 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         ),
         "BUSINESS": LoggerScopeSchema(
             enabled=True,
-            min_level=_LEVEL_ORDER[1],
+            min_level="INFO",
             # console НЕ подключён к BUSINESS: пер-кадровые INFO-логи воркеров
             # уходят только в файлы (system_file/messages_file), а не засоряют
             # терминал. В stdout остаётся лишь SYSTEM WARNING+ через свой scope.
@@ -389,7 +415,7 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         # вовсе. Закреплено характеризационным тестом, а не оставлено умолчанием.
         "PERFORMANCE": LoggerScopeSchema(
             enabled=True,
-            min_level=_LEVEL_ORDER[1],
+            min_level="INFO",
             channels=["performance_file"],
         ),
         # DEBUG-scope по умолчанию ВЫКЛЮЧЕН: на DEBUG в system_file лился пер-кадровый

@@ -394,6 +394,29 @@ class TestLogTail:
         _svc, cm = _make(logger=_FakeTapLogger(), router=_FakeRouter())
         assert cm.dispatch("log.tail.subscribe", {})["success"] is False
 
+    def test_subscribe_refuses_unknown_level(self) -> None:
+        """Ф3.1: третий путь входа имени уровня — аргумент команды.
+
+        Прежде опечатка давала порог «пропускать всё» при ``success=true``:
+        подписчик просил ошибки, получал каждую запись и не мог этого узнать.
+        Образец отказа уже стоял рядом, у ``health.report``, — расхождение двух
+        команд одной поверхности и было «дефектом на одном пути из трёх».
+        """
+        logger = _FakeTapLogger()
+        _svc, cm = _make(logger=logger, router=_FakeRouter())
+        res = cm.dispatch("log.tail.subscribe", {"subscriber": "backend_ctl", "level": "ERORR"})
+        assert res["success"] is False
+        assert "ERORR" in res["reason"]
+        assert logger.taps == {}, "отвергнутая подписка не должна ставить tap"
+
+    def test_subscribe_accepts_foreign_spelling_of_a_level(self) -> None:
+        """``WARN`` — каноничное имя OTel, а не опечатка; ответ несёт канон."""
+        logger = _FakeTapLogger()
+        _svc, cm = _make(logger=logger, router=_FakeRouter())
+        res = cm.dispatch("log.tail.subscribe", {"subscriber": "backend_ctl", "level": "warn"})
+        assert res["success"] is True
+        assert res["level"] == "WARNING"
+
     def test_subscribe_requires_router(self) -> None:
         _svc, cm = _make(logger=_FakeTapLogger(), router=None)
         res = cm.dispatch("log.tail.subscribe", {"subscriber": "backend_ctl"})
