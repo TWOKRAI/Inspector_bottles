@@ -23,3 +23,10 @@ metadata:
 `get_config` обязан иметь сигнатуру `(key, default=None)` — однопараметрический
 роняет вызывающих `TypeError` вместо того, чтобы их проверять. См.
 [[feedback-plausible-is-not-verified]], [[feedback-default-path-must-match-publisher]].
+
+**Повтор класса (Ф3.5 → найден live-ревью 2026-08-05):** `_build_resource`
+читал `observability_recipe_path` голым `get_config` — на живом webcam_sketch
+поле `recipe` молча пропадало из ВСЕХ записей, харнес-тест пинил плоскую
+форму. Хелпер существовал, но его обошли. Починено на `read_process_config` +
+тест вложенной формы на настоящем `Config`. Значит правило усиливается: НОВЫЙ
+потребитель per-process ключа = grep по `read_process_config` обязателен.

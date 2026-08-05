@@ -214,3 +214,4 @@
 - [Ноль красных = лишний слой](feedback_zero_reds_can_mean_a_useless_layer.md) — третья гипотеза: код дублирует гарантию ниже
 - [Ручка-из-env читает свою же запись](feedback_env_knob_reads_its_own_write.md) — снимок env один раз на старте
 - [Одна функция — две позиции](feedback_one_function_two_positions.md) — совпадение констант маскирует противоположные дефолты
+- [Ф3: внешнее ревью 8/10](project_f3_external_review.md) — Б-1/2/7 fixed; Б-3/4/8 → 5.2; рестарт сломан live; шторм измерен
