@@ -32,6 +32,8 @@ from pydantic import Field, field_validator, model_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...log_declarations import declared_rules
+from ...logger_module.configs.logger_manager_config import MIN_BURST_RESET_SEC
+from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 
 #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
 #: МОЛЧА (проверено), поэтому без сверки конфиг с ``enable_batching: true`` после
@@ -214,12 +216,35 @@ class ObservabilityConfig(SchemaBase):
     ] = 100
     sampling_burst_reset_sec: Annotated[
         float,
-        FieldMeta("Тишина по ключу дольше этого начинает всплеск заново, сек", min=0.0, max=86400.0),
+        FieldMeta("Тишина по ключу дольше этого начинает всплеск заново, сек", min=MIN_BURST_RESET_SEC, max=86400.0),
     ] = 5.0
     sampling_max_level: Annotated[
         str,
         FieldMeta("Верхняя граница уровня для дросселя (ERROR/CRITICAL не сэмплируются никогда)"),
     ] = "DEBUG"
+
+    # Ф7.х: валидатор-близнец к тому, что стоит на ``LoggerManagerConfig``.
+    # Асимметрия слоёв — отдельный класс дефекта этого плана: L3 принимал
+    # ``sampling_max_level: "TRACE"`` молча, а L0 то же значение отвергал.
+    # Оператор правит секцию ``observability`` — то есть попадает ровно в тот
+    # слой, который проверял меньше.
+    #
+    # Нижнюю границу ``burst_reset_sec`` держит ``FieldMeta(min=...)`` через
+    # ``SchemaBase`` — своего валидатора для неё здесь нет по тому же доводу,
+    # что и в ``LoggerManagerConfig``: два предохранителя прячут, кто держит.
+
+    @field_validator("sampling_max_level", mode="before")
+    @classmethod
+    def _normalize_sampling_max_level(cls, value):
+        if not isinstance(value, str):
+            return value
+        canonical = normalize_level_name(value)
+        if canonical is None:
+            raise ValueError(
+                f"неизвестный уровень '{value}' в sampling_max_level "
+                f"(известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+            )
+        return canonical
 
     errors: Annotated[
         ObservabilityErrorsConfig,

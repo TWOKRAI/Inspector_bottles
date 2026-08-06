@@ -136,7 +136,9 @@ class IErrorManager(Protocol):
 
         Returns:
             Словарь с полями: app_name, messages_processed, messages_skipped,
-            channels_count, batching_enabled, include_stacktrace.
+            channels_count, include_stacktrace. ``batching_enabled`` снято
+            вместе с батчингом записи (Ф7.4) — поля с таким именем плоскость
+            ошибок не отдаёт.
         """
         ...
 

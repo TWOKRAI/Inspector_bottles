@@ -161,6 +161,45 @@ class TestObservabilitySendFailureIsCountedNotLogged:
         assert silent_probe.records == []
         assert reg.get_stats()["queues"]["errors"] == 0
 
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            pytest.param(ValueError("Queue is closed"), id="closed_queue"),
+            pytest.param(TypeError("cannot pickle '_thread.lock' object"), id="unpicklable_payload"),
+        ],
+    )
+    def test_a_failure_that_is_not_overload_stays_loud(self, failure, silent_probe):
+        """Ф7.х, M-4: молчит ПЕРЕГРУЗКА, а не любой отказ хвостовой очереди.
+
+        Прежняя ветка ловила ``except Exception`` и записывала в тихий счётчик
+        ``observability_send_failed`` вообще всё: закрытую очередь, непиклящийся
+        груз. То есть починка петли завела внутри себя ровно тот проглоченный
+        сбой, который весь план вычищает — сломанный транспорт выглядел
+        «диагностики слишком много». ``Full`` остаётся тихим (это и есть
+        перегрузка), всё остальное идёт громкой дорогой.
+        """
+
+        class _Broken(_queue.Queue):
+            def full(self):
+                return False
+
+            def put_nowait(self, item):
+                raise failure
+
+        psr = ProcessStateRegistry()
+        psr.register_process("gui")
+        psr.add_queue("gui", OBS, _Broken(maxsize=4))
+        reg = QueueRegistry(process_state_registry=psr)
+        reg.initialize()
+        _drop_setup_records()
+
+        ok = reg.send_to_queue("gui", OBS, {"command": "log.record"})
+
+        assert ok is False
+        assert reg.observability_send_failed == 0, "отказ транспорта записан как перегрузка хвоста"
+        assert [lvl for lvl, _ in silent_probe.records] == ["ERROR"], "сломанный сток хвоста молчит — проглоченный сбой"
+        assert reg.get_stats()["queues"]["errors"] == 1
+
     def test_data_send_failure_still_speaks(self, silent_probe):
         """Контраст: отказ put в data-очередь по-прежнему пишет ERROR и растит ``errors``."""
 

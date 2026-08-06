@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from multiprocess_framework.modules.process_module.heartbeat.process_heartbeat import (
     ProcessHeartbeat,
 )
@@ -170,6 +172,10 @@ class TestH8RouterShmStatsPublish:
             # усиливала бы шторм) — дерево остаётся единственным местом, где их видно.
             "queue_observability_evicted": 0,
             "queue_observability_send_failed": 0,
+            # Ф7.х M-2: третья форма потери хвоста — билет не доехал ни одним путём
+            # доставки роутера. Счётчик завела Ф7.3 и наружу не вывела НИ ОДНИМ
+            # путём (проверено live: в state.shm были только два ключа выше).
+            "observability_delivery_failed": 0,
             "stale_drops": 0,
             "loan_exhausted": 0,
             "slots_released": 0,
@@ -275,6 +281,44 @@ class TestH8RouterShmStatsPublish:
         assert proxy.merge_calls == 1
         _, data = proxy.merged[0]
         assert data["loan_exhausted"] == 3
+
+    #: Гейт публикации — «все нули → молчим». Каждое слагаемое обязано уметь
+    #: открыть его В ОДИНОЧКУ: слагаемое, снятие которого ничего не ломает, и
+    #: есть счётчик, который никогда не будет опубликован.
+    #:
+    #: Ф7.х, M-3 ревью Ф7: гейт не сторожился НИ ОДНИМ тестом — снятие двух
+    #: слагаемых давало 1959 passed и ноль красных. Отдельные тесты «только X
+    #: ненулевой» были у пяти счётчиков из двенадцати, и добавлять тринадцатый
+    #: поимённо значило бы повторить ту же выборочность. Пара «ключ статистики
+    #: роутера → ключ в дереве» проверяется здесь ЦЕЛИКОМ.
+    GATE_SUMMANDS = (
+        ("frame_pickle_fallbacks", "pickle_fallbacks"),
+        ("frame_torn_reads", "torn_reads"),
+        ("frame_boundary_crossings", "boundary_crossings"),
+        ("queue_data_evicted", "queue_data_evicted"),
+        ("queue_system_evict_blocked", "queue_system_evict_blocked"),
+        ("queue_observability_evicted", "queue_observability_evicted"),
+        ("queue_observability_send_failed", "queue_observability_send_failed"),
+        ("observability_delivery_failed", "observability_delivery_failed"),
+        ("frame_stale_drops", "stale_drops"),
+        ("frame_loan_exhausted", "loan_exhausted"),
+        ("frame_slots_released", "slots_released"),
+        ("frame_slots_reclaimed", "slots_reclaimed"),
+        ("frame_handle_cache_size", "cache_size"),
+    )
+
+    @pytest.mark.parametrize("stat_key,tree_key", GATE_SUMMANDS)
+    def test_every_summand_can_open_the_gate_alone(self, stat_key: str, tree_key: str) -> None:
+        """Ненулевой один — публикация состоялась, и значение доехало под своим именем."""
+        proxy = _CountingProxy()
+        router = _FakeRouter({key: 0 for key, _ in self.GATE_SUMMANDS} | {stat_key: 7})
+        hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
+
+        hb._publish_router_shm_stats_to_tree()
+
+        assert proxy.merge_calls == 1, f"'{stat_key}' не открывает гейт публикации — счётчик наружу не выйдет никогда"
+        _, data = proxy.merged[0]
+        assert data[tree_key] == 7, f"'{stat_key}' открыл гейт, но не доехал под именем '{tree_key}'"
 
     def test_noop_when_all_zero(self) -> None:
         proxy = _CountingProxy()

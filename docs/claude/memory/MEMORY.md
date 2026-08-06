@@ -226,3 +226,6 @@
 - [Фальшивка-всегда-успех глушит гейт](feedback_fake_that_always_succeeds_mutes_the_gate.md) — дубль обязан уметь отказывать
 - [Два предохранителя прячут, кто держит](feedback_two_safeguards_hide_which_one_holds.md) — снимай в стенде все, кроме проверяемого
 - [Числа теста рядом с дефолтом](feedback_test_values_near_defaults_test_the_default.md) — проверяют дефолт, а не ручку
+- [Ф7 ревью 7.5/10, корзина Ф7.х ЗАКРЫТА](project_f7_cross_review.md) — 3 блокера + major-ряд починены, 15 инъекций красные; путь в Ф8 открыт
+- [Защищать единицу конкуренции](feedback_protect_the_unit_of_contention.md) — предел на не той единице оставляет второго без предела вовсе
+- [Откат инъекции — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа; ERROR сбора ≠ красный

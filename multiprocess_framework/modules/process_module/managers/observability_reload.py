@@ -385,7 +385,10 @@ def observability_provenance(layers: "ObservabilityLayers", *, logger: Any = Non
 PLANE_COUNTER_KEYS: tuple = (
     "messages_processed",
     "messages_skipped",
-    "messages_batched",
+    # ``messages_batched`` здесь БЫЛ и удалён (Ф7.х, хвост Ф7.4): счётчика больше
+    # нет ни у одного менеджера — батчинг записи снят целиком. Довод тот же, что
+    # у снятого ``flush_failed`` абзацем ниже: заведомо недостижимое имя в списке,
+    # объявленном «точкой забывания», подтачивает доверие ко всему списку.
     "errors_to_floor",
     "errors_floor_write_failures",
     "error_floor",
@@ -427,6 +430,11 @@ PLANE_COUNTER_KEYS: tuple = (
     "records_sampled_out",
     "sampler_keys_tracked",
     "sampler_keys_saturated",
+    # Ф7.х — карта ключей дышит: подметённые протухшие. Пара к предыдущему ключу:
+    # растёт expired — потолок работает как задумано; стоит expired при растущем
+    # saturated — карта забита горячими ключами, дроссель по повторяемости против
+    # такого шторма бессилен по построению, лечится счётчиком вместо записи.
+    "sampler_keys_expired",
     # Task 5.6 — ДОСТАВКА. Все счётчики выше считают потери, и «потерь ноль»
     # одинаково означает здоровую систему и систему, из которой ничего не
     # выходит. Без этих ключей «включён» неотличимо от «доставляет».
@@ -444,9 +452,17 @@ PLANE_COUNTER_KEYS: tuple = (
     "retention_delete_failures",
     "retention_compress_failures",
     "retention_bytes_freed",
-    # R2 — обратное давление консоли: запись отброшена по пределу ожидания.
+    # R2 → Ф7.2 — обратное давление стока: запись отброшена по пределу ожидания.
     "sink_writes_dropped",
     "sink_slow_writes",
+    # Ф7.х B-2 — два пункта приёмки Ф7.2, невыполненные при закрытой задаче
+    # (найдено сквозным ревью). ``sink_degraded`` отвечает на вопрос, которого
+    # число потерь не покрывает: сток теряет СЕЙЧАС или перестал час назад.
+    # Разбивка по имени отвечает на «чьи именно» — у трёх соседних классов
+    # потерь она есть с Ф0.4, у лесенки не было.
+    "sink_degraded",
+    "sink_degraded_channels",
+    "sink_writes_dropped_by_channel",
     # P2 (найдено LIVE-прогоном Ф1) — карта «уровень → канал» плоскости ошибок.
     # Не счётчик, но ровно тот же класс невидимости: резидуал P2 научил её
     # перестраиваться на снятие приёмника, план назвал её «публичным
@@ -466,11 +482,15 @@ PLANE_COUNTER_KEYS: tuple = (
 def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:
     """Счётчики одной плоскости наблюдаемости из её ``get_stats()``.
 
-    Нормализует расхождение имён между менеджерами: буфер логгера лежит под
-    ключом ``batch_stats`` (``LoggerCore.get_stats`` собирает словарь сам),
-    буфер статистики — под ``buffer`` (``ChannelRoutingManager.get_stats``).
-    Наружу отдаётся один ключ ``buffer`` — потребителю не должно быть нужно
-    знать, какой из двух менеджеров он спрашивает.
+    Буфер плоскости отдаётся под ключом ``buffer`` — потребителю не должно быть
+    нужно знать, какой менеджер он спрашивает.
+
+    **Ф7.х (хвост Ф7.4):** здесь нормализовалось ещё и второе имя —
+    ``batch_stats`` логгера. Буфера записи больше нет ни у логгера, ни у ошибок
+    (``BatchBuffer`` снят вместе с батчингом), поэтому ключ убран: он мог
+    подхватиться только у фальшивки в тесте, а в проде отвечал ``None`` и
+    выглядел живой нормализацией. Буфер остался у статистики (окно агрегации) —
+    его и читаем.
     """
     if manager is None or not hasattr(manager, "get_stats"):
         return None
@@ -485,7 +505,7 @@ def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:
         return {"error": f"get_stats вернул {type(raw).__name__}, ожидался dict"}
 
     out: Dict[str, Any] = {}
-    buffer = raw.get("batch_stats", raw.get("buffer"))
+    buffer = raw.get("buffer")
     if isinstance(buffer, dict):
         out["buffer"] = buffer
     for key in PLANE_COUNTER_KEYS:

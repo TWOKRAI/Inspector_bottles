@@ -571,6 +571,13 @@ class ProcessHeartbeat:
             # место, где оператор эту потерю увидит.
             obs_evicted = int(rs.get("queue_observability_evicted", 0) or 0)
             obs_send_failed = int(rs.get("queue_observability_send_failed", 0) or 0)
+            # Ф7.х M-2: ТРЕТЬЯ форма потери хвоста — билет не доехал ни одним из
+            # путей доставки роутера (targets, relay через хаб, канал). Счётчик
+            # завела Ф7.3 и не вывела наружу НИ ОДНИМ путём: ни в heartbeat, ни в
+            # аномалиях — то есть класс «проглоченный сбой» воспроизвёлся внутри
+            # починки того же класса. Проверено живьём: в ``state.shm`` были
+            # только evicted и send_failed.
+            obs_delivery_failed = int(rs.get("observability_delivery_failed", 0) or 0)
             # Ф7 G.5.c: дроп по post-use re-check zero-copy view (слот перезаписан под
             # живым view — consumer отстал > глубины кольца). Ещё один сигнал потери
             # кадра в том же месте для вкладки Pipeline.
@@ -596,6 +603,7 @@ class ProcessHeartbeat:
                 and sys_blocked == 0
                 and obs_evicted == 0
                 and obs_send_failed == 0
+                and obs_delivery_failed == 0
                 and stale_drops == 0
                 and loan_exhausted == 0
                 and slots_released == 0
@@ -613,6 +621,7 @@ class ProcessHeartbeat:
                     "queue_system_evict_blocked": sys_blocked,
                     "queue_observability_evicted": obs_evicted,
                     "queue_observability_send_failed": obs_send_failed,
+                    "observability_delivery_failed": obs_delivery_failed,
                     "stale_drops": stale_drops,
                     "loan_exhausted": loan_exhausted,
                     "slots_released": slots_released,

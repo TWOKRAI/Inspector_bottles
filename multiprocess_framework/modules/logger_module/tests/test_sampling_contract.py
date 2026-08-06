@@ -25,6 +25,7 @@ import pytest
 
 from multiprocess_framework.modules.channel_routing_module.interfaces import IChannel
 from multiprocess_framework.modules.logger_module.configs.logger_manager_config import (
+    MIN_BURST_RESET_SEC,
     LoggerManagerConfig,
 )
 from multiprocess_framework.modules.logger_module.core.log_types import LogLevel
@@ -255,19 +256,26 @@ class TestDifferentKeysAreIndependent:
 
 class TestBurstReset:
     def test_silence_longer_than_reset_restarts_the_burst(self) -> None:
-        """Часы не патчатся глобально — окно двигает реальный ``time.sleep``."""
+        """Часы не патчатся глобально — окно двигает реальный ``time.sleep``.
+
+        Окно = ``MIN_BURST_RESET_SEC``: с Ф7.х это НИЖНЯЯ ГРАНИЦА схемы, и
+        прежние 0.05 с схема больше не принимает (окно короче паузы между
+        повторами выключало дроссель молча). Число берётся из константы, а не
+        переписывается литералом: разъехавшись с границей, тест снова упёрся бы
+        в валидатор — но уже без объяснения, почему.
+        """
         mgr = _logger(
             ["a"],
             sampling_first_n=1,
             sampling_every_mth=1_000_000,
-            sampling_burst_reset_sec=0.05,
+            sampling_burst_reset_sec=MIN_BURST_RESET_SEC,
         )
         spy = _register_spy(mgr, "a")
 
         mgr.log("SYSTEM", LogLevel.DEBUG, "всплеск", "mod")  # 1: проходит (first_n)
         mgr.log("SYSTEM", LogLevel.DEBUG, "всплеск", "mod")  # 2: подавлена, бюджет исчерпан
 
-        time.sleep(0.2)  # дольше burst_reset_sec=0.05 — тишина должна сбросить окно
+        time.sleep(MIN_BURST_RESET_SEC * 4)  # заведомо дольше окна — тишина сбрасывает его
 
         mgr.log("SYSTEM", LogLevel.DEBUG, "всплеск", "mod")  # 3: обязана снова пройти как first_n
 

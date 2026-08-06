@@ -45,9 +45,12 @@ _SEVERITY_PLANE_SEVERITY = severity_of("WARNING")
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "errors",
     "default_level": "WARNING",
-    "enable_batching": True,
-    "batch_size": 50,
-    "batch_interval": 0.5,
+    # Ф7.х (хвост Ф7.4): ``enable_batching``/``batch_size``/``batch_interval``
+    # отсюда УДАЛЕНЫ. Схема принимает лишние ключи молча, поэтому дефолт плоскости
+    # ошибок продолжал объявлять батчинг включённым спустя фазу после его сноса —
+    # читающий этот словарь узнавал о механизме, которого нет. Операторские
+    # конфиги с теми же ключами ловит ``REMOVED_BATCHING_KEYS`` в
+    # ``observability_config.py``; здесь ловить было некому — это наш же дефолт.
     "channels": {
         "critical_file": {
             "type": "file",

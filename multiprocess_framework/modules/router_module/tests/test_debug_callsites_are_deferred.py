@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import pytest
 
@@ -28,15 +28,41 @@ ROUTER_MANAGER = Path(__file__).resolve().parents[1] / "core" / "router_manager.
 EXPECTED_DEBUG_CALLSITES = 12
 
 
-def _debug_calls() -> List[Tuple[int, ast.AST]]:
-    tree = ast.parse(ROUTER_MANAGER.read_text(encoding="utf-8"))
+#: Как называется первый (позиционный) параметр ``ObservableMixin._log_debug``.
+#: Ключевая форма вызова — законный Python и полностью эквивалентна позиционной,
+#: поэтому страж обязан видеть обе.
+_MESSAGE_KEYWORD = "message"
+
+
+def _debug_call_argument(node: ast.Call) -> Optional[ast.AST]:
+    """Аргумент-сообщение вызова ``_log_debug`` в любой из двух форм.
+
+    Ф7.х, M-1 ревью Ф7. Прежняя редакция отсеивала вызовы условием
+    ``not node.args`` — то есть ``self._log_debug(message=f"...")`` не попадал ни
+    в проверку отложенности, ни в подсчёт точек: нарушитель проходил мимо ОБОИХ
+    тестов, а страж и есть вся гарантия этого свойства (наблюдаемого следствия у
+    неё нет — при выключенном DEBUG обе формы дают ноль записей).
+    """
+    if node.args:
+        return node.args[0]
+    for keyword in node.keywords:
+        if keyword.arg == _MESSAGE_KEYWORD:
+            return keyword.value
+    return None
+
+
+def _debug_calls(source: Optional[str] = None) -> List[Tuple[int, ast.AST]]:
+    tree = ast.parse(source if source is not None else ROUTER_MANAGER.read_text(encoding="utf-8"))
     found = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not node.args:
+        if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Attribute) and func.attr == "_log_debug":
-            found.append((node.lineno, node.args[0]))
+        if not (isinstance(func, ast.Attribute) and func.attr == "_log_debug"):
+            continue
+        argument = _debug_call_argument(node)
+        if argument is not None:
+            found.append((node.lineno, argument))
     return found
 
 
@@ -73,13 +99,24 @@ def test_the_guard_can_see_a_violation() -> None:
     Тот же разбор на заведомо нарушающем исходнике обязан найти нарушение.
     Без этого «нарушителей нет» неотличимо от «разбор ничего не находит».
     """
-    tree = ast.parse('self._log_debug(f"собрано на месте {x}")\n')
-    calls = [
-        node.args[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "_log_debug"
-    ]
-    assert calls and not isinstance(calls[0], (ast.Lambda, ast.Constant))
+    calls = _debug_calls('self._log_debug(f"собрано на месте {x}")\n')
+    assert calls and not isinstance(calls[0][1], (ast.Lambda, ast.Constant))
+
+
+def test_the_guard_sees_the_keyword_form_too() -> None:
+    """Ключевая форма вызова — та же цена и тот же нарушитель (Ф7.х, M-1).
+
+    ``self._log_debug(message=f"...")`` эквивалентен позиционному вызову и
+    собирает строку так же. Прежний разбор требовал ``node.args`` и такой вызов
+    НЕ ВИДЕЛ вовсе: нарушитель не попадал ни сюда, ни в подсчёт точек — то есть
+    единственная гарантия дисциплины call-site обходилась одним знаком равенства.
+    """
+    calls = _debug_calls('self._log_debug(message=f"собрано на месте {x}")\n')
+    assert calls, "keyword-форма вызова не видна разбору — страж слеп на неё"
+    assert not isinstance(calls[0][1], (ast.Lambda, ast.Constant)), "нарушитель в keyword-форме не опознан"
+
+    deferred = _debug_calls("self._log_debug(message=lambda: f'{x}')\n")
+    assert deferred and isinstance(deferred[0][1], ast.Lambda), "законная keyword-форма ошибочно объявлена нарушителем"
 
 
 def test_a_lambda_reading_exc_binds_it_as_a_default_argument() -> None:

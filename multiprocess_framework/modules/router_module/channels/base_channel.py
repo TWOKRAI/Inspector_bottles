@@ -16,6 +16,7 @@ MessageChannel — абстрактный базовый класс для вс�
 RouterManager инжектит свои колбэки автоматически при register_channel():
     router.register_channel(ch)   # → ch._attach_logger(router._log_warning, ...)
 """
+
 from abc import abstractmethod
 from typing import Callable, Dict, Any, List, Optional
 
@@ -32,15 +33,15 @@ class MessageChannel(IMessageChannel):
     def __init__(
         self,
         log_warning: Optional[Callable[[str], None]] = None,
-        log_error:   Optional[Callable[[str], None]] = None,
+        log_error: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._log_warning = log_warning or (lambda msg: None)
-        self._log_error   = log_error   or (lambda msg: None)
+        self._log_error = log_error or (lambda msg: None)
 
     def _attach_logger(
         self,
         log_warning: Callable[[str], None],
-        log_error:   Callable[[str], None],
+        log_error: Callable[[str], None],
     ) -> None:
         """Подключить логирование от RouterManager после регистрации.
 
@@ -48,7 +49,7 @@ class MessageChannel(IMessageChannel):
         Переопределять не нужно.
         """
         self._log_warning = log_warning
-        self._log_error   = log_error
+        self._log_error = log_error
 
     # ---- Обязательные (реализуются в подклассах) ----
 
@@ -67,5 +68,5 @@ class MessageChannel(IMessageChannel):
         """Отправить сообщение. Вернуть {"status": "success"|"error", ...}."""
 
     @abstractmethod
-    def poll(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
-        """Опросить канал. timeout=0 → non-blocking."""
+    def poll(self, timeout: float = 0.0, max_items: int = 0) -> List[Dict[str, Any]]:
+        """Опросить канал. timeout=0 → non-blocking, ``max_items``=0 → дефолт реализации."""

@@ -299,7 +299,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 # Ф4 Task 4.3: потеря записывается ТОМУ ЖЕ отправителю — иначе видно
                 # «очередь теряет», но не видно, чей груз пропадает.
                 self._count_sender(process_name, queue_type, message, "lost")
-            if self._is_observability_queue(queue_type):
+            if isinstance(e, Full) and self._is_observability_queue(queue_type):
                 # Ф7.3, звено (а) петли самоусиления. Очередь наблюдаемости droppable,
                 # поэтому Full здесь — редкая гонка: между вытеснением и put её успел
                 # заполнить другой отправитель. Записи об этом НЕ делаем: она поехала
@@ -309,6 +309,15 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 # ``errors`` СОЗНАТЕЛЬНО не трогаем: под штормом хвоста он перестал бы
                 # отличать «транспорт сломан» от «диагностики слишком много» — этой
                 # слепотой Б-6 и запомнился.
+                #
+                # Ф7.х, M-4: сверка типа обязательна. Без неё ветка глотала ЛЮБОЕ
+                # исключение как «хвоста слишком много»: закрытая очередь
+                # (``ValueError: is closed``) и непиклящийся груз
+                # (``PicklingError``) уходили в тот же тихий счётчик — то есть
+                # отказ транспорта выглядел перегрузкой, и починка петли завела
+                # свой собственный проглоченный сбой. Всё, что не ``Full``, идёт
+                # ниже общей громкой дорогой: это не «диагностики много», это
+                # сломано, и молчать об этом нельзя.
                 self._stats["observability_send_failed"] += 1
                 self._count_sender(process_name, queue_type, message, "lost")
                 return False

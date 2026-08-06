@@ -252,8 +252,11 @@ class SocketChannel(MessageChannel):
 
     # ---- IMessageChannel: получение ----
 
-    def poll(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
+    def poll(self, timeout: float = 0.0, max_items: int = 0) -> List[Dict[str, Any]]:
         """No-op: inbound доставляется push'ем через read-loop → on_inbound, не pull'ом.
+
+        ``max_items`` принимается ради единой подписи и не используется: дренажа
+        как цикла здесь нет.
 
         Router опрашивает только каналы процесса (input_channels_only); этот канал
         с именем без префикса процесса не попадает в receive-цикл, и это верно.

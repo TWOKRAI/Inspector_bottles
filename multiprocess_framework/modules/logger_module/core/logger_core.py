@@ -191,6 +191,12 @@ _CHANNEL_BACKPRESSURE_KEYS = (
     "sink_slow_writes",
 )
 
+#: Тот из ключей выше, у которого есть АДРЕС (Ф7.х B-2): потери разбиваются по
+#: имени стока. Имя вынесено константой, а не написано строкой в двух местах —
+#: расхождение накопителя с публикацией дало бы разбивку, вечно отстающую на
+#: последний снятый канал.
+_SINK_DROPPED_KEY = "sink_writes_dropped"
+
 #: Раздатчик ключей инстансов. Не ``id(self)``: id переиспользуется после сборки
 #: мусора, и новый менеджер унаследовал бы контекст покойного в том потоке,
 #: который не сделал pop.
@@ -423,6 +429,13 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # R2: счётчики потерь ушедших каналов. Живут на менеджере, потому что
         # канал уносит свои с собой (см. _on_channel_removed).
         self._absorbed_backpressure: Dict[str, int] = {}
+        # Ф7.х B-2: та же история, но с АДРЕСОМ. Суммарное «4 потери» не отвечает
+        # на первый же вопрос оператора — чьи именно, и разбираться приходилось
+        # обходом ``get_info`` каждого канала (а ушедшего канала там уже нет).
+        # Соседние три класса потерь (``channel_write_errors_by_channel``,
+        # ``channel_refused_by_channel``, ``channel_written_by_channel``) разбивку
+        # имели с Ф0.4 — у лесенки её не было.
+        self._absorbed_dropped_by_channel: Dict[str, int] = {}
 
         self._setup_channels()
         # Ретеншен применяется и на старте, а не только на reconfigure: процесс,
@@ -1007,6 +1020,12 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             value = getattr(channel, key, 0)
             if value:
                 self._absorbed_backpressure[key] = self._absorbed_backpressure.get(key, 0) + value
+        # B-2: разбивка переезжает вместе с суммой — иначе `sink.disable` во время
+        # разбора инцидента отвечал бы «потерь 7», не говоря чьих.
+        dropped = getattr(channel, _SINK_DROPPED_KEY, 0)
+        if dropped:
+            name = getattr(channel, "name", "") or ""
+            self._absorbed_dropped_by_channel[name] = self._absorbed_dropped_by_channel.get(name, 0) + dropped
 
     def _on_channels_changed(self) -> None:
         """Состав каналов изменился в рантайме → решение should_log больше не доверенное.
@@ -1906,6 +1925,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "records_sampled_out": self._sampler.records_sampled_out,
             "sampler_keys_tracked": self._sampler.keys_tracked,
             "sampler_keys_saturated": self._sampler.keys_saturated,
+            # Ф7.х: сколько ключей подмели как протухшие. Отдельно от насыщения,
+            # потому что отвечают на противоположные вопросы: «карта дышит»
+            # против «карта забита горячим и дроссель бессилен».
+            "sampler_keys_expired": self._sampler.keys_expired,
             "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
 
@@ -1936,9 +1959,34 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # Поэтому при снятии канала его счётчики переезжают в накопитель
         # менеджера (см. `_absorb_channel_backpressure`), и наружу едет сумма
         # «накоплено + живое». Ключи присутствуют всегда, нулями.
+        channels_now = list(self._channel_registry.all())
         for key in _CHANNEL_BACKPRESSURE_KEYS:
-            live = sum(getattr(ch, key, 0) for ch in self._channel_registry.all())
+            live = sum(getattr(ch, key, 0) for ch in channels_now)
             base_stats[key] = self._absorbed_backpressure.get(key, 0) + live
+
+        # Ф7.х B-2 — два пункта приёмки Ф7.2, закрытые ревью как невыполненные.
+        #
+        # 1. ``sink_degraded`` — состояние «этот сток СЕЙЧАС теряет всё». Оно
+        #    жило только в ``get_info`` канала, то есть спросить его снаружи было
+        #    нечем: команды наблюдаемости ходят через ``get_stats``. Разомкнутый
+        #    сток от здорового при этом неотличим по числу потерь — потери могли
+        #    накопиться час назад и прекратиться.
+        # 2. Разбивка потерь по ИМЕНИ стока. Сумма отвечает «сколько», но не
+        #    «чьи», а лечатся залипший файл и залипшая консоль по-разному.
+        #
+        # Список имён, а не только булево: «разомкнут какой-то» и «разомкнут
+        # errors_file» — разные факты. Булево рядом оставлено намеренно, это
+        # дешёвый вопрос для гейта публикации и панели.
+        degraded = sorted(str(ch.name) for ch in channels_now if getattr(ch, "sink_degraded", False))
+        base_stats["sink_degraded_channels"] = degraded
+        base_stats["sink_degraded"] = bool(degraded)
+        dropped_by_channel = dict(self._absorbed_dropped_by_channel)
+        for ch in channels_now:
+            value = getattr(ch, _SINK_DROPPED_KEY, 0)
+            if value:
+                name = str(ch.name)
+                dropped_by_channel[name] = dropped_by_channel.get(name, 0) + value
+        base_stats["sink_writes_dropped_by_channel"] = dropped_by_channel
 
         return base_stats
 

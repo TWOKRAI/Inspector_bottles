@@ -315,7 +315,11 @@ class WorkerStatus:
 OBSERVABILITY_LOSS_KEYS: tuple = LOSS_COUNTER_KEYS + (
     "errors_to_floor",
     "errors_floor_write_failures",
-    "console_writes_dropped",
+    # Ф7.2 переименовала счётчик в нейтральный по стоку (лесенка живёт в базе
+    # канала, в сумму входят и файловые потери), а здесь остался прежний
+    # ``console_writes_dropped`` — ключ, которого больше не существует. Подсказка
+    # по несуществующему имени молчит ВСЕГДА, и молчит она именно про потери.
+    "sink_writes_dropped",
     "message_build_failures",
     "retention_delete_failures",
     "retention_compress_failures",

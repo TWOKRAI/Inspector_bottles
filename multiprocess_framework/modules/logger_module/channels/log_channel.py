@@ -66,6 +66,32 @@ class LogChannel(ILogChannel):
     4. **Вернуться в строй бесплатно**: неблокирующая попытка в разомкнутом
        состоянии и есть проба «сток ожил?». Отдельного таймера нет.
 
+    **Единица защиты — СТОК, а не канал (Ф7.х B-1, находка сквозного ревью).**
+    Первая редакция держала лок в экземпляре канала, и посылка спеки («каналы,
+    делящие файл, делят и лок») оказалась инвертированной: делят они ХЭНДЛЕР
+    (:func:`acquire_shared_rotating_handler`), а лок был у каждого свой. На боевой
+    раскладке (``messages_file`` + ``router_messages`` → один ``messages.log``)
+    залипший диск отнимал по потоку на КАЖДЫЙ канал: первый ждал предел и терял
+    запись, а второй входил в тот же ``stream.write`` без предела вообще — и его
+    счётчики стояли нулями в момент, когда поток уже был потерян. Вдобавок
+    ``handler.emit()`` зовётся мимо ``Handler.handle()``, то есть межканальной
+    сериализации на общем файле не было вовсе: два потока одновременно внутри
+    одного ``write``.
+
+    Поэтому лесенка берёт **лок самого хэндлера** (:meth:`_bind_sink_lock`):
+    общий хэндлер ⇒ общий лок ⇒ и предел, и сериализация достаются всем каналам
+    стока разом. ``Handler.handle()`` при этом по-прежнему не зовётся, и это
+    осознанно: он берёт тот же лок **без предела** — ровно то, что лесенка и
+    существует ограничить. Лок мы берём сами, с дедлайном, и внутри него делаем
+    ``emit()``. Лок хэндлера реентрантен (``RLock`` stdlib), поэтому внутренний
+    ``flush()`` из ``emit()`` не самоблокируется.
+
+    **Граница названа:** каналы на один путь с ``rotate: false`` получают по
+    своему ``FileHandler`` и, значит, по своему локу — их stdlib и так разводит
+    двумя fd. Две консоли на один stdout тоже не сериализуются между собой:
+    ``StreamHandler`` у каждой свой. Ни та, ни другая раскладка проектом не
+    производится, и ни одна не была тем случаем, который ревью воспроизвело.
+
     **Чего это НЕ делает, и это надо знать честно:** поток, уже вошедший в
     блокирующий ``write()`` внутри стока, остаётся заблокированным навсегда.
     Ограничить его можно только отдельным потоком-писателем — размен отвергнут
@@ -85,7 +111,11 @@ class LogChannel(ILogChannel):
         self._degrade_after = int(getattr(config, "degrade_after", 3) or 0)
         self._slow_write_sec = float(getattr(config, "slow_write_sec", 0.05) or 0.0)
 
-        self._write_lock = threading.Lock()
+        # Частный лок — фолбэк для стоков без хэндлера (память, null, HTTP).
+        # Каналы со стоком переводят лесенку на лок ХЭНДЛЕРА (``_bind_sink_lock``)
+        # сразу после его создания. ``RLock``, а не ``Lock``: лок хэндлера
+        # реентрантен, и два разных типа лока под одним именем разъехались бы.
+        self._write_lock: Any = threading.RLock()
         self._counter_lock = threading.Lock()
         self.sink_writes_dropped = 0
         self.sink_slow_writes = 0
@@ -105,6 +135,19 @@ class LogChannel(ILogChannel):
     def channel_type(self) -> str:
         return self._type
 
+    def _bind_sink_lock(self) -> None:
+        """Перевести лесенку на лок СТОКА — зовётся после создания ``self.handler``.
+
+        Ключевое свойство: у общего rotating-хэндлера лок один на всех владельцев
+        пути, поэтому предел ожидания и сериализация записи достаются каналам
+        стока разом (B-1). Канал без хэндлера остаётся на своём частном локе —
+        у ``MemoryChannel``/``NullChannel`` стока, за который можно конкурировать,
+        нет.
+        """
+        lock = getattr(getattr(self, "handler", None), "lock", None)
+        if lock is not None:
+            self._write_lock = lock
+
     @property
     def sink_degraded(self) -> bool:
         """Канал разомкнут: ожидание больше не оплачивается, записи отбрасываются сразу."""
@@ -118,14 +161,18 @@ class LogChannel(ILogChannel):
                 ПОД локом канала; всё, что происходит внутри него, — уже за
                 пределом досягаемости дедлайна (см. оговорку в докстринге класса).
         """
+        # Лок берётся в локальную переменную ОДИН раз: между acquire и release
+        # он обязан быть тем же объектом, а ``_write_lock`` — атрибут, который
+        # ``_bind_sink_lock`` подменяет.
+        lock = self._write_lock
         if self.sink_degraded:
             # Разомкнутый канал не ждёт вовсе: неблокирующая попытка здесь и есть
             # проба «сток ожил?» — отдельный таймер перепроверки не нужен.
-            acquired = self._write_lock.acquire(blocking=False)
+            acquired = lock.acquire(blocking=False)
         elif self._write_deadline_sec > 0:
-            acquired = self._write_lock.acquire(timeout=self._write_deadline_sec)
+            acquired = lock.acquire(timeout=self._write_deadline_sec)
         else:
-            acquired = self._write_lock.acquire(blocking=False)
+            acquired = lock.acquire(blocking=False)
 
         if not acquired:
             with self._counter_lock:
@@ -154,7 +201,7 @@ class LogChannel(ILogChannel):
                     self._max_write_sec = elapsed
                 if self._slow_write_sec > 0 and elapsed >= self._slow_write_sec:
                     self.sink_slow_writes += 1
-            self._write_lock.release()
+            lock.release()
         return result if isinstance(result, dict) else {"status": "success", "channel": self._name}
 
     def _warn_sink_stuck(self, dropped: int) -> None:
@@ -767,6 +814,10 @@ class FileChannel(LogChannel):
             self.handler = logging.FileHandler(self.file_path, encoding="utf-8", mode="a")
             self._shared_handler = False
             self.handler.setFormatter(formatter)
+        # B-1: лесенка переезжает на лок ХЭНДЛЕРА. У общего ротатора он один на
+        # путь — значит предел ожидания и сериализация записи достаются всем
+        # каналам файла, а не первому вошедшему.
+        self._bind_sink_lock()
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Записать в файл через лесенку перегрузки (Ф7.2).
@@ -837,6 +888,7 @@ class ConsoleChannel(LogChannel):
         self.handler = logging.StreamHandler()
         formatter = _SourceAbbreviatingFormatter(config.format, name_max_len=getattr(config, "name_max_len", 0))
         self.handler.setFormatter(formatter)
+        self._bind_sink_lock()
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
         def _emit() -> Dict[str, Any]:

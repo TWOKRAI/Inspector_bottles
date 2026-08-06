@@ -528,7 +528,17 @@ class _FakeLoggerConfig:
 
 
 class _FakeLoggerManager:
-    """Менеджер логов, отдающий буфер под своим ключом ``batch_stats``."""
+    """Менеджер логов в его нынешней форме: буфера записи у него НЕТ.
+
+    Ф7.х. Прежняя редакция отдавала секцию ``batch_stats`` — ключ ``BatchBuffer``,
+    снятого в Ф7.4 вместе с батчингом. Тесты вокруг неё проверяли нормализацию,
+    которой в проде уже не с чем было работать: подхватиться этот ключ мог только
+    здесь, у фальшивки. Ровно тот класс, который правила проекта называют «тест на
+    фальшивке доказывает фальшивку».
+
+    Потери по имени приёмника теперь считает лесенка стока (Ф7.х B-2) — их и
+    отдаём, под настоящим именем ключа.
+    """
 
     def __init__(self, *, dropped_by_channel=None, errors_to_floor=0) -> None:
         self.config = _FakeLoggerConfig()
@@ -542,12 +552,10 @@ class _FakeLoggerManager:
             "app_name": "fake",
             "errors_to_floor": self._errors_to_floor,
             "error_floor": None,
-            "batch_stats": {
-                "type": "batch",
-                "dropped": sum(self._dropped.values()),
-                "dropped_by_channel": dict(self._dropped),
-                "pending": {"system_file": 5},
-            },
+            "sink_writes_dropped": sum(self._dropped.values()),
+            "sink_writes_dropped_by_channel": dict(self._dropped),
+            "sink_degraded": bool(self._dropped),
+            "sink_degraded_channels": sorted(self._dropped),
         }
 
 
@@ -581,9 +589,10 @@ class TestIntrospectObservability:
 
         assert result["success"] is True
         assert result["process"] == "preprocessor"
-        buffer = result["counters"]["logger"]["buffer"]
-        assert buffer["dropped"] == 42
-        assert buffer["dropped_by_channel"] == {"system_file": 42}
+        logger = result["counters"]["logger"]
+        assert logger["sink_writes_dropped"] == 42
+        assert logger["sink_writes_dropped_by_channel"] == {"system_file": 42}
+        assert logger["sink_degraded_channels"] == ["system_file"]
 
     def test_reports_errors_that_never_reached_a_channel(self) -> None:
         svc, cm = _make()
@@ -593,15 +602,22 @@ class TestIntrospectObservability:
 
         assert result["counters"]["logger"]["errors_to_floor"] == 3
 
-    def test_buffer_key_is_normalized_across_planes(self) -> None:
-        """logger отдаёт batch_stats, stats — buffer; наружу оба как ``buffer``."""
+    def test_only_the_plane_that_still_has_a_buffer_reports_one(self) -> None:
+        """Буфер остался у ОДНОЙ плоскости, и наружу это видно как есть (Ф7.х).
+
+        Прежний тест сторожил нормализацию двух имён (``batch_stats`` логгера и
+        ``buffer`` статистики) в один ключ. Буфер записи снят в Ф7.4, второго
+        имени больше нет — и «нормализация» держалась исключительно на фальшивке,
+        которая его подавала. «Ключа нет» здесь честный ответ: у логгера
+        накапливать нечего, запись синхронна.
+        """
         svc, cm = _make()
         svc.logger_manager = _FakeLoggerManager()
         svc.stats_manager = _FakeStatsManager()
 
         counters = cm.dispatch("introspect.observability")["counters"]
 
-        assert counters["logger"]["buffer"]["type"] == "batch"
+        assert "buffer" not in counters["logger"], "у логгера снова появился буфер записи — это не Ф7.4"
         assert counters["stats"]["buffer"]["type"] == "aggregation"
 
     def test_effective_section_is_readback_not_echo(self) -> None:

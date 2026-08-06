@@ -274,7 +274,26 @@ class RouterManager(ChannelRoutingManager):
     #: ``shared_resources_module/queues/core/manager.py``.
     _SEND_ERROR_LOG_INTERVAL_SEC = 5.0
 
-    def _report_send_error(self, reason: str, detail: str, error: Optional[Exception] = None) -> None:
+    @staticmethod
+    def _is_observability_traffic(msg_dict: Dict[str, Any]) -> bool:
+        """Это груз ХВОСТА наблюдаемости (Ф7.3)?
+
+        Единственное следствие ответа — молчание на путях отказа и счётчик вместо
+        записи. Признак — класс груза, а не команда: их две (``log.record`` и
+        ``observability.record``), список команд разъехался бы с раскладкой
+        очередей, а ``queue_type`` проставляют оба отправителя и он же выбирает
+        транспорт.
+        """
+        return msg_dict.get("queue_type") == QUEUE_OBSERVABILITY
+
+    def _report_send_error(
+        self,
+        reason: str,
+        detail: str,
+        error: Optional[Exception] = None,
+        *,
+        muted: bool = False,
+    ) -> None:
         """Учесть ошибку отправки и — троттлированно — сказать о ней вслух.
 
         Ф6.7, находка Н-1. Ветка «no channel resolved» инкрементила ``errors``
@@ -291,7 +310,22 @@ class RouterManager(ChannelRoutingManager):
           подавленных названо в самой записи. Плоскость ошибок не батчится
           (пол ошибок пишет синхронно), поэтому нетроттлированный
           ``_track_error`` под штормом сам стал бы источником объёма.
+
+        ``muted`` — груз хвоста наблюдаемости (Ф7.х, блокер B-3). Ф7.3 замьютила
+        провал доставки в ``_deliver_by_targets``, но это только один кадр стека:
+        ``_do_send`` ВЫШЕ звал ``_report_send_error`` на том же отказе — то есть
+        петля Б-6 оставалась живой, просто через общий ``errors``. 500 отказов
+        доставки хвоста давали 500 ERROR-записей и 500 к ``errors``, а тот
+        публикуется как аномалия ``router_errors`` в overview: объём диагностики
+        сам порождал ложную тревогу о транспорте. Здесь потеря считается —
+        отдельными ключами, — но НЕ пишется и НЕ трогает общий ``errors``:
+        под штормом хвоста он перестал бы отличать «транспорт сломан» от
+        «диагностики слишком много», и этой слепотой Б-6 и запомнился.
         """
+        if muted:
+            self._inc_stat("observability_delivery_failed")
+            self._inc_stat(f"observability_errors_{reason}")
+            return
         self._inc_stat("errors")
         self._inc_stat(f"errors_{reason}")
         now = time.monotonic()
@@ -427,8 +461,16 @@ class RouterManager(ChannelRoutingManager):
         return self._do_send(self._to_dict(message))
 
     def _do_send(self, msg_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Применить middleware → резолвить каналы → channel.send()."""
+        """Применить middleware → резолвить каналы → channel.send().
+
+        Ф7.х B-3: у груза хвоста наблюдаемости все отказы ЗДЕСЬ считаются, но не
+        пишутся — иначе отказ доставки диагностики порождает диагностику, которая
+        едет тем же хвостом (петля Б-6). Мьют вычисляется ОДИН раз, до middleware:
+        мидлварь вправе поменять словарь, и признак, снятый после неё, отвечал бы
+        уже про другое сообщение.
+        """
         self._inc_stat("sent_attempted")
+        muted = self._is_observability_traffic(msg_dict)
         try:
             processed = self._send_mw.apply(msg_dict)
             if processed is None:
@@ -465,7 +507,7 @@ class RouterManager(ChannelRoutingManager):
                 else:
                     reason_key = "no_route"
                     detail = f"адресат не найден: {address}"
-                self._report_send_error(reason_key, detail)
+                self._report_send_error(reason_key, detail, muted=muted)
                 return {"status": "error", "reason": f"no channel resolved for {address}"}
 
             self._count_door("sent_via_channel", processed)
@@ -479,6 +521,7 @@ class RouterManager(ChannelRoutingManager):
                     self._report_send_error(
                         "delivery_failed",
                         f"канал '{channels[0].name}' вернул ошибку: {result.get('reason')!r}",
+                        muted=muted,
                     )
                 else:
                     self._inc_stat("sent_ok")
@@ -493,6 +536,7 @@ class RouterManager(ChannelRoutingManager):
                     self._report_send_error(
                         "delivery_failed",
                         f"канал '{ch.name}' вернул ошибку в broadcast: {r.get('reason')!r}",
+                        muted=muted,
                     )
                     all_ok = False
             if all_ok:
@@ -500,7 +544,11 @@ class RouterManager(ChannelRoutingManager):
             return {"status": "success", "broadcast": True, "results": results}
 
         except Exception as e:
-            self._report_send_error("exception", f"_do_send: {e}", error=e)
+            # Мьют распространяется и на исключение: под штормом хвоста оно
+            # повторяется на каждой записи ровно так же, как отказ доставки.
+            # Молчания при этом нет — ``observability_errors_exception`` называет
+            # именно этот случай отдельно от отказов доставки.
+            self._report_send_error("exception", f"_do_send: {e}", error=e, muted=muted)
             return {"status": "error", "reason": str(e)}
 
     @staticmethod
@@ -1635,11 +1683,19 @@ class RouterManager(ChannelRoutingManager):
             if kind_channels:
                 return kind_channels
 
-        self._log_debug(
-            lambda: (
-                f"channel_dispatcher returned no route for key_field={key_field!r} value={msg_dict.get(key_field)!r}"
+        # Ф7.х M-1: у хвоста наблюдаемости «маршрута нет» — это ШТАТНЫЙ путь, а не
+        # диагноз: обе его команды доставляются адресно (``targets``), и сюда они
+        # заходят на КАЖДОЙ записи. Запись здесь давала усилитель 1:1 на успешном
+        # пути — в артефактах живого прогона это 42 строки
+        # `returned no route for ... value='observability.record'` на 42 записи.
+        # Тот же класс, что B-3, только на здоровой дороге, а не на аварийной.
+        if not self._is_observability_traffic(msg_dict):
+            self._log_debug(
+                lambda: (
+                    f"channel_dispatcher returned no route for key_field={key_field!r} "
+                    f"value={msg_dict.get(key_field)!r}"
+                )
             )
-        )
         return []
 
     @staticmethod
