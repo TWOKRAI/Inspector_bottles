@@ -373,13 +373,13 @@ def test_console_history_survives_reconfigure(tmp_path: Path) -> None:
     try:
         console = mgr.get_channel("console")
         assert console is not None
-        console.console_writes_dropped = 5
-        assert mgr.get_stats()["console_writes_dropped"] == 5
+        console.sink_writes_dropped = 5
+        assert mgr.get_stats()["sink_writes_dropped"] == 5
 
         applied = mgr.reconfigure(mgr.config.model_dump())
         assert applied is True, "предусловие: валидный reconfigure применился"
 
-        assert mgr.get_stats()["console_writes_dropped"] == 5, (
+        assert mgr.get_stats()["sink_writes_dropped"] == 5, (
             "hot-reload стёр историю потерь консоли — а reload делают как раз при разборе"
         )
     finally:

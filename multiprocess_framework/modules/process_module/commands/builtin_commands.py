@@ -829,7 +829,14 @@ class BuiltinCommands:
             # чтобы «записано» включало всё уже эмитированное. По умолчанию
             # выключен: панель GUI опрашивает эту команду постоянно, и flush на
             # каждом опросе менял бы политику батчинга наблюдаемой системы.
-            "counters": observability_counters(logger=logger, error=error, stats=stats, flush=bool(args.get("flush"))),
+            # `hub` (Ф7.2): потери ObservabilityHub считались и наружу не выходили.
+            "counters": observability_counters(
+                logger=logger,
+                error=error,
+                stats=stats,
+                hub=getattr(svc, "_observability_hub", None),
+                flush=bool(args.get("flush")),
+            ),
             "provenance": observability_provenance(layers, logger=logger),
             "audit": layers.audit.view(audit_limit),
             **extra,

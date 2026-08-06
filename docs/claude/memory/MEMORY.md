@@ -225,3 +225,4 @@
 - [Зелёный прогон и синхронность](feedback_green_run_hides_synchronous_only_correctness.md) — «работает» ≠ «работает, пока вызов синхронный»; замыкание из except связывать дефолт-аргументом
 - [Фальшивка-всегда-успех глушит гейт](feedback_fake_that_always_succeeds_mutes_the_gate.md) — дубль обязан уметь отказывать
 - [Два предохранителя прячут, кто держит](feedback_two_safeguards_hide_which_one_holds.md) — снимай в стенде все, кроме проверяемого
+- [Числа теста рядом с дефолтом](feedback_test_values_near_defaults_test_the_default.md) — проверяют дефолт, а не ручку

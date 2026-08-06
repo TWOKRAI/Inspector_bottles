@@ -1354,6 +1354,7 @@
             "console": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1363,8 +1364,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "console",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "gui_file": {
               "file_path": "gui.log",
@@ -1374,6 +1377,7 @@
             "messages_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1383,12 +1387,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "performance_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "performance.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1398,12 +1405,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1413,8 +1423,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "trace_file": {
               "file_path": "trace.log",
@@ -1692,6 +1704,7 @@
             "console": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1701,8 +1714,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "console",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "gui_file": {
               "file_path": "gui.log",
@@ -1712,6 +1727,7 @@
             "messages_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1721,12 +1737,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "performance_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "performance.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1736,12 +1755,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1751,8 +1773,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "trace_file": {
               "file_path": "trace.log",
@@ -1982,6 +2006,7 @@
             "console": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -1991,8 +2016,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "console",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "gui_file": {
               "file_path": "gui.log",
@@ -2002,6 +2029,7 @@
             "messages_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2011,12 +2039,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "performance_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "performance.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2026,12 +2057,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2041,8 +2075,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "trace_file": {
               "file_path": "trace.log",
@@ -2369,6 +2405,7 @@
             "console": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2378,8 +2415,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "console",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "gui_file": {
               "file_path": "gui.log",
@@ -2389,6 +2428,7 @@
             "messages_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2398,12 +2438,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "performance_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "performance.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2413,12 +2456,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2428,8 +2474,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "trace_file": {
               "file_path": "trace.log",
@@ -2714,6 +2762,7 @@
             "console": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2723,8 +2772,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "console",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "gui_file": {
               "file_path": "gui.log",
@@ -2734,6 +2785,7 @@
             "messages_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2743,12 +2795,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "performance_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "performance.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2758,12 +2813,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -2773,8 +2831,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "trace_file": {
               "file_path": "trace.log",
@@ -3650,6 +3710,7 @@
             "console": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -3659,8 +3720,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "console",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "gui_file": {
               "file_path": "gui.log",
@@ -3670,6 +3733,7 @@
             "messages_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -3679,12 +3743,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "performance_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "performance.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -3694,12 +3761,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -3709,8 +3779,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "trace_file": {
               "file_path": "trace.log",
@@ -3966,6 +4038,7 @@
             "console": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": null,
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -3975,8 +4048,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "console",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "gui_file": {
               "file_path": "gui.log",
@@ -3986,6 +4061,7 @@
             "messages_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "messages.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -3995,12 +4071,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "performance_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "performance.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -4010,12 +4089,15 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
+              "degrade_after": 3,
               "enabled": true,
               "file_path": "system.log",
               "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
@@ -4025,8 +4107,10 @@
               "name_max_len": 20,
               "owner": null,
               "rotate": true,
+              "slow_write_sec": 0.05,
               "type": "file",
-              "url": null
+              "url": null,
+              "write_deadline_sec": 0.25
             },
             "trace_file": {
               "file_path": "trace.log",

@@ -151,7 +151,7 @@ def test_stats_readable_while_console_is_stuck() -> None:
         threading.Thread(target=_ask, daemon=True).start()
 
         assert answered.wait(timeout=2.0), "get_info() повис на застрявшем канале — диагностика недоступна"
-        assert "console_writes_dropped" in info
+        assert "sink_writes_dropped" in info
     finally:
         stream.release()
 
@@ -197,7 +197,7 @@ def test_dropped_error_reaches_the_floor(tmp_path: Path) -> None:
         assert not victim.is_alive(), "поток-эмитент не вернулся — предел ожидания не сработал"
 
         stats = mgr.get_stats()
-        assert stats["console_writes_dropped"] >= 1
+        assert stats["sink_writes_dropped"] >= 1
         assert stats["errors_to_floor"] >= 1, (
             "ошибка, которую не принял ни один канал, обязана уйти в пол; "
             f"получено stats={ {k: v for k, v in stats.items() if 'floor' in k or 'console' in k} }"
@@ -288,10 +288,10 @@ def test_counter_grows_after_warning_is_silenced() -> None:
             results.append(_write_with_deadline(channel, _record(f"drop-{i}")))
 
         assert all(r["status"] == "error" for r in results)
-        assert channel.console_writes_dropped == 5, (
-            f"учёт отбросов заглушён вместе с текстом: {channel.console_writes_dropped} вместо 5"
+        assert channel.sink_writes_dropped == 5, (
+            f"учёт отбросов заглушён вместе с текстом: {channel.sink_writes_dropped} вместо 5"
         )
-        assert channel.get_info()["console_writes_dropped"] == 5
+        assert channel.get_info()["sink_writes_dropped"] == 5
     finally:
         stream.release()
 
@@ -345,13 +345,13 @@ def test_stuck_console_stops_costing_time_after_threshold() -> None:
     try:
         _occupy(channel, stream)
 
-        # Фаза 1: платим предел ожидания — ровно _DEGRADE_AFTER_TIMEOUTS раз.
+        # Фаза 1: платим предел ожидания — ровно _degrade_after раз.
         warmup_started = time.perf_counter()
-        for i in range(ConsoleChannel._DEGRADE_AFTER_TIMEOUTS):
+        for i in range(channel._degrade_after):
             assert _write_with_deadline(channel, _record(f"warmup-{i}"))["status"] == "error"
         warmup_elapsed = time.perf_counter() - warmup_started
 
-        assert channel.console_degraded, "после порога подряд идущих отказов канал обязан разомкнуться"
+        assert channel.sink_degraded, "после порога подряд идущих отказов канал обязан разомкнуться"
 
         # Фаза 2: канал разомкнут — ожидание больше не оплачивается.
         hot_started = time.perf_counter()
@@ -359,14 +359,14 @@ def test_stuck_console_stops_costing_time_after_threshold() -> None:
             assert _write_with_deadline(channel, _record(f"hot-{i}"))["status"] == "error"
         hot_elapsed = time.perf_counter() - hot_started
 
-        per_warmup = warmup_elapsed / ConsoleChannel._DEGRADE_AFTER_TIMEOUTS
+        per_warmup = warmup_elapsed / channel._degrade_after
         per_hot = hot_elapsed / 20
         assert per_hot < per_warmup / 10, (
             f"разомкнутый канал по-прежнему платит ожидание: {per_hot * 1000:.1f} мс на запись "
             f"против {per_warmup * 1000:.1f} мс до размыкания"
         )
-        assert channel.get_info()["console_degraded"] is True
-        assert channel.console_writes_dropped == ConsoleChannel._DEGRADE_AFTER_TIMEOUTS + 20
+        assert channel.get_info()["sink_degraded"] is True
+        assert channel.sink_writes_dropped == channel._degrade_after + 20
     finally:
         stream.release()
 
@@ -382,16 +382,16 @@ def test_console_recovers_by_itself_when_stream_unblocks() -> None:
     channel = _console(stream)
     try:
         occupier = _occupy(channel, stream)
-        for i in range(ConsoleChannel._DEGRADE_AFTER_TIMEOUTS):
+        for i in range(channel._degrade_after):
             _write_with_deadline(channel, _record(f"drop-{i}"))
-        assert channel.console_degraded
+        assert channel.sink_degraded
 
         stream.release()
         occupier.join(timeout=2.0)
 
         result = _write_with_deadline(channel, _record("консоль ожила"))
         assert result["status"] == "success", "после освобождения потока запись обязана пройти"
-        assert not channel.console_degraded, "канал обязан сомкнуться сам, без внешнего вмешательства"
+        assert not channel.sink_degraded, "канал обязан сомкнуться сам, без внешнего вмешательства"
     finally:
         stream.release()
 
@@ -407,15 +407,15 @@ def test_thread_stuck_inside_write_does_not_close_the_breaker() -> None:
     channel = _console(stream)
     try:
         _occupy(channel, stream)
-        for i in range(ConsoleChannel._DEGRADE_AFTER_TIMEOUTS):
+        for i in range(channel._degrade_after):
             _write_with_deadline(channel, _record(f"drop-{i}"))
-        assert channel.console_degraded
+        assert channel.sink_degraded
 
         # Захватчик всё ещё внутри write(). Ещё несколько попыток — состояние
         # обязано остаться разомкнутым.
         for i in range(3):
             _write_with_deadline(channel, _record(f"still-{i}"))
-        assert channel.console_degraded, "канал сомкнулся, пока поток-захватчик всё ещё внутри записи"
+        assert channel.sink_degraded, "канал сомкнулся, пока поток-захватчик всё ещё внутри записи"
     finally:
         stream.release()
 
@@ -432,16 +432,19 @@ def test_slow_but_alive_console_is_counted_not_dropped() -> None:
     Стой он на длительности — медленный терминал начал бы терять строки, и
     правка против потерь сама стала бы их источником.
     """
-    stream = _SlowStream(delay_sec=ConsoleChannel._SLOW_WRITE_SEC * 2)
-    channel = _console(stream)
+    # Порог берётся из схемы (Ф7.2), поэтому читаем его у готового канала —
+    # а поток настраиваем ПОСЛЕ, из того же числа.
+    channel = _console(_SlowStream(delay_sec=0.0))
+    stream = _SlowStream(delay_sec=channel._slow_write_sec * 2)
+    channel.handler.stream = stream
 
     result = channel.write(_record("медленно, но дошло"))
 
     assert result["status"] == "success", "живая медленная запись не должна отбрасываться"
     assert "медленно, но дошло" in "".join(stream.written)
-    assert channel.console_slow_writes == 1, "медленная запись обязана быть замечена"
-    assert channel.console_writes_dropped == 0
-    assert channel.get_info()["max_write_sec"] >= ConsoleChannel._SLOW_WRITE_SEC
+    assert channel.sink_slow_writes == 1, "медленная запись обязана быть замечена"
+    assert channel.sink_writes_dropped == 0
+    assert channel.get_info()["max_write_sec"] >= channel._slow_write_sec
 
 
 def test_healthy_write_is_not_counted_as_slow() -> None:
@@ -452,8 +455,8 @@ def test_healthy_write_is_not_counted_as_slow() -> None:
     for i in range(50):
         assert channel.write(_record(f"fast-{i}"))["status"] == "success"
 
-    assert channel.console_slow_writes == 0, "здоровые записи попали в «медленные» — порог не работает"
-    assert channel.console_writes_dropped == 0
+    assert channel.sink_slow_writes == 0, "здоровые записи попали в «медленные» — порог не работает"
+    assert channel.sink_writes_dropped == 0
 
 
 def test_manager_stats_sum_over_channels(tmp_path: Path) -> None:
@@ -462,7 +465,7 @@ def test_manager_stats_sum_over_channels(tmp_path: Path) -> None:
     ПРАВКА ПО РЕВЬЮ ФАЗЫ (2026-07-27). Изначально этот тест требовал
     ОБРАТНОГО — «канал ушёл из реестра, вместе с ним обязано уйти и его
     число» — и тем самым закреплял дефект. Ревьюер воспроизвёл цену:
-    ``console_writes_dropped=7`` → ``logger.sink.disable console`` → readback
+    ``sink_writes_dropped=7`` → ``logger.sink.disable console`` → readback
     **0**. То есть история обнулялась ровно той командой, которую оператор даёт
     ВО ВРЕМЯ инцидента, разбирая который эти числа и смотрит.
 
@@ -486,28 +489,28 @@ def test_manager_stats_sum_over_channels(tmp_path: Path) -> None:
     )
     mgr.initialize()
     try:
-        assert mgr.get_stats()["console_writes_dropped"] == 0
+        assert mgr.get_stats()["sink_writes_dropped"] == 0
         console = mgr.get_channel("console")
         assert console is not None
-        console.console_writes_dropped = 7
+        console.sink_writes_dropped = 7
 
-        assert mgr.get_stats()["console_writes_dropped"] == 7, "менеджер не видит счётчик живого канала"
+        assert mgr.get_stats()["sink_writes_dropped"] == 7, "менеджер не видит счётчик живого канала"
 
         # Канал снят — история обязана остаться: её читают именно после этого.
         mgr.set_sink_enabled("console", False)
-        assert mgr.get_stats()["console_writes_dropped"] == 7, (
+        assert mgr.get_stats()["sink_writes_dropped"] == 7, (
             "снятие приёмника стёрло историю его потерь — диагностика обнуляется "
             "той самой командой, которую дают при разборе инцидента"
         )
 
         # Канал вернули — двойного счёта нет: новый объект начинает с нуля.
         mgr.set_sink_enabled("console", True)
-        assert mgr.get_stats()["console_writes_dropped"] == 7, "возврат приёмника задвоил историю"
+        assert mgr.get_stats()["sink_writes_dropped"] == 7, "возврат приёмника задвоил историю"
 
         # Живой счёт продолжается поверх накопленного, а не вместо него.
         revived = mgr.get_channel("console")
         assert revived is not None
-        revived.console_writes_dropped = 2
-        assert mgr.get_stats()["console_writes_dropped"] == 9, "наружу обязана ехать сумма «накоплено + живое»"
+        revived.sink_writes_dropped = 2
+        assert mgr.get_stats()["sink_writes_dropped"] == 9, "наружу обязана ехать сумма «накоплено + живое»"
     finally:
         mgr.shutdown()

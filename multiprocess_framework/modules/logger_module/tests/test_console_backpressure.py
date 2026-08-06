@@ -235,7 +235,7 @@ class TestModerateConcurrencyNoLoss:
 
 class TestStatsVisibility:
     """AC5: счётчики отбросов/медленных записей видны через ``LoggerManager.get_stats()``
-    под точными ключами ``console_writes_dropped`` / ``console_slow_writes`` —
+    под точными ключами ``sink_writes_dropped`` / ``sink_slow_writes`` —
     ВСЕГДА, в том числе нулями (иначе «ключа нет» и «отбросов нет» неразличимы)."""
 
     @staticmethod
@@ -259,14 +259,14 @@ class TestStatsVisibility:
         mgr.initialize()
         try:
             stats = mgr.get_stats()
-            assert "console_writes_dropped" in stats, "ключ обязан присутствовать ДО первого отброса"
-            assert "console_slow_writes" in stats, "ключ обязан присутствовать ДО первой медленной записи"
-            assert stats["console_writes_dropped"] == 0
-            assert stats["console_slow_writes"] == 0
+            assert "sink_writes_dropped" in stats, "ключ обязан присутствовать ДО первого отброса"
+            assert "sink_slow_writes" in stats, "ключ обязан присутствовать ДО первой медленной записи"
+            assert stats["sink_writes_dropped"] == 0
+            assert stats["sink_slow_writes"] == 0
         finally:
             mgr.shutdown()
 
-    def test_console_writes_dropped_increments_when_console_stuck(self) -> None:
+    def test_sink_writes_dropped_increments_when_console_stuck(self) -> None:
         mgr = LoggerManager(manager_name="ConsoleStatsProbeDrop", config=self._console_only_config())
         mgr.initialize()
         stream = _StuckStream()
@@ -290,9 +290,9 @@ class TestStatsVisibility:
             assert not t2.is_alive(), "второй .error() не вернулся вовремя — см. AC1 про застрявшую консоль"
 
             stats = mgr.get_stats()
-            assert stats["console_writes_dropped"] >= 1, (
+            assert stats["sink_writes_dropped"] >= 1, (
                 f"второй .error() на застрявшую консоль обязан был увеличить "
-                f"console_writes_dropped, получили stats={stats}"
+                f"sink_writes_dropped, получили stats={stats}"
             )
         finally:
             stream.release()

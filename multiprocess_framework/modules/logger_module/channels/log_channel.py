@@ -41,12 +41,61 @@ def _warn(message: str, *args: Any) -> None:
 
 
 class LogChannel(ILogChannel):
-    """Базовый класс канала логирования (реализует ILogChannel → IChannel)."""
+    """Базовый класс канала логирования (реализует ILogChannel → IChannel).
+
+    **Лесенка перегрузки стока (Ф7.2).** Из четырёх ступеней Erlang-логгера
+    (async → sync → drop → flush) здесь живут две: **предел ожидания** и **дроп со
+    счётом**. Асинхронной ступени не существует — батчинг снят в Ф7.4, запись
+    синхронна всегда, и сбрасывать нечего.
+
+    Механизм пришёл не из книжки: он был написан для консоли (R2/R12) и там
+    проверен. Ф7.2 подняла его в базу, потому что после снятия батчинга опасность
+    перестала быть консольной — залипший ФАЙЛОВЫЙ сток точно так же блокирует
+    поток-эмитент, а буфера, который раньше это поглощал, больше нет.
+
+    Ступени:
+
+    1. **Ждать с пределом** (``write_deadline_sec``). Здоровая запись занимает
+       микросекунды и в предел не упирается; потери начинаются только на
+       реально застрявшем стоке.
+    2. **Бросить со статусом ``error``** (не ``skipped``: запись никуда не
+       попала, и floor ошибок обязан это узнать), счётчик растёт.
+    3. **Разомкнуть** после ``degrade_after`` отказов подряд: ждать по четверти
+       секунды на КАЖДОЙ записи — значит не висеть, но ползти, что на кадровом
+       логировании хуже честного отказа.
+    4. **Вернуться в строй бесплатно**: неблокирующая попытка в разомкнутом
+       состоянии и есть проба «сток ожил?». Отдельного таймера нет.
+
+    **Чего это НЕ делает, и это надо знать честно:** поток, уже вошедший в
+    блокирующий ``write()`` внутри стока, остаётся заблокированным навсегда.
+    Ограничить его можно только отдельным потоком-писателем — размен отвергнут
+    сознательно: очередь writer'а умирает вместе с процессом, а лог нужен именно
+    в момент падения. Лесенка спасает ОСТАЛЬНЫХ — тех, кто иначе выстроится за
+    ним; системную цену затыка она снимает, свою жертву — нет.
+    """
 
     def __init__(self, config: LoggerChannelSchema):
         self.config = config
         self._name = config.name
         self._type = config.type
+
+        # Пороги — из схемы (операторские), с фолбэком на дефолты для чужих
+        # конфигов, собранных до Ф7.2.
+        self._write_deadline_sec = float(getattr(config, "write_deadline_sec", 0.25) or 0.0)
+        self._degrade_after = int(getattr(config, "degrade_after", 3) or 0)
+        self._slow_write_sec = float(getattr(config, "slow_write_sec", 0.05) or 0.0)
+
+        self._write_lock = threading.Lock()
+        self._counter_lock = threading.Lock()
+        self.sink_writes_dropped = 0
+        self.sink_slow_writes = 0
+        self._consecutive_timeouts = 0
+        self._max_write_sec = 0.0
+        self._last_warning_ts = 0.0
+
+    #: Не чаще одного предупреждения за интервал: затык даёт отказ на КАЖДОЙ
+    #: записи, и нетроттлированная жалоба сама стала бы штормом.
+    _WARNING_INTERVAL_SEC = 60.0
 
     @property
     def name(self) -> str:
@@ -55,6 +104,92 @@ class LogChannel(ILogChannel):
     @property
     def channel_type(self) -> str:
         return self._type
+
+    @property
+    def sink_degraded(self) -> bool:
+        """Канал разомкнут: ожидание больше не оплачивается, записи отбрасываются сразу."""
+        return self._degrade_after > 0 and self._consecutive_timeouts >= self._degrade_after
+
+    def _guarded_write(self, emit: Any) -> Dict[str, Any]:
+        """Провести запись через лесенку: предел → дроп → размыкание → возврат.
+
+        Args:
+            emit: callable без аргументов, делающий саму запись. Он вызывается
+                ПОД локом канала; всё, что происходит внутри него, — уже за
+                пределом досягаемости дедлайна (см. оговорку в докстринге класса).
+        """
+        if self.sink_degraded:
+            # Разомкнутый канал не ждёт вовсе: неблокирующая попытка здесь и есть
+            # проба «сток ожил?» — отдельный таймер перепроверки не нужен.
+            acquired = self._write_lock.acquire(blocking=False)
+        elif self._write_deadline_sec > 0:
+            acquired = self._write_lock.acquire(timeout=self._write_deadline_sec)
+        else:
+            acquired = self._write_lock.acquire(blocking=False)
+
+        if not acquired:
+            with self._counter_lock:
+                self.sink_writes_dropped += 1
+                self._consecutive_timeouts += 1
+                dropped = self.sink_writes_dropped
+            self._warn_sink_stuck(dropped)
+            return {
+                "status": "error",
+                "error": f"сток '{self._name}' занят: запись отброшена по пределу ожидания",
+                "channel": self._name,
+            }
+
+        started = time.monotonic()
+        try:
+            result = emit()
+        except Exception as e:  # noqa: BLE001 — отказ стока не роняет эмитента
+            return {"status": "error", "error": str(e), "channel": self._name}
+        finally:
+            elapsed = time.monotonic() - started
+            with self._counter_lock:
+                # Успешная запись обнуляет счёт отказов подряд — иначе размыкание
+                # было бы необратимым по построению, а не по состоянию стока.
+                self._consecutive_timeouts = 0
+                if elapsed > self._max_write_sec:
+                    self._max_write_sec = elapsed
+                if self._slow_write_sec > 0 and elapsed >= self._slow_write_sec:
+                    self.sink_slow_writes += 1
+            self._write_lock.release()
+        return result if isinstance(result, dict) else {"status": "success", "channel": self._name}
+
+    def _warn_sink_stuck(self, dropped: int) -> None:
+        """Троттлированное предупреждение о залипшем стоке."""
+        now = time.monotonic()
+        with self._counter_lock:
+            if now - self._last_warning_ts < self._WARNING_INTERVAL_SEC:
+                return
+            self._last_warning_ts = now
+        _warn(
+            "сток '%s' занят дольше %.2f с — записи отбрасываются (всего %d%s)",
+            self._name,
+            self._write_deadline_sec,
+            dropped,
+            "; канал РАЗОМКНУТ, ожидание больше не оплачивается" if self.sink_degraded else "",
+        )
+
+    def get_info(self) -> Dict[str, Any]:
+        """Состояние канала + показания лесенки (Ф7.2).
+
+        Здесь, а не у наследников: показания одинаковы у всех стоков, а копия у
+        каждого разошлась бы — этим уже били по проекту (защита в базе мертва у
+        наследника).
+        """
+        info = {"name": self.name, "active": True}
+        with self._counter_lock:
+            info.update(
+                {
+                    "sink_writes_dropped": self.sink_writes_dropped,
+                    "sink_slow_writes": self.sink_slow_writes,
+                    "sink_degraded": self.sink_degraded,
+                    "max_write_sec": round(self._max_write_sec, 4),
+                }
+            )
+        return info
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
         raise NotImplementedError
@@ -634,27 +769,38 @@ class FileChannel(LogChannel):
             self.handler.setFormatter(formatter)
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            log_record = logging.LogRecord(
-                name=record["module"],
-                level=getattr(logging, record["level"]),
-                pathname="",
-                lineno=0,
-                msg=record["message"],
-                args=(),
-                exc_info=None,
-            )
-            log_record.created = record["timestamp"]
-            extra = record.get("extra") or {}
-            log_record.proc_name = extra.get("proc_name") or "-"
-            # Пломба (2.V1). Переносится здесь, а не внутри SealFormatter:
-            # форматтер видит только stdlib-запись, наш словарь до него не доходит.
-            log_record.seq = record.get("seq") or 0
+        """Записать в файл через лесенку перегрузки (Ф7.2).
 
-            self.handler.emit(log_record)
-            return {"status": "success", "channel": self.name}
-        except Exception as e:
-            return {"status": "error", "error": str(e), "channel": self.name}
+        До Ф7.2 предела здесь не было вовсе: залипший диск (сетевая шара,
+        переполненный том, чужой процесс с локом общего ротатора) держал поток
+        столько, сколько понадобится. Пока запись была батчевой, затык поглощал
+        буфер; после Ф7.4 он блокирует поток-эмитент — то есть кадровый конвейер.
+        """
+
+        def _emit() -> Dict[str, Any]:
+            try:
+                log_record = logging.LogRecord(
+                    name=record["module"],
+                    level=getattr(logging, record["level"]),
+                    pathname="",
+                    lineno=0,
+                    msg=record["message"],
+                    args=(),
+                    exc_info=None,
+                )
+                log_record.created = record["timestamp"]
+                extra = record.get("extra") or {}
+                log_record.proc_name = extra.get("proc_name") or "-"
+                # Пломба (2.V1). Переносится здесь, а не внутри SealFormatter:
+                # форматтер видит только stdlib-запись, наш словарь до него не доходит.
+                log_record.seq = record.get("seq") or 0
+
+                self.handler.emit(log_record)
+                return {"status": "success", "channel": self.name}
+            except Exception as e:
+                return {"status": "error", "error": str(e), "channel": self.name}
+
+        return self._guarded_write(_emit)
 
     def close(self):
         """Закрывает файловый канал.
@@ -673,58 +819,18 @@ class FileChannel(LogChannel):
 
 
 class ConsoleChannel(LogChannel):
-    """Канал записи в консоль — с пределом ожидания занятой консоли (R2).
+    """Канал записи в консоль — на общей лесенке перегрузки стока (R2/R12 → Ф7.2).
 
-    Запись в консоль синхронна в потоке-эмитенте, и после Ф0.9 путь
-    ``error``/``critical`` идёт мимо батч-буфера вообще: прямо в
-    ``stream.write()`` вызывающего потока. Если stdout перенаправлен в трубу,
-    которую никто не читает, поток виснет навсегда — и до этой правки за ним
-    выстраивались ВСЕ остальные потоки-эмитенты: один заткнувшийся приёмник
-    останавливал процесс целиком.
+    Механизм (предел ожидания → дроп → размыкание → бесплатный возврат) написан
+    здесь и здесь же проверен; Ф7.2 подняла его в :class:`LogChannel`, потому что
+    после снятия батчинга (Ф7.4) та же опасность появилась у файлового стока.
+    Здесь остаётся только то, что действительно про консоль: перенаправленный в
+    непрочитанную трубу stdout виснет НАВСЕГДА, и текст предупреждения обязан
+    называть именно эту причину — оператор ищет её первой.
 
-    Предел ставится там, где он достижим: ожидание ОСВОБОЖДЕНИЯ консоли
-    ограничено :attr:`_BUSY_WAIT_SEC`, после чего запись отбрасывается со
-    статусом ``error`` (не ``skipped``: запись никуда не попала, и floor
-    ошибок обязан это узнать). Обычная конкуренция стоит микросекунды и в
-    предел не упирается никогда — потери начинаются только на реально
-    застрявшей консоли.
-
-    Одного предела мало, и это выяснилось не сразу (R12). Ждать по
-    :attr:`_BUSY_WAIT_SEC` на КАЖДОЙ записи — значит платить четверть секунды
-    за строку, пока консоль стоит: процесс не виснет, но ползёт, а на
-    пер-кадровом логировании это хуже честного отказа. Поэтому предел
-    дополнен **размыкателем**: после :attr:`_DEGRADE_AFTER_TIMEOUTS` подряд
-    канал переходит в разомкнутое состояние и перестаёт ждать вовсе — берёт
-    лок без блокировки и мгновенно отбрасывает. Стоимость затыка падает с
-    «0.25 с на запись» до нуля.
-
-    Возврат в строй бесплатен и автоматичен: та же неблокирующая попытка
-    удастся, как только застрявший поток отпустит лок. Отдельного таймера
-    перепроверки нет — состояние канала и есть проба.
-
-    ЧЕГО ЭТО НЕ ДЕЛАЕТ, и это надо знать честно: поток, который УЖЕ вошёл в
-    блокирующий ``stream.write()``, остаётся заблокированным навсегда.
-    Ограничить его можно только вынеся запись в отдельный поток-писатель.
-    Такой размен здесь отвергнут сознательно: он покупает один потерянный
-    поток ценой того, что консоль перестаёт переживать падение процесса
-    (очередь writer'а умирает вместе с ним) — а консоль это то, на что
-    смотрит человек в момент падения. Размыкатель снимает системную цену
-    затыка, не трогая этот размен.
+    Пороги берутся из схемы канала (``write_deadline_sec`` / ``degrade_after`` /
+    ``slow_write_sec``); прежние константы класса были неоперабельны.
     """
-
-    #: Сколько ждать освобождения консоли, прежде чем бросить запись.
-    #: Здоровая запись занимает микросекунды — этот предел на неё не влияет.
-    _BUSY_WAIT_SEC = 0.25
-    #: После скольких отказов подряд перестать ждать вовсе (разомкнуть).
-    #: Не 1: одиночный таймаут может быть случайным всплеском, а размыкание —
-    #: это переход к гарантированным потерям, и объявлять его по одному
-    #: событию значит терять записи на дрожании.
-    _DEGRADE_AFTER_TIMEOUTS = 3
-    #: С какой длительности запись считается подозрительно медленной.
-    _SLOW_WRITE_SEC = 0.05
-    #: Не чаще одного предупреждения за интервал — по тем же соображениям,
-    #: что у ``_SafeRotatingFileHandler``: затык даёт отказ на КАЖДОЙ записи.
-    _WARNING_INTERVAL_SEC = 60.0
 
     def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
@@ -732,77 +838,35 @@ class ConsoleChannel(LogChannel):
         formatter = _SourceAbbreviatingFormatter(config.format, name_max_len=getattr(config, "name_max_len", 0))
         self.handler.setFormatter(formatter)
 
-        self._write_lock = threading.Lock()
-        self._counter_lock = threading.Lock()
-        self.console_writes_dropped = 0
-        self.console_slow_writes = 0
-        self._consecutive_timeouts = 0
-        self._max_write_sec = 0.0
-        self._last_warning_ts = 0.0
-
-    @property
-    def console_degraded(self) -> bool:
-        """Канал разомкнут: ожидание больше не оплачивается, записи отбрасываются сразу."""
-        return self._consecutive_timeouts >= self._DEGRADE_AFTER_TIMEOUTS
-
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        # Разомкнутый канал не ждёт вообще: неблокирующая попытка здесь и есть
-        # проба «консоль ожила?» — отдельный таймер перепроверки не нужен.
-        if self.console_degraded:
-            acquired = self._write_lock.acquire(blocking=False)
-        else:
-            acquired = self._write_lock.acquire(timeout=self._BUSY_WAIT_SEC)
+        def _emit() -> Dict[str, Any]:
+            try:
+                log_record = logging.LogRecord(
+                    name=record["module"],
+                    level=getattr(logging, record["level"]),
+                    pathname="",
+                    lineno=0,
+                    msg=record["message"],
+                    args=(),
+                    exc_info=None,
+                )
+                log_record.created = record["timestamp"]
+                extra = record.get("extra") or {}
+                log_record.proc_name = extra.get("proc_name") or "-"
 
-        if not acquired:
-            with self._counter_lock:
-                self.console_writes_dropped += 1
-                self._consecutive_timeouts += 1
-                dropped = self.console_writes_dropped
-            self._warn_console_stuck(dropped)
-            return {
-                "status": "error",
-                "error": "console busy: запись отброшена по пределу ожидания",
-                "channel": self.name,
-            }
+                self.handler.emit(log_record)
+                return {"status": "success", "channel": self.name}
+            except Exception as e:
+                return {"status": "error", "error": str(e), "channel": self.name}
 
-        started = time.monotonic()
-        try:
-            log_record = logging.LogRecord(
-                name=record["module"],
-                level=getattr(logging, record["level"]),
-                pathname="",
-                lineno=0,
-                msg=record["message"],
-                args=(),
-                exc_info=None,
-            )
-            log_record.created = record["timestamp"]
-            extra = record.get("extra") or {}
-            log_record.proc_name = extra.get("proc_name") or "-"
+        return self._guarded_write(_emit)
 
-            self.handler.emit(log_record)
-            return {"status": "success", "channel": self.name}
-        except Exception as e:
-            return {"status": "error", "error": str(e), "channel": self.name}
-        finally:
-            elapsed = time.monotonic() - started
-            self._write_lock.release()
-            with self._counter_lock:
-                # Сбрасываем ЗДЕСЬ, а не сразу после взятия лока: «вошли» ещё не
-                # значит «вышли». Поток, взявший лок и застрявший внутри
-                # stream.write(), не имеет права объявить канал здоровым — иначе
-                # размыкатель смыкался бы ровно тем потоком, который и застрял.
-                self._consecutive_timeouts = 0
-                if elapsed >= self._SLOW_WRITE_SEC:
-                    self.console_slow_writes += 1
-                    self._max_write_sec = max(self._max_write_sec, elapsed)
-
-    def _warn_console_stuck(self, dropped_total: int) -> None:
-        """Троттлированное предупреждение о занятой консоли.
+    def _warn_sink_stuck(self, dropped: int) -> None:
+        """Своя формулировка: у консоли причина затыка почти всегда одна.
 
         Уходит через fallback-логгер (stdlib), а не через собственную
-        маршрутизацию: сообщение о том, что консоль не принимает записи, не
-        имеет права идти в консоль тем же путём, который сейчас затык.
+        маршрутизацию: сообщение о том, что консоль не принимает записи, не имеет
+        права идти в консоль тем же путём, который сейчас затык.
         """
         now = time.monotonic()
         with self._counter_lock:
@@ -814,22 +878,9 @@ class ConsoleChannel(LogChannel):
             "(всего отброшено: %d). Похоже, поток вывода перенаправлен туда, где его "
             "никто не читает: записи в консоль теряются, файловые каналы не затронуты.",
             self.name,
-            self._BUSY_WAIT_SEC,
-            dropped_total,
+            self._write_deadline_sec,
+            dropped,
         )
-
-    def get_info(self) -> Dict[str, Any]:
-        info = super().get_info()
-        with self._counter_lock:
-            info.update(
-                {
-                    "console_writes_dropped": self.console_writes_dropped,
-                    "console_slow_writes": self.console_slow_writes,
-                    "console_degraded": self._consecutive_timeouts >= self._DEGRADE_AFTER_TIMEOUTS,
-                    "max_write_sec": round(self._max_write_sec, 4),
-                }
-            )
-        return info
 
     def close(self):
         """Закрывает консольный канал"""
