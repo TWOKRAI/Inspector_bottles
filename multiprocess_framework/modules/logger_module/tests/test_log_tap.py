@@ -99,7 +99,8 @@ class TestRouterPushChannel:
         assert len(router.sent) == 1
         msg, priority = router.sent[0]
         assert msg["targets"] == ["backend_ctl"]
-        assert msg["queue_type"] == "system"
+        # Ф7.3: своя очередь вместо never-drop system-почты.
+        assert msg["queue_type"] == "observability"
         assert msg["command"] == "log.record"
         assert msg["type"] == "event"
         assert msg["data"]["record"]["message"] == "boom"

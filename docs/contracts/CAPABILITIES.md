@@ -35,6 +35,7 @@ request-response (dict). События (push без request_id) читаютс�
 |---|---|
 | `ProcessManager_data` | `QueueChannel` |
 | `ProcessManager_local` | `QueueChannel` |
+| `ProcessManager_observability` | `QueueChannel` |
 | `ProcessManager_state` | `QueueChannel` |
 | `ProcessManager_system` | `QueueChannel` |
 | `backend_ctl` | `SocketChannel` |

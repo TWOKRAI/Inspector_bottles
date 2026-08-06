@@ -168,7 +168,9 @@ class TestUiTapCommands:
         assert len(services.router_manager.sent) == 1
         msg = services.router_manager.sent[0]
         assert msg["targets"] == ["backend_ctl"]
-        assert msg["queue_type"] == "system"
+        # Ф7.3: UI-tap едет тем же RouterPushChannel, значит и той же очередью
+        # хвоста — диагностика клика того же сорта, что запись лога.
+        assert msg["queue_type"] == "observability"
         assert msg["command"] == "ui.event"
         assert "channel" not in msg
         assert msg["data"]["process"] == "gui"

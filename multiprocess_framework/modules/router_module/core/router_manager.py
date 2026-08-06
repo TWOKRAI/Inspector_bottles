@@ -34,6 +34,14 @@ if TYPE_CHECKING:
     from ...message_module import Message
 
 
+#: Класс груза «хвост наблюдаемости» (Ф7.3). Канонический владелец имени —
+#: ``ProcessDataKeys.QUEUE_OBSERVABILITY``; здесь литерал дублируется СОЗНАТЕЛЬНО,
+#: тем же приёмом, что ``QUEUE_STATE`` в ``delta_dispatcher`` — роутер не должен
+#: тянуть зависимость на раскладку очередей ради одной строки. Сверку имён держит
+#: контрактный тест (``test_observability_queue_split``).
+QUEUE_OBSERVABILITY = "observability"
+
+
 class RouterSendError(Exception):
     """Отправка не состоялась — повод для плоскости ошибок, а не только счётчика.
 
@@ -623,7 +631,11 @@ class RouterManager(ChannelRoutingManager):
                 and process != self._relay_hub
                 and not msg_dict.get("_relayed")
                 and self._queue_absent(process, qtype)
-                and not self._queue_absent(self._relay_hub, "system")
+                # Ф7.3: гейт спрашивает про ТУ ЖЕ очередь хаба, которой релей и поедет
+                # (``_relay_via_hub``). Проверка «system» при отправке в observability
+                # была бы вопросом не про тот сосуд: у хаба без хвостовой очереди
+                # билет уходил бы в никуда, а гейт этого не заметил бы.
+                and not self._queue_absent(self._relay_hub, qtype if qtype == QUEUE_OBSERVABILITY else "system")
             ):
                 if self._relay_via_hub(ticket):
                     delivered += 1
@@ -642,6 +654,13 @@ class RouterManager(ChannelRoutingManager):
                 if ok:
                     delivered += 1
             except Exception as exc:
+                if qtype == QUEUE_OBSERVABILITY:
+                    # Ф7.3, звено (в) петли самоусиления: билет хвоста не доехал →
+                    # записи об этом НЕ делаем, иначе отказ доставки диагностики
+                    # порождает новую диагностику в тот же хвост (Б-6: 97 066 отказов,
+                    # каждый со своей записью). Счётчик — есть, молчания нет.
+                    self._inc_stat("observability_delivery_failed")
+                    continue
                 # ``!r``, а не ``{exc}``: исключения транспорта (``queue.Full``)
                 # приходят без аргументов, и запись превращалась в «failed:» без
                 # причины — ревью Ф3, Б-6.
@@ -745,27 +764,39 @@ class RouterManager(ChannelRoutingManager):
         (канал внешнего подписчика). Повторный relay исключён меткой: если и хаб
         доставить не сможет, билет дропается — прежнее поведение, но с одним
         диагностируемым hop'ом вместо молчаливого дропа на месте.
+
+        Ф7.3: билет хвоста релеится через очередь ``observability`` хаба, а не через
+        его system-почту, и обе записи (успех/провал) заменены счётчиком. Иначе весь
+        поток записей ребёнка снова упирался бы в сотню ячеек ``{хаб}_system`` — то
+        самое место, где Б-6 намерил 97 066 отказов, — а каждая пересылка порождала бы
+        ещё одну запись, которую тоже надо релеить.
         """
+        muted = ticket.get("queue_type") == QUEUE_OBSERVABILITY
+        hub_queue = QUEUE_OBSERVABILITY if muted else "system"
         envelope = {
             "type": "command",
             "command": "router.relay",
             "sender": self.router_id,
             "targets": [self._relay_hub],
-            "queue_type": "system",
+            "queue_type": hub_queue,
             "data": {"ticket": {**ticket, "_relayed": True}},
         }
         try:
-            if self.queue_registry.send_to_queue(self._relay_hub, "system", envelope):
+            if self.queue_registry.send_to_queue(self._relay_hub, hub_queue, envelope):
                 self._inc_stat("relayed_to_hub")
-                self._log_debug(
-                    lambda: (
-                        f"_deliver_by_targets: билет command={ticket.get('command')!r} "
-                        f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "
-                        "(relay push→хаб, Ф1.7)"
+                if not muted:
+                    self._log_debug(
+                        lambda: (
+                            f"_deliver_by_targets: билет command={ticket.get('command')!r} "
+                            f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "
+                            "(relay push→хаб, Ф1.7)"
+                        )
                     )
-                )
                 return True
         except Exception as exc:  # noqa: BLE001 — relay не должен ронять доставку
+            if muted:
+                self._inc_stat("observability_delivery_failed")
+                return False
             self._log_debug(lambda exc=exc: f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc!r}")
         return False
 
@@ -776,16 +807,29 @@ class RouterManager(ChannelRoutingManager):
         напр. SocketChannel вернёт `status='error'` (`no clients connected`), если
         внешний driver не подключён — тогда билет тихо не доставлен, как и раньше
         при отсутствии очереди (пуш без подписчика не копится).
+
+        Ф7.3: для билета хвоста наблюдаемости все три записи здесь ЗАМЕНЕНЫ счётчиком.
+        Иначе отвалившийся сокет-подписчик (`no clients connected` на КАЖДУЮ запись)
+        сам становится источником записей, которые пытаются ехать той же дорогой —
+        второй вход в петлю Б-6, уже не через очередь, а через канал.
         """
+        muted = ticket.get("queue_type") == QUEUE_OBSERVABILITY
         try:
             result = channel.send(ticket)
         except Exception as exc:  # noqa: BLE001 — граница канала не должна ронять доставку
+            if muted:
+                self._inc_stat("observability_delivery_failed")
+                return False
             self._log_debug(lambda exc=exc: f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
             return False
         if isinstance(result, dict) and result.get("status") == "error":
+            if muted:
+                self._inc_stat("observability_delivery_failed")
+                return False
             self._log_debug(lambda: f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}")
             return False
-        self._log_debug(lambda: f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)")
+        if not muted:
+            self._log_debug(lambda: f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)")
         return True
 
     # ================================================================
@@ -1411,6 +1455,12 @@ class RouterManager(ChannelRoutingManager):
             # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
             "queue_data_evicted": int(getattr(self.queue_registry, "data_evicted", 0) or 0),
             "queue_system_evict_blocked": int(getattr(self.queue_registry, "system_evict_blocked", 0) or 0),
+            # Ф7.3: потери ХВОСТА наблюдаемости. Отдельные ключи от data-дропа: смешав,
+            # нельзя отличить «теряем кадры» от «теряем диагностику». Единственный
+            # путь наружу — эти счётчики: сами пути потери молчат в логах сознательно
+            # (запись о потерянной записи усиливала бы шторм, петля Б-6).
+            "queue_observability_evicted": int(getattr(self.queue_registry, "observability_evicted", 0) or 0),
+            "queue_observability_send_failed": int(getattr(self.queue_registry, "observability_send_failed", 0) or 0),
             # Ф4 Task 4.3 (plans/truth-holes-closure.md): БЕЗВОЗВРАТНЫЕ потери never-drop
             # груза. Счётчик существовал, но уходил только в stdlib-логгер — самая тяжёлая
             # потеря системы была недоступна интроспекции. Тот же дешёвый property-surface,

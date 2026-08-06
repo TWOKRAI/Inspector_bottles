@@ -16,6 +16,7 @@ from ....logger_module import get_std_logger
 from ..interfaces import IQueueRegistry
 from ...mixins import ManagerStatsMixin
 from ...qos import qos_for
+from ...state.process_data import ProcessDataKeys
 
 try:
     from multiprocessing.queues import Empty
@@ -111,6 +112,13 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             # Всегда-on телеметрия (по образцу G.3-счётчиков): «дроп data виден в state»
             # (heartbeat → state.*). Раньше data-вытеснение было ТИХИМ (счётчика не было).
             "data_evicted": 0,
+            # Ф7.3: сколько записей вытеснено из полной очереди наблюдаемости и сколько
+            # раз put в неё всё-таки упал (гонка «после вытеснения снова полна»).
+            # ОТДЕЛЬНЫЕ ключи, а не общий data_evicted: смешав их, нельзя ответить на
+            # вопрос «теряем кадры или диагностику» — а это разные аварии.
+            # Оба пути НЕ пишут записи в лог (см. _is_observability_queue).
+            "observability_evicted": 0,
+            "observability_send_failed": 0,
         }
         # Throttle для ERROR-лога переполнения system-очереди: логируем раз на окно,
         # а не на каждый put (send_to_queue — hot-path). Счётчик инкрементируется всегда.
@@ -291,6 +299,19 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 # Ф4 Task 4.3: потеря записывается ТОМУ ЖЕ отправителю — иначе видно
                 # «очередь теряет», но не видно, чей груз пропадает.
                 self._count_sender(process_name, queue_type, message, "lost")
+            if self._is_observability_queue(queue_type):
+                # Ф7.3, звено (а) петли самоусиления. Очередь наблюдаемости droppable,
+                # поэтому Full здесь — редкая гонка: между вытеснением и put её успел
+                # заполнить другой отправитель. Записи об этом НЕ делаем: она поехала
+                # бы тем же хвостом, отказ доставки которого её и породил, — ровно та
+                # петля, которую Б-6 намерил на 97 066 отказах. Потеря не молчит:
+                # счётчик уходит наружу через get_stats → heartbeat → state. Общий
+                # ``errors`` СОЗНАТЕЛЬНО не трогаем: под штормом хвоста он перестал бы
+                # отличать «транспорт сломан» от «диагностики слишком много» — этой
+                # слепотой Б-6 и запомнился.
+                self._stats["observability_send_failed"] += 1
+                self._count_sender(process_name, queue_type, message, "lost")
+                return False
             _loss_logger.error("send_to_queue('%s', '%s') failed: %r", process_name, queue_type, e)
             self._stats["errors"] += 1
             return False
@@ -456,6 +477,15 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             evicted = queue.get_nowait()
         except Empty:
             return None
+        if self._is_observability_queue(queue_type):
+            # Ф7.3, звено (б) петли. Хвост тоже drop_oldest, но БЕЗ записи: throttled
+            # WARNING отсюда поехал бы в тот же хвост, который только что переполнился,
+            # то есть каждая потеря порождала бы новую запись. Счётчики — оба (общий и
+            # пер-жертвенный), как у data: «терять можно, молчать нельзя» держится ими.
+            self._stats["observability_evicted"] += 1
+            key = f"observability_evicted.{victim}"
+            self._stats[key] = self._stats.get(key, 0) + 1
+            return evicted
         # drop_oldest сработал — громкий счётчик (раньше молчал) + throttled WARNING.
         self._stats["data_evicted"] += 1
         # Ф6.8: разбивка по ЖЕРТВЕ. Общий ``data_evicted`` остаётся (его читают
@@ -585,6 +615,20 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             return {queue_key: {s: dict(v) for s, v in items}}
         return {k: {s: dict(v) for s, v in list(per_queue.items())} for k, per_queue in list(self._sender_puts.items())}
 
+    @staticmethod
+    def _is_observability_queue(queue_type: Optional[str]) -> bool:
+        """Ф7.3: это очередь хвоста наблюдаемости?
+
+        Единственное следствие ответа — **молчание в логах** на путях потери (вытеснение,
+        отказ put). Не оптимизация и не «тише значит лучше»: запись о потерянной записи
+        едет тем же хвостом, поэтому обычная диагностика здесь работает усилителем
+        сбоя — измерено живьём (Б-6: 97 066 отказов доставки за ~25 минут, из них
+        каждый порождал новую запись). Взамен потеря видна счётчиками
+        ``observability_evicted`` / ``observability_send_failed``, которые уходят
+        наружу тем же путём, что ``data_evicted``.
+        """
+        return queue_type == ProcessDataKeys.QUEUE_OBSERVABILITY
+
     def _is_never_drop(self, queue_type: Optional[str]) -> bool:
         """Ронять ли груз данного ``queue_type`` при переполнении (Ф7 G.4.a).
 
@@ -606,6 +650,21 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         Дешёвый plain-int аксессор для surface в ``RouterManager.get_stats`` → heartbeat
         → ``state.shm.*`` (без обхода процессов, как в полном get_stats)."""
         return self._stats["data_evicted"]
+
+    @property
+    def observability_evicted(self) -> int:
+        """Ф7.3: сколько записей вытеснено из полных очередей наблюдаемости.
+
+        Единственный способ узнать о потере хвоста: путь вытеснения молчит в логах
+        сознательно (см. :meth:`_is_observability_queue`). Дешёвый plain-int аксессор
+        для surface в ``RouterManager.get_stats`` → heartbeat → ``state.shm.*``.
+        """
+        return self._stats["observability_evicted"]
+
+    @property
+    def observability_send_failed(self) -> int:
+        """Ф7.3: сколько раз put в очередь наблюдаемости упал (гонка на полной очереди)."""
+        return self._stats["observability_send_failed"]
 
     @property
     def system_evict_blocked(self) -> int:

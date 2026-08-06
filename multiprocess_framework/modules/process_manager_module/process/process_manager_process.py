@@ -39,6 +39,21 @@ def _merge_cmd_args(data: dict | None, kwargs: dict) -> dict:
     return kwargs
 
 
+#: Раскладка собственных очередей хаба (Ф7.3 вынесла её из тела ``initialize``).
+#: Константа, а не литерал внутри метода: иначе проверить состав можно было бы
+#: только чтением исходника, то есть страж сторожил бы текст, а не раскладку.
+#: "state" — паритет с детьми (подписчиков state.changed у PM нет).
+#: "observability" — по существу: через хаб идёт relay записей детей внешнему
+#: подписчику (Ф1.7), и без своей очереди хвост остался бы в system-почте хаба,
+#: где Б-6 намерил 97 066 отказов доставки.
+HUB_QUEUES: dict[str, Any] = {
+    "system": {"maxsize": 100},
+    "data": {"maxsize": 50},
+    "state": {"maxsize": 8},
+    "observability": {"maxsize": 256},
+}
+
+
 class ProcessManagerProcess(ProcessModule):
     """
     Процесс-оркестратор: управляет всеми процессами системы.
@@ -212,13 +227,7 @@ class ProcessManagerProcess(ProcessModule):
         try:
             # Регистрация ProcessManager для приёма команд (system.shutdown от GUI и др.)
             if self.shared_resources:
-                self.shared_resources.register_process(
-                    self.name,
-                    # "state" аддитивно: очередь/канал возникают из
-                    # конфига, при OFF пусты. У PM подписчиков state.changed нет, но
-                    # держим паритет раскладки очередей с дочерними процессами.
-                    {"queues": {"system": {"maxsize": 100}, "data": {"maxsize": 50}, "state": {"maxsize": 8}}},
-                )
+                self.shared_resources.register_process(self.name, {"queues": dict(HUB_QUEUES)})
 
             if not super().initialize():
                 return False

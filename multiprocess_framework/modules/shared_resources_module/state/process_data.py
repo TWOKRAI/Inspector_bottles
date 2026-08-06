@@ -33,6 +33,12 @@ class ProcessDataKeys:
     QUEUE_SYSTEM = "system"
     QUEUE_DATA = "data"
     QUEUE_STATE = "state"  # state.changed отдельно от system (drop_oldest, Ф1.2/Ф6.2)
+    # Ф7.3: записи наблюдаемости (log.record / observability.record) отдельно от
+    # never-drop system-почты. Раньше хвост делил сотню ячеек `{proc}_system` с
+    # heartbeat и process.stop — живой шторм Б-6 дал 97 066 отказов доставки за
+    # ~25 минут, то есть диагностика душила управление. QoS-профиль
+    # (`qos.py`: observability) — best_effort/drop_oldest.
+    QUEUE_OBSERVABILITY = "observability"
     QUEUE_COMMANDS = "commands"
     QUEUE_RESULTS = "results"
 

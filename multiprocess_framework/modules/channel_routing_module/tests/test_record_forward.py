@@ -103,7 +103,8 @@ def test_write_pushes_single_error_record():
     msg, prio = router.sent[0]
     assert msg["command"] == FORWARD_COMMAND
     assert msg["targets"] == ["gui"]
-    assert msg["queue_type"] == "system"
+    # Ф7.3: хвост едет своим классом груза, а не never-drop system-почтой.
+    assert msg["queue_type"] == "observability"
     assert msg["type"] == "event"
     assert msg["data"]["process"] == "cam"
     assert msg["data"]["record"]["message"] == "x"

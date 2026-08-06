@@ -6,7 +6,7 @@ RecordForwardChannel — форвардер записей наблюдаемо�
 error-tap'ом (error/critical), пушатся адресно на GUI-процесс ОТДЕЛЬНЫМ каналом
 ``command="observability.record"`` — НЕ state-дельтой. Форма сообщения зеркалит
 RouterPushChannel/state.changed: ``type=event`` + ``targets=[subscriber]`` +
-``queue_type="system"`` → мост 1.1b → GuiProcess.register_message_handler →
+``queue_type="observability"`` → мост 1.1b → GuiProcess.register_message_handler →
 DataReceiverBridge.dispatch(data_type="observability_record").
 
 Симметрия со стором (Ф5.20a):
@@ -22,14 +22,16 @@ DataReceiverBridge.dispatch(data_type="observability_record").
 Канал duck-typed: НЕ импортирует logger_module/router (только IChannel + router с
 ``send_async``); Dict at Boundary — наружу едет чистый pickle-safe dict.
 
-QoS live-хвоста (решение 5.21 (d), 2026-07-10): хвост едет ``queue_type="system"``
-и активатор держит подписку always-on на всех процессах — при error-storm это
-теснит heartbeat (system-очередь никогда не дропается молча, Ф3.3). Отдельный
-rate-limit/event-канал здесь НЕ вводим: единая QoS-модель профилей kind
-(``reliability/history_depth/drop_policy/deadline_ms`` + drop-counter в state-дерево)
-приземляется одним вскрытием в Ф7 G.4 (см. plan.md, «Cross-ref ObservabilityHub →
-G.4»). Городить второй частный механизм до G.4 — это тот самый двойной проход по
-доставке, которого консолидация Ф7 избегает. До G.4 живём на system-guard 3.3.
+QoS live-хвоста — ДОЛГ ЗАКРЫТ (Ф7.3, 2026-08-06). Прежнее решение 5.21 (d)
+(2026-07-10) оставляло хвост на ``queue_type="system"`` при always-on подписке
+на всех процессах, и при error-storm это тесняло heartbeat: system-очередь
+никогда не дропается молча (Ф3.3), поэтому её сотня ячеек забивалась записями —
+живой прогон Б-6 намерил 97 066 отказов доставки за ~25 минут. Теперь у груза
+свой класс: ``queue_type="observability"`` (профиль ``qos.py``: best_effort /
+drop_oldest / depth 1024) — переполнение хвоста роняет записи со счётчиком,
+а не блокирует управление. Потеря видна счётчиком ``observability_evicted``
+и НЕ пишется записью: запись о потере записи поехала бы в тот же хвост и
+усиливала бы шторм (третье звено петли Б-6).
 """
 
 from __future__ import annotations
@@ -101,7 +103,8 @@ class RecordForwardChannel(IChannel):
             "type": "event",
             "sender": self._sender,
             "targets": [self._subscriber],
-            "queue_type": "system",
+            # Ф7.3: своя очередь вместо never-drop system-почты (см. докстринг модуля).
+            "queue_type": "observability",
             "command": self._command,
             "data": {"process": self._sender, **payload},
         }

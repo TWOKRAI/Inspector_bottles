@@ -1048,6 +1048,9 @@
         "data": {
           "maxsize": 50
         },
+        "observability": {
+          "maxsize": 256
+        },
         "state": {
           "maxsize": 8
         },
@@ -1394,6 +1397,9 @@
         "data": {
           "maxsize": 50
         },
+        "observability": {
+          "maxsize": 256
+        },
         "state": {
           "maxsize": 8
         },
@@ -1723,6 +1729,9 @@
         "data": {
           "maxsize": 50
         },
+        "observability": {
+          "maxsize": 256
+        },
         "state": {
           "maxsize": 8
         },
@@ -2020,6 +2029,9 @@
       "queues": {
         "data": {
           "maxsize": 50
+        },
+        "observability": {
+          "maxsize": 256
         },
         "state": {
           "maxsize": 8
@@ -2360,6 +2372,9 @@
         "data": {
           "maxsize": 50
         },
+        "observability": {
+          "maxsize": 256
+        },
         "state": {
           "maxsize": 8
         },
@@ -2675,6 +2690,9 @@
         "data": {
           "maxsize": 50
         },
+        "observability": {
+          "maxsize": 256
+        },
         "state": {
           "maxsize": 8
         },
@@ -2984,6 +3002,9 @@
       "queues": {
         "data": {
           "maxsize": 50
+        },
+        "observability": {
+          "maxsize": 256
         },
         "state": {
           "maxsize": 8
@@ -3320,6 +3341,9 @@
       "queues": {
         "data": {
           "maxsize": 50
+        },
+        "observability": {
+          "maxsize": 256
         },
         "state": {
           "maxsize": 8
@@ -3688,6 +3712,9 @@
       "queues": {
         "data": {
           "maxsize": 50
+        },
+        "observability": {
+          "maxsize": 256
         },
         "state": {
           "maxsize": 8
@@ -4060,6 +4087,9 @@
       "queues": {
         "data": {
           "maxsize": 50
+        },
+        "observability": {
+          "maxsize": 256
         },
         "state": {
           "maxsize": 8

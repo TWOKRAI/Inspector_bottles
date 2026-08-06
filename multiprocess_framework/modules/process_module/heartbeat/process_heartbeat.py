@@ -565,6 +565,12 @@ class ProcessHeartbeat:
             # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
             # surface был, но публикации не было — асимметрия с data_evicted).
             sys_blocked = int(rs.get("queue_system_evict_blocked", 0) or 0)
+            # Ф7.3: потери ХВОСТА наблюдаемости. Публикация здесь обязательна, а не
+            # «для симметрии»: пути потери хвоста молчат в логах сознательно (запись
+            # о потерянной записи усиливала бы шторм), поэтому дерево — единственное
+            # место, где оператор эту потерю увидит.
+            obs_evicted = int(rs.get("queue_observability_evicted", 0) or 0)
+            obs_send_failed = int(rs.get("queue_observability_send_failed", 0) or 0)
             # Ф7 G.5.c: дроп по post-use re-check zero-copy view (слот перезаписан под
             # живым view — consumer отстал > глубины кольца). Ещё один сигнал потери
             # кадра в том же месте для вкладки Pipeline.
@@ -588,6 +594,8 @@ class ProcessHeartbeat:
                 and crossings == 0
                 and queue_evicted == 0
                 and sys_blocked == 0
+                and obs_evicted == 0
+                and obs_send_failed == 0
                 and stale_drops == 0
                 and loan_exhausted == 0
                 and slots_released == 0
@@ -603,6 +611,8 @@ class ProcessHeartbeat:
                     "boundary_crossings": crossings,
                     "queue_data_evicted": queue_evicted,
                     "queue_system_evict_blocked": sys_blocked,
+                    "queue_observability_evicted": obs_evicted,
+                    "queue_observability_send_failed": obs_send_failed,
                     "stale_drops": stale_drops,
                     "loan_exhausted": loan_exhausted,
                     "slots_released": slots_released,

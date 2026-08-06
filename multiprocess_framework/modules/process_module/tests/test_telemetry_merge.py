@@ -165,6 +165,11 @@ class TestH8RouterShmStatsPublish:
             "boundary_crossings": 100,
             "queue_data_evicted": 0,
             "queue_system_evict_blocked": 0,
+            # Ф7.3: потери ХВОСТА наблюдаемости. Публикуются здесь, потому что сами
+            # пути потери молчат в логах сознательно (запись о потерянной записи
+            # усиливала бы шторм) — дерево остаётся единственным местом, где их видно.
+            "queue_observability_evicted": 0,
+            "queue_observability_send_failed": 0,
             "stale_drops": 0,
             "loan_exhausted": 0,
             "slots_released": 0,

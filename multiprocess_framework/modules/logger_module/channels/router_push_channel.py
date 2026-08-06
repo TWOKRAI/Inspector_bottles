@@ -7,7 +7,8 @@
 БЕЗ прямого доступа к SHM (feedback_no_shm_hacks).
 
 Маршрут доставки — тот же, что у ``state.changed`` (DeltaDispatcher) и мост 1.1b
-(``RouterManager._deliver_by_targets``): ``targets=[subscriber]`` + ``queue_type="system"``.
+(``RouterManager._deliver_by_targets``): ``targets=[subscriber]`` +
+``queue_type="observability"`` (Ф7.3; до этого — ``"system"``).
 Если у подписчика нет очереди (он не процесс, а внешний сокет-клиент), но
 зарегистрирован канал того же имени (SocketChannel ``backend_ctl``) — доставка идёт
 через канал во внешний driver. Живой router обязателен → канал создаётся в рантайме
@@ -64,7 +65,7 @@ class RouterPushChannel(IChannel):
         """Отправить запись адресным router-пушем подписчику (fire-and-forget).
 
         Форма сообщения зеркалит ``state.changed`` (DeltaDispatcher._send_state_changed):
-        ``type=event`` + ``targets=[subscriber]`` + ``queue_type=system`` → мост 1.1b.
+        ``type=event`` + ``targets=[subscriber]`` + ``queue_type=observability`` → мост 1.1b.
         Ошибки глотаются (лог не должен падать/тормозить из-за проблем доставки).
         """
         if self._router is None:
@@ -73,7 +74,10 @@ class RouterPushChannel(IChannel):
             "type": "event",
             "sender": self._sender,
             "targets": [self._subscriber],
-            "queue_type": "system",
+            # Ф7.3: хвост едет СВОЕЙ очередью, не never-drop system-почтой. До этого
+            # запись делила сотню ячеек `{proc}_system` с heartbeat и process.stop —
+            # шторм диагностики душил управление (Б-6: 97 066 отказов доставки).
+            "queue_type": "observability",
             "command": self._command,
             "data": {"process": self._sender, "record": data},
         }

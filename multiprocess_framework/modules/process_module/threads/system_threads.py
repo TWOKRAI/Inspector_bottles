@@ -69,10 +69,15 @@ class SystemThreads:
                 # идут в system (как раньше), а {proc}_state пуста → опрос её = no-op,
                 # поведение бит-в-бит. Процессы без state-очереди: канала нет → фильтр
                 # receive его не находит, ошибок нет.
+                # "observability" (Ф7.3): хвост записей приезжает своей очередью, но
+                # дренируется ТЕМ ЖЕ потоком — второго потока не заводим (правило
+                # «меньше слоёв»). Потолок цикла держит сама очередь: она ограничена
+                # (256) и drop_oldest, поэтому один опрос вычерпывает не больше её
+                # глубины, а не сколько успел натолкать шторм.
                 if self.process.router_manager:
                     messages = self.process.router_manager.receive(
                         timeout=0.0,
-                        channel_types=["system", "state"],
+                        channel_types=["system", "state", "observability"],
                     )
                     for message in messages:
                         self._handle_message(message)
