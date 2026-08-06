@@ -145,3 +145,6 @@ _archive/
 *.yaml.tmp.*
 # backend_ctl flight-recorder / аудит-журнал (E.1) — дефолтный runtime-каталог записей
 backend_ctl_records/
+
+# Черновой свод статусов, генерируется вручную при сверке плана
+verdict.txt
