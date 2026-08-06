@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict
 
 from multiprocess_framework.modules.logger_module.core.sampling import KEY_CEILING, RateSampler
@@ -300,3 +301,83 @@ class TestSweepIsSafeUnderConcurrentEmitters:
             t.join(timeout=10.0)
         assert not any(t.is_alive() for t in threads), "эмитент завис в сэмплере"
         assert errors == [], f"подметание уронило эмитентов: {[repr(e) for e in errors[:3]]}"
+
+
+class _RendezvousKeys(dict):
+    """Словарь ключей, задерживающий ВСЕХ подметальщиков на входе в удаление.
+
+    Барьер на входе в ``_make_room`` (первая редакция этого стенда) коллизию НЕ
+    воспроизводит, и это измерено: под инъекцией «``del`` без снапшота» тест был
+    зелёным 6 прогонов из 6. Причина — GIL: подметание 4096 ключей укладывается в
+    один квант интерпретатора, поэтому первый поток успевает вычистить словарь
+    целиком, а остальные строят СВОЙ список протухших уже по пустому словарю и
+    выходят через ``if not stale``. Синхронизировать надо не вход в метод, а вход
+    в само удаление — там, где списки уже построены и обязаны пересечься.
+
+    Рандеву стоит и на ``__delitem__`` (инъекция), и на ``pop`` (рабочий код):
+    страж обязан задержать оба варианта, иначе он измеряет реализацию, а не
+    свойство. У барьера свой таймаут — упасть, а не подвесить прогон.
+    """
+
+    def __init__(self, source: Dict[Any, Any], parties: int) -> None:
+        super().__init__(source)
+        self._barrier = threading.Barrier(parties, timeout=5.0)
+        self._passed = threading.local()
+
+    def _rendezvous(self) -> None:
+        # Один раз на поток: дальше потоки должны идти вразнобой, иначе удаление
+        # выстроится в очередь и пересечения снова не случится.
+        if not getattr(self._passed, "done", False):
+            self._passed.done = True
+            self._barrier.wait()
+
+    def __delitem__(self, key: Any) -> None:
+        self._rendezvous()
+        super().__delitem__(key)
+
+    def pop(self, key: Any, *default: Any) -> Any:
+        self._rendezvous()
+        return super().pop(key, *default)
+
+
+class TestConcurrentSweepIsDeterministicallySafe:
+    """Ф7.х.2, усиление И-D: коллизия подметаний без рулетки таймингов.
+
+    Штормовой тест выше — вероятностный: под инъекцией «``del`` без снапшота» он
+    красный в 5 прогонах из 8 (замер владельца корзины), то есть треть регрессов
+    проскочила бы. Здесь пересечение списков протухших не выпрашивается у
+    планировщика, а навязывается: рандеву внутри удаления (``_RendezvousKeys``)
+    гарантирует, что каждый поток построил ПОЛНЫЙ список до того, как исчез
+    первый ключ. Вторая линия — арифметика: каждый удалённый ключ обязан быть
+    посчитан ровно ОДНИМ потоком, поэтому ``keys_expired == KEY_CEILING`` ловит и
+    молчаливый двойной счёт, которому исключение не нужно.
+    """
+
+    def test_rendezvous_inside_the_sweep_neither_raises_nor_double_counts(self) -> None:
+        parties = 4
+        clock = _Clock()
+        sampler = _sampler(clock, burst_reset_sec=5.0)
+        _fill_to_ceiling(sampler, clock)
+        clock.advance(6.0)  # вся карта протухла — списки протухших у потоков полные
+        sampler._keys = _RendezvousKeys(sampler._keys, parties)
+
+        errors: list = []
+
+        def _sweep() -> None:
+            try:
+                sampler._make_room(clock.now)
+            except Exception as exc:  # noqa: BLE001 — сам факт исключения и есть дефект
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_sweep, daemon=True) for _ in range(parties)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10.0)
+
+        assert not any(t.is_alive() for t in threads), "подметание зависло"
+        assert errors == [], f"одновременные подметания столкнулись: {[repr(e) for e in errors[:3]]}"
+        assert sampler.keys_expired == KEY_CEILING, (
+            f"удалённые ключи посчитаны не по одному разу: {sampler.keys_expired} при {KEY_CEILING} ключах"
+        )
+        assert sampler.keys_tracked == 0
