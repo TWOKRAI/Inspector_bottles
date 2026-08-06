@@ -186,6 +186,13 @@ class RateSampler:
         # способ сказать «дроссель только на первых N».
         self._every_mth = max(1, int(every_mth))
         self._burst_reset_sec = float(burst_reset_sec)
+        # ``_next_sweep_at`` — не окно ключа, а КЭШ решения о расписании,
+        # выведенный из ПРЕЖНЕГО значения окна. Оставить его — значит «оператор
+        # сузил окно под штормом, а подметание заблокировано до конца старого»
+        # (при окне в сутки — на сутки). Сброс бесплатен: лишний проход случится
+        # не раньше следующего переполнения. Окна КЛЮЧЕЙ при этом не трогаются —
+        # обещание докстринга держится.
+        self._next_sweep_at = 0.0
         severity = severity_of(max_level)
         # Непонятое имя уровня → сэмплируем только DEBUG. Fail-quiet здесь
         # безопаснее fail-open: опечатка в конфиге не должна начать глушить
@@ -289,13 +296,28 @@ class RateSampler:
         if now < self._next_sweep_at:
             return False
         cutoff = now - self._burst_reset_sec
-        stale = [key for key, state in self._keys.items() if state.last_at < cutoff]
+        # ``list(...)`` — снимок: класс безлоковый, и два потока, попавшие сюда
+        # одновременно, иначе ловили бы ``dictionary changed size during
+        # iteration``. ``pop(key, None)`` вместо ``del`` — идемпотентность по той
+        # же причине: пересекающиеся списки протухших дают ``KeyError`` на
+        # втором удалении. Оба отказа воспроизведены стендом ревью корзины
+        # (8 потоков, шторм уникальных ключей — красный каждый прогон); исключение
+        # отсюда выходит из процессора и ПИШЕТСЯ аварийным путём, то есть механизм
+        # снижения объёма на отказе объём добавляет.
+        stale = [key for key, state in list(self._keys.items()) if state.last_at < cutoff]
         if not stale:
             self._next_sweep_at = now + self._burst_reset_sec
             return False
+        removed = 0
         for key in stale:
-            del self._keys[key]
-        self.keys_expired += len(stale)
+            if self._keys.pop(key, None) is not None:
+                removed += 1
+        if not removed:
+            # Всё протухшее вымел параллельный поток — для НАШЕГО вызывающего
+            # места так и не появилось, честный ответ «мести было нечего».
+            self._next_sweep_at = now + self._burst_reset_sec
+            return False
+        self.keys_expired += removed
         self._next_sweep_at = 0.0
         return True
 

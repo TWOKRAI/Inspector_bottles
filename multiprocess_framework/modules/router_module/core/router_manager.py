@@ -706,8 +706,10 @@ class RouterManager(ChannelRoutingManager):
                     # Ф7.3, звено (в) петли самоусиления: билет хвоста не доехал →
                     # записи об этом НЕ делаем, иначе отказ доставки диагностики
                     # порождает новую диагностику в тот же хвост (Б-6: 97 066 отказов,
-                    # каждый со своей записью). Счётчик — есть, молчания нет.
-                    self._inc_stat("observability_delivery_failed")
+                    # каждый со своей записью). Счётчик здесь НЕ инкрементится
+                    # (Ф7.х.2): потерю записи считает ``_report_send_error(muted=True)``
+                    # кадром выше, когда провалились ВСЕ адресаты, — двойной учёт
+                    # на обоих кадрах завышал величину вдвое (200 на 100 потерь).
                     continue
                 # ``!r``, а не ``{exc}``: исключения транспорта (``queue.Full``)
                 # приходят без аргументов, и запись превращалась в «failed:» без
@@ -843,7 +845,8 @@ class RouterManager(ChannelRoutingManager):
                 return True
         except Exception as exc:  # noqa: BLE001 — relay не должен ронять доставку
             if muted:
-                self._inc_stat("observability_delivery_failed")
+                # Потерю считает ``_report_send_error(muted=True)`` кадром выше
+                # (Ф7.х.2 — двойной учёт); здесь только молчание.
                 return False
             self._log_debug(lambda exc=exc: f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc!r}")
         return False
@@ -856,23 +859,24 @@ class RouterManager(ChannelRoutingManager):
         внешний driver не подключён — тогда билет тихо не доставлен, как и раньше
         при отсутствии очереди (пуш без подписчика не копится).
 
-        Ф7.3: для билета хвоста наблюдаемости все три записи здесь ЗАМЕНЕНЫ счётчиком.
+        Ф7.3: для билета хвоста наблюдаемости все три записи здесь замьючены.
         Иначе отвалившийся сокет-подписчик (`no clients connected` на КАЖДУЮ запись)
         сам становится источником записей, которые пытаются ехать той же дорогой —
-        второй вход в петлю Б-6, уже не через очередь, а через канал.
+        второй вход в петлю Б-6, уже не через очередь, а через канал. Счётчик
+        потери при этом живёт НЕ здесь: её считает ``_report_send_error(muted=True)``
+        кадром выше, когда провалились все адресаты (Ф7.х.2 — инкремент на обоих
+        кадрах завышал величину вдвое).
         """
         muted = ticket.get("queue_type") == QUEUE_OBSERVABILITY
         try:
             result = channel.send(ticket)
         except Exception as exc:  # noqa: BLE001 — граница канала не должна ронять доставку
             if muted:
-                self._inc_stat("observability_delivery_failed")
                 return False
             self._log_debug(lambda exc=exc: f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
             return False
         if isinstance(result, dict) and result.get("status") == "error":
             if muted:
-                self._inc_stat("observability_delivery_failed")
                 return False
             self._log_debug(lambda: f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}")
             return False

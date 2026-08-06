@@ -350,3 +350,70 @@ def test_poll_of_a_stuck_sink_does_not_lose_the_healthy_neighbour(tmp_path: Path
         stuck.close()
         healthy.close()
         _reset_shared_handler_registry()
+
+
+class TestControlPathIsNotLimitedByTheSink:
+    """Ф7.х.2 (блокер верификации корзины): управляющий путь не делит лок с лесенкой.
+
+    Первая редакция B-1 посадила лесенку на ``handler.lock`` — тот самый объект,
+    который stdlib берёт БЕЗ предела в ``close()``, ``flush()`` и
+    ``logging.shutdown()``. Итог: залипший сток вешал ``logger.sink.disable`` —
+    команду, которой оператор этот сток и лечит, — а также ``config.reload`` и
+    выход из процесса. Здесь сторожится развязка: лок лесенки и лок stdlib —
+    РАЗНЫЕ объекты, и ``close()`` возвращается, пока сток держит чужой поток.
+    """
+
+    def test_ladder_lock_is_not_the_stdlib_handler_lock(self, tmp_path: Path) -> None:
+        """Устройство: наш лок стока ≠ ``handler.lock`` stdlib."""
+        _reset_shared_handler_registry()
+        ch = _shared_file_channel(tmp_path / "messages.log", "messages_file")
+        try:
+            assert ch._write_lock is not ch.handler.lock, (
+                "лесенка на stdlib-локе: close()/flush()/shutdown() будут ждать за нашим дедлайном без предела"
+            )
+        finally:
+            ch.close()
+            _reset_shared_handler_registry()
+
+    def test_close_returns_while_the_sink_is_held(self, tmp_path: Path) -> None:
+        """Сердце находки: снятие канала возвращается на залипшем стоке.
+
+        Держим лок СТОКА чужим потоком (модель залипшего write) и закрываем оба
+        канала файла — включая последнего владельца, чей ``close()`` физически
+        закрывает хэндлер через stdlib. До правки последний ``close()`` вставал
+        на ``handler.lock`` навсегда; тест-предшественник этого не видел, потому
+        что расклеивал сток ДО снятия (находка Н-5 верификации).
+        """
+        _reset_shared_handler_registry()
+        path = tmp_path / "messages.log"
+        a = _shared_file_channel(path, "messages_file", write_deadline_sec=0.05)
+        b = _shared_file_channel(path, "router_messages", write_deadline_sec=0.05)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def _hold() -> None:
+            with a._write_lock:
+                entered.set()
+                release.wait(timeout=30.0)
+
+        holder = threading.Thread(target=_hold, name="stuck-sink", daemon=True)
+        holder.start()
+        try:
+            assert entered.wait(timeout=_JOIN_DEADLINE_SEC), "стенд не воспроизведён: лок стока не занят"
+
+            closed = threading.Event()
+
+            def _close_both() -> None:
+                b.close()
+                a.close()  # последний владелец: физическое закрытие хэндлера stdlib'ом
+                closed.set()
+
+            closer = threading.Thread(target=_close_both, name="sink-disable", daemon=True)
+            closer.start()
+            assert closed.wait(timeout=_JOIN_DEADLINE_SEC), (
+                "close() встал на залипшем стоке — управляющий путь делит лок с лесенкой"
+            )
+        finally:
+            release.set()
+            holder.join(timeout=_JOIN_DEADLINE_SEC)
+            _reset_shared_handler_registry()

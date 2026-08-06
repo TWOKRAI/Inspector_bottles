@@ -202,6 +202,13 @@ class RouterStats:
     # Потери на очередях получателя: вытеснено из data / заблокировано на never-drop.
     queue_data_evicted: Optional[int] = None
     queue_system_evict_blocked: Optional[int] = None
+    #: Ф7.х: транспортные потери ХВОСТА наблюдаемости (Ф7.3). Молчат в логах по
+    #: замыслу (счётчик вместо записи — разрыв петли Б-6), поэтому типизированное
+    #: поле здесь — ЕДИНСТВЕННЫЙ способ, которым overview узнаёт о потере; без
+    #: него мьют делает потерю невидимой целиком (находка Н-3 ревью корзины).
+    queue_observability_evicted: Optional[int] = None
+    queue_observability_send_failed: Optional[int] = None
+    observability_delivery_failed: Optional[int] = None
     frame_loans_released_on_evict: Optional[int] = None
     #: Ф4 Task 4.3: БЕЗВОЗВРАТНО потерянный never-drop груз (раньше жил только в
     #: stdlib-логе, мимо интроспекции). ``None`` = процесс старой сборки, ``0`` =
@@ -235,6 +242,9 @@ class RouterStats:
             send_queue_size=_read_int(stats, "send_queue_size", missing),
             queue_data_evicted=_read_int(stats, "queue_data_evicted", missing),
             queue_system_evict_blocked=_read_int(stats, "queue_system_evict_blocked", missing),
+            queue_observability_evicted=_read_int(stats, "queue_observability_evicted", missing),
+            queue_observability_send_failed=_read_int(stats, "queue_observability_send_failed", missing),
+            observability_delivery_failed=_read_int(stats, "observability_delivery_failed", missing),
             frame_loans_released_on_evict=_read_int(stats, "frame_loans_released_on_evict", missing),
             queue_never_drop_loss_total=_read_int(stats, "queue_never_drop_loss_total", missing),
             queue_senders=_read_mapping(stats, "queue_senders", missing) or {},

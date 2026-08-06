@@ -137,6 +137,38 @@ class TestAnomalies:
         kinds = {a["kind"] for a in res["anomalies"]}
         assert {"router_dropped", "router_errors", "queue_depth"} <= kinds
 
+    def test_tail_transport_loss_is_an_anomaly_without_touching_errors(self, monkeypatch) -> None:
+        """Ф7.х.2 (Н-3 верификации корзины): потеря хвоста видна overview.
+
+        По замыслу Ф7.3 транспортные потери хвоста молчат в логах и НЕ растят
+        общий ``errors`` — значит, аномалия отсюда и есть единственное место, где
+        оператор их увидит. До правки overview был к ним слеп целиком: величина
+        класса Б-6 (97 066) доставалась только ручным чтением raw.
+        """
+        d = BackendDriver()
+        responses = _healthy_responses()
+        responses["introspect.router_stats"] = {
+            "success": True,
+            "router_stats": full_router_stats(
+                sent_ok=5,
+                received=9,
+                middleware_dropped=0,
+                errors=0,
+                queue_observability_evicted=1744,
+                observability_delivery_failed=97066,
+            ),
+        }
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+        hits = [a for a in res["anomalies"] if a["kind"] == "observability_loss"]
+        assert hits, "потеря хвоста невидима для overview — класс «проглоченный сбой»"
+        detail = hits[0]["detail"]
+        assert "observability_delivery_failed=97066" in detail
+        assert "queue_observability_evicted=1744" in detail
+        # Контраст обеих сторон: errors=0 не даёт router_errors — мьют Ф7.х B-3
+        # не подменён обратно ложной тревогой.
+        assert not any(a["kind"] == "router_errors" for a in res["anomalies"])
+
     def test_fps_zero_while_running_detected(self, monkeypatch) -> None:
         d = BackendDriver()
         _fake_backend(monkeypatch, d, procs=["cam"], responses=_healthy_responses())
@@ -517,13 +549,20 @@ class TestObservabilitySilence:
             logger.shutdown()
 
         # Не «хотя бы один», а поимённо: плоскость логов обязана публиковать все
-        # ключи перечня. Плоскость статистики беднее (у её буфера нет ``dropped``),
-        # и это свойство плоскости, а не расхождение — поэтому судим по логгеру.
+        # ключи перечня.
         for key in OBSERVABILITY_LOSS_KEYS:
             assert key in plane, f"логгер перестал публиковать {key!r} — детектор 2.V2 ослеп на этот класс"
-        for key in ("dropped", "flush_failed"):
-            assert key in OBSERVABILITY_BUFFER_LOSS_KEYS
-            assert key in plane["buffer"], f"буфер логгера перестал публиковать {key!r}"
+        # Ф7.х.2: буфера ЗАПИСИ у логгера больше нет — ``BatchBuffer`` снят
+        # (Ф7.4), нормализация в ``_plane_counters`` его секцию не производит.
+        # Отсутствие и есть контракт: вернувшийся ключ значил бы, что буфер
+        # воскрес (или что фальшивка снова кормит нормализацию, как до Ф7.х).
+        # Прежняя редакция требовала здесь buffer.dropped/flush_failed — её
+        # посылка истекла вместе с буфером.
+        assert "buffer" not in plane, "у плоскости логов снова появился буфер — батчинг воскрес?"
+        # Перечень буферных потерь остаётся для плоскости статистики (окно
+        # агрегации живо, его ``flush_failed`` публикуется); чтение защищено —
+        # отсутствие ключа у плоскости без буфера не расхождение формы.
+        assert "flush_failed" in OBSERVABILITY_BUFFER_LOSS_KEYS
 
     def test_all_three_fresh_planes_are_silent_for_real(self) -> None:
         """Приёмка 2.V2 на живых менеджерах: три плоскости в покое молчат.

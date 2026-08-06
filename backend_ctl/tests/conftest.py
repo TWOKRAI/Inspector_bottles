@@ -43,6 +43,12 @@ ROUTER_COUNTERS = (
     "send_queue_size",
     "queue_data_evicted",
     "queue_system_evict_blocked",
+    # Ф7.х.2 (Н-3 верификации): транспортные потери хвоста наблюдаемости —
+    # молчат в логах по замыслу, поэтому типизированное поле обязано быть,
+    # иначе overview слеп к классу Б-6.
+    "queue_observability_evicted",
+    "queue_observability_send_failed",
+    "observability_delivery_failed",
     "frame_loans_released_on_evict",
     # Ф4 Task 4.3: безвозвратные потери never-drop груза (раньше только в stdlib-логе).
     "queue_never_drop_loss_total",

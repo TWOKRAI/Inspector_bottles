@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from ..core.router_manager import QUEUE_OBSERVABILITY, RouterManager
+from ..interfaces import IMessageChannel
 
 
 class _DeadRegistry:
@@ -185,3 +186,88 @@ class TestTailDoesNotAmplifyOnTheHealthyPath:
         assert any("no route" in line for line in router.debug_records), (
             "замьютили не только хвост — отсутствие маршрута обычного груза стало невидимым"
         )
+
+
+class _NoClientsChannel(IMessageChannel):
+    """Настоящая форма отказа моста 1.1b: сокет без подключённого подписчика.
+
+    Наследование от ``IMessageChannel`` несущее: ``register_channel`` проверяет
+    интерфейс, и утиный стаб он молча отвергает — тест тогда едет ОЧЕРЕДНЫМ
+    путём и канального кадра не видит вовсе (поймано инъекцией И-B: предсказано
+    2 красных, получен 1).
+    """
+
+    @property
+    def name(self):
+        return "backend_ctl"
+
+    @property
+    def channel_type(self):
+        return "socket"
+
+    def send(self, m):
+        return {"status": "error", "reason": "no clients connected"}
+
+    def poll(self, t=0.0):
+        return []
+
+    def start_listening(self, cb):
+        return False
+
+    def stop_listening(self):
+        return True
+
+    def close(self):
+        pass
+
+    def is_open(self):
+        return True
+
+    def get_stats(self):
+        return {}
+
+
+class TestTheLossIsCountedExactlyOnce:
+    """Ф7.х.2 (Н-1 верификации корзины): одна потерянная запись = один инкремент.
+
+    Первая редакция мьюта добавила счёт в ``_report_send_error`` и НЕ сняла
+    инкременты в ``_deliver_by_targets``/``_deliver_via_channel`` — один отказ
+    проходил оба кадра и считался дважды (200 на 100 потерь). Оба теста той
+    редакции стояли по разные стороны шва (один звал нижний кадр напрямую,
+    другой подменял ``_resolve_channels`` и в нижний не заходил) — поэтому здесь
+    путь ПОЛНЫЙ: ``_do_send`` без подмен, с настоящим каналом в реестре, оба
+    кадра проходятся, арифметика проверяется литералом.
+    """
+
+    N = 50
+
+    def _drive(self, router, qtype: str = QUEUE_OBSERVABILITY) -> None:
+        for i in range(self.N):
+            msg = _tail_message()
+            msg["queue_type"] = qtype
+            msg["data"]["record"]["message"] = f"r{i}"
+            router._do_send(msg)
+
+    def test_channel_refusal_counts_once_per_record(self) -> None:
+        """Путь канала: no clients connected → ровно N, не 2N."""
+        router = _Router()
+        router.register_channel(_NoClientsChannel())
+        self._drive(router)
+        stats = router.get_stats()["router"]
+        assert stats.get("observability_delivery_failed") == self.N, (
+            "потеря считается не по одному разу на запись — "
+            f"ожидали {self.N}, получили {stats.get('observability_delivery_failed')}"
+        )
+        assert stats.get("errors", 0) == 0
+
+    def test_queue_refusal_counts_once_per_record(self) -> None:
+        """Путь очереди: send_to_queue вернул False → ровно N."""
+        router = _Router()  # _DeadRegistry: очередь есть у всех, приём — ни у кого
+        for i in range(self.N):
+            msg = _tail_message()
+            msg["targets"] = ["gui"]
+            msg["data"]["record"]["message"] = f"r{i}"
+            router._do_send(msg)
+        stats = router.get_stats()["router"]
+        assert stats.get("observability_delivery_failed") == self.N
+        assert stats.get("errors", 0) == 0

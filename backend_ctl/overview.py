@@ -256,6 +256,19 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             )
         if _is_positive(rs.errors):
             anomalies.append({"kind": "router_errors", "process": proc, "detail": f"errors={rs.errors}"})
+        # Ф7.х: транспортные потери хвоста наблюдаемости. По замыслу Ф7.3 они
+        # молчат в логах и НЕ растят общий errors (иначе петля Б-6) — значит
+        # аномалия отсюда и есть единственное место, где оператор их увидит
+        # без ручного чтения router_stats (находка Н-3 ревью корзины).
+        obs_transport = {
+            "queue_observability_evicted": rs.queue_observability_evicted,
+            "queue_observability_send_failed": rs.queue_observability_send_failed,
+            "observability_delivery_failed": rs.observability_delivery_failed,
+        }
+        obs_transport_hits = {k: v for k, v in obs_transport.items() if _is_positive(v)}
+        if obs_transport_hits:
+            detail = ", ".join(f"{k}={v}" for k, v in sorted(obs_transport_hits.items()))
+            anomalies.append({"kind": "observability_loss", "process": proc, "detail": f"транспорт хвоста: {detail}"})
         if ws.ok and ws.status not in (None, "running"):
             anomalies.append({"kind": "process_not_running", "process": proc, "detail": f"status={ws.status!r}"})
         for hit in hz_degraded:

@@ -229,3 +229,74 @@ class TestTheThrottleIsNotSilentlyDisabledByItsOwnConfig:
                 passed += 1
 
         assert passed <= 4, f"на минимальном окне дроссель пропустил {passed} записей — окно уже паузы шторма"
+
+
+class TestSweepScheduleCacheDoesNotOutliveItsWindow:
+    """Ф7.х.2 (НД-2 верификации): ``configure`` сбрасывает кэш расписания подметания.
+
+    ``_next_sweep_at`` — решение «раньше X мести бессмысленно», вычисленное из
+    ПРЕЖНЕГО окна. Первая редакция его сохраняла: оператор, сузивший окно под
+    штормом (ровно тот сценарий, ради которого ручка существует), получал
+    подметание, заблокированное на срок старого окна — при окне в сутки на сутки.
+    """
+
+    def test_narrowing_the_window_by_reload_unblocks_the_sweep(self) -> None:
+        clock = _Clock()
+        sampler = _sampler(clock, burst_reset_sec=3600.0)
+        _fill_to_ceiling(sampler, clock)
+
+        # Переполнение при горячей карте: бесплодный проход взводит кэш
+        # расписания на ЧАС вперёд.
+        sampler("system", "DEBUG", _record("hot-overflow"))
+        assert sampler.keys_saturated == 1
+
+        clock.advance(10.0)
+        sampler.configure(first_n=3, every_mth=1_000_000, burst_reset_sec=0.1, max_level="DEBUG")
+
+        # По НОВОМУ окну вся карта протухла (возраст 10 с > 0.1 с). Если кэш
+        # расписания пережил reload — подметание молчит до конца старого окна,
+        # и новый ключ проходит мимо дросселя с ростом насыщения.
+        sampler("system", "DEBUG", _record("fresh-after-reload"))
+        assert sampler.keys_expired == KEY_CEILING, (
+            "правка окна не подействовала: подметание заблокировано расписанием, вычисленным по старому окну"
+        )
+        assert sampler.keys_saturated == 1, "насыщение выросло после сужения окна — ручка мертва"
+
+
+class TestSweepIsSafeUnderConcurrentEmitters:
+    """Ф7.х.2 (НД-1 верификации): подметание не роняет параллельных эмитентов.
+
+    Класс безлоковый по контракту, а первая редакция подметания добавила в него
+    итерацию по словарю с удалением — два потока на переполнении ловили
+    ``KeyError`` (пересекающиеся списки протухших) и ``RuntimeError: dictionary
+    changed size during iteration``. Исключение отсюда выходит из процессора и
+    ПИШЕТСЯ аварийным путём — механизм снижения объёма на отказе объём добавляет.
+
+    Часы здесь настоящие (``time.monotonic``): гонка живёт в реальном времени, а
+    внедрённые часы сделали бы стенд однопоточным по смыслу.
+    """
+
+    def test_no_exceptions_under_a_storm_of_unique_keys(self) -> None:
+        import threading
+        import time as _time
+
+        sampler = RateSampler(first_n=1, every_mth=2, burst_reset_sec=0.05, time_fn=_time.monotonic)
+        errors: list = []
+        stop = _time.monotonic() + 1.5
+
+        def _hammer(worker: int) -> None:
+            i = 0
+            try:
+                while _time.monotonic() < stop:
+                    sampler("system", "DEBUG", _record(f"w{worker}-{i}"))
+                    i += 1
+            except Exception as exc:  # noqa: BLE001 — сам факт исключения и есть дефект
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_hammer, args=(w,), daemon=True) for w in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10.0)
+        assert not any(t.is_alive() for t in threads), "эмитент завис в сэмплере"
+        assert errors == [], f"подметание уронило эмитентов: {[repr(e) for e in errors[:3]]}"

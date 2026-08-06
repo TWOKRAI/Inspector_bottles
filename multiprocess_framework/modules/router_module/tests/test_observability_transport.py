@@ -108,14 +108,23 @@ class TestSendersUseTheirOwnQueueClass:
 class TestDeliveryFailureDoesNotFeedTheTail:
     """Звено (в): провал доставки хвоста считается, но не пишется."""
 
-    def test_queue_path_is_silent_and_counted(self):
+    def test_queue_path_is_silent_and_does_not_count_here(self):
+        """Нижний кадр молчит и НЕ считает (Ф7.х.2, Н-1 верификации).
+
+        Потерю считает ``_report_send_error(muted=True)`` кадром выше — инкремент
+        и здесь давал двойной учёт (200 на 100 потерь). Арифметику «ровно один
+        раз» сторожит ``TestTheLossIsCountedExactlyOnce`` полным путём через
+        ``_do_send``; этот тест — только про молчание нижнего кадра.
+        """
         router = _Router(_Registry({("gui", QUEUE_OBSERVABILITY)}, failing=True))
 
         result, attempted = router._deliver_by_targets(_ticket(QUEUE_OBSERVABILITY))
 
         assert (result, attempted) == (None, 1)
         assert router.debug_records == []
-        assert router.get_stats()["router"]["observability_delivery_failed"] == 1
+        assert router.get_stats()["router"].get("observability_delivery_failed", 0) == 0, (
+            "нижний кадр снова считает — вместе с кадром выше это двойной учёт"
+        )
 
     def test_data_path_still_speaks(self):
         """Контраст: обычный груз при том же отказе по-прежнему пишет запись."""
@@ -133,8 +142,11 @@ class TestDeliveryFailureDoesNotFeedTheTail:
         [{"status": "error", "reason": "no clients connected"}, "raise"],
         ids=["канал вернул ошибку", "канал бросил"],
     )
-    def test_channel_path_is_silent_and_counted(self, channel_result):
-        """Отвалившийся сокет-подписчик — второй вход в петлю: ошибка на КАЖДУЮ запись."""
+    def test_channel_path_is_silent_and_does_not_count_here(self, channel_result):
+        """Отвалившийся сокет-подписчик — второй вход в петлю: молчание без счёта.
+
+        Счёт — кадром выше (см. ``test_queue_path_is_silent_and_does_not_count_here``).
+        """
         router = _Router(_Registry(set()))
 
         class _Channel:
@@ -149,7 +161,9 @@ class TestDeliveryFailureDoesNotFeedTheTail:
 
         assert ok is False
         assert router.debug_records == []
-        assert router.get_stats()["router"]["observability_delivery_failed"] == 1
+        assert router.get_stats()["router"].get("observability_delivery_failed", 0) == 0, (
+            "нижний кадр снова считает — вместе с кадром выше это двойной учёт"
+        )
 
     def test_channel_success_is_silent_too(self):
         """Успех тоже молчит: запись на КАЖДУЮ доставленную запись — тот же объём."""

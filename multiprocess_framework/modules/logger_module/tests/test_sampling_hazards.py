@@ -227,6 +227,31 @@ class TestReloadDoesNotResetTheWindows:
 
         assert len(spy_after.written) == 2, "выключение дросселя конфигом не подействовало"
 
+    def test_reconfigure_can_also_enable_the_sampler(self) -> None:
+        """Обратная половина ручки (Ф7.х.2, Н-7 верификации): включение на живой системе.
+
+        Прежний тест проверял только выключение — мёртвая половина «включить
+        дроссель под штормом, не перезапуская процесс» осталась бы незамеченной.
+        """
+        mgr, spy = _logger(sampling_first_n=0)
+        mgr.log("SYSTEM", LogLevel.DEBUG, "повтор", "mod")
+        mgr.log("SYSTEM", LogLevel.DEBUG, "повтор", "mod")
+        assert len(spy.written) == 2, "стенд не воспроизведён: выключенный дроссель что-то задушил"
+
+        assert mgr.reconfigure(_config(sampling_first_n=1, sampling_every_mth=1000)) is True
+        spy_after = _SpyChannel("a")
+        mgr.register_channel(spy_after)
+
+        mgr.log("SYSTEM", LogLevel.DEBUG, "повтор", "mod")
+        mgr.log("SYSTEM", LogLevel.DEBUG, "повтор", "mod")
+        mgr.log("SYSTEM", LogLevel.DEBUG, "повтор", "mod")
+
+        # Ключ уже видел 2 записи при выключенном дросселе? Нет: при first_n=0
+        # учёт не вёлся вовсе, поэтому включённый дроссель начинает серию с нуля —
+        # первая проходит, дальше душится.
+        assert len(spy_after.written) == 1, "включение дросселя конфигом не подействовало"
+        assert mgr._sampler.records_sampled_out >= 2
+
 
 class TestSharedRecordIsNotMutated:
     """Аннотация «сколько подавлено» делается на КОПИИ.
