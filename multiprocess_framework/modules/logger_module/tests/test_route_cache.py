@@ -303,31 +303,26 @@ class TestOperatorDisabledSinkLeavesTheRoute:
         # Записываю факт, а не догадку.
         assert "предупреждение в снятый приёмник" in (tmp_path / "errors.log").read_text(encoding="utf-8")
 
-    def test_records_already_in_the_buffer_are_still_accounted(self, tmp_path) -> None:
-        """Хвост: то, что попало в буфер ДО disable, честно уедет в потери.
+    def test_record_for_a_disabled_sink_is_accounted_not_lost(self, tmp_path) -> None:
+        """Запись, адресованная снятому приёмнику, уходит в потери, а не в никуда.
 
-        Короткий ненулевой выхлоп сразу после снятия приёмника — не дефект
-        фикса, а следствие того, что буфер не забывает уже принятые записи
-        (он и не имеет права: молча выбросить их значило бы завести четвёртый,
-        никем не считаемый класс потери). Названо и закреплено здесь, иначе
-        первый живой прогон объявит фикс сломанным.
+        Ф7.4: прежняя редакция сторожила ХВОСТ БУФЕРА («то, что попало в пачку до
+        disable, честно уедет в потери»). Буфера нет — хвоста тоже; свойство,
+        ради которого тест писался, осталось прежним: снятие приёмника не
+        заводит четвёртый, никем не считаемый класс потери.
         """
-        config = _config(tmp_path)
-        config.enable_batching = True
-        config.batch_size = 1000  # заведомо не сбросится сам
-        manager = LoggerManager(config=config)
+        manager = LoggerManager(config=_config(tmp_path))
         try:
-            manager.info("до снятия", module="приложение")  # осела в буфере
             manager.set_sink_enabled("second", False)
-            manager.flush()
+            manager.info("после снятия", module="приложение")
             stats = manager.get_stats()
         finally:
             manager.shutdown()
 
-        # Запись адресована приёмнику, снятому уже ПОСЛЕ её приёма буфером.
-        assert stats["batch_stats"]["flush_failed"] + stats["unresolved_channel_records"] >= 1, (
-            "хвост буфера исчез бесследно — это и был бы четвёртый несчитаемый класс"
+        counted = (
+            stats["unresolved_channel_records"] + stats["records_without_channels"] + stats["channel_written_records"]
         )
+        assert counted >= 1, "запись исчезла бесследно — несчитаемый класс потери"
 
 
 class TestCachesAreBounded:

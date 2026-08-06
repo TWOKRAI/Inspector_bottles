@@ -111,36 +111,25 @@ def _floor_lines(tmp_path: Path) -> List[dict]:
 
 
 # =============================================================================
-# Синхронность: error/critical мимо буфера, WARNING — через буфер
+# Синхронность записи на ВСЕХ уровнях (Ф7.4: буфера больше нет)
 # =============================================================================
+#
+# Прежняя пара «error мимо пачки / WARNING в пачке» сторожила границу между
+# синхронным и отложенным путём. Батчинг снят (замер: ноль экономии на границе
+# ОС, хвост эмитента хуже в 18 раз) — отложенного пути не существует, и
+# обещание стало сильнее: любая запись на диске к моменту возврата из вызова.
 
 
-@pytest.mark.parametrize("method", ["error", "critical"])
-def test_severity_path_bypasses_buffer(tmp_path: Path, method: str) -> None:
+def test_every_severity_lands_synchronously(tmp_path: Path) -> None:
+    """Ни один уровень не откладывается — ни ошибка, ни предупреждение."""
     em = _manager(tmp_path)
-    em._buffer.stop()
-    buffer = _RecordingBuffer()
-    em._buffer = buffer
-    try:
-        getattr(em, method)(_MARKER)
-
-        assert buffer.calls == [], f"{method}() не имеет права оказаться в пачке"
-        assert buffer.flushed, "пачка канала должна быть сброшена ДО записи ошибки"
-    finally:
-        em.shutdown()
-
-
-def test_warning_still_buffered(tmp_path: Path) -> None:
-    """WARNING идёт тем же override-путём, но остаётся батченым."""
-    em = _manager(tmp_path)
-    em._buffer.stop()
-    buffer = _RecordingBuffer()
-    em._buffer = buffer
     try:
         em.warning("just a warning")
+        em.error(_MARKER)
 
-        assert [ch for ch, _ in buffer.calls] == ["warnings_file"]
-        assert buffer.flushed == []
+        written = (tmp_path / "errors.log").read_text(encoding="utf-8")
+        assert _MARKER in written
+        assert (tmp_path / "warnings.log").read_text(encoding="utf-8").strip(), "WARNING не доехал без flush"
     finally:
         em.shutdown()
 

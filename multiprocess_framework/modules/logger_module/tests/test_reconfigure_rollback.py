@@ -113,7 +113,7 @@ def test_rejected_config_does_not_touch_channels(tmp_path: Path) -> None:
         channel_before = mgr._channel_registry.get("system_file")
 
         raw = mgr.config.model_dump()
-        raw["batch_overflow_policy"] = "drop_middle"
+        raw["sampling_max_level"] = "ЖЁЛТЫЙ"  # Ф7.4: прежнее негодное поле снято вместе с батчингом
         assert mgr.reconfigure(raw) is False
 
         assert mgr._channel_registry.get("system_file") is channel_before, (

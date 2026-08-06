@@ -28,15 +28,25 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
-from ...channel_routing_module.buffers.batch_buffer import (
-    DEFAULT_MAX_PENDING,
-    DEFAULT_OVERFLOW_POLICY,
-    validate_overflow_policy,
-)
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...log_declarations import declared_rules
+
+#: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
+#: МОЛЧА (проверено), поэтому без сверки конфиг с ``enable_batching: true`` после
+#: сноса просто перестал бы что-либо значить: оператор правит ручку, ничего не
+#: меняется, и никто ему об этом не говорит — ровно класс «проглоченный сбой»,
+#: который эта фаза и лечит. Константа модульная (не приватное поле схемы):
+#: у Pydantic ``_имя`` в теле класса становится ``ModelPrivateAttr`` и из
+#: валидатора не читается.
+REMOVED_BATCHING_KEYS = (
+    "enable_batching",
+    "batch_size",
+    "batch_interval",
+    "batch_max_pending",
+    "batch_overflow_policy",
+)
 
 
 @register_schema("ObservabilityErrorsConfig")
@@ -116,17 +126,6 @@ class ObservabilityConfig(SchemaBase):
         Optional[str],
         FieldMeta("Корень логов (None — из env MULTIPROCESS_LOG_DIR / INSPECTOR_LOG_DIR)"),
     ] = None
-    enable_batching: Annotated[bool, FieldMeta("Батчинг записи (Logger + Error)")] = True
-    # Ф0.3: потолок буфера — операторский параметр, а не константа в коде. Без него
-    # медленный сток копит записи в памяти без предела и без следа (см. batch_buffer.py).
-    batch_max_pending: Annotated[
-        int,
-        FieldMeta("Потолок неотправленных записей на канал (0 — без потолка)", min=0, max=1_000_000),
-    ] = DEFAULT_MAX_PENDING
-    batch_overflow_policy: Annotated[
-        str,
-        FieldMeta("Что терять при переполнении: drop_oldest (кольцо) | drop_newest"),
-    ] = DEFAULT_OVERFLOW_POLICY
     console: Annotated[bool, FieldMeta("Включить консольный sink")] = True
     file: Annotated[bool, FieldMeta("Включить файловые sink-каналы (первичные)")] = True
 
@@ -235,11 +234,35 @@ class ObservabilityConfig(SchemaBase):
         FieldMeta("Секция команд (CommandManager)"),
     ] = Field(default_factory=ObservabilityCommandsConfig)
 
-    @field_validator("batch_overflow_policy")
+    #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
+    #: МОЛЧА (проверено), поэтому без этой сверки конфиг с ``enable_batching: true``
+    #: после сноса просто перестал бы что-либо значить — оператор правит ручку,
+    #: ничего не меняется, и никто ему об этом не говорит. Ровно класс «проглоченный
+    #: сбой», который эта фаза и лечит.
+    @model_validator(mode="before")
     @classmethod
-    def _check_overflow_policy(cls, value: str) -> str:
-        """Отказ на границе конфига — до того, как правка коснётся менеджеров."""
-        return validate_overflow_policy(value)
+    def _complain_about_removed_batching_keys(cls, data: Any) -> Any:
+        """Назвать снятые ключи вслух — но не уронить систему из-за старого конфига.
+
+        Отказ (``raise``) был бы честнее по форме, но дороже по существу: конфиг с
+        унаследованной ручкой встал бы колом на боевом стенде из-за строки, которая
+        ничего не делает. Поэтому — предупреждение через аварийный вывод (он работает
+        до подъёма логгера, а конфиг читают именно тогда) и продолжение работы.
+        """
+        if isinstance(data, dict):
+            stale = [k for k in REMOVED_BATCHING_KEYS if k in data]
+            if stale:
+                from ..._fallback import emergency_log
+
+                emergency_log(
+                    "observability_config",
+                    "WARNING",
+                    "конфиг наблюдаемости содержит снятые ключи %s: батчинг записи убран "
+                    "(Ф7.4, замер показал ноль экономии на границе ОС и худший хвост p99) — "
+                    "запись теперь синхронна ВСЕГДА, эти ключи не делают ничего",
+                    ", ".join(stale),
+                )
+        return data
 
     @field_validator("scopes", mode="before")
     @classmethod
@@ -300,9 +323,6 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 
     logger: Dict[str, Any] = {
-        "enable_batching": cfg.enable_batching,
-        "batch_max_pending": cfg.batch_max_pending,
-        "batch_overflow_policy": cfg.batch_overflow_policy,
         # Ретеншен получает ТОЛЬКО logger: каталог логов один на процесс, и
         # второй подметальщик (error) означал бы два прохода по одному дереву
         # с гонкой за одни и те же файлы. Один каталог — один хозяин.
@@ -382,9 +402,6 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     error: Dict[str, Any] = {
         "default_level": cfg.errors.level,
         "include_stacktrace": cfg.errors.include_stacktrace,
-        "enable_batching": cfg.enable_batching,
-        "batch_max_pending": cfg.batch_max_pending,
-        "batch_overflow_policy": cfg.batch_overflow_policy,
     }
 
     stats: Dict[str, Any] = {

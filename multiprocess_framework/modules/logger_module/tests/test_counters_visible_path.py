@@ -17,14 +17,12 @@
 
 from __future__ import annotations
 
-import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Iterator
 
 import pytest
 
-from multiprocess_framework.modules.logger_module.channels.log_channel import LogChannel
 from multiprocess_framework.modules.logger_module.core.error_floor import reset_error_floors
 from multiprocess_framework.modules.logger_module.core.log_config import (
     LoggerChannelSchema,
@@ -49,15 +47,11 @@ def _isolate_floors() -> Iterator[None]:
     reset_error_floors()
 
 
-def _config(tmp_path: Path, *, max_pending: int) -> LoggerManagerConfig:
-    """Логгер, у которого сток заведомо не разгребает: пачка только копится."""
+def _config(tmp_path: Path) -> LoggerManagerConfig:
+    """Логгер с одним файловым приёмником (Ф7.4: запись синхронна, пачки нет)."""
     return LoggerManagerConfig(
         app_name="counters_unit",
         log_directory=str(tmp_path),
-        enable_batching=True,
-        batch_size=10_000,  # сброс по заполнению не сработает
-        batch_interval=600.0,  # и по времени тоже
-        batch_max_pending=max_pending,
         modules={},
         channels={
             "system_file": LoggerChannelSchema(
@@ -72,8 +66,8 @@ def _config(tmp_path: Path, *, max_pending: int) -> LoggerManagerConfig:
 
 
 @contextmanager
-def _logger(tmp_path: Path, *, max_pending: int) -> Iterator[LoggerManager]:
-    manager = LoggerManager(manager_name="CountersLogger", config=_config(tmp_path, max_pending=max_pending))
+def _logger(tmp_path: Path, **_ignored: object) -> Iterator[LoggerManager]:
+    manager = LoggerManager(manager_name="CountersLogger", config=_config(tmp_path))
     try:
         yield manager
     finally:
@@ -85,63 +79,20 @@ def _overflow(manager: LoggerManager, count: int) -> None:
         manager.info(f"переполняем буфер {i}", module="unit")
 
 
-class _StuckChannel(LogChannel):
-    """Канал, залипший на записи — модель медленного/подвисшего приёмника.
-
-    Наследует ``LogChannel``, а не утиный тип: ``ChannelRegistry.register``
-    проверяет ``isinstance(channel, IChannel)`` и утку молча отвергает.
-    """
-
-    def __init__(self, name: str = "system_file") -> None:
-        super().__init__(LoggerChannelSchema(name=name, type="console", enabled=True))
-        self.entered = threading.Event()
-        self.release = threading.Event()
-        self.writes: List[Dict[str, Any]] = []
-
-    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        self.entered.set()
-        self.release.wait(timeout=10.0)
-        self.writes.append(record)
-        return {"status": "success", "channel": self.name}
-
-
-@contextmanager
-def _stuck_sink(manager: LoggerManager) -> Iterator[_StuckChannel]:
-    """Подменить system_file залипшим каналом и занять его сброс."""
-    manager._channel_registry.unregister("system_file")
-    channel = _StuckChannel()
-    manager._channel_registry.register(channel)
-
-    manager.info("первая запись — она и залипнет", module="unit")
-    drainer = threading.Thread(target=lambda: manager.flush(), name="drainer")
-    drainer.start()
-    assert channel.entered.wait(timeout=10.0), "сток не занят — сценарий не воспроизведён"
-    try:
-        yield channel
-    finally:
-        channel.release.set()
-        drainer.join(timeout=10.0)
-
-
 # =============================================================================
-# Потери буфера
+# Потери на стыке «менеджер → канал»
 # =============================================================================
-
-
-def test_dropped_by_channel_reaches_get_stats(tmp_path: Path) -> None:
-    """Потеря названа в get_stats() менеджера, с именем канала-виновника.
-
-    Сценарий приёмки: сток ЗАЛИП (а не «потолок ниже пачки») — именно так
-    выглядит медленный приёмник на живой системе.
-    """
-    with _logger(tmp_path, max_pending=5) as manager:
-        with _stuck_sink(manager):
-            _overflow(manager, 50)
-
-            batch_stats = manager.get_stats()["batch_stats"]
-            assert batch_stats["dropped"] == 45
-            assert batch_stats["dropped_by_channel"] == {"system_file": 45}
-            assert batch_stats["pending"]["system_file"] == 5
+#
+# Ф7.4: тесты про ``batch_stats`` (dropped_by_channel, pending, max_pending,
+# overflow_policy) сняты вместе с батчингом — они сторожили счётчики буфера,
+# которого больше нет. Гарантии, ради которых они писались, живут дальше в
+# ``LOSS_COUNTER_KEYS``: «ни одна запись не числится доставленной, если
+# приёмника нет» и «потеря видна снаружи под своим именем».
+#
+# Что при этом ИСЧЕЗЛО и названо честно: залипший сток больше не поглощается
+# буфером — он блокирует поток-эмитент. Замер прежнего сценария («сток занят,
+# 50 записей») теперь просто виснет. Политика для этого случая — предмет Ф7.2
+# (async → sync → drop → flush), а не батчинга.
 
 
 def test_dead_sink_does_not_report_a_healthy_plane(tmp_path: Path) -> None:
@@ -165,35 +116,8 @@ def test_dead_sink_does_not_report_a_healthy_plane(tmp_path: Path) -> None:
         manager.flush()
 
         stats = manager.get_stats()
-        assert stats["batch_stats"]["total_flushed"] == 0, "запись числится доставленной при снятом приёмнике"
         assert stats["records_without_channels"] == 50
         assert stats["unresolved_channel_records"] == 0
-
-
-def test_healthy_logger_reports_zero_drops(tmp_path: Path) -> None:
-    """Обратная половина: без переполнения счётчик молчит (нулём, а не отсутствием)."""
-    with _logger(tmp_path, max_pending=10_000) as manager:
-        _overflow(manager, 50)
-
-        batch_stats = manager.get_stats()["batch_stats"]
-        assert batch_stats["dropped"] == 0
-        assert batch_stats["dropped_by_channel"] == {}
-
-
-def test_counters_facade_normalizes_buffer_key(tmp_path: Path) -> None:
-    """``observability_counters`` отдаёт буфер под одним именем для всех плоскостей.
-
-    Логгер держит его в ``batch_stats`` (свой ручной словарь), статистика —
-    в ``buffer`` (от ChannelRoutingManager). Потребитель команды не должен
-    знать, какой из двух менеджеров он спрашивает.
-    """
-    with _logger(tmp_path, max_pending=5) as manager:
-        with _stuck_sink(manager):
-            _overflow(manager, 50)
-
-            counters = observability_counters(logger=manager)
-            assert set(counters) == {"logger"}
-            assert counters["logger"]["buffer"]["dropped_by_channel"] == {"system_file": 45}
 
 
 def test_counters_facade_survives_a_broken_manager() -> None:
@@ -250,52 +174,9 @@ def test_error_floor_stays_silent_while_channel_is_alive(tmp_path: Path) -> None
 # =============================================================================
 
 
-REQUIRED_BUFFER_KEYS: List[str] = [
-    "dropped",
-    "dropped_by_channel",
-    "flush_failed",
-    "flush_failed_by_channel",
-    "in_flight_records",
-    "max_pending",
-    "overflow_policy",
-    "pending",
-    "urgent_flush_requests",
-]
-
-
-def test_published_key_names_are_pinned(tmp_path: Path) -> None:
-    """Имена ключей — контракт с потребителем команды, а не деталь реализации.
-
-    Переименование без правки этого списка = молча сломанный внешний
-    потребитель (класс «дефолтный путь сверять с публикатором»).
-    """
-    with _logger(tmp_path, max_pending=10_000) as manager:
-        buffer_stats = observability_counters(logger=manager)["logger"]["buffer"]
-        missing = [k for k in REQUIRED_BUFFER_KEYS if k not in buffer_stats]
-        assert not missing, f"ключи исчезли из публикации: {missing}"
-
-
-def test_limit_is_operable_from_config(tmp_path: Path) -> None:
-    """Потолок берётся из конфига, а не зашит константой.
-
-    Иначе «ограничили буфер» означало бы «выбрали за оператора»: ни поднять под
-    свою нагрузку, ни проверить срабатывание на живой системе было бы нельзя.
-    """
-    with _logger(tmp_path, max_pending=7) as manager:
-        buffer_stats = manager.get_stats()["batch_stats"]
-        assert buffer_stats["max_pending"] == 7
-        assert buffer_stats["overflow_policy"] == "drop_oldest"
-
-
-def test_config_typo_in_policy_fails_loudly() -> None:
-    """Опечатка в политике — отказ на ГРАНИЦЕ конфига, а не посреди reconfigure.
-
-    Валидация в конструкторе буфера ловила её слишком поздно: reconfigure к тому
-    моменту уже остановил старый буфер и пересоздал каналы, и менеджер оставался
-    с молча выключенным батчингом.
-    """
-    with pytest.raises(ValueError, match="overflow_policy"):
-        LoggerManagerConfig(app_name="bad", batch_overflow_policy="drop_middle")
+# Ф7.4: пин имён ключей буфера снят вместе с батчингом — ключ ``buffer`` у
+# плоскости логов больше не публикуется (буфера нет). У плоскости статистики он
+# остался (AggregationWindow) и пинуется её собственными тестами.
 
 
 @pytest.mark.parametrize(
@@ -340,10 +221,8 @@ def test_every_manager_counter_is_published_or_declared_unpublished(make_manager
             "app_name",
             "channels_count",
             "module_channels_count",
-            "batching_enabled",
             "include_stacktrace",
             # Едет наружу целиком отдельным ключом ``buffer`` (см. _plane_counters).
-            "batch_stats",
             "buffer",
             # Описание менеджера базы CRM (статистика, роутер): состав каналов и
             # идентичность, а не состояние наблюдаемости. Спрашивается другими

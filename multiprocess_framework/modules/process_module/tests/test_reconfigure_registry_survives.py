@@ -5,7 +5,7 @@
 гласит: ``ChannelRoutingManager.reconfigure`` зовёт ``_close_all_channels()``
 ДО валидации нового конфига и не откатывается — любой отвергнутый reload
 оставляет менеджер с пустым реестром. Воспроизведено вердиктом:
-``lm.reconfigure({**валидный, "batch_overflow_policy": "drop_middle"})`` →
+``lm.reconfigure({**валидный, "sampling_max_level": "ЖЁЛТЫЙ"})`` →
 каналов 12 → 0, ``system.log`` = 0 байт, логгер больше не пишет никуда.
 
 **Причина устранена 2026-07-27** (validate-then-swap + откат в
@@ -69,7 +69,6 @@ def _logger(tmp_path: Path) -> LoggerManager:
         config=LoggerManagerConfig(
             app_name="r9_guard",
             log_directory=str(tmp_path),
-            enable_batching=True,
             modules={},
             channels={
                 "system_file": LoggerChannelSchema(
@@ -103,7 +102,9 @@ def test_rejected_observability_reload_keeps_channels(tmp_path: Path) -> None:
 
         with pytest.raises(Exception):
             _apply_section(
-                {"log_level": "DEBUG", "batch_overflow_policy": "drop_middle"},
+                # Негодное значение поля САМОЙ секции observability (Ф7.4: прежним
+                # было batch_overflow_policy, снятое вместе с батчингом).
+                {"log_level": "DEBUG", "retention_days": -5},
                 logger=mgr,
             )
 
@@ -128,11 +129,11 @@ def test_valid_observability_reload_still_applies(tmp_path: Path) -> None:
     mgr = _logger(tmp_path)
     try:
         _apply_section(
-            {"batch_max_pending": 42, "batch_overflow_policy": "drop_newest"},
+            {"sampling_first_n": 42, "sampling_max_level": "INFO"},
             logger=mgr,
         )
-        assert mgr.config.batch_max_pending == 42, "валидный reload не применился"
-        assert mgr.config.batch_overflow_policy == "drop_newest"
+        assert mgr.config.sampling_first_n == 42, "валидный reload не применился"
+        assert mgr.config.sampling_max_level == "INFO"
         assert mgr._channel_registry.names(), "валидный reload оставил менеджер без каналов"
     finally:
         mgr.shutdown()
@@ -152,7 +153,7 @@ def test_direct_manager_reconfigure_keeps_registry(tmp_path: Path) -> None:
     try:
         before = sorted(mgr._channel_registry.names())
         raw: dict[str, Any] = mgr.config.model_dump()
-        raw["batch_overflow_policy"] = "drop_middle"
+        raw["sampling_max_level"] = "ЖЁЛТЫЙ"
 
         applied = mgr.reconfigure(raw)
 
@@ -178,12 +179,12 @@ def test_rejected_reconfigure_keeps_previous_settings(tmp_path: Path) -> None:
     """
     mgr = _logger(tmp_path)
     try:
-        before_pending = mgr.config.batch_max_pending
+        before_first_n = mgr.config.sampling_first_n
         raw: dict[str, Any] = mgr.config.model_dump()
-        raw["batch_max_pending"] = before_pending + 777
-        raw["batch_overflow_policy"] = "drop_middle"
+        raw["sampling_first_n"] = before_first_n + 777
+        raw["sampling_max_level"] = "ЖЁЛТЫЙ"
 
         assert mgr.reconfigure(raw) is False
-        assert mgr.config.batch_max_pending == before_pending, "поле из отвергнутого конфига просочилось"
+        assert mgr.config.sampling_first_n == before_first_n, "поле из отвергнутого конфига просочилось"
     finally:
         mgr.shutdown()

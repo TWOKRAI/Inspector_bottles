@@ -15,7 +15,7 @@ BaseManager + ObservableMixin
 ChannelRoutingManager  ← базовый класс
         │
         ▼
-LoggerManager (BatchBuffer, scope-based routing)
+LoggerManager (синхронная запись, scope-based routing)
         │
         ▼
 ErrorManager  (хук _route() для level-based routing; log() общий)
@@ -27,7 +27,7 @@ ErrorManager  (хук _route() для level-based routing; log() общий)
 ```
 
 **Что дал ErrorManager от LoggerManager/ChannelRoutingManager:**
-- Все батчинг логики (BatchBuffer из CRM)
+- Синхронная запись в каналы (батчинг снят в Ф7.4)
 - `_channel_registry` thread-safe из CRM
 - `_dispatcher` для маршрутизации из CRM
 - Интеграция через ObservableMixin
@@ -87,7 +87,7 @@ ErrorManager  (хук _route() для level-based routing; log() общий)
 |---|---|
 | `message` → `channel_dispatcher(key=type)` → `IMessageChannel` | `error_record` → `_level_to_channel[level]` → `ILogChannel` |
 | `QueueChannel` / `SocketChannel` | `FileChannel` / `ConsoleChannel` |
-| `send_async()` с PriorityQueue | `BatchBuffer` для WARNING; ERROR/CRITICAL — синхронно мимо буфера |
+| `send_async()` с PriorityQueue | Синхронная запись на всех уровнях (Ф7.4) |
 | `register_route("set_fps", "ctrl_channel")` | Автоматическая регистрация при `_setup_level_routes()` |
 
 ---
@@ -203,7 +203,7 @@ stats = em.get_stats()
 #     "messages_processed": 42,
 #     "messages_skipped": 0,
 #     "channels_count": 3,
-#     "batching_enabled": True,
+
 #     "include_stacktrace": True,
 #     "level_routes": {               ← новое поле (level → channel)
 #         "CRITICAL": "critical_file",
@@ -270,9 +270,6 @@ config = ErrorManagerConfig(
     # Уровень и батчинг
     default_level="WARNING",   # Минимальный уровень для всех каналов
     include_stacktrace=True,
-    enable_batching=True,
-    batch_size=50,
-    batch_interval=0.5,        # сброс каждые 0.5 сек или при ERROR/CRITICAL
 
     # Дополнительные каналы через наследованный channels
     channels={
@@ -322,31 +319,13 @@ em.register_channel(alert_ch)
 
 ---
 
-## Батчинг (BatchBuffer из CRM)
+## Запись синхронна (батчинг снят в Ф7.4)
 
-Батчинг здесь касается **только `WARNING`**. `ERROR` и `CRITICAL` в пачку не попадают вовсе
-(Ф0.9): severity-путь сбрасывает пачку своего канала и пишет запись **напрямую**, синхронно.
-Это не зависит ни от `enable_batching`, ни от `priority_flush`.
-
-Почему `WARNING` остался батченым: это не crash-лог, и он спокойно терпит `batch_interval`.
-Синхронная запись каждого предупреждения оплачивалась бы вызывающим потоком без пользы.
-
-> Историческая справка: раньше здесь было написано «ERROR/CRITICAL записываются немедленно»
-> со ссылкой на `priority_flush`. Это было **неправдой** — приоритет в буфер не передавал никто,
-> и окно потери crash-лога равнялось `batch_interval` (0.5 с). Исправлено Ф0.1 → Ф0.9.
-
-| Параметр | По умолчанию | Описание |
-|---|---|---|
-| `enable_batching` | `True` | Включить батчинг **для WARNING**. На ERROR/CRITICAL не влияет |
-| `batch_size` | `50` | Максимальный размер пачки |
-| `batch_interval` | `0.5 сек` | Интервал принудительного сброса |
-| `batch_max_pending` | `10 000` | Потолок неотправленных записей **на канал**. `0` — без потолка |
-| `batch_overflow_policy` | `drop_oldest` | Что терять при переполнении: `drop_oldest` (кольцо) или `drop_newest` |
-
-**Потолок буфера (Ф0.3).** Касается только батченого пути (`WARNING` и ниже) — `ERROR`/`CRITICAL`
-идут мимо буфера и потолком не затрагиваются. Потери названы: `get_stats()["batch_stats"]`
-содержит `dropped` и `dropped_by_channel`. Параметры задаются секцией `observability` (общие
-с логгером) и читаются командой `introspect.observability`.
+Все уровни, включая `WARNING`, пишутся в вызывающем потоке. Раньше `WARNING` шёл через
+`BatchBuffer`, а `ERROR`/`CRITICAL` — мимо него; замер показал, что батчинг не экономит
+вызовы на границе ОС и ухудшает хвост эмитента в 18 раз, поэтому механизм снят целиком.
+Ключи `enable_batching` / `batch_*` из конфига убраны; секция `observability` жалуется,
+если встретит их (молча игнорировать снятую ручку — это «проглоченный сбой»).
 
 **Пол ошибок.** Severity-маршрут конфиго-зависим целиком (`_setup_level_routes` строит
 `_level_to_channel` из фактически созданных каналов). Если канал уровня отсутствует, снят через
@@ -358,8 +337,8 @@ em.register_channel(alert_ch)
 логгера — параметром `manager="error"`. Раньше команда била только в `logger_manager`,
 хотя методы у `ErrorManager` были: дыра была не в методах, а в адресуемости.
 
-**Thread-safety:** `BatchBuffer` использует `threading.Lock` — несколько потоков одного процесса
-могут одновременно вызывать `em.error()` без гонок данных.
+**Thread-safety:** запись синхронна; несколько потоков одного процесса могут одновременно
+вызывать `em.error()`.
 
 ---
 

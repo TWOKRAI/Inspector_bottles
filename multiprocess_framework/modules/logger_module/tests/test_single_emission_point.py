@@ -157,23 +157,21 @@ def test_empty_list_is_counted_as_loss(tmp_path: Path) -> None:
         mgr.shutdown()
 
 
-def test_empty_list_does_not_count_as_batched(tmp_path: Path) -> None:
-    """Счётчик не имеет права утверждать, что запись ушла в буфер.
+def test_empty_addressing_is_counted_as_loss_not_as_delivery(tmp_path: Path) -> None:
+    """Пустая адресация — потеря под своим именем, и ничем другим не числится.
 
-    Именно этим старая ветка и была опасна: ``messages_batched`` рос, в буфер не
-    попадало ничего, и по числам всё выглядело здоровым.
+    Ф7.4: прежняя редакция сторожила ``messages_batched`` («счётчик не имеет
+    права утверждать, что запись ушла в буфер»). Буфера и счётчика больше нет,
+    но опасность та же: запись без приёмников не должна выглядеть доставленной.
     """
     mgr = _custom(tmp_path, forced=[], batching=True)
     try:
-        # Дельта, а не абсолют: менеджер логирует собственное ``initialized``
-        # через себя же, и к моменту проверки счётчик уже ненулевой. Абсолютный
-        # ноль здесь был бы тестом на то, что менеджер молчит о своём старте.
-        before = mgr.stats["messages_batched"]
+        before = mgr.stats.get("channel_written_records", 0)
 
         mgr.log(LogScope.SYSTEM, LogLevel.INFO, "некуда", module="m")
 
-        assert mgr.stats["messages_batched"] == before, "пустая адресация посчитана как батченая"
         assert mgr.stats["records_without_channels"] == 1
+        assert mgr.stats.get("channel_written_records", 0) == before, "пустая адресация посчитана доставкой"
     finally:
         mgr.shutdown()
 

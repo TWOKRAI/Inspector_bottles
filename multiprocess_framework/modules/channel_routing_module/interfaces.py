@@ -91,7 +91,6 @@ class IBufferStrategy(ABC):
 
     Реализации:
         AsyncSenderBuffer — PriorityQueue + фоновый поток (для RouterManager)
-        BatchBuffer       — deque + lock + timer (для LoggerManager)
         DirectBuffer      — без буферизации, прямой вызов write() (для тестов)
 
     Контракт send_fn:

@@ -656,14 +656,16 @@ class TestObservabilityLayers:
     def test_app_layer_survives_where_recipe_is_silent(self) -> None:
         """Ключ, о котором рецепт молчит, наследуется снизу — а не пересобирается из L0."""
         assembler = BlueprintAssembler(
-            observability_section={"log_level": "DEBUG", "enable_batching": False},
+            # Ф7.4: прежним «ключом, о котором рецепт молчит», был enable_batching —
+            # снят вместе с батчингом. Взят живой ключ того же слоя.
+            observability_section={"log_level": "DEBUG", "retention_days": 3},
             log_dir="logs",
         )
         result = assembler.assemble(copy.deepcopy(_L2_BLUEPRINT))
 
         logger_cfg = result["processor"]["managers"]["logger"]
         assert logger_cfg["default_level"] == "WARNING"  # рецепт
-        assert logger_cfg["enable_batching"] is False  # system.yaml, рецепт молчит
+        assert logger_cfg["retention_days"] == 3  # system.yaml, рецепт молчит
 
     def test_per_process_override_does_not_touch_neighbours(self) -> None:
         """Пара: правка camera_0 в рецепте — сосед бит-в-бит без неё."""
@@ -703,7 +705,7 @@ class TestObservabilityLayers:
 
     def test_boot_result_equals_expand_of_resolved_layers(self) -> None:
         """boot ≡ раскладка резолвнутых слоёв — якорь для пары «boot ≡ reload»."""
-        app = {"log_level": "DEBUG", "enable_batching": False}
+        app = {"log_level": "DEBUG", "retention_days": 3}
         assembler = BlueprintAssembler(observability_section=app, log_dir="logs")
         result = assembler.assemble(copy.deepcopy(_L2_BLUEPRINT))
 

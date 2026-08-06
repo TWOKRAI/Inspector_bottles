@@ -18,7 +18,6 @@ from typing import Any, Dict, List
 from ..interfaces import IChannel
 from ..core.channel_routing_manager import ChannelRoutingManager
 from ..buffers.direct_buffer import DirectBuffer
-from ..buffers.batch_buffer import BatchBuffer, BatchConfig
 from ..buffers.async_sender_buffer import AsyncSenderBuffer
 
 
@@ -150,24 +149,39 @@ class TestBufferIntegration:
 
         assert written == [("ch", {"x": 1})]
 
-    def test_manager_flush_drains_the_batch_buffer(self):
-        """``flush()`` менеджера обязан дойти до буфера — иначе хвост теряется молча."""
-        flushed = {}
+    def test_manager_flush_reaches_the_buffer(self):
+        """``flush()`` менеджера обязан дойти до буфера — иначе хвост теряется молча.
 
-        def _flush(ch, batch):
-            flushed.setdefault(ch, []).extend(batch)
+        Ф7.4: батчевого буфера больше нет (запись синхронна), но контракт базы
+        остался — она обязана звать ``flush`` у ЛЮБОЙ стратегии. Сторожим его
+        на буфере-шпионе: без него менеджер с медленным стоком терял бы хвост
+        молча, и заметили бы это только на живом стенде.
+        """
+        calls = []
 
-        buf = BatchBuffer(flush_fn=_flush, config=BatchConfig(max_size=1000, flush_interval=60.0))
-        mgr = _manager(buffer_strategy=buf)
+        class _SpyBuffer:
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+            def enqueue(self, channel, data, priority=None):
+                calls.append(("enqueue", channel))
+
+            def flush(self, channel=None):
+                calls.append(("flush", channel))
+
+            @property
+            def stats(self):
+                return {}
+
+        mgr = _manager(buffer_strategy=_SpyBuffer())
         mgr.register_channel(_MockChannel("ch"))
-
-        buf.enqueue("ch", {"msg": "a"})
-        buf.enqueue("ch", {"msg": "b"})
-        assert len(flushed.get("ch", [])) == 0, "пачка ушла до flush — интервал не соблюдён"
 
         mgr.flush()
 
-        assert len(flushed.get("ch", [])) == 2
+        assert ("flush", None) in calls
 
     def test_async_sender_buffer_delivers(self):
         received = []

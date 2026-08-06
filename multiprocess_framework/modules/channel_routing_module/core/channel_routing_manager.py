@@ -10,7 +10,7 @@ ChannelRoutingManager — базовый менеджер маршрутизац
 
 Наследники настраивают, но не переписывают:
   - RouterManager  — buffer=AsyncSenderBuffer, channels=IMessageChannel
-  - LoggerCore     — buffer=BatchBuffer,       channels=ILogChannel
+  - LoggerCore     — буфера НЕТ (Ф7.4: запись синхронна), channels=ILogChannel
                      (LoggerManager = LoggerCore + process-singleton)
   - ErrorManager   — брат LoggerManager (общий предок LoggerCore), + severity routing
   - StatsManager   — buffer=AggregationWindow, channels=IMetricChannel
@@ -113,7 +113,6 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
                 super().__init__(
                     "LoggerManager",
                     config=config,
-                    buffer_strategy=BatchBuffer(flush_fn=self._do_batch_flush),
                 )
             def initialize(self) -> bool:
                 result = super().initialize()
@@ -680,16 +679,14 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         (``sink.disable``, per-module каналы), и без этого вызова словари росли
         монотонно — замер: 500 имён → 500 пустых очередей.
 
-        **Оговорка про наследников (находка графа, ревью Ф1).** Метод живёт в
-        базе и зовётся у всех трёх плоскостей плюс ``RouterManager``, но
-        ``forget_channel`` есть ТОЛЬКО у ``BatchBuffer``. У
-        ``AsyncSenderBuffer`` (роутер) и ``AggregationWindow`` (статистика) его
-        нет, и ``getattr`` тихо возвращает ``None`` — то есть резидуал F6
-        фактически закрыт в одной плоскости из трёх, а не в базе «на всех».
-        Практического роста там сегодня нет: имена каналов у роутера и
-        статистики статичны, монотонно растущих словарей по динамическому имени
-        у них не образуется. Но называть это «закрыто в базе» нельзя — это
-        ровно паттерн «защита в базе мертва у наследника».
+        **Оговорка про наследников (находка графа, ревью Ф1; уточнена Ф7.4).**
+        Метод живёт в базе и зовётся у всех трёх плоскостей плюс ``RouterManager``,
+        но ``forget_channel`` не реализован ни у одного из оставшихся буферов:
+        ``BatchBuffer`` (единственный, у кого он был) снят вместе с батчингом
+        записи, а у ``AsyncSenderBuffer`` (роутер) и ``AggregationWindow``
+        (статистика) его нет — ``getattr`` тихо возвращает ``None``. Практического
+        роста нет: имена каналов у роутера и статистики статичны. Но называть это
+        «закрыто в базе» нельзя — ровно паттерн «защита в базе мертва у наследника».
 
         Счётчики потерь по каналу не трогаются: их история обязана пережить
         снятие приёмника (урок ревью фазы Ф0, ``_absorbed_backpressure``).
@@ -1088,7 +1085,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
                 self._log_error(f"[{self.manager_name}] close error on '{ch.name}': {e}")
 
     def _write_to_channel(self, channel_name: str, data: Dict[str, Any]) -> None:
-        """Записать данные напрямую в канал (минуя буфер). Используется flush_fn в BatchBuffer."""
+        """Записать данные напрямую в канал (минуя буфер)."""
         ch = self._channel_registry.get(channel_name)
         if ch is not None:
             ch.write(data)

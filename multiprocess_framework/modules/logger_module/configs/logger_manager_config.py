@@ -12,11 +12,6 @@ from typing import Annotated, Any, Dict, List, Optional
 from pydantic import Field, field_validator
 
 from ...channel_routing_module import ChannelRoutingConfig
-from ...channel_routing_module.buffers.batch_buffer import (
-    DEFAULT_MAX_PENDING,
-    DEFAULT_OVERFLOW_POLICY,
-    validate_overflow_policy,
-)
 from ...channel_routing_module.levels import (
     LEVEL_ORDER,
     SEVERITY_NUMBERS,
@@ -260,20 +255,6 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             "(не текущий каталог пакета)."
         ),
     ] = None
-    enable_batching: bool = True
-    batch_size: int = 100
-    batch_interval: float = 1.0
-    batch_max_pending: Annotated[
-        int,
-        FieldMeta(
-            "Потолок неотправленных записей НА КАНАЛ. Медленный сток без потолка "
-            "съедает память тихо (Ф0.3). 0 — без потолка."
-        ),
-    ] = DEFAULT_MAX_PENDING
-    batch_overflow_policy: Annotated[
-        str,
-        FieldMeta("Что терять при переполнении: drop_oldest (кольцо) | drop_newest"),
-    ] = DEFAULT_OVERFLOW_POLICY
 
     # Ф0.7. Ротация ограничивает каждый файл, но не их число: живой замер дал
     # 730 файлов / 291 МБ и ни одного удаления за 82 дня. Обе политики
@@ -526,14 +507,3 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         if not isinstance(value, dict):
             return value
         return {(k.upper() if isinstance(k, str) else k): v for k, v in value.items()}
-
-    @field_validator("batch_overflow_policy")
-    @classmethod
-    def _check_overflow_policy(cls, value: str) -> str:
-        """Отказ на ГРАНИЦЕ конфига, а не в конструкторе буфера.
-
-        Иначе опечатка всплывала бы посреди ``reconfigure``: старый буфер уже
-        остановлен, каналы пересозданы, ``self.config`` подменён — и менеджер
-        оставался бы в полуприменённом состоянии с молча выключенным батчингом.
-        """
-        return validate_overflow_policy(value)

@@ -241,39 +241,40 @@ class TestA2DeliveryRateIsDerivableBySnapshots:
         assert calls["n"] == 0, f"часы вызваны {calls['n']} раз на пути записи"
 
 
-class TestA3BothWritePathsAccount:
-    """A3: учёт есть на ОБЕИХ дорогах записи, а не на одной из двух."""
+class TestA3TheOnlyWritePathAccounts:
+    """A3: учёт есть на дороге записи — теперь она ровно одна.
 
-    def test_batched_path_counts_delivery(self) -> None:
-        """Батчевый путь логгера (`_flush_batch`) — своя дорога, тот же счётчик.
+    Ф7.4: батчевый путь (`_flush_batch`) снят вместе с батчингом, поэтому пара
+    «обе дороги считают одинаково» выродилась в одну дорогу. Свойство осталось
+    прежним и проверяется на ней: доставка считается, отсутствие канала —
+    по-записно в потерю, а не в доставку.
+    """
 
-        Дефект, починенный на одном пути из двух, — класс, по которому проект
-        уже бился; поэтому путь проверяется своим тестом, а не «по аналогии».
-        """
+    def _core(self):
         from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
         from multiprocess_framework.modules.logger_module.core.logger_core import LoggerCore
 
-        core = LoggerCore(config=LoggerManagerConfig(app_name="t", enable_batching=True))
+        return LoggerCore(config=LoggerManagerConfig(app_name="t"))
+
+    def test_direct_path_counts_delivery(self) -> None:
+        core = self._core()
         try:
             ch = _Channel("system_file")
             core._channel_registry.register(ch)
-            assert core._flush_batch("system_file", [{"m": 1}, {"m": 2}, {"m": 3}]) == 3
+            assert core._write_record_to_channels({"m": 1}, ["system_file"]) == 1
             snap = core._loss_counters_snapshot()
-            assert snap["channel_written_records"] == 3
-            assert snap["channel_written_by_channel"] == {"system_file": 3}
+            assert snap["channel_written_records"] == 1
+            assert snap["channel_written_by_channel"] == {"system_file": 1}
         finally:
             core.shutdown()
 
-    def test_batched_path_missing_channel_is_not_delivery(self) -> None:
-        from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
-        from multiprocess_framework.modules.logger_module.core.logger_core import LoggerCore
-
-        core = LoggerCore(config=LoggerManagerConfig(app_name="t", enable_batching=True))
+    def test_missing_channel_is_not_delivery(self) -> None:
+        core = self._core()
         try:
-            assert core._flush_batch("ghost", [{"m": 1}, {"m": 2}]) == 0
+            assert core._write_record_to_channels({"m": 1}, ["ghost"]) == 0
             snap = core._loss_counters_snapshot()
             assert snap["channel_written_records"] == 0
-            assert snap["unresolved_channel_records"] == 2, "потеря считается по-записно"
+            assert snap["unresolved_channel_records"] == 1, "потеря считается по-записно"
         finally:
             core.shutdown()
 

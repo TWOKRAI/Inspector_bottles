@@ -87,14 +87,14 @@ class TestA3VerdictIsThreeStateNotBoolean:
 
         Первая редакция отвечала здесь `verified: true` при `checked: 0`.
         """
-        result = observability_verified({"enable_batching": False}, _EFFECTIVE_INFO)
+        result = observability_verified({"retention_days": 7}, _EFFECTIVE_INFO)
         assert result["verdict"] == "unverifiable"
         assert result["checked"] == 0
         assert result["unverifiable"], "непроверяемые пути обязаны быть названы"
 
     def test_confirmed_requires_at_least_one_checked_path(self) -> None:
         """Вторая половина: confirmed невозможен при нулевом охвате."""
-        for section in ({}, {"enable_batching": False}):
+        for section in ({}, {"retention_days": 7}):
             result = observability_verified(section, _EFFECTIVE_INFO)
             assert not (result["verdict"] == "confirmed" and result["checked"] == 0), (
                 f"confirmed при нулевом охвате: {section} → {result}"
@@ -107,31 +107,23 @@ class TestA3VerdictIsThreeStateNotBoolean:
 
 
 class TestCoherentSnapshotForDeltaJudgement:
-    """`flush=True` — снимок КОГЕРЕНТНЫЙ: «записано» включает уже эмитированное.
+    """``flush=True`` — снимок КОГЕРЕНТНЫЙ: «записано» включает уже эмитированное.
 
-    Проверяется наблюдаемый ЭФФЕКТ, а не вызов метода с нужным именем: счётчик
-    при батчинге отстаёт от эмиссии, и окно, открытое без ``flush``, наследует
-    записи команды-смены. Живой замер (2026-07-30): один опрос стоит ~5.1 записи,
-    и контрольный снимок без ``flush`` отдавал ровно ноль вместо этих пяти.
+    Ф7.4: прежняя редакция воспроизводила отставание счётчика БАТЧИНГОМ (запись
+    ждала в пачке, и окно без ``flush`` наследовало записи команды-смены; живой
+    замер 2026-07-30 дал 5.1 записи на опрос). Батчинг снят — отставания этого
+    рода не существует, и когерентность стала свойством самой записи. Тест
+    остаётся, потому что обещание команды не изменилось: то, что уже
+    эмитировано, обязано быть посчитано к моменту ответа.
     """
 
     def _logger(self, tmp_path):
         from multiprocess_framework.modules.logger_module.configs import LoggerManagerConfig
         from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 
-        # Батчинг с большим порогом и длинным интервалом: запись гарантированно
-        # ждёт в буфере, пока её не дожмут явно.
-        return LoggerManager(
-            config=LoggerManagerConfig(
-                app_name="coherent",
-                log_directory=str(tmp_path),
-                enable_batching=True,
-                batch_size=10_000,
-                batch_interval=600.0,
-            )
-        )
+        return LoggerManager(config=LoggerManagerConfig(app_name="coherent", log_directory=str(tmp_path)))
 
-    def test_flush_makes_the_emitted_record_counted(self, tmp_path) -> None:
+    def test_emitted_records_are_counted_without_waiting(self, tmp_path) -> None:
         from multiprocess_framework.modules.process_module.managers.observability_reload import (
             observability_counters,
         )
@@ -139,43 +131,13 @@ class TestCoherentSnapshotForDeltaJudgement:
         logger = self._logger(tmp_path)
         try:
             before = observability_counters(logger=logger)["logger"]["channel_written_records"]
-            # Уровень INFO намеренно: ERROR идёт ПРЯМЫМ путём мимо буфера (он
-            # подстрахован полом и ждать такта не имеет права), и на нём отставания
-            # счётчика не воспроизвести — тест был бы не о том.
             for i in range(5):
-                logger.info(f"запись в буфер {i}")
+                logger.info(f"запись {i}", module="unit")
 
-            # Без flush запись ещё не посчитана — она эмитирована, но не записана.
-            unflushed = observability_counters(logger=logger)["logger"]["channel_written_records"]
-            assert unflushed == before, "запись посчиталась без flush — батчинг не воспроизведён, тест не о том"
-
-            # С flush — посчитана. Это и есть свойство, на котором стоит вычет
-            # цены опроса в драйвере.
-            flushed = observability_counters(logger=logger, flush=True)["logger"]["channel_written_records"]
-            assert flushed > unflushed, f"flush не дожал буфер: {unflushed} -> {flushed}"
+            after = observability_counters(logger=logger)["logger"]["channel_written_records"]
+            assert after - before >= 5, "эмитированное не посчитано к моменту ответа"
         finally:
             logger.shutdown()
-
-    def test_broken_flush_does_not_kill_the_snapshot(self, tmp_path) -> None:
-        """Отказ flush'а не имеет права стоить снимка целиком.
-
-        Одна несжатая плоскость — это `buffer.flush_failed` в том же ответе, а не
-        потеря всех счётчиков: диагностическая команда, падающая из-за состояния
-        диагностируемого, отнимает единственный способ понять, что происходит.
-        """
-        from multiprocess_framework.modules.process_module.managers.observability_reload import (
-            observability_counters,
-        )
-
-        class _Broken:
-            def flush(self):
-                raise RuntimeError("сток не отвечает")
-
-            def get_stats(self):
-                return {"channel_written_records": 7}
-
-        section = observability_counters(logger=_Broken(), flush=True)["logger"]
-        assert section["channel_written_records"] == 7
 
 
 class TestVerdictRidesInConfigReloadResponse:

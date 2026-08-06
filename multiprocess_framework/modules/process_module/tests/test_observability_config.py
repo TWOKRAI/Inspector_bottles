@@ -104,7 +104,9 @@ def test_partial_section_fills_defaults() -> None:
     """Частичная секция (только log_level) → остальное defaults."""
     out = expand_observability({"log_level": "WARNING"})
     assert out["logger"]["default_level"] == "WARNING"
-    assert out["logger"]["enable_batching"] is True  # дефолт
+    # Второй ключ — из дефолта, а не из ввода (Ф7.4: прежним был enable_batching,
+    # снятый вместе с батчингом; смысл теста — «остальное заполняется само»).
+    assert out["logger"]["sampling_max_level"] == "DEBUG"
 
 
 def test_console_off_toggles_channel() -> None:
@@ -150,38 +152,40 @@ def test_commands_log_success_explicit_on() -> None:
     assert out["command"] == {"log_success": True}
 
 
-class TestBufferCeilingIsOperable:
-    """Ф0.3: потолок буфера доезжает из секции observability до обоих менеджеров.
+class TestRemovedBatchingKeysAreNamedAloud:
+    """Ф7.4: снятые ключи батчинга не имеют права исчезнуть МОЛЧА.
 
-    Без этого «ограничили BatchBuffer» означало бы зашитую константу: оператор
-    не может ни поднять потолок под свою нагрузку, ни проверить срабатывание
-    на живой системе через config.reload.
+    Схема принимает лишние ключи молча (проверено), поэтому конфиг с
+    ``enable_batching: true`` после сноса просто перестал бы что-либо значить.
+    Раньше здесь стоял ``TestBufferCeilingIsOperable`` — он сторожил, что потолок
+    буфера доезжает до обоих менеджеров; буфера нет, и его предмет исчез вместе
+    с ним. На освободившееся место встаёт обратное обещание: об исчезновении
+    говорят вслух.
     """
 
-    def test_defaults_are_emitted_for_logger_and_error(self) -> None:
-        result = expand_observability({})
+    def test_stale_key_produces_a_complaint(self, caplog) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            expand_observability({"enable_batching": True, "batch_size": 50})
+
+        said = " ".join(r.getMessage() for r in caplog.records)
+        assert "enable_batching" in said and "batch_size" in said
+        assert "синхрон" in said, "жалоба обязана сказать, что запись теперь синхронна"
+
+    def test_clean_config_is_silent(self, caplog) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            expand_observability({"log_level": "INFO"})
+
+        assert not any("снятые ключи" in r.getMessage() for r in caplog.records)
+
+    def test_removed_keys_do_not_reach_the_manager_configs(self) -> None:
+        result = expand_observability({"enable_batching": True, "batch_max_pending": 7})
         for plane in ("logger", "error"):
-            assert result[plane]["batch_max_pending"] == 10_000
-            assert result[plane]["batch_overflow_policy"] == "drop_oldest"
-
-    def test_explicit_values_reach_both_planes(self) -> None:
-        result = expand_observability({"batch_max_pending": 25, "batch_overflow_policy": "drop_newest"})
-        for plane in ("logger", "error"):
-            assert result[plane]["batch_max_pending"] == 25
-            assert result[plane]["batch_overflow_policy"] == "drop_newest"
-
-    def test_emitted_keys_are_valid_for_the_manager_configs(self) -> None:
-        """Секция обязана раскладываться в поля, которые конфиги реально принимают."""
-        from multiprocess_framework.modules.error_module.configs.error_manager_config import (
-            ErrorManagerConfig,
-        )
-        from multiprocess_framework.modules.logger_module.configs.logger_manager_config import (
-            LoggerManagerConfig,
-        )
-
-        result = expand_observability({"batch_max_pending": 7})
-        assert LoggerManagerConfig(**result["logger"]).batch_max_pending == 7
-        assert ErrorManagerConfig(**result["error"]).batch_max_pending == 7
+            assert "enable_batching" not in result[plane]
+            assert "batch_max_pending" not in result[plane]
 
 
 class TestMachineContextIsOverriddenOnlyByAnExplicitKey:

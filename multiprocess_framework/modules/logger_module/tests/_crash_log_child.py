@@ -6,8 +6,15 @@
     python _crash_log_child.py <baseline|fixed> <log_dir> [nosinks]
 
   * ``baseline`` — воспроизводит поведение ДО фикса: ``is_error_level``
-    подменён на «всегда False», то есть ошибка снова уходит в ``BatchBuffer``
-    и ждёт ``batch_interval``. Это болезнь.
+    подменён на «всегда False» И приёмник подменён на ОТКЛАДЫВАЮЩИЙ (копит
+    записи в памяти, пишет только на ``close``). Это болезнь.
+
+    До Ф7.4 откладывал сам фреймворк: батч-буфер держал запись до
+    ``batch_interval``. Батчинг снят, отложенной записи в проде больше нет —
+    поэтому болезнь приходится вносить приёмником. Пара сохранена сознательно:
+    без воспроизведения болезни «лечение» ничего не доказывает, а гарантия
+    «ошибка на диске до смерти процесса» переживёт любую будущую попытку
+    снова что-нибудь отложить.
   * ``fixed``    — прод-путь как есть.
   * ``nosinks``  — третий аргумент: собрать конфиг БЕЗ единого включённого
     приёмника ошибок. Проверяет конфиго-независимость floor'а.
@@ -16,8 +23,8 @@
 существовать в рабочем коде (правило «флаги не должны стать костылями»).
 
 После записи ERROR процесс печатает ``logged`` в stdout и засыпает надолго —
-убивает его родитель, чтобы ни ``shutdown()``, ни ``atexit``, ни таймер
-``BatchBuffer`` не успели ничего сбросить.
+убивает его родитель, чтобы ни ``shutdown()``, ни ``atexit``, ни ``close``
+приёмника не успели ничего сбросить.
 
 Имя начинается с ``_`` — файл не собирается pytest (``python_files = test_*.py``).
 """
@@ -60,6 +67,27 @@ def main(mode: str, log_dir: str, sinks: str = "with-sinks") -> None:
         logger_core.is_error_level = lambda _level: False
         error_manager_mod.is_error_level = lambda _level: False
 
+        # Отложенный приёмник вместо снятого батч-буфера: копит в память,
+        # на диск отдаёт только при закрытии — которого не будет, процесс убьют.
+        from multiprocess_framework.modules.logger_module.channels import log_channel as _lc
+
+        class _DeferringFileChannel(_lc.FileChannel):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                self._deferred = []
+
+            def write(self, record):
+                self._deferred.append(record)
+                return {"status": "success", "channel": self.name}
+
+            def close(self):  # pragma: no cover — в baseline до close не доходит
+                for rec in self._deferred:
+                    super().write(rec)
+                self._deferred.clear()
+                super().close()
+
+        _lc.register_sink_factory("file", _DeferringFileChannel)
+
     channels = {}
     scopes_channels = []
     if sinks != "nosinks":
@@ -75,11 +103,6 @@ def main(mode: str, log_dir: str, sinks: str = "with-sinks") -> None:
     config = LoggerManagerConfig(
         app_name="error_floor_pair",
         log_directory=log_dir,
-        enable_batching=True,
-        # Ни один другой триггер сброса не должен сработать: ни размер пачки,
-        # ни таймер. Остаётся ровно синхронный путь ошибок.
-        batch_size=10_000,
-        batch_interval=_SLEEP_UNTIL_KILLED * 10,
         modules={},
         channels=channels,
         scopes={

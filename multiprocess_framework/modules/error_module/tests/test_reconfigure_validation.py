@@ -12,11 +12,14 @@
   B5 удалить ``ErrorManager._validate_config`` (унаследовать родительский)
      → красный: rejected_config_does_not_touch_channels.
      Первая редакция этого теста НЕ ловила B5 и была зелёной под собственным
-     сломом: она подавала ``batch_overflow_policy`` — поле, которое знают ОБА
-     валидатора, так что родительский справлялся сам. Различает их только
-     поле самого ErrorManager (``error_file_path`` → разворачивается в
-     ``channels.errors_file.file_path``): родительский его не знает и
-     пропускает мусор молча.
+     сломом: она подавала поле, которое знают ОБА валидатора, так что
+     родительский справлялся сам. Различает их только поле самого ErrorManager
+     (``error_file_path`` → разворачивается в ``channels.errors_file.file_path``):
+     родительский его не знает и пропускает мусор молча.
+
+     Ф7.4: негодным значением было ``batch_overflow_policy: drop_middle``; ключ
+     снят вместе с батчингом, и опечатка в снятом поле больше ничего не
+     отвергает. Взято живое поле с валидатором границы — ``sampling_max_level``.
   B8 не восстанавливать слепок конфига в ``ErrorManager.__init__``
      → красный: include_stacktrace_survives_rollback
 """
@@ -54,7 +57,7 @@ def test_flat_config_typo_rejected(tmp_path: Path) -> None:
             {
                 "app_name": "r9_errors",
                 "log_directory": str(tmp_path),
-                "batch_overflow_policy": "drop_middle",
+                "sampling_max_level": "ЖЁЛТЫЙ",
             }
         )
 
@@ -70,7 +73,7 @@ def test_expanded_config_typo_rejected(tmp_path: Path) -> None:
     try:
         before = sorted(em._channel_registry.names())
         raw = em.config.model_dump()
-        raw["batch_overflow_policy"] = "drop_middle"
+        raw["sampling_max_level"] = "ЖЁЛТЫЙ"
 
         assert em.reconfigure(raw) is False
         assert sorted(em._channel_registry.names()) == before
@@ -90,7 +93,7 @@ def test_severity_routes_survive_rejection(tmp_path: Path) -> None:
         before_routes = dict(em._level_to_channel)
         assert before_routes.get("ERROR"), "предусловие: маршрут ERROR построен"
 
-        em.reconfigure({"app_name": "r9_errors", "batch_overflow_policy": "drop_middle"})
+        em.reconfigure({"app_name": "r9_errors", "sampling_max_level": "ЖЁЛТЫЙ"})
 
         assert dict(em._level_to_channel) == before_routes, "severity-маршруты потеряны на отказе"
 
@@ -116,13 +119,12 @@ def test_valid_reconfigure_still_applies(tmp_path: Path) -> None:
                 {
                     "app_name": "r9_errors",
                     "log_directory": str(tmp_path),
-                    "batch_max_pending": 4242,
-                    "batch_overflow_policy": "drop_newest",
+                    "sampling_max_level": "INFO",
                 }
             )
             is True
         )
-        assert em.config.batch_max_pending == 4242
+        assert em.config.sampling_max_level == "INFO"
         assert em._channel_registry.names(), "валидный reload оставил менеджер без каналов"
         assert em._level_to_channel.get("ERROR"), "валидный reload не перестроил severity-маршруты"
     finally:
@@ -206,7 +208,7 @@ def test_include_stacktrace_survives_rejection(tmp_path: Path) -> None:
     em.initialize()
     try:
         assert em._include_stacktrace is False, "предусловие: трейсбеки выключены"
-        em.reconfigure({"app_name": "r9_errors", "batch_overflow_policy": "drop_middle"})
+        em.reconfigure({"app_name": "r9_errors", "sampling_max_level": "ЖЁЛТЫЙ"})
         assert em._include_stacktrace is False, "отвергнутый конфиг тихо включил трейсбеки"
     finally:
         em.shutdown()

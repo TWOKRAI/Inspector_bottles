@@ -148,41 +148,15 @@ def test_unknown_level_is_not_error() -> None:
 
 
 # =============================================================================
-# 2. error/critical не буферизуются, обычные записи — буферизуются
+# 2. Запись синхронна для ВСЕХ уровней (Ф7.4: батчинга больше нет)
 # =============================================================================
-
-
-def test_error_bypasses_buffer(tmp_path: Path) -> None:
-    with _logger(tmp_path) as manager:
-        buffer = _RecordingBuffer()
-        manager._buffer = buffer
-
-        manager.error("boom", module="unit")
-
-        assert buffer.calls == [], "ERROR не имеет права оказаться в пачке"
-        assert "system_file" in buffer.flushed, "пачка канала должна быть сброшена ДО записи ошибки"
-
-
-def test_critical_bypasses_buffer(tmp_path: Path) -> None:
-    with _logger(tmp_path) as manager:
-        buffer = _RecordingBuffer()
-        manager._buffer = buffer
-
-        manager.critical("boom", module="unit")
-
-        assert buffer.calls == []
-
-
-def test_info_still_buffered(tmp_path: Path) -> None:
-    """Регресс-страж: батчинг обычных записей не должен исчезнуть."""
-    with _logger(tmp_path) as manager:
-        buffer = _RecordingBuffer()
-        manager._buffer = buffer
-
-        manager.info("routine", module="unit")
-
-        assert [ch for ch, _ in buffer.calls] == ["system_file"]
-        assert buffer.flushed == [], "обычная запись не должна дёргать сброс"
+#
+# Раньше здесь стояла пара «error минует пачку / info буферизуется»: ошибки
+# ходили мимо ``BatchBuffer``, остальное — через него. Батчинг снят (замер:
+# ноль экономии на границе ОС, хвост эмитента хуже в 18 раз), поэтому прежняя
+# пара сторожила бы механизм, которого нет. Обещание, ради которого она
+# существовала, стало СИЛЬНЕЕ и проверяется прямо: после возврата из вызова
+# запись уже на диске — на любом уровне, без flush и shutdown.
 
 
 def test_error_lands_on_disk_synchronously(tmp_path: Path) -> None:
@@ -193,29 +167,21 @@ def test_error_lands_on_disk_synchronously(tmp_path: Path) -> None:
         assert _CRASH_MARKER in (tmp_path / "system.log").read_text(encoding="utf-8")
 
 
-def test_error_is_synchronous_even_with_priority_flush_off(tmp_path: Path) -> None:
-    """Страж обещания README (Ф0.2): синхронность ошибок не зависит от priority_flush.
+def test_every_level_lands_on_disk_synchronously(tmp_path: Path) -> None:
+    """Ни один уровень не откладывается: без flush и shutdown всё уже в файле.
 
-    До Ф0.9 немедленность ошибок формально приписывалась именно этому параметру
-    ``BatchBuffer`` — и это было неправдой, потому что приоритет в буфер никто
-    не передавал. Теперь ошибки в буфер не попадают вовсе, значит выключенный
-    ``priority_flush`` обязан ничего не менять. Если кто-то вернёт ошибки в
-    пачку, этот тест покраснеет вместе с текстом README.
+    Прямой наследник снятой пары «error мимо пачки / info в пачке». До Ф7.4
+    INFO лежал в буфере до сброса, и этот тест был бы красным; теперь
+    отложенной записи не существует ни на одном уровне.
     """
-    from multiprocess_framework.modules.channel_routing_module.buffers.batch_buffer import (
-        BatchBuffer,
-        BatchConfig,
-    )
-
     with _logger(tmp_path) as manager:
-        manager._buffer = BatchBuffer(
-            flush_fn=manager._flush_batch,
-            config=BatchConfig(max_size=10_000, flush_interval=600.0, priority_flush=False),
-        )
+        manager.debug("routine debug", module="unit")
+        manager.info("routine info", module="unit")
+        manager.warning("routine warning", module="unit")
 
-        manager.error(_CRASH_MARKER, module="unit")
-
-        assert _CRASH_MARKER in (tmp_path / "system.log").read_text(encoding="utf-8")
+        content = (tmp_path / "system.log").read_text(encoding="utf-8")
+        assert "routine info" in content
+        assert "routine warning" in content
 
 
 def test_order_preserved_context_before_error(tmp_path: Path) -> None:

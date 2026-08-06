@@ -1042,7 +1042,6 @@
         }
       },
       "console": true,
-      "enable_batching": true,
       "errors": {
         "enabled": true,
         "include_stacktrace": true,
@@ -1122,8 +1121,6 @@
         "enabled": true
       },
       "observability": {
-        "batch_max_pending": 10000,
-        "batch_overflow_policy": "drop_oldest",
         "channels": {
           "busy_file": {
             "file_path": "busy.log",
@@ -1146,7 +1143,6 @@
         },
         "compress_rotated": false,
         "console": true,
-        "enable_batching": true,
         "errors": {
           "channels": {},
           "enabled": true,
@@ -1249,7 +1245,6 @@
             }
           },
           "console": true,
-          "enable_batching": true,
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1340,14 +1335,9 @@
         },
         "error": {
           "app_name": "errors",
-          "batch_interval": 0.5,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
           "default_level": "WARNING",
-          "enable_batching": true,
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
@@ -1355,10 +1345,6 @@
         },
         "logger": {
           "app_name": "inspector",
-          "batch_interval": 1.0,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 100,
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -1438,7 +1424,6 @@
           },
           "compress_rotated": false,
           "default_level": "INFO",
-          "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
           "logger_groups": {
             "служебное": [
@@ -1590,7 +1575,6 @@
             }
           },
           "console": true,
-          "enable_batching": true,
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1689,14 +1673,9 @@
         },
         "error": {
           "app_name": "errors",
-          "batch_interval": 0.5,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
           "default_level": "WARNING",
-          "enable_batching": true,
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
@@ -1704,10 +1683,6 @@
         },
         "logger": {
           "app_name": "inspector",
-          "batch_interval": 1.0,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 100,
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -1787,7 +1762,6 @@
           },
           "compress_rotated": false,
           "default_level": "INFO",
-          "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
           "logger_groups": {
             "служебное": [
@@ -1926,7 +1900,6 @@
             }
           },
           "console": true,
-          "enable_batching": true,
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1990,14 +1963,9 @@
         },
         "error": {
           "app_name": "errors",
-          "batch_interval": 0.5,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
           "default_level": "WARNING",
-          "enable_batching": true,
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
@@ -2005,10 +1973,6 @@
         },
         "logger": {
           "app_name": "inspector",
-          "batch_interval": 1.0,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 100,
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -2088,7 +2052,6 @@
           },
           "compress_rotated": false,
           "default_level": "INFO",
-          "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
           "logger_groups": {
             "служебное": [
@@ -2230,7 +2193,6 @@
             }
           },
           "console": true,
-          "enable_batching": true,
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -2388,14 +2350,9 @@
         },
         "error": {
           "app_name": "errors",
-          "batch_interval": 0.5,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
           "default_level": "WARNING",
-          "enable_batching": true,
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
@@ -2403,10 +2360,6 @@
         },
         "logger": {
           "app_name": "inspector",
-          "batch_interval": 1.0,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 100,
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -2486,7 +2439,6 @@
           },
           "compress_rotated": false,
           "default_level": "INFO",
-          "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
           "logger_groups": {
             "служебное": [
@@ -2627,7 +2579,6 @@
             }
           },
           "console": true,
-          "enable_batching": true,
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -2744,14 +2695,9 @@
         },
         "error": {
           "app_name": "errors",
-          "batch_interval": 0.5,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
           "default_level": "WARNING",
-          "enable_batching": true,
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
@@ -2759,10 +2705,6 @@
         },
         "logger": {
           "app_name": "inspector",
-          "batch_interval": 1.0,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 100,
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -2842,7 +2784,6 @@
           },
           "compress_rotated": false,
           "default_level": "INFO",
-          "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
           "logger_groups": {
             "служебное": [
@@ -2983,7 +2924,6 @@
             }
           },
           "console": true,
-          "enable_batching": true,
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -3691,14 +3631,9 @@
         },
         "error": {
           "app_name": "errors",
-          "batch_interval": 0.5,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
           "default_level": "WARNING",
-          "enable_batching": true,
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
@@ -3706,10 +3641,6 @@
         },
         "logger": {
           "app_name": "inspector",
-          "batch_interval": 1.0,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 100,
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -3789,7 +3720,6 @@
           },
           "compress_rotated": false,
           "default_level": "INFO",
-          "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
           "logger_groups": {
             "служебное": [
@@ -3931,7 +3861,6 @@
             }
           },
           "console": true,
-          "enable_batching": true,
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -4018,14 +3947,9 @@
         },
         "error": {
           "app_name": "errors",
-          "batch_interval": 0.5,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
           "default_level": "WARNING",
-          "enable_batching": true,
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
@@ -4033,10 +3957,6 @@
         },
         "logger": {
           "app_name": "inspector",
-          "batch_interval": 1.0,
-          "batch_max_pending": 10000,
-          "batch_overflow_policy": "drop_oldest",
-          "batch_size": 100,
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -4116,7 +4036,6 @@
           },
           "compress_rotated": false,
           "default_level": "INFO",
-          "enable_batching": true,
           "log_directory": "<ROOT>/logs/prototype_2",
           "logger_groups": {
             "служебное": [

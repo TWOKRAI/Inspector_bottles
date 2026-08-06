@@ -128,26 +128,25 @@ class TestItIsAudible:
 
         assert not any("не приняли ни одной записи" in r.getMessage() for r in caplog.records)
 
-    def test_warning_comes_after_flush(self, tmp_path, caplog) -> None:
-        """Жалоба ПОСЛЕ сброса буфера — иначе объявили бы молчащим того, кто вот-вот получит.
+    def test_no_false_alarm_for_a_sink_that_received(self, tmp_path, caplog) -> None:
+        """Приёмник, что-то получивший, молчащим не объявляют.
 
-        Батчинг включён: без сброса записи ещё лежат в буфере, и ранняя проверка
-        назвала бы молчащим работающий приёмник — ложная тревога на ровном месте.
+        Ф7.4: раньше тест назывался «жалоба ПОСЛЕ сброса буфера» и держался на
+        батчинге — запись лежала в пачке, и ранняя проверка объявила бы
+        работающий приёмник молчащим. Батчинга нет, ложной тревоги этого рода
+        тоже; свойство, ради которого тест писался, проверяется прямо.
         """
         manager = LoggerManager(
             config=LoggerManagerConfig(
                 app_name="idle26f",
                 log_directory=str(tmp_path),
-                enable_batching=True,
-                batch_size=1000,
-                batch_interval=600.0,
                 modules={},
                 channels={"буферный": LoggerChannelSchema(type="file", enabled=True, file_path="b.log", rotate=False)},
                 scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["буферный"])},
             )
         )
-        manager.system(LogLevel.INFO, "в буфере", module="источник")
-        assert manager.idle_sinks() == ["буферный"], "до сброса он и правда молчит"
+        manager.system(LogLevel.INFO, "запись", module="источник")
+        assert manager.idle_sinks() == [], "приёмник получил запись — молчащим он не является"
 
         with caplog.at_level(logging.WARNING):
             manager.shutdown()

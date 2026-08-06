@@ -38,7 +38,7 @@ BaseManager + ObservableMixin
         ▼
 ChannelRoutingManager  ←── НОВЫЙ БАЗОВЫЙ КЛАСС
         │
-        ├── LoggerManager       (BatchBuffer,       key=level/scope)
+        ├── LoggerManager       (без буфера — синхронно, key=level/scope)
         │       │
         │       └── ErrorManager  (_level_to_channel, severity routing)
         │
@@ -86,11 +86,11 @@ ChannelRoutingConfig (RegisterBase)
     build() → (name, dict)
 
     ├── LoggerManagerConfig (будущий)
-    │       default_level, batch_size, scopes
+    │       default_level, scopes, sampling_*
     │
     └── ErrorManagerConfig
             critical_file_path, error_file_path, warnings_file_path
-            include_stacktrace, enable_batching, batch_size
+            include_stacktrace, severity-маршруты
             channels ← унаследован (точка расширения для Telegram/Slack)
 ```
 
@@ -108,23 +108,28 @@ normalize_config(MyConfig())   # → config.build()[1] → dict
 | Стратегия | Когда использовать | Используется в |
 |---|---|---|
 | `DirectBuffer` | Тесты, синхронные операции, низкая нагрузка | Тесты CRM |
-| `BatchBuffer` | Запись в файлы, агрегация логов (I/O-bound) | `LoggerManager` |
+| ~~`BatchBuffer`~~ | **Снят в Ф7.4** — батчинг файловой записи не давал экономии на границе ОС (write/flush одинаковы) и портил хвост эмитента (p99 1348 против 75 мкс). Запись синхронна | — |
 | `AsyncSenderBuffer` | Message-очереди, низкая задержка | Тесты CRM |
 | `AsyncSender` (в RouterManager) | Полный pipeline с middleware | `RouterManager` |
 
-### Потолок и потери (Ф0.3)
+### Потолок и потери (Ф0.3, сокращено в Ф7.4)
 
-Обе очередные стратегии ограничены и считают потери — «сток не успевает» не бывает молчаливым:
+Очередная стратегия ограничена и считает потери — «сток не успевает» не бывает молчаливым:
 
 | Стратегия | Потолок | Счётчики в `stats` |
 |---|---|---|
-| `BatchBuffer` | `BatchConfig.max_pending` на канал (дефолт 10 000; `0` — без потолка) | `dropped`, `dropped_by_channel`, `flush_failed`, `flush_failed_by_channel`, `in_flight`, `in_flight_records`, `flush_skipped_busy`, `max_pending`, `overflow_policy` |
 | `AsyncSenderBuffer` | `queue_size` на очередь | `dropped` |
 
-**Память росла не в очереди.** Deque держит триггер `max_size`, а вот число пачек «в полёте» не держало ничто: медленный сток не мешал каждому следующему потоку начать свой сброс. Поэтому у `BatchBuffer` два механизма, а не один:
+**Что ушло вместе с `BatchBuffer` (Ф7.4).** Его потолок `max_pending`, механизм
+`_in_flight` («один сбрасывающий поток на канал») и счётчики пачек существовали ради
+батчинга файловой записи. Замер показал, что батчинг не экономит ни одного вызова на
+границе ОС и ухудшает хвост эмитента в 18 раз, — механизм снят целиком.
 
-1. `_in_flight` — **один сбрасывающий поток на канал**; остальные копят (`flush_skipped_busy` считает отклонённые попытки);
-2. `max_pending` — потолок накопленного, срабатывающий **только пока сток занят**. При свободном стоке переполнение лечится сбросом, поэтому `max_pending < max_size` не превращает батчинг в сэмплирование на здоровой системе.
+**Что при этом ИСЧЕЗЛО и названо честно:** буфер был единственным поглотителем
+залипшего стока. Теперь медленный приёмник блокирует поток-эмитент (у консоли есть
+свой дедлайн записи, R2; файловый сток локальный). Политика для этого случая —
+предмет Ф7.2 (async → sync → drop → flush), и заводиться она обязана **у стока**,
+а не общим буфером на менеджер.
 
 Политика переполнения:
 
@@ -296,8 +301,7 @@ hot-reload. Порог задаётся уровнем; у плоскостей 
 
 ```python
 from channel_routing_module import (
-    ChannelRoutingManager, IChannel,
-    BatchBuffer, BatchConfig, ChannelRoutingConfig,
+    ChannelRoutingManager, IChannel, ChannelRoutingConfig,
 )
 from data_schema_module import register_schema, FieldMeta
 from typing import Annotated, List, Dict, Any
@@ -308,7 +312,6 @@ from typing import Annotated, List, Dict, Any
 class MyManagerConfig(ChannelRoutingConfig):
     manager_name: str = "MyManager"
     output_path: str = "data/output.jsonl"
-    batch_size: Annotated[int, FieldMeta("Размер батча", min=1, max=10000)] = 100
 
     def build(self) -> tuple[str, dict]:
         return (self.manager_name, {
@@ -345,10 +348,6 @@ class MyManager(ChannelRoutingManager):
         super().__init__(
             "MyManager",
             config=cfg,
-            buffer_strategy=BatchBuffer(
-                flush_fn=self._on_flush,
-                config=BatchConfig(max_size=100, flush_interval=1.0),
-            ),
             dispatcher_key_field="event_type",
         )
         self._output_ch = MyChannel("output", "data/output.jsonl")
@@ -384,17 +383,15 @@ mgr.shutdown()
 
 ## Примеры из реальных наследников
 
-### LoggerManager — BatchBuffer + scope routing
+### LoggerManager — scope routing (буфера нет с Ф7.4)
 
 ```python
 class LoggerManager(ChannelRoutingManager, ILoggerManager):
     def __init__(self, config=None):
         super().__init__(
             "LoggerManager",
-            buffer_strategy=BatchBuffer(flush_fn=self._flush_batch),
             dispatcher_key_field="level",
         )
-        self._buffer = BatchBuffer(...)
 
     def info(self, msg, module="main"):
         self.log(LogScope.BUSINESS, LogLevel.INFO, msg, module)
@@ -475,7 +472,6 @@ channel_routing_module/
 ├── buffers/
 │   ├── direct_buffer.py            — DirectBuffer (прямой вызов, для тестов)
 │   ├── async_sender_buffer.py      — AsyncSenderBuffer (PriorityQueue + worker thread)
-│   └── batch_buffer.py             — BatchBuffer (deque + lock + timer flush)
 │
 └── tests/
     ├── test_channel_routing_manager.py  — 18 тестов

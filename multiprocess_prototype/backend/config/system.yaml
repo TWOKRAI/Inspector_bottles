@@ -45,7 +45,6 @@ backend_ctl:
 # log_directory не задан → используется system.log_dir выше.
 observability:
   log_level: INFO          # DEBUG | INFO | WARNING | ERROR | CRITICAL
-  enable_batching: true    # батчинг записи (Logger + Error)
   console: true            # консольный sink
   file: true               # файловые sink-каналы
 

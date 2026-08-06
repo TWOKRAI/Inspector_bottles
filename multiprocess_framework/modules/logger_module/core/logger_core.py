@@ -12,7 +12,6 @@ Task 5.14 (CRM-развязка):
 
 Наследование от ChannelRoutingManager:
   - self._channel_registry  — thread-safe хранилище каналов (IChannel)
-  - self._buffer            — BatchBuffer для пакетной записи
 
 Публичный API не изменён (info, error, log, flush, get_stats и т.д.).
 """
@@ -31,7 +30,6 @@ if TYPE_CHECKING:
 
 from ...channel_routing_module import ChannelRoutingManager, resolve_build_result
 from ...channel_routing_module.interfaces import channel_accepted
-from ...channel_routing_module.buffers.batch_buffer import BatchBuffer, BatchConfig as CRMBatchConfig
 from ..interfaces import ILoggerManager
 from ..configs.logger_manager_config import (
     LoggerChannelSchema,
@@ -244,7 +242,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
     Использует от ChannelRoutingManager:
       - self._channel_registry  — thread-safe хранилище каналов (IChannel)
-      - self._buffer            — BatchBuffer для пакетной записи
 
     Специфика:
       - LoggerManagerConfig    — конфигурация областей/уровней/каналов (SchemaBase)
@@ -389,7 +386,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             {
                 "messages_processed": 0,
                 "messages_skipped": 0,
-                "messages_batched": 0,
                 # Сколько раз штатный маршрут ошибок не принял запись и сработал
                 # floor. Ненулевое значение — сигнал «маршрут ошибок сломан», а
                 # не норма. У статистики аналога нет: там нет записи, которую
@@ -425,7 +421,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._absorbed_backpressure: Dict[str, int] = {}
 
         self._setup_channels()
-        self._setup_batcher()
         # Ретеншен применяется и на старте, а не только на reconfigure: процесс,
         # который подняли с настроенным ретеншеном и ни разу не переконфигурировали,
         # обязан чистить за собой — иначе чистка зависела бы от факта reload'а.
@@ -441,8 +436,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # Ф4.6: _dispatcher больше нет и в самой базе. Он был мёртв не только
             # здесь — у всех четырёх наследников; комментарий «его использует
             # ErrorManager» был ложным и держал слот живым на бумаге.
-            if self._buffer:
-                self._buffer.start()
             self.is_initialized = True
             self.info("LoggerManager initialized", module="logger_manager")
             return True
@@ -464,8 +457,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # (Ф4.6: диспетчера в базе больше нет вовсе). Хук только в базе не сработал бы
             # на ГЛАВНОЙ плоскости — поймано тестом. Повтор защищён флагом.
             self._warn_about_idle_sinks()
-            if self._buffer:
-                self._buffer.stop()
 
             for channel in self._channel_registry.clear():
                 try:
@@ -753,27 +744,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         except Exception as e:
             self._fallback_log("ERROR", f"Failed to setup channel {channel_name}: {e}")
 
-    def _setup_batcher(self):
-        """Настроить BatchBuffer из CRM если батчинг включён."""
-        if self.config.enable_batching:
-            self._buffer = BatchBuffer(
-                flush_fn=self._flush_batch,
-                config=CRMBatchConfig(
-                    max_size=self.config.batch_size,
-                    flush_interval=self.config.batch_interval,
-                    # Ф0.3: потолок операбелен из конфига — иначе «ограничили»
-                    # означало бы «зашили константу», и оператор не может ни
-                    # поднять его под свою нагрузку, ни проверить срабатывание.
-                    # Без getattr-фолбэка: поле объявлено в обеих схемах
-                    # (Logger/Error), и молчаливый откат на свою копию дефолта
-                    # прятал бы расхождение схем вместо того, чтобы его показать.
-                    max_pending=self.config.batch_max_pending,
-                    overflow_policy=self.config.batch_overflow_policy,
-                ),
-            )
-        else:
-            self._buffer = None
-
     # =========================================================================
     # РЕТЕНШЕН КАТАЛОГА ЛОГОВ (Ф0.7)
     # =========================================================================
@@ -962,19 +932,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # в момент, когда оператор правит конфиг из-за шторма.
         self._apply_sampling_config(self.config)
 
-        # 3. Остановить старый батчер перед пересозданием (если запущен).
-        if self._buffer is not None:
-            try:
-                self._buffer.stop()
-            except Exception as e:
-                self._fallback_log("ERROR", f"buffer stop failed: {e}")
-            self._buffer = None
-
-        # 4. Воссоздать каналы и батчер из нового конфига.
+        # 3. Воссоздать каналы из нового конфига (Ф7.4: батчера больше нет —
+        # запись синхронна, поэтому останавливать и пересоздавать нечего).
         self._setup_channels()
-        self._setup_batcher()
-        if self.is_initialized and self._buffer is not None:
-            self._buffer.start()
 
         # 5. Сбросить кэш решений should_log (критический баг — раньше не сбрасывался).
         self.invalidate_decision_cache()
@@ -1082,41 +1042,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # =========================================================================
     # УЧЁТ ПОТЕРЬ НА СТЫКЕ «ИМЯ → КАНАЛ» (Ф0.4)
     # =========================================================================
-
-    def _flush_batch(self, channel: str, batch: List[Dict]) -> int:
-        """Callback для BatchBuffer — записать пачку в канал.
-
-        Returns:
-            Число записей, которые канал ФАКТИЧЕСКИ принял.
-
-        Возврат обязателен (Ф0.3, ревью). Раньше метод возвращал ``None`` и молча
-        выходил, если канала нет, — буфер считал такую пачку доставленной, и при
-        снятых приёмниках ``get_stats`` рапортовал «доставлено N, потерь 0» при
-        нуле байт на диске. Разницу между отданным и принятым буфер теперь
-        относит на ``flush_failed_by_channel``.
-        """
-        ch = self._channel_registry.get(channel)
-        if ch is None:
-            # Канала нет — вся пачка потеряна. Не событие «ничего не произошло».
-            # Ф0.4: считаем ПОКАЗАПИСНО (не «одна пачка»), иначе размер потери
-            # зависел бы от настроек батчинга, а не от числа потерянных записей.
-            self._count_unresolved_channel(channel, len(batch))
-            return 0
-
-        written = 0
-        for record_dict in batch:
-            try:
-                if _channel_accepted(ch.write(record_dict)):
-                    written += 1
-            except Exception:  # noqa: BLE001 — сбой одного канала не имеет права уронить эмитента; счётчик ниже делает потерю видимой
-                self._count_channel_write_error(channel)
-        # Task 5.6: батчевый путь считает доставку тем же методом базы, что прямой.
-        # Своя копия учёта разошлась бы с прямой ровно так, как уже разошёлся учёт
-        # отказа (здесь его видно разницей в буфере, там — счётчиком).
-        # Один lock на ПАЧКУ, а не на запись: батч для этого и существует.
-        if written:
-            self._count_channel_written([channel], written)
-        return written
 
     # =========================================================================
     # ОСНОВНОЙ API ЛОГИРОВАНИЯ
@@ -1592,9 +1517,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         elif not channels:
             # Ни одного приёмника: запись потеряна, но НЕ молча. Раньше этот
             # случай проваливался в ветку буфера, ничего не клал и всё равно
-            # инкрементировал messages_batched — счётчик врал в сторону «ушло».
+            # инкрементировал ``messages_batched`` — счётчик врал в сторону
+            # «ушло». Сам буфер снят в Ф7.4; ветка учёта осталась честной.
             self._count_records_without_channels(level)
-        elif self._buffer:
+        else:
             # Ф4.1: словарь ОДИН на все каналы. Прежний ``record.to_dict()``
             # внутри цикла давал каждому каналу свою копию — и это была не
             # изоляция, а побочный эффект сборки: копию никто не запрашивал.
@@ -1603,10 +1529,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # display-вида (``stamp_observed``) происходит уже на приёмной
             # стороне, за IPC, на своей копии. Разделяемая мутация здесь была бы
             # дефектом канала, и стережёт её отдельный тест.
-            for ch_name in channels:
-                self._buffer.enqueue(ch_name, record_dict)
-            self.stats["messages_batched"] += 1
-        else:
             self._write_record_to_channels(record_dict, channels)
 
     # =========================================================================
@@ -1759,14 +1681,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         маршрут не записал НИ ОДНОГО канала. Пока хоть один канал жив, второй
         копии записи не появляется (это и отличает вариант B от отклонённого A).
         """
-        if self._buffer is not None:
-            # Порядок: сначала на диск уходит то, что накоплено ДО ошибки.
-            for ch_name in channel_names:
-                try:
-                    self._buffer.flush(ch_name)
-                except Exception:  # nosec B110 — сбой сброса не должен съесть саму ошибку
-                    pass
-
         written = self._write_record_to_channels(record_dict, channel_names)
         if written == 0:
             # Ни одного живого приёмника: каналы выключены конфигом, сняты
@@ -1965,7 +1879,6 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "messages_processed": self.stats["messages_processed"],
             "messages_skipped": self.stats["messages_skipped"],
             "channels_count": len(self._channel_registry),
-            "batching_enabled": self.config.enable_batching,
             # Ф0.3: до этой правки счётчик жил только в self.stats и наружу не
             # выходил — «сколько ошибок не дошло ни до одного канала» нельзя было
             # спросить у живого процесса. Тот же класс, что потери буфера ниже.
@@ -2023,23 +1936,19 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             live = sum(getattr(ch, key, 0) for ch in self._channel_registry.all())
             base_stats[key] = self._absorbed_backpressure.get(key, 0) + live
 
-        if self._buffer:
-            base_stats.update(
-                {
-                    "messages_batched": self.stats["messages_batched"],
-                    "batch_stats": self._buffer.stats,
-                }
-            )
-
         return base_stats
 
     # =========================================================================
-    # БУФЕР
+    # СБРОС
     # =========================================================================
 
     def flush(self):
-        if self._buffer:
-            self._buffer.flush()
+        """No-op: с Ф7.4 запись синхронна, накопленного между вызовами нет.
+
+        Метод оставлен намеренно: его зовут ``shutdown``, команды наблюдаемости и
+        прикладной код. Обещание «после flush запись на диске» он выполняет
+        по-прежнему — только выполняет его сама запись, а не сброс пачки.
+        """
 
     # =========================================================================
     # FRAME TRACE (Option A pipeline-live-control)
