@@ -417,8 +417,8 @@ blueprint:
   metadata:
     gui_positions:
       camera_0.capture:
-        - 16.0
-        - 40.0
+        - 12.486998403033141
+        - 271.8581053998128
       seg.segmentation:
         - 16.0
         - 760.0
@@ -437,9 +437,18 @@ blueprint:
       lines.strokes_to_points:
         - 616.0
         - 280.0
+      lines.text_main:
+        - 2220.0
+        - 100.0
+      lines.text_name:
+        - 2420.0
+        - 100.0
       points.robot_scale:
         - 16.0
         - 520.0
+      points.drawing_io:
+        - 841.1227833997888
+        - 437.1762774308222
       points.points_render:
         - 217.08217851052075
         - 520.0

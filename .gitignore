@@ -56,6 +56,10 @@ logs/
 **/logs/
 *.log
 *.log.*
+# Артефакты живых прогонов (INSPECTOR_LOG_DIR=logs_live_*): каталоги на сотни МБ,
+# на них ссылаются отчёты ревью, но в git они не едут — правило записано в
+# plans/observability-unified-routing.md:1363
+logs_live_*/
 
 # ML models & weights (только манифест, не бинарники)
 *.keras
