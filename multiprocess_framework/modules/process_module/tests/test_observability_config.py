@@ -227,3 +227,36 @@ class TestMachineContextIsOverriddenOnlyByAnExplicitKey:
         overlay = expand_observability({"log_level": "ERROR"})
         merged = merge_managers(base, {"logger": overlay["logger"]})
         assert merged["logger"]["default_level"] == "ERROR"
+
+
+class TestSamplingKnobsReachTheLogger:
+    """Ф7.1: четыре ручки дросселя обязаны доехать до менеджера.
+
+    Ручка, которая есть в схеме и не доезжает до потребителя, — мёртвая: в
+    файле она видна, в поведении её нет. Этот класс дефекта в проекте уже
+    стоил дней поиска, поэтому путь от YAML до менеджера проверяется, а не
+    предполагается.
+    """
+
+    def test_sampling_values_travel_to_the_logger_section(self) -> None:
+        out = expand_observability(
+            {
+                "sampling_first_n": 5,
+                "sampling_every_mth": 500,
+                "sampling_burst_reset_sec": 30.0,
+                "sampling_max_level": "INFO",
+            }
+        )
+        assert out["logger"]["sampling_first_n"] == 5
+        assert out["logger"]["sampling_every_mth"] == 500
+        assert out["logger"]["sampling_burst_reset_sec"] == 30.0
+        assert out["logger"]["sampling_max_level"] == "INFO"
+
+    def test_sampling_is_off_by_default(self) -> None:
+        """Механизм, сам решающий чего не останется, молча не включается."""
+        assert expand_observability({})["logger"]["sampling_first_n"] == 0
+
+    def test_error_plane_gets_no_sampling_knobs(self) -> None:
+        """У плоскости ошибок дросселя нет — заявленная там ручка ничего бы не делала."""
+        out = expand_observability({"sampling_first_n": 5})
+        assert not [key for key in out.get("error", {}) if key.startswith("sampling")]

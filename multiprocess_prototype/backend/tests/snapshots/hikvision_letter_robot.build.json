@@ -693,6 +693,10 @@
         "retention_days": 7,
         "retention_sweep_interval_sec": 3600.0,
         "retention_total_mb": 200,
+        "sampling_burst_reset_sec": 5.0,
+        "sampling_every_mth": 100,
+        "sampling_first_n": 0,
+        "sampling_max_level": "DEBUG",
         "scopes": {},
         "session_ttl_sec": 300.0,
         "stats": {
@@ -970,6 +974,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -1320,6 +1328,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -1645,6 +1657,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -1939,6 +1955,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -2274,6 +2294,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -2585,6 +2609,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -2891,6 +2919,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -3215,6 +3247,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -3587,6 +3623,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [
@@ -3955,6 +3995,10 @@
           "retention_days": 7,
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
           "scopes": {
             "BUSINESS": {
               "channels": [

@@ -200,6 +200,28 @@ class ObservabilityConfig(SchemaBase):
         FieldMeta("Период фонового свипа ретеншена, сек (0 — только старт и reconfigure)", min=0.0, max=86400.0),
     ] = 3600.0
 
+    # Ф7.1. Дроссель повторяющихся записей: ключ «уровень + текст», first-N
+    # then every-Mth с перезапуском по тишине. Выключен по умолчанию, и
+    # выключенность выражена параметром (0), а не отдельным флагом. Живёт
+    # рядом с ретеншеном не случайно: обе политики САМИ решают, чего не
+    # останется, и обе поэтому не включаются молча.
+    sampling_first_n: Annotated[
+        int,
+        FieldMeta("Сколько одинаковых записей пропускать всегда (0 — сэмплинг выключен)", min=0, max=100_000),
+    ] = 0
+    sampling_every_mth: Annotated[
+        int,
+        FieldMeta("После первых N проходит каждая M-я одинаковая запись", min=1, max=1_000_000),
+    ] = 100
+    sampling_burst_reset_sec: Annotated[
+        float,
+        FieldMeta("Тишина по ключу дольше этого начинает всплеск заново, сек", min=0.0, max=86400.0),
+    ] = 5.0
+    sampling_max_level: Annotated[
+        str,
+        FieldMeta("Верхняя граница уровня для дросселя (ERROR/CRITICAL не сэмплируются никогда)"),
+    ] = "DEBUG"
+
     errors: Annotated[
         ObservabilityErrorsConfig,
         FieldMeta("Секция ошибок"),
@@ -288,6 +310,13 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         "retention_total_mb": cfg.retention_total_mb,
         "compress_rotated": cfg.compress_rotated,
         "retention_sweep_interval_sec": cfg.retention_sweep_interval_sec,
+        # Ф7.1: дроссель получает ТОЛЬКО logger — у плоскости ошибок его нет по
+        # построению (ошибки не сэмплируются), и передавать туда параметры
+        # значило бы заявлять ручку, которая ничего не делает.
+        "sampling_first_n": cfg.sampling_first_n,
+        "sampling_every_mth": cfg.sampling_every_mth,
+        "sampling_burst_reset_sec": cfg.sampling_burst_reset_sec,
+        "sampling_max_level": cfg.sampling_max_level,
     }
     # log_directory эмитим ТОЛЬКО если задан явно: при overlay-merge поверх дефолтов
     # None затёр бы уже резолвнутый абсолютный путь (managers_from_log_dir). None =

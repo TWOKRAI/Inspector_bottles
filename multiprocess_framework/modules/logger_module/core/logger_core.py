@@ -44,6 +44,7 @@ from ...channel_routing_module.levels import UNKNOWN_SEVERITY, is_error_level, s
 from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
 from .log_types import LogRecord, Processor
 from .redaction import SecretRedactor
+from .sampling import RateSampler
 from ..channels.log_channel import (
     create_channel,
     drop_memory_rings,
@@ -365,7 +366,21 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # встала» означало бы секрет в файле. (3) Первым в цепочке: всё, что
         # добавят позже (сэмплинг Ф7.1), обязано видеть уже замаскированное.
         self._redactor = SecretRedactor()
-        self._processors = (self._redactor,)
+
+        # Ф7.1: сэмплинг — ВТОРЫМ, после редактора, ровно как обещал его
+        # докстринг. Порядок несущий: дроссель решает по тексту сообщения, и
+        # текст обязан быть уже замаскированным — иначе два вызова с разными
+        # паролями в одной строке считались бы разными событиями и дроссель
+        # молча не сработал бы там, где секреты как раз и текут.
+        #
+        # Как и редактор — в КОНСТРУКТОРЕ, а не проводкой после boot. Но
+        # причина другая: у сэмплинга есть состояние (окна ключей), и
+        # пересоздание на каждом ``reload`` означало бы «дёрнул конфиг под
+        # штормом — получил шторм заново». Параметры меняются в
+        # ``_apply_sampling_config``, состояние продолжается.
+        self._sampler = RateSampler()
+        self._processors = (self._redactor, self._sampler)
+        self._apply_sampling_config(log_config)
 
         # Только СВОИ счётчики: четыре класса потери на стыке «менеджер → канал»
         # объявлены в базе (LOSS_COUNTER_KEYS) и общие для трёх плоскостей —
@@ -938,6 +953,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             getattr(self.config, "logger_groups", None),
             complain=self._complain_about_groups,
         )
+
+        # Ф7.1: сэмплеру отдаются ПАРАМЕТРЫ, а сам он не пересоздаётся — в
+        # отличие от дерева правил строкой выше. Разница не в аккуратности, а в
+        # природе состояния: правило — целиком описание из конфига, и снятое
+        # правило обязано исчезнуть; окно сэмплинга — факт о том, что уже
+        # произошло, и стирать его сменой конфига значит терять дроссель ровно
+        # в момент, когда оператор правит конфиг из-за шторма.
+        self._apply_sampling_config(self.config)
 
         # 3. Остановить старый батчер перед пересозданием (если запущен).
         if self._buffer is not None:
@@ -1676,6 +1699,21 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._processors = remaining
         return True
 
+    def _apply_sampling_config(self, log_config: "LoggerManagerConfig") -> None:
+        """Ф7.1: параметры дросселя из конфига — БЕЗ сброса окон.
+
+        ``getattr`` с дефолтом, потому что ``ErrorManager`` собирается из своей
+        схемы (``ErrorManagerConfig``), у которой этих полей нет вовсе: у
+        плоскости ошибок дроссель отключён по построению, и отсутствие полей —
+        это ответ, а не пробел.
+        """
+        self._sampler.configure(
+            first_n=getattr(log_config, "sampling_first_n", 0),
+            every_mth=getattr(log_config, "sampling_every_mth", 100),
+            burst_reset_sec=getattr(log_config, "sampling_burst_reset_sec", 5.0),
+            max_level=getattr(log_config, "sampling_max_level", "DEBUG"),
+        )
+
     def _run_processors(
         self,
         scope: ScopeName,
@@ -1942,6 +1980,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # содержимого (fail-closed), и молча так терять текст нельзя.
             "records_redacted": self._redactor.records_redacted,
             "redaction_failures": self._redactor.redaction_failures,
+            # Ф7.1: дроссель. Три ключа, потому что три разных вопроса, и ни
+            # один не выводится из соседей: сколько подавлено (потеря законная,
+            # но обязана быть видна), сколько ключей под учётом (близость к
+            # потолку видна ЗАРАНЕЕ, а не по факту насыщения) и сколько записей
+            # прошло мимо дросселя из-за переполнения карты — то есть «дроссель
+            # включён, а не работает».
+            "records_sampled_out": self._sampler.records_sampled_out,
+            "sampler_keys_tracked": self._sampler.keys_tracked,
+            "sampler_keys_saturated": self._sampler.keys_saturated,
             "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
 

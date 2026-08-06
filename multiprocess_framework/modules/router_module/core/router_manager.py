@@ -584,7 +584,7 @@ class RouterManager(ChannelRoutingManager):
             try:
                 address = split_address(target)  # prefix-валидация dotted-адреса
             except AddressValidationError as exc:
-                self._log_debug(f"_deliver_by_targets: невалидный адрес {target!r}: {exc}")
+                self._log_debug(lambda exc=exc: f"_deliver_by_targets: невалидный адрес {target!r}: {exc}")
                 continue
             attempted += 1
             process = address[0]
@@ -645,7 +645,9 @@ class RouterManager(ChannelRoutingManager):
                 # ``!r``, а не ``{exc}``: исключения транспорта (``queue.Full``)
                 # приходят без аргументов, и запись превращалась в «failed:» без
                 # причины — ревью Ф3, Б-6.
-                self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc!r}")
+                self._log_debug(
+                    lambda exc=exc: f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc!r}"
+                )
 
         if delivered == 0:
             return None, attempted
@@ -710,7 +712,9 @@ class RouterManager(ChannelRoutingManager):
             # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
             qr.send_to_queue(owner, "system", release_msg)
         except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
-            self._log_debug(f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc!r}")
+            self._log_debug(
+                lambda exc=exc: f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc!r}"
+            )
 
     def _queue_absent(self, process: str, qtype: str) -> bool:
         """True, если у процесса нет очереди `(process, qtype)` в queue_registry.
@@ -730,7 +734,7 @@ class RouterManager(ChannelRoutingManager):
         try:
             return get_queue(process, qtype) is None
         except Exception as exc:  # noqa: BLE001 — реестр не должен ронять доставку
-            self._log_debug(f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc!r}")
+            self._log_debug(lambda exc=exc: f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc!r}")
             return True
 
     def _relay_via_hub(self, ticket: Dict[str, Any]) -> bool:
@@ -754,13 +758,15 @@ class RouterManager(ChannelRoutingManager):
             if self.queue_registry.send_to_queue(self._relay_hub, "system", envelope):
                 self._inc_stat("relayed_to_hub")
                 self._log_debug(
-                    f"_deliver_by_targets: билет command={ticket.get('command')!r} "
-                    f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "
-                    "(relay push→хаб, Ф1.7)"
+                    lambda: (
+                        f"_deliver_by_targets: билет command={ticket.get('command')!r} "
+                        f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "
+                        "(relay push→хаб, Ф1.7)"
+                    )
                 )
                 return True
         except Exception as exc:  # noqa: BLE001 — relay не должен ронять доставку
-            self._log_debug(f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc!r}")
+            self._log_debug(lambda exc=exc: f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc!r}")
         return False
 
     def _deliver_via_channel(self, channel: IMessageChannel, process: str, ticket: Dict[str, Any]) -> bool:
@@ -774,12 +780,12 @@ class RouterManager(ChannelRoutingManager):
         try:
             result = channel.send(ticket)
         except Exception as exc:  # noqa: BLE001 — граница канала не должна ронять доставку
-            self._log_debug(f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
+            self._log_debug(lambda exc=exc: f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
             return False
         if isinstance(result, dict) and result.get("status") == "error":
-            self._log_debug(f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}")
+            self._log_debug(lambda: f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}")
             return False
-        self._log_debug(f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)")
+        self._log_debug(lambda: f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)")
         return True
 
     # ================================================================
@@ -1102,7 +1108,7 @@ class RouterManager(ChannelRoutingManager):
         handler = self._worker_handlers.get(worker)
         if handler is None:
             self._log_debug(
-                f"receive: нет worker-handler для '{worker}' (адрес {address}) — fallback на process-dispatch"
+                lambda: f"receive: нет worker-handler для '{worker}' (адрес {address}) — fallback на process-dispatch"
             )
             return False
         try:
@@ -1580,7 +1586,9 @@ class RouterManager(ChannelRoutingManager):
                 return kind_channels
 
         self._log_debug(
-            f"channel_dispatcher returned no route for key_field={key_field!r} value={msg_dict.get(key_field)!r}"
+            lambda: (
+                f"channel_dispatcher returned no route for key_field={key_field!r} value={msg_dict.get(key_field)!r}"
+            )
         )
         return []
 

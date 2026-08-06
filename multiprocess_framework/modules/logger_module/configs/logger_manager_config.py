@@ -304,6 +304,62 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         ),
     ] = 3600.0
 
+    # Ф7.1. Дроссель повторяющихся записей (ключ — уровень + текст). Выключен
+    # по умолчанию, и выключенность выражена ПАРАМЕТРОМ (first_n = 0), а не
+    # отдельным булевым флагом: два способа сказать «выключено» рано или поздно
+    # разъезжаются. Механизм — logger_module/core/sampling.py.
+    sampling_first_n: Annotated[
+        int,
+        FieldMeta(
+            "Сколько одинаковых записей пропускать всегда, прежде чем включится дроссель (0 — сэмплинг выключен)",
+            min=0,
+            max=100_000,
+        ),
+    ] = 0
+    sampling_every_mth: Annotated[
+        int,
+        FieldMeta(
+            "После первых N проходит каждая M-я одинаковая запись (1 — проходят все)",
+            min=1,
+            max=1_000_000,
+        ),
+    ] = 100
+    sampling_burst_reset_sec: Annotated[
+        float,
+        FieldMeta(
+            "Тишина по ключу дольше этого времени начинает всплеск заново, сек",
+            min=0.0,
+            max=86400.0,
+        ),
+    ] = 5.0
+    sampling_max_level: Annotated[
+        str,
+        FieldMeta(
+            "Верхняя граница уровня, который вообще подлежит дросселю. "
+            "ERROR/CRITICAL не сэмплируются никогда — граница обрезана в коде"
+        ),
+    ] = "DEBUG"
+
+    @field_validator("sampling_max_level", mode="before")
+    @classmethod
+    def _normalize_sampling_max_level(cls, value):
+        """Ф7.1: имя уровня проверяется НА ГРАНИЦЕ, как и ``min_level``.
+
+        Тот же класс дефекта, что Ф3.1 нашла у порога скоупа: неопознанное имя
+        доехало бы до горячего пути и там молча получило бы дефолт. Разница
+        только в направлении ошибки — здесь опечатка означала бы «дроссель
+        работает не на тех уровнях», что видно ещё хуже: записи есть, но не все.
+        """
+        if not isinstance(value, str):
+            return value
+        canonical = normalize_level_name(value)
+        if canonical is None:
+            raise ValueError(
+                f"неизвестный уровень '{value}' в sampling_max_level "
+                f"(известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+            )
+        return canonical
+
     loggers: Annotated[
         Dict[str, LoggerRuleSchema],
         FieldMeta("Правила по иерархическому имени источника (префикс → уровень/приёмники)"),

@@ -35,7 +35,7 @@ ObservableMixin позволяет менеджеру прозрачно вза�
 
 import logging
 
-from typing import Optional, Dict, Any, Set, List
+from typing import Callable, Optional, Dict, Any, Set, List
 from contextlib import contextmanager
 
 from .core.manager_registry import ManagerRegistry
@@ -129,8 +129,19 @@ class ObservableMixin(IObservableMixin):
         kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", level, message, **kwargs)
 
-    def _log_debug(self, message: str, **kwargs) -> None:
-        """Логирование уровня DEBUG через logger manager."""
+    def _log_debug(self, message: "str | Callable[[], str]", **kwargs) -> None:
+        """Логирование уровня DEBUG через logger manager.
+
+        Сообщение может быть ОТЛОЖЕННЫМ (Ф1.4): ``lambda: f"…"`` вместо
+        ``f"…"``. Разница не стилистическая — она в том, кто платит за сборку
+        строки при ВЫКЛЮЧЕННОМ DEBUG. ``f``-строка собирается на call-site, то
+        есть до входа в логгер, и никаким гейтом внутри не снимается; лямбда
+        зовётся только после гейта и ровно один раз.
+
+        Правило (baseline §2.5, задача Ф7.1): точка на пути КАЖДОГО сообщения
+        обязана быть отложенной. Точке с постоянным текстом лямбда не нужна —
+        собирать там нечего, и замыкание было бы чистой ценой.
+        """
         kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", "debug", message, **kwargs)
 
