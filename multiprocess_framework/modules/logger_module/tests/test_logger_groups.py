@@ -239,7 +239,8 @@ class TestGroupsWorkThroughTheRealManager:
                     "общий": LoggerChannelSchema(type="file", enabled=True, file_path="общий.log", rotate=False),
                     "цех": LoggerChannelSchema(type="file", enabled=True, file_path="цех.log", rotate=False),
                 },
-                scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["общий"])},
+                default_level="DEBUG",
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["общий"])},
                 logger_groups={"шумные": list(ЧЛЕНЫ)},
                 loggers={"шумные": LoggerRuleSchema(channels=["цех"])},
             )
@@ -278,7 +279,8 @@ class TestGroupsWorkThroughTheRealManager:
                 "log_directory": str(tmp_path),
                 "enable_batching": False,
                 "channels": {"цех": {"type": "file", "enabled": True, "file_path": "цех.log", "rotate": False}},
-                "scopes": {"SYSTEM": {"enabled": True, "min_level": "INFO", "channels": ["цех"]}},
+                "default_level": "DEBUG",
+                "scopes": {"SYSTEM": {"channels": ["цех"]}},
                 "logger_groups": {"шумные": list(ЧЛЕНЫ)},
                 "loggers": {"шумные": {"level": "ERROR"}},
             }

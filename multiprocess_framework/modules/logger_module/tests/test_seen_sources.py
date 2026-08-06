@@ -39,7 +39,12 @@ def logger(tmp_path) -> Any:
             enable_batching=False,
             modules={},
             channels={"f": LoggerChannelSchema(type="file", enabled=True, file_path="f.log", rotate=False)},
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["f"])},
+            # Ф8.1: порог, ради которого фикстура и заведена (см. докстринг), —
+            # теперь корневой. Автоматическая миграция поставила сюда DEBUG,
+            # выбрав «самый низкий порог файла», и тем убила предмет теста:
+            # DEBUG-запись обязана ГАСИТЬСЯ, иначе проверять нечего.
+            default_level="INFO",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["f"])},
         )
     )
     yield manager

@@ -84,8 +84,9 @@ def _config(
         batch_interval=batch_interval,
         modules={},
         channels=channels,
+        default_level="DEBUG",
         scopes={
-            "BUSINESS": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=scope_channels),
+            "BUSINESS": LoggerScopeSchema(channels=scope_channels),
         },
     )
 

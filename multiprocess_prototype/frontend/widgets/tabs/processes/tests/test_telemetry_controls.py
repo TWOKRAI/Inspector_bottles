@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from multiprocess_framework.modules.process_module.heartbeat.telemetry import GATED_METRICS
+from multiprocess_framework.modules.process_module.heartbeat.telemetry import gated_metrics
 from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 from multiprocess_prototype.frontend.widgets.tabs.processes._panels import SingleProcessPanel
 from multiprocess_prototype.frontend.widgets.tabs.processes._telemetry_controls import (
@@ -48,9 +48,9 @@ class TestTemplateGeneration:
         assert set(section._rows) == {"a", "b", "c", "d"}
 
     def test_gated_metrics_all_present(self, qtbot) -> None:
-        section = TelemetryControlsSection("cam", list(GATED_METRICS))
+        section = TelemetryControlsSection("cam", list(gated_metrics()))
         qtbot.addWidget(section)
-        assert set(section._rows) == set(GATED_METRICS)
+        assert set(section._rows) == set(gated_metrics())
 
     def test_label_falls_back_to_key(self, qtbot) -> None:
         section = TelemetryControlsSection("cam", ["fps"], labels={"fps": "Кадры/с"})
@@ -226,4 +226,4 @@ class TestPanelIntegration:
         panel = SingleProcessPanel(_presenter(), MagicMock(name="bindings"), "camera_0", telemetry=vm)
         qtbot.addWidget(panel)
         assert hasattr(panel, "_telemetry_controls")
-        assert set(panel._telemetry_controls._rows) == set(GATED_METRICS)
+        assert set(panel._telemetry_controls._rows) == set(gated_metrics())

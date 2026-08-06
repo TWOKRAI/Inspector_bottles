@@ -72,7 +72,8 @@ def logger(tmp_path):
         "enable_batching": False,
         "modules": {},
         "channels": {"f": {"type": "file", "enabled": True, "file_path": str(tmp_path / "a.log")}},
-        "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["f"]}},
+        "default_level": "DEBUG",
+        "scopes": {"SYSTEM": {"channels": ["f"]}},
     }
     mgr = LoggerManager(manager_name="ScopeProbe", config=config)
     mgr.initialize()

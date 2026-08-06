@@ -173,7 +173,7 @@ class TestRebuildDropsWhatNoLayerDeclares:
                 enable_batching=False,
                 modules={},
                 channels={"bespoke": LoggerChannelSchema(type="file", file_path="bespoke.log")},
-                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["bespoke"])},
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["bespoke"])},
             )
         )
         svc = _Svc(logger)
@@ -355,7 +355,11 @@ class TestProvenanceInIntrospect:
             live_scopes = list(logger.config.scopes)
             assert live_scopes
             for name in live_scopes:
-                assert f"scopes.{name}.min_level" in prov, name
+                # Ф8.1: у скоупа остался один ключ — приёмники, и провенанс
+                # адресует именно его. Проверяем «группа объяснена», а не имя
+                # конкретного листа: точная форма ключа — деталь обходчика,
+                # а требование теста — чтобы необъяснённых групп не осталось.
+                assert any(k.startswith(f"scopes.{name}") for k in prov), name
         finally:
             logger.shutdown()
 

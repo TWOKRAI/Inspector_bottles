@@ -76,7 +76,8 @@ def _logger(tmp_path: Path, *, batching: bool = False) -> LoggerManager:
                     rotate=False,
                 ),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["system_file"])},
         ),
     )
     mgr.initialize()
@@ -113,7 +114,8 @@ def _custom(tmp_path: Path, forced: Optional[List[str]], *, batching: bool = Fal
                 ),
             },
             # Скоуп БЕЗ списка каналов: резолв родителя возьмёт весь реестр.
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=[])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=[])},
         ),
     )
     mgr.initialize()
@@ -130,7 +132,9 @@ def test_none_means_gated_not_lost(tmp_path: Path) -> None:
     """``None`` учитывается как отклонение гейтом, а не как потеря."""
     mgr = _custom(tmp_path, forced=None)
     try:
-        mgr.config.scopes["SYSTEM"].enabled = False
+        # Ф8.1: «заглушить» — это порог корня выше уровня записи, а не выключатель
+        # у скоупа. Свойство теста не изменилось: отклонение гейтом не потеря.
+        mgr.config.default_level = "ERROR"
         mgr.invalidate_decision_cache()
 
         mgr.log(LogScope.SYSTEM, LogLevel.INFO, "заглушённое", module="m")

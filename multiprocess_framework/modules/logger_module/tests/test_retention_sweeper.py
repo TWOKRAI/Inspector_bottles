@@ -42,7 +42,8 @@ def _config(directory: Path, **overrides: Any) -> Dict[str, Any]:
         "enable_batching": False,
         "modules": {},
         "channels": {"a": {"type": "file", "enabled": True, "file_path": str(directory / "a.log")}},
-        "scopes": {"SYSTEM": {"enabled": True, "min_level": "INFO", "channels": ["a"]}},
+        "default_level": "DEBUG",
+        "scopes": {"SYSTEM": {"channels": ["a"]}},
         "retention_days": 1,
         "retention_sweep_interval_sec": _TICK,
     }

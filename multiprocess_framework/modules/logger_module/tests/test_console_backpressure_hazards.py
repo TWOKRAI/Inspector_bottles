@@ -177,7 +177,8 @@ def test_dropped_error_reaches_the_floor(tmp_path: Path) -> None:
                 "enable_batching": False,
                 "modules": {},
                 "channels": {"console": {"type": "console", "enabled": True, "format": "%(message)s"}},
-                "scopes": {"SYSTEM": {"enabled": True, "min_level": "WARNING", "channels": ["console"]}},
+                "default_level": "DEBUG",
+                "scopes": {"SYSTEM": {"channels": ["console"]}},
             }
         ),
     )
@@ -234,13 +235,8 @@ def test_file_channel_still_writes_while_console_is_stuck(tmp_path: Path) -> Non
                         "format": "%(message)s",
                     },
                 },
-                "scopes": {
-                    "SYSTEM": {
-                        "enabled": True,
-                        "min_level": "WARNING",
-                        "channels": ["console", "system_file"],
-                    }
-                },
+                "default_level": "DEBUG",
+                "scopes": {"SYSTEM": {"channels": ["console", "system_file"]}},
             }
         ),
     )
@@ -483,7 +479,8 @@ def test_manager_stats_sum_over_channels(tmp_path: Path) -> None:
                 "enable_batching": False,
                 "modules": {},
                 "channels": {"console": {"type": "console", "enabled": True, "format": "%(message)s"}},
-                "scopes": {"SYSTEM": LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["console"])},
+                "default_level": "DEBUG",
+                "scopes": {"SYSTEM": LoggerScopeSchema(channels=["console"])},
             }
         ),
     )

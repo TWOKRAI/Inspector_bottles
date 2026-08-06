@@ -61,9 +61,10 @@ def _config(directory: Path) -> LoggerManagerConfig:
         channels={
             "main": LoggerChannelSchema(name="main", type="file", enabled=True, file_path="main.log", rotate=False),
         },
+        default_level="DEBUG",
         scopes={
-            "BUSINESS": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["main"]),
-            "SYSTEM": LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["main"]),
+            "BUSINESS": LoggerScopeSchema(channels=["main"]),
+            "SYSTEM": LoggerScopeSchema(channels=["main"]),
         },
     )
 

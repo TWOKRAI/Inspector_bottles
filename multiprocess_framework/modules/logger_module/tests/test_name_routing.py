@@ -59,10 +59,11 @@ def _config(directory: Path, loggers: Dict[str, LoggerRuleSchema] | None = None)
                 name="named_file", type="file", enabled=True, file_path="named.log", rotate=False
             ),
         },
+        default_level="WARNING",
         scopes={
-            "BUSINESS": LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["main_file"]),
-            "SYSTEM": LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["main_file"]),
-            "DEBUG": LoggerScopeSchema(enabled=False, min_level="DEBUG", channels=["main_file"]),
+            "BUSINESS": LoggerScopeSchema(channels=["main_file"]),
+            "SYSTEM": LoggerScopeSchema(channels=["main_file"]),
+            "DEBUG": LoggerScopeSchema(channels=["main_file"]),
         },
     )
 
@@ -371,15 +372,28 @@ class TestHotPathUnchanged:
         finally:
             mgr.shutdown()
 
-    def test_unknown_level_in_a_rule_passes_the_record(self, tmp_path: Path) -> None:
-        """Опечатка в имени уровня — не повод устроить тишину.
+    def test_unknown_level_in_a_rule_is_refused_at_the_boundary(self) -> None:
+        """Ф8.1: опечатка в уровне правила отвергается на ГРАНИЦЕ — как у прежнего скоупа.
 
-        Та же политика, что у ``LoggerScopeSchema.should_log``: незнакомый
-        уровень пропускает. Две соседние ветки одного решения с разной политикой
-        были бы худшим вариантом — «тише DEBUG» в одном месте и firehose в
-        другом.
+        Прежняя редакция характеризовала здесь fail-open: правило с именем
+        ``ВАЖНО`` запись пропускало. Это было расхождение двух соседних веток
+        одного решения — у ``min_level`` проверка на границе стояла с Ф3.1, у
+        правила не было вовсе. Ф8.1 делает правило ЕДИНСТВЕННОЙ осью порога, и
+        оставить его без проверки значило бы вернуть дефект 3.1 целиком
+        (репро: ``WARN`` вместо ``WARNING`` → молчаливый firehose).
         """
-        mgr = _manager(tmp_path, {"vision": LoggerRuleSchema(level="ВАЖНО")})
+        with pytest.raises(ValueError, match="неизвестный уровень"):
+            LoggerRuleSchema(level="ВАЖНО")
+
+    def test_the_hot_path_stays_fail_open_when_validation_is_bypassed(self, tmp_path: Path) -> None:
+        """Рубеж горячего пути остался прежним: минуя валидацию, запись проходит.
+
+        Пара к тесту выше, и она обязательна: без неё «строгая граница»
+        неотличима от «гейт молча душит всё, что не понял». Fail-closed на
+        горячем пути означал бы тишину от опечатки — невидимую потерю,
+        запрещённую инвариантом 2 плана.
+        """
+        mgr = _manager(tmp_path, {"vision": LoggerRuleSchema.model_construct(level="ВАЖНО")})
         try:
             mgr.log(LogScope.BUSINESS, LogLevel.INFO, "опечатка в уровне", SOURCE)
         finally:

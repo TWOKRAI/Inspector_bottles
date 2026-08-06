@@ -55,7 +55,8 @@ def _config(**sampling: Any) -> Dict[str, Any]:
         "app_name": "sampling_hazards",
         "enable_batching": False,
         "channels": {},
-        "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["a"]}},
+        "default_level": "DEBUG",
+        "scopes": {"SYSTEM": {"channels": ["a"]}},
     }
     config.update(sampling)
     return config

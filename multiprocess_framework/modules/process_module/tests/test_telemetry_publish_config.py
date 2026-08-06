@@ -7,7 +7,7 @@ Acceptance 1.1:
   - выключенная метрика → enabled=False;
   - from_dict/to_dict round-trip (Dict at Boundary).
 
-Acceptance 2.3 (валидация metrics-ключей против GATED_METRICS):
+Acceptance 2.3 (валидация metrics-ключей против каталога метрик):
   - опечатка в имени метрики → unknown_metrics() её ловит;
   - все ключи известны → unknown_metrics() пуст.
 """
@@ -19,8 +19,17 @@ from multiprocess_framework.modules.process_module.configs import (
     TelemetryPublishConfig,
 )
 from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
-    GATED_METRICS,
+    gated_metrics,
 )
+
+# Ф8.1: каталог метрик наполняется ИМПОРТОМ производителей, а не литералом в
+# configs/. Этот модуль спрашивает каталог, значит обязан импортировать тех, кто
+# его наполняет, — иначе в одиночном прогоне каталог пуст и «опечатка не
+# услышана», а в полном зелено, потому что производителей импортировал сосед.
+# Зависимость от порядка тестов, воспроизведённая при написании этих проверок.
+import multiprocess_framework.modules.process_module.heartbeat.process_heartbeat  # noqa: F401,E402
+import multiprocess_framework.modules.process_module.heartbeat.telemetry  # noqa: F401,E402
+import pytest  # noqa: E402
 
 
 class TestUnknownMetrics:
@@ -30,8 +39,8 @@ class TestUnknownMetrics:
         assert cfg.unknown_metrics() == {"latency"}
 
     def test_all_known_metrics_empty(self) -> None:
-        """Все ключи metrics из GATED_METRICS → unknown_metrics() пуст."""
-        cfg = TelemetryPublishConfig(metrics={m: MetricRule() for m in GATED_METRICS})
+        """Все ключи metrics из каталога → unknown_metrics() пуст."""
+        cfg = TelemetryPublishConfig(metrics={m: MetricRule() for m in gated_metrics()})
         assert cfg.unknown_metrics() == set()
 
     def test_empty_metrics_empty(self) -> None:
@@ -148,3 +157,27 @@ class TestDictBoundary:
         """Неизвестные ключи игнорируются (SchemaBase extra=ignore), не падает."""
         cfg = TelemetryPublishConfig.from_dict({"default_interval_sec": 1.0, "totally_unknown": 123})
         assert cfg.default_interval_sec == 1.0
+
+
+class TestEmptyCatalogIsNotAVerdict:
+    """Ф8.1: пустой каталог означает «судить не по чему», а не «известных нет».
+
+    Пока каталог был кортежем-литералом, он существовал всегда. Теперь он
+    наполняется импортом производителей, и процесс, который телеметрию не
+    считает, законно видит его пустым. Без этой ветки КАЖДЫЙ ключ ``metrics``
+    объявлялся бы опечаткой — ложная тревога на ровном месте.
+
+    Пара обязательна: «пустой каталог молчит» без «полный каталог говорит»
+    зелено и у реализации, которая не жалуется никогда.
+    """
+
+    def test_an_empty_catalog_accuses_nobody(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from multiprocess_framework.modules.process_module.configs import telemetry_publish_config as модуль
+
+        monkeypatch.setattr(модуль, "declared_metrics", lambda: ())
+        cfg = TelemetryPublishConfig(metrics={"что_угодно": MetricRule()})
+        assert cfg.unknown_metrics() == set()
+
+    def test_a_full_catalog_still_names_the_typo(self) -> None:
+        cfg = TelemetryPublishConfig(metrics={"latency": MetricRule()})
+        assert cfg.unknown_metrics() == {"latency"}, "опечатка перестала быть слышной"

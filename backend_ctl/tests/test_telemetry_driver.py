@@ -334,7 +334,7 @@ class TestTelemetrySetVerify:
         assert ("camera_0", "introspect.telemetry", None) in calls
 
     def test_typo_metric_verifies_false_with_reason(self, monkeypatch) -> None:
-        """Опечатка: правило записано, но метрики нет в GATED_METRICS → ничего не гейтит."""
+        """Опечатка: правило записано, но метрики нет в каталоге → ничего не гейтит."""
         d, _calls = _verify_recorder(
             monkeypatch,
             readback=_readback({"fps": {"enabled": True, "interval_sec": 1.0}}, unknown=["latency"]),
@@ -342,7 +342,7 @@ class TestTelemetrySetVerify:
         res = d.telemetry_set("camera_0", "latency", enabled=False, verify=True, verify_within=0.0)
         assert res["success"] is True  # консервативно: не блокируем
         assert res["verified_effect"] is False
-        assert "GATED_METRICS" in res["verification"]["reason"]
+        assert "каталог метрик" in res["verification"]["reason"]
 
     def test_value_mismatch_verifies_false(self, monkeypatch) -> None:
         """Правило есть, но значение чужое (перезаписал кто-то другой) → честный False."""

@@ -142,7 +142,7 @@ class TestFlattenSection:
 
     def test_empty_dict_is_a_leaf(self) -> None:
         # «Слой задал пустую карту» ≠ «слой не сказал ничего».
-        assert flatten_section({"scopes": {}}) == {"scopes": {}}
+        assert flatten_section({"loggers": {}}) == {"loggers": {}}
 
 
 class TestProvenance:
@@ -206,10 +206,10 @@ class TestProvenance:
         assert prov["channels.messages_file.enabled"]["layer"] == LAYER_SESSION
 
     def test_materialized_scopes_name_the_level_owner(self) -> None:
-        layers = ObservabilityLayers(recipe={"scopes": {"DEBUG": {"enabled": False}}}, recipe_source="r.yaml")
+        layers = ObservabilityLayers(recipe={"loggers": {"шумный": {"level": "DEBUG"}}}, recipe_source="r.yaml")
         expanded = expand_observability(layers.resolve())
         prov = layers.provenance(expanded["logger"])
-        assert prov["scopes.DEBUG.enabled"] == {"layer": LAYER_RECIPE, "source": "r.yaml"}
+        assert prov["loggers.шумный.level"] == {"layer": LAYER_RECIPE, "source": "r.yaml"}
 
 
 class TestExpandHonoursPartialOverrides:
@@ -232,7 +232,7 @@ class TestExpandHonoursPartialOverrides:
     def test_no_overrides_emit_no_keys(self) -> None:
         expanded = expand_observability({})
         assert "channels" not in expanded["logger"]
-        assert "scopes" not in expanded["logger"]
+        assert "loggers" not in expanded["logger"]
 
 
 if __name__ == "__main__":  # pragma: no cover

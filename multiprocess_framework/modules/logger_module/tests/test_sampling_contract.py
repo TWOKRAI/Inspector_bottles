@@ -66,7 +66,8 @@ def _logger(
         "enable_batching": False,
         "modules": {},
         "channels": {},
-        "scopes": {"SYSTEM": {"enabled": True, "min_level": min_level, "channels": list(channels)}},
+        "default_level": "DEBUG",
+        "scopes": {"SYSTEM": {"channels": list(channels)}},
     }
     config.update(sampling_kwargs)
     mgr = LoggerCore(manager_name="SamplingContractLogger", config=config)
@@ -382,7 +383,8 @@ class TestReconfigureDoesNotResetWindow:
             "enable_batching": False,
             "modules": {},
             "channels": {},
-            "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["a"]}},
+            "default_level": "DEBUG",
+            "scopes": {"SYSTEM": {"channels": ["a"]}},
             "sampling_first_n": 1,
             "sampling_every_mth": 1_000_000,
         }

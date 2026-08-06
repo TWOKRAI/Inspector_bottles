@@ -72,7 +72,12 @@ def _logger(channels: List[str], min_level: str = "DEBUG") -> LoggerCore:
         # register_channel вернул бы False — запись поехала бы в memory-каналы
         # мимо наблюдения.
         "channels": {},
-        "scopes": {"SYSTEM": {"enabled": True, "min_level": min_level, "channels": list(channels)}},
+        # Ф8.1: параметр помощника значил «порог гейта», и после снятия второй
+        # оси он обязан ехать туда, где порог теперь живёт, — в корень. Оставить
+        # его прежним аргументом скоупа значило бы получить помощник с мёртвой
+        # ручкой: три теста ниже задают ERROR и проверяли бы поведение DEBUG.
+        "default_level": min_level,
+        "scopes": {"SYSTEM": {"channels": list(channels)}},
     }
     mgr = LoggerCore(manager_name="CharacterizedLogger", config=config)
     mgr.initialize()
@@ -249,7 +254,8 @@ class TestSerializationCost:
             "enable_batching": True,
             "modules": {},
             "channels": {},
-            "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["a", "b", "c"]}},
+            "default_level": "DEBUG",
+            "scopes": {"SYSTEM": {"channels": ["a", "b", "c"]}},
         }
         mgr = LoggerCore(manager_name="BatchCharacterized", config=config)
         mgr.initialize()

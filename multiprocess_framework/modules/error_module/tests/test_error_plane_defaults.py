@@ -105,7 +105,10 @@ class TestErrorPlaneIsQuietAtRest:
         try:
             mgr.flush()
             assert mgr.get_stats()["unresolved_channel_records"] == 0
-            assert [s.enabled for s in mgr.config.scopes.values()] == [False] * len(mgr.config.scopes), (
+            # Ф8.1: у скоупа не осталось выключателя, и «свой, а не логгерный»
+            # теперь читается по приёмникам: у плоскости ошибок их в скоупах нет
+            # по определению (P3), у логгера — есть (console/system_file/...).
+            assert [s.channels for s in mgr.config.scopes.values()] == [[]] * len(mgr.config.scopes), (
                 "дефолтный ErrorManager получил ЧУЖИЕ (логгерные) скоупы"
             )
         finally:
@@ -152,7 +155,7 @@ class TestErrorPlaneIsQuietAtRest:
 
     def test_explicit_scopes_win_over_the_default(self) -> None:
         """Умолчание — именно умолчание: заданные скоупы не перетираются."""
-        mine = {"BUSINESS": {"enabled": True, "min_level": "INFO", "channels": ["errors_file"]}}
+        mine = {"BUSINESS": {"channels": ["errors_file"]}}
         expanded = expand_error_manager_config({"scopes": mine})
         assert expanded["scopes"] == mine
 

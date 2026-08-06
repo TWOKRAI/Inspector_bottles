@@ -98,10 +98,8 @@ def _config(tmp_path: Path, *, with_channel: bool = True) -> LoggerManagerConfig
         batch_interval=600.0,
         modules={},
         channels=channels,
-        scopes={
-            scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=scope_channels)
-            for scope in ("SYSTEM", "BUSINESS", "DEBUG")
-        },
+        default_level="DEBUG",
+        scopes={scope: LoggerScopeSchema(channels=scope_channels) for scope in ("SYSTEM", "BUSINESS", "DEBUG")},
     )
 
 
@@ -290,7 +288,8 @@ def test_floor_path_falls_back_to_channel_directory(tmp_path: Path) -> None:
                 rotate=False,
             )
         },
-        scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["errors_file"])},
+        default_level="DEBUG",
+        scopes={"SYSTEM": LoggerScopeSchema(channels=["errors_file"])},
     )
     manager = LoggerManager(manager_name="PathLogger", config=config)
     try:

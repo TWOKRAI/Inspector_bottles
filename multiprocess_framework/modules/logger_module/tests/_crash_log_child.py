@@ -105,13 +105,9 @@ def main(mode: str, log_dir: str, sinks: str = "with-sinks") -> None:
         log_directory=log_dir,
         modules={},
         channels=channels,
-        scopes={
-            "SYSTEM": LoggerScopeSchema(
-                enabled=True,
-                min_level="DEBUG",
-                channels=scopes_channels,
-            )
-        },
+        # Ф8.1: порог — корневым правилом, у скоупа осталась только раздача приёмников.
+        default_level="DEBUG",
+        scopes={"SYSTEM": LoggerScopeSchema(channels=scopes_channels)},
     )
 
     manager = ErrorManager(config=config)

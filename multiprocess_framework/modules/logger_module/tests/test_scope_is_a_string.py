@@ -56,7 +56,7 @@ def _manager(tmp_path, **scopes: LoggerScopeSchema) -> LoggerManager:
 def logger(tmp_path) -> Any:
     manager = _manager(
         tmp_path,
-        SYSTEM=LoggerScopeSchema(enabled=True, min_level="INFO", channels=["первый"]),
+        SYSTEM=LoggerScopeSchema(channels=["первый"]),
     )
     yield manager
     manager.shutdown()
@@ -65,22 +65,25 @@ def logger(tmp_path) -> Any:
 class TestNewGroupNeedsOnlyConfig:
     """Главное свойство задачи: группа заводится конфигом, кода фреймворка — 0 правок."""
 
-    def test_group_declared_only_in_config_routes_and_gates(self, tmp_path) -> None:
-        """Порог и приёмник НОВОЙ группы действуют — значит она настоящая, а не «прошла мимо».
+    def test_group_declared_only_in_config_gets_its_own_sink(self, tmp_path) -> None:
+        """Приёмник НОВОЙ группы действует — значит она настоящая, а не «прошла мимо».
 
-        Проверяются обе оси решения сразу: запись ниже порога группы отклоняется
-        (гейт видит группу), запись выше — уходит в её приёмник, а не в чужой
-        (маршрут видит группу). Одной оси мало: «запись где-то появилась»
+        Ф8.1 сняла у группы вторую ось: порога у неё больше нет, и прежняя
+        половина этого теста («запись ниже порога группы отклоняется») проверяла
+        бы механизм, которого не существует. Осталась та ось, ради которой группа
+        и заводится, — **какие приёмники**.
+
+        Пара к утверждению обязательна и здесь: приёмник новой группы получает
+        запись, а приёмник чужой группы её НЕ получает. «Запись где-то появилась»
         согласуется и с реализацией, где незнакомая группа молча стала SYSTEM.
         """
         manager = _manager(
             tmp_path,
-            КОНВЕЙЕР=LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["цех"]),
+            КОНВЕЙЕР=LoggerScopeSchema(channels=["цех"]),
         )
         try:
-            assert manager.should_log("КОНВЕЙЕР", LogLevel.INFO, "мод") is False
-            assert manager.should_log("КОНВЕЙЕР", LogLevel.ERROR, "мод") is True
             assert manager._route("КОНВЕЙЕР", LogLevel.ERROR, "мод") == ["цех"]
+            assert manager._route(LogScope.SYSTEM, LogLevel.ERROR, "мод") != ["цех"]
         finally:
             manager.shutdown()
 
@@ -104,7 +107,7 @@ class TestNewGroupNeedsOnlyConfig:
         assert "КОНВЕЙЕР" not in PRESET_SCOPES
         manager = _manager(
             tmp_path,
-            КОНВЕЙЕР=LoggerScopeSchema(enabled=True, min_level="INFO", channels=["цех"]),
+            КОНВЕЙЕР=LoggerScopeSchema(channels=["цех"]),
         )
         try:
             manager.log("КОНВЕЙЕР", LogLevel.INFO, "деталь принята", "мод")
@@ -136,13 +139,11 @@ class TestOneSpelling:
         второй ключ был бы недостижим (``log()`` спрашивает канон), а оператор
         видел бы свою настройку в конфиге и не понимал, почему она не действует.
         """
-        cfg = LoggerManagerConfig(
-            scopes={
-                "system": {"enabled": True, "min_level": "ERROR", "channels": ["первый"]},
-            }
-        )
+        cfg = LoggerManagerConfig(default_level="DEBUG", scopes={"system": {"channels": ["первый"]}})
         assert list(cfg.scopes) == ["SYSTEM"]
-        assert cfg.scopes["SYSTEM"].min_level == "ERROR"
+        # Содержимое сверяется тоже: без этого тест зелен и у реализации, которая
+        # ключ канонизировала, а значение потеряла. Ф8.1 — у скоупа одно поле.
+        assert cfg.scopes["SYSTEM"].channels == ["первый"]
 
     def test_observability_layer_key_is_normalized_too(self) -> None:
         """Вторая граница конфига — слои наблюдаемости.
@@ -155,7 +156,7 @@ class TestOneSpelling:
             ObservabilityConfig,
         )
 
-        cfg = ObservabilityConfig(scopes={"business": {"min_level": "DEBUG"}})
+        cfg = ObservabilityConfig(scopes={"business": {}})
         assert list(cfg.scopes) == ["BUSINESS"]
 
 
@@ -199,8 +200,8 @@ class TestUnknownScopeIsAudible:
                     "первый": LoggerChannelSchema(type="file", enabled=True, file_path="первый.log", rotate=False),
                     "цех": LoggerChannelSchema(type="file", enabled=True, file_path="цех.log", rotate=False),
                 },
-                scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["первый"])},
                 # Корневое правило решает и порог, и приёмники — скоуп не спрашивают.
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["первый"])},
                 loggers={"": {"level": "DEBUG", "channels": ["цех"]}},
             )
         )

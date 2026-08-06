@@ -230,7 +230,8 @@ class TestRealAssemblyNoCollision:
                     "первый": LoggerChannelSchema(type="file", enabled=True, file_path=shared),
                     "второй": LoggerChannelSchema(type="file", enabled=True, file_path=shared),
                 },
-                scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["первый", "второй"])},
+                default_level="DEBUG",
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["первый", "второй"])},
             ),
         )
         try:

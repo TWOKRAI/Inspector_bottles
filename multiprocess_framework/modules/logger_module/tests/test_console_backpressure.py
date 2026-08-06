@@ -248,8 +248,9 @@ class TestStatsVisibility:
                 "channels": {
                     "console": {"type": "console", "enabled": True, "format": "%(message)s"},
                 },
+                "default_level": "DEBUG",
                 "scopes": {
-                    "SYSTEM": {"enabled": True, "min_level": "WARNING", "channels": ["console"]},
+                    "SYSTEM": {"channels": ["console"]},
                 },
             }
         )

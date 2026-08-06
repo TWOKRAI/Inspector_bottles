@@ -13,7 +13,7 @@ from __future__ import annotations
 from multiprocess_framework.modules.process_module.heartbeat.process_heartbeat import (
     ProcessHeartbeat,
 )
-from multiprocess_framework.modules.process_module.heartbeat.telemetry import GATED_METRICS
+from multiprocess_framework.modules.process_module.heartbeat.telemetry import gated_metrics
 
 
 def _workers(n: int = 2) -> dict:
@@ -79,7 +79,7 @@ class TestReconfigureGate:
         gate = hb._telemetry_gate
         assert gate is not None
         # Все метрики созревают на первом тике (next_due=0), затем реже 1.0с.
-        assert gate.due_metrics(now=0.0) == set(GATED_METRICS)
+        assert gate.due_metrics(now=0.0) == set(gated_metrics())
         assert gate.due_metrics(now=0.5) == set()  # <1.0с — зажато
 
     def test_payload_drops_disabled_metric_after_reconfigure(self) -> None:

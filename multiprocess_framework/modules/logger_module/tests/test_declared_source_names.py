@@ -62,9 +62,8 @@ def logger(tmp_path) -> Any:
             enable_batching=False,
             modules={},
             channels={"ring": LoggerChannelSchema(type="memory", enabled=True, capacity=200)},
-            scopes={
-                name: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["ring"]) for name in _ALL_SCOPES
-            },
+            default_level="DEBUG",
+            scopes={name: LoggerScopeSchema(channels=["ring"]) for name in _ALL_SCOPES},
         )
     )
     yield manager

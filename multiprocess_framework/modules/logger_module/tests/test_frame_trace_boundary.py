@@ -53,7 +53,8 @@ def tracing_logger(monkeypatch, tmp_path: Path):
             "app_name": "frame_trace_boundary",
             "enable_batching": False,
             "channels": {},
-            "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": []}},
+            "default_level": "DEBUG",
+            "scopes": {"SYSTEM": {"channels": []}},
         }
         config.update(sampling)
         mgr = LoggerCore(manager_name="TraceLogger", config=config)

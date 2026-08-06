@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """A-A4-1 (ревью Ф5) + решение владельца Г3: ``{}`` в слое = ВЛАДЕНИЕ.
 
-Дефект: ``flatten_section`` считал ``{"scopes": {}}`` листом (слой владеет), а
+Дефект: ``flatten_section`` считал ``{"loggers": {}}`` листом (слой владеет), а
 ``deep_merge`` в ``resolve`` считал ``{}`` no-op (нижний побеждает). Итог: resolve
 отдавал ``scopes`` из нижнего слоя, а provenance называл верхний — оператор правил
 не тот файл.
@@ -35,18 +35,18 @@ class TestEmptyDictOwnsInResolve:
     def test_upper_empty_dict_replaces_lower_branch(self) -> None:
         """``scopes: {}`` наверху ЗАМЕНЯЕТ ветку нижнего слоя на пустую (владение)."""
         layers = ObservabilityLayers(
-            app={"scopes": {"SYSTEM": {"min_level": "DEBUG"}}},
-            recipe={"scopes": {}},
+            app={"loggers": {"камера": {"level": "DEBUG"}}},
+            recipe={"loggers": {}},
         )
-        assert layers.resolve()["scopes"] == {}, "пустой словарь верхнего слоя не перекрыл нижний"
+        assert layers.resolve()["loggers"] == {}, "пустой словарь верхнего слоя не перекрыл нижний"
 
     def test_absent_key_still_inherits(self) -> None:
         """Контраст: ОТСУТСТВИЕ ключа (а не ``{}``) — по-прежнему наследование."""
         layers = ObservabilityLayers(
-            app={"scopes": {"SYSTEM": {"min_level": "DEBUG"}}},
+            app={"loggers": {"камера": {"level": "DEBUG"}}},
             recipe={"log_level": "WARNING"},  # scopes НЕ упомянут
         )
-        assert layers.resolve()["scopes"] == {"SYSTEM": {"min_level": "DEBUG"}}
+        assert layers.resolve()["loggers"] == {"камера": {"level": "DEBUG"}}
 
     def test_non_empty_dict_still_merges_per_key(self) -> None:
         """Регресс-страж: непустой словарь мержится по-ключевому, а не заменяет ветку."""
@@ -68,29 +68,29 @@ class TestResolveAndProvenanceAgree:
     def test_provenance_names_the_owner_of_the_empty_branch(self) -> None:
         """Ветку, объявленную ``{}`` наверху, provenance отдаёт ВЕРХНЕМУ слою."""
         layers = ObservabilityLayers(
-            app={"scopes": {"SYSTEM": {"min_level": "DEBUG"}}},
-            recipe={"scopes": {}},
+            app={"loggers": {"камера": {"level": "DEBUG"}}},
+            recipe={"loggers": {}},
             app_source="system.yaml",
             recipe_source="recipe.yaml",
         )
-        assert layers.provenance()["scopes"] == {"layer": LAYER_RECIPE, "source": "recipe.yaml"}
+        assert layers.provenance()["loggers"] == {"layer": LAYER_RECIPE, "source": "recipe.yaml"}
 
     def test_shadowed_lower_key_is_not_attributed_to_lower_layer(self) -> None:
         """Затенённый ``{}``-ом ключ нижнего слоя provenance НЕ приписывает нижнему.
 
-        Это ядро A-A4-1: resolve уронил ``scopes.SYSTEM.min_level`` из app, и
+        Это ядро A-A4-1: resolve уронил ``loggers.камера.level`` из app, и
         provenance обязан назвать действующий источник (материализованный дефолт
         фреймворка), а не мёртвый app.
         """
         layers = ObservabilityLayers(
-            app={"scopes": {"SYSTEM": {"min_level": "DEBUG"}}},
-            recipe={"scopes": {}},
+            app={"loggers": {"камера": {"level": "DEBUG"}}},
+            recipe={"loggers": {}},
             app_source="system.yaml",
             recipe_source="recipe.yaml",
         )
         expanded = expand_observability(layers.resolve())
         prov = layers.provenance(expanded["logger"])
-        owner = prov.get("scopes.SYSTEM.min_level")
+        owner = prov.get("loggers.камера.level")
         assert owner is None or owner["layer"] != LAYER_APP, f"затенённый ключ всё ещё за app: {owner}"
 
     def test_resolve_and_provenance_do_not_contradict(self) -> None:
@@ -101,17 +101,17 @@ class TestResolveAndProvenanceAgree:
         секции этого слоя и не быть затенён выше.
         """
         layers = ObservabilityLayers(
-            app={"scopes": {"SYSTEM": {"min_level": "DEBUG"}}, "log_level": "INFO"},
-            recipe={"scopes": {}, "log_level": "WARNING"},
+            app={"loggers": {"камера": {"level": "DEBUG"}}, "log_level": "INFO"},
+            recipe={"loggers": {}, "log_level": "WARNING"},
             session={"channels": {"messages_file": {"enabled": False}}},
         )
         resolved = layers.resolve()
         prov = layers.provenance()
         # scopes стал {} (recipe владеет) → в resolved нет ни одного scopes.* листа
-        assert resolved["scopes"] == {}
+        assert resolved["loggers"] == {}
         # provenance для scopes указывает recipe, и НЕ содержит app-претензии на SYSTEM
-        assert prov["scopes"]["layer"] == LAYER_RECIPE
-        assert "scopes.SYSTEM.min_level" not in prov
+        assert prov["loggers"]["layer"] == LAYER_RECIPE
+        assert "loggers.камера.level" not in prov
         # log_level: recipe перекрыл app
         assert resolved["log_level"] == "WARNING"
         assert prov["log_level"]["layer"] == LAYER_RECIPE
@@ -121,17 +121,17 @@ class TestUnchangedNonEmptyProvenance:
     def test_non_empty_scopes_keep_per_key_ownership(self) -> None:
         """Регресс: непустой ``scopes`` наверху не затеняет соседние ключи снизу."""
         layers = ObservabilityLayers(
-            app={"scopes": {"SYSTEM": {"min_level": "DEBUG"}}},
-            recipe={"scopes": {"BUSINESS": {"min_level": "INFO"}}},
+            app={"loggers": {"камера": {"level": "DEBUG"}}},
+            recipe={"loggers": {"гуй": {"level": "INFO"}}},
             app_source="system.yaml",
             recipe_source="recipe.yaml",
         )
         prov = layers.provenance()
-        assert prov["scopes.SYSTEM.min_level"] == {"layer": LAYER_APP, "source": "system.yaml"}
-        assert prov["scopes.BUSINESS.min_level"] == {"layer": LAYER_RECIPE, "source": "recipe.yaml"}
-        assert layers.resolve()["scopes"] == {
-            "SYSTEM": {"min_level": "DEBUG"},
-            "BUSINESS": {"min_level": "INFO"},
+        assert prov["loggers.камера.level"] == {"layer": LAYER_APP, "source": "system.yaml"}
+        assert prov["loggers.гуй.level"] == {"layer": LAYER_RECIPE, "source": "recipe.yaml"}
+        assert layers.resolve()["loggers"] == {
+            "камера": {"level": "DEBUG"},
+            "гуй": {"level": "INFO"},
         }
 
 

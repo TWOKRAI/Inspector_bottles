@@ -33,9 +33,9 @@ def logger_to_file(tmp_path: Path):
         "modules": {},
         "channels": {"a": {"type": "file", "enabled": True, "file_path": str(tmp_path / "a.log")}},
         "scopes": {
-            "SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["a"]},
-            "BUSINESS": {"enabled": True, "min_level": "DEBUG", "channels": ["a"]},
-            "DEBUG": {"enabled": True, "min_level": "DEBUG", "channels": ["a"]},
+            "SYSTEM": {"channels": ["a"]},
+            "BUSINESS": {"channels": ["a"]},
+            "DEBUG": {"channels": ["a"]},
         },
     }
     mgr = LoggerManager(manager_name="PlaneProbe", config=config)

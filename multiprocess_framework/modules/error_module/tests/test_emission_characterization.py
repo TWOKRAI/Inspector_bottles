@@ -160,7 +160,7 @@ def test_info_uses_scope_channels(tmp_path: Path) -> None:
             },
         },
         scopes={
-            "BUSINESS": {"enabled": True, "min_level": "DEBUG", "channels": ["system_file"]},
+            "BUSINESS": {"channels": ["system_file"]},
         },
     )
     try:
@@ -186,7 +186,7 @@ def test_severity_path_ignores_scope_gate(tmp_path: Path) -> None:
     try:
         errors = _replace(em, "errors_file")
         system = _replace(em, "system_file")
-        em.config.scopes["SYSTEM"].enabled = False
+        em.config.default_level = "CRITICAL"  # Ф8.1: заглушить = поднять порог корня
         em.invalidate_decision_cache()
 
         em.log(LogScope.SYSTEM, LogLevel.INFO, "заглушённое", module="char")

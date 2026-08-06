@@ -71,9 +71,9 @@ def _config(tmp_path: Path, *, with_channels: bool = True) -> LoggerManagerConfi
             "modules": {},
             "channels": channels,
             "scopes": {
-                "SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": list(channels)},
-                "BUSINESS": {"enabled": True, "min_level": "DEBUG", "channels": list(channels)},
-                "DEBUG": {"enabled": True, "min_level": "DEBUG", "channels": list(channels)},
+                "SYSTEM": {"channels": list(channels)},
+                "BUSINESS": {"channels": list(channels)},
+                "DEBUG": {"channels": list(channels)},
             },
         }
     )

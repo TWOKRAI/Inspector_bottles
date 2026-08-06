@@ -120,7 +120,8 @@ def _manager(tmp_path, loggers: Dict[str, Any]) -> Any:
                 "common": LoggerChannelSchema(type="file", enabled=True, file_path="common.log", rotate=False),
                 "own": LoggerChannelSchema(type="file", enabled=True, file_path="own.log", rotate=False),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["common"])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["common"])},
             loggers=loggers,
         )
     )

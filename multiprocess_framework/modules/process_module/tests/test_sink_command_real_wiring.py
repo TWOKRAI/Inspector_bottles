@@ -71,7 +71,7 @@ def wired(tmp_path: Path):
                     "format": "%(message)s",
                 },
             },
-            "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["system_file"]}},
+            "scopes": {"SYSTEM": {"channels": ["system_file"]}},
         },
     )
     logger.initialize()

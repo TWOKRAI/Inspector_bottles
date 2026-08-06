@@ -847,6 +847,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -951,6 +966,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -980,35 +1000,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -1205,6 +1213,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -1309,6 +1332,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -1338,35 +1366,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -1538,6 +1554,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -1642,6 +1673,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -1671,35 +1707,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -1840,6 +1864,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -1944,6 +1983,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -1973,35 +2017,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -2183,6 +2215,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -2287,6 +2334,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -2316,35 +2368,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -2502,6 +2542,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -2606,6 +2661,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -2635,35 +2695,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -2816,6 +2864,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -2920,6 +2983,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -2949,35 +3017,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -3148,6 +3204,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -3252,6 +3323,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -3281,35 +3357,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -3528,6 +3592,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -3632,6 +3711,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -3661,35 +3745,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },
@@ -3904,6 +3976,21 @@
           "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
           "include_stacktrace": true,
           "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
@@ -4008,6 +4095,11 @@
             ]
           },
           "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -4037,35 +4129,23 @@
               "channels": [
                 "system_file",
                 "messages_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "DEBUG": {
               "channels": [
                 "system_file"
-              ],
-              "enabled": false,
-              "min_level": "DEBUG",
-              "modules": []
+              ]
             },
             "PERFORMANCE": {
               "channels": [
                 "performance_file"
-              ],
-              "enabled": true,
-              "min_level": "INFO",
-              "modules": []
+              ]
             },
             "SYSTEM": {
               "channels": [
                 "console",
                 "system_file"
-              ],
-              "enabled": true,
-              "min_level": "WARNING",
-              "modules": []
+              ]
             }
           }
         },

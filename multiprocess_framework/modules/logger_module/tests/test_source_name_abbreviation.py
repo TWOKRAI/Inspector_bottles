@@ -96,7 +96,8 @@ def _manager(tmp_path, name_max_len: int) -> Any:
                     format="%(name)s: %(message)s",
                 )
             },
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["f"])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["f"])},
         )
     )
 
@@ -148,7 +149,8 @@ class TestTwoRepresentationsDoNotSwap:
                         type="file", enabled=True, file_path="ruled.log", rotate=False, name_max_len=20
                     ),
                 },
-                scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["scope_file"])},
+                default_level="DEBUG",
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["scope_file"])},
                 loggers={"multiprocess_framework.modules": {"channels": ["ruled_file"]}},
             )
         )

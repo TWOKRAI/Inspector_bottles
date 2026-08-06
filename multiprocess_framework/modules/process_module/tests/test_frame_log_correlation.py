@@ -284,7 +284,8 @@ class TestRecordsActuallyCarryIt:
                 "enable_batching": False,
                 "modules": {},
                 "channels": {"f": {"type": "file", "enabled": True, "file_path": str(tmp_path / "a.log")}},
-                "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["f"]}},
+                "default_level": "DEBUG",
+                "scopes": {"SYSTEM": {"channels": ["f"]}},
             },
         )
         logger.initialize()

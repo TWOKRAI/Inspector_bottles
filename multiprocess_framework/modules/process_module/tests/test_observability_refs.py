@@ -75,12 +75,12 @@ class TestReferenceVersusDefinition:
 
 class TestScopeIsARuleThatMustHaveSomewhereToWrite:
     def test_new_scope_without_channels_is_reported(self) -> None:
-        refs = unknown_observability_refs({"scopes": {"SYSTEMM": {"min_level": "DEBUG"}}}, _KNOWN)
+        refs = unknown_observability_refs({"scopes": {"SYSTEMM": {}}}, _KNOWN)
         assert refs == {"scopes": ["SYSTEMM"]}
 
     def test_new_scope_with_channels_is_a_definition(self) -> None:
         refs = unknown_observability_refs(
-            {"scopes": {"AUDIT": {"min_level": "INFO", "channels": ["system_file"]}}},
+            {"scopes": {"AUDIT": {"channels": ["system_file"]}}},
             _KNOWN,
         )
         assert refs == {}
@@ -91,7 +91,7 @@ class TestScopeIsARuleThatMustHaveSomewhereToWrite:
         Требуй мы их здесь — самая частая правка (`{min_level: DEBUG}`) стала бы
         отказом.
         """
-        assert unknown_observability_refs({"scopes": {"SYSTEM": {"min_level": "DEBUG"}}}, _KNOWN) == {}
+        assert unknown_observability_refs({"scopes": {"SYSTEM": {}}}, _KNOWN) == {}
 
     def test_scope_pointing_at_unknown_channel_is_reported(self) -> None:
         refs = unknown_observability_refs(
@@ -263,7 +263,7 @@ class TestInlineTypoIsRefusedWithoutTouchingState:
         svc, logger, reload_cmd = _reload_command(tmp_path)
         try:
             before = _snapshot(logger)
-            res = reload_cmd({"observability": {"scopes": {"SYSTEMM": {"min_level": "DEBUG"}}}})
+            res = reload_cmd({"observability": {"scopes": {"SYSTEMM": {}}}})
             assert res["success"] is False, res
             assert res["unknown_refs"] == {"scopes": ["SYSTEMM"]}
             assert "verified" not in res, "вердикт о значении не выносится, когда применения не было"

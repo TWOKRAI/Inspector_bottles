@@ -143,84 +143,91 @@ class TestRebuildFromLayers:
         assert logger.calls[-1]["default_level"] == "WARNING"
 
 
-class TestLevelProfile:
-    def test_debug_opens_all_scopes(self) -> None:
-        """Плечо ON: log_level=DEBUG → все скоупы DEBUG, DEBUG-scope включён."""
+class TestRootLevelRule:
+    """Ф8.1 (механизм 2.3b): ``log_level`` — ОДНО правило корня, а не профиль скоупов.
+
+    Класс заменил ``TestLevelProfile``. Прежний профиль переписывал ``min_level``
+    у каждого скоупа, и именно переписывание было дефектом: оптовая ручка стирала
+    адресную правку, из-за чего «всё на DEBUG, кроме одного источника» не
+    выражалось ни одним конфигом (репро 2026-08-04, повторено 2026-08-06).
+    """
+
+    def test_debug_lands_as_a_root_rule(self) -> None:
+        """Плечо ON: log_level=DEBUG → корневое правило DEBUG, порог живой."""
         logger = _FakeManagerWithConfig({"default_level": "INFO"})
         _apply_section({"log_level": "DEBUG"}, logger=logger)
-        scopes = logger.calls[-1]["scopes"]
-        assert scopes, "профиль уровня не собрал scopes — уровень остаётся мёртвым параметром"
-        for name, sc in scopes.items():
-            assert sc["min_level"] == "DEBUG", f"скоуп {name} не опущен до DEBUG"
-        assert scopes["DEBUG"]["enabled"] is True, "DEBUG-scope не включён при log_level=DEBUG"
+        applied = logger.calls[-1]
+        assert applied["loggers"][""]["level"] == "DEBUG", "уровень не доехал корневым правилом"
+        assert applied["default_level"] == "DEBUG"
 
-    def test_warning_raises_thresholds_keeps_debug_scope_off(self) -> None:
-        """Плечо OFF: log_level=WARNING → пороги подняты, DEBUG-scope выключен."""
+    def test_warning_raises_the_root_threshold(self) -> None:
+        """Плечо OFF: log_level=WARNING → корень поднят, и это тот же единственный ключ."""
         logger = _FakeManagerWithConfig({"default_level": "DEBUG"})
         _apply_section({"log_level": "WARNING"}, logger=logger)
-        scopes = logger.calls[-1]["scopes"]
-        for name in ("SYSTEM", "BUSINESS", "PERFORMANCE"):
-            assert scopes[name]["min_level"] == "WARNING", f"скоуп {name} не поднят до WARNING"
-        assert scopes["DEBUG"]["enabled"] is False, "DEBUG-scope не должен включаться на WARNING"
+        applied = logger.calls[-1]
+        assert applied["loggers"][""]["level"] == "WARNING"
+        assert applied["default_level"] == "WARNING"
 
-    def test_info_restores_tuned_defaults(self) -> None:
-        """Возврат на INFO → штатный настроенный профиль (SYSTEM=WARNING и т.д.)."""
-        logger = _FakeManagerWithConfig({"default_level": "DEBUG"})
-        _apply_section({"log_level": "INFO"}, logger=logger)
-        scopes = logger.calls[-1]["scopes"]
-        assert scopes["SYSTEM"]["min_level"] == "WARNING"
-        assert scopes["BUSINESS"]["min_level"] == "INFO"
-        assert scopes["DEBUG"]["enabled"] is False
+    def test_the_level_no_longer_rewrites_scopes(self) -> None:
+        """**Главное свойство Ф8.1.** Уровень не трогает скоупы вообще.
 
-    def test_section_without_level_does_not_apply_the_profile(self) -> None:
-        """Секция без log_level профиль НЕ включает: пороги остаются базовыми."""
+        Стережёт возврат снятого механизма: пока профиль переписывал пороги
+        скоупов, адресная правка исчезала молча. Проверяется отсутствие ПОБОЧНОГО
+        эффекта, а не наличие нового — такие свойства теряются первыми.
+        """
+        logger = _FakeManagerWithConfig({"default_level": "INFO"})
+        _apply_section({"log_level": "DEBUG"}, logger=logger)
+        для_скоупов = logger.calls[-1].get("scopes") or {}
+        assert all("min_level" not in sc and "enabled" not in sc for sc in для_скоупов.values()), (
+            "уровень снова полез в скоупы — вернулась вторая ось гейта"
+        )
+
+    def test_section_without_level_does_not_touch_the_root(self) -> None:
+        """Секция без log_level корневое правило НЕ выставляет: база остаётся базой."""
         logger = _FakeManagerWithConfig({})
         _apply_section({"stats": {"enabled": False}}, logger=logger)
         applied = logger.calls[-1]
-        # База (managers_from_log_dir) — настроенный профиль, не «всё DEBUG».
-        assert applied["scopes"]["SYSTEM"]["min_level"] == "WARNING"
-        assert applied["scopes"]["DEBUG"]["enabled"] is False
+        assert applied["default_level"] == "INFO", "порог базы подменён без запроса"
 
-    def test_live_scope_not_backed_by_any_layer_does_not_survive(self) -> None:
+    def test_a_live_rule_not_backed_by_any_layer_does_not_survive(self) -> None:
         """Обратная сторона разворота — названа явно, а не обнаружена потом.
 
         Порог, выставленный кем-то в живом конфиге и не записанный НИ В ОДИН слой,
         пересборку не переживает. Это цена, которой куплен работающий сброс:
         сохрани его — и «вернуть как было» перестало бы возвращать.
         """
-        current_scopes = {"SYSTEM": {"enabled": True, "min_level": "ERROR", "channels": [], "modules": []}}
-        logger = _FakeManagerWithConfig({"default_level": "INFO", "scopes": current_scopes})
+        logger = _FakeManagerWithConfig({"default_level": "INFO", "loggers": {"живой": {"level": "ERROR"}}})
         _apply_section({"stats": {"enabled": False}}, logger=logger)
-        assert logger.calls[-1]["scopes"]["SYSTEM"]["min_level"] != "ERROR"
+        assert "живой" not in (logger.calls[-1].get("loggers") or {})
 
-    def test_scope_written_into_a_layer_survives_and_beats_the_profile(self) -> None:
-        """Пара к предыдущему: то же значение, но записанное СЛОЕМ, доживает.
+    def test_an_addressed_rule_from_a_layer_survives_the_bulk_knob(self) -> None:
+        """**Приёмка 2.3b.** Адресное правило переживает оптовую ручку в том же вызове.
 
-        И ложится ПОВЕРХ профиля уровня — адресная правка не должна стираться
-        оптовой ручкой, применённой в том же вызове.
+        Ровно то, что до Ф8.1 было невыразимо: корневое правило DEBUG действует
+        всем, а источник со своим правилом остаётся на ERROR. Раньше здесь
+        побеждала одна ось из двух, и какая именно — зависело от того, кто
+        сильнее, а не от того, что написал оператор.
         """
         logger = _FakeManagerWithConfig({})
         _apply_section(
-            {"log_level": "DEBUG", "scopes": {"SYSTEM": {"min_level": "ERROR"}}},
+            {"log_level": "DEBUG", "loggers": {"тихий.источник": {"level": "ERROR"}}},
             logger=logger,
         )
-        scopes = logger.calls[-1]["scopes"]
-        assert scopes["SYSTEM"]["min_level"] == "ERROR", "адресная правка стёрта профилем уровня"
-        assert scopes["BUSINESS"]["min_level"] == "DEBUG", "профиль уровня не применён к остальным"
+        rules = logger.calls[-1]["loggers"]
+        assert rules["тихий.источник"]["level"] == "ERROR", "адресное правило стёрто оптовой ручкой"
+        assert rules[""]["level"] == "DEBUG", "корневое правило не применено к остальным"
 
 
-class TestOneProfileForBothPaths:
-    """Ф2.3a — ``log_level`` значит ОДНО И ТО ЖЕ на старте и на пересборке.
+class TestOneLevelForBothPaths:
+    """Ф2.3a, перенесённая на новый механизм: ``log_level`` значит ОДНО на обоих путях.
 
     Дефект был воспроизведён, а не выведен из кода (2026-08-03): при
     ``INSPECTOR_LOG_LEVEL=DEBUG`` стартовая сборка опускала ОДИН скоуп из
-    четырёх (SYSTEM оставался WARNING, PERFORMANCE — INFO, DEBUG-скоуп
-    выключенным), а тот же ``DEBUG`` через ``config.reload`` опускал все четыре
-    и будил выключенный. Одна ручка — два смысла, в зависимости от того, как её
-    задали.
+    четырёх, а тот же ``DEBUG`` через ``config.reload`` — все четыре. Одна ручка
+    — два смысла, в зависимости от того, как её задали.
 
     Сравниваются ДВА ПУТИ между собой, а не путь с константой: константа
-    зафиксировала бы сегодняшний профиль и молчала бы ровно про то, что
+    зафиксировала бы сегодняшнюю раскладку и молчала бы ровно про то, что
     сломалось, — про их расхождение.
     """
 
@@ -231,52 +238,51 @@ class TestOneProfileForBothPaths:
             managers_from_log_dir,
         )
         from multiprocess_framework.modules.process_module.managers.observability_reload import (
-            _level_profile_scopes,
+            _root_level_rule,
         )
 
-        boot = {
-            str(name): (sc.min_level, sc.enabled)
-            for name, sc in managers_from_log_dir(str(tmp_path), level, model_cls=ManagersConfig).logger.scopes.items()
-        }
-        reload_ = {str(name): (sc["min_level"], sc["enabled"]) for name, sc in _level_profile_scopes(level).items()}
+        boot = managers_from_log_dir(str(tmp_path), level, model_cls=ManagersConfig).logger.loggers[""].level
+        reload_ = _root_level_rule(level)[""]["level"]
         assert boot == reload_, f"старт и пересборка разошлись на log_level={level}"
 
-    def test_boot_no_longer_ignores_the_level_on_three_scopes_of_four(self, tmp_path) -> None:
-        """Характеризация ИЗМЕНЁННОГО поведения — прямо, а не умолчанием.
+    def test_boot_puts_the_level_where_the_gate_reads_it(self, tmp_path) -> None:
+        """Уровень обязан лечь туда, откуда его ЧИТАЕТ гейт, а не просто в конфиг.
 
-        До Ф2.3a стартовый путь при ``DEBUG`` оставлял SYSTEM на WARNING,
-        PERFORMANCE на INFO и DEBUG-скоуп выключенным. Теперь настройку слышат
-        все четыре — в том числе SYSTEM, то есть **консоль становится
-        болтливой**, чего на старте раньше не было. Это осознанная унификация на
-        семантику пересборки, и здесь она записана как факт, а не как побочный
-        эффект.
+        Проверяется поведением живого менеджера, а не формой конфига: правило,
+        лежащее не в том ключе, конфиг проходит и гейт не меняет — класс
+        «спека плана может врать», уже стрелявший в этой фазе.
         """
+        from multiprocess_framework.modules.logger_module.core.log_config import LogLevel, LogScope
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
         from multiprocess_framework.modules.process_module.configs.managers_config import (
             ManagersConfig,
             managers_from_log_dir,
         )
 
-        scopes = managers_from_log_dir(str(tmp_path), "DEBUG", model_cls=ManagersConfig).logger.scopes
-        assert scopes["SYSTEM"].min_level == "DEBUG"
-        assert scopes["PERFORMANCE"].min_level == "DEBUG"
-        assert scopes["DEBUG"].enabled is True
+        cfg = managers_from_log_dir(str(tmp_path), "DEBUG", model_cls=ManagersConfig).logger
+        mgr = LoggerManager(manager_name="BootLevel81", config=cfg)
+        mgr.initialize()
+        try:
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.DEBUG, "любой.источник") is True
+        finally:
+            mgr.shutdown()
 
-    def test_boot_scopes_are_schema_objects_not_dicts(self, tmp_path) -> None:
-        """Профиль кладётся ВАЛИДИРОВАННЫМ, иначе порог молча не действует.
+    def test_boot_rules_are_schema_objects_not_dicts(self, tmp_path) -> None:
+        """Правило кладётся ВАЛИДИРОВАННЫМ, иначе порог молча не действует.
 
         ``model_copy(update=…)`` не валидирует: словарь на месте схемы прошёл бы
-        сборку молча, а гейт читает атрибуты — и ``min_level`` перестал бы
+        сборку молча, а резолв читает атрибуты — и ``level`` перестал бы
         существовать. Тот же класс ошибки уже пойман в этой фазе на правилах
         иерархии, поэтому здесь стоит страж, а не надежда.
         """
+        from multiprocess_framework.modules.logger_module.configs import LoggerRuleSchema
         from multiprocess_framework.modules.process_module.configs.managers_config import (
             ManagersConfig,
             managers_from_log_dir,
         )
-        from multiprocess_framework.modules.logger_module.configs import LoggerScopeSchema
 
-        scopes = managers_from_log_dir(str(tmp_path), "WARNING", model_cls=ManagersConfig).logger.scopes
-        assert all(isinstance(sc, LoggerScopeSchema) for sc in scopes.values())
+        rules = managers_from_log_dir(str(tmp_path), "WARNING", model_cls=ManagersConfig).logger.loggers
+        assert all(isinstance(r, LoggerRuleSchema) for r in rules.values())
 
 
 class TestEffectiveReadback:
@@ -290,8 +296,10 @@ class TestEffectiveReadback:
             _apply_section({"log_level": "DEBUG"}, logger=logger)
             eff = observability_effective(logger=logger)
             assert eff["logger"]["default_level"] == "DEBUG"
-            assert eff["logger"]["scopes"]["DEBUG"]["enabled"] is True
-            assert eff["logger"]["scopes"]["SYSTEM"]["min_level"] == "DEBUG"
+            # Ф8.1: порог виден там, где он теперь живёт, — в правиле корня.
+            # Скоупы в readback остались, но отвечают только про приёмники.
+            assert eff["logger"]["loggers"][""]["level"] == "DEBUG"
+            assert "min_level" not in eff["logger"]["scopes"]["SYSTEM"]
             # Плечо реального эффекта: DEBUG-запись теперь проходит фильтр.
             from multiprocess_framework.modules.logger_module.core.log_config import LogLevel, LogScope
 
@@ -416,7 +424,7 @@ class TestDisabledSinksAreVisibleInReadback:
                     "a": LoggerChannelSchema(type="file", file_path="a.log"),
                     "b": LoggerChannelSchema(type="file", file_path="b.log"),
                 },
-                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["a", "b"])},
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["a", "b"])},
             )
         )
 

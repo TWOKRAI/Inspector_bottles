@@ -31,21 +31,32 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
-from multiprocess_framework.modules.logger_module.configs.logger_manager_config import LoggerScopeSchema
+from multiprocess_framework.modules.data_schema_module import SchemaBase
 from multiprocess_framework.modules.logger_module.core.log_config import LogLevel, LogScope
+from multiprocess_framework.modules.logger_module.core.logger_core import _passes_threshold
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 
 _LEGACY_LEVEL_ORDER = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
-class _LegacyScopeSchema(LoggerScopeSchema):
-    """Прежнее ``should_log`` — на ТОЙ ЖЕ Pydantic-модели.
+class _LegacyScopeSchema(SchemaBase):
+    """Прежнее ``should_log`` — на Pydantic-модели ТОГО ЖЕ рода.
 
-    Наследование, а не голый объект: первая редакция бенча сравнивала новый код
-    на ``LoggerScopeSchema`` со старым на обычном классе и мерила разницу между
-    Pydantic и не-Pydantic, а не между двумя реализациями. Сравнение обязано
-    отличаться ровно телом метода.
+    Модель проекта (``SchemaBase``), а не голый объект: первая редакция бенча
+    сравнивала новый код на Pydantic со старым на обычном классе и мерила
+    разницу между Pydantic и не-Pydantic, а не между двумя реализациями.
+    Сравнение обязано отличаться ровно телом метода.
+
+    Ф8.1: наследование от ``LoggerScopeSchema`` пришлось снять — та теперь
+    ОТВЕРГАЕТ снятые поля, и эталон «до Ф1» перестал бы собираться. Эталон
+    обязан быть замороженной копией прежнего кода, а не потомком текущего;
+    пока он был потомком, любая правка живой схемы меняла и точку отсчёта.
     """
+
+    enabled: bool = True
+    min_level: str = "INFO"
+    channels: List[str] = []
+    modules: List[str] = []
 
     def should_log(self, level: LogLevel, module: str) -> bool:
         if not self.enabled:
@@ -173,8 +184,8 @@ def logger(tmp_path: Path):
             },
             "scopes": {
                 # BUSINESS принимает INFO, DEBUG-скоуп выключен — две ветки бенча.
-                "BUSINESS": {"enabled": True, "min_level": "INFO", "channels": ["sink"]},
-                "DEBUG": {"enabled": False, "min_level": "DEBUG", "channels": ["sink"]},
+                "BUSINESS": {"channels": ["sink"]},
+                "DEBUG": {"channels": ["sink"]},
             },
         },
     )
@@ -215,12 +226,19 @@ class TestGateDoesNotAllocatePerDecision:
             class _Probe(_CountingStr):
                 calls = 0
 
+            if schema_cls is None:
+                # Ф8.1: решение уровня переехало из схемы скоупа в `_passes_threshold`
+                # — инструмент обязан смотреть туда, где решение принимается СЕЙЧАС,
+                # иначе счётчик молчит про другой код (класс «шпион на имени API»).
+                for _ in range(100):
+                    _passes_threshold(_Probe(level_name), LogLevel.DEBUG)
+                return _Probe.calls
             schema = schema_cls.model_construct(enabled=True, min_level=_Probe(level_name), modules=[])
             for _ in range(100):
                 schema.should_log(LogLevel.DEBUG, "bench_mod")
             return _Probe.calls
 
-        new = _upper_calls(LoggerScopeSchema, "INFO")
+        new = _upper_calls(None, "INFO")
         old = _upper_calls(_LegacyScopeSchema, "INFO")
 
         _report(capsys, f"  .upper() на 100 решений: было {old} -> стало {new}")
@@ -234,13 +252,15 @@ class TestGateDoesNotAllocatePerDecision:
         Без неё «нет .upper()» согласовалось бы и с реализацией, которая просто
         всегда возвращает False. Подменяем таблицу — решение обязано измениться.
         """
-        from multiprocess_framework.modules.logger_module.configs import logger_manager_config as cfg
+        from multiprocess_framework.modules.channel_routing_module import levels as уровни
 
-        schema = LoggerScopeSchema(enabled=True, min_level="WARNING")
-        assert schema.should_log(LogLevel.INFO, "bench_mod") is False
+        assert _passes_threshold("WARNING", LogLevel.INFO) is False
 
-        monkeypatch.setattr(cfg, "SEVERITY_NUMBERS", {"INFO": 21, "WARNING": 9})
-        assert schema.should_log(LogLevel.INFO, "bench_mod") is True
+        # Подменяем таблицу рангов — решение обязано измениться. Ф8.1: владелец
+        # решения сменился, а требование к тесту нет: «нет .upper()» без этой
+        # половины согласуется и с реализацией, которая всегда возвращает False.
+        monkeypatch.setattr(уровни, "SEVERITY_NUMBERS", {"INFO": 21, "WARNING": 9})
+        assert _passes_threshold("WARNING", LogLevel.INFO) is True
 
     def test_cached_manager_path_does_not_retain_memory(self, logger: LoggerManager) -> None:
         """Повторная отклонённая запись не наращивает удержанную память.
@@ -319,10 +339,11 @@ class TestGateIsNotSlowerThanBefore:
     def test_scope_schema_decision(self, logger: LoggerManager, capsys: pytest.CaptureFixture) -> None:
         """Некэшированное решение — то, что считает сам ``LoggerScopeSchema``."""
         legacy = _LegacyGate(min_level="INFO")
-        schema = logger.config.scopes["BUSINESS"]
 
         new, old = _timed_pair(
-            lambda: schema.should_log(LogLevel.DEBUG, "bench_mod"),
+            # Ф8.1: некэшированное решение считает `_passes_threshold`, а не схема
+            # скоупа. Эталон «до Ф1» не трогаем — сравнение осталось тем же.
+            lambda: _passes_threshold("INFO", LogLevel.DEBUG),
             lambda: legacy._direct(LogLevel.DEBUG, "bench_mod"),
             self.REPEATS,
         )

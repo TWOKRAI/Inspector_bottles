@@ -58,10 +58,8 @@ def _config(tmp_path: Path) -> LoggerManagerConfig:
                 name="system_file", type="file", enabled=True, file_path="system.log", rotate=False
             )
         },
-        scopes={
-            scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])
-            for scope in ("SYSTEM", "BUSINESS", "DEBUG")
-        },
+        default_level="DEBUG",
+        scopes={scope: LoggerScopeSchema(channels=["system_file"]) for scope in ("SYSTEM", "BUSINESS", "DEBUG")},
     )
 
 
@@ -283,7 +281,8 @@ def test_records_without_channels_reaches_the_outside(tmp_path: Path) -> None:
             enable_batching=False,
             modules={},
             channels={},  # ни одного приёмника
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=[])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=[])},
         ),
     )
     manager.initialize()

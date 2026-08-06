@@ -50,8 +50,9 @@ def _real_config(directory: "Path") -> LoggerManagerConfig:
                 name="system_file", type="file", enabled=True, file_path="system.log", rotate=False
             )
         },
+        default_level="DEBUG",
         scopes={
-            scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])
+            scope: LoggerScopeSchema(channels=["system_file"])
             for scope in ("SYSTEM", "BUSINESS", "PERFORMANCE", "DEBUG")
         },
     )
@@ -643,8 +644,8 @@ class TestDeferredTracebackCost:
                 "modules": {},
                 "channels": {"a": {"type": "file", "enabled": True, "file_path": str(tmp_path / "a.log")}},
                 "scopes": {
-                    "SYSTEM": {"enabled": True, "min_level": "WARNING", "channels": ["a"]},
-                    "DEBUG": {"enabled": False, "min_level": "DEBUG", "channels": ["a"]},
+                    "SYSTEM": {"channels": ["a"]},
+                    "DEBUG": {"channels": ["a"]},
                 },
             },
         )

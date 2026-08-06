@@ -61,10 +61,8 @@ def _config(directory: Path) -> LoggerManagerConfig:
                 name="system_file", type="file", enabled=True, file_path="system.log", rotate=False
             )
         },
-        scopes={
-            scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])
-            for scope in ("SYSTEM", "BUSINESS", "DEBUG")
-        },
+        default_level="DEBUG",
+        scopes={scope: LoggerScopeSchema(channels=["system_file"]) for scope in ("SYSTEM", "BUSINESS", "DEBUG")},
     )
 
 
@@ -207,7 +205,7 @@ def test_percent_args_are_formatted_after_the_gate(tmp_path: Path) -> None:
         __repr__ = __str__
 
     config = _config(tmp_path)
-    config.scopes["DEBUG"].enabled = False  # DEBUG отклоняется гейтом
+    config.default_level = "INFO"  # Ф8.1: DEBUG отклоняется порогом корня, не выключателем скоупа
     logger = LoggerManager(config=config)
     rejected, accepted = _Counting(), _Counting()
     try:

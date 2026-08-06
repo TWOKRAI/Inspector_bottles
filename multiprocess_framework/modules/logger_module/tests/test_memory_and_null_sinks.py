@@ -111,7 +111,7 @@ class TestSinkTypesAreConfigurable:
             mgr = _manager(
                 tmp_path,
                 channels={"loud": LoggerChannelSchema(type="shout_29")},
-                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["loud"])},
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["loud"])},
             )
             try:
                 mgr.info("привет", module="m")
@@ -183,7 +183,7 @@ class TestMemoryChannel:
         mgr = _manager(
             tmp_path,
             channels={"mem": LoggerChannelSchema(type="memory", capacity=2)},
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["mem"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["mem"])},
         )
         try:
             for i in range(5):
@@ -211,7 +211,7 @@ class TestMemoryChannel:
         mgr = _manager(
             tmp_path,
             channels={"mem": LoggerChannelSchema(type="memory", capacity=0)},
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["mem"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["mem"])},
         )
         try:
             assert mgr._channel_registry.get("mem") is None
@@ -236,7 +236,7 @@ class TestTheRingOutlivesTheChannel:
         return _manager(
             tmp_path,
             channels={"ring": LoggerChannelSchema(type="memory", capacity=capacity)},
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["ring"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["ring"])},
         )
 
     def test_records_survive_config_reload(self, tmp_path) -> None:
@@ -338,7 +338,7 @@ class TestOperatorMarkDoesNotOutliveTheConfig:
                 "a": LoggerChannelSchema(type="file", file_path="a.log"),
                 "b": LoggerChannelSchema(type="file", file_path="b.log"),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["a", "b"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["a", "b"])},
         )
 
     def test_reload_returns_the_sink_to_the_route(self, tmp_path) -> None:
@@ -398,7 +398,7 @@ class TestNullChannel:
         mgr = _manager(
             tmp_path,
             channels={"nowhere": LoggerChannelSchema(type="null")},
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["nowhere"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["nowhere"])},
         )
         try:
             for _ in range(7):
@@ -423,7 +423,7 @@ class TestNullOnTheErrorPathIsAnnounced:
             mgr = _manager(
                 tmp_path,
                 channels={"nowhere": LoggerChannelSchema(type="null")},
-                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["nowhere"])},
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["nowhere"])},
             )
         try:
             warnings = _silence_warnings(caplog)
@@ -447,7 +447,7 @@ class TestNullOnTheErrorPathIsAnnounced:
                 "nowhere": LoggerChannelSchema(type="null"),
                 "real": LoggerChannelSchema(type="file", file_path="real.log"),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["real", "nowhere"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["real", "nowhere"])},
         )
         try:
             with caplog.at_level(logging.WARNING, logger=_EMERGENCY_LOGGER):
@@ -475,7 +475,7 @@ class TestNullOnTheErrorPathIsAnnounced:
         mgr = _manager(
             tmp_path,
             channels={"nowhere": LoggerChannelSchema(type="null")},
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["nowhere"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["nowhere"])},
         )
         try:
             before = mgr.get_stats().get("errors_to_floor", 0)
@@ -496,7 +496,7 @@ class TestNullOnTheErrorPathIsAnnounced:
                     "nowhere": LoggerChannelSchema(type="null"),
                     "real": LoggerChannelSchema(type="file", file_path="real.log"),
                 },
-                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["nowhere", "real"])},
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["nowhere", "real"])},
             )
         try:
             assert not _silence_warnings(caplog)
@@ -515,7 +515,7 @@ class TestNullOnTheErrorPathIsAnnounced:
             mgr = _manager(
                 tmp_path,
                 channels={"nowhere": LoggerChannelSchema(type="null")},
-                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["__опечатка__"])},
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["__опечатка__"])},
             )
         try:
             assert not _silence_warnings(caplog)
@@ -563,7 +563,7 @@ class TestReadSinkTail:
         mgr = _manager(
             tmp_path,
             channels={"mem": LoggerChannelSchema(type="memory", capacity=50)},
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["mem"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["mem"])},
         )
         try:
             for i in range(4):
@@ -581,7 +581,7 @@ class TestReadSinkTail:
         mgr = _manager(
             tmp_path,
             channels={"real": LoggerChannelSchema(type="file", file_path="real.log")},
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["real"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["real"])},
         )
         try:
             result = mgr.read_sink_tail("real")
@@ -595,7 +595,7 @@ class TestReadSinkTail:
         mgr = _manager(
             tmp_path,
             channels={"mem": LoggerChannelSchema(type="memory", capacity=5)},
-            scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["mem"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["mem"])},
         )
         try:
             result = mgr.read_sink_tail("__нет такого__")

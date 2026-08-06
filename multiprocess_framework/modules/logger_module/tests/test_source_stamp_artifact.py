@@ -63,10 +63,8 @@ def _config(tmp_path: Path) -> LoggerManagerConfig:
                 rotate=False,
             )
         },
-        scopes={
-            scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])
-            for scope in ("SYSTEM", "BUSINESS", "DEBUG")
-        },
+        default_level="DEBUG",
+        scopes={scope: LoggerScopeSchema(channels=["system_file"]) for scope in ("SYSTEM", "BUSINESS", "DEBUG")},
     )
 
 

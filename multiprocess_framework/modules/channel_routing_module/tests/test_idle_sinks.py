@@ -45,7 +45,8 @@ def _manager(tmp_path) -> Any:
                 "используемый": LoggerChannelSchema(type="file", enabled=True, file_path="u.log", rotate=False),
                 "молчащий": LoggerChannelSchema(type="file", enabled=True, file_path="i.log", rotate=False),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["используемый"])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["используемый"])},
         )
     )
 
@@ -119,7 +120,8 @@ class TestItIsAudible:
                 channels={
                     "единственный": LoggerChannelSchema(type="file", enabled=True, file_path="one.log", rotate=False)
                 },
-                scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["единственный"])},
+                default_level="DEBUG",
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["единственный"])},
             )
         )
         manager.system(LogLevel.INFO, "проба", module="источник")
@@ -142,7 +144,8 @@ class TestItIsAudible:
                 log_directory=str(tmp_path),
                 modules={},
                 channels={"буферный": LoggerChannelSchema(type="file", enabled=True, file_path="b.log", rotate=False)},
-                scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["буферный"])},
+                default_level="DEBUG",
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["буферный"])},
             )
         )
         manager.system(LogLevel.INFO, "запись", module="источник")

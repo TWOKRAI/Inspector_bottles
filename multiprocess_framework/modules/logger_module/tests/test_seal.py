@@ -82,9 +82,9 @@ def _config(tmp_path: Path, *, batching: bool = False, fmt: str | None = None) -
         modules={},
         channels={"system_file": channel},
         scopes={
-            "SYSTEM": LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["system_file"]),
-            "BUSINESS": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["system_file"]),
-            "DEBUG": LoggerScopeSchema(enabled=False, min_level="DEBUG", channels=["system_file"]),
+            "SYSTEM": LoggerScopeSchema(channels=["system_file"]),
+            "BUSINESS": LoggerScopeSchema(channels=["system_file"]),
+            "DEBUG": LoggerScopeSchema(channels=["system_file"]),
         },
     )
 
@@ -312,8 +312,8 @@ def test_precondition_default_scopes_all_reach_a_file_channel() -> None:
     config = LoggerManagerConfig()
     file_channels = {name for name, channel in config.channels.items() if channel.type == "file" and channel.enabled}
     for scope_name, scope in config.scopes.items():
-        if not scope.enabled:
-            continue
+        # Ф8.1: выключателя у скоупа больше нет — проверяются ВСЕ группы.
+        # Раньше выключенный DEBUG пропускался, и предусловие про него молчало.
         targets = set(scope.channels) or set(config.channels)
         assert targets & file_channels, f"скоуп {scope_name} не пишет ни в один файл"
 

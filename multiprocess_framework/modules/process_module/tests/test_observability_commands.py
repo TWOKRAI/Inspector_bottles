@@ -197,7 +197,7 @@ class TestLoggerSink:
                 channels={
                     "trace_file": LoggerChannelSchema(type="file", enabled=True, file_path="trace.log", rotate=False)
                 },
-                scopes={"BUSINESS": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["trace_file"])},
+                scopes={"BUSINESS": LoggerScopeSchema(channels=["trace_file"])},
             )
         )
         try:
@@ -241,7 +241,7 @@ class TestLoggerSinkTail:
                 enable_batching=False,
                 modules={},
                 channels={"mem": LoggerChannelSchema(type="memory", capacity=20)},
-                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["mem"])},
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["mem"])},
             )
         )
 
@@ -302,8 +302,8 @@ class TestSinkToggleNamesWhatItTouches:
                 modules={},
                 channels={"a": LoggerChannelSchema(type="file", file_path="a.log")},
                 scopes={
-                    "SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["a"]),
-                    "BUSINESS": LoggerScopeSchema(min_level="INFO", channels=["другой"]),
+                    "SYSTEM": LoggerScopeSchema(channels=["a"]),
+                    "BUSINESS": LoggerScopeSchema(channels=["другой"]),
                 },
             )
         )
@@ -363,7 +363,7 @@ class TestTailCrossesTheProcessBoundary:
                 enable_batching=False,
                 modules={},
                 channels={"ring": LoggerChannelSchema(type="memory", capacity=10)},
-                scopes={"SYSTEM": LoggerScopeSchema(min_level="INFO", channels=["ring"])},
+                scopes={"SYSTEM": LoggerScopeSchema(channels=["ring"])},
             )
         )
         try:

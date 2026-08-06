@@ -19,7 +19,7 @@ from multiprocess_framework.modules.process_module.heartbeat.process_heartbeat i
     ProcessHeartbeat,
 )
 from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
-    GATED_METRICS,
+    gated_metrics,
     TelemetryGate,
     build_worker_telemetry,
 )
@@ -30,15 +30,61 @@ def _workers(n: int = 2) -> dict:
 
 
 class TestGatedMetricsLocation:
-    """Task 2.3: GATED_METRICS переехала в configs — оба пути импорта работают (round-trip)."""
+    """Ф8.1: каталог метрик доступен обоими путями импорта и наполнен объявлениями."""
 
     def test_old_and_new_import_paths_agree(self) -> None:
         from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
-            GATED_METRICS as NEW_LOCATION,
+            gated_metrics as NEW_LOCATION,
         )
 
-        assert GATED_METRICS is NEW_LOCATION
-        assert GATED_METRICS == ("fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm")
+        assert gated_metrics is NEW_LOCATION
+
+    def test_the_catalog_holds_exactly_the_five_declared_metrics(self) -> None:
+        """Состав каталога — литералом, а не выводом из самого каталога.
+
+        Ожидание, посчитанное через ``declared_metrics()``, согласилось бы с
+        любым ответом, включая пустой; поэтому здесь перечень написан руками.
+        Пять имён — те же, что были в снятом кортеже ``GATED_METRICS``: Ф8.1
+        меняла ВЛАДЕНИЕ каталогом, а не его содержимое.
+        """
+        assert set(gated_metrics()) == {"fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"}
+
+    def test_the_order_is_sorted_not_import_order(self) -> None:
+        """Порядок устойчив к порядку импортов — иначе строки GUI переставлялись бы.
+
+        Прежний кортеж-литерал давал порядок автора; реестр наполняется импортом,
+        и без сортировки каталог зависел бы от того, какой производитель загрузился
+        первым. Каталог уезжает в шаблон строк вкладки «Процессы», где перестановка
+        видна глазом.
+        """
+        каталог = gated_metrics()
+        assert list(каталог) == sorted(каталог)
+
+    def test_a_new_metric_needs_no_framework_edit(self) -> None:
+        """Приёмка Ф8.1: метрика заводится ОБЪЯВЛЕНИЕМ, а не правкой фреймворка.
+
+        Проверка идёт через настоящий реестр, а не через фейк: подменённый реестр
+        доказал бы фейк. Объявление снимается в ``finally`` — реестр процессный,
+        и оставленная запись сломала бы соседа.
+        """
+        from multiprocess_framework.modules.observability_declarations import (
+            KIND_METRIC,
+            declare_metric,
+            forget_declarations,
+        )
+
+        было = set(gated_metrics())
+        declare_metric("прикладная_метрика", owner="тест_приложения")
+        try:
+            assert "прикладная_метрика" in gated_metrics()
+            # и она сразу гейтится — то есть попала именно в каталог publisher-gate
+            cfg = TelemetryPublishConfig(metrics={"прикладная_метрика": MetricRule(enabled=False)})
+            assert cfg.unknown_metrics() == set()
+            assert cfg.resolve("прикладная_метрика")[0] is False
+        finally:
+            forget_declarations(KIND_METRIC)
+            for имя in было:
+                declare_metric(имя, owner="восстановление_после_теста")
 
 
 # --------------------------------------------------------------------------- #
@@ -58,7 +104,7 @@ class TestBuildFilter:
 
     def test_disabled_effective_hz_absent(self) -> None:
         """effective_hz не в allowed → его нет в per-worker payload (status остаётся)."""
-        allowed = set(GATED_METRICS) - {"effective_hz"}
+        allowed = set(gated_metrics()) - {"effective_hz"}
         _, data = build_worker_telemetry(_workers(1), "proc", allowed)
         wp = data["workers"]["w0"]
         assert "effective_hz" not in wp
@@ -119,7 +165,7 @@ class TestGate:
         """Первый тик (next_due=0) выдаёт все включённые метрики."""
         cfg = TelemetryPublishConfig(default_interval_sec=5.0)
         gate = TelemetryGate(cfg)
-        assert gate.due_metrics(now=0.0) == set(GATED_METRICS)
+        assert gate.due_metrics(now=0.0) == set(gated_metrics())
 
     def test_per_metric_independent_intervals(self) -> None:
         """Разные интервалы у метрик независимы: shm реже, fps чаще."""
@@ -259,7 +305,7 @@ class TestPublishMetricsGated:
         """Через _publish_metrics_to_tree: выключенный effective_hz не в merge."""
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServices(proxy))
-        allowed = set(GATED_METRICS) - {"effective_hz", "cycle_duration_ms"}
+        allowed = set(gated_metrics()) - {"effective_hz", "cycle_duration_ms"}
         hb._publish_metrics_to_tree(_workers(2), allowed)
         assert proxy.merge_calls == 1
         _, data = proxy.merged[0]

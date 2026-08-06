@@ -56,9 +56,10 @@ def _config(tmp_path: Path, *, enable_batching: bool, scope_channels: List[str])
                 name="system_file", type="file", enabled=True, file_path="system.log", rotate=False
             ),
         },
+        default_level="DEBUG",
         scopes={
-            "BUSINESS": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=scope_channels),
-            "SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=scope_channels),
+            "BUSINESS": LoggerScopeSchema(channels=scope_channels),
+            "SYSTEM": LoggerScopeSchema(channels=scope_channels),
         },
     )
 

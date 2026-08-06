@@ -157,7 +157,8 @@ def _floor_path_for(process_name: str, logs_dir: Path) -> Dict[str, str]:
             enable_batching=False,
             modules={},
             channels={"console": LoggerChannelSchema(name="console", type="console", enabled=False)},
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=[])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=[])},
         ),
         process=process,
     )
@@ -229,7 +230,8 @@ def test_floor_failure_is_counted_separately_and_not_as_success(
             enable_batching=False,
             modules={},
             channels={},
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=[])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=[])},
         ),
         process=_FakeProcess("floor_fail"),
     )
@@ -291,7 +293,8 @@ def test_disabled_channel_does_not_choose_the_floor_location(tmp_path: Path) -> 
                     rotate=False,
                 ),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["live_file"])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["live_file"])},
         ),
         process=_FakeProcess("disabled_probe"),
     )
@@ -331,7 +334,8 @@ def test_no_duplicate_when_scope_has_no_explicit_channels(tmp_path: Path) -> Non
                 "проба_файл": LoggerChannelSchema(type="file", enabled=True, file_path="проба.log", rotate=False),
             },
             # Пустой список — тот самый вырожденный случай: набор берётся из реестра.
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=[])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=[])},
             loggers={"проба": {"channels_extra": ["проба_файл"]}},
         ),
         process=_FakeProcess("dup_probe"),

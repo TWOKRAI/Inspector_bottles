@@ -48,7 +48,8 @@ from multiprocess_framework.modules.logger_module.core.log_config import (
     LogScope,
     PRESET_SCOPES,
 )
-from multiprocess_framework.modules.logger_module.core.logger_core import _LEVEL_DEFAULT_SCOPE
+from multiprocess_framework.modules.logger_module.configs.logger_manager_config import LoggerRuleSchema
+from multiprocess_framework.modules.logger_module.core.logger_core import _LEVEL_DEFAULT_SCOPE, _passes_threshold
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 
 
@@ -117,79 +118,205 @@ class TestLevelRanks:
         assert threshold_severity(None) == 0
 
 
-class TestScopeGateCharacterization:
-    """Поведение ``LoggerScopeSchema.should_log`` — снято с прежней реализации."""
+class TestThresholdGateCharacterization:
+    """Ф8.1: ось порога одна — правило имени и его корень.
+
+    Класс заменил ``TestScopeGateCharacterization``, характеризовавший
+    ``LoggerScopeSchema.should_log``. **Свойства не выброшены вместе с
+    механизмом, а переставлены на выжившую ось** — иначе снятие второй оси
+    заодно и молча сняло бы всё, что она стерегла. Каждый тест ниже — тот же
+    вопрос, заданный новому владельцу ответа.
+    """
 
     def test_below_threshold_is_rejected(self) -> None:
-        scope = LoggerScopeSchema(enabled=True, min_level="WARNING")
-        assert scope.should_log(LogLevel.INFO, "any") is False
-        assert scope.should_log(LogLevel.WARNING, "any") is True
-        assert scope.should_log(LogLevel.CRITICAL, "any") is True
+        """Было: порог скоупа. Стало: порог правила имени."""
+        assert _passes_threshold("WARNING", LogLevel.INFO) is False
+        assert _passes_threshold("WARNING", LogLevel.WARNING) is True
+        assert _passes_threshold("WARNING", LogLevel.CRITICAL) is True
 
-    def test_disabled_scope_rejects_everything(self) -> None:
-        scope = LoggerScopeSchema(enabled=False, min_level="DEBUG")
-        assert scope.should_log(LogLevel.CRITICAL, "any") is False
+    def test_silencing_a_group_is_now_a_threshold(self, tmp_path: Path) -> None:
+        """Было: ``enabled=False`` у скоупа. Стало: порог выше уровня записи.
 
-    def test_module_filter_applies_above_threshold(self) -> None:
-        scope = LoggerScopeSchema(enabled=True, min_level="DEBUG", modules=["camera"])
-        assert scope.should_log(LogLevel.INFO, "camera") is True
-        assert scope.should_log(LogLevel.INFO, "gui") is False
+        Проверяется на живом менеджере, а не на схеме: выключатель был у скоупа,
+        а порог — у иерархии, и утверждение «одно заменило другое» ложно, если
+        оно верно только для чистой функции.
+        """
+        mgr = LoggerManager(
+            manager_name="Silence81",
+            config={
+                "app_name": "silence",
+                "log_directory": str(tmp_path),
+                "enable_batching": False,
+                "loggers": {"": {"level": "CRITICAL"}},
+            },
+        )
+        mgr.initialize()
+        try:
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.ERROR, "любой") is False
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.CRITICAL, "любой") is True
+        finally:
+            mgr.shutdown()
 
-    def test_lowercase_min_level_still_works(self) -> None:
-        """``min_level`` нормализуется — прежняя реализация звала ``.upper()``."""
-        scope = LoggerScopeSchema(enabled=True, min_level="warning")
-        assert scope.should_log(LogLevel.INFO, "any") is False
-        assert scope.should_log(LogLevel.ERROR, "any") is True
+    def test_addressing_a_subtree_replaces_the_module_whitelist(self, tmp_path: Path) -> None:
+        """Было: ``modules=[...]`` у скоупа (Р-2.4-Г). Стало: правило по префиксу.
 
-    def test_unknown_min_level_is_refused_at_the_boundary(self) -> None:
-        """Ф3.1: незнакомый порог до гейта больше НЕ доезжает.
+        Разница не только в записи: whitelist требовал перечислить имена, а
+        префикс ловит и то, чего ещё нет, — новый плагин поддерева подчиняется
+        правилу без правки конфига.
+        """
+        mgr = LoggerManager(
+            manager_name="Subtree81",
+            config={
+                "app_name": "subtree",
+                "log_directory": str(tmp_path),
+                "enable_batching": False,
+                "loggers": {"": {"level": "ERROR"}, "камера": {"level": "INFO"}},
+            },
+        )
+        mgr.initialize()
+        try:
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.INFO, "камера") is True
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.INFO, "камера.видоискатель") is True
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.INFO, "гуй") is False
+        finally:
+            mgr.shutdown()
 
-        Прежде здесь была характеризация странности: ``ValueError`` из
-        ``index()`` возвращал ``True`` ДО проверки модулей, то есть незнакомый
-        порог отключал заодно и фильтр модулей. Странность была сохранена
-        осознанно — её нельзя было менять попутно с оптимизацией Ф1.1.
+    def test_lowercase_level_still_works(self) -> None:
+        """Нормализация имени осталась на границе — теперь у правила и у корня."""
+        assert LoggerRuleSchema(level="warning").level == "WARNING"
+        assert LoggerManagerConfig(default_level="warning").default_level == "WARNING"
 
-        Теперь её чинит отдельная задача, и чинит на входе: имя проверяется в
-        валидаторе схемы. Сам гейт по-прежнему fail-open (проверяется ниже
-        через ``model_construct``, обходящий валидацию) — это последний рубеж
-        для программного вызова, а не первый.
+    def test_unknown_level_is_refused_at_the_boundary(self) -> None:
+        """Ф3.1 стерегла ЭТО у ``min_level``; Ф8.1 обязана стеречь у обеих новых позиций.
+
+        Повод не теоретический и записан репро Ф3.1: ``min_level='WARN'`` давал
+        ``should_log(DEBUG) = True`` — порог «предупреждения и выше» молча
+        оборачивался firehose. Оставить проверку только там, откуда ось ушла,
+        значило бы починить дефект на одном пути из трёх.
         """
         import pytest as _pytest
 
         with _pytest.raises(ValueError, match="неизвестный уровень"):
-            LoggerScopeSchema(enabled=True, min_level="ОПЕЧАТКА", modules=["camera"])
+            LoggerRuleSchema(level="ОПЕЧАТКА")
+        with _pytest.raises(ValueError, match="неизвестный уровень"):
+            LoggerManagerConfig(default_level="ОПЕЧАТКА")
+
+    def test_foreign_spellings_are_accepted_not_refused(self) -> None:
+        """``WARN``/``FATAL`` — каноничные имена OTel, а не опечатки.
+
+        Стоит рядом с отказом намеренно: без этой пары «строгий валидатор»
+        нельзя отличить от «валидатор, отвергающий всё подряд», и первый же
+        конфиг с ``WARN`` упал бы на ровном месте.
+        """
+        assert LoggerRuleSchema(level="WARN").level == "WARNING"
+        assert LoggerRuleSchema(level="FATAL").level == "CRITICAL"
 
     def test_gate_stays_fail_open_when_validation_is_bypassed(self) -> None:
         """Рубеж горячего пути: минуя валидацию, незнакомый порог пропускает всё.
 
         Fail-closed здесь означал бы тишину от опечатки — невидимую потерю,
-        запрещённую инвариантом 2 плана. Фильтр модулей тоже отключается, как
-        и прежде: это ровно та же ветка.
+        запрещённую инвариантом 2 плана. Свойство перенесено с прежней ветки
+        скоупа на ``_passes_threshold``, то есть на обе новые позиции сразу:
+        функция одна, и разъехаться им теперь нечем.
         """
-        scope = LoggerScopeSchema.model_construct(enabled=True, min_level="ОПЕЧАТКА", modules=["camera"])
-        assert scope.should_log(LogLevel.DEBUG, "gui") is True
+        assert _passes_threshold("ОПЕЧАТКА", LogLevel.DEBUG) is True
 
-    def test_precomputed_threshold_follows_field_assignment(self) -> None:
-        """Слепок не может разъехаться с полем: присваивание пересчитывает его.
+    @pytest.mark.parametrize(
+        "снятое",
+        [
+            {"min_level": "ERROR"},
+            {"enabled": False},
+            {"modules": ["камера"]},
+        ],
+    )
+    def test_a_removed_field_is_refused_not_ignored(self, снятое: Dict[str, Any]) -> None:
+        """Снятое поле в конфиге — **отказ**, а не тихое ``extra="ignore"``.
 
-        Без этого правка ``min_level`` у живой схемы оставила бы гейт на старом
-        пороге — дефект, который в проде выглядел бы как «конфиг применили, а
-        уровень не поменялся».
+        Без этого стража Ф8.1 создала бы дефект хуже того, что чинила: оператор
+        пишет ``scopes.SYSTEM.min_level``, конфиг принят, readback показывает
+        написанное — а гейт про него не знает. Это «тихая потеря адресной
+        правки», один из двух исходов, ради недопущения которых 2.3b и стояла.
+
+        Каждое поле проверяется ОТДЕЛЬНО: общая проверка «хоть одно отвергается»
+        осталась бы зелёной, забудь мы в списке одно из трёх.
         """
-        scope = LoggerScopeSchema(enabled=True, min_level="DEBUG")
-        assert scope.should_log(LogLevel.INFO, "any") is True
+        with pytest.raises(ValueError, match="скоуп больше не задаёт порог"):
+            LoggerScopeSchema.model_validate({"channels": ["a"], **снятое})
 
-        scope.min_level = "ERROR"
-        assert scope.should_log(LogLevel.INFO, "any") is False
-        assert scope.should_log(LogLevel.ERROR, "any") is True
+    def test_a_removed_field_is_refused_through_the_whole_config_too(self) -> None:
+        """Тот же отказ на пути ЦЕЛОГО конфига, а не только отдельной схемы.
 
-    def test_module_filter_follows_field_assignment(self) -> None:
-        scope = LoggerScopeSchema(enabled=True, min_level="DEBUG")
-        assert scope.should_log(LogLevel.INFO, "gui") is True
+        Пара к тесту выше и не дубль: конфиг едет через ``LoggerManagerConfig``,
+        и проверка, работающая на схеме, но обойдённая сборкой, была бы
+        неотличима от её отсутствия — ровно там, где конфиг и приходит.
+        """
+        with pytest.raises(ValueError, match="скоуп больше не задаёт порог"):
+            LoggerManagerConfig.model_validate({"scopes": {"SYSTEM": {"min_level": "ERROR"}}})
 
-        scope.modules = ["camera"]
-        assert scope.should_log(LogLevel.INFO, "gui") is False
-        assert scope.should_log(LogLevel.INFO, "camera") is True
+    def test_an_explicit_root_rule_beats_the_default_level(self, tmp_path: Path) -> None:
+        """У корня ДВА написания, и их отношение зафиксировано, а не оставлено на удачу.
+
+        Найдено слом-инъекцией, а не чтением: инъекция «корневой порог не
+        читается» (``default_level`` → всегда True) НЕ убила тест про заглушенную
+        группу, хотя предсказание её называло. Причина — тест задаёт корень
+        правилом ``loggers[""]``, и до ветки ``default_level`` дело не доходит.
+
+        Это не дубль одной величины: ``default_level`` — что действует, когда про
+        имя не сказало НИ ОДНО правило, а ``loggers[""]`` — правило, которое про
+        имя сказало. Явное сильнее умолчания, ровно как более длинный префикс
+        сильнее более короткого. Пара ниже пиннит это на случае, когда они
+        РАСХОДЯТСЯ, — единственном, где разница наблюдаема.
+        """
+        mgr = LoggerManager(
+            manager_name="RootPair81",
+            config={
+                "app_name": "root_pair",
+                "log_directory": str(tmp_path),
+                "enable_batching": False,
+                "default_level": "CRITICAL",
+                "loggers": {"": {"level": "DEBUG"}},
+            },
+        )
+        mgr.initialize()
+        try:
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.DEBUG, "любой") is True, (
+                "явное корневое правило проиграло умолчанию default_level"
+            )
+        finally:
+            mgr.shutdown()
+
+    def test_without_a_root_rule_the_default_level_decides(self, tmp_path: Path) -> None:
+        """Обратная половина: без правила решает ``default_level``.
+
+        Без неё предыдущий тест зелен и у реализации, которая ``default_level``
+        не читает вовсе, — то есть ровно у той, что оставила бы главную ручку
+        мёртвой.
+        """
+        mgr = LoggerManager(
+            manager_name="RootDefault81",
+            config={
+                "app_name": "root_default",
+                "log_directory": str(tmp_path),
+                "enable_batching": False,
+                "default_level": "CRITICAL",
+            },
+        )
+        mgr.initialize()
+        try:
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.ERROR, "любой") is False
+            assert mgr.should_log(LogScope.SYSTEM, LogLevel.CRITICAL, "любой") is True
+        finally:
+            mgr.shutdown()
+
+    def test_the_scope_no_longer_answers_about_thresholds(self) -> None:
+        """Ось снята НАСОВСЕМ, и это проверяется, а не подразумевается.
+
+        Без этого теста ничто не мешало бы вернуть ``min_level`` в схему рядом с
+        новой осью — и получить обратно ровно ту коллизию, ради снятия которой
+        задача делалась (репро 2026-08-04 и 2026-08-06).
+        """
+        assert not hasattr(LoggerScopeSchema(), "should_log")
+        assert set(LoggerScopeSchema.model_fields) == {"channels"}
 
 
 # =============================================================================
@@ -326,10 +453,11 @@ class TestIsEnabledForAgreesWithRouting:
                 "enable_batching": False,
                 # DEBUG-скоуп включаем: иначе половина сетки зелёная по одной
                 # и той же причине «всё выключено».
+                "default_level": "DEBUG",
                 "scopes": {
-                    "SYSTEM": {"enabled": True, "min_level": "WARNING", "channels": ["probe"]},
-                    "BUSINESS": {"enabled": True, "min_level": "INFO", "channels": ["probe"]},
-                    "DEBUG": {"enabled": True, "min_level": "DEBUG", "channels": ["probe"]},
+                    "SYSTEM": {"channels": ["probe"]},
+                    "BUSINESS": {"channels": ["probe"]},
+                    "DEBUG": {"channels": ["probe"]},
                 },
                 "channels": {"probe": {"type": "file", "enabled": True, "file_path": str(tmp_path / "p.log")}},
                 "modules": {},
@@ -364,10 +492,22 @@ class TestIsEnabledForAgreesWithRouting:
         finally:
             mgr.shutdown()
 
-    def test_explicit_scope_overrides_default(self, logger: Any) -> None:
-        """У SYSTEM порог WARNING, у BUSINESS — INFO; предикат обязан их различать."""
-        assert logger.is_enabled_for("main", LogLevel.INFO, LogScope.SYSTEM) is False
+    def test_the_scope_argument_no_longer_changes_the_verdict(self, logger: Any) -> None:
+        """Ф8.1: скоуп на решение гейта не влияет — и это проверяется, а не подразумевается.
+
+        Прежний тест на этом месте утверждал обратное («у SYSTEM порог WARNING, у
+        BUSINESS — INFO, предикат обязан их различать»). Различие исчезло вместе
+        со второй осью, и молчаливо этого оставлять нельзя: ``is_enabled_for``
+        по-прежнему ПРИНИМАЕТ ``scope``, потому что аргумент нужен маршруту,
+        и без теста читатель сигнатуры решил бы, что он ещё и фильтрует.
+
+        Пара «два разных скоупа — один ответ» плюс «порог правила ответ меняет»:
+        первое без второго зелено и у гейта, который просто всегда говорит True.
+        """
+        assert logger.is_enabled_for("main", LogLevel.INFO, LogScope.SYSTEM) is True
         assert logger.is_enabled_for("main", LogLevel.INFO, LogScope.BUSINESS) is True
+        assert logger.is_enabled_for("main", LogLevel.DEBUG, LogScope.SYSTEM) is False
+        assert logger.is_enabled_for("main", LogLevel.DEBUG, LogScope.BUSINESS) is False
 
 
 # =============================================================================
@@ -389,8 +529,13 @@ class _StampedManager(BaseManager, ObservableMixin):
         return True
 
 
-def _whitelist_logger(tmp_path: Path, allowed: List[str]) -> LoggerManager:
-    """Логгер, у которого каждый scope пускает ТОЛЬКО перечисленные модули."""
+def _rule_logger(tmp_path: Path, rules: Dict[str, dict]) -> LoggerManager:
+    """Логгер, адресующий источники ПРАВИЛАМИ ИМЁН (Ф8.1: whitelist `modules` снят).
+
+    Корень поднят до CRITICAL, чтобы «прошло» означало «прошло по правилу», а не
+    «прошло, потому что и так всё открыто»: без глухого корня тест был бы зелёным
+    при полностью выключенном резолве.
+    """
     return LoggerManager(
         config=LoggerManagerConfig(
             app_name="wl",
@@ -398,53 +543,37 @@ def _whitelist_logger(tmp_path: Path, allowed: List[str]) -> LoggerManager:
             enable_batching=False,
             modules={},
             channels={"f": LoggerChannelSchema(name="f", type="file", enabled=True, file_path="s.log", rotate=False)},
-            scopes={
-                scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["f"], modules=list(allowed))
-                for scope in ("SYSTEM", "BUSINESS", "DEBUG")
-            },
+            default_level="CRITICAL",
+            scopes={scope: LoggerScopeSchema(channels=["f"]) for scope in ("SYSTEM", "BUSINESS", "DEBUG")},
+            loggers={имя: LoggerRuleSchema.model_validate(правило) for имя, правило in rules.items()},
         )
     )
 
 
-class TestWhitelistSemanticsAfterStamping:
-    """Ф2.1 сменила смысл поля `modules` в scope — и это надо было назвать вслух.
+class TestPrefixRuleReplacedTheWhitelist:
+    """Ф8.1 (Р-2.4-Г): whitelist ``modules`` снят, адресация — правилом по префиксу.
 
-    До штампа записи менеджеров приходили под ``module="main"`` и проходили
-    любой whitelist, где есть ``"main"``. После штампа они приходят под своим
-    именем — и тот же самый конфиг их глушит. Ни один конфиг репозитория
-    whitelist сегодня не задаёт, поэтому дефекта в проде нет; но это смена
-    семантики конфига, и она обязана быть закреплена тестом, а не памятью.
+    Класс заменил ``TestWhitelistSemanticsAfterStamping``. Тот прямо предсказывал
+    эту замену: *«если иерархия имён решит, что whitelist должен понимать префиксы,
+    эти тесты покраснеют, и это будет правильный сигнал — семантику меняем
+    осознанно»*. Они покраснели; смена осознанная и записана здесь.
 
-    Тесты снимают ПОВЕДЕНИЕ как есть. Если 2.2 (иерархия имён) решит, что
-    whitelist должен понимать префиксы — эти тесты покраснеют, и это будет
-    правильный сигнал «семантику меняем осознанно», а не тихий дрейф.
+    Что осталось прежним: проверка идёт **по файлу**, а не по счётчику. Счётчик
+    «отклонено гейтом» сказал бы то же самое и при исправной доставке.
 
-    Проверка идёт по ФАЙЛУ, а не по счётчику: счётчик «отклонено гейтом»
-    сказал бы то же самое и при исправной доставке.
+    Что изменилось по существу: whitelist сравнивал имя строго по равенству, и
+    третий тест ниже раньше проверял именно это ограничение. Теперь он проверяет
+    обратное — и в этом весь смысл перехода: правило родителя действует на
+    потомков, поэтому источник, которого ещё нет, конфига не требует.
     """
 
-    def test_stamped_record_is_dropped_by_main_only_whitelist(self, tmp_path: Path) -> None:
-        """Воспроизведение находки: whitelist ["main"] глушит менеджерскую запись."""
-        logger = _whitelist_logger(tmp_path, allowed=["main"])
-        try:
-            logger.info("прямой вызов без миксина")
-            _StampedManager("router_manager", logger)._log_info("запись менеджера")
-        finally:
-            logger.shutdown()
+    def test_the_stamped_name_is_what_the_rule_addresses(self, tmp_path: Path) -> None:
+        """Правило по настоящему имени источника запись пропускает.
 
-        text = (tmp_path / "s.log").read_text(encoding="utf-8")
-        assert "прямой вызов без миксина" in text, "запись под 'main' обязана пройти whitelist"
-        assert "запись менеджера" not in text, (
-            "характеризация: после Ф2.1 запись едет под 'router_manager' и whitelist "
-            "['main'] её отсекает — если это изменилось, семантику поменяли осознанно"
-        )
-
-    def test_whitelist_with_real_source_name_lets_record_through(self, tmp_path: Path) -> None:
-        """Обратная сторона: whitelist, знающий настоящее имя, запись пропускает.
-
-        Без этой половины первый тест зелен и при полностью сломанной записи.
+        Ф2.1 штампует записи менеджеров их именем (``router_manager``), а не
+        ``main``, — правило адресует именно его.
         """
-        logger = _whitelist_logger(tmp_path, allowed=["router_manager"])
+        logger = _rule_logger(tmp_path, {"router_manager": {"level": "DEBUG"}})
         try:
             _StampedManager("router_manager", logger)._log_info("запись менеджера")
         finally:
@@ -452,16 +581,39 @@ class TestWhitelistSemanticsAfterStamping:
 
         assert "запись менеджера" in (tmp_path / "s.log").read_text(encoding="utf-8")
 
-    def test_whitelist_does_not_match_by_prefix_today(self, tmp_path: Path) -> None:
-        """Сегодня сравнение строгое по равенству — префикса ('router') мало.
+    def test_a_rule_for_someone_else_does_not_let_it_through(self, tmp_path: Path) -> None:
+        """Обратная половина: чужое правило запись не пропускает.
 
-        Это и есть точка входа задачи 2.2: иерархия по точкам должна будет
-        решить, распространяется ли правило родителя на потомков.
+        Без неё первый тест зелен и при правиле, которое пропускает вообще всё.
         """
-        logger = _whitelist_logger(tmp_path, allowed=["router"])
+        logger = _rule_logger(tmp_path, {"кто_то_другой": {"level": "DEBUG"}})
         try:
             _StampedManager("router_manager", logger)._log_info("запись менеджера")
         finally:
             logger.shutdown()
 
         assert "запись менеджера" not in (tmp_path / "s.log").read_text(encoding="utf-8")
+
+    def test_the_rule_now_reaches_descendants_which_the_whitelist_could_not(self, tmp_path: Path) -> None:
+        """**Смена семантики, названная вслух.** Правило поддерева ловит потомка.
+
+        Прежний тест на этом месте утверждал ОБРАТНОЕ: whitelist ``["router"]``
+        запись источника ``router.manager`` не пропускал, потому что сравнение
+        шло по равенству. Ради этого свойства фаза и делалась — новый плагин
+        поддерева подчиняется правилу родителя, и конфиг при его добавлении не
+        трогают.
+
+        Совпадение по ГРАНИЦЕ ТОЧКИ, а не по началу строки: пара ниже стережёт
+        ровно это — ``router`` не должен ловить ``routerX``, иначе источник молча
+        получил бы чужой порог.
+        """
+        logger = _rule_logger(tmp_path, {"router": {"level": "DEBUG"}})
+        try:
+            _StampedManager("router.manager", logger)._log_info("запись потомка")
+            _StampedManager("routerX", logger)._log_info("запись однофамильца")
+        finally:
+            logger.shutdown()
+
+        text = (tmp_path / "s.log").read_text(encoding="utf-8")
+        assert "запись потомка" in text, "правило родителя обязано действовать на поддерево"
+        assert "запись однофамильца" not in text, "совпадение только по границе точки, а не по началу строки"

@@ -80,7 +80,7 @@ def _logger(tmp_path: Path) -> LoggerManager:
                     rotate=False,
                 ),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["system_file"])},
         ),
     )
     mgr.initialize()

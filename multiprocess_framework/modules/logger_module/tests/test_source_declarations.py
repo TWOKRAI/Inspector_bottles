@@ -22,9 +22,10 @@ from typing import Any
 
 import pytest
 
-from multiprocess_framework.modules.log_declarations import (
+from multiprocess_framework.modules.observability_declarations import (
     declare_log_source,
     declared_rules,
+    KIND_LOG_SOURCE,
     declared_sources,
     forget_declarations,
 )
@@ -40,9 +41,14 @@ def чистый_реестр() -> Any:
     """
     было = {name: (owner, None) for name, owner in declared_sources().items()}
     правила = declared_rules()
-    forget_declarations()
+    # Ф8.1: чистим ТОЛЬКО свою плоскость. Реестр стал общим, и сплошная очистка
+    # уносила бы каталог метрик — а он наполняется импортом производителей и
+    # обратно не появится: они уже импортированы. Воспроизведено полным прогоном:
+    # семь телеметрийных тестов краснели после этого файла и были зелёными
+    # поодиночке.
+    forget_declarations(KIND_LOG_SOURCE)
     yield
-    forget_declarations()
+    forget_declarations(KIND_LOG_SOURCE)
     for name, (owner, _r) in было.items():
         declare_log_source(name, owner=owner, rule=правила.get(name))
 

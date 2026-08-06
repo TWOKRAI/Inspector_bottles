@@ -42,9 +42,9 @@ def _config(directory: Path) -> LoggerManagerConfig:
             ),
         },
         scopes={
-            "BUSINESS": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["first", "second"]),
-            "SYSTEM": LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["first"]),
-            "DEBUG": LoggerScopeSchema(enabled=False, min_level="DEBUG", channels=["first"]),
+            "BUSINESS": LoggerScopeSchema(channels=["first", "second"]),
+            "SYSTEM": LoggerScopeSchema(channels=["first"]),
+            "DEBUG": LoggerScopeSchema(channels=["first"]),
         },
     )
 
@@ -103,7 +103,7 @@ class TestRouteCacheStaleness:
         logger.flush()
 
         config = _config(tmp_path)
-        config.scopes["BUSINESS"].min_level = "ERROR"
+        config.default_level = "ERROR"  # Ф8.1: порог — у корня, не у скоупа
         logger.reconfigure(config.to_dict() if hasattr(config, "to_dict") else config.model_dump())
         logger.info("после ужесточения", module="приложение")
         logger.flush()

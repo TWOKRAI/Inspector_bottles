@@ -65,7 +65,7 @@ def _make_logger(tmp_path: Path, name: str = "log") -> tuple:
                 "file": {"type": "file", "enabled": True, "file_path": str(log_path)},
             },
             "scopes": {
-                "SYSTEM": {"enabled": True, "min_level": "WARNING", "channels": ["file"]},
+                "SYSTEM": {"channels": ["file"]},
             },
         },
     )

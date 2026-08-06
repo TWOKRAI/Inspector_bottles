@@ -100,7 +100,8 @@ class TestLoggerManager:
                         "rotate": False,
                     }
                 },
-                "scopes": {"SYSTEM": {"enabled": True, "min_level": "DEBUG", "channels": ["frames_file"]}},
+                "default_level": "DEBUG",
+                "scopes": {"SYSTEM": {"channels": ["frames_file"]}},
             }
         )
         manager = LoggerManager(manager_name="TestLogger", config=cfg)
@@ -123,7 +124,8 @@ class TestLoggerManager:
             {
                 "enable_batching": False,
                 "channels": {"mod_file": {"type": "file", "enabled": True, "file_path": str(log_file)}},
-                "scopes": {"BUSINESS": {"enabled": True, "min_level": "DEBUG", "channels": ["mod_file"]}},
+                "default_level": "DEBUG",
+                "scopes": {"BUSINESS": {"channels": ["mod_file"]}},
                 "loggers": {"test_module": {"channels_extra": ["mod_file"]}},
             }
         )
@@ -163,26 +165,26 @@ class TestLoggerReconfigure:
     """Reconfigure + инвалидация кэша should_log (Task 1.1)."""
 
     @staticmethod
-    def _cfg(debug_min_level: str, channel_name: str) -> LoggerManagerConfig:
-        """Конфиг с одним file-каналом и заданным min_level у DEBUG scope."""
+    def _cfg(root_level: str, channel_name: str) -> LoggerManagerConfig:
+        """Конфиг с одним каналом и заданным КОРНЕВЫМ порогом (Ф8.1).
+
+        Раньше параметр правил ``min_level`` у DEBUG-скоупа. После снятия второй
+        оси он обязан ехать в корень: оставь его у скоупа — и ручка станет
+        мёртвой, а тест «кэш инвалидирован» пройдёт при любом поведении.
+        """
         return LoggerManagerConfig.model_validate(
             {
                 "enable_batching": False,
                 "channels": {
                     channel_name: {"type": "console", "enabled": True},
                 },
-                "scopes": {
-                    "DEBUG": {
-                        "enabled": True,
-                        "min_level": debug_min_level,
-                        "channels": [channel_name],
-                    }
-                },
+                "default_level": root_level,
+                "scopes": {"DEBUG": {"channels": [channel_name]}},
             }
         )
 
     def test_reconfigure_invalidates_decision_cache(self):
-        # min_level=INFO → DEBUG скипается и кэшируется как False.
+        # Ф8.1: порог корня INFO → DEBUG скипается и кэшируется как False.
         mgr = LoggerManager(
             manager_name="TestLogger",
             config=self._cfg("INFO", "ch_a"),

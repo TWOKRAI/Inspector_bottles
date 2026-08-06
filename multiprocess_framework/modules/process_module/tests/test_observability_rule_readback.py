@@ -57,7 +57,7 @@ def logger(tmp_path) -> Any:
                 "main": LoggerChannelSchema(type="file", enabled=True, file_path="main.log", rotate=False),
                 "own": LoggerChannelSchema(type="file", enabled=True, file_path="own.log", rotate=False),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="INFO", channels=["main"])},
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["main"])},
             loggers=_RULES,
         )
     )

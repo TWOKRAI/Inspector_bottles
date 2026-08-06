@@ -25,7 +25,11 @@ from multiprocess_framework.modules.channel_routing_module.core.channel_routing_
     ChannelRoutingManager,
 )
 from multiprocess_framework.modules.channel_routing_module.interfaces import IChannel
-from multiprocess_framework.modules.logger_module.configs.logger_manager_config import LoggerScopeSchema
+from multiprocess_framework.modules.logger_module.configs.logger_manager_config import (
+    LoggerManagerConfig,
+    LoggerRuleSchema,
+)
+from multiprocess_framework.modules.logger_module.core.logger_core import _passes_threshold
 from multiprocess_framework.modules.logger_module.log_enums import LogLevel
 
 _LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -70,8 +74,13 @@ class TestGateGridIsPreservedByRenumbering:
 
     @pytest.mark.parametrize("min_level", _LEVELS)
     def test_row(self, min_level: str) -> None:
-        scope = LoggerScopeSchema(enabled=True, min_level=min_level)
-        observed = [scope.should_log(LogLevel(name), "any") for name in _LEVELS]
+        """Ф8.1: решётка снята с ``LoggerScopeSchema.should_log`` на ``_passes_threshold``.
+
+        Значения решётки не тронуты — переехал только владелец ответа. Это и есть
+        смысл характеризации: вердикты не должны зависеть ни от нумерации (Ф3.1),
+        ни от того, какая ось задаёт порог (Ф8.1).
+        """
+        observed = [_passes_threshold(min_level, LogLevel(name)) for name in _LEVELS]
         assert observed == _GATE_GRID[min_level], f"порог {min_level}: решётка вердиктов изменилась"
 
 
@@ -217,11 +226,20 @@ class TestTypoInThresholdIsSilentFirehose:
     """
 
     def test_warn_is_a_legal_synonym_of_warning(self) -> None:
-        scope = LoggerScopeSchema(enabled=True, min_level="WARN")
-        assert scope.min_level == "WARNING", "алиас обязан раскрыться в канон, а не остаться как есть"
-        assert scope.should_log(LogLevel.DEBUG, "any") is False
-        assert scope.should_log(LogLevel.WARNING, "any") is True
+        """Ф8.1: то же требование, заданное новому владельцу порога — правилу имени."""
+        правило = LoggerRuleSchema(level="WARN")
+        assert правило.level == "WARNING", "алиас обязан раскрыться в канон, а не остаться как есть"
+        assert _passes_threshold(правило.level, LogLevel.DEBUG) is False
+        assert _passes_threshold(правило.level, LogLevel.WARNING) is True
 
     def test_typo_threshold_is_refused(self) -> None:
+        """Ф8.1: отказ обязан стоять на ОБЕИХ новых позициях порога, а не на одной.
+
+        Ось порога переехала с ``min_level`` на правило и его корень. Проверка,
+        оставшаяся только у одной из них, вернула бы дефект 3.1 через вторую —
+        класс «дефект починен на одном пути из трёх».
+        """
         with pytest.raises(ValueError, match="неизвестный уровень"):
-            LoggerScopeSchema(enabled=True, min_level="WARNIGN")
+            LoggerRuleSchema(level="WARNIGN")
+        with pytest.raises(ValueError, match="неизвестный уровень"):
+            LoggerManagerConfig(default_level="WARNIGN")

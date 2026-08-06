@@ -88,9 +88,9 @@ class TestBootstrapLogger:
                         rotate=False,
                     )
                 },
+                default_level="DEBUG",
                 scopes={
-                    scope: LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])
-                    for scope in ("SYSTEM", "BUSINESS", "DEBUG")
+                    scope: LoggerScopeSchema(channels=["system_file"]) for scope in ("SYSTEM", "BUSINESS", "DEBUG")
                 },
             )
         )

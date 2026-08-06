@@ -53,9 +53,9 @@ def _manager(tmp_path: Path, **overrides: Any) -> LoggerManager:
             "b": {"type": "file", "enabled": True, "file_path": str(tmp_path / "b.log")},
         },
         "scopes": {
-            "BUSINESS": {"enabled": True, "min_level": "INFO", "channels": ["a", "b"]},
-            "SYSTEM": {"enabled": True, "min_level": "WARNING", "channels": ["a"]},
-            "DEBUG": {"enabled": False, "min_level": "DEBUG", "channels": ["a"]},
+            "BUSINESS": {"channels": ["a", "b"]},
+            "SYSTEM": {"channels": ["a"]},
+            "DEBUG": {"channels": ["a"]},
         },
     }
     config.update(overrides)

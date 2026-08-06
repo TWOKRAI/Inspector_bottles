@@ -68,7 +68,7 @@ from multiprocess_framework.modules.process_module.managers.observability_reload
 
 #: Ветка, которой оператор владеет пустотой. `scopes` выбран потому, что это
 #: законная настройка «в этом рецепте адресных охватов нет», а не искусственный ключ.
-SCOPES = {"SYSTEM": {"min_level": "DEBUG"}}
+ПРАВИЛА = {"камера": {"level": "DEBUG"}}
 
 _RECIPE_TEXT = """# Рецепт человека — сюда машина не пишет.
 name: demo
@@ -125,7 +125,7 @@ def wired(tmp_path, recipe):
         logger,
         config={
             RECIPE_PATH_CONFIG_KEY: str(recipe),
-            OVERRIDE_CONFIG_KEY: {"scopes": dict(SCOPES)},
+            OVERRIDE_CONFIG_KEY: {"loggers": dict(ПРАВИЛА)},
         },
     )
     BuiltinCommands(svc)._register_observability_commands()
@@ -172,15 +172,15 @@ class TestOwnershipSurvivesPersist:
         разное, а команда отвечала success.
         """
         svc, handlers, _recipe = wired
-        handlers["config.reload"]({"observability": {"scopes": {}}})
+        handlers["config.reload"]({"observability": {"loggers": {}}})
         layers = process_observability_layers(svc)
-        before = layers.resolve()["scopes"]
+        before = layers.resolve()["loggers"]
         assert before == {}, "контроль: до persist владение действует"
 
         res = handlers["observability.persist"]({})
         assert res["success"] is True
-        assert layers.resolve()["scopes"] == before, (
-            f"persist изменил действующее состояние: было {before}, стало {layers.resolve()['scopes']}"
+        assert layers.resolve()["loggers"] == before, (
+            f"persist изменил действующее состояние: было {before}, стало {layers.resolve()['loggers']}"
         )
 
     def test_ownership_survives_a_restart(self, wired) -> None:
@@ -190,11 +190,11 @@ class TestOwnershipSurvivesPersist:
         файла, записанного настоящей командой.
         """
         svc, handlers, recipe = wired
-        handlers["config.reload"]({"observability": {"scopes": {}}})
+        handlers["config.reload"]({"observability": {"loggers": {}}})
         handlers["observability.persist"]({})
 
-        body, source = compose_over_base({"scopes": dict(SCOPES)}, recipe, "seg")
-        assert body["scopes"] == {}, f"после рестарта ветка рецепта воскресла: {body['scopes']}"
+        body, source = compose_over_base({"loggers": dict(ПРАВИЛА)}, recipe, "seg")
+        assert body["loggers"] == {}, f"после рестарта ветка рецепта воскресла: {body['loggers']}"
         assert source.endswith(".observability.yaml")
 
     def test_second_persist_does_not_resurrect_the_first(self, wired) -> None:
@@ -204,13 +204,13 @@ class TestOwnershipSurvivesPersist:
         снятие не доезжало до файла: спутник хранил ключи первого сохранения.
         """
         svc, handlers, recipe = wired
-        handlers["config.reload"]({"observability": {"scopes": {"BUSINESS": {"min_level": "INFO"}}}})
+        handlers["config.reload"]({"observability": {"loggers": {"гуй": {"level": "INFO"}}}})
         handlers["observability.persist"]({})
-        assert load_companion(recipe)["processes"]["seg"]["scopes"] == {"BUSINESS": {"min_level": "INFO"}}
+        assert load_companion(recipe)["processes"]["seg"]["loggers"] == {"гуй": {"level": "INFO"}}
 
-        handlers["config.reload"]({"observability": {"scopes": {}}})
+        handlers["config.reload"]({"observability": {"loggers": {}}})
         handlers["observability.persist"]({})
-        assert load_companion(recipe)["processes"]["seg"]["scopes"] == {}, (
+        assert load_companion(recipe)["processes"]["seg"]["loggers"] == {}, (
             "в спутнике остались ключи прошлого сохранения — снятие не доехало до файла"
         )
 
@@ -221,35 +221,41 @@ class TestOwnershipSurvivesPersist:
         )
 
         svc, handlers, recipe = wired
-        write_companion(recipe, {"processes": {"other": {"scopes": dict(SCOPES)}}})
-        handlers["config.reload"]({"observability": {"scopes": {}}})
+        write_companion(recipe, {"processes": {"other": {"loggers": dict(ПРАВИЛА)}}})
+        handlers["config.reload"]({"observability": {"loggers": {}}})
         handlers["observability.persist"]({})
 
         section = load_companion(recipe)
-        assert section["processes"]["other"]["scopes"] == SCOPES
-        assert section["processes"]["seg"]["scopes"] == {}
+        assert section["processes"]["other"]["loggers"] == ПРАВИЛА
+        assert section["processes"]["seg"]["loggers"] == {}
 
 
 class TestOwnershipInsideOneRecipeSection:
     """Шов 4: `defaults` → per-process. «Заглушить у одного процесса» обязано работать."""
 
     def test_per_process_empty_dict_beats_defaults(self) -> None:
-        section = {"defaults": {"scopes": dict(SCOPES)}, "processes": {"p1": {"scopes": {}}}}
-        assert resolve_recipe_section(section, "p1")["scopes"] == {}, "per-process владение потеряно"
+        section = {
+            "defaults": {"loggers": dict(ПРАВИЛА)},
+            "processes": {"p1": {"loggers": {}}},
+        }
+        assert resolve_recipe_section(section, "p1")["loggers"] == {}, "per-process владение потеряно"
 
     def test_other_processes_still_inherit_defaults(self) -> None:
         """Контроль: сосед, который молчит, наследует defaults как раньше."""
-        section = {"defaults": {"scopes": dict(SCOPES)}, "processes": {"p1": {"scopes": {}}}}
-        assert resolve_recipe_section(section, "p2")["scopes"] == SCOPES
+        section = {
+            "defaults": {"loggers": dict(ПРАВИЛА)},
+            "processes": {"p1": {"loggers": {}}},
+        }
+        assert resolve_recipe_section(section, "p2")["loggers"] == ПРАВИЛА
 
     def test_per_process_partial_delta_still_merges(self) -> None:
         """Контроль: непустая per-process правка домерживается к defaults, а не заменяет их."""
         section = {
-            "defaults": {"scopes": dict(SCOPES), "log_level": "WARNING"},
-            "processes": {"p1": {"scopes": {"BUSINESS": {"min_level": "INFO"}}}},
+            "defaults": {"loggers": dict(ПРАВИЛА), "log_level": "WARNING"},
+            "processes": {"p1": {"loggers": {"гуй": {"level": "INFO"}}}},
         }
         resolved = resolve_recipe_section(section, "p1")
-        assert set(resolved["scopes"]) == {"SYSTEM", "BUSINESS"}
+        assert set(resolved["loggers"]) == {"камера", "гуй"}
         assert resolved["log_level"] == "WARNING"
 
 
@@ -263,32 +269,32 @@ class TestOwnershipOfTheInlineDelta:
         наследовала первую: оператор видел success и прежние охваты.
         """
         svc, handlers, _recipe = wired
-        handlers["config.reload"]({"observability": {"scopes": {"BUSINESS": {"min_level": "INFO"}}}})
+        handlers["config.reload"]({"observability": {"loggers": {"гуй": {"level": "INFO"}}}})
         layers = process_observability_layers(svc)
-        assert "BUSINESS" in layers.resolve()["scopes"]
+        assert "гуй" in layers.resolve()["loggers"]
 
-        handlers["config.reload"]({"observability": {"scopes": {}}})
-        assert layers.resolve()["scopes"] == {}, f"вторая правка не сняла первую: {layers.resolve()['scopes']}"
+        handlers["config.reload"]({"observability": {"loggers": {}}})
+        assert layers.resolve()["loggers"] == {}, f"вторая правка не сняла первую: {layers.resolve()['loggers']}"
 
     def test_shadowed_key_loses_its_deadline_with_its_value(self, wired) -> None:
         """Побочный путь, открытый самим Г3: владение пустотой РОНЯЕТ листья сессии.
 
         Канонический мерж только добавлял, поэтому ключ не мог исчезнуть из L3 при
-        мерже — и сроки за ним никто не убирал. С Г3 может: `{"scopes": {}}` сносит
-        `scopes.DEBUG.enabled`, а его дедлайн оставался висеть в readback'е, обещая
+        мерже — и сроки за ним никто не убирал. С Г3 может: `{"loggers": {}}` сносит
+        `loggers.шумный.level`, а его дедлайн оставался висеть в readback'е, обещая
         оператору возврат правки, которой уже нет («следствие без причины»).
         Найдено полным гейтом корзины 2.1, воспроизведено до фикса.
         """
         svc, handlers, _recipe = wired
-        handlers["config.reload"]({"observability": {"scopes": {"DEBUG": {"enabled": True}}}, "ttl": 600})
+        handlers["config.reload"]({"observability": {"loggers": {"шумный": {"level": "DEBUG"}}}, "ttl": 600})
         layers = process_observability_layers(svc)
-        assert layers.session_ttl_view() == {"scopes.DEBUG.enabled": 600.0}
+        assert layers.session_ttl_view() == {"loggers.шумный.level": 600.0}
 
-        handlers["config.reload"]({"observability": {"scopes": {}}, "ttl": 10})
-        assert "scopes.DEBUG.enabled" not in layers.session_ttl_view(), (
+        handlers["config.reload"]({"observability": {"loggers": {}}, "ttl": 10})
+        assert "loggers.шумный.level" not in layers.session_ttl_view(), (
             f"срок пережил свой ключ: {layers.session_ttl_view()}"
         )
-        assert layers.session_ttl_view() == {"scopes": 10.0}
+        assert layers.session_ttl_view() == {"loggers": 10.0}
 
     def test_shadowed_key_is_named_in_the_audit(self, wired) -> None:
         """Снятое той же командой обязано быть НАЗВАНО, а не исчезнуть молча.
@@ -298,21 +304,21 @@ class TestOwnershipOfTheInlineDelta:
         (замечание 2 ревью 5.9, здесь тот же класс на новом пути).
         """
         svc, handlers, _recipe = wired
-        handlers["config.reload"]({"observability": {"scopes": {"DEBUG": {"enabled": True}}}, "ttl": 600})
-        handlers["config.reload"]({"observability": {"scopes": {}}, "ttl": 10})
+        handlers["config.reload"]({"observability": {"loggers": {"шумный": {"level": "DEBUG"}}}, "ttl": 600})
+        handlers["config.reload"]({"observability": {"loggers": {}}, "ttl": 10})
 
         layers = process_observability_layers(svc)
         touches = [e for e in layers.audit.entries() if e.get("action") == "touch"]
         assert touches, "правка не записана в аудит вовсе"
-        assert touches[-1].get("removed") == ["scopes.DEBUG.enabled"], f"снятый ключ не назван в записи: {touches[-1]}"
+        assert touches[-1].get("removed") == ["loggers.шумный.level"], f"снятый ключ не назван в записи: {touches[-1]}"
 
     def test_partial_delta_still_accumulates(self, wired) -> None:
         """Контроль: непустые дельты по-прежнему НАКАПЛИВАЮТСЯ, а не заменяют друг друга."""
         svc, handlers, _recipe = wired
-        handlers["config.reload"]({"observability": {"scopes": {"BUSINESS": {"min_level": "INFO"}}}})
+        handlers["config.reload"]({"observability": {"loggers": {"гуй": {"level": "INFO"}}}})
         handlers["config.reload"]({"observability": {"log_level": "ERROR"}})
         layers = process_observability_layers(svc)
-        assert "BUSINESS" in layers.resolve()["scopes"], "вторая правка снесла первую"
+        assert "гуй" in layers.resolve()["loggers"], "вторая правка снесла первую"
         assert layers.resolve()["log_level"] == "ERROR"
 
 
@@ -348,18 +354,18 @@ class TestDeadlineOfAnotherEditDoesNotKillMine:
     def test_a_leaf_keeps_its_own_deadline_when_the_branch_is_rewritten(self) -> None:
         """Контроль: снимается ЧУЖОЙ срок, а не всякий. Свой ключ остаётся со своим."""
         layers = ObservabilityLayers()
-        layers.session_set("scopes.DEBUG.enabled", True, 600, origin="op")
-        layers.session_set("scopes", {"DEBUG": {"enabled": True}}, 10, origin="op")
-        assert layers.session_ttl_view() == {"scopes": 10.0, "scopes.DEBUG.enabled": 600.0}, (
+        layers.session_set("loggers.шумный.level", "DEBUG", 600, origin="op")
+        layers.session_set("loggers", {"шумный": {"level": "INFO"}}, 10, origin="op")
+        assert layers.session_ttl_view() == {"loggers": 10.0, "loggers.шумный.level": 600.0}, (
             "срок листа снят, хотя сам лист на месте — снятие слишком широкое"
         )
 
     def test_a_leaf_written_over_a_branch_takes_its_orphans_along(self) -> None:
         """Лист поверх ветки уносит ключи под ней — их сроки обязаны уйти следом."""
         layers = ObservabilityLayers()
-        layers.session_set("scopes.DEBUG.enabled", True, 600, origin="op")
-        layers.session_set("scopes", {}, 10, origin="op")
-        assert layers.session_ttl_view() == {"scopes": 10.0}, f"срок пережил свой ключ: {layers.session_ttl_view()}"
+        layers.session_set("loggers.шумный.level", "DEBUG", 600, origin="op")
+        layers.session_set("loggers", {}, 10, origin="op")
+        assert layers.session_ttl_view() == {"loggers": 10.0}, f"срок пережил свой ключ: {layers.session_ttl_view()}"
 
     def test_the_removal_is_named_in_the_audit(self) -> None:
         """Снятое названо в ТОЙ ЖЕ записи: путь, меняющий состояние без следа, запрещён."""

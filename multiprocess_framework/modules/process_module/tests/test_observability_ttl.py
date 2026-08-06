@@ -715,7 +715,7 @@ class TestMechanismHazards:
 
         **Дорога к этому состоянию сменилась (корзина 2.1, правило Г3.)** Раньше
         срок на родителя ставила вторая команда ``config.reload`` с
-        ``{"scopes": {}}``: канонический мерж считал пустой словарь no-op, ветка
+        ``{"loggers": {}}``: канонический мерж считал пустой словарь no-op, ветка
         под ним оставалась жить, и получалась пара «дедлайн на родителе + непустая
         ветка». С Г3 ``{}`` — ВЛАДЕНИЕ, и та же команда ветку опустошает; собрать
         нужное состояние ею больше нельзя. Механизм от этого не исчез: срок на
@@ -725,20 +725,20 @@ class TestMechanismHazards:
         """
         svc, handlers, clock = wired
         layers = process_observability_layers(svc)
-        handlers["config.reload"]({"observability": {"scopes": {"DEBUG": {"enabled": True}}}, "ttl": 600})
-        assert layers.session_ttl_view() == {"scopes.DEBUG.enabled": 600.0}
+        handlers["config.reload"]({"observability": {"loggers": {"шумный": {"level": "DEBUG"}}}, "ttl": 600})
+        assert layers.session_ttl_view() == {"loggers.шумный.level": 600.0}
 
         # Срок на РОДИТЕЛЯ непустой ветки: значение то же, что уже лежит в L3.
         # Срок листа при этом остаётся своим (600) — `session_set` дедлайны детей
         # не трогает, и это здесь кстати: истечёт РОДИТЕЛЬ, а снести он обязан
         # лист, чей собственный срок ещё не наступил. Ровно замечание 3.
-        layers.session_set("scopes", {"DEBUG": {"enabled": True}}, 10, origin="test")
-        assert layers.session_ttl_view() == {"scopes": 10.0, "scopes.DEBUG.enabled": 600.0}
+        layers.session_set("loggers", {"шумный": {"level": "INFO"}}, 10, origin="test")
+        assert layers.session_ttl_view() == {"loggers": 10.0, "loggers.шумный.level": 600.0}
         clock.advance(11)
         report = sweep_session_ttl(svc)
 
         assert report is not None
-        assert report["keys"] == ["scopes.DEBUG.enabled"], "отчёт назвал не то, что реально снято"
+        assert report["keys"] == ["loggers.шумный.level"], "отчёт назвал не то, что реально снято"
         assert layers.session_ttl_view() == {}, "срок-сирота пережил свой ключ"
         assert layers.session_keys() == ()
 
@@ -746,10 +746,10 @@ class TestMechanismHazards:
         """Тот же дефект на пути ручного сброса — команда обязана назвать снятое."""
         svc, handlers, clock = wired
         layers = process_observability_layers(svc)
-        handlers["config.reload"]({"observability": {"scopes": {"DEBUG": {"enabled": True}}}, "ttl": 600})
+        handlers["config.reload"]({"observability": {"loggers": {"шумный": {"level": "DEBUG"}}}, "ttl": 600})
 
-        res = handlers["config.reload"]({"observability_reset": ["scopes"]})
-        assert res["reset"] == ["scopes.DEBUG.enabled"]
+        res = handlers["config.reload"]({"observability_reset": ["loggers"]})
+        assert res["reset"] == ["loggers.шумный.level"]
         assert layers.session_ttl_view() == {}
         assert layers.session_keys() == ()
 

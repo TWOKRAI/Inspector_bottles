@@ -63,9 +63,10 @@ def _manager(tmp_path: Path, name: str) -> LoggerManager:
             channels={
                 "console": LoggerChannelSchema(name="console", type="console", enabled=False),
             },
+            default_level="DEBUG",
             scopes={
-                "SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["console"]),
-                "BUSINESS": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["console"]),
+                "SYSTEM": LoggerScopeSchema(channels=["console"]),
+                "BUSINESS": LoggerScopeSchema(channels=["console"]),
             },
         ),
     )

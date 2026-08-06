@@ -94,7 +94,8 @@ def _unbatched_logger(tmp_path: Path) -> LoggerManager:
                     rotate=False,
                 ),
             },
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="DEBUG", channels=["system_file"])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["system_file"])},
         ),
         process=_FakeProcess("direct_probe"),
     )
@@ -365,7 +366,8 @@ def test_console_history_survives_reconfigure(tmp_path: Path) -> None:
             enable_batching=False,
             modules={},
             channels={"console": LoggerChannelSchema(name="console", type="console", format="%(message)s")},
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["console"])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["console"])},
         ),
         process=_FakeProcess("console_history"),
     )
@@ -404,7 +406,8 @@ def test_absorbed_history_lists_every_backpressure_key(tmp_path: Path) -> None:
             enable_batching=False,
             modules={},
             channels={"console": LoggerChannelSchema(name="console", type="console", format="%(message)s")},
-            scopes={"SYSTEM": LoggerScopeSchema(enabled=True, min_level="WARNING", channels=["console"])},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["console"])},
         ),
         process=_FakeProcess("absorb_all"),
     )
