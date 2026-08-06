@@ -2052,6 +2052,27 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         буферизует строки текущего кадра и перезаписывает ``logs/trace/<process>.log``
         одним write на кадр (batched + overwrite). No-op без ``INSPECTOR_FRAME_TRACE=1``.
 
+        **Граница с цепочкой процессоров — решение Ф7.5, названо здесь целиком.**
+        Этот путь идёт МИМО :meth:`log`, то есть мимо ``_run_processors``. Из двух
+        процессоров цепочки один зовётся явно, второй — сознательно нет:
+
+        * **редакция (``SecretRedactor``) — зовётся.** ADR-LOG-006 сделал маскировку
+          безусловной, а этот метод пишет на диск в обход неё. Сегодня единственный
+          вызывающий (``process_managers._log_message_middleware``) передаёт только
+          метаданные конверта (``type``/``sender``/``targets``/``data_type``/
+          ``command``/``event_type``) — проверено по коду, пользовательских строк там
+          нет. Но метод ПУБЛИЧНЫЙ и ничего такого не обещает: гарантия, которая держится
+          на привычках единственного вызывающего, — не гарантия;
+        * **сэмплинг (``RateSampler``) — НЕ зовётся, и это не забывчивость.** Дроссель
+          душит повторы по ключу ``level+message``, а здесь повтор одинаковой строки на
+          соседних кадрах — норма жанра. Задросселировать его значило бы выбросить
+          именно те кадры, ради сравнения которых трассу и включают. Канал и так
+          «батчит + перезаписывает», то есть объём ограничен кадром, а не темпом.
+
+        Всю цепочку целиком не зовём по этой же причине: она приходит комплектом,
+        а нужна её половина. Пара тестов (``test_frame_trace_boundary.py``) сторожит
+        обе стороны решения — маскировку и невлияние сэмплинга.
+
         Args:
             message: строка цепочки (например, router-сообщение).
             seq_id: идентификатор кадра — граница перезаписи.
@@ -2070,15 +2091,20 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             ch = self._ensure_frame_trace_channel()
         if ch is None:
             return
-        ch.write(
-            {
-                "module": "frame_trace",
-                "level": "INFO",
-                "message": message,
-                "timestamp": time.time(),
-                "extra": {"seq_id": seq_id},
-            }
-        )
+        record = {
+            "module": "frame_trace",
+            "level": "INFO",
+            "message": message,
+            "timestamp": time.time(),
+            "extra": {"seq_id": seq_id},
+        }
+        # Ф7.5: половина цепочки, названная в докстринге. Редактор fail-closed сам
+        # (при сбое отдаёт запись с маркером вместо содержимого), поэтому запись
+        # не теряется, а её содержимое не утекает. ``or record`` — на случай, если
+        # процессор когда-нибудь научится поглощать: трасса кадра поглощению не
+        # подлежит, у неё своя граница объёма (перезапись по seq_id).
+        record = self._redactor(LogScope.SYSTEM, "INFO", record) or record
+        ch.write(record)
 
     def _ensure_frame_trace_channel(self) -> Optional[LogChannel]:
         """Лениво создать+зарегистрировать FrameTraceChannel (per-process trace-файл)."""
