@@ -9,17 +9,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from ...channel_routing_module import ChannelRoutingConfig
 from ...channel_routing_module.levels import (
     LEVEL_ORDER,
-    SEVERITY_NUMBERS,
-    UNKNOWN_SEVERITY,
     normalize_level_name,
 )
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
-from ..log_enums import LogLevel
 
 _STD_FMT = "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s"
 
@@ -53,12 +50,6 @@ MIN_BURST_RESET_SEC = 0.1
 #: плоского ``dispatcher``).
 _NAME_MAX_LEN = 20
 _FILE_MAX = 10 * 1024 * 1024
-
-#: Порядок уровней — из общего дома трёх плоскостей, а не своей копией.
-#: Своя копия здесь уже была: пока она жила рядом, гейт логгера и severity-путь
-#: ошибок сравнивали уровни по двум разным кортежам, и расхождение было бы
-#: молчаливым (тот же класс, что _RETENTION_STAT_KEYS в Ф0.7).
-_LEVEL_ORDER = LEVEL_ORDER
 
 
 class LoggerChannelSchema(SchemaBase):
@@ -120,81 +111,64 @@ class LoggerChannelSchema(SchemaBase):
     owner: Optional[str] = None
 
 
+#: Ф8.1. Поля, которые скоуп нёс, пока был ВТОРОЙ осью гейта. Сняты вместе с
+#: осью; перечислены поимённо, чтобы конфиг с ними получил отказ по адресу, а не
+#: молчаливое ``extra="ignore"`` Pydantic — то есть ровно ту тихую потерю
+#: адресной правки, из-за которой 2.3b и стояла заблокированной.
+_SCOPE_GATE_FIELDS_GONE = {
+    "min_level": "порог — правилом имени: loggers['<префикс>'].level (корень — ключ '')",
+    "enabled": "выключение — порогом: loggers['<префикс>'].level выше уровня записи",
+    "modules": "whitelist модулей — правилом имени по префиксу (Р-2.4-Г)",
+}
+
+
 class LoggerScopeSchema(SchemaBase):
-    """Скоуп логирования (ключи SYSTEM, BUSINESS, …)."""
+    """Группа логирования — **поставщик приёмников, и только** (ключи SYSTEM, BUSINESS, …).
 
-    enabled: bool = True
-    # Литерал, а не ``_LEVEL_ORDER[1]``: дефолт, выведенный из индекса кортежа,
-    # молча сменился бы при вставке нового имени в начало порядка (Ф3.1).
-    min_level: str = "INFO"
+    Ф8.1: у скоупа была вторая роль — порог гейта (``min_level``/``enabled``/
+    ``modules``). Она снята, и это не упрощение ради упрощения, а снятие второго
+    кодирования оси уровня. Замер, на котором решение стоит: производственных
+    call-site, выбирающих скоуп НЕ по уровню, **один** (``log_stats_channel`` →
+    ``PERFORMANCE``) против **742** уровневых обёрток. Скоуп записи брался из
+    :data:`~..core.logger_core._LEVEL_DEFAULT_SCOPE`, то есть был функцией уровня,
+    а его ``min_level`` — вторым способом сказать то же самое.
+
+    Цена второй оси была не теоретической: пока обе оси решали, «всё на DEBUG,
+    кроме SYSTEM» не выражалось ни одним конфигом (репро 2026-08-04 и 2026-08-06),
+    и задача 2.3b стояла заблокированной именно этим.
+
+    Что осталось: ``channels`` — какие приёмники получает группа по умолчанию.
+    Ровно та роль, которую за скоупом закрепило решение Р-2.2-А.
+    """
+
     channels: List[str] = Field(default_factory=list)
-    modules: List[str] = Field(default_factory=list)
 
-    @field_validator("min_level")
+    @model_validator(mode="before")
     @classmethod
-    def _normalize_min_level(cls, value: str) -> str:
-        """Ф1.1: порог приводится к канону ОДИН раз — на границе конфига.
+    def _reject_gate_fields(cls, data: Any) -> Any:
+        """Ф8.1: снятое поле — **отказ**, а не тихое игнорирование.
 
-        Прежняя реализация звала ``self.min_level.upper()`` на КАЖДОЙ записи,
-        то есть аллоцировала строку ради решения «писать или нет». Нормализация
-        здесь снимает эту цену навсегда и заодно делает ``min_level`` в
-        ``model_dump`` каноничным.
-
-        Валидатор поля, а не хранение производной рядом: приватный атрибут
-        Pydantic-модели читается через ``__getattr__``, и замер показал **921 нс
-        против 47 нс** у обычного поля — «оптимизация» через ``PrivateAttr``
-        делала гейт впятеро ДОРОЖЕ прежнего. Поймано бенчем Ф1.6, а не глазом.
-
-        **Ф3.1 — здесь же имя и ПРОВЕРЯЕТСЯ.** До этого валидатор только
-        поднимал регистр, и неопознанное имя доезжало до горячего пути, где
-        ``should_log`` честно пропускал всё. Воспроизведено: ``min_level='WARN'``
-        → ``should_log(DEBUG)`` = ``True``, то есть порог «предупреждения и выше»
-        оборачивался firehose, молча. ``WARN`` при этом не опечатка, а каноничное
-        имя OTel — поэтому чужие написания раскрываются алиасами, а вот
-        действительно неизвестное имя отвергается.
+        ``SchemaBase`` не запрещает лишние ключи (``extra`` по умолчанию
+        ``ignore``), поэтому оставленный в конфиге ``min_level`` доехал бы сюда и
+        исчез молча. Симптом был бы худшим из возможных: оператор написал порог,
+        конфиг принят, readback показывает написанное — а гейт про него не знает.
+        Это класс «тихая потеря адресной правки», названный в разборе 2.3b как
+        один из двух исходов, ради недопущения которых задача и не делалась.
 
         Отказ безопасен по построению: ``reconfigure`` разбирает конфиг ДО
-        разрушения реестра (R9), поэтому отвергнутый порог оставляет менеджер с
-        прежним рабочим набором каналов, а не с пустым.
+        разрушения реестра (R9), поэтому отвергнутая секция оставляет менеджер
+        с прежним рабочим набором каналов, а не с пустым.
         """
-        if not isinstance(value, str):
-            return value
-        canonical = normalize_level_name(value)
-        if canonical is None:
+        if not isinstance(data, dict):
+            return data
+        present = [key for key in _SCOPE_GATE_FIELDS_GONE if key in data]
+        if present:
+            hints = "; ".join(f"{key}: {_SCOPE_GATE_FIELDS_GONE[key]}" for key in present)
             raise ValueError(
-                f"неизвестный уровень '{value}' в min_level (известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+                f"скоуп больше не задаёт порог (Ф8.1): поля {present} сняты вместе со второй "
+                f"осью гейта. Куда переехало — {hints}. У скоупа осталось только 'channels'"
             )
-        return canonical
-
-    def should_log(self, level: LogLevel, module: str) -> bool:
-        """Пройдёт ли запись гейт скоупа. Горячий путь — без аллокаций.
-
-        Незнакомый уровень (или незнакомый ``min_level``) ПРОПУСКАЕТ запись
-        вместе с фильтром модулей — ровно как прежняя реализация, где
-        ``ValueError`` из ``index()`` возвращал ``True`` до проверки модулей.
-        Это характеризовано тестом: «тише DEBUG» из-за опечатки в имени уровня
-        было бы тихой потерей.
-
-        Что осталось на пути решения: два обращения к полям модели, два
-        словарных лукапа и сравнение int. Ни линейного поиска по кортежу
-        (``LEVEL_ORDER.index``), ни ``.upper()``.
-        """
-        if not self.enabled:
-            return False
-        min_severity = SEVERITY_NUMBERS.get(self.min_level, UNKNOWN_SEVERITY)
-        if min_severity == UNKNOWN_SEVERITY:
-            return True
-        severity = SEVERITY_NUMBERS.get(level.value, UNKNOWN_SEVERITY)
-        if severity == UNKNOWN_SEVERITY:
-            return True
-        if severity < min_severity:
-            return False
-        # Список, а не frozenset: он почти всегда пуст, а его материализация в
-        # множество жила бы в приватном атрибуте — то есть на дорогом пути.
-        modules = self.modules
-        if modules and module not in modules:
-            return False
-        return True
+        return data
 
 
 class LoggerRuleSchema(SchemaBase):
@@ -257,13 +231,32 @@ class LoggerRuleSchema(SchemaBase):
     @field_validator("level")
     @classmethod
     def _normalize_level(cls, value: Optional[str]) -> Optional[str]:
-        """Канон один раз — на границе конфига, как у ``LoggerScopeSchema.min_level``.
+        """Канон один раз — на границе конфига, и здесь же ОТКАЗ незнакомому имени.
 
-        Иначе сравнение рангов на горячем пути платило бы ``.upper()`` за каждую
-        запись, а ``model_dump`` отдавал бы пульту неканоничное значение — и
-        readback расходился бы с тем, что стоит в гейте.
+        Канон нужен, чтобы сравнение рангов на горячем пути не платило ``.upper()``
+        за каждую запись, а ``model_dump`` не отдавал пульту неканоничное значение —
+        иначе readback расходится с тем, что стоит в гейте.
+
+        **Отказ добавлен в Ф8.1, и это починка регрессии, а не новое требование.**
+        Проверку имени завела Ф3.1 — но на пороге СКОУПА, с воспроизведением:
+        ``min_level='WARN'`` давал ``should_log(DEBUG) = True``, то есть порог
+        «предупреждения и выше» молча оборачивался firehose. Ф8.1 снимает порог
+        скоупа и делает единственной осью вот это поле — вместе с осью сюда обязана
+        переехать и её защита. Оставить проверку только там, откуда ось ушла, —
+        ровно класс «дефект починен на одном пути из трёх».
+
+        Чужие написания раскрываются алиасами (``WARN``, ``FATAL``): это каноничные
+        имена OTel, а не опечатки. Отвергается действительно неизвестное.
         """
-        return value.upper() if isinstance(value, str) else value
+        if not isinstance(value, str):
+            return value
+        canonical = normalize_level_name(value)
+        if canonical is None:
+            raise ValueError(
+                f"неизвестный уровень '{value}' в правиле loggers "
+                f"(известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+            )
+        return canonical
 
 
 @register_schema("LoggerManagerConfig")
@@ -274,6 +267,34 @@ class LoggerManagerConfig(ChannelRoutingConfig):
 
     app_name: str = "unknown_app"
     default_level: str = "INFO"
+    """Порог КОРНЯ иерархии — то, что действует, когда про имя не сказало ни одно правило.
+
+    Ф8.1: до неё поле не фильтровало вовсе (решение принимал порог скоупа), а его
+    значение раскрывалось в профиль, переписывающий пороги всех скоупов. Теперь это
+    прямой участник решения гейта — см. ``LoggerCore._should_log_direct``.
+    """
+
+    @field_validator("default_level")
+    @classmethod
+    def _normalize_default_level(cls, value: str) -> str:
+        """Ф8.1: у корневого порога та же защита, что у правил и у прежнего скоупа.
+
+        Поле стало осью гейта — значит опечатка в нём теперь значит ровно то же,
+        что значила опечатка в ``min_level`` до Ф3.1: молчаливый firehose
+        (незнакомый порог пропускает всё). Три позиции одной величины — правило,
+        корень, прежний скоуп — обязаны отвечать одинаково; расхождение здесь
+        было бы невидимым, потому что обе ветки «работают».
+        """
+        if not isinstance(value, str):
+            return value
+        canonical = normalize_level_name(value)
+        if canonical is None:
+            raise ValueError(
+                f"неизвестный уровень '{value}' в default_level "
+                f"(известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+            )
+        return canonical
+
     log_directory: Annotated[
         Optional[str],
         FieldMeta(
@@ -472,16 +493,13 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         FieldMeta("Скоупы: SYSTEM, BUSINESS, …"),
     ] = {
         "SYSTEM": LoggerScopeSchema(
-            enabled=True,
-            min_level="WARNING",
             channels=["console", "system_file"],
         ),
         "BUSINESS": LoggerScopeSchema(
-            enabled=True,
-            min_level="INFO",
             # console НЕ подключён к BUSINESS: пер-кадровые INFO-логи воркеров
             # уходят только в файлы (system_file/messages_file), а не засоряют
-            # терминал. В stdout остаётся лишь SYSTEM WARNING+ через свой scope.
+            # терминал. В stdout остаётся лишь SYSTEM через свой scope, а какой
+            # уровень туда доедет — решает порог правила имени (Ф8.1).
             channels=["system_file", "messages_file"],
         ),
         # Ф2.6: свой файл вместо system_file — обоснование у канала
@@ -490,18 +508,15 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         # дублирование, и выбран он сознательно — иначе разгрузки не случится
         # вовсе. Закреплено характеризационным тестом, а не оставлено умолчанием.
         "PERFORMANCE": LoggerScopeSchema(
-            enabled=True,
-            min_level="INFO",
             channels=["performance_file"],
         ),
-        # DEBUG-scope по умолчанию ВЫКЛЮЧЕН: на DEBUG в system_file лился пер-кадровый
-        # firehose (периодический TRACE-лог PipelineExecutor — снят в Ф7 G.1,
-        # channel_dispatcher "no route" на каждый кадр) → ~100 МБ/мин, постоянная
-        # ротация затирала историю. INFO+ продолжают писаться в файлы через
-        # SYSTEM/BUSINESS. Для отладки временно enabled=True.
+        # Ф8.1: у DEBUG-группы больше нет своего выключателя — firehose держит
+        # порог КОРНЯ (`default_level`, по умолчанию INFO), и это тот же самый
+        # запрет, только выраженный один раз вместо двух. Повод не забыт: на DEBUG
+        # в system_file лился пер-кадровый поток (~100 МБ/мин, ротация затирала
+        # историю). Разница в том, что теперь «включить DEBUG одному источнику» не
+        # требует открыть шлюз всей группе — ради чего фаза и делалась.
         "DEBUG": LoggerScopeSchema(
-            enabled=False,
-            min_level="DEBUG",
             channels=["system_file"],
         ),
     }

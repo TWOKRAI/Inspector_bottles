@@ -90,22 +90,25 @@ def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
     return managers_payload_for_proc(managers_from_log_dir(resolve_base_log_dir(log_dir), model_cls=ManagersConfig))
 
 
-def _level_profile_scopes(level: str) -> Dict[str, Dict[str, Any]]:
-    """Профиль уровня — **вид на общую функцию**, а не вторая её реализация (Ф2.3a).
+def _root_level_rule(level: str) -> Dict[str, Dict[str, Any]]:
+    """Корневое правило уровня — **вид на общую функцию**, а не вторая реализация.
 
-    Тело переехало в :func:`..configs.managers_config.level_profile_scopes`,
-    туда же, где живёт стартовая сборка. Пока копий было две, одна и та же
-    величина значила разное: старт опускал один скоуп из четырёх, пересборка —
-    все четыре. Имя оставлено здесь ради вызывающего внутри модуля; знание —
-    в одном месте.
+    Тело живёт в :func:`..configs.managers_config.root_level_rule`, там же, где
+    стартовая сборка. Пока копий было две (Ф2.3a), одна и та же величина значила
+    разное: старт опускал один скоуп из четырёх, пересборка — все четыре. Имя
+    оставлено здесь ради вызывающего внутри модуля; знание — в одном месте.
+
+    Ф8.1: функция сменила ФОРМУ результата — было «набор скоупов целиком», стало
+    «одно правило корня». Это и есть суть задачи: пока уровень возвращал набор,
+    его применение стирало всё, что оператор написал адреснее.
 
     Импорт ленивый: ``managers_config`` тянет конфиги всех менеджеров, а этот
     модуль грузится на пути пересборки, где лишний импорт на старте не нужен
     (та же причина, что у ``base_managers_payload``).
     """
-    from ..configs.managers_config import level_profile_scopes
+    from ..configs.managers_config import root_level_rule
 
-    return level_profile_scopes(level)
+    return root_level_rule(level)
 
 
 def observability_effective(
@@ -130,12 +133,12 @@ def observability_effective(
         }
         scopes = getattr(lc, "scopes", None)
         if isinstance(scopes, dict):
+            # Ф8.1: у скоупа осталась одна ось — приёмники. Прежний readback отдавал
+            # `enabled`/`min_level`, и после снятия полей они превратились бы в
+            # вечные `True`/`None` — то есть пульт показывал бы ручки, которых нет.
+            # Readback, расходящийся с гейтом, хуже отсутствующего: по нему решают.
             section["scopes"] = {
-                str(k): {
-                    "enabled": bool(getattr(v, "enabled", True)),
-                    "min_level": getattr(v, "min_level", None),
-                }
-                for k, v in scopes.items()
+                str(k): {"channels": list(getattr(v, "channels", None) or ())} for k, v in scopes.items()
             }
         # Ф2.6: таблица правил по имени источника. Раньше наружу не выходила вовсе —
         # `effective_*` жили в коде с 2.2, а посмотреть на них было нечем, и живой
@@ -154,7 +157,7 @@ def observability_effective(
         # Ф2.7: каталог объявленных источников — что МОЖЕТ писать, в отличие от
         # `sources` (что уже писало). Источник, у которого всё гасится порогом, в
         # журнале не появится вовсе, а разбирают обычно именно его.
-        from ...log_declarations import declared_sources
+        from ...observability_declarations import declared_sources
 
         section["declared_sources"] = declared_sources()
         # Ф2.6, шаг 4: какие имена источников вообще писали. Разбор `resolve` требует
@@ -359,12 +362,9 @@ def observability_provenance(layers: "ObservabilityLayers", *, logger: Any = Non
                 known.setdefault(name, {"enabled": True, "type": ""})
         scopes = getattr(cfg, "scopes", None)
         if isinstance(scopes, dict):
+            # Ф8.1: одна ось — приёмники (см. соседний readback выше).
             view["scopes"] = {
-                str(name): {
-                    "enabled": bool(getattr(sc, "enabled", True)),
-                    "min_level": getattr(sc, "min_level", None),
-                }
-                for name, sc in scopes.items()
+                str(name): {"channels": list(getattr(sc, "channels", None) or ())} for name, sc in scopes.items()
             }
     return layers.provenance(view)
 
@@ -718,16 +718,18 @@ def _rebuild_and_apply(
     base = base_managers_payload(log_dir)
 
     explicit_level = resolved.get("log_level")
-    # scopes слоёв достаём ДО merge: профиль уровня переписывает набор целиком,
-    # и адресная правка обязана лечь ПОВЕРХ него, а не быть им стёртой.
-    scope_overrides = expanded["logger"].pop("scopes", None)
-
     logger_cfg = merge_managers(base.get("logger", {}), expanded["logger"])
     if explicit_level is not None:
-        logger_cfg["scopes"] = _level_profile_scopes(explicit_level)
+        # Ф8.1: уровень кладётся ОДНИМ правилом корня и мержится с остальными
+        # правилами, а не заменяет секцию. Прежде здесь стоял танец
+        # «вынуть scopes до merge → положить профиль → вернуть правки поверх»:
+        # он существовал ровно потому, что профиль переписывал набор целиком.
+        # Причина снята — танец снят вместе с ней.
+        #
+        # ``deep_merge``, а не ``update``: у корня может быть и правило приёмников
+        # (``loggers[""].channels``), и замена словаря целиком снесла бы его молча.
+        logger_cfg["loggers"] = deep_merge(logger_cfg.get("loggers") or {}, _root_level_rule(explicit_level))
         logger_cfg["default_level"] = str(explicit_level).upper()
-    if scope_overrides:
-        logger_cfg["scopes"] = deep_merge(logger_cfg.get("scopes") or {}, scope_overrides)
     expanded["logger"] = logger_cfg
     expanded["error"] = merge_managers(base.get("error", {}), expanded["error"])
     expanded["stats"] = merge_managers(base.get("stats", {}), expanded["stats"])

@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable, List, Optional
 
 from ..base_manager.interfaces import IBaseManager
-from ..log_declarations import declare_log_source
+from ..observability_declarations import declare_log_source
 
 #: Имя источника, которым модуль штампует свои записи (Ф2.6, решение Р-2.6-В).
 #:

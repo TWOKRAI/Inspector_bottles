@@ -31,7 +31,7 @@ from typing import Annotated, Any, Dict, List, Optional
 from pydantic import Field, field_validator, model_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
-from ...log_declarations import declared_rules
+from ...observability_declarations import declared_rules
 from ...logger_module.configs.logger_manager_config import MIN_BURST_RESET_SEC
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 
@@ -143,7 +143,7 @@ class ObservabilityConfig(SchemaBase):
     ] = Field(default_factory=dict)
     scopes: Annotated[
         Dict[str, Dict[str, Any]],
-        FieldMeta("Переопределения отдельных скоупов логгера ({имя: {min_level: DEBUG}})"),
+        FieldMeta("Переопределения приёмников групп логгера ({имя: {channels: [...]}}) — порог задаётся loggers"),
     ] = Field(default_factory=dict)
 
     # Ф2.2 — вторая ось адресации: правило по иерархическому имени источника.

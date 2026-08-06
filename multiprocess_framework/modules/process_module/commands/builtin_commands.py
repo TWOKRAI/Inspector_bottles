@@ -1009,10 +1009,10 @@ class BuiltinCommands:
         - ``publish`` — эффективная секция живого gate (``TelemetryPublishConfig.to_dict``):
           ровно то, из чего gate принимает решения;
         - ``resolved`` — развёрнутое ``{metric: {enabled, interval_sec}}`` по ВСЕМ
-          :data:`GATED_METRICS` с уже применённым наследованием ``default_interval_sec``.
+          каталога :func:`gated_metrics` с уже применённым наследованием ``default_interval_sec``.
           Отвечает на вопрос оператора «а fps сейчас публикуется?» без пересчёта правил
           в голове;
-        - ``unknown_metrics`` — ключи ``metrics``, которых нет в ``GATED_METRICS``
+        - ``unknown_metrics`` — ключи ``metrics``, которых нет в каталоге метрик
           (опечатка вида ``latency`` вместо ``latency_ms``);
         - ``gated_metrics`` — каталог известных метрик (справочник против опечаток);
         - ``throttle_rules`` — правила ЦЕНТРАЛЬНОГО store-троттла, если процесс их
@@ -1022,7 +1022,7 @@ class BuiltinCommands:
         Best-effort по образцу ``introspect.memory``: недоступная подсистема → ``None``
         в своей секции, а не ошибка всей команды.
         """
-        from ..configs.telemetry_publish_config import GATED_METRICS
+        from ..configs.telemetry_publish_config import gated_metrics
 
         svc = self._services
         heartbeat = getattr(svc, "_heartbeat", None)
@@ -1034,7 +1034,7 @@ class BuiltinCommands:
             "publish": None,
             "resolved": None,
             "unknown_metrics": [],
-            "gated_metrics": list(GATED_METRICS),
+            "gated_metrics": list(gated_metrics()),
             "throttle_rules": None,
         }
 
@@ -1068,13 +1068,13 @@ class BuiltinCommands:
         """Развернуть эффективную секцию в ``{metric: {enabled, interval_sec}}``.
 
         Наследование ``default_interval_sec`` считает сам конфиг (``resolve``) — здесь
-        только обход :data:`GATED_METRICS`, чтобы читатель видел итог, а не правила.
+        только обход каталога :func:`gated_metrics`, чтобы читатель видел итог, а не правила.
         """
-        from ..configs.telemetry_publish_config import GATED_METRICS, TelemetryPublishConfig
+        from ..configs.telemetry_publish_config import TelemetryPublishConfig, gated_metrics
 
         config = TelemetryPublishConfig.from_dict(publish)
         out: dict = {}
-        for metric in GATED_METRICS:
+        for metric in gated_metrics():
             enabled, interval = config.resolve(metric)
             out[metric] = {"enabled": bool(enabled), "interval_sec": float(interval)}
         return out
@@ -1812,7 +1812,7 @@ class BuiltinCommands:
         также из расширенного ``config.reload``. Применение адресное — один процесс-адресат.
 
         Task 2.3: если ``publish`` применён и в эффективной секции остались ключи
-        ``metrics``, отсутствующие в ``GATED_METRICS`` (опечатка в имени метрики), ответ
+        ``metrics``, отсутствующие в каталоге метрик (опечатка в имени метрики), ответ
         дополняется ``"unknown_metrics": [...]`` (отсортированный список). Секция при
         этом не отвергается — поле только для наблюдаемости; пустой набор → поля нет.
         """

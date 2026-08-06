@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from multiprocess_framework.modules.process_module.heartbeat.telemetry import GATED_METRICS
+from multiprocess_framework.modules.process_module.heartbeat.telemetry import gated_metrics
 from multiprocess_framework.modules.frontend_module.widgets.telemetry_chart import (
     SeriesSpec,
     TelemetryChart,
@@ -109,7 +109,7 @@ _GRAPH_RANGES: tuple[tuple[str, str, float], ...] = (
 _DEFAULT_GRAPH_RANGE = "10m"
 
 # Шаблон секции «Телеметрия» (Ф4.1): RU-метки и дефолтные интервалы для метрик
-# framework GATED_METRICS. Ключи — те же метрики; отсутствующий ключ → сам ключ /
+# каталог метрик фреймворка. Ключи — те же метрики; отсутствующий ключ → сам ключ /
 # общий дефолт. Значения — app-specific presentation (framework даёт лишь список).
 _TELEMETRY_METRIC_LABELS: dict[str, str] = {
     "fps": "FPS (кадров/с)",
@@ -775,11 +775,11 @@ class SingleProcessPanel(QWidget):
         page_layout.addWidget(self._build_graph_box())
 
         # Секция управления телеметрией (Ф4.1): авто-строки контролов вкл/выкл +
-        # частота по списку метрик GATED_METRICS (шаблон, не хардкод). Запись —
+        # частота по каталогу метрик (шаблон, не хардкод). Запись —
         # через command-result-bridge (RequestRunner), результат несёт caps.
         self._telemetry_controls = TelemetryControlsSection(
             self._process_name,
-            list(GATED_METRICS),
+            list(gated_metrics()),
             labels=_TELEMETRY_METRIC_LABELS,
             defaults=_TELEMETRY_METRIC_DEFAULTS,
             on_change=self._on_telemetry_change,

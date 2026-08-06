@@ -26,13 +26,27 @@ from typing import Annotated, Any, Dict, Optional
 from pydantic import Field
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
+from ...observability_declarations import declared_metrics
 
-# Суффиксы метрик, подлежащих publisher-gate (вкл/выкл + частота). ``status``
-# воркеров и health/errors СЮДА не входят — они публикуются всегда (инвариант плана).
-# Task 2.3: константа живёт здесь (не в heartbeat/telemetry.py), т.к. этот модуль —
-# нижний слой контракта (configs не импортирует heartbeat, а heartbeat — импортирует
-# configs); heartbeat/telemetry.py ре-экспортирует её для обратной совместимости импортов.
-GATED_METRICS: tuple[str, ...] = ("fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm")
+
+def gated_metrics() -> tuple[str, ...]:
+    """Каталог метрик под publisher-gate — Ф8.1, вместо кортежа-литерала.
+
+    Раньше здесь стоял ``GATED_METRICS = ("fps", …)``: завести метрику значило
+    править файл фреймворка, то есть конструктор требовал правки конструктора.
+    Теперь каталог наполняется объявлениями рядом с вычислением метрики
+    (:func:`~...observability_declarations.declare_metric`), и приложение либо
+    плагин заводит свою метрику, не трогая фреймворк вовсе.
+
+    **Функция, а не константа-снимок.** Реестр наполняется импортом, и снимок,
+    взятый на импорте ЭТОГО модуля, застал бы только тех производителей, что
+    успели импортироваться раньше, — то есть каталог зависел бы от порядка
+    импортов, ровно от чего реестр объявлений и защищает.
+
+    ``status`` воркеров и health/errors в каталог не входят — они публикуются
+    всегда (инвариант плана «errors/status always-on»), и гейта у них нет.
+    """
+    return declared_metrics()
 
 
 @register_schema("MetricRule")
@@ -105,7 +119,7 @@ class TelemetryPublishConfig(SchemaBase):
         return rule.enabled, interval
 
     def unknown_metrics(self) -> set[str]:
-        """Ключи ``metrics``, отсутствующие в :data:`GATED_METRICS` — опечатка в имени.
+        """Ключи ``metrics``, отсутствующие в каталоге :func:`gated_metrics` — опечатка.
 
         Task 2.3: правило на несуществующий суффикс (например ``latency`` вместо
         ``latency_ms``) раньше было тихим no-op — ``resolve()`` его просто никогда не
@@ -113,11 +127,22 @@ class TelemetryPublishConfig(SchemaBase):
         такие ключи (forward-compat: новая метрика в старом процессе не должна ронять
         reload) — только позволяет вызывающему коду залогировать/вернуть предупреждение.
 
+        **Пустой каталог означает «судить не по чему», а не «известных нет»** (Ф8.1).
+        Пока каталог был литералом, он существовал всегда; теперь он наполняется
+        импортом производителей, и в процессе, который телеметрию не считает, он пуст
+        законно. Без этой ветки КАЖДЫЙ ключ там объявлялся бы опечаткой — ложная
+        тревога на ровном месте, класс «молчащий детектор» наоборот. Ветка не
+        прикрывает настоящий промах: как только хоть один производитель импортирован,
+        неизвестный ключ снова слышен, и это стережёт отдельный тест.
+
         Returns:
-            Множество ключей ``metrics``, которых нет среди :data:`GATED_METRICS`
-            (пусто — все ключи известны).
+            Множество ключей ``metrics``, которых нет в каталоге (пусто — все ключи
+            известны либо каталог пуст).
         """
-        return set(self.metrics) - set(GATED_METRICS)
+        catalog = gated_metrics()
+        if not catalog:
+            return set()
+        return set(self.metrics) - set(catalog)
 
     def to_dict(self) -> Dict[str, Any]:
         """Сериализовать в dict (Dict at Boundary — уходит в IPC/конфиг)."""
@@ -129,4 +154,4 @@ class TelemetryPublishConfig(SchemaBase):
         return cls.model_validate(data or {})
 
 
-__all__ = ["GATED_METRICS", "MetricRule", "TelemetryPublishConfig"]
+__all__ = ["gated_metrics", "MetricRule", "TelemetryPublishConfig"]

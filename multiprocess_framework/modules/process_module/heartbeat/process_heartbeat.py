@@ -5,8 +5,20 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
+from ...observability_declarations import declare_metric
+
 if TYPE_CHECKING:
     pass
+
+# Ф8.1: `shm` объявляется здесь, потому что считает её `_publish_router_shm_stats_to_tree`
+# в этом файле. Остальные четыре — у `telemetry.py`, где собираются они. Каталог
+# перестал быть кортежем-литералом в configs/, и владение метрикой теперь совпадает
+# с местом её вычисления, а не держится совпадением имени.
+#
+# Импорт на уровне модуля, а не ленивый, как соседи: ленивый объявил бы метрику
+# только после первого вызова публикатора, то есть каталог отвечал бы на вопрос
+# «что бывает» уже после того, как по нему приняли решение.
+METRIC_SHM = declare_metric("shm", owner=__name__)
 
 
 class ProcessHeartbeat:
@@ -281,7 +293,7 @@ class ProcessHeartbeat:
         )
 
     def _warn_unknown_metrics(self, config: Any) -> None:
-        """Залогировать WARNING по ключам ``metrics``, отсутствующим в ``GATED_METRICS``.
+        """Залогировать WARNING по ключам ``metrics``, отсутствующим в каталоге метрик.
 
         Task 2.3: опечатка в имени метрики (например ``latency`` вместо ``latency_ms``)
         раньше была тихим no-op — правило существует в конфиге, но ``resolve()`` его
@@ -384,7 +396,7 @@ class ProcessHeartbeat:
             return None
         # Task 1.2: WARNING по метрикам, чей interval_sec < эффективного тика (не тихий no-op).
         self._warn_capped_metrics(config)
-        # Task 2.3: WARNING по ключам metrics, отсутствующим в GATED_METRICS (опечатка).
+        # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
         self._warn_unknown_metrics(config)
         # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
         # fake-clock тестов каденции; в проде обоим — time.monotonic).
@@ -476,7 +488,7 @@ class ProcessHeartbeat:
         config = TelemetryPublishConfig.from_dict(publish_section)
         # Task 1.2: WARNING по метрикам, чья частота ограничена телеметрийным тиком.
         self._warn_capped_metrics(config)
-        # Task 2.3: WARNING по ключам metrics, отсутствующим в GATED_METRICS (опечатка).
+        # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
         self._warn_unknown_metrics(config)
         # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
         # Gate использует clock heartbeat'а (fake-clock тесты; в проде time.monotonic).

@@ -1101,7 +1101,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         extra: Dict[str, Any] = {"expected": rule, "observed": observed_rule}
         if metric in unknown:
             extra["reason"] = (
-                f"метрика {metric!r} не входит в GATED_METRICS — вероятна опечатка "
+                f"метрика {metric!r} не входит в каталог метрик — вероятна опечатка "
                 f"(правило записано, но ничего не гейтит); известные имена — "
                 f"introspect_telemetry(process).gated_metrics"
             )

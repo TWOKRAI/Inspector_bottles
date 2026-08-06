@@ -42,9 +42,14 @@ _SEVERITY_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 #: в ПОКОЕ показывал 2 (воспроизведено: ``{'system_file': 1, 'messages_file': 1}``
 #: после первого ``flush``). Сигнал «маршрут сломан» был загрязнён собственным
 #: шумом менеджера — а по нему судят об инциденте.
+#: Ф8.1: у скоупа остались только приёмники — ``enabled``/``min_level`` сняты
+#: вместе со второй осью гейта. Смысл не изменился: записи ниже WARNING у этой
+#: плоскости приёмника по-прежнему нет, но теперь это говорит ОДНА вещь — пустой
+#: список каналов, — а не она же плюс выключатель плюс порог.
+#: Молчание собственного ``info()`` менеджера держит порог корня
+#: (``default_level="WARNING"`` плоскости ошибок), а не выключенный скоуп.
 _ERROR_PLANE_SCOPES: Dict[str, Any] = {
-    scope: {"enabled": False, "min_level": "WARNING", "channels": []}
-    for scope in ("SYSTEM", "BUSINESS", "PERFORMANCE", "AUDIT", "SECURITY", "DEBUG")
+    scope: {"channels": []} for scope in ("SYSTEM", "BUSINESS", "PERFORMANCE", "AUDIT", "SECURITY", "DEBUG")
 }
 
 
