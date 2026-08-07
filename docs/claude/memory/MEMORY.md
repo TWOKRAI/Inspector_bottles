@@ -230,3 +230,8 @@
 - [Защищать единицу конкуренции](feedback_protect_the_unit_of_contention.md) — предел на не той единице оставляет второго без предела вовсе
 - [Откат инъекции — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа; ERROR сбора ≠ красный
 - [Барьер на входе не воспроизводит гонку](feedback_barrier_at_entry_does_not_reproduce_the_race.md) — GIL отдаёт первому потоку весь короткий проход; рандеву вешать на саму операцию
+- [Дубль фикстуры проверяет сам себя](feedback_duplicate_fixture_verifies_itself.md) — приватная копия расходится с conftest молча; 9 красных жили как «не наш» долг
+- [Совпадение констант прячет реализации](feedback_coinciding_constants_hide_opposite_implementations.md) — floor(now/1.0)==now: 18 тестов зелены под инъекцией; брать числа, где кандидаты расходятся
+- [Докстринг утверждает то, чего регистрация не ставила](feedback_docs_assert_what_registration_never_set.md) — три места звали воркер SYSTEM, создавался он без типа; оба предохранителя на одной вере
+- [Слишком грубая инъекция ничего не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) — красный не по проверяемой причине так же вреден, как зелёный
+- [monotonic на Windows — 15.6 мс](project_monotonic_resolution_windows.md) — GetTickCount64; сравнение разностей ниже ~100 мс недостоверно, отображать на сетку
