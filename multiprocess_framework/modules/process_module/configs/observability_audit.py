@@ -140,19 +140,31 @@ class ObservabilityAudit:
     ring: Deque[Dict[str, Any]] = field(default_factory=lambda: deque(maxlen=AUDIT_HISTORY))
     seq: int = 0
     log: Optional[Callable[[str, bool], None]] = None
+    #: Приёмник ДОКУМЕНТА: ``(dict) -> Any``. ``None`` — плоскость документов не
+    #: подключена, поведение прежнее (кольцо + строка журнала).
+    #:
+    #: Тип намеренно структурный, а не импортированный: фреймворк не имеет права
+    #: знать про ``Services`` (правило слоёв 9), поэтому здесь один вызов с ``dict``,
+    #: а реализацию поверх SQL приносит композиционный корень.
+    sink: Optional[Callable[[Dict[str, Any]], Any]] = None
     clock: Callable[[], float] = time.time
     _lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def __getstate__(self) -> Dict[str, Any]:
-        """Лок и колбэк непиклимы — стек слоёв едет в снимок процесса без них."""
+        """Лок и колбэки непиклимы — стек слоёв едет в снимок процесса без них."""
         state = dict(self.__dict__)
         state.pop("_lock", None)
         state.pop("log", None)
+        # sink выбрасывается по той же причине, что и log: это замыкание на
+        # соединение с БД. Забыть его здесь — значит уронить пиклинг всего стека
+        # слоёв, а стек едет в снимок процесса на каждом boot/switch.
+        state.pop("sink", None)
         return state
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
         self.__dict__.setdefault("log", None)
+        self.__dict__.setdefault("sink", None)
         self._lock = threading.Lock()
 
     def record(
@@ -231,7 +243,40 @@ class ObservabilityAudit:
         # то, что условие ещё держится, видно счётчиком `repeats` в readback'е
         # `introspect.observability`.
         self._announce(entry)
+        self._emit_document(entry)
         return entry
+
+    def _emit_document(self, entry: Dict[str, Any]) -> None:
+        """Отдать запись в плоскость документов — долговечный запрашиваемый след.
+
+        **Писатель один, носителей два, и это не два реестра.** Строка журнала и
+        документ рождаются здесь, из ОДНОЙ ``entry``, и потому разойтись по содержанию
+        не могут. Разные у них не факты, а сроки и способ чтения: журнал ротируется за
+        дни и читается глазами, документ живёт по своему сроку и отвечает на запрос.
+        Именно поэтому «когда включили DEBUG» перестаёт быть вопросом к grep'у.
+
+        Повтор сюда не попадает по той же причине, что и в журнал: схлопнутая запись —
+        не новая смена, а то же условие, всё ещё длящееся (см. ``record``).
+
+        Отказ приёмника глушится: аудит наблюдает, а не мешает — он зовётся из пути
+        смены конфигурации, и падение БД не имеет права отменить уже случившуюся смену.
+        Но глушение **именное**: отказ помечается в самой записи, как у журнала, иначе
+        документ считался бы записанным, а его бы не было.
+        """
+        if self.sink is None:
+            return
+        document = {
+            "kind": "audit",
+            "ts": entry.get("ts", self.clock()),
+            "summary": f"{entry.get('action', '?')} {entry.get('key', '')}".strip(),
+            **entry,
+        }
+        try:
+            if self.sink(document) is False:
+                entry["document_failed"] = True
+        except Exception as exc:  # noqa: BLE001 — см. докстринг
+            entry["document_failed"] = True
+            entry["document_error"] = str(exc)[:200]
 
     def _announce(self, entry: Dict[str, Any]) -> None:
         """Одна строка в журнал процесса — долговечный след записи.
