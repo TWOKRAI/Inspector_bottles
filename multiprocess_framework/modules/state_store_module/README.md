@@ -166,7 +166,7 @@ manager.use(ValidationMiddleware({
     "cameras.*.config.type": {"type": str, "enum": ["webcam", "hikvision"]},
 }))
 manager.use(ThrottleMiddleware({
-    "**.state.actual_fps":   1.0,   # max 1 раз/сек
+    "**.state.actual_fps":   1.0,   # не более одной записи на секундное окно
     "**.state.last_seq":     0,     # полная блокировка
 }))
 manager.use(LoggingMiddleware(level="DEBUG", exclude_patterns=["**.state.actual_fps"]))
@@ -176,7 +176,9 @@ manager.initialize()
 ```
 
 Встроенные middleware:
-- **ThrottleMiddleware** — дебаунс высокочастотных метрик
+- **ThrottleMiddleware** — предохранитель частоты: не более одной записи на окно
+  `interval` (фиксированная сетка `floor(now / interval)`, ADR-SS-021). Устойчивый
+  потолок ровно `1 / interval`; трафик НА пределе и ниже проходит целиком
 - **ValidationMiddleware** — проверка типов / диапазонов / enum-ов
 - **LoggingMiddleware** — логирование всех изменений с exclude-фильтром
 - **MetricsMiddleware** — счётчики операций
