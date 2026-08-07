@@ -19,62 +19,31 @@ import pytest
 
 from backend_ctl.driver import MemoryStats, ProcessCapabilities, QueueDepths, RouterStats, WorkerStatus
 from backend_ctl.protocol import UNWRAP_MISS, unwrap
-
+from backend_ctl.tests.conftest import ROUTER_COUNTERS, full_router_stats
 
 # Реальная форма ответа команды: внешний конверт success + вложенная payload под result
 # (снято с живого бэкенда — см. probe). Парсеры обязаны спускаться по result.
-#: Полный набор счётчиков, которые роутер инициализирует при старте и потому
-#: обязан отдавать всегда. Фикстура держит их все: обёртка судит форму ответа по
-#: ``missing``, поэтому неполная фикстура проверяла бы не тот контракт.
-#: Точечные ключи (разбивка по kind) в этот набор НЕ входят — они заводятся на
-#: лету и живут в ``by_kind`` (см. _read_breakdown).
-def _full_router_stats(**overrides: object) -> dict:
-    stats: dict = {
-        "sent_ok": 10,
-        "received": 21,
-        "middleware_dropped": 0,
-        "errors": 0,
-        "sent_attempted": 10,
-        "sent_via_channel": 3,
-        "sent_via_targets": 7,
-        "queued_async": 0,
-        "send_queue_size": 0,
-        "queue_data_evicted": 0,
-        "queue_system_evict_blocked": 0,
-        "frame_loans_released_on_evict": 0,
-        # Ф4 Task 4.3: потери never-drop груза + атрибуция «кто душит очередь X».
-        "queue_never_drop_loss_total": 0,
-        "queue_senders": {},
-    }
-    stats.update(overrides)
-    return stats
 
+#: Имена всех счётчиков строгого края — в порядке чтения из ``from_response``.
+#: Своего списка здесь нет СОЗНАТЕЛЬНО: до 2026-08-07 файл держал приватные копии
+#: набора и фикстуры, и когда Ф7.х.2 добавила три счётчика хвоста наблюдаемости в
+#: ``protocol.py`` и в conftest, копии остались прежними — восемь тестов покраснели
+#: и жили красными. Дубль фикстуры проверяет не контракт сервера, а сам себя.
+_ALL_COUNTERS = list(ROUTER_COUNTERS)
 
-#: Имена всех счётчиков строгого края — в порядке чтения из from_response.
-_ALL_COUNTERS = [
-    "sent_ok",
-    "received",
-    "middleware_dropped",
-    "errors",
-    "sent_attempted",
-    "sent_via_channel",
-    "sent_via_targets",
-    "queued_async",
-    "send_queue_size",
-    "queue_data_evicted",
-    "queue_system_evict_blocked",
-    "frame_loans_released_on_evict",
-    "queue_never_drop_loss_total",
-    "queue_senders",
-]
-
+#: Значения, на которых стоят утверждения ниже. Дефолты фикстуры (нули + sent_ok/
+#: received) для этого не годятся: тест на дефолте проверял бы дефолт, а не чтение.
 _ROUTER_RESP = {
     "type": "response",
     "success": True,
     "result": {
         "success": True,
         "process": "preprocessor",
-        "router_stats": _full_router_stats(
+        "router_stats": full_router_stats(
+            received=21,
+            sent_attempted=10,
+            sent_via_channel=3,
+            sent_via_targets=7,
             **{"sent_via_targets.state": 5, "sent_via_channel.system": 3},
         ),
     },
@@ -116,7 +85,7 @@ class TestRouterStatsParsing:
         Именно этот случай раньше был неотличим от «трафика не было»: ``int(
         stats.get("sent_ok", 0) or 0)`` отдавал ноль, и агент читал его как факт.
         """
-        stats = _full_router_stats()
+        stats = full_router_stats(received=21)
         stats["sent_okay"] = stats.pop("sent_ok")  # сервер переименовал ровно один счётчик
         renamed = {"success": True, "result": {"success": True, "router_stats": stats}}
         rs = RouterStats.from_response(renamed)
@@ -176,7 +145,7 @@ class TestRouterStatsParsing:
             "success": True,
             "result": {
                 "success": True,
-                "router_stats": _full_router_stats(
+                "router_stats": full_router_stats(
                     queue_never_drop_loss_total=597,
                     queue_senders={"gui_system": {"ProcessManager": {"put": 1728, "lost": 597}}},
                 ),
@@ -189,7 +158,7 @@ class TestRouterStatsParsing:
 
     def test_missing_loss_counter_is_none_not_zero(self) -> None:
         """Старая сборка без счётчика → None + имя в missing (не тихий ноль)."""
-        stats = _full_router_stats()
+        stats = full_router_stats()
         del stats["queue_never_drop_loss_total"]
         rs = RouterStats.from_response({"success": True, "router_stats": stats})
         assert rs.queue_never_drop_loss_total is None
@@ -205,7 +174,7 @@ class TestRouterStatsParsing:
         assert rs.by_kind == {"sent_via_targets.state": 5, "sent_via_channel.system": 3}
         assert all("." not in name for name in rs.missing)
 
-        without_breakdown = {"success": True, "router_stats": _full_router_stats()}
+        without_breakdown = {"success": True, "router_stats": full_router_stats()}
         rs2 = RouterStats.from_response(without_breakdown)
         assert rs2.by_kind == {}
         assert rs2.missing == [], "нет разбивки — это не пропажа, а отсутствие такого трафика"
