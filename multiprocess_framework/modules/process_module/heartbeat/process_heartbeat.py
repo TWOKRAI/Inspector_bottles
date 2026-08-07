@@ -81,7 +81,7 @@ class ProcessHeartbeat:
         if not self._services.worker_manager:
             return
 
-        from ...worker_module import ThreadConfig, ThreadPriority
+        from ...worker_module import ThreadConfig, ThreadPriority, WorkerType
 
         self._interval = interval
         # PC 1.2: собрать publisher-gate из секции telemetry.publish (если задана).
@@ -89,7 +89,17 @@ class ProcessHeartbeat:
         self._services.worker_manager.create_worker(
             "heartbeat_sender",
             self._loop,
-            ThreadConfig(priority=ThreadPriority.BACKGROUND),
+            # worker_type=SYSTEM — не косметика, а единственное, что выводит этот
+            # воркер из-под ``worker.pause_all``: guard в ``pause_all_workers``
+            # сравнивает именно ``WorkerType.SYSTEM`` (worker_manager.py:269-272),
+            # а реестр берёт тип из конфига (worker_registry.py:70). До 2026-08-07
+            # тип здесь не передавался вовсе, то есть был APPLICATION, и пауза
+            # процесса глушила его вместе с прикладными воркерами: heartbeat
+            # замолкал → ProcessMonitor объявлял процесс UNRESPONSIVE → супервизия
+            # рестартила его → флап ``unresponsive ↔ running`` каждые ~5 с.
+            # Приоритет остаётся BACKGROUND: SYSTEM здесь про НАЗНАЧЕНИЕ воркера
+            # (внутренний механизм, не прикладная задача), а не про планировщик.
+            ThreadConfig(priority=ThreadPriority.BACKGROUND, worker_type=WorkerType.SYSTEM),
             auto_start=True,
         )
         self._started = True
