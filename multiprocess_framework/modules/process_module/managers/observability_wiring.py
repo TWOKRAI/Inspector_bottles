@@ -51,6 +51,8 @@ heartbeat. Отклонённая гейтом запись стоит ~240 нс
 
 from __future__ import annotations
 
+import importlib
+import time
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 from ...channel_routing_module.observability import (
@@ -248,6 +250,235 @@ def unwire_observability_forward(taps: Optional[list]) -> None:
                 mgr.remove_tap(tap_name)
             except Exception:  # nosec B110 — teardown best-effort
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Ф8.5 — плоскость документов: второе правило допуска
+# ---------------------------------------------------------------------------
+
+#: Адрес ключа в конфиге — он же то, что печатается в WARNING'е. Константа, а не
+#: строка по месту: оператор получает адрес, по которому можно ГРЕПНУТЬ конфиг, и
+#: этот адрес обязан совпадать с тем, что читает код.
+DOCUMENTS_CONFIG_ADDRESS = "observability.documents"
+
+#: Атрибуты процесса, на которых живёт плоскость. Публикация стока (``document_sink``)
+#: — не удобство, а условие того, что клиентов у плоскости может быть двое: аудит
+#: (пишет фреймворк) и вердикты (пишет приложение) идут в ОДИН экземпляр, то есть в
+#: одно соединение и один файл. Заведи приложение свой стор — writer'ов на файл стало
+#: бы вдвое больше, а «один писатель на процесс» перестало бы быть правдой.
+DOCUMENT_SINK_ATTR = "document_sink"
+_PURGE_DEADLINE_ATTR = "_document_purge_at"
+_PURGE_INTERVAL_ATTR = "_document_purge_interval"
+
+#: Период уборки по умолчанию, сек. Час — потому что срок хранения документа
+#: измеряется сутками и годами: точность уборки в пределах часа не наблюдаема.
+DEFAULT_PURGE_INTERVAL_SEC = 3600.0
+
+
+def _process_warn(svc: Any, message: str) -> None:
+    """Сказать вслух. Форма повторяет ``make_audit_log``: логгер бывает разный, а
+    молчание недопустимо ни при каком."""
+    warn = (
+        getattr(svc, "_log_warning", None)
+        or getattr(svc, "log_warning", None)
+        or getattr(svc, "_log_info", None)
+        or getattr(svc, "log_info", None)
+    )
+    if not callable(warn):
+        return
+    try:
+        warn(message, module="observability")
+    except TypeError:  # логгер без kwarg `module` — сообщение важнее формы
+        warn(message)
+
+
+def resolve_factory(path: str) -> Callable[..., Any]:
+    """``"пакет.модуль:атрибут"`` (или ``"пакет.модуль.атрибут"``) → вызываемый объект.
+
+    Обе формы приняты сознательно. Двоеточие однозначно (``class_loader`` его не знает,
+    но ``register_sink_factory`` и точки входа setuptools — знают) и не заставляет
+    гадать, где кончается пакет; точка привычна и уже используется для класса процесса.
+    Отказ громкий: неизвестный модуль/атрибут — исключение, а не ``None``.
+    """
+    text = str(path).strip()
+    if ":" in text:
+        module_name, _, attr = text.partition(":")
+    else:
+        module_name, _, attr = text.rpartition(".")
+    if not module_name or not attr:
+        raise ValueError(f"{path!r} — не import-path вида 'модуль:атрибут'")
+    obj = getattr(importlib.import_module(module_name), attr)
+    if not callable(obj):
+        raise TypeError(f"{path!r} — не вызываемый объект ({type(obj).__name__})")
+    return obj
+
+
+def wire_document_sink(svc: Any) -> Optional[Any]:
+    """Ф8.5: собрать сток документов процесса и подключить его к аудиту.
+
+    Возвращает объект стока (для teardown и для второго клиента) либо ``None`` —
+    плоскость не объявлена ЛИБО объявлена и не собралась. Разница между этими двумя
+    случаями не теряется: во втором в журнал уходит WARNING с адресом ключа и
+    причиной. Молчаливый ``None`` был бы неотличим от «не настроено» — тот самый
+    класс «проглоченный сбой», ради которого фаза и затевалась.
+
+    **Зовётся у КАЖДОГО процесса, а не только у пилота hub'а** (Р-8.5-А): аудит смен
+    наблюдаемости есть везде, потому что команда смены приходит куда угодно. Ключа в
+    конфиге нет — выходим на второй строке, поведение прежнее.
+
+    **Почему ключ читается из разрешённых слоёв, а не отдельным полем proc_dict.**
+    Секция ``observability`` уже едет к процессу целиком (L1 ``observability_app`` +
+    L2 ``observability_override``) обеими дорогами сборки — и boot, и switch. Заведи
+    мы свой плоский ключ, его пришлось бы класть в ДВУХ конструкторах ассемблера, и
+    забытый второй дал бы ровно «дефект на одном пути из трёх»: после горячей смены
+    рецепта плоскость молча исчезала бы. Здесь класть нечего — ключ доезжает тем же
+    механизмом, что и уровень логирования, и настраивается рецептом наравне с ним.
+    """
+    from ..configs.observability_layers import process_observability_layers
+
+    try:
+        layers = process_observability_layers(svc)
+        section = layers.resolve().get("documents") or {}
+    except Exception as exc:  # noqa: BLE001 — процесс без конфига живёт без плоскости
+        _process_warn(svc, f"[observability] секция {DOCUMENTS_CONFIG_ADDRESS} не прочитана: {exc!r}")
+        return None
+
+    if not isinstance(section, dict):
+        _process_warn(
+            svc,
+            f"[observability] {DOCUMENTS_CONFIG_ADDRESS} не словарь "
+            f"({type(section).__name__}) — плоскость документов не поднята",
+        )
+        return None
+    factory_path = str(section.get("factory") or "").strip()
+    if not factory_path:
+        return None
+
+    config = section.get("config")
+    try:
+        sink = resolve_factory(factory_path)(dict(config) if isinstance(config, dict) else {})
+    except Exception as exc:  # noqa: BLE001 — отказ фабрики громкий, но не фатальный
+        _process_warn(
+            svc,
+            f"[observability] плоскость документов НЕ поднята: фабрика "
+            f"{DOCUMENTS_CONFIG_ADDRESS}.factory={factory_path!r} отказала ({exc!r}). "
+            "Аудит остаётся кольцом в памяти и строками журнала; документы не пишутся",
+        )
+        return None
+
+    append = getattr(sink, "append", None)
+    if not callable(append):
+        # Проверка СТРУКТУРНАЯ, а не isinstance протокола: импортировать протокол
+        # значило бы импортировать Services, то есть отменить всю развилку.
+        #
+        # Адрес ключа тут обязателен ровно так же, как в ветке выше. Найдено
+        # независимым tester'ом: правило «называй адрес» было применено к ОДНОЙ из
+        # двух точек отказа, и оператор, попавший во вторую, получал сообщение без
+        # места, куда идти править. Тот же класс, что «инъекция покрывает не все
+        # точки правила», только со стороны исполнения.
+        _process_warn(
+            svc,
+            f"[observability] плоскость документов НЕ поднята: "
+            f"{DOCUMENTS_CONFIG_ADDRESS}.factory={factory_path!r} вернула "
+            f"{type(sink).__name__} без метода append(dict)",
+        )
+        return None
+
+    layers.audit.sink = append
+    # Имя процесса в документе: плоскость одна на систему, и без него восемь
+    # писателей неразличимы — «когда включили DEBUG» отвечалось бы без «где».
+    layers.audit.source = str(getattr(svc, "name", "") or "")
+    try:
+        setattr(svc, DOCUMENT_SINK_ATTR, sink)
+        setattr(svc, _PURGE_INTERVAL_ATTR, _purge_interval(config))
+        # Срок здесь НЕ ставится: первая уборка идёт на первом же такте. Иначе
+        # пришлось бы засеять дедлайн показанием часов, которых сшивка не видит —
+        # ``sweep_process_documents`` принимает ``now`` параметром, и смешивать его
+        # с монотоникой, снятой в другом месте, значит сравнивать разные шкалы.
+        # Побочная польза: процесс, поднятый после долгого простоя, подметает сразу,
+        # а не через час после старта.
+        setattr(svc, _PURGE_DEADLINE_ATTR, None)
+    except Exception:  # noqa: BLE001 — объект без сеттеров: аудит пишет, уборки нет
+        pass
+    return sink
+
+
+def _purge_interval(config: Any) -> float:
+    """Период уборки из словаря фабрики. Мусор и ноль → дефолт, а не «никогда»."""
+    raw = config.get("purge_interval_sec") if isinstance(config, dict) else None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_PURGE_INTERVAL_SEC
+    return value if value > 0 else DEFAULT_PURGE_INTERVAL_SEC
+
+
+def sweep_process_documents(svc: Any, now: Optional[float] = None) -> Optional[int]:
+    """Р-8.5-В: удалить протухшие документы — не чаще ``purge_interval_sec``.
+
+    Возвращает число удалённых, либо ``None``, если такт пропущен (плоскости нет или
+    срок следующей уборки не наступил).
+
+    **Свой поток не заводится.** Такт heartbeat уже идёт в каждом процессе, уже
+    дренирует hub и уже снимает просроченные правки L3 — четвёртое хозяйственное дело
+    в нём стоит одного ``if``, а поток стоил бы ещё одной процедуры остановки ради
+    операции раз в час.
+
+    **Отказ БД такт не роняет** (Р-8.5-Г). Симметрично ``append``: уборка — это
+    хозяйство, а heartbeat — liveness, и потеря первого не имеет права стоить второго.
+    Но глушение именное: отказ уходит в журнал WARNING'ом.
+    """
+    store = getattr(svc, DOCUMENT_SINK_ATTR, None)
+    purge = getattr(store, "purge_expired", None)
+    if not callable(purge):
+        return None
+    moment = time.monotonic() if now is None else float(now)
+    deadline = getattr(svc, _PURGE_DEADLINE_ATTR, None)
+    if deadline is not None and moment < float(deadline):
+        return None
+    interval = float(getattr(svc, _PURGE_INTERVAL_ATTR, DEFAULT_PURGE_INTERVAL_SEC) or DEFAULT_PURGE_INTERVAL_SEC)
+    # Срок следующей уборки ставится ДО самой уборки: упади она — такт всё равно
+    # не превратится в попытку каждый heartbeat, то есть отказ БД не станет ещё и
+    # источником нагрузки на неё же.
+    try:
+        setattr(svc, _PURGE_DEADLINE_ATTR, moment + interval)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return int(purge() or 0)
+    except Exception as exc:  # noqa: BLE001 — см. докстринг
+        _process_warn(svc, f"[observability] уборка плоскости документов не удалась: {exc!r}")
+        return None
+
+
+def unwire_document_sink(svc: Any) -> None:
+    """Отцепить сток от аудита и закрыть его (graceful teardown).
+
+    Порядок обратный сшивке: сперва аудит перестаёт писать, потом закрывается БД.
+    Наоборот — и запись, пришедшая между двумя строками, ушла бы в закрытое
+    соединение, то есть отказ появился бы ровно на остановке, где его труднее всего
+    объяснить.
+    """
+    from ..configs.observability_layers import LAYERS_ATTR
+
+    layers = getattr(svc, LAYERS_ATTR, None)
+    audit = getattr(layers, "audit", None)
+    if audit is not None:
+        try:
+            audit.sink = None
+        except Exception:  # noqa: BLE001 — teardown best-effort
+            pass
+    store = getattr(svc, DOCUMENT_SINK_ATTR, None)
+    close = getattr(store, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # nosec B110 — teardown best-effort
+            pass
+    try:
+        setattr(svc, DOCUMENT_SINK_ATTR, None)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def wire_observability_store(

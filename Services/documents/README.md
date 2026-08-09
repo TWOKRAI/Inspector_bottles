@@ -18,6 +18,32 @@
 - `IDocumentStore` — приёмник + чтение + ретеншен ([interfaces.py](interfaces.py))
 - `DocumentStore` — реализация поверх `Services/sql` ([store.py](store.py))
 - `KIND_AUDIT`, `KIND_VERDICT` — роды документов
+- `make_document_sink(config)` — фабрика стока для сшивки из конфига ([wiring.py](wiring.py))
+
+## Сшивка с фреймворком (Ф8.5, вариант B)
+
+Фреймворк не имеет права импортировать `Services`, а живой сток ему нужен: аудит смен
+наблюдаемости рождается внутри его процесса. Поэтому он знает **строку из конфига**:
+
+```yaml
+# multiprocess_prototype/backend/config/system.yaml
+observability:
+  documents:
+    factory: "Services.documents.wiring:make_document_sink"
+    config:
+      db_path: data/documents.db
+      retention_sec: {audit: 31536000, verdict: 315360000}
+      purge_interval_sec: 3600
+```
+
+Фреймворк резолвит `factory` importlib'ом, зовёт с `config` и вешает результат на аудит
+процесса; уборку исполняет такт heartbeat. Пустая `factory` → плоскости нет, поведение
+прежнее. Отказ фабрики → процесс стартует без плоскости и **пишет WARNING с адресом
+ключа**: молчаливый `sink is None` неотличим от «не настроено».
+
+Экземпляр стока публикуется на процессе как `svc.document_sink` — второй клиент
+(вердикты приложения) обязан писать в него же, а не заводить свой: один писатель на
+процесс, одна БД на систему в режиме WAL.
 
 ## Использование
 

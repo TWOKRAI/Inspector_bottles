@@ -156,6 +156,17 @@ class DocumentStore:
                 removed += int(self._adapter.execute(sql, {"kind": kind, "cutoff": moment - float(ttl)}) or 0)
         return removed
 
+    def close(self) -> None:
+        """Освободить движок БД (graceful teardown процесса).
+
+        Симметрия с ``ObservabilityStore.close`` не косметическая: на Windows
+        неотпущенный файл БД не даёт удалить каталог, и тест, забывший закрыть стор,
+        падает не там, где ошибся, а в уборке ``tmp_path``.
+        """
+        dispose = getattr(self._adapter, "dispose", None)
+        if callable(dispose):
+            dispose()
+
     def count(self, kind: Optional[str] = None) -> int:
         """Число документов (опц. по роду) — для проб и вкладки."""
         where = ' WHERE "kind" = :kind' if kind is not None else ""

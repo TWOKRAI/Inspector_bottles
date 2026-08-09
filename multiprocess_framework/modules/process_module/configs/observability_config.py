@@ -51,6 +51,33 @@ REMOVED_BATCHING_KEYS = (
 )
 
 
+@register_schema("ObservabilityDocumentsConfig")
+class ObservabilityDocumentsConfig(SchemaBase):
+    """Под-секция плоскости документов (Ф8.5) — второе правило допуска.
+
+    Здесь нет ни пути к БД, ни срока хранения: и то и другое едет в ``config``
+    неразобранным. Фреймворк владеет ВОПРОСОМ («куда девать запись, чья ценность не
+    выражается severity»), а ответ — SQL, файл, сетевой сервис — принадлежит
+    композиционному корню. Знай фреймворк про ``db_path``, он знал бы, что плоскость
+    реализована базой, — то есть импорт ``Services`` вернулся бы через конфиг
+    (правило слоёв 9).
+
+    ``factory`` пуст → плоскости нет, поведение прежнее (аудит живёт кольцом и
+    строкой журнала). Заполнен и не сработал → процесс стартует БЕЗ плоскости и
+    пишет WARNING с адресом ключа: молчаливый ``sink is None`` неотличим от
+    «не настроено», а это ровно класс «проглоченный сбой».
+    """
+
+    factory: Annotated[
+        str,
+        FieldMeta("Import-path фабрики стока, 'модуль:атрибут' или 'модуль.атрибут' (пусто — плоскости нет)"),
+    ] = ""
+    config: Annotated[
+        Dict[str, Any],
+        FieldMeta("Словарь фабрики, отдаётся ей as-is (db_path, retention_sec, purge_interval_sec, …)"),
+    ] = Field(default_factory=dict)
+
+
 @register_schema("ObservabilityErrorsConfig")
 class ObservabilityErrorsConfig(SchemaBase):
     """Под-секция ошибок (фасад над ErrorManagerConfig)."""
@@ -258,6 +285,14 @@ class ObservabilityConfig(SchemaBase):
         ObservabilityCommandsConfig,
         FieldMeta("Секция команд (CommandManager)"),
     ] = Field(default_factory=ObservabilityCommandsConfig)
+    #: Ф8.5. В manager-конфиги НЕ раскладывается (как ``session_ttl_sec``): это не
+    #: параметр менеджера, а адрес второй плоскости. Читает его сшивка процесса
+    #: (``wire_document_sink``) прямо из разрешённых слоёв — поэтому ключ настраивается
+    #: и рецептом (L2), и командой (L3), тем же правом, что и всё остальное здесь.
+    documents: Annotated[
+        ObservabilityDocumentsConfig,
+        FieldMeta("Плоскость документов: фабрика стока и её словарь (Ф8.5)"),
+    ] = Field(default_factory=ObservabilityDocumentsConfig)
 
     #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
     #: МОЛЧА (проверено), поэтому без этой сверки конфиг с ``enable_batching: true``

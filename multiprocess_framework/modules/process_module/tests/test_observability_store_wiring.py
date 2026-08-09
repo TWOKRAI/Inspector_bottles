@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+from multiprocess_framework.modules.channel_routing_module.levels import (
+    record_severity,
+    threshold_severity,
+)
 from multiprocess_framework.modules.channel_routing_module.observability import (
     ObservabilityHub,
     ObservabilityStore,
@@ -17,22 +21,45 @@ from multiprocess_framework.modules.process_module.managers.observability_wiring
 
 
 class FakeLoggerCore:
-    """Мини-LoggerCore: реестр tap'ов + эмиссия записи через них."""
+    """Мини-LoggerCore: реестр tap'ов + эмиссия записи через них.
+
+    **Порог ``min_level`` фальшивка обязана СОБЛЮДАТЬ (задача 8.5f).** До этой правки
+    она принимала аргумент и выбрасывала его, отдавая каждую запись каждому tap'у —
+    то есть проверяла ровно ту половину сшивки, которая её не интересовала. Цена
+    была измерена инъекцией: подмени ``min_level="ERROR"`` в ``wire_observability_store``
+    на ``"DEBUG"`` — и в стор поехал бы весь лог процесса, а не ошибки; ни один тест
+    файла не краснел. Дубль, который всегда пропускает, глушит гейт так же надёжно,
+    как дубль, который всегда успешен.
+
+    Сравнение уровней берётся у ПРОДАКШН-функций (``record_severity`` /
+    ``threshold_severity``), а не пишется здесь заново: своя таблица уровней в
+    фальшивке разошлась бы с настоящей молча, и тест продолжал бы быть зелёным,
+    доказывая себя.
+    """
 
     def __init__(self):
+        #: {имя: (канал, порог)} — порог хранится, потому что он и есть то, что
+        #: проверяется: без него реестр tap'ов помнит подписку, но не её условие.
         self._taps = {}
 
     def add_tap(self, channel, *, min_level="ERROR", name=None):
-        self._taps[name or channel.name] = channel
-        return name or channel.name
+        key = name or channel.name
+        self._taps[key] = (channel, threshold_severity(min_level))
+        return key
 
     def remove_tap(self, name):
         return self._taps.pop(name, None) is not None
 
     def emit_error(self, message, module="worker_module", level="ERROR"):
+        self.emit(message, module=module, level=level)
+
+    def emit(self, message, module="worker_module", level="ERROR"):
+        """Эмиссия записи ЛЮБОГО уровня — доедет только до tap'ов, чей порог её пускает."""
         rec = {"timestamp": 1.0, "level": level, "scope": "system", "message": message, "module": module, "extra": {}}
-        for ch in list(self._taps.values()):
-            ch.write(rec)
+        severity = record_severity(level)
+        for channel, threshold in list(self._taps.values()):
+            if severity >= threshold:
+                channel.write(rec)
 
 
 class TestWireStore:
@@ -65,6 +92,30 @@ class TestWireStore:
         assert len(rows) == 1
         assert rows[0]["message"] == "camera open failed"
         assert rows[0]["module"] == "camera_0"
+        store.close()
+
+    def test_store_tap_is_gated_by_error_level(self, tmp_path):
+        """8.5f: в стор ошибок едут ОШИБКИ, а не весь журнал процесса.
+
+        Порог ``min_level="ERROR"`` — не украшение подписки: вкладка «Ошибки» читает
+        этот стор целиком, и пропусти tap INFO/DEBUG — она превратилась бы во вторую
+        вкладку логов, а файл стора рос бы со скоростью всего журнала. До 8.5f
+        свойство не было закреплено ничем: фальшивка порог игнорировала, и снятие
+        гейта в проде не краснело ни одним тестом.
+        """
+        log = FakeLoggerCore()
+        store, _ = wire_observability_store(None, log, db_path=str(tmp_path / "obs.db"))
+
+        log.emit("рутина кадра", level="DEBUG")
+        log.emit("камера открыта", level="INFO")
+        log.emit("кадр просрочен", level="WARNING")
+        log.emit("камера не открылась", level="ERROR")
+        log.emit("процесс умирает", level="CRITICAL")
+
+        rows = store.list_records(kind="error")
+        assert [r["message"] for r in rows] == ["процесс умирает", "камера не открылась"], (
+            "ниже ERROR в стор попадать не имеет права"
+        )
         store.close()
 
     def test_wire_without_managers(self, tmp_path):

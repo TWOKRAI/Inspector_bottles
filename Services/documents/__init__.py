@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .interfaces import KIND_AUDIT, KIND_VERDICT, IDocumentSink, IDocumentStore
 from .store import DocumentStore
+from .wiring import make_document_sink
 
 __all__ = [
     "KIND_AUDIT",
@@ -16,4 +17,5 @@ __all__ = [
     "IDocumentSink",
     "IDocumentStore",
     "DocumentStore",
+    "make_document_sink",
 ]

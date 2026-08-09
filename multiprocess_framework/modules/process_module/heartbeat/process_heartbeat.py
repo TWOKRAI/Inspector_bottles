@@ -179,6 +179,12 @@ class ProcessHeartbeat:
                     # дело процесса, которому не нужен собственный поток.
                     self._sweep_observability_session()
 
+                    # Ф8.5 (Р-8.5-В): удалить документы с истёкшим сроком. Четвёртое
+                    # хозяйственное дело того же такта; сам вызов не чаще
+                    # purge_interval_sec, то есть на подавляющем большинстве тиков
+                    # это один if по атрибуту процесса.
+                    self._sweep_documents()
+
                     # Ф7 G.9(a) H-ревью: pump scheduled-GC. Heartbeat — периодический
                     # BACKGROUND-тик вне hot-path кадра → законная «пауза» для явной сборки.
                     # Без этого pump FW_GC_SCHEDULED отключил бы авто-GC НАВСЕГДА (сборки
@@ -377,6 +383,22 @@ class ProcessHeartbeat:
                 _log = getattr(self._services, "log_info", None)
             if callable(_log):
                 _log(f"[observability] подметальщик сроков L3 упал: {exc!r}", module="observability")
+
+    def _sweep_documents(self) -> None:
+        """Ф8.5: удалить документы с истёкшим сроком (не чаще ``purge_interval_sec``).
+
+        ``sweep_process_documents`` сам решает, наступил ли срок, и сам глушит отказ
+        БД именным WARNING'ом. Внешний ``except`` здесь — на неожиданное: плоскость
+        документов хозяйственна, а такт heartbeat несёт liveness, и уронить второе
+        ради первого нельзя.
+        """
+        try:
+            from ..managers.observability_wiring import sweep_process_documents
+
+            sweep_process_documents(self._services)
+        except Exception as exc:  # noqa: BLE001 — такт HB не роняем, но и не молчим
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"[observability] уборка документов сорвалась: {exc!r}", module="heartbeat")
 
     def _build_telemetry_gate(self) -> Any:
         """Собрать ``TelemetryGate`` из секции ``telemetry.publish`` конфига процесса.

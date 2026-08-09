@@ -395,9 +395,16 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         пилота (worker_module). log/stats буферизуются в hub и дренируются по
         heartbeat; error-слот остаётся реальным error_manager (write-through)."""
         from ..managers.observability_wiring import (
+            wire_document_sink,
             wire_observability_store,
             wire_process_observability,
         )
+
+        # Ф8.5: плоскость документов — НЕЗАВИСИМО от наличия hub'а. Аудит смен
+        # наблюдаемости есть у каждого процесса (команда смены приходит куда угодно),
+        # а hub — только у пилота: сшей мы документы внутри условия ниже, «когда
+        # включили DEBUG» отвечалось бы ровно на одном процессе из восьми.
+        wire_document_sink(self)
 
         self._observability_hub, self._observability_drain = wire_process_observability(
             self.name,
@@ -981,6 +988,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         Дренаж не критичен — исключения глушим, чтобы не сорвать teardown."""
         from ..managers.observability_wiring import (
             drain_process_observability,
+            unwire_document_sink,
             unwire_observability_forward,
             unwire_observability_store,
         )
@@ -1007,6 +1015,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         for _fwd, taps in self._observability_forwarders.values():
             unwire_observability_forward(taps)
         self._observability_forwarders = {}
+        # Ф8.5: отцепить сток документов от аудита и закрыть БД. ПОСЛЕ дренажа: до
+        # этой строки запись аудита ещё имеет право появиться (её может породить сам
+        # teardown), и уехать ей есть куда.
+        unwire_document_sink(self)
 
     def subscribe_observability_tail(self, subscriber: str, level: str = "ERROR") -> dict:
         """Ф5.20b: подписать адрес на live-хвост записей наблюдаемости (F1: per-subscriber).
