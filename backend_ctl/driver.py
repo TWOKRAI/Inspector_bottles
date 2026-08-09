@@ -1542,6 +1542,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         self,
         *,
         subscriber: Optional[str] = None,
+        level: Optional[str] = None,
         pm_name: str = "ProcessManager",
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
@@ -1560,10 +1561,22 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Durable-намерение регистрируется ОДНО (на PM), поэтому реконнект восстанавливает
         подписку одним replay'ем вместо списка имён, который к тому моменту устаревал.
 
+        Args:
+            subscriber: адрес получателя пушей (по умолчанию — свой).
+            level: порог хвоста (``INFO``/``WARNING``/…). ``None`` — «не назван»,
+                дефолт применяет процесс. A1 (Б-1б): до этого параметра не было
+                вовсе, и «хочу всё с INFO» превращалось в ERROR-only ещё здесь —
+                на первом же звене после вызывающего.
+
         Returns:
-            Ответ брокера: ``success``, ``subscriber``, охват разворачивания.
+            Ответ брокера: ``success``, ``subscriber``, ``level``, охват разворачивания.
         """
-        args = {"subscriber": subscriber or self._subscriber}
+        args: Dict[str, Any] = {"subscriber": subscriber or self._subscriber}
+        # Ключ едет только когда уровень назван: durable-намерение драйвера
+        # реплеится как есть, и `level: None` в нём означал бы «просили дефолт»
+        # там, где просили «как настроено».
+        if level:
+            args["level"] = str(level).upper()
         res = _leaf_result(self.send_command(pm_name, "observability.tail.subscribe_all", args, timeout=timeout))
         self._register_subscription("observability.tail.subscribe_all", pm_name, args, res)
         return res

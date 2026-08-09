@@ -1530,3 +1530,87 @@ class TestRegisterCommitConfirmed:
         conf = d.register_confirm(res["commit_id"])
         assert conf["success"] is False
         assert conf["rolled_back"]["outcome"] == "failed"
+
+
+class TestTailLevelReachesTheServer:
+    """A1 (Б-1б): звенья 1–2 цепочки — ``tail_level`` доезжает до брокера.
+
+    Корень блокера был здесь: ``watch.py`` звал ``observability_tail_all(timeout=…)``
+    без уровня, а у самого метода параметра ``level`` не существовало. Заявленное
+    намерение подписчика умирало на первом же звене после вызывающего, и живой
+    хвост оставался ERROR-only при подписке с INFO.
+
+    Проверяется ФАКТ на проводе (``args`` команды), а не имя метода: спай на
+    имени сторожил бы имя, а не свойство.
+    """
+
+    def _driver(self, monkeypatch, procs=("gui", "camera_0")):
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            calls.append((target, command, args))
+            if command == "state.get_subtree":
+                return {"success": True, "result": {"subtree": {p: {} for p in procs}}}
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d, calls
+
+    @staticmethod
+    def _broker_args(calls) -> dict:
+        rows = [args for _t, c, args in calls if c == "observability.tail.subscribe_all"]
+        assert len(rows) == 1, f"ожидался ровно один вызов брокера, было: {rows}"
+        return rows[0]
+
+    def test_watch_like_gui_sends_the_declared_level_to_the_broker(self, monkeypatch) -> None:
+        d, calls = self._driver(monkeypatch)
+        try:
+            d.watch_like_gui(tail_level="INFO")
+            assert self._broker_args(calls).get("level") == "INFO", (
+                "tail_level не доехал до брокера — хвост останется ERROR-only"
+            )
+        finally:
+            d.close()
+
+    def test_level_is_normalised_to_upper_case_on_the_wire(self, monkeypatch) -> None:
+        """Порог сравнивается по имени: 'info' и 'INFO' обязаны быть одним порогом."""
+        d, calls = self._driver(monkeypatch)
+        try:
+            d.observability_tail_all(subscriber="backend_ctl.s1", level="warning")
+            assert self._broker_args(calls)["level"] == "WARNING"
+        finally:
+            d.close()
+
+    def test_no_level_puts_no_key_so_the_process_default_survives(self, monkeypatch) -> None:
+        """Отсутствие ручки не смеет означать «попросили дефолт» — ключа просто нет.
+
+        Иначе durable-намерение реплеилось бы с ``level: None`` и перетирало бы
+        порог, настроенный процессом.
+        """
+        d, calls = self._driver(monkeypatch)
+        try:
+            d.observability_tail_all(subscriber="backend_ctl.s1")
+            assert "level" not in self._broker_args(calls)
+        finally:
+            d.close()
+
+    def test_the_level_survives_a_reconnect_replay(self, monkeypatch) -> None:
+        """Durable-намерение реплеится ДОСЛОВНО — иначе реконнект гасит порог.
+
+        Пара к тесту брокера про шов инкарнации: там порог терялся на рестарте
+        процесса, здесь — на обрыве соединения. Дефект, починенный на одном пути
+        из двух, воскресает на соседней развилке.
+        """
+        d, calls = self._driver(monkeypatch)
+        try:
+            d.observability_tail_all(subscriber="backend_ctl.s1", level="DEBUG")
+            calls.clear()
+
+            d.replay_subscriptions()
+
+            replayed = [args for _t, c, args in calls if c == "observability.tail.subscribe_all"]
+            assert replayed, "подписка не переиграна после реконнекта"
+            assert replayed[0].get("level") == "DEBUG", f"реплей потерял порог: {replayed[0]}"
+        finally:
+            d.close()

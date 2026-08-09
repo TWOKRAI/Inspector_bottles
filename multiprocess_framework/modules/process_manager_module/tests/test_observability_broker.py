@@ -655,3 +655,126 @@ class TestForgetSessionOnSocketClose:
         broker = pm._observability_broker_obj()
         broker.forget_session = lambda _sid: (_ for _ in ()).throw(RuntimeError("boom"))
         pm._forget_observability_session("aaa")  # не должно бросить
+
+
+class TestLevelIsPartOfTheIntent:
+    """A1 (Б-1б): порог едет по всей цепочке и переживает переподписку.
+
+    До A1 слова ``level`` в этом файле не было ни разу — и ровно там жил
+    блокер: подписка «хочу всё с INFO» доезжала до процесса без порога,
+    процесс подставлял свой ERROR, и живой хвост молчал на здоровом стенде
+    (40 минут подписки → 0 событий при росте стора на 1931 строку).
+
+    Опасность механизма, ради которой нужны эти тесты: раздачу делают ДВА
+    пути — команда подписчика и шов «поднялась свежая инкарнация». Положи
+    уровень только в первый — и каждый рестарт процесса молча возвращает
+    подписку к дефолту, тем незаметнее, чем реже рестарты.
+    """
+
+    def test_subscribe_all_carries_the_level_into_the_fan_out(self):
+        t = _Transport()
+        res = _broker(t).subscribe_all("gui", level="INFO")
+
+        assert res["level"] == "INFO"
+        _kind, _target, _command, data = t.sent[0]
+        assert data == {"subscriber": "gui", "level": "INFO"}, (
+            "порог не доехал до процесса — подписка молча вернётся к дефолту ERROR"
+        )
+
+    def test_replay_carries_the_level_from_the_intent(self):
+        """Шов инкарнации: переподписка обязана нести ТОТ ЖЕ порог (инъекция и-4).
+
+        Раздачу через ``replay`` делает не подписчик, а оркестратор, и запроса
+        у него уже нет. Уровень поэтому хранится в намерении, а не передаётся
+        аргументом первой раздачи.
+        """
+        t = _Transport()
+        broker = _broker(t)
+        broker.subscribe_all("gui", level="DEBUG")
+        t.sent.clear()
+
+        broker.replay(target="camera_1")
+
+        assert t.sent, "переподписка свежей инкарнации не состоялась вовсе"
+        _kind, target, command, data = t.sent[0]
+        assert (target, command) == ("camera_1", SUBSCRIBE_COMMAND)
+        assert data == {"subscriber": "gui", "level": "DEBUG"}, (
+            "свежая инкарнация подписана БЕЗ порога — после рестарта хвост молча вернулся к дефолту"
+        )
+
+    def test_level_is_visible_in_the_readback(self):
+        """Механизм, о котором нельзя спросить, через час неотличим от сломанного."""
+        broker = _broker(_Transport())
+        broker.subscribe_all("gui", level="WARNING")
+
+        entry = broker.snapshot()["subscribers"][0]
+        assert entry["level"] == "WARNING"
+
+    def test_resubscribe_with_another_level_updates_the_intent(self):
+        """Смена порога — законная операция, а не «намерение уже есть, игнорируем»."""
+        t = _Transport()
+        broker = _broker(t)
+        broker.subscribe_all("gui", level="ERROR")
+        broker.subscribe_all("gui", level="INFO")
+        t.sent.clear()
+
+        broker.replay(target="camera_1")
+
+        _kind, _target, _command, data = t.sent[0]
+        assert data["level"] == "INFO", "переподписка несёт устаревший порог"
+        assert broker.snapshot()["subscribers"][0]["level"] == "INFO"
+
+    def test_absent_level_puts_no_key_at_all(self):
+        """«Не назван» ≠ «ERROR»: константа дефолта живёт в ОДНОЙ позиции — у процесса.
+
+        Положи брокер сюда свой ``"ERROR"`` — и смена дефолта у процесса
+        доехала бы одним путём из двух, а совпадение констант замаскировало бы
+        расхождение до первого изменения.
+        """
+        t = _Transport()
+        res = _broker(t).subscribe_all("gui")
+
+        assert res["level"] is None
+        _kind, _target, _command, data = t.sent[0]
+        assert "level" not in data, "брокер подставил собственный дефолт — вторая позиция той же константы"
+
+    def test_unsubscribe_never_carries_a_level(self):
+        """Снятие порогом не параметризуется: общая схема — не повод слать лишнее."""
+        t = _Transport()
+        broker = _broker(t)
+        broker.subscribe_all("gui", level="INFO")
+        t.sent.clear()
+
+        broker.unsubscribe_all("gui")
+
+        _kind, _target, command, data = t.sent[0]
+        assert command == UNSUBSCRIBE_COMMAND
+        assert data == {"subscriber": "gui"}
+
+    def test_pm_command_seam_hands_the_level_to_the_broker(self):
+        """Живой PM (реальные объекты, не фейк-гарнесс): звено 3 цепочки A1.
+
+        Именно здесь порог терялся: ``subscribe_all(str(args.get("subscriber")))``
+        читал один ключ из двух. Тест на живом PM, а не на дубле брокера —
+        иначе переименование продового атрибута оставило бы всё зелёным.
+        """
+        pm = make_pm({"camera_0": {"class": "x.Y"}})
+        sent: list[dict] = []
+
+        class _Comm:
+            def broadcast(self, msg, exclude_self=True):
+                sent.append({"kind": "broadcast", **msg})
+                return 2
+
+            def send_to_process(self, target, msg):
+                sent.append({"kind": "addressed", "target": target, **msg})
+                return True
+
+        pm.communication = _Comm()
+
+        res = pm._cmd_observability_tail_subscribe_all({"subscriber": "gui", "level": "INFO"})
+
+        assert res["success"] is True
+        assert sent[0]["data"] == {"subscriber": "gui", "level": "INFO"}, (
+            "порог не пережил шов команды ПМ — ровно корень Б-1"
+        )

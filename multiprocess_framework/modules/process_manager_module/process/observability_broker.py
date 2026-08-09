@@ -86,25 +86,44 @@ class ObservabilitySubscriptionBroker:
     # Намерения
     # ------------------------------------------------------------------
 
-    def subscribe_all(self, subscriber: str, *, origin: str = REASON_COMMAND) -> dict:
+    def subscribe_all(
+        self,
+        subscriber: str,
+        *,
+        level: Optional[str] = None,
+        origin: str = REASON_COMMAND,
+    ) -> dict:
         """Записать намерение и развернуть его прямо сейчас: один broadcast + свой хвост.
 
         Идемпотентна по подписчику: повторный вызов не плодит намерение, но
         раздачу повторяет — на стороне процесса подписка тоже идемпотентна, а
         повтор это единственный способ подобрать процесс, до которого прошлая
         раздача не доехала.
+
+        A1 (Б-1б): ``level`` — часть НАМЕРЕНИЯ, а не разовой раздачи. Хранится в
+        записи подписчика, потому что переподписку свежей инкарнации делает
+        :meth:`replay`, у которого исходного запроса уже нет: положи уровень
+        только в первую раздачу — и каждый перезапуск процесса молча возвращал
+        бы подписку к дефолту, причём тем незаметнее, чем реже рестарты.
+        ``None`` — «уровень не назван», дефолт применяет процесс; повторять
+        константу здесь нельзя (две позиции одного дефолта расходятся молча).
+
+        Повторный ``subscribe_all`` с другим уровнем — законная смена порога:
+        намерение обновляется, раздача уходит с новым значением.
         """
         name = str(subscriber or "").strip()
         if not name:
             return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
+        wanted = str(level).strip().upper() if level else None
         now = time.time()
         with self._lock:
             entry = self._subscribers.get(name)
             if entry is None:
                 entry = {"subscriber": name, "since": now, "origin": str(origin), "replays": 0}
                 self._subscribers[name] = entry
+            entry["level"] = wanted
         result = self._fan_out(name, SUBSCRIBE_COMMAND, reason=REASON_COMMAND)
-        return {"success": True, "subscriber": name, **result}
+        return {"success": True, "subscriber": name, "level": wanted, **result}
 
     def unsubscribe_all(self, subscriber: str) -> dict:
         """Снять намерение и разослать снятие. ``subscriber`` обязателен.
@@ -222,8 +241,20 @@ class ObservabilitySubscriptionBroker:
         Исключение транспорта не имеет права ронять ни команду подписчика, ни
         старт процесса: раздача — обслуживание, а не lifecycle. Но и молчать
         нельзя, поэтому провал попадает и в лог, и в ответ (``error``).
+
+        A1: уровень берётся ИЗ НАМЕРЕНИЯ, а не из аргумента — потому что этот
+        же метод обслуживает и переподписку свежей инкарнации (:meth:`replay`),
+        где никакого запроса уже нет. Один источник уровня на оба пути.
         """
-        payload = {"subscriber": subscriber}
+        payload: Dict[str, Any] = {"subscriber": subscriber}
+        if command == SUBSCRIBE_COMMAND:
+            with self._lock:
+                held = self._subscribers.get(subscriber)
+                wanted = (held or {}).get("level")
+            # Ключ кладётся только когда уровень назван: пустой `level` в конверте
+            # означал бы «подписчик попросил дефолт», что неотличимо от «не просил».
+            if wanted:
+                payload["level"] = wanted
         out: Dict[str, Any] = {"reached": 0}
         try:
             if target is not None:

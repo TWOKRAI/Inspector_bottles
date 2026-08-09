@@ -1030,7 +1030,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # teardown), и уехать ей есть куда.
         unwire_document_sink(self)
 
-    def subscribe_observability_tail(self, subscriber: str, level: str = "ERROR") -> dict:
+    def subscribe_observability_tail(self, subscriber: str, level: Optional[str] = None) -> dict:
         """Ф5.20b: подписать адрес на live-хвост записей наблюдаемости (F1: per-subscriber).
 
         Ставит форвардер (drain log/stats) + error-tap'ы (write-through) на push
@@ -1074,6 +1074,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Ф3.1: и проверяется он здесь же — второй путь той же поверхности.
         # Без проверки опечатка в имени уровня давала порог «пропускать всё» при
         # успешном ответе с эхом запрошенного порога.
+        # A1: ЕДИНСТВЕННАЯ позиция дефолта на всей цепочке подписки. ``None``
+        # («уровень не назван») приходит и от хендлера команды, и от брокера —
+        # ни один из них константу не повторяет, иначе смена дефолта здесь
+        # доехала бы одним путём из трёх.
         min_level = normalize_level_name(level or "ERROR")
         if min_level is None:
             return {

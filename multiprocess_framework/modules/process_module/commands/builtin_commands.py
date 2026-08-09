@@ -2568,8 +2568,13 @@ class BuiltinCommands:
         Логи/Ошибки/Статистика (Ф5.19). Идемпотентно по подписчику.
 
         Параметры (data): ``subscriber`` (адрес GUI-процесса, обяз.), ``level``
-        (порог tap'ов, по умолчанию "ERROR" — Ф6.х.5: прежде порог был захардкожен
-        в проводке, и хвост молчал на здоровом стенде).
+        (порог tap'ов — Ф6.х.5: прежде порог был захардкожен в проводке, и хвост
+        молчал на здоровом стенде).
+
+        A1: ``level`` НЕ подставляется здесь. Дефолт "ERROR" живёт в одной
+        позиции — :meth:`ProcessModule.subscribe_observability_tail`; вторая
+        копия константы означала бы, что смена дефолта в одном месте молча не
+        доедет через другое. Здесь только нормализация регистра.
         """
         args = self._merge_args(data, kwargs)
         svc = self._services
@@ -2578,7 +2583,8 @@ class BuiltinCommands:
             return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
         if not hasattr(svc, "subscribe_observability_tail"):
             return {"success": False, "reason": "процесс не поддерживает observability-tail"}
-        level = str(args.get("level") or "ERROR").upper()
+        raw_level = args.get("level")
+        level = str(raw_level).upper() if raw_level else None
         return svc.subscribe_observability_tail(subscriber, level=level)
 
     def _cmd_observability_tail_unsubscribe(self, data=None, **kwargs) -> dict:

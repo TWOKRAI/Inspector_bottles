@@ -144,11 +144,66 @@ class TestLevelOpensTheTail:
 
 
 class TestCommandSeamPassesLevel:
-    def test_command_handler_forwards_level_to_the_process(self) -> None:
-        """Шов команды: observability.tail.subscribe прокидывает level в svc.
+    """Шов команды — ЧЕРЕЗ реестр контрактов, а не мимо мидлвари (A1).
 
-        Отдельно от доставки: обработчик — 2 строки, и потерять kwargs здесь
-        значило бы вернуть захардкоженный дефолт при живой проводке ниже.
+    Прежняя версия этих тестов подставляла самодельный ``_Svc``, чья сигнатура
+    сама принимала ``level``. Тест был зелёным ровно потому, что дубль
+    разошёлся с production-формой: контракт ``level`` запрещал, мидлварь
+    отбрасывала бы ключ, а тест этого не видел — он жил НИЖЕ границы. Здесь
+    вход сначала проходит контракт команды, и запрет поля убивает тест.
+    """
+
+    @staticmethod
+    def _through_contract(command: str, payload: dict) -> dict:
+        """Пропустить payload через реальную схему команды и вернуть очищенный вход.
+
+        Это и есть граница: то, что схема не объявила, до хендлера не доедет
+        (при ``FW_CONTRACTS_STRICT=1`` — вместе со всем сообщением).
+        """
+        from multiprocess_framework.modules.process_module.commands.command_contracts import (
+            BUILTIN_COMMAND_CONTRACTS,
+        )
+
+        schema = BUILTIN_COMMAND_CONTRACTS[command]
+        return schema(**payload).model_dump(exclude_none=True)
+
+    def test_command_handler_forwards_level_to_the_process(self) -> None:
+        from multiprocess_framework.modules.process_module.commands.builtin_commands import (
+            BuiltinCommands,
+        )
+
+        captured: Dict[str, Any] = {}
+
+        class _Svc:
+            name = "proc"
+
+            # Сигнатура — КОПИЯ production-формы ProcessModule.subscribe_observability_tail
+            # (level: Optional[str] = None). Разойдётся продовая — тест внизу это поймает.
+            def subscribe_observability_tail(self, subscriber: str, level=None) -> dict:
+                captured["subscriber"] = subscriber
+                captured["level"] = level
+                return {"success": True}
+
+        bc = BuiltinCommands.__new__(BuiltinCommands)
+        bc._services = _Svc()
+
+        args = self._through_contract(
+            "observability.tail.subscribe",
+            {"subscriber": "backend_ctl.x", "level": "info"},
+        )
+        res = bc._cmd_observability_tail_subscribe(args)
+
+        assert res == {"success": True}
+        assert captured == {"subscriber": "backend_ctl.x", "level": "INFO"}, (
+            "level не пережил границу контракта или не нормализован"
+        )
+
+    def test_absent_level_reaches_the_process_as_none_not_as_error(self) -> None:
+        """Дефолт живёт в ОДНОЙ позиции — у процесса, а не в хендлере.
+
+        Подставь хендлер свой ``"ERROR"`` — и смена дефолта у процесса молча не
+        доехала бы. Совпадение констант замаскировало бы это до первого изменения,
+        поэтому проверяется именно ``None``, а не итоговый порог.
         """
         from multiprocess_framework.modules.process_module.commands.builtin_commands import (
             BuiltinCommands,
@@ -159,17 +214,33 @@ class TestCommandSeamPassesLevel:
         class _Svc:
             name = "proc"
 
-            def subscribe_observability_tail(self, subscriber: str, level: str = "ERROR") -> dict:
-                captured["subscriber"] = subscriber
+            def subscribe_observability_tail(self, subscriber: str, level=None) -> dict:
                 captured["level"] = level
                 return {"success": True}
 
         bc = BuiltinCommands.__new__(BuiltinCommands)
         bc._services = _Svc()
 
-        res = bc._cmd_observability_tail_subscribe({"subscriber": "backend_ctl.x", "level": "info"})
+        args = self._through_contract("observability.tail.subscribe", {"subscriber": "x"})
+        bc._cmd_observability_tail_subscribe(args)
 
-        assert res == {"success": True}
-        assert captured == {"subscriber": "backend_ctl.x", "level": "INFO"}, (
-            "level не доехал до процесса или не нормализован"
+        assert captured["level"] is None, "хендлер подставил собственный дефолт — вторая позиция той же константы"
+
+    def test_the_fake_signature_still_matches_production(self) -> None:
+        """Дубль обязан сверяться с оригиналом, иначе он проверяет сам себя.
+
+        Прецедент: приватная копия фикстуры разошлась с conftest молча, и девять
+        красных жили как «не наш» долг. Здесь дубль узкий (одна сигнатура), но
+        сверка всё равно явная.
+        """
+        import inspect
+
+        from multiprocess_framework.modules.process_module.core.process_module import (
+            ProcessModule,
+        )
+
+        sig = inspect.signature(ProcessModule.subscribe_observability_tail)
+        assert list(sig.parameters) == ["self", "subscriber", "level"]
+        assert sig.parameters["level"].default is None, (
+            "production-дефолт уровня переехал — дубль в тестах выше устарел"
         )

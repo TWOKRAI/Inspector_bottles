@@ -2375,10 +2375,19 @@ class ProcessManagerProcess(ProcessModule):
         Здесь намерение записывается один раз, а разворачивает его тот, у кого
         есть сигнал «поднялась свежая инкарнация», — оркестратор.
 
-        Параметры (data): ``subscriber`` (адрес получателя пушей, обяз.).
+        Параметры (data): ``subscriber`` (адрес получателя пушей, обяз.),
+        ``level`` (порог хвоста; не задан → дефолт применяет процесс).
+
+        A1 (Б-1б): до этого ``level`` здесь терялся — намерение уезжало без
+        порога, процесс подставлял свой ERROR, и живой хвост молчал на здоровом
+        стенде при подписке с INFO. Константу дефолта это звено не знает
+        намеренно: она одна и живёт у процесса.
         """
         args = _merge_cmd_args(data, kwargs)
-        return self._observability_broker_obj().subscribe_all(str(args.get("subscriber") or ""))
+        return self._observability_broker_obj().subscribe_all(
+            str(args.get("subscriber") or ""),
+            level=args.get("level"),
+        )
 
     def _cmd_observability_tail_unsubscribe_all(self, data=None, **kwargs) -> dict:
         """Снять намерение подписчика и разослать снятие хвоста всем процессам.

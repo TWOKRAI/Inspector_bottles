@@ -28,7 +28,7 @@ built-in команд безопасна без allow-исключений.
 from __future__ import annotations
 
 import typing
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, Union
 
 from pydantic import BaseModel, ConfigDict
 
@@ -141,6 +141,12 @@ class ConfigReloadParams(BaseModel):
     # (``session_ttl_sec``, дефолт 300с); ``0`` → бессрочно, явным решением.
     ttl: Optional[float] = None
     path: Optional[str] = None
+    # A1 (оракул контракт↔хендлер): ключ ЗАРЕЗЕРВИРОВАН и хендлер отвечает на него
+    # адресным отказом с указанием на `observability.persist`. Объявлен он именно
+    # ради этого отказа: при extra="forbid" незадекларированный ключ дропается
+    # мидлварью, и защита оказывается недостижимой — оператор не увидел бы ни
+    # отказа, ни подсказки, а решил бы, что правка записана навсегда.
+    persist: Optional[bool] = None
 
 
 class ObservabilityPersistParams(BaseModel):
@@ -172,12 +178,21 @@ class ObservabilityIntrospectParams(BaseModel):
     Объявить её обязательно: ``extra="forbid"`` означает, что незадекларированный
     параметр помечается ``unexpected`` warn-мидлварью, а в ``FW_CONTRACTS_STRICT``
     сообщение дропается целиком — ручка была бы мертва при зелёных тестах.
+
+    A1: правило выше сформулировано здесь с Task 5.9, но выполнено было только
+    для ``audit_limit`` — ``resolve`` (Ф2.6) и ``flush`` (Task 5.7) добавлялись
+    в хендлер мимо схемы. Ровно тот случай, который докстринг описывает.
+    Расхождение теперь судится оракулом ``test_command_contract_oracle.py``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     #: Сколько последних записей аудита вернуть (дефолт 20; 0 — не возвращать).
     audit_limit: Optional[int] = None
+    #: Ф2.6: разобрать правило для имени источника (строка) или списка имён.
+    resolve: Optional[Union[str, List[str]]] = None
+    #: Task 5.7: дожать буферы перед снимком счётчиков (когерентный снимок).
+    flush: Optional[bool] = None
 
 
 class LogTailSubscribeParams(BaseModel):
@@ -200,11 +215,21 @@ class LogTailUnsubscribeParams(BaseModel):
 
 
 class ObservabilityTailSubscribeParams(BaseModel):
-    """Параметры ``observability.tail.subscribe`` (Ф5.20b)."""
+    """Параметры ``observability.tail.subscribe`` (Ф5.20b).
+
+    A1 (Б-1б): ``level`` объявлен здесь с той же ролью, что у брата
+    ``LogTailSubscribeParams``. До этого хендлер его читал, а схема запрещала:
+    при ``extra="forbid"`` каждая подписка давала ``contract_violation``, а с
+    ``FW_CONTRACTS_STRICT=1`` исчезала бы молча. ``None`` — «уровень не назван»,
+    дефолт применяет процесс (см. ``subscribe_observability_tail``); повторять
+    здесь константу ``"ERROR"`` нельзя — две позиции одного дефолта расходятся
+    молча.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     subscriber: Optional[str] = None
+    level: Optional[str] = None
 
 
 class ObservabilityTailUnsubscribeParams(BaseModel):
@@ -226,12 +251,18 @@ class ObservabilityTailBrokerParams(BaseModel):
     Команды брокера живут на ОРКЕСТРАТОРЕ, но контракт объявляется здесь, вместе
     со всеми остальными: два реестра имён одной плоскости однажды разойдутся, и
     тогда через одно написание пройдёт то, что другое отвергает (урок 5.10.e).
-    Схема одна на обе команды — параметр у них ровно один и тот же.
+    Схема одна на обе команды — параметр ``subscriber`` у них общий.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     subscriber: Optional[str] = None
+    #: A1: порог, который брокер кладёт в намерение и разворачивает в
+    #: ``observability.tail.subscribe`` — включая переподписку свежей инкарнации.
+    #: Осмыслен только у ``subscribe_all``; у ``unsubscribe_all`` игнорируется
+    #: (общая схема — сознательный выбор, см. докстринг: два реестра имён одной
+    #: плоскости однажды разойдутся).
+    level: Optional[str] = None
 
 
 class HealthReportParams(BaseModel):
@@ -242,6 +273,10 @@ class HealthReportParams(BaseModel):
     context: Optional[str] = None
     message: Optional[str] = None
     status: Optional[str] = None
+    #: A1: уровень сопутствующей лог-записи. Хендлер читает его и на неизвестном
+    #: имени отвечает адресным отказом — но необъявленный ключ до этой проверки
+    #: не доезжает, то есть проверка была недостижима (см. ConfigReloadParams.persist).
+    level: Optional[str] = None
 
 
 #: Реестр контрактов built-in команд: имя команды → Pydantic-схема параметров.
