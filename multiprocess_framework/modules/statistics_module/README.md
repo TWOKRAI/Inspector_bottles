@@ -165,8 +165,15 @@ stats.get_all_channels() -> List[IChannel] # все каналы
 |---|---|---|---|
 | `manager_name` | str | `"StatsManager"` | Имя менеджера |
 | `channels` | Dict | `{}` | Каналы вывода |
-| `aggregation_interval` | float | `5.0` | Интервал агрегации, сек |
-| `flush_interval` | float | `10.0` | Интервал flush в каналы, сек |
+| `aggregation_interval` | float | `5.0` | Интервал агрегации, сек — действует `max` с `flush_interval` |
+| `flush_interval` | float | `10.0` | **ПОЛ** интервала записи в каналы, сек — темп ниже него недостижим |
+
+**Темп записи = `max(flush_interval, aggregation_interval)`** (B1, решение Р-3б).
+Пол оставлен, но не действует молча: при `aggregation_interval` ниже пола
+менеджер пишет WARNING с обоими числами и адресом ключа, а действующий темп
+виден в `introspect.observability → effective.stats.aggregation_interval`
+(читается из живого окна агрегации, не из конфига). `config.reload` на значении
+ниже пола отдаёт `verdict=failed` с расхождением, а не «успех».
 | `enable_logging` | bool | `True` | Логировать через LoggerManager |
 | `log_level` | str | `"INFO"` | Уровень логирования метрик |
 | `default_tags` | Dict | `{}` | Теги по умолчанию (appended к каждой метрике) |

@@ -5,6 +5,7 @@ StatsManagerConfig — конфигурация менеджера статис�
 Наследует ChannelRoutingConfig, добавляет параметры агрегации, flush,
 логирования метрик и тегов по умолчанию.
 """
+
 from typing import Annotated, Dict
 
 from ...channel_routing_module import ChannelRoutingConfig
@@ -31,14 +32,20 @@ class StatsManagerConfig(ChannelRoutingConfig):
         FieldMeta("Имя менеджера статистики"),
     ] = "StatsManager"
 
+    # Р-3(б), B1: действующий темп записи = max(flush_interval, aggregation_interval),
+    # и это ОБЪЯВЛЕНО здесь, а не спрятано в `stats_manager.__init__`. Пол оставлен
+    # (совместимость темпа не ломается), но перестал действовать молча: при
+    # срабатывании пишется WARNING с обоими числами, а действующий темп виден в
+    # readback'е `introspect.observability -> effective.stats.aggregation_interval`
+    # (читается из живого окна агрегации). Формула — `stats_manager.resolve_tempo`.
     aggregation_interval: Annotated[
         float,
-        FieldMeta("Интервал агрегации, сек", min=0.1, max=60.0),
+        FieldMeta("Интервал агрегации, сек (действует max с flush_interval)", min=0.1, max=60.0),
     ] = 5.0
 
     flush_interval: Annotated[
         float,
-        FieldMeta("Интервал flush в каналы, сек", min=1.0, max=300.0),
+        FieldMeta("ПОЛ интервала записи в каналы, сек — темп ниже него недостижим", min=1.0, max=300.0),
     ] = 10.0
 
     enable_logging: Annotated[

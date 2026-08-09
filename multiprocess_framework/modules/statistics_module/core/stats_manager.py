@@ -18,10 +18,11 @@ StatsManager не держит ссылку на router (см. ADR comm-system-t
 """
 
 import threading
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from ...channel_routing_module import ChannelRoutingManager
 from ...channel_routing_module.core.config_normalizer import normalize_config
+from ..configs.stats_config import StatsManagerConfig
 from ..interfaces import IStatsManager
 from .metric_record import MetricRecord, MetricType
 from .aggregation_window import AggregationWindow
@@ -43,6 +44,43 @@ def _metric_key(name: str, tags: Optional[Dict] = None) -> str:
         return name
     parts = [name] + [f"{k}:{v}" for k, v in sorted(tags.items())]
     return "|".join(parts)
+
+
+def _float_or(value: Any, default: float) -> float:
+    """Мусор на месте числа не роняет плоскость — берётся дефолт схемы."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _schema_default(field_name: str) -> float:
+    """Дефолт темпа — ИЗ СХЕМЫ, а не вторая копия числа в коде.
+
+    Одна и та же величина в двух позициях расходится молча, и совпадение
+    значений маскирует расхождение до первого изменения дефолта (оплаченный
+    урок A1). Здесь позиция одна: :class:`StatsManagerConfig`.
+    """
+    return float(StatsManagerConfig.model_fields[field_name].default)
+
+
+def resolve_tempo(cfg: Mapping[str, Any]) -> Tuple[float, float, float]:
+    """``(запрошенный интервал агрегации, пол, действующий темп записи)``.
+
+    Действующий темп = ``max(пол, запрошенный)``. Решение владельца **Р-3(б)**:
+    пол ОСТАЁТСЯ (совместимость темпа не ломается), но перестаёт действовать
+    молча — он объявлен в схеме (:class:`StatsManagerConfig`,
+    ``ObservabilityStatsConfig``), назван в WARNING при срабатывании
+    (:meth:`StatsManager._warn_if_floor_raises_tempo`) и виден в readback'е
+    отдельным ключом ``flush_interval``.
+
+    Формула живёт ровно здесь. Пока она стояла инлайном в ``__init__``,
+    пересборка конфига её не звала вовсе — и правка темпа на лету не
+    действовала (major-3).
+    """
+    requested = _float_or(cfg.get("aggregation_interval"), _schema_default("aggregation_interval"))
+    floor = _float_or(cfg.get("flush_interval"), _schema_default("flush_interval"))
+    return requested, floor, max(requested, floor)
 
 
 class StatsManager(ChannelRoutingManager, IStatsManager):
@@ -70,13 +108,7 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             managers = {}
 
         cfg = normalize_config(config, default={})
-        flush_interval = cfg.get("flush_interval", 10.0)
-        aggregation_interval = cfg.get("aggregation_interval", 5.0)
-
-        buffer = AggregationWindow(
-            flush_fn=self._do_flush,
-            flush_interval=max(flush_interval, aggregation_interval),
-        )
+        buffer = AggregationWindow(flush_fn=self._do_flush, flush_interval=resolve_tempo(cfg)[2])
 
         ChannelRoutingManager.__init__(
             self,
@@ -103,6 +135,7 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             # Порядок важен: сперва каналы, буфер — после них.
             # (Ф4.6: здесь же инициализировался мёртвый CRM-диспетчер; снят.)
             self._setup_channels()
+            self._warn_if_floor_raises_tempo()
             if self._buffer:
                 self._buffer.start()
             self.is_initialized = True
@@ -116,20 +149,111 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     # flush() → buffer.stop() (финальный flush) → _close_all_channels()
 
     def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
-        """Хук CRM.reconfigure: пересоздать каналы агрегации из нового конфига.
+        """Хук CRM.reconfigure: пересоздать каналы и ОКНО агрегации из нового конфига.
 
         Базовый ``reconfigure`` уже сделал flush() и ``_close_all_channels()``
         (очистил реестр CRM). Здесь обновляем dict-конфиг и default_tags, затем
         вызываем существующий ``_setup_channels()`` (reuse) — он сам добавит
         LogStats/FileStats по новому конфигу плюс fallback-канал при необходимости.
 
-        Live-метрики (``self._metrics``) и буфер агрегации (AggregationWindow)
-        НЕ сбрасываются — метрики переживают reconfigure.
+        Live-метрики (``self._metrics``) НЕ сбрасываются — они переживают
+        reconfigure.
+
+        **B1 (major-3): окно агрегации теперь пересобирается.** Прежде здесь
+        стояло «буфер НЕ сбрасывается», и это было не решением, а дефектом:
+        темп записи задаётся ``AggregationWindow.flush_interval``, окно
+        создавалось единожды в ``__init__``, и правка темпа на лету не
+        действовала вовсе. Живой замер ревью: 115 → 138 сбросов за 187 с при
+        заявленных «30».
         """
         cfg = normalize_config(config, default={})
         self._config_dict = cfg
         self._default_tags = cfg.get("default_tags") or {}
         self._setup_channels()
+        # Строго ПОСЛЕ каналов: подмена окна делает финальный flush старого, и
+        # ему нужно, куда писать, — на этом шаге реестр уже пересобран.
+        self._swap_aggregation_window(cfg)
+        self._warn_if_floor_raises_tempo()
+
+    def _swap_aggregation_window(self, cfg: Dict[str, Any]) -> None:
+        """Подменить окно агрегации, если СМЕНИЛСЯ ТЕМП.
+
+        Порядок здесь и есть суть:
+
+        1. новое окно встаёт на место ДО остановки старого — эмиссия, идущая
+           прямо сейчас из чужого потока, попадает в живое окно, а не в
+           закрываемое;
+        2. старое окно останавливается: ``stop()`` гасит его таймер (иначе
+           рядом остался бы второй писатель с прежним темпом — два разных
+           периода записи одновременно) и делает ФИНАЛЬНЫЙ flush. Второе важно
+           именно на этом шве: базовый ``reconfigure`` сбрасывает буфер ДО
+           закрытия каналов, но эмиссия на время пересборки не замирает, и
+           запись, попавшая в старое окно после того flush'а, исчезла бы вместе
+           с окном.
+
+        Темп не изменился — окно не трогаем: пересоздание ради того же числа
+        обнуляло бы накопленную агрегацию на каждом ``config.reload``.
+        """
+        tempo = resolve_tempo(cfg)[2]
+        old = self._buffer
+        if old is not None and getattr(old, "flush_interval", None) == tempo:
+            return
+        was_running = bool(old is not None and old.stats.get("running"))
+        new = AggregationWindow(flush_fn=self._do_flush, flush_interval=tempo)
+        self._buffer = new
+        if old is not None:
+            old.stop()
+        if was_running:
+            new.start()
+
+    def _warn_if_floor_raises_tempo(self) -> None:
+        """Сказать вслух, что пол поднял темп (решение Р-3б).
+
+        Адрес ключа — в тексте: WARNING без адреса уже был находкой Ф8.5, по
+        нему нельзя понять, ЧТО править. Пара к этому предупреждению —
+        молчание, когда пол не сработал: детектор, срабатывающий всегда, не
+        отличает настроенное от заглушенного.
+        """
+        requested, floor, tempo = resolve_tempo(self._config_dict)
+        if requested >= floor:
+            return
+        self._log_warning(
+            f"[{self.manager_name}] stats.aggregation_interval={requested} ниже пола "
+            f"stats.flush_interval={floor} — действует {tempo} с. "
+            f"Темп ниже пола задаётся только уменьшением stats.flush_interval."
+        )
+
+    def observability_readback(self) -> Dict[str, Any]:
+        """Действующее состояние плоскости — для ``introspect.observability`` (B1).
+
+        **Темп читается из ЖИВОГО окна**, а не пересчитывается из конфига:
+        пересчёт дал бы то же число и при полностью несработавшей пересборке,
+        то есть «effective» снова был бы эхом запроса (major-13). Пол
+        (``flush_interval``) отдаётся рядом отдельным ключом — без него
+        действующий темп, разошедшийся с запрошенным, нечем объяснить.
+
+        ``enable_logging`` — про ЖИВОЙ реестр каналов, а не про то, что
+        просили: логгер-менеджер мог не подняться, а канал мог быть снят
+        оператором, и обе ситуации выглядят из конфига одинаково.
+
+        Метод существует потому, что общий readback
+        (``observability_effective``) читал у плоскостей ``self.config``, а у
+        ``StatsManager`` этого атрибута нет вовсе — ``self.config`` ставит
+        ``LoggerCore``, общий предок логгера и ошибок. Ветка stats не
+        исполнялась ни разу: воспроизведено до правки —
+        ``observability_effective(stats=mgr)`` → ``{}``.
+        """
+        out: Dict[str, Any] = {}
+        tempo = getattr(self._buffer, "flush_interval", None)
+        if tempo is not None:
+            out["aggregation_interval"] = tempo
+        out["flush_interval"] = resolve_tempo(self._config_dict)[1]
+        log_channel = self._channel_registry.get(STATS_LOG_CHANNEL)
+        out["enable_logging"] = log_channel is not None
+        level = getattr(log_channel, "level", None)
+        if level is not None:
+            out["log_level"] = level
+        return out
 
     # =========================================================================
     # SETUP КАНАЛОВ

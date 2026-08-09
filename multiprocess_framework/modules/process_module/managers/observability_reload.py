@@ -182,14 +182,28 @@ def observability_effective(
             **_sink_readback(error),
             **_idle_sinks(error),
         }
-    if stats is not None and getattr(stats, "config", None) is not None:
-        sc = stats.config
-        out["stats"] = {
-            "enable_logging": getattr(sc, "enable_logging", None),
-            "aggregation_interval": getattr(sc, "aggregation_interval", None),
-            **_sink_readback(stats),
-            **_idle_sinks(stats),
-        }
+    if stats is not None:
+        # B1. Прежде ветка сторожилась `getattr(stats, "config", None) is not None`
+        # и НЕ ИСПОЛНЯЛАСЬ НИ РАЗУ: `self.config` ставит `LoggerCore` (общий
+        # предок логгера и ошибок), а `StatsManager` — наследник CRM напрямую, и
+        # такого атрибута у него нет. Воспроизведено:
+        # `observability_effective(stats=mgr)` → `{}`. Защита была недостижима,
+        # то есть весь темп стат-плоскости жил в вердикте как `unverifiable`, а
+        # приёмники и молчащие стоки третьей плоскости не выходили наружу вовсе.
+        #
+        # Спрашиваем плоскость, а не её конфиг: что действует — знает она сама
+        # (темп берётся из живого окна агрегации, см. `observability_readback`).
+        section: Dict[str, Any] = {}
+        readback = getattr(stats, "observability_readback", None)
+        if callable(readback):
+            try:
+                section.update(readback() or {})
+            except Exception as exc:  # noqa: BLE001 — readback best-effort, но отказ назван
+                section["error"] = repr(exc)
+        section.update(_sink_readback(stats))
+        section.update(_idle_sinks(stats))
+        if section:
+            out["stats"] = section
     return out
 
 

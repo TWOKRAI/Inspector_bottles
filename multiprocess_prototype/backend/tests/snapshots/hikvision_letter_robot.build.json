@@ -587,7 +587,7 @@
       "retention_sweep_interval_sec": 3600.0,
       "retention_total_mb": 200,
       "stats": {
-        "aggregation_interval": 5.0,
+        "aggregation_interval": 10.0,
         "enabled": true,
         "log_level": "INFO"
       }
@@ -696,7 +696,7 @@
         "scopes": {},
         "session_ttl_sec": 300.0,
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "enabled": true,
           "flush_interval": 10.0,
@@ -790,7 +790,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -1029,7 +1029,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -1136,7 +1136,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -1395,7 +1395,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -1499,7 +1499,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -1736,7 +1736,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -1830,7 +1830,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -2046,7 +2046,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -2140,7 +2140,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -2397,7 +2397,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -2494,7 +2494,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -2724,7 +2724,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -2820,7 +2820,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -3046,7 +3046,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -3143,7 +3143,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -3386,7 +3386,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -3499,7 +3499,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -3774,7 +3774,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
@@ -3873,7 +3873,7 @@
           "retention_sweep_interval_sec": 3600.0,
           "retention_total_mb": 200,
           "stats": {
-            "aggregation_interval": 5.0,
+            "aggregation_interval": 10.0,
             "enabled": true,
             "log_level": "INFO"
           }
@@ -4158,7 +4158,7 @@
           "use_kind_channels": false
         },
         "stats": {
-          "aggregation_interval": 5.0,
+          "aggregation_interval": 10.0,
           "channels": {},
           "default_tags": {},
           "enable_logging": true,

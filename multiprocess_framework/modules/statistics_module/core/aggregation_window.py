@@ -63,6 +63,16 @@ class AggregationWindow(IBufferStrategy):
         self._timer_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
+    @property
+    def flush_interval(self) -> float:
+        """Темп ЭТОГО окна, сек — публично, потому что его спрашивают снаружи.
+
+        B1: readback темпа обязан читаться из живого окна, а не пересчитываться
+        из конфига (пересчёт совпал бы с конфигом даже при несработавшей
+        пересборке — это и есть «effective = эхо запроса», major-13).
+        """
+        return self._flush_interval
+
     def _ensure_record(
         self,
         name: str,
@@ -205,6 +215,10 @@ class AggregationWindow(IBufferStrategy):
             pending = len(self._metrics)
         return {
             "type": "aggregation",
+            # B1: темп едет вместе со счётчиками сбросов — иначе `total_flushes`
+            # снаружи не с чем сопоставить, и «сбросов стало вдвое меньше»
+            # неотличимо от «процесс стал тише».
+            "flush_interval": self._flush_interval,
             "total_enqueued": self._total_enqueued,
             "total_flushes": self._total_flushes,
             "total_flushed": self._total_flushed,

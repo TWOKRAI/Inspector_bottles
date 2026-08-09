@@ -103,17 +103,21 @@ class ObservabilityStatsConfig(SchemaBase):
     enabled: Annotated[bool, FieldMeta("Логировать метрики через LoggerManager")] = True
     aggregation_interval: Annotated[
         float,
-        FieldMeta("Интервал агрегации, сек", min=0.1, max=60.0),
+        FieldMeta("Интервал агрегации, сек (действует max с flush_interval)", min=0.1, max=60.0),
     ] = 5.0
     # Ф6.х.8 (решение владельца 2026-08-03): ручка «реже» для snapshot-записей.
     # Реальный период записи в каналы = max(flush_interval, aggregation_interval)
-    # (stats_manager.py) — прежде flush_interval фасадом не прокидывался вовсе,
-    # и «тише 10 с» было невыразимо из конфига, только бинарный «выкл».
+    # (stats_manager.resolve_tempo) — прежде flush_interval фасадом не прокидывался
+    # вовсе, и «тише 10 с» было невыразимо из конфига, только бинарный «выкл».
     # Дефолт 10.0 НЕ меняется: объём по умолчанию не трогаем до Ф7 (замеры
     # остаются сопоставимыми). Один источник давал 64 % объёма логов (замер #3).
+    #
+    # B1 / Р-3(б): это ПОЛ, и он объявлен полом здесь, в WARNING менеджера и в
+    # readback'е. Значение `aggregation_interval` ниже пола не действует —
+    # `config_reload_verified` вернёт `failed` с обоими числами, а не «успех».
     flush_interval: Annotated[
         float,
-        FieldMeta("Интервал записи snapshot'ов в каналы, сек", min=1.0, max=300.0),
+        FieldMeta("ПОЛ интервала записи snapshot'ов, сек — темп ниже него недостижим", min=1.0, max=300.0),
     ] = 10.0
     log_level: Annotated[str, FieldMeta("Уровень логирования метрик")] = "INFO"
 

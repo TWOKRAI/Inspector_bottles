@@ -38,6 +38,16 @@ class LogStatsChannel(IChannel):
     def channel_type(self) -> str:
         return "log"
 
+    @property
+    def level(self) -> str:
+        """Уровень, с которым канал ПИШЕТ сейчас — для readback'а плоскости (B1).
+
+        Читается у живого канала, а не из конфига: после ``sink.enable`` канал
+        пересобирается своим сборщиком, и единственная надёжная копия уровня —
+        та, что у него в руках.
+        """
+        return self._level_str
+
     def write(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Записать снапшот метрик в лог."""
         try:
