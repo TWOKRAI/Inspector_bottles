@@ -235,3 +235,4 @@
 - [Докстринг утверждает то, чего регистрация не ставила](feedback_docs_assert_what_registration_never_set.md) — три места звали воркер SYSTEM, создавался он без типа; оба предохранителя на одной вере
 - [Слишком грубая инъекция ничего не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) — красный не по проверяемой причине так же вреден, как зелёный
 - [monotonic на Windows — 15.6 мс](project_monotonic_resolution_windows.md) — GetTickCount64; сравнение разностей ниже ~100 мс недостоверно, отображать на сетку
+- [F8 review + сшивка B](project_f8_review_and_stitching.md) — 8.0/10 GO; спека 8.5a-g; механика → Opus-чат
