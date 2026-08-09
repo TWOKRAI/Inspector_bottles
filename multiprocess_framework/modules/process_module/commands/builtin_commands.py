@@ -44,6 +44,44 @@ _SINK_SESSION_PREFIX = {
     "stats": "stats.channels.",
 }
 
+#: Метасимволы, при которых имя приёмника читается как УЗОР (Task 5.4).
+#: Ровно те, что понимает :mod:`fnmatch`. Имя без них в ветку раскрытия не
+#: заходит вовсе — гарантия «точное имя ведёт себя бит-в-бит как прежде» стоит
+#: на одном дешёвом вопросе, а не на совпадении логики двух путей (та же форма,
+#: что у пустой таблицы правил в Ф2.2).
+_SINK_GLOB_METACHARS = "*?["
+
+
+def _sink_catalog(target: Any) -> list[str]:
+    """Каталог имён приёмников плоскости — множество, по которому раскрывается узор.
+
+    Task 5.4. Каталог собирается из ТРЁХ источников, и ни один поодиночке не полон:
+
+      * реестр каналов — то, что поднято прямо сейчас (адресаты ``disable``);
+      * ``config.channels`` — то, что менеджер умеет пересоздать (адресаты
+        ``enable``: снятый приёмник из реестра уже ушёл);
+      * отметки оператора — имена, снятые командой; они и есть главный адресат
+        возврата, а в конфиге младших плоскостей могут не значиться вовсе.
+
+    Каталог называется в отказе при пустом раскрытии: «узор не поймал ничего» без
+    перечня искомого отправляет искать опечатку туда, где её нет.
+    """
+    names: set[str] = set()
+    registry = getattr(target, "_channel_registry", None)
+    reg_names = getattr(registry, "names", None)
+    if callable(reg_names):
+        try:
+            names.update(str(n) for n in reg_names())
+        except Exception:  # noqa: BLE001 — каталог best-effort, как и readback
+            pass
+    channels = getattr(getattr(target, "config", None), "channels", None)
+    if isinstance(channels, dict):
+        names.update(str(n) for n in channels)
+    disabled = getattr(target, "_sinks_disabled_by_operator", None)
+    if isinstance(disabled, set):
+        names.update(str(n) for n in disabled)
+    return sorted(names)
+
 
 def _parse_ttl(args: dict) -> tuple[float | None, str | None]:
     """Разобрать параметр ``ttl`` команд наблюдаемости (Task 5.8).
@@ -1885,6 +1923,12 @@ class BuiltinCommands:
         Дефолт ``logger`` — команда существовала до параметра, и старые вызовы
         обязаны продолжать бить туда же.
 
+        Task 5.4: ``sink`` принимает **узор** (``module_*``, ``errors_?ile``) — он
+        раскрывается по каталогу адресованной плоскости, и каждое пойманное имя
+        получает свой ответ, свой ключ L3 и свой срок. Ось приёмников — единственная,
+        где узор нечем заменить: имена каналов плоские, иерархии longest-prefix (Ф2.2)
+        и ярлыков-групп (Ф2.5) у них нет по построению.
+
         Цель ищется по WHITELIST'у, а не через ``hasattr(set_sink_enabled)``.
         Причина конкретная: после подъёма метода в ``ChannelRoutingManager``
         его унаследовал и ``RouterManager``, который наблюдаемостью не является
@@ -1919,6 +1963,124 @@ class BuiltinCommands:
         if target is None or not hasattr(target, "set_sink_enabled"):
             return {"success": False, "reason": f"{attr} недоступен", "process": svc.name}
 
+        # Task 5.4: узор — отдельная ветка, и вход в неё решается ОДНИМ вопросом
+        # «есть ли метасимвол». Точное имя не платит за существование узоров ни
+        # одной новой строкой на своём пути.
+        if any(ch in name for ch in _SINK_GLOB_METACHARS):
+            return self._toggle_sinks_by_pattern(
+                target,
+                plane,
+                name,
+                enabled=enabled,
+                ttl=ttl,
+                requested_ttl="ttl" in args,
+            )
+        return self._toggle_one_sink(
+            target,
+            plane,
+            name,
+            enabled=enabled,
+            ttl=ttl,
+            requested_ttl="ttl" in args,
+        )
+
+    def _toggle_sinks_by_pattern(
+        self,
+        target: Any,
+        plane: str,
+        pattern: str,
+        *,
+        enabled: bool,
+        ttl: float | None,
+        requested_ttl: bool,
+    ) -> dict:
+        """Раскрыть узор по каталогу СВОЕЙ плоскости и применить к каждому имени (Task 5.4).
+
+        Раскрытие живёт здесь, а не в драйвере, потому что каталог приёмников знает
+        только процесс: раскрытие снаружи стоило бы лишнего round-trip'а и жило бы в
+        гонке с реестром, который правит эта же команда. Побочная выгода — ручку
+        получает любой клиент команды, а не только драйвер.
+
+        Примитив — :func:`fnmatch.fnmatchcase`, а не glob-ходок ``state_store_module``:
+        имя приёмника **односегментное** (``module_camera``, ``errors_file``), точек в
+        нём нет, и посегментный обход дерева здесь описывал бы несуществующую
+        структуру. Регистр значим (``fnmatchcase``) — имена каналов регистрозависимы
+        всюду в этой плоскости, и «умное» игнорирование регистра поймало бы соседа.
+
+        **Каждое пойманное имя — своя запись L3 и свой срок.** Общий ключ на узор
+        означал бы, что возврат одного приёмника воскрешает остальных, а ``persist``
+        закреплял бы в рецепте узор, а не приёмники, которые он поймал в тот раз.
+
+        ``success`` означает то же, что и у точного имени: **что-то изменилось**.
+        Узор, поймавший только те приёмники, что уже в требуемом состоянии, — не
+        успех и не сбой, а названный no-op (``unchanged``); узор, не поймавший
+        ничего, — отказ с перечнем каталога. Тихого «ок, ничего не сделано» здесь
+        нет: класс, закрытый 5.5, не имеет права воскреснуть через узор.
+        """
+        import fnmatch
+
+        svc = self._services
+        catalog = _sink_catalog(target)
+        matched = [n for n in catalog if fnmatch.fnmatchcase(n, pattern)]
+        base = {
+            "pattern": pattern,
+            "manager": plane,
+            "process": svc.name,
+            "matched": matched,
+        }
+        if not matched:
+            return {
+                "success": False,
+                "reason": (
+                    f"узор {pattern!r} не поймал ни одного приёмника плоскости {plane!r}; каталог: {catalog or '—'}"
+                ),
+                "catalog": catalog,
+                **base,
+            }
+        results = {
+            name: self._toggle_one_sink(
+                target,
+                plane,
+                name,
+                enabled=enabled,
+                ttl=ttl,
+                requested_ttl=requested_ttl,
+            )
+            for name in matched
+        }
+        changed = [name for name, res in results.items() if res.get("success")]
+        unchanged = [name for name in matched if name not in changed]
+        out = {
+            "success": bool(changed),
+            "changed": changed,
+            "unchanged": unchanged,
+            "results": results,
+            **base,
+        }
+        if not changed:
+            out["reason"] = (
+                f"узор {pattern!r} поймал {len(matched)} приёмник(ов), "
+                f"и все уже в требуемом состоянии (enabled={enabled})"
+            )
+        return out
+
+    def _toggle_one_sink(
+        self,
+        target: Any,
+        plane: str,
+        name: str,
+        *,
+        enabled: bool,
+        ttl: float | None,
+        requested_ttl: bool,
+    ) -> dict:
+        """Одно имя приёмника: правка, запись в L3 и ответ про срок.
+
+        Выделено из :meth:`_toggle_logger_sink` задачей 5.4 — узору нужно ровно это
+        тело, применённое к каждому пойманному имени. Поведение точного имени не
+        меняется ни в одном поле.
+        """
+        svc = self._services
         # Затронутые маршруты собираются ДО операции: после disable канала уже
         # нет, и «что я сейчас погасил» стало бы неотвечаемым вопросом.
         routes = []
@@ -1962,7 +2124,7 @@ class BuiltinCommands:
             # прислал `ttl` явно, и только молчаливый повтор (без `ttl`) остаётся
             # чистым no-op с названным остатком.
             held = f"{_SINK_SESSION_PREFIX.get(plane, '')}{name}.enabled"
-            result.update(self._touch_or_report_ttl(held, ttl, requested="ttl" in args, expected=enabled))
+            result.update(self._touch_or_report_ttl(held, ttl, requested=requested_ttl, expected=enabled))
         return result
 
     def _touch_or_report_ttl(

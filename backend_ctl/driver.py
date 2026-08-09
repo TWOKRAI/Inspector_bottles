@@ -21,10 +21,12 @@ request_id (или не матчащие ни один pending) — наприм
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import socket
 import threading
 from collections import deque  # noqa: F401 — используется в аннотации back-compat property _rollback_journal
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from multiprocess_framework.modules.telemetry_readmodel_module import (
@@ -50,6 +52,7 @@ from .protocol import (  # noqa: F401 — re-export для back-compat шима
     RouterStats,
     WorkerStatus,
     _find_payload,
+    _is_ok,
     _leaf_result,
     delivery_window,
     unwrap,
@@ -91,6 +94,24 @@ _LOG_SEVERITY_RANK: Dict[str, int] = {
     "critical": 50,
     "fatal": 50,
 }
+
+#: Метасимволы, при которых адрес процесса читается как узор (Task 5.4).
+_PROCESS_GLOB_METACHARS = "*?["
+
+
+def _is_process_batch(process: Any) -> bool:
+    """Просил ли оператор БАТЧ — или адресовал один процесс (Task 5.4).
+
+    Вопрос решается формой аргумента, который пишет сам оператор: список, ``"all"``
+    или узор — батч; всё остальное — прежний адресный путь. Отсюда и разные формы
+    ответа: она выбирается жестом, а не догадкой о намерении. Одно точное имя не
+    платит за существование батча ни round-trip'ом за топологией, ни изменением
+    ответа — гарантия «бит-в-бит прежнее» стоит на этом одном вопросе.
+    """
+    if process is None or isinstance(process, (list, tuple, set)):
+        return True
+    text = str(process).strip()
+    return text == "all" or any(ch in text for ch in _PROCESS_GLOB_METACHARS)
 
 
 class BackendDriver(_TransportMixin, _EventChannelMixin):
@@ -717,12 +738,19 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         (сменить уровень логгера на лету). Без него процесс читает свой файл конфига
         (``path`` или ``observability_config_path`` — тот же путь, что hot-reload watcher).
         Ответ содержит ``applied.log_level`` — применённый уровень (диагностика).
+
+        Task 5.4: ``process`` принимает батч-адрес (``"all"``/``"*"``, узор ``camera_*``,
+        список имён) — тогда ответ приходит в форме :meth:`send_command_many`
+        (``batch: True``, секция на каждый процесс). Одно точное имя идёт прежним путём
+        и отвечает прежней формой: форму выбирает жест оператора, а не догадка.
         """
         args: Dict[str, Any] = {}
         if observability is not None:
             args["observability"] = observability
         if path is not None:
             args["path"] = path
+        if _is_process_batch(process):
+            return self.send_command_many(process, "config.reload", args, timeout=timeout)
         return _leaf_result(self.send_command(process, "config.reload", args, timeout=timeout))
 
     def config_reload_verified(
@@ -826,13 +854,31 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         out.update(window.as_dict())
         return out
 
-    def logger_sink_enable(self, process: str, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
-        """Включить sink логгера процесса по имени (register_channel)."""
-        return _leaf_result(self.send_command(process, "logger.sink.enable", {"sink": sink}, timeout=timeout))
+    def logger_sink_enable(self, process: Any, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Включить sink логгера процесса по имени (register_channel).
 
-    def logger_sink_disable(self, process: str, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
-        """Выключить sink логгера процесса по имени (unregister_channel)."""
-        return _leaf_result(self.send_command(process, "logger.sink.disable", {"sink": sink}, timeout=timeout))
+        Task 5.4 — обе оси адресации разом: ``process`` принимает батч-адрес
+        (``"all"``/узор/список), ``sink`` — узор имён приёмников (``module_*``),
+        который раскрывает уже сам процесс по своему каталогу.
+        """
+        return self._sink_command(process, "logger.sink.enable", sink, timeout=timeout)
+
+    def logger_sink_disable(self, process: Any, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Выключить sink логгера процесса по имени (unregister_channel). См. :meth:`logger_sink_enable`."""
+        return self._sink_command(process, "logger.sink.disable", sink, timeout=timeout)
+
+    def _sink_command(
+        self,
+        process: Any,
+        command: str,
+        sink: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Общий путь sink-команд: батч по процессам либо прежний адресный вызов."""
+        if _is_process_batch(process):
+            return self.send_command_many(process, command, {"sink": sink}, timeout=timeout)
+        return _leaf_result(self.send_command(process, command, {"sink": sink}, timeout=timeout))
 
     # ---- Telemetry publish control plane (PC 3.2/3.3: адресно + fan-out на всех) ----
 
@@ -1664,6 +1710,123 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         tree = unwrap(st, leaf=True)
         node = tree.get("subtree") or tree.get("value") or {}
         return sorted(node) if isinstance(node, dict) else []
+
+    def _expand_processes(
+        self,
+        spec: Any,
+        *,
+        timeout: Optional[float] = None,
+    ) -> tuple[List[str], List[str], List[str]]:
+        """Раскрыть адрес батча в имена по ЖИВОЙ топологии (Task 5.4).
+
+        Топология — каталог этой оси, и знает её драйвер; поэтому раскрытие живёт
+        здесь, а не в процессе (узор приёмников — наоборот, см. команду
+        ``observability.sink.*``: каждая ось раскрывается там, где лежит её каталог).
+
+        Returns:
+            ``(кого адресуем, имена вне топологии, вся топология)``. Второй элемент
+            не пустеет молча: имя из явного списка, которого в системе нет, —
+            названный промах, а не тихо выпавший элемент.
+        """
+        topology = self._discover_processes(timeout=timeout)
+        if isinstance(spec, (list, tuple, set)):
+            asked = [str(item).strip() for item in spec if str(item).strip()]
+            return ([n for n in asked if n in topology], [n for n in asked if n not in topology], topology)
+        text = str(spec if spec is not None else "all").strip()
+        if text in ("all", "*"):
+            return list(topology), [], topology
+        return [n for n in topology if fnmatch.fnmatchcase(n, text)], [], topology
+
+    def send_command_many(
+        self,
+        process: Any,
+        command: str,
+        data: Optional[Dict[str, Any]] = None,
+        *,
+        timeout: Optional[float] = None,
+        max_workers: int = 8,
+    ) -> Dict[str, Any]:
+        """Одна команда — M процессов, ответ **per-process** (Task 5.4).
+
+        Раздача живёт в драйвере, а не в оркестраторе, и это решено не вкусом.
+        Соседняя плоскость этот путь уже прошла: ``telemetry.broadcast`` раздаёт с PM
+        и per-child ответа не возвращает — *«сбор ответа ребёнка в PM дедлочил бы
+        message_processor»* (см. :meth:`telemetry_reconfigure`); брокер подписки 5.11
+        называет fire-and-forget **структурным** свойством своей раздачи. Приёмка 5.4
+        требует именно ответа от каждого — значит дом у неё здесь, где параллельный
+        сбор уже работает (:func:`overview.system_overview`) и где ничего не нужно
+        заводить заново.
+
+        ``process`` — ``"all"``/``"*"``, узор (``camera_*``), список имён или одно имя.
+        Одно точное имя батчем не становится: у него свой прямой путь.
+
+        Сбой одного процесса не роняет раздачу: исключение возвращается **значением**
+        (форма ``system_overview``) и попадает в ``failed``. Пустое раскрытие — отказ
+        с перечислением живой топологии: «раздал в никуда» не имеет права выглядеть
+        как «раздал».
+
+        Returns:
+            ``{success, batch, command, targets, processes: {имя: ответ}, failed,
+            not_ok, unknown, topology}``. ``failed`` — от кого ответа нет вовсе;
+            ``not_ok`` — кто ответил отказом. Это разные диагнозы, и слитые в один
+            список они лечились бы одинаково, а лечатся по-разному.
+        """
+        targets, unknown, topology = self._expand_processes(process, timeout=timeout)
+        out: Dict[str, Any] = {
+            "batch": True,
+            "command": command,
+            "targets": targets,
+            "unknown": unknown,
+            "topology": topology,
+        }
+        if not targets:
+            out.update(
+                success=False,
+                processes={},
+                failed=[],
+                not_ok=[],
+                error=(
+                    f"адрес {process!r} не поймал ни одного процесса; живая топология: {topology or '—'}"
+                    + (f"; вне топологии: {unknown}" if unknown else "")
+                ),
+            )
+            return out
+
+        def _one(name: str) -> Any:
+            """``(конверт, лист)`` либо исключение ЗНАЧЕНИЕМ (форма ``system_overview``)."""
+            try:
+                raw = self.send_command(name, command, data, timeout=timeout)
+                return raw, _leaf_result(raw)
+            except Exception as exc:  # noqa: BLE001 — больной процесс не роняет батч
+                return exc
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(targets)), thread_name_prefix="bctl-batch") as pool:
+            collected = dict(zip(targets, pool.map(_one, targets)))
+
+        processes: Dict[str, Any] = {}
+        failed: List[str] = []
+        not_ok: List[str] = []
+        for name in targets:
+            res = collected[name]
+            if isinstance(res, BaseException):
+                failed.append(name)
+                processes[name] = {"success": False, "error": f"{type(res).__name__}: {res}", "process": name}
+                continue
+            raw, leaf = res
+            processes[name] = leaf
+            # Успех читается тем же примитивом, что и у адресных обёрток: `success`
+            # живёт то в листе, то в конверте, и второе прочтение этого различия
+            # разошлось бы с первым (проверено тестом: лист без `success` при
+            # успешном конверте считался отказом).
+            if not _is_ok(raw, leaf):
+                not_ok.append(name)
+        out.update(
+            success=not failed and not unknown,
+            processes=processes,
+            failed=failed,
+            not_ok=not_ok,
+        )
+        return out
 
     # ---- Подписка на состояние (state.subscribe → событийный канал) ----
 

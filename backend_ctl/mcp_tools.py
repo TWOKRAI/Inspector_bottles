@@ -88,6 +88,22 @@ def _obj(
 
 
 _PROCESS = {"type": "string", "description": "Имя процесса (например 'preprocessor', 'ProcessManager')"}
+#: Task 5.4: адрес БАТЧА — там, где команда умеет раздаваться на несколько процессов
+#: и отвечать per-process. Отдельный параметр, а не расширенное описание `_PROCESS`:
+#: инструмент, не умеющий батч, обязан и в схеме этого не обещать.
+_PROCESS_BATCH = {
+    "type": ["string", "array"],
+    "items": {"type": "string"},
+    "description": (
+        "Имя процесса ИЛИ батч-адрес: 'all'/'*' (все живые), узор ('camera_*'), список имён. "
+        "Батч отвечает формой {batch:true, processes:{имя: ответ}, failed, not_ok}."
+    ),
+}
+#: Task 5.4: имя приёмника ИЛИ узор — раскрывает его процесс, по каталогу своей плоскости.
+_SINK_PATTERN = {
+    "type": "string",
+    "description": "Имя sink'а или узор ('module_*', 'errors_?ile'). Узор, не поймавший ничего, — отказ с каталогом.",
+}
 _TIMEOUT = {"type": "number", "description": "Таймаут ожидания ответа, сек (по умолчанию таймаут driver)"}
 # E.3: снять дефолтное усечение тяжёлого ответа и вернуть полный объём.
 _FULL = {"type": "boolean", "description": "Вернуть полный объём без усечения по размеру (E.3). По умолчанию false."}
@@ -880,10 +896,11 @@ TOOLS: List[ToolSpec] = [
     ToolSpec(
         "config_reload",
         "Перечитать/применить observability-секцию процесса на лету. "
-        "observability={'log_level': 'DEBUG'} — сменить уровень логгера без рестарта.",
+        "observability={'log_level': 'DEBUG'} — сменить уровень логгера без рестарта. "
+        "process принимает батч-адрес ('all'/узор/список, Task 5.4) — ответ per-process.",
         _obj(
             {
-                "process": _PROCESS,
+                "process": _PROCESS_BATCH,
                 "observability": {
                     "type": "object",
                     "description": "Inline-override секции observability",
@@ -923,18 +940,20 @@ TOOLS: List[ToolSpec] = [
     ),
     ToolSpec(
         "logger_sink_enable",
-        "Включить sink логгера процесса по имени.",
+        "Включить sink логгера по имени. Обе оси адресации (Task 5.4): process — имя/'all'/узор/список, "
+        "sink — имя или узор ('module_*'), который раскрывает сам процесс по своему каталогу.",
         _obj(
-            {"process": _PROCESS, "sink": {"type": "string", "description": "Имя sink'а"}, "timeout": _TIMEOUT},
+            {"process": _PROCESS_BATCH, "sink": _SINK_PATTERN, "timeout": _TIMEOUT},
             ["process", "sink"],
         ),
         _logger_sink_enable,
     ),
     ToolSpec(
         "logger_sink_disable",
-        "Выключить sink логгера процесса по имени.",
+        "Выключить sink логгера по имени. Обе оси адресации (Task 5.4): process — имя/'all'/узор/список, "
+        "sink — имя или узор ('module_*'), который раскрывает сам процесс по своему каталогу.",
         _obj(
-            {"process": _PROCESS, "sink": {"type": "string", "description": "Имя sink'а"}, "timeout": _TIMEOUT},
+            {"process": _PROCESS_BATCH, "sink": _SINK_PATTERN, "timeout": _TIMEOUT},
             ["process", "sink"],
         ),
         _logger_sink_disable,
