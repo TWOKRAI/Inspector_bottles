@@ -140,3 +140,96 @@ def test_context_with_config_process_name_preserved():
     ctx = PluginContext(services=services, config={})
     new_ctx = ctx.with_config({"val": 99})
     assert new_ctx.process_name == "named_proc"
+
+
+# ---------------------------------------------------------------------------
+# A2 (Б-2): фасад несёт ВСЮ пятёрку, и это судится протоколом, а не списком
+# ---------------------------------------------------------------------------
+
+_LOG_METHODS = ("log_debug", "log_info", "log_warning", "log_error", "log_critical")
+
+
+def _protocol_log_methods() -> tuple:
+    """Имена log-методов, ОБЪЯВЛЕННЫХ протоколом (а не выписанных здесь руками).
+
+    Список берётся из самого ``IProcessServices``, поэтому добавление метода в
+    протокол ломает тест ниже — как и требует правило «добавление обязано
+    ломать, а не оставлять дыру». Выпиши имена константой — и новый метод
+    протокола молча остался бы непроверенным.
+    """
+    from multiprocess_framework.modules.process_module.plugins.interfaces import IProcessServices
+
+    return tuple(sorted(n for n in dir(IProcessServices) if n.startswith("log_")))
+
+
+def test_protocol_declares_the_whole_five():
+    """Сперва сам протокол: он обязан объявлять пятёрку, а не тройку.
+
+    Б-2 держался на том, что протокол объявлял три метода, ObservableMixin имел
+    пять, а фасад штамповал два — три разных списка в трёх местах.
+    """
+    assert set(_protocol_log_methods()) == set(_LOG_METHODS), (
+        f"протокол объявляет {_protocol_log_methods()}, ожидалась пятёрка {_LOG_METHODS}"
+    )
+
+
+def test_real_plugin_context_has_every_log_method_of_the_protocol():
+    """РЕАЛЬНЫЙ PluginContext против протокола — не мок против протокола.
+
+    Прежний тест проверял ``log_warning`` на ``MockProcessServices``: мок
+    протоколу удовлетворял, а фасад — нет, и дыра жила при зелёных тестах.
+    Проверяется тот объект, который получает плагин.
+    """
+    ctx = PluginContext(services=MockProcessServices())
+    missing = [name for name in _protocol_log_methods() if not hasattr(ctx, name)]
+    assert not missing, (
+        f"PluginContext не несёт объявленные протоколом методы: {missing}. "
+        "Штатная деградация плагина превратится в AttributeError"
+    )
+    for name in _protocol_log_methods():
+        assert callable(getattr(ctx, name)), f"ctx.{name} есть, но не вызываем"
+
+
+def test_with_config_clone_carries_the_whole_five():
+    """Производный контекст обязан нести ту же пятёрку (инъекция и-6).
+
+    Прецедент этого же файла: ``state_proxy`` терялся у клона, потому что
+    ставился ПОСЛЕ ``__init__``. Пятёрка ставится внутри ``__init__``, но
+    свойство всё равно закрепляется тестом, а не рассуждением.
+    """
+    ctx = PluginContext(services=MockProcessServices())
+    clone = ctx.with_config({"a": 1}, plugin_name="probe_plugin")
+    missing = [name for name in _protocol_log_methods() if not hasattr(clone, name)]
+    assert not missing, f"with_config-клон потерял методы: {missing}"
+
+
+def test_every_level_reaches_the_services_under_the_plugin_name():
+    """Каждый из пяти доезжает до services И несёт имя плагина, а не процесса.
+
+    Проверяется ЭФФЕКТ (запись у сервисов с нужным уровнем и штампом), а не
+    наличие имени метода: спай на имени сторожил бы имя, не свойство.
+    """
+    services = MockProcessServices()
+    ctx = PluginContext(services=services).with_config({}, plugin_name="probe_plugin")
+
+    expected = {
+        "log_debug": "DEBUG",
+        "log_info": "INFO",
+        "log_warning": "WARNING",
+        "log_error": "ERROR",
+        "log_critical": "CRITICAL",
+    }
+    for name, level in expected.items():
+        fn = getattr(ctx, name, None)
+        assert callable(fn), f"ctx.{name} отсутствует"
+        fn(f"через {name}")
+
+    got = {rec["level"] for rec in services.logs}
+    assert got == set(expected.values()), (
+        f"до services доехали уровни {sorted(got)}, ожидались {sorted(expected.values())}"
+    )
+    stamped = [rec for rec in services.logs if rec.get("module") == "probe_plugin"]
+    assert len(stamped) == len(expected), (
+        f"под именем плагина пришло {len(stamped)} записей из {len(expected)}: "
+        f"{[r.get('module') for r in services.logs]}"
+    )

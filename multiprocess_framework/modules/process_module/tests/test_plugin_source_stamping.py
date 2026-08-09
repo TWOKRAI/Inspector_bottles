@@ -27,11 +27,23 @@ class _Services:
         self.name = name
         self.calls: List[Tuple[str, str, Dict[str, Any]]] = []
 
+    # A2: пятёрка целиком. Приватный дубль объявлял два метода и молча
+    # разошёлся с протоколом — расхождение вскрылось только тогда, когда фасад
+    # начал требовать все пять. Список сверяется тестом ниже.
+    def log_debug(self, message: str, **kwargs: Any) -> None:
+        self.calls.append(("debug", message, kwargs))
+
     def log_info(self, message: str, **kwargs: Any) -> None:
         self.calls.append(("info", message, kwargs))
 
+    def log_warning(self, message: str, **kwargs: Any) -> None:
+        self.calls.append(("warning", message, kwargs))
+
     def log_error(self, message: str, **kwargs: Any) -> None:
         self.calls.append(("error", message, kwargs))
+
+    def log_critical(self, message: str, **kwargs: Any) -> None:
+        self.calls.append(("critical", message, kwargs))
 
     @property
     def last_module(self) -> Any:

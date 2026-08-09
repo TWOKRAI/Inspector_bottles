@@ -300,3 +300,69 @@ class TestShutdown:
 
         assert plugin._is_capturing is False
         assert plugin._backend is None
+
+
+class TestHubUnavailableOnARealContext:
+    """A2 (Б-2): ветка «hub недоступен» на НАСТОЯЩЕМ PluginContext, не на MagicMock.
+
+    Почему прежние тесты этой же ветки были зелёными при живом блокере:
+    ``_make_mock_ctx`` отдаёт ``MagicMock``, который порождает ЛЮБОЙ атрибут.
+    ``ctx.log_warning`` у него существует всегда — в том числе тогда, когда у
+    реального фасада его нет. Гарнесс из моков доказывает гарнесс.
+
+    Радиус блокера: докстринг ``_hik_release_best_effort`` обещает «hub
+    недоступен → warning, НЕ блокировать старт», а вызов идёт из
+    ``_do_start_capture`` без ``try`` — то есть ``AttributeError`` ронял
+    команду старта захвата hikvision-камеры. На webcam-стенде не проявлялось.
+    """
+
+    @staticmethod
+    def _real_ctx():
+        from multiprocess_framework.modules.process_module.plugins.base import PluginContext
+        from multiprocess_framework.modules.process_module.plugins.testing import (
+            MockProcessServices,
+        )
+
+        services = MockProcessServices()
+        ctx = PluginContext(services=services).with_config({"camera_type": "hikvision"}, plugin_name="camera_service")
+        return ctx, services
+
+    def test_router_unavailable_gives_warning_and_does_not_raise(self):
+        from unittest.mock import patch
+
+        plugin = CameraServicePlugin()
+        ctx, services = self._real_ctx()
+
+        fake_client = MagicMock()
+        fake_client.send_fire_and_forget.return_value = False
+
+        with patch("Plugins.hub.device_hub.client.DeviceHubClient", return_value=fake_client):
+            plugin._hik_release_best_effort(ctx)  # обязан НЕ бросить
+
+        warnings = [r for r in services.logs if r["level"] == "WARNING"]
+        assert warnings, f"предупреждение не записано; всё, что попало в лог: {services.logs}"
+        assert "hik_release" in warnings[0]["msg"]
+        assert warnings[0].get("module") == "camera_service", f"запись пришла не под именем плагина: {warnings[0]}"
+
+    def test_missing_hub_module_gives_info_and_does_not_raise(self):
+        """Вторая половина пары: hub-плагина нет вовсе → INFO, тоже без падения."""
+        import builtins
+
+        plugin = CameraServicePlugin()
+        ctx, services = self._real_ctx()
+
+        orig_import = builtins.__import__
+
+        def _fail_hub(name, *args, **kwargs):
+            if "device_hub" in name:
+                raise ImportError("нет модуля")
+            return orig_import(name, *args, **kwargs)
+
+        builtins.__import__ = _fail_hub
+        try:
+            plugin._hik_release_best_effort(ctx)
+        finally:
+            builtins.__import__ = orig_import
+
+        infos = [r for r in services.logs if r["level"] == "INFO"]
+        assert infos, f"INFO о недоступном hub не записан: {services.logs}"

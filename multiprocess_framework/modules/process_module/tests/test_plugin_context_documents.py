@@ -64,10 +64,20 @@ class _Services:
         if sink is not None:
             self.document_sink = sink
 
+    # A2: пятёрка целиком — фасад штампует все пять, и дубль обязан их иметь.
+    def log_debug(self, message: str, **kwargs: Any) -> None:
+        pass
+
     def log_info(self, message: str, **kwargs: Any) -> None:
         pass
 
+    def log_warning(self, message: str, **kwargs: Any) -> None:
+        pass
+
     def log_error(self, message: str, **kwargs: Any) -> None:
+        self.errors.append(message)
+
+    def log_critical(self, message: str, **kwargs: Any) -> None:
         self.errors.append(message)
 
 

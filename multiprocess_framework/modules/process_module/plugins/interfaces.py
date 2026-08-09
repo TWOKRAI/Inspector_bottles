@@ -174,6 +174,17 @@ class IProcessServices(Protocol):
         ...
 
     # --- Логирование (публичные методы ObservableMixin) ---
+    #
+    # A2 (Б-2): пятёрка, а не тройка. Прежде здесь было объявлено три метода,
+    # ``ObservableMixin`` имел пять, а ``PluginContext`` штамповал два — три
+    # разных списка в трёх местах. Плагин, звавший ``ctx.log_warning`` в ветке
+    # штатной деградации, получал ``AttributeError`` вместо предупреждения.
+    # Список судится тестом, который читает его ОТСЮДА: добавление метода
+    # обязано ломать проверку фасада, а не оставлять дыру.
+
+    def log_debug(self, msg: str, **kwargs: Any) -> None:
+        """Записать DEBUG-сообщение через LoggerManager процесса."""
+        ...
 
     def log_info(self, msg: str, **kwargs: Any) -> None:
         """Записать INFO-сообщение через LoggerManager процесса."""
@@ -185,6 +196,10 @@ class IProcessServices(Protocol):
 
     def log_error(self, msg: str, **kwargs: Any) -> None:
         """Записать ERROR-сообщение через LoggerManager процесса."""
+        ...
+
+    def log_critical(self, msg: str, **kwargs: Any) -> None:
+        """Записать CRITICAL-сообщение через LoggerManager процесса."""
         ...
 
     # --- IPC ---

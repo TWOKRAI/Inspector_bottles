@@ -109,8 +109,20 @@ class PluginContext:
         # под его именем, а не под именем процесса. Штамп ставится здесь, а не
         # на call-site: плагины зовут ctx.log_info(msg) в сотнях мест, и
         # правка call-sites не входит в задачу по построению.
+        # A2 (Б-2): ВСЯ пятёрка, а не log_info/log_error. Плагин, звавший
+        # `ctx.log_warning` в ветке штатной деградации (camera_service: «hub
+        # недоступен»), получал AttributeError и ронял старт захвата — при том
+        # что докстринг той ветки обещал её не роняющей. Метод терялся ровно
+        # здесь: протокол его объявлял, ObservableMixin имел, фасад — нет.
+        #
+        # Явная пятёрка, а не `__getattr__`-проксирование: проксирование делает
+        # ЛЮБОЕ имя «существующим», то есть превращает опечатку в молчаливый
+        # no-op, и перестаёт быть обязательством, которое можно проверить.
+        self.log_debug: Callable[[str], None] = self._stamped(services.log_debug)
         self.log_info: Callable[[str], None] = self._stamped(services.log_info)
+        self.log_warning: Callable[[str], None] = self._stamped(services.log_warning)
         self.log_error: Callable[[str], None] = self._stamped(services.log_error)
+        self.log_critical: Callable[[str], None] = self._stamped(services.log_critical)
         self.send_message: Callable = getattr(services, "send_message", None)  # type: ignore[assignment]
         self.receive_message: Callable = getattr(services, "receive_message", None)  # type: ignore[assignment]
 

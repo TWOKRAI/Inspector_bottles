@@ -128,17 +128,38 @@ class MockProcessServices:
 
     # --- Логирование ---
 
+    def _record(self, level: str, msg: str, kwargs: dict[str, Any]) -> None:
+        """Записать вызов ВМЕСТЕ с kwargs (A2).
+
+        Прежде дубль молча выбрасывал ``**kwargs`` — а именно там едет
+        ``module=`` со штампом имени плагина (Ф2.1). Значит свойство «запись
+        приходит под именем плагина, а не процесса» не мог проверить ни один
+        тест: дубль всегда «успешен», потому что не умеет потерять то, чего не
+        хранит. Дубль обязан уметь отказывать.
+        """
+        entry: dict[str, Any] = {"level": level, "msg": msg}
+        entry.update(kwargs)
+        self.logs.append(entry)
+
+    def log_debug(self, msg: str, **kwargs: Any) -> None:
+        """Записать DEBUG-сообщение в self.logs."""
+        self._record("DEBUG", msg, kwargs)
+
     def log_info(self, msg: str, **kwargs: Any) -> None:
         """Записать INFO-сообщение в self.logs."""
-        self.logs.append({"level": "INFO", "msg": msg})
+        self._record("INFO", msg, kwargs)
 
     def log_warning(self, msg: str, **kwargs: Any) -> None:
         """Записать WARNING-сообщение в self.logs."""
-        self.logs.append({"level": "WARNING", "msg": msg})
+        self._record("WARNING", msg, kwargs)
 
     def log_error(self, msg: str, **kwargs: Any) -> None:
         """Записать ERROR-сообщение в self.logs."""
-        self.logs.append({"level": "ERROR", "msg": msg})
+        self._record("ERROR", msg, kwargs)
+
+    def log_critical(self, msg: str, **kwargs: Any) -> None:
+        """Записать CRITICAL-сообщение в self.logs."""
+        self._record("CRITICAL", msg, kwargs)
 
     # --- IPC ---
 

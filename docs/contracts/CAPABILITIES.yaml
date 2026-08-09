@@ -42,6 +42,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -69,6 +72,9 @@ processes:
       name: health.report
       params_schema:
       - name: context
+        required: false
+        type: str
+      - name: level
         required: false
         type: str
       - name: message
@@ -105,6 +111,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -244,6 +256,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -254,6 +269,9 @@ processes:
         не транзит'
       name: observability.tail.subscribe_all
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -270,6 +288,9 @@ processes:
     - description: 'Брокер: снять намерение подписчика и разослать снятие хвоста всем процессам'
       name: observability.tail.unsubscribe_all
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -609,6 +630,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -639,6 +663,9 @@ processes:
       name: health.report
       params_schema:
       - name: context
+        required: false
+        type: str
+      - name: level
         required: false
         type: str
       - name: message
@@ -675,6 +702,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -814,6 +847,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -1066,6 +1102,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -1128,6 +1167,9 @@ processes:
       - name: context
         required: false
         type: str
+      - name: level
+        required: false
+        type: str
       - name: message
         required: false
         type: str
@@ -1180,6 +1222,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -1319,6 +1367,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -1667,6 +1718,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -1694,6 +1748,9 @@ processes:
       name: health.report
       params_schema:
       - name: context
+        required: false
+        type: str
+      - name: level
         required: false
         type: str
       - name: message
@@ -1730,6 +1787,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -1869,6 +1932,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -2117,6 +2183,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -2144,6 +2213,9 @@ processes:
       name: health.report
       params_schema:
       - name: context
+        required: false
+        type: str
+      - name: level
         required: false
         type: str
       - name: message
@@ -2180,6 +2252,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2319,6 +2397,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -2556,6 +2637,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -2583,6 +2667,9 @@ processes:
       name: health.report
       params_schema:
       - name: context
+        required: false
+        type: str
+      - name: level
         required: false
         type: str
       - name: message
@@ -2619,6 +2706,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2758,6 +2851,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -2995,6 +3091,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -3022,6 +3121,9 @@ processes:
       name: health.report
       params_schema:
       - name: context
+        required: false
+        type: str
+      - name: level
         required: false
         type: str
       - name: message
@@ -3058,6 +3160,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -3197,6 +3305,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -3434,6 +3545,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -3461,6 +3575,9 @@ processes:
       name: health.report
       params_schema:
       - name: context
+        required: false
+        type: str
+      - name: level
         required: false
         type: str
       - name: message
@@ -3497,6 +3614,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -3636,6 +3759,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -3873,6 +3999,9 @@ processes:
       - name: path
         required: false
         type: str
+      - name: persist
+        required: false
+        type: bool
       - name: telemetry
         required: false
         type: Dict
@@ -3900,6 +4029,9 @@ processes:
       name: health.report
       params_schema:
       - name: context
+        required: false
+        type: str
+      - name: level
         required: false
         type: str
       - name: message
@@ -3936,6 +4068,12 @@ processes:
       - name: audit_limit
         required: false
         type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -4075,6 +4213,9 @@ processes:
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
       name: observability.tail.subscribe
       params_schema:
+      - name: level
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
