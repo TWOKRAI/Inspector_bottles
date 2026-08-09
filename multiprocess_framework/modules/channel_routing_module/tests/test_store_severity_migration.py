@@ -18,7 +18,6 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Dict, List
 
-import pytest
 
 from multiprocess_framework.modules.channel_routing_module.levels import SEVERITY_NUMBERS
 from multiprocess_framework.modules.channel_routing_module.observability.observability_store import (
@@ -182,34 +181,50 @@ class TestThresholdOnFreshRecords:
         finally:
             store.close()
 
-    def test_observed_stamp_survives_the_round_trip(self, tmp_path: Any) -> None:
-        """Задержка доставки восстановима на истории — ради этого колонка и есть."""
+    def test_history_no_longer_carries_the_observed_stamp(self, tmp_path: Any) -> None:
+        """Ф5.2 (Б-3): отметки приёма в истории НЕТ, и это заменённый контракт.
+
+        Прежняя пара тестов пришпиливала обратное — «отметка переживает круг».
+        Круг работал; писателя не было: отметку ставит ПРИЁМНИК (GUI), а в стор
+        пишут процессы-эмитенты, и живьём колонка была пуста в 0 из 303 016 строк.
+        Поле, которое всегда ``None``, читается как «задержки не было», а не как
+        «её здесь не измеряют».
+
+        Отметка, поданная на вход, в ответе НЕ воскресает — иначе «в истории её
+        нет» держалось бы на том, что никто не подаёт, а не на устройстве стора.
+        """
         store = ObservabilityStore(str(tmp_path / "new.db"))
         try:
             store.append_records(
-                [
-                    {
-                        "kind": "log",
-                        "module": "m",
-                        "ts": 100.0,
-                        "severity": "info",
-                        "message": "x",
-                        "observed_ts": 108.5,
-                    }
-                ]
+                [{"kind": "log", "module": "m", "ts": 100.0, "severity": "info", "message": "x", "observed_ts": 108.5}]
             )
+
             record = store.list_records()[0]
-            assert record["observed_ts"] == 108.5
-            assert record["observed_ts"] - record["ts"] == pytest.approx(8.5)
+            assert "observed_ts" not in record, f"отметка приёма вернулась в историю: {record}"
+            assert record["ts"] == 100.0, "снятие отметки задело соседние поля"
         finally:
             store.close()
 
-    def test_record_without_stamp_reads_as_absent_not_zero(self, tmp_path: Any) -> None:
-        """``None``, а не ``0``: ноль здесь читался бы как «принято в 1970»."""
-        store = ObservabilityStore(str(tmp_path / "new.db"))
+    def test_old_db_with_the_column_still_opens_and_reads(self, tmp_path: Any) -> None:
+        """Файл, заведённый до Ф5.2, открывается: лишняя колонка не мешает.
+
+        ``DROP COLUMN`` ради пустого поля был бы миграцией без выгоды — но тогда
+        обязано работать чтение файла, у которого колонка есть.
+        """
+        import sqlite3
+
+        path = str(tmp_path / "old.db")
+        store = ObservabilityStore(path)
+        store.close()
+        conn = sqlite3.connect(path)
+        conn.execute("ALTER TABLE records ADD COLUMN observed_ts REAL")
+        conn.commit()
+        conn.close()
+
+        store = ObservabilityStore(path)
         try:
-            store.append_records([{"kind": "log", "module": "m", "ts": 1.0, "severity": "info", "message": "x"}])
-            assert store.list_records()[0]["observed_ts"] is None
+            store.append_records([{"kind": "log", "module": "m", "ts": 1.0, "severity": "info", "message": "живо"}])
+            assert store.list_records()[0]["message"] == "живо"
         finally:
             store.close()
 

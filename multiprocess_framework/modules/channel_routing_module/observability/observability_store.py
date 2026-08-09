@@ -83,11 +83,16 @@ def _row_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "module": d["module"],
         "ts": d["ts"],
         "severity": d["severity"],
-        # Ф3.6: число и отметка приёма берутся из ТОГО ЖЕ нормализатора, а не
-        # считаются здесь заново — второй способ вычисления разошёлся бы с
-        # живым хвостом молча.
+        # Ф3.6: число берётся из ТОГО ЖЕ нормализатора, а не считается здесь
+        # заново — второй способ вычисления разошёлся бы с живым хвостом молча.
         "severity_number": d.get("severity_number", 0),
-        "observed_ts": d.get("observed_ts"),
+        # ``observed_ts`` здесь НЕТ — снят Ф5.2 (Б-3). Отметку приёма ставит
+        # ПРИЁМНИК (GUI, `stamp_observed`), а в стор пишут ПРОЦЕССЫ-эмитенты:
+        # пути не пересекаются, и колонка простояла пустой 0 из 303 016 строк.
+        # Заполнить её можно было бы, только сделав приёмник вторым писателем в
+        # чужую БД, то есть сломав «один писатель на процесс», ради которого стор
+        # так и построен. Задержка живёт там, где известны ОБА конца — в
+        # display-виде живого пути.
         "message": d["message"],
         "extra": json.dumps(d["extra"], ensure_ascii=False, default=str),
     }
@@ -151,7 +156,13 @@ class ObservabilityStore:
             self._conn.commit()
 
     def _migrate_add_severity_number(self) -> None:
-        """Аддитивная миграция Ф3.6: ``severity_number`` + ``observed_ts``.
+        """Аддитивная миграция Ф3.6: ``severity_number``.
+
+        **``observed_ts`` больше не заводится** (Ф5.2, Б-3): у колонки не было
+        писателя — отметку приёма ставит GUI, а в стор пишут процессы-эмитенты.
+        В уже существующих файлах колонка остаётся (SQLite не мешает лишней
+        колонке, а ``DROP COLUMN`` ради пустого поля — миграция без выгоды);
+        просто никто её больше не читает и не пишет.
 
         По образцу :meth:`_migrate_add_process`: колонки доливаются ALTER'ом,
         идемпотентно, старый файл открывается без потерь.
@@ -172,8 +183,6 @@ class ObservabilityStore:
         cols = {row[1] for row in self._conn.execute("PRAGMA table_info(records)")}
         if "severity_number" not in cols:
             self._conn.execute("ALTER TABLE records ADD COLUMN severity_number INTEGER")
-        if "observed_ts" not in cols:
-            self._conn.execute("ALTER TABLE records ADD COLUMN observed_ts REAL")
         # Засыпка БЕЗУСЛОВНАЯ (идемпотентность даёт WHERE severity_number IS
         # NULL), а не под гейтом «колонку добавили только что». Гейт держался
         # на допущении, что колонка и числа появляются атомарно, — а sqlite3
@@ -229,9 +238,8 @@ class ObservabilityStore:
             try:
                 self._conn.executemany(
                     "INSERT INTO records "
-                    "(kind, process, module, ts, severity, severity_number, observed_ts, message, extra) "
-                    "VALUES (:kind, :process, :module, :ts, :severity, :severity_number, "
-                    ":observed_ts, :message, :extra)",
+                    "(kind, process, module, ts, severity, severity_number, message, extra) "
+                    "VALUES (:kind, :process, :module, :ts, :severity, :severity_number, :message, :extra)",
                     rows,
                 )
                 self._conn.commit()
@@ -300,8 +308,7 @@ class ObservabilityStore:
         # файле и до Ф3.6 — хук сканирует только изменённые файлы, поэтому
         # всплыло при первой же правке стора.
         sql = (
-            "SELECT id, kind, process, module, ts, severity, severity_number, observed_ts, "
-            "message, extra FROM records"
+            "SELECT id, kind, process, module, ts, severity, severity_number, message, extra FROM records"
             f"{where} ORDER BY id {order} LIMIT ? OFFSET ?"  # nosec B608
         )
         params.extend([int(limit), int(offset)])
@@ -413,7 +420,9 @@ class ObservabilityStore:
             # Дореформенные строки читаются: колонки нет → 0 (UNSPECIFIED), то
             # есть «важность неизвестна», а не «самый низкий уровень».
             "severity_number": _column_or(row, "severity_number", 0),
-            "observed_ts": _column_or(row, "observed_ts", None),
+            # ``observed_ts`` из ответа снят (Ф5.2, Б-3): у колонки не было писателя
+            # и быть не могло. Поле, которое всегда ``None``, читается как «задержки
+            # не было», а не как «её здесь не измеряют» — и именно так его читали.
             "message": row["message"],
             "extra": extra,
         }
