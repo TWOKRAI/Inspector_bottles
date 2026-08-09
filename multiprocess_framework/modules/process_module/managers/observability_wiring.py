@@ -275,6 +275,91 @@ _PURGE_INTERVAL_ATTR = "_document_purge_interval"
 #: измеряется сутками и годами: точность уборки в пределах часа не наблюдаема.
 DEFAULT_PURGE_INTERVAL_SEC = 3600.0
 
+#: C3 (major-10): документы, которые писали в НЕОБЪЯВЛЕННУЮ плоскость. Симметрия с
+#: четвёртым классом потери записей (``records_without_channels``): «приёмника нет
+#: вовсе» — отдельный диагноз, и лечится он конфигом, а не базой.
+#: Счётчик живёт на ПРОЦЕССЕ, а не на ``PluginContext``: контекстов у процесса
+#: столько же, сколько плагинов (плюс клоны ``with_config``), и счётчик на
+#: контексте показывал бы каждому свою правду.
+_DOCS_WITHOUT_SINK_ATTR = "_documents_without_sink"
+#: «Уже сказали» — по одному флагу на КЛАСС отказа, а не один на оба: голос про
+#: отсутствие плоскости не имеет права заглушить голос про отказ стока.
+_DOCS_WARNED_NO_SINK_ATTR = "_documents_warned_no_sink"
+_DOCS_WARNED_REFUSED_ATTR = "_documents_warned_refused"
+
+
+def note_document_without_sink(svc: Any, kind: str, source: str) -> None:
+    """Учесть документ, которому некуда ехать, и сказать это ОДИН раз (C3).
+
+    Первый случай — WARNING с адресом: род документа, его источник и ключ
+    конфига, по которому плоскость поднимают. Дальше — молча, счётчиком:
+    вердикт на каждую деталь превратил бы ненастроенную плоскость в поток
+    предупреждений, а к потоку перестают прислушиваться. Число при этом не
+    теряется — его отдаёт :func:`document_plane_report`.
+    """
+    try:
+        setattr(svc, _DOCS_WITHOUT_SINK_ATTR, int(getattr(svc, _DOCS_WITHOUT_SINK_ATTR, 0) or 0) + 1)
+    except Exception:  # noqa: BLE001 — иммутабельный дубль в тесте не должен ронять запись
+        return
+    if getattr(svc, _DOCS_WARNED_NO_SINK_ATTR, False):
+        return
+    try:
+        setattr(svc, _DOCS_WARNED_NO_SINK_ATTR, True)
+    except Exception:  # noqa: BLE001
+        pass
+    _process_warn(
+        svc,
+        f"[documents] документ рода {kind!r} от {source!r} писать некуда: плоскость не объявлена "
+        f"({DOCUMENTS_CONFIG_ADDRESS}.factory) — дальше считаем молча, "
+        f"счётчик в introspect.observability -> documents.without_sink",
+    )
+
+
+def note_document_refused(svc: Any, kind: str, source: str) -> None:
+    """Сказать ОДИН раз, что настроенный сток отказал (C3).
+
+    Своего счётчика здесь нет намеренно: отказы считает сам сток
+    (``DocumentStore.dropped``), и второй счётчик того же события разошёлся бы
+    с первым. Наружу число отдаёт :func:`document_plane_report`, читая сток.
+    """
+    if getattr(svc, _DOCS_WARNED_REFUSED_ATTR, False):
+        return
+    try:
+        setattr(svc, _DOCS_WARNED_REFUSED_ATTR, True)
+    except Exception:  # noqa: BLE001
+        pass
+    _process_warn(
+        svc,
+        f"[documents] документ рода {kind!r} от {source!r} НЕ записан: сток отказал "
+        f"— дальше считаем молча, счётчик в introspect.observability -> documents.dropped",
+    )
+
+
+def document_plane_report(svc: Any) -> Dict[str, Any]:
+    """Секция ``documents`` для ``introspect.observability`` (C3).
+
+    Три числа, и каждое отвечает на свой вопрос:
+
+    * ``declared`` — плоскость объявлена конфигом и сток поднялся;
+    * ``without_sink`` — сколько документов писали, когда плоскости нет. Лечится
+      конфигом (``observability.documents``);
+    * ``dropped`` — сколько отказал сам сток. Лечится базой. ``None`` — сток не
+      ведёт счётчика: «не измерено» обязано отличаться от «ноль потерь», иначе
+      слепота читается как здоровье.
+
+    Слить два первых числа в одно нельзя: диагнозы разные, и общий счётчик
+    отправил бы искать поломку не туда.
+    """
+    sink = getattr(svc, DOCUMENT_SINK_ATTR, None)
+    dropped = getattr(sink, "dropped", None) if sink is not None else 0
+    return {
+        "documents": {
+            "declared": bool(getattr(sink, "append", None)),
+            "without_sink": int(getattr(svc, _DOCS_WITHOUT_SINK_ATTR, 0) or 0),
+            "dropped": int(dropped) if isinstance(dropped, int) else None,
+        }
+    }
+
 
 def _process_warn(svc: Any, message: str) -> None:
     """Сказать вслух. Форма повторяет ``make_audit_log``: логгер бывает разный, а

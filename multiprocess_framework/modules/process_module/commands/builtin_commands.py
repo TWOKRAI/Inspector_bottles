@@ -822,6 +822,7 @@ class BuiltinCommands:
             observability_effective,
             observability_provenance,
         )
+        from ..managers.observability_wiring import document_plane_report
 
         from ..managers.observability_ttl import ttl_report
 
@@ -881,6 +882,11 @@ class BuiltinCommands:
             # сломанной: «вкладка пуста» одинаково выглядит и при высоком пороге,
             # и при неподнятом сторе, и лечится это по-разному.
             **self._history_report(),
+            # C3 (major-10): третья плоскость наконец отвечает на «доезжает ли».
+            # Прежде секции не было вовсе: `DocumentStore.dropped` рос, и прочитать
+            # его снаружи было нечем — при том что докстринг ЭТОЙ ЖЕ команды
+            # формулирует «без readback'а ручка неотличима от сломанной».
+            **document_plane_report(svc),
             "audit": layers.audit.view(audit_limit),
             **extra,
             "layers": {

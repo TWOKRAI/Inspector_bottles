@@ -125,6 +125,7 @@ class HealthState:
         self,
         *,
         log: Callable[[str], None] | None = None,
+        track: Callable[..., None] | None = None,
         log_only: bool | None = None,
         clock: Callable[[], float] = time.time,
         breaker: CircuitBreaker | None = None,
@@ -132,6 +133,10 @@ class HealthState:
         """
         Args:
             log: callback логирования (обычно ``services.log_warning``); None → no-op.
+            track: callback ПЛОСКОСТИ ОШИБОК (``services.track_error``); None → no-op.
+                Заведён C2: до него ни одна дорога плагина в эту плоскость не вела
+                (доказано прогоном ``probe_c2_error_route``), а ``report_error``
+                называлась инцидентом и уходила строкой в журнал.
             log_only: форсировать режим отката; None → читать из env ``LOG_ONLY_ENV``.
             clock: источник времени (инъекция для детерминизма в тестах).
             breaker: честный circuit breaker подряд-ошибок (Task 2.2); None →
@@ -141,6 +146,7 @@ class HealthState:
         self._lock = threading.Lock()
         self._clock = clock
         self._log: Callable[[str], None] = log if callable(log) else (lambda _msg: None)
+        self._track: Callable[..., None] | None = track if callable(track) else None
         self._log_only = _env_log_only() if log_only is None else bool(log_only)
 
         self._status: HealthStatus = HealthStatus.OK
@@ -234,6 +240,19 @@ class HealthState:
         if should_log:
             where = f" @ {ctx}" if ctx else ""
             self._safe_log(f"[health] {etype}{where}: {emsg}")
+            # C2: инцидент едет и в ПЛОСКОСТЬ ОШИБОК — под тем же дросселем, что
+            # строка журнала. Прежде «report_error» было названием без
+            # обязательства: прогон `probe_c2_error_route` показал, что запись
+            # уходила в `system.log` через `services.log_warning`, а
+            # `errors.log`/`critical.log`/`warnings.log` не видели от плагинов
+            # НИЧЕГО — единственной дорогой туда оставался `_track_error`,
+            # которого у `PluginContext` нет.
+            #
+            # Дроссель общий с логом намеренно: у плоскости ошибок своего нет, а
+            # проглоченное исключение в горячем цикле — ровно тот случай, где
+            # «пишем каждое» превращает журнал инцидентов в поток. Счётчик
+            # health при этом считает ВСЕ, поэтому число не теряется.
+            self._safe_track(exc, ctx)
 
         # Честный breaker (Task 2.2): инкремент подряд-счётчика ВНЕ self._lock —
         # breaker держит собственный lock, а переход в degraded ниже снова берёт
@@ -355,6 +374,20 @@ class HealthState:
             HealthField.BREAKER: self._breaker.state,
         }
 
+    def _safe_track(self, exc: BaseException, context: str) -> None:
+        """Отдать инцидент плоскости ошибок; её отсутствие — законное состояние.
+
+        Падать здесь запрещено: `report_error` зовут из веток «мы поймали
+        исключение», и отказ учёта не имеет права стать вторым исключением
+        поверх первого.
+        """
+        if self._track is None:
+            return
+        try:
+            self._track(exc, {"context": context} if context else None)
+        except Exception:  # noqa: BLE001 — учёт инцидента не роняет обработчик инцидента
+            pass
+
     def _safe_log(self, msg: str) -> None:
         try:
             self._log(msg)
@@ -440,6 +473,21 @@ def _resolve_log(services: Any) -> Callable[[str], None] | None:
     return None
 
 
+def _resolve_track(services: Any) -> Callable[..., None] | None:
+    """Найти дорогу в ПЛОСКОСТЬ ОШИБОК (C2).
+
+    Тем же приёмом, что :func:`_resolve_log`, и по той же причине: у процесса
+    публичный ``track_error``, у менеджеров — приватный ``_track_error``
+    (``ObservableMixin``), а у минимального дубля в тесте может не быть ни
+    одного — тогда плоскости просто нет, и это законное состояние.
+    """
+    for attr in ("track_error", "_track_error"):
+        fn = getattr(services, attr, None)
+        if callable(fn):
+            return fn
+    return None
+
+
 def get_or_create_health_state(services: Any) -> HealthState:
     """Вернуть (создав при необходимости) единый HealthState процесса.
 
@@ -453,7 +501,7 @@ def get_or_create_health_state(services: Any) -> HealthState:
     existing = getattr(services, "_health_state", None)
     if isinstance(existing, HealthState):
         return existing
-    hs = HealthState(log=_resolve_log(services))
+    hs = HealthState(log=_resolve_log(services), track=_resolve_track(services))
     try:
         services._health_state = hs
     except Exception:  # noqa: BLE001 — services может быть иммутабельным

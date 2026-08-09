@@ -21,7 +21,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
-from ..managers.observability_wiring import DOCUMENT_SINK_ATTR
+from ..managers.observability_wiring import (
+    DOCUMENT_SINK_ATTR,
+    note_document_refused,
+    note_document_without_sink,
+)
 from .interfaces import IProcessServices
 from .manifest import PLUGIN_API_VERSION
 
@@ -175,6 +179,21 @@ class PluginContext:
         явная деградация. Публикуется в state-дерево через heartbeat процесса
         (``processes.<name>.health.*`` — см. ``..health.schema``).
 
+        **Чем это отличается от ``ctx.log_error`` (ADR-PM-030, задача C2).**
+        Разъёмы разведены по НАМЕРЕНИЮ, и разница наблюдаема в файлах:
+
+        * ``ctx.log_error("строка")`` — диагностическая строка, плоскость логов
+          (``system.log``/``messages.log``). Инцидентом она не становится;
+        * ``ctx.health.report_error(exc)`` — ИНЦИДЕНТ: плоскость ошибок
+          (``errors.log``/``critical.log``) **плюс** дросселированная строка в
+          журнал **плюс** счётчик health и подряд-счётчик breaker.
+
+        До C2 второе было названием без обязательства: прогон
+        ``backend_ctl/probes/probe_c2_error_route.py`` показал, что
+        ``report_error`` уходила в ``system.log``, а плоскость ошибок не видела
+        от плагинов ничего. Дорога туда теперь есть, и её сторожит тест на
+        МАРШРУТ (``tests/test_error_route.py``), а не на имя метода.
+
         Один :class:`HealthState` на процесс (агрегат уровня процесса); reporter
         подставляет имя плагина как context по умолчанию. Кэшируется на ctx, чтобы
         не пересоздавать при каждом обращении из горячего пути обработки.
@@ -259,11 +278,16 @@ class PluginContext:
             документ на каждый кадр остановил бы линию. Клиент обязан звать
             это на событии, а не на такте.
         """
+        who = source if source is not None else (self.plugin_name or self.process_name or "")
         sink = getattr(self.services, DOCUMENT_SINK_ATTR, None)
         append = getattr(sink, "append", None)
         if not callable(append):
-            # Плоскость не объявлена — это законное состояние, а не сбой:
-            # молчим и не платим ничего, кроме двух getattr.
+            # C3 (major-10): плоскость не объявлена — законное состояние, но не
+            # БЕЗМОЛВНОЕ. Прежде здесь стоял голый `return False`: вердикт
+            # исчезал без счётчика и без строки, тогда как у записей тот же
+            # случай назван четвёртым классом потери
+            # (`records_without_channels`). Голос — однократный, число — всегда.
+            note_document_without_sink(self.services, str(kind), str(who))
             return False
 
         try:
@@ -274,14 +298,22 @@ class PluginContext:
                 **fields,
                 "kind": str(kind),
                 "ts": time.time() if ts is None else float(ts),
-                "source": source if source is not None else (self.plugin_name or self.process_name or ""),
+                "source": who,
                 "summary": str(summary),
             }
-            return bool(append(document))
+            if append(document):
+                return True
+            # C3: отказ СТАТУСОМ был так же нем, как отсутствие плоскости.
+            # Сток свой отказ считает (`DocumentStore.dropped`), но до C3 этот
+            # счётчик не читал никто — потеря существовала и была недоступна
+            # там, где о ней спрашивают.
+            note_document_refused(self.services, str(kind), str(who))
+            return False
         except Exception as exc:  # noqa: BLE001 — сбой хранилища не роняет линию
             # Но и не молчит: потерянный вердикт без следа — ровно тот класс
             # «проглоченный сбой», ради которого плоскость и заводилась.
             self.log_error(f"[documents] документ рода {kind!r} не записан: {exc!r}")
+            note_document_refused(self.services, str(kind), str(who))
             return False
 
 
