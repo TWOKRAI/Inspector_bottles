@@ -130,6 +130,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Персистентный стор наблюдаемости (Ф5.20a): drain log/stats + error-tap'ы.
         self._observability_store = None
         self._observability_store_taps = []
+        # Ф5.2: политика истории (порог записи + пределы ретеншена). None до сшивки
+        # стора — и такт уборки на это опирается: политики нет → убирать нечего.
+        self._observability_history_policy = None
         # Live-хвосты hub→подписчики (Ф5.20b, F1: per-subscriber). Ключ — адрес
         # подписчика, значение — ``(forwarder, taps)``. Несколько подписчиков (GUI +
         # backend_ctl) сосуществуют: раньше был единственный слот на процесс и второй
@@ -395,6 +398,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         пилота (worker_module). log/stats буферизуются в hub и дренируются по
         heartbeat; error-слот остаётся реальным error_manager (write-through)."""
         from ..managers.observability_wiring import (
+            resolve_history_policy,
             wire_document_sink,
             wire_observability_store,
             wire_process_observability,
@@ -416,8 +420,14 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Ф5.20a: персистентный стор — только когда есть hub (пилот-телеметрия).
         # log/stats из drain-петли, error через store-tap'ы на error+logger-менеджерах.
         if self._observability_hub is not None:
+            # Ф5.2: порог истории и её пределы — из конфига (секция
+            # `observability.history`). Политика кладётся на процесс ДО проводки:
+            # её читает такт уборки, и «стор есть, политики нет» означало бы
+            # безлимитную таблицу — ровно то состояние, которое задача чинит.
+            policy = resolve_history_policy(self)
+            self._observability_history_policy = policy
             self._observability_store, self._observability_store_taps = wire_observability_store(
-                self.error_manager, self.logger_manager, process=self.name
+                self.error_manager, self.logger_manager, process=self.name, min_level=policy["level"]
             )
             # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
             # Ни одного tap → вкладка «Ошибки» молча пуста — предупреждаем

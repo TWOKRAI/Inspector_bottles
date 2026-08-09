@@ -24,7 +24,7 @@ def _log_record_dict(level="ERROR", message="boom", module="worker_module", **ex
 class TestStoreTapChannel:
     def test_write_normalizes_to_error_row(self, tmp_path):
         store = ObservabilityStore(str(tmp_path / "obs.db"))
-        tap = StoreTapChannel(store)  # kind='error' по умолчанию
+        tap = StoreTapChannel(store)  # kind считает важность записи (Ф5.2, Б-4)
 
         tap.write(_log_record_dict(level="ERROR", message="boom", error_type="ValueError"))
 

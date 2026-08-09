@@ -33,6 +33,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from .record_display import hub_record_to_display
@@ -318,6 +319,68 @@ class ObservabilityStore:
             else:
                 cur = self._conn.execute("SELECT COUNT(*) FROM records WHERE kind = ?", (kind,))
             return int(cur.fetchone()[0])
+
+    def purge(
+        self,
+        *,
+        max_rows: Optional[int] = None,
+        max_age_sec: Optional[float] = None,
+        now: Optional[float] = None,
+    ) -> Dict[str, int]:
+        """Ретеншен истории: срезать старое по возрасту и по числу строк (Ф5.2).
+
+        **До этой задачи ретеншена не было вовсе** — только ручной :meth:`clear`.
+        Пока в стор писал один error-путь, это сходило с рук; с приходом лог-плоскости
+        (порог ``observability.history.level``) безлимитная таблица — это инцидент
+        645 МБ, повторённый в SQLite. Поэтому предел не опция задачи, а её условие.
+
+        **Две меры, а не одна, и обе нужны.** Возраст отвечает «история за последнюю
+        неделю» — предсказуемое окно разбора; число строк отвечает за место на диске
+        при всплеске (шторм ошибок за минуту способен переполнить любое окно времени).
+        Оставь только возраст — всплеск съест диск; только число — история молча
+        схлопнется до последних секунд шторма, и «что было час назад» станет
+        неотвечаемым.
+
+        Порядок именно такой: сперва возраст (дешёвый предикат по индексируемому
+        ``ts``), потом остаток по числу. Обратный порядок считал бы лимит строк по
+        множеству, часть которого всё равно уйдёт по возрасту.
+
+        Args:
+            max_rows: сколько СВЕЖИХ строк оставить. ``None``/``<=0`` — не ограничивать.
+            max_age_sec: возраст, старше которого строка удаляется. ``None``/``<=0`` —
+                не ограничивать. **Ноль значит «предела нет», а не «удалить всё»:**
+                мусор в конфиге не должен уметь стирать историю.
+            now: показания часов (wall) — параметром, а не ``time.time()`` внутри:
+                глобальный патч часов в тестах даёт флейк.
+
+        Returns:
+            ``{"by_age": n, "by_rows": m, "remaining": k}`` — сколько чем срезано и
+            сколько осталось. Ноль — валидный ответ «резать было нечего».
+        """
+        by_age = 0
+        by_rows = 0
+        with self._lock:
+            if max_age_sec is not None and float(max_age_sec) > 0:
+                moment = time.time() if now is None else float(now)
+                cur = self._conn.execute("DELETE FROM records WHERE ts < ?", (moment - float(max_age_sec),))
+                by_age = max(0, cur.rowcount)
+            if max_rows is not None and int(max_rows) > 0:
+                # Граница берётся по `id`, а не по `ts`: часы источников могут идти
+                # вразнобой (стор общий на процессы), и срез по времени вырезал бы
+                # «свежие» строки процесса с отставшими часами. `id` монотонен по
+                # порядку ПРИХОДА в стор — единственная величина, в которой «последние
+                # N» имеет один смысл для всех писателей.
+                cur = self._conn.execute(
+                    "SELECT id FROM records ORDER BY id DESC LIMIT 1 OFFSET ?",
+                    (int(max_rows) - 1,),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    cur = self._conn.execute("DELETE FROM records WHERE id < ?", (row[0],))
+                    by_rows = max(0, cur.rowcount)
+            self._conn.commit()
+            remaining = int(self._conn.execute("SELECT COUNT(*) FROM records").fetchone()[0])
+        return {"by_age": by_age, "by_rows": by_rows, "remaining": remaining}
 
     def clear(self, kind: Optional[str] = None) -> int:
         """Удалить записи (опц. по kind). Возвращает число удалённых."""

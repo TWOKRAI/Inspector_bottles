@@ -25,7 +25,8 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from ..interfaces import IChannel
-from .observability_store import KIND_ERROR, ObservabilityStore
+from .observability_store import ObservabilityStore
+from .record_display import KIND_LOG, kind_for_severity, severity_number_for
 
 
 class StoreTapChannel(IChannel):
@@ -34,20 +35,22 @@ class StoreTapChannel(IChannel):
     def __init__(
         self,
         store: ObservabilityStore,
-        kind: str = KIND_ERROR,
         name: str = "observability_store_tap",
         process: str = "",
     ) -> None:
         """
         Args:
             store: целевой ObservabilityStore.
-            kind: kind стор-записи (обычно 'error' — tap висит на error_manager).
             name: имя tap'а (хэндл для remove_tap).
             process: имя процесса-источника (5.21 (c)) — стор проставит колонку
                 ``process``; пусто → падаем на ``module`` LogRecord.
+
+        Параметра ``kind`` больше нет (Ф5.2, Б-4): вид записи считает её важность,
+        а не конструктор канала. Прежний дефолт ``'error'`` и был дефектом — tap
+        висит на ДВУХ менеджерах, и всё, что проходило порог на logger'е, ложилось
+        в стор ошибкой.
         """
         self._store = store
-        self._kind = kind
         self._name = name
         self._process = process
 
@@ -61,12 +64,16 @@ class StoreTapChannel(IChannel):
 
     def write(self, record_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Нормализовать LogRecord-dict и добавить в стор. Ошибку глушим (tail не критичен)."""
+        severity = str(record_dict.get("level", "")).lower()
         rec = {
-            "kind": self._kind,
+            # Ф5.2 (Б-4): вид считает важность записи, тем же правилом и тем же
+            # порогом, что и live-хвост — иначе одна запись приезжала бы во вкладку
+            # логом, а в историю ошибкой.
+            "kind": kind_for_severity(severity_number_for(KIND_LOG, severity)),
             "process": self._process,
             "module": record_dict.get("module", ""),
             "ts": record_dict.get("timestamp", 0.0),
-            "severity": str(record_dict.get("level", "")).lower(),
+            "severity": severity,
             "message": record_dict.get("message", ""),
             "context": record_dict.get("extra", {}),
         }

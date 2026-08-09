@@ -41,7 +41,6 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ..interfaces import IChannel
-from .observability_store import KIND_ERROR
 from .record_display import log_record_to_display
 
 FORWARD_COMMAND = "observability.record"
@@ -57,7 +56,6 @@ class RecordForwardChannel(IChannel):
         subscriber: str,
         sender: str = "",
         name: str = "observability_forward",
-        kind: str = KIND_ERROR,
         command: str = FORWARD_COMMAND,
     ) -> None:
         """
@@ -66,14 +64,17 @@ class RecordForwardChannel(IChannel):
             subscriber: адрес получателя (GUI-процесс), ``targets=[subscriber]``.
             sender: имя процесса-источника (в сообщении и в ``data.process``).
             name: имя канала (хэндл tap'а для remove_tap).
-            kind: kind при нормализации LogRecord-dict в ``write`` (обычно 'error').
             command: поле ``command`` пуша (роутинг-ключ у GUI-хендлера).
+
+        Параметра ``kind`` больше нет (Ф5.2, Б-4): вид записи считает её важность.
+        Прежний дефолт ``'error'`` метил ошибкой ВСЁ, что прошло порог tap'а, —
+        а порог с Ф6.х.5 задаёт подписчик, то есть под ``kind=error`` в хвост
+        поехали INFO-записи (живая находка: INFO-снимок метрик).
         """
         self._router = router
         self._subscriber = subscriber
         self._sender = sender or subscriber
         self._name = name
-        self._kind = kind
         self._command = command
 
     @property
@@ -88,7 +89,7 @@ class RecordForwardChannel(IChannel):
         """IChannel (tap-путь): LogRecord-dict error/critical → display → push (одна запись)."""
         # process=sender (5.21 (c)): запись несёт процесс-источник, а не имя
         # источника внутри процесса (`module`) и не группу логирования (`scope`).
-        display = log_record_to_display(record_dict, kind=self._kind, process=self._sender)
+        display = log_record_to_display(record_dict, process=self._sender)
         return self._push({"record": display})
 
     def push_batch(self, display_records: List[Dict[str, Any]]) -> Dict[str, Any]:

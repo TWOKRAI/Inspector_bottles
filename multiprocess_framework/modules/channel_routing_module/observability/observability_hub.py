@@ -53,9 +53,7 @@ def _serialize_exception(error: BaseException) -> Dict[str, Any]:
     """
     if isinstance(error, BaseException):
         tb = getattr(error, "__traceback__", None)
-        tb_str = (
-            "".join(_tb.format_exception(type(error), error, tb)) if tb is not None else None
-        )
+        tb_str = "".join(_tb.format_exception(type(error), error, tb)) if tb is not None else None
         return {
             "error_type": type(error).__name__,
             "message": str(error),
@@ -138,9 +136,7 @@ class ObservabilityHub:
     # StatsLike
     # ------------------------------------------------------------------
 
-    def _emit_stat(
-        self, metric_name: str, value: Any, metric_type: str, tags: Optional[Dict[str, str]]
-    ) -> None:
+    def _emit_stat(self, metric_name: str, value: Any, metric_type: str, tags: Optional[Dict[str, str]]) -> None:
         self._emit(
             KIND_STATS,
             {
@@ -151,33 +147,23 @@ class ObservabilityHub:
             },
         )
 
-    def record_metric(
-        self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None
-    ) -> None:
+    def record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
         self._emit_stat(metric_name, value, METRIC_GAUGE, tags)
 
-    def increment(
-        self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None
-    ) -> None:
+    def increment(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
         self._emit_stat(metric_name, value, METRIC_COUNTER, tags)
 
-    def record_timing(
-        self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None
-    ) -> None:
+    def record_timing(self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None) -> None:
         self._emit_stat(metric_name, duration, METRIC_TIMING, tags)
 
-    def gauge(
-        self, metric_name: str, value: Any, tags: Optional[Dict[str, str]] = None
-    ) -> None:
+    def gauge(self, metric_name: str, value: Any, tags: Optional[Dict[str, str]] = None) -> None:
         self._emit_stat(metric_name, value, METRIC_GAUGE, tags)
 
     # ------------------------------------------------------------------
     # ErrorLike
     # ------------------------------------------------------------------
 
-    def _emit_error(
-        self, error: BaseException, context: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def _emit_error(self, error: BaseException, context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         ctx = dict(context or {})
         # severity-роутинг ErrorManager сохраняем: контекст может поднять уровень
         # (например critical), иначе — дефолт "error".
@@ -191,14 +177,10 @@ class ObservabilityHub:
     # _track_error при None-возврате делает fallback track_error → record_error на
     # ТОМ ЖЕ слоте; так как hub реализует оба метода, None привёл бы к ДВОЙНОЙ
     # записи ошибки. Truthy-возврат гасит fallback → ровно одна запись.
-    def track_error(
-        self, error: BaseException, context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def track_error(self, error: BaseException, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return self._emit_error(error, context)
 
-    def record_error(
-        self, error: BaseException, context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def record_error(self, error: BaseException, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return self._emit_error(error, context)
 
     # ------------------------------------------------------------------

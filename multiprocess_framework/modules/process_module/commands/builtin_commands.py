@@ -876,6 +876,11 @@ class BuiltinCommands:
                 flush=bool(args.get("flush")),
             ),
             "provenance": observability_provenance(layers, logger=logger),
+            # Ф5.2: политика истории — порог записи и пределы ретеншена, плюс
+            # сколько строк лежит сейчас. Без readback'а ручка неотличима от
+            # сломанной: «вкладка пуста» одинаково выглядит и при высоком пороге,
+            # и при неподнятом сторе, и лечится это по-разному.
+            **self._history_report(),
             "audit": layers.audit.view(audit_limit),
             **extra,
             "layers": {
@@ -896,6 +901,46 @@ class BuiltinCommands:
                 **ttl_report(svc, layers),
             },
         }
+
+    def _history_report(self) -> dict:
+        """Секция ``history`` ответа ``introspect.observability`` (Ф5.2).
+
+        Отвечает на вопрос, который вкладка «Логи» задаёт первым: **почему тут
+        пусто**. Три разных причины дают одну и ту же пустоту — стор не поднят,
+        порог выше пишущих записей, ретеншен уже срезал, — и различить их можно
+        только этими полями.
+
+        Стора нет → секция говорит именно это, а не молчит: у процесса без воркеров
+        (а значит без hub'а) истории нет ПО ПОСТРОЕНИЮ, и молчание отправило бы
+        искать поломку там, где её нет.
+        """
+        svc = self._services
+        store = getattr(svc, "_observability_store", None)
+        policy = getattr(svc, "_observability_history_policy", None)
+        if store is None:
+            return {
+                "history": {
+                    "enabled": False,
+                    "reason": (
+                        "у процесса нет стора истории — он заводится вместе с hub'ом, то есть у процесса с воркерами"
+                    ),
+                }
+            }
+        report: dict = {"enabled": True, "db_path": getattr(store, "db_path", "")}
+        if isinstance(policy, dict):
+            report.update(
+                {
+                    "level": policy.get("level"),
+                    "max_rows": policy.get("max_rows"),
+                    "max_age_sec": policy.get("max_age_sec"),
+                    "purge_interval_sec": policy.get("purge_interval_sec"),
+                }
+            )
+        try:
+            report["rows"] = {kind: store.count(kind) for kind in ("log", "error", "stats")}
+        except Exception as exc:  # noqa: BLE001 — читающая команда не падает из-за счёта
+            report["rows_error"] = str(exc)
+        return {"history": report}
 
     def _cmd_introspect_queues(self, data=None, **kwargs) -> dict:
         """Глубины собственных очередей процесса (backpressure-диагностика).

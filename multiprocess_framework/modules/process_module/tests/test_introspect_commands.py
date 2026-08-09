@@ -693,7 +693,19 @@ class TestObservabilityIntrospectExtra:
 
         assert res["success"] is True
         assert "broker" not in res
-        assert set(res) == {"success", "process", "effective", "counters", "provenance", "audit", "layers"}
+        # `history` — секция Ф5.2 (порог и пределы истории). Она у КАЖДОГО процесса,
+        # в отличие от `broker`, который и проверяет этот тест: обычный процесс не
+        # платит за ОРКЕСТРАТОРСКУЮ добавку — это утверждение, а не «ключей ровно семь».
+        assert set(res) == {
+            "success",
+            "process",
+            "effective",
+            "counters",
+            "provenance",
+            "history",
+            "audit",
+            "layers",
+        }
 
     def test_broken_hook_does_not_break_the_reading_command(self) -> None:
         """Читающая команда не падает из-за добавки, но и не молчит о сбое."""

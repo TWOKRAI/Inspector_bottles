@@ -53,8 +53,9 @@ from __future__ import annotations
 
 import importlib
 import time
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
+from ...channel_routing_module.levels import normalize_level_name
 from ...channel_routing_module.observability import (
     KIND_LOG,
     KIND_STATS,
@@ -481,11 +482,142 @@ def unwire_document_sink(svc: Any) -> None:
         pass
 
 
+#: Адрес секции истории в конфиге наблюдаемости (Ф5.2). Константа, а не строка по
+#: месту: этот адрес печатается в readback и в предупреждениях, и он обязан
+#: совпадать с тем, по которому оператор грепает конфиг.
+HISTORY_CONFIG_ADDRESS = "observability.history"
+
+#: Порог записи в историю по умолчанию. **INFO, а не ERROR**, и это решение задачи,
+#: а не унаследованное число: вкладка «Логи» с порогом ERROR пуста по построению —
+#: ровно та находка (Б-8), ради которой задача и заведена. Безопасным INFO делает
+#: не скромность, а предел: :data:`DEFAULT_HISTORY_MAX_ROWS` ограничивает таблицу
+#: сверху независимо от темпа записи.
+DEFAULT_HISTORY_LEVEL = "INFO"
+
+#: Потолок истории по числу строк. 200 000 строк ≈ 60–80 МБ при нынешней длине
+#: строки (замер Ф6: 108 Б на строку лога) — то есть предсказуемые десятки мегабайт,
+#: а не «сколько получится».
+DEFAULT_HISTORY_MAX_ROWS = 200_000
+
+#: Возраст, старше которого запись уходит: неделя. Столько живёт вопрос «что было
+#: в прошлый вторник» на этом стенде; больше хранит файловый журнал, у него своя
+#: ротация и свой объём.
+DEFAULT_HISTORY_MAX_AGE_SEC = 7 * 24 * 3600.0
+
+#: Период уборки истории. Реже документов (там срок в сутках, здесь строки копятся
+#: минутами), но не на каждый такт: уборка — хозяйство, а не горячий путь.
+DEFAULT_HISTORY_PURGE_INTERVAL_SEC = 300.0
+
+_HISTORY_POLICY_ATTR = "_observability_history_policy"
+_HISTORY_PURGE_DEADLINE_ATTR = "_observability_history_purge_at"
+
+
+def resolve_history_policy(svc: Any) -> Dict[str, Any]:
+    """Политика истории из слоёв конфига — с дефолтами и без тихого мусора (Ф5.2).
+
+    Читается из ``observability.history`` теми же слоями, что и всё остальное
+    (L0→L3): отдельного плоского ключа не заводится по той же причине, что у
+    плоскости документов — его пришлось бы класть в ДВУХ конструкторах ассемблера,
+    и забытый второй дал бы «дефект на одном пути из трёх».
+
+    Мусор в значении **не молчит**: ключ падает на дефолт, и об этом говорится
+    вслух. Тихое приведение к дефолту здесь опаснее обычного — оператор,
+    опечатавшийся в ``max_rows``, ушёл бы уверенным, что поставил предел.
+    """
+    section: Any = {}
+    try:
+        from ..configs.observability_layers import process_observability_layers
+
+        section = process_observability_layers(svc).resolve().get("history") or {}
+    except Exception as exc:  # noqa: BLE001 — процесс без конфига живёт на дефолтах
+        _process_warn(svc, f"[observability] секция {HISTORY_CONFIG_ADDRESS} не прочитана: {exc!r}")
+        section = {}
+    if not isinstance(section, dict):
+        _process_warn(
+            svc,
+            f"[observability] {HISTORY_CONFIG_ADDRESS} не словарь ({type(section).__name__}) — история на дефолтах",
+        )
+        section = {}
+
+    def _number(key: str, default: float, *, integer: bool) -> Any:
+        raw = section.get(key)
+        if raw is None:
+            return int(default) if integer else float(default)
+        try:
+            value = int(raw) if integer else float(raw)
+        except (TypeError, ValueError):
+            _process_warn(
+                svc,
+                f"[observability] {HISTORY_CONFIG_ADDRESS}.{key}={raw!r} — не число, взят дефолт {default}",
+            )
+            return int(default) if integer else float(default)
+        # Ноль и отрицательное = «предела нет». Это ОБЪЯВЛЕННЫЙ отказ от защиты, и
+        # он проходит как есть — но громко, потому что молчаливая безлимитность и
+        # была исходным состоянием, которое задача чинит.
+        if value <= 0:
+            _process_warn(
+                svc,
+                f"[observability] {HISTORY_CONFIG_ADDRESS}.{key}={value} — предел СНЯТ, история растёт без ограничения",
+            )
+        return value
+
+    level = str(section.get("level") or DEFAULT_HISTORY_LEVEL).upper()
+    if normalize_level_name(level) is None:
+        _process_warn(
+            svc,
+            f"[observability] {HISTORY_CONFIG_ADDRESS}.level={level!r} — неизвестный уровень, "
+            f"взят дефолт {DEFAULT_HISTORY_LEVEL}",
+        )
+        level = DEFAULT_HISTORY_LEVEL
+    return {
+        "level": level,
+        "max_rows": _number("max_rows", DEFAULT_HISTORY_MAX_ROWS, integer=True),
+        "max_age_sec": _number("max_age_sec", DEFAULT_HISTORY_MAX_AGE_SEC, integer=False),
+        "purge_interval_sec": _number("purge_interval_sec", DEFAULT_HISTORY_PURGE_INTERVAL_SEC, integer=False),
+    }
+
+
+def sweep_observability_history(svc: Any, now: Optional[float] = None) -> Optional[Dict[str, int]]:
+    """Уборка истории по такту heartbeat — не чаще ``purge_interval_sec`` (Ф5.2).
+
+    Форма повторяет :func:`sweep_process_documents` дословно, и это намеренно:
+    второй способ делать хозяйственное дело в такте означал бы вторую процедуру
+    остановки и второе место, где его забудут.
+
+    Возвращает отчёт :meth:`ObservabilityStore.purge` либо ``None`` — такт пропущен
+    (стора нет или срок не наступил).
+    """
+    store = getattr(svc, "_observability_store", None)
+    purge = getattr(store, "purge", None)
+    if not callable(purge):
+        return None
+    policy = getattr(svc, _HISTORY_POLICY_ATTR, None) or {}
+    moment = time.monotonic() if now is None else float(now)
+    deadline = getattr(svc, _HISTORY_PURGE_DEADLINE_ATTR, None)
+    if deadline is not None and moment < float(deadline):
+        return None
+    interval = float(policy.get("purge_interval_sec") or DEFAULT_HISTORY_PURGE_INTERVAL_SEC)
+    if interval <= 0:
+        interval = DEFAULT_HISTORY_PURGE_INTERVAL_SEC
+    # Срок ставится ДО уборки: упади она — такт не превратится в попытку каждый
+    # heartbeat, то есть отказ БД не станет ещё и источником нагрузки на неё же.
+    try:
+        setattr(svc, _HISTORY_PURGE_DEADLINE_ATTR, moment + interval)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return purge(max_rows=policy.get("max_rows"), max_age_sec=policy.get("max_age_sec"))
+    except Exception as exc:  # noqa: BLE001 — хозяйство не имеет права ронять liveness
+        _process_warn(svc, f"[observability] уборка истории не удалась: {exc!r}")
+        return None
+
+
 def wire_observability_store(
     error_manager: Optional[Any],
     logger_manager: Optional[Any] = None,
     db_path: Optional[str] = None,
     process: str = "",
+    min_level: str = "ERROR",
 ) -> Tuple[ObservabilityStore, list]:
     """Создать персистентный стор и повесить store-tap на менеджеры ошибок (Ф5.20a).
 
@@ -514,6 +646,11 @@ def wire_observability_store(
         process: имя процесса-источника (5.21 (c)) — tap проставит колонку
             ``process`` в стор-записи (иначе виден только ``module`` — имя
             источника внутри процесса).
+        min_level: порог записи в историю (Ф5.2). Прежнее ``ERROR`` оставляло
+            вкладку «Логи» пустой ПО ПОСТРОЕНИЮ — это и была находка Б-8. Теперь
+            порог задаёт ``observability.history.level`` (дефолт INFO), а от роста
+            таблицы защищает ретеншен (:func:`sweep_observability_history`), а не
+            высокий порог.
 
     Returns:
         (store, taps) — taps: список (manager, tap_name) для unwire.
@@ -523,8 +660,8 @@ def wire_observability_store(
     for mgr, tap_name in ((error_manager, STORE_ERROR_TAP), (logger_manager, STORE_LOGGER_TAP)):
         if mgr is None or not hasattr(mgr, "add_tap"):
             continue
-        # min_level=ERROR → ловим error + critical, ниже не пишем (вкладка «Ошибки»).
-        mgr.add_tap(StoreTapChannel(store, name=tap_name, process=process), min_level="ERROR", name=tap_name)
+        # Вид записи (log/error) считает её важность — tap'у он не задаётся (Б-4).
+        mgr.add_tap(StoreTapChannel(store, name=tap_name, process=process), min_level=min_level, name=tap_name)
         taps.append((mgr, tap_name))
     return store, taps
 

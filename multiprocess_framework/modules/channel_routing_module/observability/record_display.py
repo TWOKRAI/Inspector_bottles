@@ -29,10 +29,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from ..levels import UNKNOWN_SEVERITY, UNSPECIFIED, severity_of
+from ..levels import ERROR_SEVERITY, UNKNOWN_SEVERITY, UNSPECIFIED, severity_of
 from .observability_hub import KIND_STATS
 
 KIND_ERROR = "error"  # локальная константа (не тянем observability_store → без цикла store↔display)
+KIND_LOG = "log"
 
 _ENVELOPE_KEYS = ("kind", "module", "process", "ts", "severity", "message", "observed_ts")
 #: ``observed_ts`` в конверте, а не в ``extra`` (Ф3.6): иначе отметка приёма
@@ -155,12 +156,38 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
     return display
 
 
-def log_record_to_display(record_dict: Dict[str, Any], kind: str = KIND_ERROR, process: str = "") -> Dict[str, Any]:
-    """Нормализовать LogRecord-dict (error/critical у tap'а) в display-вид.
+def kind_for_severity(severity_number: int) -> str:
+    """Вид записи по её важности: ``error`` от ERROR и выше, иначе ``log`` (Б-4).
+
+    **Вид считает ИСТОЧНИК записи, а не канал, который её везёт.** До Ф5.2 оба
+    канала (стор-tap и live-форвардер) получали ``kind`` константой в конструкторе
+    и висели ОБА на ``logger_manager`` — то есть любая запись, прошедшая порог
+    tap'а, метилась ошибкой. Живьём это выглядело так: INFO-снимок метрик приехал
+    в хвост как ``kind: "error"``, а в сторе все 303 016 строк оказались ошибками —
+    вкладки «Логи» и «Статистика» были структурно пусты не потому, что записей
+    нет, а потому что каждая называлась чужим именем.
+
+    Порог — тот же ``ERROR_SEVERITY``, которым уже выражен инвариант «≥17 = ошибка»
+    (Ф3.1). Второго определения аварийности не заводится: разойдясь однажды, они
+    дали бы запись, которая для floor'а ошибка, а для вкладки — лог.
+
+    Неопознанный уровень приходит сюда **числом** ``UNSPECIFIED = 0`` — не
+    ``UNKNOWN_SEVERITY``: до этой функции строку уже прочёл
+    :func:`severity_number_for`, и он переводит «имя не опознано» в «оси важности
+    нет». Ноль ниже порога, поэтому такая запись становится ``log``, и это
+    сознательно: опечатка в имени уровня не повод объявить запись аварией.
+    Проверено инъекцией — первая её редакция целилась в ``-1`` и не убила ни
+    одного теста, потому что до сюда ``-1`` не доходит вовсе.
+    """
+    return KIND_ERROR if severity_number >= ERROR_SEVERITY else KIND_LOG
+
+
+def log_record_to_display(record_dict: Dict[str, Any], process: str = "") -> Dict[str, Any]:
+    """Нормализовать LogRecord-dict (tap на менеджере) в display-вид.
 
     На вход — ``LogRecord.to_dict()``: {timestamp, level, scope, message, module, extra}.
-    По дизайну Ф5.16 error/critical идут write-through в реальный менеджер, а tap
-    ловит их у sink'а — поэтому kind по умолчанию 'error'.
+    ``kind`` **выводится из важности самой записи** (:func:`kind_for_severity`), а не
+    приходит параметром: параметр и был дефектом Б-4 — см. его докстринг.
 
     Args:
         process: имя процесса-источника (tap знает ``sender``); пусто → падаем на
@@ -168,6 +195,11 @@ def log_record_to_display(record_dict: Dict[str, Any], kind: str = KIND_ERROR, p
     """
     module = record_dict.get("module", "")
     severity = str(record_dict.get("level", "")).lower()
+    # Число считается ДО вида и одно на оба поля: вид, посчитанный по другому
+    # прочтению уровня, чем число, дал бы строку, где `kind=error` соседствует с
+    # `severity_number` ниже порога — и фильтр вкладки разошёлся бы с её колонкой.
+    number = severity_number_for(KIND_LOG, severity)
+    kind = kind_for_severity(number)
     return {
         "kind": kind,
         "process": process or module,
@@ -175,8 +207,10 @@ def log_record_to_display(record_dict: Dict[str, Any], kind: str = KIND_ERROR, p
         "ts": float(record_dict.get("timestamp", 0.0) or 0.0),
         "severity": severity,
         # Ф3.6: оба нормализатора дают ОДНУ форму — иначе пороговый фильтр
-        # работал бы на половине данных (error-tap идёт этой дорогой).
-        "severity_number": severity_number_for(kind, severity),
+        # работал бы на половине данных (tap идёт этой дорогой). Число берётся
+        # ПОСЧИТАННОЕ выше, а не пересчитывается: два вычисления одного поля —
+        # это два места, где оно может разойтись.
+        "severity_number": number,
         "message": record_dict.get("message", ""),
         # extra под ключом "context" — паритет с историей: StoreTapChannel кладёт
         # LogRecord.extra в "context", и стор сохраняет его как {"context": {...}}.

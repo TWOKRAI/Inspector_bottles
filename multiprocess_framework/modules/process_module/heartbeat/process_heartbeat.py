@@ -185,6 +185,11 @@ class ProcessHeartbeat:
                     # это один if по атрибуту процесса.
                     self._sweep_documents()
 
+                    # Ф5.2: ретеншен истории наблюдаемости. Пятое хозяйственное дело
+                    # того же такта и по той же причине: с приходом лог-плоскости в
+                    # стор безлимитная таблица стала бы инцидентом 645 МБ в SQLite.
+                    self._sweep_observability_history()
+
                     # Ф7 G.9(a) H-ревью: pump scheduled-GC. Heartbeat — периодический
                     # BACKGROUND-тик вне hot-path кадра → законная «пауза» для явной сборки.
                     # Без этого pump FW_GC_SCHEDULED отключил бы авто-GC НАВСЕГДА (сборки
@@ -399,6 +404,21 @@ class ProcessHeartbeat:
         except Exception as exc:  # noqa: BLE001 — такт HB не роняем, но и не молчим
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"[observability] уборка документов сорвалась: {exc!r}", module="heartbeat")
+
+    def _sweep_observability_history(self) -> None:
+        """Ф5.2: срезать историю по возрасту и числу строк (не чаще интервала).
+
+        Форма — дословно ``_sweep_documents``: ``sweep_observability_history`` сам
+        решает, наступил ли срок, и сам глушит отказ БД именным WARNING'ом. Второй
+        способ делать то же дело в такте означал бы второе место, где его забудут.
+        """
+        try:
+            from ..managers.observability_wiring import sweep_observability_history
+
+            sweep_observability_history(self._services)
+        except Exception as exc:  # noqa: BLE001 — такт HB не роняем, но и не молчим
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"[observability] уборка истории сорвалась: {exc!r}", module="heartbeat")
 
     def _build_telemetry_gate(self) -> Any:
         """Собрать ``TelemetryGate`` из секции ``telemetry.publish`` конфига процесса.
