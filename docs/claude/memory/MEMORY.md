@@ -235,4 +235,6 @@
 - [Докстринг утверждает то, чего регистрация не ставила](feedback_docs_assert_what_registration_never_set.md) — три места звали воркер SYSTEM, создавался он без типа; оба предохранителя на одной вере
 - [Слишком грубая инъекция ничего не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) — красный не по проверяемой причине так же вреден, как зелёный
 - [monotonic на Windows — 15.6 мс](project_monotonic_resolution_windows.md) — GetTickCount64; сравнение разностей ниже ~100 мс недостоверно, отображать на сетку
-- [F8 review + сшивка B](project_f8_review_and_stitching.md) — 8.0/10 GO; спека 8.5a-g; механика → Opus-чат
+- [Ф8 ЗАКРЫТА (кроме 8.6/8.7)](project_f8_review_and_stitching.md) — плоскость документов сшита, живьём переживает рестарт; инъекции 9/9
+- [Отметка после публикации ломает схлопывание](feedback_post_publication_mark_breaks_collapsing.md) — выключается ровно на отказе; страж КЛАССА, не поля
+- [Ключ читать из уже едущей секции](feedback_read_the_key_from_the_section_already_travelling.md) — два ассемблера не правятся; поля нет в схеме → model_dump выбросит
