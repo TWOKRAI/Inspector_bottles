@@ -210,3 +210,50 @@ def test_every_test_dir_is_collected() -> None:
         f"каталоги тестов вне testpaths (modules/pytest.ini): {sorted(uncollected)}. "
         "Эти тесты не гоняются — добавьте путь в testpaths."
     )
+
+
+def _root_testpaths() -> list[str]:
+    """Секция `testpaths` КОРНЕВОГО pyproject.toml (дефолтный гейт репозитория)."""
+    import tomllib
+
+    pyproject = _MODULES_ROOT.parents[1] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    return list(data["tool"]["pytest"]["ini_options"]["testpaths"])
+
+
+def test_services_and_plugins_test_dirs_are_collected() -> None:
+    """Каждый каталог тестов под `Services/` и `Plugins/` виден ДЕФОЛТНОМУ гейту.
+
+    Седьмой случай класса «тесты-невидимки» (Ф8.5, 2026-08-09): `Services/documents/tests`
+    не значился в корневом `testpaths` вовсе, а сверка всех каталогов показала, что вне
+    гейта — весь `Services/` и весь `Plugins/` (1937 зелёных тестов, гонявшихся только
+    руками). Решение владельца 2026-08-09: оба слоя входят в дефолтный гейт целиком.
+
+    Покрытие считается ПО ПРЕФИКСУ: запись `Services` покрывает любой
+    `Services/x/tests`, поэтому новый сервис попадает в гейт даром. Страж ловит
+    обратное движение — если записи слоёв снимут из testpaths, тесты слоёв снова
+    станут невидимыми, и этот тест назовёт каталоги поимённо.
+    """
+    repo_root = _MODULES_ROOT.parents[1]
+    entries = _root_testpaths()
+
+    def covered(rel: str) -> bool:
+        return any(rel == entry or rel.startswith(entry.rstrip("/") + "/") for entry in entries)
+
+    uncovered: list[str] = []
+    for layer in ("Services", "Plugins"):
+        layer_root = repo_root / layer
+        if not layer_root.is_dir():
+            continue
+        for path in layer_root.rglob("tests"):
+            if not path.is_dir() or "__pycache__" in path.parts:
+                continue
+            rel = path.relative_to(repo_root).as_posix()
+            if not covered(rel):
+                uncovered.append(rel)
+
+    assert not uncovered, (
+        f"каталоги тестов вне корневого testpaths (pyproject.toml): {sorted(uncovered)}. "
+        "Эти тесты не гоняются дефолтным гейтом — верните слой в testpaths "
+        "(решение владельца 2026-08-09) или добавьте каталог явно."
+    )
