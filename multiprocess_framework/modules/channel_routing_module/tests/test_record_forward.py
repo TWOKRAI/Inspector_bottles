@@ -40,6 +40,9 @@ def test_hub_log_record_to_display():
         "module": "worker",
         "ts": 1.5,
         "severity": "info",  # нормализуется в lower
+        # Ф3.6: число едет рядом с текстом — в ОБЕИХ формах (live и history),
+        # иначе пороговый фильтр работал бы на половине данных.
+        "severity_number": 9,
         "message": "hi",
         "extra": {"context": {"a": 1}},
     }
@@ -75,10 +78,11 @@ def test_log_record_dict_to_display_defaults_error():
     # extra под "context" — паритет со стором (StoreTapChannel → _row_from_record).
     assert d == {
         "kind": "error",
-        "process": "camera_0",  # 5.21 (c): процесс-источник, не scope логгера
+        "process": "camera_0",  # 5.21 (c): процесс-источник, не имя источника внутри процесса
         "module": "cam",
         "ts": 3.0,
         "severity": "critical",
+        "severity_number": 21,  # Ф3.6: обе формы несут число
         "message": "boom",
         "extra": {"context": {"rid": 7}},
     }
@@ -99,7 +103,8 @@ def test_write_pushes_single_error_record():
     msg, prio = router.sent[0]
     assert msg["command"] == FORWARD_COMMAND
     assert msg["targets"] == ["gui"]
-    assert msg["queue_type"] == "system"
+    # Ф7.3: хвост едет своим классом груза, а не never-drop system-почтой.
+    assert msg["queue_type"] == "observability"
     assert msg["type"] == "event"
     assert msg["data"]["process"] == "cam"
     assert msg["data"]["record"]["message"] == "x"

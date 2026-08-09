@@ -18,10 +18,11 @@ action — тот же путь, что кнопка «Рисовать».
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 _PLUGIN = "control_panel"
 

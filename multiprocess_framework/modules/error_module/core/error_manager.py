@@ -8,7 +8,10 @@ Task 5.14 (CRM-развязка): ErrorManager наследует общий л�
 
 Ключевые улучшения (Фаза 3 — CRM унификация):
   - _setup_level_routes() строит _level_to_channel: {level_str → channel_name}
-    и регистрирует маршруты в self._dispatcher (из CRM) напрямую.
+    — обычный словарь, читаемый в log(). Прежняя редакция этой строки
+    утверждала, что маршруты регистрируются «в self._dispatcher (из CRM)
+    напрямую»: неправда, ни одного обращения к слоту здесь не было никогда.
+    Из-за неё слот и считали живым — в Ф4.6 он снесён вместе с ложной ссылкой.
   - log() перегружает LoggerCore.log() для WARNING/ERROR/CRITICAL:
     → ищет channel_name через _level_to_channel (O(1))
     → пишет через buffer (если есть) или напрямую в channel
@@ -20,31 +23,40 @@ Task 5.14 (CRM-развязка): ErrorManager наследует общий л�
   ErrorManager:    error   → _level_to_channel(key=level) → ILogChannel
 """
 
-import time
 import traceback
-from typing import Optional, Any, Union, Dict
+from copy import deepcopy
+from typing import Optional, Any, List, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
-from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
-from ...logger_module.core.log_types import LogRecord
+from ...channel_routing_module.levels import is_error_level, severity_of
+from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, ScopeName
 from ...logger_module.core.logger_core import LoggerCore
-from ..configs.error_manager_config import ErrorManagerConfig
+from ..configs.error_manager_config import DEFAULT_SEVERITY_ROUTES, ErrorManagerConfig
 from ..interfaces import IErrorManager
 from .error_config_assembly import expand_error_manager_config
 
 
+#: С какого ранга запись принадлежит плоскости ошибок. WARNING, а не ERROR:
+#: ``_setup_level_routes`` строит маршрут и для него, и именно WARNING+ ходят
+#: severity-путём мимо гейта скоупа. Число берётся из общего реестра рангов —
+#: своя константа здесь разъехалась бы с ``_setup_level_routes`` молча.
+_SEVERITY_PLANE_SEVERITY = severity_of("WARNING")
+
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "errors",
     "default_level": "WARNING",
-    "enable_batching": True,
-    "batch_size": 50,
-    "batch_interval": 0.5,
+    # Ф7.х (хвост Ф7.4): ``enable_batching``/``batch_size``/``batch_interval``
+    # отсюда УДАЛЕНЫ. Схема принимает лишние ключи молча, поэтому дефолт плоскости
+    # ошибок продолжал объявлять батчинг включённым спустя фазу после его сноса —
+    # читающий этот словарь узнавал о механизме, которого нет. Операторские
+    # конфиги с теми же ключами ловит ``REMOVED_BATCHING_KEYS`` в
+    # ``observability_config.py``; здесь ловить было некому — это наш же дефолт.
     "channels": {
         "critical_file": {
             "type": "file",
             "enabled": True,
             "file_path": "logs/critical.log",
-            "format": "%(asctime)s [CRITICAL] %(name)s: %(message)s",
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             "max_size": 10 * 1024 * 1024,
             "backup_count": 10,
         },
@@ -60,7 +72,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
             "type": "file",
             "enabled": True,
             "file_path": "logs/warnings.log",
-            "format": "%(asctime)s [WARNING] %(name)s: %(message)s",
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             "max_size": 5 * 1024 * 1024,
             "backup_count": 3,
         },
@@ -70,34 +82,55 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
 
 def _normalize_error_config(
     config: Optional[Union[Dict[str, Any], LoggerManagerConfig, Any]],
-) -> tuple[str, LoggerManagerConfig, bool]:
-    """Преобразовать config → (manager_name, LoggerManagerConfig, include_stacktrace).
+) -> tuple[str, LoggerManagerConfig, bool, Dict[str, List[str]]]:
+    """Преобразовать config → (manager_name, LoggerManagerConfig, include_stacktrace, severity_routes).
 
     Поддерживает: None | dict | ErrorManagerConfig | LoggerManagerConfig | build() → (name, dict).
     Плоские dict / ErrorManagerConfig проходят через :func:`expand_error_manager_config`.
     Вызывает TypeError для неизвестных типов.
+
+    Ф8.1: ``severity_routes`` едет отдельным значением по той же причине, что
+    ``include_stacktrace``, — это поле плоскости ОШИБОК, а не логгера, и в
+    ``LoggerManagerConfig`` ему места нет. Оба одинаково потерялись бы, будь они
+    просто ключами разворачиваемого dict'а.
     """
     manager_name = "ErrorManager"
     include_stacktrace = True
 
     if config is None:
-        return manager_name, LoggerManagerConfig.model_validate(_DEFAULT_CONFIG), include_stacktrace
+        # Через ту же сборку, что и остальные пути: умолчания плоскости ошибок
+        # (scopes/modules, резидуал P3) обязаны действовать и на ``config=None``,
+        # иначе «дефолтный ErrorManager» и «ErrorManager из ErrorManagerConfig»
+        # получаются разными менеджерами.
+        # deepcopy: без него наружу уезжают ТЕ ЖЕ вложенные словари каналов
+        # ``_DEFAULT_CONFIG``, и правка одного конфига до валидации утекает во
+        # все последующие ``ErrorManager()``. Половина этой опасности была
+        # закрыта deepcopy'ем скоупов, вторая осталась — поймано ревью Ф1.
+        expanded = expand_error_manager_config(deepcopy(_DEFAULT_CONFIG))
+        return (
+            manager_name,
+            LoggerManagerConfig.model_validate(expanded),
+            include_stacktrace,
+            _routes_from(expanded),
+        )
 
     if isinstance(config, LoggerManagerConfig):
-        return manager_name, config, include_stacktrace
+        # Голый LoggerManagerConfig severity-маршрутов не несёт по построению —
+        # берём дефолтную лестницу, как и до Ф8.1, когда она была зашита в код.
+        return manager_name, config, include_stacktrace, _routes_from({})
 
     if isinstance(config, ErrorManagerConfig):
         raw = config.model_dump()
         d = expand_error_manager_config(raw)
         manager_name = str(raw.get("manager_name", "ErrorManager"))
         include_stacktrace = bool(d.get("include_stacktrace", True))
-        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace
+        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace, _routes_from(d)
 
     if isinstance(config, dict):
         d = expand_error_manager_config(dict(config))
         include_stacktrace = bool(d.get("include_stacktrace", True))
         manager_name = str(d.get("manager_name", "ErrorManager"))
-        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace
+        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace, _routes_from(d)
 
     if hasattr(config, "build") and callable(config.build):
         # D1 (constructor-master Ф5-добор, ADR-CRM-008): разбор build()-объекта
@@ -113,12 +146,27 @@ def _normalize_error_config(
         if hasattr(config, "include_stacktrace"):
             include_stacktrace = bool(config.include_stacktrace)
         d = expand_error_manager_config(d)
-        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace
+        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace, _routes_from(d)
 
     raise TypeError(
         f"config must be dict, LoggerManagerConfig, ErrorManagerConfig, or object"
         f" with build() -> (name, dict), got {type(config)}"
     )
+
+
+def _routes_from(data: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Severity-маршруты из конфига либо дефолтная лестница (Ф8.1).
+
+    Ключи уровней приводятся к верхнему регистру здесь, на границе: карта
+    читается по имени уровня записи (``"ERROR"``), и ``severity_routes: {error: …}``
+    из YAML иначе не нашёлся бы — молча, с откатом на дефолт. Тихая потеря
+    адресной правки, ровно того класса, что Ф8.1 закрывает у скоупов.
+
+    Копия списков, а не ссылки на них: карта уезжает в менеджер и живёт там,
+    а общий список позволил бы правке у одного менеджера доехать до всех.
+    """
+    raw = data.get("severity_routes") or DEFAULT_SEVERITY_ROUTES
+    return {str(level).upper(): [str(name) for name in chain] for level, chain in raw.items()}
 
 
 class ErrorManager(LoggerCore, IErrorManager):
@@ -156,7 +204,7 @@ class ErrorManager(LoggerCore, IErrorManager):
         managers: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> None:
-        resolved_name, log_config, include_stacktrace = _normalize_error_config(config)
+        resolved_name, log_config, include_stacktrace, severity_routes = _normalize_error_config(config)
         manager_name = resolved_name
 
         # Guard до super(): LoggerCore.__init__ дёргает self.log()/self.info() косвенно
@@ -165,6 +213,7 @@ class ErrorManager(LoggerCore, IErrorManager):
         # (Task 5.14: ErrorManager — брат LoggerManager через LoggerCore, singleton _instance
         #  живёт только на LoggerManager и здесь НЕ выставляется.)
         self._level_to_channel: Dict[str, str] = {}
+        self._severity_routes: Dict[str, List[str]] = severity_routes
         self._include_stacktrace = include_stacktrace
 
         super().__init__(
@@ -176,6 +225,30 @@ class ErrorManager(LoggerCore, IErrorManager):
             **kwargs,
         )
 
+        # R9: родитель положил в слепок для отката развёрнутый LoggerManagerConfig,
+        # в котором нет include_stacktrace — это флаг ErrorManager, а не логгера.
+        # Откат с такого слепка тихо ВКЛЮЧИЛ бы трейсбеки тому, кто их выключил.
+        # Исходный ввод восстанавливает обе половины; None не подменяем — на нём
+        # родительский слепок уже равен дефолту, к которому и надо возвращаться.
+        if config is not None:
+            self._last_applied_config = config
+
+        # Маршруты строятся УЖЕ здесь, а не только в initialize(): между
+        # конструктором и initialize() менеджер обязан писать ошибку в СВОЙ
+        # файл, а не в приёмник последней инстанции.
+        #
+        # Прежняя редакция этого комментария утверждала, что без вызова ERROR
+        # «был бы отклонён гейтом молча» и инвариант 1 был бы пробит. Ревью Ф1
+        # это опровергло запуском: гейт severity-плоскости открыт по РАНГУ
+        # безусловно (см. `_is_gate_open`), поэтому запись не теряется — её
+        # ловит пол. Настоящее последствие мягче и всё равно нежелательно:
+        # `errors_to_floor` 0 → 1 при пустом `errors.log`, то есть ошибка
+        # уезжает в аварийный JSONL при живом штатном канале, а счётчик
+        # поднимает ложный сигнал «маршрут ошибок сломан».
+        #
+        # Вызов идемпотентен, в initialize() он остаётся.
+        self._setup_level_routes()
+
     def initialize(self) -> bool:
         result = super().initialize()
         if result:
@@ -186,25 +259,80 @@ class ErrorManager(LoggerCore, IErrorManager):
         """Построить _level_to_channel: {уровень → имя канала}.
 
         После этого self._level_to_channel["ERROR"] == "errors_file" (O(1) в log()).
+
+        **У каждого уровня есть запасной приёмник** — и это правило, а не набор
+        частных случаев. Ревью Ф1 воспроизвело асимметрию: у ERROR запасного не
+        было вовсе, и снятие ОДНОГО ``errors_file`` отправляло ошибку в пол при
+        живом ``critical_file`` (``errors_to_floor`` 0 → 1, ``critical.log``
+        пуст). Потери не было — пол сработал, счётчик виден, — но приёмник
+        последней инстанции нужен для случая «приёмников нет», а не «приёмник
+        есть, просто не тот». После P2 это состояние стало достижимым в
+        рантайме одной командой, поэтому цепочка достроена.
+
+        Направление запасного — к БОЛЕЕ важному файлу, никогда к менее важному:
+        ERROR уходит в ``critical.log``, а не в ``warnings.log``. Файл
+        предупреждений просматривают реже всех, и спрятать ошибку там значит
+        потерять её на практике, формально ничего не потеряв.
+
+        **Ф8.1: лестница стала данными.** До неё те же три правила были написаны
+        девятью ветками ``if/elif``, и завести уровень или свой файл под него
+        значило править фреймворк — третий из реестров, которые задача схлопывает
+        (рядом с каталогом метрик и порогом скоупа). Теперь порядок предпочтения
+        живёт в ``ErrorManagerConfig.severity_routes``, а здесь остался один
+        проход: **первый приёмник цепочки, который есть в реестре**. Правило
+        «запасной — к более важному» кодируется порядком, и оно теперь видно в
+        readback конфига, а не только в исходнике.
         """
         self._level_to_channel = {}
 
-        has_critical = self._channel_registry.get("critical_file") is not None
-        has_errors = self._channel_registry.get("errors_file") is not None
-        has_warnings = self._channel_registry.get("warnings_file") is not None
+        registry = self._channel_registry
+        for level, preference in self._severity_routes.items():
+            for channel_name in preference:
+                if registry.get(channel_name) is not None:
+                    self._level_to_channel[level] = channel_name
+                    break
 
-        if has_critical:
-            self._level_to_channel["CRITICAL"] = "critical_file"
-        elif has_errors:
-            self._level_to_channel["CRITICAL"] = "errors_file"
+        self._warn_on_silenced_severity_routes()
 
-        if has_errors:
-            self._level_to_channel["ERROR"] = "errors_file"
+    def routes_using_sink(self, name: str) -> List[str]:
+        """Уровни severity-карты, ведущие в этот приёмник.
 
-        if has_warnings:
-            self._level_to_channel["WARNING"] = "warnings_file"
-        elif has_errors:
-            self._level_to_channel["WARNING"] = "errors_file"
+        Не скоупы: у этой плоскости приёмников в скоупах нет по определению (P3),
+        и ответ родителя перечислял бы маршруты, которых здесь не существует —
+        то есть врал бы оператору ровно в тот момент, когда он решает, снимать ли
+        канал.
+        """
+        target = str(name)
+        return sorted(f"severity:{level}" for level, channel in self._level_to_channel.items() if channel == target)
+
+    def _warn_on_silenced_severity_routes(self) -> None:
+        """Severity-приёмник, ведущий в «никуда» (2.9) — свой аналог проверки родителя.
+
+        Проверка родителя ходит по скоупам, а эта плоскость маршрутизирует
+        severity-картой: у её скоупов приёмников нет по определению (P3),
+        поэтому там смотреть не на что, и покрытие пришлось бы выдумать.
+        Здесь смотрим по своей карте — на том же наборе понятий, каким плоскость
+        реально решает, куда писать.
+
+        Стоит в конце ``_setup_level_routes``, а не в ``_setup_channels``:
+        карта строится ПОСЛЕ каналов, и в момент родительской проверки она
+        ещё пуста. Пересборка маршрутов повторит предупреждение — это верно:
+        конфигурация в этот момент заявлена заново.
+        """
+        for level, channel_name in sorted(self._level_to_channel.items()):
+            if is_error_level(level) and self._all_null_sinks([channel_name]):
+                self._warn_silenced_route(f"severity-маршрут {level}", [channel_name])
+
+    def _validate_config(self, config: Dict[str, Any]) -> None:
+        """R9: разобрать error-конфиг ДО закрытия каналов.
+
+        Свой override вместо родительского: ErrorManager принимает и плоский
+        error-dict, и развёрнутый LoggerManagerConfig, и разбор у него свой
+        (``expand_error_manager_config``). Родительский ``_resolve_log_config``
+        на плоском error-dict молча вернул бы дефолтный конфиг — то есть
+        «проверка», которая пропускает любую опечатку.
+        """
+        _normalize_error_config(config)
 
     def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
         """Хук CRM.reconfigure: пересобрать каналы + перестроить severity-routing.
@@ -218,59 +346,85 @@ class ErrorManager(LoggerCore, IErrorManager):
             ``_level_to_channel`` через ``_setup_level_routes()`` — иначе
             severity-маршруты ссылались бы на закрытые каналы.
         """
-        _name, log_config, include_stacktrace = _normalize_error_config(config)
+        _name, log_config, include_stacktrace, severity_routes = _normalize_error_config(config)
         self._include_stacktrace = include_stacktrace
+        self._severity_routes = severity_routes
         self._apply_log_config_rebuild(log_config)
         self._setup_level_routes()
 
-    def log(
-        self,
-        scope: LogScope,
-        level: LogLevel,
-        message: str,
-        module: str = "main",
-        **extra,
-    ) -> None:
-        """Override: WARNING/ERROR/CRITICAL → level-based routing.
+    def _on_channels_changed(self) -> None:
+        """Состав каналов поменялся → severity-маршруты пересобрать (резидуал P2).
 
-        DEBUG/INFO → fallback to LoggerCore.log() (scope-based).
+        Воспроизведение до правки: ``em.set_sink_enabled("critical_file", False)``
+        → ``level_routes`` продолжал утверждать ``CRITICAL → critical_file``, хотя
+        канала в реестре уже нет. Запись при этом не терялась (её ловил floor,
+        ``errors_to_floor`` 0 → 1), но ``errors_file`` был ЖИВ — то есть вместо
+        штатного маршрута ошибка уходила в приёмник последней инстанции, а
+        публичный ``level_routes`` показывал маршрут, которого нет.
 
-        Теперь level routing РЕАЛЬНО используется (в старом коде маршруты
-        были зарегистрированы но route_by_level() никогда не вызывался).
+        Fallback-цепочка (``critical_file`` → ``errors_file``) считалась ровно
+        один раз на ``initialize()``. Теперь она пересчитывается на каждом
+        изменении состава — то есть ровно тогда, когда fallback и нужен.
+
+        Родительский хук (сброс кэша решений) обязателен: ``_is_gate_open``
+        здесь зависит от ``_level_to_channel``, а тот только что поменялся.
         """
-        self.stats["messages_processed"] += 1
+        super()._on_channels_changed()
+        self._setup_level_routes()
 
+    def _is_gate_open(self, scope: ScopeName, level: LogLevel, module: str) -> bool:
+        """Severity-плоскость открыта всегда; остальное решает скоуп (Ф1.3).
+
+        Условие — «уровень принадлежит плоскости ошибок», а НЕ «для уровня
+        сейчас есть канал». Разница стоила бы инварианта 1: канал у ERROR может
+        исчезнуть (``sink.disable``), и завязка на его наличие закрывала бы
+        гейт ровно в тот момент, когда запись обязана дойти хотя бы до пола.
+
+        Пара к :meth:`_route`: гейт и резолв обязаны отвечать одинаково, иначе
+        публичный ``is_enabled_for`` обещает одно, а ``log()`` делает другое.
+        Сетка ``test_gate_predicate.py`` проверяет их согласие на каждой паре
+        scope×level×module, поэтому расхождение не может проехать молча.
+        """
+        if severity_of(level) >= _SEVERITY_PLANE_SEVERITY:
+            return True
+        return super()._is_gate_open(scope, level, module)
+
+    def _route(self, scope: ScopeName, level: LogLevel, module: str) -> Optional[List[str]]:
+        """WARNING/ERROR/CRITICAL → один канал по уровню; остальное — родителю.
+
+        **Ф4.2: это ВСЯ разница между двумя путями эмиссии.** Раньше здесь жил
+        полный override ``log()`` — со своей сборкой записи, своим кормлением
+        tap'ов, своим enqueue и своим полом. Развилка обходилась в ручное
+        зеркалирование каждого улучшения родителя: 0.4 — в двух местах, 0.9 — в
+        двух, tap'ы — в двух, а 0.5 забыли, и на ГЛАВНОМ производственном пути
+        ошибок пропал ``proc_name``. Теперь общего кода нет в двух копиях,
+        потому что второй копии нет.
+
+        Гейт скоупа на этом пути НЕ спрашивается — и это осознанно, а не
+        побочно: у ошибки приёмник определяет severity, и порог скоупа
+        (у ``SYSTEM`` это ``WARNING``) не должен уметь заглушить ERROR.
+        Закреплено характеризационным тестом ``test_severity_path_ignores_scope_gate``.
+        """
         channel_name = self._level_to_channel.get(level.value)
-        if channel_name is None:
-            # DEBUG / INFO / unknown level → parent scope-based routing
-            # Don't double-count messages_processed
-            self.stats["messages_processed"] -= 1
-            return LoggerCore.log(self, scope, level, message, module, **extra)
+        if channel_name is not None:
+            return [channel_name]
 
-        record_dict = LogRecord(
-            timestamp=time.time(),
-            level=level,
-            scope=scope,
-            message=message,
-            module=module,
-            extra={**self._get_thread_context(), **extra},
-        ).to_dict()
+        if severity_of(level) >= _SEVERITY_PLANE_SEVERITY:
+            # Уровень плоскости ошибок, но живого приёмника не осталось (все
+            # severity-каналы сняты). Пустой список, а НЕ путь родителя: у
+            # скоупов плоскости ошибок приёмников нет по определению (P3), и
+            # делегирование туда означало бы «ошибка отклонена гейтом» —
+            # то есть тихое исчезновение записи вместо пола.
+            #
+            # Это не теория: правка P2 (пересборка маршрутов на изменение
+            # состава) без этой ветки уронила четыре теста разом, включая оба
+            # теста пола. Пустой список ловит ``_write_error_record`` → floor
+            # для ERROR/CRITICAL и ``_count_records_without_channels`` для
+            # WARNING — обе судьбы видимы наружу.
+            return []
 
-        # Tail логов (Task 1.5): severity-путь ErrorManager не зовёт super().log(),
-        # поэтому tap'ы кормим здесь явно (DEBUG/INFO уходят в LoggerCore.log выше).
-        if self._tap_sinks:
-            self._emit_to_taps(record_dict, level)
-
-        if self._buffer is not None:
-            self._buffer.enqueue(channel_name, record_dict)
-            self.stats["messages_batched"] += 1
-        else:
-            ch = self._channel_registry.get(channel_name)
-            if ch is not None:
-                try:
-                    ch.write(record_dict)
-                except Exception as e:
-                    self._fallback_log("ERROR", f"write to {channel_name} failed: {e}")
+        # DEBUG / INFO / неизвестный уровень → scope-based резолв родителя.
+        return super()._route(scope, level, module)
 
     def log_exception(
         self,

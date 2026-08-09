@@ -21,7 +21,8 @@ from typing import Any, Dict, Optional
 
 from ..base_manager.interfaces import IBaseManager
 from ..channel_routing_module.interfaces import IChannel
-from .core.log_config import LogLevel, LogScope
+from .core.log_config import LogLevel, LogScope, ScopeName
+from .utils import LogMessage
 
 
 class ILogChannel(IChannel):
@@ -78,10 +79,11 @@ class ILoggerManager(IBaseManager, ABC):
     @abstractmethod
     def log(
         self,
-        scope: LogScope,
+        scope: ScopeName,
         level: LogLevel,
-        message: str,
+        message: "LogMessage",
         module: str = "main",
+        *args: Any,
         **extra: Any,
     ) -> None:
         """Базовый метод логирования с явным указанием scope и level.
@@ -89,31 +91,37 @@ class ILoggerManager(IBaseManager, ABC):
         Args:
             scope:   Область логирования (SYSTEM, BUSINESS, DEBUG, ...).
             level:   Уровень важности (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-            message: Текст сообщения.
+            message: Текст, ``%``-шаблон или ``Callable[[], str]``. Callable
+                     вызывается только после гейта и ровно один раз (Ф1.4).
             module:  Имя модуля/компонента-источника.
+            *args:   Аргументы ``%``-формата; склейка — после гейта.
             **extra: Произвольные поля для контекста (trace_id, user_id, ...).
         """
 
     # ---- Быстрые методы по уровню (scope определяется автоматически) ----
+    #
+    # Все принимают ``message: LogMessage`` и ``*args`` ``%``-формата на тех же
+    # правилах, что :meth:`log`; заявленный здесь scope — тот же, по которому
+    # отвечает :meth:`is_enabled_for`.
 
     @abstractmethod
-    def debug(self, message: str, module: str = "main", **extra: Any) -> None:
+    def debug(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Отладочная информация. scope=DEBUG, level=DEBUG."""
 
     @abstractmethod
-    def info(self, message: str, module: str = "main", **extra: Any) -> None:
+    def info(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Информационное сообщение. scope=BUSINESS, level=INFO."""
 
     @abstractmethod
-    def warning(self, message: str, module: str = "main", **extra: Any) -> None:
+    def warning(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Предупреждение. scope=SYSTEM, level=WARNING."""
 
     @abstractmethod
-    def error(self, message: str, module: str = "main", **extra: Any) -> None:
+    def error(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Ошибка. scope=SYSTEM, level=ERROR."""
 
     @abstractmethod
-    def critical(self, message: str, module: str = "main", **extra: Any) -> None:
+    def critical(self, message: "LogMessage", module: str = "main", *args: Any, **extra: Any) -> None:
         """Критическая ошибка. scope=SYSTEM, level=CRITICAL."""
 
     # ---- Методы по области (scope явный, level как параметр) ----
@@ -143,27 +151,13 @@ class ILoggerManager(IBaseManager, ABC):
     # =========================================================================
 
     @abstractmethod
-    def enable_module_logging(self, module_name: str, file_path: Optional[str] = None) -> None:
-        """Включить отдельный файл логирования для модуля.
-
-        Args:
-            module_name: Имя модуля (будет ключом канала).
-            file_path:   Путь к файлу. По умолчанию logs/{module_name}.log.
-        """
-
     @abstractmethod
-    def disable_module_logging(self, module_name: str) -> None:
-        """Выключить отдельный файл логирования для модуля."""
-
-    # =========================================================================
-    # Контекстное логирование
-    # =========================================================================
-
     @abstractmethod
     def push_context(self, **context_vars: Any) -> None:
-        """Добавить поля в контекст текущего потока.
+        """Добавить поля в контекст ТЕКУЩЕГО потока (и текущего asyncio-таска).
 
-        Все последующие вызовы log() будут автоматически дополнены этими полями.
+        Все последующие вызовы log() из этого потока будут дополнены полями.
+        Соседний поток их не видит и своего не теряет.
 
         Example:
             logger.push_context(request_id="abc-123", user="admin")
@@ -172,15 +166,41 @@ class ILoggerManager(IBaseManager, ABC):
 
     @abstractmethod
     def pop_context(self) -> None:
-        """Удалить последний слой контекста."""
+        """Удалить последний слой контекста текущего потока.
+
+        В потоке, который ничего не клал, — тихий no-op.
+        """
+
+    @abstractmethod
+    def set_base_context(self, **context_vars: Any) -> None:
+        """Задать поля контекста, видимые из ВСЕХ потоков процесса (Ф0.5).
+
+        Для фактов про процесс целиком (``proc_name``), которые обязаны
+        попасть и в записи потоков-воркеров. Потоковый контекст
+        (:meth:`push_context`) перекрывает базу по совпадающим ключам, а
+        явный ``extra`` вызова перекрывает и его.
+
+        Вызовы накапливаются; снять всё — :meth:`clear_base_context`.
+        """
+
+    @abstractmethod
+    def clear_base_context(self) -> None:
+        """Очистить базу процесса — парная операция к :meth:`set_base_context`."""
 
     # =========================================================================
-    # Управление буфером
+    # Управление записью
     # =========================================================================
 
     @abstractmethod
     def flush(self) -> None:
-        """Принудительно сбросить все буферизованные записи (batching)."""
+        """Дожать запись до стока.
+
+        Ф7.4 сняла батчинг: запись синхронна, накопленного между вызовами нет, и
+        реализация — no-op. Метод в контракте остаётся: его зовут ``shutdown``,
+        команды наблюдаемости и прикладной код, а обещание «после ``flush``
+        запись на диске» продолжает выполняться — только выполняет его сама
+        запись, а не сброс пачки.
+        """
 
     # =========================================================================
     # Диагностика
@@ -192,15 +212,56 @@ class ILoggerManager(IBaseManager, ABC):
 
         Returns:
             Словарь с полями: app_name, messages_processed, messages_skipped,
-            channels_count, module_channels_count,
-            batching_enabled и (если батчинг включён) messages_batched, batch_stats.
+            channels_count, module_channels_count, классы потерь (Ф0.4) и
+            показания лесенки перегрузки стока (Ф7.2: ``sink_writes_dropped``,
+            ``sink_slow_writes``, ``sink_degraded``).
+
+            Полей ``batching_enabled`` / ``messages_batched`` / ``batch_stats``
+            здесь БОЛЬШЕ НЕТ — батчинг записи снят в Ф7.4. Обещание контракта,
+            пережившее свой механизм, хуже отсутствующего: по нему пишут
+            потребителей.
         """
 
     @abstractmethod
-    def should_log(self, scope: LogScope, level: LogLevel, module: str) -> bool:
+    def should_log(self, scope: ScopeName, level: LogLevel, module: str) -> bool:
         """Проверить, нужно ли логировать это сообщение (кэшированная проверка).
 
         Используется внутренне, но полезен для внешних валидаций производительности.
+
+        Для прикладного кода правильный вопрос — :meth:`is_enabled_for`: он не
+        требует знать, какой скоуп подставит ``logger.info(...)``, и у наследника
+        с собственным резолвом (severity-маршрут ошибок) отвечает верно.
+        """
+
+    @abstractmethod
+    def is_enabled_for(
+        self,
+        name: str,
+        level: LogLevel,
+        scope: Optional[ScopeName] = None,
+    ) -> bool:
+        """Пройдёт ли такая запись ГЕЙТ (Ф1.3).
+
+        Дешёвый предикат для случая «сборка сообщения дороже самой записи»:
+        аналог ``logging.Logger.isEnabledFor`` из stdlib и ``Logger.enabled``
+        из OTel Logs Bridge API.
+
+        Args:
+            name:  Имя модуля-источника (то же, что ``module`` в :meth:`log`).
+            level: Уровень записи.
+            scope: Скоуп; ``None`` — тот, который для этого уровня возьмёт
+                   удобный метод (``info`` → BUSINESS, ``error`` → SYSTEM…).
+
+        **Чего контракт НЕ обещает: что у записи есть живой приёмник.** Первая
+        редакция называла метод «пойдёт ли запись хоть куда-нибудь», и ревью Ф1
+        это опровергло запуском: со снятым каналом предикат возвращает ``True``,
+        а запись уходит в ``unresolved_channel_records`` (у плоскости ошибок без
+        severity-каналов WARNING — в ``records_without_channels``). Для
+        ERROR/CRITICAL ``True`` подстрахован полом, для остальных уровней — нет.
+
+        Формулировка обязана совпадать с реализацией
+        (``LoggerCore.is_enabled_for``): два расходящихся контракта одного
+        метода в одном дереве — это и был отдельный пункт вердикта.
         """
 
 
@@ -209,6 +270,7 @@ class ILoggerManager(IBaseManager, ABC):
 __all__ = [
     "LogLevel",
     "LogScope",
+    "ScopeName",
     "ILogChannel",
     "ILoggerManager",
 ]

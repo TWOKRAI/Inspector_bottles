@@ -7,3 +7,4 @@
 - [backend_ctl state-транспорт](project_backend_ctl_state_transport_path.md) — драйвер едет по Ф1.1b direct-socket-bridge (не {name}_state drop_oldest); флип FW_STATE транспортно-нейтрален; read-model без revision-gap = truth-hole
 - [Overview слеп к потерям](project_overview_blind_to_loss.md) — system_overview аномалии не читают never_drop_loss/evict_blocked/data_evicted; health зелёный при тяжелейшей потере
 - [backend_ctl fake-fidelity gap](project_backend_ctl_fake_fidelity_gap.md) — FakeDriver=эхо, ответы хендлеров выписаны руками, live-сверка только у 4 обёрток; logger_sink 0 тестов
+- [Основания лог-плоскости для Ф2.2](project_logging_foundations_2_2.md) — бенчи stdlib/pico/наш стек + вердикт «семантику брать, рантайм нет»; OTel Logs = Development

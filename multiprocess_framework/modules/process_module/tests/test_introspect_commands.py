@@ -514,3 +514,206 @@ class TestIntrospectPlugins:
         assert result["plugins"] == {}
         assert result["count"] == 0
         assert result["failed_imports"] == {}
+
+
+# ====================================================================== #
+#  introspect.observability (Ф0.3)                                        #
+# ====================================================================== #
+
+
+class _FakeLoggerConfig:
+    default_level = "INFO"
+    log_directory = "/logs"
+    scopes: dict = {}
+
+
+class _FakeLoggerManager:
+    """Менеджер логов в его нынешней форме: буфера записи у него НЕТ.
+
+    Ф7.х. Прежняя редакция отдавала секцию ``batch_stats`` — ключ ``BatchBuffer``,
+    снятого в Ф7.4 вместе с батчингом. Тесты вокруг неё проверяли нормализацию,
+    которой в проде уже не с чем было работать: подхватиться этот ключ мог только
+    здесь, у фальшивки. Ровно тот класс, который правила проекта называют «тест на
+    фальшивке доказывает фальшивку».
+
+    Потери по имени приёмника теперь считает лесенка стока (Ф7.х B-2) — их и
+    отдаём, под настоящим именем ключа.
+    """
+
+    def __init__(self, *, dropped_by_channel=None, errors_to_floor=0) -> None:
+        self.config = _FakeLoggerConfig()
+        self._dropped = dropped_by_channel or {}
+        self._errors_to_floor = errors_to_floor
+        self.get_stats_calls = 0
+
+    def get_stats(self) -> dict:
+        self.get_stats_calls += 1
+        return {
+            "app_name": "fake",
+            "errors_to_floor": self._errors_to_floor,
+            "error_floor": None,
+            "sink_writes_dropped": sum(self._dropped.values()),
+            "sink_writes_dropped_by_channel": dict(self._dropped),
+            "sink_degraded": bool(self._dropped),
+            "sink_degraded_channels": sorted(self._dropped),
+        }
+
+
+class _FakeStatsConfig:
+    enable_logging = True
+    aggregation_interval = 1.0
+
+
+class _FakeStatsManager:
+    """Менеджер статистики: буфер лежит под ключом ``buffer`` (от CRM)."""
+
+    def __init__(self) -> None:
+        self.config = _FakeStatsConfig()
+
+    def get_stats(self) -> dict:
+        return {"buffer": {"type": "aggregation", "pending": {}}, "metrics_count": 3}
+
+
+class TestIntrospectObservability:
+    """Видимый путь наружу для счётчиков потерь наблюдаемости (задача Ф0.3)."""
+
+    def test_command_is_registered(self) -> None:
+        _svc, cm = _make()
+        assert "introspect.observability" in cm.handlers
+
+    def test_reports_drops_with_the_guilty_channel(self) -> None:
+        svc, cm = _make()
+        svc.logger_manager = _FakeLoggerManager(dropped_by_channel={"system_file": 42})
+
+        result = cm.dispatch("introspect.observability")
+
+        assert result["success"] is True
+        assert result["process"] == "preprocessor"
+        logger = result["counters"]["logger"]
+        assert logger["sink_writes_dropped"] == 42
+        assert logger["sink_writes_dropped_by_channel"] == {"system_file": 42}
+        assert logger["sink_degraded_channels"] == ["system_file"]
+
+    def test_reports_errors_that_never_reached_a_channel(self) -> None:
+        svc, cm = _make()
+        svc.logger_manager = _FakeLoggerManager(errors_to_floor=3)
+
+        result = cm.dispatch("introspect.observability")
+
+        assert result["counters"]["logger"]["errors_to_floor"] == 3
+
+    def test_only_the_plane_that_still_has_a_buffer_reports_one(self) -> None:
+        """Буфер остался у ОДНОЙ плоскости, и наружу это видно как есть (Ф7.х).
+
+        Прежний тест сторожил нормализацию двух имён (``batch_stats`` логгера и
+        ``buffer`` статистики) в один ключ. Буфер записи снят в Ф7.4, второго
+        имени больше нет — и «нормализация» держалась исключительно на фальшивке,
+        которая его подавала. «Ключа нет» здесь честный ответ: у логгера
+        накапливать нечего, запись синхронна.
+        """
+        svc, cm = _make()
+        svc.logger_manager = _FakeLoggerManager()
+        svc.stats_manager = _FakeStatsManager()
+
+        counters = cm.dispatch("introspect.observability")["counters"]
+
+        assert "buffer" not in counters["logger"], "у логгера снова появился буфер записи — это не Ф7.4"
+        assert counters["stats"]["buffer"]["type"] == "aggregation"
+
+    def test_effective_section_is_readback_not_echo(self) -> None:
+        svc, cm = _make()
+        svc.logger_manager = _FakeLoggerManager()
+
+        effective = cm.dispatch("introspect.observability")["effective"]
+
+        assert effective["logger"]["default_level"] == "INFO"
+        assert effective["logger"]["log_directory"] == "/logs"
+
+    def test_missing_managers_are_omitted_not_faked(self) -> None:
+        """Нет менеджера — нет секции. Пустой словарь вместо честного отсутствия врал бы."""
+        _svc, cm = _make()
+
+        result = cm.dispatch("introspect.observability")
+
+        assert result["success"] is True
+        assert result["counters"] == {}
+        assert result["effective"] == {}
+
+    def test_command_does_not_mutate_managers(self) -> None:
+        """Read-команда: менеджер только опрашивается, дважды подряд — тот же ответ."""
+        svc, cm = _make()
+        logger = _FakeLoggerManager(dropped_by_channel={"system_file": 1})
+        svc.logger_manager = logger
+
+        first = cm.dispatch("introspect.observability")
+        second = cm.dispatch("introspect.observability")
+
+        assert first["counters"] == second["counters"]
+        assert logger.get_stats_calls == 2  # только чтение, по разу на вызов
+
+
+# ====================================================================== #
+#  introspect.observability — оркестраторская добавка (Task 5.11)         #
+# ====================================================================== #
+
+
+class TestObservabilityIntrospectExtra:
+    """Хук ``observability_introspect_extra``: секция брокера доезжает до КОМАНДЫ.
+
+    Тест на самом хуке проверял бы только хук: переименуй ключ в команде — и он
+    остался бы зелёным, а readback брокера исчез бы («фейк-гарнесс доказывает
+    гарнесс»). Поэтому здесь дёргается зарегистрированный обработчик.
+    """
+
+    @staticmethod
+    def _handler(extra_fn=None):
+        svc = _FakeServices()
+        svc.logger_manager = None
+        svc.error_manager = None
+        svc.stats_manager = None
+        svc.get_config = lambda key, default=None: default
+        if extra_fn is not None:
+            svc.observability_introspect_extra = extra_fn
+        bc = BuiltinCommands(svc)
+        bc._register_introspect_commands()
+        return svc.command_manager.handlers["introspect.observability"]
+
+    def test_extra_section_reaches_the_command_answer(self) -> None:
+        handler = self._handler(lambda: {"broker": {"subscribers": [{"subscriber": "gui"}], "count": 1}})
+
+        res = handler({})
+
+        assert res["success"] is True
+        assert res["broker"]["count"] == 1
+        assert res["broker"]["subscribers"][0]["subscriber"] == "gui"
+
+    def test_process_without_the_hook_answers_exactly_as_before(self) -> None:
+        """Обычный процесс не платит за оркестраторскую добавку ни одним ключом."""
+        res = self._handler()({})
+
+        assert res["success"] is True
+        assert "broker" not in res
+        # `history` — секция Ф5.2 (порог и пределы истории). Она у КАЖДОГО процесса,
+        # в отличие от `broker`, который и проверяет этот тест: обычный процесс не
+        # платит за ОРКЕСТРАТОРСКУЮ добавку — это утверждение, а не «ключей ровно семь».
+        assert set(res) == {
+            "success",
+            "process",
+            "effective",
+            "counters",
+            "provenance",
+            "history",
+            "audit",
+            "layers",
+        }
+
+    def test_broken_hook_does_not_break_the_reading_command(self) -> None:
+        """Читающая команда не падает из-за добавки, но и не молчит о сбое."""
+
+        def _boom():
+            raise RuntimeError("брокер сломан")
+
+        res = self._handler(_boom)({})
+
+        assert res["success"] is True
+        assert "брокер сломан" in res["extra_error"]

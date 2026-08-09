@@ -7,7 +7,7 @@ Grafana health, Erlang observer.
 
 Fan-out на стороне driver'а СУЩЕСТВУЮЩИМИ ручками — ноль новых IPC-команд:
 ``introspect.status`` / ``introspect.router_stats`` / ``introspect.queues`` /
-``introspect.memory`` по каждому процессу из state-топологии
+``introspect.memory`` / ``introspect.observability`` по каждому процессу из state-топологии
 (``state.get_subtree``), плюс ЛОКАЛЬНЫЕ источники без IPC: telemetry read-model
 (fps, supervisor-события) и счётчики самого driver'а (late_replies,
 event_errors, вытеснения из колец B.1).
@@ -87,9 +87,9 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
 
     Returns:
         ``{"success": True, "processes": {name: {ok, status, workers, router,
-        queues, memory_ok, hz, missing?}}, "telemetry": {"fps": {path: value}},
-        "driver": {late_replies, event_errors, watch_resub_errors,
-        events_evicted}, "anomalies": [...], "anomaly_count": N}``. Пустая
+        queues, memory_ok, hz, observability_losses, missing?}},
+        "telemetry": {"fps": {path: value}},
+        "driver": {late_replies, event_errors, events_evicted}, "anomalies": [...], "anomaly_count": N}``. Пустая
         топология (бэкенд не прогрет) → ``processes == {}`` + hint.
 
         Счётчики в ``router`` могут быть ``None`` — «показания нет» (строгий край
@@ -123,6 +123,7 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
                 drv.router_stats(proc, timeout=timeout),
                 drv.queues(proc, timeout=timeout),
                 drv.introspect_memory(proc, timeout=timeout),
+                drv.observability_counters(proc, timeout=timeout),
             )
         except Exception as exc:  # noqa: BLE001 — сбой одного процесса не должен рушить сводку
             return exc
@@ -148,7 +149,7 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
                 }
             )
             continue
-        ws, rs, qd, mem = section
+        ws, rs, qd, mem, obs = section
         # Воркеры — до статус-строки: сводка компактна, детали — get_status.
         workers = {name: (w.get("status") if isinstance(w, dict) else w) for name, w in (ws.workers or {}).items()}
         # Главный перф-сигнал воркеров (effective_hz) сводка теряла, схлопывая их до
@@ -185,6 +186,9 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             "queues": qd.sizes,
             "memory_ok": mem.ok,
             "hz": leading_hz,
+            # 2.V2. Пустой словарь = тишина: ни один класс потери наблюдаемости не
+            # шевельнулся. ``None`` = спросить не удалось, и это НЕ тишина.
+            "observability_losses": obs.nonzero if obs.ok else None,
         }
         if missing_by_source:
             processes[proc]["missing"] = missing_by_source
@@ -213,12 +217,58 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
                     "detail": f"{source}: нет показаний по {', '.join(keys)} ({cause})",
                 }
             )
+        # 2.V2 — тишина в покое как живой инвариант. Ненулевой класс потери
+        # наблюдаемости обязан быть виден ПЕРВОЙ командой сессии, а не только
+        # тесту: резидуал P3 (свежий ErrorManager давал два
+        # unresolved_channel_records в полном покое) прожил незамеченным всю Ф0
+        # именно потому, что спросить об этом снаружи было нечем.
+        #
+        # Флагается ПОЖИЗНЕННОЕ значение, а не прирост, — сознательно иначе, чем
+        # у кумулятивных счётчиков driver'а ниже. Там прирост отделяет «свежую
+        # беду» от «шрама»; здесь шрам не бывает приемлемым: потеря записи
+        # наблюдаемости не залечивается тем, что она случилась давно. Свежесть
+        # видна по самому числу при повторной сводке.
+        for plane, hits in (obs.nonzero or {}).items():
+            detail = ", ".join(f"{key}={value}" for key, value in sorted(hits.items()))
+            anomalies.append(
+                {"kind": "observability_loss", "process": proc, "detail": f"плоскость {plane!r}: {detail}"}
+            )
+        if not obs.ok:
+            anomalies.append(
+                {
+                    "kind": "observability_unavailable",
+                    "process": proc,
+                    "detail": "introspect.observability не ответила — потери плоскостей НЕ проверены",
+                }
+            )
+        elif obs.missing:
+            anomalies.append(
+                {
+                    "kind": "counter_missing",
+                    "process": proc,
+                    "detail": f"observability: нет показаний по {', '.join(obs.missing)} "
+                    "(ручка ответила, форма разошлась)",
+                }
+            )
         if _is_positive(rs.middleware_dropped):
             anomalies.append(
                 {"kind": "router_dropped", "process": proc, "detail": f"middleware_dropped={rs.middleware_dropped}"}
             )
         if _is_positive(rs.errors):
             anomalies.append({"kind": "router_errors", "process": proc, "detail": f"errors={rs.errors}"})
+        # Ф7.х: транспортные потери хвоста наблюдаемости. По замыслу Ф7.3 они
+        # молчат в логах и НЕ растят общий errors (иначе петля Б-6) — значит
+        # аномалия отсюда и есть единственное место, где оператор их увидит
+        # без ручного чтения router_stats (находка Н-3 ревью корзины).
+        obs_transport = {
+            "queue_observability_evicted": rs.queue_observability_evicted,
+            "queue_observability_send_failed": rs.queue_observability_send_failed,
+            "observability_delivery_failed": rs.observability_delivery_failed,
+        }
+        obs_transport_hits = {k: v for k, v in obs_transport.items() if _is_positive(v)}
+        if obs_transport_hits:
+            detail = ", ".join(f"{k}={v}" for k, v in sorted(obs_transport_hits.items()))
+            anomalies.append({"kind": "observability_loss", "process": proc, "detail": f"транспорт хвоста: {detail}"})
         if ws.ok and ws.status not in (None, "running"):
             anomalies.append({"kind": "process_not_running", "process": proc, "detail": f"status={ws.status!r}"})
         for hit in hz_degraded:
@@ -260,7 +310,6 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
     totals = {
         "late_replies": drv.late_replies,
         "event_errors": drv.event_errors,
-        "watch_resub_errors": drv.watch_resub_errors,
     }
     seen = getattr(drv, "_overview_counters_seen", None) or {}
     deltas = {key: value - seen.get(key, 0) for key, value in totals.items()}
@@ -286,13 +335,6 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             {
                 "kind": "event_callback_errors",
                 "detail": f"event_errors +{deltas['event_errors']} (всего {totals['event_errors']})",
-            }
-        )
-    if deltas["watch_resub_errors"] > 0:
-        anomalies.append(
-            {
-                "kind": "watch_resub_errors",
-                "detail": f"watch_resub_errors +{deltas['watch_resub_errors']} (всего {totals['watch_resub_errors']})",
             }
         )
     for plane, evicted in events_evicted.items():

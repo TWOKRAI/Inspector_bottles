@@ -378,3 +378,108 @@ class TestLifecycle:
         info = channel.get_info()
         for key in ("name", "type", "active", "bound", "host", "port", "clients", "rx", "tx"):
             assert key in info
+
+
+class TestSessionClosedSignal:
+    """5.11-R1: разрыв соединения — сигнал держателю подписок, а не только unbind.
+
+    Внешний подписчик адресуется как ``"<sender>.<session>"``; session уникален на
+    соединение. Значит закрытие сокета — единственный сигнал о смерти этого адреса
+    ПО ФАКТУ: реконнект берёт новый session, и старое имя не знает уже никто.
+    Без сигнала мёртвые намерения копятся линейно по реконнектам.
+    """
+
+    def test_closed_session_is_reported_once(self, inbound: List[Dict[str, Any]]) -> None:
+        closed: List[str] = []
+        ch = SocketChannel(
+            "backend_ctl",
+            host="127.0.0.1",
+            port=0,
+            on_inbound=inbound.append,
+            session_isolation=True,
+            on_session_closed=closed.append,
+        )
+        assert ch.start() is True
+        try:
+            a = _connect_nth(ch, 1)
+            _register_session(ch, a, "sid-a", 1)
+            a.close()
+            assert _wait(lambda: closed == ["sid-a"]), f"сигнал о закрытии сессии не пришёл: {closed}"
+        finally:
+            ch.close()
+
+    def test_no_signal_without_bound_session(self, inbound: List[Dict[str, Any]]) -> None:
+        """Соединение без привязанной сессии закрывается тихо — снимать нечего."""
+        closed: List[str] = []
+        ch = SocketChannel(
+            "backend_ctl",
+            host="127.0.0.1",
+            port=0,
+            on_inbound=inbound.append,
+            session_isolation=True,
+            on_session_closed=closed.append,
+        )
+        assert ch.start() is True
+        try:
+            a = _connect_nth(ch, 1)
+            a.close()
+            assert _wait(lambda: ch.get_info()["clients"] == 0)
+            assert closed == [], f"сигнал о несуществующей сессии: {closed}"
+        finally:
+            ch.close()
+
+    def test_failing_handler_does_not_break_the_channel(self, inbound: List[Dict[str, Any]]) -> None:
+        """Колбэк зовут из read-потока: его падение не имеет права убить канал."""
+        ch = SocketChannel(
+            "backend_ctl",
+            host="127.0.0.1",
+            port=0,
+            on_inbound=inbound.append,
+            session_isolation=True,
+            on_session_closed=lambda _sid: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        assert ch.start() is True
+        try:
+            a = _connect_nth(ch, 1)
+            _register_session(ch, a, "sid-a", 1)
+            a.close()
+            assert _wait(lambda: ch.get_info()["sessions"] == 0)
+            # Канал жив: следующий клиент подключается и привязывается.
+            b = _connect_nth(ch, 1)
+            _register_session(ch, b, "sid-b", 1)
+            assert ch.get_info()["sessions"] == 1
+            b.close()
+        finally:
+            ch.close()
+
+    def test_signal_fires_in_the_DEFAULT_mode_too(self, inbound: List[Dict[str, Any]]) -> None:
+        """Без session_isolation — то есть в ШТАТНОЙ конфигурации — сигнал обязан быть.
+
+        Живой прогон 5.11-R1 поймал ровно это: привязка session→сокет велась только
+        при включённой изоляции, а она по умолчанию выключена. Фикс существовал
+        только в режиме, который никто не включает, — и мёртвые намерения копились
+        именно там, где их и замерили. Все остальные тесты этого класса создают
+        канал с ``session_isolation=True`` и дефект пропускали.
+
+        Роли разведены: изоляция отвечает на «кому адресовать», привязка — на
+        «жив ли ещё этот адрес».
+        """
+        closed: List[str] = []
+        ch = SocketChannel(
+            "backend_ctl",
+            host="127.0.0.1",
+            port=0,
+            on_inbound=inbound.append,
+            session_isolation=False,  # ДЕФОЛТ
+            on_session_closed=closed.append,
+        )
+        assert ch.start() is True
+        try:
+            a = _connect_nth(ch, 1)
+            _register_session(ch, a, "sid-default", 1)
+            a.close()
+            assert _wait(lambda: closed == ["sid-default"]), (
+                f"в дефолтном режиме сигнал о закрытии сессии не пришёл: {closed}"
+            )
+        finally:
+            ch.close()

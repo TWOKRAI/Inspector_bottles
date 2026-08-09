@@ -22,13 +22,14 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import platform
 import sys
 from multiprocessing import shared_memory
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Количество коллекций-слотов по умолчанию для перебора имён вида {name}_0 .. {name}_{N-1}
 _MAX_COLL_SCAN = 16

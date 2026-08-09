@@ -13,6 +13,128 @@ if TYPE_CHECKING:
     pass
 
 
+#: Кого команда sink-control имеет право трогать: плоскость → атрибут в services.
+#: WHITELIST, а не резолв по наличию метода. После Ф0.6 ``set_sink_enabled``
+#: живёт в ``ChannelRoutingManager``, и его унаследовал в том числе
+#: ``RouterManager`` — транспорт, а не наблюдаемость. Резолв «любой менеджер с
+#: методом» сделал бы message-канал IPC снимаемым одной командой.
+_SINK_ADDRESSABLE_MANAGERS = {
+    "logger": "logger_manager",
+    "error": "error_manager",
+    "stats": "stats_manager",
+}
+
+#: Плоскость → префикс ключа слоя L3 (Task 5.10.b). Повторяет путь секции в
+#: ``ObservabilityConfig``: логгер держит ``channels`` наверху, младшие
+#: плоскости — внутри своих секций. Одно снятие — одно написание, иначе сброс
+#: и ``persist`` адресовали бы не то, что видно в файле.
+#: Механизм смены для аудита наблюдаемости (Task 5.9) — по одному на КОМАНДУ, а
+#: не одна строка «команда» на всех: в разборе инцидента первым делом отличают
+#: «оператор снял приёмник» от «switch унёс сессию целиком», а обе смены приходят
+#: через один и тот же обработчик.
+_ORIGIN_RELOAD = "command:config.reload"
+_ORIGIN_SWITCH = "switch:broadcast"
+_ORIGIN_SINK = "command:observability.sink"
+_ORIGIN_PERSIST = "command:observability.persist"
+_ORIGIN_TELEMETRY = "command:telemetry.reconfigure"
+
+_SINK_SESSION_PREFIX = {
+    "logger": "channels.",
+    "error": "errors.channels.",
+    "stats": "stats.channels.",
+}
+
+#: Метасимволы, при которых имя приёмника читается как УЗОР (Task 5.4).
+#: Ровно те, что понимает :mod:`fnmatch`. Имя без них в ветку раскрытия не
+#: заходит вовсе — гарантия «точное имя ведёт себя бит-в-бит как прежде» стоит
+#: на одном дешёвом вопросе, а не на совпадении логики двух путей (та же форма,
+#: что у пустой таблицы правил в Ф2.2).
+_SINK_GLOB_METACHARS = "*?["
+
+
+def _sink_catalog(target: Any) -> list[str]:
+    """Каталог имён приёмников плоскости — множество, по которому раскрывается узор.
+
+    Task 5.4. Каталог собирается из ТРЁХ источников, и ни один поодиночке не полон:
+
+      * реестр каналов — то, что поднято прямо сейчас (адресаты ``disable``);
+      * ``config.channels`` — то, что менеджер умеет пересоздать (адресаты
+        ``enable``: снятый приёмник из реестра уже ушёл);
+      * отметки оператора — имена, снятые командой; они и есть главный адресат
+        возврата, а в конфиге младших плоскостей могут не значиться вовсе.
+
+    Каталог называется в отказе при пустом раскрытии: «узор не поймал ничего» без
+    перечня искомого отправляет искать опечатку туда, где её нет.
+    """
+    names: set[str] = set()
+    registry = getattr(target, "_channel_registry", None)
+    reg_names = getattr(registry, "names", None)
+    if callable(reg_names):
+        try:
+            names.update(str(n) for n in reg_names())
+        except Exception:  # noqa: BLE001 — каталог best-effort, как и readback
+            pass
+    channels = getattr(getattr(target, "config", None), "channels", None)
+    if isinstance(channels, dict):
+        names.update(str(n) for n in channels)
+    disabled = getattr(target, "_sinks_disabled_by_operator", None)
+    if isinstance(disabled, set):
+        names.update(str(n) for n in disabled)
+    return sorted(names)
+
+
+def _parse_ttl(args: dict) -> tuple[float | None, str | None]:
+    """Разобрать параметр ``ttl`` команд наблюдаемости (Task 5.8).
+
+    Returns:
+        ``(секунды | None, причина отказа | None)``. ``None`` в первом элементе
+        при отсутствии ошибки означает «срок не задан» — то есть взять политику
+        слоёв, а НЕ «бессрочно»: бессрочность запрашивается явным ``ttl=0``.
+    """
+    if "ttl" not in args or args.get("ttl") is None:
+        return None, None
+    from ..configs.observability_layers import validate_ttl
+
+    try:
+        return validate_ttl(args.get("ttl")), None
+    except ValueError as exc:
+        return None, str(exc)
+
+
+#: Что разрешено уехать через IPC как есть. Всё остальное — в ``repr``.
+_BOUNDARY_SCALARS = (str, int, float, bool, type(None))
+
+#: Насколько глубоко разбирать вложенность записи. Глубже — ``repr``: лог-запись
+#: не дерево, а плоский словарь с одним уровнем ``extra``, и неограниченная
+#: рекурсия по чужим данным дороже пользы.
+_BOUNDARY_MAX_DEPTH = 4
+
+
+def _boundary_safe(value: Any, depth: int = 0) -> Any:
+    """Привести значение к сериализуемому виду перед отправкой через IPC.
+
+    Находка ревью 2.9, воспроизведена: ``logger.sink.tail`` отдавал сырой
+    ``extra`` записи, и ОДНА запись с несериализуемым объектом
+    (``logger.info(..., lock=threading.Lock())``) роняла pickle всего ответа —
+    ``TypeError: cannot pickle '_thread.lock' object``. Оператор при этом видел
+    отказ транспорта, далеко от причины, и терял весь хвост, а не одно поле.
+
+    Публичный API логирования принимать объекты в ``extra`` не запрещает, и
+    запрещать поздно — значит чинить на границе, где правило и живёт («Dict at
+    Boundary»). Незнакомое значение заменяется на ``repr``: для разбора инцидента
+    строка полезнее отсутствующего ответа.
+    """
+    if isinstance(value, _BOUNDARY_SCALARS):
+        return value
+    if depth >= _BOUNDARY_MAX_DEPTH:
+        return repr(value)
+    if isinstance(value, dict):
+        return {str(key): _boundary_safe(item, depth + 1) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_boundary_safe(item, depth + 1) for item in value]
+    return repr(value)
+
+
 class BuiltinCommands:
     """Встроенные команды ProcessModule через IProcessServices.
 
@@ -65,20 +187,27 @@ class BuiltinCommands:
             if not services.worker_manager:
                 return {"success": False, "reason": "worker_manager недоступен"}
             services.worker_manager.pause_all_workers(exclude_system=True)
-            # Обновляем статус — он попадёт в следующий heartbeat
-            services._current_process_status = "paused"
+            # Ф6.х.7г: обе плоскости статуса разом (heartbeat И PSR) + enum
+            # вместо голого литерала — правило перехода в RUNNING (run()).
+            from multiprocess_framework.modules.base_manager.types import ProcessStatus
+
+            services.update_process_state(status=ProcessStatus.PAUSED.value)
+            services._current_process_status = ProcessStatus.PAUSED.value
             services._log_info(f"Процесс '{services.name}' переведён в паузу", module="lifecycle")
-            return {"success": True, "status": "paused"}
+            return {"success": True, "status": ProcessStatus.PAUSED.value}
 
         def resume_all_handler(data=None, **kwargs) -> dict:
             """Возобновить все прикладные воркеры."""
             if not services.worker_manager:
                 return {"success": False, "reason": "worker_manager недоступен"}
             services.worker_manager.resume_all_workers(exclude_system=True)
-            # Возвращаем статус "running"
-            services._current_process_status = "running"
+            # Ф6.х.7г: см. pause_all_handler — обе плоскости, enum.
+            from multiprocess_framework.modules.base_manager.types import ProcessStatus
+
+            services.update_process_state(status=ProcessStatus.RUNNING.value)
+            services._current_process_status = ProcessStatus.RUNNING.value
             services._log_info(f"Процесс '{services.name}' возобновлён", module="lifecycle")
-            return {"success": True, "status": "running"}
+            return {"success": True, "status": ProcessStatus.RUNNING.value}
 
         cm.register_command(
             "worker.pause_all",
@@ -400,6 +529,11 @@ class BuiltinCommands:
                 self._cmd_introspect_telemetry,
                 "Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval)",
             ),
+            (
+                "introspect.observability",
+                self._cmd_introspect_observability,
+                "Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor)",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
@@ -639,6 +773,175 @@ class BuiltinCommands:
             pass
         return result
 
+    def _cmd_introspect_observability(self, data=None, **kwargs) -> dict:
+        """Плоскости наблюдаемости процесса: что настроено и что уже потеряно.
+
+        Ф0.3. До этой команды счётчики логгера/ошибок/статистики наружу не выходили
+        вовсе (``get_stats()`` читали только тесты) — потолок буфера и пол ошибок
+        были бы очередным невидимым сигналом. Две секции:
+
+          - ``effective`` — readback конфигурации (пороги скоупов, каталог, активные
+            каналы). Та же функция, что отдаёт readback у ``config.reload``;
+          - ``counters`` — потери: ``buffer.pending`` / ``buffer.dropped_by_channel``
+            (медленный сток) и ``errors_to_floor`` (ошибка не дошла ни до одного канала);
+          - ``provenance`` (Task 5.12) — слой-победитель у КАЖДОГО действующего ключа:
+            ``framework`` | ``app`` | ``recipe`` | ``session``, с конкретным файлом-
+            источником там, где он известен. Четыре слоя без ответа на «почему у меня
+            INFO» превращают отладку в полдня — поэтому это не украшение секции, а
+            условие, при котором слои вообще имеет смысл вводить;
+          - ``layers`` — что именно держит сессия (L3) прямо сейчас;
+          - ``audit`` (Task 5.9) — хвост смен наблюдаемости: *когда* и *чем*
+            (командой, правкой файла, подметальщиком, ``switch``), включая
+            неудавшиеся. Провенанс отвечает «каким слоём задан ключ», аудит —
+            «когда это сделали и что из этого не получилось»; без второго
+            вопроса первый не закрывает инцидент.
+
+        Не мутирует состояние: только чтение живых менеджеров и стека слоёв.
+        Аудит эта команда, соответственно, не пополняет — читающая команда,
+        оставляющая след, сделала бы журнал шумом о самом себе.
+
+        **Оговорка про ``flush`` (сверено ревью Ф5, корзина 2 п.11).** «Не мутирует»
+        сказано про КОНФИГУРАЦИЮ и про аудит, и это точно. Но параметр ``flush``
+        доступен любому клиенту и дожимает буферы менеджеров — то есть меняет
+        ТАЙМИНГИ батчинга наблюдаемой системы, хотя и не её настройки. Поэтому он
+        выключен по умолчанию (панель GUI опрашивает эту команду постоянно, и flush
+        на каждом опросе менял бы политику батчинга наблюдаемого процесса), а просят
+        его только те, кому нужен когерентный снимок счётчиков: ``config.reload`` и
+        оба замера ``config_reload_verified``.
+
+        ``audit_limit`` — сколько последних записей вернуть (по умолчанию 20:
+        ответ команды не должен раздуваться до всего кольца). ``dropped`` в
+        ответе отличает «аудит полон» от «смен не было».
+        """
+        from ..configs.observability_layers import (
+            process_observability_layers,
+            recipe_defaults_apply_to,
+        )
+        from ..managers.observability_reload import (
+            observability_counters,
+            observability_effective,
+            observability_provenance,
+        )
+
+        from ..managers.observability_ttl import ttl_report
+
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        logger = getattr(svc, "logger_manager", None)
+        error = getattr(svc, "error_manager", None)
+        stats = getattr(svc, "stats_manager", None)
+        layers = process_observability_layers(svc)
+        try:
+            audit_limit = int(args.get("audit_limit", 20))
+        except (TypeError, ValueError):
+            audit_limit = 20
+        # Task 5.11: оркестраторская добавка (секция брокера подписки). Хук, а не
+        # ветка «если это PM»: process_module не обязан знать, кто над ним, — тот
+        # же приём, что у `capabilities_extra`. Процесс без хука отдаёт прежний
+        # ответ бит-в-бит.
+        extra: dict = {}
+        extra_fn = getattr(svc, "observability_introspect_extra", None)
+        if callable(extra_fn):
+            try:
+                extra = dict(extra_fn() or {})
+            except Exception as exc:  # noqa: BLE001 — читающая команда не падает из-за добавки
+                extra = {"extra_error": str(exc)}
+        # Ф2.6, шаг 6: разбор конкретного имени по запросу. Секция появляется ТОЛЬКО
+        # когда её попросили: панель GUI дёргает эту команду постоянно, и разбор на
+        # каждом опросе раздувал бы ответ ради данных, которых никто не читает.
+        # Принимается и одно имя, и список — оператор чаще сравнивает два соседних
+        # источника, чем смотрит один.
+        resolved: dict = {}
+        asked = args.get("resolve")
+        if asked is not None and callable(getattr(logger, "resolve_rule", None)):
+            names = [asked] if isinstance(asked, str) else list(asked)
+            for candidate in names:
+                resolved[str(candidate)] = logger.resolve_rule(str(candidate))
+
+        return {
+            "success": True,
+            "process": svc.name,
+            "effective": observability_effective(logger=logger, error=error, stats=stats),
+            **({"resolve": resolved} if resolved else {}),
+            # `flush` (Task 5.7) — просьба о КОГЕРЕНТНОМ снимке: дожать буферы,
+            # чтобы «записано» включало всё уже эмитированное. По умолчанию
+            # выключен: панель GUI опрашивает эту команду постоянно, и flush на
+            # каждом опросе менял бы политику батчинга наблюдаемой системы.
+            # `hub` (Ф7.2): потери ObservabilityHub считались и наружу не выходили.
+            "counters": observability_counters(
+                logger=logger,
+                error=error,
+                stats=stats,
+                hub=getattr(svc, "_observability_hub", None),
+                flush=bool(args.get("flush")),
+            ),
+            "provenance": observability_provenance(layers, logger=logger),
+            # Ф5.2: политика истории — порог записи и пределы ретеншена, плюс
+            # сколько строк лежит сейчас. Без readback'а ручка неотличима от
+            # сломанной: «вкладка пуста» одинаково выглядит и при высоком пороге,
+            # и при неподнятом сторе, и лечится это по-разному.
+            **self._history_report(),
+            "audit": layers.audit.view(audit_limit),
+            **extra,
+            "layers": {
+                "session_keys": list(layers.session_keys()),
+                "app_source": layers.app_source,
+                "recipe_source": layers.recipe_source,
+                # Task 5.13: действует ли на ЭТОТ процесс оптовый ключ рецепта
+                # (`defaults` и короткая форма). У оркестратора — нет, и без
+                # этого поля `provenance` показывал бы у него `layer=app` там,
+                # где у соседа `layer=recipe`, не объясняя почему. Значение
+                # берётся из того же `recipe_defaults_apply_to`, которым правило
+                # и исполняется: два источника разошлись бы, и readback начал бы
+                # описывать не то, что происходит.
+                "recipe_defaults_applied": recipe_defaults_apply_to(svc.name),
+                # Task 5.8: сроки правок, действующая политика, идёт ли подметальщик
+                # и последние авто-возвраты. Без последнего пункта «а куда делся мой
+                # DEBUG» отвечается только чтением файла лога.
+                **ttl_report(svc, layers),
+            },
+        }
+
+    def _history_report(self) -> dict:
+        """Секция ``history`` ответа ``introspect.observability`` (Ф5.2).
+
+        Отвечает на вопрос, который вкладка «Логи» задаёт первым: **почему тут
+        пусто**. Три разных причины дают одну и ту же пустоту — стор не поднят,
+        порог выше пишущих записей, ретеншен уже срезал, — и различить их можно
+        только этими полями.
+
+        Стора нет → секция говорит именно это, а не молчит: у процесса без воркеров
+        (а значит без hub'а) истории нет ПО ПОСТРОЕНИЮ, и молчание отправило бы
+        искать поломку там, где её нет.
+        """
+        svc = self._services
+        store = getattr(svc, "_observability_store", None)
+        policy = getattr(svc, "_observability_history_policy", None)
+        if store is None:
+            return {
+                "history": {
+                    "enabled": False,
+                    "reason": (
+                        "у процесса нет стора истории — он заводится вместе с hub'ом, то есть у процесса с воркерами"
+                    ),
+                }
+            }
+        report: dict = {"enabled": True, "db_path": getattr(store, "db_path", "")}
+        if isinstance(policy, dict):
+            report.update(
+                {
+                    "level": policy.get("level"),
+                    "max_rows": policy.get("max_rows"),
+                    "max_age_sec": policy.get("max_age_sec"),
+                    "purge_interval_sec": policy.get("purge_interval_sec"),
+                }
+            )
+        try:
+            report["rows"] = {kind: store.count(kind) for kind in ("log", "error", "stats")}
+        except Exception as exc:  # noqa: BLE001 — читающая команда не падает из-за счёта
+            report["rows_error"] = str(exc)
+        return {"history": report}
+
     def _cmd_introspect_queues(self, data=None, **kwargs) -> dict:
         """Глубины собственных очередей процесса (backpressure-диагностика).
 
@@ -789,10 +1092,10 @@ class BuiltinCommands:
         - ``publish`` — эффективная секция живого gate (``TelemetryPublishConfig.to_dict``):
           ровно то, из чего gate принимает решения;
         - ``resolved`` — развёрнутое ``{metric: {enabled, interval_sec}}`` по ВСЕМ
-          :data:`GATED_METRICS` с уже применённым наследованием ``default_interval_sec``.
+          каталога :func:`gated_metrics` с уже применённым наследованием ``default_interval_sec``.
           Отвечает на вопрос оператора «а fps сейчас публикуется?» без пересчёта правил
           в голове;
-        - ``unknown_metrics`` — ключи ``metrics``, которых нет в ``GATED_METRICS``
+        - ``unknown_metrics`` — ключи ``metrics``, которых нет в каталоге метрик
           (опечатка вида ``latency`` вместо ``latency_ms``);
         - ``gated_metrics`` — каталог известных метрик (справочник против опечаток);
         - ``throttle_rules`` — правила ЦЕНТРАЛЬНОГО store-троттла, если процесс их
@@ -802,7 +1105,7 @@ class BuiltinCommands:
         Best-effort по образцу ``introspect.memory``: недоступная подсистема → ``None``
         в своей секции, а не ошибка всей команды.
         """
-        from ..configs.telemetry_publish_config import GATED_METRICS
+        from ..configs.telemetry_publish_config import gated_metrics
 
         svc = self._services
         heartbeat = getattr(svc, "_heartbeat", None)
@@ -814,7 +1117,7 @@ class BuiltinCommands:
             "publish": None,
             "resolved": None,
             "unknown_metrics": [],
-            "gated_metrics": list(GATED_METRICS),
+            "gated_metrics": list(gated_metrics()),
             "throttle_rules": None,
         }
 
@@ -848,13 +1151,13 @@ class BuiltinCommands:
         """Развернуть эффективную секцию в ``{metric: {enabled, interval_sec}}``.
 
         Наследование ``default_interval_sec`` считает сам конфиг (``resolve``) — здесь
-        только обход :data:`GATED_METRICS`, чтобы читатель видел итог, а не правила.
+        только обход каталога :func:`gated_metrics`, чтобы читатель видел итог, а не правила.
         """
-        from ..configs.telemetry_publish_config import GATED_METRICS, TelemetryPublishConfig
+        from ..configs.telemetry_publish_config import TelemetryPublishConfig, gated_metrics
 
         config = TelemetryPublishConfig.from_dict(publish)
         out: dict = {}
-        for metric in GATED_METRICS:
+        for metric in gated_metrics():
             enabled, interval = config.resolve(metric)
             out[metric] = {"enabled": bool(enabled), "interval_sec": float(interval)}
         return out
@@ -869,7 +1172,7 @@ class BuiltinCommands:
 
         IPC-двойник hot-reload watcher'а (тот живёт в оркестраторе, эти команды
         адресуются ЛЮБОМУ процессу). Оба пути идут через один
-        ``apply_observability_reconfigure`` → ``reconfigure`` — не конфликтуют.
+        ``apply_observability_layers`` → ``reconfigure`` — не конфликтуют.
         """
         cm = self._services.command_manager
         if not cm:
@@ -886,15 +1189,41 @@ class BuiltinCommands:
                 self._cmd_telemetry_reconfigure,
                 "Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)",
             ),
+            # Task 5.10.e: каноническое имя называет ОХВАТ. Команда адресует три
+            # плоскости параметром `manager` с Ф0.6, а имя всё это время
+            # называло одну — оператор искал ручку для ошибок под `error.*` и не
+            # находил. Старые имена оставлены живыми алиасами (ниже): они
+            # записаны в сохранённых сессиях драйвера и в MCP-инструментах, и
+            # ломать их ради красоты имени было бы ценой не по покупке.
+            (
+                "observability.sink.enable",
+                self._cmd_logger_sink_enable,
+                "Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)",
+            ),
+            (
+                "observability.sink.disable",
+                self._cmd_logger_sink_disable,
+                "Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)",
+            ),
+            (
+                "observability.sink.tail",
+                self._cmd_logger_sink_tail,
+                "Прочитать последние N записей приёмника, хранящего их у себя (type=memory)",
+            ),
             (
                 "logger.sink.enable",
                 self._cmd_logger_sink_enable,
-                "Включить sink логгера по имени (register_channel)",
+                "Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)",
             ),
             (
                 "logger.sink.disable",
                 self._cmd_logger_sink_disable,
-                "Выключить sink логгера по имени (unregister_channel)",
+                "Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)",
+            ),
+            (
+                "logger.sink.tail",
+                self._cmd_logger_sink_tail,
+                "Алиас observability.sink.tail (имя до 5.10)",
             ),
             (
                 "log.tail.subscribe",
@@ -905,6 +1234,11 @@ class BuiltinCommands:
                 "log.tail.unsubscribe",
                 self._cmd_log_tail_unsubscribe,
                 "Снять подписку на tail логов процесса",
+            ),
+            (
+                "observability.persist",
+                self._cmd_observability_persist,
+                "Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)",
             ),
             (
                 "observability.tail.subscribe",
@@ -927,16 +1261,31 @@ class BuiltinCommands:
     def _cmd_config_reload(self, data=None, **kwargs) -> dict:
         """Перечитать/применить секции observability И/ИЛИ telemetry (Ф1 Task 1.4 + PC 3.1).
 
+        Task 5.12 — **у секции observability теперь есть слой-адресат**, и он разный
+        у двух намерений, которые исторически носила одна команда:
+
+          * **inline** ``data["observability"]`` = «примени вот это сейчас» — ручка
+            оператора, пишет в **L3 (сессия)**. Поэтому она переживает последующий
+            ``config.reload`` из файла: файл владеет L1, не L3. ``data["persist"]``
+            зарезервирован под запись в рецепт (задача 5.12.f) и **пока НЕ реализован:
+            команда на него отказывает**. Молча принятый флаг был ловушкой — оператор
+            уходил уверенным, что записал правку навсегда, а она лежала в L3 со сроком
+            и исчезала сама. Постоянную запись делает ``observability.persist``;
+          * **файл** = «перечитай источники» — заменяет **L1**, оставляя L2 (дельта
+            рецепта) и L3 (сессию) на месте, и пересобирает конфиг из слоёв.
+
+        ``data["observability_reset"]`` — список ключей (``"log_level"``,
+        ``"channels.messages_file.enabled"``), которые надо УДАЛИТЬ из L3. Удалить,
+        а не присвоить прежнее значение: присвоение порвало бы связь с нижним слоем
+        навсегда — поменяется дефолт, а сессия продолжит держать старое число.
+
         Источник секций (по приоритету):
-          1. inline: ``data["observability"]`` и/или ``data["telemetry"]`` (dict) —
-             напр. ``{"observability": {"log_level": "DEBUG"}}`` (сменить уровень логгера)
-             или ``{"telemetry": {"publish": {"metrics": {"fps": {"enabled": false}}}}}``
-             (выключить метрику fps на лету через driver);
+          1. inline: ``data["observability"]`` и/или ``data["telemetry"]`` (dict);
           2. файл конфига по ``data["path"]`` / ``get_config("observability_config_path")``
              (тот же путь, что читает hot-reload watcher) — читаются ОБЕ секции.
 
         Применение делегируется в единые идемпотентные пути:
-        ``apply_observability_reconfigure`` (Logger/Error/Stats) и (PC 3.1)
+        ``apply_observability_layers`` (Logger/Error/Stats, пересборка из слоёв) и (PC 3.1)
         ``apply_telemetry_reconfigure`` (publisher-gate процесса + центральный троттл
         оркестратора). Один ``config.reload`` может нести ОБЕ секции — применяются обе,
         не конфликтуя (тот же приём достаёт менеджеры/heartbeat/store из контекста svc).
@@ -947,16 +1296,106 @@ class BuiltinCommands:
         args = self._merge_args(data, kwargs)
         svc = self._services
 
+        # `persist` зарезервирован докстрингом и НЕ реализован. Пока это так —
+        # отказ, а не молчаливое игнорирование (корзина 2 п.10 ревью Ф5).
+        # Принятый и выброшенный флаг — ложный сигнал: оператор уходит уверенным,
+        # что записал правку в рецепт, а она лежит в L3 со сроком и исчезает сама.
+        # Постоянная запись существует, её делает `observability.persist`, и отказ
+        # обязан назвать её — иначе он сообщает о проблеме, но не о выходе.
+        # Проверка стоит ДО любой записи в слой: «отказано, но всё-таки записано»
+        # было бы вторым костылём поверх первого.
+        if args.get("persist"):
+            return {
+                "success": False,
+                "reason": (
+                    "persist в config.reload не реализован (ключ зарезервирован): правка легла бы "
+                    "в слой сессии со сроком и исчезла. Постоянную запись делает команда "
+                    "observability.persist — она пишет спутник рецепта"
+                ),
+            }
+
         obs_section = args.get("observability")
         telemetry_section = args.get("telemetry")  # PC 3.1 (inline)
         source = "inline"
+        obs_reset = args.get("observability_reset") or []
+        # switch рецепта = новая сессия: L3 обязан обнулиться У ВСЕХ разом. Иначе
+        # выжившие (protected) процессы сохранят ручки, пересозданные — потеряют,
+        # и система окажется в лоскутном состоянии, где introspect соседей врёт
+        # по-разному. Отдельный флаг, а не «сбросить перечисленное»: инициатор
+        # switch не знает и не обязан знать, что именно держит каждый процесс.
+        obs_clear = bool(args.get("observability_session_clear"))
+        # R6: switch несёт не только «забудь ручки», но и НОВЫЙ слой рецепта.
+        # Живьём (2026-07-29) без этого переживший switch protected-процесс
+        # продолжал крутить секцию ПРЕЖНЕГО рецепта, а пересозданный сосед —
+        # секцию текущего: соседи расходились в ответе на «что говорит активный
+        # рецепт». `None` = «switch про слой L2 молчит» (обычный reload), `{}` =
+        # «новый рецепт молчит про наблюдаемость» — и это разные вещи.
+        obs_recipe = args.get("observability_recipe")
+        obs_recipe_path = args.get("observability_recipe_path")
+        obs_recipe_given = isinstance(obs_recipe, dict) or bool(obs_recipe_path)
+        # R4 (Task 5.11.f): «перечитай слой L2 со СВОЕГО адреса» — зеркало файловой
+        # ветки для L1. Watcher за спутником живёт только у оркестратора (детям
+        # своих watcher'ов не заводим — один наблюдатель на файл), и до 5.11 правка
+        # спутника доезжала только до менеджеров оркестратора: дети узнавали о ней
+        # лишь на следующем рестарте. Тело слоя собирает ТА ЖЕ функция, что и boot.
+        obs_recipe_refresh = bool(args.get("observability_recipe_reload"))
+        # Сброс — тоже повод пересобрать: без этого «удали ключ» ничего бы не изменило
+        # до следующего reload, то есть команда молча откладывала бы свой эффект.
+        obs_requested = (
+            isinstance(obs_section, dict) or bool(obs_reset) or obs_clear or obs_recipe_given or obs_recipe_refresh
+        )
+        # Замечание 2 ревью 5.10: режим проверяется ЗДЕСЬ, до любой записи в слой.
+        # Прежде его судил только `_apply_telemetry_section`, а ветка observability
+        # вливала publish в слой раньше неё — и `telemetry_mode="bogus"` вместе с
+        # секцией observability проходил как успех. Task 1.2 finding-1 воскресала
+        # на одном пути из трёх, то есть отказ зависел от соседней секции.
+        telemetry_mode = str(args.get("telemetry_mode", "replace"))
+        if isinstance(telemetry_section, dict):
+            from ..managers.telemetry_reload import VALID_MODES
+
+            if telemetry_mode not in VALID_MODES:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "mode": telemetry_mode,
+                    "reason": f"неизвестный режим {telemetry_mode!r}; допустимы {'|'.join(VALID_MODES)}",
+                }
+            # Замечание 1 ревью 5.10, второй путь: срок без единого адресата в
+            # слоях (нет observability-секции и нет publish) молча пропадал бы.
+            if args.get("ttl") is not None and not obs_requested and "publish" not in telemetry_section:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "reason": (
+                        "ttl нечему адресовать: нет ни inline-секции observability, ни telemetry.publish; "
+                        "throttle — центральная политика оркестратора, срока у неё нет"
+                    ),
+                }
+        # Task 5.8: срок жизни inline-правки. Проверяем до применения — команда с
+        # опечаткой в ttl не имеет права применить секцию и «заодно» отказать.
+        ttl, ttl_error = _parse_ttl(args)
+        if ttl_error is not None:
+            return {"success": False, "process": svc.name, "reason": ttl_error}
 
         # Файловый фолбэк — только если НИ ОДНОЙ секции нет inline (прежнее поведение +
         # telemetry из того же файла).
-        if not isinstance(obs_section, dict) and not isinstance(telemetry_section, dict):
-            path = args.get("path") or (
-                svc.get_config("observability_config_path") if hasattr(svc, "get_config") else None
-            )
+        if not obs_requested and not isinstance(telemetry_section, dict):
+            from ..configs.observability_layers import read_process_config
+
+            # Замечание 2 ревью 5.8: файл владеет L1 — бессрочным слоем, и срок к
+            # нему неприменим. Прежняя редакция принимала ttl и молча его теряла:
+            # оператор уходил с уверенностью, что правка временная, а она вечная.
+            # Отказ ДО чтения файла — ничего не применено.
+            if ttl is not None:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "reason": (
+                        "ttl применим только к inline-секции observability (слой сессии); "
+                        "reload из файла заменяет слой приложения, у которого срока нет"
+                    ),
+                }
+            path = args.get("path") or read_process_config(svc, "observability_config_path")
             if not path:
                 return {"success": False, "reason": "нет секции observability/telemetry и пути к конфигу"}
             try:
@@ -974,7 +1413,12 @@ class BuiltinCommands:
             # из сохранённой ассемблером сырой дельты (telemetry_override), иначе reload
             # молча терял бы per-process настройку метрик (boot ≠ reload).
             if isinstance(telemetry_section, dict):
-                override = svc.get_config("telemetry_override") if hasattr(svc, "get_config") else None
+                # Живая находка 5.12: на ДЕТЯХ конфиг едет целым proc_dict, и плоское
+                # чтение возвращало None — то есть починка находки C (задача 2.2)
+                # работала только на оркестраторе. Читаем тем же устойчивым способом.
+                from ..configs.observability_layers import read_process_config as _read_cfg
+
+                override = _read_cfg(svc, "telemetry_override")
                 if override:
                     from ...data_schema_module import deep_merge
 
@@ -982,66 +1426,434 @@ class BuiltinCommands:
                     telemetry_section["publish"] = deep_merge(telemetry_section.get("publish") or {}, override)
 
         result: dict = {"success": True, "process": svc.name, "source": source}
+        # Секцию телеметрии в слой вливает РОВНО ОДНА из двух веток ниже. Флаг, а
+        # не «нет ли поля в ответе»: пустой результат применения — законный
+        # (получателей нет), и по его отсутствию вторая ветка влила бы ту же
+        # секцию повторно.
+        telemetry_layered = False
 
-        # --- observability (если задана inline или из файла) ---
-        if isinstance(obs_section, dict):
+        # --- observability (если задана inline, сброшена или прочитана из файла) ---
+        if obs_requested or (source != "inline" and isinstance(obs_section, dict)):
+            from ..configs.observability_layers import LAYER_APP, process_observability_layers
             from ..managers.observability_reload import (
-                apply_observability_reconfigure,
+                apply_observability_layers,
+                observability_counters,
                 observability_effective,
+                telemetry_targets,
             )
 
+            layers = process_observability_layers(svc)
             _logger = getattr(svc, "logger_manager", None)
             _error = getattr(svc, "error_manager", None)
             _stats = getattr(svc, "stats_manager", None)
-            try:
-                expanded = apply_observability_reconfigure(
-                    obs_section,
-                    logger=_logger,
-                    error=_error,
-                    stats=_stats,
-                    log_info=getattr(svc, "_log_info", None),
-                )
-            except Exception as exc:  # noqa: BLE001
-                return {"success": False, "reason": f"reconfigure failed: {exc}"}
-            result["applied"] = {"log_level": expanded["logger"].get("default_level")}
+
+            # Task 5.5: ссылки, за которыми нет приёмника. Ответ РАЗНЫЙ по месту, и
+            # это не вкус:
+            #   * inline — ручка оператора, имя написано руками → отказ ДО любой
+            #     записи в слой, состояние не изменилось. Узнать об опечатке через
+            #     час по отсутствию логов дороже, чем сейчас;
+            #   * файл/рецепт/switch → применить остальное и сказать ВСЛУХ. Отказ
+            #     здесь означал бы, что опечатка в спутнике валит switch рецепта.
+            # Известные имена считаются ДО применения: после него опечатка уже в
+            # конфиге, и «известное» включало бы её саму.
+            #
+            # ФР-2: и расчёт сирот, и громкая строка теперь живут в
+            # `observability_refs` — здесь остаётся только выбор политики. Прежде
+            # они были написаны ЗДЕСЬ, и потому существовали лишь на этой дороге:
+            # соседние ветки того же обработчика (конверт switch'а, перечитка
+            # спутника) клали тело в слой молча.
+            from ..configs.observability_refs import (
+                format_unknown_refs,
+                merge_unknown_refs,
+                report_unknown_refs,
+                unknown_refs_for,
+            )
+
+            if source == "inline":
+                _unknown_refs = unknown_refs_for(svc, obs_section)
+                if _unknown_refs:
+                    return {
+                        "success": False,
+                        "process": svc.name,
+                        "reason": format_unknown_refs(_unknown_refs),
+                        "unknown_refs": _unknown_refs,
+                    }
+            else:
+                _unknown_refs = report_unknown_refs(svc, obs_section, source=source)
+                if _unknown_refs:
+                    result["unknown_refs"] = _unknown_refs
+
+            # Блокер ревью 5.8: правка слоя и её применение — ОДИН критический
+            # блок. Прежняя редакция считала `deep_merge(layers.session, ...)` и
+            # присваивала результат вне лока; подметальщик, попавший в этот зазор,
+            # получал результат, где просроченный ключ ВОСКРЕС — и уже без срока
+            # (его `session_touch` не касался). Журнал при этом объявлял возврат,
+            # то есть врал, а снятый приёмник оставался снятым навсегда. RLock
+            # реентерабелен, и `apply_observability_layers` берёт его же изнутри.
+            with layers.lock:
+                if source == "inline":
+                    # Ручка оператора пишет в СЕССИЮ (L3), не в L1: иначе следующий
+                    # файловый reload молча стирал бы её — ровно та живая находка,
+                    # ради которой заведена эта задача.
+                    if isinstance(obs_section, dict):
+                        from ..configs.observability_layers import flatten_section, layer_merge
+
+                        # Секция мержится целиком, минуя `session_set`: запись в
+                        # аудит за неё кладёт `session_touch` ниже — он и есть
+                        # место, где ключи этой правки перечисляются поимённо.
+                        # Мерж — `layer_merge` (правило Г3): присланная дельта новее
+                        # того, что уже в сессии, и её `{}` — владение. С каноном
+                        # оператор не мог СНЯТЬ то, что сам же поставил минуту назад:
+                        # `{"scopes": {}}` молча наследовал прошлую правку.
+                        held = set(flatten_section(layers.session).keys())
+                        layers.session = layer_merge(layers.session, obs_section)
+                        # Владение пустотой РОНЯЕТ листья сессии — путь, которого при
+                        # каноническом мерже не существовало (тот только добавлял), и
+                        # потому сроки за ним не убирались. Найдено гейтом корзины 2.1:
+                        # снятый ключ уносил своё значение, но оставлял свой дедлайн, и
+                        # readback обещал оператору возврат правки, которой больше нет.
+                        # Приём тот же, что на пути `telemetry replace` выше: снять
+                        # сроки и назвать снятое В ТОЙ ЖЕ записи аудита.
+                        shadowed = sorted(held - set(flatten_section(layers.session).keys()))
+                        if shadowed:
+                            layers.session_forget_expiry(shadowed)
+                        # Task 5.8: срок ставится КЛЮЧАМ ЭТОЙ правки, а не всей сессии —
+                        # иначе одна команда продлевала бы жизнь чужим, давно забытым
+                        # ручкам, и «включил DEBUG и забыл» вернулось бы через заднюю дверь.
+                        touched = layers.session_touch(
+                            flatten_section(obs_section).keys(),
+                            ttl,
+                            origin=_ORIGIN_RELOAD,
+                            removed=shadowed or None,
+                        )
+                        result["ttl_sec"] = touched
+                else:
+                    # Файл — источник L1. L2 (дельта рецепта) и L3 (сессия) остаются:
+                    # файл про них ничего не знает и не имеет права их отменять.
+                    layers.replace_layer(LAYER_APP, obs_section, source=source, origin=_ORIGIN_RELOAD)
+
+                # R6: новый слой L2 въезжает ДО сброса сессии — порядок «слои
+                # снизу вверх». Пересборка ниже одна на оба изменения: два
+                # применения подряд дали бы промежуточный конфиг, которого ни
+                # один слой не описывает.
+                if obs_recipe_given:
+                    from ..configs.observability_layers import (
+                        LAYER_RECIPE,
+                        OVERRIDE_CONFIG_KEY,
+                        RECIPE_PATH_CONFIG_KEY,
+                        resolve_recipe_section,
+                    )
+
+                    # Содержимое слоя меняет ТОЛЬКО присланная секция. Адрес без
+                    # секции — это «рецепт переехал», а не «рецепт опустел»:
+                    # `resolve_recipe_section(None, …)` вернул бы `{}`, и одинокий
+                    # ретаргет молча стирал бы настройки конвейера (ревью R6,
+                    # находка 1: `config.reload` с одним путём уводил WARNING→INFO).
+                    body = (
+                        resolve_recipe_section(obs_recipe, svc.name) if isinstance(obs_recipe, dict) else layers.recipe
+                    )
+                    # Адрес рецепта — отдельный факт от содержимого слоя:
+                    # `recipe_source` после первого `persist` указывает на
+                    # СПУТНИК, а `observability.persist` спрашивает, где лежит
+                    # РЕЦЕПТ. Живьём (R6) без этой строки «сохранить» после
+                    # switch писало спутник рецепта, с которого ушли.
+                    update_config = getattr(svc, "update_config", None)
+                    if obs_recipe_path and callable(update_config):
+                        update_config(RECIPE_PATH_CONFIG_KEY, str(obs_recipe_path))
+                        result["recipe_path"] = str(obs_recipe_path)
+                    # Находка 1 ревью 5.11: вместе с адресом обязана переехать и
+                    # БАЗА слоя. `OVERRIDE_CONFIG_KEY` — долька L2 этого процесса,
+                    # и её читает `compose_recipe_layer`, когда слой пересобирают
+                    # с диска (R4). Оставь мы здесь дольку ПОКИНУТОГО рецепта —
+                    # первая же правка спутника нового воскресила бы ключи
+                    # старого: воспроизведено на пережившем switch процессе
+                    # (`log_level: WARNING` рецепта A всплыл при активном B,
+                    # который про наблюдаемость молчит). Инвариант простой:
+                    # ключ описывает ДЕЙСТВУЮЩУЮ дольку рецепта, всегда.
+                    # Спутник сюда не пишется намеренно — иначе снятый из него
+                    # ключ въехал бы в базу и не исчез бы уже никогда.
+                    #
+                    # ФР-3: до неё утверждение было верным только здесь. Спутник
+                    # въезжал в базу РАНЬШЕ, у отправителя: PM домерживал его в
+                    # конверт switch'а, а прототип — в секцию рецепта на boot и
+                    # на пересборке. То есть `body` ниже уже нёс спутника, и
+                    # комментарий описывал инвариант, нарушенный на главной
+                    # прод-дороге. Теперь конверт везёт только рецепт, и спутник
+                    # кладётся ровно строкой ниже — поверх базы, а не в неё.
+                    if callable(update_config):
+                        update_config(OVERRIDE_CONFIG_KEY, dict(body) if isinstance(body, dict) else {})
+
+                    # Резидуал 5.11-R2: слой собирается ТОЙ ЖЕ функцией, что на
+                    # boot — из дельты рецепта И спутника. Прежде switch клал
+                    # только дельту, и спутник НОВОГО рецепта переживший процесс
+                    # видел лишь после рестарта: два процесса одного конвейера
+                    # читали одну пару файлов по-разному, а разойтись им нельзя
+                    # («boot ≡ reload»). Адрес и база записаны выше — именно их
+                    # `compose_recipe_layer` и читает, поэтому порядок обязателен.
+                    from ..configs.observability_companion import compose_recipe_layer as _compose
+
+                    try:
+                        # ФР-2: третьим значением едут сироты — их посчитала и
+                        # назвала вслух сама `compose_recipe_layer`. До ФР-2 эта
+                        # дорога клала тело в слой молча, и опечатка, записанная
+                        # в спутник командой `observability.persist`, доезжала до
+                        # менеджеров как законный ключ.
+                        body, composed_source, _recipe_refs = _compose(svc)
+                    except Exception as exc:  # noqa: BLE001 — битый спутник не роняет switch
+                        composed_source = str(obs_recipe_path or "")
+                        log_error = getattr(svc, "_log_error", None)
+                        if callable(log_error):
+                            log_error(
+                                f"[observability] спутник нового рецепта не прочитан ({obs_recipe_path}): {exc} "
+                                "— слой собран без него",
+                                module="lifecycle",
+                            )
+                        # Спутник не прочитан — но в слой всё равно едет долька
+                        # рецепта, и её ссылки проверены быть обязаны: иначе
+                        # «битый спутник» становился бы способом внести опечатку
+                        # молча.
+                        _recipe_refs = report_unknown_refs(svc, body, source=composed_source)
+                    if _recipe_refs:
+                        result["unknown_refs"] = merge_unknown_refs(result.get("unknown_refs") or {}, _recipe_refs)
+                    result["recipe_layer"] = list(
+                        layers.replace_layer(
+                            LAYER_RECIPE,
+                            body,
+                            source=composed_source or str(obs_recipe_path or "") or None,
+                            origin=_ORIGIN_SWITCH,
+                        )
+                    )
+
+                # R4: перечитка слоя L2 с диска. Идёт ПОСЛЕ ветки switch'а и до
+                # сброса сессии — тот же порядок «слои снизу вверх», и та же одна
+                # пересборка внизу. Слой ЗАМЕНЯЕТСЯ целиком: домержи мы его к
+                # текущему, снятый из спутника ключ не исчез бы уже никогда.
+                if obs_recipe_refresh:
+                    from ..configs.observability_companion import compose_recipe_layer
+                    from ..configs.observability_layers import LAYER_RECIPE as _LAYER_RECIPE
+
+                    try:
+                        # ФР-2: сироты считает та же `compose_recipe_layer` —
+                        # перечитка спутника ничем не отличается от boot'а, и
+                        # трактовать одну пару файлов двумя способами нельзя.
+                        body, source, _refresh_refs = compose_recipe_layer(svc)
+                    except Exception as exc:  # noqa: BLE001 — битый спутник не роняет reload
+                        return {
+                            "success": False,
+                            "process": svc.name,
+                            "reason": f"слой рецепта не перечитан: {exc}",
+                        }
+                    if _refresh_refs:
+                        result["unknown_refs"] = merge_unknown_refs(result.get("unknown_refs") or {}, _refresh_refs)
+                    result["recipe_layer"] = list(
+                        layers.replace_layer(
+                            _LAYER_RECIPE,
+                            body,
+                            source=source or None,
+                            origin="reload:companion",
+                        )
+                    )
+
+                if obs_clear:
+                    dropped = list(layers.session_clear(origin=_ORIGIN_SWITCH))
+                    unknown = []
+                else:
+                    dropped, unknown = [], []
+                    for key in obs_reset:
+                        # Сброс ветки снимает ВСЕ листья под ней — перечисляем именно
+                        # их, а не запрошенный путь: замечание 3 ревью 5.8, где отчёт
+                        # называл `scopes`, а исчезал ещё и сосед под ним.
+                        removed = layers.session_reset_keys(str(key), origin=_ORIGIN_RELOAD)
+                        (dropped.extend(removed) if removed else unknown.append(str(key)))
+
+                # Task 5.10.f/g: секция телеметрии въезжает в ТОТ ЖЕ слой, что и
+                # всё остальное, — иначе файл продолжал бы стирать ручку
+                # оператора. Само применение сделает пересборка ниже.
+                if isinstance(telemetry_section, dict):
+                    result["telemetry_ttl_sec"] = self._merge_telemetry_layer(
+                        layers,
+                        telemetry_section,
+                        source=source,
+                        mode=telemetry_mode,
+                        ttl=ttl,
+                        origin=_ORIGIN_RELOAD,
+                    )
+                    telemetry_layered = True
+
+                try:
+                    expanded = apply_observability_layers(
+                        layers,
+                        logger=_logger,
+                        error=_error,
+                        stats=_stats,
+                        log_info=getattr(svc, "_log_info", None),
+                        **telemetry_targets(svc),
+                        origin=_ORIGIN_SWITCH if obs_clear else _ORIGIN_RELOAD,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    return {"success": False, "reason": f"reconfigure failed: {exc}"}
+                if expanded.get("telemetry") is not None:
+                    result["telemetry_applied"] = expanded["telemetry"]
+                result["applied"] = {"log_level": expanded["logger"].get("default_level")}
+                # Что держится сессией — в ответе всегда: слой, о котором не сказано,
+                # через час выглядит как необъяснимое поведение процесса.
+                result["session_keys"] = list(layers.session_keys())
+            if dropped:
+                result["reset"] = dropped
+            if unknown:
+                # Молчаливый no-op на сбросе несуществующего ключа = оператор
+                # уверен, что вернул как было, а не вернул ничего.
+                result["reset_not_held"] = unknown
             # Readback: фактическое состояние менеджеров ПОСЛЕ применения — инициатор
             # видит эффект (пороги скоупов, каталог, активные каналы), а не эхо входа.
             result["effective"] = observability_effective(logger=_logger, error=_error, stats=_stats)
+            # Task 5.7: судить, а не только показывать. Readback лежал в ответе, но
+            # `success` означал «применение не упало» — запрошенный ключ, перебитый
+            # вышестоящим слоем, и ОПЕЧАТКА в имени давали тот же успех.
+            #
+            # `success` и `verified` намеренно РАЗНЫЕ поля: «команда сломалась» и
+            # «команда ничего не изменила» — разные диагнозы, и слипнись они,
+            # различие исчезло бы вместе с возможностью его увидеть.
+            if isinstance(obs_section, dict):
+                from ..managers.observability_reload import observability_verified
 
-        # --- telemetry (PC 3.1: publisher-gate + центральный троттл) ---
-        if isinstance(telemetry_section, dict):
-            from ..managers.telemetry_reload import apply_telemetry_reconfigure
+                result["verified"] = observability_verified(obs_section, result["effective"])
+            # Task 5.7, вторая половина: БАЗА ОТСЧЁТА для «идут ли записи после
+            # смены». Судить о потоке команда не может — поток это разница во
+            # времени, а команда исполняется мгновенно; поэтому она отдаёт снимок
+            # счётчиков, а вердикт `delivering` выносит тот, кто делает второй
+            # замер (`BackendDriver.config_reload_verified`).
+            #
+            # Место снимка — ПОСЛЕ применения, и это обязательно: окно должно
+            # начинаться в момент смены. Возьми базу вызывающий сам до команды —
+            # в окно попали бы записи, сделанные ДО новой раскладки, то есть
+            # прежний уровень доказывал бы новый. Плюс лишний round-trip за
+            # данными, которые всё равно едут этим ответом.
+            #
+            # Форма — та же, что у `introspect.observability` (ключ `counters`),
+            # намеренно: второй снимок читается той же функцией, и разойтись
+            # формам двух снимков нечем.
+            #
+            # `flush=True` здесь НЕ опция: без него в окно наследуются записи
+            # самой этой команды (эмитированы до снимка, посчитаны после него —
+            # батчинг), и на молчащем процессе поток выглядел бы ненулевым.
+            # Замер цены одного опроса — в docstring `observability_counters`.
+            result["counters"] = observability_counters(logger=_logger, error=_error, stats=_stats, flush=True)
+            # Task 5.8: сроки — в ответе КАЖДОГО reload, включая файловый. Файл L3 не
+            # трогает, но именно после reload оператор и спрашивает «что у меня ещё
+            # висит»; молчание здесь читалось бы как «ничего не висит».
+            from ..managers.observability_ttl import ttl_report
 
-            # Task 2.1: из ФАЙЛА (декларативный источник) пустой throttle → boot-дефолты;
-            # inline (операторская правка) — как есть (throttle={} снимает всё явно).
-            default_throttle = (
-                svc.get_config("state_throttle_rules") if source != "inline" and hasattr(svc, "get_config") else None
-            )
+            result["session_ttl"] = ttl_report(svc, layers)
+
+        # --- telemetry БЕЗ секции observability: слой ТОТ ЖЕ, но полная
+        # пересборка менеджеров логов не нужна — она закрывает и заново
+        # открывает файловые приёмники, а телеметрийные правки приходят пачками.
+        if isinstance(telemetry_section, dict) and not telemetry_layered:
             try:
-                telemetry_applied = apply_telemetry_reconfigure(
+                applied, ttl_sec = self._apply_telemetry_section(
                     telemetry_section,
-                    mode=str(args.get("telemetry_mode", "replace")),  # Task 1.1: дельта-семантика
-                    heartbeat=getattr(svc, "_heartbeat", None),
-                    store_throttle=self._resolve_store_throttle(),
-                    default_throttle_rules=default_throttle,
-                    log_info=getattr(svc, "_log_info", None),
+                    source=source,
+                    mode=telemetry_mode,
+                    ttl=ttl,
+                    # Замечание 1 ревью 5.9: обработчик зовут ДВОЕ, и зашитый
+                    # здесь `telemetry.reconfigure` подписывал бы `config.reload`
+                    # именем команды, которую никто не вызывал.
+                    origin=_ORIGIN_RELOAD,
                 )
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
-            # Task 1.2 finding-1: неизвестный mode → apply вернул error-dict и НИЧЕГО не
-            # применил. Ошибка не должна «хорониться» в telemetry_applied при success=True —
-            # поднимаем до success=False, чтобы инициатор (backend_ctl/GUI) её увидел.
-            if "error" in telemetry_applied:
+            if "error" in applied:
                 return {
                     "success": False,
                     "process": svc.name,
                     "source": source,
-                    "mode": telemetry_applied.get("mode"),
-                    "reason": telemetry_applied["error"],
+                    "mode": telemetry_mode,
+                    "reason": applied["error"],
                 }
-            result["telemetry_applied"] = telemetry_applied
+            result["telemetry_ttl_sec"] = ttl_sec
+            result["telemetry_applied"] = applied
 
         return result
+
+    def _merge_telemetry_layer(
+        self,
+        layers: Any,
+        section: dict,
+        *,
+        source: str,
+        mode: str,
+        ttl: float | None,
+        origin: str,
+    ) -> float | None:
+        """Влить секцию ``telemetry`` в СВОЙ слой (Task 5.10.f/g). Возвращает срок.
+
+        Адресат слоя — тот же, что у наблюдаемости, и по той же причине:
+        inline — ручка оператора (L3, со сроком), файл — источник L1 (бессрочный,
+        сроку неподвластный). До 5.10 обе формы применялись к получателям
+        напрямую, и файл затирал ручку молча.
+
+        ``replace`` заменяет ТОЛЬКО названные под-секции. Заменять всё поддерево
+        было бы враньём соседней плоскости: оператор, поправивший ``publish``,
+        не просил снять свою же дельту троттла.
+        """
+        from ...data_schema_module import deep_merge
+        from ..configs.observability_layers import LAYER_APP, TELEMETRY_KEY, flatten_section, layer_merge
+
+        if source != "inline":
+            # Шов седьмой (найден независимым ревью корзины 2.1). Здесь СВЕЖИЙ файл
+            # ложится на действующий слой L1 — то же отношение «новее поверх
+            # старше», что и между этажами, значит и правило Г3 то же. С каноном
+            # `publish: {}` из файла не владел, и одно и то же значение вело себя
+            # по-разному в зависимости от двери: через `config.reload` inline —
+            # владело, через файл — нет. Накопления при этом нет только когда рядом
+            # приехала секция `observability` (её `replace_layer` идёт выше); файл
+            # с одной лишь секцией `telemetry` шёл сюда поверх прежнего L1.
+            layers.replace_layer(
+                LAYER_APP,
+                layer_merge(layers.app or {}, {TELEMETRY_KEY: section}),
+                source=source,
+                origin=origin,
+            )
+            return None
+
+        incoming = list(flatten_section({TELEMETRY_KEY: section}).keys())
+        removed: list[str] = []
+        current = layers.session.get(TELEMETRY_KEY)
+        current = dict(current) if isinstance(current, dict) else {}
+        if mode == "merge":
+            merged = deep_merge(current, section)
+        else:
+            # Замечание 3(а) ревью 5.10: `replace` ОБЯЗАН заменить, а не лечь
+            # поверх. Прежняя редакция звала тот же `deep_merge`, и прошлая
+            # правка выживала: `replace` с одним `fps` оставлял в гейте
+            # `latency` от предыдущей команды. Режим назывался «замена», а делал
+            # слияние. Сроки снятых листьев тоже снимаются — иначе они пережили
+            # бы свои ключи и всплыли в readback'е как срок несуществующей правки.
+            merged = dict(current)
+            for sub, value in section.items():
+                stale = current.get(sub)
+                if stale:
+                    gone = flatten_section({f"{TELEMETRY_KEY}.{sub}": stale}).keys()
+                    layers.session_forget_expiry(gone)
+                    # Замечание 2 ревью 5.9, воспроизведено: снятые `replace`-ом
+                    # листья исчезали из действующей наблюдаемости БЕЗ следа —
+                    # ручка оператора пропадала, а аудит показывал только новые
+                    # ключи. Перечисляем их в ТОЙ ЖЕ записи: снятие и постановка
+                    # здесь один факт, и разносить их по двум записям значило бы
+                    # заставить читателя сшивать их по времени.
+                    removed.extend(k for k in gone if k not in incoming)
+                merged[sub] = value
+        replaced = dict(layers.session)
+        replaced[TELEMETRY_KEY] = merged
+        layers.session = replaced
+        # Замечание 3(б) ревью 5.10: срок ставится ключам ЭТОЙ правки, а не всему
+        # поддереву. Прежняя редакция брала ключи слитого результата, и `merge`
+        # продлевал жизнь чужим, давно забытым ручкам: правка `fps` с ttl=600
+        # растягивала до 600с срок `latency`, которому оставалось 2 секунды.
+        # «Включил и забыл» возвращалось через заднюю дверь внутри одной секции.
+        left = layers.session_touch(incoming, ttl, origin=origin, removed=sorted(set(removed)))
+        return left
 
     def _resolve_store_throttle(self) -> Any:
         """Достать живой ``ThrottleMiddleware`` через StateStoreManager процесса-адресата.
@@ -1083,7 +1895,7 @@ class BuiltinCommands:
         также из расширенного ``config.reload``. Применение адресное — один процесс-адресат.
 
         Task 2.3: если ``publish`` применён и в эффективной секции остались ключи
-        ``metrics``, отсутствующие в ``GATED_METRICS`` (опечатка в имени метрики), ответ
+        ``metrics``, отсутствующие в каталоге метрик (опечатка в имени метрики), ответ
         дополняется ``"unknown_metrics": [...]`` (отсортированный список). Секция при
         этом не отвергается — поле только для наблюдаемости; пустой набор → поля нет.
         """
@@ -1100,30 +1912,31 @@ class BuiltinCommands:
         if not section:
             return {"success": False, "reason": "нужна хотя бы одна под-секция: publish и/или throttle"}
 
-        from ..managers.telemetry_reload import apply_telemetry_reconfigure
-
+        mode = str(args.get("telemetry_mode", "replace"))
+        # Task 5.10.f: срок проверяем ДО правки — как у остальных ручек (5.8).
+        ttl, ttl_error = _parse_ttl(args)
+        if ttl_error is not None:
+            return {"success": False, "process": svc.name, "reason": ttl_error}
         try:
-            applied = apply_telemetry_reconfigure(
-                section,
-                mode=str(args.get("telemetry_mode", "replace")),  # Task 1.1: дельта-семантика
-                heartbeat=getattr(svc, "_heartbeat", None),
-                store_throttle=self._resolve_store_throttle(),
-                log_info=getattr(svc, "_log_info", None),
+            applied, ttl_sec = self._apply_telemetry_section(
+                section, source="inline", mode=mode, ttl=ttl, origin=_ORIGIN_TELEMETRY
             )
         except Exception as exc:  # noqa: BLE001 — вернуть причину инициатору
             return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
-
-        # Task 1.2 finding-1: неизвестный mode → error-dict, НИЧЕГО не применено. Поднимаем
-        # до success=False (не хороним в applied), чтобы ошибка была видна инициатору.
         if "error" in applied:
-            return {
-                "success": False,
-                "process": svc.name,
-                "mode": applied.get("mode"),
-                "reason": applied["error"],
-            }
+            # Task 1.2 finding-1: неизвестный mode → НИЧЕГО не применено. Ошибка не
+            # должна хорониться в applied при success=True.
+            return {"success": False, "process": svc.name, "mode": mode, "reason": applied["error"]}
 
+        # Task 5.10.g: обе под-секции живут в слое, и обе под сроком. Разницу
+        # (у троттла срок ОДИН на всю дельту, а не свой у каждого правила)
+        # называем полем, а не умолчанием: оператор, ожидавший per-rule срок,
+        # обнаружил бы разницу по пропавшей настройке, то есть позже всего.
         result: dict = {"success": True, "process": svc.name, "applied": applied}
+        result["ttl_sec"] = ttl_sec
+        result["survives_reload"] = True
+        if "throttle" in section:
+            result["throttle_ttl_scope"] = "вся дельта целиком (паттерны содержат точки — per-rule срока нет)"
         # Task 2.3: publisher-gate перестроен → отдать инициатору неизвестные ключи
         # metrics (опечатка), если они есть — видимая диагностика вместо тихого no-op.
         # Поле присутствует ТОЛЬКО при непустом наборе (пустой набор — как раньше).
@@ -1135,25 +1948,535 @@ class BuiltinCommands:
         return result
 
     def _cmd_logger_sink_enable(self, data=None, **kwargs) -> dict:
-        """Включить sink логгера по имени (ADR-CRM-006 п.3: register_channel)."""
+        """Включить sink по имени (ADR-CRM-006 п.3: register_channel).
+
+        Параметр ``manager``: ``logger`` (дефолт) | ``error`` | ``stats``.
+        """
         return self._toggle_logger_sink(data, kwargs, enabled=True)
 
     def _cmd_logger_sink_disable(self, data=None, **kwargs) -> dict:
-        """Выключить sink логгера по имени (ADR-CRM-006 п.3: unregister_channel)."""
+        """Выключить sink по имени (ADR-CRM-006 п.3: unregister_channel).
+
+        Параметр ``manager``: ``logger`` (дефолт) | ``error`` | ``stats``.
+        """
         return self._toggle_logger_sink(data, kwargs, enabled=False)
 
     def _toggle_logger_sink(self, data, kwargs, *, enabled: bool) -> dict:
-        """Общий обработчик logger.sink.enable|disable — делегирует в set_sink_enabled."""
+        """Общий обработчик logger.sink.enable|disable — делегирует в set_sink_enabled.
+
+        Ф0.6: адресуем каждый из ТРЁХ братьев отдельно, по параметру ``manager``.
+        Дефолт ``logger`` — команда существовала до параметра, и старые вызовы
+        обязаны продолжать бить туда же.
+
+        Task 5.4: ``sink`` принимает **узор** (``module_*``, ``errors_?ile``) — он
+        раскрывается по каталогу адресованной плоскости, и каждое пойманное имя
+        получает свой ответ, свой ключ L3 и свой срок. Ось приёмников — единственная,
+        где узор нечем заменить: имена каналов плоские, иерархии longest-prefix (Ф2.2)
+        и ярлыков-групп (Ф2.5) у них нет по построению.
+
+        Цель ищется по WHITELIST'у, а не через ``hasattr(set_sink_enabled)``.
+        Причина конкретная: после подъёма метода в ``ChannelRoutingManager``
+        его унаследовал и ``RouterManager``, который наблюдаемостью не является
+        вовсе — это транспорт. Generic-резолв «любой менеджер с методом» сделал
+        бы message-канал IPC снимаемым одной командой, то есть дал бы способ
+        тихо отрезать процессу связь.
+        """
         args = self._merge_args(data, kwargs)
         svc = self._services
         name = str(args.get("sink") or args.get("name") or "").strip()
         if not name:
             return {"success": False, "reason": "sink (имя канала) обязателен"}
-        logger = getattr(svc, "logger_manager", None)
-        if logger is None or not hasattr(logger, "set_sink_enabled"):
-            return {"success": False, "reason": "logger_manager недоступен"}
-        ok = logger.set_sink_enabled(name, enabled)
-        return {"success": bool(ok), "sink": name, "enabled": enabled, "process": svc.name}
+
+        plane = str(args.get("manager") or "logger").strip().lower()
+        attr = _SINK_ADDRESSABLE_MANAGERS.get(plane)
+        if attr is None:
+            allowed = "|".join(sorted(_SINK_ADDRESSABLE_MANAGERS))
+            return {
+                "success": False,
+                "reason": f"manager={plane!r} не адресуем командой sink-control; допустимы {allowed}",
+                "process": svc.name,
+            }
+
+        # Task 5.8: срок проверяем ДО правки приёмника. Иначе опечатка в ttl
+        # оставила бы канал уже снятым, а команду — неуспешной: состояние
+        # изменено, ответ говорит «нет». Валидация на входе, а не на выходе.
+        ttl, ttl_error = _parse_ttl(args)
+        if ttl_error is not None:
+            return {"success": False, "reason": ttl_error, "process": svc.name}
+
+        target = getattr(svc, attr, None)
+        if target is None or not hasattr(target, "set_sink_enabled"):
+            return {"success": False, "reason": f"{attr} недоступен", "process": svc.name}
+
+        # Task 5.4: узор — отдельная ветка, и вход в неё решается ОДНИМ вопросом
+        # «есть ли метасимвол». Точное имя не платит за существование узоров ни
+        # одной новой строкой на своём пути.
+        if any(ch in name for ch in _SINK_GLOB_METACHARS):
+            return self._toggle_sinks_by_pattern(
+                target,
+                plane,
+                name,
+                enabled=enabled,
+                ttl=ttl,
+                requested_ttl="ttl" in args,
+            )
+        return self._toggle_one_sink(
+            target,
+            plane,
+            name,
+            enabled=enabled,
+            ttl=ttl,
+            requested_ttl="ttl" in args,
+        )
+
+    def _toggle_sinks_by_pattern(
+        self,
+        target: Any,
+        plane: str,
+        pattern: str,
+        *,
+        enabled: bool,
+        ttl: float | None,
+        requested_ttl: bool,
+    ) -> dict:
+        """Раскрыть узор по каталогу СВОЕЙ плоскости и применить к каждому имени (Task 5.4).
+
+        Раскрытие живёт здесь, а не в драйвере, потому что каталог приёмников знает
+        только процесс: раскрытие снаружи стоило бы лишнего round-trip'а и жило бы в
+        гонке с реестром, который правит эта же команда. Побочная выгода — ручку
+        получает любой клиент команды, а не только драйвер.
+
+        Примитив — :func:`fnmatch.fnmatchcase`, а не glob-ходок ``state_store_module``:
+        имя приёмника **односегментное** (``module_camera``, ``errors_file``), точек в
+        нём нет, и посегментный обход дерева здесь описывал бы несуществующую
+        структуру. Регистр значим (``fnmatchcase``) — имена каналов регистрозависимы
+        всюду в этой плоскости, и «умное» игнорирование регистра поймало бы соседа.
+
+        **Каждое пойманное имя — своя запись L3 и свой срок.** Общий ключ на узор
+        означал бы, что возврат одного приёмника воскрешает остальных, а ``persist``
+        закреплял бы в рецепте узор, а не приёмники, которые он поймал в тот раз.
+
+        ``success`` означает то же, что и у точного имени: **что-то изменилось**.
+        Узор, поймавший только те приёмники, что уже в требуемом состоянии, — не
+        успех и не сбой, а названный no-op (``unchanged``); узор, не поймавший
+        ничего, — отказ с перечнем каталога. Тихого «ок, ничего не сделано» здесь
+        нет: класс, закрытый 5.5, не имеет права воскреснуть через узор.
+        """
+        import fnmatch
+
+        svc = self._services
+        catalog = _sink_catalog(target)
+        matched = [n for n in catalog if fnmatch.fnmatchcase(n, pattern)]
+        base = {
+            "pattern": pattern,
+            "manager": plane,
+            "process": svc.name,
+            "matched": matched,
+        }
+        if not matched:
+            return {
+                "success": False,
+                "reason": (
+                    f"узор {pattern!r} не поймал ни одного приёмника плоскости {plane!r}; каталог: {catalog or '—'}"
+                ),
+                "catalog": catalog,
+                **base,
+            }
+        results = {
+            name: self._toggle_one_sink(
+                target,
+                plane,
+                name,
+                enabled=enabled,
+                ttl=ttl,
+                requested_ttl=requested_ttl,
+            )
+            for name in matched
+        }
+        changed = [name for name, res in results.items() if res.get("success")]
+        unchanged = [name for name in matched if name not in changed]
+        out = {
+            "success": bool(changed),
+            "changed": changed,
+            "unchanged": unchanged,
+            "results": results,
+            **base,
+        }
+        if not changed:
+            out["reason"] = (
+                f"узор {pattern!r} поймал {len(matched)} приёмник(ов), "
+                f"и все уже в требуемом состоянии (enabled={enabled})"
+            )
+        return out
+
+    def _toggle_one_sink(
+        self,
+        target: Any,
+        plane: str,
+        name: str,
+        *,
+        enabled: bool,
+        ttl: float | None,
+        requested_ttl: bool,
+    ) -> dict:
+        """Одно имя приёмника: правка, запись в L3 и ответ про срок.
+
+        Выделено из :meth:`_toggle_logger_sink` задачей 5.4 — узору нужно ровно это
+        тело, применённое к каждому пойманному имени. Поведение точного имени не
+        меняется ни в одном поле.
+        """
+        svc = self._services
+        # Затронутые маршруты собираются ДО операции: после disable канала уже
+        # нет, и «что я сейчас погасил» стало бы неотвечаемым вопросом.
+        routes = []
+        resolve_routes = getattr(target, "routes_using_sink", None)
+        if callable(resolve_routes):
+            routes = list(resolve_routes(name))
+        ok = target.set_sink_enabled(name, enabled)
+        # Task 5.12: удачная правка записывается в слой L3, и только поэтому она
+        # переживает `config.reload`. До этого она жила рантайм-множеством, которое
+        # пересборка не видела: `sink.disable` → `config.reload` → канал снова
+        # активен, молча (воспроизведено на живом прогоне).
+        session_key = self._record_sink_in_session(plane, name, enabled, ttl) if ok else None
+        # `enabled` = ДОСТИГНУТОЕ состояние, а не запрошенное (живая находка
+        # 2026-07-28). Прежняя редакция эхом возвращала аргумент, и отказ выглядел
+        # как `{"success": false, "enabled": true}` — оператор, читающий соседнее
+        # поле, оставался в уверенности, что канал вернулся. Провал enable
+        # означает «канала так и нет», провал disable — «его и не было»: в обоих
+        # случаях достигнутое состояние ложно.
+        result = {
+            "success": bool(ok),
+            "sink": name,
+            "enabled": bool(enabled and ok),
+            # Приёмка 2.8: назвать затронутое. Снятие приёмника вслепую
+            # обнаруживается по отсутствию логов, то есть позже всего.
+            "routes": routes,
+            "manager": plane,
+            "process": svc.name,
+            # Ключ слоя L3, которым правка закреплена, либо None. None означает
+            # «переживёт до первого reload и не дальше» — и это ОТВЕТ, а не
+            # умолчание: молчащее различие между двумя плоскостями оператор
+            # обнаружил бы только по пропавшей настройке.
+            "session_key": session_key,
+            "survives_reload": session_key is not None,
+        }
+        # Task 5.8: срок — только там, где есть чему жить.
+        if session_key is not None:
+            result.update(self._session_ttl_answer(session_key))
+        else:
+            # Отказ «канал уже в этом состоянии» ничего не записывает. Task 5.10.d
+            # снимает отсюда прежнюю тупиковость: срок ПРОДЛЕВАЕТСЯ, если оператор
+            # прислал `ttl` явно, и только молчаливый повтор (без `ttl`) остаётся
+            # чистым no-op с названным остатком.
+            held = f"{_SINK_SESSION_PREFIX.get(plane, '')}{name}.enabled"
+            result.update(self._touch_or_report_ttl(held, ttl, requested=requested_ttl, expected=enabled))
+        return result
+
+    def _touch_or_report_ttl(
+        self,
+        session_key: str,
+        ttl: float | None,
+        *,
+        requested: bool,
+        expected: bool | None = None,
+    ) -> dict:
+        """Ответ про срок ключа, состояние которого команда не изменила.
+
+        Task 5.8 завела здесь честный отчёт («срок НЕ продлён, остаток такой-то»),
+        Task 5.10.d — сам путь продления. Различие намеренное и держится на
+        **явности запроса**, а не на факте правки:
+
+          * оператор прислал ``ttl`` — он просит именно срок, и повтор команды на
+            уже снятом приёмнике продлевает его. Иначе продление приходилось бы
+            выражать через ``config.reload``, то есть через другую команду с
+            другим синтаксисом — резидуал T3 из 5.8;
+          * ``ttl`` не прислан — это повтор по инерции, и молча передвигать чужой
+            дедлайн он не вправе: «включил DEBUG и забыл» вернулось бы через
+            заднюю дверь, стоит поставить такую команду в цикл опроса.
+
+        ``expected`` — состояние, которого команда ДОБИВАЛАСЬ. Продлевать можно
+        только срок ТОГО ЖЕ состояния (замечание 4 ревью 5.10): живьём
+        ``sink.enable module_camera ttl=600`` на провалившемся возврате продлевал
+        срок записи **disable** с 30 до 600 секунд — оператор просил временно
+        вернуть канал, а команда в двадцать раз продлила его отсутствие и
+        рапортовала ``ttl_extended: true`` внутри ``success: false``.
+
+        Пусто, если сессия ключа не держит: поле-заглушка про несуществующий срок
+        читалось бы как «бессрочно», то есть как ответ.
+        """
+        from ..configs.observability_layers import flatten_section, process_observability_layers
+
+        layers = process_observability_layers(self._services)
+        with layers.lock:
+            if session_key not in layers.session_keys():
+                return {}
+            held_value = flatten_section(layers.session).get(session_key)
+            mismatch = expected is not None and bool(held_value) is not bool(expected)
+            if not requested or mismatch:
+                if not layers.session_has_deadline(session_key):
+                    return {}
+                note = {
+                    "session_key_held": session_key,
+                    "expires_in_sec": layers.session_expires_in(session_key),
+                    "ttl_hint": ("команда ничего не изменила и срок НЕ продлён; продлить — та же команда с явным ttl"),
+                }
+                if mismatch:
+                    note["ttl_hint"] = (
+                        f"сессия держит противоположное состояние (enabled={bool(held_value)}), "
+                        "и срок этой записи НЕ продлён: продлевать можно только то, чего команда добилась"
+                    )
+                return note
+            layers.session_touch((session_key,), ttl, origin=_ORIGIN_SINK)
+            answer = self._session_ttl_answer(session_key)
+        answer["session_key_held"] = session_key
+        answer["ttl_extended"] = True
+        return answer
+
+    def _session_ttl_answer(self, session_key: str) -> dict:
+        """Поля ответа про срок жизни только что записанного ключа L3 (Task 5.8)."""
+        from ..configs.observability_layers import process_observability_layers
+        from ..managers.observability_ttl import ttl_enforced
+
+        svc = self._services
+        layers = process_observability_layers(svc)
+        remaining = layers.session_expires_in(session_key)
+        enforced = ttl_enforced(svc)
+        answer: dict = {
+            # None = бессрочно. Заявляется всегда, потому что «вечно» — это
+            # решение, а не то, что должно выясняться по отсутствию поля.
+            "ttl_sec": remaining,
+            "expires_in_sec": remaining,
+            "ttl_enforced": enforced,
+        }
+        if remaining is not None and not enforced:
+            answer["ttl_warning"] = (
+                "срок записан, но авто-возврат не сработает: у процесса не идёт такт heartbeat "
+                "(heartbeat_interval <= 0 либо нет worker_manager)"
+            )
+        return answer
+
+    def _cmd_observability_persist(self, data=None, **kwargs) -> dict:
+        """Закрепить рантайм-правки (L3) в спутнике рецепта — ОТДЕЛЬНОЕ явное действие.
+
+        Почему не «каждая ручка сразу пишет в рецепт», как звучало исходное
+        требование: тогда любая отладочная сессия навсегда меняет рецепт, и после
+        каждого захода в ``git diff`` мусор. Плюс за файлом следит watcher — запись
+        на каждое нажатие дала бы ещё и петлю применений поверх порчи файла.
+
+        Пишется **спутник** ``recipes/<имя>.observability.yaml``, а не сам рецепт:
+        «пишет человек» и «пишет машина» разведены по файлам, а не по аккуратности
+        сериализатора — она в этом проекте уже подводила (GUI-save стёр комментарии
+        ``system.yaml``). Файл человека не изменяется ни на байт.
+
+        После успешной записи ключи ПЕРЕЕЗЖАЮТ из L3 в L2 в памяти: действующее
+        состояние не меняется, но ``introspect.observability`` начинает честно
+        говорить ``recipe`` вместо ``session`` — иначе оператор видел бы «держится
+        сессией» у того, что уже сохранено, и сбросил бы это по ошибке.
+
+        Параметры: ``recipe_path`` (по умолчанию — из конфига процесса).
+        """
+        from ..configs.observability_companion import persist_session_to_companion
+        from ..configs.observability_layers import (
+            RECIPE_PATH_CONFIG_KEY,
+            process_observability_layers,
+            read_process_config,
+        )
+
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        recipe_path = args.get("recipe_path") or read_process_config(svc, RECIPE_PATH_CONFIG_KEY)
+        layers = process_observability_layers(svc)
+
+        from ..configs.observability_audit import ACTION_PERSIST
+        from ..configs.observability_layers import LAYER_RECIPE, flatten_section, layer_merge
+
+        # Блокер ревью 5.8: снимок → запись файла → переезд ключей → обнуление L3
+        # держатся ОДНИМ критическим блоком. Иначе правка, сделанная между снимком
+        # и `session = {}`, пропадала бы вместе с чужим сохранением, а сохранённый
+        # ключ мог бы вернуться подметальщиком по сроку, который снимали не с него.
+        # Запись файла внутри лока намеренна: persist редок, а разрыв тут дороже.
+        with layers.lock:
+            session = dict(layers.session)
+            try:
+                report = persist_session_to_companion(recipe_path, svc.name, session)
+            except Exception as exc:  # noqa: BLE001 — «сохранить не сохранило» обязано быть слышно
+                return {"success": False, "process": svc.name, "reason": f"запись спутника не удалась: {exc}"}
+            if not report.get("success"):
+                return {**report, "process": svc.name}
+
+            # Task 5.8: ключи уезжают в L2 — файл, у которого срока нет по построению.
+            # Снимаем сроки ЯВНО и перечисляем снятые в ответе: «сохранил, а оно через
+            # пять минут откатилось» — ровно тот отказ, который выглядит как отказ
+            # сохранения и уводит поиск не туда.
+            ttl_cleared = list(layers.session_forget_expiry(flatten_section(session).keys()))
+            moved = sorted(flatten_section(session).keys())
+            # Мерж — `layer_merge` (правило Г3), а не канон: сессия НОВЕЕ рецепта,
+            # и её `{}` — владение. С каноническим переезд L3→L2 воскрешал ключи
+            # рецепта прямо в памяти, то есть «сохранить» МЕНЯЛО действующее
+            # состояние, обещая обратное (ревью корзины 2, находка Ф-1).
+            layers.replace_layer(
+                LAYER_RECIPE,
+                layer_merge(layers.recipe, session),
+                source=report["path"],
+                origin=_ORIGIN_PERSIST,
+            )
+            layers.session = {}
+        # Task 5.9: переезд L3 → L2 записывается ОДНОЙ записью и именно здесь —
+        # намерение известно только команде. `session_forget_expiry` сам не пишет:
+        # его зовут двое с разными намерениями, и общая запись соврала бы одному.
+        layers.audit.record(ACTION_PERSIST, origin=_ORIGIN_PERSIST, keys=moved, ttl_cleared=ttl_cleared)
+        # Ревью 5.12 (замечание 6): watcher слоя L2 поднимается только на boot и
+        # при switch, а спутника до первого «сохранить» не существует — значит
+        # правки только что созданного файла не подхватывались бы до следующего
+        # switch. Пере-вооружаем наблюдателя здесь; у процессов без него (все
+        # дети — watcher живёт на оркестраторе) метода нет, и это не отказ.
+        rearm = getattr(svc, "_start_recipe_observability_watcher", None)
+        watcher_rearmed = False
+        if callable(rearm):
+            try:
+                rearm(layers)
+                watcher_rearmed = True
+            except Exception as exc:  # noqa: BLE001 — файл записан, отказ вооружения не отменяет успех
+                svc._log_error(f"[observability] L2-watcher не пере-вооружён после сохранения: {exc}")
+        return {
+            **report,
+            "process": svc.name,
+            "session_keys": list(layers.session_keys()),
+            # Что перестало быть временным. Пустой список = сохранённые правки и
+            # так были бессрочными (ttl=0), а не «сроки не снялись».
+            "ttl_cleared": ttl_cleared,
+            # Наблюдает ли кто-то за только что записанным файлом. False у детей —
+            # это норма (watcher один, на оркестраторе), но молчать об этом нельзя:
+            # иначе «правлю спутник, ничего не происходит» выясняется чтением кода.
+            "watcher_rearmed": watcher_rearmed,
+        }
+
+    def _apply_telemetry_section(
+        self,
+        section: dict,
+        *,
+        source: str,
+        mode: str,
+        ttl: float | None,
+        origin: str,
+    ) -> tuple[dict, float | None]:
+        """Влить секцию ``telemetry`` в слой и применить её оттуда (Task 5.10.f/g).
+
+        ОБЕ под-секции идут одним путём — через слои: правка переживает
+        ``config.reload`` и возвращается по сроку. До 5.10 они применялись к
+        получателям напрямую, и следствие было ровно тем же, что у логов до
+        5.12: файловый reload молча стирал ручку оператора, а срока у неё не
+        было вовсе.
+
+        Разница между ними — только в ФОРМЕ хранения в слое (см.
+        ``TELEMETRY_LAYERED_SUBSECTION`` и ``OPAQUE_LAYER_PATHS``): ``publish``
+        раскладывается по ключам, ``throttle`` лежит одним непрозрачным листом,
+        потому что точки внутри его паттернов — часть имени, а не разделитель
+        пути. Наружу это различие видно одним полем: у троттла срок один на всю
+        дельту, а не свой у каждого правила.
+
+        ``mode`` управляет тем, как правка ВХОДИТ В СЛОЙ, а не тем, как она
+        ложится на получателя: к получателю результат всегда применяется
+        собранным из слоёв (дельта поверх живого не умеет выразить удаление, а
+        удаление здесь — основная операция).
+        """
+        from ..configs.observability_layers import process_observability_layers
+        from ..managers.observability_reload import apply_telemetry_layers, telemetry_targets
+        from ..managers.telemetry_reload import VALID_MODES
+
+        svc = self._services
+        if mode not in VALID_MODES:
+            # Отказ ДО записи в слой: иначе правка уже лежала бы в L3 и
+            # применилась бы следующей пересборкой — отказ был бы ложным.
+            return {"error": f"неизвестный режим {mode!r}; допустимы {'|'.join(VALID_MODES)}"}, None
+
+        applied: dict = {}
+        ttl_sec: float | None = None
+        layered = {k: v for k, v in section.items() if k in ("publish", "throttle")}
+        if layered:
+            layers = process_observability_layers(svc)
+            with layers.lock:
+                ttl_sec = self._merge_telemetry_layer(layers, layered, source=source, mode=mode, ttl=ttl, origin=origin)
+                out = apply_telemetry_layers(
+                    layers,
+                    log_info=getattr(svc, "_log_info", None),
+                    **telemetry_targets(svc),
+                    origin=origin,
+                )
+            if out:
+                applied.update(out)
+        return applied, ttl_sec
+
+    def _record_sink_in_session(
+        self,
+        plane: str,
+        name: str,
+        enabled: bool,
+        ttl: float | None = None,
+    ) -> str | None:
+        """Записать снятие/возврат приёмника в слой L3. Возвращает ключ или None.
+
+        Task 5.10.b: декларативно выразимы ВСЕ ТРИ плоскости. До неё
+        ``expand_observability`` клал ``channels`` только под ``logger``, и на
+        двух плоскостях из трёх команда работала, а пережить `config.reload` не
+        могла — снятый `errors_file` воскресал молча. Путь ключа повторяет путь
+        секции конфига (``errors.channels…`` / ``stats.channels…``), чтобы у
+        одного снятия не завелось двух написаний: сброс, provenance и persist
+        адресуют ровно тот ключ, что виден в файле.
+
+        ``ttl=None`` → действующая политика слоёв (Task 5.8), а не «навсегда».
+        """
+        prefix = _SINK_SESSION_PREFIX.get(plane)
+        if prefix is None:
+            return None
+        from ..configs.observability_layers import process_observability_layers
+
+        key = f"{prefix}{name}.enabled"
+        process_observability_layers(self._services).session_set(key, bool(enabled), ttl, origin=_ORIGIN_SINK)
+        return key
+
+    def _cmd_logger_sink_tail(self, data=None, **kwargs) -> dict:
+        """Прочитать хвост приёмника, хранящего записи у себя (2.9).
+
+        Единственный способ достать записи процесса **ретроспективно**: живой
+        хвост (``log.tail.subscribe``) — подписка, и кто не подписался заранее,
+        прошлое не увидит; ``ObservabilityStore`` — уже диск.
+
+        Параметры: ``sink`` (имя, обяз.), ``limit`` (сколько последних; без него
+        — всё кольцо), ``manager``: ``logger`` (дефолт) | ``error`` | ``stats``.
+
+        Whitelist менеджеров — тот же и по той же причине, что у sink-control:
+        ``read_sink_tail`` поднят в ``ChannelRoutingManager``, а его унаследовал
+        и ``RouterManager``, который наблюдаемостью не является вовсе.
+        """
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        name = str(args.get("sink") or args.get("name") or "").strip()
+        if not name:
+            return {"success": False, "reason": "sink (имя канала) обязателен"}
+
+        plane = str(args.get("manager") or "logger").strip().lower()
+        attr = _SINK_ADDRESSABLE_MANAGERS.get(plane)
+        if attr is None:
+            allowed = "|".join(sorted(_SINK_ADDRESSABLE_MANAGERS))
+            return {
+                "success": False,
+                "reason": f"manager={plane!r} не адресуем командой sink-control; допустимы {allowed}",
+                "process": svc.name,
+            }
+
+        target = getattr(svc, attr, None)
+        if target is None or not hasattr(target, "read_sink_tail"):
+            return {"success": False, "reason": f"{attr} недоступен", "process": svc.name}
+
+        limit = args.get("limit")
+        result = target.read_sink_tail(name, limit)
+        records = result.get("records")
+        if records is not None:
+            result["records"] = [_boundary_safe(record) for record in records]
+        result["manager"] = plane
+        result["process"] = svc.name
+        return result
 
     def _cmd_log_tail_subscribe(self, data=None, **kwargs) -> dict:
         """Подписать адрес на LogRecord'ы процесса с level ≥ порога (Ф1 Task 1.5).
@@ -1170,14 +2493,30 @@ class BuiltinCommands:
         subscriber = str(args.get("subscriber") or "").strip()
         if not subscriber:
             return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
-        level = str(args.get("level") or "ERROR").upper()
+        # Ф3.1: имя уровня проверяется, а не только поднимается в регистр.
+        # Прежде опечатка (или каноничное чужое "FATAL") давала порог «пропускать
+        # всё» при ответе success=true с эхом запрошенного уровня — подписчик
+        # получал firehose и был уверен, что подписан на ошибки. Образец отказа —
+        # `health.report` ниже; расхождение двух команд одной поверхности было
+        # тем самым «дефектом на одном пути из трёх».
+        from multiprocess_framework.modules.channel_routing_module.levels import (
+            LEVEL_ORDER,
+            normalize_level_name,
+        )
+
+        level = normalize_level_name(args.get("level") or "ERROR")
+        if level is None:
+            return {
+                "success": False,
+                "reason": f"неизвестный level '{args.get('level')}' ({'|'.join(LEVEL_ORDER)})",
+            }
         command = str(args.get("command") or "log.record")
 
         router = getattr(svc, "router_manager", None)
         if router is None:
             return {"success": False, "reason": "router_manager недоступен"}
         logger = getattr(svc, "logger_manager", None)
-        if logger is None or not hasattr(logger, "add_log_tap"):
+        if logger is None or not hasattr(logger, "add_tap"):
             return {"success": False, "reason": "logger_manager недоступен"}
 
         from multiprocess_framework.modules.logger_module import RouterPushChannel
@@ -1193,7 +2532,7 @@ class BuiltinCommands:
                 sender=svc.name,
                 command=command,
             )
-            mgr.add_log_tap(channel, min_level=level, name=tap_name)
+            mgr.add_tap(channel, min_level=level, name=tap_name)
             installed.append(getattr(mgr, "manager_name", mgr.__class__.__name__))
 
         if not installed:
@@ -1217,7 +2556,7 @@ class BuiltinCommands:
             return {"success": False, "reason": "subscriber или tap обязателен"}
         removed = False
         for mgr in self._log_tail_managers():
-            removed = mgr.remove_log_tap(tap_name) or removed
+            removed = mgr.remove_tap(tap_name) or removed
         return {"success": bool(removed), "process": svc.name, "tap": tap_name}
 
     def _cmd_observability_tail_subscribe(self, data=None, **kwargs) -> dict:
@@ -1228,7 +2567,9 @@ class BuiltinCommands:
         ``command="observability.record"`` на подписчика. Живой хвост вкладок
         Логи/Ошибки/Статистика (Ф5.19). Идемпотентно по подписчику.
 
-        Параметры (data): ``subscriber`` (адрес GUI-процесса, обяз.).
+        Параметры (data): ``subscriber`` (адрес GUI-процесса, обяз.), ``level``
+        (порог tap'ов, по умолчанию "ERROR" — Ф6.х.5: прежде порог был захардкожен
+        в проводке, и хвост молчал на здоровом стенде).
         """
         args = self._merge_args(data, kwargs)
         svc = self._services
@@ -1237,7 +2578,8 @@ class BuiltinCommands:
             return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
         if not hasattr(svc, "subscribe_observability_tail"):
             return {"success": False, "reason": "процесс не поддерживает observability-tail"}
-        return svc.subscribe_observability_tail(subscriber)
+        level = str(args.get("level") or "ERROR").upper()
+        return svc.subscribe_observability_tail(subscriber, level=level)
 
     def _cmd_observability_tail_unsubscribe(self, data=None, **kwargs) -> dict:
         """Снять подписку на live-хвост наблюдаемости (форвардер + error-tap'ы), F1: per-subscriber.
@@ -1263,7 +2605,7 @@ class BuiltinCommands:
         managers = []
         for attr in ("logger_manager", "error_manager"):
             mgr = getattr(svc, attr, None)
-            if mgr is not None and hasattr(mgr, "add_log_tap"):
+            if mgr is not None and hasattr(mgr, "add_tap"):
                 managers.append(mgr)
         return managers
 

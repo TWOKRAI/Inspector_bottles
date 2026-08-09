@@ -84,30 +84,54 @@ class QueueChannel(MessageChannel):
 
     # ---- IMessageChannel: получение ----
 
-    def poll(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
+    #: Потолок одного неблокирующего дренажа (Ф7.х, M-5 ревью Ф7).
+    #:
+    #: Прежняя редакция считала, что цикл держит ГЛУБИНА очереди — «больше
+    #: maxsize оттуда всё равно не достанешь». Опровергнуто замером: producer в
+    #: том же процессе доливает быстрее, чем consumer читает, и один ``poll(0)``
+    #: вынес **2.1 млн сообщений за 88 секунд**, не отдав управление ни разу. Это
+    #: livelock приёмного цикла: пока он внутри дренажа, ни ``_running``, ни
+    #: остальные каналы не опрашиваются. Сегодня от этого спасает ТОПОЛОГИЯ (в
+    #: проде никто не подписан сам на себя), а не механизм — а гарантия,
+    #: держащаяся на раскладке, перестаёт держаться при первой её смене.
+    #:
+    #: 4096 = глубже самой глубокой очереди проекта (data 1024) вчетверо: штатный
+    #: дренаж в потолок не упирается никогда, а недобранное достанется следующему
+    #: такту — цикл возвращается в свою голову, а не в вечность.
+    POLL_DRAIN_CEILING = 4096
+
+    def poll(self, timeout: float = 0.0, max_items: int = 0) -> List[Dict[str, Any]]:
         """Опросить очередь.
 
         Args:
             timeout: 0 → non-blocking drain (все доступные сообщения).
                      >0 → блокирующий вызов, ждёт одно сообщение.
+            max_items: потолок одного дренажа; 0 → :attr:`POLL_DRAIN_CEILING`.
+                     Отрицательное — «без потолка», и это надо писать явно.
 
         Returns:
             Список сообщений (может быть пустым).
         """
         messages: List[Dict[str, Any]] = []
+        ceiling = self.POLL_DRAIN_CEILING if max_items == 0 else max_items
         try:
             if timeout > 0:
                 msg = self._queue.get(timeout=timeout)
                 if msg is not None:
                     messages.append(msg)
             else:
-                while True:
+                # Потолок считает ВЫНУТОЕ, а не собранное: ``None`` в очереди не
+                # попадает в результат, и счёт по длине списка оставил бы ровно
+                # ту же бесконечность на потоке из ``None``.
+                drained = 0
+                while ceiling < 0 or drained < ceiling:
                     try:
                         msg = self._queue.get_nowait()
-                        if msg is not None:
-                            messages.append(msg)
                     except Empty:
                         break
+                    drained += 1
+                    if msg is not None:
+                        messages.append(msg)
         except Empty:
             pass
         except Exception as e:

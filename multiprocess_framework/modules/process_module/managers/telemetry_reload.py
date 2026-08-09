@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Telemetry hot-reload: единая идемпотентная точка применения секции ``telemetry`` (PC 3.1).
 
-По образцу :func:`observability_reload.apply_observability_reconfigure` — раскладывает
+По образцу :func:`observability_reload.apply_observability_layers` — раскладывает
 секцию ``telemetry`` на ДВЕ плоскости управления (план ``telemetry-publish-control``)
 и применяет их к живым получателям БЕЗ рестарта процесса:
 

@@ -34,6 +34,25 @@ if TYPE_CHECKING:
     from ...message_module import Message
 
 
+#: Класс груза «хвост наблюдаемости» (Ф7.3). Канонический владелец имени —
+#: ``ProcessDataKeys.QUEUE_OBSERVABILITY``; здесь литерал дублируется СОЗНАТЕЛЬНО,
+#: тем же приёмом, что ``QUEUE_STATE`` в ``delta_dispatcher`` — роутер не должен
+#: тянуть зависимость на раскладку очередей ради одной строки. Сверку имён держит
+#: контрактный тест (``test_observability_queue_split``).
+QUEUE_OBSERVABILITY = "observability"
+
+
+class RouterSendError(Exception):
+    """Отправка не состоялась — повод для плоскости ошибок, а не только счётчика.
+
+    Ф6.7. Ошибки роутера, у которых нет исходного исключения (маршрут не
+    нашёлся, доставка провалилась), до этой правки существовали только как
+    прирост числа ``errors``. ``_track_error`` требует объект исключения, и
+    заворачивать причину в общий ``Exception`` значило бы слить их в одну кучу
+    с чужими: у ErrorManager тип — часть адреса записи.
+    """
+
+
 class _PendingRequest:
     """Слот ожидания ответа на синхронный request (P0.5).
 
@@ -96,8 +115,6 @@ class RouterManager(ChannelRoutingManager):
             process=process,
             config=None,
             buffer_strategy=None,  # AsyncSender handles buffering (not CRM buffer)
-            dispatcher_key_field="command",
-            dispatcher_strategy=dispatch_strategy,
             managers=managers,
             observable_config=kwargs.pop("observable_config", None),
             auto_proxy=kwargs.pop("auto_proxy", True),
@@ -134,7 +151,20 @@ class RouterManager(ChannelRoutingManager):
 
         self._send_mw = MiddlewarePipeline("send", log_warning=self._log_warning)
         self._recv_mw = MiddlewarePipeline("receive", log_warning=self._log_warning)
-        self.channel_dispatcher = self._dispatcher
+        # Ф4.6: диспетчер теперь СВОЙ, а не алиас базового слота.
+        #
+        # Раньше здесь стояло ``self.channel_dispatcher = self._dispatcher`` —
+        # объект создавала база ``ChannelRoutingManager`` для всех четырёх
+        # наследников, и пользовался им ровно один: этот. Трём остальным он
+        # доставался мёртвым, но выглядел общим механизмом, а имя ``register_route``
+        # у базы и у роутера означало РАЗНОЕ (база писала в канал напрямую, роутер
+        # возвращает имя канала). Имя объекта оставлено прежним, чтобы записи и
+        # статистика не уехали под другим адресом.
+        self.channel_dispatcher = Dispatcher(
+            f"{manager_name}_dispatcher",
+            process=process,
+            default_strategy=dispatch_strategy,
+        )
         self.event_dispatcher = Dispatcher(
             f"{manager_name}_event_dispatcher",
             process=process,
@@ -146,6 +176,23 @@ class RouterManager(ChannelRoutingManager):
             "sent_ok": 0,
             "received": 0,
             "errors": 0,
+            # Ф6.7 (находка Н-1 живого прогона 2026-08-03). До этой правки
+            # ``errors`` был ОДНИМ числом на три разных случая, и живой прогон
+            # это доказал: 45 ошибок за 7.7 мин на трёх процессах, ни строки в
+            # логах, и по счётчикам нельзя было сказать, что именно случилось.
+            # Три ключа — три разных диагноза и три разных действия:
+            #   errors_no_route         — адресата не нашли вовсе (опечатка в
+            #                             имени канала/процесса, не поднятая
+            #                             топология): чинить конфигурацию;
+            #   errors_delivery_failed  — адресат найден, доставка провалилась
+            #                             (очередь мертва/полна, канал вернул
+            #                             error): чинить пропускную способность;
+            #   errors_exception        — исключение на пути отправки: чинить код.
+            # Сумма трёх равна приросту ``errors`` — общий счётчик остаётся
+            # совместимым и продолжает работать как раньше.
+            "errors_no_route": 0,
+            "errors_delivery_failed": 0,
+            "errors_exception": 0,
             "middleware_dropped": 0,
             # Ф4.2 (fencing-token): сколько входящих отброшено fence-фильтром как
             # stale (epoch отправителя < известного получателю). Подмножество
@@ -172,6 +219,15 @@ class RouterManager(ChannelRoutingManager):
             # Рост на старте = окно до регистрации kind-каналов (register_router_channels
             # вызывается один раз, ре-скана нет) — рабочая гипотеза §8.4.
             "kind_fallback_total": 0,
+            # Ф7.х.2: замьюченная потеря хвоста наблюдаемости (см. _report_send_error).
+            # Инициализируется здесь, а не заводится на лету первым отказом: типизированная
+            # обёртка судит форму ответа по ``missing``, и ленивый ключ означал бы, что на
+            # ЗДОРОВОМ сервере счётчика нет вовсе — «отказов не было» и «сборка без учёта»
+            # становятся неотличимы. Два соседа (queue_observability_evicted/_send_failed)
+            # всегда в снимке, потому что читаются из queue_registry; этот считается сам.
+            # Пер-причинные ``observability_errors_<reason>`` остаются ленивыми — состав
+            # причин заранее не перечислим, и обёртка их не читает.
+            "observability_delivery_failed": 0,
         }
         self._stats_lock = threading.Lock()
 
@@ -205,12 +261,99 @@ class RouterManager(ChannelRoutingManager):
         self._pending_requests: Dict[str, _PendingRequest] = {}
         self._pending_lock = threading.Lock()
 
+        # Ф6.7: троттлинг записей об ошибках отправки — по причине, а не общий.
+        # Отдельное окно на причину: шторм «нет маршрута» не имеет права
+        # заглушить редкое «исключение», иначе диагностика теряет как раз тот
+        # случай, ради которого её и читают.
+        self._send_error_last_log: Dict[str, float] = {}
+        self._send_error_suppressed: Dict[str, int] = {}
+
     def _inc_stat(self, key: str, value: int = 1) -> None:
         # get(key, 0): счётчики с разбивкой по kind (``sent_via_channel.data`` и т.п.)
         # заводятся на лету — состав kind'ов зависит от топологии и не может быть
         # перечислен в _stats заранее. Для статических ключей поведение прежнее.
         with self._stats_lock:
             self._stats[key] = self._stats.get(key, 0) + value
+
+    #: Не чаще одной записи об ошибке отправки НА ПРИЧИНУ за это окно (сек).
+    #: Троттлинг по времени, а не «каждая N-я»: живой прогон дал 45 ошибок за
+    #: 7.7 мин на трёх процессах, но темп зависит от нагрузки, и порог по счёту
+    #: при шторме дал бы несколько записей в секунду — вторая беда того же рода,
+    #: что раздула messages.log до 645 МБ. Окно = образец из
+    #: ``shared_resources_module/queues/core/manager.py``.
+    _SEND_ERROR_LOG_INTERVAL_SEC = 5.0
+
+    @staticmethod
+    def _is_observability_traffic(msg_dict: Dict[str, Any]) -> bool:
+        """Это груз ХВОСТА наблюдаемости (Ф7.3)?
+
+        Единственное следствие ответа — молчание на путях отказа и счётчик вместо
+        записи. Признак — класс груза, а не команда: их две (``log.record`` и
+        ``observability.record``), список команд разъехался бы с раскладкой
+        очередей, а ``queue_type`` проставляют оба отправителя и он же выбирает
+        транспорт.
+        """
+        return msg_dict.get("queue_type") == QUEUE_OBSERVABILITY
+
+    def _report_send_error(
+        self,
+        reason: str,
+        detail: str,
+        error: Optional[Exception] = None,
+        *,
+        muted: bool = False,
+    ) -> None:
+        """Учесть ошибку отправки и — троттлированно — сказать о ней вслух.
+
+        Ф6.7, находка Н-1. Ветка «no channel resolved» инкрементила ``errors``
+        и возвращала error-dict — без единой записи и без ``_track_error``.
+        Итог на живом прогоне: 45 потерянных data-сообщений (≈0.37 %), которых
+        не видела ни плоскость логов, ни плоскость ошибок; узнать о них можно
+        было только вычитанием счётчиков вручную.
+
+        Что троттлируется, а что нет — граница проведена сознательно:
+
+        * **счётчики полные** (``errors`` + пер-причинный) — арифметика обязана
+          сходиться, иначе «0.37 % теряется» не посчитать;
+        * **запись и ``_track_error`` — троттлированы** одним окном, и число
+          подавленных названо в самой записи. Плоскость ошибок не батчится
+          (пол ошибок пишет синхронно), поэтому нетроттлированный
+          ``_track_error`` под штормом сам стал бы источником объёма.
+
+        ``muted`` — груз хвоста наблюдаемости (Ф7.х, блокер B-3). Ф7.3 замьютила
+        провал доставки в ``_deliver_by_targets``, но это только один кадр стека:
+        ``_do_send`` ВЫШЕ звал ``_report_send_error`` на том же отказе — то есть
+        петля Б-6 оставалась живой, просто через общий ``errors``. 500 отказов
+        доставки хвоста давали 500 ERROR-записей и 500 к ``errors``, а тот
+        публикуется как аномалия ``router_errors`` в overview: объём диагностики
+        сам порождал ложную тревогу о транспорте. Здесь потеря считается —
+        отдельными ключами, — но НЕ пишется и НЕ трогает общий ``errors``:
+        под штормом хвоста он перестал бы отличать «транспорт сломан» от
+        «диагностики слишком много», и этой слепотой Б-6 и запомнился.
+        """
+        if muted:
+            self._inc_stat("observability_delivery_failed")
+            self._inc_stat(f"observability_errors_{reason}")
+            return
+        self._inc_stat("errors")
+        self._inc_stat(f"errors_{reason}")
+        now = time.monotonic()
+        with self._stats_lock:
+            last = self._send_error_last_log.get(reason, 0.0)
+            if last and now - last < self._SEND_ERROR_LOG_INTERVAL_SEC:
+                self._send_error_suppressed[reason] = self._send_error_suppressed.get(reason, 0) + 1
+                return
+            suppressed = self._send_error_suppressed.pop(reason, 0)
+            self._send_error_last_log[reason] = now
+            # Ф6.х.7б: чтение под тем же локом, что и инкремент (_inc_stat) —
+            # вне лока число в тексте записи могло отстать от своего момента.
+            total = self._stats.get(f"errors_{reason}", 0)
+        tail = f"; подавлено с прошлой записи: {suppressed}" if suppressed else ""
+        self._log_error(f"send [{reason}] {detail} (errors_{reason}={total}{tail})")
+        self._track_error(
+            error if error is not None else RouterSendError(f"[{reason}] {detail}"),
+            {"reason": reason, "suppressed_since_last": suppressed},
+        )
 
     def _count_door(self, door: str, msg_dict: Dict[str, Any]) -> None:
         """Учесть, какой «дверью» ушло сообщение, + разбивка по kind.
@@ -273,7 +416,7 @@ class RouterManager(ChannelRoutingManager):
 
     def initialize(self) -> bool:
         try:
-            self._dispatcher.initialize()
+            self.channel_dispatcher.initialize()
             self.event_dispatcher.initialize()
             self._sender.start()
             self.is_initialized = True
@@ -296,7 +439,7 @@ class RouterManager(ChannelRoutingManager):
                 except Exception:  # nosec B110 — best-effort остановка канала при shutdown
                     pass
 
-            self._dispatcher.shutdown()
+            self.channel_dispatcher.shutdown()
             self.event_dispatcher.shutdown()
             self.is_initialized = False
             self._log_info("RouterManager shutdown completed")
@@ -327,8 +470,16 @@ class RouterManager(ChannelRoutingManager):
         return self._do_send(self._to_dict(message))
 
     def _do_send(self, msg_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Применить middleware → резолвить каналы → channel.send()."""
+        """Применить middleware → резолвить каналы → channel.send().
+
+        Ф7.х B-3: у груза хвоста наблюдаемости все отказы ЗДЕСЬ считаются, но не
+        пишутся — иначе отказ доставки диагностики порождает диагностику, которая
+        едет тем же хвостом (петля Б-6). Мьют вычисляется ОДИН раз, до middleware:
+        мидлварь вправе поменять словарь, и признак, снятый после неё, отвечал бы
+        уже про другое сообщение.
+        """
         self._inc_stat("sent_attempted")
+        muted = self._is_observability_traffic(msg_dict)
         try:
             processed = self._send_mw.apply(msg_dict)
             if processed is None:
@@ -342,28 +493,45 @@ class RouterManager(ChannelRoutingManager):
                 # когда channel/route не резолвится (раньше здесь был silent drop) —
                 # реализует Message(targets=[...]) → RouterManager → доставлено,
                 # не ломая существующие channel-маршруты.
-                delivered = self._deliver_by_targets(processed)
+                delivered, attempted = self._deliver_by_targets(processed)
                 if delivered is not None:
                     self._count_door("sent_via_targets", processed)
                     return delivered
-                self._inc_stat("errors")
-                return {
-                    "status": "error",
-                    "reason": (
-                        f"no channel resolved for "
-                        f"channel={processed.get('channel')!r} "
-                        f"command={processed.get('command')!r} "
-                        f"type={processed.get('type')!r}"
-                    ),
-                }
+                # Ф6.7: два неразличимых прежде случая. ``attempted`` — сколько
+                # валидных адресатов было, кому пытались положить в очередь.
+                # Ноль означает «адреса не было вовсе», ненулевое — «адрес был,
+                # доставка провалилась». Раньше и то и другое давало одинаковый
+                # +1 к ``errors`` и одинаковый текст, то есть разбор упирался в
+                # чтение кода.
+                address = (
+                    f"channel={processed.get('channel')!r} "
+                    f"command={processed.get('command')!r} "
+                    f"type={processed.get('type')!r}"
+                )
+                if attempted:
+                    reason_key = "delivery_failed"
+                    detail = (
+                        f"ни один из {attempted} адресатов не принял: {address} targets={processed.get('targets')!r}"
+                    )
+                else:
+                    reason_key = "no_route"
+                    detail = f"адресат не найден: {address}"
+                self._report_send_error(reason_key, detail, muted=muted)
+                return {"status": "error", "reason": f"no channel resolved for {address}"}
 
             self._count_door("sent_via_channel", processed)
 
             if len(channels) == 1:
                 result = channels[0].send(processed)
                 if isinstance(result, dict) and result.get("status") == "error":
-                    self._inc_stat("errors")
-                    self._log_debug(f"channel '{channels[0].name}' error: {result.get('reason')}")
+                    # Ф6.7: было ``_log_debug`` — то есть при выключенном DEBUG
+                    # (боевой дефолт) отказ канала не оставлял НИКАКОГО следа,
+                    # только +1 к общему ``errors``.
+                    self._report_send_error(
+                        "delivery_failed",
+                        f"канал '{channels[0].name}' вернул ошибку: {result.get('reason')!r}",
+                        muted=muted,
+                    )
                 else:
                     self._inc_stat("sent_ok")
                 return result
@@ -374,15 +542,22 @@ class RouterManager(ChannelRoutingManager):
                 r = ch.send(processed)
                 results.append({"channel": ch.name, **r})
                 if isinstance(r, dict) and r.get("status") == "error":
-                    self._inc_stat("errors")
+                    self._report_send_error(
+                        "delivery_failed",
+                        f"канал '{ch.name}' вернул ошибку в broadcast: {r.get('reason')!r}",
+                        muted=muted,
+                    )
                     all_ok = False
             if all_ok:
                 self._inc_stat("sent_ok")
             return {"status": "success", "broadcast": True, "results": results}
 
         except Exception as e:
-            self._inc_stat("errors")
-            self._log_error(f"_do_send exception: {e}")
+            # Мьют распространяется и на исключение: под штормом хвоста оно
+            # повторяется на каждой записи ровно так же, как отказ доставки.
+            # Молчания при этом нет — ``observability_errors_exception`` называет
+            # именно этот случай отдельно от отказов доставки.
+            self._report_send_error("exception", f"_do_send: {e}", error=e, muted=muted)
             return {"status": "error", "reason": str(e)}
 
     @staticmethod
@@ -413,7 +588,7 @@ class RouterManager(ChannelRoutingManager):
             return explicit
         return "system" if msg_dict.get("type") in ("command", "system") else "data"
 
-    def _deliver_by_targets(self, msg_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _deliver_by_targets(self, msg_dict: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], int]:
         """Адресная доставка по msg["targets"] через общий queue_registry.
 
         "Адресная книга" оркестратора: queue_registry динамически хранит очереди
@@ -438,10 +613,17 @@ class RouterManager(ChannelRoutingManager):
         Выбор очереди — :meth:`_select_queue_type`.
 
         Returns:
-            dict-результат, если хотя бы один валидный таргет был найден адресом
-            (после фильтрации пустых/broadcast/невалидных); None — если targets
-            пуст, queue_registry недоступен или ВСЕ таргеты отфильтрованы (нечего
-            было пытаться доставить — вызывающий формирует обычную ошибку).
+            Пара ``(результат, attempted)``.
+
+            Первый элемент — dict-результат, если доставлено хотя бы одному
+            валидному таргету; ``None`` — если targets пуст, queue_registry
+            недоступен, все таргеты отфильтрованы или ни один не принял.
+
+            Второй — сколько валидных адресатов было (после фильтрации
+            broadcast/невалидных). Ф6.7: без него вызывающий не отличал «адреса
+            не было» от «адрес был, доставка провалилась» — оба случая давали
+            одинаковый ``None`` и сливались в один счётчик ``errors``. Число, а
+            не флаг, потому что оно же идёт в текст записи: «ни один из N».
 
             A-2 (bug-hunt 2026-07-20 §5): при ЧАСТИЧНОМ fan-out (доставлено не всем
             валидным таргетам) статус — ``"partial"``, не ``"success"``. Раньше
@@ -452,10 +634,10 @@ class RouterManager(ChannelRoutingManager):
         """
         targets = msg_dict.get("targets")
         if not targets:
-            return None
+            return None, 0
         qr = self.queue_registry
         if qr is None:
-            return None
+            return None, 0
 
         qtype = self._select_queue_type(msg_dict)
 
@@ -467,7 +649,7 @@ class RouterManager(ChannelRoutingManager):
             try:
                 address = split_address(target)  # prefix-валидация dotted-адреса
             except AddressValidationError as exc:
-                self._log_debug(f"_deliver_by_targets: невалидный адрес {target!r}: {exc}")
+                self._log_debug(lambda exc=exc: f"_deliver_by_targets: невалидный адрес {target!r}: {exc}")
                 continue
             attempted += 1
             process = address[0]
@@ -506,7 +688,11 @@ class RouterManager(ChannelRoutingManager):
                 and process != self._relay_hub
                 and not msg_dict.get("_relayed")
                 and self._queue_absent(process, qtype)
-                and not self._queue_absent(self._relay_hub, "system")
+                # Ф7.3: гейт спрашивает про ТУ ЖЕ очередь хаба, которой релей и поедет
+                # (``_relay_via_hub``). Проверка «system» при отправке в observability
+                # была бы вопросом не про тот сосуд: у хаба без хвостовой очереди
+                # билет уходил бы в никуда, а гейт этого не заметил бы.
+                and not self._queue_absent(self._relay_hub, qtype if qtype == QUEUE_OBSERVABILITY else "system")
             ):
                 if self._relay_via_hub(ticket):
                     delivered += 1
@@ -525,10 +711,24 @@ class RouterManager(ChannelRoutingManager):
                 if ok:
                     delivered += 1
             except Exception as exc:
-                self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc}")
+                if qtype == QUEUE_OBSERVABILITY:
+                    # Ф7.3, звено (в) петли самоусиления: билет хвоста не доехал →
+                    # записи об этом НЕ делаем, иначе отказ доставки диагностики
+                    # порождает новую диагностику в тот же хвост (Б-6: 97 066 отказов,
+                    # каждый со своей записью). Счётчик здесь НЕ инкрементится
+                    # (Ф7.х.2): потерю записи считает ``_report_send_error(muted=True)``
+                    # кадром выше, когда провалились ВСЕ адресаты, — двойной учёт
+                    # на обоих кадрах завышал величину вдвое (200 на 100 потерь).
+                    continue
+                # ``!r``, а не ``{exc}``: исключения транспорта (``queue.Full``)
+                # приходят без аргументов, и запись превращалась в «failed:» без
+                # причины — ревью Ф3, Б-6.
+                self._log_debug(
+                    lambda exc=exc: f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc!r}"
+                )
 
         if delivered == 0:
-            return None
+            return None, attempted
         if delivered < attempted:
             # A-2: часть валидных таргетов НЕ получила сообщение — честный статус
             # вместо молчаливого "success". Соседний _resolve_kind_channels
@@ -537,9 +737,9 @@ class RouterManager(ChannelRoutingManager):
             # ретраить с нуля вредно), но status отличим от полного success.
             self._inc_stat("sent_ok")
             self._log_warning(f"_deliver_by_targets: частичный fan-out — доставлено {delivered}/{attempted} таргетам")
-            return {"status": "partial", "delivered_by_targets": delivered, "targets_total": attempted}
+            return {"status": "partial", "delivered_by_targets": delivered, "targets_total": attempted}, attempted
         self._inc_stat("sent_ok")
-        return {"status": "success", "delivered_by_targets": delivered, "targets_total": attempted}
+        return {"status": "success", "delivered_by_targets": delivered, "targets_total": attempted}, attempted
 
     def _on_frame_evicted(self, evicted_item: Any, reader_process: str) -> None:
         """LIVE-2 (release-on-evict): кадровое сообщение вытеснено из ПОЛНОЙ data-очереди
@@ -590,7 +790,9 @@ class RouterManager(ChannelRoutingManager):
             # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
             qr.send_to_queue(owner, "system", release_msg)
         except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
-            self._log_debug(f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc}")
+            self._log_debug(
+                lambda exc=exc: f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc!r}"
+            )
 
     def _queue_absent(self, process: str, qtype: str) -> bool:
         """True, если у процесса нет очереди `(process, qtype)` в queue_registry.
@@ -610,7 +812,7 @@ class RouterManager(ChannelRoutingManager):
         try:
             return get_queue(process, qtype) is None
         except Exception as exc:  # noqa: BLE001 — реестр не должен ронять доставку
-            self._log_debug(f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc}")
+            self._log_debug(lambda exc=exc: f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc!r}")
             return True
 
     def _relay_via_hub(self, ticket: Dict[str, Any]) -> bool:
@@ -621,26 +823,41 @@ class RouterManager(ChannelRoutingManager):
         (канал внешнего подписчика). Повторный relay исключён меткой: если и хаб
         доставить не сможет, билет дропается — прежнее поведение, но с одним
         диагностируемым hop'ом вместо молчаливого дропа на месте.
+
+        Ф7.3: билет хвоста релеится через очередь ``observability`` хаба, а не через
+        его system-почту, и обе записи (успех/провал) заменены счётчиком. Иначе весь
+        поток записей ребёнка снова упирался бы в сотню ячеек ``{хаб}_system`` — то
+        самое место, где Б-6 намерил 97 066 отказов, — а каждая пересылка порождала бы
+        ещё одну запись, которую тоже надо релеить.
         """
+        muted = ticket.get("queue_type") == QUEUE_OBSERVABILITY
+        hub_queue = QUEUE_OBSERVABILITY if muted else "system"
         envelope = {
             "type": "command",
             "command": "router.relay",
             "sender": self.router_id,
             "targets": [self._relay_hub],
-            "queue_type": "system",
+            "queue_type": hub_queue,
             "data": {"ticket": {**ticket, "_relayed": True}},
         }
         try:
-            if self.queue_registry.send_to_queue(self._relay_hub, "system", envelope):
+            if self.queue_registry.send_to_queue(self._relay_hub, hub_queue, envelope):
                 self._inc_stat("relayed_to_hub")
-                self._log_debug(
-                    f"_deliver_by_targets: билет command={ticket.get('command')!r} "
-                    f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "
-                    "(relay push→хаб, Ф1.7)"
-                )
+                if not muted:
+                    self._log_debug(
+                        lambda: (
+                            f"_deliver_by_targets: билет command={ticket.get('command')!r} "
+                            f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "
+                            "(relay push→хаб, Ф1.7)"
+                        )
+                    )
                 return True
         except Exception as exc:  # noqa: BLE001 — relay не должен ронять доставку
-            self._log_debug(f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc}")
+            if muted:
+                # Потерю считает ``_report_send_error(muted=True)`` кадром выше
+                # (Ф7.х.2 — двойной учёт); здесь только молчание.
+                return False
+            self._log_debug(lambda exc=exc: f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc!r}")
         return False
 
     def _deliver_via_channel(self, channel: IMessageChannel, process: str, ticket: Dict[str, Any]) -> bool:
@@ -650,16 +867,30 @@ class RouterManager(ChannelRoutingManager):
         напр. SocketChannel вернёт `status='error'` (`no clients connected`), если
         внешний driver не подключён — тогда билет тихо не доставлен, как и раньше
         при отсутствии очереди (пуш без подписчика не копится).
+
+        Ф7.3: для билета хвоста наблюдаемости все три записи здесь замьючены.
+        Иначе отвалившийся сокет-подписчик (`no clients connected` на КАЖДУЮ запись)
+        сам становится источником записей, которые пытаются ехать той же дорогой —
+        второй вход в петлю Б-6, уже не через очередь, а через канал. Счётчик
+        потери при этом живёт НЕ здесь: её считает ``_report_send_error(muted=True)``
+        кадром выше, когда провалились все адресаты (Ф7.х.2 — инкремент на обоих
+        кадрах завышал величину вдвое).
         """
+        muted = ticket.get("queue_type") == QUEUE_OBSERVABILITY
         try:
             result = channel.send(ticket)
         except Exception as exc:  # noqa: BLE001 — граница канала не должна ронять доставку
-            self._log_debug(f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
+            if muted:
+                return False
+            self._log_debug(lambda exc=exc: f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
             return False
         if isinstance(result, dict) and result.get("status") == "error":
-            self._log_debug(f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}")
+            if muted:
+                return False
+            self._log_debug(lambda: f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}")
             return False
-        self._log_debug(f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)")
+        if not muted:
+            self._log_debug(lambda: f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)")
         return True
 
     # ================================================================
@@ -982,7 +1213,7 @@ class RouterManager(ChannelRoutingManager):
         handler = self._worker_handlers.get(worker)
         if handler is None:
             self._log_debug(
-                f"receive: нет worker-handler для '{worker}' (адрес {address}) — fallback на process-dispatch"
+                lambda: f"receive: нет worker-handler для '{worker}' (адрес {address}) — fallback на process-dispatch"
             )
             return False
         try:
@@ -1285,6 +1516,12 @@ class RouterManager(ChannelRoutingManager):
             # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
             "queue_data_evicted": int(getattr(self.queue_registry, "data_evicted", 0) or 0),
             "queue_system_evict_blocked": int(getattr(self.queue_registry, "system_evict_blocked", 0) or 0),
+            # Ф7.3: потери ХВОСТА наблюдаемости. Отдельные ключи от data-дропа: смешав,
+            # нельзя отличить «теряем кадры» от «теряем диагностику». Единственный
+            # путь наружу — эти счётчики: сами пути потери молчат в логах сознательно
+            # (запись о потерянной записи усиливала бы шторм, петля Б-6).
+            "queue_observability_evicted": int(getattr(self.queue_registry, "observability_evicted", 0) or 0),
+            "queue_observability_send_failed": int(getattr(self.queue_registry, "observability_send_failed", 0) or 0),
             # Ф4 Task 4.3 (plans/truth-holes-closure.md): БЕЗВОЗВРАТНЫЕ потери never-drop
             # груза. Счётчик существовал, но уходил только в stdlib-логгер — самая тяжёлая
             # потеря системы была недоступна интроспекции. Тот же дешёвый property-surface,
@@ -1459,9 +1696,19 @@ class RouterManager(ChannelRoutingManager):
             if kind_channels:
                 return kind_channels
 
-        self._log_debug(
-            f"channel_dispatcher returned no route for key_field={key_field!r} value={msg_dict.get(key_field)!r}"
-        )
+        # Ф7.х M-1: у хвоста наблюдаемости «маршрута нет» — это ШТАТНЫЙ путь, а не
+        # диагноз: обе его команды доставляются адресно (``targets``), и сюда они
+        # заходят на КАЖДОЙ записи. Запись здесь давала усилитель 1:1 на успешном
+        # пути — в артефактах живого прогона это 42 строки
+        # `returned no route for ... value='observability.record'` на 42 записи.
+        # Тот же класс, что B-3, только на здоровой дороге, а не на аварийной.
+        if not self._is_observability_traffic(msg_dict):
+            self._log_debug(
+                lambda: (
+                    f"channel_dispatcher returned no route for key_field={key_field!r} "
+                    f"value={msg_dict.get(key_field)!r}"
+                )
+            )
         return []
 
     @staticmethod

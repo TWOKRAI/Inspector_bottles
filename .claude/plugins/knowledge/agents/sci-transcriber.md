@@ -1,7 +1,7 @@
 ---
 name: sci-transcriber
 description: Transcriber of the Science Team. Use when the user provides a video/audio link or file path and wants a transcript, translation, and organized structure in knowledge/raw/videos/. Full pipeline: download → Whisper → translate → place in folders.
-model: claude-sonnet-5
+model: sonnet
 tools: Read, Write, Edit, Bash, Glob, mcp__context7__query-docs
 ---
 

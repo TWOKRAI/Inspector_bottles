@@ -1,14 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Тесты ObservabilityTailActivator (Ф5.20b) — активация и переподписка live-хвоста.
+"""Тесты ObservabilityTailActivator (Task 5.11) — намерение объявляется ОДИН раз.
 
-Закрытие долга: авто-рестарт поднимает новую инкарнацию с тем же именем → дедуп по
-имени блокировал переподписку → после рестарта хвост процесса пропадал. Триггер
-переподписки — supervisor.event=recovered.
+Прежняя редакция проверяла цикл подписки по процессам и переподписку по
+``supervisor.event="recovered"``. Этой логики больше нет: её забрал брокер на
+оркестраторе — вместе с резидуалом F4, из-за которого ручной рестарт и hot-swap
+оставляли новую инкарнацию без хвоста (``recovered`` они не публикуют).
+
+Что проверяется теперь: один выстрел, правильный адресат, и что GUI больше НЕ
+разбирает состав системы.
 """
 
 from __future__ import annotations
 
 from multiprocess_prototype.frontend.widgets.tabs.observability import ObservabilityTailActivator
+
+SUBSCRIBE_ALL = "observability.tail.subscribe_all"
 
 
 class RecordingSend:
@@ -25,70 +31,110 @@ def _delta(path, value=None):
     return {"data_type": "state_delta", "path": path, "value": value}
 
 
-def test_subscribes_process_on_first_sight():
+def test_announces_intent_once_to_the_broker():
     send = RecordingSend()
     act = ObservabilityTailActivator(send, "gui")
+
     act.on_state_delta(_delta("processes.cam.state.fps", 30))
-    assert send.calls == [("cam", "observability.tail.subscribe", {"subscriber": "gui"})]
+
+    assert send.calls == [("ProcessManager", SUBSCRIBE_ALL, {"subscriber": "gui"})]
 
 
-def test_dedup_one_subscription_per_process():
+def test_further_deltas_do_not_produce_more_commands():
+    """Один выстрел, а не цикл: дельт ``processes.*`` идут сотни в секунду."""
     send = RecordingSend()
     act = ObservabilityTailActivator(send, "gui")
-    act.on_state_delta(_delta("processes.cam.state.fps", 30))
-    act.on_state_delta(_delta("processes.cam.state.fps", 31))
-    act.on_state_delta(_delta("processes.cam.workers.w1.status", "running"))
-    assert len(send.calls) == 1  # cam подписан ровно раз
 
+    for path in (
+        "processes.cam.state.fps",
+        "processes.preprocessor.state.fps",
+        "processes.stitcher.workers.w1.status",
+        "processes.cam.supervisor.event",
+    ):
+        act.on_state_delta(_delta(path, 1))
 
-def test_resubscribe_on_recovered_after_restart():
-    """Долг закрыт: supervisor.event=recovered → переподписать новую инкарнацию."""
-    send = RecordingSend()
-    act = ObservabilityTailActivator(send, "gui")
-    act.on_state_delta(_delta("processes.cam.state.fps", 30))  # первичная подписка
     assert len(send.calls) == 1
-    # Рестарт → recovered → снять дедуп и переподписать
-    act.on_state_delta(_delta("processes.cam.supervisor.event", "recovered"))
-    assert len(send.calls) == 2
-    assert send.calls[1] == ("cam", "observability.tail.subscribe", {"subscriber": "gui"})
 
 
-def test_no_resubscribe_on_other_supervisor_events():
+def test_gui_does_not_name_a_single_process():
+    """Состав системы — забота брокера; в конверте GUI нет ни одного имени процесса."""
     send = RecordingSend()
     act = ObservabilityTailActivator(send, "gui")
+
     act.on_state_delta(_delta("processes.cam.state.fps", 30))
-    act.on_state_delta(_delta("processes.cam.supervisor.event", "restarting"))
-    act.on_state_delta(_delta("processes.cam.supervisor.event", "crashed"))
-    assert len(send.calls) == 1  # только recovered переподписывает
+
+    target, _command, args = send.calls[0]
+    assert target == "ProcessManager"
+    assert args == {"subscriber": "gui"}
 
 
-def test_does_not_subscribe_self():
+def test_waits_for_the_first_process_delta():
+    """Дельта ``processes.*`` — первое доказательство, что оркестратор отвечает;
+    команда, посланная раньше, ушла бы в пустоту молча."""
     send = RecordingSend()
     act = ObservabilityTailActivator(send, "gui")
-    act.on_state_delta(_delta("processes.gui.state.fps", 60))
-    assert send.calls == []
 
-
-def test_ignores_non_process_and_non_delta():
-    send = RecordingSend()
-    act = ObservabilityTailActivator(send, "gui")
     act.on_state_delta(_delta("system.chain_fps", 30))
     act.on_state_delta({"data_type": "gui_local_metric", "path": "processes.cam.x", "value": 1})
     act.on_state_delta({"data_type": "observability_record", "records": []})
+
     assert send.calls == []
+    assert act.announced is False
 
 
-def test_send_exception_swallowed():
+class _RecordingLog:
+    """Журнал вместо реального логгера: копит (уровень, отформатированное сообщение)."""
+
+    def __init__(self) -> None:
+        self.lines: list[tuple] = []
+
+    def warning(self, msg, *args):
+        self.lines.append(("WARNING", msg % args if args else msg))
+
+    def error(self, msg, *args):
+        self.lines.append(("ERROR", msg % args if args else msg))
+
+
+def test_transport_failure_is_retried_and_never_silent():
+    """Находка 2 ревью 5.11: раньше пометка «объявлено» ставилась ДО отправки, а
+    исключение уходило в `except: pass` — один сбой оставлял GUI без хвоста
+    навсегда и молча. Теперь отказ громкий и повторяется до предела."""
+    calls = {"n": 0}
+    log = _RecordingLog()
+
     def boom(*a, **k):
+        calls["n"] += 1
         raise RuntimeError("router down")
 
-    act = ObservabilityTailActivator(boom, "gui")
-    act.on_state_delta(_delta("processes.cam.state.fps", 30))  # не должно бросить
+    act = ObservabilityTailActivator(boom, "gui", log=log)
+
+    for i in range(10):
+        act.on_state_delta(_delta("processes.cam.state.fps", i))  # не должно бросить
+
+    assert calls["n"] == 3, "повтор либо не случился, либо не ограничен"
+    assert act.announced is False, "провалившаяся отправка не имеет права считаться объявлением"
+    assert len(log.lines) == 3
+    # Последняя попытка называет последствие, а не только факт сбоя.
+    assert log.lines[-1][0] == "ERROR"
+    assert "живого хвоста" in log.lines[-1][1]
 
 
-def test_multiple_processes_each_subscribed():
-    send = RecordingSend()
-    act = ObservabilityTailActivator(send, "gui")
-    for p in ("cam", "preprocessor", "stitcher"):
-        act.on_state_delta(_delta(f"processes.{p}.state.fps", 1))
-    assert {c[0] for c in send.calls} == {"cam", "preprocessor", "stitcher"}
+def test_a_retry_after_a_hiccup_succeeds_and_stops():
+    """Транспорт моргнул на первой дельте — вторая доносит намерение."""
+    calls: list = []
+    state = {"fail": True}
+
+    def flaky(target, command, args):
+        if state["fail"]:
+            state["fail"] = False
+            raise RuntimeError("router down")
+        calls.append((target, command, args))
+
+    act = ObservabilityTailActivator(flaky, "gui", log=_RecordingLog())
+
+    act.on_state_delta(_delta("processes.cam.state.fps", 1))
+    act.on_state_delta(_delta("processes.cam.state.fps", 2))
+    act.on_state_delta(_delta("processes.cam.state.fps", 3))
+
+    assert calls == [("ProcessManager", SUBSCRIBE_ALL, {"subscriber": "gui"})]
+    assert act.announced is True and act.attempts == 2

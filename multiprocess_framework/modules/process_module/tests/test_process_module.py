@@ -3,6 +3,7 @@
 """
 
 from unittest.mock import Mock
+from multiprocess_framework.modules.base_manager.types.process_status import ProcessStatus
 from multiprocess_framework.modules.process_module import ProcessModule
 
 
@@ -89,6 +90,132 @@ class TestProcessModule:
 
         assert process._stop_requested is True
 
+    def test_ready_announced_only_after_commands_registered(self):
+        """5.11: готовность объявляется, когда команды процесса УЖЕ зарегистрированы.
+
+        Живой прогон 2026-07-29: сигнал ставил runner сразу после ``initialize()``,
+        а команды регистрируются в ``run()``. Отправитель, поверивший сигналу, слал
+        команду в это окно, ребёнок ронял её (`No handler for key
+        'observability.tail.subscribe'`) — и хвост подписчика пропадал молча.
+
+        Проверяется СВОЙСТВО, а не имя вызова: в момент объявления команда,
+        ради которой сигнал и читают, обязана быть разрешима.
+        """
+        process = ProcessModule("test_process")
+        process.worker_manager = Mock()
+        process.update_process_state = Mock()
+        process.log = Mock()
+        process.shutdown = Mock(return_value=True)
+
+        registered: list = []
+        cm = Mock()
+        cm.register_command = Mock(side_effect=lambda name, *a, **k: registered.append(name))
+        process.command_manager = cm
+
+        registered_at_announce: list = []
+        event = Mock()
+        event.set = Mock(side_effect=lambda: registered_at_announce.append(list(registered)))
+        process.attach_ready_event(event)
+
+        process.run()
+        process.stop()
+
+        assert registered_at_announce, "готовность не объявлена вовсе — барьер PM ушёл бы в liveness-фолбэк"
+        assert "observability.tail.subscribe" in registered_at_announce[0], (
+            "в момент объявления готовности команда подписки ещё не зарегистрирована — "
+            f"сигнал снова опережает обработчик (было зарегистрировано: {len(registered_at_announce[0])})"
+        )
+
+    def test_running_status_is_not_announced_before_commands_are_registered(self):
+        """6.4б: статус RUNNING не имеет права опережать регистрацию команд.
+
+        Находка Н-5б живого прогона 2026-08-03: ``run()`` выставлял ``RUNNING``
+        ПЕРВОЙ строкой, а ``BuiltinCommands.register()`` шёл ниже. В это окно
+        ``system_overview`` видел процесс «running» и получал по нему
+        ``introspect_failed`` на четырёх ручках. Окно уже чинили однажды через
+        ``attach_ready_event``, но на одном пути из трёх: сигнал стал честным,
+        статус продолжал врать.
+
+        Проверяется ПОРЯДОК как свойство: сколько команд было зарегистрировано
+        к моменту, когда статус стал RUNNING.
+        """
+        process = ProcessModule("test_process")
+        process.worker_manager = Mock()
+        process.log = Mock()
+        process.shutdown = Mock(return_value=True)
+
+        registered: list = []
+        cm = Mock()
+        cm.register_command = Mock(side_effect=lambda name, *a, **k: registered.append(name))
+        process.command_manager = cm
+
+        registered_at_running: list = []
+
+        def _capture_state(**kwargs):
+            if kwargs.get("status") == ProcessStatus.RUNNING.value:
+                registered_at_running.append(list(registered))
+
+        process.update_process_state = Mock(side_effect=_capture_state)
+
+        process.run()
+        process.stop()
+
+        assert registered_at_running, "статус RUNNING не выставлен вовсе"
+        assert "observability.tail.subscribe" in registered_at_running[0], (
+            "процесс объявил себя RUNNING до регистрации команд — снаружи это «работает», "
+            f"а на introspect.* он отвечает «нет хендлера» (зарегистрировано было: "
+            f"{len(registered_at_running[0])})"
+        )
+
+    def test_initialize_moves_both_status_planes_to_ready(self):
+        """Ф6.х.7г: ``initialize()`` двигает ОБЕ плоскости статуса, не только PSR.
+
+        Прежде PSR получал ``ready``, а ``_current_process_status`` оставался
+        ``initializing`` до конца ``run()`` — heartbeat и introspect всё окно
+        (у ``GuiProcess`` — вся жизнь Qt-loop) давали два разных ответа на один
+        вопрос «процесс готов?».
+        """
+        process = ProcessModule("test_process")
+        captured: list = []
+        process.update_process_state = Mock(side_effect=lambda **kw: captured.append(kw.get("status")))
+
+        try:
+            assert process.initialize() is True, "initialize() не прошёл на пустом конфиге"
+            assert ProcessStatus.READY.value in captured, "PSR не получил ready"
+            assert process._current_process_status == ProcessStatus.READY.value, (
+                f"вторая плоскость отстала: {process._current_process_status!r}"
+            )
+        finally:
+            process.shutdown()
+
+    def test_status_before_run_is_not_running(self):
+        """Вторая половина пары: до ``run()`` процесс НЕ объявляет себя работающим.
+
+        Дефолт ``"running"`` стоял прямо в ``__init__`` — то есть свежесозданный
+        объект, у которого ещё не было ни ``initialize()``, ни воркеров, ни
+        команд, рапортовал в heartbeat «работаю». Без этой половины первый тест
+        зелен и на коде, где статус выставляется в конструкторе и больше нигде.
+        """
+        process = ProcessModule("test_process")
+
+        assert process._current_process_status != ProcessStatus.RUNNING.value, (
+            "процесс объявляет себя работающим из конструктора"
+        )
+        assert process._current_process_status == ProcessStatus.INITIALIZING.value
+
+    def test_ready_event_absent_is_not_an_error(self):
+        """Процесс без переданного события просто не объявляет готовность (SRM-mode)."""
+        process = ProcessModule("test_process")
+        process.worker_manager = Mock()
+        process.update_process_state = Mock()
+        process.log = Mock()
+        process.shutdown = Mock(return_value=True)
+
+        process.run()  # attach_ready_event не звали — падать не на чем
+        process.stop()
+
+        assert process.should_stop() is True
+
     def test_should_stop(self):
         """Тест проверки флага остановки."""
         process = ProcessModule("test_process")
@@ -120,6 +247,30 @@ class TestProcessModule:
 
         process.update_config("key", "new_value")
 
+        assert process.config["key"] == "new_value"
+
+    def test_update_config_reaches_a_live_handler(self):
+        """R6: у настоящего процесса ``config_handler`` есть — и запись шла мимо.
+
+        ``Config.update`` принимает СЛОВАРЬ одним позиционным аргументом, а
+        ``update_config`` звал его парой ``(key, value)`` → ``TypeError`` у
+        любого процесса с обработчиком. Тест выше строит ``ProcessModule`` без
+        него и проверяет только ветку ``self.config``, поэтому дефект жил.
+
+        Читаем ТЕМ ЖЕ ``get_config``, каким читают потребители: он ходит в
+        обработчик, а не в ``self.config``, и запись «в один из двух» для них
+        неотличима от отсутствия записи.
+        """
+        from multiprocess_framework.modules.process_module.configs.process_config_handler import (
+            ProcessConfigHandler,
+        )
+
+        process = ProcessModule("test_process", config={"key": "value"})
+        process.config_handler = ProcessConfigHandler("test_process", config={"key": "value"})
+
+        process.update_config("key", "new_value")
+
+        assert process.get_config("key") == "new_value"
         assert process.config["key"] == "new_value"
 
     def test_managers_property(self):

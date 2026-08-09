@@ -18,13 +18,14 @@ Carve-out 2026-06-18 из multiprocess_prototype/domain/event_bus.py (прави
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from collections.abc import Callable
 from threading import RLock
 from types import TracebackType
 from typing import Any, Generic, TypeVar
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 E = TypeVar("E")
 

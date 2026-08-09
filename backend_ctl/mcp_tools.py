@@ -88,6 +88,22 @@ def _obj(
 
 
 _PROCESS = {"type": "string", "description": "Имя процесса (например 'preprocessor', 'ProcessManager')"}
+#: Task 5.4: адрес БАТЧА — там, где команда умеет раздаваться на несколько процессов
+#: и отвечать per-process. Отдельный параметр, а не расширенное описание `_PROCESS`:
+#: инструмент, не умеющий батч, обязан и в схеме этого не обещать.
+_PROCESS_BATCH = {
+    "type": ["string", "array"],
+    "items": {"type": "string"},
+    "description": (
+        "Имя процесса ИЛИ батч-адрес: 'all'/'*' (все живые), узор ('camera_*'), список имён. "
+        "Батч отвечает формой {batch:true, processes:{имя: ответ}, failed, not_ok}."
+    ),
+}
+#: Task 5.4: имя приёмника ИЛИ узор — раскрывает его процесс, по каталогу своей плоскости.
+_SINK_PATTERN = {
+    "type": "string",
+    "description": "Имя sink'а или узор ('module_*', 'errors_?ile'). Узор, не поймавший ничего, — отказ с каталогом.",
+}
 _TIMEOUT = {"type": "number", "description": "Таймаут ожидания ответа, сек (по умолчанию таймаут driver)"}
 # E.3: снять дефолтное усечение тяжёлого ответа и вернуть полный объём.
 _FULL = {"type": "boolean", "description": "Вернуть полный объём без усечения по размеру (E.3). По умолчанию false."}
@@ -283,7 +299,7 @@ def _log_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _observability_tail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return drv.observability_tail(args["process"], **_kw_timeout(args))
+    return drv.observability_tail(args["process"], level=args.get("level"), **_kw_timeout(args))
 
 
 def _observability_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -320,6 +336,19 @@ def _config_reload(drv: BackendDriver, args: Dict[str, Any]) -> Any:
         args["process"],
         observability=args.get("observability"),
         path=args.get("path"),
+        **_kw_timeout(args),
+    )
+
+
+def _config_reload_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    kw: Dict[str, Any] = {}
+    if "settle" in args and args.get("settle") is not None:
+        kw["settle"] = float(args["settle"])
+    return drv.config_reload_verified(
+        args["process"],
+        observability=args.get("observability"),
+        path=args.get("path"),
+        **kw,
         **_kw_timeout(args),
     )
 
@@ -785,8 +814,16 @@ TOOLS: List[ToolSpec] = [
         "observability_tail",
         "Подписаться на live-хвост наблюдаемости процесса: ЛОГИ+ОШИБКИ+СТАТИСТИКА "
         "(богаче log_tail — три плоскости). Записи едут push'ем (command='observability.record', "
-        "поле kind=log|error|stats) в событийный канал — читать инструментом events. Создаёт подписку.",
-        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        "поле kind=log|error|stats) в событийный канал — читать инструментом events. Создаёт подписку. "
+        "level задаёт порог tap'ов (дефолт ERROR; живой хвост на здоровом стенде — level=INFO).",
+        _obj(
+            {
+                "process": _PROCESS,
+                "level": {"type": "string", "description": "Минимальный уровень tap'ов (по умолчанию ERROR)"},
+                "timeout": _TIMEOUT,
+            },
+            ["process"],
+        ),
         _observability_tail,
     ),
     ToolSpec(
@@ -859,10 +896,11 @@ TOOLS: List[ToolSpec] = [
     ToolSpec(
         "config_reload",
         "Перечитать/применить observability-секцию процесса на лету. "
-        "observability={'log_level': 'DEBUG'} — сменить уровень логгера без рестарта.",
+        "observability={'log_level': 'DEBUG'} — сменить уровень логгера без рестарта. "
+        "process принимает батч-адрес ('all'/узор/список, Task 5.4) — ответ per-process.",
         _obj(
             {
-                "process": _PROCESS,
+                "process": _PROCESS_BATCH,
                 "observability": {
                     "type": "object",
                     "description": "Inline-override секции observability",
@@ -876,19 +914,46 @@ TOOLS: List[ToolSpec] = [
         _config_reload,
     ),
     ToolSpec(
-        "logger_sink_enable",
-        "Включить sink логгера процесса по имени.",
+        "config_reload_verified",
+        "То же, что config_reload, но с ДОКАЗАТЕЛЬСТВОМ: verdict (значение действует: "
+        "confirmed|failed|unverifiable) + delivering/losing/silent_source (идут ли записи "
+        "после смены — по двум замерам счётчика доставки). Молчащий источник — отдельное "
+        "состояние, не провал.",
         _obj(
-            {"process": _PROCESS, "sink": {"type": "string", "description": "Имя sink'а"}, "timeout": _TIMEOUT},
+            {
+                "process": _PROCESS,
+                "observability": {
+                    "type": "object",
+                    "description": "Inline-override секции observability",
+                    "additionalProperties": True,
+                },
+                "path": {"type": "string", "description": "Путь к файлу конфига (вместо inline)"},
+                "settle": {
+                    "type": "number",
+                    "description": "Выдержка между замерами доставки, сек (по умолчанию 1.0)",
+                },
+                "timeout": _TIMEOUT,
+            },
+            ["process"],
+        ),
+        _config_reload_verified,
+    ),
+    ToolSpec(
+        "logger_sink_enable",
+        "Включить sink логгера по имени. Обе оси адресации (Task 5.4): process — имя/'all'/узор/список, "
+        "sink — имя или узор ('module_*'), который раскрывает сам процесс по своему каталогу.",
+        _obj(
+            {"process": _PROCESS_BATCH, "sink": _SINK_PATTERN, "timeout": _TIMEOUT},
             ["process", "sink"],
         ),
         _logger_sink_enable,
     ),
     ToolSpec(
         "logger_sink_disable",
-        "Выключить sink логгера процесса по имени.",
+        "Выключить sink логгера по имени. Обе оси адресации (Task 5.4): process — имя/'all'/узор/список, "
+        "sink — имя или узор ('module_*'), который раскрывает сам процесс по своему каталогу.",
         _obj(
-            {"process": _PROCESS, "sink": {"type": "string", "description": "Имя sink'а"}, "timeout": _TIMEOUT},
+            {"process": _PROCESS_BATCH, "sink": _SINK_PATTERN, "timeout": _TIMEOUT},
             ["process", "sink"],
         ),
         _logger_sink_disable,
@@ -1163,6 +1228,9 @@ TOOL_SAFETY: Dict[str, str] = {
     "register_restore": SAFETY_WRITE,
     "register_confirm": SAFETY_WRITE,
     "config_reload": SAFETY_WRITE,
+    # Task 5.7: обёртка над тем же config.reload — класс тот же. Два лишних
+    # ЧТЕНИЯ счётчиков состояние не меняют и класс не понижают.
+    "config_reload_verified": SAFETY_WRITE,
     "logger_sink_enable": SAFETY_WRITE,
     "logger_sink_disable": SAFETY_WRITE,
     "telemetry_reconfigure": SAFETY_WRITE,

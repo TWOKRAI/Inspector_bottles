@@ -13,11 +13,17 @@ Logger Module (Refactored) - Модуль системы логирования.
 from .configs import (
     LoggerChannelSchema,
     LoggerManagerConfig,
-    LoggerModuleSchema,
+    LoggerRuleSchema,
     LoggerScopeSchema,
 )
-from .core.log_config import LogLevel, LogScope
-from .core.logger_manager import LoggerManager, get_logger, init_logging, shutdown_logging
+from .core.log_config import PRESET_SCOPES, LogLevel, LogScope, ScopeName
+from .core.logger_manager import (
+    LoggerManager,
+    contextualize,
+    get_logger,
+    init_logging,
+    shutdown_logging,
+)
 from .channels.log_channel import (
     LogChannel,
     FileChannel,
@@ -28,8 +34,18 @@ from .channels.log_channel import (
     get_registered_sink_types,
 )
 from .channels.router_push_channel import RouterPushChannel
-from .log_enums import LEVEL_ORDER, level_rank
-from .adapters.logger_adapter import LoggerAdapter
+from ..channel_routing_module.levels import (
+    ERROR_SEVERITY,
+    LEVEL_ORDER,
+    SEVERITY_NUMBERS,
+    is_error_level,
+    record_severity,
+    severity_of,
+)
+
+# Ранги переехали в общую базу (Ф0.6/R6); здесь остаются в публичном экспорте
+# logger_module — исторические потребители не обязаны знать о переезде.
+from .core.error_floor import ErrorFloor, get_error_floor, reset_error_floors
 from .adapters.std_facade import StdLoggerFacade, get_std_logger
 from .interfaces import ILoggerManager, ILogChannel
 
@@ -38,9 +54,11 @@ __all__ = [
     "LoggerManagerConfig",
     "LoggerChannelSchema",
     "LoggerScopeSchema",
-    "LoggerModuleSchema",
+    "LoggerRuleSchema",
     "LogLevel",
     "LogScope",
+    "ScopeName",
+    "PRESET_SCOPES",
     "LogChannel",
     "FileChannel",
     "ConsoleChannel",
@@ -50,8 +68,14 @@ __all__ = [
     "get_registered_sink_types",
     "RouterPushChannel",
     "LEVEL_ORDER",
-    "level_rank",
-    "LoggerAdapter",
+    "record_severity",
+    "severity_of",
+    "SEVERITY_NUMBERS",
+    "ERROR_SEVERITY",
+    "is_error_level",
+    "ErrorFloor",
+    "get_error_floor",
+    "reset_error_floors",
     "StdLoggerFacade",
     "get_std_logger",
     "ILoggerManager",
@@ -59,6 +83,10 @@ __all__ = [
     "get_logger",
     "init_logging",
     "shutdown_logging",
+    # Ф4.3: наружу отдана безопасная дверь к форточке контекста, а не сама
+    # переменная — два правила её применения (пересоздавать значение целиком,
+    # возвращать по токену) руками нарушаются тихо.
+    "contextualize",
 ]
 
 __version__ = "2.0.0"

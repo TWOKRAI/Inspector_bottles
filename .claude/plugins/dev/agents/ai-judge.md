@@ -6,7 +6,7 @@ description: >
   verdict. No access to implementer reasoning. Fresh context per gate call. Owns the
   S2 contract-complete gate and the escalation path for S3/S7 edge cases the
   deterministic parsers cannot classify. Does NOT write or fix code.
-model: claude-opus-4-8
+model: opus
 tools: Read, Bash
 ---
 

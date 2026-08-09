@@ -16,7 +16,7 @@ P1.1 command-engine audit сделан 2026-05-29 → `docs/refactors/2026-05_co
 
 **Узкая RBAC-дыра:** field-edit (`SetPluginConfig` через `presenter._on_inspector_field_changed`) НЕ гейтится `tabs.pipeline.edit` — в отличие от toolbar/drop/wire. Не блокер для single-user; точечный фикс ~пара строк.
 
-**Why:** избежать повторного расследования и не строить middleware-машинерию P1 впрок. Сам план отложен — см. [[project-priority-product-over-engine]].
+**Why:** избежать повторного расследования и не строить middleware-машинерию P1 впрок. Сам план был отложен тогдашним приоритетом «продукт > движок» — см. [[project-priority-engine-first]] (с 2026-07-26 развёрнут).
 
 **How to apply:** при возврате к движку — стартовать с этого вердикта (P1.1 закрыт). Перед P1.3 владельцу нужны 2 ответа: нужен ли persistent action_log (комплаенс)? и формат RBAC-фикса. Память может устареть — сверяться с кодом (call-sites дрейфуют).
 

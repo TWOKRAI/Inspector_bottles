@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-Тесты буферных стратегий: DirectBuffer, AsyncSenderBuffer, BatchBuffer.
+Тесты буферных стратегий: DirectBuffer, AsyncSenderBuffer.
+
+(BatchBuffer снят в Ф7.4 вместе с батчингом записи — замер показал ноль
+экономии на границе ОС и худший хвост p99 в потоке-эмитенте.)
 
 Проверяет: enqueue, flush, stats, thread-safety, priority ordering.
 """
 
 import time
-import threading
 import pytest
-from typing import Dict, List
 
 from ..buffers.direct_buffer import DirectBuffer
 from ..buffers.async_sender_buffer import AsyncSenderBuffer
-from ..buffers.batch_buffer import BatchBuffer, BatchConfig
 
 
 # ---------------------------------------------------------------------------
@@ -147,134 +147,3 @@ class TestAsyncSenderBuffer:
         buf.start()  # second call should not create new thread
         assert buf._thread is thread1
         buf.stop()
-
-
-# ---------------------------------------------------------------------------
-# BatchBuffer
-# ---------------------------------------------------------------------------
-
-
-class TestBatchBuffer:
-    def test_enqueue_and_flush(self):
-        flushed = {}
-
-        def _flush(ch, batch):
-            flushed[ch] = flushed.get(ch, []) + batch
-
-        buf = BatchBuffer(flush_fn=_flush)
-        buf.start()
-        buf.enqueue("ch1", {"v": 1})
-        buf.enqueue("ch1", {"v": 2})
-        buf.flush("ch1")
-
-        assert "ch1" in flushed
-        assert len(flushed["ch1"]) == 2
-
-    def test_flush_all(self):
-        flushed: Dict[str, List] = {}
-
-        def _flush(ch, batch):
-            flushed.setdefault(ch, []).extend(batch)
-
-        buf = BatchBuffer(flush_fn=_flush)
-        buf.start()
-        buf.enqueue("a", {"n": 1})
-        buf.enqueue("b", {"n": 2})
-        buf.flush()
-
-        assert "a" in flushed
-        assert "b" in flushed
-
-    def test_flush_on_max_size(self):
-        flushed: Dict[str, List] = {}
-
-        def _flush(ch, batch):
-            flushed.setdefault(ch, []).extend(batch)
-
-        config = BatchConfig(max_size=3, flush_interval=60.0, priority_flush=False)
-        buf = BatchBuffer(flush_fn=_flush, config=config)
-        buf.start()
-
-        for i in range(3):
-            buf.enqueue("ch", {"n": i})
-
-        time.sleep(0.1)
-        assert len(flushed.get("ch", [])) == 3
-
-    def test_priority_flush(self):
-        flushed: Dict[str, List] = {}
-
-        def _flush(ch, batch):
-            flushed.setdefault(ch, []).extend(batch)
-
-        config = BatchConfig(max_size=1000, flush_interval=60.0, priority_flush=True)
-        buf = BatchBuffer(flush_fn=_flush, config=config)
-        buf.start()
-        buf.enqueue("ch", {"n": 1}, priority="urgent")
-
-        time.sleep(0.1)
-        assert "ch" in flushed
-
-    def test_stats(self):
-        buf = BatchBuffer(flush_fn=lambda ch, batch: None)
-        buf.start()
-        buf.enqueue("ch", {"x": 1})
-        buf.enqueue("ch", {"x": 2})
-        buf.flush()
-        s = buf.stats
-        assert s["total_enqueued"] == 2
-        assert s["type"] == "batch"
-
-    def test_stop_flushes_remaining(self):
-        flushed: Dict[str, List] = {}
-
-        def _flush(ch, batch):
-            flushed.setdefault(ch, []).extend(batch)
-
-        config = BatchConfig(max_size=1000, flush_interval=60.0)
-        buf = BatchBuffer(flush_fn=_flush, config=config)
-        buf.start()
-        buf.enqueue("ch", {"n": 1})
-        buf.stop()
-
-        assert len(flushed.get("ch", [])) == 1
-
-    def test_concurrent_enqueue(self):
-        received = []
-        lock = threading.Lock()
-
-        def _flush(ch, batch):
-            with lock:
-                received.extend(batch)
-
-        config = BatchConfig(max_size=10, flush_interval=0.1)
-        buf = BatchBuffer(flush_fn=_flush, config=config)
-        buf.start()
-
-        def _producer(start: int) -> None:
-            for i in range(start, start + 20):
-                buf.enqueue("ch", {"n": i})
-
-        threads = [threading.Thread(target=_producer, args=(i * 20,)) for i in range(5)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        buf.stop()
-        assert len(received) == 100
-
-    def test_timer_flushes_automatically(self):
-        flushed: Dict[str, List] = {}
-
-        def _flush(ch, batch):
-            flushed.setdefault(ch, []).extend(batch)
-
-        config = BatchConfig(max_size=1000, flush_interval=0.2)
-        buf = BatchBuffer(flush_fn=_flush, config=config)
-        buf.start()
-        buf.enqueue("ch", {"n": 1})
-        time.sleep(0.5)
-        buf.stop()
-
-        assert "ch" in flushed

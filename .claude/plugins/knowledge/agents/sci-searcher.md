@@ -1,7 +1,7 @@
 ---
 name: sci-searcher
 description: Semantic search agent (Sonnet) via qex MCP. Searches by keywords, topics, and analogues in the knowledge base and other zones — projects/{slug}, apps/, workspace/. Per-zone indexes: deleting a project does not affect other zones.
-model: claude-sonnet-5
+model: sonnet
 tools: Read, Glob, Grep, mcp__qex__search_code, mcp__qex__index_codebase, mcp__qex__get_indexing_status, mcp__qex__clear_index
 ---
 

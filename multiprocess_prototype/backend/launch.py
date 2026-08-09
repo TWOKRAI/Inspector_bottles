@@ -12,12 +12,16 @@ state bootstrap) останется здесь.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    orchestrator_observability_config,
+)
 from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 
 if TYPE_CHECKING:
@@ -37,6 +41,34 @@ _ORCHESTRATOR_CLASS_PATH = "multiprocess_prototype.orchestrator.ProcessManagerPr
 # ---------------------------------------------------------------------------
 # Чистые помощники работы с топологиями
 # ---------------------------------------------------------------------------
+
+
+def _env_log_dir_override(env: "dict | Any") -> "str | None":
+    """Волеизъявление оператора про корень логов; порядок ключей — как у ``log_paths``."""
+    return env.get("MULTIPROCESS_LOG_DIR") or env.get("INSPECTOR_LOG_DIR")
+
+
+#: Снято ОДИН раз при импорте, а не читается живьём на каждом build().
+#: Причина: ``build()`` сам пишет резолвнутый АБСОЛЮТНЫЙ путь в
+#: ``INSPECTOR_LOG_DIR`` (setdefault — для hot-swap и детей), и живое чтение env
+#: на втором build() того же процесса принимало бы СВОЮ ЖЕ запись за волю
+#: оператора. Поймано характеризацией сборки: снапшот менялся от того, какой
+#: build в процессе был первым. env фиксируется на старте процесса — снимок при
+#: импорте и есть то, что задал оператор.
+_ENV_LOG_DIR_OVERRIDE: "str | None" = _env_log_dir_override(os.environ)
+
+
+def resolve_log_dir_root(system_log_dir: "str | None") -> str:
+    """Корень дерева логов: env главнее yaml, yaml главнее дефолта (Ф2.х, Н6).
+
+    До этой правки env читали только PM (``managers_from_log_dir``) и fallback
+    горячей замены, а дети получали ``system.log_dir`` из yaml через ассемблер:
+    запуск с ``INSPECTOR_LOG_DIR`` раскалывал дерево логов на ДВА корня —
+    воспроизведено live-прогоном 2026-08-04 (PM в env-каталоге, дети в
+    ``logs/prototype_2``). env-переопределение на то и переопределение, что
+    слышат его все.
+    """
+    return _ENV_LOG_DIR_OVERRIDE or system_log_dir or "logs"
 
 
 def unwrap_recipe(raw: dict) -> dict:
@@ -71,6 +103,17 @@ def unwrap_recipe(raw: dict) -> dict:
     # display_definitions — list[dict] (Dict-at-Boundary, НЕ Pydantic).
     if raw.get("displays"):
         bp["display_definitions"] = list(raw["displays"])
+    # Task 5.12: слой L2 живёт на ВЕРХНЕМ уровне рецепта — рядом с displays, а не
+    # внутри blueprint: человек пишет «наблюдаемость этого конвейера», а не «узел
+    # графа». Без подъёма секция молча терялась бы здесь, и рецепт выглядел бы
+    # настроенным, ничего не настраивая — ровно класс уже пойманной ловушки
+    # `inspector` под `metadata`. Вложенная (blueprint.observability) побеждает
+    # верхнеуровневую поключевым merge: правило «частное поверх общего» то же,
+    # что у всех остальных слоёв, и ни один ключ не пропадает молча.
+    if raw.get("observability") is not None:
+        from multiprocess_framework.modules.data_schema_module import deep_merge
+
+        bp["observability"] = deep_merge(raw["observability"] or {}, bp.get("observability") or {})
     return bp
 
 
@@ -143,7 +186,22 @@ def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:
         merged["display_definitions"] = merged_defs
     if merged_metadata:
         merged["metadata"] = merged_metadata
+    # Task 5.12: слой L2 суммируется как metadata — pipeline поверх фундамента.
+    # Без этой строки секция, поднятая unwrap_recipe, терялась бы ровно на
+    # паре «фундамент + pipeline», то есть на штатной раскладке прототипа.
+    merged_obs = _merge_observability(base_dict.get("observability"), pipeline_dict.get("observability"))
+    if merged_obs is not None:
+        merged["observability"] = merged_obs
     return merged
+
+
+def _merge_observability(base: dict | None, pipeline: dict | None) -> dict | None:
+    """Слить секции ``observability`` фундамента и pipeline (pipeline побеждает)."""
+    if base is None and pipeline is None:
+        return None
+    from multiprocess_framework.modules.data_schema_module import deep_merge
+
+    return deep_merge(base or {}, pipeline or {})
 
 
 def _resolve_pipeline(app: "AppManifest", override: str | None) -> Path:
@@ -189,8 +247,25 @@ def persist_pipeline_choice(manifest_path: Path, override: str) -> str:
 
     Returns:
         Строка, записанная (или уже бывшая) в ``pipeline:`` — для логов.
+
+    Raises:
+        FileNotFoundError: рецепт не существует — манифест НЕ трогается
+            (Ф6.х.6: прежде persist шёл ДО проверки, и опечатка в CLI ломала
+            и следующий запуск без аргументов — ``app.yaml`` уже указывал на
+            битый путь).
     """
     value = _manifest_pipeline_value(override)
+
+    # Ф6.х.6: валидация ДО записи. Резолв — по правилу самого манифеста:
+    # относительный путь считается от каталога app.yaml, абсолютный — как есть.
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = manifest_path.parent / candidate
+    if not candidate.is_file():
+        raise FileNotFoundError(
+            f"рецепт не найден: {candidate} — манифест не изменён "
+            f"(проверьте имя: run.py <recipe> ищет recipes/<recipe>.yaml)"
+        )
 
     # NEW-1 (Ф5.11): запись через ManifestStore — единственная точка read/write
     # app.yaml, сериализованная межпроцессным локом (закрывает гонку backend↔GUI:
@@ -315,7 +390,6 @@ class SystemBuilder:
         from multiprocess_framework.modules.process_manager_module.launcher import (
             assemble_launcher,
         )
-        from multiprocess_framework.modules.process_module.configs import expand_observability
         from multiprocess_prototype.backend.state.bootstrap import build_initial_state
         from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
 
@@ -345,20 +419,24 @@ class SystemBuilder:
         # (fallback на хардкод-дефолты внутри build_throttle_rules, если пусто).
         throttle_rules = build_throttle_rules(sys_config)
 
-        log_dir = sys_config.system.log_dir or "logs"
+        log_dir = resolve_log_dir_root(sys_config.system.log_dir)
 
         # Зафиксировать log_dir в env: дочерние процессы наследуют его (spawn), и при
         # ГОРЯЧЕЙ замене рецепта процессы, у которых cfg.log_dir пуст, резолвят его
         # через INSPECTOR_LOG_DIR (process_launch_config._resolve_log_dir) → пишут
-        # в ту же папку, а не в ./logs (fallback).
-        import os as _os
+        # в ту же папку, а не в ./logs (fallback). Обратного влияния на build() нет:
+        # env-переопределение снято при импорте (см. _ENV_LOG_DIR_OVERRIDE).
+        os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
 
-        _os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
-
-        # Единая секция observability → overlay поверх дефолтных managers каждого
-        # процесса (Logger/Error/Stats). Фреймворк уже даёт полный набор менеджеров;
-        # overlay лишь применяет пользовательские значения из system.yaml.
-        obs_overlay = expand_observability(sys_config.observability.model_dump())
+        # Слой L1 — секция observability из system.yaml, СЫРАЯ. Раскладку делает
+        # assembler per-process, поверх слоя L2 рецепта (Task 5.12).
+        #
+        # `exclude_unset=True` — не оптимизация, а условие существования слоёв:
+        # полный model_dump() материализует ВСЕ дефолты схемы, и L1 начинает
+        # владеть каждым ключом наблюдаемости. Тогда «в рецепте нет — подтянется
+        # дефолтный» превращается в «дефолт фреймворка недостижим», а provenance
+        # никогда не отвечает `framework`. Слой обязан уметь молчать.
+        obs_section = sys_config.observability.model_dump(exclude_unset=True)
 
         # PC 1.3: глобальный дефолт telemetry.publish → assembler (per-process
         # override живёт в самом blueprint, assembler читает его сам). None, если
@@ -370,10 +448,33 @@ class SystemBuilder:
         # BlueprintAssembler: stateless сборщик — та же цепочка, что была инлайн
         # (validate → check → build_configs → log_dir → process → merge_managers →
         # merge_with_defaults).  Невалидный blueprint → BlueprintInvalid (не sys.exit).
+        #
+        # ФР-3: спутник рецепта (machine-owned слой L2) в СЕКЦИЮ здесь НЕ мержится.
+        # Секция становится базой слоя у каждого процесса (`observability_override`)
+        # и живёт в его конфиге; спутник кладёт поверх `compose_over_base` — уже на
+        # процессе и последним. Домержи мы его сюда (так было до ФР-3), снятый из
+        # спутника ключ остался бы в базе навсегда, тогда как generic-дорога
+        # (`app_module.SystemBuilder`, она спутника не мержит) честно возвращала бы
+        # значение рецепта. Один дефект — две разные системы.
+        #
+        # Читаем спутник всё же здесь, и только ради ОТКАЗА: на boot битый файл
+        # обязан уронить старт, а не стартовать без сохранённых настроек. Каждый
+        # процесс дальше глотает эту ошибку в лог (падать на старте из-за спутника
+        # ему нельзя), поэтому громким отказ остаётся ровно в одной точке — этой.
+        recipe_path = str(self._topology_path) if self._topology_path else ""
+        if recipe_path:
+            from multiprocess_framework.modules.process_module.configs.observability_companion import (
+                load_companion,
+            )
+
+            load_companion(recipe_path)
+
         assembler = BlueprintAssembler(
-            observability_dict=obs_overlay,
+            observability_section=obs_section,
             log_dir=log_dir,
             telemetry_dict=telemetry_dict,
+            recipe_path=recipe_path,
+            app_config_path=str(self._system_path) if self._system_path else "",
         )
         try:
             proc_dicts = assembler.assemble(bp_dict)
@@ -396,8 +497,22 @@ class SystemBuilder:
                 "initial_state": initial_state,
                 "state_throttle_rules": throttle_rules,
                 "backend_ctl": sys_config.backend_ctl.model_dump(),
-                # Путь к system.yaml для observability hot-reload watcher (P3.3).
-                "observability_config_path": str(self._system_path) if self._system_path else "",
+                # Task 5.13: слои наблюдаемости оркестратора — общий шов с generic-дорогой.
+                # Здесь L1 (сырая секция system.yaml), адрес L1 для provenance, адрес L2
+                # (рецепт + спутник рядом, нужен watcher'у и observability.persist) и
+                # ДОЛЬКА рецепта, названная именем оркестратора. Последней до 5.13 не было
+                # вовсе: PM получал адрес слоя без содержимого. Раскладка живёт одной
+                # функцией на обе дороги — третья копия разошлась бы с первыми двумя.
+                **orchestrator_observability_config(
+                    app_section=obs_section,
+                    recipe_section=bp_dict.get("observability"),
+                    app_config_path=str(self._system_path) if self._system_path else "",
+                    recipe_path=recipe_path,
+                ),
+                # Манифест — существующая истина «какой рецепт активен» (его пишет
+                # GUI при активации). Нужен для ретаргета L2-watcher после switch,
+                # когда инициатор не передал путь явно.
+                "manifest_path": str(self._manifest_path) if self._manifest_path else "",
                 # Дебаунс hot-swap: коалесинг повторных/наложенных кликов 3 точек входа
                 # (Recipes «Загрузить», Pipeline «Запустить»/«Перезапустить») → не «тасуем»
                 # процессы. Меряется от завершения предыдущей замены. 0 = выключено (тесты).

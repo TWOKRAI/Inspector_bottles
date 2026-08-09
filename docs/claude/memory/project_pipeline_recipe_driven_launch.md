@@ -31,4 +31,4 @@ metadata:
 
 **Осталось:** (2-А, опц.) табличный редактор regions поверх JSON (6 колонок name/x/y/w/h/target + add/remove) — для удобства, не для функции. (3) опц. дефолт-config при drag + manifest `default_recipe` + GUI «сохранить как рецепт» → запуск.
 
-Связано: [[project_priority_product_over_engine]] (продукт > движок — это оно), [[project_pipeline_node_plugin_containers]], [[project_recipes_manager]], [[project_transport_router_hub]] (P3 каналов отложен ради этого).
+Связано: [[project_priority_engine_first]] (тогда действовал приоритет «продукт > движок»; с 2026-07-26 он развёрнут), [[project_pipeline_node_plugin_containers]], [[project_recipes_manager]], [[project_transport_router_hub]] (P3 каналов отложен ради этого).

@@ -9,6 +9,20 @@ from .observability_config import (
     ObservabilityStatsConfig,
     expand_observability,
 )
+from .observability_layers import (
+    LAYER_APP,
+    LAYER_FRAMEWORK,
+    LAYER_ORDER,
+    LAYER_RECIPE,
+    LAYER_SESSION,
+    ORCHESTRATOR_PROCESS_NAME,
+    OVERRIDE_CONFIG_KEY,
+    ObservabilityLayers,
+    apply_layers_to_proc_dict,
+    flatten_section,
+    layers_are_silent,
+    resolve_recipe_section,
+)
 from .process_config_handler import ProcessConfigHandler
 from .process_launch_config import ProcessLaunchConfig
 from .telemetry_publish_config import MetricRule, TelemetryPublishConfig
@@ -20,6 +34,18 @@ __all__ = [
     "ObservabilityErrorsConfig",
     "ObservabilityStatsConfig",
     "expand_observability",
+    "ObservabilityLayers",
+    "LAYER_FRAMEWORK",
+    "LAYER_APP",
+    "LAYER_RECIPE",
+    "LAYER_SESSION",
+    "LAYER_ORDER",
+    "ORCHESTRATOR_PROCESS_NAME",
+    "OVERRIDE_CONFIG_KEY",
+    "apply_layers_to_proc_dict",
+    "flatten_section",
+    "layers_are_silent",
+    "resolve_recipe_section",
     "ProcessConfigHandler",
     "ProcessLaunchConfig",
     "MetricRule",

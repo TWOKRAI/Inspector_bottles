@@ -28,7 +28,7 @@ built-in команд безопасна без allow-исключений.
 from __future__ import annotations
 
 import typing
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel, ConfigDict
 
@@ -118,16 +118,66 @@ class ConfigReloadParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     observability: Optional[Dict[str, Any]] = None
+    # PC 3.1 — секцию telemetry команда принимает с тех пор, но в контракте её
+    # не было: при extra="forbid" warn-мидлварь ругалась на КАЖДЫЙ штатный вызов.
+    telemetry: Optional[Dict[str, Any]] = None
+    telemetry_mode: Optional[str] = None
+    # Task 5.12 — ключи, которые надо УДАЛИТЬ из слоя сессии (L3).
+    observability_reset: Optional[List[str]] = None
+    # switch рецепта: обнулить слой сессии целиком (инициатор не знает его состава).
+    observability_session_clear: Optional[bool] = None
+    # R6 (живой switch): новый слой L2 целиком — СЫРАЯ секция рецепта и его адрес.
+    # Секция сырая, а не готовая долька процесса: резолв (`defaults` +
+    # `processes[<имя>]`) обязан идти ТЕМ ЖЕ кодом, что и на boot, иначе switch и
+    # старт разойдутся в трактовке одного файла. Пустая секция (`{}`) — законное
+    # «новый рецепт про наблюдаемость молчит», и она обязана СНЯТЬ прежний слой.
+    observability_recipe: Optional[Dict[str, Any]] = None
+    observability_recipe_path: Optional[str] = None
+    # R4 (Task 5.11.f) — «перечитай слой L2 со своего адреса»: зеркало файловой
+    # ветки для L1. Секцию на проводе НЕ несёт: спутник лежит на диске, и читать
+    # его обязан тот же код, что на boot, иначе перечитка и старт разойдутся.
+    observability_recipe_reload: Optional[bool] = None
+    # Task 5.8 — срок жизни inline-правки, сек. Не задан → политика слоёв
+    # (``session_ttl_sec``, дефолт 300с); ``0`` → бессрочно, явным решением.
+    ttl: Optional[float] = None
     path: Optional[str] = None
 
 
+class ObservabilityPersistParams(BaseModel):
+    """Параметры ``observability.persist`` (Task 5.12: L3 → спутник рецепта)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    recipe_path: Optional[str] = None
+
+
 class LoggerSinkParams(BaseModel):
-    """Параметры ``logger.sink.enable`` / ``logger.sink.disable``."""
+    """Параметры ``observability.sink.enable`` / ``.disable`` (и алиасов ``logger.sink.*``)."""
 
     model_config = ConfigDict(extra="forbid")
 
     sink: Optional[str] = None
     name: Optional[str] = None  # алиас sink (см. _toggle_logger_sink)
+    # Ф0.6: какую плоскость наблюдаемости адресуем — logger (дефолт) | error | stats.
+    # Значения вне whitelist'а отвергает обработчик (роутер — транспорт, не плоскость).
+    manager: Optional[str] = None
+    # Task 5.8 — срок жизни снятия/возврата приёмника, сек (0 — бессрочно).
+    ttl: Optional[float] = None
+
+
+class ObservabilityIntrospectParams(BaseModel):
+    """Параметры ``introspect.observability`` (Task 5.9).
+
+    Команда была ``NoParams``; аудит добавил ровно одну ручку — глубину хвоста.
+    Объявить её обязательно: ``extra="forbid"`` означает, что незадекларированный
+    параметр помечается ``unexpected`` warn-мидлварью, а в ``FW_CONTRACTS_STRICT``
+    сообщение дропается целиком — ручка была бы мертва при зелёных тестах.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Сколько последних записей аудита вернуть (дефолт 20; 0 — не возвращать).
+    audit_limit: Optional[int] = None
 
 
 class LogTailSubscribeParams(BaseModel):
@@ -170,6 +220,20 @@ class ObservabilityTailUnsubscribeParams(BaseModel):
     subscriber: Optional[str] = None
 
 
+class ObservabilityTailBrokerParams(BaseModel):
+    """Параметры ``observability.tail.subscribe_all`` / ``.unsubscribe_all`` (Task 5.11).
+
+    Команды брокера живут на ОРКЕСТРАТОРЕ, но контракт объявляется здесь, вместе
+    со всеми остальными: два реестра имён одной плоскости однажды разойдутся, и
+    тогда через одно написание пройдёт то, что другое отвергает (урок 5.10.e).
+    Схема одна на обе команды — параметр у них ровно один и тот же.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    subscriber: Optional[str] = None
+
+
 class HealthReportParams(BaseModel):
     """Параметры ``health.report`` (диагностический впрыск health-события, Ф2 Task 2.1)."""
 
@@ -201,14 +265,24 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     "introspect.memory": NoParams,
     "introspect.capabilities": NoParams,
     "introspect.plugins": NoParams,
+    "introspect.observability": ObservabilityIntrospectParams,
     # observability control plane (Ф1 Task 1.4/1.5, Ф5.20b)
     "config.reload": ConfigReloadParams,
+    "observability.persist": ObservabilityPersistParams,
+    # Task 5.10.e: каноническое имя и алиас судятся ОДНИМ контрактом. Разные
+    # схемы у двух имён одной команды означали бы, что через алиас проходит то,
+    # что канон отвергает — то есть контракт обходится сменой написания.
+    "observability.sink.enable": LoggerSinkParams,
+    "observability.sink.disable": LoggerSinkParams,
     "logger.sink.enable": LoggerSinkParams,
     "logger.sink.disable": LoggerSinkParams,
     "log.tail.subscribe": LogTailSubscribeParams,
     "log.tail.unsubscribe": LogTailUnsubscribeParams,
     "observability.tail.subscribe": ObservabilityTailSubscribeParams,
     "observability.tail.unsubscribe": ObservabilityTailUnsubscribeParams,
+    # Task 5.11 — брокер подписки (обрабатывает оркестратор, судится общим реестром)
+    "observability.tail.subscribe_all": ObservabilityTailBrokerParams,
+    "observability.tail.unsubscribe_all": ObservabilityTailBrokerParams,
     # health (Ф2 Task 2.1)
     "health.report": HealthReportParams,
     "health.status": NoParams,
@@ -259,6 +333,7 @@ __all__ = [
     "LogTailSubscribeParams",
     "LogTailUnsubscribeParams",
     "ObservabilityTailSubscribeParams",
+    "ObservabilityTailBrokerParams",
     "HealthReportParams",
     "BUILTIN_COMMAND_CONTRACTS",
     "params_schema_of",

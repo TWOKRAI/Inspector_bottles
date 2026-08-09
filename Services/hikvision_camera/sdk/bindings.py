@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import ctypes
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import sys
 from ctypes import (
     byref,
@@ -27,7 +28,7 @@ from .structures import (
     MVCC_FLOATVALUE,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Загрузка DLL (graceful degradation)

@@ -24,14 +24,15 @@ API:
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from pathlib import Path
 
 import yaml
 
 from multiprocess_prototype.registers.theme.schemas import ThemeVariables
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 # Пути по умолчанию относительно расположения этого файла:
 #   managers/theme_presets_manager.py
@@ -108,10 +109,7 @@ class ThemePresetsManager:
         if not self._custom_dir.is_dir():
             return []
 
-        names: list[str] = [
-            f.stem for f in self._custom_dir.iterdir()
-            if f.is_file() and f.suffix in (".yaml", ".yml")
-        ]
+        names: list[str] = [f.stem for f in self._custom_dir.iterdir() if f.is_file() and f.suffix in (".yaml", ".yml")]
         return sorted(names)
 
     def list_all(self) -> list[tuple[str, str]]:
@@ -203,7 +201,10 @@ class ThemePresetsManager:
         return ""
 
     def save_custom(
-        self, name: str, variables: ThemeVariables, parent: str = "",
+        self,
+        name: str,
+        variables: ThemeVariables,
+        parent: str = "",
     ) -> None:
         """Сохранить (или перезаписать) custom-тему.
 
@@ -227,9 +228,7 @@ class ThemePresetsManager:
                 yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
             _logger.debug("[ThemePresetsManager] custom-тема '%s' сохранена: %s", name, target)
         except Exception as exc:
-            _logger.error(
-                "[ThemePresetsManager] ошибка сохранения custom-темы '%s': %s", name, exc
-            )
+            _logger.error("[ThemePresetsManager] ошибка сохранения custom-темы '%s': %s", name, exc)
             raise
 
     def delete_custom(self, name: str) -> bool:
@@ -255,9 +254,7 @@ class ThemePresetsManager:
             _logger.debug("[ThemePresetsManager] custom-тема '%s' удалена", name)
             return True
         except Exception as exc:
-            _logger.error(
-                "[ThemePresetsManager] ошибка удаления custom-темы '%s': %s", name, exc
-            )
+            _logger.error("[ThemePresetsManager] ошибка удаления custom-темы '%s': %s", name, exc)
             raise
 
     def copy_theme(self, src_name: str, dst_name: str) -> None:
@@ -340,8 +337,7 @@ class ThemePresetsManager:
 
             if not isinstance(raw, dict):
                 _logger.warning(
-                    "[ThemePresetsManager] тема '%s': ожидался dict, получен %s — "
-                    "используются дефолтные значения",
+                    "[ThemePresetsManager] тема '%s': ожидался dict, получен %s — используются дефолтные значения",
                     name,
                     type(raw).__name__,
                 )

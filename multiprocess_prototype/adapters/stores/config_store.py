@@ -25,14 +25,15 @@ Refs: plans/2026-05-27_cross-tab-architecture/phase-d-app-services.md (Task D.2b
 from __future__ import annotations
 
 import fnmatch
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import threading
 from typing import Any, Callable, Mapping, Sequence
 
 from multiprocess_prototype.domain.protocols.config_store import ConfigStore
 from multiprocess_prototype.domain.protocols.event_bus import Subscription
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class _ConfigSubscription:

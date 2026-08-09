@@ -36,10 +36,12 @@ Refs: plans/displays-in-recipe/plan.md, Task 3.1
 from __future__ import annotations
 
 import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import os
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Путь к директории рецептов: migrations/ -> recipes/ (один уровень вверх)
 _DEFAULT_RECIPES_DIR = Path(__file__).resolve().parent.parent

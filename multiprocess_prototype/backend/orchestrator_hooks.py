@@ -47,8 +47,6 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
     # Lazy-импорты: prototype-символы, не нужные framework
     from pathlib import Path
 
-    from multiprocess_framework.modules.process_module.configs import expand_observability
-
     from multiprocess_prototype.backend.assembly import BlueprintAssembler, FullReplacePlanner
     from multiprocess_prototype.backend.assembly.normalize import normalize_blueprint
     from multiprocess_prototype.backend.config.schemas import SystemConfig
@@ -73,7 +71,9 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         discovered = app_discover(plugin_paths=plugin_paths, service_paths=[]).plugins_discovered
         orchestrator._log_info(f"[topology-engine] discover: {discovered} плагинов в PM-процессе")
 
-    obs_overlay = expand_observability(sys_config.observability.model_dump())
+    # Слой L1 — сырая секция system.yaml (exclude_unset: слой обязан уметь
+    # молчать, иначе рецепт нечем переопределять — см. launch.py, Task 5.12).
+    obs_section = sys_config.observability.model_dump(exclude_unset=True)
     log_dir = sys_config.system.log_dir or "logs"
 
     # PC 3.1 (hot-swap gap fix): прокинуть глобальный telemetry.publish в assembler —
@@ -84,11 +84,27 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
     # assembler читает его независимо; здесь закрываем именно ГЛОБАЛЬНЫЙ дефолт.
     telemetry_publish = sys_config.telemetry.publish
     telemetry_dict = telemetry_publish.model_dump() if telemetry_publish is not None else None
-    assembler = BlueprintAssembler(
-        observability_dict=obs_overlay,
-        log_dir=log_dir,
-        telemetry_dict=telemetry_dict,
-    )
+    app_config_path = str(orchestrator.get_config("observability_config_path") or "")
+
+    def _active_recipe_path() -> str:
+        """Адрес слоя L2 НА МОМЕНТ ЭТОЙ сборки (Task 5.12, блокер ревью 2).
+
+        Резолвится ПОКАЖДЫЙ вызов, а не один раз в конструкторе ассемблера:
+        ассемблер живёт всё время работы PM, а рецепт меняется каждым switch.
+        Зашитый в конструктор путь означал бы, что пересозданные процессы
+        получают адрес ПЕРВОГО рецепта — и сохранённый спутник нового молча
+        не применяется (та же живая находка «сохранить не сохраняет», только
+        воскрешённая для switch).
+
+        Свежее всего — манифест (``app.yaml: pipeline``): его пишет GUI при
+        активации рецепта. Фолбэк — boot-значение из orchestrator_config.
+        """
+        from_manifest = getattr(orchestrator, "_active_recipe_from_manifest", None)
+        if callable(from_manifest):
+            resolved = from_manifest()
+            if resolved:
+                return str(resolved)
+        return str(orchestrator.get_config("observability_recipe_path") or "")
 
     def _build_proc_dicts(bp: dict) -> dict[str, dict]:
         """unwrap рецепта v3 → normalize → assemble (единая сборка boot+switch).
@@ -97,7 +113,32 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         исходного blueprint), normalize_blueprint мутирует in-place →
         без deepcopy повторный switch накапливал бы side-effect на IPC-рецепте.
         """
-        return assembler.assemble(normalize_blueprint(copy.deepcopy(unwrap_recipe(bp)), sys_config))
+        recipe_path = _active_recipe_path()
+        topology = normalize_blueprint(copy.deepcopy(unwrap_recipe(bp)), sys_config)
+        # Task 5.13, шаг 7 — что эта пересборка делает с долькой ОРКЕСТРАТОРА:
+        # ничего, и это решение, а не пропуск. Она возвращает proc_dict'ы ДЕТЕЙ,
+        # а свой слой оркестратор берёт из конверта switch'а
+        # (`_recipe_layer_payload` → `_reset_observability_sessions`). Выдай она
+        # дольку ещё и здесь — слой ставился бы дважды, из двух источников,
+        # и на первом же расхождении победил бы тот, кто пришёл последним.
+        # Согласованность держится тем, что спутник у обоих путей кладётся
+        # ПОСЛЕДНИМ и одним кодом (`compose_over_base`), из одного файла.
+        #
+        # ФР-3: спутник в `topology["observability"]` не домерживается — как и на
+        # boot (`launch.py`). Эта секция становится БАЗОЙ слоя в конфиге каждого
+        # пересобранного процесса, а базу процесс переживает; спутник же обязан
+        # оставаться снимаемым — иначе снятый из него ключ воскресал бы вечно.
+        # Пересозданный процесс читает спутник сам, на старте
+        # (`ProcessModule._apply_boot_observability_layers`), переживший —
+        # в ветке switch'а `config.reload`.
+        assembler = BlueprintAssembler(
+            observability_section=obs_section,
+            log_dir=log_dir,
+            telemetry_dict=telemetry_dict,
+            recipe_path=recipe_path,
+            app_config_path=app_config_path,
+        )
+        return assembler.assemble(topology)
 
     # Планировщик (BaseManager + ObservableMixin)
     planner = FullReplacePlanner(

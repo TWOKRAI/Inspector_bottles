@@ -9,11 +9,12 @@ Pure Python, без Qt, независимо тестируемый блок к�
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 __all__ = [
     "ICommandCatalog",

@@ -53,27 +53,15 @@ def _logger_config_for_routing(
     return LoggerManagerConfig.model_validate(
         {
             "app_name": "err_route_test",
-            "default_level": default_level,
+            "default_level": "DEBUG",
             "enable_batching": enable_batching,
             "batch_size": 50,
             "batch_interval": 0.5,
             "channels": channels,
             "scopes": {
-                "SYSTEM": {
-                    "enabled": True,
-                    "min_level": "DEBUG",
-                    "channels": list(channels.keys()),
-                },
-                "BUSINESS": {
-                    "enabled": True,
-                    "min_level": "DEBUG",
-                    "channels": ["errors_file"],
-                },
-                "DEBUG": {
-                    "enabled": True,
-                    "min_level": "DEBUG",
-                    "channels": ["errors_file"],
-                },
+                "SYSTEM": {"channels": list(channels.keys())},
+                "BUSINESS": {"channels": ["errors_file"]},
+                "DEBUG": {"channels": ["errors_file"]},
             },
         }
     )

@@ -1,7 +1,7 @@
 ---
 name: spec-writer
 description: Product specifier. Creates and updates the living spec (docs/direction/) — a description of the application from the user's perspective. The user edits the spec → Claude understands what to change in the code.
-model: claude-sonnet-5
+model: sonnet
 memory: project
 ---
 

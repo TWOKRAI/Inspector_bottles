@@ -221,18 +221,50 @@ class TestObservabilityRecordHandler:
         assert len(got) == 1
         assert got[0]["data_type"] == "observability_record"
         assert got[0]["process"] == "cam"
-        assert got[0]["records"] == [{"m": 1}, {"m": 2}]
+        # Ф3.4: обработчик — первая точка, где запись увидел ЧУЖОЙ процесс,
+        # поэтому он же ставит отметку приёма. Сверяем содержимое без неё, а
+        # саму отметку — отдельным тестом ниже.
+        assert [{k: v for k, v in r.items() if k != "observed_ts"} for r in got[0]["records"]] == [
+            {"m": 1},
+            {"m": 2},
+        ]
 
     def test_single_record_wrapped_in_list(self, qtbot):
         handler, fake_self, got = self._handler()
         msg = {"data": {"process": "cam", "record": {"m": 9}}}
         handler(fake_self, msg)
-        assert got[0]["records"] == [{"m": 9}]
+        assert [{k: v for k, v in r.items() if k != "observed_ts"} for r in got[0]["records"]] == [{"m": 9}]
 
     def test_empty_no_dispatch(self, qtbot):
         handler, fake_self, got = self._handler()
         handler(fake_self, {"data": {"process": "cam"}})
         assert got == []
+
+    def test_handler_stamps_the_moment_of_receipt(self, qtbot):
+        """Ф3.4: ПРОВОДКА, а не помощник.
+
+        Тесты самого ``stamp_observed`` живут в framework и доказывают функцию.
+        Здесь проверяется, что её ВЫЗВАЛИ — и вызвали в правильной точке: на
+        приёме, где запись впервые увидел чужой процесс. Без этого теста
+        корректная функция могла бы просто нигде не звучать.
+        """
+        import time
+
+        handler, fake_self, got = self._handler()
+        before = time.time()
+        handler(fake_self, {"data": {"process": "cam", "records": [{"ts": 1.0}]}})
+        after = time.time()
+
+        stamped = got[0]["records"][0]
+        assert "observed_ts" in stamped, "обработчик не поставил отметку приёма"
+        assert before <= stamped["observed_ts"] <= after, "отметка не из часов приёмника"
+        assert stamped["observed_ts"] - stamped["ts"] > 0, "задержка доставки не считается"
+
+    def test_handler_keeps_a_stamp_made_upstream(self, qtbot):
+        """Пересылка через вторые руки не обнуляет задержку первого приёмника."""
+        handler, fake_self, got = self._handler()
+        handler(fake_self, {"data": {"process": "cam", "records": [{"ts": 1.0, "observed_ts": 5.0}]}})
+        assert got[0]["records"][0]["observed_ts"] == 5.0
 
 
 # ============================================================================

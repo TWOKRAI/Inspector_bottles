@@ -47,7 +47,10 @@ class TestLogSuccessGatePair:
         (msg,), kwargs = mgr._log_info.call_args
         assert "ping" in msg
         assert "executed successfully" in msg
-        assert kwargs.get("module") == "command_manager"
+        # Ф2.6: имя источника стало точечным (было "command_manager"). Литерал, а не
+        # импорт LOG_SOURCE: сравнение с константой из кода под тестом согласилось бы
+        # с любым её значением, в том числе с молчаливым переименованием обратно.
+        assert kwargs.get("module") == "multiprocess_framework.modules.command_module"
 
     def test_setter_flips_gate_at_runtime(self) -> None:
         """set_log_success_enabled — та же пара, но через runtime-переключатель."""

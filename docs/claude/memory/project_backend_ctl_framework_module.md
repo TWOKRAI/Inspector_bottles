@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-План `plans/backend-ctl-framework-module.md` — превратить `backend_ctl` в модуль фреймворка + догнать GUI-паритет приёма. **Решение владельца 2026-07-17: продукт-first форк** — фичи Phase 2 строим на ТЕКУЩЕЙ раскладке `backend_ctl/` (не извлекаем в `modules/`/`tooling/`); переезд (Phase 1) + MCP-SDK (Phase 3) + Phase 4 отложены ЦЕЛИКОМ до codemod layer-grouping. Мотивация — [[feedback_priority_product_over_engine]]: ценность агент=GUI-паритет нужна сейчас, движковый детур (coherence 2-3 → codemod) откладывается.
+План `plans/backend-ctl-framework-module.md` — превратить `backend_ctl` в модуль фреймворка + догнать GUI-паритет приёма. **Решение владельца 2026-07-17: продукт-first форк** — фичи Phase 2 строим на ТЕКУЩЕЙ раскладке `backend_ctl/` (не извлекаем в `modules/`/`tooling/`); переезд (Phase 1) + MCP-SDK (Phase 3) + Phase 4 отложены ЦЕЛИКОМ до codemod layer-grouping. Мотивация — тогдашний приоритет «продукт-first» ([[project_priority_engine_first]], развёрнут 2026-07-26): ценность агент=GUI-паритет нужна была сейчас, движковый детур (coherence 2-3 → codemod) откладывался. **Основание решения устарело — отложенные фазы пересмотреть.**
 
 **В main (2026-07-17):**
 - **Phase 0 (hardening)** — второй чат, `cfc3e531`: durable-подписки переживают реконнект, гонка close()/request() закрыта, единый endpoint-конфиг, MCP-регистрация telemetry-методов (Task 0.5).
@@ -23,4 +23,4 @@ metadata:
 
 **Отложено:** 2.3 telemetry read-model — блокер: reuse-источник generic-`TelemetryViewModel` появится в coherence Task 3.5 ([[project_telemetry_coherence_remediation]]). **Split god-file `driver.py` (~1567 строк, растёт)** — можно СЕЙЧАС на текущей раскладке (развязан от переезда), с директивой владельца «сделать красиво» (вычистить процессные комментарии: хеши/ревью-пометки/Task-номера → чистый production-код). Phase 1 переезд в `tooling/` + Phase 3 SDK + Phase 4 — пост-codemod.
 
-Связано: [[project-backend-control-mcp]] (транспорт/P0-P2, старый план), [[feedback_backend_ctl_for_agents]] (бэкенд тестировать driver'ом), [[feedback_priority_product_over_engine]].
+Связано: [[project-backend-control-mcp]] (транспорт/P0-P2, старый план), [[feedback_backend_ctl_for_agents]] (бэкенд тестировать driver'ом), [[project_priority_engine_first]].

@@ -207,10 +207,36 @@ class _RefusingBridge:
 
 
 class _RecordingLoggerManager:
-    """Дубль LoggerManager: собирает (level, message, module)."""
+    """Дубль LoggerManager: собирает (level, message, module).
+
+    **Записывает ``log()`` — тот вызов, которым фасад НА САМОМ ДЕЛЕ пишет.**
+    Прежняя редакция дубля выставляла только ``warning``/``info``, то есть
+    удобные методы менеджера, а ``std_facade._emit`` зовёт ``writer.log(scope,
+    level, msg, module, …)``. Совпадения не было, и тест «предупреждение доехало
+    до LoggerManager» проходил ровно потому, что до записи дело не доходило
+    вовсе. Вскрыто Ф8.1: после снятия второй оси гейт перестал отклонять эту
+    запись, вызов дошёл до дубля — и дубль упал с ``has no attribute 'log'``.
+
+    Класс «фальшивка, не умеющая того, что умеет оригинал»: пока дубль молчал,
+    молчал и тест. Удобные методы оставлены — presenter может звать и их.
+    """
 
     def __init__(self) -> None:
         self.records: list[tuple[str, str, str]] = []
+
+    def log(self, _scope: Any, level: Any, message: Any, module: str = "main", *args: Any, **_extra: Any) -> None:
+        # ``%``-аргументы применяются здесь, как их применяет настоящий
+        # ``LoggerCore.log``. Без этого дубль хранил бы шаблон
+        # ``"delete_process(%s): …"``, и проверка «в сообщении названо имя
+        # процесса» была бы неверна при полностью исправной записи.
+        имя = getattr(level, "value", level)
+        текст = str(message)
+        if args:
+            try:
+                текст = текст % args
+            except (TypeError, ValueError):
+                pass
+        self.records.append((str(имя).lower(), текст, module))
 
     def warning(self, message: str, module: str = "main", **_extra: Any) -> None:
         self.records.append(("warning", message, module))

@@ -22,7 +22,8 @@ endpoint-строки + каталог плагинов → совместимо
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
         PortSpec,
     )
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 @dataclass(frozen=True)

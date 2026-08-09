@@ -9,9 +9,10 @@ from multiprocessing import Event, Process
 from typing import Any, Callable, Dict, Optional, Union
 
 from ...logger_module.utils import FallbackLogger
-from ..runner.class_loader import _ProcessLogger
+from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
 from ..runner.process_runner import run_process_function
 from ..platforms import get_platform_adapter
+from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
 from ...shared_resources_module import SharedResourcesManager
 from .process_tree_guard import ProcessTreeGuard
 
@@ -45,7 +46,7 @@ class ProcessSpawner:
         self._stop_event = Event()
         self._process: Optional[Process] = None
         self._shared_resources: Optional[SharedResourcesManager] = None
-        self._logger: Optional[_ProcessLogger] = None
+        self._logger: Optional[StdLoggerFacade] = None
         self._stop_timeout = stop_timeout
         self._on_shutdown = on_shutdown
         # Event для сигнализации готовности системы (ADR-116).
@@ -69,7 +70,7 @@ class ProcessSpawner:
         self._shared_resources = SharedResourcesManager(manager_name="shared_resources")
         self._shared_resources.initialize()
 
-        self._logger = _ProcessLogger("spawner")
+        self._logger = get_std_logger("spawner")
         self._guard = ProcessTreeGuard(logger=self._logger)
         # ДО спавна оркестратора (Windows: создать job — дети наследуют по job).
         self._guard.install()
@@ -100,7 +101,10 @@ class ProcessSpawner:
             # system_stop_event — отдельным аргументом (inheritance), НЕ в bundle custom.
             args=(
                 self._orchestrator_class_path,
-                "ProcessManager",
+                # Task 5.13: имя оркестратора — одна константа на систему. Здесь оно
+                # становится `svc.name`, а по нему резолвится и долька рецепта, и имя
+                # файла-спутника. Литерал в этом месте расходился бы с правилом молча.
+                ORCHESTRATOR_PROCESS_NAME,
                 self._stop_event,
                 bundle,
                 self._system_stop_event,
@@ -108,7 +112,7 @@ class ProcessSpawner:
             # new_session: POSIX — оркестратор делает setsid() (новая группа для всего
             # дерева). Windows игнорирует. Нужно ProcessTreeGuard для killpg на POSIX.
             kwargs={"new_session": self._guard.wants_new_session()},
-            name="ProcessManager",
+            name=ORCHESTRATOR_PROCESS_NAME,
         )
         self._process.start()
 

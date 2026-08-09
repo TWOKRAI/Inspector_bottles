@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 import time
 
 from .scenarios import ScenarioManager
+from ..interfaces import LOG_SOURCE
 from ..types.types import DispatchStrategy, HandlerInfo, Scenario
 from ..strategies import (
     ExactMatchStrategy,
@@ -234,14 +235,14 @@ class Dispatcher(BaseManager, ObservableMixin):
         Returns:
             True если регистрация успешна, False в случае ошибки
         """
-        self._log_debug(f"Registering handler: {key}", module="dispatcher")
+        self._log_debug(f"Registering handler: {key}", module=LOG_SOURCE)
         self._record_metric("dispatcher.handler.registration.attempts", tags={"key": key})
 
         target_strategy = strategy or self._default_strategy
 
         # CHAIN_MATCH не поддерживает прямую регистрацию
         if target_strategy == DispatchStrategy.CHAIN_MATCH:
-            self._log_warning(f"Cannot register handler '{key}' directly in CHAIN_MATCH strategy", module="dispatcher")
+            self._log_warning(f"Cannot register handler '{key}' directly in CHAIN_MATCH strategy", module=LOG_SOURCE)
             return False
 
         strategy_impl = self._strategies[target_strategy]
@@ -259,15 +260,15 @@ class Dispatcher(BaseManager, ObservableMixin):
             )
 
             if result:
-                self._log_info(f"Handler '{key}' registered successfully", module="dispatcher")
+                self._log_info(f"Handler '{key}' registered successfully", module=LOG_SOURCE)
                 self._record_metric("dispatcher.handler.registration.success", tags={"key": key})
             else:
-                self._log_warning(f"Failed to register handler '{key}'", module="dispatcher")
+                self._log_warning(f"Failed to register handler '{key}'", module=LOG_SOURCE)
                 self._record_metric("dispatcher.handler.registration.failed", tags={"key": key})
 
             return result
         except Exception as e:
-            self._log_error(f"Error registering handler '{key}': {str(e)}", module="dispatcher")
+            self._log_error(f"Error registering handler '{key}': {str(e)}", module=LOG_SOURCE)
             self._track_error(e, {"key": key, "strategy": target_strategy.value})
             self._record_metric("dispatcher.handler.registration.errors", tags={"key": key})
             return False
@@ -341,17 +342,17 @@ class Dispatcher(BaseManager, ObservableMixin):
             key = message.get(key_field)
             if not key:
                 error_msg = f"Key field '{key_field}' not found"
-                self._log_warning(error_msg, module="dispatcher")
+                self._log_warning(error_msg, module=LOG_SOURCE)
                 self._record_metric("dispatcher.dispatch.errors", tags={"error": "missing_key"})
                 return {"status": "error", "reason": error_msg}
 
-            self._log_debug(f"Dispatching message with key '{key}'", module="dispatcher", key=key)
+            self._log_debug(f"Dispatching message with key '{key}'", module=LOG_SOURCE, key=key)
             self._record_metric("dispatcher.dispatch.attempts", tags={"key": key})
 
             # 1. Проверка на явное указание сценария в сообщении
             explicit_scenario = message.get("scenario")
             if explicit_scenario and self._scenario_mgr.has_scenario(explicit_scenario):
-                self._log_debug(f"Executing scenario '{explicit_scenario}'", module="dispatcher")
+                self._log_debug(f"Executing scenario '{explicit_scenario}'", module=LOG_SOURCE)
                 result = self.dispatch_scenario(explicit_scenario, message, data_field)
                 duration = time.time() - start_time
                 self._record_timing(
@@ -363,7 +364,7 @@ class Dispatcher(BaseManager, ObservableMixin):
 
             # 2. Проверка на сценарий по ключу (если ключ является сценарием)
             if self._scenario_mgr.has_scenario(key):
-                self._log_debug(f"Executing scenario '{key}'", module="dispatcher")
+                self._log_debug(f"Executing scenario '{key}'", module=LOG_SOURCE)
                 result = self.dispatch_scenario(key, message, data_field)
                 duration = time.time() - start_time
                 self._record_timing("dispatcher.dispatch.scenario.duration", duration, tags={"scenario": key})
@@ -376,13 +377,13 @@ class Dispatcher(BaseManager, ObservableMixin):
             if requested_strategy == DispatchStrategy.CHAIN_MATCH:
                 # Явный запрос chain — ключ должен быть именем сценария
                 if self._scenario_mgr.has_scenario(key):
-                    self._log_debug(f"Executing scenario '{key}' via chain strategy", module="dispatcher")
+                    self._log_debug(f"Executing scenario '{key}' via chain strategy", module=LOG_SOURCE)
                     result = self.dispatch_scenario(key, message, data_field)
                     duration = time.time() - start_time
                     self._record_timing("dispatcher.dispatch.scenario.duration", duration, tags={"scenario": key})
                     return result
                 error_msg = f"No scenario '{key}' found for chain strategy"
-                self._log_warning(error_msg, module="dispatcher", key=key)
+                self._log_warning(error_msg, module=LOG_SOURCE, key=key)
                 self._record_metric("dispatcher.dispatch.errors", tags={"error": "scenario_not_found", "key": key})
                 return {"status": "error", "reason": error_msg}
             elif requested_strategy:
@@ -394,7 +395,7 @@ class Dispatcher(BaseManager, ObservableMixin):
 
             if not handler_info:
                 error_msg = f"No handler for key '{key}'"
-                self._log_warning(error_msg, module="dispatcher", key=key)
+                self._log_warning(error_msg, module=LOG_SOURCE, key=key)
                 self._record_metric("dispatcher.dispatch.errors", tags={"error": "handler_not_found", "key": key})
                 return {"status": "error", "reason": error_msg}
 
@@ -403,7 +404,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             result = handler_info.handler(handler_data)
 
             duration = time.time() - start_time
-            self._log_debug(f"Dispatch completed for key '{key}' in {duration:.3f}s", module="dispatcher")
+            self._log_debug(f"Dispatch completed for key '{key}' in {duration:.3f}s", module=LOG_SOURCE)
             self._record_timing("dispatcher.dispatch.duration", duration, tags={"key": key})
             self._record_metric("dispatcher.dispatch.success", tags={"key": key})
 
@@ -412,7 +413,7 @@ class Dispatcher(BaseManager, ObservableMixin):
         except Exception as e:
             duration = time.time() - start_time
             error_msg = f"Dispatch failed: {str(e)}"
-            self._log_error(error_msg, module="dispatcher", exception=str(e))
+            self._log_error(error_msg, module=LOG_SOURCE, exception=str(e))
             self._track_error(e, {"key": key if "key" in locals() else None, "message": str(message)})
             self._record_timing("dispatcher.dispatch.error_duration", duration)
             self._record_metric("dispatcher.dispatch.errors", tags={"error": "exception"})

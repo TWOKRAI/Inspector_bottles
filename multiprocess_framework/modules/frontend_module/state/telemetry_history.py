@@ -21,13 +21,14 @@ Live ≠ история: последние ~N минут — из кольце�
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import os
 import sqlite3
 from collections.abc import Sequence
 from typing import Any
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 # Дефолт даунсемпла, если вызывающий не указал max_points явно.
 _DEFAULT_MAX_POINTS = 300

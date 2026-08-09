@@ -73,6 +73,11 @@ class AppSpec:
     proc_dicts_builder: Optional[ProcDictsBuilder] = None
     state_bootstrap: Optional[StateBootstrap] = None
     throttle_rules: Optional[ThrottleRules] = None
+    #: Task 5.13: override слоя L1 (сырая секция ``observability``). ``None`` —
+    #: секция берётся из ``manifest.system``, и это дефолтный путь: приложению не
+    #: нужно писать Python, чтобы получить наблюдаемость. Поле нужно там, где
+    #: файла нет (тесты, программная сборка) либо его надо перебить.
+    observability_section: Optional[dict[str, Any]] = None
     #: Runtime-хук: DI оркестратора. None → generic ``GenericProcessManagerApp``.
     orchestrator_class_path: Optional[str] = None
     orchestrator_config: dict[str, Any] = field(default_factory=dict)
@@ -107,8 +112,10 @@ def default_blueprint_loader(manifest: "AppManifest") -> dict[str, Any]:
 def assemble_proc_dicts(
     blueprint: dict[str, Any],
     *,
-    observability_dict: dict[str, Any] | None = None,
+    observability_section: dict[str, Any] | None = None,
     log_dir: str = "logs",
+    app_config_path: str = "",
+    recipe_path: str = "",
 ) -> dict[str, dict[str, Any]]:
     """Universal-шов сборки: blueprint dict → ``{name: proc_dict}`` (E3/5.3, framework-only).
 
@@ -116,6 +123,14 @@ def assemble_proc_dicts(
     (per-category defaults применяются снаружи, если нужны):
     validate → infer_missing_inspectors → check → build_configs → log_dir →
     process → merge_managers → merge_with_defaults.
+
+    ``observability_section`` — СЫРАЯ секция слоя L1 (Task 5.12); слой L2 читается
+    из самого blueprint (``blueprint.observability``) и мержится поверх per-process.
+    Раскладка (``expand_observability``) делается здесь, а не снаружи: разложенный
+    снаружи L1 материализовал бы дефолты и стал бы неперебиваемым. Эта ветка —
+    generic-двойник прикладного ассемблера, и без слоёв здесь секция рецепта
+    молча не применялась бы ровно на тех приложениях, у которых своего
+    ассемблера нет.
 
     Raises:
         BlueprintError: ``SystemBlueprint.check`` вернул ошибки.
@@ -128,9 +143,16 @@ def assemble_proc_dicts(
     from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
         SystemBlueprint,
     )
-    from multiprocess_framework.modules.process_module.configs.managers_config import merge_managers
+    from multiprocess_framework.modules.process_module.configs.observability_layers import (
+        APP_CONFIG_KEY,
+        OVERRIDE_CONFIG_KEY,
+        RECIPE_PATH_CONFIG_KEY,
+        ObservabilityLayers,
+        apply_layers_to_proc_dict,
+        resolve_recipe_section,
+    )
 
-    obs = observability_dict or {}
+    app_layer = observability_section or {}
     topology = SystemBlueprint.model_validate(blueprint)
     topology.infer_missing_inspectors()
 
@@ -146,7 +168,24 @@ def assemble_proc_dicts(
     result: dict[str, dict[str, Any]] = {}
     for cfg in configs:
         name, proc_dict = process(cfg)
-        proc_dict["managers"] = merge_managers(proc_dict.get("managers", {}), obs)
+        obs_override = resolve_recipe_section(topology.observability, name)
+        layers = ObservabilityLayers(app=app_layer, recipe=obs_override)
+        # Раскладка «слои → менеджеры» общая с прикладным ассемблером (ревью 5.13):
+        # молчание слоёв не создаёт секцию и не затирает уровень, пришедший другим
+        # путём (INSPECTOR_LOG_LEVEL через managers_from_log_dir).
+        apply_layers_to_proc_dict(proc_dict, layers)
+        if obs_override:
+            proc_dict["config"][OVERRIDE_CONFIG_KEY] = obs_override
+        if app_layer:
+            proc_dict["config"][APP_CONFIG_KEY] = dict(app_layer)
+        # Task 5.13: адреса слоёв — паритет с прикладным ассемблером. Без них у
+        # generic-дороги мертвы provenance-source («откуда этот ключ») и
+        # observability.persist («куда сохранять») — команда отвечала бы отказом
+        # «путь к рецепту неизвестен» на живой системе.
+        if app_config_path:
+            proc_dict["config"]["observability_config_path"] = str(app_config_path)
+        if recipe_path:
+            proc_dict["config"][RECIPE_PATH_CONFIG_KEY] = str(recipe_path)
         proc_dict = merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)
         result[name] = proc_dict
     return result
@@ -204,8 +243,22 @@ class SystemBuilder:
         blueprint = loader(manifest)
         _pickle_sanity(blueprint, hook_name="blueprint_loader")
 
+        # Task 5.13 / решение владельца Р2: слой L1 generic-дороги приезжает из
+        # МАНИФЕСТА. Ключ `system:` там уже был (`AppManifest.system`), но читал
+        # его только баннер — из-за чего ни дети, ни оркестратор на этой дороге
+        # не получали ни L1, ни адресов слоёв: `builder(blueprint)` звался одним
+        # аргументом. Приложение-конфиг получает наблюдаемость, не написав ни
+        # строки Python; `AppSpec.observability_section` — override для DI и тестов.
+        obs_section, obs_source = self._resolve_app_observability(manifest, spec)
+        recipe_path = str(manifest.pipeline) if manifest.pipeline else ""
+
         builder: ProcDictsBuilder = spec.proc_dicts_builder or assemble_proc_dicts
-        proc_dicts = builder(blueprint)
+        proc_dicts = builder(
+            blueprint,
+            observability_section=obs_section,
+            app_config_path=obs_source,
+            recipe_path=recipe_path,
+        )
         _pickle_sanity(proc_dicts, hook_name="proc_dicts_builder")
 
         # Build-time хуки: результат (dict) уйдёт в orchestrator_config → пиклится
@@ -216,7 +269,21 @@ class SystemBuilder:
             initial_state = bootstrap(blueprint)
             _pickle_sanity(initial_state, hook_name="state_bootstrap")
 
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            orchestrator_observability_config,
+        )
+
         orchestrator_config: dict[str, Any] = {"initial_state": initial_state}
+        # Task 5.13: тот же шов, что на прикладной дороге. Оркестратор — адресат
+        # слоёв, а не исключение из них; раскладка одна на обе дороги.
+        orchestrator_config.update(
+            orchestrator_observability_config(
+                app_section=obs_section,
+                recipe_section=blueprint.get("observability"),
+                app_config_path=obs_source,
+                recipe_path=recipe_path,
+            )
+        )
         if spec.throttle_rules is not None:
             throttle: ThrottleRules = spec.throttle_rules
             orchestrator_config["state_throttle_rules"] = throttle(blueprint)
@@ -238,6 +305,34 @@ class SystemBuilder:
             orchestrator_config=orchestrator_config,
             stop_timeout=spec.stop_timeout,
         )
+
+    @staticmethod
+    def _resolve_app_observability(manifest: "AppManifest", spec: "AppSpec") -> tuple[dict[str, Any], str]:
+        """Слой L1 generic-дороги и его адрес (Task 5.13, решение владельца Р2).
+
+        Порядок: ``AppSpec.observability_section`` (override) → секция
+        ``observability`` файла ``manifest.system`` → пусто.
+
+        Адрес возвращается ТОЛЬКО когда секция реально пришла из файла. У
+        override'а файла нет, и назвать им ``manifest.system`` значило бы соврать
+        в ``provenance``: оператор пошёл бы править файл, который ни на что не
+        влияет.
+
+        Нечитаемый ``system.yaml`` роняет сборку, и это намеренно: приложение
+        назвало файл в манифесте — значит рассчитывает на него. Молчаливый
+        пустой L1 здесь дал бы процессы на голых дефолтах без единого признака,
+        что что-то пошло не так.
+
+        Returns:
+            ``(секция, адрес)``; секция — сырой dict (возможно пустой).
+        """
+        if spec.observability_section is not None:
+            return dict(spec.observability_section), ""
+        if manifest.system is None:
+            return {}, ""
+        raw = _load_yaml_or_json(manifest.system)
+        section = raw.get("observability") if isinstance(raw, dict) else None
+        return (dict(section) if isinstance(section, dict) else {}), str(manifest.system)
 
     def _print_banner(
         self,
@@ -293,7 +388,9 @@ def _pickle_sanity(value: Any, *, hook_name: str) -> None:
     Raises:
         TypeError: значение не проходит ``pickle.dumps`` — сообщение называет хук.
     """
-    import pickle
+    # nosec B403 — только `dumps` собственного результата хука: проверка
+    # пиклябельности перед spawn, десериализации чужих данных здесь нет.
+    import pickle  # nosec B403
 
     try:
         pickle.dumps(value)

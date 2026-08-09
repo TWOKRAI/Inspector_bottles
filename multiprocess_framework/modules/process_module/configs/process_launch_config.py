@@ -21,6 +21,14 @@ DEFAULT_QUEUES: dict[str, Any] = {
     # QoS-профиля _STATE): каждый evict = resync round-trip у клиента, 8 амортизирует
     # burst state.set, не заставляя ресинкать на каждое переполнение.
     "state": {"maxsize": 8},
+    # "observability": хвост записей (log.record / observability.record) отдельно от
+    # never-drop system-почты (Ф7.3). Создаётся ВСЕГДА — канал {proc}_observability и
+    # его приём возникают из этого конфига автоматически (process_communication).
+    # Глубина 256 — между сотней system-очереди и 1024 из QoS-профиля: секундный
+    # всплеск хвоста переживается, буфером на мегабайты очередь не становится. При
+    # переполнении — drop_oldest со счётчиком (потеря видна, но БЕЗ записи в лог:
+    # запись о потере записи поехала бы в тот же хвост и усиливала бы шторм).
+    "observability": {"maxsize": 256},
 }
 
 
@@ -148,6 +156,13 @@ class ProcessLaunchConfig(SchemaBase):
         queues = self.queues if self.queues is not None else DEFAULT_QUEUES
         if "state" not in queues:
             queues = {**queues, "state": DEFAULT_QUEUES["state"]}
+        # Ф7.3: очередь "observability" обязательна по той же причине, что и "state".
+        # Кастомный `queues` без неё означал бы, что записи процесса не доезжают до
+        # подписчика вовсе: у отправителя лишь «Queue 'observability' not found», у
+        # оператора — пустой хвост при живом процессе. Домердживаем, оставляя
+        # пользовательские глубины остальных очередей.
+        if "observability" not in queues:
+            queues = {**queues, "observability": DEFAULT_QUEUES["observability"]}
         priority = self.priority.value if hasattr(self.priority, "value") else self.priority
 
         log_dir = self._resolve_log_dir()

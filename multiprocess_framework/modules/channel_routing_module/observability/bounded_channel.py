@@ -53,9 +53,7 @@ class BoundedChannel(IChannel):
         if capacity < 1:
             raise ValueError(f"capacity должен быть >= 1, получено {capacity}")
         if overflow not in _OVERFLOW_POLICIES:
-            raise ValueError(
-                f"overflow должен быть одним из {_OVERFLOW_POLICIES}, получено {overflow!r}"
-            )
+            raise ValueError(f"overflow должен быть одним из {_OVERFLOW_POLICIES}, получено {overflow!r}")
 
         self._name = name
         self._capacity = capacity

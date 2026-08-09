@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.actions_module.schemas import Action
     from multiprocess_prototype.adapters import TopologyRepositoryStore
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class RecipeApplyHandler:

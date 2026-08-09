@@ -7,13 +7,14 @@ Qt-виджетов, поэтому `_resolve_kind` тестируется бе�
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
 
 from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

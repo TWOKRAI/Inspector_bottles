@@ -7,6 +7,8 @@ channels:
 - kind: QueueChannel
   name: ProcessManager_local
 - kind: QueueChannel
+  name: ProcessManager_observability
+- kind: QueueChannel
   name: ProcessManager_state
 - kind: QueueChannel
   name: ProcessManager_system
@@ -22,9 +24,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -70,6 +96,15 @@ processes:
       - system
     - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
       name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -122,26 +157,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -152,8 +249,26 @@ processes:
         type: str
       tags:
       - system
+    - description: 'Брокер (Task 5.11): подписать адрес на хвост ВСЕХ процессов одним вызовом; намерение
+        переживает рестарт, switch и появление нового процесса. Записи идут напрямую подписчику — PM брокер,
+        не транзит'
+      name: observability.tail.subscribe_all
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Брокер: снять намерение подписчика и разослать снятие хвоста всем процессам'
+      name: observability.tail.unsubscribe_all
       params_schema:
       - name: subscriber
         required: false
@@ -476,9 +591,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -527,6 +666,15 @@ processes:
       - system
     - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
       name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -579,26 +727,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -838,9 +1048,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -939,6 +1173,15 @@ processes:
       name: introspect.memory
       tags:
       - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -989,26 +1232,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -1344,9 +1649,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -1392,6 +1721,15 @@ processes:
       - system
     - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
       name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -1444,26 +1782,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -1699,9 +2099,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -1747,6 +2171,15 @@ processes:
       - system
     - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
       name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -1799,26 +2232,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -2043,9 +2538,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -2091,6 +2610,15 @@ processes:
       - system
     - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
       name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2143,26 +2671,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -2387,9 +2977,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -2435,6 +3049,15 @@ processes:
       - system
     - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
       name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2487,26 +3110,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -2731,9 +3416,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -2779,6 +3488,15 @@ processes:
       - system
     - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
       name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2831,26 +3549,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
@@ -3075,9 +3855,33 @@ processes:
       - name: observability
         required: false
         type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
       - name: path
         required: false
         type: str
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -3123,6 +3927,15 @@ processes:
       - system
     - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
       name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -3175,26 +3988,88 @@ processes:
         type: str
       tags:
       - system
-    - description: Выключить sink логгера по имени (unregister_channel)
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
       name: logger.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
         required: false
         type: str
       tags:
       - system
-    - description: Включить sink логгера по имени (register_channel)
-      name: logger.sink.enable
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
       params_schema:
+      - name: manager
+        required: false
+        type: str
       - name: name
         required: false
         type: str
       - name: sink
         required: false
         type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
       tags:
       - system
     - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)

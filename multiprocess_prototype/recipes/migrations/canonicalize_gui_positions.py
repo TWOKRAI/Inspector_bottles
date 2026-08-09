@@ -70,13 +70,15 @@ from __future__ import annotations
 
 import copy
 import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any
 
 from multiprocess_framework.modules.recipe.migrations import migration
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # doc_type реестра миграций (C2) — namespace, отличает этот шаг от
 # "recipe.config_snapshot" (backend/state/recipes/migrations/v1_to_v2.py) и

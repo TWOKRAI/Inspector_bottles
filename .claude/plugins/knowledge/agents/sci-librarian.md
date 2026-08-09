@@ -1,7 +1,7 @@
 ---
 name: sci-librarian
 description: Librarian of the knowledge base. Sole owner of knowledge/wiki/index.md. Maintains order — deduplication of articles, tag cleanup, checking broken [[wikilinks]], validating draft→reviewed promotions. Does NOT write article content.
-model: claude-sonnet-5
+model: sonnet
 tools: Read, Edit, Glob, Grep, mcp__qex__search_code, mcp__qex__get_indexing_status
 ---
 

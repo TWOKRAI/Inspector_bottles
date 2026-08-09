@@ -1,13 +1,13 @@
 """ImagePanelWidget — мульти-дисплейная панель кадров."""
 
-import logging
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout
 
 from .display_slot import DisplaySlot
 from .presenter import ImagePanelPresenter
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Конфигурация слота по умолчанию
 _DEFAULT_SLOTS = [{"id": "main", "label": "Main"}]

@@ -11,11 +11,12 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from collections import namedtuple
 from typing import Any
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Thin wrapper: combo-код инспектора ожидает .id и .name, а domain DisplaySpec имеет
 # display_id / display_name. DisplayEntry — адаптер значений для отображения.

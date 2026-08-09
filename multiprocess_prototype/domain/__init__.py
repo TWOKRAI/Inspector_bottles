@@ -122,6 +122,10 @@ def register_domain_schemas(registry: object = None) -> None:  # type: ignore[as
     Вызывается явно (например, в фабрике AppServices или в тестах).
     Импорт пакета больше не вызывает эту функцию автоматически.
     """
+    # Ф6.2: вид вместо голого stdlib. Импорт локальный — пакет domain
+    # сознательно не тянет фреймворк на import-time (решение Q3 выше).
+    from multiprocess_framework.modules.logger_module import get_std_logger
+
     try:
         from multiprocess_framework.modules.data_schema_module import (
             get_default_registry,
@@ -140,18 +144,14 @@ def register_domain_schemas(registry: object = None) -> None:  # type: ignore[as
             ("Topology", Topology),
             ("Project", Project),
         ]
-        import logging as _log
-
-        _logger = _log.getLogger(__name__)
+        _logger = get_std_logger(__name__)
         for _name, _cls in _domain_classes:
             try:
                 target.register(_name, _cls)  # type: ignore[union-attr]
             except Exception as _reg_exc:  # nosec B110 — дублирующая регистрация не критична
                 _logger.debug("domain: register %s skipped: %s", _name, _reg_exc)
     except Exception as _exc:
-        import logging as _logging
-
-        _logging.getLogger(__name__).debug("domain: SchemaRegistry registration skipped: %s", _exc)
+        get_std_logger(__name__).debug("domain: SchemaRegistry registration skipped: %s", _exc)
 
 
 __all__ = [

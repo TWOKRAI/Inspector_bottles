@@ -60,7 +60,10 @@ test-fw: ## Тесты фреймворка (через скрипт)
 # ── Quality gate (полный цикл) ──
 
 .PHONY: gate
-gate: check test ## Полный gate: ruff + pyright + bandit + tests
+gate: check test test-fw ## Полный gate: ruff + pyright + bandit + tests + фреймворк-suite
+# Ф6.х.1в: test-fw в gate обязателен — корневой pytest НЕ видит
+# multiprocess_framework/modules (два независимых testpaths-списка),
+# без него gate был слеп к ~6.5k тестов фреймворка.
 
 # ── Диаграммы ──
 

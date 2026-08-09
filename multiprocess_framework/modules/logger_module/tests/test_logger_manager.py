@@ -5,8 +5,6 @@
 
 import logging
 import logging.handlers
-import tempfile
-import os
 
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.logger_module.core.log_config import (
@@ -82,59 +80,64 @@ class TestLoggerManager:
         manager.shutdown()
         assert manager.is_initialized is False
 
-    def test_module_rotate_false_uses_file_handler(self, tmp_path):
-        """Без ротации — FileHandler (избегаем os.rename на Windows для частых логов)."""
+    def test_rotate_false_uses_file_handler(self, tmp_path):
+        """Без ротации — FileHandler (избегаем os.rename на Windows для частых логов).
+
+        **Переклассифицирован в Ф2.6.** Свойство принадлежит файловому каналу, а
+        не снятому механизму per-module файлов: раньше единственным способом
+        задать ``rotate: false`` из конфига была секция ``modules``, теперь —
+        обычный канал.
+        """
         log_file = tmp_path / "frames.log"
         cfg = LoggerManagerConfig.model_validate(
             {
                 "enable_batching": False,
-                "modules": {
-                    "processor_frames": {
+                "channels": {
+                    "frames_file": {
+                        "type": "file",
                         "enabled": True,
                         "file_path": str(log_file),
-                        "min_level": "DEBUG",
                         "rotate": False,
                     }
                 },
+                "default_level": "DEBUG",
+                "scopes": {"SYSTEM": {"channels": ["frames_file"]}},
             }
         )
         manager = LoggerManager(manager_name="TestLogger", config=cfg)
         manager.initialize()
-        ch = manager._module_channels["processor_frames"]
+        ch = manager._channel_registry.get("frames_file")
         assert ch.handler.__class__ is logging.FileHandler
         assert not isinstance(ch.handler, logging.handlers.RotatingFileHandler)
         manager.shutdown()
 
-    def test_module_channel(self):
-        """Тест создания канала для модуля."""
-        manager = LoggerManager(manager_name="TestLogger")
+    def test_channel_created_from_config_receives_records(self, tmp_path):
+        """Канал, объявленный конфигом, реально принимает запись.
+
+        **Переклассифицирован в Ф2.6.** Прежняя редакция поднимала канал
+        рантайм-вызовом ``enable_module_logging`` — этой ручки больше нет, и
+        рантайм-эквивалент ей теперь ровно один: объявить приёмник и правило.
+        Проверяется тот же наблюдаемый факт: файл создан и в нём есть запись.
+        """
+        log_file = tmp_path / "модуль.log"
+        cfg = LoggerManagerConfig.model_validate(
+            {
+                "enable_batching": False,
+                "channels": {"mod_file": {"type": "file", "enabled": True, "file_path": str(log_file)}},
+                "default_level": "DEBUG",
+                "scopes": {"BUSINESS": {"channels": ["mod_file"]}},
+                "loggers": {"test_module": {"channels_extra": ["mod_file"]}},
+            }
+        )
+        manager = LoggerManager(manager_name="TestLogger", config=cfg)
         manager.initialize()
-
-        # Создаем временный файл для модуля
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
-            temp_path = f.name
-
         try:
-            # Используем правильное имя метода
-            manager.enable_module_logging("test_module", file_path=temp_path)
             manager.info("Module message", module="test_module")
-
-            # Проверяем что файл создан
-            assert os.path.exists(temp_path)
-
-            # Закрываем все хендлеры перед удалением файла (важно для Windows)
-            manager.shutdown()
+            manager.flush()
+            assert log_file.exists()
+            assert "Module message" in log_file.read_text(encoding="utf-8", errors="replace")
         finally:
-            # Небольшая задержка для Windows (файл может быть еще открыт)
-            import time
-
-            time.sleep(0.1)
-            if os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except PermissionError:
-                    # На Windows файл может быть еще занят, игнорируем ошибку
-                    pass
+            manager.shutdown()
 
     def test_config_update(self):
         """Тест обновления конфигурации."""
@@ -162,26 +165,26 @@ class TestLoggerReconfigure:
     """Reconfigure + инвалидация кэша should_log (Task 1.1)."""
 
     @staticmethod
-    def _cfg(debug_min_level: str, channel_name: str) -> LoggerManagerConfig:
-        """Конфиг с одним file-каналом и заданным min_level у DEBUG scope."""
+    def _cfg(root_level: str, channel_name: str) -> LoggerManagerConfig:
+        """Конфиг с одним каналом и заданным КОРНЕВЫМ порогом (Ф8.1).
+
+        Раньше параметр правил ``min_level`` у DEBUG-скоупа. После снятия второй
+        оси он обязан ехать в корень: оставь его у скоупа — и ручка станет
+        мёртвой, а тест «кэш инвалидирован» пройдёт при любом поведении.
+        """
         return LoggerManagerConfig.model_validate(
             {
                 "enable_batching": False,
                 "channels": {
                     channel_name: {"type": "console", "enabled": True},
                 },
-                "scopes": {
-                    "DEBUG": {
-                        "enabled": True,
-                        "min_level": debug_min_level,
-                        "channels": [channel_name],
-                    }
-                },
+                "default_level": root_level,
+                "scopes": {"DEBUG": {"channels": [channel_name]}},
             }
         )
 
     def test_reconfigure_invalidates_decision_cache(self):
-        # min_level=INFO → DEBUG скипается и кэшируется как False.
+        # Ф8.1: порог корня INFO → DEBUG скипается и кэшируется как False.
         mgr = LoggerManager(
             manager_name="TestLogger",
             config=self._cfg("INFO", "ch_a"),
@@ -257,7 +260,7 @@ class TestTraceIdExtraField:
         mgr = LoggerManager(manager_name="TestLoggerTraceId")
         mgr.initialize()
         tap = _FakeTapChannel()
-        mgr.add_log_tap(tap, min_level=LogLevel.DEBUG)
+        mgr.add_tap(tap, min_level=LogLevel.DEBUG)
 
         trace_id = "0123456789abcdef0123456789abcdef"
         mgr.info("frame processed", module="detector", trace_id=trace_id, frame_hops=2)
@@ -274,7 +277,7 @@ class TestTraceIdExtraField:
         mgr = LoggerManager(manager_name="TestLoggerTraceIdCorrelate")
         mgr.initialize()
         tap = _FakeTapChannel()
-        mgr.add_log_tap(tap, min_level=LogLevel.DEBUG)
+        mgr.add_tap(tap, min_level=LogLevel.DEBUG)
 
         # info() (BUSINESS/INFO) — включён в дефолтном конфиге (в отличие от DEBUG,
         # см. test_reconfigure_invalidates_decision_cache); суть теста — корреляция

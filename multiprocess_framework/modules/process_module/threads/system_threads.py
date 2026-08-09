@@ -69,10 +69,18 @@ class SystemThreads:
                 # идут в system (как раньше), а {proc}_state пуста → опрос её = no-op,
                 # поведение бит-в-бит. Процессы без state-очереди: канала нет → фильтр
                 # receive его не находит, ошибок нет.
+                # "observability" (Ф7.3): хвост записей приезжает своей очередью, но
+                # дренируется ТЕМ ЖЕ потоком — второго потока не заводим (правило
+                # «меньше слоёв»). Потолок цикла держит НЕ глубина очереди (Ф7.х.2:
+                # прежнее объяснение опровергнуто замером — poll(0) без предела
+                # вычерпал 2.1 млн сообщений за 88 с при in-process отправителе),
+                # а ``QueueChannel.POLL_DRAIN_CEILING``: один опрос отдаёт не больше
+                # потолка, остаток добирают следующие такты, system-канал опрашивается
+                # первым и не голодает. Обоснование и замер — в докстринге потолка.
                 if self.process.router_manager:
                     messages = self.process.router_manager.receive(
                         timeout=0.0,
-                        channel_types=["system", "state"],
+                        channel_types=["system", "state", "observability"],
                     )
                     for message in messages:
                         self._handle_message(message)

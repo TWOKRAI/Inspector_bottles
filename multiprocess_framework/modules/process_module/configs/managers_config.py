@@ -18,7 +18,8 @@ from ...command_module.configs.command_manager_config import CommandManagerConfi
 from ...console_module.configs.console_config import ConsoleConfig
 from ...data_schema_module import SchemaBase
 from ...error_module.configs.error_manager_config import ErrorManagerConfig
-from ...logger_module.configs.logger_manager_config import LoggerManagerConfig
+from ...logger_module.configs.logger_manager_config import LoggerManagerConfig, LoggerRuleSchema
+from ...logger_module.core.name_hierarchy import ROOT_NAME
 from ...router_module.configs.router_manager_config import RouterManagerConfig
 from ...statistics_module.configs.stats_config import StatsManagerConfig
 
@@ -75,6 +76,35 @@ def _default_console() -> ConsoleConfig:
 TManagersConfig = TypeVar("TManagersConfig", bound="ManagersConfig")
 
 
+def root_level_rule(level: str) -> dict[str, dict[str, Any]]:
+    """``log_level`` как КОРНЕВОЕ ПРАВИЛО иерархии — Ф8.1, механизм задачи 2.3b.
+
+    Замена снятому ``level_profile_scopes``. Тот переписывал ``min_level``
+    КАЖДОГО скоупа, потому что ``default_level`` сам по себе не фильтровал:
+    решение принимал порог скоупа. Переписывание потомков и было дефектом —
+    оптовая ручка стирала адресную правку, и намерение «всё на DEBUG, кроме
+    SYSTEM» переставало быть выразимым (репро 2026-08-04 и 2026-08-06).
+
+    После Ф8.1 порог у записи ровно один — от самого длинного совпавшего
+    правила имени, а при их молчании от корня. Поэтому глобальный уровень
+    выражается одним правилом на корне (ключ ``""``), а всё, что написано
+    адреснее, **переживает смену глобального уровня**: у longest-prefix
+    более длинное совпадение сильнее по построению, без разбора приоритетов.
+
+    Returns:
+        Кусок секции ``loggers`` — ``{"": {"level": <уровень>}}``. Словарь, а не
+        схема: значение уезжает в конфиг через границу процесса (Dict at
+        Boundary), а валидация происходит там, где секция собирается.
+
+    **Уровень не нормализуется здесь.** Имя проверяет
+    ``LoggerRuleSchema.level`` на границе конфига — то же место, где проверяются
+    все остальные пороги. Своя проверка тут была бы второй позицией одной
+    функции: разъехавшись, они дали бы «уровень принят в одном пути и отвергнут
+    в другом».
+    """
+    return {ROOT_NAME: {"level": str(level).upper()}}
+
+
 class ManagersConfig(SchemaBase):
     """Корневая схема конфигурации менеджеров процесса."""
 
@@ -96,7 +126,13 @@ class ManagersConfig(SchemaBase):
         log_dir: str,
         log_level: str | None = None,
     ) -> TManagersConfig:
-        """Собрать конфиг: дефолты LoggerManagerConfig + log_directory и уровень BUSINESS = log_level."""
+        """Собрать конфиг: дефолты LoggerManagerConfig + log_directory и профиль уровня log_level.
+
+        Ф8.1: уровень едет корневым правилом иерархии. Раньше он доставался
+        ровно скоупу BUSINESS (три из четырёх настройку игнорировали), потом —
+        переписыванием всех четырёх, что стирало адресные правки. Применяется то же
+        правило, что и на пересборке (:func:`root_level_rule`).
+        """
         return managers_from_log_dir(log_dir, log_level, model_cls=cls)
 
 
@@ -132,10 +168,22 @@ def managers_from_log_dir(
             "log_directory": log_dir_s,
         }
     )
-    scopes = dict(base_logger.scopes)
-    if "BUSINESS" in scopes:
-        scopes["BUSINESS"] = scopes["BUSINESS"].model_copy(update={"min_level": level})
-    logger = base_logger.model_copy(update={"scopes": scopes})
+    # Ф8.1 (механизм 2.3b): уровень едет ОДНИМ корневым правилом, а не
+    # переписыванием порогов у каждого скоупа. Тот же путь применяет пересборка
+    # — копий по-прежнему одна, но теперь она ничего не стирает: правило,
+    # написанное адреснее корня, переживает смену глобального уровня.
+    #
+    # Правила КОРНЯ, а не всей секции: ``loggers`` из blueprint'а (правила
+    # приложения) обязаны остаться на месте. Замена словаря целиком снесла бы
+    # их молча — класс «merge меняет ФОРМУ».
+    #
+    # ``model_validate``, а не подстановка словарей: ``model_copy(update=…)``
+    # НЕ валидирует и положил бы dict вместо схемы — резолв читает атрибуты, и
+    # порог молча перестал бы действовать. Класс ошибки уже пойман в этой же
+    # фазе, на правилах иерархии.
+    loggers = dict(base_logger.loggers)
+    loggers.update({name: LoggerRuleSchema.model_validate(data) for name, data in root_level_rule(level).items()})
+    logger = base_logger.model_copy(update={"loggers": loggers})
     error = ErrorManagerConfig(
         error_file_path=os.path.join(log_dir_s, "errors.log"),
         critical_file_path=os.path.join(log_dir_s, "critical.log"),

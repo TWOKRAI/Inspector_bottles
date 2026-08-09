@@ -12,7 +12,8 @@ SetPluginConfig) добавляет панель-оркестратор при �
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any
 
 from PySide6.QtCore import Signal
@@ -20,7 +21,7 @@ from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit, QWidget
 
 from .hikvision_embed import create_hikvision_widget
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class ParamsFormSection(QWidget):

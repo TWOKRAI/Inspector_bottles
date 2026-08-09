@@ -8,7 +8,8 @@ ActionBus -- шина выполнения действий с undo/redo и coal
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from collections.abc import Callable
 from typing import (
     TYPE_CHECKING,
@@ -25,7 +26,7 @@ from .schemas import Action
 if TYPE_CHECKING:
     from .interfaces import IActionLogWriter
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

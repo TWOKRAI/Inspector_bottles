@@ -24,6 +24,9 @@ class ProcessStatus(str, Enum):
     INITIALIZING = "initializing"
     READY = "ready"
     RUNNING = "running"
+    # Ф6.х.7г: worker.pause_all/resume_all держали "paused" голым литералом —
+    # статус существовал в рантайме, но не в едином enum (ADR-117 — суперсет).
+    PAUSED = "paused"
     STOPPING = "stopping"
     STOPPED = "stopped"
     ERROR = "error"

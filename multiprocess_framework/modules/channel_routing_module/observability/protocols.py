@@ -18,7 +18,18 @@ from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 @runtime_checkable
 class LoggerLike(Protocol):
-    """Слот 'logger': уровни логирования, которые дергает ObservableMixin._log_*."""
+    """Слот 'logger': уровни логирования, которые дергает ObservableMixin._log_*.
+
+    ``**kwargs`` в сигнатурах — не украшение, а часть контракта (Ф2.1). Миксин
+    ВСЕГДА передаёт ``module=<имя источника>``, поэтому объект без ``**kwargs``
+    после Ф2.1 падает с ``TypeError`` на каждом вызове. Падение не тихое —
+    ``_call_manager`` ловит его в ``manager_call_failures`` и пишет WARNING один
+    раз на пару, — но записи такого слота теряются все до единой. Найдено ревью
+    Ф2.1 (Н4); все production-регистрации проверены и контракт держат.
+
+    Собственный ``module`` слота, если он у него есть, миксин НЕ перетирает:
+    штамп ставится через ``setdefault``.
+    """
 
     def debug(self, message: str, **kwargs: Any) -> None: ...
     def info(self, message: str, **kwargs: Any) -> None: ...
@@ -31,18 +42,10 @@ class LoggerLike(Protocol):
 class StatsLike(Protocol):
     """Слот 'stats': метрики, счётчики, тайминги, gauge."""
 
-    def record_metric(
-        self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None
-    ) -> None: ...
-    def increment(
-        self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None
-    ) -> None: ...
-    def record_timing(
-        self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None
-    ) -> None: ...
-    def gauge(
-        self, metric_name: str, value: Any, tags: Optional[Dict[str, str]] = None
-    ) -> None: ...
+    def record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None: ...
+    def increment(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None: ...
+    def record_timing(self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None) -> None: ...
+    def gauge(self, metric_name: str, value: Any, tags: Optional[Dict[str, str]] = None) -> None: ...
 
 
 @runtime_checkable
@@ -54,9 +57,5 @@ class ErrorLike(Protocol):
     методами ошибка записалась бы дважды).
     """
 
-    def track_error(
-        self, error: BaseException, context: Optional[Dict[str, Any]] = None
-    ) -> Any: ...
-    def record_error(
-        self, error: BaseException, context: Optional[Dict[str, Any]] = None
-    ) -> Any: ...
+    def track_error(self, error: BaseException, context: Optional[Dict[str, Any]] = None) -> Any: ...
+    def record_error(self, error: BaseException, context: Optional[Dict[str, Any]] = None) -> Any: ...

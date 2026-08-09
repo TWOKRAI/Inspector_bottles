@@ -24,10 +24,21 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Iterable, Optional
 
-# Task 2.3: константа переехала в configs/telemetry_publish_config.py (нижний слой
-# контракта, configs не импортирует heartbeat) — здесь ре-экспорт для обратной
-# совместимости импортов (``from .telemetry import GATED_METRICS``).
-from ..configs.telemetry_publish_config import GATED_METRICS
+from ...observability_declarations import declare_metric
+from ..configs.telemetry_publish_config import gated_metrics
+
+# Ф8.1: метрика объявляется ТАМ, ГДЕ СЧИТАЕТСЯ, а не перечисляется кортежем в
+# configs/. Четыре ниже собирает `build_worker_telemetry` в этом же файле; `shm`
+# считает `ProcessHeartbeat` и объявляет у себя. Прежний кортеж-литерал жил на два
+# слоя ниже вычисления, и связь «строка каталога ↔ величина» держалась только
+# совпадением имени.
+#
+# На уровне модуля, а не внутри функции: каталог обязан быть полон к моменту, когда
+# `ProcessHeartbeat` спросит `unknown_metrics()`, а не к моменту первой публикации.
+METRIC_FPS = declare_metric("fps", owner=__name__)
+METRIC_LATENCY_MS = declare_metric("latency_ms", owner=__name__)
+METRIC_EFFECTIVE_HZ = declare_metric("effective_hz", owner=__name__)
+METRIC_CYCLE_DURATION_MS = declare_metric("cycle_duration_ms", owner=__name__)
 
 
 def build_worker_telemetry(
@@ -160,9 +171,9 @@ def capped_metrics(config: Any, effective_tick: float) -> list[tuple[str, float]
         (пустой — ни одна метрика тиком не ограничена).
     """
     out: list[tuple[str, float]] = []
-    for metric in GATED_METRICS:
+    for metric in gated_metrics():
         # config — валидированный TelemetryPublishConfig; resolve() тотальна для суффиксов
-        # GATED_METRICS (возвращает (enabled, interval) даже для отсутствующих правил).
+        # каталога (возвращает (enabled, interval) даже для отсутствующих правил).
         enabled, interval = config.resolve(metric)
         if enabled and interval < effective_tick:
             out.append((metric, interval))
@@ -175,7 +186,7 @@ class TelemetryGate:
     Держит ``TelemetryPublishConfig`` (duck-typed по ``.resolve(metric) -> (enabled,
     interval)``) и ``_next_due`` по суффиксу метрики — тот же паттерн, что
     ``IoPeekPublisher`` (``plugins/io_peek.py``). На каждый тик heartbeat метод
-    ``due_metrics(now)`` возвращает подмножество :data:`GATED_METRICS`, которые
+    ``due_metrics(now)`` возвращает подмножество каталога :func:`gated_metrics`, которые
     (а) ``enabled`` по конфигу И (б) «созрели» (прошёл ``interval_sec`` с прошлой
     выдачи), и продвигает их ``_next_due``. Выключенные метрики не возвращаются
     никогда → не считаются и не публикуются.
@@ -219,7 +230,7 @@ class TelemetryGate:
         if now is None:
             now = self._clock()
         allowed: set[str] = set()
-        for metric in GATED_METRICS:
+        for metric in gated_metrics():
             enabled, interval = self._config.resolve(metric)
             if not enabled:
                 continue
@@ -230,4 +241,4 @@ class TelemetryGate:
         return allowed
 
 
-__all__ = ["build_worker_telemetry", "TelemetryGate", "GATED_METRICS", "capped_metrics"]
+__all__ = ["build_worker_telemetry", "TelemetryGate", "gated_metrics", "capped_metrics"]

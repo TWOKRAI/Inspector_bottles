@@ -366,7 +366,7 @@ class TestApplyTopologyDebounce:
     def test_cooldown_rejects_rapid_second(self) -> None:
         """С replace_debounce_s>0 повторный запрос в окне после завершения -> отклоняется."""
         pm = make_pm({"w1": {"class": "m.W1"}})
-        pm.get_config = lambda key: {"stop_process_timeout": 1.0, "replace_debounce_s": 10.0}.get(key)
+        pm.get_config = lambda key, default=None: {"stop_process_timeout": 1.0, "replace_debounce_s": 10.0}.get(key)
 
         # Первый apply проходит (last_replace_ts по умолчанию 0 -> окно давно вышло).
         r1 = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})

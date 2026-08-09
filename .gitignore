@@ -56,6 +56,13 @@ logs/
 **/logs/
 *.log
 *.log.*
+# Артефакты живых прогонов: один каталог на все прогоны, подкаталог на прогон
+# (INSPECTOR_LOG_DIR=logs_live/<дата>_<задача>_<точка>). Конвенция и уборка —
+# в logs_live/README.md; сам README трекается, содержимое — нет.
+logs_live/*
+!logs_live/README.md
+# Прежняя россыпь в корне — правило оставлено, чтобы старый прогон не всплыл
+logs_live_*/
 
 # ML models & weights (только манифест, не бинарники)
 *.keras
@@ -141,3 +148,6 @@ _archive/
 *.yaml.tmp.*
 # backend_ctl flight-recorder / аудит-журнал (E.1) — дефолтный runtime-каталог записей
 backend_ctl_records/
+
+# Черновой свод статусов, генерируется вручную при сверке плана
+verdict.txt

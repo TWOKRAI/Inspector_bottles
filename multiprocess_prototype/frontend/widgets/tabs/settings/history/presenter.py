@@ -17,7 +17,8 @@ timestamp), таблица показывает 3 колонки: Время / �
 from __future__ import annotations
 
 import csv
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -28,7 +29,7 @@ from .view import HistoryView
 if TYPE_CHECKING:
     from multiprocess_prototype.domain.app_services import AppServices
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class HistoryPresenter(TabPresenterBase[HistoryView, None]):

@@ -1,7 +1,7 @@
 ---
 name: debugger
 description: Diagnose failing tests and runtime errors. Reproduces the bug, finds root cause, fixes within scope (1-5 lines). For cross-module architectural issues → investigator (Opus).
-model: claude-sonnet-5
+model: sonnet
 memory: project
 ---
 

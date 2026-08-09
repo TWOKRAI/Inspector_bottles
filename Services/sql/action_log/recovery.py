@@ -8,7 +8,8 @@ ActionLogRecovery -- восстановление состояния из action
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import time
 from typing import TYPE_CHECKING
 
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.actions_module.bus import ActionBus, IRegistersManagerGui
     from .repository import ActionLogRepository
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class ActionLogRecovery:
@@ -140,7 +141,7 @@ class ActionLogRecovery:
             if not desc.startswith("[UNDO] "):
                 continue
             # Это UNDO-запись -- ищем оригинал (последний matching перед ним)
-            original_desc = desc[len("[UNDO] "):]
+            original_desc = desc[len("[UNDO] ") :]
             for j in range(i - 1, -1, -1):
                 if j in to_remove:
                     continue

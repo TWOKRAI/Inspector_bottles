@@ -25,7 +25,8 @@ Refs: plans/2026-05-27_cross-tab-architecture/phase-d-app-services.md (Task D.1)
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -56,7 +57,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.qt_event_bus import QtEventBus
     from multiprocess_prototype.frontend.state.auth_state import AuthState
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Путь к директории рецептов (convention, аналог 3g в app.py)
 _RECIPES_DIR = Path(__file__).resolve().parent.parent / "recipes"

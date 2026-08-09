@@ -207,8 +207,13 @@ class IMessageChannel(IChannel):
         return self.send(data)
 
     @abstractmethod
-    def poll(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
-        """Опросить канал. timeout=0 → non-blocking. Вернуть список сообщений."""
+    def poll(self, timeout: float = 0.0, max_items: int = 0) -> List[Dict[str, Any]]:
+        """Опросить канал. timeout=0 → non-blocking. Вернуть список сообщений.
+
+        ``max_items`` (Ф7.х) — потолок одного неблокирующего дренажа; 0 означает
+        «дефолт реализации». Канал вправе его игнорировать, если дренажа как
+        цикла у него нет (сокет отдаёт накопленное одним куском).
+        """
 
     def close(self) -> None:
         """IChannel.close() — останавливает listening если запущен."""

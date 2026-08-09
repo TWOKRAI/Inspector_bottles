@@ -6,12 +6,15 @@
 """
 
 import importlib
-from typing import TYPE_CHECKING, Any, Optional
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from ...state_store_module.interfaces import IStateProxy
 
 from ...base_manager import BaseManager, ObservableMixin
+from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 from ..communication import ProcessCommunication
 
 # Публичные контракты и типы
@@ -88,9 +91,18 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         self._stop_requested = False
 
-        # Текущий статус процесса для трансляции в heartbeat
-        # Обновляется командами worker.pause_all / worker.resume_all
-        self._current_process_status: str = "running"
+        # Текущий статус процесса для трансляции в heartbeat.
+        # Обновляется командами worker.pause_all / worker.resume_all и концом run().
+        #
+        # Ф6.4б (находка Н-5б живого прогона 2026-08-03). Здесь стоял литерал
+        # ``"running"`` — то есть процесс объявлял себя работающим ИЗ
+        # КОНСТРУКТОРА, до initialize(), до старта воркеров и до регистрации
+        # команд. Наблюдалось снаружи: ``system_overview`` через ~10 с получал
+        # ``introspect_failed`` по четырём ручкам процесса, который по статусу
+        # был «running». Окно уже чинили однажды (``attach_ready_event``), но
+        # на ОДНОМ пути из трёх: ready_event стал честным, а статус продолжал
+        # врать.
+        self._current_process_status: str = ProcessStatus.INITIALIZING.value
 
         # Менеджеры (создаются в initialize() через ManagersBundle, ADR-PM-009)
         self.worker_manager = None
@@ -118,6 +130,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Персистентный стор наблюдаемости (Ф5.20a): drain log/stats + error-tap'ы.
         self._observability_store = None
         self._observability_store_taps = []
+        # Ф5.2: политика истории (порог записи + пределы ретеншена). None до сшивки
+        # стора — и такт уборки на это опирается: политики нет → убирать нечего.
+        self._observability_history_policy = None
         # Live-хвосты hub→подписчики (Ф5.20b, F1: per-subscriber). Ключ — адрес
         # подписчика, значение — ``(forwarder, taps)``. Несколько подписчиков (GUI +
         # backend_ctl) сосуществуют: раньше был единственный слот на процесс и второй
@@ -171,13 +186,23 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             # 7. Системные потоки (message_processor) — после воркеров
             self._init_system_threads()
 
-            # 8. Обновляем статус на "ready"
+            # 8. Обновляем статус на "ready" — ОБЕ плоскости разом (Ф6.х.7г):
+            # прежде PSR получал ready, а _current_process_status оставался
+            # initializing до конца run() — heartbeat и introspect всё окно
+            # (у GuiProcess — вся жизнь Qt-loop) давали два разных ответа на
+            # один вопрос. Правило то же, что у перехода в RUNNING (:857-859).
             self.update_process_state(status=ProcessStatus.READY.value)
+            self._current_process_status = ProcessStatus.READY.value
 
-            # 9. Контекст логирования (proc_name в extra для логов)
+            # 9. Контекст логирования (proc_name в extra для логов).
+            #    Ф0.5: именно БАЗА процесса, а не push_context. proc_name — факт
+            #    про процесс целиком, а этот вызов делается из главного потока,
+            #    тогда как пишут логи потоки-воркеры. После того как контекст
+            #    push_context стал потоковым, proc_name отсюда до воркеров бы
+            #    не доехал — запись потеряла бы имя процесса.
             logger = self.get_manager("logger")
-            if logger and hasattr(logger, "push_context"):
-                logger.push_context(proc_name=self.name)
+            if logger and hasattr(logger, "set_base_context"):
+                logger.set_base_context(**self._build_resource())
 
             # 10. Регистрация state.changed handler (ADR-SS-006) — только в
             #     success-пути. Раньше вызов стоял в finally и при исключении
@@ -263,16 +288,127 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._process_managers.register_all(bundle, self)
         self._process_managers.attach_adapters(bundle, self)
         self._process_managers.connect_event_manager(self)
+        self._apply_boot_observability_layers()
         self._wire_observability_hub()
+
+    def _apply_boot_observability_layers(self) -> None:
+        """Применить стек слоёв на старте — там, где ассемблер этого не сделал.
+
+        Две причины пересобрать менеджеры из слоёв в момент boot, и обе про то,
+        что готового ответа у процесса нет:
+
+        1. **Менеджеры не пришли готовыми** (Task 5.13). Ассемблер раскладывает
+           ``expand_observability(layers.resolve())`` в ``proc_dict["managers"]``
+           ДОЧЕРНИМ процессам. Оркестратор спавнится другим кодом, и в его bundle
+           ключа ``managers`` нет вовсе (``spawner.py``) — его ``LoggerManager``
+           строился из голых дефолтов L0, то есть ``default_level="INFO"`` и
+           ``log_directory=None``. Отсюда и «дети WARNING, PM INFO», и пустой
+           ``effective.logger.log_directory`` у оркестратора: **один корень, два
+           симптома** (резидуалы R6-C и R6-H). Воспроизводилось это и БЕЗ рецепта,
+           одним ``system.yaml: log_level: WARNING``.
+
+           Признак **структурный** — «секция менеджеров пуста», а не «имя равно
+           ProcessManager». Проверка по имени починила бы ровно одного адресата и
+           оставила бы дефект ждать следующего процесса, поднятого без готовой
+           секции; кроме того, имя — это контракт адресации, а не контракт сборки.
+
+        2. **Спутник рецепта говорит про ЭТОТ процесс** (Task 5.12). Живая
+           находка прогона 5.12: ``observability.persist`` записывал спутник, но
+           пересозданный процесс стартовал из boot-``proc_dict``, спутника не
+           читал — и сохранённая настройка откатывалась на первом же рестарте.
+           «Сохранить» сохраняло на диск, но не в систему.
+
+        Ни одна не выполняется → выходим. У ребёнка со свежим ``proc_dict``
+        пересборка была бы лишней работой на пути, который и так верен.
+
+        **Инвариант (ревью 5.13):** пустая секция менеджеров разрешает пересборку
+        только вместе с непустыми слоями. Молчащие слои не дают повода трогать
+        менеджеры НИКОМУ — ни ассемблеру, ни этому месту; правило одно и живёт в
+        :func:`~..configs.observability_layers.layers_are_silent`.
+        """
+        from ..configs.observability_companion import companion_path, compose_recipe_layer
+        from ..configs.observability_layers import (
+            LAYER_RECIPE,
+            RECIPE_PATH_CONFIG_KEY,
+            layers_are_silent,
+            process_observability_layers,
+            read_process_config,
+        )
+
+        # Пустая секция менеджеров = ассемблер этого процесса не касался.
+        try:
+            managers_ready = bool(self.config_handler.get_managers_config())
+        except Exception as exc:  # noqa: BLE001 — нечитаемый конфиг не имеет права ронять старт
+            # Отказ здесь ЗНАЧИМ: он выбирает консервативную ветку («менеджеры
+            # готовы») и тем самым отменяет пересборку. Проглоти его молча — и
+            # процесс поднялся бы на дефолтах L0, а причина осталась бы без следа.
+            self._log_error(f"[observability] секция менеджеров не прочитана, пересборка на старте пропущена: {exc}")
+            managers_ready = True
+
+        layers = process_observability_layers(self)
+        origin = "boot:layers"
+
+        recipe_path = read_process_config(self, RECIPE_PATH_CONFIG_KEY)
+        if recipe_path:
+            try:
+                # ФР-2: третье значение — ссылки без приёмника; `compose_recipe_layer`
+                # их уже назвала в журнале. Boot ими не распоряжается (отвечать
+                # некому — команды не было), но молчать про них он больше не может:
+                # именно этой дорогой опечатка, сохранённая в спутник, въезжала в
+                # систему на каждом старте как законный ключ.
+                body, source, _ = compose_recipe_layer(self)
+            except Exception as exc:  # noqa: BLE001 — битый спутник не имеет права ронять старт
+                self._log_error(f"[observability] спутник рецепта не прочитан ({recipe_path}): {exc}")
+                body, source = None, None
+            # Спутник поверх boot-дельты рецепта: он новее — его писали уже после
+            # старта. Источник называем конкретным файлом: при паре «рецепт +
+            # спутник» оператор иначе не знает, какой из двух править.
+            if source is not None and source == str(companion_path(recipe_path)):
+                origin = "boot:companion"
+                layers.replace_layer(LAYER_RECIPE, body, source=source, origin=origin)
+
+        # Выходим в двух случаях: слой уже разложен ассемблером (и спутник про этот
+        # процесс молчит) — либо слои молчат сами, и накладывать нечего.
+        #
+        # Вторая половина условия — ревью 5.13. «Секция менеджеров пуста» читалось
+        # как «менеджеры не настроены», а это не следует: во фреймворке-конструкторе
+        # встройщик вправе собрать LoggerManager программно и не заводить секцию
+        # вовсе. Пересборка из молчащих слоёв дала бы ему голые дефолты L0 —
+        # то есть тихо отменила бы его настройку. Молчание слоёв означает
+        # «решает нижний», см. `layers_are_silent`.
+        if origin == "boot:layers" and (managers_ready or layers_are_silent(layers)):
+            return
+
+        from ..managers.observability_reload import apply_observability_layers
+
+        try:
+            apply_observability_layers(
+                layers,
+                logger=self.logger_manager,
+                error=self.error_manager,
+                stats=self.stats_manager,
+                log_info=getattr(self, "_log_info", None),
+                origin=origin,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log_error(f"[observability] слои наблюдаемости не применены на старте: {exc}")
 
     def _wire_observability_hub(self) -> None:
         """Ф5.16: создать hub наблюдаемости процесса и инъектировать его в слоты
         пилота (worker_module). log/stats буферизуются в hub и дренируются по
         heartbeat; error-слот остаётся реальным error_manager (write-through)."""
         from ..managers.observability_wiring import (
+            resolve_history_policy,
+            wire_document_sink,
             wire_observability_store,
             wire_process_observability,
         )
+
+        # Ф8.5: плоскость документов — НЕЗАВИСИМО от наличия hub'а. Аудит смен
+        # наблюдаемости есть у каждого процесса (команда смены приходит куда угодно),
+        # а hub — только у пилота: сшей мы документы внутри условия ниже, «когда
+        # включили DEBUG» отвечалось бы ровно на одном процессе из восьми.
+        wire_document_sink(self)
 
         self._observability_hub, self._observability_drain = wire_process_observability(
             self.name,
@@ -284,8 +420,14 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Ф5.20a: персистентный стор — только когда есть hub (пилот-телеметрия).
         # log/stats из drain-петли, error через store-tap'ы на error+logger-менеджерах.
         if self._observability_hub is not None:
+            # Ф5.2: порог истории и её пределы — из конфига (секция
+            # `observability.history`). Политика кладётся на процесс ДО проводки:
+            # её читает такт уборки, и «стор есть, политики нет» означало бы
+            # безлимитную таблицу — ровно то состояние, которое задача чинит.
+            policy = resolve_history_policy(self)
+            self._observability_history_policy = policy
             self._observability_store, self._observability_store_taps = wire_observability_store(
-                self.error_manager, self.logger_manager, process=self.name
+                self.error_manager, self.logger_manager, process=self.name, min_level=policy["level"]
             )
             # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
             # Ни одного tap → вкладка «Ошибки» молча пуста — предупреждаем
@@ -293,7 +435,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             if not self._observability_store_taps:
                 self._log_warning(
                     f"Process '{self.name}': ObservabilityStore без error-tap "
-                    "(ни logger_manager, ни error_manager не поддержали add_log_tap) "
+                    "(ни logger_manager, ни error_manager не поддержали add_tap) "
                     "— ошибки в стор попадать НЕ будут",
                     module="observability",
                 )
@@ -305,12 +447,101 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self.queues,
             self.router_manager,
             self.shared_resources,
-            logger_callback=self._fallback_log,
+            logger_callback=self._log_callback,
         )
 
         # Регистрация очередей
         self.communication.register_process_queues()
         self.communication.register_router_channels()
+
+    def _build_resource(self) -> Dict[str, Any]:
+        """``Resource`` процесса (Ф3.5) — то, что одинаково у ВСЕХ его записей.
+
+        Понятие из словаря OTel: набор атрибутов, описывающих того, кто породил
+        телеметрию. Собирается **один раз** — база контекста логгера ставится на
+        инициализации и дальше не пересчитывается ни на запись, ни на кадр.
+
+        Поля и почему именно они:
+
+        * ``proc_name`` — было с Ф0.5, ради него база и заводилась;
+        * ``fw_version`` — версия КОДА (``version.code_version()``):
+          семантическая часть плюс хеш коммита и признак грязного дерева
+          (``2.0.0+9950851b.dirty``). Рукописной константы здесь не хватало —
+          она не менялась четыре месяца, и записи двух разных срезов дерева
+          были неотличимы (ревью Ф3, Н-5; решение владельца 2026-08-05).
+          Версия из ``pyproject`` не годится ни в каком виде: она версионирует
+          дистрибутив, который здесь вообще не собирается;
+        * ``incarnation`` — **самое ценное поле набора**. После перезапуска
+          процесса его записи неотличимы от записей прежнего инстанса: имя то
+          же, файл тот же, время растёт монотонно. Инкарнация их разделяет.
+          Свою инкарнацию процесс НЕ бампит (``routing.refresh`` пропускает
+          собственное имя и следит за соседями), она проставлена при рождении —
+          значит снимок на инициализации не устаревает по построению;
+        * ``recipe`` — имя (не путь) активного рецепта. Отвечает на «каким
+          конвейером это порождено», когда записи нескольких прогонов лежат в
+          одном каталоге;
+        * ``pid`` — весь остаток задачи Ф4.4 «процессор обогащения». Она
+          ставилась как механизм для тройки ``pid`` / имя процесса /
+          ``trace_id``, но к моменту входа в Ф4 два поля из трёх уже ехали
+          (имя — с Ф0.5, след — с Ф7 G.6 через ``log_context``), и заводить
+          цепочку ради одного поля значило бы положить слой поверх работающего.
+          Инкарнацию pid не дублирует: та различает инстансы по логике
+          фреймворка, а pid — единственный ключ, которым запись сшивается с
+          внешним миром (диспетчер задач, дамп, вывод сторонней утилиты).
+          Берётся здесь и только здесь: метод зовётся из ``initialize()``, то
+          есть уже в СВОЁМ процессе. Перенос сборки в родителя дал бы у всех
+          процессов один родительский pid — правдоподобно и неверно.
+
+        **Недостающее поле пропускается, а не заполняется словом «unknown»:**
+        отсутствие ключа честно значит «не знаем», а строка-заглушка выглядела
+        бы как знание. Ни одна ветка не вправе уронить инициализацию процесса —
+        Resource это украшение записи, а не работа.
+
+        **Цена в объёме — ноль на файлах.** Файловые каналы ``extra`` не
+        рендерят (берут оттуда только ``proc_name``), поэтому вес ``system.log``
+        не меняется; платят только IPC, стор и кольца памяти, а они на порядок
+        меньше.
+        """
+        resource: Dict[str, Any] = {"proc_name": self.name, "pid": os.getpid()}
+
+        try:
+            # Из version.py, а не из фасада пакета — ради адреса, а не ради
+            # дешевизны: импорт подмодуля всё равно исполняет __init__ пакета
+            # (проверено запуском — 440 модулей), «лёгким» он не бывает.
+            from multiprocess_framework.version import code_version
+
+            resource["fw_version"] = code_version()
+        except Exception:  # noqa: BLE001 — версия не стоит падения процесса
+            pass
+
+        try:
+            psr = getattr(self.shared_resources, "process_state_registry", None)
+            data = psr.get_process_data(self.name) if psr is not None else None
+            meta = getattr(data, "metadata", None)
+            if isinstance(meta, dict) and "routing_incarnation" in meta:
+                resource["incarnation"] = int(meta.get("routing_incarnation", 0) or 0)
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            from ..configs.observability_layers import RECIPE_PATH_CONFIG_KEY, read_process_config
+
+            # Через read_process_config, НЕ через голый get_config: оркестратор
+            # получает конфиг плоским, а ребёнок — весь proc_dict, где ключи
+            # ассемблера лежат под "config." — голое чтение на живом стенде
+            # молча теряло поле recipe во всех записях (live webcam_sketch,
+            # ревью Ф3). Класс уже был записан после 5.12 («форма доставки
+            # конфига различается»), и хелпер для него уже существовал —
+            # повторное изобретение здесь его обошло.
+            recipe_path = str(read_process_config(self, RECIPE_PATH_CONFIG_KEY) or "")
+            if recipe_path:
+                # Имя, а не путь: путь длинный, машинно-специфичный и в каждой
+                # записи бесполезен — различать прогоны достаточно именем.
+                resource["recipe"] = Path(recipe_path).stem
+        except Exception:  # noqa: BLE001
+            pass
+
+        return resource
 
     def _init_state_proxy(self) -> None:
         """Авто-регистрация handler'а state.changed (ADR-SS-006).
@@ -465,11 +696,6 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         return self.router_manager
 
     @property
-    def logger_adapter(self):
-        """Доступ к logger_adapter через менеджера."""
-        return self.logger_manager.get_adapter() if self.logger_manager else None
-
-    @property
     def command_adapter(self):
         """Доступ к command_adapter через менеджера."""
         return self.command_manager.get_adapter() if self.command_manager else None
@@ -521,8 +747,21 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
     # ========================================================================
 
-    def _fallback_log(self, level: str, msg: str, ctx: str = None):
-        """Fallback логирование через ObservableMixin."""
+    def _log_callback(self, level: str, msg: str, ctx: str = None):
+        """Колбэк логирования для ``ProcessCommunication`` (уровень строкой + контекст).
+
+        **Переименован из ``_fallback_log`` (2.2) — имя лгало.** «Fallback» на
+        этом проекте означает аварийный выход мимо сломанного маршрута
+        (``ChannelRoutingManager._fallback_log`` пишет в stdlib напрямую именно
+        поэтому). Здесь же запись идёт по ШТАТНОМУ пути — через
+        ``ObservableMixin._log_*``, со всеми гейтом, роутингом и учётом потерь.
+        Никакого запасного маршрута тут нет и не было.
+
+        Цена ложного имени не гипотетическая: разбирая, где у нас аварийные
+        выходы, легко посчитать этот метод вторым — и «слить копии», которых не
+        существует. Правило проекта прямое: уверенное неверное объяснение
+        переживает баг.
+        """
         log_fn = getattr(self, f"_log_{level.lower()}", self._log_info)
         log_fn(f"{ctx or self.name}: {msg}")
 
@@ -531,9 +770,18 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         return self.config_handler.get(key, default) if self.config_handler else self.config.get(key, default)
 
     def update_config(self, key: str, value: Any):
-        """Обновить значение конфигурации."""
+        """Обновить значение конфигурации.
+
+        ``set(key, value)``, а не ``update(key, value)``: у ``Config`` метод
+        ``update`` принимает СЛОВАРЬ и один позиционный аргумент, поэтому вызов
+        с парой валился ``TypeError`` — у любого процесса с живым
+        ``config_handler``, то есть у всех настоящих. Тест на метод был, но
+        строил ``ProcessModule`` без обработчика и проверял только ветку
+        ``self.config`` (R6, 2026-07-29: тот же класс, что «защита в базе мертва
+        у наследника»).
+        """
         if self.config_handler:
-            self.config_handler.update(key, value)
+            self.config_handler.set(key, value)
         self.config[key] = value
 
     # ========================================================================
@@ -641,10 +889,51 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # ЖИЗНЕННЫЙ ЦИКЛ (расширенные методы)
     # ========================================================================
 
-    def run(self):
-        """Запуск процесса — статус RUNNING, старт воркеров, heartbeat."""
-        self.update_process_state(status=ProcessStatus.RUNNING.value)
+    def attach_ready_event(self, event) -> None:
+        """Принять от runner'а сигнал self-reported ready (Ф3.2) — объявит его сам процесс.
 
+        Ф3.2 выставлял событие в runner'е СРАЗУ после ``initialize()``. Живой
+        прогон 5.11 (2026-07-29, стенд switch+restart) показал, что это неправда:
+        message-loop поднимается на шаге 7 ``initialize()``, а команды процесса
+        регистрируются позже — в :meth:`run`. В это окно ребёнок читает адресованную
+        ему команду и роняет её (``No handler for key 'observability.tail.subscribe'``
+        в живом логе). Кто ориентировался на «готов», обращался к процессу, который
+        отвечать ещё не умеет.
+
+        Поэтому событие теперь ставит сам процесс — в точке, где он ДЕЙСТВИТЕЛЬНО
+        умеет принимать команды (конец :meth:`run`). Хранится через атрибут, а не
+        через ``__init__``: тесты строят модуль с no-op-инициализацией.
+        """
+        self._ready_event = event
+
+    def _announce_ready(self) -> None:
+        """Объявить готовность: команды зарегистрированы, воркеры и heartbeat живые.
+
+        Сбой сигнала не имеет права уронить старт: PM переживает отсутствие event'а
+        фолбэком по liveness. Но и молчать нельзя — иначе «процесс не объявился»
+        неотличимо от «объявился, а мы не увидели».
+        """
+        event = getattr(self, "_ready_event", None)
+        if event is None:
+            return
+        try:
+            event.set()
+        except Exception as exc:  # noqa: BLE001 — см. докстринг
+            self._log_error(f"ready_event процесса '{self.name}' не выставлен: {exc}", module="lifecycle")
+
+    def run(self):
+        """Запуск процесса — старт воркеров, команды, heartbeat, затем RUNNING.
+
+        Ф6.4б: ``RUNNING`` выставляется ПОСЛЕДНИМ, вместе с объявлением
+        готовности, а не первой строкой. Раньше статус менялся здесь, а
+        ``BuiltinCommands.register()`` шёл ниже — в это окно процесс по статусу
+        уже работал, а на ``introspect.*`` отвечал «нет хендлера». Один момент
+        истины вместо двух: статус и ``ready_event`` меняются в одной точке,
+        поэтому разъехаться не могут.
+
+        До этой точки статус остаётся тем, что выставил ``initialize()``
+        (``READY`` — «поднят, но ещё не обслуживает»), и это правда.
+        """
         if self.worker_manager:
             self.worker_manager.start_all_workers()
 
@@ -673,6 +962,18 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._gc_discipline.freeze_after_startup()
 
         self._log_info(f"Process '{self.name}' started", module="lifecycle")
+        # Готовность объявляется ПОСЛЕДНИМ действием run(): к этой строке команды
+        # процесса зарегистрированы, воркеры и heartbeat подняты. Наследник с
+        # блокирующим run() (GuiProcess: Qt-loop) зовёт super().run() первым, поэтому
+        # объявление до него доходит — а вот перенос сигнала в runner ЗА run() его
+        # бы навсегда лишил готовности.
+        #
+        # Ф6.4б: обе плоскости статуса меняются ЗДЕСЬ же, рядом с сигналом
+        # готовности. Разнести их — значит завести два ответа на один вопрос
+        # «процесс работает?», и живой прогон показал, чем это кончается.
+        self.update_process_state(status=ProcessStatus.RUNNING.value)
+        self._current_process_status = ProcessStatus.RUNNING.value
+        self._announce_ready()
 
     def stop(self):
         """Остановка процесса — статус STOPPING, остановка воркеров и shutdown."""
@@ -697,6 +998,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         Дренаж не критичен — исключения глушим, чтобы не сорвать teardown."""
         from ..managers.observability_wiring import (
             drain_process_observability,
+            unwire_document_sink,
             unwire_observability_forward,
             unwire_observability_store,
         )
@@ -723,8 +1025,12 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         for _fwd, taps in self._observability_forwarders.values():
             unwire_observability_forward(taps)
         self._observability_forwarders = {}
+        # Ф8.5: отцепить сток документов от аудита и закрыть БД. ПОСЛЕ дренажа: до
+        # этой строки запись аудита ещё имеет право появиться (её может породить сам
+        # teardown), и уехать ей есть куда.
+        unwire_document_sink(self)
 
-    def subscribe_observability_tail(self, subscriber: str) -> dict:
+    def subscribe_observability_tail(self, subscriber: str, level: str = "ERROR") -> dict:
         """Ф5.20b: подписать адрес на live-хвост записей наблюдаемости (F1: per-subscriber).
 
         Ставит форвардер (drain log/stats) + error-tap'ы (write-through) на push
@@ -742,6 +1048,20 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         if self.router_manager is None:
             return {"success": False, "reason": "router_manager недоступен"}
+        # Task 5.11: подписка процесса на САМОГО СЕБЯ — петля: каждая запись
+        # уезжает пушем в собственную очередь, где становится сообщением, о
+        # котором тоже можно записать. Инвариант живёт здесь, а не у вызывающего:
+        # GUI фильтровал себя сам, брокер фильтровал бы вторым местом, а третий
+        # потребитель забыл бы — «дефект чинится на одном пути из трёх».
+        # Брокер шлёт ОДИН конверт всем сразу и адресно исключить себя не может;
+        # отказ — его штатный ответ, поэтому он громкий и с причиной.
+        if subscriber == self.name:
+            return {
+                "success": False,
+                "process": self.name,
+                "subscriber": subscriber,
+                "reason": "подписка процесса на собственный хвост — петля (записи ушли бы в свою же очередь)",
+            }
         if self._observability_hub is None:
             return {"success": False, "reason": "observability hub не активен (нет пилот-воркеров)"}
         # Идемпотентность ТОЛЬКО для своего подписчика: снять его прежние tap'ы (если были),
@@ -749,17 +1069,49 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         prev = self._observability_forwarders.get(subscriber)
         if prev is not None:
             unwire_observability_forward(prev[1])
+        # Ф6.х.5: уровень задаёт подписчик (как у log.tail) — прежде порог был
+        # захардкожен ERROR внутри проводки, и хвост молчал на здоровом стенде.
+        # Ф3.1: и проверяется он здесь же — второй путь той же поверхности.
+        # Без проверки опечатка в имени уровня давала порог «пропускать всё» при
+        # успешном ответе с эхом запрошенного порога.
+        min_level = normalize_level_name(level or "ERROR")
+        if min_level is None:
+            return {
+                "success": False,
+                "process": self.name,
+                "subscriber": subscriber,
+                "reason": f"неизвестный level '{level}' ({'|'.join(LEVEL_ORDER)})",
+            }
         forwarder, taps = wire_observability_forward(
             self.router_manager,
             subscriber,
             self.name,
             self.logger_manager,
             self.error_manager,
+            min_level=min_level,
         )
         # Атомарный rebind, не in-place set: heartbeat-drain итерирует .values() в
         # другом потоке — смена размера dict во время итерации дала бы RuntimeError.
         self._observability_forwarders = {**self._observability_forwarders, subscriber: (forwarder, taps)}
-        return {"success": True, "process": self.name, "subscriber": subscriber}
+        # Ф6.х.5: ответ громкий, как у log.tail — tap'ы, менеджеры, порог.
+        # Молча-пустой список tap'ов и был лицом дефекта З-1: подписка
+        # «успешна», а слушать некому.
+        tap_names = [name for _mgr, name in taps]
+        managers = [getattr(m, "manager_name", m.__class__.__name__) for m, _n in taps]
+        if not taps:
+            self._log_warning(
+                f"observability.tail: подписка '{subscriber}' принята, но tap'ов ноль — "
+                "live-хвоста не будет (менеджеры без add_tap?)",
+                module="observability",
+            )
+        return {
+            "success": True,
+            "process": self.name,
+            "subscriber": subscriber,
+            "min_level": min_level,
+            "taps": tap_names,
+            "managers": managers,
+        }
 
     def unsubscribe_observability_tail(self, subscriber: Optional[str] = None) -> dict:
         """Ф5.20b: снять подписку на live-хвост (форвардер + error-tap'ы), F1: per-subscriber.

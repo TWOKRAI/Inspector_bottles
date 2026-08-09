@@ -7,15 +7,16 @@ QueueRegistry делегирует хранение в PSR.
 Pickle-safe: Queue ссылки живут в ProcessData (pickle-safe).
 """
 
-import logging
 import time
 from multiprocessing import Queue
 from typing import Any, Dict, List, Optional
 
 from ....base_manager import BaseManager, ObservableMixin
+from ....logger_module import get_std_logger
 from ..interfaces import IQueueRegistry
 from ...mixins import ManagerStatsMixin
 from ...qos import qos_for
+from ...state.process_data import ProcessDataKeys
 
 try:
     from multiprocessing.queues import Empty
@@ -24,15 +25,40 @@ except ImportError:
 
 from queue import Full
 
-# Отдельный stdlib-логгер для сообщений о БЕЗВОЗВРАТНОЙ потере груза.
-# Штатная плоскость (self._log_*) здесь молчит по построению: ни один продовый
-# вызов SharedResourcesManager(...) не передаёт logger (spawner.py, bundle_builder.py,
-# process_runner.py — все три без него), поэтому ManagerRegistry пуст и
-# _call_manager('logger', ...) тихо возвращает None. Плюс ObservableMixin.__getstate__
-# выкидывает _registry при pickle, так что даже переданный logger не пережил бы spawn.
-# Итог до этой правки: 26 тысяч событий потери → 0 строк во всём logs/.
-# Тот же приём, что _fallback_logger в logger_module (log_channel.py / logger_core.py).
-_fallback_logger = logging.getLogger(__name__)
+# Вид на процессный LoggerManager — ЕДИНСТВЕННЫЙ живой лог-канал этого файла
+# (Ф6.8 — детекторы потерь; Ф6.х.3 — весь остальной класс).
+#
+# Штатная плоскость (``self._log_*``) здесь молчит ПО ПОСТРОЕНИЮ: ни один
+# продовый вызов ``SharedResourcesManager(...)`` не передаёт logger
+# (spawner.py, bundle_builder.py, process_runner.py — все три без него),
+# поэтому ManagerRegistry пуст и ``_call_manager('logger', …)`` тихо возвращает
+# None. Плюс ``ObservableMixin.__getstate__`` выкидывает ``_registry`` при
+# pickle — даже переданный logger не пережил бы spawn. Ф6.8 оживила этим видом
+# только детекторы потерь; ревью 2026-08-03 нашло в том же классе ещё 12 точек
+# на мёртвой плоскости (`initialize failed`, `send_to_queue failed`,
+# `Queue not found`…) — Ф6.х.3 перевела их сюда же. ``self._log_*`` в этом
+# файле больше не зовётся: полкласса слышно, полкласса нет — хуже, чем ничего.
+#
+# Раньше здесь стоял ``logging.getLogger(__name__)``, и это был ВТОРОЙ мёртвый
+# путь: у stdlib-root в процессах фреймворка нет ни одного хендлера. Итог,
+# измеренный живьём: 26 тысяч событий потери и 246 вытеснений кадров → 0 строк
+# во всём ``logs/``. Детектор существовал и не срабатывал никогда.
+#
+# Вид ``get_std_logger`` решает обе беды сразу: он не пиклится (создаётся на
+# импорте в КАЖДОМ процессе) и связывается с процессным ``LoggerManager``
+# лениво, на первой записи, — то есть уже после ``init_logging()``.
+#
+# ``fallback_name=__name__`` — чтобы в режиме «менеджера нет» запись уходила в
+# stdlib-логгер с ТОЧНЫМ именем модуля, а не с префиксом ``mpf.``: иначе адрес
+# записи менялся бы в зависимости от того, поднят ли менеджер.
+_loss_logger = get_std_logger(__name__, fallback_name=__name__)
+
+# Исключения в этом файле форматируются через ``%r``, а не ``%s``. Причина
+# измерена ревью Ф3 (Б-6, 2026-08-05) на живом шторме: ``queue.Full``
+# поднимается БЕЗ аргументов, поэтому ``%s`` давал строку
+# ``send_to_queue('gui', 'system') failed:`` и пустоту после двоеточия —
+# следствие без причины, класс «проглоченный сбой». ``%r`` печатает
+# ``Full()``: класс назван всегда, текст добавляется когда он есть.
 
 
 class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMixin):
@@ -86,6 +112,13 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             # Всегда-on телеметрия (по образцу G.3-счётчиков): «дроп data виден в state»
             # (heartbeat → state.*). Раньше data-вытеснение было ТИХИМ (счётчика не было).
             "data_evicted": 0,
+            # Ф7.3: сколько записей вытеснено из полной очереди наблюдаемости и сколько
+            # раз put в неё всё-таки упал (гонка «после вытеснения снова полна»).
+            # ОТДЕЛЬНЫЕ ключи, а не общий data_evicted: смешав их, нельзя ответить на
+            # вопрос «теряем кадры или диагностику» — а это разные аварии.
+            # Оба пути НЕ пишут записи в лог (см. _is_observability_queue).
+            "observability_evicted": 0,
+            "observability_send_failed": 0,
         }
         # Throttle для ERROR-лога переполнения system-очереди: логируем раз на окно,
         # а не на каждый put (send_to_queue — hot-path). Счётчик инкрементируется всегда.
@@ -94,6 +127,11 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         # Throttle громкого WARNING про drop_oldest из data-очереди (тот же приём).
         self._data_evict_log_window: float = 5.0
         self._data_evict_last_log: float = 0.0
+        # Ф6.х.3: throttle WARNING «Queue not found» — send_to_queue это hot-path,
+        # отсутствующая очередь в окне teardown стреляла бы покадрово. Счётчик
+        # ``queue_missing`` растёт всегда, запись — раз в окно.
+        self._queue_missing_log_window: float = 5.0
+        self._queue_missing_last_log: float = 0.0
         # Учёт безвозвратных потерь never-drop груза (см. _report_never_drop_loss).
         # Копится всегда, пишется в лог раз в окно; _since_log нужен, чтобы
         # троттлированная запись честно называла ТЕМП потери, а не только факт.
@@ -127,19 +165,19 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
     def initialize(self) -> bool:
         try:
             self.is_initialized = True
-            self._log_info(f"QueueRegistry '{self.manager_name}' initialized")
+            _loss_logger.info("QueueRegistry '%s' initialized", self.manager_name)
             return True
         except Exception as e:
-            self._log_error(f"QueueRegistry.initialize() failed: {e}")
+            _loss_logger.error("QueueRegistry.initialize() failed: %r", e)
             return False
 
     def shutdown(self) -> bool:
         try:
             self.is_initialized = False
-            self._log_info("QueueRegistry shutdown completed")
+            _loss_logger.info("QueueRegistry shutdown completed")
             return True
         except Exception as e:
-            self._log_error(f"QueueRegistry.shutdown() failed: {e}")
+            _loss_logger.error("QueueRegistry.shutdown() failed: %r", e)
             return False
 
     # =========================================================================
@@ -160,7 +198,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 queues[queue_type] = Queue(maxsize=maxsize)
                 self._stats["created"] += 1
         except Exception as e:
-            self._log_error(f"create_queues() failed: {e}")
+            _loss_logger.error("create_queues() failed: %r", e)
             self._stats["errors"] += 1
         return queues
 
@@ -175,10 +213,10 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             if self._process_state_registry:
                 for queue_type, queue in queues.items():
                     self._process_state_registry.add_queue(process_name, queue_type, queue)
-            self._log_debug(f"Registered {len(queues)} queues for '{process_name}'")
+            _loss_logger.debug("Registered %d queues for '%s'", len(queues), process_name)
             return True
         except Exception as e:
-            self._log_error(f"register_process_queues('{process_name}') failed: {e}")
+            _loss_logger.error("register_process_queues('%s') failed: %r", process_name, e)
             self._stats["errors"] += 1
             return False
 
@@ -225,16 +263,27 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         flags-off пути (on_evict=None) поведение бит-в-бит прежнее."""
         queue = self.get_queue(process_name, queue_type)
         if queue is None:
-            self._log_warning(f"Queue '{queue_type}' not found for '{process_name}'")
+            # Ф6.х.3: счётчик — всегда, запись — раз в окно (hot-path; в окне
+            # teardown отсутствующая очередь стреляла бы покадрово).
+            self._stats["queue_missing"] = self._stats.get("queue_missing", 0) + 1
+            now = time.monotonic()
+            if now - self._queue_missing_last_log >= self._queue_missing_log_window:
+                self._queue_missing_last_log = now
+                _loss_logger.warning(
+                    "Queue '%s' not found for '%s' (queue_missing=%d) — груз не доставлен",
+                    queue_type,
+                    process_name,
+                    self._stats["queue_missing"],
+                )
             return False
         self._count_sender(process_name, queue_type, message, "put")
         try:
-            evicted = self.remove_old_if_full(queue, queue_type)
+            evicted = self.remove_old_if_full(queue, queue_type, victim_process=process_name)
             if evicted is not None and on_evict is not None:
                 try:
                     on_evict(evicted, process_name)
                 except Exception as e:  # noqa: BLE001 — хук наблюдаемости не роняет доставку
-                    self._log_error(f"send_to_queue on_evict hook failed: {e}")
+                    _loss_logger.error("send_to_queue on_evict hook failed: %r", e)
             if timeout > 0:
                 queue.put(message, timeout=timeout)
             else:
@@ -250,7 +299,29 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 # Ф4 Task 4.3: потеря записывается ТОМУ ЖЕ отправителю — иначе видно
                 # «очередь теряет», но не видно, чей груз пропадает.
                 self._count_sender(process_name, queue_type, message, "lost")
-            self._log_error(f"send_to_queue('{process_name}', '{queue_type}') failed: {e}")
+            if isinstance(e, Full) and self._is_observability_queue(queue_type):
+                # Ф7.3, звено (а) петли самоусиления. Очередь наблюдаемости droppable,
+                # поэтому Full здесь — редкая гонка: между вытеснением и put её успел
+                # заполнить другой отправитель. Записи об этом НЕ делаем: она поехала
+                # бы тем же хвостом, отказ доставки которого её и породил, — ровно та
+                # петля, которую Б-6 намерил на 97 066 отказах. Потеря не молчит:
+                # счётчик уходит наружу через get_stats → heartbeat → state. Общий
+                # ``errors`` СОЗНАТЕЛЬНО не трогаем: под штормом хвоста он перестал бы
+                # отличать «транспорт сломан» от «диагностики слишком много» — этой
+                # слепотой Б-6 и запомнился.
+                #
+                # Ф7.х, M-4: сверка типа обязательна. Без неё ветка глотала ЛЮБОЕ
+                # исключение как «хвоста слишком много»: закрытая очередь
+                # (``ValueError: is closed``) и непиклящийся груз
+                # (``PicklingError``) уходили в тот же тихий счётчик — то есть
+                # отказ транспорта выглядел перегрузкой, и починка петли завела
+                # свой собственный проглоченный сбой. Всё, что не ``Full``, идёт
+                # ниже общей громкой дорогой: это не «диагностики много», это
+                # сломано, и молчать об этом нельзя.
+                self._stats["observability_send_failed"] += 1
+                self._count_sender(process_name, queue_type, message, "lost")
+                return False
+            _loss_logger.error("send_to_queue('%s', '%s') failed: %r", process_name, queue_type, e)
             self._stats["errors"] += 1
             return False
 
@@ -268,7 +339,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         except Empty:
             return None
         except Exception as e:
-            self._log_error(f"receive_from_queue('{process_name}', '{queue_type}') failed: {e}")
+            _loss_logger.error("receive_from_queue('%s', '%s') failed: %r", process_name, queue_type, e)
             self._stats["errors"] += 1
             return None
 
@@ -350,10 +421,15 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             for item in saved:
                 queue.put(item)
         except Exception as e:
-            self._log_error(f"clear_queue() failed: {e}")
+            _loss_logger.error("clear_queue() failed: %r", e)
             self._stats["errors"] += 1
 
-    def remove_old_if_full(self, queue: Queue, queue_type: Optional[str] = None) -> Optional[Any]:
+    def remove_old_if_full(
+        self,
+        queue: Queue,
+        queue_type: Optional[str] = None,
+        victim_process: Optional[str] = None,
+    ) -> Optional[Any]:
         """Освободить место в полной очереди перед put (QoS-профиль, Ф7 G.4.a).
 
         Решение «ронять или нет» берётся из ЕДИНОГО QoS-профиля класса груза
@@ -372,12 +448,22 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         throttled-WARNING — всегда-on телеметрия (по образцу G.3, поведение drop не
         меняют). Для system/data вердикт профиля идентичен хардкоду — флип безопасен.
 
+        Args:
+            victim_process: чью очередь вытесняем (Ф6.8). Счётчик ``data_evicted``
+                живёт у ОТПРАВИТЕЛЯ, а вытесняется чужая очередь — очередь
+                ПОЛУЧАТЕЛЯ. Из-за этого «246 вытеснений у points» на живом
+                прогоне читалось ровно наоборот: как будто переполнялась очередь
+                самого points, тогда как points переполнял очередь потребителя.
+                Имя жертвы попадает и в пер-жертвенный счётчик, и в текст
+                WARNING'а — без него запись не отвечает на вопрос «где затор».
+
         Returns:
             вытесненный элемент (drop_oldest сработал) или ``None`` (очередь не полна,
             never-drop заблокировал вытеснение, либо очередь опустела гонкой). Вызывающий
             (``send_to_queue``) отдаёт его в ``on_evict``-хук — LIVE-2: у вытесненного
             кадра есть незакрытый займ SHM-кольца, который иначе не отпустит никто.
         """
+        victim = f"{victim_process}.{queue_type}" if victim_process else f"?.{queue_type}"
         if not queue.full():
             return None
         # process_data.QUEUE_SYSTEM == "system" — каноническое имя system-очереди.
@@ -386,25 +472,47 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             now = time.monotonic()
             if now - self._system_evict_last_log >= self._system_evict_log_window:
                 self._system_evict_last_log = now
-                self._log_error(
-                    "system-очередь переполнена — вытеснение заблокировано "
-                    f"(system_evict_blocked={self._stats['system_evict_blocked']}); "
-                    "system-команда может быть потеряна при put"
+                # Ф6.8: мимо ``self._log_error`` по той же причине, что и
+                # ``_report_never_drop_loss`` — штатная плоскость у этого
+                # менеджера не подключена ни в одном процессе.
+                _loss_logger.error(
+                    "system-очередь '%s' переполнена — вытеснение заблокировано "
+                    "(system_evict_blocked=%d); system-команда может быть потеряна при put",
+                    victim,
+                    self._stats["system_evict_blocked"],
                 )
             return None
         try:
             evicted = queue.get_nowait()
         except Empty:
             return None
+        if self._is_observability_queue(queue_type):
+            # Ф7.3, звено (б) петли. Хвост тоже drop_oldest, но БЕЗ записи: throttled
+            # WARNING отсюда поехал бы в тот же хвост, который только что переполнился,
+            # то есть каждая потеря порождала бы новую запись. Счётчики — оба (общий и
+            # пер-жертвенный), как у data: «терять можно, молчать нельзя» держится ими.
+            self._stats["observability_evicted"] += 1
+            key = f"observability_evicted.{victim}"
+            self._stats[key] = self._stats.get(key, 0) + 1
+            return evicted
         # drop_oldest сработал — громкий счётчик (раньше молчал) + throttled WARNING.
         self._stats["data_evicted"] += 1
+        # Ф6.8: разбивка по ЖЕРТВЕ. Общий ``data_evicted`` остаётся (его читают
+        # heartbeat и introspect), но он отвечает «сколько», а не «где» —
+        # а разбор затора начинается со второго вопроса. Кардинальность
+        # ограничена топологией: имён процессов единицы.
+        key = f"data_evicted.{victim}"
+        self._stats[key] = self._stats.get(key, 0) + 1
         now = time.monotonic()
         if now - self._data_evict_last_log >= self._data_evict_log_window:
             self._data_evict_last_log = now
-            self._log_warning(
-                f"data-очередь '{queue_type}' переполнена — вытеснен старый элемент "
-                f"(drop_oldest; data_evicted={self._stats['data_evicted']}); "
-                "устойчивая перегрузка = теряем кадры, чинить пропускную способность"
+            _loss_logger.warning(
+                "переполнена data-очередь ПОЛУЧАТЕЛЯ '%s' — вытеснен старый элемент "
+                "(drop_oldest; вытеснено в неё %d, всего этим процессом %d); "
+                "устойчивая перегрузка = теряем кадры, чинить пропускную способность",
+                victim,
+                self._stats[key],
+                self._stats["data_evicted"],
             )
         return evicted
 
@@ -424,7 +532,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         """Троттлированный отчёт о безвозвратно потерянном never-drop грузе.
 
         Почему мимо ``self._log_error``: штатная плоскость логов у QueueRegistry
-        не подключена ни в одном процессе (см. ``_fallback_logger``), и запись
+        не подключена ни в одном процессе (см. ``_loss_logger``), и запись
         просто исчезала. Почему с именем получателя: без него запись не отвечает
         на главный вопрос разбора — КОМУ не доехало; счётчики этого не знают.
         """
@@ -440,7 +548,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             size = queue.qsize()
         except (NotImplementedError, OSError, AttributeError):
             size = -1  # qsize недоступен (macOS) — не повод молчать о потере
-        _fallback_logger.error(
+        _loss_logger.error(
             "ПОТЕРЯ СООБЩЕНИЯ: очередь '%s' процесса-получателя '%s' переполнена "
             "(размер %s), вытеснение запрещено QoS-профилем (never-drop) — "
             "сообщение отброшено БЕЗВОЗВРАТНО и не будет доставлено. "
@@ -516,6 +624,20 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             return {queue_key: {s: dict(v) for s, v in items}}
         return {k: {s: dict(v) for s, v in list(per_queue.items())} for k, per_queue in list(self._sender_puts.items())}
 
+    @staticmethod
+    def _is_observability_queue(queue_type: Optional[str]) -> bool:
+        """Ф7.3: это очередь хвоста наблюдаемости?
+
+        Единственное следствие ответа — **молчание в логах** на путях потери (вытеснение,
+        отказ put). Не оптимизация и не «тише значит лучше»: запись о потерянной записи
+        едет тем же хвостом, поэтому обычная диагностика здесь работает усилителем
+        сбоя — измерено живьём (Б-6: 97 066 отказов доставки за ~25 минут, из них
+        каждый порождал новую запись). Взамен потеря видна счётчиками
+        ``observability_evicted`` / ``observability_send_failed``, которые уходят
+        наружу тем же путём, что ``data_evicted``.
+        """
+        return queue_type == ProcessDataKeys.QUEUE_OBSERVABILITY
+
     def _is_never_drop(self, queue_type: Optional[str]) -> bool:
         """Ронять ли груз данного ``queue_type`` при переполнении (Ф7 G.4.a).
 
@@ -537,6 +659,21 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         Дешёвый plain-int аксессор для surface в ``RouterManager.get_stats`` → heartbeat
         → ``state.shm.*`` (без обхода процессов, как в полном get_stats)."""
         return self._stats["data_evicted"]
+
+    @property
+    def observability_evicted(self) -> int:
+        """Ф7.3: сколько записей вытеснено из полных очередей наблюдаемости.
+
+        Единственный способ узнать о потере хвоста: путь вытеснения молчит в логах
+        сознательно (см. :meth:`_is_observability_queue`). Дешёвый plain-int аксессор
+        для surface в ``RouterManager.get_stats`` → heartbeat → ``state.shm.*``.
+        """
+        return self._stats["observability_evicted"]
+
+    @property
+    def observability_send_failed(self) -> int:
+        """Ф7.3: сколько раз put в очередь наблюдаемости упал (гонка на полной очереди)."""
+        return self._stats["observability_send_failed"]
 
     @property
     def system_evict_blocked(self) -> int:

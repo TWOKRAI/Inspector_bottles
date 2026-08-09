@@ -15,7 +15,7 @@ def _integration_config(tmp_path, errors_name: str = "errors.log") -> LoggerMana
     return LoggerManagerConfig.model_validate(
         {
             "app_name": "err_integration",
-            "default_level": "WARNING",
+            "default_level": "DEBUG",
             "enable_batching": False,
             "batch_size": 50,
             "batch_interval": 0.5,
@@ -46,21 +46,9 @@ def _integration_config(tmp_path, errors_name: str = "errors.log") -> LoggerMana
                 },
             },
             "scopes": {
-                "SYSTEM": {
-                    "enabled": True,
-                    "min_level": "WARNING",
-                    "channels": ["errors_file", "critical_file", "warnings_file"],
-                },
-                "BUSINESS": {
-                    "enabled": True,
-                    "min_level": "INFO",
-                    "channels": ["errors_file"],
-                },
-                "DEBUG": {
-                    "enabled": True,
-                    "min_level": "DEBUG",
-                    "channels": ["errors_file"],
-                },
+                "SYSTEM": {"channels": ["errors_file", "critical_file", "warnings_file"]},
+                "BUSINESS": {"channels": ["errors_file"]},
+                "DEBUG": {"channels": ["errors_file"]},
             },
         }
     )

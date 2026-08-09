@@ -18,7 +18,8 @@ engine.predict (sidecar сам делает resize/normalize). Тем самым
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import re
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ from Services.dataset_gen.core.catalog import imread_unicode
 from Services.dataset_gen.core.realcut import detect_disk
 from Services.ml_inference.engine import InferenceEngine
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
 

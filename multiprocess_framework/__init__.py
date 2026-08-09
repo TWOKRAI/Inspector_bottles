@@ -20,7 +20,10 @@ UI-метаданные, дефолт и маршрут между процес�
 
 from __future__ import annotations
 
-__version__ = "2.0.0"
+# Семантическая версия живёт в version.py вместе с выведением идентичности
+# кода из git (ревью Ф3, Н-5) — здесь она реэкспортируется, чтобы не сломать
+# ни одного из прежних читателей ``multiprocess_framework.__version__``.
+from multiprocess_framework.version import __version__, code_version
 
 # === LAYER 1: FOUNDATION ===
 from multiprocess_framework.modules.base_manager import (
@@ -166,6 +169,7 @@ def __getattr__(name: str):
 
 __all__ = [
     "__version__",
+    "code_version",
     # Foundation
     "BaseAdapter",
     "BaseManager",

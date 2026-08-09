@@ -347,14 +347,26 @@ def run_gui(process: "GuiProcess") -> None:
 
     process._bridge.add_state_listener(_forward_state_delta_to_topology)
 
-    # Ф5.20b: активировать live-хвост наблюдаемости. Форвардер на каждом backend-
-    # процессе «мёртв» без подписчика (как log_tail), поэтому GUI сам инициирует
-    # подписку по мере обнаружения процессов в processes.* state-дельтах — каждый
-    # процесс шлёт свои log/stats/error записи на GUI (command=observability.record).
-    # Переподписывает НОВУЮ инкарнацию после авто-рестарта (supervisor.event=recovered).
+    # Ф5.20b + Task 5.11: включить live-хвост наблюдаемости ОДНИМ вызовом. GUI
+    # объявляет брокеру на оркестраторе намерение «хочу хвост всех», а PM
+    # разворачивает его на живые процессы и сам доигрывает каждой свежей
+    # инкарнации (boot, ручной рестарт, авто-рестарт, switch рецепта). Записи
+    # идут напрямую сюда (command=observability.record) — PM не транзит.
+    # Прежний цикл по processes.*-дельтам с триггером supervisor.event="recovered"
+    # снят вместе со своим резидуалом F4: ручной рестарт `recovered` не публикует,
+    # и новая инкарнация молча оставалась без хвоста.
     from .widgets.tabs.observability import ObservabilityTailActivator
 
-    _obs_tail_activator = ObservabilityTailActivator(command_sender.send_command, process.name)
+    class _ActivatorLog:
+        """Отказ активации — в журнал ПРОЦЕССА, а не в голый logging (тот пуст)."""
+
+        def warning(self, message: str) -> None:
+            process._log_warning(message, module="observability")
+
+        def error(self, message: str) -> None:
+            process._log_error(message, module="observability")
+
+    _obs_tail_activator = ObservabilityTailActivator(command_sender.send_command, process.name, log=_ActivatorLog())
     process._bridge.add_state_listener(_obs_tail_activator.on_state_delta)
 
     # 3f. ServiceStateAdapter — подключить ПОСЛЕ bindings (proxy-aware step)
@@ -623,9 +635,9 @@ def run_gui(process: "GuiProcess") -> None:
 
     def _on_plugin_config_changed(event: PluginConfigChanged) -> None:
         """Live field-write: domain → GUI RegistersManager + register_update IPC."""
-        import logging as _logging
+        from multiprocess_framework.modules.logger_module import get_std_logger
 
-        _log = _logging.getLogger(__name__)
+        _log = get_std_logger(__name__)
 
         # Адрес плагина: register_name = plugin_name по (process, plugin_index).
         # Fallback на process_name — legacy 1:1 (process == plugin == register).

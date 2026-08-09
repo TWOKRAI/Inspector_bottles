@@ -7,18 +7,49 @@ LoggerManagerConfig — SchemaBase / ChannelRoutingConfig для LoggerManager.
 
 from __future__ import annotations
 
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from ...channel_routing_module import ChannelRoutingConfig
+from ...channel_routing_module.levels import (
+    LEVEL_ORDER,
+    normalize_level_name,
+)
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
-from ..log_enums import LogLevel
 
 _STD_FMT = "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s"
-_FILE_MAX = 10 * 1024 * 1024
 
-_LEVEL_ORDER = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+#: Ф7.х. Нижняя граница окна всплеска дросселя (сек). Единственный владелец
+#: значения: фасад ``ObservabilityConfig`` импортирует эту же константу — своя
+#: копия там разъехалась бы, и слой L3 принимал бы то, что отвергает L0.
+#:
+#: 0.1 с — вдвое шире паузы, с которой шёл живой шторм Б-6 (~20 мс между
+#: повторами одного текста). Всё, что уже́, означает «окно короче шторма»:
+#: каждая запись считалась бы новым всплеском и проходила бы целиком.
+MIN_BURST_RESET_SEC = 0.1
+#: Ф2.6. Потолок длины имени источника в выводе фреймворковых каналов.
+#: Полное точечное имя продолжает жить в записи и в правилах; укорачивается
+#: только то, что видит глаз.
+#:
+#: Значение выбрано ЗАМЕРОМ, а не копированием дефолта logback (``%logger{36}``):
+#: у нас общий префикс пакета длиннее, и 36 его почти не сжимает. Прирост веса
+#: логов от перехода на точечные имена, по строкам прогона 2026-08-03:
+#:
+#: ===========  ==============  ===============  ======
+#: потолок      ProcessManager  region_splitter  gui
+#: ===========  ==============  ===============  ======
+#: 0 (полное)   +9.27%          +16.38%          +4.74%
+#: **20**       **+1.20%**      **+3.04%**       **+1.46%**
+#: 24           +2.01%          +4.50%           +1.60%
+#: 36           +2.92%          +6.00%           +2.19%
+#: ===========  ==============  ===============  ======
+#:
+#: 20 — колено: ниже него выигрыш не растёт, выше цена удваивается. Даёт
+#: ``m.m.dispatch_module`` (19 символов против 46 полного и 10 у прежнего
+#: плоского ``dispatcher``).
+_NAME_MAX_LEN = 20
+_FILE_MAX = 10 * 1024 * 1024
 
 
 class LoggerChannelSchema(SchemaBase):
@@ -28,46 +59,204 @@ class LoggerChannelSchema(SchemaBase):
     type: str = "file"
     enabled: bool = True
     format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    #: Ф2.6. Потолок длины имени источника В ВЫВОДЕ; 0 — печатать полностью.
+    #:
+    #: Развязывает две разные задачи, которые до сих пор решались одной строкой:
+    #: конфиг и правила адресуют ПОЛНОЕ точечное имя (иначе префиксный резолв
+    #: не работает), а в файл пишется сокращённое — иначе каждая строка растёт на
+    #: длину пакета. Замер на прогоне 2026-08-03: переход трёх шумных источников
+    #: на точечные имена БЕЗ сокращения дал бы +4.7…16.4% к весу ``system.log``,
+    #: то есть фаза, которая борется за объём, добавила бы объёма.
+    #:
+    #: Правило сокращения — как ``%logger{N}`` в logback: ведущие сегменты
+    #: сжимаются до первой буквы, последний не трогается никогда
+    #: (``multiprocess_framework.modules.dispatch_module`` → ``m.m.dispatch_module``).
+    #:
+    #: Дефолт 0 выбран сознательно: молча менять вид КАЖДОЙ строки лога у всех,
+    #: кто соберёт менеджер сам, — не настройка. Фреймворковые каналы включают
+    #: сокращение явно, ниже.
+    name_max_len: int = 0
     max_size: int = 10 * 1024 * 1024
     backup_count: int = 5
     rotate: bool = True
     file_path: Optional[str] = None
     url: Optional[str] = None
     headers: Dict[str, str] = Field(default_factory=dict)
+    # Только для type="memory": сколько ЗАПИСЕЙ держит кольцо в памяти процесса.
+    # Отдельным полем, а не переиспользованием max_size: там байты, и 10 МБ,
+    # прочитанные как число записей, дали бы кольцо на 10 миллионов элементов.
+    capacity: Optional[int] = None
+    # --- Лесенка перегрузки стока (Ф7.2) -------------------------------------
+    # Дефолты — проверенные значения консоли (R2/R12), поднятые в базу канала:
+    # у файлового стока предела не было вовсе, а после снятия батчинга (Ф7.4)
+    # затык блокирует поток-эмитент. Пороги операторские, а не константы: без
+    # ручки «ограничили» означало бы «выбрали за оператора» (довод Ф0.3).
+    #: Сколько ждать освобождения стока, прежде чем бросить запись. Здоровая
+    #: запись занимает микросекунды и в предел не упирается никогда. 0 —
+    #: не ждать вовсе (для стоков, где ожидание бессмысленно).
+    #: Ф7.х.2: лок у стока ОБЩИЙ на путь, поэтому на файле с несколькими
+    #: каналами предел покрывает ожидание за ВСЕМИ его писателями, а не за
+    #: одним, — порог читайте «на сток», не «на канал».
+    write_deadline_sec: float = 0.25
+    #: После скольких отказов ПОДРЯД перестать ждать вовсе (разомкнуть канал).
+    #: Не 1: одиночный таймаут бывает случайным всплеском, а размыкание — это
+    #: переход к гарантированным потерям.
+    degrade_after: int = 3
+    #: С какой длительности запись считается подозрительно медленной (счётчик).
+    slow_write_sec: float = 0.05
+    # Имя менеджера-владельца. Проставляет НЕ пользователь, а сам менеджер при
+    # создании канала: ресурсы, переживающие канал (кольцо в памяти), лежат в
+    # процессном реестре, и без владельца одноимённые каналы двух плоскостей-
+    # братьев слились бы в одно кольцо.
+    owner: Optional[str] = None
+
+
+#: Ф8.1. Поля, которые скоуп нёс, пока был ВТОРОЙ осью гейта. Сняты вместе с
+#: осью; перечислены поимённо, чтобы конфиг с ними получил отказ по адресу, а не
+#: молчаливое ``extra="ignore"`` Pydantic — то есть ровно ту тихую потерю
+#: адресной правки, из-за которой 2.3b и стояла заблокированной.
+_SCOPE_GATE_FIELDS_GONE = {
+    "min_level": "порог — правилом имени: loggers['<префикс>'].level (корень — ключ '')",
+    "enabled": "выключение — порогом: loggers['<префикс>'].level выше уровня записи",
+    "modules": "whitelist модулей — правилом имени по префиксу (Р-2.4-Г)",
+}
 
 
 class LoggerScopeSchema(SchemaBase):
-    """Скоуп логирования (ключи SYSTEM, BUSINESS, …)."""
+    """Группа логирования — **поставщик приёмников, и только** (ключи SYSTEM, BUSINESS, …).
 
-    enabled: bool = True
-    min_level: str = _LEVEL_ORDER[1]  # INFO
+    Ф8.1: у скоупа была вторая роль — порог гейта (``min_level``/``enabled``/
+    ``modules``). Она снята, и это не упрощение ради упрощения, а снятие второго
+    кодирования оси уровня. Замер, на котором решение стоит: производственных
+    call-site, выбирающих скоуп НЕ по уровню, **один** (``log_stats_channel`` →
+    ``PERFORMANCE``) против **742** уровневых обёрток. Скоуп записи брался из
+    :data:`~..core.logger_core._LEVEL_DEFAULT_SCOPE`, то есть был функцией уровня,
+    а его ``min_level`` — вторым способом сказать то же самое.
+
+    Цена второй оси была не теоретической: пока обе оси решали, «всё на DEBUG,
+    кроме SYSTEM» не выражалось ни одним конфигом (репро 2026-08-04 и 2026-08-06),
+    и задача 2.3b стояла заблокированной именно этим.
+
+    Что осталось: ``channels`` — какие приёмники получает группа по умолчанию.
+    Ровно та роль, которую за скоупом закрепило решение Р-2.2-А.
+    """
+
     channels: List[str] = Field(default_factory=list)
-    modules: List[str] = Field(default_factory=list)
 
-    def should_log(self, level: LogLevel, module: str) -> bool:
-        if not self.enabled:
-            return False
-        try:
-            lv = _LEVEL_ORDER.index(level.value)
-            mv = _LEVEL_ORDER.index(self.min_level.upper())
-        except ValueError:
-            return True
-        if lv < mv:
-            return False
-        if self.modules and module not in self.modules:
-            return False
-        return True
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_gate_fields(cls, data: Any) -> Any:
+        """Ф8.1: снятое поле — **отказ**, а не тихое игнорирование.
+
+        ``SchemaBase`` не запрещает лишние ключи (``extra`` по умолчанию
+        ``ignore``), поэтому оставленный в конфиге ``min_level`` доехал бы сюда и
+        исчез молча. Симптом был бы худшим из возможных: оператор написал порог,
+        конфиг принят, readback показывает написанное — а гейт про него не знает.
+        Это класс «тихая потеря адресной правки», названный в разборе 2.3b как
+        один из двух исходов, ради недопущения которых задача и не делалась.
+
+        Отказ безопасен по построению: ``reconfigure`` разбирает конфиг ДО
+        разрушения реестра (R9), поэтому отвергнутая секция оставляет менеджер
+        с прежним рабочим набором каналов, а не с пустым.
+        """
+        if not isinstance(data, dict):
+            return data
+        present = [key for key in _SCOPE_GATE_FIELDS_GONE if key in data]
+        if present:
+            hints = "; ".join(f"{key}: {_SCOPE_GATE_FIELDS_GONE[key]}" for key in present)
+            raise ValueError(
+                f"скоуп больше не задаёт порог (Ф8.1): поля {present} сняты вместе со второй "
+                f"осью гейта. Куда переехало — {hints}. У скоупа осталось только 'channels'"
+            )
+        return data
 
 
-class LoggerModuleSchema(SchemaBase):
-    """Per-module file logging (router_messages, processor, …)."""
+class LoggerRuleSchema(SchemaBase):
+    """Правило по иерархическому имени источника (Ф2.2).
 
-    enabled: bool = True
-    file_path: Optional[str] = None
-    min_level: str = "DEBUG"
-    max_size: Optional[int] = None
-    backup_count: Optional[int] = None
-    rotate: bool = True
+    Ключ в :attr:`LoggerManagerConfig.loggers` — префикс имени источника
+    (``multiprocess_framework.modules.router_module``), корень — пустая строка.
+    Действует по самому длинному совпавшему префиксу; разбор — в
+    :class:`~..core.name_hierarchy.NameHierarchy`.
+
+    Оба поля **необязательны и резолвятся независимо**: ``None`` значит «это
+    правило про такую-то ось молчит, наследую с более короткого префикса».
+    Отличать молчание от объявленной пустоты обязательно — ``channels: []``
+    значит «приёмников нет, и это решение», а не «наследую» (то же правило, что
+    решение Г3 для слоёв конфига).
+    """
+
+    level: Annotated[
+        Optional[str],
+        FieldMeta("Порог для поддерева (None — наследовать)"),
+    ] = None
+    channels: Annotated[
+        Optional[List[str]],
+        FieldMeta("Приёмники для поддерева (None — наследовать, [] — приёмников нет)"),
+    ] = None
+    channels_extra: Annotated[
+        Optional[List[str]],
+        FieldMeta("Приёмники ДОПОЛНИТЕЛЬНО к унаследованным (накапливаются по ветке)"),
+    ] = None
+    """Ф2.6, решение Р-2.6-Ж — вторая операция на оси приёмников.
+
+    **Упущение, а не решение.** Ф2.2 сделала правило ЗАМЕЩАЮЩИМ, и слова
+    «additivity»/``propagate`` не было ни в одной врезке. При этом снесённый
+    ``modules`` был АДДИТИВНЫМ: ``_route`` добавлял ``module_<имя>`` к каналам
+    скоупа, и дефолт это прямо фиксировал («логи с ``module="trace"`` уходят сюда
+    ПЛЮС в scope-каналы»). Перенос таких маршрутов на замещающее правило был бы
+    тихой сменой поведения: файл остался бы непустым, а из ``system.log`` записи
+    исчезли — и приёмка «маршрут жив» этого не заметила бы.
+
+    Выразить это через ``channels`` нельзя в принципе: правило про скоуп не знает,
+    а наборы у скоупов разные (``SYSTEM`` — console+system_file, ``BUSINESS`` —
+    system_file+messages_file). Пришлось бы скопировать список, который живёт в
+    другом месте, — ровно та вторая копия строки, ради устранения которой заведено
+    объявление имени (Р-2.6-В).
+
+    Отдельный ключ, а не флаг ``additive: bool``: смысл флага зависел бы от
+    соседнего ключа, то есть это второй диалект. Здесь операция самостоятельна и
+    резолвится тем же проходом.
+
+    **Накапливается по ВСЕЙ ветке**, в отличие от ``channels`` (там побеждает самый
+    длинный префикс). Иначе добавка у листа молча отменяла бы добавку у пакета —
+    тот же дефект, ради которого две оси резолвятся независимо.
+
+    ``[]`` — «ничего не добавляю», и это НЕ отмена добавок предков: отмена была бы
+    третьей операцией, а её никто не просил. ``None`` — то же самое, ключ просто
+    не задан; здесь молчание и объявленная пустота совпадают по смыслу, и это
+    сказано прямо, чтобы не искали в них разницу по аналогии с ``channels``.
+    """
+
+    @field_validator("level")
+    @classmethod
+    def _normalize_level(cls, value: Optional[str]) -> Optional[str]:
+        """Канон один раз — на границе конфига, и здесь же ОТКАЗ незнакомому имени.
+
+        Канон нужен, чтобы сравнение рангов на горячем пути не платило ``.upper()``
+        за каждую запись, а ``model_dump`` не отдавал пульту неканоничное значение —
+        иначе readback расходится с тем, что стоит в гейте.
+
+        **Отказ добавлен в Ф8.1, и это починка регрессии, а не новое требование.**
+        Проверку имени завела Ф3.1 — но на пороге СКОУПА, с воспроизведением:
+        ``min_level='WARN'`` давал ``should_log(DEBUG) = True``, то есть порог
+        «предупреждения и выше» молча оборачивался firehose. Ф8.1 снимает порог
+        скоупа и делает единственной осью вот это поле — вместе с осью сюда обязана
+        переехать и её защита. Оставить проверку только там, откуда ось ушла, —
+        ровно класс «дефект починен на одном пути из трёх».
+
+        Чужие написания раскрываются алиасами (``WARN``, ``FATAL``): это каноничные
+        имена OTel, а не опечатки. Отвергается действительно неизвестное.
+        """
+        if not isinstance(value, str):
+            return value
+        canonical = normalize_level_name(value)
+        if canonical is None:
+            raise ValueError(
+                f"неизвестный уровень '{value}' в правиле loggers "
+                f"(известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+            )
+        return canonical
 
 
 @register_schema("LoggerManagerConfig")
@@ -78,6 +267,34 @@ class LoggerManagerConfig(ChannelRoutingConfig):
 
     app_name: str = "unknown_app"
     default_level: str = "INFO"
+    """Порог КОРНЯ иерархии — то, что действует, когда про имя не сказало ни одно правило.
+
+    Ф8.1: до неё поле не фильтровало вовсе (решение принимал порог скоупа), а его
+    значение раскрывалось в профиль, переписывающий пороги всех скоупов. Теперь это
+    прямой участник решения гейта — см. ``LoggerCore._should_log_direct``.
+    """
+
+    @field_validator("default_level")
+    @classmethod
+    def _normalize_default_level(cls, value: str) -> str:
+        """Ф8.1: у корневого порога та же защита, что у правил и у прежнего скоупа.
+
+        Поле стало осью гейта — значит опечатка в нём теперь значит ровно то же,
+        что значила опечатка в ``min_level`` до Ф3.1: молчаливый firehose
+        (незнакомый порог пропускает всё). Три позиции одной величины — правило,
+        корень, прежний скоуп — обязаны отвечать одинаково; расхождение здесь
+        было бы невидимым, потому что обе ветки «работают».
+        """
+        if not isinstance(value, str):
+            return value
+        canonical = normalize_level_name(value)
+        if canonical is None:
+            raise ValueError(
+                f"неизвестный уровень '{value}' в default_level "
+                f"(известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+            )
+        return canonical
+
     log_directory: Annotated[
         Optional[str],
         FieldMeta(
@@ -86,67 +303,133 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             "(не текущий каталог пакета)."
         ),
     ] = None
-    enable_batching: bool = True
-    batch_size: int = 100
-    batch_interval: float = 1.0
 
-    modules: Annotated[
-        Dict[str, LoggerModuleSchema],
-        FieldMeta("Per-module файлы"),
-    ] = {
-        "router_messages": LoggerModuleSchema(
-            enabled=True,
-            file_path="messages.log",
-            # INFO, не DEBUG: на DEBUG router_messages писал маршрут КАЖДОГО кадра
-            # (data X -> [Y]) → messages.log распухал на ~МБ/сек. Для отладки роутинга
-            # временно вернуть "DEBUG".
-            min_level="INFO",
+    # Ф0.7. Ротация ограничивает каждый файл, но не их число: живой замер дал
+    # 730 файлов / 291 МБ и ни одного удаления за 82 дня. Обе политики
+    # выключены по умолчанию — механизм, который сам решает что удалить, не
+    # включается молча.
+    retention_days: Annotated[
+        int,
+        FieldMeta("Удалять логи старше N суток (0 — выключено)", min=0, max=3650),
+    ] = 0
+    retention_total_mb: Annotated[
+        int,
+        FieldMeta("Потолок суммарного веса каталога логов, МБ (0 — выключено)", min=0, max=1_000_000),
+    ] = 0
+    compress_rotated: Annotated[
+        bool,
+        FieldMeta("Сжимать ротированные бэкапы (foo.log.1 → foo.log.1.gz)"),
+    ] = False
+    # Ф6.9. Свип звали только на старте и на reconfigure — на стенде 24/7
+    # настроенный ретеншен подметал бы лишь при рестарте, то есть никогда.
+    # Поток поднимается ТОЛЬКО если ретеншен реально включён: при выключенных
+    # политиках интервал ничего не стоит и ничего не запускает.
+    retention_sweep_interval_sec: Annotated[
+        float,
+        FieldMeta(
+            "Период фонового свипа ретеншена, сек (0 — только старт и reconfigure)",
+            min=0.0,
+            max=86400.0,
         ),
-        "database": LoggerModuleSchema(
-            enabled=True,
-            file_path="database.log",
-            min_level="INFO",
+    ] = 3600.0
+
+    # Ф7.1. Дроссель повторяющихся записей (ключ — уровень + текст). Выключен
+    # по умолчанию, и выключенность выражена ПАРАМЕТРОМ (first_n = 0), а не
+    # отдельным булевым флагом: два способа сказать «выключено» рано или поздно
+    # разъезжаются. Механизм — logger_module/core/sampling.py.
+    #
+    # Ф7.х: у ``burst_reset_sec`` появилась НИЖНЯЯ граница. Прежний ``min=0.0``
+    # проверялся (``SchemaBase._check_field_constraints`` применяет ``FieldMeta``),
+    # но разрешал ровно то значение, которое молча выключает дроссель целиком:
+    # при нулевом окне любая пауза «дольше окна», и всплеск начинается заново на
+    # КАЖДОЙ записи. Шторм Б-6 шёл с паузами ~20 мс — то есть ручка с виду
+    # включённого дросселя отдавала бы 100 % записей.
+    #
+    # Своего ``field_validator`` здесь НЕТ намеренно. Он был написан и снят
+    # слом-инъекцией: с ним граница держалась ДВУМЯ предохранителями, и снятие
+    # любого одного не давало ни одного красного — то есть тест не сторожил
+    # ничего конкретного. Держит один: ``FieldMeta(min=...)``.
+    sampling_first_n: Annotated[
+        int,
+        FieldMeta(
+            "Сколько одинаковых записей пропускать всегда, прежде чем включится дроссель (0 — сэмплинг выключен)",
+            min=0,
+            max=100_000,
         ),
-        "processor": LoggerModuleSchema(
-            enabled=True,
-            file_path="processor.log",
-            min_level="INFO",
+    ] = 0
+    sampling_every_mth: Annotated[
+        int,
+        FieldMeta(
+            "После первых N проходит каждая M-я одинаковая запись (1 — проходят все)",
+            min=1,
+            max=1_000_000,
         ),
-        "processor_frames": LoggerModuleSchema(
-            enabled=True,
-            file_path="frames.log",
-            min_level="DEBUG",
-            rotate=False,
+    ] = 100
+    sampling_burst_reset_sec: Annotated[
+        float,
+        FieldMeta(
+            "Тишина по ключу дольше этого времени начинает всплеск заново, сек",
+            min=MIN_BURST_RESET_SEC,
+            max=86400.0,
         ),
-        "camera": LoggerModuleSchema(
-            enabled=True,
-            file_path="camera.log",
-            min_level="INFO",
+    ] = 5.0
+    sampling_max_level: Annotated[
+        str,
+        FieldMeta(
+            "Верхняя граница уровня, который вообще подлежит дросселю. "
+            "ERROR/CRITICAL не сэмплируются никогда — граница обрезана в коде"
         ),
-        "renderer": LoggerModuleSchema(
-            enabled=True,
-            file_path="renderer.log",
-            min_level="INFO",
-        ),
-        "robot": LoggerModuleSchema(
-            enabled=True,
-            file_path="robot.log",
-            min_level="INFO",
-        ),
-        "gui": LoggerModuleSchema(
-            enabled=True,
-            file_path="gui.log",
-            min_level="INFO",
-        ),
-        # trace — отдельный файл для диагностики cross-layer цепочек.
-        # Логи с module="trace" уходят сюда (плюс в scope-каналы:
-        # system_file/messages_file/console).
-        "trace": LoggerModuleSchema(
-            enabled=True,
-            file_path="trace.log",
-            min_level="DEBUG",
-        ),
-    }
+    ] = "DEBUG"
+
+    @field_validator("sampling_max_level", mode="before")
+    @classmethod
+    def _normalize_sampling_max_level(cls, value):
+        """Ф7.1: имя уровня проверяется НА ГРАНИЦЕ, как и ``min_level``.
+
+        Тот же класс дефекта, что Ф3.1 нашла у порога скоупа: неопознанное имя
+        доехало бы до горячего пути и там молча получило бы дефолт. Разница
+        только в направлении ошибки — здесь опечатка означала бы «дроссель
+        работает не на тех уровнях», что видно ещё хуже: записи есть, но не все.
+        """
+        if not isinstance(value, str):
+            return value
+        canonical = normalize_level_name(value)
+        if canonical is None:
+            raise ValueError(
+                f"неизвестный уровень '{value}' в sampling_max_level "
+                f"(известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+            )
+        return canonical
+
+    loggers: Annotated[
+        Dict[str, LoggerRuleSchema],
+        FieldMeta("Правила по иерархическому имени источника (префикс → уровень/приёмники)"),
+    ] = {}
+    """Ф2.2. Пусто по умолчанию — и это часть контракта, а не «ещё не заполнили».
+
+    Пока таблица пуста, гейт и маршрут работают ровно как до Ф2.2: решение
+    принимает скоуп. Прикладные правила живут в конфиге приложения
+    (``system.yaml`` прототипа), фреймворк несёт только механизм — требование
+    2.6 «нулей прикладных имён во фреймворке» начинает соблюдаться сразу, а не
+    чинится потом.
+    """
+
+    logger_groups: Annotated[
+        Dict[str, List[str]],
+        FieldMeta("Ярлыки: имя группы → список префиксов источников"),
+    ] = {}
+    """Ф2.5. Ярлык набора источников — модель ``logging.group.*`` Spring Boot.
+
+    Правило, написанное под ключом-ярлыком в :attr:`loggers`, раскрывается в
+    правила по каждому члену при сборке дерева. Ярлык сам префиксом не
+    становится, резолв о нём не знает, горячий путь не платит ничего.
+
+    **Пусто по умолчанию, и это часть контракта** — как и ``loggers``. Состав
+    групп решает приложение: фреймворк несёт механизм, а «что считать служебной
+    болтовнёй» — вопрос той системы, которую собирают (Р-2.5-Д). Spring везёт
+    готовые ``web``/``sql``, но у него один известный набор пакетов, а здесь
+    приложение может не подключать половину модулей вовсе.
+    """
 
     channels: Annotated[
         Dict[str, LoggerChannelSchema],
@@ -159,6 +442,7 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             max_size=_FILE_MAX,
             backup_count=5,
             format=_STD_FMT,
+            name_max_len=_NAME_MAX_LEN,
         ),
         "messages_file": LoggerChannelSchema(
             type="file",
@@ -167,11 +451,40 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             max_size=_FILE_MAX,
             backup_count=5,
             format=_STD_FMT,
+            name_max_len=_NAME_MAX_LEN,
+        ),
+        # Ф2.6. Снапшот метрик — ЕДИНСТВЕННЫЙ писатель скоупа PERFORMANCE
+        # (`statistics_module/channels/log_stats_channel.py`, проверено грепом:
+        # прямых `log(LogScope.PERFORMANCE, …)` в проде нет), и он же самый
+        # тяжёлый источник в системе. Замер 2026-08-03: 5.27 МБ из 9.38 МБ
+        # `system.log` у ProcessManager (56%), 2.33 из 8.88 у gui (26%), 2.08 из
+        # 8.63 у region_splitter (24%). Одна строка снапшота весит ~7 КБ —
+        # список метрик, отрендеренный в текст.
+        #
+        # Свой файл, а не правило иерархии: у скоупа один писатель, значит
+        # адресовать его отдельным механизмом незачем — ручка «какому скоупу
+        # какие приёмники» существует с самого начала и уже оттестирована.
+        # Найдено ревью решений Ф2.6: главный выигрыш фазы брался без нового
+        # механизма, а мы собирались платить за него таблицей правил.
+        #
+        # Суммарная запись на диск при этом НЕ уменьшается ни на байт — те же
+        # МБ, только в другом файле. Сокращение объёма (сэмплинг, перевод
+        # снапшота из логов в телеметрию) — отдельная задача, и приёмку
+        # «system.log похудел» нельзя засчитывать как «логов стало меньше».
+        "performance_file": LoggerChannelSchema(
+            type="file",
+            enabled=True,
+            file_path="performance.log",
+            max_size=_FILE_MAX,
+            backup_count=5,
+            format=_STD_FMT,
+            name_max_len=_NAME_MAX_LEN,
         ),
         "console": LoggerChannelSchema(
             type="console",
             enabled=True,
             format=_STD_FMT,
+            name_max_len=_NAME_MAX_LEN,
         ),
     }
 
@@ -180,31 +493,71 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         FieldMeta("Скоупы: SYSTEM, BUSINESS, …"),
     ] = {
         "SYSTEM": LoggerScopeSchema(
-            enabled=True,
-            min_level="WARNING",
             channels=["console", "system_file"],
         ),
         "BUSINESS": LoggerScopeSchema(
-            enabled=True,
-            min_level=_LEVEL_ORDER[1],
             # console НЕ подключён к BUSINESS: пер-кадровые INFO-логи воркеров
             # уходят только в файлы (system_file/messages_file), а не засоряют
-            # терминал. В stdout остаётся лишь SYSTEM WARNING+ через свой scope.
+            # терминал. В stdout остаётся лишь SYSTEM через свой scope, а какой
+            # уровень туда доедет — решает порог правила имени (Ф8.1).
             channels=["system_file", "messages_file"],
         ),
+        # Ф2.6: свой файл вместо system_file — обоснование у канала
+        # `performance_file` выше. Изменение живого поведения названо вслух:
+        # снапшоты метрик ПЕРЕСТАЮТ попадать в `system.log`. Это перенос, а не
+        # дублирование, и выбран он сознательно — иначе разгрузки не случится
+        # вовсе. Закреплено характеризационным тестом, а не оставлено умолчанием.
         "PERFORMANCE": LoggerScopeSchema(
-            enabled=True,
-            min_level=_LEVEL_ORDER[1],
-            channels=["system_file"],
+            channels=["performance_file"],
         ),
-        # DEBUG-scope по умолчанию ВЫКЛЮЧЕН: на DEBUG в system_file лился пер-кадровый
-        # firehose (периодический TRACE-лог PipelineExecutor — снят в Ф7 G.1,
-        # channel_dispatcher "no route" на каждый кадр) → ~100 МБ/мин, постоянная
-        # ротация затирала историю. INFO+ продолжают писаться в файлы через
-        # SYSTEM/BUSINESS. Для отладки временно enabled=True.
+        # Ф8.1: у DEBUG-группы больше нет своего выключателя — firehose держит
+        # порог КОРНЯ (`default_level`, по умолчанию INFO), и это тот же самый
+        # запрет, только выраженный один раз вместо двух. Повод не забыт: на DEBUG
+        # в system_file лился пер-кадровый поток (~100 МБ/мин, ротация затирала
+        # историю). Разница в том, что теперь «включить DEBUG одному источнику» не
+        # требует открыть шлюз всей группе — ради чего фаза и делалась.
         "DEBUG": LoggerScopeSchema(
-            enabled=False,
-            min_level="DEBUG",
             channels=["system_file"],
         ),
     }
+
+    @field_validator("logger_groups")
+    @classmethod
+    def _reject_dotted_group_names(cls, value: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        """Ф2.5 (Р-2.5-Г): ярлык с точкой отвергается на границе конфига.
+
+        Отказ, а не предупреждение: у такого конфига нет правильного прочтения.
+        Имя ``a.b`` было бы одновременно алиасом и узлом дерева, и «самое длинное
+        совпадение» перестало бы быть однозначным — а на этом свойстве держится
+        весь резолв Ф2.2.
+        """
+        dotted = sorted(name for name in value if "." in str(name))
+        if dotted:
+            raise ValueError(
+                f"имя группы не может содержать точку: {dotted}. Точка — разделитель уровней "
+                f"иерархии имён, и ярлык с точкой неотличим от префикса источника"
+            )
+        return value
+
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def _normalize_scope_keys(cls, value: Any) -> Any:
+        """Ф2.4: имя группы — ОДНО написание, канон заглавными (Р-2.4-А).
+
+        Приведение стоит здесь, а не на пути записи: ``.upper()`` в
+        ``_scope_schema`` стоил бы аллокации на каждом промахе кэша, а канон
+        нужен ровно один раз — когда конфиг собирают.
+
+        Без этого валидатора слой приложения с ключом ``system:`` не
+        переопределял бы дефолтный ``SYSTEM``, а ложился бы РЯДОМ с ним:
+        ``deep_merge`` слоёв работает по ключу словаря, и два написания дали бы
+        два скоупа, один из которых недостижим (``log()`` спрашивает канон).
+        Тихое «настройка не подействовала» — тот же класс, что уже стоил фазе
+        288 пустых файлов.
+
+        ``mode="before"`` обязателен: ключи надо поправить ДО того, как Pydantic
+        разложит значения по ``LoggerScopeSchema``.
+        """
+        if not isinstance(value, dict):
+            return value
+        return {(k.upper() if isinstance(k, str) else k): v for k, v in value.items()}

@@ -41,9 +41,18 @@ from pathlib import Path
 # a project may deliberately pin opus-4-6/4-7 for cost. Membership = no warning
 # about typos; freshness is a separate signal (CURRENT_MODELS below).
 KNOWN_MODELS = {
+    # Generation aliases — resolve to the newest model of the tier, so they never
+    # go stale. Preferred form since 2026-08-05 ("последние модели всегда").
+    "opus",
+    "sonnet",
+    "haiku",
+    "fable",
+    # Pinned IDs — still valid, but they freeze a generation.
+    "claude-opus-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
+    "claude-fable-5",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
@@ -54,11 +63,20 @@ KNOWN_MODELS = {
 # Latest model per tier — the enforce-latest signal ("последние модели везде",
 # plan addendum OQ-A1/OQ-A2). A known-but-not-current model (e.g. opus-4-6) is
 # valid yet stale → soft WARNING here. The HARD gate that every *bundled* seed
-# agent is on a CURRENT model lives in tests/test_lint_agents_models.py.
-# Update both when a new model ships (source of truth: claude-api skill).
-#   Opus → claude-opus-4-8 · Sonnet → claude-sonnet-5 · Haiku → claude-haiku-4-5
+# agent is on a CURRENT model lives in
+# .claude/plugins/core/tests/test_lint_agents_models.py — it is in `testpaths`,
+# so `make gate` runs it. (Until 2026-08-05 this comment named a file that did
+# not exist anywhere in the repo; the gate it promised was never running.)
+# Update the pinned IDs when a new model ships (source of truth: claude-api skill).
+# The generation aliases need no updating — that is the point of preferring them.
+#   Opus → claude-opus-5 · Sonnet → claude-sonnet-5 · Haiku → claude-haiku-4-5
 CURRENT_MODELS = {
-    "claude-opus-4-8",
+    "opus",  # aliases are current by construction
+    "sonnet",
+    "haiku",
+    "fable",
+    "claude-opus-5",
+    "claude-fable-5",
     "claude-sonnet-5",
     "claude-haiku-4-5",
     "claude-haiku-4-5-20251001",  # dated alias of the current Haiku
@@ -122,9 +140,7 @@ def lint_file(path: Path) -> tuple[list[str], list[str]]:
 
     model = fm.get("model", "")
     if model and model not in KNOWN_MODELS:
-        warnings.append(
-            f"model {model!r} not in KNOWN_MODELS — typo, or update the linter?"
-        )
+        warnings.append(f"model {model!r} not in KNOWN_MODELS — typo, or update the linter?")
     elif model and model not in CURRENT_MODELS:
         latest = ", ".join(sorted(CURRENT_MODELS - {"inherit"}))
         warnings.append(
@@ -178,9 +194,7 @@ def cross_check_claude_md(claude_md: Path, agent_files: dict[str, Path]) -> list
     mentioned = candidates & known_roles
     missing = mentioned - set(agent_files.keys())
     for name in sorted(missing):
-        warnings.append(
-            f"CLAUDE.md mentions agent {name!r} but no agents/company/{name}.md found"
-        )
+        warnings.append(f"CLAUDE.md mentions agent {name!r} but no agents/company/{name}.md found")
     return warnings
 
 
@@ -199,8 +213,7 @@ def main(argv: list[str]) -> int:
             roots = [c for c in (Path(".claude/agents"), Path("agents")) if c.is_dir()]
         if not roots:
             print(
-                "error: no agent dirs found "
-                "(.claude/plugins/*/agents or .claude/agents) — pass path explicitly",
+                "error: no agent dirs found (.claude/plugins/*/agents or .claude/agents) — pass path explicitly",
                 file=sys.stderr,
             )
             return 1

@@ -9,14 +9,15 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from pathlib import Path
 
 import yaml
 
 from Services.ml_inference.core.model_spec import ModelSpec, Normalize
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 _WEIGHT_SUFFIXES = (".onnx", ".pt", ".pth")
 _BACKEND_BY_SUFFIX = {".onnx": "onnx", ".pt": "torch", ".pth": "torch"}

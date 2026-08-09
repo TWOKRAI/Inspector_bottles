@@ -18,12 +18,13 @@ Legacy-формат (Phase 0-4):
 from __future__ import annotations
 
 import copy
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any
 
 from multiprocess_framework.modules.recipe.migrations import migration
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 RECIPE_VERSION_V1 = 1  # legacy: regions содержат processing_blocks
 RECIPE_VERSION_V2 = 2  # current: regions содержат nodes

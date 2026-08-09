@@ -10,7 +10,8 @@ runtime: сканируем `data/models` через ModelRegistry и показ
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from pathlib import Path
 
 from PySide6.QtWidgets import QComboBox, QLabel, QWidget
@@ -20,7 +21,7 @@ from Services.ml_inference.core.registry import ModelRegistry
 
 from .field_editor import FieldEditor
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # .../multiprocess_prototype/frontend/forms/model_picker.py → parents[3] = корень проекта.
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]

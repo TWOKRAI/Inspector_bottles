@@ -20,13 +20,14 @@ process-fallback нодой (``node_id=process_name``, ``plugin_index=-1``).
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from dataclasses import dataclass
 from typing import AbstractSet, Any, Mapping
 
 from .graph.data import DisplayNodeData, EdgeData, NodeData, PortSchema
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 # Ключевой config-параметр в подписи ноды: {plugin_name: (config_key, префикс)}.

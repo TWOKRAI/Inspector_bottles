@@ -15,10 +15,10 @@ BaseManager + ObservableMixin
 ChannelRoutingManager  ← базовый класс
         │
         ▼
-LoggerManager (BatchBuffer, scope-based routing)
+LoggerManager (синхронная запись, scope-based routing)
         │
         ▼
-ErrorManager  (override log() для level-based routing)
+ErrorManager  (хук _route() для level-based routing; log() общий)
         │
         Чего добавляет ErrorManager:
         ├─ _level_to_channel: {CRITICAL→critical_file, ERROR→errors_file, WARNING→warnings_file}
@@ -27,7 +27,7 @@ ErrorManager  (override log() для level-based routing)
 ```
 
 **Что дал ErrorManager от LoggerManager/ChannelRoutingManager:**
-- Все батчинг логики (BatchBuffer из CRM)
+- Синхронная запись в каналы (батчинг снят в Ф7.4)
 - `_channel_registry` thread-safe из CRM
 - `_dispatcher` для маршрутизации из CRM
 - Интеграция через ObservableMixin
@@ -65,13 +65,13 @@ ErrorManager  (override log() для level-based routing)
         └─────────────────┬──────────────────────────┘
                           │
         ┌─────────────────▼──────────────────────────┐
-        │  log() метод (override от ErrorManager)     │
+        │  _route() — ЕДИНСТВЕННЫЙ хук (Ф4.2)         │
+        │  сам log() живёт в LoggerCore, один на всех │
         │                                            │
-        │  if level in ["CRITICAL", "ERROR", ...]:  │
-        │    channel = _level_to_channel[level]       │
-        │    buffer.enqueue(channel, record)          │
+        │  if level in _level_to_channel:            │
+        │    return [_level_to_channel[level]]        │
         │  else:                                     │
-        │    super().log() # scope-based routing    │
+        │    return super()._route()  # каналы скоупа │
         └─────────────────┬──────────────────────────┘
                           │
         ┌─────────────────▼──────────────────────────┐
@@ -87,7 +87,7 @@ ErrorManager  (override log() для level-based routing)
 |---|---|
 | `message` → `channel_dispatcher(key=type)` → `IMessageChannel` | `error_record` → `_level_to_channel[level]` → `ILogChannel` |
 | `QueueChannel` / `SocketChannel` | `FileChannel` / `ConsoleChannel` |
-| `send_async()` с PriorityQueue | `BatchBuffer` с priority_flush |
+| `send_async()` с PriorityQueue | Синхронная запись на всех уровнях (Ф7.4) |
 | `register_route("set_fps", "ctrl_channel")` | Автоматическая регистрация при `_setup_level_routes()` |
 
 ---
@@ -203,7 +203,7 @@ stats = em.get_stats()
 #     "messages_processed": 42,
 #     "messages_skipped": 0,
 #     "channels_count": 3,
-#     "batching_enabled": True,
+
 #     "include_stacktrace": True,
 #     "level_routes": {               ← новое поле (level → channel)
 #         "CRITICAL": "critical_file",
@@ -226,18 +226,30 @@ ERROR    → errors_file
 WARNING  → warnings_file  (если канал не настроен → fallback в errors_file)
 ```
 
-**Главное улучшение (Фаза 3):** переопределённый `log()` метод **реально использует** этот маппинг:
+Маппинг применяется через хук резолва приёмников — `log()` **не переопределяется**
+(Ф4.2, ADR-EM-007):
 
 ```python
-def log(self, scope, level, message, module, **extra):
+def _route(self, scope, level, module):
     channel_name = self._level_to_channel.get(level.value)
-    if channel_name:
-        # Level-based routing РЕАЛЬНО вызывается
-        self._buffer.enqueue(channel_name, record_dict)
-    else:
-        # DEBUG/INFO → scope-based routing через LoggerManager
-        super().log(scope, level, message, module, **extra)
+    if channel_name is None:
+        return super()._route(scope, level, module)  # DEBUG/INFO → каналы скоупа
+    return [channel_name]
 ```
+
+Это **вся** разница между двумя путями эмиссии. Сборка записи, контекст, tap'ы,
+пол ошибок и учёт потерь — общие и физически в одном месте (`LoggerCore.log`).
+
+> **Почему так, а не override `log()`.** Полный override стоил фазе четырёх
+> ручных зеркалирований улучшений родителя: 0.4 — в двух местах, 0.9 — в двух,
+> tap'ы — в двух, а Ф0.5 забыли, из-за чего на ГЛАВНОМ производственном пути
+> ошибок пропал `proc_name`. Развилка воспроизводит этот дефект при каждой
+> следующей правке `log()`, поэтому убрана до фаз адресации и `trace_id`.
+
+Гейт скоупа на severity-пути **не спрашивается**, и это осознанно: приёмник
+ошибки определяет severity, а порог скоупа (у `SYSTEM` это `WARNING`) не должен
+уметь заглушить `ERROR`. Закреплено характеризационным тестом
+`test_severity_path_ignores_scope_gate`.
 
 ---
 
@@ -258,9 +270,6 @@ config = ErrorManagerConfig(
     # Уровень и батчинг
     default_level="WARNING",   # Минимальный уровень для всех каналов
     include_stacktrace=True,
-    enable_batching=True,
-    batch_size=50,
-    batch_interval=0.5,        # сброс каждые 0.5 сек или при ERROR/CRITICAL
 
     # Дополнительные каналы через наследованный channels
     channels={
@@ -310,17 +319,26 @@ em.register_channel(alert_ch)
 
 ---
 
-## Батчинг (BatchBuffer из CRM)
+## Запись синхронна (батчинг снят в Ф7.4)
 
-| Параметр | По умолчанию | Описание |
-|---|---|---|
-| `enable_batching` | `True` | Включить батчинг |
-| `batch_size` | `50` | Максимальный размер пачки |
-| `batch_interval` | `0.5 сек` | Интервал принудительного сброса |
-| `priority_flush` | `True` | ERROR/CRITICAL записываются немедленно |
+Все уровни, включая `WARNING`, пишутся в вызывающем потоке. Раньше `WARNING` шёл через
+`BatchBuffer`, а `ERROR`/`CRITICAL` — мимо него; замер показал, что батчинг не экономит
+вызовы на границе ОС и ухудшает хвост эмитента в 18 раз, поэтому механизм снят целиком.
+Ключи `enable_batching` / `batch_*` из конфига убраны; секция `observability` жалуется,
+если встретит их (молча игнорировать снятую ручку — это «проглоченный сбой»).
 
-**Thread-safety:** `BatchBuffer` использует `threading.Lock` — несколько потоков одного процесса
-могут одновременно вызывать `em.error()` без гонок данных.
+**Пол ошибок.** Severity-маршрут конфиго-зависим целиком (`_setup_level_routes` строит
+`_level_to_channel` из фактически созданных каналов). Если канал уровня отсутствует, снят через
+`logger.sink.disable` или упал на записи — запись уходит в общий `errors_floor.jsonl`
+(JSON Lines, полный трейсбек и `extra`). Пол срабатывает **только** при непринявшем канале,
+поэтому дубля «и в канал, и в пол» не бывает. Счётчик: `get_stats()["errors_to_floor"]`.
+
+**Ф0.6:** `ErrorManager` адресуется командой `logger.sink.enable|disable` отдельно от
+логгера — параметром `manager="error"`. Раньше команда била только в `logger_manager`,
+хотя методы у `ErrorManager` были: дыра была не в методах, а в адресуемости.
+
+**Thread-safety:** запись синхронна; несколько потоков одного процесса могут одновременно
+вызывать `em.error()`.
 
 ---
 

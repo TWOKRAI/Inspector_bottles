@@ -9,7 +9,8 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 import numpy as np
 
@@ -21,7 +22,7 @@ from Services.ml_inference.core.postprocess import angle_postprocess, classify_p
 from Services.ml_inference.core.preprocess import preprocess
 from Services.ml_inference.core.registry import ModelRegistry
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 def _make_backend(backend_type: str) -> BaseInferenceBackend:

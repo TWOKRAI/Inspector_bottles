@@ -97,12 +97,12 @@ class MyProcess(ProcessModule):
     def initialize(self) -> bool:
         self.log_info("Инициализация...")
         return True
-    
+
     def run(self):
         while not self.should_stop():
             self.log_info("Работаю...")
             time.sleep(1)
-    
+
     def shutdown(self) -> bool:
         self.log_info("Завершение...")
         return True
@@ -189,3 +189,16 @@ process.broadcast_message({"event": "status_changed"})
 - **docs/COMMUNICATION.md** — межпроцессная коммуникация
 - **interfaces.py** — публичные контракты
 - **tests/** — примеры использования
+
+
+## Обновление 2026-08-06 (Ф8.1 — каталог метрик объявлениями)
+
+`GATED_METRICS` как кортеж-литерал **исчез**. Метрика объявляется там, где считается
+(`declare_metric` рядом с вычислением), каталог отдаёт `gated_metrics()`. Приложение
+или плагин заводит свою метрику, не трогая фреймворк. Разбор — ADR-PM-027.
+
+Живая проверка 2026-08-06: `introspect_telemetry("seg").gated_metrics` вернул все пять
+имён отсортированными — собранные объявлениями.
+
+**Резидуал:** GUI строит строки контролов из ИМПОРТА производителей, а не из readback,
+поэтому метрика, объявленная только в бэкенд-процессе, строки во вкладке не получит.

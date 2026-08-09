@@ -12,7 +12,8 @@ atan2 не требует нормировки) — ml_inference использ�
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ import yaml
 from Services.ml_train.config import TrainConfig
 from Services.ml_train.models import build_model
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 def load_checkpoint(path: str | Path) -> dict[str, Any]:

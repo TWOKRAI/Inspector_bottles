@@ -86,26 +86,27 @@ class ProcessManagers:
     def attach_adapters(self, bundle: ManagersBundle, process) -> None:
         """Создать адаптеры и привязать их к менеджерам.
 
+        У `logger` адаптера НЕТ (2.2): прежний `LoggerAdapter` не имел ни одного
+        потребителя, зато нёс вторую таблицу «уровень → scope», расходившуюся с
+        канонической по DEBUG. Именованная точка входа к логгеру — `get_std_logger`.
+
         Args:
             bundle: ManagersBundle с созданными менеджерами.
             process: ProcessModule — хост (передаётся в адаптеры).
         """
         from ...command_module import CommandAdapter
         from ...console_module.adapters.console_adapter import ConsoleAdapter
-        from ...logger_module.adapters.logger_adapter import LoggerAdapter
         from ...router_module import RouterAdapter
         from ...statistics_module import StatsAdapter
         from ...worker_module.adapters.worker_adapter import WorkerAdapter
 
         worker_adapter = WorkerAdapter(bundle.worker, process)
-        logger_adapter = LoggerAdapter(bundle.logger, process)
         stats_adapter = StatsAdapter(bundle.stats, process)
         command_adapter = CommandAdapter(bundle.command, process)
         router_adapter = RouterAdapter(bundle.router, process)
         console_adapter = ConsoleAdapter(bundle.console, process)
 
         bundle.worker.attach_adapter(worker_adapter, name="process")
-        bundle.logger.attach_adapter(logger_adapter, name="process")
         bundle.stats.attach_adapter(stats_adapter, name="process")
         bundle.command.attach_adapter(command_adapter, name="process")
         bundle.router.attach_adapter(router_adapter, name="process")

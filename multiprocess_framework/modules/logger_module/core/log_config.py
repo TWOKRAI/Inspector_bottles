@@ -5,19 +5,21 @@
 Конфигурация — SchemaBase: см. config/logger_manager_config.py.
 """
 
-from ..log_enums import LogLevel, LogScope
+from ..log_enums import PRESET_SCOPES, LogLevel, LogScope, ScopeName
 from ..configs.logger_manager_config import (
     LoggerChannelSchema,
     LoggerManagerConfig,
-    LoggerModuleSchema,
+    LoggerRuleSchema,
     LoggerScopeSchema,
 )
 
 __all__ = [
     "LogLevel",
     "LogScope",
+    "ScopeName",
+    "PRESET_SCOPES",
     "LoggerChannelSchema",
     "LoggerManagerConfig",
-    "LoggerModuleSchema",
+    "LoggerRuleSchema",
     "LoggerScopeSchema",
 ]

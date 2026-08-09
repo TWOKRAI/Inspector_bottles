@@ -186,39 +186,57 @@ class PipelineExecutor:
             # субмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
             t_start = time.perf_counter()
 
-            # Ф7 G.5.c: снять view-тикеты ВХОДНЫХ items ДО прогона — цепочка может
-            # заменить item/frame, а re-check/release относятся к ВХОДНОМУ кадру (пока
-            # плагины его читали, writer мог обернуть кольцо и перезаписать слот).
-            view_tickets = self._collect_view_tickets(items)
-
-            # Прогнать items через chain плагинов
-            items = self._execute_chain(items)
-
-            # Ф7 G.5.c (В1-пол): post-use re-check — слот перезаписан под живым view за
-            # время обработки → результат на порванных пикселях. Ф7 G.5.d-2 (В3): consumer
-            # ДОЧИТАЛ входные views → release займов владельцу (батч/async), НЕЗАВИСИМО от
-            # исхода цепочки/re-check (читатель в любом случае закончил с этими слотами).
-            valid = self._frame_views_valid(view_tickets) if view_tickets else True
-            self._accumulate_releases(view_tickets)
-
-            # Если items пустой после chain — ничего не отправляем (но release уже учтён).
-            if not items:
-                self._cycle_metrics.record(time.perf_counter() - t_start)
-                continue
-
-            # Stale view → ДРОП батча (frame_stale_drops уже учтён в _frame_views_valid).
-            if not valid:
-                self._cycle_metrics.record(time.perf_counter() - t_start)
-                continue
-
-            # Отправить результаты по IPC
-            self._send_results(items)
-
-            # Полный цикл обработки batch'а (chain + send) → телеметрия.
-            self._cycle_metrics.record(time.perf_counter() - t_start)
+            # Ф3.3: ЗДЕСЬ главная точка корреляции. Обработка идёт в СВОЁМ
+            # LOOP-воркере за очередью, то есть в другом потоке, чем приём, —
+            # значит контекст приёмника сюда не долетает (ContextVar по потокам),
+            # и записи плагинов остались бы без следа кадра. Накрываем весь такт,
+            # включая _send_results: отправка результата — часть работы над этим
+            # же кадром.
+            with frame_trace.log_correlation(items):
+                self._run_batch(items, t_start)
 
         # Ф7 G.5.d-2: не потерять хвост release'ов на остановке воркера.
         self._flush_releases()
+
+    def _run_batch(self, items: list[dict], t_start: float) -> None:
+        """Один такт: цепочка → проверка view → отправка. Выделен ради Ф3.3.
+
+        Тело такта уехало в метод, а не осталось под ``with``, по одной причине:
+        ``continue`` внутри ``with`` в цикле читается как выход из такта, а на
+        самом деле выходит и из контекста, и из итерации — при добавлении новой
+        ветви это ровно то место, где след кадра протёк бы в следующий такт.
+        Ранний ``return`` из метода такой двусмысленности не имеет.
+        """
+        # Ф7 G.5.c: снять view-тикеты ВХОДНЫХ items ДО прогона — цепочка может
+        # заменить item/frame, а re-check/release относятся к ВХОДНОМУ кадру (пока
+        # плагины его читали, writer мог обернуть кольцо и перезаписать слот).
+        view_tickets = self._collect_view_tickets(items)
+
+        # Прогнать items через chain плагинов
+        items = self._execute_chain(items)
+
+        # Ф7 G.5.c (В1-пол): post-use re-check — слот перезаписан под живым view за
+        # время обработки → результат на порванных пикселях. Ф7 G.5.d-2 (В3): consumer
+        # ДОЧИТАЛ входные views → release займов владельцу (батч/async), НЕЗАВИСИМО от
+        # исхода цепочки/re-check (читатель в любом случае закончил с этими слотами).
+        valid = self._frame_views_valid(view_tickets) if view_tickets else True
+        self._accumulate_releases(view_tickets)
+
+        # Если items пустой после chain — ничего не отправляем (но release уже учтён).
+        if not items:
+            self._cycle_metrics.record(time.perf_counter() - t_start)
+            return
+
+        # Stale view → ДРОП батча (frame_stale_drops уже учтён в _frame_views_valid).
+        if not valid:
+            self._cycle_metrics.record(time.perf_counter() - t_start)
+            return
+
+        # Отправить результаты по IPC
+        self._send_results(items)
+
+        # Полный цикл обработки batch'а (chain + send) → телеметрия.
+        self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _execute_chain(self, items: list[dict]) -> list[dict]:
         """Прогон items через processing-плагины поверх ``ChainRunnable`` (C6d).

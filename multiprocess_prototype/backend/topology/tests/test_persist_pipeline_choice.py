@@ -33,6 +33,12 @@ recipes: recipes
 def _write_manifest(tmp_path: Path) -> Path:
     path = tmp_path / "app.yaml"
     path.write_text(_MANIFEST_TEXT, encoding="utf-8")
+    # Ф6.х.6: persist валидирует существование рецепта ДО записи — рецепты,
+    # на которые ссылаются тесты, обязаны существовать рядом с манифестом.
+    recipes = tmp_path / "recipes"
+    recipes.mkdir(exist_ok=True)
+    (recipes / "phone_sketch.yaml").write_text("processes: []\n", encoding="utf-8")
+    (recipes / "webcam_sketch.yaml").write_text("processes: []\n", encoding="utf-8")
     return path
 
 
@@ -68,6 +74,24 @@ def test_persist_preserves_comments(tmp_path: Path) -> None:
     assert "Заголовок-комментарий манифеста" in text
     assert "Активный pipeline (комментарий к ключу)." in text
     assert "active: innotech_theme" in text
+
+
+def test_missing_recipe_raises_and_leaves_the_manifest_alone(tmp_path: Path) -> None:
+    """Ф6.х.6 — опечатка в CLI не имеет права ломать следующий запуск.
+
+    Прежде persist шёл ДО проверки существования: ``app.yaml`` перезаписывался
+    на битый путь, и падал уже И запуск без аргументов (живая репродукция
+    ревью 2026-08-03: ``run.py --help`` записал ``recipes/--help.yaml``).
+    """
+    manifest = _write_manifest(tmp_path)
+    text_before = manifest.read_text(encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError):
+        persist_pipeline_choice(manifest, "опечатка_нет_такого")
+
+    assert manifest.read_text(encoding="utf-8") == text_before, (
+        "манифест изменён при несуществующем рецепте — следующий запуск сломан"
+    )
 
 
 def test_persist_is_idempotent_no_rewrite(tmp_path: Path) -> None:

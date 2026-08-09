@@ -51,10 +51,10 @@ class TestProcessStatusHasAllLegacyValues:
         assert srm_values.issubset(actual), f"Отсутствуют значения shared_resources: {srm_values - actual}"
 
     def test_total_count(self):
-        """Всего 9 уникальных значений (суперсет)."""
+        """Всего 10 уникальных значений (суперсет; Ф6.х.7г добавила paused)."""
         from multiprocess_framework.modules.base_manager.types import ProcessStatus
 
-        assert len(ProcessStatus) == 9
+        assert len(ProcessStatus) == 10
 
     def test_is_str_enum(self):
         """ProcessStatus наследуется от str и Enum — для удобной сериализации."""

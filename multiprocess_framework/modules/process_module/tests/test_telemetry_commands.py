@@ -204,9 +204,18 @@ class TestTelemetryReconfigureMergeMode:
     """Task 1.1: mode='merge' — точечная правка не стирает соседние правила/метрики."""
 
     def test_throttle_merge_changes_only_target_rule(self) -> None:
-        """Acceptance: telemetry_mode=merge меняет ТОЛЬКО одно правило (снимок до/после)."""
-        throttle = ThrottleMiddleware({"processes.**.state.latency_ms": 1.0, "processes.**.state.fps": 1.0})
+        """Acceptance: telemetry_mode=merge меняет ТОЛЬКО одно правило (снимок до/после).
+
+        Task 5.10.g: загрузочные правила теперь задаются ТАМ ЖЕ, откуда их берёт
+        boot (``state_throttle_rules``), а не только посевом живого middleware.
+        Причина в смене семантики: дельта оператора собирается из ИСТОЧНИКОВ, а
+        не накладывается на живое состояние — иначе истёкшая дельта не смогла бы
+        вернуться к загрузочным правилам. Сам acceptance не изменился.
+        """
+        boot = {"processes.**.state.latency_ms": 1.0, "processes.**.state.fps": 1.0}
+        throttle = ThrottleMiddleware(dict(boot))
         _svc, cm = _make(throttle=throttle)
+        _svc._config["state_throttle_rules"] = dict(boot)
         before = throttle.rules
         res = cm.dispatch(
             "telemetry.reconfigure",
@@ -218,9 +227,16 @@ class TestTelemetryReconfigureMergeMode:
         assert before["processes.**.state.latency_ms"] == 1.0
 
     def test_throttle_merge_none_removes_rule(self) -> None:
-        """merge + None → remove_rule: правило исчезает, остальные сохранены."""
-        throttle = ThrottleMiddleware({"keep": 5.0, "drop.me": 1.0})
+        """merge + None → правило исчезает, остальные сохранены.
+
+        Маркер удаления :data:`THROTTLE_REMOVE` пережил переезд дельты в слои
+        (Task 5.10.g) без единой правки контракта: он остался ВНУТРИ дельты, а
+        слои видят её одним непрозрачным листом.
+        """
+        boot = {"keep": 5.0, "drop.me": 1.0}
+        throttle = ThrottleMiddleware(dict(boot))
         _svc, cm = _make(throttle=throttle)
+        _svc._config["state_throttle_rules"] = dict(boot)
         res = cm.dispatch(
             "telemetry.reconfigure",
             {"throttle": {"drop.me": None}, "telemetry_mode": "merge"},

@@ -14,14 +14,15 @@ backend) или в TorchScript: `torch.jit.script(model).save(...)`.
 from __future__ import annotations
 
 import gc
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 import numpy as np
 
 from Services.ml_inference.backends.base import BaseInferenceBackend
 from Services.ml_inference.core.model_spec import ModelSpec
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 try:
     import torch

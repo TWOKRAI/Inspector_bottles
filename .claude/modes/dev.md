@@ -94,7 +94,7 @@ semantics here (that would create a second source to keep in sync).
 | Flow stage | Primary MCP | Fallback (no MCP) |
 |-----------|-------------|-------------------|
 | **plan** (manager) | `mcp:qex:search_code` (recon) + `mcp:sentrux:health` / `mcp:sentrux:dsm` (architecture) | `Grep` + read module READMEs |
-| **INTERFACE** | `mcp:codegraph:codegraph_explore` — blast radius of the new/changed API | `git diff` + `Grep` for call sites |
+| **INTERFACE** | `mcp:codegraph:codegraph_explore` — blast radius of the new/changed API | `python scripts/graph_slice/graph_slice.py <module> --inbound-only` (dependents from the graphify graph; heed its staleness header), then `git diff` + `Grep` for call sites |
 | **RED** (tester) | `mcp:qex:search_code` — edge cases in related code | `Grep` by symbol + read neighbors |
 | **GREEN** (developer/teamlead) | `mcp:serena:rename_symbol` / `find_referencing_symbols` (symbol ops) + `mcp:context7:query-docs` (library API) + `mcp:ast-grep:scan` (codemod) | `WebFetch` for docs + `Grep` / `Edit` |
 | **regression** (tester) | `mcp:sentrux:test_gaps` — uncovered zones | `pytest --cov` read by hand |

@@ -76,7 +76,7 @@ class PluginOrchestrator:
             try:
                 plugin = self._load_plugin(resolved_class_path, plugin_name)
                 plugin_config = self._extract_plugin_config(pdef)
-                ctx = base_ctx.with_config(plugin_config)
+                ctx = base_ctx.with_config(plugin_config, plugin_name=plugin_name)
                 plugin.configure_managers(ctx)
                 self._early_plugins.append((plugin, ctx))
             except Exception as e:

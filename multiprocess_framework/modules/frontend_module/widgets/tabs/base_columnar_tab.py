@@ -29,7 +29,8 @@ See also: ADR-126, ADR-127, Phase 6b (plans/tab-template-extraction/plan.md).
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Callable
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
@@ -42,7 +43,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
 if TYPE_CHECKING:
     from .tab_layout_protocol import TabLayoutProtocol
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class BaseColumnarTab(QWidget):

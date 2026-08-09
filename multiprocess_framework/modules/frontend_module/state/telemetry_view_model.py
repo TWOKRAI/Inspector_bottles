@@ -35,7 +35,8 @@ Dict-at-Boundary: view-model ест dict-сообщение (не live SchemaBas
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -45,7 +46,7 @@ from multiprocess_framework.modules.telemetry_readmodel_module import (
     TelemetryReadModel,
 )
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 # Sentinel «путь удалён» во внутреннем накопителе пачки. В публичный батч
 # ``updated`` удаление выходит как (path, None) — потребитель перечитывает

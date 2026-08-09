@@ -23,9 +23,7 @@ channel_routing_module — базовый модуль маршрутизаци�
     IChannelRoutingManager — контракт менеджера
 
     AsyncSenderBuffer      — PriorityQueue + поток (для RouterManager)
-    BatchBuffer            — deque + timer (для LoggerManager)
     DirectBuffer           — без буферизации (для тестов)
-    BatchConfig            — параметры BatchBuffer
 
 Зависимости:
     Foundation: base_manager, data_schema_module (RegisterBase)
@@ -40,7 +38,6 @@ from .core.config_normalizer import normalize_config, resolve_build_result
 from .core.config import ChannelRoutingConfig
 from .configs.channel_routing_manager_config import ChannelRoutingManagerConfig
 from .buffers.async_sender_buffer import AsyncSenderBuffer
-from .buffers.batch_buffer import BatchBuffer, BatchConfig
 from .buffers.direct_buffer import DirectBuffer
 from .observability import (
     BoundedChannel,
@@ -64,8 +61,6 @@ __all__ = [
     "resolve_build_result",
     # Буферы
     "AsyncSenderBuffer",
-    "BatchBuffer",
-    "BatchConfig",
     "DirectBuffer",
     # Observability (Ф5.15) — фасад наблюдаемости модуля
     "ObservabilityHub",

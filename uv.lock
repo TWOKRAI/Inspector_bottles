@@ -724,6 +724,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+ctl = [
+    { name = "mcp" },
+]
 ml = [
     { name = "onnx" },
     { name = "onnxruntime" },
@@ -772,6 +775,7 @@ requires-dist = [
     { name = "harvesters", marker = "platform_machine != 'arm64' or sys_platform != 'darwin'", specifier = ">=1.4" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "matplotlib", specifier = ">=3.9" },
+    { name = "mcp", marker = "extra == 'ctl'", specifier = ">=1.27,<1.28" },
     { name = "nodegraphqt", git = "https://github.com/C3RV1/NodeGraphQt-PySide6.git?rev=7fa60017" },
     { name = "numpy", specifier = ">=2.4,<3" },
     { name = "onnx", marker = "extra == 'ml'", specifier = ">=1.17" },
@@ -805,7 +809,7 @@ requires-dist = [
     { name = "torchvision", marker = "extra == 'ml-train'", specifier = ">=0.26" },
     { name = "watchdog", specifier = ">=4.0" },
 ]
-provides-extras = ["ml", "ml-torch", "ml-train", "modbus"]
+provides-extras = ["ml", "ml-torch", "ml-train", "modbus", "ctl"]
 
 [package.metadata.requires-dev]
 dev = [

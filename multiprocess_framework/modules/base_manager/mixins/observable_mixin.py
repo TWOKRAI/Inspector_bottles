@@ -35,7 +35,7 @@ ObservableMixin позволяет менеджеру прозрачно вза�
 
 import logging
 
-from typing import Optional, Dict, Any, Set, List
+from typing import Callable, Optional, Dict, Any, Set, List
 from contextlib import contextmanager
 
 from .core.manager_registry import ManagerRegistry
@@ -76,6 +76,7 @@ class ObservableMixin(IObservableMixin):
         managers: Optional[Dict[str, Any]] = None,
         config: Optional[Dict[str, Any]] = None,
         auto_proxy: bool = False,
+        source_name: Optional[str] = None,
     ):
         """
         Args:
@@ -84,9 +85,13 @@ class ObservableMixin(IObservableMixin):
                         Простая форма:  {'logger': True}
                         Подробная форма: {'logger': {'enabled': True}}
             auto_proxy: Создать публичные прокси-методы (log_info, record_metric …)
+            source_name: Имя источника для штампа ``module`` (Ф2.1). Если не
+                        задано — берётся ``manager_name`` от BaseManager.
         """
         self._registry = ManagerRegistry(managers, config)
         self._auto_proxy = auto_proxy
+        if source_name:
+            self._source_name_override = source_name
 
         if auto_proxy:
             self._proxy_created = True
@@ -101,28 +106,63 @@ class ObservableMixin(IObservableMixin):
     # возвращают None, не генерируя исключений.
     # =========================================================================
 
+    def _observability_source(self) -> str:
+        """Имя источника для штампа ``module`` (Ф2.1).
+
+        Порядок: явный ``source_name`` из ``__init__`` → ``manager_name``
+        (ставит ``BaseManager.__init__``) → ``"main"``.
+
+        Читается из ``__dict__``, а не через ``getattr``: путь горячий (каждая
+        запись лога), а дескрипторы и обход MRO здесь ничего не дают —
+        оба имени кладутся как обычные атрибуты экземпляра.
+
+        Резолв ЛЕНИВЫЙ, не в ``__init__``, потому что порядок инициализации
+        миксина и ``BaseManager`` в наследниках не одинаков: часть зовёт
+        ``ObservableMixin.__init__`` первым, и на тот момент ``manager_name``
+        ещё нет.
+        """
+        d = self.__dict__
+        return d.get("_source_name_override") or d.get("manager_name") or "main"
+
     def _log(self, level: str, message: str, **kwargs) -> None:
         """Логирование через logger manager (любой уровень)."""
+        kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", level, message, **kwargs)
 
-    def _log_debug(self, message: str, **kwargs) -> None:
-        """Логирование уровня DEBUG через logger manager."""
+    def _log_debug(self, message: "str | Callable[[], str]", **kwargs) -> None:
+        """Логирование уровня DEBUG через logger manager.
+
+        Сообщение может быть ОТЛОЖЕННЫМ (Ф1.4): ``lambda: f"…"`` вместо
+        ``f"…"``. Разница не стилистическая — она в том, кто платит за сборку
+        строки при ВЫКЛЮЧЕННОМ DEBUG. ``f``-строка собирается на call-site, то
+        есть до входа в логгер, и никаким гейтом внутри не снимается; лямбда
+        зовётся только после гейта и ровно один раз.
+
+        Правило (baseline §2.5, задача Ф7.1): точка на пути КАЖДОГО сообщения
+        обязана быть отложенной. Точке с постоянным текстом лямбда не нужна —
+        собирать там нечего, и замыкание было бы чистой ценой.
+        """
+        kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", "debug", message, **kwargs)
 
     def _log_info(self, message: str, **kwargs) -> None:
         """Логирование уровня INFO через logger manager."""
+        kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", "info", message, **kwargs)
 
     def _log_warning(self, message: str, **kwargs) -> None:
         """Логирование уровня WARNING через logger manager."""
+        kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", "warning", message, **kwargs)
 
     def _log_error(self, message: str, **kwargs) -> None:
         """Логирование уровня ERROR через logger manager."""
+        kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", "error", message, **kwargs)
 
     def _log_critical(self, message: str, **kwargs) -> None:
         """Логирование уровня CRITICAL через logger manager."""
+        kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", "critical", message, **kwargs)
 
     # Публичные алиасы — для внешнего кода, который принимает менеджер
@@ -154,8 +194,17 @@ class ObservableMixin(IObservableMixin):
             self._call_manager("statistics", "record_timing", metric_name, duration, tags or {})
 
     def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
-        """Отслеживание ошибки через error manager (каноничный слот 'error')."""
-        ctx = context or {}
+        """Отслеживание ошибки через error manager (каноничный слот 'error').
+
+        Ф2.1: имя источника кладётся в КОНТЕКСТ, а не в kwargs — у слота
+        ``error`` сигнатура другая (``track_error(error, context)``), и
+        ``ErrorManager.track_error`` читает имя именно из ``ctx["module"]``,
+        подставляя ``"unknown"`` при его отсутствии. Без этой строки плоскость
+        ошибок осталась бы без штампа при заштампованной плоскости логов —
+        то есть у самой важной из трёх. Найдено ревью Ф2.1.
+        """
+        ctx = dict(context) if context else {}
+        ctx.setdefault("module", self._observability_source())
         # Task 5.14: имя error-гнезда каноникализировано на 'error'. Legacy-fallback
         # на слот 'errors' убран — все точки регистрации переведены на 'error'.
         result = self._call_manager("error", "track_error", error, ctx)

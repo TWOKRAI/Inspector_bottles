@@ -12,14 +12,15 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 import cv2
 import numpy as np
 
 from Services.ml_inference.core.model_spec import ModelSpec
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 #: формы кадра, для которых уже залогирован stretch-на-неквадрате (анти-спам на 25 fps)
 _WARNED_STRETCH_SHAPES: set[tuple[int, int]] = set()

@@ -1,22 +1,32 @@
 # -*- coding: utf-8 -*-
 """watch.py — WatchController: GUI-эквивалентный watch-профиль как отдельный класс.
 
-Стейт-машина приёмного профиля GUI (state.subscribe + observability.tail + авто-
-переподписка после авто-рестарта). Раньше жила ~15 полями и 7 методами внутри
-BackendDriver — теперь ВЛАДЕЕТ своим состоянием и инъектируется в driver
-(`self._watch = WatchController(self)`), а driver-обёртки лишь делегируют (C.1,
-headline распила: «watch-машина не живёт полями чужого класса»).
+Приёмный профиль GUI одной командой: ``state.subscribe`` по wildcard'ам +
+хвост наблюдаемости со ВСЕХ процессов. Владеет своим состоянием и инъектируется
+в driver (``self._watch = WatchController(self)``), а driver-обёртки делегируют.
 
-Контур: слушатель (`_on_event`) в reader-потоке НЕ зовёт request() сам (дедлок —
-ответ дренирует тот же reader), а кладёт имя процесса в очередь намерений; отдельный
-applier-поток (`_resub_loop`) применяет переподписку на безопасном потоке. Команды
-идут через back-ref на driver (`self._d`): subscribe/observability_tail/state_subscribe/
-_discover_processes. close() driver'а делегирует гашение applier-потока в :meth:`stop`.
+**Task 5.11.h — контур переподписки снят.** Здесь жила собственная машина:
+слушатель supervisor-события ``recovered`` в reader-потоке, очередь намерений,
+applier-поток, дедуп по именам и само-исцеление in-flight resub'а. Всю эту работу
+делает брокер подписки на оркестраторе (Task 5.11): драйвер говорит «хочу всё»
+ОДИН раз, а разворачивает намерение и переподписывает свежие инкарнации тот, у
+кого есть сигнал «поднялась новая», — PM.
+
+Что это чинит, помимо объёма:
+
+* триггером переподписки было supervisor-событие ``recovered``, которое НЕ
+  публикуется на ручном рестарте и на switch рецепта — драйвер молча оставался
+  без хвоста от новых инкарнаций (та же дыра, что была у GUI и закрыта 5.11);
+* старт watch стоил N последовательных round-trip'ов (по одному на процесс,
+  таймаут до 5с каждый) — стал один;
+* applier-поток был обходным манёвром вокруг дедлока «request() из reader-потока».
+  Конструкции нет — нет и класса дефектов.
+
+Записи как шли адресным пушем напрямую драйверу, так и идут: PM брокер, не транзит.
 """
 
 from __future__ import annotations
 
-import queue
 import threading
 from typing import Any, Dict, Optional
 
@@ -35,42 +45,15 @@ GUI_DEFAULT_PATTERNS: tuple[str, ...] = (
 )
 
 
-def _drain_queue(q: "queue.Queue") -> None:
-    """Ненадолго осушить очередь без блокировки (F3: leftover-намерения на unwatch).
-
-    Снимает все немедленно доступные элементы; ``task_done`` сохраняет баланс для
-    ``queue.join()``. Sentinel/имена процессов, оставшиеся после снятия watch, не
-    должны применяться — applier их и так пропустит по guard'у, но пустая очередь
-    исключает лишний виток.
-    """
-    while True:
-        try:
-            q.get_nowait()
-        except queue.Empty:
-            return
-        else:
-            try:
-                q.task_done()
-            except ValueError:  # task_done без соответствующего get — баланс уже нулевой
-                pass
-
-
 class WatchController:
     """Владелец состояния watch-профиля; команды идут через back-ref на driver."""
 
     def __init__(self, driver: Any) -> None:
         self._d = driver
-        # Слушатель живёт в reader-потоке и НЕ смеет звать request() сам (дедлок —
-        # см. start): он лишь кладёт имя процесса в очередь намерений, а отдельный
-        # applier-поток применяет их на безопасном потоке. Всё под _watch_lock.
+        # Состояние профиля. Лок остаётся: manifest/resume/default_tail_level
+        # читаются из чужих потоков (MCP-сессия, reader), а start/stop пишут.
         self._watch_lock = threading.Lock()
         self._watch_active = False
-        self._watch_subscribed: set[str] = set()  # процессы с активным obs-хвостом (дедуп)
-        self._watch_listener: Optional[Any] = None
-        self._resub_queue: "queue.Queue[Optional[str]]" = queue.Queue()
-        self._resub_thread: Optional[threading.Thread] = None
-        self._watch_resub_timeout: Optional[float] = None
-        self._watch_resub_errors = 0  # счётчик неудачных авто-переподписок (диагностика)
         self._watch_patterns: tuple[str, ...] = ()  # реально включённые watch-паттерны (для unwatch)
         self._watch_tail_level = "WARNING"  # объявленный порог логов (для watch-манифеста, F2)
 
@@ -87,34 +70,22 @@ class WatchController:
 
           - ``state.subscribe`` на каждый wildcard из ``patterns`` (по умолчанию
             :data:`GUI_DEFAULT_PATTERNS` — зеркало ``frontend/process.py``);
-          - ``observability.tail`` на КАЖДЫЙ процесс из state-топологии
-            (``_discover_processes``) — live логи+ошибки+статистика;
-          - **авто-переподписку** observability-хвоста после авто-рестарта процесса
-            (порт логики ``ObservabilityTailActivator``, см. ниже).
+          - ``observability.tail.subscribe_all`` — ОДИН вызов брокеру PM, который
+            разворачивает намерение на все живые процессы и переподписывает
+            свежие инкарнации сам (Task 5.11.h).
 
         Всё приходит в ЕДИНУЮ очередь ``events``; записи наблюдаемости раскладывает по
         плоскостям ``observability_records``. Кадры/SHM через сокет НЕ гоняются (Dict at
         Boundary) — вне контракта watch.
 
         Сводка best-effort: недоступный источник — честная запись об ошибке, остальные
-        работают. Повторный вызов при активном watch сначала
-        делает :meth:`stop_profile` (чистый рестарт профиля).
+        работают. Повторный вызов при активном watch сначала делает :meth:`stop_profile`
+        (чистый рестарт профиля).
 
-        **Авто-переподписка и thread-safety (главный риск задачи, п.5 ТЗ).**
-        Триггер переподписки — громкое supervisor-событие
-        ``processes.<name>.supervisor.event = "recovered"`` (публикуется по возврату
-        heartbeat после авто-рестарта, ADR-PMM-015): авто-рестарт поднимает НОВУЮ
-        инкарнацию процесса, её форвардер не подписан, а дедуп по имени переподписку
-        блокировал бы. Слушатель ловит это в событийном канале и снимает дедуп.
-
-        Слушатель исполняется в **reader-потоке** driver'а (колбэк ``subscribe``). Из
-        reader-потока НЕЛЬЗЯ звать ``observability_tail`` напрямую: она уходит в
-        ``request()`` и блокируется в ``pending.event.wait()`` — но ответ на этот самый
-        запрос дренирует ТОТ ЖЕ reader-поток (``_read_loop`` → ``_dispatch``), который
-        сейчас заблокирован. Итог — request таймаутит и на время таймаута встаёт вся
-        доставка событий. Поэтому слушатель лишь КЛАДЁТ имя процесса в очередь намерений
-        (:attr:`_resub_queue`), а отдельный applier-поток (:meth:`_resub_loop`) применяет
-        переподписку на безопасном потоке. Идемпотентность subscribe сохраняется (дедуп).
+        **Переподписки здесь больше нет.** Свежая инкарнация получает хвост от
+        брокера — по шву ``_mark_instance_started``, через который проходят все пять
+        путей старта. Прежний триггер (supervisor-событие ``recovered``) не покрывал
+        ручной рестарт и switch: это и был резидуал F4.
 
         Args:
             patterns: набор state-wildcard'ов (по умолчанию GUI-набор).
@@ -123,10 +94,10 @@ class WatchController:
                 уровень применяется на стороне клиента —
                 ``observability_records(kind="error")`` и т.п. Возвращается в сводке
                 как объявленное намерение (сервер его не срезает).
-            timeout: таймаут каждой под-команды (и авто-переподписок).
+            timeout: таймаут каждой под-команды.
 
         Returns:
-            Сводка: ``{"state": {pattern: res}, "observability": {proc: res},
+            Сводка: ``{"state": {pattern: res}, "observability": {...ответ брокера},
             "processes": [...], "tail_level": ..., "success": bool}``.
         """
         if self._watch_active:
@@ -139,84 +110,48 @@ class WatchController:
             "tail_level": tail_level,
         }
 
-        # F4: активируем watch-контур и регистрируем слушатель+applier ПЕРВЫМИ, ДО
-        # первичных подписок. Раньше слушатель вешался ПОСЛЕДНИМ (после N×obs_tail до
-        # 5с каждый) → supervisor-``recovered``, прилетевший в это окно, терялся и
-        # процесс оставался без хвоста. Дедуп ``_watch_subscribed`` оптимистичен и
-        # потокобезопасен (под ``_watch_lock``), поэтому ранний старт безопасен:
-        # applier переподпишет идемпотентно, если listener опередит основной цикл.
         with self._watch_lock:
             self._watch_active = True
-            self._watch_resub_timeout = timeout
-            self._watch_subscribed = set()
             self._watch_patterns = tuple(patterns)  # запомнить фактический набор для unwatch
             self._watch_tail_level = tail_level
-            self._resub_queue = queue.Queue()  # свежая очередь на поколение watch (F3: изоляция)
-            q = self._resub_queue
-
-        # Applier-поток намерений переподписки (безопасный поток для request()).
-        self._resub_thread = threading.Thread(target=self._resub_loop, args=(q,), name="backend-ctl-resub", daemon=True)
-        self._resub_thread.start()
-        # Слушатель авто-переподписки на событийном канале (исполняется в reader-потоке).
-        self._watch_listener = self._d.subscribe(self._on_event)
 
         for pattern in patterns:
             summary["state"][pattern] = self._d.state_subscribe(pattern, timeout=timeout)
 
-        procs = self._d._discover_processes(timeout=timeout)
-        summary["processes"] = list(procs)
+        # ОДИН вызов вместо цикла по топологии. Себя драйвер не исключает: инвариант
+        # «не подписывай себя на себя» живёт у процесса (Task 5.11.c), а не у каждого
+        # потребителя — иначе третий забудет.
+        summary["observability"] = self._d.observability_tail_all(timeout=timeout)
 
-        for proc in procs:
-            # F7: не тейлим собственный процесс driver'а (self._d._sender) — тейлить себя
-            # бессмысленно (ObservabilityTailActivator у GUI тоже себя не подписывает).
-            # gui-процесс НЕ исключаем: driver может его тейлить, но у него нет пилот-hub'а,
-            # поэтому obs_tail(gui) честно вернёт success=False (reason: нет hub'а) — это
-            # ОЖИДАЕМО, не ошибка; в сводку кладём как есть, без шумного «fail».
-            if proc == self._d._sender:
-                continue
-            res = self._d.observability_tail(proc, timeout=timeout)
-            summary["observability"][proc] = res
-            # Дедуп: пометить процесс подписанным независимо от исхода (over-record —
-            # безопаснее; recovered-триггер всё равно снимет пометку и переподпишет).
-            with self._watch_lock:
-                self._watch_subscribed.add(proc)
+        # Имена процессов — для читаемости сводки (кого накрыло намерение). Это
+        # СПРАВКА, а не источник подписки: брокер накроет и тех, кто появится после.
+        try:
+            summary["processes"] = list(self._d._discover_processes(timeout=timeout))
+        except Exception as exc:  # noqa: BLE001 — справочное поле не роняет профиль
+            summary["processes_error"] = str(exc)
 
-        # Успех: хотя бы одна state-подписка и хотя бы один obs-хвост не провалились
-        # (best-effort — часть процессов может не поддерживать observability-hub).
         state_ok = any((r or {}).get("success") is not False for r in summary["state"].values())
-        summary["success"] = bool(state_ok)
+        obs_ok = (summary["observability"] or {}).get("success") is not False
+        summary["success"] = bool(state_ok and obs_ok)
         return summary
 
     def stop_profile(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
-        """Выключить GUI-профиль: снять obs-хвосты + слушатель + applier-поток.
+        """Выключить GUI-профиль: снять намерение «хочу всё» + state-подписки.
 
-        Снимает ``observability.tail`` со всех процессов, на которые watch подписался,
-        отключает слушатель авто-переподписки и останавливает applier-поток. Durable-
-        намерения (``state.subscribe`` по watch-паттернам и obs-хвосты) вычищаются из
-        реестра, чтобы будущий реконнект НЕ воскресил снятый профиль. Серверную
-        state-подписку снимаем через ``state_unsubscribe`` (durable-намерение; серверная
-        подписка освобождается закрытием соединения driver'а).
+        Одно ``unsubscribe_all`` вместо цикла untail по запомненным именам — и это
+        не только короче: список имён к моменту unwatch мог разойтись с реальностью
+        (switch пересоздал процессы), а брокер снимает по НАМЕРЕНИЮ, не по снимку.
 
-        F3 (гонка in-flight resub): applier может держать незавершённый
-        ``observability_tail`` дольше join'а. Само-исцеление — в :meth:`_resub_loop`:
-        по завершении resub'а applier перепроверяет ``_watch_active`` и, если watch уже
-        снят, ОТМЕНЯЕТ свою переподписку (untail) — форвардер/намерение не воскресают
-        независимо от тайминга join'а. Свежая очередь на поколение (:meth:`start`)
-        изолирует стоп-sentinel от будущего watch (инвариант «один applier»).
+        Durable-намерения вычищаются, чтобы будущий реконнект НЕ воскресил снятый
+        профиль. Серверную state-подписку снимаем через ``state_unsubscribe``
+        (durable-намерение; серверная подписка освобождается закрытием соединения).
 
         F2 (б, реконнект без восстановления контура): даже при ``was_active=False``
-        всё равно чистим watch-намерения (obs-tail целиком + state.subscribe по
-        GUI-паттернам fallback), чтобы «полу-durable» watch не воскрес молча.
+        всё равно чистим watch-намерения, чтобы «полу-durable» watch не воскрес молча.
         """
         with self._watch_lock:
             was_active = self._watch_active
             self._watch_active = False
-            procs = sorted(self._watch_subscribed)
-            self._watch_subscribed = set()
-            listener = self._watch_listener
-            self._watch_listener = None
-            thread = self._resub_thread
-            self._resub_thread = None
             # Снять ровно те паттерны, что включал start (не хардкод — кастомный набор
             # иначе утёк бы в реестре). Fallback на GUI-набор — только если контур был
             # потерян при реконнекте (was_active=False, паттерны не восстановлены).
@@ -224,56 +159,33 @@ class WatchController:
                 self._watch_patterns if self._watch_patterns else (GUI_DEFAULT_PATTERNS if not was_active else ())
             )
             self._watch_patterns = ()
-            resub_q = self._resub_queue
-
-        if listener is not None:
-            self._d.unsubscribe(listener)
-
-        # Остановить applier-поток: sentinel в его (текущего поколения) очередь + join.
-        if thread is not None:
-            resub_q.put(None)
-            thread.join(timeout=2.0)
-        # Дренировать хвост очереди этого поколения (leftover-намерения не должны
-        # применяться после снятия watch — applier их и так пропустит по guard'у).
-        _drain_queue(resub_q)
 
         summary: Dict[str, Any] = {"observability": {}, "was_active": was_active}
-        for proc in procs:
-            summary["observability"][proc] = self._d.observability_untail(proc, timeout=timeout)
+        summary["observability"] = self._d.observability_untail_all(timeout=timeout)
 
         # Снять durable state.subscribe watch-паттернов через явную обёртку.
         for pattern in patterns:
             self._d.state_unsubscribe(pattern, timeout=timeout)
 
         # F2 (б): подчистить ЛЮБЫЕ висящие obs-tail-намерения (watch-owned), если контур
-        # был потерян и procs пуст — иначе полу-durable watch воскреснет при реконнекте.
-        if not was_active and not procs:
+        # был потерян — иначе полу-durable watch воскреснет при реконнекте. Снимаем ОБЕ
+        # формы: брокерную и per-process (профиль мог быть поднят версией до 5.11.h).
+        if not was_active:
+            self._d._subscriptions.remove_by_command("observability.tail.subscribe_all")
             self._d._subscriptions.remove_by_command("observability.tail.subscribe")
 
         summary["success"] = True
         return summary
 
     def stop(self) -> None:
-        """Погасить applier-поток на close() driver'а (реконнект зовёт close(), не unwatch).
+        """Погасить клиентское состояние watch на ``close()`` driver'а.
 
-        Снимает ``_watch_active`` под локом (layer-1 guard не даёт применителю дёргать
-        сеть на закрывающемся сокете), забирает поток+очередь, кладёт sentinel и join'ит.
-        Вызывается из ``BackendDriver.close()`` ПОСЛЕ пробуждения pending'ов — in-flight
-        applier-request к этому моменту уже разбужен, поэтому join не виснет.
+        До 5.11.h здесь гасился applier-поток. Потока нет — остаётся только снять
+        флаг: сеть на закрывающемся сокете не трогаем (намерение у брокера снимет
+        либо явный ``unwatch``, либо закрытие соединения на стороне PM).
         """
         with self._watch_lock:
             self._watch_active = False
-            thread = self._resub_thread
-            self._resub_thread = None
-            resub_q = self._resub_queue
-        if thread is not None:
-            resub_q.put(None)
-            thread.join(timeout=1.0)
-
-    @property
-    def resub_errors(self) -> int:
-        """Сколько авто-переподписок хвоста завершились ошибкой (диагностика, Task 2.2)."""
-        return self._watch_resub_errors
 
     def default_tail_level(self) -> Optional[str]:
         """Объявленный tail_level активного watch (или None) — дефолт severity-фильтра (F5)."""
@@ -284,10 +196,11 @@ class WatchController:
         """Снимок активного watch-профиля для переживания реконнекта (F2).
 
         MCP-сервер сохраняет манифест ДО сброса driver'а и после реконнекта передаёт
-        его новому driver'у (:meth:`resume`), чтобы восстановить watch-КОНТУР (слушатель
-        авто-переподписки + applier), а не только durable-намерения. Раньше реконнект
-        replay'ил намерения, но контур не поднимался → авто-resub был мёртв, а unwatch —
-        no-op (профиль воскресал каждый реконнект).
+        его новому driver'у (:meth:`resume`).
+
+        Списка процессов в манифесте больше нет (5.11.h): подписка держится ОДНИМ
+        намерением у брокера, а имена к моменту реконнекта могли устареть — хранить
+        их значило бы восстанавливать снимок вместо намерения.
         """
         with self._watch_lock:
             if not self._watch_active:
@@ -296,127 +209,23 @@ class WatchController:
                 "active": True,
                 "patterns": list(self._watch_patterns),
                 "tail_level": self._watch_tail_level,
-                "processes": sorted(self._watch_subscribed),
             }
 
     def resume(self, manifest: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Восстановить watch-контур из манифеста ПОСЛЕ реконнекта (F2, парный к :meth:`manifest`).
+        """Восстановить watch-профиль из манифеста ПОСЛЕ реконнекта (F2, парный к :meth:`manifest`).
 
-        Поднимает ТОЛЬКО клиентский контур (слушатель + applier + watch-состояние) БЕЗ
-        повторных подписок: серверные ``state.subscribe``/``observability.tail`` уже
-        восстановлены replay'ем durable-намерений (``replay_subscriptions``) на новом
-        соединении. Двойной подписки нет; ``observability.tail`` идемпотентна на сервере.
+        Поднимает клиентское состояние БЕЗ повторных подписок: серверные
+        ``state.subscribe``/``observability.tail.subscribe_all`` уже восстановлены
+        replay'ем durable-намерений (``replay_subscriptions``) на новом соединении.
 
-        Нет активного watch в манифесте → no-op. Идемпотентно: если контур уже поднят
-        (``_watch_active``) — сначала :meth:`stop_profile`, чтобы не плодить второй applier.
+        Нет активного watch в манифесте → no-op. Идемпотентно.
         """
         if not manifest or not manifest.get("active"):
             return {"resumed": False}
-        if self._watch_active:
-            self.stop_profile()
 
         patterns = tuple(manifest.get("patterns") or ())
-        procs = list(manifest.get("processes") or [])
         with self._watch_lock:
             self._watch_active = True
             self._watch_patterns = patterns
             self._watch_tail_level = str(manifest.get("tail_level") or "WARNING")
-            self._watch_subscribed = set(procs)
-            self._watch_resub_timeout = None
-            self._resub_queue = queue.Queue()
-            q = self._resub_queue
-
-        self._resub_thread = threading.Thread(target=self._resub_loop, args=(q,), name="backend-ctl-resub", daemon=True)
-        self._resub_thread.start()
-        self._watch_listener = self._d.subscribe(self._on_event)
-        return {"resumed": True, "processes": procs, "patterns": list(patterns)}
-
-    def _on_event(self, msg: Dict[str, Any]) -> None:
-        """Слушатель событийного канала: ловит supervisor-recovered → намерение переподписки.
-
-        Исполняется в reader-потоке — ТОЛЬКО кладёт имя процесса в очередь намерений
-        (никаких блокирующих ``request()`` — см. :meth:`start`). Разбирает
-        ``state.changed``-дельты: процесс, чей ``processes.<name>.supervisor.event``
-        стал ``recovered``, переподписываем заново (новая инкарнация); процесс, ещё
-        не подписанный (свежее появление в топологии), подписываем впервые — паритет
-        с ``ObservabilityTailActivator.on_state_delta``.
-        """
-        if not isinstance(msg, dict) or msg.get("command") != "state.changed":
-            return
-        data = msg.get("data")
-        if not isinstance(data, dict):
-            return
-        deltas = data.get("deltas")
-        if not isinstance(deltas, list):
-            return
-        for delta in deltas:
-            if not isinstance(delta, dict):
-                continue
-            path = delta.get("path") or ""
-            if not path.startswith("processes."):
-                continue
-            parts = path.split(".")
-            proc = parts[1] if len(parts) >= 2 else ""
-            if not proc or proc == self._d._sender:
-                continue  # F7: себя не тейлим (симметрично стартовому циклу start)
-            recovered = path.endswith(".supervisor.event") and delta.get("new_value") == "recovered"
-            with self._watch_lock:
-                if not self._watch_active:
-                    return
-                if recovered:
-                    # Новая инкарнация: снять дедуп, чтобы переподписать заново.
-                    self._watch_subscribed.discard(proc)
-                if proc in self._watch_subscribed:
-                    continue
-                # Пометить оптимистично (как ObservabilityTailActivator) и поставить
-                # намерение — applier применит observability_tail на безопасном потоке.
-                self._watch_subscribed.add(proc)
-            self._resub_queue.put(proc)
-
-    def _resub_loop(self, q: "queue.Queue[Optional[str]]") -> None:
-        """Applier-поток намерений переподписки (безопасный поток для ``request()``).
-
-        Дренирует очередь ``q`` СВОЕГО поколения (свежая на каждый watch — изоляция
-        стоп-sentinel'ов, инвариант «один applier»): на каждое имя процесса делает
-        ``observability_tail`` (тут блокировка в ``request()`` штатна — reader-поток
-        свободен дренировать ответ). ``None`` — sentinel остановки (кладёт stop_profile/
-        stop). ``task_done`` на каждый элемент — чтобы тесты могли детерминированно
-        дождаться обработки через ``_resub_queue.join()``.
-
-        F3 (гонка со снятием watch), два слоя:
-          1. Пред-guard: перед resub'ом проверяем ``_watch_active``; watch уже снят →
-             пропускаем (не переподписываем на снятом профиле).
-          2. Само-исцеление: после resub'а перепроверяем ``_watch_active``; если watch
-             сняли, ПОКА наш ``observability_tail`` был in-flight (stop_profile не дождался
-             join'а) — немедленно ``observability_untail`` откатывает нашу переподписку
-             (форвардер + durable-намерение), чтобы профиль не воскрес.
-        """
-        while True:
-            proc = q.get()
-            try:
-                if proc is None:
-                    return
-                # Слой 1: watch снят до старта resub'а — не применяем.
-                with self._watch_lock:
-                    active = self._watch_active
-                if not active:
-                    continue
-                try:
-                    res = self._d.observability_tail(proc, timeout=self._watch_resub_timeout)
-                    if isinstance(res, dict) and res.get("success") is False:
-                        self._watch_resub_errors += 1
-                except Exception:  # noqa: BLE001 — авто-переподписка best-effort, поток не роняем
-                    self._watch_resub_errors += 1
-                # Слой 2: watch сняли, пока resub был in-flight → откатить (само-исцеление).
-                with self._watch_lock:
-                    still_active = self._watch_active
-                if not still_active:
-                    try:
-                        self._d.observability_untail(proc, timeout=self._watch_resub_timeout)
-                    except Exception:  # noqa: BLE001 — откат best-effort
-                        pass
-            finally:
-                q.task_done()
-
-
-__all__ = ["WatchController", "GUI_DEFAULT_PATTERNS"]
+        return {"resumed": True, "patterns": list(patterns)}

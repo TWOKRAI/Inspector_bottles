@@ -15,11 +15,13 @@ PluginContext даёт доступ ко всему что есть в ProcessMo
 from __future__ import annotations
 
 import functools
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
+from ..managers.observability_wiring import DOCUMENT_SINK_ATTR
 from .interfaces import IProcessServices
 from .manifest import PLUGIN_API_VERSION
 
@@ -77,10 +79,14 @@ class PluginContext:
         config: dict[str, Any] | None = None,
         io: Any | None = None,
         registers: Any | None = None,
+        plugin_name: str | None = None,
     ) -> None:
         self.services = services
         self.process_name = services.name
         self.config = config or {}
+        # Ф2.1: имя источника для штампа записей. У базового ctx его нет —
+        # штампуется имя процесса; per-plugin копия из with_config несёт своё.
+        self.plugin_name = plugin_name
 
         # Менеджеры через Protocol (плагин использует только то, что ему нужно)
         self.worker_manager = getattr(services, "worker_manager", None)
@@ -98,23 +104,47 @@ class PluginContext:
         # StateProxy (Phase 8) — из services
         self.state_proxy = getattr(services, "state_proxy", None)
 
-        # Логирование и IPC — публичные методы Protocol
-        self.log_info: Callable[[str], None] = services.log_info
-        self.log_error: Callable[[str], None] = services.log_error
+        # Логирование и IPC — публичные методы Protocol.
+        # Ф2.1: если контекст принадлежит конкретному плагину — записи уходят
+        # под его именем, а не под именем процесса. Штамп ставится здесь, а не
+        # на call-site: плагины зовут ctx.log_info(msg) в сотнях мест, и
+        # правка call-sites не входит в задачу по построению.
+        self.log_info: Callable[[str], None] = self._stamped(services.log_info)
+        self.log_error: Callable[[str], None] = self._stamped(services.log_error)
         self.send_message: Callable = getattr(services, "send_message", None)  # type: ignore[assignment]
         self.receive_message: Callable = getattr(services, "receive_message", None)  # type: ignore[assignment]
+
+    def _stamped(self, log_fn: Callable[..., None]) -> Callable[..., None]:
+        """Обернуть log-функцию процесса штампом имени плагина (Ф2.1).
+
+        Без имени плагина возвращает исходную функцию — лишней обёртки на
+        горячем пути не появляется. ``functools.partial`` вместо lambda:
+        сохраняет пикл-совместимость там, где сам ``log_fn`` пиклится.
+
+        ``module=`` идёт keyword'ом, а ``ObservableMixin._log_*`` ставит свой
+        штамп через ``setdefault`` — поэтому имя плагина выигрывает у имени
+        процесса, а явный ``module=`` на call-site выигрывает у обоих.
+        """
+        if not self.plugin_name:
+            return log_fn
+        return functools.partial(log_fn, module=self.plugin_name)
 
     def with_config(
         self,
         plugin_config: dict[str, Any],
         registers: Any | None = None,
+        plugin_name: str | None = None,
     ) -> PluginContext:
-        """Создать копию контекста с plugin-specific конфигом."""
+        """Создать копию контекста с plugin-specific конфигом.
+
+        ``plugin_name`` — имя источника для штампа записей (Ф2.1).
+        """
         new = PluginContext(
             services=self.services,
             config=plugin_config,
             io=self.io,
             registers=registers,
+            plugin_name=plugin_name,
         )
         # state_proxy ставится оркестратором ПОСЛЕ __init__ (процесс хранит его как
         # services._state_proxy — приватный атрибут, недоступный через публичный
@@ -146,9 +176,122 @@ class PluginContext:
             self._health_reporter = reporter
         return reporter
 
+    # ------------------------------------------------------------------
+    # Ф8.7 — плоскость документов: дорога приложения в долговечное хранилище
+    # ------------------------------------------------------------------
+
+    def write_document(
+        self,
+        kind: str,
+        summary: str = "",
+        /,
+        *,
+        source: str | None = None,
+        ts: float | None = None,
+        **fields: Any,
+    ) -> bool:
+        """Записать документ — запись о РЕШЕНИИ, а не о происходившем.
+
+        Вердикт о качестве изделия живёт годами, диагностика — дни (файлы
+        ротируются по 6.9: 7 суток / 200 МБ). Поэтому у документа своё
+        хранилище со своим сроком, и попадание туда НЕ зависит от severity:
+        правило допуска здесь структурное — свой приёмник, а не фильтр по
+        уровню, который надо не забыть настроить (ADR-CRM-013, ADR-PM-028).
+
+        Плоскость у процесса ОДНА: сток сшивает ``wire_document_sink`` и
+        публикует на процессе, аудит смен наблюдаемости пишет в тот же
+        экземпляр. Заведи приложение свой стор — писателей на файл стало бы
+        вдвое больше, а «один писатель на процесс» перестало бы быть правдой.
+
+        Args:
+            kind: род документа (``"verdict"``, ``"audit"``, …). Задаёт срок
+                хранения: уборка берёт его из ``retention_sec[kind]``, а род,
+                которого в конфиге нет, не удаляется никогда.
+            summary: человекочитаемая суть — то, что видно в списке без
+                раскрытия payload.
+            source: кто породил документ. По умолчанию имя плагина, а при его
+                отсутствии — имя процесса: документ без «где» отвечает на
+                «что решено», но не на «кем».
+            ts: момент события, epoch-секунды. По умолчанию — сейчас. Параметр,
+                а не глобальный вызов: тесту иначе пришлось бы патчить ``time``
+                для всего процесса.
+            **fields: прикладная часть, уезжает в ``payload`` как JSON.
+
+        Returns:
+            ``True`` — документ записан. ``False`` — плоскость не настроена
+            (``observability.documents`` в конфиге нет) ЛИБО запись отказала.
+            Два случая различает вызывающий: у ненастроенной плоскости отказов
+            не бывает, а у настроенной каждый отказ уже посчитан стоком
+            (``dropped``) и назван здесь строкой журнала.
+
+        Note:
+            Конверт (``kind``/``ts``/``source``/``summary``) кладётся ПОСЛЕ
+            ``**fields``: прикладное поле с таким же именем не имеет права
+            увести документ в чужой род — иначе срок хранения оказался бы
+            функцией случайного совпадения имён.
+
+            ``kind`` и ``summary`` — **позиционные** (``/``) именно ради этого.
+            Будь они обычными параметрами, вызов ``write_document(KIND, s,
+            **payload)`` с ключом ``kind`` в нагрузке падал бы TypeError'ом
+            «got multiple values», то есть вердикт терялся бы с исключением
+            прямо на линии — хуже подмены, от которой защита и ставилась
+            (найдено собственным тестом конверта). Позиционные — и такой ключ
+            спокойно уезжает в payload, а род остаётся тем, что попросили.
+            ``source``/``ts`` оставлены именованными сознательно: одноимённый
+            ключ нагрузки означает ровно их и правильно связывается с ними.
+
+            **Цена — на вызывающем.** ``append`` идёт синхронно в SQLite:
+            замер под конкуренцией шести процессов — медиана 3.6 мс, p95 82 мс,
+            **max 928 мс**. Это бюджет РЕДКОГО события (отбраковка, смена
+            настройки), а не кадра: на 25–60 FPS бюджет кадра 16–40 мс, и
+            документ на каждый кадр остановил бы линию. Клиент обязан звать
+            это на событии, а не на такте.
+        """
+        sink = getattr(self.services, DOCUMENT_SINK_ATTR, None)
+        append = getattr(sink, "append", None)
+        if not callable(append):
+            # Плоскость не объявлена — это законное состояние, а не сбой:
+            # молчим и не платим ничего, кроме двух getattr.
+            return False
+
+        try:
+            # Сборка конверта — ВНУТРИ try вместе с записью: приведение ``ts``
+            # к float делается над значением, пришедшим от приложения, и мусор
+            # в нём обязан стоить документа, а не линии.
+            document = {
+                **fields,
+                "kind": str(kind),
+                "ts": time.time() if ts is None else float(ts),
+                "source": source if source is not None else (self.plugin_name or self.process_name or ""),
+                "summary": str(summary),
+            }
+            return bool(append(document))
+        except Exception as exc:  # noqa: BLE001 — сбой хранилища не роняет линию
+            # Но и не молчит: потерянный вердикт без следа — ровно тот класс
+            # «проглоченный сбой», ради которого плоскость и заводилась.
+            self.log_error(f"[documents] документ рода {kind!r} не записан: {exc!r}")
+            return False
+
 
 def _noop_log(msg: str) -> None:
     """No-op fallback для логирования в SubPluginContext."""
+
+
+def _noop_document(kind: str, summary: str = "", **fields: Any) -> bool:
+    """Fallback плоскости документов для SubPluginContext без родителя (Ф8.7).
+
+    Возвращает ``False`` — ровно то же, что вернул бы настоящий контекст на
+    процессе без плоскости. Форма ответа одна на оба случая намеренно: клиент
+    и так обязан различать «записано» и «нет», а вторая форма отказа
+    заставила бы его знать, в каком контексте он живёт.
+
+    Вложенный контекст своей плоскости не имеет и иметь не должен: сток —
+    ресурс процесса, а sub-плагин живёт внутри чужого. Родитель, у которого
+    вложенный плагин выносит вердикт, пробрасывает свою дорогу явно::
+
+        SubPluginContext(..., write_document=self._ctx.write_document)
+    """
+    return False
 
 
 def _standalone_health() -> Any:
@@ -198,6 +341,9 @@ class SubPluginContext:
     # Health-фасад (Ф2): дефолт — автономный log-only reporter; родитель
     # пробрасывает свой ctx.health, чтобы ошибки sub-плагинов кормили процесс.
     health: Any = field(default_factory=_standalone_health)
+    # Плоскость документов (Ф8.7): дефолт — отказ, потому что своего стока у
+    # вложенного контекста нет. Родитель пробрасывает свой ctx.write_document.
+    write_document: Callable[..., bool] = _noop_document
 
 
 class ProcessModulePlugin(ABC):

@@ -25,14 +25,15 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .base import PluginContext
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

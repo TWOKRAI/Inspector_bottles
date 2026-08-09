@@ -6,25 +6,34 @@ RecordForwardChannel — форвардер записей наблюдаемо�
 error-tap'ом (error/critical), пушатся адресно на GUI-процесс ОТДЕЛЬНЫМ каналом
 ``command="observability.record"`` — НЕ state-дельтой. Форма сообщения зеркалит
 RouterPushChannel/state.changed: ``type=event`` + ``targets=[subscriber]`` +
-``queue_type="system"`` → мост 1.1b → GuiProcess.register_message_handler →
+``queue_type="observability"`` → мост 1.1b → GuiProcess.register_message_handler →
 DataReceiverBridge.dispatch(data_type="observability_record").
 
 Симметрия со стором (Ф5.20a):
   - log/stats — пачкой из drain-петли (``push_batch``), уже в display-виде;
   - error/critical — по одной у tap'а на logger/error менеджерах (``write`` —
-    IChannel: LogRecord-dict → display), min_level=ERROR.
+    IChannel: LogRecord-dict → display), min_level задаёт подписчик (Ф6.х.5;
+    дефолт ERROR — прежний захардкоженный порог был половиной дефекта З-1).
+
+Ф6.х.5, честно про batch-путь: в проде hub наполняет только stats-слот, и его
+единственный владелец (WorkerManager) метрик не эмитит — push_batch сегодня не
+вызывается, stats-плоскость хвоста структурно пуста. Охват hub'а — решение Ф8.3.
 
 Канал duck-typed: НЕ импортирует logger_module/router (только IChannel + router с
 ``send_async``); Dict at Boundary — наружу едет чистый pickle-safe dict.
 
-QoS live-хвоста (решение 5.21 (d), 2026-07-10): хвост едет ``queue_type="system"``
-и активатор держит подписку always-on на всех процессах — при error-storm это
-теснит heartbeat (system-очередь никогда не дропается молча, Ф3.3). Отдельный
-rate-limit/event-канал здесь НЕ вводим: единая QoS-модель профилей kind
-(``reliability/history_depth/drop_policy/deadline_ms`` + drop-counter в state-дерево)
-приземляется одним вскрытием в Ф7 G.4 (см. plan.md, «Cross-ref ObservabilityHub →
-G.4»). Городить второй частный механизм до G.4 — это тот самый двойной проход по
-доставке, которого консолидация Ф7 избегает. До G.4 живём на system-guard 3.3.
+QoS live-хвоста — ДОЛГ ЗАКРЫТ (Ф7.3, 2026-08-06). Прежнее решение 5.21 (d)
+(2026-07-10) оставляло хвост на ``queue_type="system"`` при always-on подписке
+на всех процессах, и при error-storm это тесняло heartbeat: system-очередь
+никогда не дропается молча (Ф3.3), поэтому её сотня ячеек забивалась записями —
+живой прогон Б-6 намерил 97 066 отказов доставки за ~25 минут. Теперь у груза
+свой класс: ``queue_type="observability"`` (best_effort / drop_oldest, **глубина
+256** — ``DEFAULT_QUEUES``/``HUB_QUEUES``) — переполнение хвоста роняет записи со
+счётчиком, а не блокирует управление. Число 1024 из профиля ``qos.py`` относится
+к ёмкости ``BoundedChannel`` хаба, а не к этой очереди; прежняя редакция называла
+здесь его, и читатель получал глубину вчетверо больше настоящей. Потеря видна счётчиком ``observability_evicted``
+и НЕ пишется записью: запись о потере записи поехала бы в тот же хвост и
+усиливала бы шторм (третье звено петли Б-6).
 """
 
 from __future__ import annotations
@@ -32,7 +41,6 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ..interfaces import IChannel
-from .observability_store import KIND_ERROR
 from .record_display import log_record_to_display
 
 FORWARD_COMMAND = "observability.record"
@@ -48,7 +56,6 @@ class RecordForwardChannel(IChannel):
         subscriber: str,
         sender: str = "",
         name: str = "observability_forward",
-        kind: str = KIND_ERROR,
         command: str = FORWARD_COMMAND,
     ) -> None:
         """
@@ -56,15 +63,18 @@ class RecordForwardChannel(IChannel):
             router: RouterManager с ``send_async(dict, priority)`` — живой роутер процесса.
             subscriber: адрес получателя (GUI-процесс), ``targets=[subscriber]``.
             sender: имя процесса-источника (в сообщении и в ``data.process``).
-            name: имя канала (хэндл tap'а для remove_log_tap).
-            kind: kind при нормализации LogRecord-dict в ``write`` (обычно 'error').
+            name: имя канала (хэндл tap'а для remove_tap).
             command: поле ``command`` пуша (роутинг-ключ у GUI-хендлера).
+
+        Параметра ``kind`` больше нет (Ф5.2, Б-4): вид записи считает её важность.
+        Прежний дефолт ``'error'`` метил ошибкой ВСЁ, что прошло порог tap'а, —
+        а порог с Ф6.х.5 задаёт подписчик, то есть под ``kind=error`` в хвост
+        поехали INFO-записи (живая находка: INFO-снимок метрик).
         """
         self._router = router
         self._subscriber = subscriber
         self._sender = sender or subscriber
         self._name = name
-        self._kind = kind
         self._command = command
 
     @property
@@ -77,8 +87,9 @@ class RecordForwardChannel(IChannel):
 
     def write(self, record_dict: Dict[str, Any]) -> Dict[str, Any]:
         """IChannel (tap-путь): LogRecord-dict error/critical → display → push (одна запись)."""
-        # process=sender (5.21 (c)): запись несёт процесс-источник, а не scope логгера.
-        display = log_record_to_display(record_dict, kind=self._kind, process=self._sender)
+        # process=sender (5.21 (c)): запись несёт процесс-источник, а не имя
+        # источника внутри процесса (`module`) и не группу логирования (`scope`).
+        display = log_record_to_display(record_dict, process=self._sender)
         return self._push({"record": display})
 
     def push_batch(self, display_records: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -95,7 +106,8 @@ class RecordForwardChannel(IChannel):
             "type": "event",
             "sender": self._sender,
             "targets": [self._subscriber],
-            "queue_type": "system",
+            # Ф7.3: своя очередь вместо never-drop system-почты (см. докстринг модуля).
+            "queue_type": "observability",
             "command": self._command,
             "data": {"process": self._sender, **payload},
         }

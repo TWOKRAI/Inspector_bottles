@@ -28,7 +28,7 @@ Edit the agent's frontmatter (e.g. `agents/company/developer.md`):
 ---
 name: developer
 description: ...
-model: claude-sonnet-5
+model: sonnet
 tools: Read, Write, Edit, Glob, Grep, Bash, mcp__qex__search_code
 isolation: worktree                # ← add this
 ---

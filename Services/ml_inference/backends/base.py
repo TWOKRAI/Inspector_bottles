@@ -7,14 +7,15 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from abc import ABC, abstractmethod
 
 import numpy as np
 
 from Services.ml_inference.core.model_spec import ModelSpec
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class BaseInferenceBackend(ABC):

@@ -12,7 +12,8 @@ V3_MY_PURE: plugin самодостаточен — создаёт локаль�
 from __future__ import annotations
 
 import importlib
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -27,7 +28,7 @@ from multiprocess_framework.modules.process_module.generic import frame_trace
 
 from .registers import WorkerPoolRegisters
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 @register_plugin(

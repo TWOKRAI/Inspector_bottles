@@ -14,13 +14,14 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import subprocess  # nosec B404 — запуск собственного SDK App фиксированной командой
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 _PLUGIN = "hikvision"
 

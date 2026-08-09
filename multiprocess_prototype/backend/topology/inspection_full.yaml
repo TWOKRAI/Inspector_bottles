@@ -36,8 +36,14 @@ processes:
   - process_name: processor
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
     priority: normal
+    # Детектор — общий исток двух дорог: показа (renderer) и решения (inspector).
+    # До 2026-08-09 маршрута processor→inspector не было вовсе, хотя провод
+    # `blob_detector.detections → robot_control.detections` объявлен: коллекция у
+    # инспектора не собиралась, и RobotControlPlugin.process не вызывался ни разу
+    # (живой прогон: total_inspected=0 при 1772 принятых сообщениях, молча).
     chain_targets:
       - renderer
+      - inspector
     plugins:
       # Шаг 1: HSV-маска красного диапазона (H: 0-30, насыщенный цвет)
       - plugin_class: Plugins.processing.color_mask.plugin.ColorMaskPlugin
@@ -62,8 +68,10 @@ processes:
   - process_name: renderer
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
     priority: normal
+    # Показ, а не решение: отрисованный кадр уходит на дисплей, а отбраковку
+    # считает inspector напрямую от детектора (см. wires ниже).
     chain_targets:
-      - inspector
+      - gui
     plugins:
       - plugin_class: Plugins.render.render_overlay.plugin.RenderOverlayPlugin
         plugin_name: render_overlay
@@ -120,8 +128,12 @@ wires:
     target: renderer.render_overlay.mask
   - source: processor.blob_detector.detections
     target: renderer.render_overlay.detections
-  # Overlay → инспектор (готовый кадр) + детекции (fan-out от детектора)
-  - source: renderer.render_overlay.rendered_frame
+  # Детектор → инспектор: ОБА входа от одного отправителя, в одном item.
+  # Раньше кадр приходил от renderer, а детекции от processor — коллекция из двух
+  # разных отправителей у инспектора не собиралась, и плагин не вызывался ни разу
+  # (живой прогон 2026-08-09: total_inspected=0 при 1772 принятых сообщениях,
+  # молча). Overlay остаётся дорогой ПОКАЗА, а не дорогой решения.
+  - source: processor.blob_detector.frame
     target: inspector.robot_control.frame
   - source: processor.blob_detector.detections
     target: inspector.robot_control.detections

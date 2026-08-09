@@ -439,9 +439,10 @@ class DriverSession:
                 resubscribed = self._driver.replay_subscriptions()
                 self._note_report(reconnected=True, resubscribed=resubscribed)
                 self._log(f"[mcp] реконнект: replay {len(resubscribed)} подписк(и)")
-            # F2: если watch был активен — поднять watch-КОНТУР на новом driver'е (слушатель
-            # + applier). Серверные подписки уже восстановлены replay'ем выше; resume_watch
-            # НЕ переподписывает, только оживляет авто-resub и делает unwatch управляемым.
+            # F2: если watch был активен — восстановить его на новом driver'е.
+            # Серверные подписки уже восстановлены replay'ем выше (одно намерение
+            # брокеру вместо списка имён, 5.11.h); resume_watch НЕ переподписывает,
+            # а поднимает клиентское состояние и делает unwatch управляемым.
             if self._watch_manifest and self._watch_manifest.get("active") and hasattr(self._driver, "resume_watch"):
                 wr = self._driver.resume_watch(self._watch_manifest)
                 self._note_report(reconnected=True, watch_resumed=bool(isinstance(wr, dict) and wr.get("resumed")))

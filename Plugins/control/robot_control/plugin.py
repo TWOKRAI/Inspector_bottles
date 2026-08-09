@@ -4,6 +4,12 @@ Processing-плагин: принимает item с detections (от blob_detect
 фильтрует дефекты по min_defect_area, принимает решение reject/pass.
 Ведёт статистику: total_inspected, total_rejected, reject_rate.
 
+Ф8.7: решение об отбраковке — **вердикт о качестве**, и он уходит документом в
+плоскость документов (``ctx.write_document``), а не строкой в диагностический
+журнал. Причина в сроках: файлы логов ротируются за 7 суток / 200 МБ (Ф6.9), а
+вердикт о браке в промышленности спрашивают годами. Плоскость даёт ему свой
+срок (``retention_sec.verdict``), и чистка логов его не касается.
+
 V3_MY_PURE: plugin самодостаточен — создаёт локальный register
 если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
@@ -11,7 +17,6 @@ V3_MY_PURE: plugin самодостаточен — создаёт локаль�
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
@@ -20,6 +25,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 from multiprocess_framework.modules.process_module.plugins import Port
 from multiprocess_framework.modules.process_module.plugins import register_plugin
+from Services.documents.interfaces import KIND_VERDICT
 
 from .registers import RobotControlRegisters
 
@@ -86,6 +92,13 @@ class RobotControlPlugin(ProcessModulePlugin):
         self._total_inspected: int = 0
         self._total_rejected: int = 0
 
+        # Ф8.7 — вердикты. `_rejecting` держит ФРОНТ решения: документ пишется
+        # на переходе pass→reject, а не на каждом кадре брака (см. _write_verdict).
+        self._rejecting: bool = False
+        self._verdicts_written: int = 0
+        self._verdicts_unwritten: int = 0
+        self._verdict_gap_reported: bool = False
+
         ctx.log_info(
             f"RobotControlPlugin: enabled={self._reg.enabled}, "
             f"min_defect_area={self._reg.min_defect_area}, "
@@ -110,6 +123,10 @@ class RobotControlPlugin(ProcessModulePlugin):
 
         # Плагин отключён — всегда пропускаем
         if not self._reg.enabled:
+            # Фронт сбрасывается и здесь: выключение посреди брака завершает
+            # текущую отбраковку. Иначе повторное включение на том же дефекте
+            # не дало бы вердикта вовсе — фронта-то не было.
+            self._rejecting = False
             item["inspection_result"] = {
                 "action": "pass",
                 "reason": "disabled",
@@ -120,31 +137,31 @@ class RobotControlPlugin(ProcessModulePlugin):
         detections: list[dict] = item.get("detections", [])
 
         # Фильтруем дефекты по минимальной площади
-        defects = [
-            d for d in detections
-            if d.get("area", 0) >= self._reg.min_defect_area
-        ]
+        defects = [d for d in detections if d.get("area", 0) >= self._reg.min_defect_area]
 
         # Ограничиваем количество дефектов для анализа (если задано)
         if self._reg.max_detections_for_reject > 0:
-            defects = defects[:self._reg.max_detections_for_reject]
+            defects = defects[: self._reg.max_detections_for_reject]
 
         # Принимаем решение
         if len(defects) > 0:
             action = "reject"
             self._total_rejected += 1
+            # Вердикт — на ФРОНТЕ решения, до задержки: она может длиться
+            # сотни миллисекунд, и документ, записанный после неё, нёс бы
+            # время механизма, а не время решения.
+            if not self._rejecting:
+                self._write_verdict(defects)
+            self._rejecting = True
             # Задержка перед отбраковкой (например, для синхронизации с механизмом)
             if self._reg.reject_delay_ms > 0:
                 time.sleep(self._reg.reject_delay_ms / 1000.0)
         else:
             action = "pass"
+            self._rejecting = False
 
         # Вычисляем коэффициент отбраковки
-        rate = (
-            self._total_rejected / self._total_inspected
-            if self._total_inspected > 0
-            else 0.0
-        )
+        rate = self._total_rejected / self._total_inspected if self._total_inspected > 0 else 0.0
 
         item["inspection_result"] = {
             "action": action,
@@ -155,6 +172,60 @@ class RobotControlPlugin(ProcessModulePlugin):
         }
 
         return item
+
+    # --- Вердикт как документ (Ф8.7) ---
+
+    def _write_verdict(self, defects: list[dict]) -> None:
+        """Записать вердикт об отбраковке в плоскость документов.
+
+        **Почему на фронте, а не на каждом кадре брака.** Дефектное изделие
+        видно детектору десятки кадров подряд, а ``append`` идёт синхронно в
+        SQLite: медиана 3.6 мс, p95 82 мс, max 928 мс под конкуренцией шести
+        процессов. Бюджет кадра на 25 FPS — 40 мс. Документ на каждый кадр
+        останавливал бы линию и давал бы вместо одного решения десятки строк
+        об одном и том же. Фронт pass→reject — одно решение, один документ.
+
+        **Чего здесь честно нет.** Идентификатора изделия: конвейер его не
+        несёт, и связать вердикт с конкретной деталью нечем. ``reject_seq`` —
+        порядковый номер отбраковки в этом запуске процесса, а не номер
+        изделия; переживает он ровно столько, сколько процесс. Per-part
+        traceability уровня MES потребует внешнего идентификатора и в объём
+        задачи не входит.
+
+        Отказ записи линию не роняет: решение об отбраковке уже принято и
+        уедет по своей дороге (``inspection_result``) независимо от того,
+        удалось ли записать документ.
+        """
+        areas = [float(d.get("area", 0) or 0) for d in defects]
+        summary = f"отбраковка #{self._total_rejected}: дефектов {len(defects)}"
+        written = self._ctx.write_document(
+            KIND_VERDICT,
+            summary,
+            action="reject",
+            reject_seq=self._total_rejected,
+            inspected_seq=self._total_inspected,
+            defect_count=len(defects),
+            defect_area_max=max(areas) if areas else 0.0,
+            defect_area_total=sum(areas),
+            # Порог, по которому вынесено решение: без него вердикт нечем
+            # оспорить — «почему брак» отвечается только вместе с ним.
+            min_defect_area=self._reg.min_defect_area,
+        )
+        if written:
+            self._verdicts_written += 1
+            return
+
+        self._verdicts_unwritten += 1
+        if not self._verdict_gap_reported:
+            # Ровно один раз на запуск: причина не меняется от кадра к кадру,
+            # а линия выдаёт брак сериями — повтор дал бы шторм на пути,
+            # который и без того признан отказавшим.
+            self._verdict_gap_reported = True
+            self._ctx.log_error(
+                "RobotControlPlugin: вердикт не записан — плоскость документов "
+                "не настроена (ключ observability.documents) либо запись отказала; "
+                "счёт потерь в get_stats.verdicts_unwritten"
+            )
 
     # --- Команды ---
 
@@ -178,22 +249,33 @@ class RobotControlPlugin(ProcessModulePlugin):
         return {"status": "ok", "delay_ms": delay_ms}
 
     def cmd_reset_counters(self, data: dict) -> dict:
-        """Обнулить счётчики статистики."""
+        """Обнулить счётчики статистики.
+
+        Фронт решения (``_rejecting``) НЕ трогается: он часть текущего состояния
+        линии, а не статистики. Сбрось его здесь — и следующий кадр той же
+        отбраковки выдал бы второй вердикт об одном изделии.
+        """
         self._total_inspected = 0
         self._total_rejected = 0
+        self._verdicts_written = 0
+        self._verdicts_unwritten = 0
         self._ctx.log_info("RobotControlPlugin: счётчики сброшены")
         return {"status": "ok"}
 
     def cmd_get_stats(self, data: dict) -> dict:
-        """Вернуть текущую статистику инспекции."""
-        rate = (
-            self._total_rejected / self._total_inspected
-            if self._total_inspected > 0
-            else 0.0
-        )
+        """Вернуть текущую статистику инспекции.
+
+        ``verdicts_written`` / ``verdicts_unwritten`` — путь наружу для Ф8.7:
+        расхождение с ``total_rejected`` видно без похода в БД. Ненастроенная
+        плоскость и отказавшая запись здесь неразличимы намеренно — плагин
+        различить их не может, а причину называет разовая строка журнала.
+        """
+        rate = self._total_rejected / self._total_inspected if self._total_inspected > 0 else 0.0
         return {
             "status": "ok",
             "total_inspected": self._total_inspected,
             "total_rejected": self._total_rejected,
             "reject_rate": round(rate, 4),
+            "verdicts_written": self._verdicts_written,
+            "verdicts_unwritten": self._verdicts_unwritten,
         }

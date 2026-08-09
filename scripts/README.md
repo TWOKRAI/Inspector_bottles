@@ -30,6 +30,7 @@
 | [`message_contracts/`](message_contracts/) | `/message-contracts` | AST-дамп классов `SchemaBase` / `Message` / `BaseModel` с полями. Аудит Dict-at-Boundary и диф контрактов между ветками. | [README](message_contracts/README.md) |
 | [`test_ratio/`](test_ratio/) | `/test-ratio` | LOC-отношение `tests/` к `code/` на каждый модуль. Дополнение к `/sentrux-gaps` (объёмная метрика). | [README](test_ratio/README.md) |
 | [`todo_inventory/`](todo_inventory/) | `/todo-inventory` | Сбор `TODO/FIXME/HACK/XXX/BUG/NOTE` с автором и возрастом через `git blame`. | [README](todo_inventory/README.md) |
+| [`graph_slice/`](graph_slice/) | `/graph-slice` | Срез графа graphify по границе модуля: кто зависит от модуля и от чего зависит он. Проверяет свежесть графа относительно `HEAD`. | [README](graph_slice/README.md) |
 | [`clean_cache/`](clean_cache/) | `/clean-cache` | Чистка `__pycache__/`, `.pytest_cache/`, `*.pyc`, `.coverage` и т.п. **Dry-run по умолчанию**, реальное удаление — `--apply`. | [README](clean_cache/README.md) |
 | [`transport_boundary/`](transport_boundary/) | — (в `ci.py`) | AST-инвариант transport-router-hub P4.3: прямой queue/SHM-транспорт (`send_to_queue`/`broadcast_message`/SHM) только внутри хаба (`router_module`/`shared_resources_module`). Ratchet с `[[debt]]`. Exit 0/1. | [README](transport_boundary/README.md) |
 
@@ -87,6 +88,7 @@ Slash-команды у `sync/` нет — это инфраструктурны
 | `/message-contracts` | [`message_contracts/message_contracts.py`](message_contracts/message_contracts.py) |
 | `/test-ratio` | [`test_ratio/test_ratio.py`](test_ratio/test_ratio.py) |
 | `/todo-inventory` | [`todo_inventory/todo_inventory.py`](todo_inventory/todo_inventory.py) |
+| `/graph-slice` | [`graph_slice/graph_slice.py`](graph_slice/graph_slice.py) |
 | `/clean-cache` | [`clean_cache/clean_cache.py`](clean_cache/clean_cache.py) |
 
 Полный список slash-команд проекта — в [`.claude/README.md`](../.claude/README.md#команды-commands).

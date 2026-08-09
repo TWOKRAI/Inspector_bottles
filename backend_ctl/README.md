@@ -201,7 +201,8 @@ with BackendDriver(port=8765) as drv:
   дренаж «новое с прошлого вызова» поверх `events_page`, F.1), `await_condition`
   (серверное ожидание B.2),
   `log_tail`/`log_untail`, `ui_tap`/`ui_untap`/`ui_tap_ping`,
-  `config_reload`, `logger_sink_enable|disable`,
+  `config_reload` / `config_reload_verified` (смена + вердикт «действует» и «записи идут», Task 5.7),
+  `logger_sink_enable|disable`,
   `telemetry_reconfigure`/`telemetry_set` (управление частотой/метриками телеметрии — Task 0.5).
 - **Жизненный цикл:** driver подключается лениво при первом вызове; бэкенд поднимается
   отдельно (`BACKEND_CTL=1`). Нет бэкенда → инструмент возвращает `isError` с понятным

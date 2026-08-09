@@ -37,22 +37,25 @@ class ProxyCreator:
     def _create_standard_proxies(instance: Any, managers: dict, call_manager_func: Callable):
         """Создать стандартные прокси-методы для logger, stats и error."""
         # --- Logger ---
+        # Прокси делегируют в _log_* инстанса, а не в call_manager_func напрямую:
+        # штамп имени источника (Ф2.1) живёт в _log_*, и прямой вызов оставил бы
+        # записи auto_proxy-менеджеров под дефолтным module="main".
         if "logger" in managers:
 
             def log_debug(msg, **kw):
-                return call_manager_func("logger", "debug", msg, **kw)
+                return instance._log_debug(msg, **kw)
 
             def log_info(msg, **kw):
-                return call_manager_func("logger", "info", msg, **kw)
+                return instance._log_info(msg, **kw)
 
             def log_warning(msg, **kw):
-                return call_manager_func("logger", "warning", msg, **kw)
+                return instance._log_warning(msg, **kw)
 
             def log_error(msg, **kw):
-                return call_manager_func("logger", "error", msg, **kw)
+                return instance._log_error(msg, **kw)
 
             def log_critical(msg, **kw):
-                return call_manager_func("logger", "critical", msg, **kw)
+                return instance._log_critical(msg, **kw)
 
             instance.log_debug = log_debug
             instance.log_info = log_info

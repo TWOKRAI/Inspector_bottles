@@ -174,7 +174,11 @@ class SourceProducer:
             # FW_PERF_PROBES, дефолт OFF, см. perf_probes.py).
             with self._perf.measure("send"):
                 for item in items:
-                    self._send_item(item)
+                    # Ф3.3: записи, сделанные при отправке этого кадра, несут его
+                    # trace_id. Пер-item, а не на всю пачку: produce может отдать
+                    # несколько кадров, и у каждого след свой.
+                    with frame_trace.log_correlation(item):
+                        self._send_item(item)
 
             # Backoff при открытом produce-breaker (Task 2.2): не жечь CPU в горячем
             # цикле ошибок на мёртвом источнике — спим breaker_backoff (обычно >>

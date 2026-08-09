@@ -13,10 +13,13 @@ from multiprocess_framework.modules.data_schema_module import (
     SchemaBase,
     deep_merge,
 )
+from multiprocess_framework.modules.logger_module import get_std_logger
 from multiprocess_framework.modules.process_module.configs import (
     ObservabilityConfig,
     TelemetryPublishConfig,
 )
+
+logger = get_std_logger(__name__)
 
 
 class SystemSection(SchemaBase):
@@ -270,7 +273,10 @@ def load_system_config(path: Path | str | None = None) -> SystemConfig:
                 override_raw = yaml.safe_load(f) or {}
             raw = _deep_merge(raw, override_raw)
         except yaml.YAMLError as e:
-            print(f"[config] user_overrides.yaml: ошибка разбора: {e}")
+            # Ф6.х.7а: раньше print в stdout — мимо всей наблюдаемости, следа в
+            # logs/ не оставалось. Чтение конфига идёт ДО подъёма LoggerManager,
+            # поэтому запись ляжет в ранний буфер (6.4а) и доедет при связывании.
+            logger.warning("user_overrides.yaml: ошибка разбора: %s — оверрайды пропущены", e)
 
     return SystemConfig.model_validate(raw)
 

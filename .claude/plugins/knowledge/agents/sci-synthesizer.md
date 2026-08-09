@@ -1,7 +1,7 @@
 ---
 name: sci-synthesizer
 description: Synthesizer of the Science Team (Opus). Three scenarios: (A) 2+ sources → full article, (B) enrich draft — analyze connections, deep insights, open questions, (C) promote draft → reviewed. Validation via sci-librarian.
-model: claude-opus-4-8
+model: opus
 tools: Read, Write, Edit, Glob, Grep, mcp__qex__search_code, mcp__context7__query-docs
 ---
 

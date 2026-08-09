@@ -21,10 +21,12 @@ request_id (или не матчащие ни один pending) — наприм
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import socket
 import threading
 from collections import deque  # noqa: F401 — используется в аннотации back-compat property _rollback_journal
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from multiprocess_framework.modules.telemetry_readmodel_module import (
@@ -44,12 +46,15 @@ from .endpoint_config import resolve_endpoint
 from .protocol import (  # noqa: F401 — re-export для back-compat шима
     Capabilities,
     MemoryStats,
+    ObservabilityCounters,
     ProcessCapabilities,
     QueueDepths,
     RouterStats,
     WorkerStatus,
     _find_payload,
+    _is_ok,
     _leaf_result,
+    delivery_window,
     unwrap,
 )
 from .conditions import DEFAULT_AWAIT_TIMEOUT, await_condition as _await_condition
@@ -89,6 +94,24 @@ _LOG_SEVERITY_RANK: Dict[str, int] = {
     "critical": 50,
     "fatal": 50,
 }
+
+#: Метасимволы, при которых адрес процесса читается как узор (Task 5.4).
+_PROCESS_GLOB_METACHARS = "*?["
+
+
+def _is_process_batch(process: Any) -> bool:
+    """Просил ли оператор БАТЧ — или адресовал один процесс (Task 5.4).
+
+    Вопрос решается формой аргумента, который пишет сам оператор: список, ``"all"``
+    или узор — батч; всё остальное — прежний адресный путь. Отсюда и разные формы
+    ответа: она выбирается жестом, а не догадкой о намерении. Одно точное имя не
+    платит за существование батча ни round-trip'ом за топологией, ни изменением
+    ответа — гарантия «бит-в-бит прежнее» стоит на этом одном вопросе.
+    """
+    if process is None or isinstance(process, (list, tuple, set)):
+        return True
+    text = str(process).strip()
+    return text == "all" or any(ch in text for ch in _PROCESS_GLOB_METACHARS)
 
 
 class BackendDriver(_TransportMixin, _EventChannelMixin):
@@ -415,6 +438,30 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """Статус процесса и воркеров как :class:`WorkerStatus` (форма, не логика)."""
         return WorkerStatus.from_response(self.introspect_status(process, **kw))
 
+    def observability_counters(
+        self,
+        process: str,
+        *,
+        flush: bool = False,
+        timeout: Optional[float] = None,
+    ) -> ObservabilityCounters:
+        """Потери трёх плоскостей наблюдаемости как :class:`ObservabilityCounters` (2.V2).
+
+        Спрашивает у живого процесса ``introspect.observability`` и оставляет из
+        ответа то, что отвечает на один вопрос: **что уже потеряно**. Счётчики
+        логгера до этой обёртки наружу не выходили — их читал только тест, то есть
+        сигнал существовал и был недоступен там, где его спрашивают.
+
+        ``flush`` — попросить КОГЕРЕНТНЫЙ снимок (Task 5.7): счётчик «записано»
+        включит всё уже эмитированное, а не только доехавшее до такта батчинга.
+        Нужен тому, кто судит по дельте двух снимков; для разового «что потеряно»
+        не нужен и по умолчанию выключен, чтобы не менять политику батчинга
+        наблюдаемой системы.
+        """
+        args = {"flush": True} if flush else None
+        res = self.send_command(process, "introspect.observability", args, timeout=timeout)
+        return ObservabilityCounters.from_response(res)
+
     def introspect_capabilities(self, process: str, **kw: Any) -> Dict[str, Any]:
         """Карточка процесса (сырой dict): команды+descriptions, регистры, handlers."""
         return self.send_command(process, "introspect.capabilities", **kw)
@@ -691,21 +738,147 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         (сменить уровень логгера на лету). Без него процесс читает свой файл конфига
         (``path`` или ``observability_config_path`` — тот же путь, что hot-reload watcher).
         Ответ содержит ``applied.log_level`` — применённый уровень (диагностика).
+
+        Task 5.4: ``process`` принимает батч-адрес (``"all"``/``"*"``, узор ``camera_*``,
+        список имён) — тогда ответ приходит в форме :meth:`send_command_many`
+        (``batch: True``, секция на каждый процесс). Одно точное имя идёт прежним путём
+        и отвечает прежней формой: форму выбирает жест оператора, а не догадка.
         """
         args: Dict[str, Any] = {}
         if observability is not None:
             args["observability"] = observability
         if path is not None:
             args["path"] = path
+        if _is_process_batch(process):
+            return self.send_command_many(process, "config.reload", args, timeout=timeout)
         return _leaf_result(self.send_command(process, "config.reload", args, timeout=timeout))
 
-    def logger_sink_enable(self, process: str, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
-        """Включить sink логгера процесса по имени (register_channel)."""
-        return _leaf_result(self.send_command(process, "logger.sink.enable", {"sink": sink}, timeout=timeout))
+    def config_reload_verified(
+        self,
+        process: str,
+        *,
+        observability: Optional[Dict[str, Any]] = None,
+        path: Optional[str] = None,
+        settle: float = 1.0,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Смена наблюдаемости с доказательством: значение ДЕЙСТВУЕТ и записи ИДУТ (Task 5.7).
 
-    def logger_sink_disable(self, process: str, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
-        """Выключить sink логгера процесса по имени (unregister_channel)."""
-        return _leaf_result(self.send_command(process, "logger.sink.disable", {"sink": sink}, timeout=timeout))
+        Два утверждения намеренно РАЗНЫЕ, и ни одно не выводится из другого:
+
+        1. ``verdict`` — **значение действует**. Судит сам процесс (``config.reload``
+           сравнивает запрошенное с действующим в один момент) и отдаёт трёхзначно:
+           ``confirmed`` / ``failed`` / ``unverifiable``. Булева здесь нет
+           намеренно: первая редакция отвечала «подтверждено» при нуле
+           проверенных путей.
+        2. ``delivering`` / ``losing`` / ``silent_source`` — **записи идут**. Это
+           разница во времени, и знать её может только тот, кто делает два
+           замера. База отсчёта приезжает в ответе ``config.reload`` (снимок
+           снят ПОСЛЕ применения — окно начинается в момент смены), второй замер
+           берётся здесь через ``introspect.observability``.
+
+        Почему мало одного утверждения: ``verdict == "confirmed"`` означает
+        «уровень выставлен», а не «в файл что-то попало» — приёмник мог быть снят
+        соседней командой, и оператор ушёл бы с уверенностью, что включил
+        диагностику. Обратное тоже верно: записи могут идти при провалившемся
+        вердикте (идут по ПРЕЖНЕЙ раскладке).
+
+        ``settle`` — выдержка между замерами (сек). Ноль означает «замерь сразу»
+        и годится только тестам: живому процессу нужно время, чтобы хоть что-то
+        написать.
+
+        **Третий замер снимается всегда**, сразу за вторым и без паузы: его
+        прирост — цена самого опроса. Читающая команда идёт через диспетчер и
+        пишет записи о себе; замерено живьём (2026-07-30) — **~5.1 записи на один
+        опрос** на DEBUG. Без вычета ``delivering`` был бы истинным всегда,
+        включая молчащий источник, то есть сигнал, не связанный с реальностью.
+        Цена не предполагается нулевой, а измеряется.
+
+        Оба замера просят КОГЕРЕНТНЫЙ снимок (``flush=True``). Это не украшение:
+        счётчик считает записи в момент записи, а батчинг сдвигает его на такт
+        flush'а — без ``flush`` контрольный снимок отдавал ровно ноль при реальных
+        пяти записях, и вычет был бы фикцией.
+
+        **Вычет верен в ЭКСКЛЮЗИВНОМ окне** (BCTL-ADR-009): зазор между вторым и
+        третьим замером приписывается своему опросу целиком, поэтому второй клиент
+        или GUI-панель, пишущие в тот же зазор, вычитаются как своя цена. Когда
+        вычет съедает больше, чем показало всё окно, арифметика недостоверна —
+        ``cost_exceeds_window``, и тишина тогда НЕ утверждается.
+
+        Returns:
+            ``{success, process, verdict, verified, delivering, silent_source,
+            losing, written_delta, self_cost, written_net, loss_delta,
+            counters_reset, reset_planes, cost_exceeds_window, window_sec,
+            written_by_channel, losses, reload}``.
+        """
+        import time
+
+        reload_reply = self.config_reload(process, observability=observability, path=path, timeout=timeout)
+        reply = reload_reply if isinstance(reload_reply, dict) else {}
+        verified = reply.get("verified")
+        if isinstance(verified, dict) and verified.get("verdict"):
+            verdict = str(verified.get("verdict"))
+            verdict_reason: Optional[str] = None
+        else:
+            # Файловый reload не несёт inline-секции, и сравнивать запрошенное не с
+            # чем: «запрос» тут — весь файл целиком. Отсутствие суждения называется
+            # вслух, а не выдаётся за подтверждение.
+            verdict = "unverifiable"
+            verdict_reason = "процесс не вынес суждения: config.reload без inline-секции observability"
+
+        baseline = reply.get("counters")
+        if settle > 0:
+            time.sleep(settle)
+        # `flush=True` у ОБОИХ замеров, иначе вычет цены опроса не работает:
+        # счётчик считает в момент записи, а батчинг сдвигает его на такт flush'а,
+        # и прирост, который контрольный снимок обязан увидеть, приезжает уже
+        # после него. Замерено живьём: без flush цена отдавала ноль при реальных
+        # ~5 записях на опрос.
+        after = self.observability_counters(process, flush=True, timeout=timeout).planes
+        control = self.observability_counters(process, flush=True, timeout=timeout).planes
+        window = delivery_window(baseline, after, control=control)
+        out: Dict[str, Any] = {
+            # `success` — про применение («команда не упала»), и он НЕ вердикт:
+            # слипнись они, различие «команда сломалась» / «команда ничего не
+            # изменила» исчезло бы вместе с возможностью его увидеть.
+            "success": bool(reply.get("success")),
+            "process": process,
+            "verdict": verdict,
+            "verified": verified if isinstance(verified, dict) else None,
+            "reload": reload_reply,
+        }
+        if verdict_reason:
+            out["verdict_reason"] = verdict_reason
+        if baseline is None:
+            out["baseline_missing"] = "в ответе config.reload нет секции counters — окно доставки не построено"
+        out.update(window.as_dict())
+        return out
+
+    def logger_sink_enable(self, process: Any, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Включить sink логгера процесса по имени (register_channel).
+
+        Task 5.4 — обе оси адресации разом: ``process`` принимает батч-адрес
+        (``"all"``/узор/список), ``sink`` — узор имён приёмников (``module_*``),
+        который раскрывает уже сам процесс по своему каталогу.
+        """
+        return self._sink_command(process, "logger.sink.enable", sink, timeout=timeout)
+
+    def logger_sink_disable(self, process: Any, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Выключить sink логгера процесса по имени (unregister_channel). См. :meth:`logger_sink_enable`."""
+        return self._sink_command(process, "logger.sink.disable", sink, timeout=timeout)
+
+    def _sink_command(
+        self,
+        process: Any,
+        command: str,
+        sink: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Общий путь sink-команд: батч по процессам либо прежний адресный вызов."""
+        if _is_process_batch(process):
+            return self.send_command_many(process, command, {"sink": sink}, timeout=timeout)
+        return _leaf_result(self.send_command(process, command, {"sink": sink}, timeout=timeout))
 
     # ---- Telemetry publish control plane (PC 3.2/3.3: адресно + fan-out на всех) ----
 
@@ -974,7 +1147,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         extra: Dict[str, Any] = {"expected": rule, "observed": observed_rule}
         if metric in unknown:
             extra["reason"] = (
-                f"метрика {metric!r} не входит в GATED_METRICS — вероятна опечатка "
+                f"метрика {metric!r} не входит в каталог метрик — вероятна опечатка "
                 f"(правило записано, но ничего не гейтит); известные имена — "
                 f"introspect_telemetry(process).gated_metrics"
             )
@@ -1308,6 +1481,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         process: str,
         *,
         subscriber: Optional[str] = None,
+        level: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Подписаться на live-хвост наблюдаемости процесса (логи+ошибки+статистика).
@@ -1328,12 +1502,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             process: имя процесса-источника (должен поддерживать observability-hub;
                 процесс без него вернёт ``success=False`` — честно, не бросок).
             subscriber: адрес получателя пушей (по умолчанию адрес driver'а).
+            level: порог tap'ов (Ф6.х.5; по умолчанию ERROR — прежнее поведение).
+                На здоровом стенде ERROR-записей нет: живой хвост открывает
+                ``level="INFO"``. stats-плоскость хвоста сегодня пуста
+                структурно (hub без владельцев-эмитентов) — решение Ф8.3.
             timeout: таймаут ожидания подтверждения подписки.
 
         Returns:
-            dict результата подписки (``success`` + детали процесса).
+            dict результата подписки (``success`` + ``taps``/``managers``/``min_level``).
         """
-        args = {"subscriber": subscriber or self._subscriber}
+        args: Dict[str, Any] = {"subscriber": subscriber or self._subscriber}
+        if level:
+            args["level"] = str(level).upper()
         res = _leaf_result(self.send_command(process, "observability.tail.subscribe", args, timeout=timeout))
         self._register_subscription("observability.tail.subscribe", process, args, res)
         return res
@@ -1356,6 +1536,54 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         identity = {"subscriber": subscriber or self._subscriber}
         res = _leaf_result(self.send_command(process, "observability.tail.unsubscribe", identity, timeout=timeout))
         self._subscriptions.remove("observability.tail.subscribe", process, identity)
+        return res
+
+    def observability_tail_all(
+        self,
+        *,
+        subscriber: Optional[str] = None,
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Подписаться на хвост наблюдаемости ВСЕХ процессов ОДНИМ вызовом (Task 5.11).
+
+        Намерение «хочу всё» записывается у оркестратора; он же разворачивает его в
+        ``observability.tail.subscribe`` на процессах и **сам переподписывает** свежие
+        инкарнации — у него единственного есть сигнал «поднялась новая». Записи при
+        этом идут адресным пушем НАПРЯМУЮ сюда: PM брокер, а не транзит.
+
+        Заменяет цикл ``_discover_processes`` → N × :meth:`observability_tail`, у
+        которого было два врождённых изъяна: N последовательных round-trip'ов на
+        старте и собственный контур переподписки, промахивавшийся мимо ручного
+        рестарта и switch (его триггером было supervisor-событие ``recovered``).
+
+        Durable-намерение регистрируется ОДНО (на PM), поэтому реконнект восстанавливает
+        подписку одним replay'ем вместо списка имён, который к тому моменту устаревал.
+
+        Returns:
+            Ответ брокера: ``success``, ``subscriber``, охват разворачивания.
+        """
+        args = {"subscriber": subscriber or self._subscriber}
+        res = _leaf_result(self.send_command(pm_name, "observability.tail.subscribe_all", args, timeout=timeout))
+        self._register_subscription("observability.tail.subscribe_all", pm_name, args, res)
+        return res
+
+    def observability_untail_all(
+        self,
+        *,
+        subscriber: Optional[str] = None,
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Снять намерение «хочу всё» и все развёрнутые из него хвосты (зеркало :meth:`observability_tail_all`).
+
+        Снимает намерение у брокера — тот сам рассылает ``unsubscribe`` процессам.
+        Durable-намерение вычищается здесь же, иначе реконнект воскресил бы снятую
+        подписку (ровно тот «полу-durable» класс, который ловили в F2).
+        """
+        identity = {"subscriber": subscriber or self._subscriber}
+        res = _leaf_result(self.send_command(pm_name, "observability.tail.unsubscribe_all", identity, timeout=timeout))
+        self._subscriptions.remove("observability.tail.subscribe_all", pm_name, identity)
         return res
 
     def observability_records(
@@ -1483,6 +1711,123 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         node = tree.get("subtree") or tree.get("value") or {}
         return sorted(node) if isinstance(node, dict) else []
 
+    def _expand_processes(
+        self,
+        spec: Any,
+        *,
+        timeout: Optional[float] = None,
+    ) -> tuple[List[str], List[str], List[str]]:
+        """Раскрыть адрес батча в имена по ЖИВОЙ топологии (Task 5.4).
+
+        Топология — каталог этой оси, и знает её драйвер; поэтому раскрытие живёт
+        здесь, а не в процессе (узор приёмников — наоборот, см. команду
+        ``observability.sink.*``: каждая ось раскрывается там, где лежит её каталог).
+
+        Returns:
+            ``(кого адресуем, имена вне топологии, вся топология)``. Второй элемент
+            не пустеет молча: имя из явного списка, которого в системе нет, —
+            названный промах, а не тихо выпавший элемент.
+        """
+        topology = self._discover_processes(timeout=timeout)
+        if isinstance(spec, (list, tuple, set)):
+            asked = [str(item).strip() for item in spec if str(item).strip()]
+            return ([n for n in asked if n in topology], [n for n in asked if n not in topology], topology)
+        text = str(spec if spec is not None else "all").strip()
+        if text in ("all", "*"):
+            return list(topology), [], topology
+        return [n for n in topology if fnmatch.fnmatchcase(n, text)], [], topology
+
+    def send_command_many(
+        self,
+        process: Any,
+        command: str,
+        data: Optional[Dict[str, Any]] = None,
+        *,
+        timeout: Optional[float] = None,
+        max_workers: int = 8,
+    ) -> Dict[str, Any]:
+        """Одна команда — M процессов, ответ **per-process** (Task 5.4).
+
+        Раздача живёт в драйвере, а не в оркестраторе, и это решено не вкусом.
+        Соседняя плоскость этот путь уже прошла: ``telemetry.broadcast`` раздаёт с PM
+        и per-child ответа не возвращает — *«сбор ответа ребёнка в PM дедлочил бы
+        message_processor»* (см. :meth:`telemetry_reconfigure`); брокер подписки 5.11
+        называет fire-and-forget **структурным** свойством своей раздачи. Приёмка 5.4
+        требует именно ответа от каждого — значит дом у неё здесь, где параллельный
+        сбор уже работает (:func:`overview.system_overview`) и где ничего не нужно
+        заводить заново.
+
+        ``process`` — ``"all"``/``"*"``, узор (``camera_*``), список имён или одно имя.
+        Одно точное имя батчем не становится: у него свой прямой путь.
+
+        Сбой одного процесса не роняет раздачу: исключение возвращается **значением**
+        (форма ``system_overview``) и попадает в ``failed``. Пустое раскрытие — отказ
+        с перечислением живой топологии: «раздал в никуда» не имеет права выглядеть
+        как «раздал».
+
+        Returns:
+            ``{success, batch, command, targets, processes: {имя: ответ}, failed,
+            not_ok, unknown, topology}``. ``failed`` — от кого ответа нет вовсе;
+            ``not_ok`` — кто ответил отказом. Это разные диагнозы, и слитые в один
+            список они лечились бы одинаково, а лечатся по-разному.
+        """
+        targets, unknown, topology = self._expand_processes(process, timeout=timeout)
+        out: Dict[str, Any] = {
+            "batch": True,
+            "command": command,
+            "targets": targets,
+            "unknown": unknown,
+            "topology": topology,
+        }
+        if not targets:
+            out.update(
+                success=False,
+                processes={},
+                failed=[],
+                not_ok=[],
+                error=(
+                    f"адрес {process!r} не поймал ни одного процесса; живая топология: {topology or '—'}"
+                    + (f"; вне топологии: {unknown}" if unknown else "")
+                ),
+            )
+            return out
+
+        def _one(name: str) -> Any:
+            """``(конверт, лист)`` либо исключение ЗНАЧЕНИЕМ (форма ``system_overview``)."""
+            try:
+                raw = self.send_command(name, command, data, timeout=timeout)
+                return raw, _leaf_result(raw)
+            except Exception as exc:  # noqa: BLE001 — больной процесс не роняет батч
+                return exc
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(targets)), thread_name_prefix="bctl-batch") as pool:
+            collected = dict(zip(targets, pool.map(_one, targets)))
+
+        processes: Dict[str, Any] = {}
+        failed: List[str] = []
+        not_ok: List[str] = []
+        for name in targets:
+            res = collected[name]
+            if isinstance(res, BaseException):
+                failed.append(name)
+                processes[name] = {"success": False, "error": f"{type(res).__name__}: {res}", "process": name}
+                continue
+            raw, leaf = res
+            processes[name] = leaf
+            # Успех читается тем же примитивом, что и у адресных обёрток: `success`
+            # живёт то в листе, то в конверте, и второе прочтение этого различия
+            # разошлось бы с первым (проверено тестом: лист без `success` при
+            # успешном конверте считался отказом).
+            if not _is_ok(raw, leaf):
+                not_ok.append(name)
+        out.update(
+            success=not failed and not unknown,
+            processes=processes,
+            failed=failed,
+            not_ok=not_ok,
+        )
+        return out
+
     # ---- Подписка на состояние (state.subscribe → событийный канал) ----
 
     def state_subscribe(
@@ -1560,8 +1905,3 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
     def resume_watch(self, manifest: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Восстановить watch-контур из манифеста после реконнекта (делегат)."""
         return self._watch.resume(manifest)
-
-    @property
-    def watch_resub_errors(self) -> int:
-        """Сколько авто-переподписок хвоста завершились ошибкой (диагностика, делегат)."""
-        return self._watch.resub_errors

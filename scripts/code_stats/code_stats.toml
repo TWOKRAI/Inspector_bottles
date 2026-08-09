@@ -8,12 +8,18 @@
 # CLI-аргументы перекрывают значения из этого файла.
 
 [scan]
-# Корень обхода. Относительный путь — от текущей рабочей директории.
-root = "."
+# Папки для анализа (можно несколько). Относительные пути — от текущей рабочей
+# директории. Перекрывается позиционными аргументами CLI:
+#   python scripts/code_stats/code_stats.py multiprocess_framework Services
+paths = ["."]
 # Рекурсивный обход подпапок.
 recursive = true
 # Следовать ли по симлинкам (false безопаснее: не зациклится).
 follow_symlinks = false
+# Считать только то, что знает git (tracked + untracked не-ignored).
+# true = честная оценка проекта: сгенерированные кэши (graphify-out, дампы,
+# датасеты) из .gitignore не попадают в цифры. false = весь диск как есть.
+git_tracked = true
 
 [formats]
 # Расширения, которые учитываем. Регистр не важен. Пустой список = все файлы.
@@ -51,6 +57,9 @@ comments = true
 docstrings = true
 # Считать ли символы (помимо строк). Незначительные накладные расходы.
 chars = true
+# Считать ли слова. Определение как у `wc -w`: последовательности непробельных
+# символов. Для .md это осмысленный объём текста, для .py — грубая мера.
+words = true
 # Кодировка для чтения. errors='replace' гарантирует, что бинарь-подобные файлы не уронят скрипт.
 encoding = "utf-8"
 
@@ -59,11 +68,16 @@ encoding = "utf-8"
 format = "table"
 # Группировка строк отчёта: extension | directory | none
 group_by = "extension"
-# Сортировка: lines | chars | files | name
+# Сортировка: lines | words | chars | files | dirs | name
 sort_by = "lines"
 # Порядок сортировки: desc | asc
 sort_order = "desc"
-# Показывать ли итоговую строку TOTAL.
+# Показывать ли итоговую строку TOTAL. TOTAL считается по ВСЕМ группам,
+# даже если вывод обрезан limit'ом.
 show_total = true
 # Максимум строк в выводе (0 = без ограничений). Удобно при group_by = "directory".
 limit = 0
+# Глубина группировки при group_by = "directory":
+#   0 — полный путь (multiprocess_framework/modules/logger_module/tests)
+#   1 — только зона верхнего уровня (multiprocess_framework)
+dir_depth = 0

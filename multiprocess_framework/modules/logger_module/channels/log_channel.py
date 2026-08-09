@@ -5,36 +5,146 @@
 Все каналы наследуют ILogChannel(IChannel) — совместимы с ChannelRoutingManager.
 """
 
+import gzip
 import logging
 import logging.handlers
 import os
+import re
+import shutil
 import threading
 import time
+from collections import deque
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     import requests
 except ImportError:
     requests = None
 
+from ..._fallback import emergency_log
 from ..interfaces import ILogChannel
 from ..configs.logger_manager_config import LoggerChannelSchema
 
-# Отдельный stdlib-логгер для сообщений О САМОМ логировании (сбой ротации).
-# НЕ маршрутизируется через LoggerManager/каналы — тот механизм и есть то,
-# что может быть сломано в этот момент (циклическая зависимость). Тот же
-# приём, что _fallback_logger в core/logger_core.py (LoggerCore._fallback_log).
-_fallback_logger = logging.getLogger(__name__)
+# Сообщения О САМОМ логировании (сбой ротации, ретеншена, занятой консоли) НЕ
+# маршрутизируются через LoggerManager/каналы — тот механизм и есть то, что
+# сломано в этот момент. Пишет их единственная аварийная функция
+# ``emergency_log`` (2.2); здесь остаётся только ИМЯ, и оно прежнее (``__name__``
+# этого модуля), чтобы записи не уехали под чужим именем.
+_EMERGENCY_NAME = __name__
+
+
+def _warn(message: str, *args: Any) -> None:
+    """Аварийное предупреждение канала: stdlib напрямую, никогда через менеджер."""
+    emergency_log(_EMERGENCY_NAME, "WARNING", message, *args)
 
 
 class LogChannel(ILogChannel):
-    """Базовый класс канала логирования (реализует ILogChannel → IChannel)."""
+    """Базовый класс канала логирования (реализует ILogChannel → IChannel).
+
+    **Лесенка перегрузки стока (Ф7.2).** Из четырёх ступеней Erlang-логгера
+    (async → sync → drop → flush) здесь живут две: **предел ожидания** и **дроп со
+    счётом**. Асинхронной ступени не существует — батчинг снят в Ф7.4, запись
+    синхронна всегда, и сбрасывать нечего.
+
+    Механизм пришёл не из книжки: он был написан для консоли (R2/R12) и там
+    проверен. Ф7.2 подняла его в базу, потому что после снятия батчинга опасность
+    перестала быть консольной — залипший ФАЙЛОВЫЙ сток точно так же блокирует
+    поток-эмитент, а буфера, который раньше это поглощал, больше нет.
+
+    Ступени:
+
+    1. **Ждать с пределом** (``write_deadline_sec``). Здоровая запись занимает
+       микросекунды и в предел не упирается; потери начинаются только на
+       реально застрявшем стоке.
+    2. **Бросить со статусом ``error``** (не ``skipped``: запись никуда не
+       попала, и floor ошибок обязан это узнать), счётчик растёт.
+    3. **Разомкнуть** после ``degrade_after`` отказов подряд: ждать по четверти
+       секунды на КАЖДОЙ записи — значит не висеть, но ползти, что на кадровом
+       логировании хуже честного отказа.
+    4. **Вернуться в строй бесплатно**: неблокирующая попытка в разомкнутом
+       состоянии и есть проба «сток ожил?». Отдельного таймера нет.
+
+    **Единица защиты — СТОК, а не канал (Ф7.х B-1, находка сквозного ревью).**
+    Первая редакция держала лок в экземпляре канала, и посылка спеки («каналы,
+    делящие файл, делят и лок») оказалась инвертированной: делят они ХЭНДЛЕР
+    (:func:`acquire_shared_rotating_handler`), а лок был у каждого свой. На боевой
+    раскладке (``messages_file`` + ``router_messages`` → один ``messages.log``)
+    залипший диск отнимал по потоку на КАЖДЫЙ канал: первый ждал предел и терял
+    запись, а второй входил в тот же ``stream.write`` без предела вообще — и его
+    счётчики стояли нулями в момент, когда поток уже был потерян. Вдобавок
+    ``handler.emit()`` зовётся мимо ``Handler.handle()``, то есть межканальной
+    сериализации на общем файле не было вовсе: два потока одновременно внутри
+    одного ``write``.
+
+    Поэтому лесенка берёт **свой лок стока** (:meth:`_bind_sink_lock`): у общего
+    rotating-хэндлера он один на путь и живёт вместе с хэндлером в реестре, —
+    общий сток ⇒ общий лок ⇒ и предел, и сериализация достаются всем каналам
+    стока разом. Это НЕ ``handler.lock``, и различие несущее (Ф7.х.2, блокер
+    ревью корзины): stdlib берёт собственный лок хэндлера **без предела** в
+    ``close()``, ``flush()`` и ``logging.shutdown()`` — раздели мы с ними один
+    объект, залипший сток вешал бы ``logger.sink.disable`` (команду, которой его
+    лечат), ``config.reload`` и выход из процесса. ``Handler.handle()`` не
+    зовётся по той же причине — он ждёт без предела; лок мы берём сами, с
+    дедлайном, и внутри него делаем ``emit()``. Лок реентрантен (``RLock``),
+    поэтому внутренний ``flush()`` из ``emit()`` не самоблокируется. Обратная
+    сторона реентрантности названа: она **потоковая, а не канальная** — поток,
+    уже держащий лок стока (например, ``emergency_log`` изнутри ``doRollover``),
+    пишет в любой канал того же стока мимо дедлайна. Это осознанная цена: такой
+    поток уже оплатил вход, второй предел не спас бы никого.
+
+    **Смысл ``write_deadline_sec`` после переезда лока:** предел теперь покрывает
+    ожидание за ВСЕМИ каналами файла, а не за одним, — здоровый, но медленный
+    сосед по стоку способен съесть дедлайн быстрого канала (новый класс потерь,
+    назван ревью корзины). Порог, выбранный «на канал», на общем файле читайте
+    как «на сток». Размыкатель при этом остаётся **per-канал** при локе
+    per-сток: каждый канал платит свои ``degrade_after × write_deadline_sec``,
+    прежде чем разомкнуться, — цена ограничена и сходится, но синхронного
+    «сток умер — разомкнулись все» здесь нет намеренно (возврат в строй тоже
+    per-канал, и чужие пробы друг друга не маскируют).
+
+    **Граница названа:** каналы на один путь с ``rotate: false`` получают по
+    своему ``FileHandler`` и, значит, по своему локу — их stdlib и так разводит
+    двумя fd. Две консоли на один stdout тоже не сериализуются между собой:
+    ``StreamHandler`` у каждой свой. Ни та, ни другая раскладка проектом не
+    производится, и ни одна не была тем случаем, который ревью воспроизвело.
+
+    **Чего это НЕ делает, и это надо знать честно:** поток, уже вошедший в
+    блокирующий ``write()`` внутри стока, остаётся заблокированным навсегда.
+    Ограничить его можно только отдельным потоком-писателем — размен отвергнут
+    сознательно: очередь writer'а умирает вместе с процессом, а лог нужен именно
+    в момент падения. Лесенка спасает ОСТАЛЬНЫХ — тех, кто иначе выстроится за
+    ним; системную цену затыка она снимает, свою жертву — нет.
+    """
 
     def __init__(self, config: LoggerChannelSchema):
         self.config = config
         self._name = config.name
         self._type = config.type
+
+        # Пороги — из схемы (операторские), с фолбэком на дефолты для чужих
+        # конфигов, собранных до Ф7.2.
+        self._write_deadline_sec = float(getattr(config, "write_deadline_sec", 0.25) or 0.0)
+        self._degrade_after = int(getattr(config, "degrade_after", 3) or 0)
+        self._slow_write_sec = float(getattr(config, "slow_write_sec", 0.05) or 0.0)
+
+        # Частный лок — для стоков, за которые не конкурируют (консоль, память,
+        # null, HTTP, файл с rotate:false — у каждого свой fd). Каналы ОБЩЕГО
+        # стока переводят лесенку на лок стока из реестра (``_bind_sink_lock``)
+        # сразу после его создания. ``RLock``, а не ``Lock``: лок стока
+        # реентрантен, и два разных типа лока под одним именем разъехались бы.
+        self._write_lock: Any = threading.RLock()
+        self._counter_lock = threading.Lock()
+        self.sink_writes_dropped = 0
+        self.sink_slow_writes = 0
+        self._consecutive_timeouts = 0
+        self._max_write_sec = 0.0
+        self._last_warning_ts = 0.0
+
+    #: Не чаще одного предупреждения за интервал: затык даёт отказ на КАЖДОЙ
+    #: записи, и нетроттлированная жалоба сама стала бы штормом.
+    _WARNING_INTERVAL_SEC = 60.0
 
     @property
     def name(self) -> str:
@@ -43,6 +153,113 @@ class LogChannel(ILogChannel):
     @property
     def channel_type(self) -> str:
         return self._type
+
+    def _bind_sink_lock(self) -> None:
+        """Перевести лесенку на лок СТОКА — зовётся после создания ``self.handler``.
+
+        Ключевое свойство: у общего rotating-хэндлера ``sink_lock`` один на всех
+        владельцев пути (кладётся реестром при создании хэндлера), поэтому предел
+        ожидания и сериализация записи достаются каналам стока разом (B-1).
+        Берётся именно ``sink_lock``, а НЕ ``handler.lock``: stdlib захватывает
+        свой лок без предела в ``close()``/``flush()``/``logging.shutdown()``,
+        и общий с ним объект превращал бы залипший сток в вечный захват для
+        операторских команд (Ф7.х.2). Канал без общего стока (консоль, память,
+        null, файл без ротации) остаётся на своём частном локе — конкурировать
+        там некому.
+        """
+        lock = getattr(getattr(self, "handler", None), "sink_lock", None)
+        if lock is not None:
+            self._write_lock = lock
+
+    @property
+    def sink_degraded(self) -> bool:
+        """Канал разомкнут: ожидание больше не оплачивается, записи отбрасываются сразу."""
+        return self._degrade_after > 0 and self._consecutive_timeouts >= self._degrade_after
+
+    def _guarded_write(self, emit: Any) -> Dict[str, Any]:
+        """Провести запись через лесенку: предел → дроп → размыкание → возврат.
+
+        Args:
+            emit: callable без аргументов, делающий саму запись. Он вызывается
+                ПОД локом канала; всё, что происходит внутри него, — уже за
+                пределом досягаемости дедлайна (см. оговорку в докстринге класса).
+        """
+        # Лок берётся в локальную переменную ОДИН раз: между acquire и release
+        # он обязан быть тем же объектом, а ``_write_lock`` — атрибут, который
+        # ``_bind_sink_lock`` подменяет.
+        lock = self._write_lock
+        if self.sink_degraded:
+            # Разомкнутый канал не ждёт вовсе: неблокирующая попытка здесь и есть
+            # проба «сток ожил?» — отдельный таймер перепроверки не нужен.
+            acquired = lock.acquire(blocking=False)
+        elif self._write_deadline_sec > 0:
+            acquired = lock.acquire(timeout=self._write_deadline_sec)
+        else:
+            acquired = lock.acquire(blocking=False)
+
+        if not acquired:
+            with self._counter_lock:
+                self.sink_writes_dropped += 1
+                self._consecutive_timeouts += 1
+                dropped = self.sink_writes_dropped
+            self._warn_sink_stuck(dropped)
+            return {
+                "status": "error",
+                "error": f"сток '{self._name}' занят: запись отброшена по пределу ожидания",
+                "channel": self._name,
+            }
+
+        started = time.monotonic()
+        try:
+            result = emit()
+        except Exception as e:  # noqa: BLE001 — отказ стока не роняет эмитента
+            return {"status": "error", "error": str(e), "channel": self._name}
+        finally:
+            elapsed = time.monotonic() - started
+            with self._counter_lock:
+                # Успешная запись обнуляет счёт отказов подряд — иначе размыкание
+                # было бы необратимым по построению, а не по состоянию стока.
+                self._consecutive_timeouts = 0
+                if elapsed > self._max_write_sec:
+                    self._max_write_sec = elapsed
+                if self._slow_write_sec > 0 and elapsed >= self._slow_write_sec:
+                    self.sink_slow_writes += 1
+            lock.release()
+        return result if isinstance(result, dict) else {"status": "success", "channel": self._name}
+
+    def _warn_sink_stuck(self, dropped: int) -> None:
+        """Троттлированное предупреждение о залипшем стоке."""
+        now = time.monotonic()
+        with self._counter_lock:
+            if now - self._last_warning_ts < self._WARNING_INTERVAL_SEC:
+                return
+            self._last_warning_ts = now
+        _warn(
+            "сток '%s' занят дольше %.2f с — записи отбрасываются (всего %d%s)",
+            self._name,
+            self._write_deadline_sec,
+            dropped,
+            "; канал РАЗОМКНУТ, ожидание больше не оплачивается" if self.sink_degraded else "",
+        )
+
+    def get_info(self) -> Dict[str, Any]:
+        """Состояние канала + показания лесенки (Ф7.2).
+
+        Здесь, а не у наследников: показания одинаковы у всех стоков, а копия у
+        каждого разошлась бы — этим уже били по проекту (защита в базе мертва у
+        наследника).
+        """
+        info = {"name": self.name, "active": True}
+        with self._counter_lock:
+            info.update(
+                {
+                    "sink_writes_dropped": self.sink_writes_dropped,
+                    "sink_slow_writes": self.sink_slow_writes,
+                    "sink_degraded": self.sink_degraded,
+                    "max_write_sec": round(self._max_write_sec, 4),
+                }
+            )
+        return info
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
         raise NotImplementedError
@@ -104,7 +321,7 @@ class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
             size_str = f"{size_bytes / (1024 * 1024):.1f} МБ"
         except OSError:
             size_str = "неизвестен"
-        _fallback_logger.warning(
+        _warn(
             "Ротация лог-файла '%s' не удалась %d раз(а) подряд (PermissionError — файл "
             "занят другим процессом): лимит max_size НЕ соблюдается, файл растёт "
             "неограниченно (текущий размер: %s)",
@@ -164,7 +381,7 @@ def acquire_shared_rotating_handler(
         handler = _shared_handlers.get(key)
         if handler is not None:
             if handler.maxBytes != max_bytes or handler.backupCount != backup_count:
-                _fallback_logger.warning(
+                _warn(
                     "Канал открывает уже используемый лог-файл '%s' с другими параметрами "
                     "ротации (max_size %d против %d, backup %d против %d): применяются "
                     "параметры первого зарегистрировавшего канала.",
@@ -182,6 +399,12 @@ def acquire_shared_rotating_handler(
             backupCount=backup_count,
             encoding="utf-8",
         )
+        # Лок СТОКА (Ф7.х B-1 → Ф7.х.2): один на путь, живёт и умирает вместе с
+        # хэндлером. Отдельный от ``handler.lock`` намеренно — stdlib берёт свой
+        # без предела в ``close()``/``flush()``/``shutdown()``, и наш дедлайн не
+        # имеет права стоять у этих путей на дороге (иначе залипший сток вешает
+        # ``logger.sink.disable`` — команду, которой его лечат).
+        handler.sink_lock = threading.RLock()
         _shared_handlers[key] = handler
         _shared_handler_refs[key] = 1
         return handler, True
@@ -226,6 +449,375 @@ def _reset_shared_handler_registry() -> None:
         _shared_handler_refs.clear()
 
 
+# =============================================================================
+# Ретеншен каталога логов (Ф0.7)
+# =============================================================================
+#
+# Ротация ограничивает КАЖДЫЙ файл (max_size × backup_count), но не ограничивает
+# ЧИСЛО файлов. Живой замер 2026-07-26: ``logs/`` = 730 файлов / 291 МБ,
+# старейший от 2026-05-05 (82 дня, ни одного удаления), ~700 различных
+# ``.log``-баз. При исправно работающей ротации теоретический потолок — 41 ГБ.
+# Потолок стоял не там, где происходил рост.
+#
+# Ретеншен закрывает именно рост: удаление по возрасту, потолок на суммарный
+# вес каталога и компрессия ротированных бэкапов. ОБЕ политики выключены по
+# умолчанию — механизм, который сам решает что удалить, не имеет права
+# включаться молча.
+
+#: Имена файлов, которые sweep не трогает НИКОГДА, каким бы старым файл ни был.
+#: ``errors_floor.jsonl`` (Ф0.9) — последнее свидетельство о падении процесса;
+#: политика дискового места не должна отменять политику сохранности улик.
+PROTECTED_BASENAMES = frozenset({"errors_floor.jsonl"})
+
+#: Что считается ротированным бэкапом: ``foo.log.1``, ``foo.log.12``.
+#: Активный ``foo.log`` под шаблон НЕ попадает — сжимать файл, в который прямо
+#: сейчас пишет открытый хэндлер, нельзя.
+_ROTATED_BACKUP_RE = re.compile(r"\.log\.\d+$")
+
+_MB = 1024 * 1024
+_SEC_PER_DAY = 86400.0
+
+# «Сказали один раз на файл»: неудаляемый файл (на Windows — занятый другим
+# процессом) встречается на КАЖДОМ проходе sweep. Без памяти о сказанном
+# предупреждение превратилось бы в периодический шум ровно того рода, которым
+# логи и переполняются. Учёт при этом не глушится — счётчик растёт всегда.
+_retention_warn_lock = threading.Lock()
+_retention_warned_paths: set = set()
+#: Потолок множества «кому уже сказали»: оно не должно само стать утечкой.
+#: По достижении — предупреждения прекращаются (счётчик продолжает расти).
+_RETENTION_WARNED_LIMIT = 512
+
+
+def _reset_retention_warnings() -> None:
+    """Забыть, о каких файлах уже предупреждали (тест-хелпер)."""
+    with _retention_warn_lock:
+        _retention_warned_paths.clear()
+
+
+def _warn_retention_failure(path: Any, action: str, exc: BaseException) -> None:
+    """Предупредить о сбое sweep — не более одного раза на файл за жизнь процесса."""
+    key = _handler_key(path)
+    with _retention_warn_lock:
+        if key in _retention_warned_paths or len(_retention_warned_paths) >= _RETENTION_WARNED_LIMIT:
+            return
+        _retention_warned_paths.add(key)
+    _warn(
+        "Ретеншен логов: не удалось %s '%s' (%s: %s). Файл остаётся на диске, "
+        "место не освобождено; повторные отказы по этому же файлу не сообщаются.",
+        action,
+        path,
+        type(exc).__name__,
+        exc,
+    )
+
+
+def _new_retention_result() -> Dict[str, int]:
+    return {
+        "deleted": 0,
+        "compressed": 0,
+        "delete_failures": 0,
+        "compress_failures": 0,
+        "bytes_freed": 0,
+    }
+
+
+def _remove_file(path: Path, result: Dict[str, int]) -> bool:
+    """Удалить файл; вернуть True, если после вызова его на диске нет.
+
+    Отказ учитывается по ФАКТУ («файл на месте»), а не по типу исключения.
+    Причина конкретная: при гонке двух подметальщиков за один файл Windows
+    отдаёт проигравшему не ``FileNotFoundError``, а ``PermissionError``
+    (WinError 5) — удаление уже идёт. Разбор по типу исключения давал бы
+    ненулевой счётчик отказов на исправно работающей системе, то есть ровно
+    ту ложную тревогу, ради борьбы с которой счётчик и заводился.
+    """
+    try:
+        os.remove(path)
+        return True
+    except FileNotFoundError:
+        # Кто-то удалил раньше — это результат, которого мы добивались.
+        return True
+    except OSError as exc:
+        # ``os.path.exists`` (а НЕ ``Path.exists``) намеренно: на Windows файл в
+        # состоянии delete-pending даёт PermissionError уже на stat, и
+        # ``Path.exists`` это исключение пробрасывает. Трактовать его как «файл
+        # на месте» значило бы записать в отказы ровно ту гонку, которая на
+        # самом деле закончилась удалением. ``os.path.exists`` глотает любой
+        # OSError и отвечает False — то есть «дотянуться нельзя», что для
+        # нашего вопроса («осталось ли что удалять») и есть правильный ответ.
+        if not os.path.exists(path):
+            return True
+        result["delete_failures"] += 1
+        _warn_retention_failure(path, "удалить", exc)
+        return False
+
+
+def _compress_backup(path: Path, result: Dict[str, int], mtime: float) -> bool:
+    """Сжать ротированный бэкап в ``<имя>.gz`` и удалить исходник.
+
+    Инвариант: на диске остаётся РОВНО ОДНА копия. Оборвавшаяся компрессия
+    убирает недописанный ``.gz`` (неполный архив хуже отсутствующего), а
+    неудачное удаление исходника откатывает уже созданный ``.gz`` — иначе
+    каталог получил бы обе копии и вырос вместо того, чтобы уменьшиться.
+
+    Возраст переносится на архив (``os.utime``). Без этого компрессия обнуляла
+    бы возраст: свежесозданный ``.gz`` выглядел бы для политики
+    ``retention_days`` минутным, и достаточно старый бэкап не удалялся бы
+    НИКОГДА — две политики работали бы друг против друга.
+    """
+    gz_path = Path(str(path) + ".gz")
+    try:
+        with open(path, "rb") as src, gzip.open(gz_path, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    except OSError as exc:
+        result["compress_failures"] += 1
+        _warn_retention_failure(path, "сжать", exc)
+        try:
+            os.remove(gz_path)
+        except OSError:  # nosec B110 — уборка недописанного архива best-effort
+            pass
+        return False
+
+    if not _remove_file(path, result):
+        # Исходник занят (WinError 32): откатываем архив, иначе двойной вес.
+        try:
+            os.remove(gz_path)
+        except OSError:  # nosec B110 — откат best-effort
+            pass
+        return False
+
+    try:
+        os.utime(gz_path, (mtime, mtime))
+    except OSError:  # nosec B110 — перенос возраста best-effort, архив уже валиден
+        pass
+    result["compressed"] += 1
+    return True
+
+
+def _scan_directory(root: Path, protected: set) -> Tuple[List[List[Any]], int]:
+    """Собрать кандидатов sweep и суммарный вес каталога.
+
+    Returns:
+        (entries, total_bytes) — ``entries`` это ``[path, mtime, size]`` только
+        для файлов, которые МОЖНО трогать; ``total_bytes`` считает и защищённые
+        тоже: место на диске они занимают наравне со всеми, и потолок каталога,
+        который их «не видит», был бы потолком не на то.
+    """
+    entries: List[List[Any]] = []
+    total = 0
+    for path in root.rglob("*"):
+        try:
+            if not path.is_file():
+                continue
+            stat = path.stat()
+        except OSError:
+            # Файл исчез между listdir и stat (сосед отротировал) — пропускаем.
+            continue
+        total += stat.st_size
+        if path.name in PROTECTED_BASENAMES or _handler_key(path) in protected:
+            continue
+        entries.append([path, stat.st_mtime, stat.st_size])
+    return entries, total
+
+
+def enforce_log_retention(
+    directory: Any,
+    *,
+    retention_days: int = 0,
+    retention_total_mb: int = 0,
+    compress_rotated: bool = False,
+    active_files: Iterable[Any] = (),
+) -> Dict[str, int]:
+    """Применить политики ретеншена к каталогу логов (рекурсивно).
+
+    Порядок шагов не произволен: сперва возраст (не тратить CPU на компрессию
+    того, что сейчас удалим), затем компрессия (освобождает место и может
+    увести каталог под потолок сама), затем потолок (добирает остаток
+    удалением старейших).
+
+    Args:
+        directory: корень каталога логов; обходится рекурсивно (``trace/`` и
+            прочие подпапки — часть того же хозяйства).
+        retention_days: удалять файлы старше N суток по mtime. 0 — выключено.
+        retention_total_mb: потолок суммарного веса каталога, МБ; при
+            превышении удаляются старейшие, пока каталог не уйдёт под потолок.
+            0 — выключено.
+        compress_rotated: сжимать ротированные бэкапы (``foo.log.1`` →
+            ``foo.log.1.gz``). Уже сжатые ``.gz`` — обычные файлы для политик
+            возраста и потолка, иммунитета у них нет.
+        active_files: пути, в которые прямо сейчас пишут открытые каналы. Не
+            удаляются и не сжимаются ни при каких условиях — удалить файл под
+            работающим хэндлером значит потерять поток записей молча.
+
+    Returns:
+        Счётчики прохода: ``deleted``, ``compressed``, ``delete_failures``,
+        ``compress_failures``, ``bytes_freed``.
+
+    Note:
+        Каждый менеджер метёт СВОЙ подкаталог (``logs/<процесс>/``), поэтому в
+        штатной раскладке он не пересекается с чужими активными файлами.
+
+        Прежняя формулировка здесь гласила «удалить активный файл соседнего
+        процесса структурно невозможно» — это НЕВЕРНО, и ревью фазы это
+        воспроизвело. Структурной защиты нет: есть список СВОИХ открытых файлов
+        (``active_files``) плюс блокировка файловой системы. Второй менеджер,
+        нацеленный на тот же каталог, активный файл первого удалить ПЫТАЕТСЯ —
+        на Windows это даёт ``delete_failures=1`` и файл выживает по WinError 32,
+        **на POSIX он был бы удалён**. Менеджер без ``process`` метёт корень
+        рекурсивно, включая каталоги чужих процессов. В проде менеджеры
+        получают ``process`` (``process_managers.py``), поэтому это край, а не
+        рабочий режим — но называть случайность блокировки ФС гарантией нельзя.
+
+        Обратная сторона разводки по подкаталогам: каталоги давно умерших
+        процессов не метёт никто — это разовая уборка, а не рост, и она вне
+        объёма Ф0.7.
+    """
+    result = _new_retention_result()
+    if retention_days <= 0 and retention_total_mb <= 0 and not compress_rotated:
+        # Обе политики выключены — sweep обязан быть НИЧЕМ, а не «почти ничем»:
+        # выход до обхода каталога, ни одного stat.
+        return result
+
+    root = Path(directory)
+    if not root.is_dir():
+        return result
+
+    protected = {_handler_key(p) for p in active_files}
+    entries, total = _scan_directory(root, protected)
+
+    # 1. Возраст.
+    if retention_days > 0:
+        cutoff = time.time() - retention_days * _SEC_PER_DAY
+        survivors: List[List[Any]] = []
+        for entry in entries:
+            path, mtime, size = entry
+            if mtime < cutoff and _remove_file(path, result):
+                result["deleted"] += 1
+                result["bytes_freed"] += size
+                total -= size
+                continue
+            survivors.append(entry)
+        entries = survivors
+
+    # 2. Компрессия ротированных бэкапов.
+    if compress_rotated:
+        for entry in entries:
+            path, mtime, size = entry
+            if not _ROTATED_BACKUP_RE.search(path.name):
+                continue
+            if not _compress_backup(path, result, mtime):
+                continue
+            gz_path = Path(str(path) + ".gz")
+            try:
+                new_size = gz_path.stat().st_size
+            except OSError:
+                new_size = 0
+            total -= size - new_size
+            entry[0] = gz_path
+            entry[2] = new_size
+
+    # 3. Потолок каталога — старейшие уходят первыми.
+    if retention_total_mb > 0:
+        cap = retention_total_mb * _MB
+        if total > cap:
+            for entry in sorted(entries, key=lambda e: e[1]):
+                if total <= cap:
+                    break
+                path, _mtime, size = entry
+                if _remove_file(path, result):
+                    result["deleted"] += 1
+                    result["bytes_freed"] += size
+                    total -= size
+
+    return result
+
+
+#: Пломба (2.V1) в файловой строке: префикс ``#<seq> `` в самом начале.
+#:
+#: Префиксом, а не суффиксом: у записи с traceback'ом суффикс уехал бы на
+#: последнюю строку блока, и «одна строка — одна запись» перестало бы держаться.
+#: В начале строки он однозначен — продолжения traceback'а начинаются с пробела
+#: или со слова, но не с ``#<цифры> ``.
+SEAL_LINE_RE = r"^#(\d+) "
+
+#: Запись без пломбы (создана мимо ``LoggerCore.log``) помечается явно, а не
+#: пишется без префикса: «пломбы нет» обязано отличаться от «строка не разобрана».
+SEAL_ABSENT = "#- "
+
+
+@lru_cache(maxsize=512)
+def abbreviate_source(name: str, limit: int) -> str:
+    """Сжать иерархическое имя источника под потолок — правило ``%logger{N}`` logback.
+
+    Ведущие сегменты сжимаются до первой буквы слева направо, пока имя не влезет;
+    **последний сегмент не трогается никогда** — он и несёт смысл
+    (``multiprocess_framework.modules.dispatch_module`` → ``m.m.dispatch_module``).
+
+    Односегментное имя возвращается как есть, даже если длиннее потолка: сжать
+    ``command_manager`` до ``c`` значило бы уничтожить его, а не сократить.
+
+    Кэш обязателен, а не «для скорости»: функция стоит на пути КАЖДОЙ записи, а
+    различных имён в процессе — десятки. Потолок 512 с запасом покрывает и
+    мигрированные ``__name__`` (116 файлов после Ф6), и имена процессов.
+    """
+    if limit <= 0 or len(name) <= limit:
+        return name
+    parts = name.split(".")
+    if len(parts) == 1:
+        return name
+    for index in range(len(parts) - 1):
+        parts[index] = parts[index][:1]
+        candidate = ".".join(parts)
+        if len(candidate) <= limit:
+            return candidate
+    return ".".join(parts)
+
+
+class _SourceAbbreviatingFormatter(logging.Formatter):
+    """Общий предок форматтеров: печатает имя источника в сокращённом виде.
+
+    Сокращение живёт ЗДЕСЬ, а не в ``LoggerCore``, намеренно: полное имя обязано
+    доехать до правил маршрутизации и до пульта в целости, укорачивается только
+    ТО, ЧТО ВИДИТ ГЛАЗ. Сделай наоборот — и префиксный резолв начнёт получать
+    ``m.m.dispatch_module``, то есть правило, написанное по-человечески, молча
+    перестанет совпадать.
+
+    Запись мутируется на месте: ``LogRecord`` создаётся заново на каждый
+    ``write()`` и уходит ровно в один хэндлер — общих владельцев у неё нет.
+
+    **Ловушка, названная вслух:** у общего ротатора (несколько каналов на один
+    путь) форматтер выставляет ТОЛЬКО первый владелец пути. Значит два канала на
+    один файл с разным ``name_max_len`` дадут вид, заданный тем, кто успел
+    раньше. Это не новая беда — так же ведёт себя и ``format``, — но теперь у неё
+    появился второй повод, и молчать о нём нельзя.
+    """
+
+    def __init__(self, fmt: Optional[str] = None, name_max_len: int = 0):
+        super().__init__(fmt)
+        self._name_max_len = int(name_max_len or 0)
+
+    def format(self, record: logging.LogRecord) -> str:
+        if self._name_max_len > 0:
+            record.name = abbreviate_source(record.name, self._name_max_len)
+        return super().format(record)
+
+
+class SealFormatter(_SourceAbbreviatingFormatter):
+    """Формат канала + пломба, которую строка формата отменить не может.
+
+    Пломба не поле ``%(seq)s`` намеренно. Формат канала операбелен из конфига и
+    сохраняется в рецептах; поле в нём означало бы, что достаточно сохранить
+    рецепт со старым форматом — и проверяющий 2.V1 молча ослепнет на этом
+    канале, не сказав ни слова. Здесь префикс ставится ПОСЛЕ форматирования и
+    от ``config.format`` не зависит вовсе.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        seq = getattr(record, "seq", None)
+        prefix = f"#{seq} " if seq else SEAL_ABSENT
+        return prefix + super().format(record)
+
+
 class FileChannel(LogChannel):
     """Канал записи в файл"""
 
@@ -234,7 +826,7 @@ class FileChannel(LogChannel):
         self.file_path = Path(config.file_path or f"logs/{config.name}.log")
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        formatter = logging.Formatter(config.format)
+        formatter = SealFormatter(config.format, name_max_len=getattr(config, "name_max_len", 0))
         if getattr(config, "rotate", True):
             # Общий хэндлер на путь: несколько каналов на один файл делят один
             # ротатор (иначе конкуренция fd ломает ротацию на Windows — см. реестр
@@ -251,26 +843,45 @@ class FileChannel(LogChannel):
             self.handler = logging.FileHandler(self.file_path, encoding="utf-8", mode="a")
             self._shared_handler = False
             self.handler.setFormatter(formatter)
+        # B-1: лесенка переезжает на лок СТОКА (лежит рядом с общим ротатором,
+        # один на путь) — значит предел ожидания и сериализация записи достаются
+        # всем каналам файла, а не первому вошедшему. При rotate:false хэндлер
+        # частный (свой fd), sink_lock'а у него нет — остаётся лок канала.
+        self._bind_sink_lock()
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            log_record = logging.LogRecord(
-                name=record["module"],
-                level=getattr(logging, record["level"]),
-                pathname="",
-                lineno=0,
-                msg=record["message"],
-                args=(),
-                exc_info=None,
-            )
-            log_record.created = record["timestamp"]
-            extra = record.get("extra") or {}
-            log_record.proc_name = extra.get("proc_name") or "-"
+        """Записать в файл через лесенку перегрузки (Ф7.2).
 
-            self.handler.emit(log_record)
-            return {"status": "success", "channel": self.name}
-        except Exception as e:
-            return {"status": "error", "error": str(e), "channel": self.name}
+        До Ф7.2 предела здесь не было вовсе: залипший диск (сетевая шара,
+        переполненный том, чужой процесс с локом общего ротатора) держал поток
+        столько, сколько понадобится. Пока запись была батчевой, затык поглощал
+        буфер; после Ф7.4 он блокирует поток-эмитент — то есть кадровый конвейер.
+        """
+
+        def _emit() -> Dict[str, Any]:
+            try:
+                log_record = logging.LogRecord(
+                    name=record["module"],
+                    level=getattr(logging, record["level"]),
+                    pathname="",
+                    lineno=0,
+                    msg=record["message"],
+                    args=(),
+                    exc_info=None,
+                )
+                log_record.created = record["timestamp"]
+                extra = record.get("extra") or {}
+                log_record.proc_name = extra.get("proc_name") or "-"
+                # Пломба (2.V1). Переносится здесь, а не внутри SealFormatter:
+                # форматтер видит только stdlib-запись, наш словарь до него не доходит.
+                log_record.seq = record.get("seq") or 0
+
+                self.handler.emit(log_record)
+                return {"status": "success", "channel": self.name}
+            except Exception as e:
+                return {"status": "error", "error": str(e), "channel": self.name}
+
+        return self._guarded_write(_emit)
 
     def close(self):
         """Закрывает файловый канал.
@@ -289,33 +900,71 @@ class FileChannel(LogChannel):
 
 
 class ConsoleChannel(LogChannel):
-    """Канал записи в консоль"""
+    """Канал записи в консоль — на общей лесенке перегрузки стока (R2/R12 → Ф7.2).
+
+    Механизм (предел ожидания → дроп → размыкание → бесплатный возврат) написан
+    здесь и здесь же проверен; Ф7.2 подняла его в :class:`LogChannel`, потому что
+    после снятия батчинга (Ф7.4) та же опасность появилась у файлового стока.
+    Здесь остаётся только то, что действительно про консоль: перенаправленный в
+    непрочитанную трубу stdout виснет НАВСЕГДА, и текст предупреждения обязан
+    называть именно эту причину — оператор ищет её первой.
+
+    Пороги берутся из схемы канала (``write_deadline_sec`` / ``degrade_after`` /
+    ``slow_write_sec``); прежние константы класса были неоперабельны.
+    """
 
     def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
         self.handler = logging.StreamHandler()
-        formatter = logging.Formatter(config.format)
+        formatter = _SourceAbbreviatingFormatter(config.format, name_max_len=getattr(config, "name_max_len", 0))
         self.handler.setFormatter(formatter)
+        # ``_bind_sink_lock`` НЕ зовётся (Ф7.х.2): StreamHandler у каждой консоли
+        # свой, конкурировать за него некому, а привязка к ``handler.lock``
+        # заставила бы ``logging.shutdown()`` ждать за нашим дедлайном.
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            log_record = logging.LogRecord(
-                name=record["module"],
-                level=getattr(logging, record["level"]),
-                pathname="",
-                lineno=0,
-                msg=record["message"],
-                args=(),
-                exc_info=None,
-            )
-            log_record.created = record["timestamp"]
-            extra = record.get("extra") or {}
-            log_record.proc_name = extra.get("proc_name") or "-"
+        def _emit() -> Dict[str, Any]:
+            try:
+                log_record = logging.LogRecord(
+                    name=record["module"],
+                    level=getattr(logging, record["level"]),
+                    pathname="",
+                    lineno=0,
+                    msg=record["message"],
+                    args=(),
+                    exc_info=None,
+                )
+                log_record.created = record["timestamp"]
+                extra = record.get("extra") or {}
+                log_record.proc_name = extra.get("proc_name") or "-"
 
-            self.handler.emit(log_record)
-            return {"status": "success", "channel": self.name}
-        except Exception as e:
-            return {"status": "error", "error": str(e), "channel": self.name}
+                self.handler.emit(log_record)
+                return {"status": "success", "channel": self.name}
+            except Exception as e:
+                return {"status": "error", "error": str(e), "channel": self.name}
+
+        return self._guarded_write(_emit)
+
+    def _warn_sink_stuck(self, dropped: int) -> None:
+        """Своя формулировка: у консоли причина затыка почти всегда одна.
+
+        Уходит через fallback-логгер (stdlib), а не через собственную
+        маршрутизацию: сообщение о том, что консоль не принимает записи, не имеет
+        права идти в консоль тем же путём, который сейчас затык.
+        """
+        now = time.monotonic()
+        with self._counter_lock:
+            if now - self._last_warning_ts < self._WARNING_INTERVAL_SEC:
+                return
+            self._last_warning_ts = now
+        _warn(
+            "Консольный канал '%s' не освободился за %.2f с — запись отброшена "
+            "(всего отброшено: %d). Похоже, поток вывода перенаправлен туда, где его "
+            "никто не читает: записи в консоль теряются, файловые каналы не затронуты.",
+            self.name,
+            self._write_deadline_sec,
+            dropped,
+        )
 
     def close(self):
         """Закрывает консольный канал"""
@@ -409,6 +1058,252 @@ class FrameTraceChannel(LogChannel):
                 self._fh = None
 
 
+class _MemoryRing:
+    """Кольцо записей с историей счётчиков. Переживает канал, который его открыл.
+
+    Отдельный объект, а не поля канала: канал — вещь короткоживущая (пересоздаётся
+    на каждом ``reconfigure`` и на каждом ``sink.enable``), а улики обязаны жить
+    дольше. Лок держит СНИМОК согласованным — ``snapshot()`` отдаёт size, written
+    и evicted одним куском, а не тремя моментами времени.
+    """
+
+    __slots__ = ("_capacity", "_records", "_lock", "written", "evicted")
+
+    def __init__(self, capacity: int) -> None:
+        self._capacity = capacity
+        self._records: "deque[Dict[str, Any]]" = deque(maxlen=capacity)
+        self._lock = threading.Lock()
+        self.written = 0
+        self.evicted = 0
+
+    def resize(self, capacity: int) -> None:
+        """Сменить ёмкость, сохранив хвост. Счётчики — история, они не сбрасываются."""
+        if capacity == self._capacity:
+            return
+        with self._lock:
+            kept = list(self._records)[-capacity:]
+            # Урезание — это вытеснение по воле оператора, и оно считается так же.
+            self.evicted += max(0, len(self._records) - len(kept))
+            self._capacity = capacity
+            self._records = deque(kept, maxlen=capacity)
+
+    def append(self, record: Dict[str, Any]) -> None:
+        with self._lock:
+            if len(self._records) == self._capacity:
+                self.evicted += 1
+            # Мелкая копия верхнего уровня: словарь записи после write никем не
+            # переиспользуется, но кольцо переживает вызывающего, и разделять с
+            # ним изменяемый объект незачем. Вложенное (``extra``) остаётся общим.
+            self._records.append(dict(record))
+            self.written += 1
+
+    def tail(self, limit: Any = None) -> List[Dict[str, Any]]:
+        with self._lock:
+            items = list(self._records)
+        if limit is not None:
+            count = int(limit)
+            if count <= 0:
+                return []
+            items = items[-count:]
+        return [dict(item) for item in items]
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "capacity": self._capacity,
+                "size": len(self._records),
+                "written": self.written,
+                "evicted": self.evicted,
+            }
+
+
+#: Процессный реестр колец: (владелец, имя канала) → кольцо. Тот же приём, что у
+#: общего rotating-хэндлера по пути файла, и по той же причине: время жизни
+#: ресурса не совпадает со временем жизни канала-владельца.
+#:
+#: **Владелец — ЭКЗЕМПЛЯР менеджера, а не его имя.** Ключ по имени казался
+#: достаточным (в процессе один ``LoggerManager``), и сразу же дал протечку между
+#: соседями: два теста, поднявшие свои менеджеры с каналом ``mem``, разделили одно
+#: кольцо — ``written`` пришёл 10 вместо 4. В проде это край, но кольцо обязано
+#: переживать КАНАЛ, а не менеджера: умер менеджер — умерли и его улики.
+_memory_rings: Dict[Tuple[str, str], _MemoryRing] = {}
+_memory_rings_lock = threading.RLock()
+
+
+def acquire_memory_ring(owner: Any, name: Any, capacity: int) -> _MemoryRing:
+    """Вернуть кольцо канала, создав при первом обращении.
+
+    Ключ парный: у процесса две плоскости-брата, и одноимённые каналы логгера и
+    ошибок обязаны остаться разными кольцами. Смена ёмкости в конфиге применяется
+    к существующему кольцу с сохранением хвоста — reload параметра не должен
+    стирать историю.
+
+    **Без владельца кольцо ЧАСТНОЕ, а не общее.** Канал, созданный напрямую
+    (мимо менеджера, как в тестах), делить своё кольцо не с кем — «ничей»
+    означает «мой», а не «общий для всех ничейных». Прежняя редакция сводила их
+    всех в ключ ``("", name)``, и два независимых канала с именем ``mem``
+    оказывались одним кольцом.
+    """
+    if not owner:
+        return _MemoryRing(capacity)
+    key = (str(owner), str(name or ""))
+    with _memory_rings_lock:
+        ring = _memory_rings.get(key)
+        if ring is None:
+            ring = _memory_rings[key] = _MemoryRing(capacity)
+        else:
+            ring.resize(capacity)
+        return ring
+
+
+def drop_memory_rings(owner: Any) -> int:
+    """Забыть все кольца владельца. Возвращает число выброшенных.
+
+    Зовётся из ``shutdown`` менеджера: реестр процессный, и без этого кольца
+    умерших менеджеров жили бы до конца процесса. Не из ``close()`` канала —
+    именно там прежняя редакция и теряла улики на каждом ``config.reload``.
+    """
+    prefix = str(owner or "")
+    with _memory_rings_lock:
+        keys = [key for key in _memory_rings if key[0] == prefix]
+        for key in keys:
+            del _memory_rings[key]
+        return len(keys)
+
+
+class MemoryChannel(LogChannel):
+    """Кольцо записей в памяти процесса, читаемое по запросу (2.9).
+
+    Приёмник для логов, которые нужны «если что» — при разборе инцидента через
+    ``backend_ctl``, — но не стоят файла на диске. Записи копятся в кольце
+    фиксированной ёмкости и отдаются командой ``logger.sink.tail``.
+
+    **Чем это НЕ является.** Рядом живут три похожих механизма, и путать их
+    дорого:
+
+    - ``ObservabilityHub`` / ``BoundedChannel`` — кольцо **транзитное**: владелец
+      дренирует его по heartbeat, к моменту запроса оно обычно пусто. И стоит
+      оно ВЫШЕ логгера, а не приёмником в нём;
+    - живой хвост ``backend_ctl`` (``log.tail.subscribe``) — **подписка** (push):
+      кто не подписался заранее, тот прошлое не увидит;
+    - ``ObservabilityStore`` — SQLite на **диске**.
+
+    Это кольцо — единственное место, где последние N записей лежат В ПАМЯТИ
+    процесса и достаются **ретроспективно**, без подписки и без диска.
+
+    **Ёмкость считает ЗАПИСИ, а не байты**, и это единственная граница. Запись
+    держит ссылку на свой ``extra``, а туда кладут что угодно — при большом
+    ``capacity`` кольцо способно удерживать в живых объекты, которые иначе
+    собрал бы GC. Дефолт поэтому скромный (:attr:`DEFAULT_CAPACITY`), а не
+    «побольше на всякий случай».
+
+    **Вытеснение старого — контракт кольца, а не потеря.** ``evicted`` живёт в
+    ``get_info`` и НЕ входит в ``LOSS_COUNTER_KEYS``: оператор, задавший
+    ёмкость N, ровно это и заказал. Потерей была бы запись, не дошедшая до
+    приёмника, — она считается там же, где и всегда.
+
+    **Кольцо переживает пересоздание канала** — оно живёт в процессном реестре
+    :data:`_memory_rings`, а не в объекте канала (находка ревью 2.9,
+    воспроизведена). Иначе фича теряется ровно в том сценарии, ради которого
+    вводилась: оператор разбирает инцидент, трогает наблюдаемость
+    (``config.reload``, ``sink.disable``/``enable``) — и улики исчезают. Это тот
+    же класс «7 → disable → 0», который уже стоил проекту отдельной починки
+    счётчиков; приём взят у соседа — общего rotating-хэндлера по пути файла.
+
+    Ключ реестра — ``(владелец, имя канала)``. Не одно имя: у процесса ДВЕ
+    плоскости-брата, и канал ``ring`` у логгера с ``ring`` у ошибок — разные
+    кольца. Владельца проставляет менеджер при создании канала.
+    """
+
+    #: Скромно намеренно: см. оговорку про ``extra`` в докстринге класса.
+    DEFAULT_CAPACITY = 500
+
+    def __init__(self, config: LoggerChannelSchema):
+        super().__init__(config)
+        capacity = config.capacity if config.capacity is not None else self.DEFAULT_CAPACITY
+        if capacity < 1:
+            # Не «молча выключить» и не «подставить дефолт»: и то, и другое
+            # превращает опечатку в конфиге в тихо пропавший лог. Исключение
+            # ловит _setup_channel → канал не создаётся → записи к нему уходят
+            # в unresolved_channel_records, то есть отказ виден счётчиком.
+            raise ValueError(f"capacity должна быть ≥ 1 (канал '{config.name}', получено {capacity})")
+        self._capacity = int(capacity)
+        self._ring = acquire_memory_ring(config.owner, config.name, self._capacity)
+
+    @property
+    def written(self) -> int:
+        return self._ring.written
+
+    @property
+    def evicted(self) -> int:
+        return self._ring.evicted
+
+    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        self._ring.append(record)
+        return {"status": "success", "channel": self.name}
+
+    def tail(self, limit: Any = None) -> List[Dict[str, Any]]:
+        """Последние ``limit`` записей (все, если limit не задан), старые первыми.
+
+        Копии, а не внутренние словари кольца (находка ревью 2.9, воспроизведена:
+        читатель менял ``tail(1)[0]["message"]`` — и менялось содержимое кольца).
+        На записи копия делается по тому же доводу, и на чтении он даже сильнее:
+        читатель тут ВНЕШНИЙ (команда, `backend_ctl`), а кольцо — улика, которую
+        разбирают. Тот же довод, что у возврата кортежа из `_effective_route`.
+        """
+        return self._ring.tail(limit)
+
+    def get_info(self) -> Dict[str, Any]:
+        info = super().get_info()
+        info.update(self._ring.snapshot())
+        info["type"] = self.channel_type
+        return info
+
+    def close(self) -> None:
+        """Ничего не делает — и это осознанно.
+
+        Прежняя редакция чистила кольцо, и `config.reload` вместе с
+        `sink.disable` уничтожали единственное ретроспективное хранилище
+        процесса. Записи живут в процессном реестре и переживают канал; чистит
+        их только вытеснение по ёмкости (контракт кольца) и
+        :func:`drop_memory_ring` — явное «забудь», которого сегодня никто не
+        зовёт, кроме тестов.
+        """
+
+
+class NullChannel(LogChannel):
+    """Явный «никуда»: запись принята и выброшена (2.9).
+
+    Нужен, чтобы «этот лог мне не нужен» было ОТДЕЛЬНЫМ состоянием, а не
+    неотличимым от «приёмник сломался». Запись сюда — **доставка**
+    (``status=success``, ``written += 1``), а не потеря: оператор выбрал этот
+    приёмник явно, и раздувать ему класс потерь значит обесценить сам счётчик.
+
+    **Вырожденный случай назван прямо.** Скоуп уровня ERROR, маршрутизированный
+    ТОЛЬКО сюда, глушит пол ошибок: floor ловит запись, которой не досталось
+    НИ ОДНОГО канала, а здесь канал есть и он рапортует успех. Запрещать это
+    не нужно — бывает, что шум ошибок конкретного скоупа действительно не нужен,
+    — но конфигурация обязана сказать об этом вслух: предупреждение выдаёт
+    ``LoggerCore._warn_on_silenced_error_scopes`` при поднятии каналов.
+    """
+
+    def __init__(self, config: LoggerChannelSchema):
+        super().__init__(config)
+        self._lock = threading.Lock()
+        self.written = 0
+
+    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            self.written += 1
+        return {"status": "success", "channel": self.name}
+
+    def get_info(self) -> Dict[str, Any]:
+        info = super().get_info()
+        with self._lock:
+            info.update({"type": self.channel_type, "written": self.written})
+        return info
+
+
 # Реестр фабрик sink-каналов: type → класс канала.
 # Мутируемый: новые типы добавляются через register_sink_factory() без правки create_channel.
 _SINK_FACTORIES: Dict[str, type] = {
@@ -416,6 +1311,8 @@ _SINK_FACTORIES: Dict[str, type] = {
     "console": ConsoleChannel,
     "http": HttpChannel,
     "frame_trace": FrameTraceChannel,
+    "memory": MemoryChannel,
+    "null": NullChannel,
 }
 
 

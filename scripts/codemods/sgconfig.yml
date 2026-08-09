@@ -1,0 +1,9 @@
+# Конфиг ast-grep для кодмодов проекта (Ф6.0).
+#
+# Запуск ВСЕГДА из корня репозитория с явным конфигом:
+#   ast-grep scan -c scripts/codemods/sgconfig.yml            # вхолостую, только отчёт
+#   ast-grep scan -c scripts/codemods/sgconfig.yml -U         # применить правки
+#
+# Правила лежат в rules/ и находятся по ruleDirs.
+ruleDirs:
+  - rules

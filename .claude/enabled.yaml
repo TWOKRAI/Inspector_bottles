@@ -164,3 +164,18 @@ plugins:
   sentry:
     source: "sentry@claude-plugins-official"
     enabled: true
+  # ponytail v4.8.4 — "lazy senior dev" mode: YAGNI-ladder before writing code
+  # (нужно ли вообще → есть ли уже в проекте → stdlib → платформа → одна строка).
+  # BUNDLED (vendored git): скопирован из github.com/DietrichGebert/ponytail
+  # (MIT) в .claude/plugins/ponytail/ — только hooks/ + skills/, без benchmarks
+  # и assets. Vendored, а не consume: плагин ставится маркетплейсом глобально на
+  # ВСЕ проекты, а здесь он нужен project-scoped и git-tracked.
+  # Установлен SKILLS-ONLY: хуков в settings.json нет, always-on-инъекции нет.
+  # Границу «когда применять» задаёт секция в .claude/CLAUDE.md; там же приоритет
+  # (правила проекта побеждают ponytail). Детали и замеры, а также снипет хуков
+  # на случай always-on — .claude/plugins/ponytail/WIRING.ru.md.
+  # Сеть/child_process не использует (проверено).
+  ponytail:
+    source: "https://github.com/DietrichGebert/ponytail"
+    version: "4.8.4"
+    enabled: true

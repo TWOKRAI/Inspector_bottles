@@ -454,7 +454,7 @@ Windows test-debt (2 фейла app_module) — вне скоупа, отдел�
 
 | # | Sev | Что | Куда |
 |---|---|---|---|
-| W1 | MED | Watcher не фанит publish-plane детям (шаг 3 Task 3.2) — декларативность лестницы не замкнута | реши ДО Фазы 4 GUI |
+| W1 | MED | ~~Watcher не фанит publish-plane детям (шаг 3 Task 3.2)~~ — **✅ ЗАКРЫТ 5.11.f (L1-конверт)**: fan-out watcher'а → `config.reload` → ребёнок перечитывает свой файл и поднимает ОБЕ секции + восстанавливает per-process `telemetry_override` (`builtin_commands.py:1268-1287, :1567`). Проверено сквозным ревью Ф5 2026-08-01 ([отчёт](../docs/reviews/2026-08-01_f5-cross-review.md), C-5г). Оговорка: рассылка fire-and-forget — отказ ребёнка виден только числом `reached` в логе оркестратора | ✅ закрыт |
 | W2 | MED | Адресные per-process runtime-дельты не персистятся → respawn теряет точечную правку | вместе с W1 (per-child overlay) |
 | W3 | LOW/MED | cap-детекция матчит по суффиксу-листу → wildcard-лист операторского правила невидим (возможен тихий срез) | WARNING или абзац в ADR-PM-017 |
 | W4 | LOW | `_stale_age_threshold` = K×max(интервал) глобально — редкое правило 60с раздувает порог гигиены | per-rule порог (опц.) |

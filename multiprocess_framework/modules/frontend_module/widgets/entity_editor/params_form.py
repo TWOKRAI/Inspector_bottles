@@ -14,7 +14,8 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import typing
 from copy import deepcopy
 from typing import Any, get_args, get_origin
@@ -32,7 +33,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     Signal,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Границы по умолчанию для числовых виджетов без FieldMeta min/max
 _DEFAULT_INT_MIN = -1_000_000_000

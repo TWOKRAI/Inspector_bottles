@@ -9,9 +9,11 @@
 
 НЕ импортирует Qt-классы напрямую. Работает исключительно через AppearanceView Protocol.
 """
+
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import TabPresenterBase
@@ -29,7 +31,7 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.frontend_module.managers.theme_manager import ThemeManager
     from multiprocess_prototype.frontend.managers.theme_presets_manager import ThemePresetsManager
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class AppearancePresenter(TabPresenterBase[AppearanceView, None]):
@@ -97,10 +99,7 @@ class AppearancePresenter(TabPresenterBase[AppearanceView, None]):
         """Загрузить переменные темы по имени и обновить view."""
         variables: ThemeVariables = self._presets_manager.get_variables(name)
         # Собрать в плоский dict
-        self._current_vars = {
-            field: getattr(variables, field)
-            for field in ThemeVariables.model_fields
-        }
+        self._current_vars = {field: getattr(variables, field) for field in ThemeVariables.model_fields}
         # Дополнить пропущенные ключи дефолтами
         defaults = get_default_variables()
         for k, v in defaults.items():
@@ -133,7 +132,8 @@ class AppearancePresenter(TabPresenterBase[AppearanceView, None]):
 
         if self._current_subcategory:
             var_names = self._get_vars_for_subcategory(
-                self._current_category, self._current_subcategory,
+                self._current_category,
+                self._current_subcategory,
             )
         elif self._current_category:
             var_names = self._get_vars_for_category(self._current_category)
@@ -161,7 +161,9 @@ class AppearancePresenter(TabPresenterBase[AppearanceView, None]):
         self._selected_is_default = is_default
         can_modify = not is_default and bool(name)
         self._view.set_crud_buttons_enabled(
-            save=can_modify, rename=can_modify, delete=can_modify,
+            save=can_modify,
+            rename=can_modify,
+            delete=can_modify,
         )
         self._load_theme(name)
 
@@ -203,7 +205,9 @@ class AppearancePresenter(TabPresenterBase[AppearanceView, None]):
         variables = ThemeVariables.model_validate(self._current_vars)
         parent = self._presets_manager.get_parent(self._selected_theme)
         self._presets_manager.save_custom(
-            self._selected_theme, variables, parent=parent,
+            self._selected_theme,
+            variables,
+            parent=parent,
         )
         self._last_saved_vars = dict(self._current_vars)
 
@@ -225,10 +229,7 @@ class AppearancePresenter(TabPresenterBase[AppearanceView, None]):
         if self._selected_is_default:
             parent = self._selected_theme
         else:
-            parent = (
-                self._presets_manager.get_parent(self._selected_theme)
-                or self._selected_theme
-            )
+            parent = self._presets_manager.get_parent(self._selected_theme) or self._selected_theme
         variables = ThemeVariables.model_validate(self._current_vars)
         self._presets_manager.save_custom(name, variables, parent=parent)
         self._refresh_and_select(name)
@@ -239,7 +240,9 @@ class AppearancePresenter(TabPresenterBase[AppearanceView, None]):
             return
         copy_name = self._selected_theme + "_copy"
         name, ok = self._view.get_input_text(
-            "Копировать тему", "Введите имя копии:", default=copy_name,
+            "Копировать тему",
+            "Введите имя копии:",
+            default=copy_name,
         )
         if not ok or not name.strip():
             return
@@ -252,7 +255,9 @@ class AppearancePresenter(TabPresenterBase[AppearanceView, None]):
         if not self._selected_theme or self._selected_is_default:
             return
         new_name, ok = self._view.get_input_text(
-            "Переименовать тему", "Введите новое имя:", default=self._selected_theme,
+            "Переименовать тему",
+            "Введите новое имя:",
+            default=self._selected_theme,
         )
         if not ok or not new_name.strip():
             return

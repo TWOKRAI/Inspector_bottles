@@ -15,7 +15,8 @@ Refs: plans/displays-in-recipe/plan.md Task 2.3, 5.2
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import TYPE_CHECKING, Callable
 
 from multiprocess_prototype.domain.protocols.display_catalog import (
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 
     from .view import IDisplaysView
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class DisplaysPresenter:

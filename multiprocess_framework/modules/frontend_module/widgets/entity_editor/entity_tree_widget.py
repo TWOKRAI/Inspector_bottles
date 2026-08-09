@@ -20,7 +20,8 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
@@ -36,7 +37,7 @@ from .entity_tree_config import (
     ParamDef,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 # Универсальные роли для EntityTreeWidget
 ROLE_TYPE = Qt.ItemDataRole.UserRole + 1  # "parent"|"child"|"param_group"|"parent_param"|"child_param"

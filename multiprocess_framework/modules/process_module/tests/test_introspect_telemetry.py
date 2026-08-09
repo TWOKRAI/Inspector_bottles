@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
 from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
-    GATED_METRICS,
+    gated_metrics,
 )
 from multiprocess_framework.modules.process_module.heartbeat.process_heartbeat import (
     ProcessHeartbeat,
@@ -109,7 +109,7 @@ class TestGateOff:
         """Каталог известных метрик отдаётся и при выключенном gate (справочник от опечаток)."""
         _svc, cm = _make()
         res = cm.dispatch("introspect.telemetry")
-        assert res["gated_metrics"] == list(GATED_METRICS)
+        assert res["gated_metrics"] == list(gated_metrics())
 
     def test_process_without_heartbeat(self) -> None:
         """Нет ProcessHeartbeat → success=True + note, а не падение команды."""
@@ -153,7 +153,7 @@ class TestReadbackPair:
         res = cm.dispatch("introspect.telemetry")
         assert res["resolved"]["fps"]["interval_sec"] == 0.25  # явный override
         assert res["resolved"]["shm"]["interval_sec"] == 2.0  # унаследован от default
-        assert set(res["resolved"]) == set(GATED_METRICS)  # все метрики каталога
+        assert set(res["resolved"]) == set(gated_metrics())  # все метрики каталога
 
     def test_publish_section_is_effective_not_last_command(self) -> None:
         """publish = ЭФФЕКТИВНАЯ секция живого gate: merge-правка видна поверх прежней."""

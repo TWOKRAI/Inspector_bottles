@@ -17,6 +17,7 @@ sandbox-снимок переведён на `webcam_controls.capture_single_fra
 | Сервис | Готовность | Комментарий | ADR |
 |--------|-----------|-------------|-----|
 | `sql` | production | SQLManager + Repository + UoW + QuerySet; выехал из `multiprocess_framework/modules/sql_module/` | ADR-121 |
+| `documents` | contract | Плоскость документов (аудит смен наблюдаемости + вердикты о качестве) поверх `Services/sql`; срок хранения ПО ВРЕМЕНИ per-kind, отдельно от ротации логов. **Потребители не подключены** — см. [STATUS](documents/STATUS.md) | ADR-CRM-013 |
 | `hikvision_camera` | production | Плагин-обёртка над HikSDK + core/sdk_app; выехал из плагинов | ADR-122 |
 | `modbus` | ready | Универсальный драйвер Modbus-TCP / RS485 (pymodbus 3.x); 3 слоя sdk/core/plugin + service; атомарные `transaction`, `RegisterTransport`, декларативная `RegisterMap` — фундамент сервисов устройств | — |
 | `device_hub` | ready | Реестр устройств + DeviceManager + 4 драйвера (robot/vfd/hikvision/generic_modbus); always-on процесс `devices`, GUI-вкладки, YAML-протоколы | ADR-DH-001..005 |

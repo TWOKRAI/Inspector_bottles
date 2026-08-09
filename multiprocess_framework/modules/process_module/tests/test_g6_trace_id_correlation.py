@@ -168,7 +168,7 @@ def test_trace_id_correlates_across_nodes_via_logger_tap():
     mgr = LoggerManager(manager_name="TestG6TraceCorrelate")
     mgr.initialize()
     tap = _FakeTapChannel()
-    mgr.add_log_tap(tap, min_level=LogLevel.DEBUG)
+    mgr.add_tap(tap, min_level=LogLevel.DEBUG)
 
     # Звено 1 (source) и звено 2 (detector) логируют через ОДИН и тот же факад —
     # ровно так, как это делают реальные ctx.log_info/_log_debug в проде.

@@ -46,7 +46,7 @@
 - [Cross-tab Phase G final](project_cross_tab_phase_g.md) — ЗАВЕРШЕНА 2026-05-29: все G.0–G.6 DONE. G.6 UX (auto-reveal/validation/selection/diff + RecipeActivated prod вариант A + cross-tab Services-highlight); reviewer APPROVED; 2035 passed/sentrux 9-9/quality 7136; boot-smoke — долг перед merge
 - [Commit message format](feedback_commit_msg_format.md) — trailer предпочтительно одной строкой, но хук с 2026-07-14 ТЕРПИТ перенос (git-стиль фолдинг, корень починен); pre-commit ruff-format → re-stage + re-commit
 - [ruff убирает свежий импорт](feedback_ruff_strips_unused_import.md) — PostToolUse ruff --fix вырезает импорт, добавленный Edit'ом раньше его использования → добавлять импорт+использование одним Edit
-- [Priority: ENGINE first (развёрнут 2026-07-26)](project_priority_product_over_engine.md) — движок в первую очередь, прототип = параллельный стенд для проверок; прежняя установка «продукт важнее движка» (2026-05-29) отменена
+- [Приоритет: ДВИЖОК первым (2026-07-26)](project_priority_engine_first.md) — движок в первую очередь, прототип = параллельный стенд для проверок; прежняя установка «продукт важнее движка» (2026-05-29) отменена
 - [Command-engine P1.1 audit](project_command_engine_audit.md) — ActionBus в проде мёртв (0 потребителей), domain-dispatch единственный живой; «двух движков» нет; RBAC field-edit дыра
 - [Pipeline reuse Plugins widgets](feedback_pipeline_reuse_plugins_widgets.md) — карточка ноды Pipeline переиспользует config-виджеты Plugins (поля по plugin_name); gui скрыт (protected); auto-layout на старте; дисплеи в палитре
 - [Pipeline node→process→worker](project_pipeline_node_process_worker.md) — Phase A+B done (uncommitted): блок «Исполнение» + MovePlugin/«Перенести в процесс»; Phase B+ долг и Phase C (worker A/B решение) — в новом чате
@@ -164,3 +164,80 @@
 - [Дефолтный путь сверять с публикатором](feedback_default_path_must_match_publisher.md) — правило читало несуществующий `drops_count` (реальный `drops`): фича мертва при 26 зелёных тестах на моке; регресс-страж + список кандидатов
 - [Тесты-невидимки мимо testpaths](feedback_tests_invisible_to_testpaths.md) — 3 каталога tests/ вне testpaths = 58 зелёных тестов не гонялись; покрытие судить по конфигу прогона + страж-тест
 - [Глобальный патч часов = флейк](feedback_global_clock_patch_flake.md) — patch("time.monotonic") с конечным side_effect доедают чужие потоки → StopIteration в невиновном тесте; часы — зависимость объекта
+- [Тест не доказан, пока не красный без правки](feedback_prove_test_red_without_fix.md) — откатить call-site через stash, сверить число упавших арифметически
+- [Три менеджера — одна база](feedback_three_managers_share_base.md) — logger/error/stats братья: общее поднимать в ChannelRoutingManager, не дописывать третью копию
+- [Три роли авторства тестов](feedback_test_authorship_three_roles.md) — автор доказывает свою модель, не реальность; tester от acceptance + ревьюер запуском
+- [Русский вывод и wc -w врут](feedback_ru_output_encoding_and_wc.md) — cp866-поток = «инструмент молчал» у потребителя; wc -w режет кириллицу по байту 0xA0
+- [Защита в базе мертва у наследника](feedback_base_guard_dead_in_heir.md) — наследник с config=None обходит механизм базы; проверка с недостижимым отрицательным путём = не защита
+- [qex reindex timeout](project_qex_reindex_timeout.md) — батч 8-10с против зашитого ~10с таймаута, ручки нет; лечится циклом повторов, свежесть по last_indexed
+- [Таймауты qex = выгрузка эмбеддера](feedback_qex_reindex_budget.md) — модель не влезает в 4 ГБ; keep_alive=-1 + свободный VRAM → 12 мин
+- [std_facade не используется](project_std_facade_unused.md) — get_std_logger дешевле миксина (1028 vs 1673 нс), но 76 файлов на голом logging пишут в пустоту; 2.2 = доделать его, не переписывать
+- [Один пишущий логгер](feedback_one_log_writer.md) — писателей в пределе ОДИН; остальное вид поверх него, аварийная функция ≠ писатель
+- [Ложная тревога обменяна на тихую потерю](feedback_false_alarm_traded_for_silent_loss.md) — снимая шумный сигнал, тестируй ПОСЛЕДОВАТЕЛЬНОСТЬ (disable → reload), а не каждое действие
+- [Три объектива — три класса дефектов](feedback_three_lenses_three_defect_classes.md) — тесты=механика, живой прогон=проводка, ревью=связки; 6368 зелёных пропустили обе живые находки
+- [Форма доставки конфига различается](feedback_config_delivery_shape_differs.md) — оркестратор плоско, ребёнок весь proc_dict; get_config молчит у детей (умер telemetry_override)
+- [Merge меняет ФОРМУ, а не только значения](feedback_merge_changes_the_form.md) — машинная запись структурной формы глушила человеческие ключи короткой
+- [Слои конфига наблюдаемости (5.12)](project_observability_config_layers.md) — L0 фреймворк→L1 system.yaml→L2 рецепт+спутник→L3 сессия; reload ПЕРЕСОБИРАЕТ, а не мержит
+- [TTL слоя сессии (5.8)](project_observability_session_ttl.md) — L3 временный по построению, возврат тактом heartbeat; вечность только через persist
+- [Тест, переживший свой слом](feedback_test_survived_its_own_break.md) — гонка в два байткода + шов из своего потока сквозь RLock = проверял отсутствие защиты
+- [Симметрия namespace (5.10)](project_observability_namespace_symmetry.md) — три плоскости + телеметрия в слоях; точки в паттернах троттла ломают плоский namespace (OPAQUE_LAYER_PATHS = долг, не лечение)
+- [Дефект чинится на одном пути из трёх](feedback_defect_fixed_on_one_path_only.md) — ревью 5.10 нашло два воскрешения закрытых дефектов на соседних развилках
+- [Аудит смен наблюдаемости (5.9)](project_observability_audit.md) — один писатель, origin обязателен сигнатурой, долговечность через журнал процесса
+- [Шов обязан стрелять при ПОЛНОМ отпускании лока](feedback_seam_must_fire_on_full_release.md) — RLock: «вышли из with» ≠ «лок отпущен»; признак — ровно-N-секундный тайминг
+- [Switch раздаёт слой L2 (R6)](project_switch_delivers_layer.md) — адрес+содержимое всем пережившим; стенд обязан содержать protected-процесс, иначе раздача недоказуема
+- [update_config мёртв при живом handler](feedback_config_update_dead_with_handler.md) — тест строил объект БЕЗ обработчика и проверял вторую ветку; читать тем же способом, что потребители
+- [Брокер подписки на наблюдаемость (5.11)](project_observability_subscription_broker.md) — намерение «хочу всё» у PM, переподписка на шве инкарнации; backend_ctl не мигрирован
+- [Ф6: миграция stdlib-логгера](project_observability_stdlib_migration.md) — 100 файлов на вид; объём НЕ вырос (5.4→4.78 МБ/час); 64% объёма даёт один источник stats
+- [Побочный эффект не смеет откатить транзакцию](feedback_side_effect_must_not_undo_the_transaction.md) — раздача на success-пути в своём try, иначе наблюдаемость откатывает успешный switch
+- [Ревью ловит стык между своими же кусками](feedback_review_finds_the_seam_between_own_pieces.md) — каждый кусок верен, вместе дефект; инъекция ломает одну гарантию и стык не видит
+- [Сигнал «готов» означал меньше, чем читали](feedback_ready_signal_meant_less_than_read.md) — ready=«инициализирован», а команда в окно до регистрации обработчика теряется молча
+- [Молчащий детектор ничего не доказывает](feedback_silent_detector_proves_nothing.md) — ноль значим только после того, как детектор показан красным на сломанном
+- [Идемпотентность ≠ монотонность](feedback_idempotent_is_not_monotonic.md) — второй путь доставки без признака свежести возит прошлое в настоящее
+- [Ревью спеки требует независимого агента](feedback_spec_review_needs_independent_agent.md) — автор находит карту, форму задачи находит только чужой
+- [Одиночное чтение не видит общей базы](feedback_single_reader_test_misses_multi_reader_defect.md) — 15 тестов и зонд читали в одиночку; два потребителя портили темп друг другу
+- [Предсказание инъекций — после всех тестов](feedback_predict_injections_after_writing_tests.md) — 3 расхождения из 7 из-за арифметики по неполному файлу
+- [uv sync сносит необъявленное](feedback_uv_sync_prunes_venv.md) — 27 пакетов за запуск; cv2 умирает с opencv-contrib; ходить через --inexact
+- [venv заблокирован MCP-сервером](project_venv_locked_by_mcp.md) — backend_ctl держит numpy .pyd, Claude Code респавнит; лечится закрытием VS Code, не kill по PID
+- [Сквозное ревью Ф5](project_f5_cross_review.md) — 7.5/10, 3 блокера ФР-1/2/3 до гейта; отчёт docs/reviews/2026-08-01
+- [Инъекция покрывает ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) — частичная = ложный B1; стреляло дважды (I-F, I-7)
+- [Дельта, а не размер файла](feedback_measure_delta_not_file_size.md) — «изменён в окне» ≠ «записан в окне»; база Ф6 = 5.4 МБ/час
+- [Второй потребитель вскрывает дефект](feedback_second_consumer_reveals_the_defect.md) — зелено поодиночке, красно вместе = дефект общего состояния
+- [mp.Queue асинхронна в тестах](feedback_mp_queue_is_async_in_tests.md) — учёт мерить на stdlib queue.Queue
+- [Ф6.х корзина ревью ЗАКРЫТА](project_f6x_review_basket.md) — форвардер tail жив (level задаёт подписчик); make gate видит fw-suite; 5-й случай тестов-невидимок
+- [model_copy не валидирует](feedback_model_copy_does_not_validate.md) — dict вместо схемы молча = «настройки нет»
+- [Ф2.4: скоуп — строка](project_f2_4_scope_is_a_string.md) — группа из конфига; остаток фазы 2 и три пробела
+- [Сигнал в одной ветке слепнет](feedback_signal_placed_in_a_branch_goes_blind.md) — ставить туда, где известен фактический результат
+- [Негодная инъекция != вакуумный тест](feedback_broken_injection_is_not_a_vacuous_test.md) — сломанный импорт даёт ERROR, а не FAILED
+- [Кэш прячет однократность](feedback_cache_hides_the_once_only_property.md) — варьировать вход по ключу кэша
+- [Ф2 закрыта (кроме 2.3b)](project_f2_closed_2026_08.md) — три оси адресации; дальше Ф3/Ф4/Ф6
+- [Посылка плана устаревает](feedback_a_plans_premise_expires.md) — блокер отложенной задачи воспроизводить, а не сверять номера
+- [Ноль красных = лишний слой](feedback_zero_reds_can_mean_a_useless_layer.md) — третья гипотеза: код дублирует гарантию ниже
+- [Ручка-из-env читает свою же запись](feedback_env_knob_reads_its_own_write.md) — снимок env один раз на старте
+- [Одна функция — две позиции](feedback_one_function_two_positions.md) — совпадение констант маскирует противоположные дефолты
+- [Ф3: внешнее ревью 8/10](project_f3_external_review.md) — Б-1/2/7 fixed; Б-3/4/8 → 5.2; рестарт сломан live; шторм измерен
+- [Тест, поднимающий ошибку сам](feedback_test_raising_the_error_itself_guards_the_branch.md) — сторожит except, а не механизм; проверять параметр на границе ОС
+- [fw_version из git](project_fw_version_from_git.md) — 2.0.0+hash[.dirty]; пределы: вложенный репо, frozen-сборка; nosec последним на строке
+- [Алиас держит объект живым](feedback_alias_keeps_the_object_alive.md) — grep по методу не видит присваивания; владение отдать единственному потребителю
+- [Названный механизм — не обязательство](feedback_named_mechanism_is_not_a_commitment.md) — проверка политикой отказа механизма
+- [Цена хука на горячем пути](feedback_hot_path_hook_must_be_priced.md) — мерить дельтой против цены самой эмиссии
+- [Ф4 процессоры ЗАКРЫТА](project_f4_processors_closed.md) — contextualize + редакция секретов всегда включена (ADR-LOG-006); хвост Б-1/2/3 закрыт
+- [Снос оставляет хвост у соседа](feedback_removal_leaves_a_tail_in_the_neighbour.md) — дифф не видит, цена удобного метода видит
+- [Зелёный прогон и синхронность](feedback_green_run_hides_synchronous_only_correctness.md) — «работает» ≠ «работает, пока вызов синхронный»; замыкание из except связывать дефолт-аргументом
+- [Фальшивка-всегда-успех глушит гейт](feedback_fake_that_always_succeeds_mutes_the_gate.md) — дубль обязан уметь отказывать
+- [Два предохранителя прячут, кто держит](feedback_two_safeguards_hide_which_one_holds.md) — снимай в стенде все, кроме проверяемого
+- [Числа теста рядом с дефолтом](feedback_test_values_near_defaults_test_the_default.md) — проверяют дефолт, а не ручку
+- [Ф7 ревью 7.5/10, корзина Ф7.х ЗАКРЫТА](project_f7_cross_review.md) — 3 блокера + major-ряд починены, 15 инъекций красные; путь в Ф8 открыт
+- [Защищать единицу конкуренции](feedback_protect_the_unit_of_contention.md) — предел на не той единице оставляет второго без предела вовсе
+- [Откат инъекции — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа; ERROR сбора ≠ красный
+- [Барьер на входе не воспроизводит гонку](feedback_barrier_at_entry_does_not_reproduce_the_race.md) — GIL отдаёт первому потоку весь короткий проход; рандеву вешать на саму операцию
+- [Дубль фикстуры проверяет сам себя](feedback_duplicate_fixture_verifies_itself.md) — приватная копия расходится с conftest молча; 9 красных жили как «не наш» долг
+- [Совпадение констант прячет реализации](feedback_coinciding_constants_hide_opposite_implementations.md) — floor(now/1.0)==now: 18 тестов зелены под инъекцией; брать числа, где кандидаты расходятся
+- [Докстринг утверждает то, чего регистрация не ставила](feedback_docs_assert_what_registration_never_set.md) — три места звали воркер SYSTEM, создавался он без типа; оба предохранителя на одной вере
+- [Слишком грубая инъекция ничего не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) — красный не по проверяемой причине так же вреден, как зелёный
+- [monotonic на Windows — 15.6 мс](project_monotonic_resolution_windows.md) — GetTickCount64; сравнение разностей ниже ~100 мс недостоверно, отображать на сетку
+- [Ф8 ЗАКРЫТА (кроме 8.6/8.7)](project_f8_review_and_stitching.md) — плоскость на ДВУХ клиентах (8.7: вердикт на фронте, 95 кадров → 1 документ); 8.6 отложена
+- [Отметка после публикации ломает схлопывание](feedback_post_publication_mark_breaks_collapsing.md) — выключается ровно на отказе; страж КЛАССА, не поля
+- [Ключ читать из уже едущей секции](feedback_read_the_key_from_the_section_already_travelling.md) — два ассемблера не правятся; поля нет в схеме → model_dump выбросит
+- [Защита должна быть достижима](feedback_guard_must_be_reachable.md) — одноимённый параметр даёт TypeError раньше защиты
+- [Провод портов ≠ маршрут процессов](feedback_port_wire_is_not_a_process_route.md) — плагин не вызван ни разу, молча
+- [PRAGMA молчит об отказе](feedback_sqlite_pragma_fails_silently.md) — порядок до WAL; incremental_vacuum дошагивать fetchall

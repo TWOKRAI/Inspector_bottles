@@ -15,10 +15,11 @@ Refs: plans/device-hub.md Фаза 3, Р11
 from __future__ import annotations
 
 import copy
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 from typing import Any
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 def extract_recipe_devices(raw: dict[str, Any]) -> list[dict[str, Any]]:

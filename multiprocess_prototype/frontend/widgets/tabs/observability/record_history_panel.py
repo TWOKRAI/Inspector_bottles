@@ -41,6 +41,28 @@ LEVEL_OPTIONS = {
     "error": ["ERROR", "CRITICAL"],
 }
 
+#: Ф5.2 (Б-8): чем объяснить ПУСТУЮ вкладку. Пустота бывает трёх разных причин —
+#: записей правда нет, порог выше пишущих записей, история уже срезана ретеншеном, —
+#: и «просто пустая таблица» одинаково выглядит при каждой. Три года наблюдений за
+#: этим проектом сводятся к одному правилу: молчащий сигнал через час неотличим от
+#: сломанного.
+#:
+#: У ``stats`` причина СЕГОДНЯ структурная и названа прямо. Формулировка
+#: самоограничивающаяся: подсказка показывается только пока строк ноль, поэтому
+#: после Ф8.3 (охват hub'а) она исчезнет сама, а не превратится в устаревшую ложь.
+EMPTY_HINTS = {
+    "log": (
+        "Записей нет. Порог записи в историю задаёт observability.history.level "
+        "(дефолт INFO) — проверьте его в introspect.observability → history."
+    ),
+    "error": "Ошибок в истории нет. Это нормальное состояние здорового прогона.",
+    "stats": (
+        "Плоскость метрик сегодня без эмитента: слот статистики hub'а принадлежит "
+        "WorkerManager, а он метрик не шлёт (охват hub'а — задача Ф8.3). "
+        "Если задача уже сделана, смотрите порог в introspect.observability → history."
+    ),
+}
+
 
 def _format_ts(ts: Any) -> str:
     """float epoch → 'YYYY-MM-DD HH:MM:SS.mmm'; мусор/0 → '—'."""
@@ -54,6 +76,30 @@ def _format_ts(ts: Any) -> str:
         return datetime.fromtimestamp(val).strftime("%Y-%m-%d %H:%M:%S.") + f"{int((val % 1) * 1000):03d}"
     except (ValueError, OverflowError, OSError):
         return "—"
+
+
+def _delivery_lag(record: Any) -> Optional[float]:
+    """Задержка доставки записи: ``observed_ts - ts``, либо ``None`` (Ф5.2).
+
+    ``None`` возвращается в трёх случаях, и все три означают «мерить нечем»:
+    записи из истории (у эмитента отметки приёма нет), мусор в любом из полей,
+    отрицательная разность (часы источника ушли вперёд — «задержка −0.3 с» не
+    ответ, а новая загадка).
+
+    Функция чистая и вынесена из виджета намеренно: правило «что считать
+    задержкой» проверяется без Qt и одинаково для метки и для карточки записи —
+    два прочтения одного числа разошлись бы.
+    """
+    if not isinstance(record, dict):
+        return None
+    observed = record.get("observed_ts")
+    ts = record.get("ts")
+    if not isinstance(observed, (int, float)) or not isinstance(ts, (int, float)):
+        return None
+    if isinstance(observed, bool) or isinstance(ts, bool):
+        return None
+    lag = float(observed) - float(ts)
+    return lag if lag >= 0 else None
 
 
 class RecordHistoryPanel(BaseAdminPanel):
@@ -127,6 +173,15 @@ class RecordHistoryPanel(BaseAdminPanel):
         self._table.itemDoubleClicked.connect(self._on_row_double_clicked)
         root.addWidget(self._table, stretch=1)
 
+        # Ф5.2 (Б-8): объяснение пустоты. Живёт под таблицей и появляется ТОЛЬКО
+        # когда строк ноль: подсказка, висящая над непустой историей, была бы
+        # шумом, а исчезающая сама — не может устареть незамеченной.
+        self._lbl_empty = QLabel("")
+        self._lbl_empty.setWordWrap(True)
+        self._lbl_empty.setObjectName("EmptyHint")
+        self._lbl_empty.setVisible(False)
+        root.addWidget(self._lbl_empty)
+
         # Кнопки Обновить / Копировать / Очистить создаём здесь, но НЕ кладём в
         # контент — они уходят в action-колонку вкладки (колонка 1) через
         # action_buttons(), чтобы «Наблюдаемость» выглядела как остальные вкладки
@@ -154,6 +209,17 @@ class RecordHistoryPanel(BaseAdminPanel):
 
         self._lbl_page = QLabel("Стр. 1")
         pagination_layout.addWidget(self._lbl_page)
+
+        # Ф5.2 (Б-3/Н-4): задержка плоскости. Показывается ЗДЕСЬ, а не колонкой в
+        # истории: отметку приёма ставит этот процесс на живом хвосте, а в стор
+        # пишут процессы-эмитенты — историческую задержку взять неоткуда, и
+        # колонка под неё простояла пустой всю жизнь (0 из 303 016 строк).
+        self._lbl_lag = QLabel("")
+        self._lbl_lag.setToolTip(
+            "Задержка живого хвоста: сколько прошло между эмиссией записи и её приёмом GUI. "
+            "Пусто — по этой вкладке ещё не приезжало живых записей."
+        )
+        pagination_layout.addWidget(self._lbl_lag)
 
         self._btn_next = QPushButton("→")
         self._btn_next.setObjectName("PaginationArrow")
@@ -198,6 +264,21 @@ class RecordHistoryPanel(BaseAdminPanel):
         self._table.setRowCount(len(rows))
         for r, rec in enumerate(rows):
             self._set_row(r, rec)
+        self._update_empty_hint(bool(rows))
+
+    def _update_empty_hint(self, has_rows: bool) -> None:
+        """Пустая вкладка обязана сказать, ПОЧЕМУ она пуста (Ф5.2, Б-8).
+
+        Подсказка не показывается, если строки есть, и не показывается на первой
+        странице пагинации при непустой истории — то есть не может застрять
+        поверх работающей вкладки.
+        """
+        if has_rows:
+            self._lbl_empty.setVisible(False)
+            return
+        hint = EMPTY_HINTS.get(self._presenter.kind, "")
+        self._lbl_empty.setText(hint)
+        self._lbl_empty.setVisible(bool(hint))
 
     def _set_row(self, row: int, rec: Dict[str, Any]) -> None:
         cells = [
@@ -244,9 +325,30 @@ class RecordHistoryPanel(BaseAdminPanel):
                 self._dropped_live += 1  # 5.21 (e): усечение хвоста не молчим
         finally:
             self._table.setUpdatesEnabled(True)
+        self._update_live_lag(fresh)
         # Пагинация зависит от числа строк (has_next) — держим кнопки честными.
         self._update_pagination()
         return len(fresh)
+
+    def _update_live_lag(self, fresh: List[Dict[str, Any]]) -> None:
+        """Показать задержку плоскости по свежей пачке (Ф5.2, Б-3 + Н-4).
+
+        Задержка = ``observed_ts - ts``: момент приёма ставит ЭТОТ процесс
+        (``stamp_observed`` в обработчике пуша), момент эмиссии несёт запись.
+        Информация появляется ровно на границе процессов, поэтому показать её
+        может только принимающая сторона — и только для живого хвоста.
+
+        Берётся МАКСИМУМ по пачке, а не последняя запись: вопрос, ради которого
+        число показывается, звучит «не застряла ли плоскость», и на него отвечает
+        худшая запись, а не случайно оказавшаяся последней.
+
+        Отрицательная разность (часы источника ушли вперёд) не показывается:
+        «задержка −0.3 с» — не ответ, а новая загадка. Молчание здесь честнее.
+        """
+        lags = [lag for lag in (_delivery_lag(rec) for rec in fresh) if lag is not None]
+        if not lags:
+            return
+        self._lbl_lag.setText(f"задержка: {max(lags):.2f} с")
 
     # ------------------------------------------------------------------
     # Кнопки
@@ -335,6 +437,13 @@ class _RecordDetailDialog(QDialog):
             f"<b>Источник:</b> {escape(str(record.get('module', '')))}",
             f"<b>Сообщение:</b> {escape(str(record.get('message', '')))}",
         ]
+        # Ф5.2: задержка — только у живых записей. У строки из истории отметки
+        # приёма нет и быть не может (в стор пишет эмитент), поэтому строка
+        # добавляется, а не показывается вечным «—»: прочерк читался бы как
+        # «задержки не было», а не как «здесь её не измеряют».
+        lag = _delivery_lag(record)
+        if lag is not None:
+            meta.append(f"<b>Задержка доставки:</b> {lag:.3f} с")
         for line in meta:
             lbl = QLabel(line)
             lbl.setTextFormat(Qt.TextFormat.RichText)

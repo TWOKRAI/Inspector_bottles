@@ -24,7 +24,8 @@
 
 from __future__ import annotations
 
-import logging
+
+from multiprocess_framework.modules.logger_module import get_std_logger
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +37,7 @@ from .detect import is_v3_recipe
 from .interfaces import StoreProtocol
 from .migrations import run_chain
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 def _flatten(data: dict, prefix: str = "") -> list[tuple[str, Any]]:

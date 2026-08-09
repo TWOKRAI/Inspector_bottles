@@ -343,3 +343,54 @@ class TestMergeDisplayDefinitions:
         pipeline = {"name": "p", "processes": []}
         merged = merge_topologies(base, pipeline)
         assert merged["display_definitions"] == [{"id": "d"}]
+
+
+class TestObservabilityLayerSurvivesRecipePath:
+    """Task 5.12: слой L2 не должен теряться на пути «файл → топология»."""
+
+    def test_unwrap_lifts_top_level_section_into_topology(self) -> None:
+        """Человек пишет секцию рядом с blueprint — без подъёма она исчезала бы молча."""
+        raw = {
+            "blueprint": {"processes": [], "wires": []},
+            "observability": {"defaults": {"log_level": "WARNING"}},
+        }
+        assert unwrap_recipe(raw)["observability"] == {"defaults": {"log_level": "WARNING"}}
+
+    def test_nested_section_beats_top_level_per_key(self) -> None:
+        raw = {
+            "blueprint": {
+                "processes": [],
+                "wires": [],
+                "observability": {"defaults": {"log_level": "ERROR"}},
+            },
+            "observability": {"defaults": {"log_level": "WARNING", "console": False}},
+        }
+        # Ни один ключ не пропал: вложенное победило только там, где сказало.
+        assert unwrap_recipe(raw)["observability"] == {"defaults": {"log_level": "ERROR", "console": False}}
+
+    def test_recipe_without_section_stays_untouched(self) -> None:
+        raw = {"blueprint": {"processes": [], "wires": []}}
+        assert "observability" not in unwrap_recipe(raw)
+
+    def test_merge_topologies_carries_section_pipeline_over_base(self) -> None:
+        """Штатная раскладка прототипа — фундамент ⊕ pipeline; секция обязана дожить."""
+        base = {"processes": [], "wires": [], "observability": {"defaults": {"log_level": "INFO"}}}
+        pipeline = {
+            "name": "p",
+            "processes": [],
+            "wires": [],
+            "observability": {"defaults": {"log_level": "DEBUG"}},
+        }
+        merged = merge_topologies(base, pipeline)
+        assert merged["observability"] == {"defaults": {"log_level": "DEBUG"}}
+
+    def test_merge_topologies_omits_key_when_neither_side_has_it(self) -> None:
+        merged = merge_topologies({"processes": [], "wires": []}, {"processes": [], "wires": []})
+        assert "observability" not in merged
+
+    def test_blueprint_validation_keeps_the_section(self) -> None:
+        """SystemBlueprint не должен съедать секцию при валидации (Dict at Boundary)."""
+        bp = SystemBlueprint.model_validate(
+            {"processes": [], "wires": [], "observability": {"defaults": {"log_level": "WARNING"}}}
+        )
+        assert bp.observability == {"defaults": {"log_level": "WARNING"}}

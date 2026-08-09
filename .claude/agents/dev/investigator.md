@@ -1,7 +1,7 @@
 ---
 name: investigator
 description: Deep investigation of architectural problems and non-obvious bugs. Does not fix — diagnoses and produces a report with root cause, evidence, and recommendation. Read-only.
-model: claude-opus-4-8
+model: opus
 memory: project
 ---
 

@@ -12,11 +12,13 @@ import copy
 import os
 import threading
 import time
+from collections import deque
 from typing import Any
 
 from ...config_module.feature_flags import is_enabled
 from ...console_module import ConsoleManager
 from ...process_module import ProcessModule
+from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
 from ...shared_resources_module import QueueRegistry
 from ..core.process_priority import ProcessPriority
 from ..core.process_registry import ProcessRegistry
@@ -37,6 +39,21 @@ def _merge_cmd_args(data: dict | None, kwargs: dict) -> dict:
     return kwargs
 
 
+#: Раскладка собственных очередей хаба (Ф7.3 вынесла её из тела ``initialize``).
+#: Константа, а не литерал внутри метода: иначе проверить состав можно было бы
+#: только чтением исходника, то есть страж сторожил бы текст, а не раскладку.
+#: "state" — паритет с детьми (подписчиков state.changed у PM нет).
+#: "observability" — по существу: через хаб идёт relay записей детей внешнему
+#: подписчику (Ф1.7), и без своей очереди хвост остался бы в system-почте хаба,
+#: где Б-6 намерил 97 066 отказов доставки.
+HUB_QUEUES: dict[str, Any] = {
+    "system": {"maxsize": 100},
+    "data": {"maxsize": 50},
+    "state": {"maxsize": 8},
+    "observability": {"maxsize": 256},
+}
+
+
 class ProcessManagerProcess(ProcessModule):
     """
     Процесс-оркестратор: управляет всеми процессами системы.
@@ -52,7 +69,7 @@ class ProcessManagerProcess(ProcessModule):
 
     def __init__(
         self,
-        name: str = "ProcessManager",
+        name: str = ORCHESTRATOR_PROCESS_NAME,
         shared_resources=None,
         config: dict[str, Any] | None = None,
     ) -> None:
@@ -69,6 +86,10 @@ class ProcessManagerProcess(ProcessModule):
         self._routing_epoch: int = 0
         self._incarnations: dict[str, int] = {}
         self._routing_lock = threading.Lock()
+        # Поколения рассылок (R4/ревью-1): «этот конверт ещё последний?». Здесь же,
+        # а не только лениво, чтобы первое касание было заведомо однопоточным.
+        self.__dict__["_broadcast_generations_map"] = {}
+        self.__dict__["_broadcast_generations_lock_obj"] = threading.Lock()
         # Ф2 Task 2.1 (правда supervision): замена инстанса видима БЕЗ участия
         # incarnation. При reuse-очередей (дефолт) incarnation осознанно не растёт
         # (DECISIONS PMM:311-333), поэтому маркер «до/после рестарта» — пара
@@ -206,13 +227,7 @@ class ProcessManagerProcess(ProcessModule):
         try:
             # Регистрация ProcessManager для приёма команд (system.shutdown от GUI и др.)
             if self.shared_resources:
-                self.shared_resources.register_process(
-                    self.name,
-                    # "state" аддитивно: очередь/канал возникают из
-                    # конфига, при OFF пусты. У PM подписчиков state.changed нет, но
-                    # держим паритет раскладки очередей с дочерними процессами.
-                    {"queues": {"system": {"maxsize": 100}, "data": {"maxsize": 50}, "state": {"maxsize": 8}}},
-                )
+                self.shared_resources.register_process(self.name, {"queues": dict(HUB_QUEUES)})
 
             if not super().initialize():
                 return False
@@ -252,6 +267,12 @@ class ProcessManagerProcess(ProcessModule):
                 config=self.get_config("backend_ctl"),
                 log_info=self._log_info,
                 log_error=self._log_error,
+                # 5.11-R1: внешний подписчик адресуется как "<sender>.<session>" и
+                # умирает вместе с сокетом. Закрытие соединения — единственный сигнал
+                # об этом ПО ФАКТУ: имени старой сессии после реконнекта не знает уже
+                # никто, а шов инкарнации иначе воскрешал бы мёртвую подписку на
+                # каждом свежем процессе.
+                on_session_closed=self._forget_observability_session,
             )
 
             # Ф3.2: boot-барьер — дождаться self-reported ready стартованных детей
@@ -261,12 +282,22 @@ class ProcessManagerProcess(ProcessModule):
             # навсегда) + WARNING со списком не-ready.
             self._wait_boot_ready()
 
-            # Сигнализируем SystemLauncher, что инициализация завершена (ADR-116).
-            # К этому моменту: все дочерние процессы spawned, started и (Ф3.2)
-            # сообщили о готовности либо истёк boot_ready_timeout_s.
+            # Готовность оркестратора для SystemLauncher (ADR-116) объявляется ТЕМ ЖЕ
+            # примитивом, что и у детей: _announce_ready() ПОСЛЕДНЕЙ строкой run() —
+            # там, где BuiltinCommands (introspect.capabilities/status, router.relay)
+            # уже зарегистрированы. B-1-1 сквозного ревью Ф5: раньше внешний сигнал
+            # взводился ЗДЕСЬ, в конце initialize(), тогда как эти команды
+            # регистрируются позже, в ProcessModule.run() (шаг после initialize).
+            # Наблюдатель (launcher/harness), доверившись раннему сигналу, слал
+            # introspect.capabilities в окно без обработчика («No handler for key
+            # 'introspect.capabilities'» в живом логе boot) и получал ok=False —
+            # окно длиной со спавн детей и boot-барьер (до 5с). Один механизм
+            # готовности на все процессы, включая оркестратор: событие ПЕРЕДаётся
+            # через тот же attach_ready_event, что у детей, а взводит его сам PM в
+            # точке, где действительно умеет отвечать. Ранний .set() здесь снят.
             if self._system_ready_event is not None:
-                self._system_ready_event.set()
-                self._log_info("system_ready_event выставлен — система готова")
+                self.attach_ready_event(self._system_ready_event)
+                self._log_info("готовность будет объявлена в конце run() — после регистрации команд PM")
 
             return True
         except Exception as exc:
@@ -342,6 +373,16 @@ class ProcessManagerProcess(ProcessModule):
                 self._cmd_telemetry_broadcast,
                 "Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), "
                 "throttle → центральный троттл оркестратора; cap-детекция на обоих путях",
+            ),
+            "observability.tail.subscribe_all": (
+                self._cmd_observability_tail_subscribe_all,
+                "Брокер (Task 5.11): подписать адрес на хвост ВСЕХ процессов одним вызовом; "
+                "намерение переживает рестарт, switch и появление нового процесса. "
+                "Записи идут напрямую подписчику — PM брокер, не транзит",
+            ),
+            "observability.tail.unsubscribe_all": (
+                self._cmd_observability_tail_unsubscribe_all,
+                "Брокер: снять намерение подписчика и разослать снятие хвоста всем процессам",
             ),
         }
 
@@ -573,7 +614,167 @@ class ProcessManagerProcess(ProcessModule):
         td = args.get("topology_dict")
         if td is None:
             return {"error": "topology_dict required"}
-        return self.apply_topology(td)
+        # R6-G: debounce судится ДО ретаргета. Прежде отклонённый по cooldown
+        # запрос успевал переставить адрес и откатить его обратно — то есть
+        # дёргал watcher парой stop/start за замену, которой не было. Проверка
+        # одна на два вызова (здесь и внутри `apply_topology`): второго
+        # механизма коалесинга не появляется, а решает по-прежнему владелец
+        # побочных эффектов — просто теперь мы не платим за его отказ.
+        debounced = self._topology_debounce_reject()
+        if debounced is not None:
+            return debounced
+        # Task 5.12: L2-watcher обязан переехать на спутник НОВОГО рецепта. Иначе
+        # правка нового файла молча не применяется, а правка старого — применяется,
+        # и оба симптома читаются как «hot-reload сломался».
+        #
+        # R6 (живой switch, 2026-07-29): ретаргет идёт ДО сборки. Адрес рецепта
+        # ассемблер читает на КАЖДОЙ сборке, и пересозданные процессы уносили
+        # адрес покинутого рецепта — живьём новорождённые получали `r6_a.yaml`
+        # при активном `r6_b.yaml`. Откат при неудаче явный: адрес обязан
+        # описывать ту топологию, которая на самом деле крутится.
+        previous = self._observability_recipe_address()
+        self._retarget_recipe_address(str(args.get("recipe_path") or ""))
+        try:
+            # Слой рецепта раздаёт сам `apply_topology` — ОДНИМ конвертом вместе
+            # со сбросом сессии (R6-E). Адрес он берёт из конфига, куда его
+            # только что положил ретаргет: два аргумента одного факта разошлись
+            # бы ровно там, где `apply_topology` зовут в обход команды.
+            result = self.apply_topology(td)
+        except BaseException:
+            # Ревью R6, находка 3: часть `apply_topology` живёт ВНЕ её внутреннего
+            # try, и вылетевшее оттуда исключение проносило адрес мимо ветки
+            # отката — новый рецепт при живой старой топологии. Адрес обязан
+            # описывать то, что на самом деле крутится.
+            self._retarget_recipe_address(previous)
+            raise
+        if not result.get("success"):
+            self._retarget_recipe_address(previous)
+        return result
+
+    def _topology_debounce_reject(self) -> dict | None:
+        """Отказ debounce (in-flight guard + cooldown) или ``None``, если можно идти.
+
+        Единственная реализация коалесинга; зовут её двое — команда (до ретаргета,
+        R6-G) и сам ``apply_topology`` (он владелец побочных эффектов и обязан
+        держать инвариант даже при прямом вызове). Проверка идемпотентна и ничего
+        не меняет, поэтому двойной вызов безопасен: гонка между ними всё равно
+        разрешается второй проверкой, а адрес откатывает ветка неуспеха.
+        """
+        if getattr(self, "_replace_in_progress", False):
+            self._log_warning("apply_topology: замена уже выполняется — запрос пропущен (debounce)")
+            return {
+                "success": False,
+                "debounced": True,
+                "error": "замена уже выполняется",
+                "rolled_back": False,
+            }
+        cooldown = float(self.get_config("replace_debounce_s") or 0.0)
+        if cooldown > 0.0 and (time.monotonic() - getattr(self, "_last_replace_ts", 0.0)) < cooldown:
+            self._log_info("apply_topology: запрос в пределах cooldown — пропущен (debounce)")
+            return {
+                "success": False,
+                "debounced": True,
+                "error": "debounce cooldown",
+                "rolled_back": False,
+            }
+        return None
+
+    def _observability_recipe_address(self) -> str:
+        """Действующий адрес рецепта (слой L2) — для отката и для конверта switch'а.
+
+        Чтение адреса не имеет права уронить УСПЕШНО применённую топологию: этот
+        вызов живёт на success-пути ``apply_topology``, и вылетевшее отсюда
+        исключение откатывало бы живой switch из-за неудавшейся наблюдаемости.
+        Пустая строка — честное «источник неизвестен», но молчать о ней нельзя.
+        """
+        from ...process_module.configs.observability_layers import RECIPE_PATH_CONFIG_KEY
+
+        get_config = getattr(self, "get_config", None)
+        if not callable(get_config):
+            return ""
+        try:
+            return str(get_config(RECIPE_PATH_CONFIG_KEY, "") or "")
+        except Exception as exc:  # noqa: BLE001 — см. докстринг
+            self._log_error(f"[observability] адрес рецепта не прочитан из конфига: {exc}")
+            return ""
+
+    def _retarget_recipe_address(self, recipe_path: str) -> str:
+        """Перевести адрес рецепта (и watcher за ним) — возвращает РЕЗОЛВНУТЫЙ путь.
+
+        Раздача слоя НЕ обусловлена наличием ретаргета: watcher — про файлы
+        оркестратора, слой — про конфиг каждого процесса. Свяжи мы их, и
+        потребитель framework без ``app_module`` (у него метода нет) молча
+        остался бы на секции покинутого рецепта.
+
+        Task 5.11: без хука ``app_module`` адрес всё равно записывается в конфиг.
+        Он не собственность watcher'а — его читают ещё ассемблер на каждой сборке
+        и ``observability.persist``; оставь мы запись только внутри хука, PM без
+        app_module называл бы источником слоя покинутый рецепт, а раздача уезжала
+        бы по старому адресу.
+        """
+        retarget = getattr(self, "retarget_observability_recipe_watcher", None)
+        if not callable(retarget):
+            resolved = str(recipe_path or "")
+            update_config = getattr(self, "update_config", None)
+            if callable(update_config):
+                from ...process_module.configs.observability_layers import RECIPE_PATH_CONFIG_KEY
+
+                try:
+                    update_config(RECIPE_PATH_CONFIG_KEY, resolved)
+                except Exception as exc:  # noqa: BLE001 — адрес не должен ронять switch
+                    self._log_error(f"[observability] адрес рецепта не записан в конфиг: {exc}")
+            return resolved
+        try:
+            return str(retarget(str(recipe_path or "")) or "")
+        except Exception as exc:  # noqa: BLE001 — ретаргет не должен ронять switch
+            self._log_error(f"[observability] ретаргет L2-watcher после switch не удался: {exc}")
+            return str(recipe_path or "")
+
+    def _recipe_layer_payload(self, topology_dict: dict | None) -> dict:
+        """Ключи слоя L2 нового рецепта для конверта switch'а (адрес + сырая секция).
+
+        Рассылается СЫРАЯ секция ``observability`` рецепта, а долька процесса
+        резолвится у получателя тем же ``resolve_recipe_section``, что и на boot.
+        Иначе switch и старт трактовали бы один файл по-разному — а это ровно тот
+        класс расхождения, который 5.12 закрывала как «boot ≡ reload».
+
+        Свою дольку оркестратор берёт из ЭТОГО ЖЕ конверта — в
+        ``_reset_observability_sessions``, тем же ``resolve_recipe_section`` и по
+        собственному имени (Task 5.13). Прежняя редакция исключала себя, и это
+        было верно ровно до тех пор, пока boot тоже ничего ему не давал:
+        исключение держало switch и boot в согласии — оба молчали. Теперь оба
+        выдают, и согласие сохранено с другой стороны.
+
+        **Спутник в конверт НЕ кладётся (ФР-3).** Task 5.13 (шаг 6) домерживала
+        его здесь — и это чинило настоящий дефект (protected-процесс терял после
+        switch сохранённую ``observability.persist`` настройку), но чинило не с
+        той стороны. Конверт задаёт получателю БАЗУ слоя, а базу получатель
+        кладёт себе в конфиг (``OVERRIDE_CONFIG_KEY``) и переживает с ней
+        пересборки. Слой заменяется целиком, база — нет: спутник в базе означал,
+        что снятый из него ключ не исчезнет уже никогда.
+
+        Настоящий адресат обоих случаев — ``compose_over_base``, и он исполняется
+        у получателя ПОСЛЕ записи базы (см. ветку switch'а в
+        ``builtin_commands._cmd_config_reload``), у оркестратора — в
+        ``_reset_observability_sessions``. Спутник читается из ОДНОГО файла одним
+        кодом, а на проводе едет только то, что сказал сам рецепт.
+        """
+        section = topology_dict.get("observability") if isinstance(topology_dict, dict) else None
+        # Нормализация к dict — не косметика: получатель различает `None`
+        # («рецепт переехал, слой не трогать») и `{}` («новый рецепт про
+        # наблюдаемость молчит» → снять прежний слой). До ФР-3 её делал
+        # `merge_companion_over` побочным эффектом своего `base`; убрав мерж,
+        # нормализацию пришлось назвать явно — иначе молчащий рецепт перестал
+        # бы снимать слой покинутого, и тот действовал бы вечно.
+        section = dict(section) if isinstance(section, dict) else {}
+        recipe_path = self._observability_recipe_address()
+        return {
+            # Пустая секция едет как `{}`, а не пропускается: «новый рецепт про
+            # наблюдаемость молчит» обязано СНЯТЬ прежний слой, иначе покинутый
+            # рецепт продолжал бы действовать вечно.
+            "observability_recipe": section,
+            "observability_recipe_path": recipe_path,
+        }
 
     def _cmd_topology_get(self, data=None, **kwargs) -> dict:
         """Получить текущую топологию.
@@ -839,14 +1040,42 @@ class ProcessManagerProcess(ProcessModule):
                     "role": role,
                 },
             }
-            try:
-                self.send_message(process_name, configure_cmd)
-                info["status"] = "active"
+            # Ревью Fable, находка 2: отправка шла НЕМЕДЛЕННО, сразу после барьера
+            # 0.5с, которого реальный инстанс не пробегает — конверт попадал в окно
+            # «message-loop крутится, команды не зарегистрированы» и выбрасывался.
+            # Статус при этом ставился `active` по факту доставки-в-очередь, то есть
+            # провод объявлялся живым по несостоявшемуся применению.
+            outcome = {"ok": False}
+
+            def _do(k=wire_key, i=info, r=role, cmd=configure_cmd, out=outcome):
+                out["ok"] = self._send_wire_configure(process_name, k, i, r, cmd)
+
+            deferred = self._run_when_child_ready(
+                process_name,
+                _do,
+                label="wire-reissue",
+                deadline_s=self._late_delivery_deadline() or 15.0,
+            )
+            # Счётчик считает ПЕРЕИГРАННЫЕ, а не запланированные. Отложенный провод
+            # сюда не попадает: его исход на этот момент неизвестен, а «раздал» и
+            # «применилось» — разные утверждения. Отложенный остаётся `broken` до
+            # фактической отправки — статус честен в каждый момент времени.
+            if not deferred and outcome["ok"]:
                 reissued += 1
-                self._log_info(f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})")
-            except Exception as exc:  # noqa: BLE001 — провод остаётся broken, lifecycle не роняем
-                self._log_error(f"wire re-issue '{wire_key}' в '{process_name}' не удался: {exc}")
         return reissued
+
+    def _send_wire_configure(
+        self, process_name: str, wire_key: str, info: dict, role: str, configure_cmd: dict
+    ) -> bool:
+        """Отправить wire.configure и пометить провод активным по факту отправки."""
+        try:
+            self.send_message(process_name, configure_cmd)
+            info["status"] = "active"
+            self._log_info(f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})")
+            return True
+        except Exception as exc:  # noqa: BLE001 — провод остаётся broken, lifecycle не роняем
+            self._log_error(f"wire re-issue '{wire_key}' в '{process_name}' не удался: {exc}")
+            return False
 
     # -------------------------------------------------------------------------
     # Protected / cleanup / rollback / snapshot — общие хелперы topology
@@ -967,6 +1196,15 @@ class ProcessManagerProcess(ProcessModule):
         # точка очистки (симметрия register/unregister): реестр+SHM+монитор+state.
         self._delete_process_state(name)
 
+        # Task 5.11: снятый с топологии процесс мог быть ПОДПИСЧИКОМ (GUI —
+        # обычный процесс системы). Намерение пережившего его брокера заставляло
+        # бы каждую новую инкарнацию форвардить записи в очередь мертвеца.
+        # Это единственный сигнал о смерти подписчика, который у оркестратора
+        # есть по факту, а не по догадке.
+        broker = getattr(self, "_observability_broker", None)
+        if broker is not None:
+            broker.forget_subscriber(name)
+
     def _state_op(self, handler_name: str, payload: dict, ctx: str) -> None:
         """Единый локальный путь мутации StateStore из PM (без IPC).
 
@@ -1005,11 +1243,28 @@ class ProcessManagerProcess(ProcessModule):
         )
 
     def _mark_instance_started(self, name: str) -> None:
-        """Запомнить момент запуска ИНСТАНСА процесса (Ф2 Task 2.1).
+        """Отметка старта ИНСТАНСА процесса + шов «поднялась свежая инкарнация».
 
-        Вызывается на всех путях старта (boot, start_process, restart, автостарт).
-        Вместе с pid из ОС даёт ответ на вопрос «это тот же инстанс или новый?»
-        даже когда incarnation не менялась (reuse-очередей).
+        Ф2 Task 2.1: вызывается на всех путях старта (boot, start_process,
+        restart, автостарт, пересоздание топологией). Вместе с pid из ОС даёт
+        ответ на вопрос «это тот же инстанс или новый?» даже когда incarnation не
+        менялась (reuse-очередей).
+
+        Task 5.11: **и по той же причине здесь висит переподписка на
+        наблюдаемость.** Свежая инкарнация стартует с пустым набором форвардеров,
+        то есть хвост подписчика на ней молча пропадает. Пять путей старта уже
+        сходятся в этой точке — заводить шестое место «не забыть переподписать»
+        значило бы построить ровно ту неполноту, которой болели оба потребителя
+        (GUI-триггер ``recovered`` не покрывал ручной рестарт). Раздача адресная
+        и fire-and-forget.
+
+        **Правка после живого прогона 2026-07-29.** Здесь стояло утверждение, что
+        команда «будет прочитана, когда инстанс раскрутит цикл сообщений — ждать
+        нечего и некого». Живьём она читалась раньше, чем инстанс регистрировал
+        команды, и молча терялась. Раздача ушла за readiness-гейт
+        (:meth:`_replay_observability_when_ready`); сам шов остаётся единственной
+        точкой всех путей старта.
+
         Защитный getattr — unit-тесты строят PM с no-op ``__init__``
         (та же философия, что ``_ensure_routing_state``).
         """
@@ -1018,6 +1273,291 @@ class ProcessManagerProcess(ProcessModule):
             started = {}
             self._instance_started_at = started
         started[name] = time.time()
+        self._replay_observability_when_ready(name)
+
+    # -------------------------------------------------------------------------
+    # Readiness-гейт: «команда не раньше, чем инкарнация сможет её принять»
+    #
+    # Task 5.11 завела его для раздачи подписок, резидуал 5.11-R4 показал живьём
+    # ту же гонку на routing.refresh / config.reload / telemetry.reconfigure.
+    # Механизм здесь ОДИН на всех потребителей: копия на каждую команду — ровно
+    # тот способ, которым дефект уже воскресал на соседней развилке.
+    # -------------------------------------------------------------------------
+
+    def _child_ready_event(self, name: str):
+        """Event готовности ребёнка, либо ``None`` — сигнала нет.
+
+        ``None`` означает «спросить не у кого» (mock-реестр, старый bundle,
+        процесс не создавался), а НЕ «не готов»: потребители гейта в этом случае
+        действуют немедленно — прежнее поведение хуже, чем с сигналом, но лучше,
+        чем не действовать вовсе.
+
+        Отказ реестра логируется ОДИН РАЗ на имя, а не на каждое чтение (ревью
+        корзины 2.1). До корзины 2.1 реестр читался один раз на действие, и
+        отдельной ручки не требовалось; теперь его перечитывает ожидающий воркер
+        каждые 0.25с, и при недоступном реестре одно действие с дедлайном 30с дало
+        бы ~120 одинаковых строк — а очередь адресата умножила бы это на число
+        досылок. Диагностика, глушащая собственный журнал, — тот же класс, что
+        инцидент 645 МБ, ради которого затевалась фаза. Флага «уже писали» хватает:
+        удачное чтение его снимает, поэтому мигающий реестр снова будет слышен.
+        """
+        get_ready_event = getattr(self._process_registry, "get_ready_event", None)
+        if not callable(get_ready_event):
+            return None
+        muted = getattr(self, "_ready_event_read_failed", None)
+        if muted is None:
+            muted = set()
+            self._ready_event_read_failed = muted
+        try:
+            event = get_ready_event(name)
+        except Exception as exc:  # noqa: BLE001 — отсутствие сигнала не повод падать
+            if name not in muted:
+                muted.add(name)
+                self._log_error(f"[ready-gate] ready_event '{name}' не прочитан: {exc} (дальше молча)")
+            return None
+        muted.discard(name)
+        return event
+
+    @property
+    def _child_action_pipelines(self) -> dict:
+        """Ленивый реестр очередей досылки на адресата (та же философия, что
+        ``_broadcast_generations``: unit-тесты строят PM с no-op ``__init__``).
+
+        ``имя ребёнка → deque отложенных действий``. Один ключ — одна очередь,
+        один воркер, порядок FIFO. Так досылки ОДНОМУ адресату упорядочены между
+        собой ПО ПОСТРОЕНИЮ, а не двумя daemon-потоками с гонкой (B-5-1)."""
+        pipes = self.__dict__.get("_child_action_pipelines_map")
+        if pipes is None:
+            pipes = {}
+            self.__dict__["_child_action_pipelines_map"] = pipes
+        return pipes
+
+    @property
+    def _child_action_running(self) -> set:
+        """Имена, у которых прямо сейчас крутится воркер-дренаж очереди."""
+        running = self.__dict__.get("_child_action_running_set")
+        if running is None:
+            running = set()
+            self.__dict__["_child_action_running_set"] = running
+        return running
+
+    @property
+    def _child_action_lock(self) -> threading.Lock:
+        lock = self.__dict__.get("_child_action_lock_obj")
+        if lock is None:
+            lock = threading.Lock()
+            self.__dict__["_child_action_lock_obj"] = lock
+        return lock
+
+    def _run_when_child_ready(
+        self,
+        name: str,
+        action,
+        *,
+        label: str,
+        deadline_s: float,
+        still_relevant=None,
+    ) -> bool:
+        """Выполнить действие над ребёнком тогда, когда он умеет его принять.
+
+        Готов, сигнала нет И очередь этого адресата пуста → действие прямо здесь,
+        синхронно (порядок тривиален — впереди никого). Иначе действие встаёт в
+        FIFO-очередь ЭТОГО ребёнка, а единственный воркер-дренаж выполняет её по
+        порядку после готовности. Ждать синхронно нельзя: гейт зовут из
+        ``message_processor``, а событие живёт ВНЕ message-loop (``mp.Event``) —
+        тот же аргумент, которым обоснованы барьеры Ф3.2.
+
+        **Почему очередь, а не поток-на-действие (B-5-1 сквозного ревью Ф5).**
+        Раньше каждое не-готовое действие поднимало свой daemon-поток, и два
+        действия одному ребёнку (``subscribe`` + ``unsubscribe`` разных команд,
+        или switch-конверты) доживали до готовности в НЕЗАВИСИМЫХ потоках без
+        всякого упорядочивания: репро ревьюера дал 17/30 прогонов с инверсией —
+        ``unsubscribe`` доставлялся ПЕРВЫМ, и на ребёнке оставался форвардер-сирота,
+        вечно пушащий записи мёртвому адресу. Очередь на адресата держит порядок
+        для ЛЮБОЙ пары команд, включая будущие — это не частный случай «пара
+        sub/unsub», а свойство места (урок ``feedback_defect_fixed_on_one_path_only``).
+
+        Args:
+            still_relevant: опциональная проверка «действие ещё имеет смысл».
+                Зовётся перед постановкой и во время ожидания/дренажа. ``False`` →
+                действие снимается (но НЕ роняет очередь — воркер идёт к
+                следующему). Нужна там, где событие может стать НЕДОСТИЖИМЫМ: switch
+                пересоздаёт ребёнка вместе с его ``ready_event``, и ожидание
+                остаётся на мёртвом объекте — иначе дотянуло бы дедлайн и доставило
+                конверт ПОЗЖЕ свежего (ревью Fable, находка 1).
+
+        Returns:
+            ``True`` — действие поставлено в очередь до готовности; ``False`` —
+            выполнено сразу (или снято как неактуальное).
+        """
+        if still_relevant is not None and not still_relevant():
+            return False
+        event = self._child_ready_event(name)
+        start_worker = False
+        with self._child_action_lock:
+            # «Впереди никого» = воркер этого адресата НЕ крутится. Пока он крутится,
+            # синхронный обгон реинтродуцировал бы гонку (действие уехало бы мимо
+            # очереди), поэтому busy → строго в очередь, даже если событие уже взведено.
+            busy = name in self._child_action_running
+            deliver_now = not busy and (event is None or event.is_set())
+            if not deliver_now:
+                self._child_action_pipelines.setdefault(name, deque()).append(
+                    (action, label, event, deadline_s, still_relevant)
+                )
+                if name not in self._child_action_running:
+                    self._child_action_running.add(name)
+                    start_worker = True
+        if deliver_now:
+            action()
+            return False
+        if start_worker:
+            threading.Thread(
+                target=self._drain_child_actions,
+                args=(name,),
+                name=f"ready-gate-{name}",
+                daemon=True,
+            ).start()
+        return True
+
+    def _drain_child_actions(self, name: str) -> None:
+        """Единственный воркер адресата: выполнять его отложенные действия по порядку.
+
+        FIFO по построению: один поток на ключ (гарантирует множество
+        ``_child_action_running`` под локом), поэтому порядок доставки = порядок
+        постановки. Действие обрабатывается ВНЕ лока (ожидание готовности может
+        блокировать), а опустошение очереди и снятие флага — под локом, чтобы
+        параллельная постановка либо попала в живую очередь, либо честно завела
+        новый воркер (без потерянного пробуждения).
+        """
+        while True:
+            with self._child_action_lock:
+                queue = self._child_action_pipelines.get(name)
+                if not queue:
+                    self._child_action_running.discard(name)
+                    self._child_action_pipelines.pop(name, None)
+                    return
+                action, label, event, deadline_s, still_relevant = queue.popleft()
+            self._run_child_action_after_ready(name, action, label, event, deadline_s, still_relevant)
+
+    #: Шаг опроса ожидания готовности. Ждём НЕ одним ``event.wait(deadline)``, а
+    #: срезами: между срезами проверяется актуальность. Без этого поток, чьё
+    #: событие умерло вместе с прежней инкарнацией, висит весь дедлайн и в конце
+    #: доставляет прошлое в настоящее.
+    _READY_GATE_POLL_S = 0.25
+
+    def _run_child_action_after_ready(
+        self,
+        name: str,
+        action,
+        label: str,
+        event,
+        deadline_s: float,
+        still_relevant=None,
+    ) -> None:
+        """Дождаться готовности инкарнации и выполнить действие (daemon-поток).
+
+        По истечении дедлайна действуем ВСЁ РАВНО и громко: «процесс не
+        объявился» — не повод молча пропустить команду, но и не повод сделать
+        вид, что всё прошло штатно.
+
+        Действие, потерявшее актуальность (``still_relevant`` → ``False``),
+        снимается — но НЕ молча: снятая команда и потерянная команда снаружи
+        выглядят одинаково, а различать их приходится именно в разборе.
+        """
+        try:
+            deadline = time.monotonic() + deadline_s
+            # Сигнала готовности нет — ждать нечего и некого: та же семантика, что
+            # у синхронной ветки :meth:`_run_when_child_ready`. В очередь такое
+            # действие попадает не затем, чтобы чего-то ждать, а затем, чтобы не
+            # обогнать уже стоящие в ней (B-5-1) — путь, которого до очереди не
+            # существовало. Без этой ветки ``event.wait`` на ``None`` падал в
+            # ``except`` ниже, и действие ТЕРЯЛОСЬ, оставив одну строку в логе:
+            # шов, созданный самой очередью. Достижим на switch — ребёнок
+            # пересоздан, и его запись готовности сменилась между двумя досылками.
+            ready = event is None
+            while not ready:
+                if still_relevant is not None and not still_relevant():
+                    self._log_info(
+                        f"[ready-gate:{label}] '{name}': досылка снята — конверт устарел "
+                        "(рассылка того же типа ушла позже)"
+                    )
+                    return
+                # Инкарнация могла смениться, пока мы ждали: switch/рестарт
+                # пересоздаёт ребёнка ВМЕСТЕ с его ready_event, и объект, который
+                # держит этот поток, после того уже никто не взведёт. Конверт при
+                # этом остаётся АКТУАЛЬНЫМ (поколение не менялось — свежей рассылки
+                # не было), поэтому проверка выше его не снимает, и голова очереди
+                # висела бы весь дедлайн: за ней стоят действия того же адресата.
+                # Ревью корзины 2 (Ф-7): ADR-PMM-024 утверждал, что такого не
+                # бывает, — утверждение было ложным, а не реализация неполной.
+                # Перечитываем реестр КАЖДЫЙ срез: ждём того, кто может объявиться,
+                # а не того, кого уже нет. `None` (ребёнка сняли с топологии) не
+                # подменяет событие — там семантика «действуем вслепую по дедлайну»,
+                # и обрывать её тихо нельзя.
+                current = self._child_ready_event(name)
+                if current is not None and current is not event:
+                    self._log_info(
+                        f"[ready-gate:{label}] '{name}': ждём сигнал НОВОЙ инкарнации "
+                        "(прежний объект пересоздан вместе с ребёнком)"
+                    )
+                    event = current
+                    if event.is_set():
+                        ready = True
+                        break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                if event.wait(min(self._READY_GATE_POLL_S, remaining)):
+                    ready = True
+                    break
+            # Перепроверка ПОСЛЕ ожидания обязательна: конверт мог устареть ровно
+            # в тот момент, когда инкарнация объявилась (свежая рассылка той же
+            # команды приходит именно тогда). Без неё поток, дождавшийся события,
+            # доставлял прошлое — поймано собственным тестом поколений.
+            if still_relevant is not None and not still_relevant():
+                self._log_info(f"[ready-gate:{label}] '{name}': досылка снята (рассылка того же типа ушла позже)")
+                return
+            if not ready:
+                self._log_warning(
+                    f"[ready-gate:{label}] '{name}' не объявил готовность за {deadline_s}s — "
+                    "действую вслепую (команда может не застать обработчик)"
+                )
+            action()
+        except Exception as exc:  # noqa: BLE001 — поток обслуживания не роняет систему
+            self._log_error(f"[ready-gate:{label}] отложенное действие для '{name}' упало: {exc}")
+
+    def _replay_observability_when_ready(self, name: str) -> None:
+        """Раздать намерения свежей инкарнации — но не раньше, чем она сможет их принять.
+
+        **Живой прогон 2026-07-29 (switch + ручной рестарт) — дефект, которого не
+        видел ни один из 6000+ зелёных тестов.** Раздача со шва приезжала ребёнку,
+        у которого message-loop уже крутится (шаг 7 ``initialize``), а команды ещё
+        не зарегистрированы (они регистрируются в ``run()``). Ребёнок писал
+        ``No handler for key 'observability.tail.subscribe'`` и ронял команду —
+        хвост подписчика пропадал НАВСЕГДА и молча: раздача fire-and-forget, ответа
+        никто не ждёт, повтора нет. В тестах дефект невидим по построению — у
+        фейкового ребёнка хендлер есть всегда.
+
+        Прежний докстринг шва утверждал обратное («будет прочитана, когда тот
+        раскрутит цикл сообщений — ждать здесь нечего и некого»). Сообщение
+        действительно читается — просто раньше, чем появляется тот, кто его поймёт.
+
+        Ждать синхронно нельзя: шов зовут из message_processor. Ожидание живёт в
+        общем примитиве :meth:`_run_when_child_ready` — том же, которым резидуал
+        5.11-R4 развёл рассылки switch'а. Своей копии ожидания здесь больше нет.
+        """
+        broker = getattr(self, "_observability_broker", None)
+        if broker is None or not broker.subscriber_names():
+            # Намерений нет — ни потока, ни раздачи: платить за них на КАЖДОМ
+            # старте процесса не за что.
+            return
+        timeout = self.get_config("observability_replay_ready_timeout_s")
+        self._run_when_child_ready(
+            name,
+            lambda: self._replay_observability_subscriptions("instance.started", target=name),
+            label="observability",
+            deadline_s=30.0 if timeout is None else float(timeout),
+        )
 
     def _publish_process_identity(self, name: str) -> None:
         """Опубликовать ОС-идентичность процесса в StateStore: pid + актуальный config.
@@ -1365,7 +1905,19 @@ class ProcessManagerProcess(ProcessModule):
             payload["telemetry_mode"] = delta["mode"]
         try:
             if target is not None:
-                reached = 1 if self._send_child_command(target, "telemetry.reconfigure", payload) else 0
+                # Ревью Fable, находка 2: адресный путь шёл МИМО гейта готовности —
+                # ровно для того процесса, которого только что перезапустили, то есть
+                # для сценария из Why задачи R4. Компенсирующей рассылки за ним нет:
+                # потеря тихая и постоянная (ребёнок остаётся на boot-конфиге).
+                deferred = self._run_when_child_ready(
+                    target,
+                    lambda t=target, p=payload: self._send_child_command(t, "telemetry.reconfigure", p),
+                    label="telemetry-replay",
+                    deadline_s=self._late_delivery_deadline() or 15.0,
+                )
+                # Охват отложенной отправки неизвестен на этот момент — честнее
+                # вернуть 0, чем выдать намерение за доставку.
+                reached = 0 if deferred else 1
             else:
                 reached = self._broadcast_command("telemetry.reconfigure", payload)
             self._log_info(f"telemetry runtime-дельта доиграна ({reason}, target={target!r}): reached={reached}")
@@ -1373,6 +1925,164 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:  # noqa: BLE001 — доигрывание не должно ронять lifecycle
             self._log_error(f"_replay_telemetry_runtime_delta({reason}) упал: {exc}")
             return 0
+
+    def _compose_own_recipe_layer(self, recipe: dict) -> tuple[dict, str]:
+        """Свой слой L2 из конверта switch'а: долька рецепта + спутник ПОВЕРХ (ФР-3).
+
+        Конверт везёт только то, что сказал сам рецепт (см. ``_recipe_layer_payload``),
+        поэтому спутник оркестратор кладёт себе сам — тем же ``compose_over_base``,
+        которым это делают дети и boot. Раньше спутник приезжал уже вмерженным в
+        конверт, и слой получался тот же — но ценой того, что база слоя несла
+        спутника, а снятый из него ключ жил вечно.
+
+        Битый спутник не имеет права уронить switch: жалуемся и берём базу как есть.
+        Отказ здесь значим — без строки в логе «сохранённая настройка не применилась»
+        выясняется сравнением файлов.
+
+        **ФР-2: ссылки без приёмника проверяются и здесь.** Дети собирают свой слой
+        ``compose_recipe_layer``, и проверка живёт внутри неё; оркестратор идёт мимо
+        (база у него из конверта, не из конфига), поэтому правило зовётся явно — то
+        же самое, из ``observability_refs``. Оставь мы эту развилку без него, опечатка
+        в спутнике была бы громкой у всех детей и тихой у одного PM — и «у кого
+        сломалось» решалось бы тем, чей журнал открыли первым.
+
+        Returns:
+            ``(тело слоя, источник)``. Источник — конкретный файл (спутник или
+            рецепт): при паре оператор иначе не знает, какой из двух править.
+        """
+        from ...process_module.configs.observability_companion import compose_over_base
+        from ...process_module.configs.observability_layers import resolve_recipe_section
+        from ...process_module.configs.observability_refs import report_unknown_refs
+
+        base = resolve_recipe_section(recipe.get("observability_recipe"), self.name)
+        recipe_path = str(recipe.get("observability_recipe_path") or "")
+        try:
+            body, source = compose_over_base(base, recipe_path, self.name)
+        except Exception as exc:  # noqa: BLE001 — битый спутник не роняет switch
+            self._log_error(
+                f"[observability] спутник нового рецепта не прочитан ({recipe_path}): {exc} — свой слой без него"
+            )
+            body, source = base, recipe_path
+        report_unknown_refs(self, body, source=source)
+        return body, source
+
+    def _reset_observability_sessions(self, reason: str, *, recipe: dict | None = None) -> dict:
+        """Обнулить слой сессии наблюдаемости (L3) у себя и у всех живых детей.
+
+        Switch рецепта — это новый конвейер, а L3 отвечает на вопрос «что я кручу
+        руками ПРЯМО СЕЙЧАС». Пережившая switch ручка отвечала бы на него про
+        прошлый конвейер. Хуже того, пережила бы она НЕ у всех: protected-процессы
+        не перезапускаются и сохранили бы L3, пересозданные стартуют чистыми — и
+        ``introspect.observability`` соседей начал бы врать по-разному.
+
+        **Что здесь честно, а что нет.** Свои ключи PM называет поимённо — он их
+        знает. Ключи детей он НЕ собирает: ``_broadcast_command`` — fire-and-forget,
+        а собирать N ответов внутри ``topology.apply`` значит ждать в потоке, где
+        уже ловили дедлоки. Поэтому в ответе — охват рассылки, а не выдуманный
+        список: проверяемое утверждение «после switch у всех пусто» доказывается
+        опросом ``introspect.observability``, не эхом этой команды.
+        """
+        own: list = []
+        own_recipe: dict | None = None
+        try:
+            from ...process_module.configs.observability_layers import (
+                LAYER_RECIPE,
+                process_observability_layers,
+            )
+            from ...process_module.managers.observability_reload import (
+                apply_observability_layers,
+                telemetry_targets,
+            )
+
+            # Task 5.9: `reason` в origin, а не «switch» литералом — сброс L3
+            # инициируют разные события (switch рецепта, пересборка топологии), и
+            # в разборе инцидента вопрос ровно этот: чем именно унесло ручки.
+            layers = process_observability_layers(self)
+            origin = f"switch:{reason}"
+            own = list(layers.session_clear(origin=origin))
+            # Task 5.13: свой слой L2 — из ТОГО ЖЕ конверта и ТЕМ ЖЕ резолвером,
+            # что у детей (`resolve_recipe_section` по собственному имени). До
+            # 5.13 оркестратор себе дольку не выдавал — сознательно, чтобы не
+            # развести switch и boot, потому что boot её тоже не выдавал. Теперь
+            # выдают оба, и исключение снято с ОБОИХ концов провода сразу.
+            #
+            # Место выбрано на ОБЩЕМ пути, а не внутри app_module-хука ретаргета:
+            # PM без этого хука идёт другой развилкой (`_retarget_recipe_address`),
+            # и правка там оставила бы такую сборку без слоя. Один код на обе
+            # развилки вместо двух похожих.
+            if recipe is not None:
+                own_recipe, own_source = self._compose_own_recipe_layer(recipe)
+                layers.replace_layer(
+                    LAYER_RECIPE,
+                    own_recipe,
+                    source=own_source,
+                    origin=origin,
+                )
+            # R6 (живой switch, 2026-07-29): снять ключ со слоя — половина дела.
+            # Без пересборки менеджеры остаются на СНЯТОМ значении, а readback
+            # честно отвечает «сессия пуста» — то есть провенанс и действующий
+            # конфиг расходятся, и расходятся молча. Живьём: PM после switch
+            # держал DEBUG при пустом L3, тогда как ребёнок (у него пересборку
+            # делает `config.reload`) вернулся на INFO. Асимметрия ровно та, от
+            # которой эта функция и должна была защищать.
+            # Пересборка нужна, если изменился ЛЮБОЙ слой: снятая ручка сессии
+            # или новый слой рецепта. Условие «только own» оставило бы switch без
+            # ручек молча неприменённым — рецепт сменился, менеджеры прежние.
+            if own or recipe is not None:
+                apply_observability_layers(
+                    layers,
+                    logger=getattr(self, "logger_manager", None),
+                    error=getattr(self, "error_manager", None),
+                    stats=getattr(self, "stats_manager", None),
+                    log_info=None,  # своё сообщение об охвате ниже
+                    **telemetry_targets(self),
+                    origin=origin,
+                )
+            # Advisory A2 ревью 5.9: у детей та же смена подписана `switch:broadcast`
+            # (см. `_ORIGIN_SWITCH`) — оба написания начинаются с `switch:`, и
+            # grep по одному находит другое. Разными они остаются намеренно:
+            # оркестратор чистит СВОЙ слой, ребёнок — по рассылке, и в разборе
+            # «у кого не сбросилось» это первый различающий признак.
+        except Exception as exc:  # noqa: BLE001 — сброс не имеет права ронять switch
+            self._log_error(f"_reset_observability_sessions({reason}): свой L3 не сброшен: {exc}")
+
+        # R6-E: сброс L3 и новый слой L2 едут ОДНИМ конвертом. Двумя рассылками
+        # каждый ребёнок делал две полные пересборки на один switch, а между ними
+        # существовало окно, где сессия уже пуста, а слой рецепта ещё прежний —
+        # состояние, которого не описывает ни один слой. Обработчик ребёнка умеет
+        # оба ключа сразу и делает ОДНУ пересборку, порядок «снизу вверх» (слой
+        # рецепта въезжает до сброса сессии) держит он же.
+        payload: dict = {"observability_session_clear": True}
+        if recipe:
+            payload.update(recipe)
+        reached = 0
+        try:
+            reached = self._broadcast_command("config.reload", payload)
+        except Exception as exc:  # noqa: BLE001
+            self._log_error(f"_reset_observability_sessions({reason}): рассылка не удалась: {exc}")
+
+        if own or reached or own_recipe is not None:
+            self._log_info(
+                f"[observability] слой сессии сброшен ({reason}): свои ключи={own or '—'}, "
+                f"свой слой рецепта={sorted(own_recipe) if own_recipe is not None else 'не менялся'}, "
+                f"рассылка детям reached={reached}, слой рецепта={'в том же конверте' if recipe else 'не менялся'}"
+            )
+        result = {"orchestrator": own, "broadcast_reached": int(reached)}
+        # Task 5.13: свой слой называется отдельно от детского. «Раздал всем» и
+        # «применил себе» — разные утверждения, и до 5.13 второе было ложным при
+        # истинном первом; слить их в одно поле значило бы снова сделать этот
+        # разрыв ненаблюдаемым.
+        if own_recipe is not None:
+            result["orchestrator_recipe_keys"] = sorted(own_recipe)
+        # Что именно уехало детям — в ответе: «раздал» и «раздал ЭТО» — разные
+        # утверждения, а проверяется потом второе. Читаем ИЗ КОНВЕРТА, а не из
+        # аргумента (находка 3 ревью 5.11): по аргументу ответ называл слой даже
+        # тогда, когда тот не попал в рассылку, — то есть отвечал за намерение,
+        # выдавая это за доставку.
+        if "observability_recipe" in payload:
+            result["recipe_path"] = payload.get("observability_recipe_path", "")
+            result["recipe_keys"] = sorted(payload.get("observability_recipe") or {})
+        return result
 
     def _broadcast_command(self, command: str, data: dict, *, queue_type: str = "system") -> int:
         """Единый примитив рассылки command-билета всем детям (Ф3.1 / PC 3.3).
@@ -1388,8 +2098,27 @@ class ProcessManagerProcess(ProcessModule):
         телеметрии решает по-своему. ``communication`` недоступен (минимальный/тестовый
         PM) → 0 (тихий no-op).
 
+        **Резидуал 5.11-R4 — досылка не-готовым.** Ребёнок читает system-очередь с
+        шага 7 ``initialize()``, а команды регистрирует в ``run()``: попавшее в это
+        окно сообщение читается и выбрасывается (``No handler for key ...``), а
+        отправитель fire-and-forget об этом не узнаёт никогда. Живой лог switch'а
+        показал так и ``routing.refresh``, и ``config.reload``. Поэтому рассылка
+        идёт как прежде — всем и сразу, — а тем, кто на этот момент готовности не
+        объявил, тот же конверт досылается адресно за readiness-гейтом. Досылка
+        живёт ЗДЕСЬ, а не в трёх вызывающих: список «не забыть» из трёх пунктов —
+        ровно та форма, которой дефект уже воскресал на соседней развилке.
+
+        Все команды этого пути идемпотентны (``routing.refresh`` — guard по epoch,
+        ``config.reload`` — пересборка слоёв, ``telemetry.reconfigure`` —
+        replace/merge, ``observability.tail.*`` — идемпотентны по подписчику),
+        поэтому ребёнок, успевший стать готовым в зазоре, безопасно переживает
+        двойную доставку.
+
         Returns:
-            Число успешных доставок (охват) от ``comm.broadcast``.
+            Число успешных доставок (охват) от ``comm.broadcast`` — доставок В
+            ОЧЕРЕДЬ на момент рассылки. Досланные позже здесь НЕ учитываются:
+            «раздал» и «применилось» — разные утверждения, и складывать их в одно
+            число значило бы отвечать за второе, измерив первое.
         """
         comm = getattr(self, "communication", None)
         if comm is None:
@@ -1401,7 +2130,174 @@ class ProcessManagerProcess(ProcessModule):
             "queue_type": queue_type,
             "data": data,
         }
-        return int(comm.broadcast(msg, exclude_self=True))
+        reached = int(comm.broadcast(msg, exclude_self=True))
+        self._redeliver_to_unready_children(command, data, queue_type=queue_type)
+        return reached
+
+    #: Дорожка поколений для конверта БЕЗ содержимого. Пустой ``config.reload`` —
+    #: не «ничего», а самостоятельное намерение «перечитай свой источник»
+    #: (фан-аут watcher'а L1, ``app_module/orchestrator.py``). Своя дорожка ему
+    #: нужна в обе стороны: без неё он либо гасит чужие конверты (дефект ФР-1),
+    #: либо перестаёт гасить сам себя и копится дублями.
+    _EMPTY_ENVELOPE_KEY = "\x00empty"
+
+    @staticmethod
+    def _envelope_content_keys(data) -> tuple[str, ...]:
+        """Из чего состоит конверт — верхнеуровневые ключи его payload'а.
+
+        Гранулярность по КЛЮЧАМ, а не по значениям — намеренно: «свежее того же
+        рода» — про то, какие ручки конверт трогает, а не какие значения везёт.
+        По значениям каждый switch оказался бы «новым родом» и не гасил бы
+        предыдущий, то есть стейл-после-свежего вернулся бы с другой стороны.
+        """
+        if isinstance(data, dict) and data:
+            return tuple(sorted(str(key) for key in data))
+        return (ProcessManagerProcess._EMPTY_ENVELOPE_KEY,)
+
+    def _next_broadcast_generation(self, command: str, data) -> dict:
+        """Начать новое поколение рассылки и вернуть отметки поколений её содержимого.
+
+        Дорожка поколений — на пару ``(команда, ключ содержимого)``, а не на одно
+        лишь имя команды (ФР-1 сквозного ревью Ф5, находка B-4-1). Имя команды
+        одно, а конверты под ним разные: конверт switch'а едет как
+        ``config.reload`` с ключами ``observability_session_clear`` /
+        ``observability_recipe`` / ``observability_recipe_path``, а фан-аут
+        watcher'а — как тот же ``config.reload`` с ПУСТЫМ payload'ом. На общей
+        дорожке поздний пустой конверт получал более свежее поколение и гасил
+        досылку switch-конверта, содержимого которого сам не нёс: protected-процесс,
+        рестартующий в момент switch, навсегда оставался на слое покинутого рецепта.
+
+        Returns:
+            ``{(команда, ключ): номер}`` — отметка для :meth:`_broadcast_envelope_relevant`.
+        """
+        marks: dict = {}
+        with self._broadcast_generations_lock:
+            for key in self._envelope_content_keys(data):
+                lane = (command, key)
+                nxt = self._broadcast_generations.get(lane, 0) + 1
+                self._broadcast_generations[lane] = nxt
+                marks[lane] = nxt
+        return marks
+
+    def _broadcast_envelope_relevant(self, marks: dict) -> bool:
+        """Конверт ещё актуален, пока ХОТЬ ОДНА его ручка не перекрыта свежей рассылкой.
+
+        Правило «any», а не «all», потому что снимать досылку имеет право только
+        тот, кто везёт то же самое: конверт из двух ключей, перекрытый рассылкой
+        по одному из них, во второй половине остаётся единственным носителем
+        содержимого. «all» здесь означало бы «частичное перекрытие считаем полным»
+        — ровно та потеря содержимого, ради которой дорожки и разделены.
+
+        Обратная сторона осознанная: богатый конверт переживает бедный и приедет
+        после него. Это дубль (безвредный — все команды этого пути идемпотентны),
+        а не стейл-после-свежего: перекрытые ключи у него уже сняты, неперекрытые
+        свежее ничем не заменены.
+        """
+        if not marks:  # отметок нет — гасить нечем, конверт считается актуальным
+            return True
+        with self._broadcast_generations_lock:
+            return any(self._broadcast_generations.get(lane, 0) == generation for lane, generation in marks.items())
+
+    @property
+    def _broadcast_generations(self) -> dict:
+        """Ленивый реестр поколений (та же философия, что ``_ensure_routing_state``:
+        unit-тесты строят PM с no-op ``__init__``)."""
+        gens = self.__dict__.get("_broadcast_generations_map")
+        if gens is None:
+            gens = {}
+            self.__dict__["_broadcast_generations_map"] = gens
+        return gens
+
+    @property
+    def _broadcast_generations_lock(self) -> threading.Lock:
+        lock = self.__dict__.get("_broadcast_generations_lock_obj")
+        if lock is None:
+            lock = threading.Lock()
+            self.__dict__["_broadcast_generations_lock_obj"] = lock
+        return lock
+
+    def _late_delivery_deadline(self) -> float:
+        """Сколько ждать готовности ребёнка перед досылкой (``child_command_ready_timeout_s``).
+
+        Отдельный ключ от ``observability_replay_ready_timeout_s`` намеренно:
+        механизм ожидания один (:meth:`_run_when_child_ready`), а политика разная.
+        Раздача подписок может ждать долго — подписчик всё равно молчит, пока не
+        дождётся. Досылка lifecycle-команды ждать столько же не должна: рассылка
+        привязана к событию (switch, рестарт), и через минуту она уже про прошлое.
+        ``0`` → досылка выключена (аварийный откат к поведению до R4).
+        """
+        raw = self.get_config("child_command_ready_timeout_s")
+        return 15.0 if raw is None else float(raw)
+
+    def _log_redelivery(self, name: str, command: str, data: dict, *, queue_type: str) -> bool:
+        """Отправить досылку и сказать вслух, чем она кончилась.
+
+        Механизм, о котором нельзя спросить, через час неотличим от сломанного:
+        «запланировал» и «доставил» — разные утверждения, а без второго в логе
+        остаётся только намерение. Пара строк ЗАПЛАНИРОВАНА/ДОСТАВЛЕНА — то, по
+        чему живой прогон отличает работающую досылку от заведённого потока.
+        """
+        delivered = self._send_child_command(name, command, data, queue_type=queue_type)
+        if delivered:
+            self._log_info(f"[ready-gate] '{command}' → '{name}': досылка доставлена (инкарнация готова)")
+        else:
+            self._log_error(f"[ready-gate] '{command}' → '{name}': досылка НЕ доставлена — команда потеряна")
+        return delivered
+
+    def _redeliver_to_unready_children(self, command: str, data: dict, *, queue_type: str) -> list[str]:
+        """Досылать конверт тем детям, кто на момент рассылки ещё не готов её принять.
+
+        Отбор — по ``ready_event``: событие есть и НЕ взведено. Нет события
+        (mock-реестр, не-ProcessModule) → спрашивать не у кого, досылка не
+        заводится: гадать «наверное, не готов» значило бы слать вторую копию
+        всем и всегда.
+
+        Returns:
+            Имена, которым досылка запланирована (для лога и тестов).
+        """
+        deadline = self._late_delivery_deadline()
+        if deadline <= 0:
+            return []
+        registry = getattr(self, "_process_registry", None)
+        if registry is None:
+            return []
+        # Поколение рассылки ЭТОГО конверта. Досылка обязана нести содержимое своего
+        # конверта — но только пока он последний: конверт switch'а A→B, доставленный
+        # после конверта B→C, пересобирает у ребёнка слой ПОКИНУТОГО рецепта.
+        # Идемпотентность тут не спасает: дубль безвреден, стейл-после-свежего нет
+        # (ревью Fable, находка 1 — воспроизведено двумя switch подряд).
+        # «Последний» считается по СОДЕРЖИМОМУ, а не по имени команды (ФР-1): под
+        # одним `config.reload` едут и конверт switch'а, и пустой фан-аут watcher'а,
+        # и второй гасил первый, ничего взамен не привозя.
+        marks = self._next_broadcast_generation(command, data)
+        late: list[str] = []
+        snapshot: dict | None = None
+        for proc in list(getattr(registry, "os_processes", None) or []):
+            name = getattr(proc, "name", None)
+            if not name:
+                continue
+            event = self._child_ready_event(name)
+            if event is None or event.is_set():
+                continue
+            if snapshot is None:
+                # Досылка уходит секундами позже, а вызывающий волен переиспользовать
+                # свой payload (так делает fan-out телеметрии). Уезжает СНИМОК того,
+                # что реально ушло в рассылке, а не то, во что он превратился потом.
+                snapshot = copy.deepcopy(data)
+            late.append(name)
+            self._run_when_child_ready(
+                name,
+                lambda n=name, d=snapshot: self._log_redelivery(n, command, d, queue_type=queue_type),
+                label=f"redeliver:{command}",
+                deadline_s=deadline,
+                still_relevant=lambda m=marks: self._broadcast_envelope_relevant(m),
+            )
+        if late:
+            self._log_info(
+                f"[ready-gate] '{command}': досылка запланирована не-готовым {sorted(late)} "
+                f"(дедлайн {deadline}s) — рассылка их обработчика не застала бы"
+            )
+        return late
 
     def _send_child_command(self, target: str, command: str, data: dict, *, queue_type: str = "system") -> bool:
         """Адресная отправка command-билета ОДНОМУ ребёнку (аналог :meth:`_broadcast_command`).
@@ -1427,6 +2323,98 @@ class ProcessManagerProcess(ProcessModule):
             "data": data,
         }
         return bool(comm.send_to_process(target, msg))
+
+    # -------------------------------------------------------------------------
+    # Брокер подписки на наблюдаемость (Task 5.11)
+    # -------------------------------------------------------------------------
+
+    def _observability_broker_obj(self):
+        """Ленивый брокер подписки (та же философия, что ``_ensure_routing_state``).
+
+        Строится на уже существующих примитивах рассылки: ``_broadcast_command``
+        (fan-out всем детям тем же путём, что routing.refresh — по СВЕЖИМ
+        очередям PM, значит долетает и до пересозданных switch'ем) и
+        ``_send_child_command`` (адресно одному). Свой хвост оркестратор ставит
+        тем же ``subscribe_observability_tail``, что и любой процесс.
+        """
+        broker = getattr(self, "_observability_broker", None)
+        if broker is None:
+            from .observability_broker import ObservabilitySubscriptionBroker
+
+            broker = ObservabilitySubscriptionBroker(
+                broadcast=lambda command, data: self._broadcast_command(command, data),
+                send_to=lambda target, command, data: self._send_child_command(target, command, data),
+                subscribe_self=getattr(self, "subscribe_observability_tail", None),
+                unsubscribe_self=getattr(self, "unsubscribe_observability_tail", None),
+                log_info=self._log_info,
+                log_error=self._log_error,
+            )
+            self._observability_broker = broker
+        return broker
+
+    def _forget_observability_session(self, session_id: str) -> None:
+        """Снять намерения подписчика закрытой сессии (5.11-R1, сигнал от SocketChannel).
+
+        Зовётся из read-потока канала. Ничего блокирующего здесь делать нельзя и не
+        нужно: снятие — это правка словаря брокера под его же локом.
+        """
+        broker = getattr(self, "_observability_broker", None)
+        if broker is None:
+            return  # брокера не заводили — снимать нечего
+        try:
+            broker.forget_session(session_id)
+        except Exception as exc:  # noqa: BLE001 — сигнал не имеет права ронять канал
+            self._log_error(f"[observability] снятие намерений сессии '{session_id}' упало: {exc}")
+
+    def _cmd_observability_tail_subscribe_all(self, data=None, **kwargs) -> dict:
+        """Подписать адрес на хвост ВСЕХ процессов одним вызовом (Task 5.11).
+
+        До брокера потребитель сам опрашивал топологию, сам крутил цикл подписок
+        и сам ловил рестарты — каждый по-своему и каждый неполно (GUI не видел
+        ручного рестарта, драйвер получил дедлок автоподписки из reader-потока).
+        Здесь намерение записывается один раз, а разворачивает его тот, у кого
+        есть сигнал «поднялась свежая инкарнация», — оркестратор.
+
+        Параметры (data): ``subscriber`` (адрес получателя пушей, обяз.).
+        """
+        args = _merge_cmd_args(data, kwargs)
+        return self._observability_broker_obj().subscribe_all(str(args.get("subscriber") or ""))
+
+    def _cmd_observability_tail_unsubscribe_all(self, data=None, **kwargs) -> dict:
+        """Снять намерение подписчика и разослать снятие хвоста всем процессам.
+
+        ``subscriber`` обязателен: пустой адрес у процесса означает «снять всех»,
+        и та же вольность здесь снесла бы хвост соседнего потребителя.
+        """
+        args = _merge_cmd_args(data, kwargs)
+        return self._observability_broker_obj().unsubscribe_all(str(args.get("subscriber") or ""))
+
+    def observability_introspect_extra(self) -> dict:
+        """Хук ``introspect.observability``: секция брокера (Task 5.11).
+
+        Оркестраторская часть readback'а — единственное место, где видно,
+        КТО подписан на всё и доехала ли последняя раздача. Без неё «хвоста нет»
+        неотличимо от «намерение снято».
+        """
+        return {"broker": self._observability_broker_obj().snapshot()}
+
+    def _replay_observability_subscriptions(self, reason: str, *, target: str | None = None) -> dict:
+        """Доиграть намерения подписки (шов инкарнации / смена топологии).
+
+        Fire-and-forget по построению: PM не ждёт ответа ребёнка ни здесь, ни в
+        хендлере команды. Именно это, а не договорённость «не звать из такого-то
+        потока», делает дедлок-путь автоподписки невоспроизводимым.
+        """
+        broker = getattr(self, "_observability_broker", None)
+        if broker is None:
+            # Ни одного намерения не записано — строить брокер ради пустой
+            # раздачи значит платить на КАЖДОМ старте процесса.
+            return {"subscribers": [], "reached": 0}
+        try:
+            return broker.replay(target=target, reason=reason)
+        except Exception as exc:  # noqa: BLE001 — раздача не имеет права ронять старт
+            self._log_error(f"_replay_observability_subscriptions({reason}) упал: {exc}")
+            return {"subscribers": [], "reached": 0, "error": str(exc)}
 
     def _refresh_after_topology(self, reason: str, executed: list | None) -> int | None:
         """Если топология что-то исполнила (executed непуст) — bump epoch + broadcast.
@@ -2242,26 +3230,10 @@ class ProcessManagerProcess(ProcessModule):
             dict с ключами ``success``, ``rolled_back``, ``debounced``, ``error``
             и полями результата ``TopologyManager.apply``.
         """
-        # --- Debounce: in-flight guard ---
-        if getattr(self, "_replace_in_progress", False):
-            self._log_warning("apply_topology: замена уже выполняется — запрос пропущен (debounce)")
-            return {
-                "success": False,
-                "debounced": True,
-                "error": "замена уже выполняется",
-                "rolled_back": False,
-            }
-
-        # --- Debounce: cooldown ---
-        cooldown = float(self.get_config("replace_debounce_s") or 0.0)
-        if cooldown > 0.0 and (time.monotonic() - getattr(self, "_last_replace_ts", 0.0)) < cooldown:
-            self._log_info("apply_topology: запрос в пределах cooldown — пропущен (debounce)")
-            return {
-                "success": False,
-                "debounced": True,
-                "error": "debounce cooldown",
-                "rolled_back": False,
-            }
+        # --- Debounce: in-flight guard + cooldown (одна реализация, R6-G) ---
+        debounced = self._topology_debounce_reject()
+        if debounced is not None:
+            return debounced
 
         # --- Проверка конфигурации ---
         if self._topology_manager is None:
@@ -2377,6 +3349,21 @@ class ProcessManagerProcess(ProcessModule):
                 # Task 3.2: доиграть сохранённую runtime telemetry-дельту пересозданным
                 # детям — runtime-состояние publisher-gate ≡ до свитча (не boot-дефолт).
                 self._replay_telemetry_runtime_delta("topology.apply")
+                # Task 5.12: наблюдаемость — НАОБОРОТ. Телеметрия доигрывается (её
+                # runtime-дельта переживает switch намеренно), а слой сессии
+                # наблюдаемости обнуляется: switch = новый конвейер = новая сессия.
+                # Асимметрия осознанная — у телеметрии PM хранит дельту централизованно
+                # и может её честно восстановить всем, а L3 живёт у каждого процесса
+                # свой; «восстановить частично» дало бы лоскутное состояние.
+                # R6-E: сброс сессии и слой нового рецепта — один конверт, одна
+                # пересборка у ребёнка. Адрес берётся из конфига (его положил
+                # ретаргет ДО сборки), а не приезжает вторым аргументом: при
+                # прямом вызове `apply_topology` второй аргумент разошёлся бы с
+                # тем, что реально записано в процессе.
+                response["observability_session_reset"] = self._reset_observability_sessions(
+                    "topology.apply",
+                    recipe=self._recipe_layer_payload(blueprint),
+                )
                 return response
 
             except Exception as exc:
@@ -2467,8 +3454,10 @@ class ProcessManagerProcess(ProcessModule):
     def _wait_boot_ready(self) -> None:
         """Ф3.2: boot-барьер — дождаться ready всех стартованных на boot детей.
 
-        Вызывается в ``initialize()`` PM (initialize-поток, НЕ message_processor)
-        ПЕРЕД ``_system_ready_event.set()``. Ждёт до ``boot_ready_timeout_s``
+        Вызывается в ``initialize()`` PM (initialize-поток, НЕ message_processor),
+        ПЕРЕД тем как готовность будет объявлена в конце ``run()`` (B-1-1: сигнал
+        ``system_ready_event`` взводит сам PM через ``_announce_ready``, а не эта
+        фаза). Ждёт до ``boot_ready_timeout_s``
         (дефолт 5.0с; 0 → барьер выключен). По таймауту система стартует ВСЁ
         РАВНО (boot не блокировать навсегда) — не-ready логируются WARNING'ом.
         Медленный ребёнок (ML-веса) не ломает boot: liveness-фолбэк → ready.

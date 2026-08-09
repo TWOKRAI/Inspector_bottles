@@ -11,6 +11,7 @@ from multiprocess_framework.modules.process_module.configs import (
     ObservabilityConfig,
     expand_observability,
 )
+from multiprocess_framework.modules.process_module.configs.managers_config import merge_managers
 from multiprocess_framework.modules.logger_module.configs.logger_manager_config import (
     LoggerManagerConfig,
 )
@@ -58,6 +59,40 @@ def test_stats_dict_validates() -> None:
     assert cfg.enable_logging is False
 
 
+class TestStatsFlushIntervalIsOperable:
+    """Ф6.х.8 — ручка «реже» для snapshot-записей реально доезжает до менеджера.
+
+    Реальный период записи = ``max(flush_interval, aggregation_interval)``
+    (``stats_manager.py``); прежде ``flush_interval`` фасадом не прокидывался
+    вовсе — менеджер всегда брал дефолт 10.0, и «реже» было невыразимо из
+    конфига (только бинарный «выкл» для источника 64 % объёма логов).
+    """
+
+    def test_default_is_emitted_and_unchanged(self) -> None:
+        """Литерал 10.0: дефолтный темп НЕ меняется до Ф7 (замеры сопоставимы)."""
+        out = expand_observability({})
+        assert out["stats"]["flush_interval"] == 10.0
+
+    def test_explicit_value_validates_for_the_manager_config(self) -> None:
+        out = expand_observability({"stats": {"flush_interval": 60.0}})
+        assert out["stats"]["flush_interval"] == 60.0
+        cfg = StatsManagerConfig.model_validate(out["stats"])
+        assert cfg.flush_interval == 60.0
+
+    def test_manager_window_respects_the_handle(self) -> None:
+        """Сквозняк до окна: StatsManager строит период из max(flush, agg)."""
+        from multiprocess_framework.modules.statistics_module.core.stats_manager import (
+            StatsManager,
+        )
+
+        out = expand_observability({"stats": {"flush_interval": 60.0}})
+        mgr = StatsManager(manager_name="FlushProbe", config=out["stats"])
+        try:
+            assert mgr._buffer._flush_interval == 60.0, "ручка не доехала до окна — max() снова съел настройку"
+        finally:
+            mgr.shutdown()
+
+
 def test_default_section_creates_error_manager_config() -> None:
     """Пустая секция всё равно даёт валидный непустой error-dict."""
     out = expand_observability(None)
@@ -69,7 +104,9 @@ def test_partial_section_fills_defaults() -> None:
     """Частичная секция (только log_level) → остальное defaults."""
     out = expand_observability({"log_level": "WARNING"})
     assert out["logger"]["default_level"] == "WARNING"
-    assert out["logger"]["enable_batching"] is True  # дефолт
+    # Второй ключ — из дефолта, а не из ввода (Ф7.4: прежним был enable_batching,
+    # снятый вместе с батчингом; смысл теста — «остальное заполняется само»).
+    assert out["logger"]["sampling_max_level"] == "DEBUG"
 
 
 def test_console_off_toggles_channel() -> None:
@@ -113,3 +150,117 @@ def test_commands_log_success_explicit_on() -> None:
     """observability.commands.log_success=true явно доезжает до command-секции (пара к тесту выше)."""
     out = expand_observability({"commands": {"log_success": True}})
     assert out["command"] == {"log_success": True}
+
+
+class TestRemovedBatchingKeysAreNamedAloud:
+    """Ф7.4: снятые ключи батчинга не имеют права исчезнуть МОЛЧА.
+
+    Схема принимает лишние ключи молча (проверено), поэтому конфиг с
+    ``enable_batching: true`` после сноса просто перестал бы что-либо значить.
+    Раньше здесь стоял ``TestBufferCeilingIsOperable`` — он сторожил, что потолок
+    буфера доезжает до обоих менеджеров; буфера нет, и его предмет исчез вместе
+    с ним. На освободившееся место встаёт обратное обещание: об исчезновении
+    говорят вслух.
+    """
+
+    def test_stale_key_produces_a_complaint(self, caplog) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            expand_observability({"enable_batching": True, "batch_size": 50})
+
+        said = " ".join(r.getMessage() for r in caplog.records)
+        assert "enable_batching" in said and "batch_size" in said
+        assert "синхрон" in said, "жалоба обязана сказать, что запись теперь синхронна"
+
+    def test_clean_config_is_silent(self, caplog) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            expand_observability({"log_level": "INFO"})
+
+        assert not any("снятые ключи" in r.getMessage() for r in caplog.records)
+
+    def test_removed_keys_do_not_reach_the_manager_configs(self) -> None:
+        result = expand_observability({"enable_batching": True, "batch_max_pending": 7})
+        for plane in ("logger", "error"):
+            assert "enable_batching" not in result[plane]
+            assert "batch_max_pending" not in result[plane]
+
+
+class TestMachineContextIsOverriddenOnlyByAnExplicitKey:
+    """A-A4-2 (корзина 2 п.7): частичный слой не имеет права затирать env-уровень.
+
+    Правило ADR-PM-020 — «молчание слоёв означает „решает нижний“» — было
+    реализовано для секции ЦЕЛИКОМ (`layers_are_silent`) и для одного ключа
+    (`log_directory` эмитится только явный), но не для `log_level`: expand
+    материализовал дефолт L0 `INFO` ВСЕГДА. Достаточно было одного ключа
+    `channels.*` в любом слое, чтобы уровень из `INSPECTOR_LOG_LEVEL` молча
+    вернулся к дефолту. Здесь то же правило доводится до уровня ключа.
+    """
+
+    def test_absent_log_level_is_not_emitted(self) -> None:
+        """Симметрия с `log_directory`: не задано → downstream-дефолт, а не L0 поверх."""
+        out = expand_observability({"channels": {"messages_file": {"enabled": False}}})
+        assert "default_level" not in out["logger"], out["logger"]
+
+    def test_explicit_log_level_is_emitted(self) -> None:
+        """Контроль: явный ключ по-прежнему доезжает — иначе слой перестал бы работать."""
+        out = expand_observability({"log_level": "WARNING"})
+        assert out["logger"]["default_level"] == "WARNING"
+
+    def test_explicit_level_equal_to_the_l0_default_still_counts(self) -> None:
+        """«Задано явно» и «не задано» различимы, даже когда значение совпало с дефолтом.
+
+        Слить их — значит потерять намерение оператора, записавшего INFO руками
+        поверх DEBUG из окружения (то же основание, что в ограничении ADR-PM-020).
+        """
+        out = expand_observability({"log_level": "INFO"})
+        assert out["logger"]["default_level"] == "INFO"
+
+    def test_partial_layer_does_not_clobber_the_env_level_in_the_merge(self) -> None:
+        """Репро R7 ревьюера на продакшн-форме: overlay поверх базы из окружения."""
+        base = {"logger": {"default_level": "DEBUG", "log_directory": "X:/logs"}}
+        overlay = expand_observability({"channels": {"messages_file": {"enabled": False}}})
+        merged = merge_managers(base, {"logger": overlay["logger"]})
+        assert merged["logger"]["default_level"] == "DEBUG", "частичный слой вернул уровень окружения к дефолту L0"
+
+    def test_an_explicit_level_in_the_layer_does_override_the_env(self) -> None:
+        """Пара к предыдущему: слой, который ДЕЙСТВИТЕЛЬНО задаёт уровень, обязан победить."""
+        base = {"logger": {"default_level": "DEBUG", "log_directory": "X:/logs"}}
+        overlay = expand_observability({"log_level": "ERROR"})
+        merged = merge_managers(base, {"logger": overlay["logger"]})
+        assert merged["logger"]["default_level"] == "ERROR"
+
+
+class TestSamplingKnobsReachTheLogger:
+    """Ф7.1: четыре ручки дросселя обязаны доехать до менеджера.
+
+    Ручка, которая есть в схеме и не доезжает до потребителя, — мёртвая: в
+    файле она видна, в поведении её нет. Этот класс дефекта в проекте уже
+    стоил дней поиска, поэтому путь от YAML до менеджера проверяется, а не
+    предполагается.
+    """
+
+    def test_sampling_values_travel_to_the_logger_section(self) -> None:
+        out = expand_observability(
+            {
+                "sampling_first_n": 5,
+                "sampling_every_mth": 500,
+                "sampling_burst_reset_sec": 30.0,
+                "sampling_max_level": "INFO",
+            }
+        )
+        assert out["logger"]["sampling_first_n"] == 5
+        assert out["logger"]["sampling_every_mth"] == 500
+        assert out["logger"]["sampling_burst_reset_sec"] == 30.0
+        assert out["logger"]["sampling_max_level"] == "INFO"
+
+    def test_sampling_is_off_by_default(self) -> None:
+        """Механизм, сам решающий чего не останется, молча не включается."""
+        assert expand_observability({})["logger"]["sampling_first_n"] == 0
+
+    def test_error_plane_gets_no_sampling_knobs(self) -> None:
+        """У плоскости ошибок дросселя нет — заявленная там ручка ничего бы не делала."""
+        out = expand_observability({"sampling_first_n": 5})
+        assert not [key for key in out.get("error", {}) if key.startswith("sampling")]

@@ -5,8 +5,20 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
+from ...observability_declarations import declare_metric
+
 if TYPE_CHECKING:
     pass
+
+# Ф8.1: `shm` объявляется здесь, потому что считает её `_publish_router_shm_stats_to_tree`
+# в этом файле. Остальные четыре — у `telemetry.py`, где собираются они. Каталог
+# перестал быть кортежем-литералом в configs/, и владение метрикой теперь совпадает
+# с местом её вычисления, а не держится совпадением имени.
+#
+# Импорт на уровне модуля, а не ленивый, как соседи: ленивый объявил бы метрику
+# только после первого вызова публикатора, то есть каталог отвечал бы на вопрос
+# «что бывает» уже после того, как по нему приняли решение.
+METRIC_SHM = declare_metric("shm", owner=__name__)
 
 
 class ProcessHeartbeat:
@@ -48,6 +60,10 @@ class ProcessHeartbeat:
         # PC 1.2: publisher-gate телеметрии. None → гейт неактивен (нет секции
         # telemetry.publish в конфиге) → все метрики каждый тик (обратная совместимость).
         self._telemetry_gate: Any = None
+        # Task 5.8: запущен ли воркер такта. Единственный честный ответ на вопрос
+        # «сработает ли авто-возврат TTL» — подметальщик живёт на этом такте, и
+        # процесс без него срок принимает, но не исполняет.
+        self._started: bool = False
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -65,7 +81,7 @@ class ProcessHeartbeat:
         if not self._services.worker_manager:
             return
 
-        from ...worker_module import ThreadConfig, ThreadPriority
+        from ...worker_module import ThreadConfig, ThreadPriority, WorkerType
 
         self._interval = interval
         # PC 1.2: собрать publisher-gate из секции telemetry.publish (если задана).
@@ -73,14 +89,35 @@ class ProcessHeartbeat:
         self._services.worker_manager.create_worker(
             "heartbeat_sender",
             self._loop,
-            ThreadConfig(priority=ThreadPriority.BACKGROUND),
+            # worker_type=SYSTEM — не косметика, а единственное, что выводит этот
+            # воркер из-под ``worker.pause_all``: guard в ``pause_all_workers``
+            # сравнивает именно ``WorkerType.SYSTEM`` (worker_manager.py:269-272),
+            # а реестр берёт тип из конфига (worker_registry.py:70). До 2026-08-07
+            # тип здесь не передавался вовсе, то есть был APPLICATION, и пауза
+            # процесса глушила его вместе с прикладными воркерами: heartbeat
+            # замолкал → ProcessMonitor объявлял процесс UNRESPONSIVE → супервизия
+            # рестартила его → флап ``unresponsive ↔ running`` каждые ~5 с.
+            # Приоритет остаётся BACKGROUND: SYSTEM здесь про НАЗНАЧЕНИЕ воркера
+            # (внутренний механизм, не прикладная задача), а не про планировщик.
+            ThreadConfig(priority=ThreadPriority.BACKGROUND, worker_type=WorkerType.SYSTEM),
             auto_start=True,
         )
+        self._started = True
         _log = getattr(self._services, "log_debug", self._services.log_info)
         _log(
             f"Heartbeat воркер запущен (interval={interval}с)",
             module="heartbeat",
         )
+
+    def is_running(self) -> bool:
+        """Идёт ли такт (Task 5.8: от него зависит исполнение сроков L3).
+
+        Отвечает на «воркер создан», а не «поток прямо сейчас в цикле»: между
+        ними разница только на teardown, где спрашивать уже некому. Все ветки
+        раннего выхода :meth:`start` (интервал ≤ 0, нет worker_manager) оставляют
+        ``False`` — а именно они и означают процесс без авто-возврата.
+        """
+        return self._started
 
     def _loop(self, stop_event, pause_event) -> None:
         """Цикл: телеметрия по ``_telemetry_tick``, heartbeat-сообщение по ``heartbeat_interval``.
@@ -136,6 +173,22 @@ class ProcessHeartbeat:
                     # → реальные менеджеры адаптером. error/critical идут мимо буфера
                     # (write-through), здесь их нет. Прецедент — health self-publish 2.1.
                     self._drain_observability()
+
+                    # Task 5.8: вернуть рантайм-правки наблюдаемости, чей срок вышел.
+                    # Тот же такт и та же роль, что у дренажа выше: хозяйственное
+                    # дело процесса, которому не нужен собственный поток.
+                    self._sweep_observability_session()
+
+                    # Ф8.5 (Р-8.5-В): удалить документы с истёкшим сроком. Четвёртое
+                    # хозяйственное дело того же такта; сам вызов не чаще
+                    # purge_interval_sec, то есть на подавляющем большинстве тиков
+                    # это один if по атрибуту процесса.
+                    self._sweep_documents()
+
+                    # Ф5.2: ретеншен истории наблюдаемости. Пятое хозяйственное дело
+                    # того же такта и по той же причине: с приходом лог-плоскости в
+                    # стор безлимитная таблица стала бы инцидентом 645 МБ в SQLite.
+                    self._sweep_observability_history()
 
                     # Ф7 G.9(a) H-ревью: pump scheduled-GC. Heartbeat — периодический
                     # BACKGROUND-тик вне hot-path кадра → законная «пауза» для явной сборки.
@@ -219,7 +272,11 @@ class ProcessHeartbeat:
             "command": "heartbeat",
             "sender": self._services.name,
             "timestamp": time.time(),
-            "status": getattr(self._services, "_current_process_status", "running"),
+            # Ф6.4б: фолбэк был ``"running"`` — третье место, где отсутствие
+            # знания подменялось утверждением «работает». Соседний
+            # ``introspect.status`` в тех же условиях отвечает ``"unknown"``;
+            # два разных ответа на один вопрос — хуже, чем один незнающий.
+            "status": getattr(self._services, "_current_process_status", "unknown"),
         }
         if getattr(self._services, "worker_manager", None):
             for w in workers.values():
@@ -257,7 +314,7 @@ class ProcessHeartbeat:
         )
 
     def _warn_unknown_metrics(self, config: Any) -> None:
-        """Залогировать WARNING по ключам ``metrics``, отсутствующим в ``GATED_METRICS``.
+        """Залогировать WARNING по ключам ``metrics``, отсутствующим в каталоге метрик.
 
         Task 2.3: опечатка в имени метрики (например ``latency`` вместо ``latency_ms``)
         раньше была тихим no-op — правило существует в конфиге, но ``resolve()`` его
@@ -313,6 +370,56 @@ class ProcessHeartbeat:
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось слить observability-буфер: {exc}", module="heartbeat")
 
+    def _sweep_observability_session(self) -> None:
+        """Task 5.8: снять просроченные правки слоя L3 и пересобрать конфиг.
+
+        Сам ``sweep_session_ttl`` исключений не бросает (отказ пересборки — его
+        отчёт и повтор на следующем такте). Внешний ``except`` здесь — на
+        неожиданное, и он пишет ОШИБКУ, а не debug-строку: «возврат не сработал»
+        — это отказ защиты от инцидента 645 МБ, а не шум телеметрии.
+        """
+        try:
+            from ..managers.observability_ttl import sweep_session_ttl
+
+            sweep_session_ttl(self._services)
+        except Exception as exc:  # noqa: BLE001 — такт HB не роняем, но и не молчим
+            _log = getattr(self._services, "_log_error", None) or getattr(self._services, "log_error", None)
+            if not callable(_log):
+                _log = getattr(self._services, "log_info", None)
+            if callable(_log):
+                _log(f"[observability] подметальщик сроков L3 упал: {exc!r}", module="observability")
+
+    def _sweep_documents(self) -> None:
+        """Ф8.5: удалить документы с истёкшим сроком (не чаще ``purge_interval_sec``).
+
+        ``sweep_process_documents`` сам решает, наступил ли срок, и сам глушит отказ
+        БД именным WARNING'ом. Внешний ``except`` здесь — на неожиданное: плоскость
+        документов хозяйственна, а такт heartbeat несёт liveness, и уронить второе
+        ради первого нельзя.
+        """
+        try:
+            from ..managers.observability_wiring import sweep_process_documents
+
+            sweep_process_documents(self._services)
+        except Exception as exc:  # noqa: BLE001 — такт HB не роняем, но и не молчим
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"[observability] уборка документов сорвалась: {exc!r}", module="heartbeat")
+
+    def _sweep_observability_history(self) -> None:
+        """Ф5.2: срезать историю по возрасту и числу строк (не чаще интервала).
+
+        Форма — дословно ``_sweep_documents``: ``sweep_observability_history`` сам
+        решает, наступил ли срок, и сам глушит отказ БД именным WARNING'ом. Второй
+        способ делать то же дело в такте означал бы второе место, где его забудут.
+        """
+        try:
+            from ..managers.observability_wiring import sweep_observability_history
+
+            sweep_observability_history(self._services)
+        except Exception as exc:  # noqa: BLE001 — такт HB не роняем, но и не молчим
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"[observability] уборка истории сорвалась: {exc!r}", module="heartbeat")
+
     def _build_telemetry_gate(self) -> Any:
         """Собрать ``TelemetryGate`` из секции ``telemetry.publish`` конфига процесса.
 
@@ -341,7 +448,7 @@ class ProcessHeartbeat:
             return None
         # Task 1.2: WARNING по метрикам, чей interval_sec < эффективного тика (не тихий no-op).
         self._warn_capped_metrics(config)
-        # Task 2.3: WARNING по ключам metrics, отсутствующим в GATED_METRICS (опечатка).
+        # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
         self._warn_unknown_metrics(config)
         # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
         # fake-clock тестов каденции; в проде обоим — time.monotonic).
@@ -433,7 +540,7 @@ class ProcessHeartbeat:
         config = TelemetryPublishConfig.from_dict(publish_section)
         # Task 1.2: WARNING по метрикам, чья частота ограничена телеметрийным тиком.
         self._warn_capped_metrics(config)
-        # Task 2.3: WARNING по ключам metrics, отсутствующим в GATED_METRICS (опечатка).
+        # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
         self._warn_unknown_metrics(config)
         # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
         # Gate использует clock heartbeat'а (fake-clock тесты; в проде time.monotonic).
@@ -522,6 +629,19 @@ class ProcessHeartbeat:
             # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
             # surface был, но публикации не было — асимметрия с data_evicted).
             sys_blocked = int(rs.get("queue_system_evict_blocked", 0) or 0)
+            # Ф7.3: потери ХВОСТА наблюдаемости. Публикация здесь обязательна, а не
+            # «для симметрии»: пути потери хвоста молчат в логах сознательно (запись
+            # о потерянной записи усиливала бы шторм), поэтому дерево — единственное
+            # место, где оператор эту потерю увидит.
+            obs_evicted = int(rs.get("queue_observability_evicted", 0) or 0)
+            obs_send_failed = int(rs.get("queue_observability_send_failed", 0) or 0)
+            # Ф7.х M-2: ТРЕТЬЯ форма потери хвоста — билет не доехал ни одним из
+            # путей доставки роутера (targets, relay через хаб, канал). Счётчик
+            # завела Ф7.3 и не вывела наружу НИ ОДНИМ путём: ни в heartbeat, ни в
+            # аномалиях — то есть класс «проглоченный сбой» воспроизвёлся внутри
+            # починки того же класса. Проверено живьём: в ``state.shm`` были
+            # только evicted и send_failed.
+            obs_delivery_failed = int(rs.get("observability_delivery_failed", 0) or 0)
             # Ф7 G.5.c: дроп по post-use re-check zero-copy view (слот перезаписан под
             # живым view — consumer отстал > глубины кольца). Ещё один сигнал потери
             # кадра в том же месте для вкладки Pipeline.
@@ -545,6 +665,9 @@ class ProcessHeartbeat:
                 and crossings == 0
                 and queue_evicted == 0
                 and sys_blocked == 0
+                and obs_evicted == 0
+                and obs_send_failed == 0
+                and obs_delivery_failed == 0
                 and stale_drops == 0
                 and loan_exhausted == 0
                 and slots_released == 0
@@ -560,6 +683,9 @@ class ProcessHeartbeat:
                     "boundary_crossings": crossings,
                     "queue_data_evicted": queue_evicted,
                     "queue_system_evict_blocked": sys_blocked,
+                    "queue_observability_evicted": obs_evicted,
+                    "queue_observability_send_failed": obs_send_failed,
+                    "observability_delivery_failed": obs_delivery_failed,
                     "stale_drops": stale_drops,
                     "loan_exhausted": loan_exhausted,
                     "slots_released": slots_released,
