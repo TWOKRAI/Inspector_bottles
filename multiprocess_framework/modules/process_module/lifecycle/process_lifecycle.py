@@ -8,7 +8,12 @@ Helper-функции для инициализации и завершения 
 создают объекты и ВОЗВРАЩАЮТ результат. ProcessModule сам присваивает атрибуты.
 """
 
+from ..._fallback import emergency_log
 from ..types import ProcessStatus
+
+#: Имя stdlib-логгера аварийного выхода — ровно имя этого модуля, чтобы записи
+#: об отказе гашения искались там, где они и происходят.
+_EMERGENCY_NAME = __name__
 
 
 class ProcessLifecycle:
@@ -139,21 +144,67 @@ class ProcessLifecycle:
                 except Exception as e:
                     self.process._log_error(f"SRM shutdown error: {e}")
 
-            # 4. Завершаем менеджеры
+            # 4. Завершаем менеджеры. Порядок — часть контракта, а не привычка (B3).
+            #
+            # Логгер стоял здесь ТРЕТЬИМ, а после него шли command/router, смена
+            # статуса и запись «shut down successfully»: всё, что уборка говорит
+            # на INFO/WARNING, терялось ВСЕГДА (floor подстраховывает только
+            # ERROR/CRITICAL). Воспроизведено ревью 2026-08-09: unresolved=6,
+            # floor=1, предупреждение однократно — «дальше считаем молча».
+            #
+            # error/stats не гасились НИГДЕ (grep по репозиторию — пусто), то
+            # есть финальный сброс двух плоскостей из трёх оставался на совести
+            # ОС. Оба наследуют `shutdown` от CRM: flush() → buffer.stop()
+            # (финальный сброс окна агрегации) → _close_all_channels().
+            #
+            # stats гасится ДО логгера не по алфавиту: его канал `log_stats`
+            # пишет ЧЕРЕЗ логгер, и обратный порядок отправил бы финальный
+            # снапшот метрик в уже закрытый приёмник.
             if self.process.console_manager:
                 self.process.console_manager.shutdown()
-            if self.process.logger_manager:
-                self.process.logger_manager.shutdown()
             if self.process.command_manager:
                 self.process.command_manager.shutdown()
             if self.process.router_manager:
                 self.process.router_manager.shutdown()
+            stopped_planes = []
+            if self.process.error_manager:
+                self.process.error_manager.shutdown()
+                stopped_planes.append("error")
+            if self.process.stats_manager:
+                self.process.stats_manager.shutdown()
+                stopped_planes.append("stats")
+            # Названо ФАКТИЧЕСКОЕ, а не заявленное: список собирается из того,
+            # что действительно погашено. Без этой строки гашение младших
+            # плоскостей не наблюдаемо в журнале вовсе — собственная запись
+            # плоскости ошибок идёт по её же маршруту, а INFO по нему не ездит
+            # (пороги severity), то есть «погасили» и «не погасили» выглядели бы
+            # одинаково.
+            if stopped_planes:
+                self.process._log_info(
+                    f"Process '{self.process.name}' observability planes stopped: {', '.join(stopped_planes)}"
+                )
 
-            # 5. Обновляем статус процесса
+            # 5. Статус и итоговая запись — пока логгер ЖИВ.
             self.process.update_process_state(status=ProcessStatus.STOPPED.value)
 
             self.process.is_initialized = False
             self.process._log_info(f"Process '{self.process.name}' shut down successfully")
+
+            # 6. Логгер — последним. Его собственный отказ писать через него же
+            # нельзя (предмет претензии — он), поэтому named-исключение:
+            # аварийный выход в stdlib. Останов при этом состоялся — подменять
+            # успех останова отказом закрытия приёмника значило бы соврать в
+            # другую сторону.
+            if self.process.logger_manager:
+                try:
+                    self.process.logger_manager.shutdown()
+                except Exception as exc:  # noqa: BLE001 — отказ гашения обязан быть слышен
+                    emergency_log(
+                        _EMERGENCY_NAME,
+                        "error",
+                        f"[{self.process.name}] гашение логгера не удалось: {exc}; "
+                        "приёмники могли остаться незакрытыми",
+                    )
             return True
 
         except Exception as e:

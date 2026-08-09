@@ -487,7 +487,12 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # после закрытия каналов, увидел бы уже неактивные файлы активными
             # (список берётся из живых реестров) — и наоборот.
             self._stop_retention_sweeper()
-            self.info("LoggerManager shutting down", module="logger_manager")
+            # Имя — СВОЁ, а не класса-предка (B3). Этот shutdown наследует и
+            # ErrorManager (брат по LoggerCore), и он объявлял себя
+            # «LoggerManager shutting down» — запись, по которой нельзя понять,
+            # какая плоскость гаснет. Тот же класс, что «докстринг утверждает
+            # то, чего регистрация не ставила».
+            self.info(f"{self.manager_name} shutting down", module="logger_manager")
             self.flush()
             # Ф2.6: жалоба на молчавшие приёмники. Здесь, а не только в базе:
             # этот shutdown — полный override, базовый не вызывается вовсе

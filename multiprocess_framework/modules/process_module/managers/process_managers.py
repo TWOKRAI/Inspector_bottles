@@ -174,6 +174,26 @@ class ProcessManagers:
             from ...error_module import ErrorManager, ErrorManagerConfig
 
             error_config = ErrorManagerConfig.model_validate(error_config_dict)
+            # B3, находка живого прогона (со второго захода): имя ставится
+            # В КОНФИГ, а не только аргументом, и дефолт схемы считается
+            # «не названо».
+            #
+            # Почему так. Машинная раскладка (`managers_payload_for_proc`)
+            # МАТЕРИАЛИЗУЕТ дефолт: в словаре всегда лежит
+            # `manager_name: "ErrorManager"`, хотя оператор ничего не писал.
+            # На стороне менеджера имя конфига сильнее аргумента — и живьём это
+            # давало шесть плоскостей ошибок с одним именем на весь стенд:
+            # предупреждение «приёмники не приняли ни одной записи за прогон»
+            # приходило шесть раз одинаковым, без адреса процесса. Первая
+            # редакция этой правки проверяла только пустоту ключа и на стенде
+            # не изменила НИЧЕГО — поймано повторным живым прогоном, а не
+            # чтением.
+            #
+            # Дефолт читается из схемы, а не литералом: вторая копия строки
+            # разошлась бы с первой молча.
+            _schema_name = ErrorManagerConfig.model_fields["manager_name"].default
+            if str(error_config_dict.get("manager_name") or "") in ("", str(_schema_name)):
+                error_config.manager_name = f"error_{self.process.name}"
             error = ErrorManager(
                 manager_name=f"error_{self.process.name}",
                 config=error_config,

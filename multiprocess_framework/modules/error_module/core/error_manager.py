@@ -82,7 +82,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
 
 def _normalize_error_config(
     config: Optional[Union[Dict[str, Any], LoggerManagerConfig, Any]],
-) -> tuple[str, LoggerManagerConfig, bool, Dict[str, List[str]]]:
+) -> tuple[Optional[str], LoggerManagerConfig, bool, Dict[str, List[str]]]:
     """Преобразовать config → (manager_name, LoggerManagerConfig, include_stacktrace, severity_routes).
 
     Поддерживает: None | dict | ErrorManagerConfig | LoggerManagerConfig | build() → (name, dict).
@@ -94,7 +94,13 @@ def _normalize_error_config(
     ``LoggerManagerConfig`` ему места нет. Оба одинаково потерялись бы, будь они
     просто ключами разворачиваемого dict'а.
     """
-    manager_name = "ErrorManager"
+    # B3: ``None`` = «конфиг имени не назвал», и тогда действует имя, которое дал
+    # ВЫЗЫВАЮЩИЙ. Прежде здесь стояла строка-дефолт, и она безусловно затирала
+    # аргумент конструктора: `ErrorManager(manager_name=f"error_{proc}")` не значил
+    # ничего — все плоскости ошибок стенда звались одинаково («ErrorManager»), и
+    # предупреждение о молчащих приёмниках (которое B3 только что сделала
+    # достижимым) нельзя было отнести к процессу.
+    manager_name: Optional[str] = None
     include_stacktrace = True
 
     if config is None:
@@ -122,14 +128,14 @@ def _normalize_error_config(
     if isinstance(config, ErrorManagerConfig):
         raw = config.model_dump()
         d = expand_error_manager_config(raw)
-        manager_name = str(raw.get("manager_name", "ErrorManager"))
+        manager_name = str(raw["manager_name"]) if raw.get("manager_name") else None
         include_stacktrace = bool(d.get("include_stacktrace", True))
         return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace, _routes_from(d)
 
     if isinstance(config, dict):
         d = expand_error_manager_config(dict(config))
         include_stacktrace = bool(d.get("include_stacktrace", True))
-        manager_name = str(d.get("manager_name", "ErrorManager"))
+        manager_name = str(d["manager_name"]) if d.get("manager_name") else None
         return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace, _routes_from(d)
 
     if hasattr(config, "build") and callable(config.build):
@@ -205,7 +211,9 @@ class ErrorManager(LoggerCore, IErrorManager):
         **kwargs,
     ) -> None:
         resolved_name, log_config, include_stacktrace, severity_routes = _normalize_error_config(config)
-        manager_name = resolved_name
+        # Имя из конфига сильнее аргумента, но ОТСУТСТВИЕ имени в конфиге больше
+        # не затирает то, что назвал вызывающий (B3).
+        manager_name = resolved_name or manager_name
 
         # Guard до super(): LoggerCore.__init__ дёргает self.log()/self.info() косвенно
         # (напр. _setup_module_channel → self.debug()), а переопределённый ErrorManager.log()
