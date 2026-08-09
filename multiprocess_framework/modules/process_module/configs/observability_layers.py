@@ -439,9 +439,20 @@ class ObservabilityLayers:
         Raises:
             ValueError: отрицательный или нечисловой ``ttl`` — громкий отказ
                 вместо тихого «значит, навсегда»; ЛИБО путь ведёт ВНУТРЬ
-                непрозрачного листа (R3b, см. :func:`_reject_path_inside_opaque`).
+                непрозрачного листа (R3b, см. :func:`_reject_path_inside_opaque`);
+                ЛИБО значение не проходит схему секции (B2, см.
+                :func:`validate_layer_section`) — тогда в тексте адрес ключа и
+                список допустимых значений.
         """
         _reject_path_inside_opaque(path)
+        # B2: один ключ судится той же схемой, что целая секция, — путь
+        # разворачивается обратно в дерево. Ручка оператора (`logger.sink.*`,
+        # `config.reload` по одному ключу) ходит именно сюда, и без проверки
+        # здесь мусор доезжал бы до L3 в обход границы секции.
+        nested: Any = value
+        for part in reversed(path.split(".")):
+            nested = {part: nested}
+        validate_layer_section(nested, layer=LAYER_SESSION)
         with self._lock:
             seconds = self.effective_session_ttl() if ttl is None else validate_ttl(ttl)
             node = self.session
@@ -795,6 +806,10 @@ class ObservabilityLayers:
         написание того же факта, а «что действует» отвечает провенанс.
         """
         body = dict(section) if isinstance(section, dict) else {}
+        # B2: проверка ДО того, как тронут слой. Отвергнутая секция не имеет
+        # права оставить слой ни в новом состоянии, ни в полупустом — тот же
+        # порядок «сперва проверить, потом разрушать», что у CRM.reconfigure (R9).
+        validate_layer_section(body, layer=layer)
         with self._lock:
             if layer == LAYER_RECIPE:
                 self.recipe = body
@@ -1102,6 +1117,46 @@ def _reject_path_inside_opaque(path: str) -> None:
                 f"путь {path!r} ведёт ВНУТРЬ непрозрачного листа {opaque!r}: "
                 f"владеть им можно только целиком — session_set({opaque!r}, {{...}})"
             )
+
+
+def validate_layer_section(section: Any, *, layer: str) -> None:
+    """Проверить секцию наблюдаемости ДО записи в слой (B2, major-8).
+
+    Проверка имени уровня жила ТОЛЬКО на резолве — в ``LoggerManagerConfig``,
+    то есть срабатывала уже после того, как значение записано в слой.
+    Воспроизведено до правки: ``config.reload {"log_level": "БОЛТОВНЯ"}`` →
+    ``success: true``, мусор лёг в L3 со сроком, применение откатилось,
+    действовал прежний уровень. «Успех» означал «команда не упала», а оператор
+    читает его как «значение действует».
+
+    Стоит на ГРАНИЦЕ записи и одна на все слои: L1 и L2 (:meth:`replace_layer`),
+    L3 целой секцией (``config.reload`` inline) и L3 одним ключом
+    (:meth:`session_set`). Persist наследует гарантию через ``replace_layer``.
+    Проверка в одном из четырёх мест воскресала бы на трёх соседних.
+
+    **Что проверяется — ЗНАЧЕНИЯ объявленных ключей.** Незнакомый ключ схемой
+    отбрасывается молча, и ловит его не этот страж, а вердикт ``config.reload``
+    (``unknown_keys`` → ``verdict=failed``). Второй предохранитель на то же
+    место сделал бы неизвестным, который из них держит.
+
+    Raises:
+        ValueError: значение не годится; текст несёт адрес ключа и список
+            допустимых значений.
+    """
+    if not isinstance(section, dict) or not section:
+        return
+    from pydantic import ValidationError
+
+    from .observability_config import ObservabilityConfig
+
+    try:
+        ObservabilityConfig.model_validate(section)
+    except ValidationError as exc:
+        problems = []
+        for err in exc.errors():
+            address = ".".join(str(part) for part in err.get("loc", ())) or "<секция>"
+            problems.append(f"{address}: {err.get('msg', '')}")
+        raise ValueError(f"слой {layer} отвергнут — " + "; ".join(problems)) from exc
 
 
 def _channel_toggle(channel_type: str) -> str:

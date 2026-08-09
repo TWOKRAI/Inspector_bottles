@@ -78,6 +78,27 @@ class ObservabilityDocumentsConfig(SchemaBase):
     ] = Field(default_factory=dict)
 
 
+def canonical_level_or_raise(value: Any, *, field: str) -> Any:
+    """Каноничное имя уровня либо громкий отказ с адресом ключа (B2).
+
+    Одна позиция правила на все ручки уровня секции: `log_level`,
+    `errors.level`, `stats.log_level`, `sampling_max_level`. Пока копий было бы
+    четыре, они разошлись бы на первом же новом синониме — и «неизвестный
+    уровень» значило бы разное в соседних ключах одной секции.
+
+    Отказ несёт И адрес ключа, И список допустимых значений: WARNING без адреса
+    уже был находкой Ф8.5 — по нему нельзя понять, что именно править.
+    """
+    if not isinstance(value, str):
+        return value
+    canonical = normalize_level_name(value)
+    if canonical is None:
+        raise ValueError(
+            f"неизвестный уровень '{value}' в {field} (известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
+        )
+    return canonical
+
+
 @register_schema("ObservabilityErrorsConfig")
 class ObservabilityErrorsConfig(SchemaBase):
     """Под-секция ошибок (фасад над ErrorManagerConfig)."""
@@ -85,6 +106,11 @@ class ObservabilityErrorsConfig(SchemaBase):
     enabled: Annotated[bool, FieldMeta("Создавать ErrorManager")] = True
     level: Annotated[str, FieldMeta("Минимальный уровень ошибок")] = "WARNING"
     include_stacktrace: Annotated[bool, FieldMeta("Включать stacktrace")] = True
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def _normalize_level(cls, value):
+        return canonical_level_or_raise(value, field="errors.level")
 
     # Task 5.10.b — зеркало верхнеуровневого ``channels`` логгера. До неё
     # плоскость ошибок была адресуема ТОЛЬКО рантаймом: `sink.disable
@@ -121,6 +147,11 @@ class ObservabilityStatsConfig(SchemaBase):
     ] = 10.0
     log_level: Annotated[str, FieldMeta("Уровень логирования метрик")] = "INFO"
 
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value):
+        return canonical_level_or_raise(value, field="stats.log_level")
+
     # Task 5.10.b — то же зеркало для третьей плоскости. Служебные имена
     # ``log_stats`` / ``file_stats`` описаний в ``channels`` не имеют (их
     # собирают свои сборщики) — но ``{enabled: false}`` про них теперь читается
@@ -155,6 +186,18 @@ class ObservabilityConfig(SchemaBase):
     """Единая секция наблюдаемости процесса (Logger + Error + Stats + Command)."""
 
     log_level: Annotated[str, FieldMeta("Уровень логирования по умолчанию")] = "INFO"
+
+    # B2 (major-8): проверка имени уровня стояла ТОЛЬКО на резолве — в
+    # `LoggerManagerConfig`, то есть уже ПОСЛЕ записи значения в слой.
+    # Воспроизведено: `config.reload {"log_level": "БОЛТОВНЯ"}` → `success: true`,
+    # мусор лёг в L3 со сроком, применение откатилось, действовал прежний
+    # уровень. Проверка переехала на границу записи (см.
+    # `observability_layers.validate_layer_section`), а здесь стоит её тело.
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value):
+        return canonical_level_or_raise(value, field="log_level")
+
     log_directory: Annotated[
         Optional[str],
         FieldMeta("Корень логов (None — из env MULTIPROCESS_LOG_DIR / INSPECTOR_LOG_DIR)"),
@@ -267,15 +310,7 @@ class ObservabilityConfig(SchemaBase):
     @field_validator("sampling_max_level", mode="before")
     @classmethod
     def _normalize_sampling_max_level(cls, value):
-        if not isinstance(value, str):
-            return value
-        canonical = normalize_level_name(value)
-        if canonical is None:
-            raise ValueError(
-                f"неизвестный уровень '{value}' в sampling_max_level "
-                f"(известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
-            )
-        return canonical
+        return canonical_level_or_raise(value, field="sampling_max_level")
 
     errors: Annotated[
         ObservabilityErrorsConfig,

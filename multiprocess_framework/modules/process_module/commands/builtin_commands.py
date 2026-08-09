@@ -1469,6 +1469,23 @@ class BuiltinCommands:
                 unknown_refs_for,
             )
 
+            # B2 (major-8): ЗНАЧЕНИЯ судятся до любой записи в слой — по той же
+            # политике «inline отказывает», что и у неизвестных ссылок ниже.
+            # `replace_layer`/`session_set` держат ту же проверку у себя, но по
+            # этой дороге секция въезжает в L3 напрямую (`layer_merge`), и без
+            # проверки здесь мусор попал бы в сессию мимо обоих.
+            from ..configs.observability_layers import validate_layer_section
+
+            try:
+                validate_layer_section(obs_section, layer="session" if source == "inline" else LAYER_APP)
+            except ValueError as exc:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "source": source,
+                    "reason": str(exc),
+                }
+
             if source == "inline":
                 _unknown_refs = unknown_refs_for(svc, obs_section)
                 if _unknown_refs:
