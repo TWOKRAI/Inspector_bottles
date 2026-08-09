@@ -241,3 +241,4 @@
 - [Защита должна быть достижима](feedback_guard_must_be_reachable.md) — одноимённый параметр даёт TypeError раньше защиты
 - [Провод портов ≠ маршрут процессов](feedback_port_wire_is_not_a_process_route.md) — плагин не вызван ни разу, молча
 - [PRAGMA молчит об отказе](feedback_sqlite_pragma_fails_silently.md) — порядок до WAL; incremental_vacuum дошагивать fetchall
+- [Материализованный дефолт прячет «не задано»](feedback_materialized_default_hides_absence.md) — проверка на пустоту ключа чинит ноль; сверять с Model.model_fields["x"].default
