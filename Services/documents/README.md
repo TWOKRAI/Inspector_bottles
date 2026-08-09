@@ -59,14 +59,23 @@ adapter.setup()
 store = DocumentStore(adapter, retention_sec={KIND_AUDIT: 90 * 24 * 3600})  # вердиктам срок не задан
 ```
 
-Запись вердикта с линии:
+Запись вердикта с линии — **не напрямую в стор, а через контекст плагина** (Ф8.7,
+[ADR-PM-029](../../multiprocess_framework/modules/process_module/DECISIONS.md)). Сток у
+процесса один и общий с аудитом; заведи плагин свой стор — писателей на файл стало бы
+вдвое больше:
 
 ```python
-store.append({
-    "kind": KIND_VERDICT, "ts": time.time(), "source": "line_a",
-    "summary": "N-1743: брак", "part_id": "N-1743", "confidence": 0.91,
-})
+ctx.write_document(
+    KIND_VERDICT,
+    "отбраковка #17: дефектов 2",
+    action="reject", defect_count=2, min_defect_area=500,
+)   # -> bool: False = плоскость не настроена ЛИБО запись отказала
 ```
+
+Зовётся на СОБЫТИИ, а не на такте: `append` синхронный (медиана 3.6 мс, max 928 мс), а
+бюджет кадра на 25–60 FPS — 16–40 мс. Образец писателя — `Plugins/control/robot_control`:
+документ пишется на фронте решения pass→reject, поэтому серия кадров одного брака даёт
+один документ (живой прогон: 95 → 1).
 
 Чтение за период и уборка протухшего:
 
