@@ -49,7 +49,28 @@ class TestRowLimit:
     def test_limit_larger_than_the_table_deletes_nothing(self, tmp_path) -> None:
         store = _store(tmp_path, 3)
         try:
-            assert store.purge(max_rows=100) == {"by_age": 0, "by_rows": 0, "remaining": 3}
+            report = store.purge(max_rows=100)
+            assert (report["by_age"], report["by_rows"], report["remaining"]) == (0, 0, 3)
+        finally:
+            store.close()
+
+    def test_deleted_pages_are_returned_to_the_os_not_just_freed(self, tmp_path) -> None:
+        """Живая находка 2026-08-09: ретеншен резал СТРОКИ, но не БАЙТЫ.
+
+        На стенде: 2597 свободных страниц из 2988 (87 % файла), 11.67 МиБ при 3470
+        живых строках. Формально предел держался — файл не рос выше пика, — но
+        «объём ограничен» звучало шире, чем было правдой.
+
+        Проверяется наблюдаемое следствие: после среза свободных страниц не
+        накапливается. Без ``auto_vacuum=INCREMENTAL`` + ``incremental_vacuum``
+        их было бы много.
+        """
+        store = _store(tmp_path, 400)
+        try:
+            report = store.purge(max_rows=10)
+
+            assert report["by_rows"] == 390
+            assert report["free_pages"] == 0, f"освободившиеся страницы остались в файле: {report}"
         finally:
             store.close()
 

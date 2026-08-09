@@ -122,6 +122,13 @@ class ObservabilityStore:
 
     def _init_schema(self) -> None:
         with self._lock:
+            # Ф5.2: ПОРЯДОК ЗДЕСЬ ЗНАЧИМ И ПРОВЕРЕН ЗАМЕРОМ. `auto_vacuum`
+            # выставляется ПЕРВЫМ — до `journal_mode=WAL` и до создания таблицы.
+            # Замер (2026-08-09, две конфигурации подряд на пустых файлах):
+            # WAL первым → `PRAGMA auto_vacuum` = 0, то есть режим молча не
+            # применился; auto_vacuum первым → 2 (INCREMENTAL). Молча — ключевое
+            # слово: SQLite не отказывает, он игнорирует.
+            self._conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
             # WAL: конкурентная запись нескольких процессов + чтение GUI без блокировки.
             if self._db_path not in (":memory:", ""):
                 self._conn.execute("PRAGMA journal_mode=WAL")
@@ -386,8 +393,35 @@ class ObservabilityStore:
                     cur = self._conn.execute("DELETE FROM records WHERE id < ?", (row[0],))
                     by_rows = max(0, cur.rowcount)
             self._conn.commit()
+            # Вернуть освободившиеся страницы ОС. Живая находка 2026-08-09: без
+            # этого ретеншен резал СТРОКИ, но не БАЙТЫ — на стенде осталось 2597
+            # свободных страниц из 2988 (87 % файла) при 3470 живых строках.
+            #
+            # ``fetchall()`` здесь **несущий, а не косметика**: ``incremental_vacuum``
+            # — шагающий оператор, и ``execute()`` делает ровно ОДИН шаг. Замер:
+            # без ``fetchall`` из 99 свободных страниц возвращается 1, с ним —
+            # page_count 109 → 10, freelist 0. Первая редакция этой правки была
+            # зелёной на глаз и не работала.
+            #
+            # ``INCREMENTAL``, а не ``FULL``: полный auto_vacuum перекладывает
+            # страницы на КАЖДОМ commit'е — плата на горячем пути записи ради
+            # уборки, которая нужна раз в пять минут.
+            #
+            # На БД, созданной до Ф5.2 (режим страниц не заведён), это тихий
+            # no-op: файл продолжает переиспользовать свои страницы, то есть
+            # ведёт себя как раньше и хуже не становится.
+            if by_age or by_rows:
+                try:
+                    self._conn.execute("PRAGMA incremental_vacuum").fetchall()
+                    self._conn.commit()
+                except sqlite3.OperationalError:
+                    # Уборка места — не то, ради чего можно уронить уборку строк.
+                    pass
             remaining = int(self._conn.execute("SELECT COUNT(*) FROM records").fetchone()[0])
-        return {"by_age": by_age, "by_rows": by_rows, "remaining": remaining}
+            # Свободные страницы — в ответе: «строк 3470, а файл 11.67 МиБ» без этого
+            # числа выглядит как поломка учёта, а не как высшая отметка файла.
+            free_pages = int(self._conn.execute("PRAGMA freelist_count").fetchone()[0])
+        return {"by_age": by_age, "by_rows": by_rows, "remaining": remaining, "free_pages": free_pages}
 
     def clear(self, kind: Optional[str] = None) -> int:
         """Удалить записи (опц. по kind). Возвращает число удалённых."""
