@@ -240,3 +240,4 @@
 - [Ключ читать из уже едущей секции](feedback_read_the_key_from_the_section_already_travelling.md) — два ассемблера не правятся; поля нет в схеме → model_dump выбросит
 - [Защита должна быть достижима](feedback_guard_must_be_reachable.md) — одноимённый параметр даёт TypeError раньше защиты
 - [Провод портов ≠ маршрут процессов](feedback_port_wire_is_not_a_process_route.md) — плагин не вызван ни разу, молча
+- [PRAGMA молчит об отказе](feedback_sqlite_pragma_fails_silently.md) — порядок до WAL; incremental_vacuum дошагивать fetchall
