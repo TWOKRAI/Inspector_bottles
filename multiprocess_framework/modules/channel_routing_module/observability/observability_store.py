@@ -36,11 +36,23 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from ..._fallback import emergency_log
 from .record_display import hub_record_to_display
 
 KIND_LOG = "log"
 KIND_ERROR = "error"
 KIND_STATS = "stats"
+
+#: Имя stdlib-логгера аварийного выхода (тот же приём, что в
+#: ``channel_routing_manager.py`` — «пишем в stdlib напрямую, никогда через
+#: менеджер», 2.2). Стор не может отчитаться о собственной миграции через
+#: свою же плоскость наблюдаемости: в момент миграции он ещё открывается.
+_EMERGENCY_NAME = __name__
+
+#: Целевая версия схемы для миграции auto_vacuum (D3). Хранится в
+#: ``PRAGMA user_version`` файла — так «однократность» переживает рестарт
+#: процесса-владельца без отдельной таблицы метаданных.
+_AUTO_VACUUM_SCHEMA_VERSION = 1
 
 
 def resolve_default_db_path() -> str:
@@ -161,6 +173,56 @@ class ObservabilityStore:
             # выразительным, но не быстрым.
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_records_severity_number ON records(severity_number, id)")
             self._conn.commit()
+            self._migrate_auto_vacuum()
+
+    def _migrate_auto_vacuum(self) -> None:
+        """Разовая миграция унаследованных БД на реально работающий ``auto_vacuum`` (D3).
+
+        ``PRAGMA auto_vacuum=INCREMENTAL`` в начале :meth:`_init_schema` включает
+        режим сразу только для НОВОГО (ещё без таблиц) файла. Файлы, рождённые
+        ДО фикса Ф5.2/``083b8527`` — там порядок был обратный (``journal_mode=WAL``
+        раньше ``auto_vacuum``), и SQLite молча проигнорировал пожелание — уже
+        содержат таблицы и данные, и на непустой БД ``PRAGMA auto_vacuum=...``
+        не применяется вовсе, только ``VACUUM`` реально меняет режим страниц.
+
+        Гейт — ``PRAGMA user_version`` (не отдельная таблица: метаданные, не
+        строка данных). Не по факту «файл маленький/большой», а один раз за
+        всё время жизни файла — ``VACUUM`` переписывает БД целиком и блокирует
+        писателей, гонять его на каждом открытии недопустимо на горячем пути.
+
+        **Цена, замеренная не на глаз:** синтетическая унаследованная БД,
+        200 000 строк, 118.3 МиБ (потолок стора при том же числе строк —
+        ~110 МБ по замеру Ф5.2/``083b8527``, тот же порядок величины) —
+        ``VACUUM`` занял 1.06 с (2026-08-10, скрипт в scratchpad задачи D3,
+        холодный диск, без конкурентных писателей). Дороже, чем commit
+        (~µs), но на одну-разовую миграцию при старте процесса-владельца —
+        не в ``append_records`` — приемлемо; в горячий путь не попадает.
+
+        ``VACUUM`` транзакционен (или полностью применяется, или файл остаётся
+        прежним) и требует свободного места ≈ размера БД — при сбое питания
+        посреди него исходные данные не теряются, отдельная защита копированием
+        не нужна (см. Приёмку задачи D3).
+        """
+        if self._db_path in (":memory:", ""):
+            return  # temp/in-memory БД теста не переживает reopen — миграция бессмысленна
+        version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        if version >= _AUTO_VACUUM_SCHEMA_VERSION:
+            return
+        mode = self._conn.execute("PRAGMA auto_vacuum").fetchone()[0]
+        if mode == 0:
+            started = time.monotonic()
+            self._conn.execute("VACUUM")
+            duration = time.monotonic() - started
+            emergency_log(
+                _EMERGENCY_NAME,
+                "WARNING",
+                "ObservabilityStore: миграция auto_vacuum на %s заняла %.3f с (VACUUM унаследованной БД)",
+                self._db_path,
+                duration,
+            )
+        # PRAGMA не принимает `?`-плейсхолдеры — константа модуля, не пользовательский ввод.
+        self._conn.execute(f"PRAGMA user_version = {_AUTO_VACUUM_SCHEMA_VERSION}")
+        self._conn.commit()
 
     def _migrate_add_severity_number(self) -> None:
         """Аддитивная миграция Ф3.6: ``severity_number``.
