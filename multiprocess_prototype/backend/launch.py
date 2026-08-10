@@ -37,6 +37,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _ORCHESTRATOR_CLASS_PATH = "multiprocess_prototype.orchestrator.ProcessManagerProcessApp"
 
+#: Имя ЭТОГО приложения — то же, что у GUI-идентичности (``frontend/app.py``:
+#: ``AppIdentity(app_name="Inspector Bottles")``). Фреймворк своего продукта не знает
+#: (D4): он берёт имя из env ``MPF_APP_NAME``, а объявляет его композиционный корень.
+APP_NAME = "Inspector Bottles"
+
 
 # ---------------------------------------------------------------------------
 # Чистые помощники работы с топологиями
@@ -91,7 +96,7 @@ def unwrap_recipe(raw: dict) -> dict:
     типизир. поля ``inspector``) здесь больше НЕ поднимается в прямой ключ (снят костыль
     ``_hoist_inspector_from_metadata``, Ф4.7): join теперь выводится структурно из
     ``wires`` в ``BlueprintAssembler.assemble()`` →
-    ``SystemBlueprint.infer_missing_inspectors()``, независимо от расположения поля.
+    ``SystemBlueprint.infer_missing_collectors()``, независимо от расположения поля.
     """
     if not (has_top_level_blueprint(raw) and "processes" not in raw):
         return raw
@@ -429,9 +434,16 @@ class SystemBuilder:
 
         Сборка proc_dict делегирована ``BlueprintAssembler`` (единая дорога для
         boot и switch).  Boot-only side effects (PluginRegistry.discover,
-        build_initial_state, throttle_rules, INSPECTOR_LOG_DIR env, баннер,
-        SystemLauncher-конструктор, orchestrator_config) остаются здесь.
+        build_initial_state, throttle_rules, MPF_APP_NAME + INSPECTOR_LOG_DIR env,
+        баннер, SystemLauncher-конструктор, orchestrator_config) остаются здесь.
         """
+        # Имя приложения объявляет композиционный корень: фреймворк нейтрален и
+        # своего продукта не знает (D4). По нему он называет ``app_name`` логгера и
+        # файл pid-реестра, поэтому объявление обязано случиться ДО сборки менеджеров
+        # и до spawn (дети наследуют env). Здесь, а не в ``main()``: в бэкенд входят
+        # и мимо него (тесты, инструменты, характеризация), а имя должно быть одно.
+        # ``setdefault`` — явно заданный env (второе приложение, стенд) приоритетнее.
+        os.environ.setdefault("MPF_APP_NAME", APP_NAME)
         from multiprocess_framework.modules.process_manager_module.launcher import (
             assemble_launcher,
         )

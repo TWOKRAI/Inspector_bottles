@@ -832,7 +832,7 @@ def find_foreign_log_roots(
     Args:
         active_log_dir: резолвнутый корень, который сейчас использует система.
         candidates: пути-кандидаты, которые стоит проверить (например,
-            дефолт до применения ``INSPECTOR_LOG_DIR``/``MULTIPROCESS_LOG_DIR``).
+            дефолт до применения ``MULTIPROCESS_LOG_DIR``/``INSPECTOR_LOG_DIR``).
 
     Returns:
         Список словарей ``{"path": str, "files": int, "bytes": int}`` — по

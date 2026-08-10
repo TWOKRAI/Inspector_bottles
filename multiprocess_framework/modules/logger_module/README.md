@@ -132,7 +132,7 @@ logger.initialize()
 logger = LoggerManager(
     manager_name="app_logger",
     config={
-        "app_name": "inspector",
+        "app_name": "MultiprocessApp",
         "default_level": "INFO",
         "channels": {
             "console": {"type": "console", "enabled": True},
@@ -144,7 +144,7 @@ logger.initialize()
 
 # Вариант 3: через LoggerManagerConfig (SchemaBase)
 config = LoggerManagerConfig.model_validate({
-    "app_name": "inspector",
+    "app_name": "MultiprocessApp",
     "default_level": "INFO",
     "channels": {...},
 })

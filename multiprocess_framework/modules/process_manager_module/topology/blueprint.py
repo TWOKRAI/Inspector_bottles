@@ -23,10 +23,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...logger_module import get_std_logger
+from ...process_module.generic.collector_registry import (
+    COLLECTOR_CONFIG_KEY,
+    LEGACY_COLLECTOR_CONFIG_KEY,
+)
 from ...process_module.plugins.port import Port, are_ports_compatible, validate_chain
 from ...process_module.plugins.registry import PluginRegistry
 from ...process_module.generic.generic_process_config import GenericProcessConfig, PluginConfig
@@ -161,9 +165,14 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Source target FPS", info="Целевой FPS для source-плагинов.", min=1.0),
     ] = 25.0
 
-    inspector: Annotated[
+    collector: Annotated[
         dict[str, Any],
-        FieldMeta("Inspector", info="Режим корреляции DataReceiver: {mode: fanin|join, inputs, primary, ...}"),
+        FieldMeta(
+            "Коллектор",
+            info="Режим корреляции DataReceiver: {mode: fanin|join, inputs, primary, ...}. "
+            "До D4 ключ назывался 'inspector' — читается как алиас (см. _accept_legacy_"
+            "collector_key), пишется всегда каноничным именем.",
+        ),
     ] = {}
 
     io_peek: Annotated[
@@ -188,7 +197,7 @@ class ProcessConfig(SchemaBase):
         dict[str, Any],
         FieldMeta(
             "Extras",
-            info="Domain-opaque мешок: pipeline-специфичные ключи (inspector/chain_targets/"
+            info="Domain-opaque мешок: pipeline-специфичные ключи (collector/chain_targets/"
             "io_peek/...), которые framework не обязан знать по имени. Зеркалит формат "
             "app.yaml/manifest 'version + extras'. Типизированные поля выше — shorthand для "
             "самых частых ключей и имеют приоритет над одноимёнными в extras.",
@@ -200,13 +209,38 @@ class ProcessConfig(SchemaBase):
         FieldMeta(
             "Metadata",
             info="Domain-opaque бэг GUI-редактора (домен-entity Process не имеет типизир. "
-            "полей вроде inspector — при сохранении сворачивает их сюда). Раньше молча "
+            "полей вроде collector — при сохранении сворачивает их сюда). Раньше молча "
             "терялся (extra=ignore до model_validate, см. снятый _hoist_inspector_from_"
             "metadata); теперь обычное typed-поле — не отбрасывается. Единственный "
-            "потребитель — SystemBlueprint.infer_missing_inspectors() (тонкая настройка "
-            "inspector.timeout_sec/... из legacy metadata.inspector, Ф4.7).",
+            "потребитель — SystemBlueprint.infer_missing_collectors() (тонкая настройка "
+            "collector.timeout_sec/... из legacy metadata, Ф4.7).",
         ),
     ] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_collector_key(cls, data: Any) -> Any:
+        """Принять рецепт, написанный до D4: ключ ``inspector`` → ``collector``.
+
+        Алиас на входе, а не переименование: 22 записи в yaml-рецептах читаются этим
+        полем, и без алиаса они перестали бы находиться **молча** — `extra=ignore`
+        выбросил бы неизвестный ключ, join не активировался бы, а симптом («линия не
+        сольётся») к ключу не отсылает. Тот же класс, что снятый костыль
+        ``_hoist_inspector_from_metadata``.
+
+        Пишется всегда каноничным именем: ``model_dump`` знает только ``collector``,
+        поэтому пересохранение рецепта из GUI канонизирует ключ.
+
+        Явный ``collector`` приоритетнее: если заданы оба, легаси игнорируется —
+        иначе старый ключ молча перекрывал бы новый.
+        """
+        if isinstance(data, dict) and LEGACY_COLLECTOR_CONFIG_KEY in data:
+            legacy = data.get(LEGACY_COLLECTOR_CONFIG_KEY)
+            if legacy and not data.get(COLLECTOR_CONFIG_KEY):
+                data = dict(data)
+                data[COLLECTOR_CONFIG_KEY] = legacy
+                data.pop(LEGACY_COLLECTOR_CONFIG_KEY, None)
+        return data
 
     def as_generic_config(self) -> GenericProcessConfig:
         """Конвертировать в GenericProcessConfig для launcher."""
@@ -258,14 +292,16 @@ class ProcessConfig(SchemaBase):
 
         chain_targets = _pick("chain_targets", [])
         source_fps = _pick("source_target_fps", 25.0)
-        inspector = _pick("inspector", {})
+        # Легаси-ключ в extras: typed-поле уже канонизировано before-валидатором, но
+        # extras — domain-opaque мешок, его никто не переписывает. Читаем обе формы.
+        collector = _pick(COLLECTOR_CONFIG_KEY, {}) or extras.get(LEGACY_COLLECTOR_CONFIG_KEY) or {}
         io_peek = _pick("io_peek", {})
         if chain_targets:
             base_kwargs["chain_targets"] = chain_targets
         if source_fps != 25.0:
             base_kwargs["source_target_fps"] = source_fps
-        if inspector:
-            base_kwargs["inspector"] = inspector
+        if collector:
+            base_kwargs[COLLECTOR_CONFIG_KEY] = collector
         if io_peek:
             base_kwargs["io_peek"] = io_peek
         # Ф7 G.4.b/G.7 (финальное ревью фазы G): SHM-ключи процесса-владельца из рецепта.
@@ -345,11 +381,11 @@ class SystemBlueprint(SchemaBase):
         FieldMeta("Наблюдаемость рецепта", info="Слой L2: defaults + per-process переопределения"),
     ] = None
 
-    def infer_missing_inspectors(self) -> None:
-        """Вывести inspector(join) из wires для процессов без явного inspector (Ф4.7).
+    def infer_missing_collectors(self) -> None:
+        """Вывести collector(join) из wires для процессов без явного collector (Ф4.7).
 
         Заменяет костыль ``_hoist_inspector_from_metadata`` (снят вместе с этим методом):
-        раньше корректность join зависела от того, попал ли ``inspector`` в правильное
+        раньше корректность join зависела от того, попал ли ключ в правильное
         место рецепта (прямой ключ vs ``metadata`` — GUI-save мог молча уронить его туда,
         где бэкенд его не видел). Теперь join — СТРУКТУРНЫЙ факт графа wires, не зависит
         от расположения поля.
@@ -394,16 +430,16 @@ class SystemBlueprint(SchemaBase):
         камеры, обе с source-портом "frame") коллапсируют в join с ОДНИМ элементом
         ``inputs`` — ждёт первый прибывший item с этим тегом, а не оба источника
         (было — plain fanin). Оба случая — задокументированная граница, не баг;
-        рецепт, которому нужно иное поведение, обязан объявить явный ``inspector``
+        рецепт, которому нужно иное поведение, обязан объявить явный ``collector``
         (escape-hatch, включая ``{mode: fanin}``) — см. ADR-PMM-017 п.3/4.
 
         Тонкая настройка (``timeout_sec``/``list_merge_keys``/``inactive_sec``) не
-        выводима из графа — если есть в ``metadata.inspector`` (legacy GUI-save путь),
+        выводима из графа — если есть в ``metadata`` (legacy GUI-save путь),
         подмешивается поверх структурного skeleton'а; ``metadata`` больше не молча
         теряется (``extra=ignore`` раньше отбрасывал её до ``model_validate``) — стала
         обычным typed-полем.
 
-        Явный ``inspector`` (прямой typed-ключ ИЛИ ``extras["inspector"]``) —
+        Явный ``collector`` (прямой typed-ключ ИЛИ ``extras``, в т.ч. легаси-имя) —
         приоритетнее и НЕ переопределяется: ручная настройка выигрывает у вывода из графа.
 
         Мутирует ``self.processes`` IN PLACE. Вызывать ПОСЛЕ ``model_validate``
@@ -453,13 +489,19 @@ class SystemBlueprint(SchemaBase):
             by_source.setdefault(src_process, set()).add(src_port)
 
         for proc in self.processes:
-            # Явный inspector-конфиг: typed-поле приоритетнее extras["inspector"].
-            explicit = proc.inspector or (proc.extras or {}).get("inspector") or {}
+            # Явная секция корреляции: typed-поле приоритетнее extras (обе формы ключа).
+            extras_bag = proc.extras or {}
+            explicit = (
+                proc.collector
+                or extras_bag.get(COLLECTOR_CONFIG_KEY)
+                or extras_bag.get(LEGACY_COLLECTOR_CONFIG_KEY)
+                or {}
+            )
             # Escape-hatch (вывод НЕ применяется) — только если конфиг задаёт mode.
             # Mode-less конфиг (напр. {timeout_sec: 5}) — НЕ escape-hatch, а тонкая
             # настройка: вывод mode/inputs/primary из wires всё равно срабатывает, а
-            # прочие ключи подмешиваются поверх (иначе mode-less inspector молча
-            # отключал бы join — F2). Симметрично legacy metadata.inspector.
+            # прочие ключи подмешиваются поверх (иначе mode-less секция молча
+            # отключала бы join — F2). Симметрично legacy metadata.
             if isinstance(explicit, dict) and explicit.get("mode"):
                 continue
 
@@ -478,22 +520,29 @@ class SystemBlueprint(SchemaBase):
             derived: dict[str, Any] = {"mode": "join", "inputs": unique_tags, "primary": primary}
 
             # Тонкая настройка (структурные mode/inputs/primary остаются из wires):
-            # mode-less явный inspector (typed/extras) + legacy metadata.inspector —
+            # mode-less явная секция (typed/extras) + legacy metadata —
             # оба подмешивают только НЕ-структурные ключи (timeout_sec/… ) поверх skeleton.
-            legacy = proc.metadata.get("inspector") if isinstance(proc.metadata, dict) else None
+            legacy = None
+            if isinstance(proc.metadata, dict):
+                legacy = proc.metadata.get(COLLECTOR_CONFIG_KEY) or proc.metadata.get(LEGACY_COLLECTOR_CONFIG_KEY)
             for tuning in (explicit, legacy):
                 if isinstance(tuning, dict):
                     for key, value in tuning.items():
                         if key not in ("mode", "inputs", "primary"):
                             derived[key] = value
 
-            proc.inspector = derived
-            # Снять mode-less shadow из extras: proc.inspector теперь авторитетен (в
-            # model_fields_set через validate_assignment), но extras["inspector"] без mode
+            proc.collector = derived
+            # Снять mode-less shadow из extras: proc.collector теперь авторитетен (в
+            # model_fields_set через validate_assignment), но mode-less ключ в extras
             # иначе провоцировал бы ложный conflict-warning в as_generic_config._pick.
-            extras_insp = (proc.extras or {}).get("inspector")
-            if isinstance(extras_insp, dict) and not extras_insp.get("mode"):
-                proc.extras = {k: v for k, v in proc.extras.items() if k != "inspector"}
+            # Чистим ОБЕ формы: легаси-ключ в extras никем не канонизируется.
+            shadow_keys = {
+                key
+                for key in (COLLECTOR_CONFIG_KEY, LEGACY_COLLECTOR_CONFIG_KEY)
+                if isinstance(extras_bag.get(key), dict) and not extras_bag[key].get("mode")
+            }
+            if shadow_keys:
+                proc.extras = {k: v for k, v in proc.extras.items() if k not in shadow_keys}
 
     def build_configs(self) -> list[GenericProcessConfig]:
         """Собрать список GenericProcessConfig для launcher."""

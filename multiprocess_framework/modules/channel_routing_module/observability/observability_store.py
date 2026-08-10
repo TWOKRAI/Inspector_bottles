@@ -58,9 +58,9 @@ _AUTO_VACUUM_SCHEMA_VERSION = 1
 def resolve_default_db_path() -> str:
     """Путь к файлу стора по умолчанию: <log_dir>/observability.db.
 
-    log_dir — из env INSPECTOR_LOG_DIR / MULTIPROCESS_LOG_DIR, иначе "logs".
+    log_dir — из env MULTIPROCESS_LOG_DIR / INSPECTOR_LOG_DIR, иначе "logs".
     """
-    log_dir = os.environ.get("INSPECTOR_LOG_DIR") or os.environ.get("MULTIPROCESS_LOG_DIR") or "logs"
+    log_dir = os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR") or "logs"
     return os.path.join(log_dir, "observability.db")
 
 

@@ -19,7 +19,7 @@
   при timeout).
 - ``chosen`` — имя ветви-победителя (``region_name`` из метаданных item).
 - ``ms`` — время ожидания полной коллекции в fan-in буфере. ``0`` если не
-  измеримо (InspectorManager не передаёт эту метрику).
+  измеримо (коллектор не передаёт эту метрику).
 
 Дополнительно merged-кадр может нести ``item["trace_branches"]`` — лёгкую
 сводку по всем ветвям::
@@ -38,7 +38,8 @@ O(число ветвей) — не растёт от глубины trace.
 (monotonic у каждого процесса свой и несравним). Длительность ОБРАБОТКИ меряем
 ``perf_counter`` (high-res), длительность ПЕРЕДАЧИ — разностью wall-часов.
 
-Гейтится ``INSPECTOR_FRAME_TRACE=1`` — в проде по умолчанию OFF: stamp/record
+Гейтится ``MULTIPROCESS_FRAME_TRACE=1`` (легаси-алиас ``INSPECTOR_FRAME_TRACE``,
+D4) — в проде по умолчанию OFF: stamp/record
 становятся no-op (один bool-чек на item на участок, нулевой overhead). Дочерние
 процессы (spawn) наследуют env, если флаг выставлен до запуска ``run.py``.
 """
@@ -51,13 +52,27 @@ import time
 import uuid
 from contextlib import contextmanager
 
+#: Пара «каноничная ручка, легаси-алиас» (D4).
+FRAME_TRACE_ENV = "MULTIPROCESS_FRAME_TRACE"
+LEGACY_FRAME_TRACE_ENV = "INSPECTOR_FRAME_TRACE"
+
+
+def _env_frame_trace_on() -> bool:
+    """Включён ли frame-trace по любой из двух ручек пары."""
+    for key in (FRAME_TRACE_ENV, LEGACY_FRAME_TRACE_ENV):
+        raw = (os.environ.get(key) or "").strip().lower()
+        if raw:
+            return raw in ("1", "true", "yes")
+    return False
+
+
 # Читается один раз при импорте. Дочерние spawn-процессы наследуют env.
 # Тесты могут переопределить: frame_trace._ENABLED = True.
-_ENABLED = os.environ.get("INSPECTOR_FRAME_TRACE", "").strip().lower() in ("1", "true", "yes")
+_ENABLED = _env_frame_trace_on()
 
 
 def enabled() -> bool:
-    """Включена ли трассировка кадра (по env INSPECTOR_FRAME_TRACE)."""
+    """Включена ли трассировка кадра (по env MULTIPROCESS_FRAME_TRACE)."""
     return _ENABLED
 
 
@@ -77,7 +92,7 @@ def noop_log(message: str, **_extra: object) -> None:
 # ----------------------------------------------------------------------
 #
 # В отличие от span-трассировки выше (item["trace"], enabled()/traced()/...) —
-# ВСЕГДА активно, не за INSPECTOR_FRAME_TRACE: назначение нужно для корреляции
+# ВСЕГДА активно, не за MULTIPROCESS_FRAME_TRACE: назначение нужно для корреляции
 # ПРОДОВЫХ логов (по какому кадру какая запись), а не только для perf-дебага,
 # который в проде по умолчанию выключен. Стоимость — один hex(uuid4()) на кадр
 # У ИСТОЧНИКА (не на каждой границе процесса) + dict-присвоение; дальше поле

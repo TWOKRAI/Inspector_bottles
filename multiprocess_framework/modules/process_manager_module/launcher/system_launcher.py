@@ -134,8 +134,11 @@ class SystemLauncher:
 
             from .pid_registry import pid_file_path, reap_and_reset
 
-            # Фиксируем путь в env, чтобы все дочерние процессы писали в тот же файл
-            _os.environ["INSPECTOR_PID_FILE"] = str(pid_file_path())
+            # Фиксируем путь в env, чтобы все дочерние процессы писали в тот же файл.
+            # Обе ручки пары: каноничная и легаси-алиас — дети могут читать любую.
+            resolved = str(pid_file_path())
+            _os.environ["MULTIPROCESS_PID_FILE"] = resolved
+            _os.environ["INSPECTOR_PID_FILE"] = resolved
             reap_and_reset(log=self._log_info)
         except Exception:  # noqa: BLE001 — реестр не критичен для запуска
             pass

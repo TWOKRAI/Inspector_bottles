@@ -4,42 +4,48 @@ C6 шаг (b): выбор `InspectorManager` (region fan-in по count) vs `Join
 (join именованных входов по seq_id+data_type) — доменное решение (vision-inspection
 словарь), переехало из `generic/generic_process.py::_build_inspector` вместе с классами.
 
-Регистрируется в framework-реестре (`process_module.generic.inspector_registry`) при
+Регистрируется в framework-реестре (`process_module.generic.collector_registry`) при
 импорте модуля — generic-движок получает готовый буфер через DI, не зная конкретный класс.
+
+Имена доменных классов (`InspectorManager`/`JoinInspectorManager`) остаются: домен
+vision-inspection живёт именно здесь. Универсальным стало только имя ШВА — фабрика
+и Protocol (D4), потому что их видит фреймворк.
 """
 
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from multiprocess_framework.modules.process_module.generic.inspector_registry import (
-    ItemInspector,
-    register_inspector_factory,
+from multiprocess_framework.modules.process_module.generic.collector_registry import (
+    ItemCollector,
+    collector_config,
+    register_collector_factory,
 )
 
 from .inspector_manager import InspectorManager
 from .join_inspector_manager import JoinInspectorManager
 
 
-def build_inspector(
+def build_collector(
     app_cfg: dict[str, Any],
     log_info: Callable[[str], None] | None = None,
     log_error: Callable[[str], None] | None = None,
     log_debug: Callable[[str], None] | None = None,
-) -> ItemInspector:
+) -> ItemCollector:
     """Выбрать корреляционный буфер DataReceiver по конфигу процесса.
 
     Дефолт `fanin` (InspectorManager, region fan-in по count) — backward-compat.
     `join` (JoinInspectorManager) — generic-слияние именованных входов по
     (seq_id, data_type) для многовходовых узлов (напр. overlay_draw: frame+overlay).
 
-    Конфиг процесса:
-        config.inspector.mode: "fanin" | "join"
-        config.inspector.inputs: ["frame", "overlay"]      # для join
-        config.inspector.primary: "frame"
-        config.inspector.timeout_sec / inactive_sec / list_merge_keys
+    Конфиг процесса (ключ `collector`; легаси-имя `inspector` читается тем же
+    `collector_config` — одно место на обе формы):
+        config.collector.mode: "fanin" | "join"
+        config.collector.inputs: ["frame", "overlay"]      # для join
+        config.collector.primary: "frame"
+        config.collector.timeout_sec / inactive_sec / list_merge_keys
     """
-    insp = app_cfg.get("inspector", {}) or {}
+    insp = collector_config(app_cfg)
     mode = insp.get("mode", "fanin")
     if mode == "join":
         return JoinInspectorManager(
@@ -62,4 +68,4 @@ def build_inspector(
 
 # Self-register: импорт этого модуля (через Plugins/__init__) делает фабрику доступной
 # generic-движку. Идемпотентно — повторный импорт просто перезапишет тем же значением.
-register_inspector_factory(build_inspector)
+register_collector_factory(build_collector)

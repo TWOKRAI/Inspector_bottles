@@ -2,7 +2,7 @@
 
 **Назначение:** для каждого из 25 модулей указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть». Границы и разбор путающих осей — [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md).
 
-**Обновлено:** 2026-07-12 — C8 docs-sync: `recipe` контракт дозаписан по факту C2/C3 (реестр step-миграций + generic `yaml_io`, ADR-RCP-003/005); `process_manager_module` — контракт топологии (`SystemBlueprint`/`ProcessConfig`/`Wire`, ADR-PMM-016) + `infer_missing_inspectors` (ADR-PMM-017); инварианты `process_manager_module` перекодированы `ADR-PM-*` → `ADR-PMM-*` (коды переименованы ранее, ADR-PMM-001…006, документ не был обновлён).
+**Обновлено:** 2026-07-12 — C8 docs-sync: `recipe` контракт дозаписан по факту C2/C3 (реестр step-миграций + generic `yaml_io`, ADR-RCP-003/005); `process_manager_module` — контракт топологии (`SystemBlueprint`/`ProcessConfig`/`Wire`, ADR-PMM-016) + `infer_missing_collectors` (ADR-PMM-017); инварианты `process_manager_module` перекодированы `ADR-PM-*` → `ADR-PMM-*` (коды переименованы ранее, ADR-PMM-001…006, документ не был обновлён).
 **Ранее** 2026-07-11 — добавлен контракт `recipe` (крыша над рецептами, C1/ADR-RCP-001/002); счётчик 24 → **25**.
 **Ранее** 2026-07-08 — добавлены контракты `event_module`, `actions_module`, `service_module`, `display_module` (сверка с фактом); `sql_module` вынесен в `Services/sql` (раздел Storage → заметка).
 **Ранее** 2026-05-07 — `state_store_module` актуализирован под ADR-SS-011/012/013, `chain_module` — под ADR-CHN-006/007 (renamed из ADR-CM-*; код модуля **CHN**, не **CM** — последний за `console_module`).
@@ -551,7 +551,7 @@
 - `bundle_contract.py` — `build_bundle/validate_bundle` для pickle-safe передачи.
 - `run_process_function` — top-level runner для дочернего процесса (pickle-safe).
 - `topology/blueprint.py` — schema-модель топологии всей системы (не одного процесса): `SystemBlueprint` (`processes: list[ProcessConfig]`, `wires: list[Wire]`), `ProcessConfig` (typed-поля `inspector`/`chain_targets`/`source_target_fps`/`io_peek` — приоритет над одноимёнными в `extras`; `extras`/`metadata` — domain-opaque мешки), `Wire`, `Port`. Переехало из `process_module/generic/blueprint.py` (C6 (c), ADR-PMM-016) — системный артефакт живёт у оркестратора, не у модуля одного процесса; back-compat шим на старом пути удалён (grouping Фаза 2, 2026-07-19) — импорт только из `topology/`.
-- `SystemBlueprint.infer_missing_inspectors()` — структурный вывод `{mode: join, inputs, primary}` для процессов без явного `inspector`: ≥2 процесса-источника REQUIRED-порта → join (опциональные порты не считаются); явный `inspector`/`extras["inspector"]` — escape-hatch, отключает вывод. Заменяет снятый костыль `_hoist_inspector_from_metadata` (Ф4.7, ADR-PMM-017).
+- `SystemBlueprint.infer_missing_collectors()` — структурный вывод `{mode: join, inputs, primary}` для процессов без явного `collector`: ≥2 процесса-источника REQUIRED-порта → join (опциональные порты не считаются); явный `collector`/`extras["collector"]` — escape-hatch, отключает вывод. Заменяет снятый костыль `_hoist_inspector_from_metadata` (Ф4.7, ADR-PMM-017).
 - `TopologyManager` (`process/topology_manager.py`) — runtime-применение топологии (switch/hot-apply); отдельный от `blueprint.py` (runtime-логика применения vs schema-модель).
 
 **Инварианты:**

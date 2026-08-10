@@ -1,9 +1,9 @@
-"""Тесты SystemBlueprint.infer_missing_inspectors() — join/inspector из wires (Ф4.7).
+"""Тесты SystemBlueprint.infer_missing_collectors() — join/collector из wires (Ф4.7).
 
 Заменяет снятый костыль ``_hoist_inspector_from_metadata``
 (``multiprocess_prototype/backend/launch.py``): раньше корректность join зависела от
-того, куда GUI-save положил ``inspector`` (прямой ключ vs ``metadata`` — домен-entity
-``Process`` не имеет типизир. поля ``inspector`` → сворачивает его в ``metadata`` при
+того, куда GUI-save положил ``collector`` (прямой ключ vs ``metadata`` — домен-entity
+``Process`` не имеет типизир. поля ``collector`` → сворачивает его в ``metadata`` при
 сохранении). Теперь join — СТРУКТУРНЫЙ факт графа ``wires``: процесс, получающий
 REQUIRED-порт(ы) от ≥2 разных процессов-источников, получает
 ``{mode: join, inputs, primary}`` автоматически — независимо от того, есть ли вообще
@@ -199,14 +199,14 @@ def test_join_inferred_from_two_required_sources():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     draw = next(p for p in bp.processes if p.process_name == "draw")
-    assert draw.inspector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame"}
+    assert draw.collector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame"}
 
 
 def test_join_not_degraded_to_fanin_when_no_inspector_declared_anywhere():
-    """Регресс-тест (acceptance Ф4.7): join не деградирует в fanin без ЛЮБОЙ inspector-декларации."""
+    """Регресс-тест (acceptance Ф4.7): join не деградирует в fanin без ЛЮБОЙ collector-декларации."""
     _register(_CircleDetector, _LineFilter, _OverlayDraw)
     bp = SystemBlueprint.model_validate(
         {
@@ -222,11 +222,11 @@ def test_join_not_degraded_to_fanin_when_no_inspector_declared_anywhere():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     draw = next(p for p in bp.processes if p.process_name == "draw")
-    assert draw.inspector.get("mode") == "join", draw.inspector
-    assert draw.inspector.get("mode") != "fanin"
+    assert draw.collector.get("mode") == "join", draw.collector
+    assert draw.collector.get("mode") != "fanin"
 
 
 # ---------------------------------------------------------------------------
@@ -251,16 +251,16 @@ def test_tag_derived_from_source_port_not_target_port_name():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     recog = next(p for p in bp.processes if p.process_name == "recog")
-    assert recog.inspector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame"}
+    assert recog.collector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame"}
 
 
 # ---------------------------------------------------------------------------
 # AU-3 (follow-up В1, ADR-PMM-017 п.6): источник с ДВУМЯ РАЗНЫМИ data_type даёт ОДИН
 # тег на весь источник — задокументированная граница, НЕ баг (см. docstring
-# infer_missing_inspectors, "Известный edge (в)"). Разобрано и отвергнуто чинить:
+# infer_missing_collectors, "Известный edge (в)"). Разобрано и отвергнуто чинить:
 # структурно неотличимо от "несколько полей ОДНОГО item на разные параметры соседнего
 # плагина" (живой пример — circle_detector.frame/detections → circle_draw.frame/
 # detections в hikvision_letter_robot.yaml, см. test_build_characterization.py и
@@ -288,10 +288,10 @@ def test_source_with_two_different_data_types_collapses_to_one_tag():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     fusion = next(p for p in bp.processes if p.process_name == "fusion")
-    assert fusion.inspector == {
+    assert fusion.collector == {
         "mode": "join",
         "inputs": ["frame", "layout"],  # "depth" НЕ попадает — известная граница
         "primary": "frame",
@@ -305,7 +305,7 @@ def test_source_with_two_different_data_types_collapses_to_one_tag():
 
 def test_lookup_symmetrized_with_class_path_fallback():
     """Плагин с нестандартным именем в pdict (не совпадает с registry-ключом),
-    находимый ТОЛЬКО по class-path — раньше infer_missing_inspectors всегда передавал
+    находимый ТОЛЬКО по class-path — раньше infer_missing_collectors всегда передавал
     "" вторым аргументом _find_plugin_entry, class-path fallback был для него мёртв."""
     _register(_CircleDetector, _LineFilter, _CenterCrop)
     plugin_class_path = f"{_CenterCrop.__module__}.{_CenterCrop.__qualname__}"
@@ -326,10 +326,10 @@ def test_lookup_symmetrized_with_class_path_fallback():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     recog = next(p for p in bp.processes if p.process_name == "recog")
-    assert recog.inspector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame"}
+    assert recog.collector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame"}
 
 
 # ---------------------------------------------------------------------------
@@ -377,10 +377,10 @@ def test_optional_ports_excluded_no_false_positive_join():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     layout = next(p for p in bp.processes if p.process_name == "layout")
-    assert layout.inspector == {}
+    assert layout.collector == {}
 
 
 def test_single_required_source_stays_fanin():
@@ -398,14 +398,14 @@ def test_single_required_source_stays_fanin():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     recog = next(p for p in bp.processes if p.process_name == "recog")
-    assert recog.inspector == {}
+    assert recog.collector == {}
 
 
 # ---------------------------------------------------------------------------
-# Явный inspector — приоритет, вывод из wires НЕ применяется
+# Явный collector — приоритет, вывод из wires НЕ применяется
 # ---------------------------------------------------------------------------
 
 
@@ -420,7 +420,7 @@ def test_explicit_direct_inspector_not_overridden():
                 {
                     "process_name": "draw",
                     "plugins": [_plugin("overlay_draw")],
-                    "inspector": {"mode": "fanin"},
+                    "collector": {"mode": "fanin"},
                 },
             ],
             "wires": [
@@ -429,10 +429,10 @@ def test_explicit_direct_inspector_not_overridden():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     draw = next(p for p in bp.processes if p.process_name == "draw")
-    assert draw.inspector == {"mode": "fanin"}
+    assert draw.collector == {"mode": "fanin"}
 
 
 def test_explicit_extras_inspector_not_overridden():
@@ -446,7 +446,7 @@ def test_explicit_extras_inspector_not_overridden():
                 {
                     "process_name": "draw",
                     "plugins": [_plugin("overlay_draw")],
-                    "extras": {"inspector": {"mode": "fanin"}},
+                    "extras": {"collector": {"mode": "fanin"}},
                 },
             ],
             "wires": [
@@ -455,16 +455,16 @@ def test_explicit_extras_inspector_not_overridden():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     draw = next(p for p in bp.processes if p.process_name == "draw")
-    assert draw.inspector == {}  # typed-поле пустое; extras не трогаем — приоритет explicit
+    assert draw.collector == {}  # typed-поле пустое; extras не трогаем — приоритет explicit
 
 
 def test_mode_less_extras_inspector_is_tuning_not_escape_hatch():
-    """F2: mode-less inspector (без mode, только tuning) НЕ отключает вывод.
+    """F2: mode-less collector (без mode, только tuning) НЕ отключает вывод.
 
-    Плоский inspector: {timeout_sec: 5} едет в extras (домен-роутинг). Раньше (metadata-
+    Плоский collector: {timeout_sec: 5} едет в extras (домен-роутинг). Раньше (metadata-
     путь) он давал «join из wires + подмешанный timeout»; после AU-2 он в extras и мог бы
     молча гасить join (escape-hatch по наличию ключа). Фикс: escape-hatch — только при
     наличии mode; mode-less → тонкая настройка поверх выведенного skeleton.
@@ -479,7 +479,7 @@ def test_mode_less_extras_inspector_is_tuning_not_escape_hatch():
                 {
                     "process_name": "draw",
                     "plugins": [_plugin("overlay_draw")],
-                    "extras": {"inspector": {"timeout_sec": 5}},  # mode-less
+                    "extras": {"collector": {"timeout_sec": 5}},  # mode-less
                 },
             ],
             "wires": [
@@ -488,22 +488,22 @@ def test_mode_less_extras_inspector_is_tuning_not_escape_hatch():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     draw = next(p for p in bp.processes if p.process_name == "draw")
     # mode/inputs/primary выведены из wires; timeout_sec подмешан из mode-less extras
-    assert draw.inspector == {
+    assert draw.collector == {
         "mode": "join",
         "inputs": ["frame", "overlay"],
         "primary": "frame",
         "timeout_sec": 5,
     }
     # mode-less shadow снят из extras — as_generic_config._pick вернёт typed join без ложного warning
-    assert "inspector" not in (draw.extras or {})
+    assert "collector" not in (draw.extras or {})
 
 
 def test_mode_less_typed_inspector_is_tuning_not_escape_hatch():
-    """F2 (симметрия): mode-less typed inspector — тоже тонкая настройка, не escape-hatch."""
+    """F2 (симметрия): mode-less typed collector — тоже тонкая настройка, не escape-hatch."""
     _register(_CircleDetector, _LineFilter, _OverlayDraw)
     bp = SystemBlueprint.model_validate(
         {
@@ -514,7 +514,7 @@ def test_mode_less_typed_inspector_is_tuning_not_escape_hatch():
                 {
                     "process_name": "draw",
                     "plugins": [_plugin("overlay_draw")],
-                    "inspector": {"timeout_sec": 3},  # typed, mode-less
+                    "collector": {"timeout_sec": 3},  # typed, mode-less
                 },
             ],
             "wires": [
@@ -523,20 +523,20 @@ def test_mode_less_typed_inspector_is_tuning_not_escape_hatch():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     draw = next(p for p in bp.processes if p.process_name == "draw")
-    assert draw.inspector["mode"] == "join"
-    assert draw.inspector["timeout_sec"] == 3
+    assert draw.collector["mode"] == "join"
+    assert draw.collector["timeout_sec"] == 3
 
 
 # ---------------------------------------------------------------------------
-# Legacy metadata.inspector — тонкая настройка подмешивается, mode/inputs/primary из wires
+# Legacy metadata.collector — тонкая настройка подмешивается, mode/inputs/primary из wires
 # ---------------------------------------------------------------------------
 
 
 def test_legacy_metadata_tuning_merged_over_wire_skeleton():
-    """timeout_sec из metadata.inspector сохраняется; mode/inputs/primary — из wires
+    """timeout_sec из metadata.collector сохраняется; mode/inputs/primary — из wires
     (даже если в metadata записан устаревший/иной mode — wires авторитетны)."""
     _register(_CircleDetector, _LineFilter, _OverlayDraw)
     bp = SystemBlueprint.model_validate(
@@ -549,7 +549,7 @@ def test_legacy_metadata_tuning_merged_over_wire_skeleton():
                     "process_name": "draw",
                     "plugins": [_plugin("overlay_draw")],
                     "metadata": {
-                        "inspector": {
+                        "collector": {
                             "mode": "join",
                             "inputs": ["frame", "overlay"],
                             "primary": "frame",
@@ -564,10 +564,10 @@ def test_legacy_metadata_tuning_merged_over_wire_skeleton():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     draw = next(p for p in bp.processes if p.process_name == "draw")
-    assert draw.inspector == {
+    assert draw.collector == {
         "mode": "join",
         "inputs": ["frame", "overlay"],
         "primary": "frame",
@@ -580,16 +580,16 @@ def test_metadata_field_no_longer_dropped_by_extra_ignore():
     cfg = SystemBlueprint.model_validate(
         {
             "name": "metadata_roundtrip",
-            "processes": [{"process_name": "p", "plugins": [], "metadata": {"inspector": {"mode": "join"}}}],
+            "processes": [{"process_name": "p", "plugins": [], "metadata": {"collector": {"mode": "join"}}}],
             "wires": [],
         }
     )
     proc = cfg.processes[0]
-    assert proc.metadata == {"inspector": {"mode": "join"}}
+    assert proc.metadata == {"collector": {"mode": "join"}}
 
 
 def test_metadata_inspector_mode_not_authoritative_wires_win():
-    """AU-2: metadata.inspector={mode: fanin} НЕ перекрывает структурный join из wires.
+    """AU-2: metadata.collector={mode: fanin} НЕ перекрывает структурный join из wires.
 
     mode/inputs/primary всегда из графа — metadata-mode не авторитетен (только тонкая
     настройка вроде timeout_sec подмешивается). Escape-hatch — только прямой ключ/extras.
@@ -604,7 +604,7 @@ def test_metadata_inspector_mode_not_authoritative_wires_win():
                 {
                     "process_name": "draw",
                     "plugins": [_plugin("overlay_draw")],
-                    "metadata": {"inspector": {"mode": "fanin"}},
+                    "metadata": {"collector": {"mode": "fanin"}},
                 },
             ],
             "wires": [
@@ -613,19 +613,19 @@ def test_metadata_inspector_mode_not_authoritative_wires_win():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     draw = next(p for p in bp.processes if p.process_name == "draw")
-    assert draw.inspector["mode"] == "join"  # metadata-mode=fanin проигнорирован, wires авторитетны
+    assert draw.collector["mode"] == "join"  # metadata-mode=fanin проигнорирован, wires авторитетны
 
 
 def test_legacy_metadata_inspector_on_optional_ports_degrades_to_fanin():
-    """AU-2 случай (б): legacy metadata.inspector={mode: join} на узле без структурного
+    """AU-2 случай (б): legacy metadata.collector={mode: join} на узле без структурного
     join (2 физ. источника, но 1 required + optional) тихо остаётся fanin.
 
     metadata-mode не авторитетен: вывод не срабатывает (<2 required-источников), а тонкая
     настройка подмешивается только в join-ветку → escape-hatch из metadata теряется.
-    Задокументированная деградация (ADR-PMM-017 п.5); митигация — явный inspector
+    Задокументированная деградация (ADR-PMM-017 п.5); митигация — явный collector
     прямым ключом/extras.
     """
     _register(_CircleDetector, _LineFilter, _WordLayout)
@@ -639,7 +639,7 @@ def test_legacy_metadata_inspector_on_optional_ports_degrades_to_fanin():
                     "process_name": "layout",
                     "plugins": [_plugin("word_layout")],
                     "metadata": {
-                        "inspector": {"mode": "join", "inputs": ["predictions", "word"], "primary": "predictions"}
+                        "collector": {"mode": "join", "inputs": ["predictions", "word"], "primary": "predictions"}
                     },
                 },
             ],
@@ -649,10 +649,10 @@ def test_legacy_metadata_inspector_on_optional_ports_degrades_to_fanin():
             ],
         }
     )
-    bp.infer_missing_inspectors()
+    bp.infer_missing_collectors()
 
     layout = next(p for p in bp.processes if p.process_name == "layout")
-    assert layout.inspector == {}  # metadata-mode=join проигнорирован → тихо fanin
+    assert layout.collector == {}  # metadata-mode=join проигнорирован → тихо fanin
 
 
 # ---------------------------------------------------------------------------
@@ -660,7 +660,7 @@ def test_legacy_metadata_inspector_on_optional_ports_degrades_to_fanin():
 # ---------------------------------------------------------------------------
 
 
-def test_infer_missing_inspectors_idempotent():
+def test_infer_missing_collectors_idempotent():
     _register(_CircleDetector, _LineFilter, _OverlayDraw)
     bp = SystemBlueprint.model_validate(
         {
@@ -676,10 +676,10 @@ def test_infer_missing_inspectors_idempotent():
             ],
         }
     )
-    bp.infer_missing_inspectors()
-    first = next(p for p in bp.processes if p.process_name == "draw").inspector
+    bp.infer_missing_collectors()
+    first = next(p for p in bp.processes if p.process_name == "draw").collector
 
-    bp.infer_missing_inspectors()
-    second = next(p for p in bp.processes if p.process_name == "draw").inspector
+    bp.infer_missing_collectors()
+    second = next(p for p in bp.processes if p.process_name == "draw").collector
 
     assert first == second

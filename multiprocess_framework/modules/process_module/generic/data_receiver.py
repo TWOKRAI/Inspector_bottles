@@ -1,8 +1,8 @@
 """DataReceiver — компонент приёма IPC и трансформации в items.
 
 Receive loop:
-  IPC msg → FrameShmMiddleware.restore_frame() → item → InspectorManager.on_item()
-  Периодически: InspectorManager.check_timeouts()
+  IPC msg → FrameShmMiddleware.restore_frame() → item → ItemCollector.on_item()
+  Периодически: ItemCollector.check_timeouts()
 
 Используется GenericProcess как LOOP worker.
 """
@@ -18,16 +18,16 @@ from . import frame_trace
 from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
-from .inspector_registry import ItemInspector
+from .collector_registry import ItemCollector
 
 
 class DataReceiver:
-    """Приём data-plane IPC → item → InspectorManager → chain_queue.
+    """Приём data-plane IPC → item → ItemCollector → chain_queue.
 
     Args:
         receive_fn: callable для получения IPC сообщений (process.receive_message)
         shm_middleware: FrameShmMiddleware для восстановления frame из SHM
-        inspector_manager: ItemInspector (буфер fan-in/join, DI из Plugins/_shared/fanin)
+        item_collector: ItemCollector (буфер fan-in/join, DI из Plugins/_shared/fanin)
         chain_queue: очередь для готовых коллекций items → PipelineExecutor
         lag_alert_threshold_sec: порог для backpressure alert (Q6)
         log_info: callback для логирования
@@ -38,7 +38,7 @@ class DataReceiver:
         self,
         receive_fn: Callable,
         shm_middleware: FrameShmMiddleware | None,
-        inspector_manager: ItemInspector,
+        item_collector: ItemCollector,
         chain_queue: queue.Queue,
         lag_alert_threshold_sec: float = 2.0,
         log_info: Callable[[str], None] | None = None,
@@ -58,7 +58,7 @@ class DataReceiver:
         # Имя процесса-узла — для frame-trace transport-спана (from -> node).
         self._node = node_name
         self._shm = shm_middleware
-        self._inspector = inspector_manager
+        self._collector = item_collector
         self._chain_queue = chain_queue
         self._lag_threshold = lag_alert_threshold_sec
         self._log_info = log_info or (lambda msg: None)
@@ -100,7 +100,7 @@ class DataReceiver:
         return metrics
 
     def on_items_ready(self, items: list[dict]) -> None:
-        """Callback от InspectorManager — коллекция готова, кладём в chain_queue.
+        """Callback от ItemCollector — коллекция готова, кладём в chain_queue.
 
         Backpressure (Q6): block + alert. Никогда не дропаем в нормальной работе.
 
@@ -133,7 +133,7 @@ class DataReceiver:
                     continue  # ещё не освободилась — проверим stop_event снова
 
     def run_loop(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
-        """LOOP worker: receive IPC → restore frame → InspectorManager.
+        """LOOP worker: receive IPC → restore frame → ItemCollector.
 
         Args:
             stop_event: сигнал остановки
@@ -151,7 +151,7 @@ class DataReceiver:
             # Периодическая проверка timeouts (каждые ~100ms)
             now = time.monotonic()
             if now - self._last_timeout_check > 0.1:
-                self._inspector.check_timeouts()
+                self._collector.check_timeouts()
                 self._last_timeout_check = now
 
             # Receive IPC с timeout. return_messages=False (флаг FW_DATA_PLANE_DICTS)
@@ -192,8 +192,8 @@ class DataReceiver:
                 # frame-trace: время передачи от предыдущего узла к этому.
                 frame_trace.record_transport(item, self._node)
 
-                # Передать в InspectorManager
-                self._inspector.on_item(item)
+                # Передать в коллектор
+                self._collector.on_item(item)
 
             # Полный цикл обработки одного сообщения → телеметрия.
             self._cycle_metrics.record(time.perf_counter() - t_start)
@@ -215,7 +215,7 @@ class DataReceiver:
             item["frame"] = msg["frame"]
 
         # Стандартные поля из msg-уровня.
-        # sender/data_type — для корреляции в JoinInspectorManager (Этап 1) и io-debug:
+        # sender/data_type — для корреляции в join-коллекторе (Этап 1) и io-debug:
         # sender ставится на msg-уровне (process_communication.send_to_process) и иначе
         # потерялся бы при build; data_type помечает поток (frame/overlay/detections/...).
         for key in (

@@ -733,7 +733,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {},
+        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -865,7 +865,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -1079,7 +1079,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {},
+        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1231,7 +1231,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -1434,7 +1434,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {
+        "collector": {
           "inputs": [
             "frame",
             "overlay"
@@ -1572,7 +1572,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -1773,7 +1773,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {},
+        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1882,7 +1882,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -2083,7 +2083,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {},
+        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2233,7 +2233,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -2437,7 +2437,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {},
+        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2560,7 +2560,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -2763,7 +2763,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {},
+        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2882,7 +2882,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -3086,7 +3086,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {},
+        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3222,7 +3222,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -3434,7 +3434,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {
+        "collector": {
           "inputs": [
             "frame",
             "overlay"
@@ -3610,7 +3610,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",
@@ -3816,7 +3816,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "inspector": {},
+        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3994,7 +3994,7 @@
           "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
         },
         "logger": {
-          "app_name": "inspector",
+          "app_name": "Inspector Bottles",
           "channels": {
             "busy_file": {
               "file_path": "busy.log",

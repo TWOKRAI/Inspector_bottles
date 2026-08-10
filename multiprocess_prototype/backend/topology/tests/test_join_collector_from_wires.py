@@ -1,12 +1,12 @@
 """Ф4.7: join/inspector из wires — эквивалентность прежнему hoist-результату.
 
-Заменяет удалённый ``test_inspector_hoist.py`` (тестировал снятый костыль
+Заменяет удалённый ``test_collector_hoist.py`` (тестировал снятый костыль
 ``_hoist_inspector_from_metadata``). До Ф4.7 корректность join двух живых узлов
 (``recog``/``draw`` в ``hikvision_letter_robot.yaml``) зависела от того, что
 ``launch.py::unwrap_recipe`` поднимал ``inspector`` из ``metadata`` в прямой ключ ДО
 ``SystemBlueprint.model_validate`` (иначе ``extra="ignore"`` молча роняет ``metadata``
 целиком). Теперь mode/inputs/primary выводятся структурно из ``wires`` в
-``BlueprintAssembler.assemble()`` (``SystemBlueprint.infer_missing_inspectors()``) — вне
+``BlueprintAssembler.assemble()`` (``SystemBlueprint.infer_missing_collectors()``) — вне
 зависимости от того, куда GUI-save положил ``inspector``. Тонкая настройка
 (``timeout_sec``) при этом сохраняется — ``metadata`` больше не молча теряется, стала
 typed-полем ``ProcessConfig.metadata``.
@@ -46,20 +46,20 @@ def _build_proc_configs(recipe: str) -> dict[str, dict]:
 class TestHikvisionJoinNodes:
     """recog/draw — оба живых join-узла, inspector раньше жил под metadata."""
 
-    def test_recog_inspector_equals_former_hoist_result(self) -> None:
+    def test_recog_collector_equals_former_hoist_result(self) -> None:
         configs = _build_proc_configs("hikvision_letter_robot")
-        assert configs["recog"]["inspector"] == _EXPECTED_JOIN
+        assert configs["recog"]["collector"] == _EXPECTED_JOIN
 
-    def test_draw_inspector_equals_former_hoist_result(self) -> None:
+    def test_draw_collector_equals_former_hoist_result(self) -> None:
         configs = _build_proc_configs("hikvision_letter_robot")
-        assert configs["draw"]["inspector"] == _EXPECTED_JOIN
+        assert configs["draw"]["collector"] == _EXPECTED_JOIN
 
     def test_join_not_degraded_to_fanin(self) -> None:
         """Acceptance Ф4.7: join не деградирует в fanin ни на одном из живых узлов."""
         configs = _build_proc_configs("hikvision_letter_robot")
         for name in ("recog", "draw"):
-            assert configs[name]["inspector"]["mode"] == "join", (
-                f"{name}: join деградировал в {configs[name]['inspector']!r}"
+            assert configs[name]["collector"]["mode"] == "join", (
+                f"{name}: join деградировал в {configs[name]['collector']!r}"
             )
 
     def test_non_join_nodes_stay_fanin(self) -> None:
@@ -69,15 +69,15 @@ class TestHikvisionJoinNodes:
         wires не должен НАВЯЗЫВАТЬ join там, где раньше (с hoist) его не было.
         """
         configs = _build_proc_configs("hikvision_letter_robot")
-        assert configs["layout"]["inspector"] == {}
-        assert configs["vision"]["inspector"] == {}
-        assert configs["line"]["inspector"] == {}
+        assert configs["layout"]["collector"] == {}
+        assert configs["vision"]["collector"] == {}
+        assert configs["line"]["collector"] == {}
 
 
 class TestPhoneSketchNoJoinNodes:
-    """phone_sketch не содержит ни одной inspector-декларации — join нигде не нужен."""
+    """phone_sketch не содержит ни одной collector-декларации — join нигде не нужен."""
 
     def test_all_processes_stay_fanin(self) -> None:
         configs = _build_proc_configs("phone_sketch")
         for name, cfg in configs.items():
-            assert cfg["inspector"] == {}, f"{name}: неожиданный inspector {cfg['inspector']!r}"
+            assert cfg["collector"] == {}, f"{name}: неожиданный collector {cfg['collector']!r}"

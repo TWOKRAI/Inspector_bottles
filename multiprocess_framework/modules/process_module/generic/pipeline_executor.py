@@ -389,7 +389,7 @@ class PipelineExecutor:
             per_item_target = item.pop("target", None)
             targets = [per_item_target] if per_item_target else self._chain_targets
 
-            # data_type для корреляции в JoinInspectorManager: кадровый выход плагина
+            # data_type для корреляции в join-коллекторе: кадровый выход плагина
             # (напр. детектор шлёт frame в overlay_draw) помечаем "frame", если плагин
             # не задал свой data_type (line_filter ставит "overlay" — уважаем setdefault).
             if "frame" in item:

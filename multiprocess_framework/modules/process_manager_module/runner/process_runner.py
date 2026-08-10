@@ -130,7 +130,7 @@ def run_process_function(
 
     # Самрегистрация в PID-реестре: при жёстком убийстве главного процесса (закрытие
     # окна терминала) finally→stop() не отрабатывает; реестр позволяет следующему старту
-    # реапнуть осиротевшие хвосты. Путь — из env INSPECTOR_PID_FILE (ставит launcher).
+    # реапнуть осиротевшие хвосты. Путь — из env MULTIPROCESS_PID_FILE (ставит launcher).
     try:
         from ..launcher.pid_registry import register_self
 

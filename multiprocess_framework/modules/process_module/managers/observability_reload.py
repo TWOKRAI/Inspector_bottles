@@ -41,7 +41,7 @@ def resolve_base_log_dir(explicit: Optional[str] = None) -> str:
     """Каталог логов как МАШИННЫЙ контекст пересборки (Task 5.12).
 
     Тот же резолв, что на boot (``ProcessLaunchConfig._resolve_log_dir``): явный
-    аргумент → ``INSPECTOR_LOG_DIR`` → ``MULTIPROCESS_LOG_DIR`` → ``logs``.
+    аргумент → ``MULTIPROCESS_LOG_DIR`` → ``INSPECTOR_LOG_DIR`` → ``logs``.
 
     Живой конфиг логгера здесь СОЗНАТЕЛЬНО не читается. Он выглядит соблазнительно
     («там же уже лежит резолвнутый путь»), но тогда удаление ``log_directory`` из
@@ -50,7 +50,7 @@ def resolve_base_log_dir(explicit: Optional[str] = None) -> str:
     """
     if explicit:
         return str(explicit)
-    return os.environ.get("INSPECTOR_LOG_DIR") or os.environ.get("MULTIPROCESS_LOG_DIR") or "logs"
+    return os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR") or "logs"
 
 
 def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:

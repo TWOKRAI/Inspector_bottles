@@ -121,7 +121,7 @@ def assemble_proc_dicts(
 
     Та же цепочка, что у прикладного ``BlueprintAssembler``, но БЕЗ app-специфики
     (per-category defaults применяются снаружи, если нужны):
-    validate → infer_missing_inspectors → check → build_configs → log_dir →
+    validate → infer_missing_collectors → check → build_configs → log_dir →
     process → merge_managers → merge_with_defaults.
 
     ``observability_section`` — СЫРАЯ секция слоя L1 (Task 5.12); слой L2 читается
@@ -154,7 +154,7 @@ def assemble_proc_dicts(
 
     app_layer = observability_section or {}
     topology = SystemBlueprint.model_validate(blueprint)
-    topology.infer_missing_inspectors()
+    topology.infer_missing_collectors()
 
     errors = topology.check()
     if errors:
@@ -172,7 +172,7 @@ def assemble_proc_dicts(
         layers = ObservabilityLayers(app=app_layer, recipe=obs_override)
         # Раскладка «слои → менеджеры» общая с прикладным ассемблером (ревью 5.13):
         # молчание слоёв не создаёт секцию и не затирает уровень, пришедший другим
-        # путём (INSPECTOR_LOG_LEVEL через managers_from_log_dir).
+        # путём (MULTIPROCESS_LOG_LEVEL через managers_from_log_dir).
         apply_layers_to_proc_dict(proc_dict, layers)
         if obs_override:
             proc_dict["config"][OVERRIDE_CONFIG_KEY] = obs_override

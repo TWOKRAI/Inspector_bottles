@@ -115,7 +115,7 @@ class ProcessLaunchConfig(SchemaBase):
     def _resolve_log_dir(self) -> str:
         if self.log_dir:
             return self.log_dir
-        return os.environ.get("INSPECTOR_LOG_DIR") or "logs"
+        return os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR") or "logs"
 
     def build(self) -> tuple[str, dict[str, Any]]:
         from .managers_config import (

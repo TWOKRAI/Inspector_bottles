@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 
 from pydantic import Field
 
+from ...base_manager.utils import resolve_app_name
 from ...command_module.configs.command_manager_config import CommandManagerConfig
 from ...console_module.configs.console_config import ConsoleConfig
 from ...data_schema_module import SchemaBase
@@ -27,8 +28,11 @@ from ...statistics_module.configs.stats_config import StatsManagerConfig
 # Blueprint defaults (копии через default_factory, без общей мутации)
 # ---------------------------------------------------------------------------
 
+# ``app_name`` сознательно НЕ задан в blueprint'е: имя приложения — не константа
+# фреймворка (D4). Blueprint — модуль-уровневый объект, снимок env в нём замёрз бы
+# на импорте, до того как composition root выставит ``MPF_APP_NAME``. Имя
+# подставляется в ``_default_logger``/``managers_from_log_dir`` — то есть при вызове.
 _LOGGER_BLUEPRINT = LoggerManagerConfig(
-    app_name="inspector",
     default_level="INFO",
     log_directory="logs",
 )
@@ -50,7 +54,9 @@ _CONSOLE_BLUEPRINT = ConsoleConfig()
 
 
 def _default_logger() -> LoggerManagerConfig:
-    return _LOGGER_BLUEPRINT.model_copy(deep=True)
+    # default_factory зовётся при создании модели, не при импорте — env к этому
+    # моменту уже выставлен composition root'ом (и унаследован детьми при spawn).
+    return _LOGGER_BLUEPRINT.model_copy(deep=True, update={"app_name": resolve_app_name()})
 
 
 def _default_error() -> ErrorManagerConfig:
@@ -148,13 +154,18 @@ def managers_from_log_dir(
     log_level: str | None = None,
     *,
     model_cls: type[TManagersConfig] = ManagersConfig,
+    app_name: str | None = None,
 ) -> TManagersConfig:
     """
     Собрать экземпляр корневой схемы менеджеров: логгер и error-секция под каталог логов.
 
     ``model_cls`` — подкласс :class:`ManagersConfig` (например прототипный lite), без дублирования тела фабрики.
+    ``app_name`` — имя приложения от composition root; ``None`` → env ``MPF_APP_NAME``,
+    иначе нейтральное ``MultiprocessApp`` (D4: имя продукта не зашито во фреймворк).
     """
-    level = (log_level or os.environ.get("INSPECTOR_LOG_LEVEL", "INFO")).upper()
+    level = (
+        log_level or os.environ.get("MULTIPROCESS_LOG_LEVEL") or os.environ.get("INSPECTOR_LOG_LEVEL") or "INFO"
+    ).upper()
     root = Path(log_dir).expanduser()
     if not root.is_absolute():
         root = (Path.cwd() / root).resolve()
@@ -163,7 +174,7 @@ def managers_from_log_dir(
 
     base_logger = _LOGGER_BLUEPRINT.model_copy(
         update={
-            "app_name": "inspector",
+            "app_name": app_name or resolve_app_name(),
             "default_level": level,
             "log_directory": log_dir_s,
         }

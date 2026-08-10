@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ..configs.process_launch_config import ProcessLaunchConfig
+from .collector_registry import COLLECTOR_CONFIG_KEY, LEGACY_COLLECTOR_CONFIG_KEY
 
 
 @register_schema("PluginConfigV1")
@@ -87,13 +88,31 @@ class GenericProcessConfig(ProcessLaunchConfig):
         FieldMeta("Queue size", info="Размер internal chain_queue.", min=1, max=1024),
     ] = 64
 
-    inspector: Annotated[
+    collector: Annotated[
         dict[str, Any],
         FieldMeta(
-            "Inspector",
-            info="Режим корреляции DataReceiver: {mode: fanin|join, inputs, primary, timeout_sec, ...}",
+            "Коллектор",
+            info="Режим корреляции DataReceiver: {mode: fanin|join, inputs, primary, "
+            "timeout_sec, ...}. Легаси-имя ключа 'inspector' принимается на входе (D4).",
         ),
     ] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_collector_key(cls, data: Any) -> Any:
+        """Принять proc_dict, собранный до D4: ключ ``inspector`` → ``collector``.
+
+        Симметрично ``ProcessConfig``: proc_dict пересекает границу процессов, и
+        записанный старой сборкой словарь обязан подниматься новой. Явный
+        ``collector`` приоритетнее — иначе легаси молча перекрывал бы канон.
+        """
+        if isinstance(data, dict) and LEGACY_COLLECTOR_CONFIG_KEY in data:
+            legacy = data.get(LEGACY_COLLECTOR_CONFIG_KEY)
+            if legacy and not data.get(COLLECTOR_CONFIG_KEY):
+                data = dict(data)
+                data[COLLECTOR_CONFIG_KEY] = legacy
+                data.pop(LEGACY_COLLECTOR_CONFIG_KEY, None)
+        return data
 
     io_peek: Annotated[
         dict[str, Any],

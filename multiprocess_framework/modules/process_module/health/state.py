@@ -14,7 +14,7 @@ heartbeat процесса (тот же self-publish канал, что и те�
 - **counter честный.** ``errors`` инкрементится на КАЖДЫЙ ``report_error`` —
   даже под throttle/лог-only — потому что breaker (Ф2 Task 2.2) читает счётчик и
   ему нужна правда о числе проглоченных ошибок.
-- **откат в лог-only.** Переключатель ``INSPECTOR_HEALTH_LOG_ONLY`` (env) или
+- **откат в лог-only.** Переключатель ``MULTIPROCESS_HEALTH_LOG_ONLY`` (env) или
   явный ``log_only=True`` вырождает report_error/set_status в чистое логирование:
   state-дерево не трогается (dirty не поднимается) — путь отката, заложенный в
   дизайн по требованию плана.
@@ -49,12 +49,26 @@ from .schema import (
 DEFAULT_THROTTLE = 5.0
 
 #: Переключатель отката: report_error/set_status только логируют, state не трогают.
-LOG_ONLY_ENV = "INSPECTOR_HEALTH_LOG_ONLY"
+#: Пара «каноничное имя, легаси-алиас» (D4) — читаются оба, каноничное приоритетнее.
+LOG_ONLY_ENV = "MULTIPROCESS_HEALTH_LOG_ONLY"
+LEGACY_LOG_ONLY_ENV = "INSPECTOR_HEALTH_LOG_ONLY"
 
 #: Конфиг breaker через env (разумные дефолты в breaker.py) — порог подряд-ошибок…
-BREAKER_THRESHOLD_ENV = "INSPECTOR_HEALTH_BREAKER_THRESHOLD"
+BREAKER_THRESHOLD_ENV = "MULTIPROCESS_HEALTH_BREAKER_THRESHOLD"
+LEGACY_BREAKER_THRESHOLD_ENV = "INSPECTOR_HEALTH_BREAKER_THRESHOLD"
 #: …и окно тишины (сек) для шага восстановления.
-BREAKER_COOLDOWN_ENV = "INSPECTOR_HEALTH_BREAKER_COOLDOWN"
+BREAKER_COOLDOWN_ENV = "MULTIPROCESS_HEALTH_BREAKER_COOLDOWN"
+LEGACY_BREAKER_COOLDOWN_ENV = "INSPECTOR_HEALTH_BREAKER_COOLDOWN"
+
+
+def _env_first(*keys: str) -> str:
+    """Первое непустое значение из пары «каноничная ручка, легаси-алиас»."""
+    for key in keys:
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            return raw
+    return ""
+
 
 #: Обрезка длинных сообщений исключений (защита state-дерева от гигантских строк).
 _MAX_MESSAGE_LEN = 500
@@ -69,20 +83,24 @@ class HealthSelfTestError(RuntimeError):
 
 
 def _env_log_only() -> bool:
-    return os.environ.get(LOG_ONLY_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+    return _env_first(LOG_ONLY_ENV, LEGACY_LOG_ONLY_ENV).lower() in ("1", "true", "yes", "on")
 
 
-def _env_float(name: str, default: float) -> float:
+def _env_float(*names_then_default) -> float:
+    """Первое непустое из пары ручек → float; иначе дефолт (последний аргумент)."""
+    *names, default = names_then_default
     try:
-        raw = os.environ.get(name, "").strip()
+        raw = _env_first(*names)
         return float(raw) if raw else default
     except (TypeError, ValueError):
         return default
 
 
-def _env_int(name: str, default: int) -> int:
+def _env_int(*names_then_default) -> int:
+    """Первое непустое из пары ручек → int; иначе дефолт (последний аргумент)."""
+    *names, default = names_then_default
     try:
-        raw = os.environ.get(name, "").strip()
+        raw = _env_first(*names)
         return int(raw) if raw else default
     except (TypeError, ValueError):
         return default
@@ -165,8 +183,8 @@ class HealthState:
             breaker
             if breaker is not None
             else CircuitBreaker(
-                fail_threshold=_env_int(BREAKER_THRESHOLD_ENV, DEFAULT_FAIL_THRESHOLD),
-                cooldown_sec=_env_float(BREAKER_COOLDOWN_ENV, DEFAULT_COOLDOWN_SEC),
+                fail_threshold=_env_int(BREAKER_THRESHOLD_ENV, LEGACY_BREAKER_THRESHOLD_ENV, DEFAULT_FAIL_THRESHOLD),
+                cooldown_sec=_env_float(BREAKER_COOLDOWN_ENV, LEGACY_BREAKER_COOLDOWN_ENV, DEFAULT_COOLDOWN_SEC),
                 clock=clock,
             )
         )

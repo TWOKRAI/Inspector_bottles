@@ -6,7 +6,7 @@
 3. BlueprintInvalid при невалидном blueprint.
 4. Grep-чистота: в assembler.py нет ``multiprocess_prototype`` в import'ах.
 5. Ф4.7: join/inspector из wires — регресс-тест на реальном assemble()-пути
-   (без ЛЮБОЙ inspector-декларации join не деградирует в fanin).
+   (без ЛЮБОЙ collector-декларации join не деградирует в fanin).
 6. PC 1.3: overlay секции telemetry (global + per-process merge, backward-compat)
    и что она реально доезжает до ``ProcessConfigHandler.get_config("telemetry")``.
 """
@@ -588,7 +588,7 @@ class _OverlayDraw(ProcessModulePlugin):
 
 _JOIN_BLUEPRINT: dict = {
     "name": "join_from_wires",
-    "description": "draw-подобный join БЕЗ единой inspector-декларации где-либо",
+    "description": "draw-подобный join БЕЗ единой collector-декларации где-либо",
     "processes": [
         {
             "process_name": "vision",
@@ -614,7 +614,7 @@ class TestJoinFromWires:
     """Ф4.7: join выводится из wires на реальном assemble()-пути (снят hoist-костыль)."""
 
     def test_join_not_degraded_to_fanin(self, _clean_registry) -> None:
-        """Регресс-тест (acceptance Ф4.7): без ЛЮБОЙ inspector-декларации join не
+        """Регресс-тест (acceptance Ф4.7): без ЛЮБОЙ collector-декларации join не
         деградирует в fanin — assembler.assemble() выводит его из wires."""
         for cls in (_CircleDetector, _LineFilter, _OverlayDraw):
             PluginRegistry.register(name=cls.name, plugin_class=cls, category=cls.category)
@@ -622,11 +622,11 @@ class TestJoinFromWires:
         assembler = BlueprintAssembler(observability_section=_OBS_SECTION)
         result = assembler.assemble(copy.deepcopy(_JOIN_BLUEPRINT))
 
-        inspector = result["draw"]["config"]["inspector"]
-        assert inspector["mode"] == "join", inspector
-        assert inspector["mode"] != "fanin"
-        assert sorted(inspector["inputs"]) == ["frame", "overlay"]
-        assert inspector["primary"] == "frame"
+        collector = result["draw"]["config"]["collector"]
+        assert collector["mode"] == "join", collector
+        assert collector["mode"] != "fanin"
+        assert sorted(collector["inputs"]) == ["frame", "overlay"]
+        assert collector["primary"] == "frame"
 
 
 # ---------------------------------------------------------------------------

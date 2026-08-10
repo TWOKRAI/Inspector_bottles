@@ -8,8 +8,8 @@ import time
 from multiprocess_framework.modules.process_module.generic.data_receiver import (
     DataReceiver,
 )
-from multiprocess_framework.modules.process_module.generic.inspector_registry import (
-    PassThroughInspector,
+from multiprocess_framework.modules.process_module.generic.collector_registry import (
+    PassThroughCollector,
 )
 
 
@@ -18,11 +18,11 @@ class TestBuildItem:
 
     def test_flat_msg(self):
         """msg с полями верхнего уровня."""
-        inspector = PassThroughInspector()
+        collector = PassThroughCollector()
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
-            inspector_manager=inspector,
+            item_collector=collector,
             chain_queue=queue.Queue(),
         )
         msg = {"frame": "ndarray", "camera_id": 1, "seq_id": 5, "data": {}}
@@ -33,11 +33,11 @@ class TestBuildItem:
 
     def test_nested_data(self):
         """msg с вложенным data dict."""
-        inspector = PassThroughInspector()
+        collector = PassThroughCollector()
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
-            inspector_manager=inspector,
+            item_collector=collector,
             chain_queue=queue.Queue(),
         )
         msg = {
@@ -57,11 +57,11 @@ class TestOnItemsReady:
     def test_items_put_to_queue(self):
         """Items помещаются в chain_queue."""
         chain_q = queue.Queue(maxsize=10)
-        inspector = PassThroughInspector()
+        collector = PassThroughCollector()
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
-            inspector_manager=inspector,
+            item_collector=collector,
             chain_queue=chain_q,
         )
         items = [{"val": 1}, {"val": 2}]
@@ -73,12 +73,12 @@ class TestOnItemsReady:
         chain_q = queue.Queue(maxsize=1)
         chain_q.put([{"blocking": True}])  # Заполняем
 
-        inspector = PassThroughInspector()
+        collector = PassThroughCollector()
         errors = []
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
-            inspector_manager=inspector,
+            item_collector=collector,
             chain_queue=chain_q,
             lag_alert_threshold_sec=0.05,
             log_error=errors.append,
@@ -111,11 +111,11 @@ class TestOnItemsReady:
         chain_q.put([{"blocking": True}])  # Заполняем
 
         stop_event = threading.Event()
-        inspector = PassThroughInspector()
+        collector = PassThroughCollector()
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
-            inspector_manager=inspector,
+            item_collector=collector,
             chain_queue=chain_q,
             lag_alert_threshold_sec=0.05,
         )
@@ -157,14 +157,14 @@ class TestRunLoop:
                 return None
 
         chain_q = queue.Queue()
-        inspector = PassThroughInspector()
+        collector = PassThroughCollector()
         receiver = DataReceiver(
             receive_fn=fake_receive,
             shm_middleware=None,
-            inspector_manager=inspector,
+            item_collector=collector,
             chain_queue=chain_q,
         )
-        inspector._on_ready = receiver.on_items_ready
+        collector._on_ready = receiver.on_items_ready
 
         stop_event = threading.Event()
         pause_event = threading.Event()
@@ -190,11 +190,11 @@ class TestRunLoop:
             return None
 
         chain_q = queue.Queue()
-        inspector = PassThroughInspector()
+        collector = PassThroughCollector()
         receiver = DataReceiver(
             receive_fn=fake_receive,
             shm_middleware=None,
-            inspector_manager=inspector,
+            item_collector=collector,
             chain_queue=chain_q,
         )
 
@@ -234,10 +234,10 @@ class TestReturnMessagesFlag:
         receiver = DataReceiver(
             receive_fn=fake_receive,
             shm_middleware=None,
-            inspector_manager=PassThroughInspector(),
+            item_collector=PassThroughCollector(),
             chain_queue=chain_q,
         )
-        receiver._inspector._on_ready = receiver.on_items_ready
+        receiver._collector._on_ready = receiver.on_items_ready
         return receiver, captured
 
     def _run_once(self, receiver):

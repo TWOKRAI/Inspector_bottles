@@ -2,7 +2,7 @@
 """Тесты ProcessConfig.extras (C6 рычаг 1) — domain-opaque bag + typed-приоритет.
 
 as_generic_config() читает typed-поле, если непусто, иначе extras[key]. Типизированные
-поля (chain_targets/source_target_fps/inspector/io_peek) остаются как shorthand и имеют
+поля (chain_targets/source_target_fps/collector/io_peek) остаются как shorthand и имеют
 приоритет над одноимёнными ключами в extras — 100% back-compat со старыми рецептами.
 """
 
@@ -24,10 +24,10 @@ class TestTypedPath:
         cfg = ProcessConfig(process_name="p", source_target_fps=30.0)
         assert cfg.as_generic_config().source_target_fps == 30.0
 
-    def test_inspector_typed(self):
+    def test_collector_typed(self):
         insp = {"mode": "join", "inputs": ["frame", "overlay"]}
-        cfg = ProcessConfig(process_name="p", inspector=insp)
-        assert cfg.as_generic_config().inspector == insp
+        cfg = ProcessConfig(process_name="p", collector=insp)
+        assert cfg.as_generic_config().collector == insp
 
     def test_io_peek_typed(self):
         peek = {"enabled": True, "rate_hz": 2.0}
@@ -46,10 +46,10 @@ class TestExtrasPath:
         cfg = ProcessConfig(process_name="p", extras={"source_target_fps": 12.5})
         assert cfg.as_generic_config().source_target_fps == 12.5
 
-    def test_inspector_extras(self):
+    def test_collector_extras(self):
         insp = {"mode": "join"}
-        cfg = ProcessConfig(process_name="p", extras={"inspector": insp})
-        assert cfg.as_generic_config().inspector == insp
+        cfg = ProcessConfig(process_name="p", extras={"collector": insp})
+        assert cfg.as_generic_config().collector == insp
 
     def test_io_peek_extras(self):
         peek = {"enabled": False}
@@ -116,13 +116,13 @@ class TestTypedPriorityOverExtras:
         )
         assert cfg.as_generic_config().source_target_fps == 40.0
 
-    def test_inspector_typed_wins(self):
+    def test_collector_typed_wins(self):
         cfg = ProcessConfig(
             process_name="p",
-            inspector={"mode": "fanin"},
-            extras={"inspector": {"mode": "join"}},
+            collector={"mode": "fanin"},
+            extras={"collector": {"mode": "join"}},
         )
-        assert cfg.as_generic_config().inspector == {"mode": "fanin"}
+        assert cfg.as_generic_config().collector == {"mode": "fanin"}
 
     def test_source_fps_typed_default_value_wins_over_extras(self):
         """Fable MED-4: рецепт ЯВНО пинует source_target_fps=25.0 (== дефолт), extras=10.0.

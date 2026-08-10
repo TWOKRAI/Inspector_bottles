@@ -5,7 +5,7 @@ ProcessModule теперь нативно поддерживает плагин�
 
 GenericProcess добавляет только app-specific data pipeline
 (DataReceiver, PipelineExecutor, SourceProducer) — это не часть
-фреймворка, а логика Inspector vision приложения.
+фреймворка, а прикладная логика конкретного приложения.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import queue
 from ..core.process_module import ProcessModule
 from .data_receiver import DataReceiver
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
-from .inspector_registry import build_inspector
+from .collector_registry import build_collector
 from .pipeline_executor import PipelineExecutor
 from .plugin_runner import PluginRunner
 from .source_producer import SourceProducer
@@ -160,12 +160,12 @@ class GenericProcess(ProcessModule):
         # --- DataReceiver (если есть processing плагины) ---
         if processing_plugins:
             # Домен fan-in/join живёт в Plugins/_shared/fanin (C6 b); framework получает
-            # готовый буфер через реестр (build_inspector), не зная конкретный класс.
-            inspector = build_inspector(app_cfg, self._log_info, self._log_error, self._log_debug)
+            # готовый буфер через реестр (build_collector), не зная конкретный класс.
+            collector = build_collector(app_cfg, self._log_info, self._log_error, self._log_debug)
             self._data_receiver = DataReceiver(
                 receive_fn=self.receive_message,
                 shm_middleware=shm_middleware,
-                inspector_manager=inspector,
+                item_collector=collector,
                 chain_queue=self._chain_queue,
                 lag_alert_threshold_sec=lag_threshold,
                 log_info=self._log_info,
@@ -174,7 +174,7 @@ class GenericProcess(ProcessModule):
                 node_name=self.name,
             )
             # Подключить callback
-            inspector._on_ready = self._data_receiver.on_items_ready
+            collector._on_ready = self._data_receiver.on_items_ready
 
             # PipelineExecutor
             self._pipeline_executor = PipelineExecutor(

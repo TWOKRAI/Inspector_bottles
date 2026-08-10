@@ -215,10 +215,10 @@ class ProcessManagers:
         duplicate_messages = router_config.get("duplicate_messages_to_logger", False)
 
         # Option A frame-trace: per-process snapshot последнего кадра в файл
-        # (overwrite по seq_id) через LoggerManager-канал. Включается INSPECTOR_FRAME_TRACE=1.
-        import os as _os
+        # (overwrite по seq_id) через LoggerManager-канал. Включается MULTIPROCESS_FRAME_TRACE=1.
+        from ..generic.frame_trace import _env_frame_trace_on
 
-        frame_trace_on = _os.environ.get("INSPECTOR_FRAME_TRACE", "").strip().lower() in ("1", "true", "yes")
+        frame_trace_on = _env_frame_trace_on()
 
         router = RouterManager(
             manager_name=f"router_{self.process.name}",

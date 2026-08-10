@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import pytest
 import sqlite3  # noqa: F401 — используется в TestProcessColumn (legacy-миграция)
 
 from multiprocess_framework.modules.channel_routing_module.observability import (
@@ -191,9 +192,21 @@ class TestQuery:
 
 
 class TestDefaultPath:
-    def test_resolve_uses_env(self, monkeypatch):
-        monkeypatch.setenv("INSPECTOR_LOG_DIR", "/tmp/mylogs")
+    @pytest.mark.parametrize("env_key", ["MULTIPROCESS_LOG_DIR", "INSPECTOR_LOG_DIR"])
+    def test_resolve_uses_env(self, monkeypatch, env_key):
+        """Обе ручки пары. Соседнюю ЧИСТИМ: без этого тест мерил приоритет, а не чтение
+        (в окружении прогона задана MULTIPROCESS_LOG_DIR, и зелёным он был лишь пока
+        легаси-имя имело приоритет — D4 выправил порядок на каноничное-первым)."""
+        monkeypatch.delenv("MULTIPROCESS_LOG_DIR", raising=False)
+        monkeypatch.delenv("INSPECTOR_LOG_DIR", raising=False)
+        monkeypatch.setenv(env_key, "/tmp/mylogs")
         assert resolve_default_db_path() == os.path.join("/tmp/mylogs", "observability.db")
+
+    def test_resolve_prefers_canonical_env(self, monkeypatch):
+        """Каноничная ручка побеждает легаси — так же, как в log_paths.py."""
+        monkeypatch.setenv("MULTIPROCESS_LOG_DIR", "/tmp/canon")
+        monkeypatch.setenv("INSPECTOR_LOG_DIR", "/tmp/legacy")
+        assert resolve_default_db_path() == os.path.join("/tmp/canon", "observability.db")
 
     def test_resolve_fallback(self, monkeypatch):
         monkeypatch.delenv("INSPECTOR_LOG_DIR", raising=False)

@@ -248,7 +248,7 @@ class TestWiringOfTheThreePoints:
         receiver = DataReceiver(
             receive_fn=_receive,
             shm_middleware=None,
-            inspector_manager=_Inspector(),
+            item_collector=_Inspector(),
             chain_queue=_queue.Queue(),
             node_name="probe",
         )

@@ -2032,7 +2032,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
         Идёт через LoggerManager-канал ``FrameTraceChannel`` (не сырой файл): канал
         буферизует строки текущего кадра и перезаписывает ``logs/trace/<process>.log``
-        одним write на кадр (batched + overwrite). No-op без ``INSPECTOR_FRAME_TRACE=1``.
+        одним write на кадр (batched + overwrite). No-op без ``MULTIPROCESS_FRAME_TRACE=1``.
 
         **Граница с цепочкой процессоров — решение Ф7.5, названо здесь целиком.**
         Этот путь идёт МИМО :meth:`log`, то есть мимо ``_run_processors``. Из двух
@@ -2063,7 +2063,19 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         if enabled is None:
             import os
 
-            enabled = os.environ.get("INSPECTOR_FRAME_TRACE", "").strip().lower() in ("1", "true", "yes")
+            # Пара «каноничная ручка, легаси-алиас» (D4). Читаем на месте, а не
+            # импортом из process_module: logger_module лежит НИЖЕ по слоям.
+            enabled = next(
+                (
+                    raw in ("1", "true", "yes")
+                    for raw in (
+                        (os.environ.get(key) or "").strip().lower()
+                        for key in ("MULTIPROCESS_FRAME_TRACE", "INSPECTOR_FRAME_TRACE")
+                    )
+                    if raw
+                ),
+                False,
+            )
             self._frame_trace_enabled = enabled
         if not enabled:
             return

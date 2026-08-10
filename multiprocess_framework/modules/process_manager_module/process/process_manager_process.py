@@ -369,7 +369,7 @@ class ProcessManagerProcess(ProcessModule):
         корни). Framework сам знает только один универсальный дефолт —
         ``<cwd>/logs``: тот же fallback, что ``process_launch_config.
         _resolve_log_dir`` и ``log_paths.default_log_base_directory`` отдают
-        до применения ``INSPECTOR_LOG_DIR``/``MULTIPROCESS_LOG_DIR``. Именно
+        до применения ``MULTIPROCESS_LOG_DIR``/``INSPECTOR_LOG_DIR``. Именно
         здесь копится legacy, когда оператор один раз переопределяет log_dir
         и больше не смотрит в старый корень (живой пример — корневой
         ``logs/`` 308 МБ вне ``logs/prototype_2``).

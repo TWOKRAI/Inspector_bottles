@@ -35,8 +35,8 @@ from multiprocess_framework.modules.logger_module.core.logger_manager import Log
 from multiprocess_framework.modules.process_module.generic.data_receiver import (
     DataReceiver,
 )
-from multiprocess_framework.modules.process_module.generic.inspector_registry import (
-    PassThroughInspector,
+from multiprocess_framework.modules.process_module.generic.collector_registry import (
+    PassThroughCollector,
 )
 from multiprocess_framework.modules.process_module.generic.source_producer import (
     SourceProducer,
@@ -120,11 +120,11 @@ def test_trace_id_survives_two_hot_path_nodes():
 
     # --- звено 2: DataReceiver ("detector") принимает то же сообщение ---
     chain_q: queue.Queue = queue.Queue()
-    inspector = PassThroughInspector()
+    inspector = PassThroughCollector()
     receiver = DataReceiver(
         receive_fn=lambda **kw: None,
         shm_middleware=shm,
-        inspector_manager=inspector,
+        item_collector=inspector,
         chain_queue=chain_q,
         node_name="detector",
     )

@@ -198,7 +198,7 @@ class TestApplicationWorkerCycleMetrics:
         dr = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
-            inspector_manager=MagicMock(),
+            item_collector=MagicMock(),
             chain_queue=queue.Queue(),
         )
         assert getattr(dr.run_loop, "__self__", None) is dr

@@ -17,10 +17,21 @@ from __future__ import annotations
 import os
 
 #: Пары ``(каноничный MULTIPROCESS_*, легаси INSPECTOR_*)`` — оба читаются кодом.
+#:
+#: D4: пять нижних пар добавлены — до этого у них НЕ было каноничного имени вовсе,
+#: то есть де-брендинг Ф5.11 покрывал три ручки из восьми. Читатели этих ручек живут
+#: во фреймворке и не вправе зависеть от того, звали ли ``run_app`` (composition root
+#: может собирать систему руками — прототип так и делает), поэтому каждый из них
+#: читает ОБА имени сам; таблица ниже только досыпает недостающее в env перед spawn.
 ENV_ALIAS_PAIRS: tuple[tuple[str, str], ...] = (
     ("MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE"),
     ("MULTIPROCESS_LOG_DIR", "INSPECTOR_LOG_DIR"),
     ("MULTIPROCESS_MANIFEST", "INSPECTOR_MANIFEST"),
+    ("MULTIPROCESS_LOG_LEVEL", "INSPECTOR_LOG_LEVEL"),
+    ("MULTIPROCESS_FRAME_TRACE", "INSPECTOR_FRAME_TRACE"),
+    ("MULTIPROCESS_HEALTH_LOG_ONLY", "INSPECTOR_HEALTH_LOG_ONLY"),
+    ("MULTIPROCESS_HEALTH_BREAKER_THRESHOLD", "INSPECTOR_HEALTH_BREAKER_THRESHOLD"),
+    ("MULTIPROCESS_HEALTH_BREAKER_COOLDOWN", "INSPECTOR_HEALTH_BREAKER_COOLDOWN"),
 )
 
 

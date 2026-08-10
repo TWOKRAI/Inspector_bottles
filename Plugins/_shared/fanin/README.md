@@ -11,27 +11,27 @@
 |--------|-----------|
 | `InspectorManager` | Буферизация items по `(camera_id, seq_id)` для region fan-in (trigger — `total_regions`). Без fan-in → немедленный pass-through. |
 | `JoinInspectorManager` | Корреляция N именованных входов по `(seq_id, data_type)` (напр. `frame`+`overlay`). Left-join по primary + auto-passthrough неактивных входов. |
-| `build_inspector(app_cfg, log_*)` | Фабрика: выбирает буфер по `app_cfg["inspector"]["mode"]` (`fanin` \| `join`). |
+| `build_collector(app_cfg, log_*)` | Фабрика: выбирает буфер по `app_cfg["collector"]["mode"]` (легаси-имя `inspector` читается тем же `collector_config`) (`fanin` \| `join`). |
 
-## Контракт (Protocol `ItemInspector`)
+## Контракт (Protocol `ItemCollector`)
 
 Оба класса реализуют структурный контракт
-`process_module.generic.inspector_registry.ItemInspector`:
+`process_module.generic.collector_registry.ItemCollector`:
 
 - `on_item(item: dict) -> None` — принять item; при готовности коллекции зовёт `_on_ready`.
 - `check_timeouts() -> None` — периодический flush просроченных/неполных коллекций.
 - `pending_count: int` — незавершённые коллекции в буфере (телеметрия).
 
 `_on_ready` (доставка готовой коллекции) выставляется вызывающим извне —
-`GenericProcess._init_data_pipeline` ставит `inspector._on_ready = receiver.on_items_ready`.
+`GenericProcess._init_data_pipeline` ставит `collector._on_ready = receiver.on_items_ready`.
 
 ## DI-шов с framework
 
 Framework (уровень 1) не импортирует этот модуль (правило слоёв). Связь — через реестр:
 импорт пакета (`Plugins/__init__` → `Plugins._shared.fanin`) вызывает
-`register_inspector_factory(build_inspector)`. `GenericProcess` получает буфер через
-`inspector_registry.build_inspector(...)`. Без Plugins-слоя framework падает на безопасный
-`PassThroughInspector` (без fan-in).
+`register_collector_factory(build_collector)`. `GenericProcess` получает буфер через
+`collector_registry.build_collector(...)`. Без Plugins-слоя framework падает на безопасный
+`PassThroughCollector` (без fan-in).
 
 Любой процесс с processing-плагинами грузит плагин из `Plugins.*` → исполняет
 `Plugins/__init__` → фабрика зарегистрирована ДО `_init_data_pipeline`.

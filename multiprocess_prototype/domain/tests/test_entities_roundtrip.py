@@ -265,7 +265,7 @@ class TestInspectorEscapeHatchRoundtrip:
     """AU-2 / ADR-PMM-017 п.5: явный inspector-escape-hatch переживает GUI round-trip.
 
     До фикса домен-entity Process сворачивал плоский inspector в metadata, где
-    infer_missing_inspectors его игнорирует (только тонкая настройка, не mode) →
+    infer_missing_collectors его игнорирует (только тонкая настройка, не mode) →
     ручной {mode: fanin} стирался первым же GUI-save и деградировал в структурный join.
     Теперь inspector едет через extras и остаётся авторитетным.
     """
@@ -315,7 +315,7 @@ class TestInspectorEscapeHatchRoundtrip:
 
         Плоский inspector, пройдя через домен-entity, оседает в extras — и framework
         ProcessConfig читает его как escape-hatch (`as_generic_config._pick` /
-        `infer_missing_inspectors`). Конструируем ProcessConfig из релевантных полей
+        `infer_missing_collectors`). Конструируем ProcessConfig из релевантных полей
         (в реальном пути process_class-нормализацию делает адаптер/unwrap).
         """
         from multiprocess_framework.modules.process_manager_module.topology.blueprint import (

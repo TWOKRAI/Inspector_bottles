@@ -219,7 +219,7 @@ class SourceProducer:
         per_item_target = item.pop("target", None)
         targets = [per_item_target] if per_item_target else self._chain_targets
 
-        # data_type для корреляции в JoinInspectorManager: кадровые items от источника
+        # data_type для корреляции в join-коллекторе: кадровые items от источника
         # помечаем "frame" (точно — только при наличии frame, чтобы не тегать heartbeat
         # и пр.). Плагин мог задать свой data_type — уважаем (setdefault).
         if "frame" in item:

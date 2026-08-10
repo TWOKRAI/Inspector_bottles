@@ -25,15 +25,18 @@ from .worker import WorkerSpec
 # роутинг не нужен; restart_policy — тоже typed-поле, читается framework как typed, не из
 # extras). Домен их не типизирует, но ОБЯЗАН складывать в extras, а НЕ в metadata:
 # framework читает их из typed-поля/extras (`as_generic_config._pick`,
-# `infer_missing_inspectors`) и НИКОГДА из metadata. Поэтому shorthand-ключ, свёрнутый
+# `infer_missing_collectors`) и НИКОГДА из metadata. Поэтому shorthand-ключ, свёрнутый
 # GUI round-trip'ом в metadata, для бэкенда нем — тихая деградация (явный
-# `inspector: {mode: fanin}` теряет авторитетность → структурный join). См. ADR-PMM-017 п.5, AU-2.
+# `collector: {mode: fanin}` теряет авторитетность → структурный join). См. ADR-PMM-017 п.5, AU-2.
 #
 # ОБЯЗАТЕЛЬСТВО СИНХРОНИЗАЦИИ: набор — зеркало `_pick`-ключей ProcessConfig.as_generic_config
-# (chain_targets/source_target_fps/inspector/io_peek). При добавлении нового `_pick`-ключа
+# (chain_targets/source_target_fps/collector/io_peek). При добавлении нового `_pick`-ключа
 # в framework — добавить сюда (если он НЕ typed-поле домена) ИЛИ typed-полем в Process (как
 # chain_targets/restart_policy). Drift-guard: test_extras_shorthand_mirrors_pick_set (domain tests).
-_EXTRAS_SHORTHAND_KEYS: frozenset[str] = frozenset({"inspector", "source_target_fps", "io_peek"})
+#
+# `inspector` — легаси-имя `collector` (D4): рецепт, написанный до переименования,
+# грузится в GUI и обязан пережить round-trip, а не свернуться в metadata.
+_EXTRAS_SHORTHAND_KEYS: frozenset[str] = frozenset({"collector", "inspector", "source_target_fps", "io_peek"})
 
 
 class Process(SchemaBase):
@@ -113,7 +116,7 @@ class Process(SchemaBase):
             "io_peek), которые framework-blueprint читает как typed-shorthand/extras "
             "(симметрия ProcessConfig.extras, ADR-PM-014). Escape-hatch inspector едет "
             "здесь и переживает GUI round-trip авторитетно; в metadata его "
-            "infer_missing_inspectors игнорирует (ADR-PMM-017 п.5)."
+            "infer_missing_collectors игнорирует (ADR-PMM-017 п.5)."
         ),
     )
 

@@ -21,9 +21,9 @@ from .generic_process import GenericProcess
 from .generic_process_config import GenericProcessConfig, PluginConfig
 from .plugin_orchestrator import PluginOrchestrator
 
-# InspectorManager/JoinInspectorManager переехали в Plugins/_shared/fanin (C6 b) —
-# домен fan-in/join не живёт в framework. Здесь больше не экспортируются; DataReceiver
-# типизируется структурным ItemInspector (inspector_registry), буфер приходит через DI.
+# Доменные буферы fan-in/join переехали в Plugins/_shared/fanin (C6 b) — домен не живёт
+# в framework. Здесь больше не экспортируются; DataReceiver типизируется структурным
+# ItemCollector (collector_registry), буфер приходит через DI.
 from .pipeline_executor import PipelineExecutor
 from .source_producer import SourceProducer
 

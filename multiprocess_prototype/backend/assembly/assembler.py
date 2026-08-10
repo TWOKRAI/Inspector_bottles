@@ -92,7 +92,7 @@ class BlueprintAssembler:
 
         Цепочка (паритет с дорогой A boot):
         1. ``SystemBlueprint.model_validate(blueprint_dict)`` — копирует, не мутирует вход.
-        2. ``topology.infer_missing_inspectors()`` — join/inspector из wires (Ф4.7):
+        2. ``topology.infer_missing_collectors()`` — join/collector из wires (Ф4.7):
            процессам без явного ``inspector`` структурно выводится ``{mode: join, ...}``
            по графу связей, ДО ``check()``/``build_configs()``.
         3. ``topology.check()`` → при ошибках ``raise BlueprintInvalid``.
@@ -129,8 +129,8 @@ class BlueprintAssembler:
         }
 
         # Ф4.7: join/inspector из wires — структурный вывод ДО check()/build_configs()
-        # (снимает костыль _hoist_inspector_from_metadata; см. infer_missing_inspectors).
-        topology.infer_missing_inspectors()
+        # (снимает костыль _hoist_inspector_from_metadata; см. infer_missing_collectors).
+        topology.infer_missing_collectors()
 
         errors = topology.check()
         if errors:

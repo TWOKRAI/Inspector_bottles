@@ -91,12 +91,18 @@ class TestPartialOverrideKeepsTheDescription:
 def error_wired(tmp_path, monkeypatch):
     """Живые LoggerManager + ErrorManager и зарегистрированные команды.
 
-    ``INSPECTOR_LOG_DIR`` выставляется намеренно: пересборка стартует от
-    МАШИННОГО контекста (``resolve_base_log_dir``), а не от живого конфига
-    менеджера — иначе удаление ``log_directory`` из слоя перестало бы работать
-    (Task 5.12). Без этой строки ``config.reload`` уводит каналы в ``./logs``, и
-    тест, проверяющий СОДЕРЖИМОЕ файла, ловит не ту гарантию.
+    Каталог логов выставляется намеренно: пересборка стартует от МАШИННОГО
+    контекста (``resolve_base_log_dir``), а не от живого конфига менеджера —
+    иначе удаление ``log_directory`` из слоя перестало бы работать (Task 5.12).
+    Без этой строки ``config.reload`` уводит каналы в ``./logs``, и тест,
+    проверяющий СОДЕРЖИМОЕ файла, ловит не ту гарантию.
+
+    Выставляются ОБЕ ручки пары (D4). Прежняя редакция задавала только легаси-имя
+    и была зелёной лишь потому, что легаси имел приоритет; каноничное имя при этом
+    уже стояло в окружении прогона и указывало на общий каталог — то есть тест
+    зависел от порядка чтения пары, а не от того, что проверял.
     """
+    monkeypatch.setenv("MULTIPROCESS_LOG_DIR", str(tmp_path))
     monkeypatch.setenv("INSPECTOR_LOG_DIR", str(tmp_path))
     logger = LoggerManager(
         config=LoggerManagerConfig(app_name="sym", log_directory=str(tmp_path), enable_batching=False, modules={})
