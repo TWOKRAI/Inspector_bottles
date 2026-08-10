@@ -29,7 +29,7 @@
 | 10 | **`DECISIONS.md` 1 874 строки** — плотный | Разбить тематически: `DECISIONS_FOUNDATION.md`, `DECISIONS_PROCESS.md`, `DECISIONS_OBSERVABILITY.md` + автогенерируемый `INDEX.md` | 4 часа |
 | 11 | **Нет `CHANGELOG.md`** | Создать с привязкой к `__version__`, формат Keep-a-Changelog. Каждый релиз = пункт + ссылки на ADR | 2 часа на старт |
 | 12 | **Нет автогенерации API-докментации** | `mkdocs` + `mkdocstrings` (или Sphinx). Чтение `docstrings` → красивый HTML/PDF | 1 день |
-| 13 | **Нет интеграционных тестов «всё вместе»** | `tests/integration/`: запуск SystemLauncher с 3 процессами + IPC + graceful shutdown. Сейчас интеграция декларирована, но `TEST_ISSUES.md` упоминает баги | 2 дня |
+| 13 | **Нет интеграционных тестов «всё вместе»** | Запуск SystemLauncher с 3 процессами + IPC + graceful shutdown. Прежний каталог `tests/integration/` удалён в D2.2 (2026-08-10): он не собирался ни разу — `ImportError: ProcessManagerCore`. Новое место — `modules/process_manager_module/tests/` (в гейте fw-suite) | 2 дня |
 | 14 | **`MemoryManager` skip 15 тестов на macOS** | Разобраться с `SharedMemory` на Apple Silicon, либо честно задокументировать, либо найти fallback (mmap) | 1 день расследования |
 
 ---

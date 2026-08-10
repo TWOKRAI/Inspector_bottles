@@ -48,7 +48,9 @@ def test_concurrent_record_seq_is_strictly_monotonic(tmp_path) -> None:
     # ring больше total: интересует полная последовательность seq, а не хвост кольца.
     log = AuditLog(path=str(tmp_path / "audit.jsonl"), ring=total + 10)
 
-    barrier = threading.Barrier(threads_n)
+    # D2.3: дедлайн у барьера — если один поток умрёт до рандеву, остальные
+    # получат BrokenBarrierError и тест упадёт; без таймаута он бы завис.
+    barrier = threading.Barrier(threads_n, timeout=30.0)
     errors: List[BaseException] = []
 
     def _worker() -> None:

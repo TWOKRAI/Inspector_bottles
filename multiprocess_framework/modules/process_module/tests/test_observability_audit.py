@@ -315,7 +315,9 @@ class TestMechanismHazards:
         barrier = threading.Barrier(4)
 
         def _writer(tag: int) -> None:
-            barrier.wait()
+            # D2.3: дедлайн на рандеву — смерть одного писателя до барьера роняет
+            # остальных через BrokenBarrierError, а не вешает прогон навсегда.
+            barrier.wait(timeout=30)
             for i in range(50):
                 audit.record(ACTION_SET, origin=f"t{tag}", key=f"k{tag}.{i}", value=i)
 

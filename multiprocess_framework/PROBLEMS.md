@@ -37,7 +37,17 @@ python scripts/run_framework_tests.py
 
 ## Интеграционные тесты
 
-См. [`tests/integration/TEST_ISSUES.md`](./tests/integration/TEST_ISSUES.md):
+Каталог `multiprocess_framework/tests/integration/` **удалён** (D2.2, 2026-08-10): все семь его
+тестовых файлов падали на сборке с `ImportError: cannot import name 'ProcessManagerCore'` —
+символа нет в истории репозитория вовсе, то есть они не гонялись никогда. Вместе с ними ушли
+подпорки, которые никто больше не звал: `template_app/`, `run_integration_tests.py` и восемь
+руководств, описывавших несуществующий API (`TEST_ISSUES.md` в их числе).
 
-- Pickle на Windows (лямбда в LoggerPlugin) — заменить на module-level функции.
-- Разные точки входа pytest: unit-тесты модулей — `modules/pytest.ini`; интеграционные — корневой `pyproject.toml` (testpaths).
+Что из прежних записей остаётся верным:
+
+- Разные точки входа pytest: unit-тесты модулей — `modules/pytest.ini` (через
+  `scripts/run_framework_tests.py`); корневой гейт — `testpaths` в `pyproject.toml`.
+- Интеграция «всё вместе» (SystemLauncher + IPC + graceful shutdown) сегодня живёт в
+  `modules/process_manager_module/tests/` и в `multiprocess_prototype/backend/tests/`.
+- Утверждение про pickle-лямбду в `LoggerPlugin` пришло из удалённого `TEST_ISSUES.md` и
+  ничем не подтверждено на текущем коде — воспроизводить заново, если всплывёт.

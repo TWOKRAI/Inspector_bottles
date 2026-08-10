@@ -55,10 +55,13 @@ multiprocess_framework/
 │   ├── ADR_REGISTRY.md
 │   ├── MODULE_README_TEMPLATE.md
 │   └── archive/                # Устаревшие документы
-└── tests/                      # Интеграционные тесты
-    ├── integration/
-    └── run_unit_tests.py
 ```
+
+Каталога `tests/` на уровне пакета **больше нет** (D2.2, 2026-08-10): его тесты не собирались
+(`ImportError: ProcessManagerCore` — символа нет в истории репозитория), а `run_unit_tests.py`
+был вторым входом с зашитым списком 16 модулей из 27, то есть молча пропускал 11. Единственный
+вход — `scripts/run_framework_tests.py` (через `modules/pytest.ini`); тесты живут только
+в `modules/<X>/tests/`.
 
 Валидация структуры и инвариантов — `python scripts/validate.py` (импорты, `__init__.py`, `interfaces.py`, `README.md`, `STATUS.md`, ADR-sync) + `sentrux check` для архитектурных границ.
 

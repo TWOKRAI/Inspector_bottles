@@ -48,6 +48,11 @@ from multiprocess_framework.modules.logger_module.core.logger_manager import Log
 _LOGGER_NAME = "multiprocess_framework.modules.logger_module.channels.log_channel"
 
 
+# D2.3: см. одноимённую константу в test_console_backpressure.py — «вечная»
+# блокировка дубля с предохранителем, чтобы упавший тест не вешал прогон.
+_STUCK_GATE_DEADLINE_SEC = 120.0
+
+
 class _StuckStream:
     """Поток вывода, зависший навсегда до явного ``release()``."""
 
@@ -57,7 +62,7 @@ class _StuckStream:
 
     def write(self, data: str) -> int:
         self.entered.set()
-        self._gate.wait()
+        self._gate.wait(timeout=_STUCK_GATE_DEADLINE_SEC)
         return len(data)
 
     def flush(self) -> None:

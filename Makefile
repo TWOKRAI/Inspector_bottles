@@ -57,6 +57,20 @@ test-fast: ## pytest без coverage (быстрее)
 test-fw: ## Тесты фреймворка (через скрипт)
 	$(PYTHON) scripts/run_framework_tests.py
 
+# D2.4: каталог backend_ctl/tests в дефолтный гейт НЕ входит (633 теста, ~9 минут,
+# из них 43 — live harness_smoke, поднимающие настоящий бэкенд прототипа). При этом
+# именно там живёт наблюдаемостная часть драйвера, и вне графика она гнила молча:
+# на входе в D2 каталог был красным (1 failed / 630 passed) по опровергнутой посылке
+# и штурму delivery_failed. Два target'а вместо одного — потому что «дорого» и
+# «требует живых процессов ОС» это разные причины исключения из гейта.
+.PHONY: test-ctl
+test-ctl: ## backend_ctl/tests целиком, включая live harness_smoke (~9 мин, 633 теста)
+	$(PYTEST) backend_ctl/tests
+
+.PHONY: test-ctl-offline
+test-ctl-offline: ## backend_ctl/tests без live-прогонов (590 тестов) — то, что гоняет ночной CI
+	$(PYTEST) backend_ctl/tests -m "not harness_smoke"
+
 # ── Quality gate (полный цикл) ──
 
 .PHONY: gate

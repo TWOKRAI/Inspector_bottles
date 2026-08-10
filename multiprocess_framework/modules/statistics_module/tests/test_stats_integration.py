@@ -108,7 +108,9 @@ class TestThreadSafety:
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            # D2.3: дедлайн — блокировка в record_metric обязана ронять тест.
+            t.join(timeout=30)
+            assert not t.is_alive(), "писатель метрик не завершился за 30 с"
         m = self.mgr.get_metric("ops")
         assert m is not None
         assert m["count"] == 1000.0
@@ -138,5 +140,8 @@ class TestThreadSafety:
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            # D2.3: дедлайн — взаимная блокировка чтения и записи метрик обязана
+            # падать по таймауту, а не висеть до таймаута всего прогона.
+            t.join(timeout=30)
+            assert not t.is_alive(), "поток смешанной нагрузки не завершился за 30 с"
         assert errors == []

@@ -523,11 +523,14 @@ spawner.stop()
 python -m pytest multiprocess_framework/modules/process_manager_module/tests/ -v
 ```
 
-**Интеграционные тесты** (SystemLauncher + ProcessSpawner):
+**Интеграционные тесты** (SystemLauncher + ProcessSpawner) живут в том же каталоге модуля:
 
 ```bash
-python -m pytest multiprocess_framework/tests/integration/test_launcher_integration.py multiprocess_framework/tests/integration/test_main_launcher.py -v
+python -m pytest multiprocess_framework/modules/process_manager_module/tests/test_system_launcher.py multiprocess_framework/modules/process_manager_module/tests/test_process_spawner.py -v
 ```
+
+> D2.2 (2026-08-10): прежние адреса `multiprocess_framework/tests/integration/test_launcher_integration.py`
+> и `test_main_launcher.py` указывали на файлы, которых в истории репозитория нет вовсе.
 
 ---
 

@@ -221,6 +221,31 @@ def _root_testpaths() -> list[str]:
     return list(data["tool"]["pytest"]["ini_options"]["testpaths"])
 
 
+def test_every_testpath_points_at_something_that_exists() -> None:
+    """Обратная сторона «тестов-невидимок»: путь в `testpaths`, которого нет на диске.
+
+    D2.1 (2026-08-10): корневой `testpaths` три года нёс строку
+    `multiprocess_framework/refactored` — каталога нет с чистки v1/v2 (e128b930).
+    pytest на несуществующий путь молчит: 0 items, exit 0. То есть запись читалась
+    как «покрыто», не покрывая ничего, — зеркало тестов-невидимок: не тест без
+    прогона, а прогон без теста.
+
+    Судятся ОБА конфига: корневой `pyproject.toml` (дефолтный гейт) и
+    `modules/pytest.ini` (fw-suite) — у них независимые списки, и разъехаться
+    может любой.
+    """
+    repo_root = _MODULES_ROOT.parents[1]
+
+    missing = [entry for entry in _root_testpaths() if not (repo_root / entry).exists()]
+    assert not missing, (
+        f"в корневом testpaths пути, которых нет на диске: {missing}. "
+        "pytest на такой путь даёт 0 items и exit 0 — запись врёт о покрытии."
+    )
+
+    missing_fw = [entry for entry in sorted(_testpaths_from_ini()) if not (_MODULES_ROOT / entry).exists()]
+    assert not missing_fw, f"в modules/pytest.ini пути, которых нет на диске: {missing_fw}."
+
+
 def test_services_and_plugins_test_dirs_are_collected() -> None:
     """Каждый каталог тестов под `Services/` и `Plugins/` виден ДЕФОЛТНОМУ гейту.
 

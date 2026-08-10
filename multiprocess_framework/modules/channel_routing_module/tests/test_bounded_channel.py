@@ -103,7 +103,10 @@ class TestThreadSafety:
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            # D2.3: дедлайн обязателен — регрессия в BoundedChannel.write должна
+            # ронять тест, а не вешать прогон на неопределённый срок.
+            t.join(timeout=30)
+            assert not t.is_alive(), "писатель не завершился за 30 с"
 
         assert len(ch.drain()) == 8000
         assert ch.dropped == 0

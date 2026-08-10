@@ -8,6 +8,11 @@
 #   * tests    — тесты фреймворка через scripts/run_framework_tests.py (blocking, зелёный
 #                headless: ~3800 тестов за ~90 c под QT_QPA_PLATFORM=offscreen).
 #
+#   * backend-ctl-nightly — каталог backend_ctl/tests без live-тестов (590 из 633),
+#                ТОЛЬКО по расписанию/кнопке (D2.4). Там живёт наблюдаемостная часть
+#                драйвера; вне графика она гнила молча — на входе в фазу D каталог
+#                был красным. Полный каталог с live — локально: `make test-ctl`.
+#
 #   * examples-smoke — live headless-boot examples/minimal_app + доказанный IPC
 #                (маркер harness_smoke, BackendHarness с launcher_factory — Ф5.13,
 #                см. examples/minimal_app/tests/test_ci_smoke.py). Отдельный job,
@@ -28,6 +33,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # D2.4: ночной прогон каталога backend_ctl/tests — он слишком дорог для
+  # каждого PR (~9 минут), но без графика гниёт молча: на входе в фазу D он был
+  # красным и об этом никто не узнавал неделями. 02:17 UTC — вне рабочих часов.
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
 
 # Отменяем предыдущие прогоны для той же ветки/PR.
 concurrency:
@@ -139,3 +150,36 @@ jobs:
       # сбор (см. testpaths в pyproject.toml), запускаем явным путём.
       - name: minimal_app — headless boot + доказанный IPC
         run: uv run python -m pytest examples/minimal_app/tests -m harness_smoke -q -p no:cacheprovider
+
+  backend-ctl-nightly:
+    name: backend_ctl/tests (ночной, без live)
+    # Только по расписанию и по кнопке: на каждом PR это лишние ~5 минут, а ловит
+    # он медленный дрейф, а не свежую правку.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка системных Qt-зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3
+
+      - name: Установка uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+
+      - name: Синхронизация зависимостей
+        run: uv sync
+
+      # 590 тестов из 633: маркер harness_smoke (43 live-теста, поднимающих
+      # настоящий бэкенд прототипа) исключён по той же причине, что и harness_smoke
+      # прототипа выше — живые процессы ОС. Полный каталог, включая live, гоняется
+      # локально: `make test-ctl`.
+      - name: backend_ctl/tests без live
+        run: uv run python -m pytest backend_ctl/tests -m "not harness_smoke" -q -p no:cacheprovider

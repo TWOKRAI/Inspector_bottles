@@ -173,7 +173,9 @@ class TestThreadSafety:
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            # D2.3: дедлайн — дедлок под локом реестра обязан падать, а не висеть.
+            t.join(timeout=30)
+            assert not t.is_alive(), "регистрация не завершилась за 30 с"
 
         assert not errors
         assert len(reg) == 50
@@ -208,9 +210,11 @@ class TestThreadSafety:
         for r in readers:
             r.start()
         writer.start()
-        writer.join()
+        writer.join(timeout=30)
+        assert not writer.is_alive(), "писатель не завершился за 30 с"
         stop.set()
         for r in readers:
-            r.join()
+            r.join(timeout=30)
+            assert not r.is_alive(), "читатель не завершился за 30 с"
 
         assert not errors
