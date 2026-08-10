@@ -38,12 +38,17 @@ def _wire(window: MainWindow, bus: EventBus, session: TopologySession, save_fn=N
 # ---------------------------------------------------------------------------
 
 
-def test_diverged_indicator_after_undo_then_cleared_by_apply(qtbot) -> None:
+def test_diverged_indicator_after_undo_then_cleared_by_apply(qtbot, monkeypatch) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
     bus = EventBus()
     session = TopologySession()
     _wire(window, bus, session)
+    # Тест оставляет сессию dirty, а qtbot закрывает окно в teardown → closeEvent
+    # показывал МОДАЛЬНЫЙ диалог «несохранённые правки» и прогон ждал клика
+    # оператора (найдено 2026-08-10). Подмена — ради teardown, не ради предмета
+    # теста: закрытие проверяют тесты ниже.
+    _patch_dialog(monkeypatch, "discard")
 
     # Правка графа (dispatch публикует TopologyReplaced) → оба индикатора видны.
     # isHidden() (а не isVisible()) — устойчиво к непоказанному окну в headless-тесте:
