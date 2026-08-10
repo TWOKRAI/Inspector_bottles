@@ -242,3 +242,6 @@
 - [Провод портов ≠ маршрут процессов](feedback_port_wire_is_not_a_process_route.md) — плагин не вызван ни разу, молча
 - [PRAGMA молчит об отказе](feedback_sqlite_pragma_fails_silently.md) — порядок до WAL; incremental_vacuum дошагивать fetchall
 - [Материализованный дефолт прячет «не задано»](feedback_materialized_default_hides_absence.md) — проверка на пустоту ключа чинит ноль; сверять с Model.model_fields["x"].default
+- [Дубль обязан блокировать как оригинал](feedback_double_must_block_like_the_original.md) — мгновенный ответ превращает инъекцию «while True» в разгон памяти
+- [«Не деградировало» — идентичностью сборки](feedback_no_regression_proved_by_identical_build.md) — proc_dict ключ-в-ключ из worktree на HEAD, а не сравнение шумных прогонов
+- [Предохранитель может быть НЕ-операцией](feedback_safeguard_can_be_a_noop_with_green_units.md) — юнит на синтетике не доказывает, что механизм срабатывает на реальной топологии
