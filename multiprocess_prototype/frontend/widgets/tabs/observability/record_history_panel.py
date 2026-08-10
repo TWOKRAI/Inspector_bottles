@@ -9,6 +9,11 @@ kind. Целую историю читает пагинацией из RecordSou
 Переиспользует BaseAdminPanel (таблица/группа/read-only) — тот же паттерн, что
 AuditLogPanel; отличия: фильтр по уровню, колонка источник/канал, кнопка
 Копировать, live-append (аудит-лог статичен, наблюдаемость течёт).
+
+Задача 1.6 добавила поиск по слову: поле рядом с фильтрами, движок — FTS5
+стора. Разбор инцидента начинается со слова, а лента отвечает только «покажи
+страницу»; поэтому же поиск обязан различать «не нашлось» и «не выполнен» —
+обе пустые таблицы выглядят одинаково, а значат противоположное.
 """
 
 from __future__ import annotations
@@ -165,6 +170,18 @@ class RecordHistoryPanel(BaseAdminPanel):
         self._edit_module.returnPressed.connect(self._on_filters_changed)
         filter_layout.addWidget(self._edit_module)
 
+        # 1.6: поиск по слову. Отдельным полем от «Источник» — тот сужает точным
+        # совпадением имени, это ищет по тексту сообщения; слить их в одно поле
+        # значило бы гадать за оператора, что он ввёл.
+        filter_layout.addWidget(QLabel("Поиск:"))
+        self._edit_search = QLineEdit()
+        self._edit_search.setMinimumWidth(180)
+        self._edit_search.setClearButtonEnabled(True)
+        self._edit_search.returnPressed.connect(self._on_search_changed)
+        self._edit_search.textChanged.connect(self._on_search_text_changed)
+        self._apply_search_availability()
+        filter_layout.addWidget(self._edit_search)
+
         filter_layout.addStretch()
         root.addLayout(filter_layout)
 
@@ -241,6 +258,42 @@ class RecordHistoryPanel(BaseAdminPanel):
     # Фильтры / загрузка
     # ------------------------------------------------------------------
 
+    def _apply_search_availability(self) -> None:
+        """Живое поле поиска — или мёртвое, но с названной причиной (1.6).
+
+        Причина уходит и в подсказку поля, и в tooltip: «поиск недоступен» без
+        «почему» — приглашение решить, что сломана вкладка.
+        """
+        reason = self._presenter.search_unavailable_reason
+        if reason is None:
+            self._edit_search.setPlaceholderText('слово, "фраза", hik*')
+            self._edit_search.setToolTip(
+                "Полнотекстовый поиск по сообщению, источнику и процессу. "
+                'Синтаксис FTS5: слово, "точная фраза", префикс hik*, a OR b. '
+                "Enter — искать, пустая строка — вернуться к ленте."
+            )
+            return
+        self._edit_search.setEnabled(False)
+        self._edit_search.setPlaceholderText("поиск недоступен")
+        self._edit_search.setToolTip(reason)
+
+    def _on_search_changed(self) -> None:
+        """Enter в поле поиска: искать (или вернуться к ленте, если поле пустое)."""
+        self._presenter.set_search_query(self._edit_search.text())
+        self.reload()
+
+    def _on_search_text_changed(self, text: str) -> None:
+        """Очистка поля (крестик/Backspace) возвращает ленту без Enter.
+
+        Только на переход «был поиск → поле пусто»: на каждый набранный символ
+        поиск НЕ перезапускается — у частого слова запрос стоит десятки
+        миллисекунд, и посимвольный поиск превратил бы набор слова в очередь
+        заведомо ненужных полных проходов.
+        """
+        if not text.strip() and self._presenter.searching:
+            self._presenter.set_search_query(None)
+            self.reload()
+
     def _on_filters_changed(self) -> None:
         if self._combo_level is not None:
             level = self._combo_level.currentData()
@@ -267,14 +320,35 @@ class RecordHistoryPanel(BaseAdminPanel):
         self._update_empty_hint(bool(rows))
 
     def _update_empty_hint(self, has_rows: bool) -> None:
-        """Пустая вкладка обязана сказать, ПОЧЕМУ она пуста (Ф5.2, Б-8).
+        """Пустая вкладка обязана сказать, ПОЧЕМУ она пуста (Ф5.2, Б-8; 1.6).
 
         Подсказка не показывается, если строки есть, и не показывается на первой
         странице пагинации при непустой истории — то есть не может застрять
         поверх работающей вкладки.
+
+        Пустых теперь ЧЕТЫРЕ разных, и три из них дают одинаковую пустую таблицу:
+        история пуста, поиск не нашёл, поиск не выполнен (непонятый запрос или
+        нечем искать). Ответ «записей нет» на невыполненный поиск — ровно тот
+        класс тихой потери, ради которого движок и отвечает исключением.
         """
+        error = self._presenter.search_error
+        if error is not None:
+            # Причина отказа — самое конкретное, что можно сказать про эту
+            # пустоту, поэтому проверяется первой. Таблица при отказе пуста по
+            # построению (``load`` возвращает пустую страницу), но порядок
+            # ветвей от этого не зависит: причина важнее любой общей подсказки.
+            self._lbl_empty.setText(error)
+            self._lbl_empty.setVisible(True)
+            return
         if has_rows:
             self._lbl_empty.setVisible(False)
+            return
+        if self._presenter.searching:
+            self._lbl_empty.setText(
+                f"По запросу «{self._presenter.query}» ничего не найдено. "
+                "Это ответ поиска, а не пустая история — очистите поле, чтобы вернуться к ленте."
+            )
+            self._lbl_empty.setVisible(True)
             return
         hint = EMPTY_HINTS.get(self._presenter.kind, "")
         self._lbl_empty.setText(hint)
@@ -395,6 +469,11 @@ class RecordHistoryPanel(BaseAdminPanel):
 
     def _update_pagination(self) -> None:
         label = f"Стр. {self._presenter.page_number}"
+        if self._presenter.searching:
+            # 1.6: во время поиска живой хвост не доливается (совпадение со словом
+            # считает FTS5, а не панель). Замерший поток обязан быть НАЗВАН —
+            # молчащий через минуту неотличим от сломанного.
+            label += " · поиск: живой хвост приостановлен"
         if self._dropped_live:
             # Видимый счётчик усечённого live-хвоста (полная история — в сторе).
             label += f" · хвост усечён: {self._dropped_live}"
