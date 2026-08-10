@@ -21,7 +21,7 @@
 | `message_module` | production | 2 616 | + | Message + MessageAdapter; Dict at Boundary |
 | `dispatch_module` | production | 3 447 | + | 4 стратегии, ScenarioBuilder |
 | `channel_routing_module` | production | 2 093 | + | CRM — база Logger/Error/Router/Stats |
-| `logger_module` | production | 1 705 | + | Scope-based routing, BatchBuffer |
+| `logger_module` | production | 6 936 | + | Единственный писатель; порог по имени источника, 6 типов приёмников, floor. Синхронная запись (Ф7.4) |
 | `error_module` | production | 1 026 | + | Severity routing, наследник Logger |
 | `config_module` | production | 2 393 | + | Тонкая обёртка над data_schema |
 | `state_store_module` | stable | 3 300 | 421 | Реактивное дерево состояния; StateStoreManager, StateProxy, TreeStore, доменно-нейтральный PersistenceManager |

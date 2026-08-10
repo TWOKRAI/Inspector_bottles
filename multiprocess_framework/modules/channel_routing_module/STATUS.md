@@ -6,9 +6,9 @@
 
 | Критерий | Оценка | Комментарий |
 |---|---|---|
-| Код | 9 | CRM + ChannelRegistry + 3 буфера + normalize_config + ChannelRoutingConfig + observability/ObservabilityHub (Ф5.15) |
-| Тесты | 9 | 84 теста (58 base + 26 observability: hub/bounded-channel); все проходят |
-| Документация | 10 | README полный; `DECISIONS.md` (ADR-013…016, ADR-108); §6.4 в `ARCHITECTURE.md` |
+| Код | 9 | CRM + ChannelRegistry + 2 буфера + normalize_config + ChannelRoutingConfig + `observability/` (hub, стор, tap'ы, нормализатор записи) — 3 782 строки |
+| Тесты | 9 | 4 279 строк; все проходят |
+| Документация | 10 | README полный; `DECISIONS.md` (ADR-CRM-001…014); карта плоскости — [`docs/OBSERVABILITY_MAP.md`](../../docs/OBSERVABILITY_MAP.md) и четыре справочника в [`docs/observability/`](../../docs/observability/CONNECTORS.md) |
 | Связанность | 10 | Зависит только от base_manager + dispatch_module + data_schema_module. Нет циклов |
 | Работоспособность | 9 | Все наследники мигрированы; 155 тестов зелёные |
 
@@ -17,8 +17,8 @@
 - [x] Этап 0: interfaces.py (IChannel, IBufferStrategy, IChannelRoutingManager)
 - [x] Этап 1: ChannelRegistry (generic, thread-safe, RLock)
 - [x] Этап 2: normalize_config (Dict at Boundary: None | dict | RegisterBase → dict)
-- [x] Этап 3: Буферы (DirectBuffer, AsyncSenderBuffer, BatchBuffer + BatchConfig)
-- [x] Этап 4: ChannelRoutingManager (register_channel, route, register_route, register_broadcast)
+- [x] Этап 3: Буферы (DirectBuffer, AsyncSenderBuffer; `BatchBuffer` жил здесь до Ф7.4 и снят — см. ADR-LOG-008)
+- [x] Этап 4: ChannelRoutingManager (register_channel, unregister_channel, get_channel, flush, get_stats; `route`/`register_route`/`register_broadcast` жили здесь до Ф4.6 и сняты — ADR-CRM-012)
 - [x] Этап 5: ChannelRoutingConfig(RegisterBase) — базовый конфиг, observable_config, dispatcher_strategy
 - [x] Этап 6: Тесты (test_channel_registry, test_buffers, test_channel_routing_manager) — 58 тестов
 - [x] Этап 7: Миграция LoggerManager (Фаза 2) + ErrorManager (Фаза 3)
@@ -29,20 +29,25 @@
 
 ```
 ChannelRoutingManager
-    ├── LoggerManager  (BatchBuffer, scope/level routing, ILogChannel(IChannel))
-    │       └── ErrorManager  (_level_to_channel, severity routing)
+    ├── LoggerCore  (синхронная запись, гейт по имени источника, ILogChannel(IChannel))
+    │       ├── LoggerManager  (LoggerCore + process-singleton)
+    │       └── ErrorManager   (severity_routes данными, один _route())
+    ├── StatsManager   (AggregationWindow, IMetricChannel)
     └── RouterManager  (AsyncSender + channel_dispatcher, IMessageChannel(IChannel))
 ```
 
+`ErrorManager` — **брат** `LoggerManager`, а не его наследник: общий предок `LoggerCore`
+(Ф0.6/Ф4.2). Прежняя схема рисовала его потомком логгера и буфер у логгера — обоих больше нет.
+
 ## Известные ограничения
 
-- **configs/ vs core:** `ChannelRoutingManagerConfig` (реестр/UI) и `ChannelRoutingConfig` в `core/` (база для наследников CRM) — оба нужны; см. **ADR-108**
+- **configs/ vs core:** `ChannelRoutingManagerConfig` (реестр/UI) и `ChannelRoutingConfig` в `core/` (база для наследников CRM) — оба нужны; см. **ADR-CRM-005** (бывш. ADR-108)
 - `AsyncSenderBuffer.flush()` — не гарантирует синхронное ожидание; используй `stop()` + `start()`.
-- `BatchBuffer.max_pending` ограничивает **накопленную пачку**, но не то, что уже отдано в `flush_fn`. Верхняя граница памяти на канал — `max_pending + max_size` (одна пачка в полёте: параллельные сбросы одного канала запрещены через `_in_flight`).
-- `urgent_flush_requests` считает запросы, а не записанные пачки (сброс идёт вне lock-а). При гонке может превысить `total_batches` — это не ошибка учёта, а семантика имени.
-
-- `BatchBuffer` timer thread запускается в `start()` — вызывай `initialize()` перед использованием.
-- `RouterManager` не использует `IBufferStrategy` из CRM — см. ADR-015.
+- **Буфера у плоскости логов и ошибок нет вовсе** (Ф7.4): запись синхронна. Вместе с `BatchBuffer` ушли `max_pending`, `overflow_policy`, `_in_flight`, барьер `flush`, `urgent_flush_requests`, `flush_timeouts`, `dropped_at_stop` и `flush_contract_violations` — искать их в счётчиках больше не надо.
+- Учёт потерь — **пять** классов (`LOSS_COUNTER_KEYS`) плюс счётчик доставки; перечень один на объявление, выдачу и публикацию.
+- Tap-приёмники живут ОТДЕЛЬНО от реестра каналов и переживают `reconfigure()`; раздача защищена **поточным** счётчиком глубины (D1) — реентрантный tap не даёт лавину, подавленное считается в `tap_reentrant_suppressed`.
+- `RouterManager` не использует `IBufferStrategy` из CRM — см. ADR-CRM-003.
+- `RouterManager` унаследовал `set_sink_enabled`, но **командой не адресуем** (whitelist Ф0.6): иначе message-канал IPC снимался бы одной операторской командой.
 
 ## История изменений
 
@@ -61,3 +66,7 @@ ChannelRoutingManager
 | 2026-07-26 | **Ф0.3, редакция 3 (вторая итерация ревью):** механизм `_in_flight` сам принёс два дефекта того же класса. (1) Флаг снимался вне `finally`, а `except Exception` не ловит `KeyboardInterrupt` — один Ctrl+C внутри `ch.write` запирал канал НАВСЕГДА, причём книги при этом сходились (фантомные записи вечно в `in_flight_records`). (2) `flush()` перестал быть барьером: `stop()` возвращался мгновенно, оставляя хвост в `pending` без счётчика, а сброс порядка «контекст раньше ошибки» (Ф0.9) молча становился no-op на занятом канале. Исправлено: учёт в `finally`, `Exception` глушится / `BaseException` пробрасывается, барьер через `Condition` с таймаутом (`flush_timeouts`), `stop()` в два прохода + `dropped_at_stop`. Плюс: враньё стока о числе принятых не кламповится (`flush_contract_violations`) | Ф0.3 |
 | 2026-07-26 | **Ф0.6 (подъём в базу):** `set_sink_enabled` (generic disable + хук `_recreate_channel` на enable), `add_tap`/`remove_tap`/`_emit_to_taps`, `_fallback_log` — из `LoggerCore` в CRM; копии у логгера **удалены**, не оставлены делегатами. Ранги уровней вынесены в `levels.py` (закрывает резидуал R6: `error_manager` больше не импортирует вглубь `logger_module`, база не зависит от потомка). `add_log_tap` → `add_tap` по 14 файлам. Промежуточный класс НЕ введён (условие плана). **Риск закрыт whitelist'ом:** `RouterManager` унаследовал `set_sink_enabled`, но командой не адресуем — иначе message-канал IPC снимался бы одной командой | Ф0.6 |
 | 2026-07-26 | **Ф0.8:** хук `_on_channels_changed()` — база сообщает наследнику, что состав каналов изменился в рантайме; зовётся ТОЛЬКО при фактическом изменении (неудачный toggle не событие). `LoggerCore` вешает на него инвалидацию `_decision_cache` (плюс `enable/disable_module_logging`). Профилактика до симптома: сегодня решение `should_log` от состава каналов не зависит, с Ф2.2 будет | Ф0.8 |
+| 2026-08-05 | **Ф7.4:** `BatchBuffer` снят целиком — запись синхронна на всех уровнях (ADR-LOG-008). Вместе с ним ушли `max_pending`/`overflow_policy`/`_in_flight`/барьер `flush` и их счётчики | Ф7.4 |
+| 2026-08-05 | **Ф4.6:** key-based `Dispatcher` снят из базы — через него не проходило ни одной продовой записи ни у одного из четырёх наследников (ADR-CRM-012) | Ф4.6 |
+| 2026-08-10 | **D1:** раздача в tap'ы защищена **поточным** счётчиком глубины; подавленное считается именем `tap_reentrant_suppressed` (в `LOSS_COUNTER_KEYS` и в публикации). `ChannelRegistry` перестал логировать под своим локом (AB/BA снят структурно) и перестал молчать без разъёмов | D1 |
+| 2026-08-10 | **D3:** `ObservabilityStore` мигрирует унаследованные БД на рабочий `auto_vacuum` по `PRAGMA user_version`; rollback-гипотеза ревью снята воспроизведением, условие атомарности названо (ADR-CRM-014) | D3 |

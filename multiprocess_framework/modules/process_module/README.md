@@ -34,13 +34,13 @@ class MyProcess(ProcessModule):
         self.log_info("Инициализация MyProcess...")
         self.is_initialized = True
         return True
-    
+
     def shutdown(self) -> bool:
         """Завершение работы процесса."""
         self.log_info("Завершение MyProcess...")
         self.is_initialized = False
         return True
-    
+
     def run(self):
         """Основной цикл процесса."""
         counter = 0
@@ -71,10 +71,10 @@ class WorkerProcess(ProcessModule):
     def initialize(self) -> bool:
         """Инициализация процесса с воркерами."""
         self.log_info("Инициализирую воркеры...")
-        
+
         # Получить менеджер воркеров (автоматически создан ProcessModule)
         manager = self.worker_manager
-        
+
         # Создать воркер обработки данных
         def data_worker(stop_event, pause_event):
             while not stop_event.is_set():
@@ -83,16 +83,16 @@ class WorkerProcess(ProcessModule):
                     continue
                 self.log_info("Обработка данных...")
                 time.sleep(1)
-        
+
         config = ThreadConfig(
             priority=ThreadPriority.NORMAL,
             execution_mode=ExecutionMode.LOOP,
         )
         manager.create_worker("data_processor", data_worker, config, auto_start=True)
-        
+
         self.is_initialized = True
         return True
-    
+
     def run(self):
         """Основной цикл с мониторингом воркеров."""
         while not self.should_stop():
@@ -120,7 +120,10 @@ process_module/
 │   └── process_lifecycle.py     # Жизненный цикл: initialize/shutdown
 ├── managers/
 │   ├── __init__.py
-│   └── process_managers.py      # Инициализация менеджеров
+│   ├── process_managers.py      # Инициализация менеджеров
+│   ├── observability_wiring.py  # Сшивка плоскостей: hub, стор, tap'ы, плоскость документов
+│   ├── observability_reload.py  # Пересборка конфига из слоёв + readback + вердикт
+│   └── observability_ttl.py     # Авто-возврат рантайм-правок по истечении срока
 ├── communication/
 │   ├── __init__.py
 │   └── process_communication.py # IPC через router_module
@@ -356,14 +359,14 @@ class SimpleProcess(ProcessModule):
     def initialize(self) -> bool:
         self.counter = 0
         return True
-    
+
     def run(self):
         while not self.should_stop():
             self.counter += 1
             if self.counter % 10 == 0:
                 self.log_info(f"Counter: {self.counter}")
             time.sleep(0.1)
-    
+
     def shutdown(self) -> bool:
         self.log_info(f"Final counter: {self.counter}")
         return True
@@ -500,7 +503,7 @@ graph TD
     Worker["worker_module"]
     Router["router_module"]
     Logger["logger_module"]
-    
+
     Process -->|"ISharedResources<br/>protocol"| SharedRes
     Process -->|"WorkerManager"| Worker
     Process -->|"RouterManager"| Router
@@ -508,6 +511,40 @@ graph TD
     ProcManager -->|"ProcessModule"| Process
     ProcManager -->|"SharedResourcesManager"| SharedRes
 ```
+
+---
+
+## Наблюдаемость процесса: три файла обвязки
+
+> Сверено **2026-08-10**, коммит `b04a0c12`. Плоскость целиком —
+> [`docs/observability/`](../../docs/observability/CONNECTORS.md); здесь только то, что делает
+> **этот** модуль.
+
+Процесс не просто «имеет логгер»: он **сшивает четыре плоскости, держит слои конфигурации и умеет
+отвечать, что действует сейчас**. За это отвечают три файла в `managers/` плюс три схемы в
+`configs/` (`observability_config.py`, `observability_layers.py`, `observability_audit.py`).
+
+| Файл | Что делает | Когда зовётся |
+|---|---|---|
+| `observability_wiring.py` | сшивает `ObservabilityHub`, `ObservabilityStore` + store-tap'ы на **оба** менеджера (`logger` и `error`), forward-tap'ы живого хвоста (keyed по subscriber), плоскость документов (`wire_document_sink`) и политику истории (`resolve_history_policy`) | **один раз** на `initialize()` (`ProcessModule._wire_observability_hub`) |
+| `observability_reload.py` | **единственное** место, где секция раскладывается (`expand_observability`) и применяется (`apply_observability_layers`): пересборка из слоёв L0→L3, readback из живых менеджеров, трёхзначный вердикт | и файловый watcher, и IPC-команда `config.reload` |
+| `observability_ttl.py` | авто-возврат правок L3 по истечении срока; исполняет такт heartbeat, а не свой таймер | каждый heartbeat процесса |
+
+**Что из этого следует практически:**
+
+* **`observability.documents` и `observability.history` на лету не действуют.** Слои их принимают,
+  но сшивка идёт только на `initialize()` — новое значение вступит в силу со следующего старта
+  процесса. В `observability_reload.py` этих имён нет вовсе.
+* **Пересборка — из источников, а не дельта поверх живого.** Дельта не умеет выразить «ключ удалён
+  из слоя → вернись к нижнему», а с четырьмя слоями «вернуть как было» — основная операция.
+* **`log_directory` приходит из машинного контекста** (`resolve_base_log_dir`: явный аргумент →
+  `MULTIPROCESS_LOG_DIR` → `INSPECTOR_LOG_DIR` → `logs`) и переопределяется только явным ключом
+  слоя. Иначе частичный reload уводил бы файлы логов в чужой каталог (живая находка 2026-07-22).
+* **Срок правки исполняется не везде.** Процесс без heartbeat подметальщика не имеет; команда
+  обязана ответить `ttl_enforced: false`, а не делать вид, что срок принят.
+* **Порядок останова — часть контракта** (`lifecycle/process_lifecycle.py`):
+  `console → command → router → error → stats → статус и итоговая INFO → logger последним`.
+  Отказ гашения логгера не проглатывается — о нём говорит `emergency_log`.
 
 ---
 
@@ -528,4 +565,3 @@ graph TD
 - **interfaces.py** — публичные контракты (IProcessModule, ISharedResources, IProcessCommunication)
 - **types/types.py** — типы и перечисления (ProcessStatus, ProcessConfigDict, и т.д.)
 - **Plan** — `process_module_refactoring_40da2b2c.plan.md`
-

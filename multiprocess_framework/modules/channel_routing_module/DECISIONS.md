@@ -14,11 +14,18 @@
 
 ## ADR-CRM-002 (was ADR-014): Три стратегии буферизации
 
-**Статус:** принято
+**Статус:** частично устарело — стратегий осталось две (см. врезку)
 
 - `DirectBuffer` — без буферизации (тесты, простые случаи).
 - `BatchBuffer` — deque + timer (`LoggerManager`: batch flush по size/interval).
 - `AsyncSenderBuffer` — PriorityQueue + фоновый поток (`RouterManager`: async send).
+
+> **Ф7.4 (2026-08-05): `BatchBuffer` снят целиком** — см. ADR-LOG-008 в
+> [`logger_module/DECISIONS.md`](../logger_module/DECISIONS.md). Батчинг файловой записи не давал
+> экономии на границе ОС (`write`/`flush` одинаковы) и портил хвост эмитента (p99 1348 против
+> 75 мкс); запись синхронна на всех уровнях. Решение оставлено в реестре как запись о том, что
+> было, а не как описание живого кода: у плоскости логов и ошибок буфера сегодня нет вовсе, у
+> статистики — `AggregationWindow` (ADR-SM-006).
 
 ## ADR-CRM-003 (was ADR-015): RouterManager не использует IBufferStrategy из CRM
 

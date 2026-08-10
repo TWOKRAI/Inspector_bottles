@@ -1,17 +1,20 @@
 # logger_module — Статус рефакторинга
 
-## Текущий этап: 5 / 8
+## Текущий этап: 8 / 8  ✅
 
 ## Оценки (0–10)
 
+> Сверено **2026-08-10** (коммит `b04a0c12`), после фаз A–D плана
+> [`observability-review-remediation`](../../../plans/observability-review-remediation.md).
+
 | Критерий | Оценка | Комментарий |
 |---|---|---|
-| Код | 9 | CRM; BatchBuffer; удалены LogDispatcher, legacy batcher/, свойства channels/batcher |
-| Тесты | 7 | ~30 тестов; стресс BatchBuffer и расширенное scope routing — по желанию |
-| Документация | 9 | README, DECISIONS.md (ADR-LOG-001…003), §6.5 в ARCHITECTURE.md |
-| Связанность | 9 | Наследует ChannelRoutingManager; зависит от channel_routing_module |
-| Дублирование | 10 | Нет: registry, BatchBuffer, Dispatcher — из CRM |
-| Работоспособность | 8 | BatchBuffer + scope routing; ErrorManager без LogDispatcher |
+| Код | 9 | 6 936 строк: `LoggerCore` — единственный писатель; иерархия имён, процессоры, floor, шесть типов приёмников. Батчинга нет (Ф7.4) |
+| Тесты | 9 | 18 213 строк (2.6 : 1 к коду) — цена доказанности после Ф0, где 12 зелёных тестов закрепляли неверную модель |
+| Документация | 10 | README, `DECISIONS.md` (ADR-LOG-001…010) + четыре справочника в [`docs/observability/`](../../docs/observability/CONNECTORS.md) |
+| Связанность | 9 | Наследует `ChannelRoutingManager`; зависит от `channel_routing_module` |
+| Дублирование | 10 | Нет: registry, sink-control, tap-механика, учёт потерь — из CRM |
+| Работоспособность | 9 | Синхронная запись, гейт по имени источника, floor; порядок останова закреплён (B3) |
 
 ## Обновление 2026-08-03 (Ф2.2 — иерархия имён)
 
@@ -62,7 +65,7 @@
 - [x] `LogChannel(ILogChannel)` — `name`, `channel_type` как `@property`; `FileChannel`, `ConsoleChannel`, `HttpChannel` наследуют
 - [x] `LoggerManager(ChannelRoutingManager, ILoggerManager)` — убраны дублирующие реализации registry/buffer
 - [x] `self._channel_registry` из CRM вместо `channels: Dict` (был без lock)
-- [x] `BatchBuffer` из CRM вместо `BatchManager` (legacy batcher удалён)
+- [x] `BatchBuffer` из CRM вместо `BatchManager` (legacy batcher удалён) — сам `BatchBuffer` снят в Ф7.4, запись синхронна (ADR-LOG-008)
 - [x] `_resolve_log_config()` — None | dict | LoggerManagerConfig | `build()` → **LoggerManagerConfig** (SchemaBase)
 - [x] Конфиги: `configs/logger_manager_config.py` — **LoggerManagerConfig** extends **ChannelRoutingConfig**
 - [x] `initialize()` / `shutdown()` — только CRM-компоненты (`_dispatcher`, `_buffer`, registry)
@@ -75,17 +78,17 @@
 - [x] Этап 3: level-based routing в ErrorManager; cleanup LogDispatcher / batcher
 - [x] Этап 4: LoggerManager наследует ChannelRoutingManager; ILogChannel(IChannel)
 - [x] Этап 5: Документация и удаление legacy dispatcher/batcher (текущий шаг плана #5)
-- [ ] Этап 6: Graceful shutdown — flush() перед остановкой + router unsubscribe
-- [ ] Этап 7: Unit-тесты — покрытие > 85%, стресс-тест BatchBuffer под нагрузкой
-- [ ] Этап 8: Полная интеграция с process_manager_module
+- [x] Этап 6: Graceful shutdown — логгер гасится **последним** в процессе, его отказ не проглатывается (B3, 2026-08-09)
+- [x] Этап 7: Тесты — 18 213 строк; стресс-тест `BatchBuffer` **отпал вместе с механизмом** (Ф7.4)
+- [x] Этап 8: Интеграция с `process_manager_module` — брокер подписки (Task 5.11), пульт и слои конфигурации (Ф5), сверка команд оракулом контрактов (A1)
 
 ## Известные проблемы
 
 - На Windows `RotatingFileHandler` может падать при ротации общего файла (WinError 32). Для таких случаев в `ModuleConfig` / `ChannelConfig` есть `rotate: false` → `FileHandler` (см. ADR-051, `app_config.processor_frames`). Сам сбой ротации (fail-open — запись продолжается в текущий файл) теперь виден: `_SafeRotatingFileHandler` считает сбои подряд и не чаще раза в 60с пишет WARNING с именем файла, размером и числом неудач — раньше `PermissionError` глушился молча без счётчика и предупреждения (живая находка 2026-07-21, `messages.log` вырос до 645 МБ незамеченным).
 - **Поток, уже вошедший в блокирующую запись в консоль, ничем не ограничен (R2, остаток).** Ожидание ОЧЕРЕДИ ограничено 0.25 с и отбросы считаются, но первый поток, который уже внутри `stream.write()`, остаётся заблокированным навсегда. Полное ограничение требует выноса записи в отдельный поток-писатель — размен «консоль переживает падение процесса» на «консоль ограничена». Решение владельца, не техническая недоделка.
-- **Рост числа файлов ограничен, разовая уборка — нет (Ф0.7).** Ротация держит каждый файл, ретеншен (`retention_days` / `retention_total_mb` / `compress_rotated`) держит каталог, но метёт **свой подкаталог** — `logs/<имя процесса>/`. Каталоги давно умерших процессов не метёт никто: они не растут, но и не исчезают. Это разовая уборка, вне объёма Ф0.7.
+- ~~**Каталоги давно умерших процессов не метёт никто.**~~ **Закрыто D5 (2026-08-10):** ПМ метёт **всё дерево** `log_dir` один раз на `initialize()` (`sweep_log_dir_tree`, все подкаталоги кроме каталогов живых процессов; symlink'и не разыменовываются). Живая приёмка 6/6. Остаток названного ограничения: чужие деревья **вне** `log_dir` только называются (`find_foreign_log_roots`), и фреймворк знает единственного кандидата `<cwd>/logs` — второй пример (`multiprocess_prototype/logs/`) он структурно назвать не может, это работа композиционного корня прототипа через хук `_foreign_log_root_candidates()`.
 - **Счётчик `retention_delete_failures` может завышать при гонке двух подметальщиков за один каталог.** Детерминированный случай Windows delete-pending (удаление отказано, но файла уже нет) разобран по факту, а не по типу исключения, и в отказы не попадает. Остаточное окно между «удаление соседа началось» и «файл исчез» закрыть проверкой существования нельзя. Результат уборки это не портит — только завышает счётчик отказов. В проде сценарий не воспроизводится: `expand_observability` отдаёт ретеншен только `logger`.
-- Стресс-тест BatchBuffer под многопоточной нагрузкой не написан.
+- ~~Стресс-тест BatchBuffer под многопоточной нагрузкой не написан.~~ Отпал вместе с механизмом (Ф7.4): буфера нет, нагружать нечего.
 - **Цена синхронного пути (Ф0.9 → закрыто Ф7.4).** Пункт был про сброс пачки перед записью
 ошибки: 1.3 мс p50 / 1.6 мс p95 в потоке-эмитенте, «окончательно снимается Ф7.2/Ф7.3».
 Снято раньше и другим способом — **батчинг убран целиком** (Ф7.4): сбрасывать нечего,

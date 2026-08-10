@@ -99,7 +99,7 @@ UI (опционально)   L12  frontend_module (PySide6)
 ### `logger_module` — централизованное логирование
 **Импорт:** `from multiprocess_framework import LoggerManager, get_logger`
 **Когда применять:** в `ProcessModule` уже создан, не трогай напрямую — пиши `self._log_info("...")` через `ObservableMixin`.
-**Ключевое:** `LoggerManager` (CRM-наследник), scope-based routing (SYSTEM/BUSINESS/PERFORMANCE/AUDIT/SECURITY), `BatchBuffer`, `FileChannel`/`ConsoleChannel`/`HttpChannel`.
+**Ключевое:** `LoggerCore` — единственный писатель плоскости; `LoggerManager` = он же + process-singleton. Маршрут по группе (дефолтная раскладка каналов — `SYSTEM`/`BUSINESS`/`PERFORMANCE`/`DEBUG`), порог — по иерархическому имени источника (ADR-LOG-010). Шесть типов приёмников в реестре `_SINK_FACTORIES` (`file`/`console`/`http`/`frame_trace`/`memory`/`null`) + `register_sink_factory`; пол ошибок `ErrorFloor`. Батчинга нет — запись синхронна (Ф7.4, ADR-LOG-008). Карта плоскости — [OBSERVABILITY_MAP.md](OBSERVABILITY_MAP.md).
 **Зависимости:** `channel_routing_module`.
 **Подробно:** [`modules/logger_module/README.md`](../modules/logger_module/README.md)
 

@@ -88,7 +88,7 @@ Heartbeat-msg несёт избыточную типизацию: `type='system'
 
 | Цепочка (звенья) | modules_involved | cross-proc | layer | alive |
 |---|---|---|---|---|
-| `ObservableMixin._log_* → _call_manager('logger') → LoggerManager.log → BatchBuffer → FileChannel.write` | base_manager, logger_module, channel_routing_module | нет | framework | **alive** (242+ call-sites) |
+| `ObservableMixin._log_* → _call_manager('logger') → LoggerCore.log → FileChannel.write` (синхронно, без буфера — Ф7.4) | base_manager, logger_module, channel_routing_module | нет | framework | **alive** (676 call-sites на 2026-08-10) |
 | `_record_metric → StatsManager.record_metric → AggregationWindow → _do_flush → каналы` | statistics_module | нет | framework | **alive** |
 | `_track_error → ErrorManager.track_error → _level_to_channel → warnings/errors/critical.log` | error_module | нет | mixed | **partial** (name-mismatch 'error'→fallback 'errors'; `_log_error` идёт в logger, не сюда) |
 | `LoggerManager._route_via_router → Message(LOG, targets=['logger']) → router.send` | logger_module, message_module | да | framework | **dead** (нет процесса 'logger' в prototype) |
@@ -243,7 +243,7 @@ Heartbeat-msg несёт избыточную типизацию: `type='system'
 
 ### 5.1 Один универсальный способ коммуникации
 
-> ⚠️ **SUPERSEDED (2026-05-31) планом [`transport-router-hub`](../../../plans/_archive/2026-05-31_transport-router-hub/plan.md) / [ADR-COMM-001](../DECISIONS.md).**
+> ⚠️ **SUPERSEDED (2026-05-31) планом [`transport-router-hub`](../../plans/_archive/2026-05-31_transport-router-hub/plan.md) / [ADR-COMM-001](../DECISIONS.md).**
 > Эта рекомендация («оставить process-name + named-queue, channel-routing депрекейтить») была минимальной
 > «асфальтировать тропу». Владелец выбрал **противоположное** направление: достроить хаб правильно —
 > **`router.send(message)` как единственный вход, каналы по `kind` как канонический транспорт**, обходы убрать.
@@ -294,7 +294,7 @@ Heartbeat-msg несёт избыточную типизацию: `type='system'
 | **Domain-событие (GUI)** | `Presenter → CommandDispatcher.dispatch(cmd) → Project.apply → store.save → EventBus.publish(event) → подписчики`. Уже минимален. |
 | **Register/field-edit** | `GUI → CommandDispatcher.dispatch(SetPluginConfig) → PluginConfigChanged → rm.set_value → send_message(process, {command:'set_config', data}) → queue`. **Единственный** мост; убрать send_callback/control_-путь. |
 | **Heartbeat** | `ProcessHeartbeat → send_message('ProcessManager') → queue → ProcessMonitor → _publish_state(StateStore)`. Минимален; убрать `subtype`. |
-| **Лог/ошибка/стат** | `ObservableMixin._log_*/_record_metric/_track_error → менеджер по имени → BatchBuffer → FileChannel`. In-process, не трогать. Убрать `_route_via_router`. |
+| **Лог/ошибка/стат** | `ObservableMixin._log_*/_record_metric/_track_error → менеджер по имени → FileChannel` (синхронно; у stats между ними `AggregationWindow`). In-process, не трогать. Убрать `_route_via_router`. |
 | **Blueprint (recipe launch)** | **Один путь** вместо трёх (domain ActivateRecipe / IPC blueprint.replace / sync proxy). Рекомендация: `RecipesPresenter → CommandDispatcher.dispatch(ActivateRecipe) → recipe YAML read → send_system_command('blueprint.replace', 'ProcessManager') → _cmd_blueprint_replace`. Убить sync `process_manager_proxy` (мёртв) и YAML-as-channel сделать явным звеном с валидацией на чтении. |
 
 ### 5.4 Предлагаемые ADR

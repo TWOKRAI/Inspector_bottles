@@ -7,7 +7,7 @@
 **Связанные документы:**
 
 - [ARCHITECTURE_MODULE_CATALOG.md](./ARCHITECTURE_MODULE_CATALOG.md) — **каталог всех модулей и пакетов** (отсюда строить диаграммы связей).
-- [ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md), [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md), `frontend_module/README.md`, `DECISIONS.md`.
+- [ROUTING_GLOSSARY.md](../../docs/ROUTING_GLOSSARY.md), [MODULES_OVERVIEW.md](../../docs/MODULES_OVERVIEW.md), `frontend_module/README.md`, `DECISIONS.md`.
 
 ---
 

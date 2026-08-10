@@ -158,45 +158,54 @@
 
 ### `logger_module`
 
-**Цель:** Логирование со scope-based маршрутизацией и батчингом.
+**Цель:** Логирование с маршрутизацией по группе (scope) и порогом по имени источника.
+Единственный писатель плоскости.
+
+> Подробности разъёмов, приёмников и пульта — в [`observability/`](observability/CONNECTORS.md):
+> `CONNECTORS.md`, `SINKS_MAP.md`, `CONTROL_PANEL.md`, `NEW_MODULE_RECIPE.md`.
 
 **Контракт:**
 - `ILogChannel(IChannel)`.
-- `LoggerManager(ChannelRoutingManager)` — `info/debug/warning/error/critical/<scope>` + `should_log(level, scope)`.
-- `LoggerManagerConfig(SchemaBase)` — каналы, scopes, modules.
-- `LogScope` — преднастроенные СТРОКИ `SYSTEM/BUSINESS/PERFORMANCE/AUDIT/SECURITY/DEBUG` (Ф2.4; не enum — `log()` принимает любую строку, новая группа заводится конфигом). Перечень дефолтов — `PRESET_SCOPES`, валидацией по нему пользоваться нельзя.
+- `LoggerManager(LoggerCore)` — `info/debug/warning/error/critical/<scope>` + `should_log(level, scope)`; `LoggerCore` — тело писателя, `LoggerManager` — он же плюс process-singleton.
+- `LoggerManagerConfig(SchemaBase)` — `channels`, `scopes`, `loggers` (правила по имени источника), `logger_groups` (ярлыки).
+- `LogScope` — преднастроенные СТРОКИ; `log()` принимает любую строку, новая группа заводится конфигом. Перечень дефолтов — `PRESET_SCOPES` (`SYSTEM/BUSINESS/PERFORMANCE/AUDIT/SECURITY/DEBUG`), валидацией по нему пользоваться нельзя. **Дефолтная раскладка каналов заведена на четыре** — `SYSTEM`, `BUSINESS`, `PERFORMANCE`, `DEBUG`.
 - `LogLevel(str, Enum)` — `DEBUG/INFO/WARNING/ERROR/CRITICAL`.
-- `LogRecord` — dataclass.
-- `StdLoggerFacade` / `get_std_logger(module)` — именованный **вид** поверх писателя (stdlib-подобный интерфейс). Адаптера у логгера нет: `LoggerAdapter` снят в 2.2 как без потребителей.
-- `get_logger(name)` — фабрика.
-- Каналы: `FileChannel`, `ConsoleChannel`, `HttpChannel`.
+- `LogRecord` — dataclass: `timestamp/level/scope/message/module/extra/seq`.
+- `StdLoggerFacade` / `get_std_logger(module)` — именованный **вид** поверх писателя. Адаптера у логгера нет: `LoggerAdapter` снят в 2.2 как без потребителей.
+- `ErrorFloor` — синхронный пол error/critical, не описан в `config.channels` и потому не гасится ни `enabled: false`, ни `sink.disable`.
+- Каналы: **шесть типов** в реестре `_SINK_FACTORIES` — `file`, `console`, `http`, `frame_trace`, `memory`, `null`; седьмой добавляется `register_sink_factory(type, cls)` без правки `create_channel`.
 
 **Инварианты:**
-1. `BatchBuffer` сбрасывает по size *или* interval.
-2. `LogRecord` — отдельный тип в `core/log_types.py` (не вложен в config).
-3. `log_enums.py` лежит на уровне модуля (`logger_module/log_enums.py`), **не** внутри `core/` — иначе цикл импорта между `configs` и `core`.
+1. **Запись синхронна на всех уровнях.** Батчинг файловой записи снят целиком в Ф7.4 (ADR-LOG-008): экономии на границе ОС он не давал (`write`/`flush` одинаковы), а хвост эмитента портил — p99 1348 против 75 мкс. Ключи `enable_batching` и соседи не значат ничего и называются вслух при чтении конфига.
+2. **У порога одна ось** (ADR-LOG-010): решение принимает правило по имени источника (самое длинное совпадение префикса) либо корневой `default_level`. У скоупа осталось единственное поле — `channels`.
+3. `LogRecord` — отдельный тип в `core/log_types.py` (не вложен в config); `seq` — пломба процесса, `0` означает «запись создана мимо писателя».
+4. `log_enums.py` лежит на уровне модуля (`logger_module/log_enums.py`), **не** внутри `core/` — иначе цикл импорта между `configs` и `core`.
+5. Процессор записи (Ф4) — контракт как у `logging.Filter`: вернул тот же dict → едет как есть; новый → заменяет для всех приёмников; `None` → поглощена (считается в `records_dropped_by_processor`); **бросил → запись всё равно доставляется**, отказ считается (`processor_failures`).
 
 **Зависимости:** `channel_routing_module`.
-**Тестов:** ~40+
+**Тестов:** 18 213 строк (соотношение к коду 2.6 : 1)
 
 ---
 
 ### `error_module`
 
-**Цель:** Severity-based маршрутизация ошибок поверх `LoggerManager`.
+**Цель:** Severity-based маршрутизация ошибок. **Брат** `LoggerManager`, а не его наследник:
+общий предок — `LoggerCore`.
 
 **Контракт:**
-- `ErrorManager(LoggerManager)` — `_level_to_channel: dict[LogLevel, str]`, override `log()`, `log_exception(exc, context=None)`, `track_error(exc, context=None)` (для `ObservableMixin`).
-- `ErrorManagerConfig(SchemaBase)` — пути для `critical.log` / `errors.log` / `warnings.log`.
+- `ErrorManager(LoggerCore, IErrorManager)` — `log_exception(exc, context=None)`, `track_error(exc, context=None)` (слот `error` у `ObservableMixin`), `routes_using_sink(name)`.
+- `ErrorManagerConfig(SchemaBase)` — пути для `critical.log` / `errors.log` / `warnings.log` + `severity_routes`.
+- `DEFAULT_SEVERITY_ROUTES` — уровень → приёмники **в порядке предпочтения**: `CRITICAL → [critical_file, errors_file]`, `ERROR → [errors_file, critical_file]`, `WARNING → [warnings_file, errors_file, critical_file]`.
 - `expand_error_manager_config()` — конвертирует `ErrorManagerConfig` → `LoggerManagerConfig`.
 
 **Инварианты:**
-1. Наследник `LoggerManager` (не композиция, не слияние).
-2. `_level_to_channel = {}` инициализируется **до** `super().__init__()` — защита от `AttributeError`.
-3. `WARNING+` идёт по severity routing; `DEBUG/INFO` — fallback на scope-based parent.
+1. **Одна точка эмиссии** — `_route()` (ADR-EM-007). Override `log()` снят в Ф4.2: развилка «ошибка или лог» жила в двух местах и расходилась.
+2. **Лестница живёт данными, а не ветвлением** (ADR-EM-008): новый уровень со своим файлом заводится конфигом, правок во фреймворке — ноль. Запасной приёмник всегда к **более важному** файлу: ERROR уходит в `critical.log`, а не в `warnings.log` — спрятать ошибку там значит потерять её на практике, формально ничего не потеряв.
+3. Действует первый приёмник цепочки, который **есть в реестре каналов**; заглушенный маршрут называется вслух (`_warn_on_silenced_severity_routes`).
+4. Плоскость **гасится на останове** и делает это видимо — строка `observability planes stopped: …` называет фактически погашенное (B3).
 
 **Зависимости:** `logger_module`.
-**Тестов:** ~25+
+**Тестов:** 1 862 строки
 
 ---
 
@@ -216,9 +225,13 @@
 **Инварианты:**
 1. Sentinel-паттерн: `enqueue` один раз → `flush` во все каналы (без N-кратного счёта).
 2. `get_metric` читает из `_metrics` (live), не из буфера.
+3. **Темп задаёт `aggregation_interval`, но у него есть объявленный пол** — `resolve_tempo` считает `max(flush_interval, aggregation_interval)` в ОДНОЙ позиции, значение ниже пола называется WARNING'ом с адресом ключа (развилка Р-3=(б), B1). Дефолты берутся из схемы, а не второй копией чисел в коде.
+4. **Readback отвечает плоскость, а не её конфиг** — `observability_readback()`: темп из **живого окна** (`AggregationWindow.flush_interval`), `enable_logging` из живого реестра каналов. Пересчёт из конфига дал бы то же число и при полностью несработавшей пересборке, то есть эхо запроса.
+5. **Граница с плоскостью хранения** (ADR-SM-007, ADR-CRM-009): модуль отвечает за **агрегацию**, транспорт и персистентность — не его. Снапшот метрик уезжает в `LogStatsChannel` → `LoggerManager.performance()`, то есть физически ложится туда, куда ведёт скоуп `PERFORMANCE`. **В `ObservabilityStore` статистика сегодня не пишется** (`kind=stats` до стора не доезжает) — это открытая задача C1, уехавшая первой фазой в план телеметрии.
+6. Плоскость **гасится раньше логгера**: её канал пишет через него, обратный порядок отправил бы финальный снапшот в закрытый приёмник (B3).
 
 **Зависимости:** `channel_routing_module`.
-**Тестов:** ~40+
+**Тестов:** 1 186 строк
 
 ---
 

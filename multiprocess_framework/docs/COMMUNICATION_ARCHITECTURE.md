@@ -145,7 +145,7 @@ GUI / домен (in-proc)   EventBus · QtEventBus · CommandDispatcherOrchestr
 
 - **FieldRouting.channel + RouterSchemaAdapter + routing_table** — оживить как **декларативный kind-слой** над каналами (FieldRouting декларирует kind/priority, не произвольную channel-строку). Решение Q3.
 - **dispatch стратегии PATTERN/FALLBACK/CHAIN + сценарии** (`ScenarioBuilder`/`ScenarioManager`/`dispatch_scenario`) — reserved для vision/processing-pipeline. Решение Q4 (сценарии беречь приоритетно).
-- **IBufferStrategy** (`BatchBuffer` triple-trigger, `AggregationWindow`, `AsyncSenderBuffer`) — точка расширения буферизации (back-pressure/batch для высокочастотной телеметрии).
+- **IBufferStrategy** (`DirectBuffer`, `AggregationWindow`, `AsyncSenderBuffer`) — точка расширения буферизации. `BatchBuffer` здесь был и снят в Ф7.4 (ADR-LOG-008): у плоскостей логов и ошибок буфера нет вовсе, запись синхронна.
 - **system_events** канал — задел под cross-process событийную шину; ждёт первого подписчика (решение Q5).
 - **PreviewWindow** — продуктовый задел превью кадров (подписка `display.*`); продюсера дать при реализации фичи (решение Q8). Подписку не удалять.
 - **StateStore**: `coalesce()`, selectors/middleware/persistence/recipes, `StateAdapterBase._pending_paths` (anti-loop — беречь), per-pattern фильтрация (ADR-SS-012).

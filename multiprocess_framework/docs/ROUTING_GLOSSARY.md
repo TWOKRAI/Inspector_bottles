@@ -16,12 +16,26 @@
 
 ---
 
-## Два уровня: процесс и канал
+## Три оси адресации: процесс, канал, источник
 
 1. **Имя процесса** — аргумент `target` в `send_message(target, msg)` (например `renderer`, `processor`). Его использует `FrontendRegistersBridge` после нормализации префикса `control_` в callback `RegistersManager`.
 2. **Строка канала Router** — ключ в реестре очередей (часто вида `control_*`), по которому backend подписывает обработчики. Задаётся в `FieldRouting(channel=...)`.
+3. **Имя источника наблюдаемости** — поле `module` записи: иерархическое точечное имя
+   (`multiprocess_framework.modules.router_module`), по которому решается **порог и приёмники
+   записи**. Живёт в `observability.loggers`, действует по самому длинному совпавшему префиксу.
 
-Эти строки **не обязаны совпадать**: например, поля регистра `draw` маршрутизируются в канал `control_draw`, а сообщения `register_update` с GUI могут уходить в процесс `renderer`, если так задано в `register_dispatch` или `connection_map`.
+Первые две строки **не обязаны совпадать**: например, поля регистра `draw` маршрутизируются в канал `control_draw`, а сообщения `register_update` с GUI могут уходить в процесс `renderer`, если так задано в `register_dispatch` или `connection_map`.
+
+**Третья ось не пересекается с первыми двумя вовсе,** и путать её с ними — типовая ошибка:
+транспорт отвечает на «кому доставить сообщение», источник — на «чья это запись и куда её
+писать». Транспорт отделён от плоскости наблюдаемости whitelist'ом (`RouterManager` унаследовал
+`set_sink_enabled` от общей базы, но операторской командой не адресуем — иначе IPC-канал снимался
+бы одной командой пульта).
+
+Отдельная ловушка имени: **наш `scope`** (`SYSTEM`/`BUSINESS`/`PERFORMANCE`/`DEBUG`) — это
+*группа* логирования, ключ маршрутизации. **`InstrumentationScope` у OTel** — идентификация
+*источника*, и эту роль у нас играет `module`. Понятия разные, имя похожее; дисциплина
+зафиксирована в ADR-LOG-005. Подробности — [`observability/CONNECTORS.md`](./observability/CONNECTORS.md).
 
 ---
 
@@ -42,4 +56,6 @@
 | **Регистры приложения** | Статические Pydantic-схемы (`SchemaBase`): поля, `FieldMeta`, `FieldRouting`, `register_dispatch`. В прототипе — `multiprocess_prototype/registers/schemas` (не часть фреймворка). |
 | **shared_resources_module** | Runtime IPC: очереди, события, shared memory — инфраструктура, на которой строится Router. |
 
-Подробнее об обзоре фреймворка: [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md).
+Подробнее об обзоре фреймворка: [MODULES_OVERVIEW.md](./MODULES_OVERVIEW.md)
+(прежний `FRAMEWORK_OVERVIEW.md` лежит в [`archive/`](./archive/FRAMEWORK_OVERVIEW.md) и живым
+источником не является).

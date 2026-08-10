@@ -178,7 +178,7 @@ python scripts/run_framework_tests.py
 - [ ] Сценарии:
   - Throughput RouterManager: 1k/10k/100k send_async/sec.
   - Latency end-to-end: msg.command(A → B) p50/p95/p99.
-  - LoggerManager BatchBuffer: 10k logs/sec, измерить flush latency.
+  - LoggerCore: 10k logs/sec, измерить хвост эмитента (запись синхронна с Ф7.4 — буфера, чей flush можно было бы мерить, больше нет).
   - StateStore: 100 подписчиков на `cameras.*.config.*`, измерить delta dispatch latency.
   - SRM: 1000 register_process за раз, измерить spawn-latency.
 - [ ] Сохранить baseline в `tests/performance/baseline.json`. Падение >20% — fail в CI.

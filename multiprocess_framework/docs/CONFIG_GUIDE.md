@@ -84,4 +84,4 @@ flowchart TB
 
 - [QUICK_START.md](./QUICK_START.md) — минимальный запуск
 - [ADR_REGISTRY.md](./ADR_REGISTRY.md) — модульные ADR (CFG, DS, RM, …)
-- [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md)
+- [MODULES_OVERVIEW.md](./MODULES_OVERVIEW.md)

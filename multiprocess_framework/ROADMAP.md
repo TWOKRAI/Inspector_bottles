@@ -1,6 +1,6 @@
 # Roadmap — От 8.1 к 10.0
 
-**Контекст:** см. [`ASSESSMENT.md`](./ASSESSMENT.md). Текущая оценка фреймворка — **8.1 / 10**. Этот документ — план «дельт», которые довешивают каждый раздел до максимума.
+**Контекст:** см. [`ASSESSMENT.md`](./ASSESSMENT_2026_05.md). Текущая оценка фреймворка — **8.1 / 10**. Этот документ — план «дельт», которые довешивают каждый раздел до максимума.
 
 **Сгруппировано по приоритетам (Tier 1–3) и сведено в спринты.**
 
@@ -11,7 +11,7 @@
 | # | Где теряется балл | Что добавить | Усилие |
 |---|-------------------|--------------|--------|
 | 1 | **CI отсутствует** | GitHub Actions matrix: `os: [ubuntu, windows, macos] × python: [3.11, 3.12]`. Прогон `python scripts/run_framework_tests.py` + `python scripts/validate.py` + `sentrux check` + lint | 1 день |
-| 2 | **Performance baseline отсутствует** | `tests/performance/` с `pytest-benchmark`: throughput RouterManager, latency end-to-end IPC, BatchBuffer overhead, ConfigStore sync. Цифры в CI как regression-guard | 2 дня |
+| 2 | **Performance baseline отсутствует** | `tests/performance/` с `pytest-benchmark`: throughput RouterManager, latency end-to-end IPC, цена гейта и разъёма наблюдаемости (бенчи Ф1/Ф7/D1 уже есть), ConfigStore sync. Цифры в CI как regression-guard | 2 дня |
 | 3 | **2 failing-теста** в зелёной зоне | Починить `test_init_creates_components` (нужен `config_handler` defensive guard) и `test_console_process_config_build_and_process_helper` (обновить ожидаемый contract `proc_dict`) | 30 мин каждый |
 | 4 | **Editable installation хрупкая** | В `pyproject.toml` корня проекта добавить `[tool.setuptools]` или `[tool.uv.sources]` с явным указанием пакета `multiprocess_framework`. Сейчас работает только из текущего каталога | 1 час |
 | 5 | **`pytest-asyncio` не подключён** | Async SQL-тесты выдают `Unknown pytest.mark.asyncio` warnings — нужно добавить в зависимости и настроить `pytest.ini` | 15 мин |
@@ -94,7 +94,7 @@
 
 ## Связанные документы
 
-- [`ASSESSMENT.md`](ASSESSMENT.md) — обоснование текущей оценки 8.1
+- [`ASSESSMENT.md`](ASSESSMENT_2026_05.md) — обоснование текущей оценки 8.1
 - [`SPEC.md`](SPEC.md) — целевая архитектура
 - [`docs/DESIGN_RULES.md`](docs/DESIGN_RULES.md) — инварианты, которые нельзя нарушать в ходе работы по карте
 - [`PROBLEMS.md`](PROBLEMS.md) — известные ограничения, многие из которых закрываются Tier 1–2

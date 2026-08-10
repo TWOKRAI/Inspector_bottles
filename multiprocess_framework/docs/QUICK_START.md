@@ -94,7 +94,7 @@ if __name__ == "__main__":
 
 | Цель | Документ |
 |------|----------|
-| Архитектура | [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md) |
+| Архитектура | [MODULES_OVERVIEW.md](./MODULES_OVERVIEW.md) |
 | Конфиг и dict | [CONFIG_GUIDE.md](./CONFIG_GUIDE.md) |
 | Расширение процесса | [EXTENSION_GUIDE.md](./EXTENSION_GUIDE.md) |
 | Проблемы запуска | [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) |

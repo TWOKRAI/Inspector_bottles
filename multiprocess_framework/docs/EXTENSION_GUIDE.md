@@ -37,6 +37,34 @@
 
 ---
 
+## 3a. Разъёмы наблюдаемости (обязательный пункт для любого нового кода)
+
+Подробный рецепт — [`observability/NEW_MODULE_RECIPE.md`](./observability/NEW_MODULE_RECIPE.md).
+Здесь — минимум, который проверяется:
+
+1. **Писать только через разъём.** Модуль/менеджер — `self._log_*`, `self._track_error`,
+   `self._record_metric`; плагин — `ctx.log_*`, `ctx.health.report_error`, `ctx.write_document`.
+   Голый `logging.getLogger` запрещён и ловится стражем по AST
+   (`logger_module/tests/test_std_logger_guard.py`): у stdlib-root в живых процессах нет
+   хендлеров, `INFO`/`DEBUG` теряются всегда, под `pythonw` — вообще всё. Нужен stdlib-стиль —
+   `get_std_logger(__name__)`, это **вид** над тем же писателем.
+2. **Объявить имя источника рядом с константой** в `interfaces.py`:
+   `LOG_SOURCE = declare_log_source("multiprocess_framework.modules.<модуль>", owner=__name__)`.
+   Имя **точечное**, не ярлык: правило по префиксу работает на поддереве, плоское имя — лист.
+3. **`_log_debug` на пути каждой записи — отложенным сообщением** (`lambda: f"…"`): f-строка
+   собирается до гейта и никаким порогом не снимается.
+4. **`ctx.log_error` ≠ `ctx.health.report_error`** (ADR-PM-030): первое — диагностическая строка в
+   плоскость логов, второе — **инцидент** в плоскость ошибок + счётчик health. Выбор осознанный,
+   не по вкусу.
+5. **Свой тип приёмника — `register_sink_factory`**, свой уровень ошибок — `severity_routes`,
+   своя метрика телеметрии — `declare_metric`. Правок во фреймворке при этом ноль; если правка
+   понадобилась — сначала проверь, не пытаешься ли ты обойти реестр.
+6. **Доказать доставку прогоном, а не тестом:** `observability.sink.tail` на кольце `memory` +
+   `introspect.observability` (имя в `declared_sources` и в `sources`, приёмник не в `idle_sinks`,
+   `channel_written_records` растёт).
+
+---
+
 ## 4. Dict at Boundary
 
 - Между процессами и в публичных IPC API — **только `dict`**.
@@ -63,4 +91,5 @@
 
 - [QUICK_START.md](./QUICK_START.md)
 - [CONFIG_GUIDE.md](./CONFIG_GUIDE.md)
+- [OBSERVABILITY_MAP.md](./OBSERVABILITY_MAP.md) и четыре справочника в [`observability/`](./observability/CONNECTORS.md)
 - Навыки репозитория: `add-process-module`, `add-register-schema`

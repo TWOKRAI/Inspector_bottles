@@ -1,6 +1,6 @@
 # Устранение неполадок (FAQ)
 
-Краткие ответы для разработчиков и тестировщиков. Детали — в [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md), [CONFIG_GUIDE.md](./CONFIG_GUIDE.md), [PROBLEMS.md](../PROBLEMS.md).
+Краткие ответы для разработчиков и тестировщиков. Детали — в [MODULES_OVERVIEW.md](./MODULES_OVERVIEW.md), [CONFIG_GUIDE.md](./CONFIG_GUIDE.md), [PROBLEMS.md](../PROBLEMS.md).
 
 ---
 
