@@ -184,14 +184,12 @@ class ObservableMixin(IObservableMixin):
         self._log_critical(message, **kwargs)
 
     def _record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
-        """Запись метрики через stats/statistics manager (stats имеет приоритет)."""
-        if not self._call_manager("stats", "record_metric", metric_name, value, tags or {}):
-            self._call_manager("statistics", "record_metric", metric_name, value, tags or {})
+        """Запись метрики через stats manager."""
+        self._call_manager("stats", "record_metric", metric_name, value, tags or {})
 
     def _record_timing(self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None) -> None:
-        """Запись времени выполнения через stats/statistics manager."""
-        if not self._call_manager("stats", "record_timing", metric_name, duration, tags or {}):
-            self._call_manager("statistics", "record_timing", metric_name, duration, tags or {})
+        """Запись времени выполнения через stats manager."""
+        self._call_manager("stats", "record_timing", metric_name, duration, tags or {})
 
     def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
         """Отслеживание ошибки через error manager (каноничный слот 'error').
