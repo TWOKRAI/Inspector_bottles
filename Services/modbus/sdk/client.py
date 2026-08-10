@@ -13,11 +13,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 from typing import Any
 
-from loguru import logger
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from Services.modbus.core.config import ModbusConfig, TransportType
 from Services.modbus.sdk.errors import (
@@ -25,6 +26,13 @@ from Services.modbus.sdk.errors import (
     ModbusIOError,
     ModbusNotAvailableError,
 )
+
+# D7: loguru переведён на наш разъём (get_std_logger) — прежде `from loguru import
+# logger` писал в СВОЙ сток (stderr, отдельный формат с ANSI), второй писатель в
+# одной консоли рядом с framework sink. Замена — та же одна строка, что описана в
+# docstring std_facade.py; прецедент миграции SDK-обёрток внешних библиотек —
+# Services/hikvision_camera/sdk/bindings.py.
+logger = get_std_logger(__name__)
 
 # Wire-логирование TX/RX в КОНСОЛЬ по умолчанию ВЫКЛЮЧЕНО — обмен виден в панели
 # «Вход/Выход» на странице устройства (devices.state.<id>.io_peek). Включить флуд
@@ -44,6 +52,63 @@ except ImportError:  # pragma: no cover - окружение без pymodbus
     ModbusSerialClient = None  # type: ignore
     ModbusException = Exception  # type: ignore
     MODBUS_AVAILABLE = False
+
+
+# --------------------------------------------------------------------------- #
+# D7: мост pymodbus → наш канал
+# --------------------------------------------------------------------------- #
+# pymodbus логирует через СОБСТВЕННЫЙ stdlib-логгер (`pymodbus.logging.Log`,
+# логгер "pymodbus.logging" — унаследован из "pymodbus"; "Connection to … failed:
+# timed out", "Repeating...." и т.п.), независимо от `logger` выше. У stdlib-root
+# в процессах фреймворка хендлеров нет (см. std_facade.py), поэтому запись уходит
+# в `logging.lastResort` — третий формат в одной консоли. `pymodbus_apply_logging_
+# config()` (её собственный StreamHandler) НЕ зовём нигде — вместо этого вешаем
+# свой handler на "pymodbus" (родитель, покрывает "pymodbus.logging" через
+# propagate) и "pymodbus_internal" (сейчас там только NullHandler самой
+# библиотеки — второй handler рядом с ним безопасен и не мешает).
+#: Логгеры библиотеки, которые перехватывает мост. Первый — родитель реального
+#: `"pymodbus.logging"` (покрывается через propagate); второй библиотека заводит
+#: сама и держит на нём только NullHandler.
+PYMODBUS_LOGGER_NAMES = ("pymodbus", "pymodbus_internal")
+
+
+class _PymodbusChannelBridge(logging.Handler):
+    """Единственная точка передачи записей pymodbus в get_std_logger()."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            get_std_logger(record.name).log(record.levelname, record.getMessage())
+        except Exception:  # noqa: BLE001 — обработчик логов не роняет вызывающего
+            self.handleError(record)
+
+
+def install_pymodbus_bridge() -> int:
+    """Привязать логгеры pymodbus к нашему разъёму. Возвращает число новых мостов.
+
+    Идемпотентно: повторный вызов (reload модуля, второй тестовый файл) не
+    множит handler'ы — иначе одна запись библиотеки превратилась бы в N
+    одинаковых строк по числу импортов.
+
+    **`propagate = False` — не «на всякий случай», а закрытие второго писателя.**
+    Замер D7: с обработчиком на root запись выходит ДВАЖДЫ — один раз нашим
+    мостом (`mpf.pymodbus.logging`), второй раз оригиналом, дошедшим до root'а.
+    Пока у root'а хендлеров нет, дубля не видно, но это свойство окружения, а не
+    гарантия: любой `logging.basicConfig()` в прикладном коде возвращает третий
+    формат в консоль — ровно то, что задача убирает. Отключение подъёма делает
+    «один писатель» структурным.
+    """
+    installed = 0
+    for name in PYMODBUS_LOGGER_NAMES:
+        lib_logger = logging.getLogger(name)
+        if not any(isinstance(h, _PymodbusChannelBridge) for h in lib_logger.handlers):
+            lib_logger.addHandler(_PymodbusChannelBridge())
+            installed += 1
+        lib_logger.propagate = False
+    return installed
+
+
+if MODBUS_AVAILABLE:
+    install_pymodbus_bridge()
 
 
 def _fmt_addr(args: tuple) -> str:

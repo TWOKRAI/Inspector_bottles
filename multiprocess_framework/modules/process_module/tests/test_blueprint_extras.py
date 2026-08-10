@@ -150,38 +150,41 @@ class TestTypedPriorityOverExtras:
 
 
 class TestConflictWarning:
-    """Fable LOW-5: конфликт typed≠extras при обоих заданных — warning."""
+    """Fable LOW-5: конфликт typed≠extras при обоих заданных — warning.
 
-    def test_conflict_logs_warning(self):
-        import loguru
+    D7: `blueprint.logger` — не loguru, а `get_std_logger("blueprint")`
+    (StdLoggerFacade). Спай на loguru-синк молчал бы теперь ВСЕГДА, независимо
+    от того, логируется конфликт или нет, — то есть проверял бы факт миграции,
+    а не свойство «конфликт логируется». Перехватываем сам вызов `warning()`:
+    `StdLoggerFacade.__slots__` не даёт переопределить метод на ЭКЗЕМПЛЯРЕ
+    (`blueprint.logger.warning = ...` упал бы AttributeError), поэтому патчим
+    класс — тот же публичный вызов, которым пользуется `as_generic_config()`.
+    """
+
+    def test_conflict_logs_warning(self, monkeypatch):
+        from multiprocess_framework.modules.logger_module.adapters.std_facade import StdLoggerFacade
 
         msgs: list[str] = []
-        sink_id = loguru.logger.add(lambda m: msgs.append(str(m)), level="WARNING")
-        try:
-            cfg = ProcessConfig(
-                process_name="pc",
-                chain_targets=["typed"],
-                extras={"chain_targets": ["extras"]},
-            )
-            cfg.as_generic_config()
-        finally:
-            loguru.logger.remove(sink_id)
+        monkeypatch.setattr(StdLoggerFacade, "warning", lambda self, msg, *a, **kw: msgs.append(str(msg)))
+        cfg = ProcessConfig(
+            process_name="pc",
+            chain_targets=["typed"],
+            extras={"chain_targets": ["extras"]},
+        )
+        cfg.as_generic_config()
         assert any("chain_targets" in m and "pc" in m for m in msgs), "конфликт должен логироваться"
 
-    def test_no_warning_when_extras_matches(self):
-        import loguru
+    def test_no_warning_when_extras_matches(self, monkeypatch):
+        from multiprocess_framework.modules.logger_module.adapters.std_facade import StdLoggerFacade
 
         msgs: list[str] = []
-        sink_id = loguru.logger.add(lambda m: msgs.append(str(m)), level="WARNING")
-        try:
-            cfg = ProcessConfig(
-                process_name="pc",
-                chain_targets=["same"],
-                extras={"chain_targets": ["same"]},
-            )
-            cfg.as_generic_config()
-        finally:
-            loguru.logger.remove(sink_id)
+        monkeypatch.setattr(StdLoggerFacade, "warning", lambda self, msg, *a, **kw: msgs.append(str(msg)))
+        cfg = ProcessConfig(
+            process_name="pc",
+            chain_targets=["same"],
+            extras={"chain_targets": ["same"]},
+        )
+        cfg.as_generic_config()
         assert not any("chain_targets" in m for m in msgs)
 
 

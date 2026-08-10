@@ -23,13 +23,21 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from loguru import logger
 from pydantic import field_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
+from ...logger_module import get_std_logger
 from ...process_module.plugins.port import Port, are_ports_compatible, validate_chain
 from ...process_module.plugins.registry import PluginRegistry
 from ...process_module.generic.generic_process_config import GenericProcessConfig, PluginConfig
+
+# D7: разъём доступен — `get_std_logger` работает и без поднятого LoggerManager
+# (ранний буфер + stdlib-фолбэк, см. std_facade.py), а `as_generic_config()` зовут
+# и до подъёма ProcessManager (launch.py), и внутри его собственного процесса.
+# Прежде `from loguru import logger` писал напрямую в консоль — вторым форматом
+# рядом с framework sink; своего писателя у SchemaBase-модели нет и не должно
+# быть, есть только общий разъём модуля.
+logger = get_std_logger("blueprint")
 
 
 @register_schema("WireV1")

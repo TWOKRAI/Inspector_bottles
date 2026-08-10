@@ -80,6 +80,12 @@ WHITELIST: dict[str, str] = {
         "строкой — facade.log() зовёт level.lower() и упал бы AttributeError. "
         "Миграция = смена публичного контракта конструктора, не правка строки."
     ),
+    "Services/modbus/sdk/client.py": (
+        "D7: единственная точка привязки logging.Handler к сторонним логгерам "
+        "'pymodbus'/'pymodbus_internal' — сама библиотека логирует через stdlib "
+        "(pymodbus.logging.Log), обращение к ЕЁ логгеру по имени обязательно для "
+        "handler'а-моста, это не вызов на запись прикладного сообщения."
+    ),
 }
 
 
