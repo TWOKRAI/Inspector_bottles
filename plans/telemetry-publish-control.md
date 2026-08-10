@@ -3,7 +3,7 @@
 - **Slug:** telemetry-publish-control
 - **Дата:** 2026-07-16
 - **Ветка:** feat/telemetry-publish-control (ответвить от feat/gui-telemetry-read-model после её закрытия)
-- **Статус:** DRAFT (согласован дизайн: publisher-gate primary + центральный троттл вторым — решение владельца 2026-07-16)
+- **Статус:** **ЗАКРЫТ** — merge `1f6bbd40` (ADR-PM-018, publisher-gate + центральный троттл); residual «каскад двух плоскостей» снимается в Ф8.2 `observability-unified-routing`. *(Шапка стояла `DRAFT` при слитом плане — исправлено на сверке статусов 2026-08-10.)*
 - **Продолжает:** [`gui-telemetry-read-model.md`](gui-telemetry-read-model.md) — тот сделал дешёвое GUI-**чтение**;
   этот делает управляемую **запись/публикацию** («публиковать ровно столько, сколько надо»).
 

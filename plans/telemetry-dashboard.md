@@ -3,7 +3,7 @@
 - **Slug:** telemetry-dashboard
 - **Дата:** 2026-07-17
 - **Ветка:** feat/telemetry-dashboard (от feat/telemetry-coherence)
-- **Статус:** DRAFT
+- **Статус:** **ЗАКРЫТ** — ветка `feat/telemetry-dashboard` слита в main (`1f5083d3`), follow-up нитов ревью — `937bc541`. *(Шапка стояла `DRAFT` при слитом плане — исправлено на сверке статусов 2026-08-10, третий случай класса «шапка врёт» после coherence 2026-07-20.)*
 - **Продолжает:** [`telemetry-publish-control.md`](telemetry-publish-control.md) (Ф4.1 GUI-контролы),
   [`gui-telemetry-read-model.md`](gui-telemetry-read-model.md) (read-model)
 
