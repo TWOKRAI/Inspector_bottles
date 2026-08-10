@@ -245,3 +245,5 @@
 - [Дубль обязан блокировать как оригинал](feedback_double_must_block_like_the_original.md) — мгновенный ответ превращает инъекцию «while True» в разгон памяти
 - [«Не деградировало» — идентичностью сборки](feedback_no_regression_proved_by_identical_build.md) — proc_dict ключ-в-ключ из worktree на HEAD, а не сравнение шумных прогонов
 - [Предохранитель может быть НЕ-операцией](feedback_safeguard_can_be_a_noop_with_green_units.md) — юнит на синтетике не доказывает, что механизм срабатывает на реальной топологии
+- [Порог-сумма прячет частичную слепоту](feedback_guard_threshold_hides_partial_blindness.md) — судить поимённо, «≥40 файлов» переживает потерю каталога
+- [commit забирает весь индекс](feedback_commit_takes_the_whole_index.md) — ранний git rm уедет в чужой коммит; сорванный pre-commit прячет правки в свой патч
