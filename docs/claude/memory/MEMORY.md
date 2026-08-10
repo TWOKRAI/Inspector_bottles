@@ -247,3 +247,5 @@
 - [Предохранитель может быть НЕ-операцией](feedback_safeguard_can_be_a_noop_with_green_units.md) — юнит на синтетике не доказывает, что механизм срабатывает на реальной топологии
 - [Порог-сумма прячет частичную слепоту](feedback_guard_threshold_hides_partial_blindness.md) — судить поимённо, «≥40 файлов» переживает потерю каталога
 - [commit забирает весь индекс](feedback_commit_takes_the_whole_index.md) — ранний git rm уедет в чужой коммит; сорванный pre-commit прячет правки в свой патч
+- [Одна ручка из пары мерит приоритет](feedback_test_setting_one_handle_of_a_pair_measures_priority.md) — чистить соседнюю явно, приоритет — отдельным тестом
+- [Ассерт отсутствия при extra=ignore вакуумен](feedback_absence_assertion_under_extra_ignore_is_vacuous.md) — сторожить положительный след (model_fields_set), не hasattr
