@@ -93,7 +93,12 @@ class TestAutoVacuumMigration:
         _legacy_shaped_db(db)
         store = ObservabilityStore(db)
         try:
-            assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 1
+            # Задача 1.6 добавила вторую миграцию под ТОТ ЖЕ гейт, поэтому число
+            # выросло. Свойство здесь — «миграция auto_vacuum отмечена как
+            # сделанная», то есть версия НЕ НИЖЕ её порога; равенство
+            # закрепляло соседнюю миграцию, а не эту.
+            version = int(store._conn.execute("PRAGMA user_version").fetchone()[0])
+            assert version >= _store_mod._AUTO_VACUUM_SCHEMA_VERSION
         finally:
             store.close()
 
@@ -110,7 +115,11 @@ class TestAutoVacuumMigration:
             store = ObservabilityStore(db)
             store.close()
 
-        assert len(calls) == 1, f"VACUUM отработал не ровно один раз: {calls}"
+        # Голосов у открытия теперь может быть несколько (1.6 добавила отчёт о
+        # построении индекса), поэтому считается ИМЕННО VACUUM, а не «сколько
+        # раз что-то сказали»: счёт по всем сообщениям сторожил бы соседа.
+        vacuums = [c for c in calls if len(c) > 2 and "auto_vacuum" in str(c[2])]
+        assert len(vacuums) == 1, f"VACUUM отработал не ровно один раз: {calls}"
 
     def test_fresh_db_never_needs_vacuum(self, tmp_path: Any, monkeypatch: Any) -> None:
         """На НОВОМ файле auto_vacuum применяется сразу же (пустая БД, страниц ещё
@@ -194,11 +203,15 @@ class TestRollbackHypothesisNotReproduced:
         batch = [
             {"kind": "log", "module": "m", "ts": float(i), "severity": "info", "message": f"row-{i}"} for i in range(3)
         ]
+        # ДЕЛЬТА, а не абсолют: соединение уже меняло строки на инициализации
+        # (миграции, построение индекса 1.6). Ноль здесь закреплял «ничего не
+        # делали ВООБЩЕ», а свойство — «этот батч не записал ничего».
+        changes_before = store._conn.total_changes
         n = store.append_records(batch)
         assert n == 0, "под реальной блокировкой append обязан отказать, а не пройти"
         dropped_after_failure = store.dropped
         assert dropped_after_failure == 3
-        assert store._conn.total_changes == 0, "под WAL частичной записи батча при locked не бывает"
+        assert store._conn.total_changes == changes_before, "под WAL частичной записи батча при locked не бывает"
 
         blocker.rollback()
         blocker.close()
@@ -232,10 +245,11 @@ class TestRollbackHypothesisNotReproduced:
             {"kind": "log", "module": "m", "ts": float(i), "severity": "info", "message": f"row-{i}"}
             for i in range(2000)
         ]
+        changes_before = store._conn.total_changes
         n = store.append_records(big_batch)
         assert n == 0
         assert store.dropped == 2000
-        assert store._conn.total_changes == 0
+        assert store._conn.total_changes == changes_before
 
         blocker.rollback()
         blocker.close()
