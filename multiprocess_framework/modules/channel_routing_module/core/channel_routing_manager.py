@@ -48,6 +48,11 @@ LOSS_COUNTER_KEYS = (
     "channel_write_errors",
     "channel_refused_records",
     "records_without_channels",
+    # D1: записи, НЕ розданные в tap'ы, потому что раздача уже шла в этом потоке
+    # (tap эмитит из своего write()). Это потеря по существу — запись не доехала
+    # до наблюдателя, — и она обязана быть названа: без счётчика подавление
+    # выглядело бы снаружи так же, как исправная тишина.
+    "tap_reentrant_suppressed",
 )
 
 #: Счётчики ДОСТАВКИ (Task 5.6). До них все счётчики считали только потери, и
@@ -222,6 +227,14 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         # выглядело потерей: 5 записей → 5 `unresolved_channel_records`,
         # а 2.V2 поднимала по ним аномалию.
         self._sinks_disabled_by_operator: set = set()
+
+        # D1: глубина раздачи в tap'ы — ПОТОЧНАЯ. Tap, который в своём write()
+        # эмитит новую запись через тот же менеджер, иначе уходит в рекурсию
+        # (воспроизведено до правки: 498 записей, глубина 498, наружу — ничего,
+        # потому что RecursionError глотает `except Exception` в цикле раздачи).
+        # Поточная, а не общая на менеджер: реентрантность — свойство СТЕКА
+        # вызова, и общий флаг глушил бы законную раздачу в соседнем потоке.
+        self._tap_depth = threading.local()
 
     # =========================================================================
     # ЖИЗНЕННЫЙ ЦИКЛ
@@ -1028,19 +1041,42 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
 
         Ошибка доставки в один tap не мешает остальным и не роняет эмитента:
         tail — наблюдение за работой, а не сама работа.
+
+        **Реентрантный вход подавляется, и подавление СЧИТАЕТСЯ** (D1). Tap,
+        эмитящий запись в своём ``write()``, — не экзотика: так выглядит любой
+        sink, который сам логирует. До правки это давало лавину до предела
+        рекурсии (498 записей на замере), а `RecursionError` глотался `except`
+        ниже: снаружи отказ выглядел «часть записей куда-то делась». Теперь
+        глубже первого уровня раздача не идёт, а число подавленных видно в
+        ``get_stats()['tap_reentrant_suppressed']`` — молчаливое подавление
+        отличалось бы от исправной работы ровно ничем.
         """
         if not self._tap_sinks:
+            return
+        # Ссылка берётся один раз: на горячем пути каждый лишний поиск атрибута
+        # по `self` стоит наравне с самой проверкой (замер D1).
+        depth_state = self._tap_depth
+        if getattr(depth_state, "active", False):
+            with self._miss_lock:
+                self.stats["tap_reentrant_suppressed"] += 1
             return
         # Позиция ЗАПИСИ: уровня может не быть вовсе (плоскость статистики) или
         # он может быть не опознан — и то, и другое считается самым низким
         # уровнем, а не нулём. См. :func:`record_severity`.
         severity = record_severity(level)
-        for channel, min_severity in list(self._tap_sinks.values()):
-            if severity >= min_severity:
-                try:
-                    channel.write(record_dict)
-                except Exception:  # nosec B110 — tail не должен влиять на наблюдаемое
-                    pass
+        depth_state.active = True
+        try:
+            for channel, min_severity in list(self._tap_sinks.values()):
+                if severity >= min_severity:
+                    try:
+                        channel.write(record_dict)
+                    except Exception:  # nosec B110 — tail не должен влиять на наблюдаемое
+                        pass
+        finally:
+            # Снимается ВСЕГДА, в том числе если tap уронил не-Exception
+            # (KeyboardInterrupt, SystemExit): иначе поток остался бы навсегда
+            # «внутри раздачи» и tail замолчал бы для него целиком.
+            depth_state.active = False
 
     # =========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ (для использования наследниками)
