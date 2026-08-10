@@ -18,6 +18,14 @@ name: multi_camera
 description: "Мульти-камера: 2 камеры → 2 процессора → compositor → GUI"
 
 processes:
+  # Презентация: объявляется ЗДЕСЬ, в headless-воплощении. presentation-overlay
+  # подменяет класс на Qt-шный (frontend/presentation.yaml). Адрес, который никто
+  # не объявил, отвергается сборкой — см. SystemBlueprint._unaddressable_chain_targets.
+  - process_name: gui
+    protected: true
+    process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+    plugins: []
+
   # --- Камера 0: первая камера (simulator, camera_id=0) ---
   - process_name: camera_0
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
@@ -98,6 +106,3 @@ processes:
         grid_rows: 1
         output_width: 1280
         output_height: 480
-
-  # gui — в фундаменте (backend/topology/base.yaml), суммируется при запуске.
-  # Pipeline адресует его по имени (chain_targets: [gui]).

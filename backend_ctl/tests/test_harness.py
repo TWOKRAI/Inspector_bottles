@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Тесты BackendHarness (Ф1 Task 1.3): честный headless + гарантированный teardown.
 
-- strip_gui — чистая функция фильтрации gui из топологии (юнит, без запуска системы);
+- headless-воплощение gui — сборка headless-топологии не несёт Qt-класса (юнит);
 - harness_smoke — live-прогон: старт → introspect.status пары процессов → стоп < 30с;
 - регресс из 1.1: state_subscribe → set_register → ожидаем push state.changed в
   событийном канале (events_page). Помечен xfail — push физически не доходит до
@@ -14,54 +14,72 @@ import time
 
 import pytest
 
-from backend_ctl.harness import BackendHarness, strip_gui
+from backend_ctl.harness import BackendHarness
 from backend_ctl.tests.conftest import wait_for_events as _wait_events
 
 
-class TestStripGui:
-    """Юнит: честный headless = исключить процесс презентации из топологии."""
+class TestHeadlessIncarnation:
+    """Юнит: честный headless = процесс презентации БЕЗ Qt, а не его отсутствие.
 
-    def test_removes_gui_process(self) -> None:
-        bp = {
-            "processes": [
-                {"process_name": "gui", "protected": True},
-                {"process_name": "camera_0"},
-            ],
-            "wires": [],
+    Harness топологию больше не правит (план D8): рецепт объявляет `gui` в
+    headless-воплощении, Qt-класс ставит только presentation-overlay, который
+    harness не подмешивает. Тест судит РЕЗУЛЬТАТ сборки, а не наличие функции-
+    фильтра: прежний `strip_gui` был зелен на своих юнитах и при этом НЕ-операцией
+    на дефолтной топологии harness (после Ф2 ни `region_pipeline`, ни `base.yaml`
+    процесса `gui` не объявляли — вырезать было нечего, а шторм отказов шёл).
+    """
+
+    QT_CLASS = "multiprocess_prototype.frontend.process.GuiProcess"
+    HEADLESS_CLASS = "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess"
+
+    def _headless_processes(self, *, with_base: bool) -> dict:
+        """Процессы headless-топологии harness: {имя: process_class}."""
+        from pathlib import Path as _Path
+
+        from multiprocess_prototype.backend.launch import load_topology_dict, merge_topologies
+        from multiprocess_prototype.main import DEFAULT_BLUEPRINT, HERE
+
+        blueprint = load_topology_dict(_Path(DEFAULT_BLUEPRINT))
+        if with_base:
+            blueprint = merge_topologies(load_topology_dict(HERE / "backend" / "topology" / "base.yaml"), blueprint)
+        return {
+            proc.get("process_name"): proc.get("process_class")
+            for proc in blueprint["processes"]
+            if isinstance(proc, dict)
         }
-        out = strip_gui(bp)
-        names = [p["process_name"] for p in out["processes"]]
-        assert "gui" not in names
-        assert "camera_0" in names
 
-    def test_does_not_mutate_input(self) -> None:
-        bp = {"processes": [{"process_name": "gui"}, {"process_name": "cam"}]}
-        strip_gui(bp)
-        # исходный dict не тронут (Dict-at-Boundary: работаем на копии)
-        assert [p["process_name"] for p in bp["processes"]] == ["gui", "cam"]
+    @pytest.mark.parametrize("with_base", [False, True])
+    def test_headless_topology_carries_gui_without_qt(self, with_base: bool) -> None:
+        procs = self._headless_processes(with_base=with_base)
+        assert "gui" in procs, "приёмник презентации обязан существовать — иначе адрес gui без адресата"
+        assert procs["gui"] == self.HEADLESS_CLASS
+        assert self.QT_CLASS not in procs.values(), "headless не должен нести Qt-класс ни у одного процесса"
 
-    def test_noop_when_no_gui(self) -> None:
-        bp = {"processes": [{"process_name": "cam"}]}
-        # gui и так нет → возвращаем тот же объект (no-op, без копии)
-        assert strip_gui(bp) is bp
+    def test_every_chain_target_has_a_declared_process(self) -> None:
+        """Адрес без объявленного процесса — это и есть корень шторма D8."""
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
+            SystemBlueprint,
+        )
+        from pathlib import Path as _Path
 
-    def test_custom_gui_name(self) -> None:
-        bp = {"processes": [{"process_name": "frontend"}, {"process_name": "cam"}]}
-        out = strip_gui(bp, gui_name="frontend")
-        assert [p["process_name"] for p in out["processes"]] == ["cam"]
+        from multiprocess_prototype.backend.launch import load_topology_dict, merge_topologies
+        from multiprocess_prototype.main import DEFAULT_BLUEPRINT, HERE
 
-    def test_robust_to_missing_processes(self) -> None:
-        assert strip_gui({}) == {}
-        assert strip_gui({"processes": "not-a-list"}) == {"processes": "not-a-list"}
+        blueprint = merge_topologies(
+            load_topology_dict(HERE / "backend" / "topology" / "base.yaml"),
+            load_topology_dict(_Path(DEFAULT_BLUEPRINT)),
+        )
+        assert SystemBlueprint.model_validate(blueprint)._unaddressable_chain_targets() == []
 
 
 @pytest.mark.harness_smoke
 def test_harness_smoke_start_status_stop() -> None:
     """Live smoke: honest headless старт → introspect.status пары процессов → стоп < 30с.
 
-    with_base=True: топология включает фундамент, где объявлен gui — strip_gui обязан
-    его исключить, иначе поднялся бы Qt/LoginDialog (Ф0.4). Порт 8766 — чтобы не
-    конфликтовать с session-фикстурой headless_backend (8765), если та активна.
+    with_base=True: топология включает фундамент (always-on инфра), как в проде.
+    Qt/LoginDialog не поднимается потому, что harness не подмешивает
+    presentation-overlay, а рецепт объявляет gui в headless-воплощении (Ф0.4).
+    Порт 8766 — чтобы не конфликтовать с session-фикстурой headless_backend (8765).
     """
     t0 = time.monotonic()
     harness = BackendHarness(with_base=True, port=8766)

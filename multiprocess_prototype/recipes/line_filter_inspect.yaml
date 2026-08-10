@@ -37,6 +37,17 @@ blueprint:
     locked_nodes: []
 
   processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
     # --- Камера: кадр в детектор И в рисовальщик (frame для Join) ---
     - process_name: camera_0
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp

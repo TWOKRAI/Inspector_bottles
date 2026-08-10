@@ -15,6 +15,13 @@ description: "Описание системы"  # Человекочитаемо
 # Каждый процесс = GenericProcessApp с набором плагинов.
 # chain_targets определяет кому процесс отправляет результат.
 processes:
+  # Презентация: объявляется ЗДЕСЬ, в headless-воплощении. presentation-overlay
+  # подменяет класс на Qt-шный (frontend/presentation.yaml). Адрес, который никто
+  # не объявил, отвергается сборкой — см. SystemBlueprint._unaddressable_chain_targets.
+  - process_name: gui
+    protected: true
+    process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+    plugins: []
 
   # Источник данных (камера)
   - process_name: camera_0           # Уникальное имя процесса

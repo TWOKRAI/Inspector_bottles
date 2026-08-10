@@ -119,8 +119,12 @@ def bookmark_cursor(drv, *, plane: Any = None):
 def headless_backend():
     """Подключённый BackendDriver к headless-системе прототипа (без gui).
 
-    with_base=True — подмешиваем фундамент (там объявлен gui), чтобы strip_gui реально
-    его исключил: доказываем честный headless на топологии, которая иначе спавнит Qt.
+    with_base=True — подмешиваем фундамент (always-on инфра `devices`), как в проде.
+
+    Окна нет потому, что harness не накладывает presentation-патч, а рецепт объявляет
+    `gui` в headless-воплощении (план D8). Прежняя формулировка — «фундамент, где
+    объявлен gui, и strip_gui его исключает» — была неверна дважды: после Ф2 gui в
+    фундаменте не объявлялся, и вырезать было нечего.
     """
     harness = BackendHarness(with_base=True)
     drv = harness.start()

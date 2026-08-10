@@ -19,6 +19,17 @@ blueprint:
   description: "Пульт (control_panel): контролы → сигналы на out_1..out_4"
 
   processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
     - process_name: pult
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal

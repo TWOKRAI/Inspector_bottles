@@ -39,6 +39,17 @@ blueprint:
   description: "Робот Delta: тонкий job-форвардер в devices hub"
 
   processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
     # --- Камера: захват кадров (превью в дисплей) ---
     - process_name: camera_0
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp

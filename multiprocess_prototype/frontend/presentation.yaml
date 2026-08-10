@@ -1,33 +1,33 @@
-# presentation.yaml — ПРЕЗЕНТАЦИОННЫЙ OVERLAY (Ф2 frontend-constructor, 2026-07).
+# presentation.yaml — ПРЕЗЕНТАЦИОННЫЙ OVERLAY (Ф2 frontend-constructor, 2026-07;
+# пересмотрен планом D8, 2026-08-10).
 #
-# Единственный процесс презентации (GUI). Раньше жил в backend/topology/base.yaml
-# (обязательный фундамент); теперь — отдельный overlay, который подмешивается
-# ТОЛЬКО когда явно запрошен (см. AppManifest.presentation, SystemBuilder.from_manifest):
-#   merged = base ⊕ presentation ⊕ pipeline   (порядок важен — overlay мёржится
-#                                               ПЕРЕД pipeline, побеждает при коллизии)
+# Overlay — это ПАТЧ поверх слитой топологии, а не второй список процессов:
+#
+#   merged     = merge_topologies(base, recipe)                  # фундамент ⊕ рецепт
+#   merged     = apply_presentation_overlay(merged, presentation) # gui → GuiProcess
+#
+# Процесс ``gui`` объявляет РЕЦЕПТ — в headless-воплощении
+# (``frontend.headless_process.HeadlessGuiProcess``): бэкенд headless-first, окно
+# добавляется этим overlay'ем. Здесь подменяется только КЛАСС; имя, protected и
+# прочие поля остаются рецептными.
+#
+# Патч НЕ добавляет процессов: если рецепт презентации не объявил (пробные
+# рецепты вроде ``g1_perf_probe``), окна не будет и с overlay'ем — рисовать
+# нечего, и добавлять приёмник, которому никто не шлёт, значило бы поднимать
+# процесс зря. Несовпавшее объявление overlay'я называется предупреждением, а
+# не пропускается молча.
 #
 # Как включить:
 #   - явная точка входа фронта: multiprocess_prototype/frontend/run.py
 #     (выставляет env INSPECTOR_PRESENTATION=<путь к этому файлу>);
 #   - headless-флаг основного входа (INSPECTOR_HEADLESS=1 / --headless) ПЕРЕБИВАЕТ
-#     этот overlay — даже если presentation задан, GUI не поднимается.
-#
-# Без overlay (обычный backend-only запуск через main.py/run.py) бэкенд бутится
-# headless — только always-on инфра из base.yaml (``devices``) + pipeline.
-#
-# Известный edge case (вне скоупа Ф2, реконсиляция — после C3/4.7 recipe-оси):
-# несколько рецептов (phone_sketch, hikvision_letter_robot, dataset_circle_capture,
-# camera_robot_calibration, letter_angle_inspect, webcam_sketch) объявляют процесс
-# `gui` ИНЛАЙН прямо в себе — при запуске БЕЗ presentation-overlay они всё равно
-# поднимут GUI, т.к. несут его сами. Это ожидаемо и не является багом headless-режима.
+#     этот overlay — окно не поднимается, ``gui`` остаётся дренирующим.
 
 name: presentation
-description: "Презентационный overlay: GUI (PySide6)"
+description: "Презентационный overlay: gui получает Qt-класс (PySide6)"
 
 processes:
   - process_name: gui
-    protected: true
     process_class: multiprocess_prototype.frontend.process.GuiProcess
-    plugins: []
 
 wires: []

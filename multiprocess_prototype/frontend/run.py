@@ -11,13 +11,19 @@
 ``backend/config/manifest.py::load_manifest`` читает этот env-overlay так же, как
 ``INSPECTOR_MANIFEST`` для пути к самому манифесту — приоритетнее значения из
 ``app.yaml`` (которое presentation по умолчанию не задаёт, headless-first).
-``backend/launch.py::SystemBuilder.from_manifest`` подмешивает overlay к фундаменту
-ПЕРЕД pipeline: ``merged = base ⊕ presentation ⊕ pipeline``.
+``backend/launch.py::SystemBuilder.from_manifest`` накладывает overlay ПАТЧЕМ поверх
+уже слитой топологии (план D8, 2026-08-10)::
+
+    merged = merge_topologies(base, recipe)                      # рецепт объявил gui
+    merged = apply_presentation_overlay(merged, presentation)    # gui → Qt-класс
+
+То есть overlay не ДОБАВЛЯЕТ процесс презентации, а подменяет ему класс: сам процесс
+объявляет рецепт, в headless-воплощении (``frontend/headless_process.py``).
 
 Headless-флаг (``INSPECTOR_HEADLESS=1`` / ``--headless``, см. ``main.py``) остаётся
 единственным резолвером и ПОБЕЖДАЕТ этот overlay, даже если тот включён здесь —
-запуск ``frontend/run.py --headless`` поднимет систему БЕЗ окна (симметрия с
-``main.py``/``run.py``, где headless-флаг перебивает presentation манифеста).
+запуск ``frontend/run.py --headless`` поднимет систему БЕЗ окна: процесс ``gui``
+останется, но будет дренировать data-трафик вместо рисования.
 
 venv-guard — 1-в-1 с ``multiprocess_prototype/run.py`` (см. его докстринг про
 ``sys.path[0]`` при прямом запуске скрипта).

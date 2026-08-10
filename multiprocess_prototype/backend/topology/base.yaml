@@ -1,18 +1,21 @@
 # base.yaml — ФУНДАМЕНТ (приватная топология, headless-only).
 #
 # Базовые always-on процессы инфраструктуры, которые есть ВСЕГДА и НЕ участвуют
-# в pipeline. Презентация (GUI) здесь БОЛЬШЕ НЕ объявляется (Ф2 frontend-constructor,
-# 2026-07) — она вынесена в отдельный презентационный overlay
-# ``multiprocess_prototype/frontend/presentation.yaml``.
+# в pipeline. Процесс презентации ``gui`` здесь НЕ объявляется: он — узел
+# рецепта, как любой другой (план D8, 2026-08-09). Рецепт объявляет его в
+# headless-воплощении (``frontend.headless_process.HeadlessGuiProcess``), а
+# презентационный overlay ``multiprocess_prototype/frontend/presentation.yaml``
+# ПОДМЕНЯЕТ ему класс на Qt-шный.
 #
 # При запуске фундамент СУММИРУЕТСЯ с активным pipeline (см. launch.merge_topologies):
 #   merged.processes = base.processes + pipeline.processes
-# Если задан презентационный overlay (``AppManifest.presentation``), он подмешивается
-# ПЕРЕД pipeline: merged = base ⊕ presentation ⊕ pipeline (см. SystemBuilder.from_manifest).
+# Затем, если презентация включена, поверх накладывается overlay-ПАТЧ
+# (``launch.apply_presentation_overlay``) — см. SystemBuilder.from_manifest.
 #
-# Headless по умолчанию: без presentation-overlay бэкенд бутится без окна — просто
-# always-on инфра (``devices``) + pipeline. GUI поднимается только через явную точку
-# входа ``multiprocess_prototype/frontend/run.py`` (включает presentation-overlay).
+# Правило «адрес обязан быть объявлен» (D8): ``chain_targets``/``wires``, ведущие
+# в процесс, которого нет в СЛИТОЙ топологии, отвергаются сборкой с адресом ключа.
+# До этого правила такой адрес давал отказ доставки на каждый кадр молча —
+# 1418 отказов за 30 с на стенде ``webcam_sketch``.
 #
 # Оркестратор (ProcessManagerProcessApp) — процесс-хозяин, добавляется лончером
 # отдельно (orchestrator_class_path), здесь не объявляется.

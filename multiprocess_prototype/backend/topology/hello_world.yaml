@@ -11,6 +11,14 @@ name: hello_world
 description: "Минимальный пример: камера-симулятор → GUI"
 
 processes:
+  # Презентация: объявляется ЗДЕСЬ, в headless-воплощении. presentation-overlay
+  # подменяет класс на Qt-шный (frontend/presentation.yaml). Адрес, который никто
+  # не объявил, отвергается сборкой — см. SystemBlueprint._unaddressable_chain_targets.
+  - process_name: gui
+    protected: true
+    process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+    plugins: []
+
   - process_name: camera_0
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
     priority: normal
@@ -26,6 +34,3 @@ processes:
         resolution_width: 640
         resolution_height: 480
         auto_start: true
-
-  # gui — в фундаменте (backend/topology/base.yaml), суммируется при запуске.
-  # Pipeline адресует его по имени (chain_targets: [gui]).

@@ -1691,6 +1691,453 @@ processes:
     - shm_reclaim
     - shm_release
     - state.changed
+  gui:
+    commands:
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
+      name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: observability_recipe
+        required: false
+        type: Dict
+      - name: observability_recipe_path
+        required: false
+        type: str
+      - name: observability_recipe_reload
+        required: false
+        type: bool
+      - name: observability_reset
+        required: false
+        type: List
+      - name: observability_session_clear
+        required: false
+        type: bool
+      - name: path
+        required: false
+        type: str
+      - name: persist
+        required: false
+        type: bool
+      - name: telemetry
+        required: false
+        type: Dict
+      - name: telemetry_mode
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
+      name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
+      tags:
+      - health
+      - system
+    - description: Текущий снапшот здоровья процесса (status/errors/last_error)
+      name: health.status
+      tags:
+      - health
+      - system
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
+      tags:
+      - system
+    - description: 'Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel,
+        errors_to_floor)'
+      name: introspect.observability
+      params_schema:
+      - name: audit_limit
+        required: false
+        type: int
+      - name: flush
+        required: false
+        type: bool
+      - name: resolve
+        required: false
+        type: str | List
+      tags:
+      - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: 'Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval)'
+      name: introspect.telemetry
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости)
+      name: logger.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Алиас observability.sink.tail (имя до 5.10)
+      name: logger.sink.tail
+      tags:
+      - system
+    - description: Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2)
+      name: observability.persist
+      params_schema:
+      - name: recipe_path
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel)
+      name: observability.sink.disable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel)
+      name: observability.sink.enable
+      params_schema:
+      - name: manager
+        required: false
+        type: str
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      - name: ttl
+        required: false
+        type: float
+      tags:
+      - system
+    - description: Прочитать последние N записей приёмника, хранящего их у себя (type=memory)
+      name: observability.sink.tail
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
+      tags:
+      - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
+      tags:
+      - system
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
+      tags:
+      - system
+    registers: {}
+    router_handlers: []
   preprocessor:
     commands:
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
@@ -4432,6 +4879,8 @@ topology:
     class: multiprocess_prototype.generic_process_app.GenericProcessApp
   devices:
     class: multiprocess_prototype.generic_process_app.GenericProcessApp
+  gui:
+    class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
   preprocessor:
     class: multiprocess_prototype.generic_process_app.GenericProcessApp
   process_flip:

@@ -195,6 +195,50 @@ def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:
     return merged
 
 
+def apply_presentation_overlay(topology: dict, overlay: dict) -> dict:
+    """Наложить презентационный overlay ПАТЧЕМ на слитую топологию (план D8, 2026-08-10).
+
+    Отличие от :func:`merge_topologies` принципиальное, поэтому это отдельная
+    функция, а не флаг: там фундамент и pipeline — два СЛАГАЕМЫХ, и при коллизии
+    имён побеждает фундамент. Здесь overlay — ПАТЧ: одноимённый процесс
+    ПЕРЕОПРЕДЕЛЯЕТСЯ пополям (``gui`` получает Qt-класс вместо headless-класса,
+    объявленного рецептом).
+
+    **Патч не добавляет процессов.** Рецепт, не объявивший презентацию, окна не
+    получает и с overlay'ем: добавлять приёмник, которому никто не шлёт, значило
+    бы поднимать процесс зря. Несовпавшее объявление overlay'я НАЗЫВАЕТСЯ
+    предупреждением — молчаливый пропуск читался бы как «презентация включена».
+
+    Чистая функция над dict-контрактом (Dict-at-Boundary): вход не мутируется.
+    """
+    procs = list(topology.get("processes") or [])
+    index = {p.get("process_name"): i for i, p in enumerate(procs) if isinstance(p, dict)}
+
+    for patch in overlay.get("processes") or []:
+        if not isinstance(patch, dict):
+            continue
+        name = patch.get("process_name")
+        position = index.get(name)
+        if position is None:
+            print(
+                f"[launch] presentation-overlay: процесс '{name}' не объявлен активной "
+                f"топологией — патч не применён (окна для него не будет)",
+                file=sys.stderr,
+            )
+            continue
+        procs[position] = {**procs[position], **patch}
+
+    patched = dict(topology)
+    patched["processes"] = procs
+    # Остальные секции — суммируются: overlay может добавить свои провода/дисплеи,
+    # но не отменяет то, что объявила активная топология.
+    for section in ("wires", "displays", "display_definitions"):
+        summed = list(topology.get(section) or []) + list(overlay.get(section) or [])
+        if summed or section in topology:
+            patched[section] = summed
+    return patched
+
+
 def _merge_observability(base: dict | None, pipeline: dict | None) -> dict | None:
     """Слить секции ``observability`` фундамента и pipeline (pipeline побеждает)."""
     if base is None and pipeline is None:
@@ -321,10 +365,12 @@ class SystemBuilder:
             app: загруженный манифест.
             pipeline_override: CLI-override активного pipeline (имя рецепта или путь).
             include_presentation: единственный резолвер презентации (Ф2 T1.2/T2.2) —
-                presentation-overlay подмешивается ⟺ ``app.presentation`` задан И
+                presentation-патч накладывается ⟺ ``app.presentation`` задан И
                 ``include_presentation`` истинен. ``False`` — headless-флаг
                 (``INSPECTOR_HEADLESS``/``--headless``) перебивает presentation, даже
-                если тот задан в манифесте/env-overlay.
+                если тот задан в манифесте/env-overlay. Headless при этом означает
+                не «нет процесса презентации», а «он в дренирующем воплощении»
+                (план D8): процесс объявляет рецепт, патч лишь меняет ему класс.
         """
         from .config.schemas import load_system_config
 
@@ -336,14 +382,13 @@ class SystemBuilder:
         blueprint = unwrap_recipe(raw)
 
         if app.base:
-            foundation = load_topology_dict(app.base)
-            if include_presentation and app.presentation:
-                # overlay мёржится ПЕРЕД pipeline — при коллизии (напр. рецепт с
-                # инлайн-gui) побеждает presentation, не pipeline.
-                foundation = merge_topologies(foundation, load_topology_dict(app.presentation))
-            blueprint = merge_topologies(foundation, blueprint)
-        elif include_presentation and app.presentation:
-            blueprint = merge_topologies(load_topology_dict(app.presentation), blueprint)
+            blueprint = merge_topologies(load_topology_dict(app.base), blueprint)
+        # Overlay — ПАТЧ поверх УЖЕ СЛИТОЙ топологии (D8): процесс `gui` объявляет
+        # рецепт (в headless-воплощении), overlay подменяет ему класс на Qt-шный.
+        # Порядок «после слияния», а не «до»: патчить нужно то, что реально поедет,
+        # иначе объявление рецепта победило бы патч и окно не поднялось бы.
+        if include_presentation and app.presentation:
+            blueprint = apply_presentation_overlay(blueprint, load_topology_dict(app.presentation))
 
         # Boot-инжект recipe_devices в конфиг device_hub (Р11 device-hub)
         from multiprocess_prototype.recipes.devices_sync import (

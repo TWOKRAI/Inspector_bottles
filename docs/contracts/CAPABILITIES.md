@@ -22,6 +22,7 @@ request-response (dict). События (push без request_id) читаютс�
 |---|---|
 | `camera_0` | `multiprocess_prototype.generic_process_app.GenericProcessApp` |
 | `devices` | `multiprocess_prototype.generic_process_app.GenericProcessApp` |
+| `gui` | `multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess` |
 | `preprocessor` | `multiprocess_prototype.generic_process_app.GenericProcessApp` |
 | `process_flip` | `multiprocess_prototype.generic_process_app.GenericProcessApp` |
 | `process_grayscale` | `multiprocess_prototype.generic_process_app.GenericProcessApp` |
@@ -297,6 +298,57 @@ request-response (dict). События (push без request_id) читаютс�
 ### Router-handlers (события, не команды)
 
 `shm_reclaim`, `shm_release`, `state.changed`
+
+## Процесс `gui`
+
+### Команды
+
+| Команда | Описание | Теги |
+|---|---|---|
+| `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `flush_stats` |  | stats |
+| `get_metric` |  | stats |
+| `get_metrics` |  | stats |
+| `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
+| `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
+| `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
+| `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
+| `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
+| `introspect.plugins` | Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover) | system |
+| `introspect.queues` | Глубины очередей процесса (backpressure) | system |
+| `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
+| `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
+| `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
+| `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
+| `logger.sink.disable` | Алиас observability.sink.disable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.enable` | Алиас observability.sink.enable (имя до 5.10; охват тот же — три плоскости) | system |
+| `logger.sink.tail` | Алиас observability.sink.tail (имя до 5.10) | system |
+| `observability.persist` | Сохранить рантайм-правки наблюдаемости в спутник рецепта (слой L2) | system |
+| `observability.sink.disable` | Выключить приёмник по имени на плоскости manager=logger|error|stats (unregister_channel) | system |
+| `observability.sink.enable` | Включить приёмник по имени на плоскости manager=logger|error|stats (register_channel) | system |
+| `observability.sink.tail` | Прочитать последние N записей приёмника, хранящего их у себя (type=memory) | system |
+| `observability.tail.subscribe` | Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record) | system |
+| `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
+| `reset_metrics` |  | stats |
+| `router.relay` | Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам) | system |
+| `routing.probe` | Диагностика: отправить inner-билет соседу (peer→peer доставка после switch) | system |
+| `routing.refresh` | Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1) | system |
+| `stats_snapshot` |  | diagnostics, stats |
+| `telemetry.reconfigure` | Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle) | system |
+| `wire.configure` | Настроить wire middleware (SHM sender/receiver) | system |
+| `wire.deconfigure` | Удалить wire middleware | system |
+| `worker.create` | Создать воркер в процессе | system |
+| `worker.drain` | Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop | system |
+| `worker.pause_all` | Поставить все прикладные воркеры процесса на паузу | system |
+| `worker.remove` | Удалить воркер из процесса | system |
+| `worker.restart` | Перезапустить воркер | system |
+| `worker.resume_all` | Возобновить все прикладные воркеры процесса | system |
+| `worker.start` | Запустить остановленный воркер | system |
+| `worker.stop` | Остановить воркер (без удаления) | system |
+| `worker.update` | Перенастроить воркер (приоритет/интервал) | system |
 
 ## Процесс `preprocessor`
 

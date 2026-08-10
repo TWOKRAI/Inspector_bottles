@@ -13,6 +13,14 @@ name: inspection_basic
 description: "Базовая инспекция: камера → HSV-маска → детекция → overlay → GUI"
 
 processes:
+  # Презентация: объявляется ЗДЕСЬ, в headless-воплощении. presentation-overlay
+  # подменяет класс на Qt-шный (frontend/presentation.yaml). Адрес, который никто
+  # не объявил, отвергается сборкой — см. SystemBlueprint._unaddressable_chain_targets.
+  - process_name: gui
+    protected: true
+    process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+    plugins: []
+
   # --- Камера: захват кадров через simulator backend ---
   - process_name: camera_0
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
@@ -67,6 +75,3 @@ processes:
         category: processing
         mask_alpha: 0.5
         draw_detections: true
-
-  # gui — в фундаменте (backend/topology/base.yaml), суммируется при запуске.
-  # Pipeline адресует его по имени (chain_targets: [gui]).

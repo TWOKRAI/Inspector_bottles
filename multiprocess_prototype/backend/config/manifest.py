@@ -51,8 +51,9 @@ class AppManifest(BaseModel):
         base:         Фундамент-топология (always-on инфра, БЕЗ презентации).
                       ``None`` — фундамент не используется (запуск читает
                       только ``pipeline``).
-        presentation: Презентационный overlay-топология (GUI). ``None`` —
-                      headless (GUI не подмешивается). См.
+        presentation: Презентационный overlay-ПАТЧ (GUI): подменяет процессу ``gui``
+                      класс на Qt-шный. ``None`` — headless: тот же процесс живёт в
+                      дренирующем воплощении, объявленном рецептом (план D8). См.
                       ``frontend/presentation.yaml``, ``SystemBuilder.from_manifest``.
     """
 

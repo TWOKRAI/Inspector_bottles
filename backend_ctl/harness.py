@@ -5,13 +5,22 @@
 ``BackendDriver`` и — главное — гарантировать, что после теста НЕ остаётся висящих
 процессов (урок Ф0.4: shutdown мог зависать 8+ минут из-за gui/LoginDialog).
 
-Честный headless (не костыль в проде):
-    Процесс презентации (``gui``) исключается из топологии на стороне harness —
-    :func:`strip_gui` фильтрует его из blueprint ДО сборки ``SystemBuilder``. Прод-код
-    (multiprocess_prototype/multiprocess_framework) не трогается: harness лишь собирает
-    launcher из тех же публичных помощников (``load_topology_dict``/``merge_topologies``/
-    ``SystemBuilder``), но с урезанной топологией. Так gui-процесс физически не спавнит
-    Qt/LoginDialog — источник Ф0.4-зависания устранён в корне.
+Честный headless (без правок топологии на стороне harness):
+    Рецепт объявляет процесс ``gui`` в headless-воплощении
+    (``frontend.headless_process.HeadlessGuiProcess`` — принимает data-трафик и
+    выбрасывает); Qt-класс подставляет только презентационный overlay, а harness
+    его не подмешивает. Поэтому harness больше НИЧЕГО не делает с топологией:
+    Qt/LoginDialog не спавнится сам по себе (источник Ф0.4-зависания устранён в
+    корне), а приёмник у адреса ``gui`` есть.
+
+    До плана D8 (2026-08-10) harness ВЫРЕЗАЛ процесс ``gui`` из топологии
+    (``strip_gui``), и это стоило шторма отказов доставки: адрес оставался в
+    ``chain_targets`` продюсеров, приёмника не было — 1418 отказов за 30 с на
+    стенде ``webcam_sketch``, причём ни одного у самого продюсера (билет уходил
+    хабу relay'ем и падал уже там). Вдобавок вырезание было НЕ-операцией в
+    дефолтной конфигурации: после выноса презентации в overlay (Ф2) ни
+    ``region_pipeline``, ни ``base.yaml`` процесса ``gui`` не объявляли — вырезать
+    было нечего, а шторм шёл.
 
 Гарантированный teardown:
     ``stop()`` зовёт ``launcher.shutdown()`` в watchdog-потоке с таймаутом; независимо от
@@ -20,7 +29,7 @@
 
 Запуск по умолчанию — рецепт ``region_pipeline`` (синтетический, без реального железа;
 тот же, что использует ``smoke_proof``). С ``with_base=True`` подмешивается фундамент
-(``base.yaml``), где как раз и живёт ``gui`` — тогда :func:`strip_gui` реально срабатывает.
+(``base.yaml``) — always-on инфра (``devices``), как в проде.
 """
 
 from __future__ import annotations
@@ -40,35 +49,13 @@ if TYPE_CHECKING:
         SystemLauncher,
     )
 
-#: Имя процесса презентации в топологии (исключается для честного headless).
+#: Имя процесса презентации в топологии (объявляет РЕЦЕПТ, см. докстринг модуля).
 GUI_PROCESS_NAME = "gui"
 
 
 # ---------------------------------------------------------------------------
-# Топология: честный headless через фильтрацию gui-процесса
+# Сборка headless-launcher'а
 # ---------------------------------------------------------------------------
-
-
-def strip_gui(blueprint: dict, *, gui_name: str = GUI_PROCESS_NAME) -> dict:
-    """Вернуть топологию без процесса презентации (``gui``) — честный headless.
-
-    Чистая функция над dict-контрактом (Dict-at-Boundary): не мутирует вход,
-    возвращает либо исходный dict (если gui и так нет — no-op), либо мелкую копию
-    с отфильтрованным ``processes``. Ссылки на ``gui`` в wires/chain_targets/displays
-    остаются, но без процесса-приёмника просто не доставляются (router логирует, не
-    падает) — для headless-инспекции этого достаточно.
-    """
-    if not isinstance(blueprint, dict):
-        return blueprint
-    procs = blueprint.get("processes")
-    if not isinstance(procs, list):
-        return blueprint
-    filtered = [p for p in procs if not (isinstance(p, dict) and p.get("process_name") == gui_name)]
-    if len(filtered) == len(procs):
-        return blueprint  # gui-процесса не было — топологию не трогаем
-    bp = dict(blueprint)
-    bp["processes"] = filtered
-    return bp
 
 
 def build_headless_launcher(
@@ -76,13 +63,17 @@ def build_headless_launcher(
     recipe: Optional[Path | str] = None,
     with_base: bool = False,
 ) -> "SystemLauncher":
-    """Собрать ``SystemLauncher`` из топологии прототипа БЕЗ gui-процесса.
+    """Собрать ``SystemLauncher`` из топологии прототипа без презентационного overlay.
+
+    Headless здесь — это ОТСУТСТВИЕ overlay'я, а не правка топологии: процесс
+    ``gui`` объявлен рецептом в headless-воплощении и поднимается как обычно,
+    просто без Qt (см. докстринг модуля).
 
     Args:
         recipe: путь к рецепту/топологии; None → дефолтный ``region_pipeline``
             (тот же, что у ``smoke_proof`` — синтетический, без реального железа).
-        with_base: подмешать фундамент (``base.yaml``) — там объявлен ``gui``,
-            так что ``strip_gui`` реально что-то удаляет (демонстрация честного headless).
+        with_base: подмешать фундамент (``base.yaml``) — always-on инфра
+            (``devices``), как в проде.
 
     Использует только ПУБЛИЧНЫЕ помощники прототипа — прод-код не меняется.
     """
@@ -99,7 +90,6 @@ def build_headless_launcher(
     if with_base:
         base_path = HERE / "backend" / "topology" / "base.yaml"
         blueprint = merge_topologies(load_topology_dict(base_path), blueprint)
-    blueprint = strip_gui(blueprint)
 
     builder = SystemBuilder(
         sys_config=load_system_config(CONFIG_PATH),

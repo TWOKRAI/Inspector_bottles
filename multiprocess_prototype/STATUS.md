@@ -76,11 +76,20 @@ python multiprocess_prototype/frontend/run.py
 
 ## Граница фронт/бэк (Ф2 frontend-constructor)
 
-- `backend/topology/base.yaml` — headless-only фундамент (только `devices`); презентация
-  (`gui`) вынесена в `frontend/presentation.yaml` (overlay, подмешивается ⟺ явно запрошен).
+- `backend/topology/base.yaml` — headless-only фундамент (только `devices`).
+- **Процесс `gui` объявляет РЕЦЕПТ** — в headless-воплощении
+  (`frontend/headless_process.py::HeadlessGuiProcess`: принимает data-трафик и
+  выбрасывает). Правка D8 (2026-08-10, ADR-PMM-025): headless — это процесс без окна,
+  а не отсутствие процесса. Прежняя раскладка оставляла `chain_targets: [gui]` без
+  приёмника — 1418 отказов доставки за 30 с на стенде `webcam_sketch`.
+- `frontend/presentation.yaml` — overlay-**ПАТЧ**: подменяет `gui` класс на Qt-шный,
+  процессов не добавляет. Порядок: `merge_topologies(base, recipe)` →
+  `apply_presentation_overlay(..., presentation)`.
 - `AppManifest.presentation: Path | None` — `None` = headless. Резолвер: `SystemBuilder.
   from_manifest(app, include_presentation=...)` — единственная точка, где решается,
-  подмешивать ли overlay (`base ⊕ presentation ⊕ pipeline`).
+  накладывать ли патч.
+- **Адрес обязан быть объявлен:** `chain_target` в процесс, которого нет в слитой
+  топологии, отвергается сборкой (`SystemBlueprint.check`) с адресом ключа.
 - `backend/config/manifest.py` больше не хардкодит `frontend/styles/themes` — `styles`
   опционален (headless не читает); фронт fail-loud, если `styles` не задан.
 - sentrux-инвариант `backend/* → frontend/*` = forbid (`.sentrux/rules.toml`) — backend
@@ -88,8 +97,10 @@ python multiprocess_prototype/frontend/run.py
   `backend.launch/config/state`, — разрешено, это хардкод-shell по определению).
 - **Отложено (эстафета в В3/конструктор фронта):** dual-launcher runtime-аттач (фронт
   как отдельный ОС-процесс к живому бэкенду — грабли «два бэкенда в одном прогоне»),
-  сокращение forward-импортов `frontend → backend`, реконсиляция recipe-инлайн `gui`
-  (5-6 рецептов держат свой `gui` внутри — после C3/4.7 recipe-оси, вне скоупа Ф2).
+  сокращение forward-импортов `frontend → backend`.
+- **Закрыто D8 (2026-08-10):** реконсиляция recipe-инлайн `gui`. Инлайн-объявления
+  больше не расходятся с фундаментом — `gui` объявляют ВСЕ рецепты, которые его
+  адресуют (14 из 17), и в одном и том же headless-классе.
 
 ## Связанные документы
 

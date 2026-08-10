@@ -1,10 +1,17 @@
-"""Тесты слияния фундамент ⊕ presentation ⊕ pipeline (launch.merge_topologies).
+"""Тесты слияния фундамент ⊕ pipeline ⊕ presentation-патч (launch).
 
-Ф2 frontend-constructor (2026-07): презентация (`gui`) вынесена из обязательного
-фундамента (`base.yaml`) в отдельный overlay (`frontend/presentation.yaml`).
-Гарантируют: base.yaml — headless-only (без gui), presentation-overlay даёт gui,
-merge(base, presentation) добавляет gui ровно один раз, chain_targets:[gui]
-резолвится после полного слияния (base ⊕ presentation ⊕ pipeline).
+Ф2 frontend-constructor (2026-07) вынес презентацию из фундамента в overlay.
+План D8 (2026-08-10) поправил вторую половину: `gui` объявляет РЕЦЕПТ — в
+headless-воплощении (`HeadlessGuiProcess`), а overlay ПОДМЕНЯЕТ ему класс на
+Qt-шный. То есть headless — это не «процесса нет», а «процесс без окна».
+
+Почему так, а не как было. Прежде headless означал отсутствие процесса при
+живых `chain_targets: [gui]` у продюсеров: адрес без приёмника давал отказ
+доставки на КАЖДЫЙ кадр — 1418 отказов за 30 с на стенде `webcam_sketch`.
+
+Гарантируют: base.yaml — инфра без презентации; рецепт объявляет `gui` в
+headless-воплощении; overlay патчит КЛАСС и не добавляет процессов; ни один
+`chain_target` не ведёт в необъявленный процесс.
 """
 
 from pathlib import Path
@@ -13,7 +20,11 @@ import pytest
 import yaml
 
 from multiprocess_framework.modules.process_manager_module.topology.blueprint import SystemBlueprint
-from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
+from multiprocess_prototype.backend.launch import (
+    apply_presentation_overlay,
+    merge_topologies,
+    unwrap_recipe,
+)
 
 TOPOLOGY_DIR = Path(__file__).resolve().parents[1]
 BASE_PATH = TOPOLOGY_DIR / "base.yaml"
@@ -29,7 +40,10 @@ ACTIVE_PIPELINES = [
     "multi_camera.yaml",
 ]
 
+#: Класс презентации с окном — его ставит ТОЛЬКО presentation-overlay.
 GUI_CLASS = "multiprocess_prototype.frontend.process.GuiProcess"
+#: Headless-воплощение того же процесса — его объявляют рецепты и топологии.
+HEADLESS_CLASS = "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess"
 
 
 def _load(name: str) -> dict:
@@ -53,118 +67,128 @@ def _presentation() -> dict:
         return yaml.safe_load(f)
 
 
-def _base_with_presentation() -> dict:
-    """Полный фундамент с включённой презентацией: base ⊕ presentation."""
-    return merge_topologies(_base(), _presentation())
+def _with_presentation(topology: dict) -> dict:
+    """Активная топология с включённой презентацией: патч поверх слитого."""
+    return apply_presentation_overlay(topology, _presentation())
 
 
 class TestBaseMerge:
-    """Контракт merge_topologies: фундамент ⊕ presentation-overlay ⊕ pipeline."""
+    """Контракт: фундамент ⊕ pipeline, затем presentation-ПАТЧ поверх слитого."""
 
-    def test_base_is_headless_infra_only(self):
-        """base.yaml — headless-only фундамент: только always-on инфра (devices),
-        БЕЗ презентации (Ф2 — gui вынесен в overlay)."""
+    def test_base_is_infra_only_without_presentation(self):
+        """base.yaml — always-on инфра (devices); презентацию объявляет рецепт."""
         base = _base()
         names = {p["process_name"] for p in base["processes"]}
-        assert "gui" not in names, "gui должен быть вынесен в presentation-overlay"
+        assert "gui" not in names, "gui объявляет рецепт, не фундамент"
         assert "devices" in names
 
-    def test_presentation_overlay_provides_gui_process(self):
-        """Презентационный overlay содержит процесс презентации `gui` (класс GuiProcess)."""
+    def test_presentation_overlay_carries_only_the_qt_class(self):
+        """Overlay несёт КЛАСС, а не процесс: он патчит то, что объявил рецепт."""
         presentation = _presentation()
         gui = next((p for p in presentation["processes"] if p["process_name"] == "gui"), None)
-        assert gui is not None, "presentation.yaml должен содержать процесс gui"
+        assert gui is not None, "presentation.yaml должен нести патч для gui"
         assert gui["process_class"] == GUI_CLASS
 
-    def test_base_plus_presentation_adds_gui_once(self):
-        """merge(base, presentation): gui добавлен из overlay ровно один раз,
-        always-on инфра фундамента (devices) сохранена."""
-        merged = _base_with_presentation()
+    def test_recipe_declares_gui_in_the_headless_incarnation(self):
+        """Рецепт объявляет процесс презентации САМ — и в headless-классе.
+
+        Это и есть суть D8: приёмник существует всегда, окно добавляется патчем.
+        """
+        gui = next(p for p in _load_region_pipeline()["processes"] if p["process_name"] == "gui")
+        assert gui["process_class"] == HEADLESS_CLASS
+        assert gui.get("protected") is True, "презентация protected — switch не должен её сносить"
+
+    def test_headless_build_has_gui_without_qt(self):
+        """Headless-сборка (без overlay): процесс gui ЕСТЬ, класс — headless.
+
+        Прежний контракт утверждал обратное («gui not in names»), и ровно это
+        оставляло chain_targets:[gui] без приёмника.
+        """
+        merged = merge_topologies(_base(), _load_region_pipeline())
+        configs = SystemBlueprint.model_validate(merged).build_configs()
+        by_name = {c.process_name: c for c in configs}
+        assert "gui" in by_name, "headless — это процесс без окна, а не отсутствие процесса"
+        assert by_name["gui"].process_class == HEADLESS_CLASS
+        assert "devices" in by_name and "camera_0" in by_name and "stitcher" in by_name
+
+    def test_presentation_patch_swaps_the_class_in_place(self):
+        """С overlay'ем тот же процесс получает Qt-класс — ровно один gui."""
+        merged = _with_presentation(merge_topologies(_base(), _load_region_pipeline()))
         names = [p["process_name"] for p in merged["processes"]]
-        assert names.count("gui") == 1
-        assert "devices" in names
+        assert names.count("gui") == 1, "патч не должен добавлять второй процесс"
         gui = next(p for p in merged["processes"] if p["process_name"] == "gui")
         assert gui["process_class"] == GUI_CLASS
+        assert gui.get("protected") is True, "поля рецепта переживают патч"
 
-    def test_pipelines_have_no_gui(self):
-        """Pipeline-топологии не объявляют gui (он в presentation-overlay)."""
-        for name in ACTIVE_PIPELINES:
-            names = {p["process_name"] for p in _load(name)["processes"]}
-            assert "gui" not in names, f"{name}: gui должен приходить из presentation-overlay"
+    def test_patch_does_not_add_processes_the_topology_never_declared(self):
+        """Рецепт без презентации не получает окно даже с overlay'ем.
+
+        Добавлять приёмник, которому никто не шлёт, значило бы поднимать процесс
+        зря; а молчаливое добавление читалось бы как «презентация включена».
+        """
+        topology = {"name": "t", "processes": [{"process_name": "cam", "plugins": []}], "wires": []}
+        patched = apply_presentation_overlay(topology, _presentation())
+        assert [p["process_name"] for p in patched["processes"]] == ["cam"]
+
+    def test_patch_does_not_mutate_input(self):
+        topology = {
+            "name": "t",
+            "processes": [{"process_name": "gui", "process_class": HEADLESS_CLASS, "plugins": []}],
+            "wires": [],
+        }
+        apply_presentation_overlay(topology, _presentation())
+        assert topology["processes"][0]["process_class"] == HEADLESS_CLASS
 
     @pytest.mark.parametrize("name", ACTIVE_PIPELINES)
-    def test_merge_adds_gui_preserves_pipeline(self, name):
-        """merge(base⊕presentation, pipeline): gui добавлен из overlay ровно один раз,
-        все процессы pipeline сохранены."""
+    def test_pipelines_declare_gui_and_keep_their_processes(self, name):
+        """Каждая активная топология объявляет gui сама; merge ничего не теряет."""
         pipeline = _load(name)
-        merged = merge_topologies(_base_with_presentation(), pipeline)
+        gui = next((p for p in pipeline["processes"] if p["process_name"] == "gui"), None)
+        assert gui is not None, f"{name}: адресует gui — обязан его объявить"
+        assert gui["process_class"] == HEADLESS_CLASS
+        merged = merge_topologies(_base(), pipeline)
         names = [p["process_name"] for p in merged["processes"]]
         assert names.count("gui") == 1, f"{name}: gui должен быть ровно один"
-        gui = next(p for p in merged["processes"] if p["process_name"] == "gui")
-        assert gui["process_class"] == GUI_CLASS
         for p in pipeline["processes"]:
             assert p["process_name"] in names, f"{name}: процесс {p['process_name']} потерян при merge"
 
     def test_region_pipeline_merge_golden_build(self):
-        """Golden: merge(base⊕presentation, region_pipeline) собирается в configs;
-        gui (из overlay) присутствует ровно один раз с классом GuiProcess."""
-        merged = merge_topologies(_base_with_presentation(), _load_region_pipeline())
+        """Golden: merge(base, region_pipeline) + патч собирается в configs;
+        gui ровно один, с Qt-классом."""
+        merged = _with_presentation(merge_topologies(_base(), _load_region_pipeline()))
         configs = SystemBlueprint.model_validate(merged).build_configs()
         names = [c.process_name for c in configs]
         assert names.count("gui") == 1
         assert next(c for c in configs if c.process_name == "gui").process_class == GUI_CLASS
 
-    def test_chain_targets_gui_resolves_after_merge(self):
-        """chain_targets:[gui] из pipeline резолвится после полного слияния
-        (base ⊕ presentation ⊕ pipeline)."""
-        merged = merge_topologies(_base_with_presentation(), _load_region_pipeline())
+    def test_chain_targets_resolve_after_merge(self):
+        """Каждый chain_target резолвится в СЛИТОЙ топологии — и это же судит
+        сборка (``SystemBlueprint``), а не только этот тест."""
+        merged = merge_topologies(_base(), _load_region_pipeline())
         names = {p["process_name"] for p in merged["processes"]}
         for proc in merged["processes"]:
             for target in proc.get("chain_targets", []):
                 assert target in names, f"chain_target '{target}' не резолвится в merged"
-
-    def test_base_plus_pipeline_without_presentation_is_headless(self):
-        """Полный фундамент (base, БЕЗ presentation) ⊕ pipeline собирается без gui —
-        headless по умолчанию (аналог test_pipeline_alone_is_headless, но с фундаментом:
-        полный манифест без presentation даёт configs без процесса gui)."""
-        merged = merge_topologies(_base(), _load_region_pipeline())
-        configs = SystemBlueprint.model_validate(merged).build_configs()
-        names = {c.process_name for c in configs}
-        assert "gui" not in names
-        assert "devices" in names
-        assert "camera_0" in names and "stitcher" in names
+        assert SystemBlueprint.model_validate(merged)._unaddressable_chain_targets() == []
 
     def test_merge_dedupes_on_collision_base_wins(self):
-        """Если pipeline тоже объявляет gui — побеждает фундамент (dedupe).
-
-        base здесь = base ⊕ presentation (полный фундамент с включённой презентацией) —
-        overlay мёржится ПЕРЕД pipeline, поэтому именно overlay должен победить.
-        """
-        base = _base_with_presentation()
+        """Если pipeline объявляет процесс фундамента — побеждает фундамент."""
         pipeline = {
             "name": "dup",
             "processes": [
                 {"process_name": "cam", "plugins": []},
-                {"process_name": "gui", "process_class": "other.Class", "plugins": []},
+                {"process_name": "devices", "process_class": "other.Class", "plugins": []},
             ],
         }
-        merged = merge_topologies(base, pipeline)
-        guis = [p for p in merged["processes"] if p["process_name"] == "gui"]
-        assert len(guis) == 1, "gui не должен дублироваться"
-        assert guis[0]["process_class"] == GUI_CLASS, "должен победить presentation-overlay"
+        merged = merge_topologies(_base(), pipeline)
+        devices = [p for p in merged["processes"] if p["process_name"] == "devices"]
+        assert len(devices) == 1, "devices не должен дублироваться"
+        assert devices[0]["process_class"] != "other.Class", "должен победить фундамент"
 
     def test_merge_preserves_pipeline_name(self):
         """Результат берёт name/description из pipeline (активная нагрузка)."""
         merged = merge_topologies(_base(), _load_region_pipeline())
         assert merged["name"] == "region_pipeline"
-
-    def test_pipeline_alone_is_headless(self):
-        """Headless: pipeline без фундамента собирается без процесса презентации,
-        цепочка обработки сохраняется (бэкенд работает без GUI)."""
-        configs = SystemBlueprint.model_validate(_load_region_pipeline()).build_configs()
-        names = {c.process_name for c in configs}
-        assert "gui" not in names
-        assert "camera_0" in names and "stitcher" in names
 
     def test_protected_survives_merge_and_build(self):
         """Регрессия У1 (device-hub): protected: true из base.yaml переживает
@@ -175,7 +199,7 @@ class TestBaseMerge:
         base = {
             "name": "base",
             "processes": [
-                {"process_name": "gui", "protected": True, "process_class": GUI_CLASS, "plugins": []},
+                {"process_name": "gui", "protected": True, "process_class": HEADLESS_CLASS, "plugins": []},
                 {
                     "process_name": "devices",
                     "protected": True,
@@ -212,14 +236,16 @@ class TestBaseMerge:
         assert protected_flags["devices"] is True
         assert protected_flags["worker"] is False
 
-    def test_real_presentation_yaml_protected_gui(self):
-        """Реальный presentation.yaml: gui помечен protected, флаг доезжает до
-        proc_dict через полное слияние (base ⊕ presentation ⊕ pipeline)."""
+    def test_protected_from_the_recipe_survives_the_presentation_patch(self):
+        """`protected` объявляет РЕЦЕПТ, и патч класса его не теряет.
+
+        Раньше флаг приходил из presentation.yaml; теперь overlay несёт только
+        класс, и потеря флага при патче означала бы, что switch сносит окно.
+        """
         presentation = _presentation()
-        gui_proc = next(p for p in presentation["processes"] if p["process_name"] == "gui")
-        assert gui_proc.get("protected") is True
-        # Через build
-        merged = merge_topologies(_base_with_presentation(), _load_region_pipeline())
+        gui_patch = next(p for p in presentation["processes"] if p["process_name"] == "gui")
+        assert "protected" not in gui_patch, "overlay несёт класс, а не флаги процесса"
+        merged = _with_presentation(merge_topologies(_base(), _load_region_pipeline()))
         sb = SystemBlueprint.model_validate(merged)
         for cfg in sb.build_configs():
             if cfg.process_name == "gui":

@@ -544,6 +544,42 @@ class SystemBlueprint(SchemaBase):
             for name in orphans
         ]
 
+    def _unaddressable_chain_targets(self) -> list[str]:
+        """``chain_targets``, ведущие в процесс, которого в топологии нет (план D8).
+
+        **Почему это отдельная проверка, а не следствие проверки wires.** Провод
+        (``wires``) судится по портам плагинов и уже отвергает неизвестный адрес;
+        ``chain_targets`` — ДРУГАЯ ось (маршрут между процессами), и её не судил
+        никто. Расхождение стоило шторма: ``stitcher.chain_targets: [gui]`` при
+        отсутствующем процессе ``gui`` давал отказ доставки на КАЖДЫЙ кадр —
+        1418 отказов за 30 с на стенде, и ни строки о причине в самой топологии.
+
+        Адрес иерархический (``процесс[.воркер…]``) — судится первый сегмент:
+        ниже процесса резолв происходит уже на приёме, и топология про него
+        ничего не знает. Broadcast-адреса пропускаются: у них адресат не имя.
+
+        Оркестратор входит в известные имена: его в ``self.processes`` нет, но
+        адресовать его законно (та же оговорка, что у
+        :meth:`_unknown_observability_processes`).
+        """
+        from ...message_module.addressing import is_broadcast
+        from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
+
+        known = {proc.process_name for proc in self.processes} | {ORCHESTRATOR_PROCESS_NAME}
+        errors: list[str] = []
+        for proc in self.processes:
+            for target in proc.chain_targets or []:
+                if not target or is_broadcast(str(target)):
+                    continue
+                head = str(target).split(".")[0]
+                if head not in known:
+                    errors.append(
+                        f"chain_targets: процесс '{proc.process_name}' адресует '{target}', "
+                        f"но процесса '{head}' в топологии нет — объяви его или убери адрес "
+                        f"(есть: {', '.join(sorted(known))})"
+                    )
+        return errors
+
     def check_structure(self) -> list[str]:
         """Публичный gate структурной валидации (RS-5, C-4): дубли имён + циклы.
 
@@ -601,6 +637,7 @@ class SystemBlueprint(SchemaBase):
         """
         errors: list[str] = list(self._duplicate_process_names())
         errors.extend(self._unknown_observability_processes())
+        errors.extend(self._unaddressable_chain_targets())
 
         # Раздельные карты входов и выходов — плагин может иметь
         # одноимённые input/output порты (e.g. "frame" → "frame")

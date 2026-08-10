@@ -20,6 +20,17 @@ blueprint:
   description: "Демо с выводом метаданных кадра по Modbus параллельно дисплею"
 
   processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
     # --- Камера: захват кадров ---
     - process_name: camera_0
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp

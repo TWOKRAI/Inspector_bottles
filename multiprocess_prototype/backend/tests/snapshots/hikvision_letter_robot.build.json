@@ -1765,7 +1765,7 @@
       "workers": {}
     },
     "gui": {
-      "class": "multiprocess_prototype.frontend.process.GuiProcess",
+      "class": "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess",
       "config": {
         "chain_targets": [],
         "copy_out_targets": [],

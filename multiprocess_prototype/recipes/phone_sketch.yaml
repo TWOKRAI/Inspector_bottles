@@ -63,7 +63,7 @@ blueprint:
     - process_name: gui
       plugins: []
       workers: []
-      process_class: multiprocess_prototype.frontend.process.GuiProcess
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
       priority:
       target_process:
       chain_targets: []
