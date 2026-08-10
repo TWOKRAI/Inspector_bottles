@@ -43,6 +43,26 @@ BROKER_TARGET = "ProcessManager"
 #: журналу и при этом ограничен по построению.
 MAX_ATTEMPTS = 3
 
+#: Порог живого хвоста, который GUI объявляет брокеру (Н-2, решение Р-1а плана
+#: ``observability-roadmap``).
+#:
+#: **Почему уровень вообще назван.** Приёмка F1 нашла, что этот класс шлёт
+#: подписку без ключа ``level``, а дефолт процесса — ``ERROR``. То есть панель
+#: наблюдаемости была ERROR-only ПО ПОСТРОЕНИЮ: на здоровом стенде она пуста, и
+#: пустота неотличима от «всё хорошо». Починка хвоста оркестратора (задача 1.1)
+#: этот путь не лечит — дефект живёт у потребителя.
+#:
+#: **Почему WARNING.** Симметрия с ``watch_like_gui(tail_level="WARNING")``
+#: драйвера: два главных потребителя одной плоскости не должны показывать разное
+#: при одинаковом запросе «покажи, что происходит». Это НЕ вторая позиция дефолта
+#: процесса (``ERROR``): здесь клиент называет свой порог явно — ровно то право,
+#: которое подписка и даёт. Константа драйвера сюда не импортируется намеренно
+#: (прототип не зависит от backend_ctl); совпадение значений — согласованное
+#: решение, а не общий источник.
+#:
+#: Ручка в UI — следующий шаг Р-1; сегодня порог задаётся параметром конструктора.
+DEFAULT_TAIL_LEVEL = "WARNING"
+
 
 class ObservabilityTailActivator:
     """Объявляет брокеру намерение «хочу весь хвост» — один раз за сессию."""
@@ -52,12 +72,17 @@ class ObservabilityTailActivator:
         send_command: Callable[[str, str, Dict[str, Any]], Any],
         gui_name: str,
         *,
+        level: Optional[str] = DEFAULT_TAIL_LEVEL,
         log: Optional[Any] = None,
     ) -> None:
         """
         Args:
             send_command: отправка команды процессу (обычно CommandSender.send_command).
             gui_name: имя GUI-процесса — адрес-подписчик, на который идут записи.
+            level: порог живого хвоста (см. :data:`DEFAULT_TAIL_LEVEL`). ``None``
+                — «не называть»: тогда порог выберет процесс своим дефолтом, и
+                панель вернётся к ERROR-only. Значение едет в намерение брокера,
+                поэтому переживает рестарт и switch без участия GUI.
             log: журнал для отказов — объект с ``.warning(str)``/``.error(str)``.
                 По умолчанию логгер модуля; в живом GUI сюда подаётся адаптер к
                 ``LoggerManager`` процесса, иначе строка ушла бы в голый
@@ -65,6 +90,7 @@ class ObservabilityTailActivator:
         """
         self._send = send_command
         self._gui_name = gui_name
+        self._level = level
         self._log = log if log is not None else get_std_logger(__name__)
         self._announced = False
         self._attempts = 0
@@ -89,6 +115,10 @@ class ObservabilityTailActivator:
         «объявлено» ставилась до отправки, а исключение уходило в ``except: pass`` —
         транспортный сбой на единственном выстреле оставлял GUI без хвоста навсегда
         и молча. Теперь отказ громкий и повторяется до ``MAX_ATTEMPTS``.
+
+        Н-2: в конверте есть ``level``. Без него сервер подставлял ``ERROR``, и
+        панель наблюдаемости молчала на здоровом стенде — по построению, а не
+        по стечению обстоятельств.
         """
         if self._announced or self._attempts >= MAX_ATTEMPTS:
             return
@@ -98,7 +128,11 @@ class ObservabilityTailActivator:
             return
         self._attempts += 1
         try:
-            self._send(BROKER_TARGET, SUBSCRIBE_ALL_COMMAND, {"subscriber": self._gui_name})
+            self._send(
+                BROKER_TARGET,
+                SUBSCRIBE_ALL_COMMAND,
+                {"subscriber": self._gui_name, "level": self._level},
+            )
         except Exception as exc:  # noqa: BLE001 — активация хвоста не рушит GUI
             last = self._attempts >= MAX_ATTEMPTS
             # Сообщение форматируется ЗДЕСЬ: приёмник журнала — либо logging-логгер,
