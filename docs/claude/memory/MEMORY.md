@@ -250,3 +250,4 @@
 - [Одна ручка из пары мерит приоритет](feedback_test_setting_one_handle_of_a_pair_measures_priority.md) — чистить соседнюю явно, приоритет — отдельным тестом
 - [Ассерт отсутствия при extra=ignore вакуумен](feedback_absence_assertion_under_extra_ignore_is_vacuous.md) — сторожить положительный след (model_fields_set), не hasattr
 - [«Упоминаний = 0» стирает причину](feedback_zero_mentions_criterion_erases_the_reason.md) — ADR обязан называть снятый механизм; судить описания настоящего времени
+- [Модалка ждёт клика, а не краснеет](feedback_modal_dialog_waits_instead_of_failing.md) — страж BaseException; ищет прогон-разведка по всему гейту
