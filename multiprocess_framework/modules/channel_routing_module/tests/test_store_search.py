@@ -113,6 +113,61 @@ class TestSearchFindsAndNarrows:
         ]
 
 
+class TestOperatorPastesAFragment:
+    """То, что человек ВСТАВЛЯЕТ из сообщения, обязано искаться.
+
+    Найдено живым прогоном 2026-08-10, не тестами: голый FTS5 отвергал почти
+    любой кусок реального сообщения — ``кадр,`` → «syntax error near ","»,
+    ``12:30`` → «no such column: 12», ``camera-0`` → «no such column: 0».
+    Отказ был назван, но оператору от него толку ноль: разбор начинается со
+    слова, а слово он вставляет, а не изобретает.
+    """
+
+    @pytest.fixture
+    def pasted(self, store):
+        store.append_records(
+            [
+                _rec(ts=100.0, process="camera-0", message="кадр 12:30 потерян, ROI=1/2"),
+                # Процесс у второй записи ДРУГОЙ намеренно: дефолтный
+                # ``camera_0`` токенизируется в [camera, 0] ровно как вставленный
+                # ``camera-0``, и запрос честно нашёл бы обе — соседняя запись
+                # маскировала бы разбор запроса совпадением токенов.
+                _rec(ts=200.0, module="seg", process="seg", message="маска пустая"),
+            ]
+        )
+        return store
+
+    @pytest.mark.parametrize(
+        "pasted_fragment",
+        ["кадр,", "12:30", "ROI=1/2", "camera-0", "потерян.", "кадр 12:30", "  кадр  "],
+    )
+    def test_a_fragment_pasted_from_a_message_is_found(self, pasted, pasted_fragment):
+        assert _messages(pasted.search(pasted_fragment)) == ["кадр 12:30 потерян, ROI=1/2"]
+
+    def test_a_fragment_that_is_not_in_any_record_still_finds_nothing(self, pasted):
+        """Пара к предыдущему: разбор запроса не превращает поиск во «всё подряд»."""
+        assert pasted.search("вертолёт, 99:99") == []
+
+    def test_deliberate_syntax_is_NOT_quoted_away(self, pasted):
+        """Power-синтаксис включается явно и обязан работать по-прежнему.
+
+        Числа взяты там, где кандидаты РАСХОДЯТСЯ: при слепом закавычивании
+        ``кадр OR маска`` стало бы поиском трёх слов подряд и дало бы 0, а
+        ``мас*`` — поиском буквального «мас*» и дало бы 0.
+        """
+        assert len(pasted.search("кадр OR маска")) == 2
+        assert _messages(pasted.search("мас*")) == ["маска пустая"]
+        assert _messages(pasted.search('"маска пустая"')) == ["маска пустая"]
+        assert pasted.search('"пустая маска"') == [], "кавычки обязаны остаться ФРАЗОЙ, а не набором слов"
+
+    def test_a_query_without_a_single_word_is_a_named_refusal(self, pasted):
+        """``,`` и ``---`` — не «не нашлось», а «искать нечем»: третий случай той же пары."""
+        for junk in (",", "---", ". , ;"):
+            with pytest.raises(ObservabilitySearchError) as exc:
+                pasted.search(junk)
+            assert "нет ни одного слова" in str(exc.value)
+
+
 class TestIndexNeverOutlivesItsRows:
     """Индекс обязан забывать удалённые строки — иначе место занято вечно.
 

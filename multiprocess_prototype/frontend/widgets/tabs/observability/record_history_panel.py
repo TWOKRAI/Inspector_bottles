@@ -266,10 +266,11 @@ class RecordHistoryPanel(BaseAdminPanel):
         """
         reason = self._presenter.search_unavailable_reason
         if reason is None:
-            self._edit_search.setPlaceholderText('слово, "фраза", hik*')
+            self._edit_search.setPlaceholderText("слово или кусок сообщения")
             self._edit_search.setToolTip(
                 "Полнотекстовый поиск по сообщению, источнику и процессу. "
-                'Синтаксис FTS5: слово, "точная фраза", префикс hik*, a OR b. '
+                "Обычный текст ищется как есть — кусок сообщения можно вставить из буфера. "
+                'Дополнительно: "точная фраза", префикс hik*, a OR b. '
                 "Enter — искать, пустая строка — вернуться к ленте."
             )
             return
