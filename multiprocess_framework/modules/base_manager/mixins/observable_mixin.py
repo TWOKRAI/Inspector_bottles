@@ -191,8 +191,8 @@ class ObservableMixin(IObservableMixin):
         """Запись времени выполнения через stats manager."""
         self._call_manager("stats", "record_timing", metric_name, duration, tags or {})
 
-    def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
-        """Отслеживание ошибки через error manager (каноничный слот 'error').
+    def _error_context(self, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Контекст инцидента со штампом источника — ЕДИНСТВЕННАЯ позиция штампа.
 
         Ф2.1: имя источника кладётся в КОНТЕКСТ, а не в kwargs — у слота
         ``error`` сигнатура другая (``track_error(error, context)``), и
@@ -200,9 +200,23 @@ class ObservableMixin(IObservableMixin):
         подставляя ``"unknown"`` при его отсутствии. Без этой строки плоскость
         ошибок осталась бы без штампа при заштампованной плоскости логов —
         то есть у самой важной из трёх. Найдено ревью Ф2.1.
+
+        Н-14 (приёмка F1): штамп стоял ТОЛЬКО в :meth:`_track_error`, а публичные
+        прокси ``track_error``/``record_error`` звали менеджер напрямую — и
+        инцидент от ``health.report`` уезжал ``module="unknown"`` при
+        заштампованной лог-дороге той же пары. Причём именно публичный путь и
+        выбирает ``HealthState`` (``_resolve_track`` предпочитает ``track_error``),
+        то есть штамп был мёртв ровно там, где он нужнее всего.
+        Вынесено сюда, чтобы позиция осталась одна: два ``setdefault`` в двух
+        файлах разошлись бы молча — этим дефект и был.
         """
         ctx = dict(context) if context else {}
         ctx.setdefault("module", self._observability_source())
+        return ctx
+
+    def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
+        """Отслеживание ошибки через error manager (каноничный слот 'error')."""
+        ctx = self._error_context(context)
         # Task 5.14: имя error-гнезда каноникализировано на 'error'. Legacy-fallback
         # на слот 'errors' убран — все точки регистрации переведены на 'error'.
         result = self._call_manager("error", "track_error", error, ctx)

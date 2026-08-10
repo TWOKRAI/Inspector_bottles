@@ -249,6 +249,106 @@ def test_track_error_does_not_mutate_caller_context() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Н-14: публичный путь плоскости ошибок штампует так же, как приватный
+# ---------------------------------------------------------------------------
+
+
+class _RecordingErrorSlotBoth(_RecordingErrorSlot):
+    """Слот с ОБЕИМИ дорогами: ``track_error`` и ``record_error``.
+
+    Обе заведены осознанно: прокси создаёт оба метода, и починка одного из
+    двух — ровно тот класс «дефект на одном пути из трёх», которым Н-14 и
+    оказалась.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.recorded: List[Tuple[BaseException, Dict[str, Any]]] = []
+
+    def record_error(self, error: BaseException, context: Dict[str, Any]) -> bool:
+        self.recorded.append((error, context))
+        return True
+
+
+def _proxied_manager_with_error_slot(name: str, slot: Any) -> ObservableMixin:
+    """Менеджер с auto_proxy: публичные ``track_error``/``record_error`` созданы."""
+
+    class _M(BaseManager, ObservableMixin):
+        def __init__(self) -> None:
+            BaseManager.__init__(self, name)
+            ObservableMixin.__init__(self, managers={"error": slot}, auto_proxy=True)
+
+        def initialize(self) -> bool:
+            return True
+
+        def shutdown(self) -> bool:
+            return True
+
+    return _M()
+
+
+def test_public_track_error_proxy_stamps_the_source() -> None:
+    """Н-14: публичный прокси звал менеджер НАПРЯМУЮ, мимо штампа.
+
+    Живое следствие (репро на настоящих ProcessModule+ErrorManager): инцидент
+    от ``health.report`` приезжал подписчику с ``module="unknown"``, тогда как
+    лог-дорога той же пары несла имя. Именно публичный путь и выбирает
+    ``HealthState._resolve_track`` — то есть штамп был мёртв там, где нужнее.
+    """
+    slot = _RecordingErrorSlotBoth()
+    _proxied_manager_with_error_slot("capture_manager", slot).track_error(ValueError("сбой"))
+
+    assert slot.calls[-1][1]["module"] == "capture_manager", (
+        f"публичный track_error не заштамповал источник: {slot.calls[-1][1]}"
+    )
+
+
+def test_public_record_error_proxy_stamps_the_source_too() -> None:
+    """Соседняя дорога того же прокси — чинится вместе, а не следующей находкой."""
+    slot = _RecordingErrorSlotBoth()
+    _proxied_manager_with_error_slot("capture_manager", slot).record_error(ValueError("сбой"))
+
+    assert slot.recorded[-1][1]["module"] == "capture_manager", (
+        f"публичный record_error не заштамповал источник: {slot.recorded[-1][1]}"
+    )
+
+
+def test_public_and_private_paths_produce_the_same_stamp() -> None:
+    """Позиция штампа ОДНА: разойдись они — расхождение было бы молчаливым."""
+    slot = _RecordingErrorSlotBoth()
+    mgr = _proxied_manager_with_error_slot("capture_manager", slot)
+
+    mgr._track_error(ValueError("приватно"))
+    private_ctx = slot.calls[-1][1]
+    mgr.track_error(ValueError("публично"))
+    public_ctx = slot.calls[-1][1]
+
+    assert private_ctx == public_ctx, f"пути разошлись: приватный {private_ctx}, публичный {public_ctx}"
+
+
+def test_public_proxy_keeps_explicit_module() -> None:
+    """Штамп — ``setdefault``, а не присваивание: явное имя сайта сильнее."""
+    slot = _RecordingErrorSlotBoth()
+    mgr = _proxied_manager_with_error_slot("capture_manager", slot)
+
+    mgr.track_error(ValueError("сбой"), {"module": "hikvision"})
+
+    assert slot.calls[-1][1]["module"] == "hikvision"
+
+
+def test_public_proxy_does_not_mutate_caller_context() -> None:
+    """Словарь вызывающего часто переиспользуется — штамп кладётся в копию."""
+    slot = _RecordingErrorSlotBoth()
+    mgr = _proxied_manager_with_error_slot("capture_manager", slot)
+    caller_ctx: Dict[str, Any] = {"attempt": 1}
+
+    mgr.track_error(ValueError("сбой"), caller_ctx)
+
+    assert caller_ctx == {"attempt": 1}
+    assert slot.calls[-1][1] == {"attempt": 1, "module": "capture_manager"}
+
+
+# ---------------------------------------------------------------------------
 # Границы процесса
 # ---------------------------------------------------------------------------
 

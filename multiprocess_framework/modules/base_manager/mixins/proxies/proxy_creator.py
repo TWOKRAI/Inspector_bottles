@@ -94,12 +94,17 @@ class ProxyCreator:
         # убран — симметрия с ObservableMixin._track_error, который тоже пробует
         # только 'error'. Все точки регистрации переведены на 'error'.
         if "error" in managers:
-
+            # Н-14: контекст собирает ``instance._error_context`` — та же позиция
+            # штампа источника, что у ``_track_error``. Прямой вызов менеджера
+            # отсюда и был дефектом: ``ErrorManager.track_error`` подставляет
+            # ``module="unknown"``, когда штампа нет, а публичный прокси — это
+            # ровно тот путь, который выбирает ``HealthState._resolve_track``.
+            # Симметрия с лог-прокси выше: те тоже делегируют в методы миксина.
             def track_error(error, context=None):
-                return call_manager_func("error", "track_error", error, context or {})
+                return call_manager_func("error", "track_error", error, instance._error_context(context))
 
             def record_error(error, context=None):
-                return call_manager_func("error", "record_error", error, context or {})
+                return call_manager_func("error", "record_error", error, instance._error_context(context))
 
             instance.track_error = track_error
             instance.record_error = record_error
