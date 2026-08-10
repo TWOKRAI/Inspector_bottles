@@ -282,3 +282,41 @@ def test_services_and_plugins_test_dirs_are_collected() -> None:
         "Эти тесты не гоняются дефолтным гейтом — верните слой в testpaths "
         "(решение владельца 2026-08-09) или добавьте каталог явно."
     )
+
+
+def test_frontend_test_dirs_are_collected() -> None:
+    """Каждый каталог тестов фронта прототипа виден ДЕФОЛТНОМУ гейту.
+
+    ВОСЬМОЙ случай того же класса (2026-08-10). Шестой случай (Ф3.4) закрыли
+    ДВУМЯ ФАЙЛАМИ из `frontend/tests`, и запись в `pyproject.toml` объясняла это
+    ценой «каталог целиком >10 минут». Замер её не подтвердил: весь
+    `multiprocess_prototype/frontend` — 2371 тест за 103 с. Пока дерево было вне
+    гейта, коммит `8dad8e7b` (D8) уронил два теста `test_phase15_smoke.py`, и они
+    доехали красными до `main`.
+
+    Отдельный тест, а не строка в соседнем: слои `Services`/`Plugins` и фронт —
+    разные решения владельца с разными датами и разной ценой, и сообщение об
+    отказе должно называть своё. Покрытие — по префиксу, поэтому новый каталог
+    тестов фронта попадает в гейт даром.
+    """
+    repo_root = _MODULES_ROOT.parents[1]
+    entries = _root_testpaths()
+
+    def covered(rel: str) -> bool:
+        return any(rel == entry or rel.startswith(entry.rstrip("/") + "/") for entry in entries)
+
+    frontend_root = repo_root / "multiprocess_prototype" / "frontend"
+    if not frontend_root.is_dir():
+        pytest.skip("фронт прототипа отсутствует в этой сборке")
+
+    uncovered = [
+        path.relative_to(repo_root).as_posix()
+        for path in frontend_root.rglob("tests")
+        if path.is_dir() and "__pycache__" not in path.parts and not covered(path.relative_to(repo_root).as_posix())
+    ]
+
+    assert not uncovered, (
+        f"каталоги тестов фронта вне корневого testpaths (pyproject.toml): {sorted(uncovered)}. "
+        "Дефолтный гейт их не собирает — верните 'multiprocess_prototype/frontend' в testpaths "
+        "(решение владельца 2026-08-10) или добавьте каталог явно."
+    )
