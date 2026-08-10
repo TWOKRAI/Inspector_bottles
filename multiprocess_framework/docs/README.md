@@ -51,5 +51,6 @@
 - `ARCHITECTURE_old.md`, `FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`, `ARCHITECTURE_MODULE_CATALOG.md` — заменены на корневой `SPEC.md` + `MODULES_OVERVIEW.md` + `MODULE_CONTRACTS.md`.
 - `CONFIG_PATHS.md`, `CONFIG_SCHEMA_DATA_FLOW.md`, `CONFIG_SCHEMA_REGISTERS.md`, `CONFIG_UNIFICATION_PLAN.md` — объединены в `CONFIG_GUIDE.md`.
 - `Deepseek.md` — экспериментальные заметки.
+- `REFACTOR_PLAN_T1.1_COMPOSITION.md` — план **выполнен** (проверено по коду 2026-08-10, E3); лежит здесь как запись о причинах, а не как задача.
 
 Дорожная карта frontend-команд перемещена в [`../modules/frontend_module/ROADMAP.md`](../modules/frontend_module/ROADMAP.md).

@@ -1,3 +1,7 @@
+> **АРХИВ (2026-08-10, задача E3).** План **выполнен**; документ сохранён как запись о том, почему код выглядит так. Проверено по коду на коммите `9c074912`: псевдокомпозиции нет (`ProcessManagers.register_all` работает через `process.register_manager`), boilerplate сведён в `BuiltinCommands._merge_args`, хардкода размера кадра в оркестраторе нет, приватных `_get_status`/`_broadcast_full_status` нет, `IProcessCommunication` — `Protocol` с `runtime_checkable`.
+
+---
+
 # Рефакторинг process_module + process_manager_module
 
 ## Context
