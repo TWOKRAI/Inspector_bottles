@@ -22,20 +22,57 @@ _PLUGINS_DIR = Path(__file__).resolve().parents[3] / "Plugins"
 
 @pytest.fixture
 def topology_dict():
-    """Загрузить реальную topology как в проде: фундамент ⊕ presentation ⊕ pipeline.
+    """Собрать topology РОВНО так, как это делает прод: (фундамент ⊕ рецепт), потом ПАТЧ.
 
     Ф2 frontend-constructor (d6faaa80) вынес процесс ``gui`` из `base.yaml` в
     презентационный overlay `frontend/presentation.yaml` — фундамент стал
-    headless-only. Тест воспроизводит сборку `SystemBuilder.from_manifest`
-    (порядок важен: overlay мёржится ПЕРЕД pipeline), иначе `chain_targets:[gui]`
-    из pipeline не резолвится и StartupChecker честно падает.
+    headless-only. **D8 (`8dad8e7b`, 2026-08-10) изменил роль overlay'я:** процесс
+    ``gui`` теперь объявляет РЕЦЕПТ (со своим ``plugins: []`` и ``protected``), а
+    overlay стал патчем ОДНОГО поля — класса. Соответственно и функция другая:
+    :func:`apply_presentation_overlay`, а не второй ``merge_topologies``.
+
+    Фикстура за D8 не поехала, и разошлась она молча: ``merge_topologies``
+    отдаёт при коллизии имён победу ПЕРВОМУ слагаемому, поэтому голый
+    ``gui`` из overlay'я (только имя и класс) перекрывал полный ``gui`` рецепта,
+    и ``StartupChecker`` честно падал на «отсутствует поле plugins». Красное
+    прожило незамеченным, потому что этот файл не значится в ``testpaths``
+    (см. bisect в плане, этап 1) — восьмой случай класса «тесты-невидимки».
+
+    Правило, из-за которого фикстура собирает вручную, а не зовёт билдер:
+    дубль обязан повторять production-ФОРМУ. Разойдётся она снова — упадёт
+    ``test_the_assembly_matches_production`` ниже, а не этот тест «где-то потом».
     """
-    from multiprocess_prototype.backend.launch import merge_topologies
+    from multiprocess_prototype.backend.launch import apply_presentation_overlay, merge_topologies
 
     pipeline = yaml.safe_load(_TOPOLOGY_PATH.read_text(encoding="utf-8"))
     base = yaml.safe_load(_BASE_PATH.read_text(encoding="utf-8"))
     presentation = yaml.safe_load(_PRESENTATION_PATH.read_text(encoding="utf-8"))
-    return merge_topologies(merge_topologies(base, presentation), pipeline)
+    return apply_presentation_overlay(merge_topologies(base, pipeline), presentation)
+
+
+def test_the_presentation_overlay_patches_the_class_without_dropping_recipe_fields():
+    """Страж формы сборки: патч меняет КЛАСС и не съедает полей рецепта.
+
+    Без него фикстура выше — просто ещё одна догадка о проде. Здесь проверяется
+    ровно то свойство, потерей которого дефект и был: ``plugins`` рецепта
+    переживает наложение overlay'я, а класс становится Qt-шным.
+    """
+    from multiprocess_prototype.backend.launch import apply_presentation_overlay, merge_topologies
+
+    pipeline = yaml.safe_load(_TOPOLOGY_PATH.read_text(encoding="utf-8"))
+    base = yaml.safe_load(_BASE_PATH.read_text(encoding="utf-8"))
+    presentation = yaml.safe_load(_PRESENTATION_PATH.read_text(encoding="utf-8"))
+
+    merged = merge_topologies(base, pipeline)
+    recipe_gui = next(p for p in merged["processes"] if p.get("process_name") == "gui")
+    assert recipe_gui.get("plugins") == [], "рецепт перестал объявлять plugins у gui — проверь inspection_basic.yaml"
+
+    patched = apply_presentation_overlay(merged, presentation)
+    gui = next(p for p in patched["processes"] if p.get("process_name") == "gui")
+
+    assert gui.get("plugins") == [], f"патч съел поля рецепта: {gui}"
+    assert gui["process_class"].endswith("GuiProcess"), f"патч не подменил класс: {gui['process_class']}"
+    assert gui.get("protected") is True, "protected рецепта потерян патчем"
 
 
 @pytest.fixture
