@@ -13,10 +13,15 @@ import os
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 from ...config_module.feature_flags import is_enabled
 from ...console_module import ConsoleManager
+from ...logger_module.channels.log_channel import (
+    find_foreign_log_roots,
+    sweep_log_dir_tree,
+)
 from ...process_module import ProcessModule
 from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
 from ...shared_resources_module import QueueRegistry
@@ -239,6 +244,8 @@ class ProcessManagerProcess(ProcessModule):
             self._log_active_feature_flags()
 
             processes_config = self.get_config("processes_config") or {}
+            self._sweep_orphaned_log_dirs(self._live_process_names(processes_config))
+            self._warn_foreign_log_roots()
             if isinstance(processes_config, dict) and processes_config:
                 self._create_processes_from_config(processes_config)
 
@@ -303,6 +310,99 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:
             self._handle_critical_error(exc, "initialize")
             return False
+
+    def _live_process_names(self, processes_config: Any) -> set:
+        """Имена процессов, чьи подкаталоги log_dir считаются живыми на этом boot'е.
+
+        Собственное имя PM (``self.name``) входит всегда — его тоже метёт
+        собственный подметальщик (``LoggerCore._retention_root()``), и
+        глобальный sweep не должен с ним конфликтовать.
+        """
+        names = set(processes_config) if isinstance(processes_config, dict) else set()
+        names.add(self.name)
+        return names
+
+    def _sweep_orphaned_log_dirs(self, live_process_names: set) -> None:
+        """Разовый прогон ретеншена по ВСЕМУ дереву ``log_dir`` (D5).
+
+        Слепая зона: каждый процесс метёт только СВОЙ подкаталог
+        (``LoggerCore._retention_root()``), поэтому каталоги процессов
+        неактивного рецепта внутри того же ``log_dir`` не метёт никто —
+        подтверждено листингом (файлы старше ``retention_days`` живут).
+        Здесь PM подметает все ЧУЖИЕ (не из ``live_process_names``)
+        непосредственные подкаталоги ``log_dir`` целиком; подкаталоги живых
+        процессов не трогает — их продолжает мести собственный подметальщик
+        процесса, знающий свои открытые файлы.
+
+        Разово на старте, не по таймеру: PM создаётся один раз за инкарнацию,
+        а осиротевшие каталоги не растут между запусками сами по себе — ждать
+        следующего boot'а не то же самое, что «никогда», как для активных.
+        """
+        logger_manager = getattr(self, "logger_manager", None)
+        cfg = getattr(logger_manager, "config", None) if logger_manager is not None else None
+        log_dir = getattr(cfg, "log_directory", None) if cfg is not None else None
+        if not log_dir:
+            return
+        try:
+            result = sweep_log_dir_tree(
+                log_dir,
+                live_process_names=live_process_names,
+                retention_days=getattr(cfg, "retention_days", 0),
+                retention_total_mb=getattr(cfg, "retention_total_mb", 0),
+                compress_rotated=bool(getattr(cfg, "compress_rotated", False)),
+            )
+        except Exception as exc:  # noqa: BLE001 — уборка чужих каталогов не имеет права уронить boot
+            self._log_error(f"sweep осиротевших каталогов log_dir упал: {exc}")
+            return
+        if result["deleted"] or result["compressed"] or result["delete_failures"] or result["compress_failures"]:
+            self._log_info(
+                "ретеншен подмёл осиротевшие каталоги log_dir: "
+                f"удалено={result['deleted']}, сжато={result['compressed']}, "
+                f"освобождено_байт={result['bytes_freed']}, "
+                f"отказов_удаления={result['delete_failures']}, отказов_сжатия={result['compress_failures']}"
+            )
+
+    def _foreign_log_root_candidates(self) -> list:
+        """Кандидаты «а вдруг тут забытое legacy-дерево логов» вне активного ``log_dir``.
+
+        Переопределяемо подклассом (прототип может добавить свои исторические
+        корни). Framework сам знает только один универсальный дефолт —
+        ``<cwd>/logs``: тот же fallback, что ``process_launch_config.
+        _resolve_log_dir`` и ``log_paths.default_log_base_directory`` отдают
+        до применения ``INSPECTOR_LOG_DIR``/``MULTIPROCESS_LOG_DIR``. Именно
+        здесь копится legacy, когда оператор один раз переопределяет log_dir
+        и больше не смотрит в старый корень (живой пример — корневой
+        ``logs/`` 308 МБ вне ``logs/prototype_2``).
+        """
+        return [Path.cwd() / "logs"]
+
+    def _warn_foreign_log_roots(self) -> None:
+        """Один WARNING при старте про чужие деревья логов вне ``log_dir`` (Р-5).
+
+        Только называет — ничего не удаляет и не трогает. Уборка legacy вне
+        активного ``log_dir`` — решение владельца, не автоматика (развилка
+        Р-5 задачи D5).
+        """
+        logger_manager = getattr(self, "logger_manager", None)
+        cfg = getattr(logger_manager, "config", None) if logger_manager is not None else None
+        log_dir = getattr(cfg, "log_directory", None) if cfg is not None else None
+        if not log_dir:
+            return
+        candidates = self._foreign_log_root_candidates()
+        if not candidates:
+            return
+        try:
+            foreign = find_foreign_log_roots(log_dir, candidates)
+        except Exception as exc:  # noqa: BLE001 — диагностика не имеет права уронить boot
+            self._log_error(f"поиск чужих деревьев логов упал: {exc}")
+            return
+        if not foreign:
+            return
+        details = "; ".join(f"{item['path']} ({item['files']} файлов, {item['bytes']} байт)" for item in foreign)
+        self._log_warning(
+            f"чужие деревья логов вне активного log_dir ({log_dir}): {details} — "
+            "уборка legacy не автоматическая, решение владельца (развилка Р-5)"
+        )
 
     def _setup_state_store(self) -> None:
         """Хук: создать StateStoreManager. Переопределяется в прототипе."""

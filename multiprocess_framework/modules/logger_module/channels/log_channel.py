@@ -732,6 +732,147 @@ def enforce_log_retention(
     return result
 
 
+def sweep_log_dir_tree(
+    log_dir: Any,
+    *,
+    live_process_names: Iterable[str] = (),
+    retention_days: int = 0,
+    retention_total_mb: int = 0,
+    compress_rotated: bool = False,
+) -> Dict[str, int]:
+    """Ретеншен ВСЕГО дерева ``log_dir`` — не только подкаталогов живых процессов.
+
+    Слепая зона (Ф0.7/Ф6.9, D5): каждый процесс метёт СВОЙ подкаталог
+    (:func:`enforce_log_retention` вызывается с ``directory=log_dir/<имя
+    процесса>/``) — это и признано штатным в докстринге ``enforce_log_retention``:
+    «каталоги давно умерших процессов не метёт никто». Каталог процесса из
+    рецепта, который сейчас не запущен (переключились на другой рецепт,
+    процесс переименован/убран), не совпадает ни с одним активным ``process``
+    и потому никогда не передаётся в ``enforce_log_retention`` ни одним
+    менеджером — растёт вечно.
+
+    Эта функция закрывает именно этот пробел: проходит по каждому
+    НЕПОСРЕДСТВЕННОМУ подкаталогу ``log_dir`` и метёт его целиком (рекурсивно,
+    тем же :func:`enforce_log_retention`), КРОМЕ подкаталогов, чьё имя
+    совпадает с именем живого процесса — те продолжает мести собственный
+    подметальщик процесса, который единственный знает СВОИ открытые хэндлы
+    (``active_files``) и потому не рискует удалить файл под работающей
+    записью. Обмена информацией об открытых файлах между процессами здесь
+    нет и не нужно: директория мертва тогда и только тогда, когда её имени
+    нет среди живых, а мёртвый каталог по определению никем не пишется.
+
+    Файлы-сироты ПРЯМО В КОРНЕ ``log_dir`` (``errors.log``, ``critical.log`` —
+    общие для всех процессов, см. ``managers_from_log_dir``) не трогает: сюда
+    попадают только подкаталоги, ни один файл верхнего уровня.
+
+    Символические ссылки на подкаталоги не разыменовываются (``os.walk`` не
+    зовём, идём один уровень через ``iterdir`` + явную проверку
+    ``is_symlink()`` до ``is_dir()``) — иначе метла ушла бы за пределы
+    ``log_dir`` по ссылке. Сам ``log_dir`` не удаляется никогда: функция
+    трогает только файлы внутри его подкаталогов.
+
+    Args:
+        log_dir: корень дерева логов (тот же, что резолвит ``ManagersConfig``).
+        live_process_names: имена процессов, чьи подкаталоги пропускаем —
+            их метёт собственный подметальщик.
+        retention_days / retention_total_mb / compress_rotated: те же политики,
+            что у :func:`enforce_log_retention`, применяются к каждому чужому
+            подкаталогу независимо.
+
+    Returns:
+        Те же пять счётчиков, что и :func:`enforce_log_retention`, просуммированные
+        по всем подметённым подкаталогам.
+    """
+    result = _new_retention_result()
+    if retention_days <= 0 and retention_total_mb <= 0 and not compress_rotated:
+        return result
+
+    root = Path(log_dir)
+    if not root.is_dir():
+        return result
+
+    live = set(live_process_names)
+    try:
+        children = sorted(root.iterdir())
+    except OSError:
+        return result
+
+    for entry in children:
+        if entry.is_symlink():
+            # Ссылка могла бы указывать куда угодно — не выходим за log_dir.
+            continue
+        if not entry.is_dir():
+            continue
+        if entry.name in live:
+            continue
+        sub_result = enforce_log_retention(
+            entry,
+            retention_days=retention_days,
+            retention_total_mb=retention_total_mb,
+            compress_rotated=compress_rotated,
+        )
+        for key, value in sub_result.items():
+            result[key] += value
+
+    return result
+
+
+def find_foreign_log_roots(
+    active_log_dir: Any,
+    candidates: Iterable[Any],
+) -> List[Dict[str, Any]]:
+    """Найти каталоги-кандидаты ВНЕ активного ``log_dir``, где уже лежат файлы.
+
+    Только смотрит — ничего не удаляет и не трогает (развилка Р-5: уборка
+    легacy-деревьев — решение владельца, не автоматика). Кандидат, который
+    резолвится в тот же путь, что активный ``log_dir`` (или не существует, или
+    существует, но пуст), в результат не попадает — иначе сам активный корень
+    или пустая директория считались бы «чужим деревом».
+
+    Args:
+        active_log_dir: резолвнутый корень, который сейчас использует система.
+        candidates: пути-кандидаты, которые стоит проверить (например,
+            дефолт до применения ``INSPECTOR_LOG_DIR``/``MULTIPROCESS_LOG_DIR``).
+
+    Returns:
+        Список словарей ``{"path": str, "files": int, "bytes": int}`` — по
+        одному на каждый непустой чужой каталог, с числом файлов и суммарным
+        весом (числа, а не просто факт «есть», см. правило «дельта, а не
+        размер»).
+    """
+    try:
+        active = Path(active_log_dir).resolve()
+    except OSError:
+        active = Path(active_log_dir)
+
+    found: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        path = Path(candidate)
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if resolved == active or not path.is_dir():
+            continue
+
+        file_count = 0
+        total_bytes = 0
+        for item in path.rglob("*"):
+            try:
+                if not item.is_file():
+                    continue
+                total_bytes += item.stat().st_size
+            except OSError:
+                continue
+            file_count += 1
+
+        if file_count == 0:
+            continue
+        found.append({"path": str(path), "files": file_count, "bytes": total_bytes})
+
+    return found
+
+
 #: Пломба (2.V1) в файловой строке: префикс ``#<seq> `` в самом начале.
 #:
 #: Префиксом, а не суффиксом: у записи с traceback'ом суффикс уехал бы на
