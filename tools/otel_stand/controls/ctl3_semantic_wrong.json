@@ -1,0 +1,5 @@
+{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"ctl3-probe"}}]},
+ "scopeLogs":[{"scope":{"name":"BUSINESS"},"logRecords":[{
+  "timeUnixNano":"1754900000000000000","severityNumber":9,"severityText":"INFO",
+  "body":{"stringValue":"semantic control: scope-as-InstrumentationScope, trace_id as plain attribute"},
+  "attributes":[{"key":"trace_id","value":{"stringValue":"5b8efff798038103d269b633813fc60c"}}]}]}]}]}

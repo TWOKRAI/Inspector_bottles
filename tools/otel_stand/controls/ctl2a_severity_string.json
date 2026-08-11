@@ -1,0 +1,4 @@
+{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"ctl2a-probe"}}]},
+ "scopeLogs":[{"scope":{"name":"inspector.ctl2a"},"logRecords":[{
+  "timeUnixNano":"1754900000000000000","severityNumber":"INFO","severityText":"INFO",
+  "body":{"stringValue":"negative control: severityNumber is a string"}}]}]}]}
