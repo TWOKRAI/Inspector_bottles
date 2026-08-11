@@ -112,6 +112,18 @@ ctl = [
     "mcp>=1.27,<1.28",
 ]
 
+# OTLP-экспортёр наружу (Services/otel_export, этап 7) — опциональный.
+# Пин minor обязателен: Logs SDK живёт под opentelemetry.sdk._logs (подчёркивание
+# в имени модуля), backward-compat в minor сам проект не гарантирует. Обновление
+# extras = прогон Ф1 заново (ADR плана otel-export).
+# Кроссплатформенность: оба пакета py3-none-any; единственная бинарная зависимость
+# по цепочке — protobuf, у него есть manylinux2014_aarch64 (Jetson, Pi-64) и
+# win_amd64, а на 32-битном armv7 подхватится py3-none-any фолбэк.
+otel = [
+    "opentelemetry-sdk>=1.44,<1.45",
+    "opentelemetry-exporter-otlp-proto-http>=1.44,<1.45",
+]
+
 [tool.uv.sources]
 # NodeGraphQt-PySide6 — fork от C3RV1, не публикуется на PyPI.
 # Sha-pin для воспроизводимости (последний коммит на master 2023-01-08).
