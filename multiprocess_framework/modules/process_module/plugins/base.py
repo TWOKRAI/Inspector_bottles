@@ -356,7 +356,8 @@ class SubPluginContext:
     """Облегчённый контекст для вложенных плагинов (chain_executor, worker_pool).
 
     Совместим с PluginContext по duck-typing — плагины используют
-    ctx.config, ctx.log_info, ctx.log_error, ctx.registers, ctx.command_manager.
+    ctx.config, всю пятёрку ctx.log_*, ctx.registers, ctx.command_manager,
+    ctx.health и ctx.write_document.
 
     Заменяет unittest.mock.MagicMock в production-коде.
 
@@ -373,8 +374,17 @@ class SubPluginContext:
     process_name: str = "sub_plugin"
     config: dict[str, Any] = field(default_factory=dict)
     registers: Any = None
+    # A2 (Б-2), повторно — задача 4.2 (Н-6): ВСЯ пятёрка, а не log_info/log_error.
+    # Тот же дефект, что уже чинили в `PluginContext`, жил здесь ещё год: вложенный
+    # плагин, звавший `ctx.log_warning` в ветке штатной деградации, получал
+    # `AttributeError` и падал — при том что протокол метод объявлял, а родительский
+    # контекст его имел. Дефект, починенный на одной развилке из двух, воскресает на
+    # соседней; список судится контракт-тестом, читающим протокол, а не рукописной копией.
+    log_debug: Callable[[str], None] = _noop_log
     log_info: Callable[[str], None] = _noop_log
+    log_warning: Callable[[str], None] = _noop_log
     log_error: Callable[[str], None] = _noop_log
+    log_critical: Callable[[str], None] = _noop_log
     command_manager: Any = None
     worker_manager: Any = None
     router_manager: Any = None
@@ -388,6 +398,45 @@ class SubPluginContext:
     # Плоскость документов (Ф8.7): дефолт — отказ, потому что своего стока у
     # вложенного контекста нет. Родитель пробрасывает свой ctx.write_document.
     write_document: Callable[..., bool] = _noop_document
+
+    @classmethod
+    def from_parent(cls, parent: Any, **overrides: Any) -> "SubPluginContext":
+        """Собрать вложенный контекст, пробросив ВСЕ дороги родителя.
+
+        Задача 4.2 (Н-6). Пятёрка ``log_*`` у вложенного контекста появилась, но
+        родители на трёх живых вызовах пробрасывали два метода из пяти — и
+        ``log_warning`` вложенного плагина стал бы уходить в no-op вместо
+        родительского логгера. Это тот же дефект, только тише: было падение с
+        ``AttributeError``, стала бы бесшумная потеря записи, которую никто не ищет.
+
+        Проброс списком, а не перечислением на каждом вызове: список дорог растёт
+        (пятёрка, ``health``, ``write_document``, дальше — разъём телеметрии этапа 6),
+        и каждый новый обязан появиться в ОДНОМ месте. Три копии этого перечисления
+        уже расходились — так и родился Н-6.
+
+        Args:
+            parent: родительский :class:`PluginContext` (или любой контекст с теми же
+                дорогами — проверяется наличием, а не типом).
+            **overrides: что задать явно, прежде всего ``config`` вложенного плагина.
+        """
+        forwarded: dict[str, Any] = {}
+        for road in ("log_debug", "log_info", "log_warning", "log_error", "log_critical", "health", "write_document"):
+            value = getattr(parent, road, None)
+            if value is not None:
+                forwarded[road] = value
+        for road in (
+            "registers",
+            "command_manager",
+            "worker_manager",
+            "router_manager",
+            "memory_manager",
+            "state_proxy",
+        ):
+            value = getattr(parent, road, None)
+            if value is not None:
+                forwarded[road] = value
+        forwarded.update(overrides)
+        return cls(**forwarded)
 
 
 class ProcessModulePlugin(ABC):

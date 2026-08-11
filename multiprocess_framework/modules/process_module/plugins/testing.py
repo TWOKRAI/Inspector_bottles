@@ -86,6 +86,39 @@ class MockCommandManager:
 # ---------------------------------------------------------------------------
 
 
+class MockDocumentSink:
+    """Дубль стока плоскости документов (Ф8.7), умеющий ОТКАЗЫВАТЬ.
+
+    Дубль, который всегда успешен, глушит гейт: путь вердикта «записан» и путь
+    «сток отказал» выглядели бы для теста одинаково, а различает их именно
+    ``write_document`` — возвратом ``False`` и счётчиком потери. Поэтому у дубля
+    есть ``refuse``, а отказы он считает так же, как настоящий стор (``dropped``).
+
+    Args:
+        refuse: отказывать в записи (``append`` вернёт ``False``).
+        raises: вместо отказа поднимать исключение — третий исход настоящего
+            стора (сбой хранилища), который ``write_document`` обязан пережить,
+            не роняя линию.
+    """
+
+    def __init__(self, *, refuse: bool = False, raises: BaseException | None = None) -> None:
+        self.refuse = refuse
+        self.raises = raises
+        #: Принятые документы — по ним тест судит СОДЕРЖИМОЕ конверта, а не факт вызова.
+        self.documents: list[dict[str, Any]] = []
+        #: Отказы. Имя как у настоящего стора: ``document_plane_report`` читает его.
+        self.dropped = 0
+
+    def append(self, document: dict[str, Any]) -> bool:
+        if self.raises is not None:
+            raise self.raises
+        if self.refuse:
+            self.dropped += 1
+            return False
+        self.documents.append(dict(document))
+        return True
+
+
 class MockProcessServices:
     """Лёгкий mock IProcessServices для изолированного тестирования плагинов.
 
@@ -98,6 +131,11 @@ class MockProcessServices:
         router_manager: Можно передать кастомный mock RouterManager.
         memory_manager: Можно передать кастомный mock MemoryManager.
         state_proxy: Можно передать кастомный StateProxy.
+        document_sink: Сток плоскости документов (Ф8.7). ``None`` по умолчанию —
+            «плоскость не настроена», ровно как у процесса без секции
+            ``observability.documents``; ``write_document`` тогда вернёт ``False``
+            и посчитает документ в ``without_sink``. Чтобы судить путь вердикта,
+            передай :class:`MockDocumentSink` — он умеет и принять, и отказать.
     """
 
     def __init__(
@@ -107,8 +145,13 @@ class MockProcessServices:
         router_manager: Any = None,
         memory_manager: Any = None,
         state_proxy: Any = None,
+        document_sink: Any = None,
     ) -> None:
         self.name: str = name
+        # Ф8.7 / задача 4.2 (Н-9): атрибут ЕСТЬ всегда, значение может быть None.
+        # До 4.2 дубль стока не имел вовсе — дорога документов не судилась ни одним
+        # тестом плагина: пройти её было нечем, а отказать тем более.
+        self.document_sink: Any = document_sink
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()
