@@ -5,6 +5,7 @@ statistics_module — менеджер статистики и метрик.
 Наследует ChannelRoutingManager, параметризуется через data_schema_module,
 интегрируется с logger_module, command_module, router_module.
 """
+
 from .interfaces import IStatsManager
 from .configs import StatsManagerConfig
 from .core import StatsManager, MetricRecord, MetricType, AggregationWindow

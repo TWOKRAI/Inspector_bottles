@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты StatsAdapter (регистрация команд CommandManager)."""
+
 from unittest.mock import MagicMock
 
 import pytest
