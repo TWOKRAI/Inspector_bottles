@@ -213,6 +213,41 @@ testpaths = [
     # агентов. Линтер про устаревшую модель отдаёт WARNING (exit 2) — `make gate`
     # смотрит exit 0/1 и предупреждение проезжает молча. Цена — 0.3 с.
     ".claude/plugins/core/tests",
+    # ДЕВЯТЫЙ случай класса «тесты-невидимки» (задача 4.0, 2026-08-11) — и последний,
+    # который закрывается поимённым перечислением: вместе с ним ставится репозиторный
+    # страж `test_no_test_dir_is_invisible_to_every_runner`, судящий КЛАСС, а не
+    # очередной его экземпляр (восемь предыдущих случаев чинились по одному).
+    #
+    # ЗАМЕР 2026-08-11: вне обоих прогонщиков — 114 файлов в 19 каталогах. За вычетом
+    # `backend_ctl/tests` (осознанное исключение, см. ниже) и четырёх файлов без единого
+    # теста внутри — **871 тест в 14 каталогах, 29 с**. Из них 4 красных, все в
+    # `domain/tests/test_entities_roundtrip.py`: ренейм D4 `inspector`→`collector`
+    # (`2942c949`) сломал их, и краснота прожила незамеченной — каталога нет ни в одном
+    # прогонщике. Поведение при этом цело: легаси-ключ доезжает до
+    # `GenericProcessConfig.collector` (проверено прогоном, не чтением).
+    #
+    # `multiprocess_framework/modules/tests` — тот же класс в его самой едкой форме:
+    # там живут стражи полноты ЭТОГО списка (`test_every_testpath_points_at_something_
+    # that_exists`, `test_services_and_plugins_test_dirs_are_collected`,
+    # `test_frontend_test_dirs_are_collected`), а собирал их только фреймворковый
+    # прогонщик — который на 2026-08-11 падает целиком (access violation в sampling.py,
+    # предмет задачи 4.1). Страж корневого гейта, невидимый корневому гейту, не страж.
+    # Цена — 0.6 с.
+    "multiprocess_framework/modules/tests",
+    "multiprocess_prototype/domain/tests",
+    "multiprocess_prototype/adapters/tests",
+    "multiprocess_prototype/recipes/tests",
+    "multiprocess_prototype/registers/tests",
+    # Префиксом: покрывает state/tests, state/adapters/tests и state/recipes/tests —
+    # новый каталог тестов состояния попадёт в гейт даром.
+    "multiprocess_prototype/backend/state",
+    "multiprocess_prototype/backend/config/tests",
+    "multiprocess_prototype/backend/displays/tests",
+    "scripts/code_stats/tests",
+    "scripts/sync/tests",
+    "scripts/validate_commit/tests",
+    "Utils/fps_module/tests",
+    "examples/minimal_app/tests",
 ]
 norecursedirs = [".git", "__pycache__", ".venv"]
 python_files = ["test_*.py"]

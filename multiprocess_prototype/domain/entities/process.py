@@ -29,10 +29,12 @@ from .worker import WorkerSpec
 # GUI round-trip'ом в metadata, для бэкенда нем — тихая деградация (явный
 # `collector: {mode: fanin}` теряет авторитетность → структурный join). См. ADR-PMM-017 п.5, AU-2.
 #
-# ОБЯЗАТЕЛЬСТВО СИНХРОНИЗАЦИИ: набор — зеркало `_pick`-ключей ProcessConfig.as_generic_config
-# (chain_targets/source_target_fps/collector/io_peek). При добавлении нового `_pick`-ключа
-# в framework — добавить сюда (если он НЕ typed-поле домена) ИЛИ typed-полем в Process (как
-# chain_targets/restart_policy). Drift-guard: test_extras_shorthand_mirrors_pick_set (domain tests).
+# ОБЯЗАТЕЛЬСТВО СИНХРОНИЗАЦИИ: набор — зеркало `_pick`-ключей ProcessConfig.as_generic_config.
+# При добавлении нового `_pick`-ключа в framework — добавить сюда (если он НЕ typed-поле
+# домена) ИЛИ typed-полем в Process (как chain_targets/restart_policy), ИЛИ назвать причину
+# в `_FLAT_FORM_NOT_ACCEPTED`. Drift-guard: TestExtrasShorthandDriftGuard (domain tests) —
+# он читает набор `_pick` из исходника blueprint.py, а не из рукописной копии; копия здесь
+# уже разъезжалась дважды (ренейм D4 inspector→collector и два SHM-ключа Ф7 G.4.b).
 #
 # `inspector` — легаси-имя `collector` (D4): рецепт, написанный до переименования,
 # грузится в GUI и обязан пережить round-trip, а не свернуться в metadata.
