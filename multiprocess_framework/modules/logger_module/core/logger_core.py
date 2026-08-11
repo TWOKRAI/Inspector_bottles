@@ -739,12 +739,32 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         )
 
     def _resolved_file_path(self, file_path: Optional[str], fallback: str) -> str:
-        # Каждый процесс пишет в свою подпапку: logs/{process_name}/
+        """Путь файла лога: каждый процесс пишет в свою подпапку ``{база}/{process_name}/``.
+
+        **Базой молчащего конфига служит** :func:`default_log_base_directory`, а НЕ строка
+        ``"logs"``. Здесь стоял материализованный дефолт (``_Path("logs")``), и он отменял
+        защиту, стоящую за ним: ``log_paths`` обещает «без явной привязки файлы не попадают
+        в дерево пакета» и для ``log_directory=None`` уводит в системный temp — но получал
+        уже непустой ОТНОСИТЕЛЬНЫЙ путь и честно резолвил его от ``cwd``. То есть обещание
+        было снято слоем выше, в одну строку, и молча.
+
+        Цена этого измерена (задача 3.3): прогон тестов из корня репозитория дописывал в
+        ``<репозиторий>/logs/`` — 154 457 байт за один прогон осиротевших каталогов, в
+        подпапки по именам процессов (``ProcessManager``, ``console_sink``, ``ticker``).
+        Каталог дорос до 467 МиБ.
+
+        Поведение при ЗАДАННОМ ``log_directory`` не менялось — прототип задаёт его всегда
+        (``system.log_dir``), поэтому прод эту правку не чувствует. Меняется ровно случай
+        «никто не привязал каталог»: раньше писало рядом с cwd, теперь — в temp, как и
+        обещано в :mod:`log_paths`.
+        """
         log_dir = self.config.log_directory
         if self.process is not None and hasattr(self.process, "name"):
             from pathlib import Path as _Path
 
-            base = _Path(log_dir) if log_dir else _Path("logs")
+            from .log_paths import default_log_base_directory
+
+            base = _Path(log_dir) if log_dir else default_log_base_directory()
             log_dir = str(base / self.process.name)
         return resolve_log_file_path(
             file_path,

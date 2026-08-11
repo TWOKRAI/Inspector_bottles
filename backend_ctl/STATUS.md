@@ -74,3 +74,19 @@ reply-поля для request-response. Плюс MCP-сервер (официа�
 Phase B (P0-эргономика: cursor list-watch B.1, await_condition, system_overview) — после решения
 о завершении C.1-распила. См. план [`plans/backend-ctl-debug-console.md`](../plans/_archive/2026-07-19_backend-ctl-debug-console.md)
 (поглощён [`plans/backend-ctl-proof-discipline.md`](../plans/backend-ctl-proof-discipline.md) 2026-07-21).
+
+## Задача 3.3 (2026-08-11) — harness не кормит корневой `logs/` (ADR-138)
+
+`headless_backend` поднимает настоящую систему из девяти процессов, а каталог логов брала из
+`system.yaml` (`logs/prototype_2` относительно cwd). Замер: `test_capabilities.py` дописывал
+**163 909 байт** за прогон, полный корневой гейт — **428 736**; после правки оба — **0**.
+
+`BackendHarness(log_dir=...)` пробрасывает каталог в `build_headless_launcher` →
+`system.log_dir`. Дорога КОНФИГОМ, а не env, намеренно: `launch._ENV_LOG_DIR_OVERRIDE`
+снимается один раз при импорте, и первый harness заморозил бы снимок на своём каталоге —
+золотой снапшот сборки в том же pytest-процессе начал бы зависеть от порядка тестов.
+
+**Дефолт harness НЕ менялся:** 28 из 34 живых зондов каталог себе не задают, и подмена дефолта
+увела бы их логи туда, где оператор их не ищет. Каталог задаёт тестовая фикстура. Страж —
+`tests/test_harness_log_dir.py` (5 тестов, внесён в `testpaths`: правка снимается одной строкой,
+и без стража в гейте возврат дефекта был бы полностью бесшумным).

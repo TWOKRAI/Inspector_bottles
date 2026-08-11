@@ -233,17 +233,34 @@ def test_every_testpath_points_at_something_that_exists() -> None:
     Судятся ОБА конфига: корневой `pyproject.toml` (дефолтный гейт) и
     `modules/pytest.ini` (fw-suite) — у них независимые списки, и разъехаться
     может любой.
+
+    **2026-08-11 (задача 3.3): проверка усилена с «путь существует» до «в пути есть
+    тесты».** Прежняя формулировка молчала три месяца о записи
+    `frontend_module/actions/handlers/tests`: каталог уехал в `actions_module`
+    carve-out'ом ADR-124 (2026-05-11, `git mv`), но на диске остался ПУСТОЙ каталог с
+    одним `__pycache__` — путь «существовал», а тестов в нём не было ни одного. Для
+    pytest это ровно тот же 0 items / exit 0, от которого страж и ставился: наличие
+    каталога никогда не было тем свойством, которое здесь важно. Ложь стала видна
+    только когда снос скелетов убрал каталог физически.
     """
     repo_root = _MODULES_ROOT.parents[1]
 
-    missing = [entry for entry in _root_testpaths() if not (repo_root / entry).exists()]
+    def _empty_of_tests(base: Path, entry: str) -> bool:
+        target = base / entry
+        if not target.exists():
+            return True
+        if target.is_file():
+            return not target.name.startswith("test_")
+        return not any(target.rglob("test_*.py"))
+
+    missing = [entry for entry in _root_testpaths() if _empty_of_tests(repo_root, entry)]
     assert not missing, (
-        f"в корневом testpaths пути, которых нет на диске: {missing}. "
+        f"в корневом testpaths пути без тестов внутри: {missing}. "
         "pytest на такой путь даёт 0 items и exit 0 — запись врёт о покрытии."
     )
 
-    missing_fw = [entry for entry in sorted(_testpaths_from_ini()) if not (_MODULES_ROOT / entry).exists()]
-    assert not missing_fw, f"в modules/pytest.ini пути, которых нет на диске: {missing_fw}."
+    missing_fw = [entry for entry in sorted(_testpaths_from_ini()) if _empty_of_tests(_MODULES_ROOT, entry)]
+    assert not missing_fw, f"в modules/pytest.ini пути без тестов внутри: {missing_fw}."
 
 
 def test_services_and_plugins_test_dirs_are_collected() -> None:

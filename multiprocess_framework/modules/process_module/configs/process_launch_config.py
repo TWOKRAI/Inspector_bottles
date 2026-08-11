@@ -113,9 +113,28 @@ class ProcessLaunchConfig(SchemaBase):
         return None
 
     def _resolve_log_dir(self) -> str:
+        """Каталог дерева логов процесса: свой конфиг → env → системный temp.
+
+        Последним рубежом стоит :func:`default_log_base_directory`, а НЕ строка ``"logs"``
+        (задача 3.3). Относительная ``"logs"`` резолвится от ``cwd`` того, кто запускает,
+        и молчащий конфиг в паре с молчащим env означал «пиши рядом с рабочим каталогом»
+        — то есть в дерево репозитория при запуске из корня. Каталог дорос до 467 МиБ,
+        и то же самое ждало бы любого встройщика framework в первый день.
+
+        Абсолютный путь из temp не меняет ничего для тех, кто каталог задаёт (прототип
+        задаёт всегда, ``system.log_dir``); меняется ровно случай «не задал никто», и
+        именно его :mod:`logger_module.core.log_paths` обещает уводить из дерева пакета.
+        """
         if self.log_dir:
             return self.log_dir
-        return os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR") or "logs"
+        env_dir = os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR")
+        if env_dir:
+            return env_dir
+        from multiprocess_framework.modules.logger_module.core.log_paths import (
+            default_log_base_directory,
+        )
+
+        return str(default_log_base_directory())
 
     def build(self) -> tuple[str, dict[str, Any]]:
         from .managers_config import (

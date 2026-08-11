@@ -116,7 +116,7 @@ def bookmark_cursor(drv, *, plane: Any = None):
 
 
 @pytest.fixture(scope="session")
-def headless_backend():
+def headless_backend(tmp_path_factory: pytest.TempPathFactory):
     """Подключённый BackendDriver к headless-системе прототипа (без gui).
 
     with_base=True — подмешиваем фундамент (always-on инфра `devices`), как в проде.
@@ -125,8 +125,17 @@ def headless_backend():
     `gui` в headless-воплощении (план D8). Прежняя формулировка — «фундамент, где
     объявлен gui, и strip_gui его исключает» — была неверна дважды: после Ф2 gui в
     фундаменте не объявлялся, и вырезать было нечего.
+
+    **``log_dir`` — во временный каталог прогона, а не в репозиторий** (задача 3.3).
+    Эта фикстура поднимает НАСТОЯЩУЮ систему из девяти процессов, и они писали свои
+    логи в ``<репозиторий>/logs/prototype_2/`` — потому что так велит ``system.yaml``,
+    а тесту каталог никто не задавал. Замер: один прогон
+    ``backend_ctl/tests/test_capabilities.py`` дописывал **163 909 байт**, полный
+    корневой гейт — **428 736**; каталог дорос до 467 МиБ. Диагностику прогона это не
+    теряет: путь виден в выводе pytest как обычный ``tmp_path``, и живёт он столько же,
+    сколько прочие временные каталоги прогона.
     """
-    harness = BackendHarness(with_base=True)
+    harness = BackendHarness(with_base=True, log_dir=tmp_path_factory.mktemp("backend_logs"))
     drv = harness.start()
     try:
         yield drv
