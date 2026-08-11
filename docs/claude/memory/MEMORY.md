@@ -258,3 +258,5 @@
 - [Рождён неверным, починен после](feedback_born_wrong_then_fixed_looks_like_working.md) — работает, но кричит на каждом старте; чинить в точке создания
 - [Шаговая операция требует вычерпывания](feedback_stepwise_statement_needs_draining.md) — штатный вызов сделал 1 шаг из 2116 и ответил успехом
 - [«Главный источник» может быть 3 %](feedback_named_main_cause_may_be_a_minor_share.md) — мерь долю до правки; гейт этапа оказался недостижим
+- [Дефолт сверху отключает защиту снизу](feedback_upper_layer_default_disables_the_guard_below.md) — молчание передавать вниз как молчание; 3 точки, 505 МиБ
+- [Страж существования ≠ страж содержимого](feedback_guard_on_existence_is_not_a_guard_on_content.md) — пустой каталог устраивал; ложь прожила 3 месяца
