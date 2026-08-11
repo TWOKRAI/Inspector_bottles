@@ -251,3 +251,5 @@
 - [Ассерт отсутствия при extra=ignore вакуумен](feedback_absence_assertion_under_extra_ignore_is_vacuous.md) — сторожить положительный след (model_fields_set), не hasattr
 - [«Упоминаний = 0» стирает причину](feedback_zero_mentions_criterion_erases_the_reason.md) — ADR обязан называть снятый механизм; судить описания настоящего времени
 - [Модалка ждёт клика, а не краснеет](feedback_modal_dialog_waits_instead_of_failing.md) — страж BaseException; ищет прогон-разведка по всему гейту
+- [Отказ после записи травит соседа](feedback_refusal_after_the_write_poisons_the_neighbour.md) — слой общий; краснеет чужая плоскость
+- [Нет получателя — нет суда над формой](feedback_absent_receiver_lets_a_test_pin_an_impossible_input.md) — зелено по отсутствию, не по правильности
