@@ -59,6 +59,11 @@ class AggregationWindow(IBufferStrategy):
         # Ф0.3 у BatchBuffer (`total_flushed` означал «отдано»).
         self._total_flushed: int = 0
         self._flush_failed: int = 0
+        # 3.2/Р-4г: сколько ПУСТЫХ снапшотов не поехало стокам. Подавление — это
+        # намеренная не-доставка, и она обязана быть видна числом: иначе «плоскость
+        # молчит, потому что нечего слать» не отличить от «плоскость молчит, потому
+        # что сломалась».
+        self._empty_suppressed: int = 0
 
         self._timer_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -131,13 +136,35 @@ class AggregationWindow(IBufferStrategy):
         else:
             self.flush_all()
 
-    def flush_all(self) -> None:
-        """Сбросить все каналы — отправить агрегированный снапшот."""
+    def flush_all(self, include_empty: bool = False) -> None:
+        """Сбросить все каналы — отправить агрегированный снапшот.
+
+        **Пустой снапшот по умолчанию НЕ отдаётся** (задача 3.2, решение владельца Р-4г).
+        До этого строка ``metrics snapshot (ts=…, count=0): []`` уходила в лог каждые
+        10 с у каждого из восьми процессов и была главным источником фона плоскости.
+
+        Args:
+            include_empty: отдать снапшот, даже если метрик в окне нет. Финальный сброс
+                при :meth:`stop` зовёт с ``True`` намеренно: по наличию снапшота в окне
+                останова снаружи судят, что статистика дожила до конца
+                (``probe_b3_shutdown_order_live``, проверка S4). Вариант «не эмитить
+                вовсе» снёс бы этот признак вместе с фоном.
+
+        Ноль каналов — нечего и подавлять: снапшот некому отдать, и ``include_empty``
+        здесь ничего не меняет.
+        """
         with self._lock:
             channels = list(self._channels_seen)
             snapshot = self._build_snapshot()
             self._metrics.clear()
+            # Счётчик сбросов растёт ВСЕГДА, даже когда снапшот подавлен: сброс
+            # состоялся (окно опустошено, такт прошёл), не состоялась только доставка.
+            # Снаружи по этому счётчику мерят ТЕМП окна (probe_b1_stats_tempo_live),
+            # и тихий процесс не имеет права выглядеть как остановившееся окно.
             self._total_flushes += 1
+            if not snapshot["metrics"] and not include_empty:
+                self._empty_suppressed += 1
+                return
 
         for ch in channels:
             self._call_flush_fn(ch, [snapshot])
@@ -151,12 +178,20 @@ class AggregationWindow(IBufferStrategy):
             "total_count": len(metrics_list),
         }
 
-    def _flush_channel(self, channel: str) -> None:
-        """Сбросить один канал (отправляет полный снапшот)."""
+    def _flush_channel(self, channel: str, include_empty: bool = False) -> None:
+        """Сбросить один канал (отправляет полный снапшот).
+
+        Пустой снапшот подавляется так же, как в :meth:`flush_all` — адресный сброс
+        это вторая дорога к тем же стокам, и починка одной из двух оставила бы фон
+        живым на соседней развилке.
+        """
         with self._lock:
             snapshot = self._build_snapshot()
             self._metrics.clear()
             self._total_flushes += 1
+            if not snapshot["metrics"] and not include_empty:
+                self._empty_suppressed += 1
+                return
 
         self._call_flush_fn(channel, [snapshot])
 
@@ -191,12 +226,17 @@ class AggregationWindow(IBufferStrategy):
         self._timer_thread.start()
 
     def stop(self) -> None:
-        """Остановить таймер и выполнить финальный flush."""
+        """Остановить таймер и выполнить финальный flush.
+
+        ``include_empty=True``: финальный снапшот отдаётся даже пустым. Он не про
+        метрики, а про то, что плоскость дошла до останова живой — единственная
+        запись, по которой это видно снаружи после смерти логгера.
+        """
         self._stop_event.set()
         if self._timer_thread and self._timer_thread.is_alive():
             self._timer_thread.join(timeout=5.0)
         self._timer_thread = None
-        self.flush_all()
+        self.flush_all(include_empty=True)
 
     def _timer_worker(self) -> None:
         """Периодический flush."""
@@ -223,6 +263,9 @@ class AggregationWindow(IBufferStrategy):
             "total_flushes": self._total_flushes,
             "total_flushed": self._total_flushed,
             "flush_failed": self._flush_failed,
+            # 3.2: подавленные пустые снапшоты. Разница с `flush_failed` смысловая —
+            # там потеря, здесь намеренная не-доставка, и путать их нельзя.
+            "empty_suppressed": self._empty_suppressed,
             "errors": self._errors,
             "pending_metrics": pending,
             "channels": list(self._channels_seen),
