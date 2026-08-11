@@ -266,3 +266,4 @@
 - [Сверка копий не видит оригинал](feedback_mirror_check_never_reads_the_original.md) — читать множество из источника; сломанный парсер = вакуум
 - [Диагностика — через backend_ctl](feedback_diagnose_live_system_with_backend_ctl.md) — штатный инструмент отвечает на незаданные вопросы; соседи как контроль
 - [GUI-стенд только боевым входом](project_gui_stand_production_entry_only.md) — INSPECTOR_GUI_UNATTENDED=1; через harness gui виснет в initialize
+- [Ассерт по подстроке зеленеет на чужой ветке](feedback_substring_assert_passes_on_the_wrong_branch.md) — сверять текст причины и уровень, инъекцию ставить в соседнюю ветку
