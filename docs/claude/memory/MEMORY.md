@@ -253,3 +253,5 @@
 - [Модалка ждёт клика, а не краснеет](feedback_modal_dialog_waits_instead_of_failing.md) — страж BaseException; ищет прогон-разведка по всему гейту
 - [Отказ после записи травит соседа](feedback_refusal_after_the_write_poisons_the_neighbour.md) — слой общий; краснеет чужая плоскость
 - [Нет получателя — нет суда над формой](feedback_absent_receiver_lets_a_test_pin_an_impossible_input.md) — зелено по отсутствию, не по правильности
+- [Новый страж ослабляет старого](feedback_a_new_guard_can_weaken_an_old_one.md) — слой с приведением меняет вход защите за собой
+- [Параметризация из испытуемого](feedback_parametrization_built_from_the_subject_collapses_with_it.md) — инъекция удаляет случаи, а не красит; страж поимённый
