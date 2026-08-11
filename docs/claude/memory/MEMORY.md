@@ -256,3 +256,5 @@
 - [Новый страж ослабляет старого](feedback_a_new_guard_can_weaken_an_old_one.md) — слой с приведением меняет вход защите за собой
 - [Параметризация из испытуемого](feedback_parametrization_built_from_the_subject_collapses_with_it.md) — инъекция удаляет случаи, а не красит; страж поимённый
 - [Рождён неверным, починен после](feedback_born_wrong_then_fixed_looks_like_working.md) — работает, но кричит на каждом старте; чинить в точке создания
+- [Шаговая операция требует вычерпывания](feedback_stepwise_statement_needs_draining.md) — штатный вызов сделал 1 шаг из 2116 и ответил успехом
+- [«Главный источник» может быть 3 %](feedback_named_main_cause_may_be_a_minor_share.md) — мерь долю до правки; гейт этапа оказался недостижим
