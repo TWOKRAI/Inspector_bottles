@@ -552,6 +552,17 @@
         }
       },
       "console": true,
+      "documents": {
+        "config": {
+          "db_path": "data/documents.db",
+          "purge_interval_sec": 3600,
+          "retention_sec": {
+            "audit": 31536000,
+            "verdict": 315360000
+          }
+        },
+        "factory": "Services.documents.wiring:make_document_sink"
+      },
       "errors": {
         "enabled": true,
         "include_stacktrace": true,
@@ -653,6 +664,17 @@
         },
         "compress_rotated": false,
         "console": true,
+        "documents": {
+          "config": {
+            "db_path": "data/documents.db",
+            "purge_interval_sec": 3600,
+            "retention_sec": {
+              "audit": 31536000,
+              "verdict": 315360000
+            }
+          },
+          "factory": "Services.documents.wiring:make_document_sink"
+        },
         "errors": {
           "channels": {},
           "enabled": true,
@@ -700,7 +722,8 @@
           "channels": {},
           "enabled": true,
           "flush_interval": 10.0,
-          "log_level": "INFO"
+          "log_level": "INFO",
+          "log_line_max_bytes": 2048
         }
       },
       "processing": {
@@ -728,12 +751,12 @@
         "chain_targets": [
           "vision"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -755,6 +778,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1035,6 +1069,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -1074,12 +1109,12 @@
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
         "chain_targets": [],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1101,6 +1136,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1401,6 +1447,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -1429,11 +1476,6 @@
         "chain_targets": [
           "gui"
         ],
-        "copy_out_targets": [],
-        "error_auto_reset_sec": 60.0,
-        "error_critical_plugins": [],
-        "error_max_consecutive_fails": 5,
-        "frame_ring_depth": 0,
         "collector": {
           "inputs": [
             "frame",
@@ -1443,6 +1485,11 @@
           "primary": "frame",
           "timeout_sec": 0.25
         },
+        "copy_out_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1464,6 +1511,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1742,6 +1800,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -1768,12 +1827,12 @@
       "class": "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess",
       "config": {
         "chain_targets": [],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1795,6 +1854,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -2052,6 +2122,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -2078,12 +2149,12 @@
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
         "chain_targets": [],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2105,6 +2176,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -2403,6 +2485,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -2432,12 +2515,12 @@
           "recog",
           "draw"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2459,6 +2542,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -2730,6 +2824,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -2758,12 +2853,12 @@
         "chain_targets": [
           "gui"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2785,6 +2880,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -3052,6 +3158,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -3081,12 +3188,12 @@
           "gui",
           "layout"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3108,6 +3215,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -3392,6 +3510,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -3429,11 +3548,6 @@
           "gui",
           "layout"
         ],
-        "copy_out_targets": [],
-        "error_auto_reset_sec": 60.0,
-        "error_critical_plugins": [],
-        "error_max_consecutive_fails": 5,
-        "frame_ring_depth": 0,
         "collector": {
           "inputs": [
             "frame",
@@ -3443,6 +3557,11 @@
           "primary": "frame",
           "timeout_sec": 0.25
         },
+        "copy_out_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3464,6 +3583,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -3780,6 +3910,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
@@ -3811,12 +3942,12 @@
           "draw",
           "maskview"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3838,6 +3969,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -4164,6 +4306,7 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
           "retention_seconds": 3600.0
         }
