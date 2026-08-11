@@ -291,3 +291,114 @@ class TestKillNetOnReadinessTimeout:
         h.stop()
         assert captured.get("orchestrator_pid") == 7777, "stop() не подхватил pid fallback'ом"
         assert captured.get("snapshot") == ["proc-7777"]
+
+
+# --- Н-8: ПАРА ручек PID-реестра — второй стенд не смеет реапить чужой ---
+
+
+class TestPidRegistryEnvPair:
+    """Изоляция реестра держится ОБЕИМИ ручками пары, а не одной.
+
+    Дефект (найден 2026-08-11 бисектом каталога `backend_ctl/tests`, 11 красных):
+    harness ставил и восстанавливал только `INSPECTOR_PID_FILE`, а
+    `pid_registry.pid_file_path()` читает пару по приоритету и `MULTIPROCESS_PID_FILE`
+    СИЛЬНЕЕ. `SystemLauncher._prepare_pid_registry` после резолва пишет обе ручки —
+    значит первый стенд оставлял в окружении сильную ручку со своим реестром, второй
+    читал именно её и реапил ЧУЖОЙ ЖИВОЙ реестр, убивая процессы первого стенда.
+    """
+
+    def _fake_run(self, monkeypatch, port: int) -> BackendHarness:
+        from backend_ctl import harness as _h
+
+        monkeypatch.setattr(_h, "BackendDriver", _FakeDriver)
+        monkeypatch.setattr(_h, "_subtree", lambda pid: [])
+        monkeypatch.setattr(_h, "_shutdown_with_watchdog", lambda *a, **k: None)
+        return BackendHarness(port=port, launcher_factory=_FakeLauncher)
+
+    def test_stronger_handle_of_the_pair_points_at_our_own_file(self, monkeypatch) -> None:
+        """Сильная ручка обязана указывать на файл ЭТОГО инстанса.
+
+        Судится именно сильная: слабая могла быть выставлена и раньше — и была, а
+        реап всё равно шёл по чужому реестру.
+        """
+        import os as _os
+
+        monkeypatch.setenv("MULTIPROCESS_PID_FILE", "чужой_живой_реестр.jsonl")
+        h = self._fake_run(monkeypatch, 8795)
+
+        h.start()
+        try:
+            strong = _os.environ["MULTIPROCESS_PID_FILE"]
+            weak = _os.environ["INSPECTOR_PID_FILE"]
+            assert strong == weak, f"ручки пары разъехались: {strong!r} != {weak!r}"
+            assert f"_harness_{_os.getpid()}_8795" in strong, f"сильная ручка смотрит не на свой файл: {strong!r}"
+        finally:
+            h.stop()
+
+    def test_both_handles_restored_after_stop(self, monkeypatch) -> None:
+        """Обе ручки возвращаются к прежнему состоянию, включая «переменной не было».
+
+        Прежний набор ключей в тесте восстановления не включал сильную ручку — и
+        остался бы зелёным при живом дефекте.
+        """
+        import os as _os
+
+        monkeypatch.setenv("MULTIPROCESS_PID_FILE", "orig_mp")
+        monkeypatch.delenv("INSPECTOR_PID_FILE", raising=False)
+        keys = ("MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE")
+        before = {k: _os.environ.get(k) for k in keys}
+
+        h = self._fake_run(monkeypatch, 8794)
+        h.start()
+        h.stop()
+
+        after = {k: _os.environ.get(k) for k in keys}
+        assert after == before, f"пара ручек не восстановлена: {before} → {after}"
+
+    def test_pair_matches_the_framework_priority_list(self) -> None:
+        """Список harness'а сверяется с ИСТОЧНИКОМ, а не живёт своей копией.
+
+        Переименование или разворот приоритета во фреймворке обязаны ломать проверку
+        здесь: копия, расходящаяся с оригиналом молча, — это ровно тот дефект, который
+        и был (harness знал одну ручку из двух).
+        """
+        from backend_ctl.harness import _PID_FILE_ENV_KEYS
+        from multiprocess_framework.modules.process_manager_module.launcher.pid_registry import _ENV_KEYS
+
+        assert tuple(_PID_FILE_ENV_KEYS) == tuple(_ENV_KEYS), (
+            f"пара ручек разошлась с фреймворком: harness={_PID_FILE_ENV_KEYS}, реестр={_ENV_KEYS}"
+        )
+
+
+@pytest.mark.harness_smoke
+def test_second_stand_does_not_reap_the_live_one() -> None:
+    """Живая пара: пока второй стенд поднимается и гаснет, ПЕРВЫЙ остаётся жив.
+
+    Это и есть дефект Н-8 в его наблюдаемой форме: юнит выше сторожит механизм
+    (ручки), а здесь судится следствие — драйвер первого стенда продолжает отвечать.
+    Без правки первый ProcessManager исчезает в момент старта второго, и драйвер
+    получает WinError 10054 (воспроизведено вне pytest).
+    """
+    import tempfile
+    from pathlib import Path as _Path
+
+    # Порты ОБОИМ стендам заданы явно: дефолтный занят сессионной фикстурой каталога,
+    # и тест, молча садящийся на него, судил бы соседа, а не себя.
+    first = BackendHarness(with_base=True, port=8792, log_dir=_Path(tempfile.mkdtemp(prefix="pair_first_")))
+    drv = first.start()
+    try:
+        assert (drv.introspect_status("ProcessManager", timeout=8.0) or {}).get("success"), "первый стенд не отвечает"
+
+        second = BackendHarness(with_base=True, port=8793, log_dir=_Path(tempfile.mkdtemp(prefix="pair_second_")))
+        second.start()
+        try:
+            alive = (drv.introspect_status("ProcessManager", timeout=8.0) or {}).get("success")
+            assert alive, "первый стенд умер, пока второй был жив — реап ушёл в чужой реестр"
+        finally:
+            second.stop()
+
+        assert (drv.introspect_status("ProcessManager", timeout=8.0) or {}).get("success"), (
+            "первый стенд не пережил гашение второго"
+        )
+    finally:
+        first.stop()

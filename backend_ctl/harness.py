@@ -52,6 +52,13 @@ if TYPE_CHECKING:
 #: Имя процесса презентации в топологии (объявляет РЕЦЕПТ, см. докстринг модуля).
 GUI_PROCESS_NAME = "gui"
 
+#: ПАРА ручек PID-реестра в порядке приоритета — как их читает
+#: ``pid_registry.pid_file_path`` (каноничная + легаси-алиас после де-брендинга D4).
+#: Список литералом, а не импортом из фреймворка: harness обязан пережить отсутствие
+#: прототипа в окружении, а разойтись список может только вместе с падением
+#: ``test_pid_file_env_pair_matches_the_framework`` — он сверяет его с источником.
+_PID_FILE_ENV_KEYS = ("MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE")
+
 
 # ---------------------------------------------------------------------------
 # Сборка headless-launcher'а
@@ -332,22 +339,34 @@ class BackendHarness:
         """Поднять headless-систему, дождаться готовности, подключить driver."""
         # env-restore (Task 0.4): снимок прежних значений ДО мутации → stop() вернёт.
         # Снимок ВНЕ try, чтобы восстановление всегда имело базу (ревью MAJOR #4).
-        self._saved_env = {k: os.environ.get(k) for k in ("BACKEND_CTL", "BACKEND_CTL_PORT", "INSPECTOR_PID_FILE")}
+        self._saved_env = {k: os.environ.get(k) for k in ("BACKEND_CTL", "BACKEND_CTL_PORT", *_PID_FILE_ENV_KEYS)}
         try:
             # Гейт сокета: env — escape-hatch (yaml тоже enabled). Порт driver'а должен
             # совпасть с endpoint'ом — фиксируем BACKEND_CTL_PORT (его читает endpoint).
             os.environ["BACKEND_CTL"] = "1"
             os.environ["BACKEND_CTL_PORT"] = str(self._port)
-            # PID-реестр (INSPECTOR_PID_FILE) — свой файл на инстанс harness. Общий
-            # дефолт рассчитан на «одна система на машину»: reap_and_reset при старте
-            # ВТОРОГО бэкенда (test_harness при живой session-фикстуре) убил бы процессы
-            # первого как «хвосты прошлого запуска». Осиротевшие хвосты harness добивает
-            # сам (watchdog + kill дерева в stop()) — глобальный reap ему не нужен.
+            # PID-реестр — свой файл на инстанс harness. Общий дефолт рассчитан на
+            # «одна система на машину»: reap_and_reset при старте ВТОРОГО бэкенда
+            # (test_harness при живой session-фикстуре) убил бы процессы первого как
+            # «хвосты прошлого запуска». Осиротевшие хвосты harness добивает сам
+            # (watchdog + kill дерева в stop()) — глобальный реап ему не нужен.
+            #
+            # Ставятся ОБЕ ручки пары, и это не перестраховка (Н-8, 2026-08-11).
+            # `pid_file_path()` читает пару по приоритету: `MULTIPROCESS_PID_FILE`
+            # СИЛЬНЕЕ `INSPECTOR_PID_FILE`, а `SystemLauncher._prepare_pid_registry`
+            # после резолва пишет ОБЕ (детям через spawn). Пока harness ставил одну
+            # вторую, картина была такая: первый стенд оставлял в окружении
+            # `MULTIPROCESS_PID_FILE` = свой реестр (эту ручку никто не снимал), второй
+            # стенд читал именно её и реапил ЧУЖОЙ живой реестр — то есть убивал
+            # десять процессов первого стенда в момент своего старта. Воспроизведено
+            # вне pytest: PM сессионного стенда исчезает, драйвер получает WinError
+            # 10054, и все последующие тесты на сессионной фикстуре падают
+            # (11 красных в полном каталоге `backend_ctl/tests`).
             import tempfile
 
-            os.environ["INSPECTOR_PID_FILE"] = str(
-                Path(tempfile.gettempdir()) / f"inspector_pids_harness_{os.getpid()}_{self._port}.jsonl"
-            )
+            pid_file = str(Path(tempfile.gettempdir()) / f"inspector_pids_harness_{os.getpid()}_{self._port}.jsonl")
+            for key in _PID_FILE_ENV_KEYS:
+                os.environ[key] = pid_file
 
             if self._launcher_factory is not None:
                 self._launcher = self._launcher_factory()
