@@ -12,6 +12,7 @@ harness-тесты модуля. Тесты только читают состо
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any, Dict
 
@@ -113,6 +114,63 @@ def bookmark_cursor(drv, *, plane: Any = None):
     других читателей той же плоскости не затрагивает.
     """
     return drv.events_page(plane)["bookmark"]
+
+
+#: Флаг «гнать и живые тоже» — штатная ручка pytest, регистрируется ниже.
+LIVE_OPTION = "--backend-live"
+
+#: Env-алиас того же флага: CI и Makefile выставляют переменную, а не собирают
+#: командную строку. Одна ручка в двух написаниях — это НЕ два способа сказать одно:
+#: env читается ровно здесь и ровно в значение флага, второй логики нет.
+LIVE_ENV_KEY = "BACKEND_CTL_LIVE"
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Объявить флаг живого прогона — как велит документированный рецепт pytest.
+
+    Первая редакция этой правки читала env прямо в хуке коллекции: работало, но
+    ручка была невидима — ни ``--help``, ни конфиг о ней не говорили. Объявленный
+    флаг виден в ``pytest --help`` и потому не превращается в местное знание.
+    """
+    parser.addoption(
+        LIVE_OPTION,
+        action="store_true",
+        default=bool(os.environ.get(LIVE_ENV_KEY)),
+        help=(
+            "гнать живые тесты backend_ctl (harness_smoke): каждый поднимает систему "
+            f"из десяти процессов, весь набор ~10 минут. Алиас — env {LIVE_ENV_KEY}=1"
+        ),
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
+    """Живые тесты (``harness_smoke``) в дефолтном прогоне ПРОПУСКАЮТСЯ, а не удаляются.
+
+    Зачем. Каталог целиком идёт **10 минут**, и ровно поэтому он не входил ни в один
+    прогонщик: 642 теста не судили ничего, а 11 из них были красными с 2026-08-10 и
+    объяснялись «флейком» (настоящая причина — Н-8, реап чужого живого реестра).
+    Замер разложил цену честно: **598 тестов идут 24 секунды**, а все 10 минут дают
+    **44 живых**, каждый из которых поднимает систему из десяти процессов.
+
+    Поэтому дорогая часть отделена от дешёвой ПРОПУСКОМ, а не вырезанием:
+    ``44 skipped`` в отчёте — это видимая строка, а «просто не собрали» неотличимо от
+    «тестов нет». Класс «тестов-невидимок» на этом проекте стрелял девять раз.
+
+    Кто их всё-таки гонит: ``pytest --backend-live`` (его ставит ``make test-ctl``),
+    явный ``-m harness_smoke`` и ночной прогон. Оператор, выбравший набор маркером
+    сам, сюда не попадает — его выбор сильнее умолчания.
+    """
+    if config.getoption("--backend-live", default=False):
+        return
+    if config.getoption("-m", default=""):
+        return  # набор выбран оператором явно — не вмешиваемся
+    skip_live = pytest.mark.skip(
+        reason=f"живой тест (нет {LIVE_OPTION}): поднимает систему из десяти процессов; "
+        f"полный прогон — make test-ctl либо -m harness_smoke"
+    )
+    for item in items:
+        if "harness_smoke" in item.keywords:
+            item.add_marker(skip_live)
 
 
 @pytest.fixture(scope="session")
