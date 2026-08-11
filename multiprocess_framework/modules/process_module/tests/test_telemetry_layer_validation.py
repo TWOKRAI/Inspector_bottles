@@ -170,7 +170,13 @@ class TestDoorTelemetryCommand:
         svc, cm = _make(throttle=ThrottleMiddleware({}))
         res = cm.dispatch("telemetry.reconfigure", dict(section))
         assert res["success"] is False
-        assert address in res["reason"]
+        # Task 2.2 разделила ответственность, и это видно ровно здесь: «не словарь»
+        # на КОМАНДНОЙ дороге ловит проверка типов параметра (контракт объявляет
+        # `Optional[Dict]`) и называет поле коротким именем; содержимое словаря —
+        # по-прежнему валидатор секции, с полным адресом ключа. Обе дают отказ до
+        # записи, поэтому проверяем общее: имя виновника в тексте и нетронутый слой.
+        guilty = next(iter(section))  # publish | throttle
+        assert guilty in res["reason"], res["reason"]
         assert _session(svc) == {}, "отказ пришёл ПОВЕРХ изменённого слоя"
 
     def test_unknown_subsection_has_its_own_refusal(self) -> None:

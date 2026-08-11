@@ -101,6 +101,38 @@ def _parse_ttl(args: dict) -> tuple[float | None, str | None]:
         return None, str(exc)
 
 
+#: Команды, чьи параметры судятся ПО ТИПАМ до входа в хендлер (Task 2.2, Р-3а).
+#:
+#: Список **явный**, а не «все команды с контрактом», и это решение владельца
+#: (Р-3: (а) провалидированные args только для команд наблюдаемости — против
+#: (б) глобального STRICT). Поверхность наблюдаемости — та, куда оператор ходит
+#: руками во время инцидента, и цена мусора здесь измерена: `TypeError` вместо
+#: отказа на двух командах и стёртый слой L3 на третьей. Остальные команды
+#: остаются под прежней warn-мидлварью; расширять охват — отдельное решение с
+#: отдельным замером, а не побочный эффект этой задачи.
+#:
+#: Имена перечислены поимённо, чтобы охват был ВИДЕН и проверяем: тест
+#: `test_command_param_types.py` судит каждое имя отсюда живым вызовом, а не
+#: чтением списка.
+OBSERVABILITY_TYPED_COMMANDS = frozenset(
+    {
+        "introspect.observability",
+        "config.reload",
+        "telemetry.reconfigure",
+        "observability.sink.enable",
+        "observability.sink.disable",
+        "observability.sink.tail",
+        "logger.sink.enable",
+        "logger.sink.disable",
+        "logger.sink.tail",
+        "log.tail.subscribe",
+        "log.tail.unsubscribe",
+        "observability.persist",
+        "observability.tail.subscribe",
+        "observability.tail.unsubscribe",
+    }
+)
+
 #: Что разрешено уехать через IPC как есть. Всё остальное — в ``repr``.
 _BOUNDARY_SCALARS = (str, int, float, bool, type(None))
 
@@ -269,6 +301,52 @@ class BuiltinCommands:
             args.update(data)
         args.update(kwargs)
         return args
+
+    def _typed(self, name: str, handler):
+        """Обернуть хендлер проверкой типов параметров (Task 2.2, Р-3а).
+
+        Обёртка стоит на РЕГИСТРАЦИИ, а не внутри четырнадцати хендлеров, и это
+        главное в решении: место одно, забыть его нельзя, а следующая команда
+        наблюдаемости попадает под гарантию добавлением имени в
+        :data:`OBSERVABILITY_TYPED_COMMANDS`, а не правкой тела.
+
+        Проверка идёт ДО хендлера, поэтому отказ приходит на нетронутом
+        состоянии — то же правило, что у ``ttl`` (5.8) и у содержимого
+        телеметрии (2.1). Хендлер получает **приведённые** значения: он читает
+        их своим обычным ``_merge_args(data, kwargs)``, ничего не зная о проверке.
+
+        Не в области действия — прямой вызов метода мимо ``CommandManager``
+        (``bc._cmd_introspect_observability(...)``): так зовут только три теста,
+        и они судят внутренность хендлера, а не командную поверхность. Назвать
+        это ограничение важнее, чем закрыть: закрытие потребовало бы проверки
+        внутри каждого метода, то есть ровно того размазывания, от которого
+        обёртка и уводит.
+        """
+        if name not in OBSERVABILITY_TYPED_COMMANDS:
+            return handler
+
+        from .command_contracts import validated_params
+
+        def _typed_handler(data=None, **kwargs) -> dict:
+            params = self._merge_args(data, kwargs)
+            coerced, problems = validated_params(name, params)
+            if problems:
+                return {
+                    "success": False,
+                    "process": self._services.name,
+                    "command": name,
+                    "reason": "; ".join(problems),
+                }
+            return handler(coerced)
+
+        _typed_handler.__name__ = getattr(handler, "__name__", "_typed_handler")
+        _typed_handler.__doc__ = getattr(handler, "__doc__", None)
+        # Канон и алиас получают РАЗНЫЕ обёртки (каждая знает своё имя — отказ
+        # называет ту команду, которую позвали), поэтому тождество объектов
+        # больше не годится как признак «одна команда, два имени». Признаком
+        # становится `__wrapped__`: под обёртками обязан лежать один метод.
+        _typed_handler.__wrapped__ = handler
+        return _typed_handler
 
     def _resolve_worker_target(self, worker_class: str | None, worker_cfg: dict):
         """Создать инстанс воркера и вернуть его target callable (instance.run).
@@ -536,7 +614,7 @@ class BuiltinCommands:
             ),
         ]
         for name, handler, desc in specs:
-            cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
+            cm.register_command(name, self._typed(name, handler), metadata={"description": desc}, tags=["system"])
         self._services._log_debug(
             "Встроенные команды introspect.* зарегистрированы",
             module="lifecycle",
@@ -1258,7 +1336,7 @@ class BuiltinCommands:
             ),
         ]
         for name, handler, desc in specs:
-            cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
+            cm.register_command(name, self._typed(name, handler), metadata={"description": desc}, tags=["system"])
         self._services._log_debug(
             "Встроенные команды config.reload / telemetry.reconfigure / logger.sink.* / log.tail.* зарегистрированы",
             module="lifecycle",

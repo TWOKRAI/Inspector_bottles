@@ -239,3 +239,75 @@ class TestHandlerKeysDeclaredInContract:
             f"(объявлено: {sorted(declared) or '—'}). При extra='forbid' такой ключ "
             f"даёт contract_violation, а с FW_CONTRACTS_STRICT=1 команда исчезает молча."
         )
+
+
+def _commands_registered_by(method_name: str) -> Set[str]:
+    """Имена команд, регистрируемых конкретным методом ``_register_*`` (AST).
+
+    Считается по таблице ``specs`` внутри метода — той же форме 1, что разбирает
+    :func:`_iter_registrations`; ограничивать разбор телом ОДНОГО метода нужно
+    затем, что вопрос здесь другой: не «какие команды есть», а «какие из них
+    принадлежат поверхности наблюдаемости».
+    """
+    source = _HANDLER_SOURCES[0]
+    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == method_name:
+            return {
+                n.elts[0].value
+                for n in ast.walk(node)
+                if isinstance(n, ast.Tuple)
+                and n.elts
+                and isinstance(n.elts[0], ast.Constant)
+                and isinstance(n.elts[0].value, str)
+                and "." in n.elts[0].value
+            }
+    return set()
+
+
+class TestTypedScopeCoversTheObservabilitySurface:
+    """Вторая ось шва (Task 2.2): охват проверки типов ⊇ поверхность наблюдаемости.
+
+    Первая ось судит ИМЕНА (контракт объявляет всё, что читает хендлер). Она
+    ничего не говорит о том, что с объявленным типом кто-то СВЕРЯЕТСЯ, — и
+    ровно в этом зазоре жила Н-5: контракт объявлял
+    ``resolve: Optional[Union[str, List[str]]]``, оракул был зелёным, а
+    ``resolve=true`` доезжал до ``list(True)``.
+
+    Здесь судится третье: команда поверхности, не попавшая в
+    ``OBSERVABILITY_TYPED_COMMANDS``, остаётся со СТАРЫМ поведением молча.
+    Проверка нужна именно как страж дрейфа: добавить команду в таблицу
+    регистрации проще, чем вспомнить про список охвата, и забытая команда
+    выглядела бы ровно как защищённая.
+    """
+
+    def test_the_ast_side_is_not_empty(self):
+        """Молчащий детектор: пустое множество слева проходит любое ⊆ справа."""
+        registered = _commands_registered_by("_register_observability_commands")
+        assert len(registered) >= 10, (
+            f"разбор таблицы регистрации нашёл лишь {len(registered)} команд — "
+            f"форма таблицы изменилась, и страж ослеп: {sorted(registered)}"
+        )
+
+    def test_every_registered_observability_command_is_typed(self):
+        from multiprocess_framework.modules.process_module.commands.builtin_commands import (
+            OBSERVABILITY_TYPED_COMMANDS,
+        )
+
+        registered = _commands_registered_by("_register_observability_commands")
+        escaped = sorted(registered - OBSERVABILITY_TYPED_COMMANDS)
+        assert not escaped, (
+            f"команды наблюдаемости вне охвата проверки типов: {escaped}. "
+            f"Добавьте имя в OBSERVABILITY_TYPED_COMMANDS — иначе мусорный тип "
+            f"параметра дойдёт до хендлера, как это было с 'resolve' (Н-5)."
+        )
+
+    def test_the_scope_does_not_name_commands_that_do_not_exist(self):
+        """Обратная сторона: имя в охвате, которого нет нигде, сторожит пустоту."""
+        from multiprocess_framework.modules.process_module.commands.builtin_commands import (
+            OBSERVABILITY_TYPED_COMMANDS,
+        )
+
+        known = set(_ORACLE) | _commands_registered_by("_register_introspect_commands")
+        phantom = sorted(OBSERVABILITY_TYPED_COMMANDS - known)
+        assert not phantom, f"в охвате имена, которых нет среди зарегистрированных команд: {phantom}"
