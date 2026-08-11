@@ -87,6 +87,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from ...channel_routing_module.levels import (
     ERROR_SEVERITY,
+    LEVEL_ORDER,
+    SEVERITY_NUMBERS,
     UNKNOWN_SEVERITY,
     record_severity,
     severity_of,
@@ -329,3 +331,43 @@ class RateSampler:
     def keys_tracked(self) -> int:
         """Сколько ключей под учётом. Приближение к потолку видно заранее."""
         return len(self._keys)
+
+    def readback(self) -> Dict[str, Any]:
+        """ДЕЙСТВУЮЩИЕ параметры дросселя — не эхо запроса (задача 4.4).
+
+        Заведено живым прогоном 4.4: оператор включал дроссель командой
+        ``config.reload`` на работающем процессе и получал вердикт
+        ``unverifiable`` — «ручка подана, подтвердить нечем», потому что
+        ``observability_effective`` секции сэмплинга не отдавал вовсе. Механизм,
+        включение которого нельзя подтвердить, по закону этого проекта не
+        существует; счётчик подавленных отвечает на другой вопрос («уже
+        потеряно»), а не на «действует ли то, что я включил».
+
+        Потолок отдаётся **ПОСЧИТАННЫМ, а не запрошенным**: конфиг не вправе
+        поднять его до ошибок (``configure`` обрезает по ``ERROR_SEVERITY - 1``),
+        и readback, повторяющий запрос, врал бы ровно там, где оператор попросил
+        ``CRITICAL``. Расхождение «просил CRITICAL — действует WARNING» и есть
+        полезный ответ: readback, расходящийся с гейтом, хуже отсутствующего.
+        """
+        return {
+            "sampling_first_n": self._first_n,
+            "sampling_every_mth": self._every_mth,
+            "sampling_burst_reset_sec": self._burst_reset_sec,
+            "sampling_max_level": self.max_level,
+        }
+
+    @property
+    def max_level(self) -> str:
+        """Имя САМОГО ВЫСОКОГО уровня, который дроссель ещё берёт.
+
+        Считается по действующему числу, а не хранится вторым полем: обрезка
+        потолка живёт в ``configure``, и второе место, где записан её результат,
+        разошлось бы с первым на первой же правке. Число 16 (``ERROR - 1``)
+        собственного имени не имеет — ему отвечает ближайшее снизу ``WARNING``,
+        то есть ровно то множество уровней, которое дроссель и трогает.
+        """
+        name = LEVEL_ORDER[0]
+        for level in LEVEL_ORDER:
+            if SEVERITY_NUMBERS[level] <= self._max_severity:
+                name = level
+        return name

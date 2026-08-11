@@ -173,6 +173,16 @@ def observability_effective(
         unknown_fn = getattr(logger, "unknown_scopes", None)
         if callable(unknown_fn):
             section["unknown_scopes"] = unknown_fn()
+        # Задача 4.4: действующие параметры дросселя. Без них включение ручки на
+        # живой системе давало вердикт ``unverifiable`` — «подано, подтвердить
+        # нечем» (воспроизведено зондом ``probe_4_4_sampler_live``): ни один путь
+        # ``logger.sampling_*`` в readback не приходил, а счётчик подавленных
+        # отвечает на другой вопрос. Спрашиваем менеджер, а он — сам процессор:
+        # запрошенное и действующее здесь расходятся законно (потолок обрезан
+        # ошибками), и показать обязаны действующее.
+        sampling_fn = getattr(logger, "sampling_readback", None)
+        if callable(sampling_fn):
+            section.update(sampling_fn())
         section.update(_sink_readback(logger))
         section.update(_idle_sinks(logger))
         out["logger"] = section

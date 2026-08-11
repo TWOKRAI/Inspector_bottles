@@ -1700,6 +1700,18 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             max_level=getattr(log_config, "sampling_max_level", "DEBUG"),
         )
 
+    def sampling_readback(self) -> Dict[str, Any]:
+        """ДЕЙСТВУЮЩИЕ параметры дросселя — для readback пульта (задача 4.4).
+
+        Спрашивает САМ ПРОЦЕССОР, а не свой конфиг: цепочка держит объект, и
+        ``self.config`` пережил бы правку, которая до сэмплера не доехала, —
+        расхождение, о котором readback обязан говорить, стало бы невидимым.
+        Потолок при этом приезжает обрезанным по ошибкам (см.
+        :meth:`RateSampler.readback`), поэтому ``sampling_max_level: CRITICAL``
+        из конфига честно показывается как действующий ``WARNING``.
+        """
+        return self._sampler.readback()
+
     def _run_processors(
         self,
         scope: ScopeName,

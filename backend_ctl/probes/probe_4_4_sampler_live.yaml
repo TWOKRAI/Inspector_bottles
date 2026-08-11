@@ -1,0 +1,26 @@
+# Рецепт стенда задачи 4.4 — «сэмплер показан живым».
+#
+# Один процесс, один плагин, никакого железа и никаких кадров: приёмка требует
+# ЧИСЕЛ «сколько прошло / сколько подавлено», а не «стало меньше», поэтому шторм
+# задаёт эмитент по команде, а не темп данных.
+#
+# Запуск: python -m backend_ctl.probes.probe_4_4_sampler_live
+name: sampler_storm_probe
+version: 1
+description: "Шторм дословных повторов по команде — живая приёмка дросселя (задача 4.4)"
+
+blueprint:
+  name: sampler_storm_probe
+  description: "Один процесс с плагином-штормом; сэмплер включается ручкой на живой системе"
+
+  processes:
+    - process_name: storm
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets: []
+      plugins:
+        - plugin_class: backend_ctl.probes.log_storm_plugin.LogStormPlugin
+          plugin_name: log_storm
+          category: utility
+
+  wires: []
