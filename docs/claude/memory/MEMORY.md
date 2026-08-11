@@ -262,3 +262,5 @@
 - [Страж существования ≠ страж содержимого](feedback_guard_on_existence_is_not_a_guard_on_content.md) — пустой каталог устраивал; ложь прожила 3 месяца
 - [Фасад — белый список](feedback_facade_is_a_whitelist_not_a_passthrough.md) — поле в схеме менеджера не делает ручку управляемой; три точки: схема, фасад+expand, readback
 - [Runtime-конфиг умирает с процессом](feedback_runtime_config_dies_with_the_process.md) — рестарт берёт конфиг с диска; до/после через рестарт меряет одно и то же
+- [Зонный страж не закрывает класс](feedback_zone_guard_never_closes_the_class.md) — девятый экземпляр в непокрытой зоне; реестр исключений с причинами
+- [Сверка копий не видит оригинал](feedback_mirror_check_never_reads_the_original.md) — читать множество из источника; сломанный парсер = вакуум
