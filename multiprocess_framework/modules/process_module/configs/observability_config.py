@@ -33,6 +33,7 @@ from pydantic import Field, field_validator, model_validator
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...observability_declarations import declared_rules
 from ...logger_module.configs.logger_manager_config import MIN_BURST_RESET_SEC
+from ...statistics_module import DEFAULT_LOG_LINE_MAX_BYTES
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 
 #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
@@ -146,6 +147,16 @@ class ObservabilityStatsConfig(SchemaBase):
         FieldMeta("ПОЛ интервала записи snapshot'ов, сек — темп ниже него недостижим", min=1.0, max=300.0),
     ] = 10.0
     log_level: Annotated[str, FieldMeta("Уровень логирования метрик")] = "INFO"
+
+    # 3.4: предел объёма ОДНОЙ строки снапшота. Живёт здесь, а не только в
+    # `StatsManagerConfig`, потому что этот фасад — единственная дорога конфига
+    # приложения к плоскости: ключ, которого тут нет, схема отбрасывает молча.
+    # Проверено живым прогоном ДО правки: `config.reload` на восьми процессах вернул
+    # `failed` (ключ не выжил round-trip), а прямой тест менеджера при этом был зелёным.
+    log_line_max_bytes: Annotated[
+        int,
+        FieldMeta("Предел объёма строки снапшота, байт (0 — без предела)", min=0, max=1_048_576),
+    ] = DEFAULT_LOG_LINE_MAX_BYTES
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -510,6 +521,9 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         # max(flush_interval, aggregation_interval) съедал любую настройку темпа.
         "flush_interval": cfg.stats.flush_interval,
         "log_level": cfg.stats.log_level,
+        # 3.4: без прокида ключ существовал бы в фасаде и не доезжал до менеджера —
+        # ровно та половинчатость, которой уже был `flush_interval` (Ф6.х.8).
+        "log_line_max_bytes": cfg.stats.log_line_max_bytes,
     }
 
     # Task 5.10.b: адресные переопределения каналов двух младших плоскостей —

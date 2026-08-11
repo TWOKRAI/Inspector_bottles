@@ -10,6 +10,7 @@ from typing import Annotated, Dict
 
 from ...channel_routing_module import ChannelRoutingConfig
 from ...data_schema_module import FieldMeta, register_schema
+from ..channels.log_stats_channel import DEFAULT_LOG_LINE_MAX_BYTES
 
 
 @register_schema("StatsManagerConfig")
@@ -57,6 +58,15 @@ class StatsManagerConfig(ChannelRoutingConfig):
         str,
         FieldMeta("Уровень логирования метрик"),
     ] = "INFO"
+
+    # 3.4: непустой снапшот дампил весь список метрик в одну строку — медиана 2582,
+    # максимум 53 900 байт по 416 живым строкам. Предел 2048 держит потолок фона на
+    # 1.24 МиБ/ч (гейт этапа — ≤ ~2 МиБ/ч), сохраняя ~70 % метрик в такте; сколько
+    # опущено — сказано в самой записи. 0 снимает предел для отладки.
+    log_line_max_bytes: Annotated[
+        int,
+        FieldMeta("Предел объёма строки снапшота, байт (0 — без предела)", min=0, max=1_048_576),
+    ] = DEFAULT_LOG_LINE_MAX_BYTES
 
     default_tags: Annotated[
         Dict[str, str],

@@ -27,7 +27,7 @@ from ..interfaces import IStatsManager
 from .metric_record import MetricRecord, MetricType
 from .aggregation_window import AggregationWindow
 from ...logger_module.core.log_paths import resolve_log_file_path
-from ..channels.log_stats_channel import LogStatsChannel
+from ..channels.log_stats_channel import DEFAULT_LOG_LINE_MAX_BYTES, LogStatsChannel
 from ..channels.file_stats_channel import FileStatsChannel
 
 _STATS_SENTINEL = "__stats__"
@@ -253,6 +253,13 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         level = getattr(log_channel, "level", None)
         if level is not None:
             out["log_level"] = level
+        # 3.4: без этого ключа `config_reload_verified` не может подтвердить предел —
+        # живой прогон вернул `failed` на всех восьми процессах, и это было верно:
+        # ключ не выживал round-trip через фасад и не показывался наружу. Ручка,
+        # которую нельзя прочитать, неотличима от неприменённой.
+        max_bytes = getattr(log_channel, "max_bytes", None)
+        if max_bytes is not None:
+            out["log_line_max_bytes"] = max_bytes
         return out
 
     # =========================================================================
@@ -325,6 +332,7 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             logger_manager=logger_manager,
             level=cfg.get("log_level", "INFO"),
             name=STATS_LOG_CHANNEL,
+            max_bytes=cfg.get("log_line_max_bytes", DEFAULT_LOG_LINE_MAX_BYTES),
         )
 
     def _build_file_channel(self, name: str, params: Dict[str, Any]) -> Optional[FileStatsChannel]:

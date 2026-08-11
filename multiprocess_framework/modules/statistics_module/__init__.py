@@ -10,6 +10,7 @@ from .interfaces import IStatsManager
 from .configs import StatsManagerConfig
 from .core import StatsManager, MetricRecord, MetricType, AggregationWindow
 from .channels import LogStatsChannel, FileStatsChannel
+from .channels.log_stats_channel import DEFAULT_LOG_LINE_MAX_BYTES
 from .adapters import StatsAdapter
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "AggregationWindow",
     "LogStatsChannel",
     "FileStatsChannel",
+    "DEFAULT_LOG_LINE_MAX_BYTES",
     "StatsAdapter",
 ]

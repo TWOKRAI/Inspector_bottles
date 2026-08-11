@@ -7,8 +7,8 @@
 | Критерий        | Оценка | Комментарий                                                                   |
 |-----------------|--------|-------------------------------------------------------------------------------|
 | Код             | 9      | ChannelRoutingManager + AggregationWindow; sentinel-паттерн для broadcast     |
-| Тесты           | 9      | ~37 тестов; integration, adapter, thread-safety, tags                         |
-| Документация    | 10     | DECISIONS.md (ADR-SM-001…006), §6.15 в ARCHITECTURE.md, README fix              |
+| Тесты           | 9      | 81 тест; integration, adapter, thread-safety, tags, подавление пустых, предел строки |
+| Документация    | 10     | DECISIONS.md (ADR-SM-001…009), §6.15 в ARCHITECTURE.md, README fix              |
 | Связанность     | 9      | Наследует CRM; IStatsManager(IChannelRoutingManager); StatsPlugin-совместим   |
 | Дублирование    | 9      | _metric_key дублируется в core/ — приемлемо (изолированные слои)             |
 | Работоспособность | 9    | Все 24 теста проходят; broadcast, теги, flush работают корректно              |
@@ -66,3 +66,4 @@
 | 2026-04-03 | Импорт `ChannelRoutingConfig` из публичного `channel_routing_module` (ADR-114) |
 | 2026-04-10 | DECISIONS.md (ADR-SM-001…006), ARCHITECTURE.md §6.15, тесты integration/adapter/thread-safety, README fix; этап 4→5 |
 | 2026-07-26 | **Ф0.6:** StatsManager получил симметрию с логгером — `set_sink_enabled` / `add_tap` / `remove_tap` / `_fallback_log` (наследуются из CRM) + собственный `_recreate_channel`. `_setup_channels` разложен на сборщики по одному имени (`_build_log_channel` / `_build_file_channel` / `_build_fallback_channel`), служебные имена каналов названы константами `STATS_LOG_CHANNEL` / `STATS_FALLBACK_CHANNEL`. Адресуется командой `logger.sink.*` с `manager="stats"`. Анти-дубль-счёт (`_STATS_SENTINEL` + broadcast в `_do_flush`) НЕ тронут — закреплён характеризационным тестом | Ф0.6 |
+| 2026-08-11 | **3.4:** объём строки снапшота ограничен ручкой `log_line_max_bytes` (дефолт 2048 байт, `0` — без предела); опущенные метрики названы числом в самой записи. Потолок фона 1.24 МиБ/ч против прежних 2.6–5.5 (замер по 416 живым строкам: медиана 2582, максимум 53 900 байт). Компактная запись вместо `repr` отвергнута замером — 56.8 % объёма, гейт не закрывает, а смена формата принадлежит этапу 6. **ADR-SM-009** | 12 тестов, 7 инъекций |
