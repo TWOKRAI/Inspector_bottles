@@ -760,17 +760,19 @@ class TestGuiStateProxy:
 class TestStateProxyIntegration:
     """Интеграционные тесты: proxy <-> manager в одном процессе."""
 
-    def _build_pair(self):
-        """Создать связку proxy + manager с общим MockRouter."""
+    @pytest.fixture
+    def pair(self):
+        """Связка proxy + manager с общим MockRouter; shutdown() гарантирован teardown'ом."""
         router = MockRouter()
         mgr = StateStoreManager(router=router)
         mgr.initialize()
         proxy = StateProxy("camera_0", router=router)
-        return proxy, mgr, router
+        yield proxy, mgr, router
+        mgr.shutdown()
 
-    def test_proxy_set_reaches_manager(self):
+    def test_proxy_set_reaches_manager(self, pair):
         """proxy.set() → manager.handle_state_set() → значение в TreeStore."""
-        proxy, mgr, router = self._build_pair()
+        proxy, mgr, router = pair
 
         proxy.set("cameras.0.config.fps", 30)
 
@@ -781,9 +783,9 @@ class TestStateProxyIntegration:
         assert result["status"] == "ok"
         assert mgr.store.get("cameras.0.config.fps") == 30
 
-    def test_proxy_subscribe_and_receive_change(self):
+    def test_proxy_subscribe_and_receive_change(self, pair):
         """Полный цикл: subscribe → set → state.changed → on_state_changed."""
-        proxy, mgr, router = self._build_pair()
+        proxy, mgr, router = pair
 
         received: list[list[Delta]] = []
 
@@ -823,9 +825,9 @@ class TestStateProxyIntegration:
         assert received[0][0].path == "cameras.0.config.fps"
         assert proxy.cache["cameras.0.config.fps"] == 28
 
-    def test_proxy_cache_updated_on_state_changed(self):
+    def test_proxy_cache_updated_on_state_changed(self, pair):
         """proxy.on_state_changed() обновляет кэш корректно."""
-        proxy, mgr, router = self._build_pair()
+        proxy, mgr, router = pair
 
         # Подписываем camera_0 через менеджер
         mgr.handle_state_subscribe(

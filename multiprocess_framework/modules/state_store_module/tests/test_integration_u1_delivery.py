@@ -107,6 +107,7 @@ def test_published_state_delivered_to_subscriber_state_queue() -> None:
         assert deltas[0]["path"] == "processes.cam0.workers.w1.effective_hz"
         assert deltas[0]["new_value"] == 12.5
     finally:
+        ssm.shutdown()
         router.shutdown()
 
 
@@ -124,6 +125,7 @@ def test_process_status_change_delivered() -> None:
         assert msg["data"]["deltas"][0]["path"] == "processes.cam0.state.status"
         assert msg["data"]["deltas"][0]["new_value"] == "running"
     finally:
+        ssm.shutdown()
         router.shutdown()
 
 
@@ -139,4 +141,5 @@ def test_path_outside_subscription_not_delivered() -> None:
         with pytest.raises(_queue.Empty):
             qr.get("gui", "state", timeout=0.5)
     finally:
+        ssm.shutdown()
         router.shutdown()

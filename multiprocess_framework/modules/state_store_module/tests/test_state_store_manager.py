@@ -86,18 +86,24 @@ class TestStateStoreManagerInit:
     def test_initialize_without_router(self):
         """Инициализация без router (тестовый режим)."""
         mgr = StateStoreManager()
-        assert mgr.initialize() is True
+        try:
+            assert mgr.initialize() is True
+        finally:
+            mgr.shutdown()
 
     def test_initialize_with_router(self):
         """Инициализация с router — регистрирует обработчики."""
         router = MockRouter()
         mgr = StateStoreManager(router=router)
         mgr.initialize()
-        # Проверяем что обработчики зарегистрированы
-        assert "state.set" in router.registered_handlers
-        assert "state.get" in router.registered_handlers
-        assert "state.subscribe" in router.registered_handlers
-        assert len(router.registered_handlers) == 8
+        try:
+            # Проверяем что обработчики зарегистрированы
+            assert "state.set" in router.registered_handlers
+            assert "state.get" in router.registered_handlers
+            assert "state.subscribe" in router.registered_handlers
+            assert len(router.registered_handlers) == 8
+        finally:
+            mgr.shutdown()
 
     def test_initialize_auto_register_ipc_false_skips_raw(self):
         """auto_register_ipc=False: initialize() НЕ регистрирует RAW-обработчики.
@@ -110,16 +116,22 @@ class TestStateStoreManagerInit:
         """
         router = MockRouter()
         mgr = StateStoreManager(router=router, auto_register_ipc=False)
-        assert mgr.initialize() is True
-        # RAW-регистрации НЕТ — event_dispatcher не занят сырыми хендлерами.
-        assert router.registered_handlers == {}
+        try:
+            assert mgr.initialize() is True
+            # RAW-регистрации НЕТ — event_dispatcher не занят сырыми хендлерами.
+            assert router.registered_handlers == {}
+        finally:
+            mgr.shutdown()
 
     def test_initialize_auto_register_ipc_true_is_default(self):
         """Дефолт auto_register_ipc=True сохраняет legacy-поведение (RAW)."""
         router = MockRouter()
         mgr = StateStoreManager(router=router)  # без явного флага
         mgr.initialize()
-        assert len(router.registered_handlers) == 8
+        try:
+            assert len(router.registered_handlers) == 8
+        finally:
+            mgr.shutdown()
 
     def test_shutdown_clears_subscriptions(self):
         """shutdown() удаляет все подписки."""
@@ -779,11 +791,18 @@ class TestDeltaDispatcher:
 class TestIntegration:
     """Сквозные тесты: IPC-сообщение -> set -> subscribe -> dispatch."""
 
-    def test_full_flow(self):
-        """Полный цикл: подписка -> set -> получение state.changed."""
+    @pytest.fixture
+    def wired(self):
+        """MockRouter + инициализированный менеджер; shutdown() гарантирован teardown'ом."""
         router = MockRouter()
         mgr = StateStoreManager(router=router)
         mgr.initialize()
+        yield mgr, router
+        mgr.shutdown()
+
+    def test_full_flow(self, wired):
+        """Полный цикл: подписка -> set -> получение state.changed."""
+        mgr, router = wired
 
         # 1. Подписываем processor на cameras.**
         sub_result = mgr.handle_state_subscribe(
@@ -816,11 +835,9 @@ class TestIntegration:
         )
         assert get_result["value"] == 30
 
-    def test_merge_and_subscribe_flow(self):
+    def test_merge_and_subscribe_flow(self, wired):
         """merge + подписка: несколько дельт в одном сообщении."""
-        router = MockRouter()
-        mgr = StateStoreManager(router=router)
-        mgr.initialize()
+        mgr, router = wired
 
         # Подписываем
         mgr.handle_state_subscribe(
@@ -844,11 +861,9 @@ class TestIntegration:
         assert len(router.sent_messages) == 1
         assert len(router.sent_messages[0]["data"]["deltas"]) == 3
 
-    def test_unsubscribe_stops_delivery(self):
+    def test_unsubscribe_stops_delivery(self, wired):
         """После отписки дельты не доставляются."""
-        router = MockRouter()
-        mgr = StateStoreManager(router=router)
-        mgr.initialize()
+        mgr, router = wired
 
         # Подписываем и тут же отписываем
         sub_result = mgr.handle_state_subscribe(
