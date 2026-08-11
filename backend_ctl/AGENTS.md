@@ -37,8 +37,23 @@
 | Режим | Как | Что видно |
 |-------|-----|-----------|
 | **Бэкенд отдельно** (headless, без Qt) | `BackendHarness` в тестах или `BACKEND_CTL=1` + strip_gui | introspect/state/логи/регистры — весь этот файл |
-| **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 python run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
+| **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 INSPECTOR_GUI_UNATTENDED=1 python multiprocess_prototype/frontend/run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
 | **Совместно** (корреляция UI ↔ бэкенд) | `drv.watch_like_gui()` (весь приёмный профиль GUI: state + логи/observability + авто-переподписка) **+** `drv.ui_tap("gui")` (жесты+команды GUI); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; выключение — `drv.unwatch()` + `drv.ui_untap("gui")` | единый событийный поток с ts/seq: «клик (ui.event kind=button, seq=41) → команда GUI→бэкенд (kind=command, seq=42) → log.record → state.changed» — разрыв между уровнями локализует баг |
+
+**GUI-стенд поднимается ТОЛЬКО боевой точкой входа** (решение владельца 2026-08-11).
+`BackendHarness` — headless-стенд для тестов, и GUI через него не поднимается: попытка
+(презентационный overlay, в т.ч. с боевым `build_launcher` через `launcher_factory`)
+кончается зависанием процесса `gui` в `_init_application_threads` — до `run_gui` он не
+доходит, поэтому молчат команды и переполняется очередь данных. Двух дорог подъёма не
+заводим: та, что виснет, молча ломает сравнимость чисел между стендами.
+
+`INSPECTOR_GUI_UNATTENDED=1` обязателен для автоматических прогонов с окнами
+([`frontend/unattended.py`](../multiprocess_prototype/frontend/unattended.py)): вопрос
+«сохранить несохранённые правки графа?» получает явный ответ «не сохранять» ДО показа
+окна, любая другая модалка закрывается сторожем с записью в лог. Без него прогон встаёт
+на первой же модалке — из-за этого живые замеры и шли headless, где нагрузка беднее
+боевой в разы. Приёмка стенда — [`probe_gui_stand_live`](probes/probe_gui_stand_live.py)
+(подключается к уже поднятому, ничего не поднимает сам).
 
 **Киллер-фича:** `introspect_handlers(process)` за секунду ловит баг «нет приёмника»
 (команда есть в `CommandManager`, но не в router `message_dispatcher`, или у плагина нет

@@ -264,3 +264,5 @@
 - [Runtime-конфиг умирает с процессом](feedback_runtime_config_dies_with_the_process.md) — рестарт берёт конфиг с диска; до/после через рестарт меряет одно и то же
 - [Зонный страж не закрывает класс](feedback_zone_guard_never_closes_the_class.md) — девятый экземпляр в непокрытой зоне; реестр исключений с причинами
 - [Сверка копий не видит оригинал](feedback_mirror_check_never_reads_the_original.md) — читать множество из источника; сломанный парсер = вакуум
+- [Диагностика — через backend_ctl](feedback_diagnose_live_system_with_backend_ctl.md) — штатный инструмент отвечает на незаданные вопросы; соседи как контроль
+- [GUI-стенд только боевым входом](project_gui_stand_production_entry_only.md) — INSPECTOR_GUI_UNATTENDED=1; через harness gui виснет в initialize

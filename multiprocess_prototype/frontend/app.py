@@ -16,6 +16,7 @@ from multiprocess_framework.modules.frontend_module.core.app_identity import (
     set_app_identity,
 )
 from multiprocess_framework.modules.process_module.generic import frame_trace
+from . import unattended
 from .auth_context import AuthContext
 from .bridge.command_sender import CommandSender
 from .windows.main_window import MainWindow
@@ -60,6 +61,14 @@ def _resolve_dev_login_settings() -> tuple[bool, str, str]:
 def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # Режим без присмотра (env INSPECTOR_GUI_UNATTENDED=1): живой стенд с настоящими
+    # окнами, где кликать некому. Ставится ПЕРВЫМ делом и до всех стартовых диалогов —
+    # StartupBlockingDialog при отсутствии хранилища пользователей и LoginDialog при
+    # неудавшемся автологине висят ниже по этой же функции, и сторож, поставленный
+    # после них, опоздал бы ровно на тот случай, ради которого он есть. Off по умолчанию.
+    unattended.set_logger(process._log_warning)
+    unattended.install_modal_watchdog(app)
 
     # Диагностика зависаний GUI (env INSPECTOR_STALL_DUMP=1): faulthandler в отдельном
     # C-потоке пишет стеки ВСЕХ потоков каждые 5 сек — ловит место фриза даже когда
