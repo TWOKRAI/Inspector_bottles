@@ -43,7 +43,8 @@
 ## Стек
 
 Python 3.12 (см. корневой `pyproject.toml`), PySide6 6.10 (Phase 2 завершена 2026-04), OpenCV 4.13, NumPy 2.x | SQLite/PostgreSQL
-Ollama, pytest + pytest-qt (`qt_api = pyside6`) | Pydantic v2, loguru
+Ollama, pytest + pytest-qt (`qt_api = pyside6`) | Pydantic v2
+Логирование — своё (`logger_module`: `get_std_logger` + LoggerManager процесса). loguru снята в 4.3: писателей мимо разъёма не осталось
 ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]` в pyproject
 
 ## Правила проекта

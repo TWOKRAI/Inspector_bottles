@@ -249,3 +249,171 @@ def test_exempt_dir_is_not_stale(dir_path: str) -> None:
 def test_exempt_dir_has_a_real_reason(dir_path: str, reason: str) -> None:
     """Причина exempt-директории — по существу, как у whitelist'а."""
     assert len(reason) >= 40, f"причина для {dir_path} слишком короткая, чтобы быть причиной"
+
+
+# ==============================================================================
+# Задача 4.3 (Н-10): второй писатель мимо разъёма — loguru
+# ==============================================================================
+#
+# Страж выше видел ОДНОГО обходчика — голый stdlib. Loguru — такой же писатель
+# мимо разъёма и хуже тем, что он не молчит: у него свой sink в stderr, поэтому
+# запись выглядит доставленной, а на деле идёт вторым форматом мимо файлов,
+# ротации, троттлинга и ретеншена. Класс тот же, симптом противоположный, и
+# именно поэтому его не поймал ни один прогон: искали тишину.
+#
+# Ловится ИМПОРТ, а не вызов. Импортировать loguru незачем, кроме как чтобы им
+# писать, и импорт нельзя спрятать за алиасом переменной: `logger = get_thing()`
+# страж по вызовам не увидел бы, а импорт виден всегда.
+
+#: Исключения для loguru — та же пара защит, что у stdlib-whitelist'а: живое
+#: нарушение внутри и причина по существу. Пусто: после 4.3 обходчиков нет.
+LOGURU_WHITELIST: dict[str, str] = {}
+
+
+def _loguru_imports(path: Path) -> Iterator[tuple[int, str]]:
+    """Все импорты loguru в файле — во всех формах написания."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+    except (SyntaxError, UnicodeDecodeError):  # pragma: no cover — битый файл не наше дело
+        return
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "loguru" or alias.name.startswith("loguru."):
+                    yield node.lineno, f"import {alias.name}" + (f" as {alias.asname}" if alias.asname else "")
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "loguru":
+            names = ", ".join(a.name + (f" as {a.asname}" if a.asname else "") for a in node.names)
+            yield node.lineno, f"from {node.module} import {names}"
+
+
+def _scan_loguru(root: Path = REPO_ROOT) -> list[Hit]:
+    """Импорты loguru во всех деревьях, кроме tests/ и whitelist'а.
+
+    ``EXEMPT_DIRS`` здесь НЕ применяется: та причина — «модуль логгера нельзя
+    мигрировать на себя же» — про stdlib-фолбэк и к loguru отношения не имеет.
+    Переиспользовать чужое исключение значило бы расширить его молча.
+    """
+    hits: list[Hit] = []
+    for tree in TREES:
+        tree_root = root / tree
+        if not tree_root.is_dir():
+            continue
+        for py in tree_root.rglob("*.py"):
+            rel = _rel(py, root)
+            if "tests" in rel.split("/"):
+                continue
+            if rel in LOGURU_WHITELIST:
+                continue
+            hits.extend(Hit(rel, lineno, form) for lineno, form in _loguru_imports(py))
+    return hits
+
+
+def test_no_loguru_outside_whitelist() -> None:
+    """Ноль импортов loguru в четырёх деревьях.
+
+    До 4.3 таких точек было две — обе в прототипе (``domain/entities/process.py``
+    и ``frontend/.../sandbox_presenter.py``), и обе писали предупреждения вторым
+    форматом мимо плоскости логов.
+    """
+    hits = _scan_loguru()
+    assert hits == [], "loguru пишет мимо разъёма:\n" + "\n".join(
+        f"  {h.path}:{h.lineno}  {h.arg} — заменить на get_std_logger(__name__) "
+        f"либо внести в LOGURU_WHITELIST с причиной"
+        for h in hits
+    )
+
+
+#: Формы написания, которые страж loguru обязан видеть. Как и у stdlib: частичное
+#: покрытие форм даёт ложный зелёный на первой же правке с алиасом.
+_PLANTED_LOGURU_FORMS: dict[str, str] = {
+    "from-импорт": "from loguru import logger\nlogger.warning('мимо разъёма')\n",
+    "алиас имени": "from loguru import logger as log\nlog.warning('мимо разъёма')\n",
+    "модульный импорт": "import loguru\nloguru.logger.warning('мимо разъёма')\n",
+    "алиас модуля": "import loguru as lg\nlg.logger.warning('мимо разъёма')\n",
+    "подмодуль": "from loguru._logger import Logger\n",
+}
+
+
+@pytest.mark.parametrize("form_name,code", sorted(_PLANTED_LOGURU_FORMS.items()))
+@pytest.mark.parametrize("tree", TREES)
+def test_loguru_guard_sees_a_planted_violation(tmp_path: Path, tree: str, form_name: str, code: str) -> None:
+    """Страж loguru показан красным на каждой форме и в каждом дереве."""
+    for t in TREES:
+        (tmp_path / t).mkdir(parents=True)
+    planted = tmp_path / tree / "нарушитель.py"
+    planted.write_text(code, encoding="utf-8")
+
+    hits = _scan_loguru(tmp_path)
+
+    assert [h.path for h in hits] == [f"{tree}/нарушитель.py"], (
+        f"страж loguru не увидел форму «{form_name}» в дереве {tree}"
+    )
+
+
+@pytest.mark.parametrize("tree", TREES)
+def test_loguru_guard_exempts_tests_dir(tmp_path: Path, tree: str) -> None:
+    """Негативный контроль: в tests/ loguru — предмет теста, а не способ писать."""
+    for t in TREES:
+        (tmp_path / t / "tests").mkdir(parents=True)
+    (tmp_path / tree / "tests" / "нарушитель.py").write_text("from loguru import logger\n", encoding="utf-8")
+
+    assert _scan_loguru(tmp_path) == [], "импорт внутри tests/ не должен считаться"
+
+
+def test_the_two_guards_do_not_cover_each_other(tmp_path: Path) -> None:
+    """Страж stdlib слеп к loguru, страж loguru слеп к stdlib — и это проверено.
+
+    Иначе один из них казался бы лишним слоем: «оба зелёные» ничего не говорит о
+    том, что каждый видит своё. Ровно эта слепота и была Н-10 — writer'ов два,
+    правило стояло на одном.
+    """
+    (tmp_path / TREES[0]).mkdir(parents=True)
+    (tmp_path / TREES[0] / "только_loguru.py").write_text("from loguru import logger\n", encoding="utf-8")
+
+    assert _scan(tmp_path) == [], "страж stdlib не должен реагировать на loguru"
+    assert len(_scan_loguru(tmp_path)) == 1, "страж loguru обязан видеть свой импорт"
+
+
+@pytest.mark.parametrize("path", sorted(LOGURU_WHITELIST))
+def test_loguru_whitelist_entry_is_not_stale(path: str) -> None:
+    """Строка whitelist'а обязана указывать на живой импорт loguru."""
+    target = REPO_ROOT / path
+    assert target.is_file(), f"LOGURU_WHITELIST указывает на несуществующий файл: {path}"
+    assert list(_loguru_imports(target)), f"строка протухла: в {path} больше нет импорта loguru — удалить её"
+
+
+@pytest.mark.parametrize("path,reason", sorted(LOGURU_WHITELIST.items()))
+def test_loguru_whitelist_entry_has_a_real_reason(path: str, reason: str) -> None:
+    """Причина — по существу: свалка начинается с одной пустой строки."""
+    assert len(reason) >= 40, f"причина для {path} слишком короткая, чтобы быть причиной"
+
+
+def test_loguru_is_not_a_dependency_while_nobody_imports_it() -> None:
+    """Нет потребителей — нет и зависимости (решение владельца 2026-08-11).
+
+    Пара к стражу импортов, а не его дубль. Страж выше запрещает ПИСАТЬ через
+    loguru; этот следит, чтобы пакет не лежал в зависимостях «на всякий случай»:
+    объявленная зависимость без потребителя читается как разрешение — поставил,
+    значит можно, — и первый же новый файл вернёт второго писателя, а страж
+    импортов узнает об этом только на следующем прогоне.
+
+    Связка честная в обе стороны: появится законный потребитель — он попадёт в
+    ``LOGURU_WHITELIST`` с причиной, и тогда зависимость снова обязана быть
+    объявлена. Именно поэтому проверка условная, а не «loguru запрещена навсегда».
+    """
+    import tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = [dep for dep in pyproject["project"]["dependencies"] if dep.split(">=")[0].strip().lower() == "loguru"]
+
+    if LOGURU_WHITELIST:
+        assert declared, (
+            f"в LOGURU_WHITELIST есть законные потребители {sorted(LOGURU_WHITELIST)}, "
+            "а зависимость loguru снята — они упадут ImportError'ом"
+        )
+    else:
+        assert not declared, (
+            f"loguru объявлена зависимостью ({declared}), но её никто не импортирует. "
+            "Либо снять из pyproject, либо внести потребителя в LOGURU_WHITELIST с причиной"
+        )

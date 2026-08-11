@@ -22,9 +22,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from loguru import logger
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from multiprocess_prototype.domain.app_services import AppServices
+
+# Задача 4.3 (Н-10): было `from loguru import logger`. Песочница плагинов ловит
+# отказы чужого кода, и её предупреждения нужны в плоскости логов, а не вторым
+# форматом в stderr — там их не видит ни хвост, ни ротация, ни ретеншен.
+logger = get_std_logger(__name__)
 
 
 @dataclass
@@ -224,5 +229,5 @@ class SandboxPresenter:
     # ------------------------------------------------------------------ #
 
     def _warn(self, msg: str) -> None:
-        """Логировать предупреждение через loguru."""
+        """Логировать предупреждение через разъём логов (не мимо него)."""
         logger.warning(msg)

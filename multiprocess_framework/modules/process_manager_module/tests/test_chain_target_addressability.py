@@ -112,3 +112,54 @@ class TestUnaddressableChainTargets:
         assert len(errors) == 3, errors
         joined = " ".join(errors)
         assert all(name in joined for name in ("ghost_1", "ghost_2", "ghost_3"))
+
+    def test_the_save_gate_carries_the_verdict_too(self) -> None:
+        """Задача 4.3 (Н-13): гейт СОХРАНЕНИЯ рецепта тоже видит адрес в никуда.
+
+        ``check()`` зовут сборщики на boot/switch, а GUI-сохранение идёт через
+        ``check_structure()`` — до 4.3 оно этой проверки не спрашивало, и правка
+        с висящим адресом записывалась на диск молча. Цена приходила позже и в
+        другом месте: отказ доставки на каждый кадр вместо отказа в момент правки.
+        Страж на одной дороге из двух класс не закрывает.
+        """
+        bp = _blueprint([{"process_name": "producer", "plugins": [], "chain_targets": ["ghost"]}])
+
+        errors = bp.check_structure()
+
+        assert any("ghost" in err for err in errors), errors
+
+    def test_the_save_gate_stays_quiet_on_a_healthy_graph(self) -> None:
+        """Негативный контроль: ужесточение не начало отвергать здоровые рецепты.
+
+        Замер перед правкой: все 14 живых рецептов репозитория чисты — ни одного
+        адреса в никуда, поэтому ужесточение никому не мешает сохраняться.
+        """
+        bp = _blueprint(
+            [
+                {"process_name": "producer", "plugins": [], "chain_targets": ["consumer"]},
+                {"process_name": "consumer", "plugins": []},
+            ]
+        )
+
+        assert bp.check_structure() == []
+
+    def test_the_save_gate_also_sees_an_unknown_observability_process(self) -> None:
+        """Вторая проверка того же класса, добавленная в гейт записи вместе с первой.
+
+        ``observability.processes`` и список процессов лежат в ОДНОМ документе, значит
+        несовпадение — опечатка автора рецепта, и ловить её в момент правки дешевле,
+        чем на следующем boot. Проверка сторожится отдельно, а не «заодно»: страж без
+        собственного красного неотличим от отсутствующего.
+        """
+        bp = SystemBlueprint.model_validate(
+            {
+                "name": "t",
+                "processes": [{"process_name": "producer", "plugins": []}],
+                "wires": [],
+                "observability": {"processes": {"ghost": {"logger": {"level": "DEBUG"}}}},
+            }
+        )
+
+        errors = bp.check_structure()
+
+        assert any("ghost" in err for err in errors), errors

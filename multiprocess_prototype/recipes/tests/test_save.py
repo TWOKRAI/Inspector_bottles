@@ -96,3 +96,88 @@ def test_raw_not_mutated() -> None:
     original = {"version": 3, "blueprint": {"name": "x", "processes": [], "wires": []}}
     build_recipe_v3_raw(raw, _topo())
     assert raw == original
+
+
+# ==============================================================================
+# Задача 4.3 (Н-13): адрес в никуда не доезжает до диска
+# ==============================================================================
+
+
+class _RecordingStore:
+    """Дубль RecipeStore, который ЗАПОМИНАЕТ факт записи.
+
+    Судится наблюдаемое — попал ли рецепт на диск, — а не только тип исключения:
+    валидатор, который поднял ошибку ПОСЛЕ ``save_raw``, дал бы тот же тип и то же
+    сообщение при уже испорченном файле.
+    """
+
+    def __init__(self, raw: dict) -> None:
+        self._raw = raw
+        self.saved: list[tuple[str, dict]] = []
+
+    def read_raw(self, slug: str) -> dict:
+        return self._raw
+
+    def save_raw(self, slug: str, raw: dict) -> None:
+        self.saved.append((slug, raw))
+
+
+def _raw() -> dict:
+    return {"name": "cup", "version": 3, "blueprint": {"processes": [], "wires": []}}
+
+
+def _topo_with_dangling_target() -> dict:
+    """Граф, где producer адресует процесс, которого в рецепте нет."""
+    return {
+        "processes": [
+            {"process_name": "producer", "plugins": [], "chain_targets": ["ghost"]},
+        ],
+        "wires": [],
+        "displays": [],
+    }
+
+
+def test_saving_a_dangling_address_is_refused_and_nothing_is_written() -> None:
+    """Сохранение рецепта с адресом в никуда — отказ, файл не тронут.
+
+    До 4.3 гейт записи (``check_structure``) знал только про дубли имён и циклы,
+    а страж адресуемости стоял на boot-валидации. Правка сохранялась молча, и
+    цена приходила позже и в другом месте: отказ доставки на каждый кадр
+    (замер плана D8 — 1418 отказов за 30 с) вместо отказа в момент правки.
+    """
+    import pytest
+
+    from multiprocess_prototype.recipes.save import RecipeValidationError, save_editor_topology_to_recipe
+
+    store = _RecordingStore(_raw())
+
+    with pytest.raises(RecipeValidationError) as exc:
+        save_editor_topology_to_recipe(store, "cup", _topo_with_dangling_target())
+
+    assert store.saved == [], "рецепт с висящим адресом попал на диск"
+    text = str(exc.value)
+    assert "producer" in text and "ghost" in text, f"отказ не назвал адрес: {text}"
+
+
+def test_a_healthy_graph_still_saves() -> None:
+    """Пара к предыдущему: ужесточение не начало отвергать здоровые рецепты.
+
+    Замер перед правкой: все 14 живых рецептов репозитория чисты. Без этой
+    половины «отказ» было бы неотличимо от «сохранение сломано вообще».
+    """
+    from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
+
+    store = _RecordingStore(_raw())
+    topo = {
+        "processes": [
+            {"process_name": "producer", "plugins": [], "chain_targets": ["consumer"]},
+            {"process_name": "consumer", "plugins": []},
+        ],
+        "wires": [],
+        "displays": [],
+    }
+
+    save_editor_topology_to_recipe(store, "cup", topo)
+
+    assert len(store.saved) == 1
+    assert store.saved[0][0] == "cup"

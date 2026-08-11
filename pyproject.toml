@@ -31,8 +31,12 @@ dependencies = [
     "harvesters>=1.4; sys_platform != 'darwin' or platform_machine != 'arm64'",
     # Auth
     "bcrypt>=4.1",
-    # Logging
-    "loguru>=0.7",
+    # Logging: своего пакета нет — записи идут через logger_module (разъём
+    # `get_std_logger` + LoggerManager процесса). `loguru>=0.7` снята в задаче 4.3
+    # (решение владельца 2026-08-11): после перевода двух последних точек прототипа
+    # её не импортировал НИКТО, и ни один пакет окружения её не требует. Зависимость
+    # без потребителя — не безобидный вес: она остаётся разрешением писать мимо
+    # разъёма, а страж `test_no_loguru_outside_whitelist` держит это запретом.
     # Network / utils
     "requests>=2.32",
     "environs>=11.0",

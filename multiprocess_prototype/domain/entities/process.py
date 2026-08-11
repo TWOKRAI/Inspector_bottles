@@ -11,14 +11,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from loguru import logger
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from typing_extensions import Annotated, Self
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from .plugin import PluginInstance
 from .worker import WorkerSpec
+
+# Задача 4.3 (Н-10): было `from loguru import logger` — второй писатель мимо разъёма.
+# Он не молчал (свой sink в stderr), поэтому запись выглядела доставленной, а до
+# файлов плоскости, ротации, троттлинга и ретеншена не доезжала. Вид работает и до
+# подъёма LoggerManager (ранний буфер + stdlib-фолбэк), а домен зовут именно рано —
+# при разборе рецепта в launch.py.
+logger = get_std_logger(__name__)
 
 # Pipeline-routing shorthand-ключи framework-blueprint ProcessConfig (ADR-PM-014, рычаг
 # C6a), которых НЕТ среди typed-полей домен-entity Process (chain_targets — уже typed-поле,
@@ -158,15 +165,16 @@ class Process(SchemaBase):
             if key in bag and bag[key] != value:
                 # Явные extras/metadata имеют приоритет — предупреждаем о конфликте
                 # с одноимённым плоским ключом (симметрия Fable LOW-5 в ProcessConfig).
+                # f-строка, а не отложенное форматирование: у loguru плейсхолдер `{}`,
+                # у вида — stdlib-стиль `%s`, и прямой перенос вызова оставил бы в
+                # тексте шесть неподставленных `{}`. Одна собранная строка снимает
+                # вопрос стиля целиком.
+                bag_name = "extras" if bag is extras else "metadata"
+                process_name = data.get("process_name", "?")
                 logger.warning(
-                    "Process[{}]: плоский '{}'={!r} конфликтует с явным {}['{}']={!r} — "
-                    "сохранено явное значение (приоритет).",
-                    data.get("process_name", "?"),
-                    key,
-                    value,
-                    "extras" if bag is extras else "metadata",
-                    key,
-                    bag[key],
+                    f"Process[{process_name}]: плоский '{key}'={value!r} конфликтует "
+                    f"с явным {bag_name}['{key}']={bag[key]!r} — "
+                    "сохранено явное значение (приоритет)."
                 )
             bag.setdefault(key, value)
         if extras:
