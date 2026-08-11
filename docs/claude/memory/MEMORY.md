@@ -268,3 +268,4 @@
 - [GUI-стенд только боевым входом](project_gui_stand_production_entry_only.md) — INSPECTOR_GUI_UNATTENDED=1; через harness gui виснет в initialize
 - [Ассерт по подстроке зеленеет на чужой ветке](feedback_substring_assert_passes_on_the_wrong_branch.md) — сверять текст причины и уровень, инъекцию ставить в соседнюю ветку
 - [Порог по часам меряет кучу](feedback_wallclock_threshold_measures_the_heap.md) — краснеет от состава прогона; окно с gc.disable, порог не трогать
+- [Процессный счётчик — не по ключу](feedback_process_counter_is_not_per_key.md) — фон гасить порогом или называть числом; атрибуция эмитентом и журналом
