@@ -53,6 +53,7 @@ class DocumentStore:
         self._adapter = adapter
         self._retention = dict(retention_sec or {})
         self._now = clock
+        self._dialect = dialect
         # Сериализация записи: sqlite-соединение не потокобезопасно при общем
         # использовании, а писателей у плоскости минимум два (аудит из потока команд
         # и вердикты с линии).
@@ -60,6 +61,13 @@ class DocumentStore:
         #: Отказы записи. Терять документ можно (сбой БД не должен ронять линию),
         #: молчать о потере — нельзя.
         self.dropped = 0
+        #: Сколько страниц ретеншен вернул ОС за жизнь стора. Без этого числа
+        #: «файл уменьшился» пришлось бы доказывать размером файла, а он меняется
+        #: и от записи соседа (3.1).
+        self.pages_reclaimed = 0
+        #: Отказы возврата страниц. Уборка не удалась — документы всё равно удалены,
+        #: и это не повод ронять такт heartbeat; но и не повод молчать.
+        self.reclaim_failed = 0
 
         self._repo = GenericRepository(adapter=adapter, schema_class=DocumentRow, id_column="doc_id")
         self._ensure_schema(dialect)
@@ -154,7 +162,36 @@ class DocumentStore:
                     continue
                 sql = f'DELETE FROM "{_TABLE}" WHERE "kind" = :kind AND "ts" < :cutoff'  # nosec B608
                 removed += int(self._adapter.execute(sql, {"kind": kind, "cutoff": moment - float(ttl)}) or 0)
+        if removed:
+            self._reclaim_free_pages()
         return removed
+
+    def _reclaim_free_pages(self) -> None:
+        """Отдать ОС страницы, освободившиеся после удаления документов.
+
+        **Почему это часть ретеншена, а не отдельная забота.** ``DELETE`` в SQLite не
+        уменьшает файл: страницы уходят во freelist и ждут новых строк. Ретеншен, который
+        удаляет документы и не возвращает байты, выполняет свою букву и не выполняет
+        смысла — «приёмник не пухнет». Замер (2026-08-11): 20 000 строк, удалено 95 % —
+        файл 8.71 МиБ до возврата страниц и 0.44 МиБ после.
+
+        Вне ``self._lock``: работа идёт на своём соединении, наш замок сериализует только
+        наши записи, а держать его на время уборки значило бы блокировать писателей линии
+        дольше, чем это делает сам SQLite.
+
+        Отсутствие способности у адаптера — не отказ: PostgreSQL/MySQL сами управляют
+        своим хозяйством, и звать их нечем. Проверка та же, что у :meth:`close` с
+        ``dispose``.
+        """
+        if self._dialect != "sqlite":
+            return
+        reclaim = getattr(self._adapter, "incremental_vacuum", None)
+        if not callable(reclaim):
+            return
+        try:
+            self.pages_reclaimed += int(reclaim())
+        except Exception:  # noqa: BLE001 — документы уже удалены; такт уборки ронять нельзя
+            self.reclaim_failed += 1
 
     def close(self) -> None:
         """Освободить движок БД (graceful teardown процесса).
