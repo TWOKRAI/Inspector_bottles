@@ -379,8 +379,17 @@ class TestFoundByTheReview:
 
         Оператор, применивший файл через `config.reload`, видел в журнале
         `command:telemetry.reconfigure` — команду, которую никто не вызывал.
+
+        Форма правила — ``{"enabled": True}``, а не ``True``. Прежняя редакция
+        писала краткое ``{"fps": True}``, и это было НЕВЕРНОЙ моделью: у
+        ``MetricRule`` короткой формы нет, получатель на ней падает, а
+        ``resolve()`` спросил бы у ``bool`` поле ``enabled``. Тест этого не
+        замечал, потому что в его харнессе heartbeat отсутствует — применять
+        секцию было некому, и мусор просто лежал в слое. Проверяет тест аудит,
+        а не форму секции, поэтому правка входа его предмета не трогает
+        (Task 2.1: с валидатором такой вход теперь честно отвергается).
         """
-        handlers["config.reload"]({"telemetry": {"publish": {"metrics": {"fps": True}}}, "ttl": 60})
+        handlers["config.reload"]({"telemetry": {"publish": {"metrics": {"fps": {"enabled": True}}}}, "ttl": 60})
 
         origins = {e["origin"] for e in process_observability_layers(svc).audit.entries()}
         assert origins == {"command:config.reload"}, origins
@@ -390,14 +399,16 @@ class TestFoundByTheReview:
 
         Пара: до фикса запись перечисляла только новые ключи, и снятый `latency`
         не встречался в аудите нигде.
+
+        Про форму ``{"enabled": True}`` — см. соседний тест выше.
         """
-        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"latency": True}}, "ttl": 600})
-        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"fps": True}}, "mode": "replace"})
+        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"latency": {"enabled": True}}}, "ttl": 600})
+        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"fps": {"enabled": True}}}, "mode": "replace"})
 
         layers = process_observability_layers(svc)
-        assert layers.session_keys() == ("telemetry.publish.metrics.fps",)
+        assert layers.session_keys() == ("telemetry.publish.metrics.fps.enabled",)
         touches = [e for e in layers.audit.entries() if e["action"] == ACTION_TOUCH]
-        assert touches[-1]["removed"] == ["telemetry.publish.metrics.latency"]
+        assert touches[-1]["removed"] == ["telemetry.publish.metrics.latency.enabled"]
 
     def test_rebuild_record_cannot_claim_a_key_it_did_not_apply(self, svc) -> None:
         """Замечание 3: содержимое записи считалось ПОСЛЕ снятия лока.

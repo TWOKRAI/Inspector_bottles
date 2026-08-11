@@ -137,8 +137,18 @@ TELEMETRY_KEY = "telemetry"
 #: по построению.
 TELEMETRY_LAYERED_SUBSECTION = "publish"
 
+#: Имя второй под-секции. Литерал ``"throttle"`` был написан в этом файле
+#: ОДИН раз (внутри :data:`TELEMETRY_THROTTLE_PATH`), а сверяться с ним
+#: понадобилось валидатору Task 2.1 — вытащено в имя, чтобы у одной под-секции
+#: не завелось двух написаний.
+TELEMETRY_THROTTLE_SUBSECTION = "throttle"
+
+#: Под-секции телеметрии, которые существуют. Список ЗАКРЫТ — довод в
+#: :func:`validate_telemetry_section`.
+TELEMETRY_SUBSECTIONS = (TELEMETRY_LAYERED_SUBSECTION, TELEMETRY_THROTTLE_SUBSECTION)
+
 #: Путь дельты центрального троттла в слое сессии (Task 5.10.g).
-TELEMETRY_THROTTLE_PATH = f"{TELEMETRY_KEY}.throttle"
+TELEMETRY_THROTTLE_PATH = f"{TELEMETRY_KEY}.{TELEMETRY_THROTTLE_SUBSECTION}"
 
 #: Пути, ниже которых бухгалтерия слоёв НЕ спускается: значение целиком — лист.
 #:
@@ -1134,6 +1144,15 @@ def validate_layer_section(section: Any, *, layer: str) -> None:
     (:meth:`session_set`). Persist наследует гарантию через ``replace_layer``.
     Проверка в одном из четырёх мест воскресала бы на трёх соседних.
 
+    **Пятое место — телеметрия, и до задачи 2.1 его здесь не было.** Ревью
+    приёмки (Н-4) назвало докстринг враньём, и по делу: ``_merge_telemetry_layer``
+    пишет ``layers.session`` ПРЯМЫМ присваиванием, а ключ ``telemetry`` эта
+    функция не знала вовсе — секция ``ObservabilityConfig`` принимает лишние
+    ключи молча, поэтому мусор в ``publish``/``throttle`` проезжал границу без
+    единого возражения. Теперь ключ разбирает :func:`validate_telemetry_section`
+    — то же правило, а не вторая его реализация; мест применения по-прежнему
+    столько, сколько дверей в слой.
+
     **Что проверяется — ЗНАЧЕНИЯ объявленных ключей.** Незнакомый ключ схемой
     отбрасывается молча, и ловит его не этот страж, а вердикт ``config.reload``
     (``unknown_keys`` → ``verdict=failed``). Второй предохранитель на то же
@@ -1149,6 +1168,14 @@ def validate_layer_section(section: Any, *, layer: str) -> None:
 
     from .observability_config import ObservabilityConfig
 
+    if TELEMETRY_KEY in section:
+        # Ключ снимается ДО схемы наблюдаемости: она про него не знает и,
+        # принимая лишнее молча, вернула бы «годится» на любое содержимое.
+        validate_telemetry_section(section[TELEMETRY_KEY], layer=layer)
+        section = {k: v for k, v in section.items() if k != TELEMETRY_KEY}
+        if not section:
+            return
+
     try:
         ObservabilityConfig.model_validate(section)
     except ValidationError as exc:
@@ -1157,6 +1184,158 @@ def validate_layer_section(section: Any, *, layer: str) -> None:
             address = ".".join(str(part) for part in err.get("loc", ())) or "<секция>"
             problems.append(f"{address}: {err.get('msg', '')}")
         raise ValueError(f"слой {layer} отвергнут — " + "; ".join(problems)) from exc
+
+
+def validate_telemetry_section(section: Any, *, layer: str) -> None:
+    """Проверить секцию ``telemetry`` ДО записи в слой (Task 2.1, находка Н-4).
+
+    Плоскость телеметрии живёт в тех же слоях, что и логи, но её содержимое до
+    этой задачи не судил никто. Воспроизведено на харнессе ``test_telemetry_*``:
+
+    * ``telemetry.reconfigure {"publish": {"default_interval_sec": "быстро"}}``
+      → ``success=false`` (мусор ловит Pydantic уже У ПОЛУЧАТЕЛЯ), но в слое L3
+      к этому моменту ЛЕЖИТ ``telemetry.publish.default_interval_sec: "быстро"``.
+      Дальше отравленный слой ломает **соседа**: следующий, совершенно законный
+      ``config.reload {"observability": {"log_level": "DEBUG"}}`` того же процесса
+      отвечает ``reconfigure failed: … TelemetryPublishConfig``. Оператор, который
+      телеметрию не трогал, не может сменить уровень логов ближайшие 300 секунд —
+      до истечения срока правки, которой ему официально отказали;
+    * ``telemetry.reconfigure {"throttle": {"processes.**.state.fps": "часто"}}``
+      → ``success=true``, правило доехало до живого ``ThrottleMiddleware``, и на
+      ВТОРОЙ записи по этому пути стор падает с ``TypeError: unsupported operand
+      type(s) for /: 'float' and 'str'``. Следствие Н-4 числилось гипотезой —
+      теперь оно с репро;
+    * опечатка в имени под-секции (``pubish``) вела себя ПО-РАЗНОМУ на двух
+      дверях: без секции ``observability`` рядом — тихий no-op, вместе с ней —
+      ключ ``telemetry.pubish.tick_sec`` ложился в L3 под срок и попадал в
+      ``session_keys``. Один и тот же ввод, два ответа, оба неверные.
+
+    Список под-секций ЗАКРЫТ (:data:`TELEMETRY_SUBSECTIONS`). Незнакомое имя —
+    это опечатка оператора, а не расширение протокола: своей секции у неё нет,
+    применить её некому, и единственное, что она может, — занять место в слое и
+    съесть срок. Цена решения названа честно: рецепт с под-секцией из БУДУЩЕЙ
+    версии фреймворка будет отвергнут этой, а не принят наполовину.
+
+    Args:
+        section: значение ключа ``telemetry`` (``None`` — «слой про телеметрию
+            молчит», законно).
+        layer: имя слоя для текста отказа — тем же словом, что у соседа.
+
+    Raises:
+        ValueError: содержимое не годится; текст несёт адрес КАЖДОГО негодного
+            ключа (все проблемы разом, а не первая попавшаяся).
+    """
+    if section is None:
+        return
+    if not isinstance(section, dict):
+        raise ValueError(
+            f"слой {layer} отвергнут — {TELEMETRY_KEY}: ожидается словарь под-секций "
+            f"({'/'.join(TELEMETRY_SUBSECTIONS)}), получено {type(section).__name__}"
+        )
+
+    problems: list[str] = []
+    unknown = [str(key) for key in section if key not in TELEMETRY_SUBSECTIONS]
+    for key in sorted(unknown):
+        problems.append(
+            f"{TELEMETRY_KEY}.{key}: неизвестная под-секция телеметрии (известны: {', '.join(TELEMETRY_SUBSECTIONS)})"
+        )
+
+    if TELEMETRY_LAYERED_SUBSECTION in section:
+        problems.extend(_telemetry_publish_problems(section[TELEMETRY_LAYERED_SUBSECTION]))
+    if TELEMETRY_THROTTLE_SUBSECTION in section:
+        problems.extend(_telemetry_throttle_problems(section[TELEMETRY_THROTTLE_SUBSECTION]))
+
+    if problems:
+        raise ValueError(f"слой {layer} отвергнут — " + "; ".join(problems))
+
+
+def _telemetry_publish_problems(publish: Any) -> list[str]:
+    """Негодные ключи ``telemetry.publish`` — судит СВОЯ схема плоскости.
+
+    ``None`` — законная команда «выключить гейт» (все метрики каждый тик), и
+    отвергать её было бы отказом в существующей операции. Всё остальное едет в
+    :class:`~.telemetry_publish_config.TelemetryPublishConfig` — ту же схему, из
+    которой получатель собирает гейт. Второй копии правил здесь нет: разъедься
+    они, слой принимал бы то, чего получатель не умеет, — ровно сегодняшний
+    дефект, только с другой стороны.
+    """
+    if publish is None:
+        return []
+    from pydantic import ValidationError
+
+    from .telemetry_publish_config import TelemetryPublishConfig
+
+    try:
+        TelemetryPublishConfig.model_validate(publish)
+    except ValidationError as exc:
+        problems = []
+        for err in exc.errors():
+            tail = ".".join(str(part) for part in err.get("loc", ()))
+            address = f"{TELEMETRY_KEY}.{TELEMETRY_LAYERED_SUBSECTION}"
+            problems.append(f"{address}.{tail}: {err.get('msg', '')}" if tail else f"{address}: {err.get('msg', '')}")
+        return problems
+    return []
+
+
+def _telemetry_throttle_problems(throttle: Any) -> list[str]:
+    """Негодные правила ``telemetry.throttle`` — схемы у плоскости нет, правила здесь.
+
+    Дельта троттла — ПЛОСКИЙ словарь ``{glob-паттерн: интервал}``, и Pydantic-модели
+    у неё нет по построению (ключи — произвольные имена путей). Поэтому три правила
+    написаны здесь, и каждое стоит на своём репро:
+
+    * **интервал — конечное неотрицательное число.** Строка доезжает до живого
+      ``ThrottleMiddleware`` и роняет стор делением на неё (см. репро выше);
+    * **``bool`` интервалом не считается.** ``True`` — подкласс ``int``, то есть
+      «раз в секунду» под видом «включить»; тот же довод, по которому его
+      отвергает :func:`validate_ttl`;
+    * **``__clear__`` — только ``true``.** Применение сверяет маркер строго
+      (``is True``), и ``__clear__: "yes"`` не очистит набор, а заведёт ПРАВИЛО с
+      таким именем и строковым интервалом — то есть тихо сделает не то, о чём
+      просили, да ещё и на горячем пути.
+
+    ``None`` у паттерна остаётся законным: это родной маркер
+    ``THROTTLE_REMOVE`` («снять правило») в режиме ``merge``, а в ``replace`` —
+    просто путь без правила.
+
+    Адрес в тексте — ``telemetry.throttle[паттерн]``, а НЕ через точку: точки
+    внутри паттерна часть имени, и точечная форма назвала бы оператору путь,
+    который слои запрещают (:func:`_reject_path_inside_opaque`).
+    """
+    from ..managers.telemetry_reload import THROTTLE_CLEAR_MARKER
+
+    if throttle is None:
+        return []
+    if not isinstance(throttle, dict):
+        return [
+            f"{TELEMETRY_THROTTLE_PATH}: ожидается словарь {{паттерн: интервал_сек}}, "
+            f"получено {type(throttle).__name__}"
+        ]
+
+    problems: list[str] = []
+    for pattern, interval in throttle.items():
+        address = f"{TELEMETRY_THROTTLE_PATH}[{pattern!r}]"
+        if not isinstance(pattern, str):
+            problems.append(f"{address}: паттерн правила обязан быть строкой")
+            continue
+        if pattern == THROTTLE_CLEAR_MARKER:
+            if interval is not True:
+                problems.append(
+                    f"{address}: маркер полной очистки принимает только true "
+                    f"(получено {interval!r}); иначе это правило с таким именем, а не очистка"
+                )
+            continue
+        if interval is None:  # THROTTLE_REMOVE — снять правило
+            continue
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)):
+            problems.append(f"{address}: интервал должен быть числом секунд, получено {interval!r}")
+            continue
+        if interval != interval or interval in (float("inf"), float("-inf")):
+            problems.append(f"{address}: интервал должен быть конечным числом секунд, получено {interval!r}")
+            continue
+        if interval < 0:
+            problems.append(f"{address}: интервал не может быть отрицательным (0 — полная блокировка)")
+    return problems
 
 
 def _channel_toggle(channel_type: str) -> str:

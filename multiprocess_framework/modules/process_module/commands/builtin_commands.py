@@ -1431,6 +1431,30 @@ class BuiltinCommands:
                     telemetry_section = dict(telemetry_section)
                     telemetry_section["publish"] = deep_merge(telemetry_section.get("publish") or {}, override)
 
+        # Task 2.1 (находка Н-4): содержимое телеметрии судится ЗДЕСЬ — после того,
+        # как секция окончательно собрана (inline либо прочитана из файла вместе с
+        # per-process overlay), и ДО первой записи в слой. Место выбрано не по вкусу:
+        # ветка observability ниже кладёт СВОЮ секцию в L3 раньше, чем доходит до
+        # телеметрии, — проверь мы телеметрию там, отказ приходил бы уже поверх
+        # изменённого состояния. Ровно тот же довод, по которому здесь же, выше,
+        # стоят проверки `telemetry_mode` и `ttl`.
+        if telemetry_section is not None:
+            from ..configs.observability_layers import LAYER_APP as _LAYER_APP
+            from ..configs.observability_layers import validate_telemetry_section
+
+            try:
+                validate_telemetry_section(
+                    telemetry_section,
+                    layer="session" if source == "inline" else _LAYER_APP,
+                )
+            except ValueError as exc:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "source": source,
+                    "reason": str(exc),
+                }
+
         result: dict = {"success": True, "process": svc.name, "source": source}
         # Секцию телеметрии в слой вливает РОВНО ОДНА из двух веток ниже. Флаг, а
         # не «нет ли поля в ответе»: пустой результат применения — законный
@@ -1819,6 +1843,16 @@ class BuiltinCommands:
         ``replace`` заменяет ТОЛЬКО названные под-секции. Заменять всё поддерево
         было бы враньём соседней плоскости: оператор, поправивший ``publish``,
         не просил снять свою же дельту троттла.
+
+        **Содержимое сюда приезжает УЖЕ проверенным (Task 2.1).** Своей проверки
+        у метода нет намеренно: он пишет ``layers.session`` прямым присваиванием,
+        и на дороге ``config.reload`` его зовут ПОСЛЕ того, как секция
+        ``observability`` легла в тот же слой, — отказ отсюда приходил бы поверх
+        изменённого состояния. Поэтому :func:`validate_telemetry_section` стоит у
+        обеих дверей (``config.reload`` и ``telemetry.reconfigure``), до первой
+        записи. Ветка ``source != "inline"`` получает вторую проверку от
+        ``replace_layer`` — это не запасной предохранитель, а следствие того, что
+        ``replace_layer`` обязан судить ЛЮБОЕ тело, чьё бы оно ни было.
         """
         from ...data_schema_module import deep_merge
         from ..configs.observability_layers import LAYER_APP, TELEMETRY_KEY, flatten_section, layer_merge
@@ -1940,6 +1974,17 @@ class BuiltinCommands:
         ttl, ttl_error = _parse_ttl(args)
         if ttl_error is not None:
             return {"success": False, "process": svc.name, "reason": ttl_error}
+        # Task 2.1 (находка Н-4): содержимое — тоже ДО правки. Вторая дверь в ту же
+        # плоскость: `config.reload` судит свою секцию у себя, эта команда — свою
+        # здесь. Общее у них правило (`validate_telemetry_section`), а не место:
+        # разделяет их то, что до задачи 2.1 отказ приходил ОТ ПОЛУЧАТЕЛЯ, то есть
+        # уже поверх записанного слоя.
+        from ..configs.observability_layers import LAYER_SESSION, validate_telemetry_section
+
+        try:
+            validate_telemetry_section(section, layer=LAYER_SESSION)
+        except ValueError as exc:
+            return {"success": False, "process": svc.name, "reason": str(exc)}
         try:
             applied, ttl_sec = self._apply_telemetry_section(
                 section, source="inline", mode=mode, ttl=ttl, origin=_ORIGIN_TELEMETRY
@@ -2402,6 +2447,10 @@ class BuiltinCommands:
         ложится на получателя: к получателю результат всегда применяется
         собранным из слоёв (дельта поверх живого не умеет выразить удаление, а
         удаление здесь — основная операция).
+
+        Содержимое секции здесь НЕ судится: у метода два вызывающих, и оба —
+        обработчики команд, которые судят его до любой записи (Task 2.1, см.
+        :func:`~..configs.observability_layers.validate_telemetry_section`).
         """
         from ..configs.observability_layers import process_observability_layers
         from ..managers.observability_reload import apply_telemetry_layers, telemetry_targets
