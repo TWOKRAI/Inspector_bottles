@@ -255,3 +255,4 @@
 - [Нет получателя — нет суда над формой](feedback_absent_receiver_lets_a_test_pin_an_impossible_input.md) — зелено по отсутствию, не по правильности
 - [Новый страж ослабляет старого](feedback_a_new_guard_can_weaken_an_old_one.md) — слой с приведением меняет вход защите за собой
 - [Параметризация из испытуемого](feedback_parametrization_built_from_the_subject_collapses_with_it.md) — инъекция удаляет случаи, а не красит; страж поимённый
+- [Рождён неверным, починен после](feedback_born_wrong_then_fixed_looks_like_working.md) — работает, но кричит на каждом старте; чинить в точке создания
