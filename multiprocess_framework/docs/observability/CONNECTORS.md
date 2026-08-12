@@ -17,10 +17,15 @@
 | Кто получает | наследник `BaseManager` / любой класс, подмешавший миксин | плагин (`ProcessModulePlugin`), через `ctx` в каждом хуке |
 | Адрес | [`modules/base_manager/mixins/observable_mixin.py`](../../modules/base_manager/mixins/observable_mixin.py) | [`modules/process_module/plugins/base.py`](../../modules/process_module/plugins/base.py) |
 | Логи | `_log_debug/_log_info/_log_warning/_log_error/_log_critical` (+ публичные алиасы без подчёркивания) | `ctx.log_debug/log_info/log_warning/log_error/log_critical` |
-| Ошибки | `_track_error(exc, context)` → слот `error` | `ctx.health.report_error(exc, context=…, throttle=…)` |
-| Метрики | `_record_metric(name, value, tags)`, `_record_timing(name, sec, tags)` → слот `stats` | **разъёма нет** (см. §3, строка C1) |
+| Ошибки | `_track_error(error, context)` → слот `error` | `ctx.health.report_error(exc, context=…, throttle=…)` |
+| Метрики | `_record_metric(metric_name, value, tags)`, `_record_timing(metric_name, duration, tags)` → слот `stats` | **разъёма нет** (см. §3, строка C1) |
 | Документы | — | `ctx.write_document(kind, summary, **fields)` |
 | Штамп источника | `_observability_source()`: явный `source_name` → `manager_name` → `"main"` | имя плагина, ставит `PluginContext._stamped` через `functools.partial(log_fn, module=…)` |
+
+Имена аргументов в таблице — **дословно из кода**
+([`interfaces.py:206-214`](../../modules/base_manager/interfaces.py#L206)), а не пересказ: вызов
+именованными аргументами по прежней редакции документа (`_track_error(exc=…)`,
+`_record_metric(name=…)`) давал `TypeError` — расхождение №1 приёмки F1.
 
 **Оба разъёма ведут в одни и те же три менеджера процесса.** Их регистрирует
 [`process_managers.register_all`](../../modules/process_module/managers/process_managers.py) под
@@ -182,7 +187,7 @@ display-виде записи — `record_display.stamp_observed`
 | Выход | Адрес | Почему без него нельзя |
 |---|---|---|
 | `emergency_log` | [`modules/_fallback.py`](../../modules/_fallback.py) | отказ писателя нельзя рассказать через самого писателя. Один выход на всю плоскость: `CRM._fallback_log`, четыре точки `log_channel`, немой `ChannelRegistry` (D1), миграция стора (D3), жалоба на снятые ключи конфига — все они именованные вызовы **этой** функции |
-| `ErrorFloor` | [`logger_module/core/error_floor.py`](../../modules/logger_module/core/error_floor.py) | синхронный конфиго-независимый пол error/critical (в stdlib он не ходит вовсе — пишет JSON Lines сам). Прикладной код его позвать не может: это внутренний приёмник последней инстанции. Подробности в [`SINKS_MAP.md §4`](SINKS_MAP.md) |
+| `ErrorFloor` | [`logger_module/core/error_floor.py`](../../modules/logger_module/core/error_floor.py) | синхронный конфиго-независимый пол error/critical (в stdlib он не ходит вовсе — пишет JSON Lines сам). Прикладной код звать его **не должен**: это внутренний приёмник последней инстанции. Но это **соглашение, а не запрет** — класс публичен и импортируем, стража нет (приёмка F1 воспроизвела вызов из прикладного кода: `write returned: True`, файл записан). Подробности в [`SINKS_MAP.md §4`](SINKS_MAP.md) |
 
 **Голый `logging.getLogger` разрешён семи файлам, и каждому — под собственную причину.** Список
 живёт не в договорённости, а в страже
@@ -276,6 +281,14 @@ console → command → router → error → stats → статус + итого
   `self._log_debug(lambda: f"…")` вместо f-строки. f-строка собирается на call-site, то есть до
   гейта, и никаким порогом внутри не снимается. Точке с постоянным текстом лямбда не нужна —
   собирать там нечего.
+* **Нативные C++ писатели идут в stderr мимо плоскости логов.** `glog` внутри OpenCV/mediapipe/
+  onnxruntime пишет своим C++-логгером прямо в файловый дескриптор процесса: строки вида
+  `INFO: Created TensorFlow Lite XNNPACK delegate…` и `W0000 …` видны в консоли, но не имеют ни
+  `module`, ни severity нашей плоскости, не попадают ни в один приёмник и не считаются ни одним
+  счётчиком потерь (Н-15 приёмки F1, [ПРОВЕРЕНО консолью]). Python-мостом (`logging.Handler`,
+  как у `pymodbus`) это **не закрывается в принципе** — запись не проходит через stdlib-логгер.
+  Закрытие требует перехвата на уровне fd при спавне ребёнка; названо задачей 9.2 плана
+  [`observability-roadmap`](../../../plans/observability-roadmap.md), сейчас — принятая граница.
 * **Mojibake русских строк в консоли Windows** (cp866) — принято как есть; числа при этом верны.
 * **`events_page` на бутстрапе отдаёт ~114 КБ** — принято как есть.
 

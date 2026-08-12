@@ -32,6 +32,8 @@
 | [`todo_inventory/`](todo_inventory/) | `/todo-inventory` | Сбор `TODO/FIXME/HACK/XXX/BUG/NOTE` с автором и возрастом через `git blame`. | [README](todo_inventory/README.md) |
 | [`graph_slice/`](graph_slice/) | `/graph-slice` | Срез графа graphify по границе модуля: кто зависит от модуля и от чего зависит он. Проверяет свежесть графа относительно `HEAD`. | [README](graph_slice/README.md) |
 | [`clean_cache/`](clean_cache/) | `/clean-cache` | Чистка `__pycache__/`, `.pytest_cache/`, `*.pyc`, `.coverage` и т.п. **Dry-run по умолчанию**, реальное удаление — `--apply`. | [README](clean_cache/README.md) |
+| [`docs_verify/`](docs_verify/) | — (в гейте: `pytest scripts/docs_verify/tests`) | Сверщик справочников наблюдаемости с кодом: 15 проверок «утверждение документа ↔ факт кода» (сигнатуры, поля схем команд, лестница severity, число модулей). Каждая доказана инъекцией, красящей ровно её. Exit 0/1/2 («не проверено» ≠ «всё хорошо»). | [README](docs_verify/README.md) |
+| [`observability_seal/`](observability_seal/) | — (в гейте) | Проверка пломбы `seq`: объединение номеров по файлам процесса непрерывно от min до max. Дырка = запись прошла гейт, но не легла ни в один файл. Счётчики логгера не спрашиваются. | [README](observability_seal/README.md) |
 | [`transport_boundary/`](transport_boundary/) | — (в `ci.py`) | AST-инвариант transport-router-hub P4.3: прямой queue/SHM-транспорт (`send_to_queue`/`broadcast_message`/SHM) только внутри хаба (`router_module`/`shared_resources_module`). Ratchet с `[[debt]]`. Exit 0/1. | [README](transport_boundary/README.md) |
 
 Конфиг подпакета лежит рядом с `*.py` (например, [`code_stats/code_stats.toml`](code_stats/code_stats.toml)) — CLI-флаги перекрывают значения из конфига.
@@ -91,4 +93,5 @@ Slash-команды у `sync/` нет — это инфраструктурны
 | `/graph-slice` | [`graph_slice/graph_slice.py`](graph_slice/graph_slice.py) |
 | `/clean-cache` | [`clean_cache/clean_cache.py`](clean_cache/clean_cache.py) |
 
-Полный список slash-команд проекта — в [`.claude/README.md`](../.claude/README.md#команды-commands).
+Полный список slash-команд проекта — в корневом [`CLAUDE.md`](../CLAUDE.md) (раздел «Slash-команды»)
+и в [`.claude/CLAUDE.md`](../.claude/CLAUDE.md). Прежний адрес `.claude/README.md` мёртв — файла нет.

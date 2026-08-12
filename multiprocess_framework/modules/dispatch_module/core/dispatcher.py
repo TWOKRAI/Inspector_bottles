@@ -65,7 +65,11 @@ class Dispatcher(BaseManager, ObservableMixin):
         # С поддержкой логирования и статистики
         dispatcher = Dispatcher(
             "my_dispatcher",
-            managers={'logger': logger_manager, 'statistics': stats_manager}
+            # Канон — 'stats': self._record_metric адресует именно его. Имя
+            # 'statistics' принимает только proxy_creator (публичные прокси), и
+            # компонент по прежней редакции докстринга терял встроенные метрики
+            # молча — в manager_call_failures (Н-6-сосед приёмки F1).
+            managers={'logger': logger_manager, 'stats': stats_manager}
         )
     """
 

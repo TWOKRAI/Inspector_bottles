@@ -83,8 +83,9 @@ target = merge(base, expand(layers.resolve()))            # L1 → L2 → L3
 | `observability.persist` | `recipe_path` | переезд ключей **L3 → L2** (спутник рецепта): единственный путь сделать правку постоянной |
 | `observability.sink.enable` / `.disable` (алиасы `logger.sink.*`) | `sink`\|`name`, `manager` (`logger`\|`error`\|`stats`), `ttl` | снять/вернуть приёмник по имени. Роутер **не адресуем**: транспорт — не плоскость наблюдаемости |
 | `observability.sink.tail` (алиас `logger.sink.tail`) | имя приёмника, `limit` | хвост приёмника, хранящего записи у себя (`type=memory`) |
-| `observability.tail.subscribe` / `.unsubscribe` | `subscriber`, `level` | живой хвост записей подписчику; `None` = «уровень не назван», дефолт применяет процесс |
-| `observability.tail.subscribe_all` / `.unsubscribe_all` | `subscriber`, `level` | то же через брокер оркестратора: подписка на все процессы, включая переподписку свежей инкарнации |
+| `observability.tail.subscribe` | `subscriber`, `level` | живой хвост записей подписчику; `level=None` = «уровень не назван», дефолт применяет процесс |
+| `observability.tail.unsubscribe` | `subscriber` — **и только он** | снять форвардер этого подписчика; `subscriber=None` (legacy/teardown) — снять форвардеры всех. `level` в схеме **нет**, а `extra="forbid"` делает его передачу адресным отказом, не молчаливым игнором |
+| `observability.tail.subscribe_all` / `.unsubscribe_all` | `subscriber`, `level` | то же через брокер оркестратора: подписка на все процессы, включая переподписку свежей инкарнации. Схема у пары **одна** (`ObservabilityTailBrokerParams`), поэтому `level` у `unsubscribe_all` принимается и игнорируется — сознательный выбор против двух реестров имён одной плоскости |
 | `introspect.observability` | `audit_limit` (дефолт 20, `0` — не возвращать), `resolve`, `flush` | чтение без мутации: `effective`, `counters`, `provenance`, `ttl`, `documents`, аудит |
 | `health.report` | `context`, `message`, `status`, `level` | диагностический впрыск health-события |
 

@@ -37,7 +37,12 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
     Пример использования:
         manager = CommandManager(
             manager_name="my_process",
-            managers={'logger': logger_manager, 'statistics': stats_manager}
+            # Слот называется 'stats' — канон (CONNECTORS.md §1). Прежняя редакция
+            # этой строки учила 'statistics': публичные прокси при нём создаются
+            # (proxy_creator принимает оба имени), а встроенный self._record_metric
+            # адресует ЖЁСТКО 'stats' — то есть метрики молча уходили в
+            # manager_call_failures. Расхождение Н-6-сосед приёмки F1.
+            managers={'logger': logger_manager, 'stats': stats_manager}
         )
         manager.initialize()
 
