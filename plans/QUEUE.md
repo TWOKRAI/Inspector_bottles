@@ -44,9 +44,9 @@ readback-протокол, карта потребления, дисциплин
 задача А (ServiceContext) делается вместе с 6.2, а Б.1 — требование к спеке 6.1 «не заводить
 пятую дверь конфига».
 
-### 4. Следующий крупный трек — телеметрия = этап 6 roadmap (спека готова)
+### 4. Идёт сейчас — телеметрия = этап 6 roadmap (ветка `feat/telemetry-stage6`, старт 2026-08-12)
 
-Вход в него открыт приёмкой F2 (2026-08-12) и ремонтом хвоста Т-1…Т-5 (закрыт 2026-08-12: корневой гейт 6855/0 ×3, зонд Н3-1 exit 0 на двух стендах, дорога qt-mcp жива). **Спека написана — [`telemetry-stage6.md`](telemetry-stage6.md)**, она и есть задача 6.1 roadmap; ветка `feat/telemetry-stage6` при старте. Спека собрана из четырёх входных кусков, а не с нуля:
+Вход в него открыт приёмкой F2 (2026-08-12) и ремонтом хвоста Т-1…Т-5 (закрыт 2026-08-12: корневой гейт 6855/0 ×3, зонд Н3-1 exit 0 на двух стендах, дорога qt-mcp жива). **Спека написана и принята — [`telemetry-stage6.md`](telemetry-stage6.md), ревью 9/10** (задача 6.1 roadmap закрыта); развилки владельца решены при старте ветки: РТ-1а, РТ-3а, РТ-4а, РТ-5а, РТ-6б, РТ-2 — после живых чисел Ф3. Спека собрана из четырёх входных кусков, а не с нуля:
 - [`telemetry-pull-on-demand.md`](telemetry-pull-on-demand.md) — **DRAFT, направление владельца** (уровни по опросу, фронты push'ем); инвентарь 506 путей → 41 форма уже сделан в truth-holes 6.3 — при старте писать от него, не заново;
 - **C1 / Ф8.3** — stats-разъём плагинов + доставка `kind=stats` в стор и хвост (решение Р-2в ремедиации: первая фаза телеметрии);
 - residual coherence Task 3.2 шаг 3 (watcher фанит publish-секцию детям);
@@ -80,6 +80,12 @@ readback-протокол, карта потребления, дисциплин
 | L-3 | `errors_delivery_failed` не различает «приёмника нет» и «не успевает» | проба D8: 47/с шторм vs 0.15–0.36/с backpressure — один ключ | открыт |
 
 До закрытия L-1 «инкарнация различает инстансы» — доказано тестами, не стендом (живьём везде `incarnation: 0`).
+
+### Долги инструментов документации
+
+| # | Дефект | Что измерено | Статус |
+|---|---|---|---|
+| D-1 | Две несогласованные реализации slug'а якорей: `scripts/link_check` схлопывает серию пробелов, GitHub — нет | правка одного `link_check` даёт **−28/+53**: одна верная ссылка числится битой, ~53 автогенерируемых якоря оглавлений `DECISIONS.md` не резолвятся на GitHub. Чинить надо **оба** генератора (проверяльщик и сборщик оглавлений `scripts/sync`) с пересборкой оглавлений | открыт, заведён 2026-08-12; **не смешивать с этапом 6** — другой домен |
 
 ### Опциональные (вне строгого порядка)
 
@@ -115,7 +121,7 @@ readback-протокол, карта потребления, дисциплин
 | [pult-control-panel](pult-control-panel.md) | Phase 1-3, 5.1-5.3/5.5 DONE | 5.4 отложен; Phase 4 (доки) |
 | [letter-robot-cycle](letter-robot-cycle/) | тракт распознавания DONE | цикл укладки→возврата |
 | [draw-mode-rework](draw-mode-rework/) | A-D в основном DONE | **freeze** до железа |
-| [telemetry-pull-on-demand](telemetry-pull-on-demand.md) | DRAFT — вход будущего плана телеметрии (см. «Сейчас» п.4) | декомпозиция от инвентаря 6.3 |
+| [telemetry-pull-on-demand](telemetry-pull-on-demand.md) | **SUPERSEDED 2026-08-12 → [telemetry-stage6](telemetry-stage6.md) Ф3** | направление владельца — в 3.2 спеки; два входа отклонены там поимённо |
 
 ## Закрыто (файлы на месте; кандидаты в `_archive/` — решение №9)
 
@@ -124,7 +130,7 @@ readback-протокол, карта потребления, дисциплин
 | [observability-review-remediation](observability-review-remediation.md) | фазы A–E + F1 (2026-08-10, вердикт 7/10) | весь остаток → `observability-roadmap` (этапы 1–5); merge — решение №1 |
 | [truth-holes-closure](truth-holes-closure.md) | 2026-07-26 (6.3 вариант A, `0d8d1e3d`) | — |
 | [backend-ctl-proof-discipline](backend-ctl-proof-discipline.md) | 2026-07-22 (`5b6838e0`, 47 инструментов live) | хвосты ушли в truth-holes |
-| [telemetry-coherence-remediation](telemetry-coherence-remediation.md) | 2026-07-18 (merge `13623920`, Fable 47/60) | Task 3.2 ш.3 → план телеметрии |
+| [telemetry-coherence-remediation](telemetry-coherence-remediation.md) | 2026-07-18 (merge `13623920`, Fable 47/60) | Task 3.2 ш.3 — **закрыт 5.11.f, не остаток**; наследник W2 (адресные дельты не переживают respawn) → [telemetry-stage6](telemetry-stage6.md) 3.4 |
 | [gui-telemetry-read-model](gui-telemetry-read-model.md) | 2026-07-16 (ADR-136) | Task 1.3 qt-smoke → план телеметрии |
 | [telemetry-dashboard](telemetry-dashboard.md) | merge `1f5083d3`+`937bc541` (шапка DRAFT исправлена 2026-08-10) | — |
 | [telemetry-publish-control](telemetry-publish-control.md) | merge `1f6bbd40`, ADR-PM-018 (шапка DRAFT исправлена 2026-08-10) | residual «каскад двух плоскостей» → Ф8.2 unified-routing |
