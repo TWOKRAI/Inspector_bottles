@@ -1917,6 +1917,38 @@ class BuiltinCommands:
             result["telemetry_ttl_sec"] = ttl_sec
             result["telemetry_applied"] = applied
 
+        # Задача 5.7 (вторая половина блокера Н2-4): у телеметрийной правки не было
+        # НИ вердикта, ни голоса об опечатке в имени метрики — оба существовали, но
+        # только на соседней двери (`telemetry.reconfigure`). Дефект, живущий на
+        # одной дороге из двух, воскресает на второй: приёмка спросила `config.reload`
+        # и получила `verified=None` и пустоту про метрики.
+        if isinstance(telemetry_section, dict):
+            heartbeat = getattr(svc, "_heartbeat", None)
+            unknown_metrics = getattr(heartbeat, "current_unknown_metrics", None)
+            if callable(unknown_metrics):
+                # Имя метрики — НЕ опечатка по построению (конфиг сужает набор, а не
+                # объявляет белый список), поэтому здесь голос, а не отказ. Поле
+                # только при непустом наборе — как у соседней двери.
+                names = unknown_metrics() or []
+                if names:
+                    result["unknown_metrics"] = list(names)
+            if "verified" not in result:
+                # Честный третий исход вместо тишины: readback плоскости телеметрии
+                # `observability_effective` не отдаёт, значит подтверждать нечем — и
+                # это ОТВЕТ. Форма та же, что у соседней секции (`unverifiable`
+                # несёт запрошенные пути), чтобы потребитель читал одним способом.
+                from ..configs.observability_layers import TELEMETRY_KEY as _TELEMETRY_KEY
+                from ..configs.observability_layers import flatten_section
+
+                requested = sorted(flatten_section({_TELEMETRY_KEY: telemetry_section}).keys())
+                result["verified"] = {
+                    "verdict": "unverifiable",
+                    "checked": 0,
+                    "mismatches": [],
+                    "unknown_keys": [],
+                    "unverifiable": requested,
+                }
+
         return result
 
     def _merge_telemetry_layer(

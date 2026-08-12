@@ -1396,17 +1396,51 @@ def _telemetry_publish_problems(publish: Any) -> list[str]:
         return []
     from pydantic import ValidationError
 
-    from .telemetry_publish_config import TelemetryPublishConfig
+    from .telemetry_publish_config import MetricRule, TelemetryPublishConfig
 
+    base = f"{TELEMETRY_KEY}.{TELEMETRY_LAYERED_SUBSECTION}"
     try:
         TelemetryPublishConfig.model_validate(publish)
     except ValidationError as exc:
         problems = []
         for err in exc.errors():
             tail = ".".join(str(part) for part in err.get("loc", ()))
-            address = f"{TELEMETRY_KEY}.{TELEMETRY_LAYERED_SUBSECTION}"
-            problems.append(f"{address}.{tail}: {err.get('msg', '')}" if tail else f"{address}: {err.get('msg', '')}")
+            problems.append(f"{base}.{tail}: {err.get('msg', '')}" if tail else f"{base}: {err.get('msg', '')}")
         return problems
+
+    # Задача 5.7 (блокер Н2-4 переприёмки раунда 2). Значения проверены выше, а
+    # ИМЕНА — нет: схема принимает лишние ключи молча, и `publish: {нет_такой_ручки:
+    # …}` отвечал `success=true`, ложился в L3 со сроком 254 с, не имел readback'а и
+    # ПОПУТНО включал гейт публикации. Задача 5.4 закрыла тот же класс у соседних
+    # плоскостей и передала ключ `telemetry` сюда — а здесь судились только имена
+    # ПОД-СЕКЦИЙ. Классический «фасад — белый список»: поле в схеме менеджера не
+    # делает ручку управляемой, и делегирование соседу не делает её проверенной.
+    #
+    # Метрики НЕ трогаем: имя под `metrics` — это имя метрики, и незнакомое имя там
+    # законно (конфиг сужает, а не объявляет белый список). Их судит существующий
+    # `unknown_metrics` — голосом, а не отказом.
+    if isinstance(publish, dict):
+        known = set(TelemetryPublishConfig.model_fields)
+        problems = [
+            f"{base}.{key}: неизвестное поле секции публикации (известны: {', '.join(sorted(known))}); "
+            f"правила метрик живут под 'metrics'"
+            for key in sorted(str(k) for k in publish)
+            if str(key) not in known
+        ]
+        rules = publish.get("metrics")
+        if isinstance(rules, dict):
+            rule_fields = set(MetricRule.model_fields)
+            for name, rule in sorted(rules.items()):
+                if not isinstance(rule, dict):
+                    continue
+                problems.extend(
+                    f"{base}.metrics.{name}.{key}: неизвестное поле правила метрики "
+                    f"(известны: {', '.join(sorted(rule_fields))})"
+                    for key in sorted(str(k) for k in rule)
+                    if str(key) not in rule_fields
+                )
+        if problems:
+            return problems
     return []
 
 

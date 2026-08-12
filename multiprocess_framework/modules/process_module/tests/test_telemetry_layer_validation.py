@@ -319,3 +319,77 @@ class TestNeighbourNotBlocked:
         cm.dispatch("telemetry.reconfigure", {"publish": {"default_interval_sec": "быстро"}})
         again = cm.dispatch("telemetry.reconfigure", {"publish": {"metrics": {"fps": {"enabled": False}}}})
         assert again["success"] is True, again.get("reason")
+
+
+class TestUnknownNamesInsideTelemetry:
+    """Задача 5.7 — блокер Н2-4 переприёмки раунда 2.
+
+    Задача 5.4 закрыла класс «незнакомое ИМЯ ключа» у трёх плоскостей и передала
+    ключ ``telemetry`` сюда — а здесь судились только имена ПОД-СЕКЦИЙ и ЗНАЧЕНИЯ.
+    Воспроизведено живьём до правки::
+
+        config.reload {"telemetry": {"publish": {"нет_такой_метрики": {"interval_sec": 5.0}}}}
+        → success=true, verified=None,
+          session_keys=['telemetry.publish.нет_такой_метрики.interval_sec']  # со сроком 254 с
+
+    Граница названа: имя под ``metrics`` — это ИМЯ МЕТРИКИ, и незнакомое имя там
+    ЗАКОННО (конфиг сужает набор, а не объявляет белый список). Его судит голосом
+    ``unknown_metrics``, а не отказом.
+    """
+
+    BAD_NAMES = [
+        (
+            {"publish": {"нет_такой_метрики": {"interval_sec": 5.0}}},
+            "telemetry.publish.нет_такой_метрики",
+        ),
+        ({"publish": {"deafult_interval_sec": 2.0}}, "telemetry.publish.deafult_interval_sec"),
+        ({"publish": {"metrics": {"fps": {"enabld": True}}}}, "telemetry.publish.metrics.fps.enabld"),
+    ]
+
+    @pytest.mark.parametrize("section,address", BAD_NAMES)
+    def test_unknown_field_is_refused_with_its_address(self, section, address) -> None:
+        with pytest.raises(ValueError) as exc:
+            validate_telemetry_section(section, layer=LAYER_SESSION)
+        assert address in str(exc.value), exc.value
+
+    @pytest.mark.parametrize("section,address", BAD_NAMES)
+    def test_the_command_refuses_and_nothing_lands_in_the_layer(self, section, address) -> None:
+        svc, cm = _make()
+        res = cm.dispatch("config.reload", {"telemetry": section})
+        assert res["success"] is False, res
+        assert address in str(res.get("reason", "")), res
+        assert _session(svc) == {}, "мусорное имя всё равно легло в L3"
+
+    def test_a_metric_name_is_legal_and_only_voiced(self) -> None:
+        """Пара к отказу: страж, срабатывающий всегда, запретил бы новую метрику.
+
+        Незнакомое имя метрики — не опечатка по построению. Отказ здесь сломал бы
+        forward-compat: метрика из будущей версии в старом процессе валила бы reload.
+        """
+        validate_telemetry_section(
+            {"publish": {"metrics": {"будущая_метрика": {"enabled": True}}}},
+            layer=LAYER_SESSION,
+        )
+
+    def test_legal_fields_pass_the_same_door(self) -> None:
+        validate_telemetry_section(
+            {"publish": {"default_interval_sec": 2.0, "tick_sec": 1.0, "metrics": {"fps": {"enabled": False}}}},
+            layer=LAYER_SESSION,
+        )
+        validate_telemetry_section({"publish": None}, layer=LAYER_SESSION)
+        validate_telemetry_section({"throttle": {"processes.**.state.fps": 2.0}}, layer=LAYER_SESSION)
+
+    def test_telemetry_reload_carries_a_verdict_instead_of_silence(self) -> None:
+        """Вторая половина Н2-4: было `verified=None` — ни одного из трёх исходов.
+
+        Честный ответ — ``unverifiable`` с перечнем запрошенных путей: readback
+        плоскости телеметрии не отдаётся, значит подтверждать нечем, и это ОТВЕТ,
+        а не молчание. Форма — та же, что у соседней секции.
+        """
+        svc, cm = _make()
+        res = cm.dispatch("config.reload", {"telemetry": {"publish": {"default_interval_sec": 2.0}}})
+        assert res["success"] is True, res.get("reason")
+        verified = res.get("verified")
+        assert verified is not None, "телеметрийная правка снова без вердикта"
+        assert verified["verdict"] == "unverifiable", verified
+        assert "telemetry.publish.default_interval_sec" in verified["unverifiable"], verified
