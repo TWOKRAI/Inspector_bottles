@@ -18,6 +18,16 @@ import time
 from typing import Any
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
+from multiprocess_framework.modules.logger_module import get_std_logger
+
+#: Писатель драйверов. НЕ ``self._log_*`` миксина: слоты ``logger``/``error``/
+#: ``stats`` драйверу никто не регистрирует (проверено grep'ом по
+#: ``Services/device_hub``: ни одного ``register_manager``), поэтому вызов миксина
+#: тихо возвращает ``None`` и считает отказ в ``manager_call_failures`` — запись не
+#: доезжает никуда. Через вид над единственным писателем она доезжает; так же
+#: устроен соседний ``Services/modbus/sdk/client.py``. Разъём драйверов —
+#: отдельный долг, не эта правка.
+logger = get_std_logger(__name__)
 
 
 class BaseDeviceDriver(BaseManager, ObservableMixin):
@@ -193,5 +203,29 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
         if self._reconnect_attempts >= self.max_reconnect_attempts:
             self.desired_connected = False
             self.reconnect_exhausted = True
+            # ЕДИНСТВЕННОЕ громкое уведомление за всю серию. До 2026-08-12
+            # исчерпание лимита не логировалось вообще: оператор видел россыпь
+            # одинаковых WARNING от попыток, а потом тишину — и не мог отличить
+            # «сдались» от «всё наладилось». Живой стенд: 12 строк на одно
+            # недоступное устройство и ни одной про итог.
+            logger.warning(
+                f"устройство {getattr(self.entry, 'id', '?')!r} ({self._transport_addr()}) недоступно — "
+                f"сдались после {self._reconnect_attempts} попыток; переподключение прекращено "
+                f"до ручного «Подключить»"
+            )
             return False
         return True
+
+    def _transport_addr(self) -> str:
+        """Адрес устройства для сообщений оператору (best-effort, без падений)."""
+        transport = getattr(self.entry, "transport", None) or {}
+        if not isinstance(transport, dict):
+            return "адрес неизвестен"
+        kind = transport.get("type", "?")
+        host, port = transport.get("host"), transport.get("port")
+        if host:
+            unit = transport.get("unit_id")
+            tail = f"#unit{unit}" if unit is not None else ""
+            return f"{kind}://{host}:{port}{tail}"
+        serial_port = transport.get("port_name") or transport.get("serial_port")
+        return f"{kind}://{serial_port}" if serial_port else f"{kind}://адрес неизвестен"
