@@ -33,6 +33,7 @@ COMM_MAP = "multiprocess_framework/docs/COMMUNICATION_MAP.md"
 DOCS_README = "multiprocess_framework/docs/README.md"
 CONTRACTS = "multiprocess_framework/docs/MODULE_CONTRACTS.md"
 CMD_MANAGER = "multiprocess_framework/modules/command_module/core/command_manager.py"
+SEVERITY_CFG = "multiprocess_framework/modules/error_module/configs/error_manager_config.py"
 
 Edit = Tuple[str, str, str]  # (файл, что заменить, на что — текст ДО правок 5.1)
 
@@ -73,6 +74,19 @@ INJECTIONS: List["pytest.ParameterSet"] = [
         "F1-4",
         [(SINKS_MAP, "**нельзя**", "**можно**")],
         id="F1-4-утверждение-всегда-вверх-вернулось",
+    ),
+    pytest.param(
+        "F1-4",
+        # Слом со стороны КОДА, а не документа (Н-B приёмки F2). Прежняя редакция
+        # проверки шла по строкам документа и такой слом не видела вовсе: документ
+        # продолжал обещать ступень, которой в коде уже нет, а сверщик молчал.
+        [(SEVERITY_CFG, '"WARNING": ["warnings_file"', '"WARNING_X": ["warnings_file"')],
+        id="F1-4-ступень-снята-из-кода",
+    ),
+    pytest.param(
+        "F1-4",
+        [(SEVERITY_CFG, '"CRITICAL": ["critical_file", "errors_file"]', '"CRITICAL": ["critical_file"]')],
+        id="F1-4-цепочка-в-коде-укорочена",
     ),
     pytest.param(
         "F1-5",
@@ -212,6 +226,22 @@ def test_unreadable_source_is_unverifiable_not_green() -> None:
     report = run_all(Sources(root="Z:/каталога-нет"))
     assert report.unverifiable, "исчезнувшее дерево дало зелёный отчёт"
     assert report.exit_code == 2
+
+
+def test_readme_states_the_true_number_of_checks() -> None:
+    """README называет РЕАЛЬНОЕ число проверок.
+
+    Сверщик документов, чей собственный README врёт про свой объём, — ровно тот
+    класс дефекта, который он и ловит. Первая редакция обещала 15 при 14; поймал
+    внешний приёмщик F2 пересчётом, не автор.
+    """
+    import re
+    from pathlib import Path
+
+    readme = Path(__file__).resolve().parents[1] / "README.md"
+    stated = re.search(r"\*\*(\d+) проверок\*\*", readme.read_text(encoding="utf-8"))
+    assert stated, "в README нет строки «**N проверок**»"
+    assert int(stated.group(1)) == len(CHECKS), f"README обещает {stated.group(1)} проверок, в CHECKS их {len(CHECKS)}"
 
 
 def test_every_check_is_covered_by_an_injection() -> None:

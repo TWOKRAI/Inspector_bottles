@@ -311,16 +311,34 @@ def _check_severity_ladder(src: Sources) -> Optional[str]:
         raise Unverifiable("DEFAULT_SEVERITY_ROUTES не разобрался")
 
     doc = src.read(f"{OBS}/SINKS_MAP.md")
-    bad: List[str] = []
+    # Таблица лестницы: строка, у которой во второй ячейке цепочка приёмников.
+    # Собираем её ЦЕЛИКОМ, а не сверяем построчно: прежняя редакция шла по строкам
+    # документа и пропускала уровень со `if level not in routes: continue` — то есть
+    # была слепа к правке КОДА. Снятая из DEFAULT_SEVERITY_ROUTES ступень не давала
+    # ни одного расхождения, документ продолжал обещать её, а гейт молчал
+    # (находка Н-B приёмки F2, воспроизведена переименованием ключа "WARNING").
+    doc_routes: Dict[str, List[str]] = {}
     for cells in _md_table_rows(doc):
         if len(cells) != 2:
             continue
         level = "".join(_backticked(cells[0]))
-        if level not in routes:
+        chain = _backticked(cells[1])
+        if not level.isupper() or not chain or not all(name.endswith("_file") for name in chain):
             continue
-        written = _backticked(cells[1])
-        if written != routes[level]:
-            bad.append(f"{level}: документ {written}, код {routes[level]}")
+        doc_routes[level] = chain
+    if not doc_routes:
+        raise Unverifiable("SINKS_MAP.md: таблица лестницы отказа не разобралась")
+
+    bad: List[str] = []
+    only_in_code = sorted(set(routes) - set(doc_routes))
+    only_in_doc = sorted(set(doc_routes) - set(routes))
+    if only_in_code:
+        bad.append(f"уровни есть в коде, но не в документе: {only_in_code}")
+    if only_in_doc:
+        bad.append(f"документ обещает уровни, которых нет в DEFAULT_SEVERITY_ROUTES: {only_in_doc}")
+    for level in sorted(set(routes) & set(doc_routes)):
+        if doc_routes[level] != routes[level]:
+            bad.append(f"{level}: документ {doc_routes[level]}, код {routes[level]}")
 
     # Утверждение «запасной всегда вверх» ложно, если хоть одна лестница идёт вниз.
     goes_down = any(
