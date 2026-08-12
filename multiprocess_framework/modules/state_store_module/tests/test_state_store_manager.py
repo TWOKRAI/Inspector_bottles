@@ -614,6 +614,86 @@ class TestStateStoreManagerSubscriptions:
         assert mgr.subscription_manager.subscription_count == 1
 
 
+class TestForgetSessionOnAbnormalDisconnect:
+    """Т-2 (Н3-1): подписки умирают вместе с соединением, а не с командой снятия.
+
+    Опасность механизма: снятие по КОМАНДЕ клиента покрывает только вежливый уход.
+    Клиент, умерший аварийно (креш, kill, RST без FIN), команды не шлёт, а его адрес
+    после реконнекта не знает уже никто — новая сессия берёт новый session_id. Замер
+    жёсткого ревью 2026-08-12: `errors_delivery_failed` 0 → 1486 за 30 с (~39/с) при
+    НУЛЕ живых клиентов, и так до рестарта оркестратора.
+
+    Второй риск здесь — сама форма сопоставления. Суффикс берётся с точкой (``.sid``)
+    именно потому, что голое ``endswith(sid)`` снесло бы подписки соседа, чьё имя
+    случайно оканчивается теми же буквами.
+    """
+
+    @staticmethod
+    def _mgr_with(*subscribers: str) -> StateStoreManager:
+        mgr = StateStoreManager()
+        for name in subscribers:
+            mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": name}})
+        return mgr
+
+    def test_closed_session_loses_its_subscriptions(self):
+        """Ровно тот дефект, что даёт призрака: адрес мёртвой сессии остаётся в реестре."""
+        mgr = self._mgr_with("backend_ctl.aaa111", "backend_ctl.bbb222", "gui")
+
+        dropped = mgr.forget_session("aaa111")
+
+        assert dropped == ["backend_ctl.aaa111"]
+        assert set(mgr.subscription_manager.subscribers()) == {"backend_ctl.bbb222", "gui"}
+
+    def test_all_subscriptions_of_that_address_go_at_once(self):
+        """Адрес держит несколько паттернов — снимаются ВСЕ, иначе призрак остаётся частичным."""
+        mgr = StateStoreManager()
+        for pattern in ("processes.**", "system.*", "cameras.*"):
+            mgr.handle_state_subscribe({"data": {"pattern": pattern, "subscriber": "backend_ctl.zzz"}})
+        assert mgr.subscription_manager.subscription_count == 3
+
+        mgr.forget_session("zzz")
+
+        assert mgr.subscription_manager.subscription_count == 0
+
+    def test_a_neighbour_whose_name_merely_ends_with_the_same_letters_survives(self):
+        """Суффикс — ``.sid``, а не ``sid``: точка отделяет адрес сессии от однофамильца."""
+        mgr = self._mgr_with("backend_ctl.aaa111", "backend_ctl_aaa111", "gui.111")
+
+        dropped = mgr.forget_session("aaa111")
+
+        assert dropped == ["backend_ctl.aaa111"]
+        assert set(mgr.subscription_manager.subscribers()) == {"backend_ctl_aaa111", "gui.111"}
+
+    def test_unknown_and_empty_session_are_quiet_noops(self):
+        """Сигнал приходит из read-потока канала на КАЖДОЕ закрытие, включая чужие."""
+        mgr = self._mgr_with("gui", "backend_ctl.live")
+
+        assert mgr.forget_session("никогда-не-существовала") == []
+        assert mgr.forget_session("") == []
+        assert mgr.forget_session(None) == []  # type: ignore[arg-type]
+        assert set(mgr.subscription_manager.subscribers()) == {"gui", "backend_ctl.live"}
+
+    def test_dead_address_stops_receiving_deltas(self):
+        """Свойство, а не запись в реестре: после уборки пуш мёртвому адресу не уходит.
+
+        Проверять состав словаря подписок мало — реестр и рассылка это две позиции
+        одного механизма, и снятие, не дошедшее до диспетчера, оставило бы призрака
+        живым при зелёном тесте на реестр.
+        """
+        router = MockRouter()
+        mgr = StateStoreManager(router=router)
+        mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": "backend_ctl.dead"}})
+        mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": "gui"}})
+        router.sent_messages.clear()
+
+        mgr.forget_session("dead")
+        mgr.handle_state_set({"data": {"path": "processes.camera_0.state.fps", "value": 30}})
+
+        addressed = [t for m in router.sent_messages if m.get("command") == "state.changed" for t in m["targets"]]
+        assert "backend_ctl.dead" not in addressed, f"мёртвый адрес всё ещё получает дельты: {addressed}"
+        assert "gui" in addressed, "уборка задела живого соседа"
+
+
 class TestStateStoreManagerRegister:
     """Тесты register_commands и register_message_handlers."""
 

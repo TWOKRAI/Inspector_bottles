@@ -18,7 +18,7 @@
 | SubscriptionManager | core/subscription_manager.py | Готов | Подписки с glob-style matching + lru_cache на разборе паттернов |
 | match_pattern, split_pattern | core/subscription_manager.py (re-export через core/__init__) | Готов | Публичные хелперы glob-матчинга (ADR-SS-004) |
 | **manager/** | | | |
-| StateStoreManager | manager/state_store_manager.py | Готов | Server-фасад: TreeStore + SubscriptionManager + DeltaDispatcher + 7 IPC-handlers |
+| StateStoreManager | manager/state_store_manager.py | Готов | Server-фасад: TreeStore + SubscriptionManager + DeltaDispatcher + 7 IPC-handlers; **не-IPC вход `forget_session(session_id)`** — снятие подписок мёртвого соединения по сигналу `on_session_closed` (Т-2, ADR-PMM-027) |
 | DeltaDispatcher | manager/delta_dispatcher.py | Готов | Адресная рассылка дельт подписчикам через `targets`, дедупликация по subscriber; **доставка коалесцированная** — буфер per-subscriber + daemon-flusher (~120 мс, cap ~200), очередь класса `state`, переключателей нет (ADR-SS-020) |
 | **proxy/** | | | |
 | StateProxy | proxy/state_proxy.py | Готов | Client-прокси: локальный кэш + IPC + per-pattern фильтрация callbacks (ADR-SS-012); watch-from-revision + resync (Ф4.9, ADR-SS-015) |

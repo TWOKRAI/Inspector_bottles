@@ -279,7 +279,7 @@ class ProcessManagerProcess(ProcessModule):
                 # об этом ПО ФАКТУ: имени старой сессии после реконнекта не знает уже
                 # никто, а шов инкарнации иначе воскрешал бы мёртвую подписку на
                 # каждом свежем процессе.
-                on_session_closed=self._forget_observability_session,
+                on_session_closed=self._forget_closed_session,
             )
 
             # Ф3.2: boot-барьер — дождаться self-reported ready стартованных детей
@@ -2452,19 +2452,40 @@ class ProcessManagerProcess(ProcessModule):
             self._observability_broker = broker
         return broker
 
-    def _forget_observability_session(self, session_id: str) -> None:
-        """Снять намерения подписчика закрытой сессии (5.11-R1, сигнал от SocketChannel).
+    def _forget_closed_session(self, session_id: str) -> None:
+        """Снять подписки ВСЕХ плоскостей у адресов закрытой сессии (сигнал SocketChannel).
 
         Зовётся из read-потока канала. Ничего блокирующего здесь делать нельзя и не
-        нужно: снятие — это правка словаря брокера под его же локом.
+        нужно: снятие — это правка словарей брокера и реестра подписок под их же локами.
+
+        Задача Т-2 (находка Н3-1). Прежняя редакция звалась
+        ``_forget_observability_session`` и чистила ровно одну плоскость — намерения
+        хвоста. Подписка ``state.**`` того же мёртвого адреса оставалась жить, и
+        оркестратор пушил ей ``state.changed`` до собственного рестарта: замер
+        жёсткого ревью 2026-08-12 — ``errors_delivery_failed`` 0 → 1486 за 30 с
+        (~39/с) при НУЛЕ живых клиентов. Штатные формы завершения дефект не
+        показывали (клиент сам шлёт снятие), аварийная — RST без FIN — показывала
+        с первой попытки: зонд ``backend_ctl/probes/probe_n3_1_ghost_rst.py``.
+
+        Плоскости чистятся НЕЗАВИСИМО: падение одной уборки не имеет права отменить
+        соседнюю (иначе ремонт одной плоскости молча вернул бы призрака в другой).
+
+        Residual (назван, не закрыт): подписки, взятые клиентом НАПРЯМУЮ у ребёнка
+        (``log.tail.subscribe``, прицельный ``observability.tail.subscribe``,
+        ``ui.tap.subscribe``), оркестратору неизвестны — реестра таких адресов у
+        него нет, и суффиксную уборку ему не по чему сделать. При аварийной смерти
+        клиента они остаются; штатное закрытие драйвера их снимает само.
         """
-        broker = getattr(self, "_observability_broker", None)
-        if broker is None:
-            return  # брокера не заводили — снимать нечего
-        try:
-            broker.forget_session(session_id)
-        except Exception as exc:  # noqa: BLE001 — сигнал не имеет права ронять канал
-            self._log_error(f"[observability] снятие намерений сессии '{session_id}' упало: {exc}")
+        for plane, forget in (
+            ("observability", getattr(getattr(self, "_observability_broker", None), "forget_session", None)),
+            ("state", getattr(getattr(self, "_state_store_manager", None), "forget_session", None)),
+        ):
+            if forget is None:
+                continue  # плоскость не заведена — снимать нечего
+            try:
+                forget(session_id)
+            except Exception as exc:  # noqa: BLE001 — сигнал не имеет права ронять канал
+                self._log_error(f"[{plane}] снятие подписок сессии '{session_id}' упало: {exc}")
 
     def _cmd_observability_tail_subscribe_all(self, data=None, **kwargs) -> dict:
         """Подписать адрес на хвост ВСЕХ процессов одним вызовом (Task 5.11).

@@ -771,7 +771,7 @@ class TestForgetSessionOnSocketClose:
         pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.bbb222"})
         pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
 
-        pm._forget_observability_session("aaa111")
+        pm._forget_closed_session("aaa111")
 
         names = pm._observability_broker_obj().subscriber_names()
         assert "backend_ctl.aaa111" not in names, "намерение мёртвой сессии пережило закрытие сокета"
@@ -786,14 +786,14 @@ class TestForgetSessionOnSocketClose:
         for i in range(5):
             sid = f"sess{i}"
             pm._cmd_observability_tail_subscribe_all({"subscriber": f"backend_ctl.{sid}"})
-            pm._forget_observability_session(sid)
+            pm._forget_closed_session(sid)
         assert pm._observability_broker_obj().subscriber_names() == []
 
     def test_dead_subscriber_is_not_replayed_to_fresh_incarnations(self):
         """Главное следствие: шов инкарнации не воскрешает снятую подписку."""
         pm, sent = self._pm_with_comm()
         pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.dead01"})
-        pm._forget_observability_session("dead01")
+        pm._forget_closed_session("dead01")
         sent.clear()
 
         pm._mark_instance_started("camera_1")
@@ -803,7 +803,7 @@ class TestForgetSessionOnSocketClose:
     def test_unknown_session_is_a_quiet_noop(self):
         pm, _sent = self._pm_with_comm()
         pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
-        pm._forget_observability_session("никогда-не-существовала")
+        pm._forget_closed_session("никогда-не-существовала")
         assert pm._observability_broker_obj().subscriber_names() == ["gui"]
 
     def test_signal_never_breaks_the_channel(self):
@@ -811,7 +811,106 @@ class TestForgetSessionOnSocketClose:
         pm, _sent = self._pm_with_comm()
         broker = pm._observability_broker_obj()
         broker.forget_session = lambda _sid: (_ for _ in ()).throw(RuntimeError("boom"))
-        pm._forget_observability_session("aaa")  # не должно бросить
+        pm._forget_closed_session("aaa")  # не должно бросить
+
+
+class TestClosedSessionIsForgottenOnEveryPlane:
+    """Т-2 (Н3-1): сигнал закрытия убирает подписчика ИЗ ВСЕХ плоскостей, не из одной.
+
+    Тесты выше судят плоскость наблюдаемости и были зелёными весь срок жизни дефекта:
+    колбэк назывался ``_forget_observability_session`` и честно делал ровно то, что
+    обещал именем. Призрака давала соседняя плоскость — подписка ``state.**`` того же
+    мёртвого адреса: замер жёсткого ревью 2026-08-12 — ``errors_delivery_failed``
+    0 → 1486 за 30 с (~39/с) при нуле живых клиентов, до рестарта оркестратора.
+
+    Здесь стоит настоящий ``StateStoreManager``, а не дубль: механика уборки
+    проверена в его собственных тестах, а этот класс сторожит ПРОВОДКУ — что PM
+    зовёт обе уборки и что падение одной не отменяет соседнюю.
+    """
+
+    @staticmethod
+    def _pm_with_both_planes():
+        from ...state_store_module.manager.state_store_manager import StateStoreManager
+
+        pm, sent = TestBrokerWiredIntoPM._pm_with_comm()
+        ssm = StateStoreManager()
+        pm._state_store_manager = ssm
+        return pm, ssm, sent
+
+    @staticmethod
+    def _subscribe_state(ssm, subscriber: str) -> None:
+        ssm.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": subscriber}})
+
+    def test_both_planes_lose_the_dead_address(self):
+        pm, ssm, _sent = self._pm_with_both_planes()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.aaa111"})
+        self._subscribe_state(ssm, "backend_ctl.aaa111")
+        self._subscribe_state(ssm, "gui")
+
+        pm._forget_closed_session("aaa111")
+
+        assert pm._observability_broker_obj().subscriber_names() == []
+        assert ssm.subscription_manager.subscribers() == ["gui"], "state-подписка мёртвого адреса выжила"
+
+    def test_a_failing_observability_cleanup_does_not_cancel_the_state_one(self):
+        """Плоскости независимы: общий ``try`` вернул бы призрака при первой же ошибке."""
+        pm, ssm, _sent = self._pm_with_both_planes()
+        broker = pm._observability_broker_obj()
+        broker.forget_session = lambda _sid: (_ for _ in ()).throw(RuntimeError("boom"))
+        self._subscribe_state(ssm, "backend_ctl.aaa111")
+
+        pm._forget_closed_session("aaa111")
+
+        assert ssm.subscription_manager.subscribers() == [], "падение соседней плоскости отменило уборку state"
+
+    def test_a_failing_state_cleanup_does_not_cancel_the_observability_one(self):
+        """Обратный порядок: одного из двух направлений мало (дефект на одном пути из двух)."""
+        pm, ssm, _sent = self._pm_with_both_planes()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.aaa111"})
+        ssm.forget_session = lambda _sid: (_ for _ in ()).throw(RuntimeError("boom"))
+
+        pm._forget_closed_session("aaa111")
+
+        assert pm._observability_broker_obj().subscriber_names() == []
+
+    def test_a_pm_without_a_state_store_is_a_quiet_noop(self):
+        """Оркестратор без стора состояния — законная конфигурация, а не отказ."""
+        pm, _sent = TestBrokerWiredIntoPM._pm_with_comm()
+        pm._state_store_manager = None
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.aaa111"})
+
+        pm._forget_closed_session("aaa111")
+
+        assert pm._observability_broker_obj().subscriber_names() == []
+
+    def test_the_endpoint_is_wired_to_the_two_plane_cleanup(self):
+        """Проводка, а не метод: без неё весь класс выше судил бы код, который не зовут.
+
+        ``setup_backend_ctl_channel`` поднимается внутри ``initialize()`` PM (сокет,
+        поток, гейт env) — воспроизводить это ради одного аргумента дороже, чем оно
+        стоит. Поэтому имя колбэка читается из ИСХОДНИКА места вызова и сверяется с
+        живым атрибутом класса: переименуй метод, забыв call-site, — и `getattr`
+        не найдёт ничего.
+        """
+        import ast
+        from pathlib import Path
+
+        from ..process import process_manager_process as pmp
+
+        tree = ast.parse(Path(pmp.__file__).read_text(encoding="utf-8"))
+        wired = {
+            kw.value.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            for kw in node.keywords
+            if kw.arg == "on_session_closed" and isinstance(kw.value, ast.Attribute)
+        }
+        assert wired, "в process_manager_process.py нет ни одной передачи on_session_closed"
+        for name in wired:
+            assert callable(getattr(pmp.ProcessManagerProcess, name, None)), (
+                f"канал получает on_session_closed={name}, а такого метода у PM нет"
+            )
+        assert wired == {"_forget_closed_session"}, f"уборка сессии ушла в другой колбэк: {wired}"
 
 
 class TestLevelIsPartOfTheIntent:
