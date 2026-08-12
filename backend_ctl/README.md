@@ -240,7 +240,9 @@ python -m backend_ctl.mcp_server_sdk --http [--http-bind 127.0.0.1:8901] [--read
 
 **Инвариант:** HTTP-режим ТРЕБУЕТ бэкенд с `session_isolation=ON` (иначе broadcast течёт
 между сессиями). Сервер fail-fast проверяет флаг через `introspect.router_stats` и громко
-отказывает, если бэкенд поднят broadcast'ом. Подними бэкенд с `BACKEND_CTL_SESSION_ISOLATION=1`.
+отказывает, если бэкенд поднят broadcast'ом. **С задачи 5.5 это ДЕФОЛТ** — ручка
+нужна только чтобы изоляцию **выключить** (`BACKEND_CTL_SESSION_ISOLATION=0` либо
+`backend_ctl.session_isolation: false`), и тогда HTTP-режим откажет сам.
 **Safety-режим — per-server:** нужны одновременно read-only и full — два инстанса на разных
 портах (не per-session). `.mcp.json` с HTTP-транспортом:
 

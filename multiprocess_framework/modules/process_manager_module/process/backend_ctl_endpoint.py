@@ -57,12 +57,28 @@ def _resolve_port(source: dict, config: Optional[dict], port: Optional[int]) -> 
 
 
 def _resolve_session_isolation(source: dict, config: Optional[dict]) -> bool:
-    """Флаг session-isolation (D.1). Источников два (OR, зеркально `is_enabled`):
-    env `BACKEND_CTL_SESSION_ISOLATION=1` ИЛИ config `backend_ctl.session_isolation`.
-    Default False (broadcast) — остаётся дефолтом до доказательства (§9)."""
-    if source.get(ENV_SESSION_ISOLATION) == "1":
-        return True
-    return bool(config and config.get("session_isolation"))
+    """Флаг session-isolation (D.1). **Дефолт ON с задачи 5.5 (находка Н-A приёмки F2).**
+
+    Прежний дефолт был OFF (broadcast) с формулировкой «остаётся дефолтом до
+    доказательства (§9)». Доказательство пришло живьём: событие, адресованное
+    ОДНОМУ клиенту, доезжало до всех подключённых — два клиента дали в плоскости
+    `logs` по 17 событий с чужим `_address`, а в `state` 419/417/417 по трём
+    адресам, третий из которых мёртв. Следствие хуже самой протечки: арифметика
+    любого потребителя умножалась на число клиентов, а `dropped` считался по
+    чужому трафику — то есть числа приёмки measured не свою плоскость.
+
+    Приоритет — **явное над дефолтом**, а не OR: env со значением (``"1"``/``"0"``)
+    решает; иначе решает ключ конфига, если он ЕСТЬ (``in``, а не truthiness —
+    иначе `session_isolation: false` было бы неотличимо от молчания); иначе ON.
+    Прежний OR не умел выключать: ``"0"`` давал False лишь потому, что проваливался
+    в пустой конфиг, и с дефолтом ON эта случайность стала бы дырой.
+    """
+    raw = source.get(ENV_SESSION_ISOLATION)
+    if raw is not None and str(raw).strip() != "":
+        return str(raw).strip() == "1"
+    if config is not None and "session_isolation" in config:
+        return bool(config["session_isolation"])
+    return True
 
 
 def setup_backend_ctl_channel(

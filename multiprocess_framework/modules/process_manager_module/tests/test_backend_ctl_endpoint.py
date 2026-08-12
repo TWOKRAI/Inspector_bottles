@@ -126,11 +126,25 @@ class TestSetupTeardown:
 
 
 class TestSessionIsolationFlag:
-    """D.1 §9: флаг session_isolation — OR из env/config, default off, проброс в канал."""
+    """Флаг session_isolation: явное решает, иначе ИЗОЛЯЦИЯ (задача 5.5, находка Н-A).
 
-    def test_resolve_default_off(self) -> None:
-        assert _resolve_session_isolation({}, None) is False
-        assert _resolve_session_isolation({}, {}) is False
+    До 5.5 дефолт был OFF (broadcast) с оговоркой «до доказательства (§9)».
+    Доказательство пришло живьём: событие одного клиента доезжало до всех, и
+    арифметика любого потребителя умножалась на число клиентов.
+    """
+
+    def test_resolve_default_is_isolation(self) -> None:
+        """Молчание и env, и конфига означает изоляцию, а не broadcast."""
+        assert _resolve_session_isolation({}, None) is True
+        assert _resolve_session_isolation({}, {}) is True
+
+    def test_resolve_config_false_turns_it_off(self) -> None:
+        """Ключ есть → решает он: сверка через `in`, а не truthiness.
+
+        Иначе `session_isolation: false` было бы неотличимо от молчания конфига,
+        и выключить изоляцию конфигом было бы невозможно вообще.
+        """
+        assert _resolve_session_isolation({}, {"session_isolation": False}) is False
 
     def test_resolve_from_env(self) -> None:
         assert _resolve_session_isolation({"BACKEND_CTL_SESSION_ISOLATION": "1"}, None) is True
@@ -153,12 +167,27 @@ class TestSessionIsolationFlag:
         finally:
             teardown_backend_ctl_channel(ch, router)
 
-    def test_setup_default_flag_off(self) -> None:
+    def test_setup_default_wires_isolation_on(self) -> None:
+        """Задача 5.5: поднятый без ручек endpoint изолирует клиентов.
+
+        Страж на ПРОБРОС в канал, а не только на резолв: дефолт, посчитанный и
+        потерянный по дороге в конструктор, выглядит точно так же, как его отсутствие.
+        """
         router = FakeRouter()
         ch = setup_backend_ctl_channel(router, port=0, env={"BACKEND_CTL": "1"})
         try:
             assert ch is not None
-            assert ch.get_info()["session_isolation"] is False  # broadcast default
+            assert ch.get_info()["session_isolation"] is True
+        finally:
+            teardown_backend_ctl_channel(ch, router)
+
+    def test_setup_explicit_off_is_still_possible(self) -> None:
+        """Пара: возврат к broadcast остаётся выразимым — иначе это не дефолт, а забитый гвоздь."""
+        router = FakeRouter()
+        ch = setup_backend_ctl_channel(router, port=0, env={"BACKEND_CTL": "1", "BACKEND_CTL_SESSION_ISOLATION": "0"})
+        try:
+            assert ch is not None
+            assert ch.get_info()["session_isolation"] is False
         finally:
             teardown_backend_ctl_channel(ch, router)
 
