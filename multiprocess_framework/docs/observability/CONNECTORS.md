@@ -18,9 +18,19 @@
 | Адрес | [`modules/base_manager/mixins/observable_mixin.py`](../../modules/base_manager/mixins/observable_mixin.py) | [`modules/process_module/plugins/base.py`](../../modules/process_module/plugins/base.py) |
 | Логи | `_log_debug/_log_info/_log_warning/_log_error/_log_critical` (+ публичные алиасы без подчёркивания) | `ctx.log_debug/log_info/log_warning/log_error/log_critical` |
 | Ошибки | `_track_error(error, context)` → слот `error` | `ctx.health.report_error(exc, context=…, throttle=…)` |
-| Метрики | `_record_metric(metric_name, value, tags)`, `_record_timing(metric_name, duration, tags)` → слот `stats` | **разъёма нет** (см. §3, строка C1) |
+| Метрики | `_record_metric(metric_name, value, tags)`, `_record_timing(metric_name, duration, tags)` → слот `stats` | `ctx.record_metric(name, value=1, tags=None)`, `ctx.gauge(name, value, tags=None)`, `ctx.record_timing(name, duration, tags=None)`, `ctx.histogram(name, value, tags=None)` → `stats_manager` процесса (ADR-PM-033) |
 | Документы | — | `ctx.write_document(kind, summary, **fields)` |
-| Штамп источника | `_observability_source()`: явный `source_name` → `manager_name` → `"main"` | имя плагина, ставит `PluginContext._stamped` через `functools.partial(log_fn, module=…)` |
+| Штамп источника | `_observability_source()`: явный `source_name` → `manager_name` → `"main"` | логи — имя плагина через `PluginContext._stamped` (`functools.partial(log_fn, module=…)`); метрики — тег `plugin` с тем же именем |
+
+**Первый аргумент метрики зовётся по-разному на двух разъёмах, и это НЕ опечатка.** У миксина —
+`metric_name` ([`observable_mixin.py:186`](../../modules/base_manager/mixins/observable_mixin.py#L186)),
+у `PluginContext` и у самого `StatsManager` — `name`. Разъём плагина повторяет менеджер, в который
+пишет, дословно; миксин же — предсуществующее третье написание, и звать `ctx.record_metric(metric_name=…)`
+по его образцу — `TypeError`. Ровно тот класс расхождения, что уже стоил приёмке F1 её №1.
+
+**Единица `record_timing` — СЕКУНДЫ** на обоих разъёмах (`StatsManager.record_timing` документирован
+так, боевые вызовы передают `0.5`/`1.0`). Миллисекунды здесь не падают тестом: агрегат соберётся, но
+окажется в тысячу раз не там.
 
 Имена аргументов в таблице — **дословно из кода**
 ([`interfaces.py:206-214`](../../modules/base_manager/interfaces.py#L206)), а не пересказ: вызов
@@ -115,7 +125,7 @@ display-виде записи — `record_display.stamp_observed`
 | 6 | Ветка readback'а stats **не исполнялась ни разу** (сторожилась `getattr(stats, "config")`, которого у `StatsManager` нет) — темп, приёмники и молчащие стоки третьей плоскости наружу не выходили | **2026-08-09**, B1 | `StatsManager.observability_readback()`: темп из живого окна агрегации |
 | 7 | `channels_active` / `sinks_disabled_by_operator` / `idle_sinks` отдавал только логгер — на error/stats оператор не отличал «я выключил» от «не поднялось» | Task 5.10 | `_sink_readback` / `_idle_sinks` зовутся для всех трёх плоскостей |
 | 8 | Реентрантный tap давал лавину до предела рекурсии (498 записей), а `RecursionError` съедал `except Exception` | **2026-08-10**, D1 | поточный счётчик глубины + именованный `tap_reentrant_suppressed` |
-| 9 | **stats-разъёма у плагина нет** — `IProcessServices` не объявляет stats-методов, 0 использований на ~30 плагинов | **НЕ ЗАКРЫТА** | развилка Р-2 решена владельцем как **(в)**: C1 уехала первой фазой в план телеметрии. Ветку `KIND_STATS` в drain трогать нельзя — на ней стоит это решение |
+| 9 | **stats-разъёма у плагина нет** — `IProcessServices` не объявляет stats-методов, 0 использований на ~30 плагинов | **разъём ЗАКРЫТ 2026-08-12** (ADR-PM-033, план `telemetry-stage6` задача 1.1); **доставка — нет**, задача 2.1 | Порт `stats_manager` в протоколе, четвёрка на `PluginContext`/`SubPluginContext`, узкий контракт `IPluginStatsManager`. Ненастроенная плоскость слышима: `stats.without_plane` в `introspect.observability` + однократный WARNING. Ветку `KIND_STATS` в drain оживляет задача 2.1 — решение Р-2 исполняется там, не здесь |
 
 Строка 9 — единственная открытая. Пока она открыта, бизнес-числа плагин отдаёт телеметрией
 (self-publish в дерево состояния), а не `StatsManager`.

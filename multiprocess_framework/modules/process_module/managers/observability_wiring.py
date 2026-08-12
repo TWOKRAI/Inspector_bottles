@@ -287,6 +287,71 @@ _DOCS_WITHOUT_SINK_ATTR = "_documents_without_sink"
 _DOCS_WARNED_NO_SINK_ATTR = "_documents_warned_no_sink"
 _DOCS_WARNED_REFUSED_ATTR = "_documents_warned_refused"
 
+#: Этап 6, задача 1.1: адрес плоскости stats в конфиге — тот же приём, что у
+#: ``DOCUMENTS_CONFIG_ADDRESS``: оператор получает то, что можно грепнуть.
+STATS_CONFIG_ADDRESS = "statistics"
+
+#: Метрики, которые писали в процесс БЕЗ ``StatsManager``. Симметрия с
+#: ``_DOCS_WITHOUT_SINK_ATTR``: «менеджера нет вовсе» — диагноз конфига, не базы.
+#: Счётчик на ПРОЦЕССЕ, а не на контексте: контекстов у процесса столько же,
+#: сколько плагинов, и счётчик на контексте показывал бы каждому свою правду.
+_STATS_WITHOUT_PLANE_ATTR = "_stats_without_plane"
+_STATS_WARNED_NO_PLANE_ATTR = "_stats_warned_no_plane"
+
+
+def note_metric_without_plane(svc: Any, metric: str, source: str) -> None:
+    """Учесть метрику, которой некуда ехать, и сказать это ОДИН раз (этап 6, 1.1).
+
+    Форма — дословно ``note_document_without_sink``: первый случай WARNING'ом с
+    адресом, дальше молча счётчиком. Довод тот же и проверен на документах:
+    метрика пишется на такте, и голос на каждую превратил бы ненастроенную
+    плоскость в поток, к которому перестают прислушиваться.
+
+    Возврата у метрик нет (``record_metric -> None``, сигнатура дословна
+    ``StatsManager``), поэтому счётчик и голос — ЕДИНСТВЕННЫЙ канал, которым
+    ненастроенная плоскость наблюдаема. У документов рядом есть ``False``, и
+    там же — соблазн счесть этот путь тихим: здесь тихим он быть не может.
+    """
+    try:
+        setattr(svc, _STATS_WITHOUT_PLANE_ATTR, int(getattr(svc, _STATS_WITHOUT_PLANE_ATTR, 0) or 0) + 1)
+    except Exception:  # noqa: BLE001 — иммутабельный дубль в тесте не должен ронять линию
+        return
+    if getattr(svc, _STATS_WARNED_NO_PLANE_ATTR, False):
+        return
+    try:
+        setattr(svc, _STATS_WARNED_NO_PLANE_ATTR, True)
+    except Exception:  # noqa: BLE001
+        pass
+    _process_warn(
+        svc,
+        f"[stats] метрика {metric!r} от {source!r} писать некуда: у процесса нет StatsManager "
+        f"({STATS_CONFIG_ADDRESS}) — дальше считаем молча, "
+        f"счётчик в introspect.observability -> stats.without_plane",
+    )
+
+
+def stats_plane_report(svc: Any) -> Dict[str, Any]:
+    """Секция ``stats`` для ``introspect.observability`` (этап 6, 1.1).
+
+    Два числа отвечают на разные вопросы, и слить их нельзя:
+
+    * ``declared`` — менеджер поднят, метрике есть куда ехать;
+    * ``without_plane`` — сколько метрик написали, когда менеджера нет. Лечится
+      конфигом, а не базой.
+
+    Отказов у самого ``StatsManager`` на этом пути не бывает (запись в окно —
+    операция в памяти), поэтому третьего числа, симметричного ``dropped``
+    документов, здесь нет — пустая графа «не измерено» врала бы о наличии
+    механизма отказа.
+    """
+    stats = getattr(svc, "stats_manager", None)
+    return {
+        "stats": {
+            "declared": callable(getattr(stats, "record_metric", None)),
+            "without_plane": int(getattr(svc, _STATS_WITHOUT_PLANE_ATTR, 0) or 0),
+        }
+    }
+
 
 def note_document_without_sink(svc: Any, kind: str, source: str) -> None:
     """Учесть документ, которому некуда ехать, и сказать это ОДИН раз (C3).

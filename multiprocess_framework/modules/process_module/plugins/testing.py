@@ -119,6 +119,46 @@ class MockDocumentSink:
         return True
 
 
+class MockStatsManager:
+    """Дубль ``StatsManager`` для плоскости stats (этап 6, 1.1), умеющий ОТКАЗЫВАТЬ.
+
+    Тот же довод, что у :class:`MockDocumentSink` строкой выше: дубль,
+    который всегда успешен, глушит гейт. У метрики нет возврата, поэтому
+    отличить «записано» от «сбой учёта» можно только по тому, что фасад
+    сказал в журнал — а сказать ему не о чем, если дубль не умеет падать.
+
+    Записи хранятся списком в порядке вызова: тест судит СОДЕРЖИМОЕ (род,
+    имя, значение, теги — в т.ч. автоштамп ``plugin``), а не факт вызова.
+
+    Args:
+        raises: поднимать это исключение на каждой записи — исход, который
+            фасад обязан пережить, не роняя линию.
+    """
+
+    def __init__(self, *, raises: BaseException | None = None) -> None:
+        self.raises = raises
+        #: ``[(род, имя, значение, теги), …]`` — род берётся из имени метода,
+        #: как и у настоящего менеджера: строкового параметра рода нет нигде.
+        self.records: list[tuple[str, str, Any, dict | None]] = []
+
+    def _put(self, kind: str, name: str, value: Any, tags: dict | None) -> None:
+        if self.raises is not None:
+            raise self.raises
+        self.records.append((kind, name, value, dict(tags) if tags is not None else None))
+
+    def record_metric(self, name: str, value: Any = 1, tags: dict | None = None) -> None:
+        self._put("counter", name, value, tags)
+
+    def gauge(self, name: str, value: float, tags: dict | None = None) -> None:
+        self._put("gauge", name, value, tags)
+
+    def record_timing(self, name: str, duration: float, tags: dict | None = None) -> None:
+        self._put("timing", name, duration, tags)
+
+    def histogram(self, name: str, value: float, tags: dict | None = None) -> None:
+        self._put("histogram", name, value, tags)
+
+
 class MockProcessServices:
     """Лёгкий mock IProcessServices для изолированного тестирования плагинов.
 
@@ -136,6 +176,11 @@ class MockProcessServices:
             ``observability.documents``; ``write_document`` тогда вернёт ``False``
             и посчитает документ в ``without_sink``. Чтобы судить путь вердикта,
             передай :class:`MockDocumentSink` — он умеет и принять, и отказать.
+        stats_manager: Менеджер плоскости stats (этап 6, 1.1). ``None`` по
+            умолчанию — «плоскости нет», ровно как у процесса без
+            ``StatsManager``: четвёрка тогда считает метрику в
+            ``stats.without_plane`` и говорит один раз. Чтобы судить путь
+            метрики, передай :class:`MockStatsManager`.
     """
 
     def __init__(
@@ -146,12 +191,17 @@ class MockProcessServices:
         memory_manager: Any = None,
         state_proxy: Any = None,
         document_sink: Any = None,
+        stats_manager: Any = None,
     ) -> None:
         self.name: str = name
         # Ф8.7 / задача 4.2 (Н-9): атрибут ЕСТЬ всегда, значение может быть None.
         # До 4.2 дубль стока не имел вовсе — дорога документов не судилась ни одним
         # тестом плагина: пройти её было нечем, а отказать тем более.
         self.document_sink: Any = document_sink
+        # Этап 6, 1.1: тот же довод, что у стока строкой выше — атрибут ЕСТЬ
+        # всегда, значение может быть None. Без атрибута дубль перестал бы
+        # удовлетворять IProcessServices, который порт объявил.
+        self.stats_manager: Any = stats_manager
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()

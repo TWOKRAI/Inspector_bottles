@@ -900,7 +900,7 @@ class BuiltinCommands:
             observability_effective,
             observability_provenance,
         )
-        from ..managers.observability_wiring import document_plane_report
+        from ..managers.observability_wiring import document_plane_report, stats_plane_report
 
         from ..managers.observability_ttl import ttl_report
 
@@ -965,6 +965,11 @@ class BuiltinCommands:
             # его снаружи было нечем — при том что докстринг ЭТОЙ ЖЕ команды
             # формулирует «без readback'а ручка неотличима от сломанной».
             **document_plane_report(svc),
+            # Этап 6, 1.1: то же самое для плоскости stats. Метрика возврата не
+            # имеет (сигнатура дословна StatsManager), поэтому «писать некуда»
+            # наблюдаемо ТОЛЬКО отсюда — без этой строки счётчик
+            # `without_plane` рос бы в процессе и не читался ничем.
+            **stats_plane_report(svc),
             "audit": layers.audit.view(audit_limit),
             **extra,
             "layers": {

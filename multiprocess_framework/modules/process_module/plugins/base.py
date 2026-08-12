@@ -25,6 +25,7 @@ from ..managers.observability_wiring import (
     DOCUMENT_SINK_ATTR,
     note_document_refused,
     note_document_without_sink,
+    note_metric_without_plane,
 )
 from .interfaces import IProcessServices
 from .manifest import PLUGIN_API_VERSION
@@ -129,6 +130,15 @@ class PluginContext:
         self.log_critical: Callable[[str], None] = self._stamped(services.log_critical)
         self.send_message: Callable = getattr(services, "send_message", None)  # type: ignore[assignment]
         self.receive_message: Callable = getattr(services, "receive_message", None)  # type: ignore[assignment]
+
+        # Этап 6, 1.1: штамп источника у метрик — тот же довод, что у ``module=``
+        # в логах. Без него две метрики ``frames_processed`` из разных плагинов
+        # одного процесса сливаются в ОДНУ серию, и разошедшиеся числа выглядят
+        # как одно правдоподобное — класс «процессный счётчик не по ключу».
+        # Словарь считается ОДИН раз здесь, а не на каждом вызове: путь горячий.
+        # ``StatsManager._merged_tags`` собирает новый dict и этот не мутирует —
+        # общий экземпляр безопасен (сверено по коду, не по обещанию).
+        self._stats_tags: dict[str, str] | None = {"plugin": plugin_name} if plugin_name else None
 
     def _stamped(self, log_fn: Callable[..., None]) -> Callable[..., None]:
         """Обернуть log-функцию процесса штампом имени плагина (Ф2.1).
@@ -316,6 +326,86 @@ class PluginContext:
             note_document_refused(self.services, str(kind), str(who))
             return False
 
+    # ------------------------------------------------------------------
+    # Этап 6, задача 1.1 — плоскость stats: бизнес-число тем же жестом, что лог
+    # ------------------------------------------------------------------
+
+    def _stats_call(self, method: str, name: str, value: Any, tags: dict | None) -> None:
+        """Общая дорога всех четырёх метрик: штамп, менеджер, голос при его отсутствии.
+
+        Одно место, а не четыре копии, ровно по той причине, по которой
+        ``SubPluginContext.from_parent`` перечисляет дороги списком: три копии
+        перечисления в этом файле уже расходились (Н-6, A2/Б-2).
+
+        Исключение наружу не выпускается ни при каком исходе: метрика — не то,
+        ради чего останавливают линию. Но и не молчит — отказ считается и
+        называется, потому что возврата у метрики нет (см. ``record_metric``).
+        """
+        manager = getattr(self.services, "stats_manager", None)
+        fn = getattr(manager, method, None)
+        if not callable(fn):
+            note_metric_without_plane(self.services, str(name), self.plugin_name or self.process_name or "")
+            return
+        if self._stats_tags is not None:
+            # Явный тег call-site выигрывает у штампа — та же лесенка, что у
+            # логов (``module=`` на call-site бьёт имя плагина, оно бьёт имя
+            # процесса). Аллокации нет, пока штампа нет или тегов нет.
+            tags = self._stats_tags if tags is None else {**self._stats_tags, **tags}
+        try:
+            fn(name, value, tags)
+        except Exception as exc:  # noqa: BLE001 — сбой учёта не роняет линию
+            self.log_error(f"[stats] метрика {name!r} не записана: {exc!r}")
+
+    def record_metric(self, name: str, value: Any = 1, tags: dict | None = None) -> None:
+        """Прибавить ``value`` к счётчику (counter) ``name``.
+
+        Сигнатура — дословно ``StatsManager.record_metric``, включая дефолт
+        ``value=1``. Осторожно с именем: у ``ObservabilityHub._emit_stat`` метод
+        того же имени означает **gauge**, то есть ПЕРЕЗАПИСЬ. Здесь — counter,
+        как у менеджера, в который эта дорога и пишет.
+
+        Тег ``plugin`` подставляется автоматически по имени плагина; свой тег
+        с тем же ключом выигрывает.
+        """
+        self._stats_call("record_metric", name, value, tags)
+
+    def gauge(self, name: str, value: float, tags: dict | None = None) -> None:
+        """Записать текущее значение — перезаписывает предыдущее в окне.
+
+        Для «сколько СЕЙЧАС, чтобы показать в GUI» существует и другая дорога —
+        уровни дерева состояния (``declare_metric``, self-publish по тику).
+        Здесь — та же величина, но с агрегатом за окно и историей в сторе.
+        """
+        self._stats_call("gauge", name, value, tags)
+
+    def record_timing(self, name: str, duration: float, tags: dict | None = None) -> None:
+        """Записать длительность. **Единица — СЕКУНДЫ.**
+
+        Дословно как ``StatsManager.record_timing``; миллисекунды здесь не
+        упадут тестом — агрегат соберётся, но окажется в тысячу раз не там.
+        Замер — ``time.perf_counter()`` разностью, как в спанах кадра.
+        """
+        self._stats_call("record_timing", name, duration, tags)
+
+    def histogram(self, name: str, value: float, tags: dict | None = None) -> None:
+        """Записать наблюдение в распределение значений."""
+        self._stats_call("histogram", name, value, tags)
+
+
+def _noop_stat(name: str, value: Any = 1, tags: dict | None = None) -> None:
+    """Fallback плоскости stats для SubPluginContext без родителя (этап 6, 1.1).
+
+    Одна функция на все четыре дороги: сигнатуры совпадают по форме
+    (``name``, значение, ``tags``), а различает их род метода, которого у
+    заглушки нет по определению — заглушка ничего не записывает.
+
+    Молчит намеренно, в отличие от настоящего фасада: у вложенного контекста
+    БЕЗ родителя нет и сервисов, то есть нет ни счётчика, ни логгера, куда
+    сказать. Родитель, чей вложенный плагин считает метрики, пробрасывает свои
+    дороги через ``SubPluginContext.from_parent`` — и тогда работает голос
+    процесса.
+    """
+
 
 def _noop_log(msg: str) -> None:
     """No-op fallback для логирования в SubPluginContext."""
@@ -357,7 +447,8 @@ class SubPluginContext:
 
     Совместим с PluginContext по duck-typing — плагины используют
     ctx.config, всю пятёрку ctx.log_*, ctx.registers, ctx.command_manager,
-    ctx.health и ctx.write_document.
+    ctx.health, ctx.write_document и четвёрку stats
+    (ctx.record_metric / gauge / record_timing / histogram).
 
     Заменяет unittest.mock.MagicMock в production-коде.
 
@@ -398,6 +489,14 @@ class SubPluginContext:
     # Плоскость документов (Ф8.7): дефолт — отказ, потому что своего стока у
     # вложенного контекста нет. Родитель пробрасывает свой ctx.write_document.
     write_document: Callable[..., bool] = _noop_document
+    # Плоскость stats (этап 6, 1.1): ВСЯ четвёрка сразу, а не record_metric.
+    # Урок Н-6 дословно: дефект, починенный на одной развилке из двух,
+    # воскресает на соседней — вложенный плагин, звавший ctx.histogram, получил
+    # бы AttributeError ровно так же, как когда-то ctx.log_warning.
+    record_metric: Callable[..., None] = _noop_stat
+    gauge: Callable[..., None] = _noop_stat
+    record_timing: Callable[..., None] = _noop_stat
+    histogram: Callable[..., None] = _noop_stat
 
     @classmethod
     def from_parent(cls, parent: Any, **overrides: Any) -> "SubPluginContext":
@@ -410,7 +509,7 @@ class SubPluginContext:
         ``AttributeError``, стала бы бесшумная потеря записи, которую никто не ищет.
 
         Проброс списком, а не перечислением на каждом вызове: список дорог растёт
-        (пятёрка, ``health``, ``write_document``, дальше — разъём телеметрии этапа 6),
+        (пятёрка, ``health``, ``write_document``, четвёрка stats — этап 6, 1.1),
         и каждый новый обязан появиться в ОДНОМ месте. Три копии этого перечисления
         уже расходились — так и родился Н-6.
 
@@ -420,7 +519,21 @@ class SubPluginContext:
             **overrides: что задать явно, прежде всего ``config`` вложенного плагина.
         """
         forwarded: dict[str, Any] = {}
-        for road in ("log_debug", "log_info", "log_warning", "log_error", "log_critical", "health", "write_document"):
+        for road in (
+            "log_debug",
+            "log_info",
+            "log_warning",
+            "log_error",
+            "log_critical",
+            "health",
+            "write_document",
+            # Этап 6, 1.1 — четвёрка stats добавлена ЗДЕСЬ, в единственном
+            # перечислении дорог, ровно как обещал докстринг выше.
+            "record_metric",
+            "gauge",
+            "record_timing",
+            "histogram",
+        ):
             value = getattr(parent, road, None)
             if value is not None:
                 forwarded[road] = value

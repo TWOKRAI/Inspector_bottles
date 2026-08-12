@@ -66,7 +66,17 @@ class TestTheOracleItself:
         несудимой: она была за пределами того, на что смотрел оракул.
         """
         beyond_logs = _protocol_members() - _log_methods()
-        assert {"send_message", "receive_message", "get_config", DOCUMENT_SINK_ATTR} <= beyond_logs
+        # ``stats_manager`` (этап 6, 1.1) — здесь по тому же доводу, что и сток:
+        # порт, который читает фасад, обязан быть в протоколе, иначе дорога
+        # существует в коде и отсутствует в контракте. Сама дорога судится в
+        # ``test_plugin_stats_road.py``; здесь — только ширина оракула.
+        assert {
+            "send_message",
+            "receive_message",
+            "get_config",
+            DOCUMENT_SINK_ATTR,
+            "stats_manager",
+        } <= beyond_logs
 
     def test_the_protocol_names_the_sink_exactly_as_the_code_reads_it(self) -> None:
         """Имя стока в протоколе совпадает с константой, по которой его читает фасад.

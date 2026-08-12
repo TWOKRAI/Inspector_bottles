@@ -3,8 +3,8 @@
 Назначение:
 - IProcessServices — главный контракт, которому удовлетворяет ProcessModule
   через structural subtyping (без изменения его кода).
-- IPluginWorkerManager, IPluginCommandManager, IPluginRouter, IPluginMemoryManager —
-  узкие контракты отдельных менеджеров, используемых плагинами.
+- IPluginWorkerManager, IPluginCommandManager, IPluginRouter, IPluginMemoryManager,
+  IPluginStatsManager — узкие контракты отдельных менеджеров, используемых плагинами.
 
 Все Protocol-ы @runtime_checkable — можно использовать в assert-проверках dev-режима::
 
@@ -103,6 +103,51 @@ class IPluginRouter(Protocol):
 
 
 @runtime_checkable
+class IPluginStatsManager(Protocol):
+    """Контракт StatsManager для плагинов — плоскость stats (этап 6, задача 1.1).
+
+    Ровно та четвёрка, что есть у ``MetricType``: counter / gauge / timing /
+    histogram. Параметра ``metric_type`` здесь нет намеренно — род метрики
+    выбирается ИМЕНЕМ метода, как у ``StatsManager``; строковый род пятым
+    аргументом завёл бы второе написание того же выбора.
+
+    **Сигнатуры дословно совпадают со ``StatsManager``, включая единицы.** Это
+    не стиль, а защита от уже случившегося: имя ``record_metric`` живёт в
+    проекте с ДВУМЯ противоположными смыслами — у ``StatsManager`` и
+    ``ObservableMixin`` это counter, у ``ObservabilityHub._emit_stat`` — gauge.
+    Совпадение проверяется контракт-тестом, который сверяет
+    ``inspect.signature`` этого протокола с настоящим менеджером: ``isinstance``
+    у ``runtime_checkable``-протокола проверяет ТОЛЬКО имена, и расхождение
+    порядка или единицы он пропустил бы молча.
+
+    Не путать с ``plugins.metrics.PluginMetrics``: та считает время lifecycle'а
+    плагина для UI и в плоскость stats не едет. Разные механизмы с похожими
+    именами — поэтому названы друг через друга здесь.
+    """
+
+    def record_metric(self, name: str, value: Any = 1, tags: dict | None = None) -> None:
+        """Записать счётчик (counter): прибавить ``value`` к серии ``name``."""
+        ...
+
+    def gauge(self, name: str, value: float, tags: dict | None = None) -> None:
+        """Записать текущее значение (перезаписывает предыдущее в окне)."""
+        ...
+
+    def record_timing(self, name: str, duration: float, tags: dict | None = None) -> None:
+        """Записать длительность. **Единица — СЕКУНДЫ**, как у ``StatsManager``.
+
+        Миллисекунды поверх секундной модели не упали бы тестом: агрегат
+        собрался бы, а границы бакетов (задача 2.2) сложили бы все кадровые
+        тайминги в первый — и p95 стал бы константой при зелёном прогоне.
+        """
+        ...
+
+    def histogram(self, name: str, value: float, tags: dict | None = None) -> None:
+        """Записать наблюдение в распределение."""
+        ...
+
+
+@runtime_checkable
 class IPluginMemoryManager(Protocol):
     """Контракт MemoryManager для плагинов.
 
@@ -164,6 +209,28 @@ class IProcessServices(Protocol):
     @property
     def memory_manager(self) -> IPluginMemoryManager | None:
         """MemoryManager или None до initialize()."""
+        ...
+
+    @property
+    def stats_manager(self) -> IPluginStatsManager | None:
+        """StatsManager процесса или ``None``, если плоскость stats не поднята.
+
+        Объявлено по образцу ``document_sink`` ниже и по тому же доводу: фасад
+        ``PluginContext.record_metric`` читает менеджер ИМЕННО с сервисов, и
+        пока протокол о нём не знал, дорога метрик существовала бы в коде и
+        отсутствовала в контракте — дубль, собранный по протоколу, менеджера
+        не имел бы, и путь метрики нельзя было бы ни пройти, ни отказать.
+
+        Своего имени этот порт не заводит: атрибут — существующий
+        ``stats_manager`` процесса (``ProcessModule.__init__`` ставит его
+        всегда, ``bundle.stats`` — при initialize). Второй алиас на тот же
+        объект означал бы два имени одной дороги.
+
+        ``None`` — законное состояние (процесс без плоскости), а не ошибка:
+        фасад тогда считает метрику в ``stats.without_plane`` и говорит об этом
+        ОДИН раз. Исключения на этом пути нет ни при какой конфигурации —
+        метрика не имеет права ронять линию.
+        """
         ...
 
     # --- Состояние (опциональное) ---
