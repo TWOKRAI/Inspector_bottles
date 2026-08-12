@@ -310,10 +310,17 @@ class ProcessConfig(SchemaBase):
         # и НЕ долетали до GenericProcess — «заявлено, но не проведено».
         frame_ring_depth = _pick("frame_ring_depth", 0)
         copy_out_targets = _pick("copy_out_targets", [])
+        # Потолок отставания исполнителя (2026-08-12). Тот же путь, что у ключей выше:
+        # живёт в extras, до GenericProcess доезжает только будучи названным ЗДЕСЬ.
+        # Проверено отказом: положенный в `metadata` ключ не доехал вовсе — `metadata`
+        # читается только ради легаси-коллектора, а _pick смотрит в extras.
+        chain_max_lag_items = _pick("chain_max_lag_items", 0)
         if frame_ring_depth:
             base_kwargs["frame_ring_depth"] = int(frame_ring_depth)
         if copy_out_targets:
             base_kwargs["copy_out_targets"] = list(copy_out_targets)
+        if chain_max_lag_items:
+            base_kwargs["chain_max_lag_items"] = int(chain_max_lag_items)
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(

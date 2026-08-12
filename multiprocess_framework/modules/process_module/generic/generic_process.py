@@ -74,6 +74,11 @@ class GenericProcess(ProcessModule):
         chain_targets = app_cfg.get("chain_targets", [])
         queue_size = app_cfg.get("queue_size", 64)
         lag_threshold = app_cfg.get("lag_alert_threshold_sec", 2.0)
+        # Потолок отставания исполнителя (0 = прежнее «копим и блокируем», Q6).
+        # Ставится узлам живого тракта, где ценна СВЕЖЕСТЬ: кадр, обработанный
+        # через 30 секунд, бесполезен, а очередь всё равно теряет — см.
+        # DataReceiver._bound_lag. Дефолт 0 — поведение не меняется молча.
+        max_lag_items = app_cfg.get("chain_max_lag_items", 0)
         source_fps = app_cfg.get("source_target_fps", 25.0)
         max_fails = app_cfg.get("error_max_consecutive_fails", 5)
         auto_reset = app_cfg.get("error_auto_reset_sec", 60.0)
@@ -172,6 +177,7 @@ class GenericProcess(ProcessModule):
                 log_error=self._log_error,
                 log_debug=self._log_debug,
                 node_name=self.name,
+                max_lag_items=max_lag_items,
             )
             # Подключить callback
             collector._on_ready = self._data_receiver.on_items_ready

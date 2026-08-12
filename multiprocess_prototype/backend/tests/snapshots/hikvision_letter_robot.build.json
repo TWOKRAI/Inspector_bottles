@@ -748,6 +748,7 @@
     "camera_0": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "vision"
         ],
@@ -1108,6 +1109,7 @@
     "devices": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -1473,6 +1475,7 @@
     "draw": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui"
         ],
@@ -1826,6 +1829,7 @@
     "gui": {
       "class": "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -2148,6 +2152,7 @@
     "layout": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -2511,6 +2516,7 @@
     "line": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "recog",
           "draw"
@@ -2850,6 +2856,7 @@
     "maskview": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui"
         ],
@@ -3184,6 +3191,7 @@
     "phone": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui",
           "layout"
@@ -3544,6 +3552,7 @@
     "recog": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui",
           "layout"
@@ -3936,6 +3945,7 @@
     "vision": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "line",
           "recog",

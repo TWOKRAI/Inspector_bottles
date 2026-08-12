@@ -1238,6 +1238,7 @@
     "camera_0": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "seg"
         ],
@@ -1602,6 +1603,7 @@
     "devices": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -1959,6 +1961,7 @@
     "gui": {
       "class": "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -2281,6 +2284,7 @@
     "lines": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "points",
           "gui"
@@ -2700,6 +2704,7 @@
     "points": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui"
         ],
@@ -3077,6 +3082,7 @@
     "pult": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "points"
         ],
@@ -4045,6 +4051,7 @@
     "seg": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "lines",
           "gui"

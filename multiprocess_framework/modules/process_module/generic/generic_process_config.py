@@ -160,6 +160,19 @@ class GenericProcessConfig(ProcessLaunchConfig):
         ),
     ] = 0
 
+    chain_max_lag_items: Annotated[
+        int,
+        FieldMeta(
+            "Потолок отставания исполнителя",
+            info="Сколько коллекций разрешено держать перед PipelineExecutor. 0 = прежнее "
+            "поведение (копим до предела очереди и блокируем приём, Q6). >0 = догоняющий "
+            "буфер: держим N свежих, старые выбрасываем со счётом и голосом. Ставится "
+            "узлам живого тракта, где ценна свежесть: кадр, обработанный через 30 с, "
+            "бесполезен. В рецепте — extras.chain_max_lag_items.",
+            min=0,
+        ),
+    ] = 0
+
     copy_out_targets: Annotated[
         list[str],
         FieldMeta(
