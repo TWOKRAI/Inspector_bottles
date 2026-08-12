@@ -272,5 +272,8 @@
 - [Транзитивный GUI-backend в тестах](feedback_transitive_gui_backend_in_tests.md) — matplotlib+PySide6=qtagg: мина; в AV 2026-08-12 НЕ причина (в гейте не импортируется); Agg-страховка
 - [Поток в target держит владельца](feedback_thread_target_pins_its_owner.md) — утёкший стенд бессмертен; 23 утечки закрыты — AV гейта прекратился 5/5; проба+страж
 - [Выключатель дискриминатора проверять](feedback_discriminator_switch_must_be_verified.md) — --ignore не глушит testpaths-зону; сверять счётчик collected до вывода
-- [F2 не принят](project_f2_acceptance_not_passed.md) — 5.1/5.2 закрыты; ось 5 = 5 при пороге 9; заведены 5.4/5.5
+- [Observability: хвост-ремонт ЗАКРЫТ](project_observability_tail_repair.md) — Т-1…Т-5 закрыты; гейт 6855×3, fw 7814×3; Н3-1 закрыт ADR-PMM-027; вход в этап 6 открыт
+- [Подпись гейта живёт на HEAD](feedback_gate_signature_lives_on_a_head.md) — коммит после подписи = пере-прогон; мерило не сужать до одного каталога
+- [Уборка переживает аварийный разрыв](feedback_cleanup_must_survive_abnormal_disconnect.md) — три формы смерти клиента: снятие/close без снятия/RST
 - [Ручка рецепта — в extras](feedback_recipe_knob_must_be_named_in_from_recipe.md) — metadata не доезжает; доказывать сборкой
+- [qt-mcp: флаг сверяется дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — QT_MCP_PROBE=1; «1:9142» промолчало, рендер GUI не проверялся 3 раунда
