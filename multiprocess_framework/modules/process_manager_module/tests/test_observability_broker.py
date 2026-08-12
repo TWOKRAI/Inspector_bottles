@@ -65,8 +65,10 @@ class _OwnTailDouble:
         self.unsubscribes: list[tuple] = []
         self._answer = answer or {"success": True, "process": "ProcessManager"}
 
-    def subscribe(self, subscriber: str, level=None) -> dict:
-        self.subscribes.append((subscriber, level))
+    def subscribe(self, subscriber: str, level=None, *, wholesale: bool = False) -> dict:
+        # Задача 5.6: дубль принимает третий аргумент и ЗАПОМИНАЕТ его:
+        # без запоминания он бы терпел любое значение, включая неверное.
+        self.subscribes.append((subscriber, level, wholesale))
         return dict(self._answer)
 
     def unsubscribe(self, *args, **kwargs) -> dict:
@@ -95,7 +97,7 @@ class TestBrokerMechanics:
         assert len(t.sent) == 1
         kind, target, command, data = t.sent[0]
         assert (kind, target, command) == ("broadcast", None, SUBSCRIBE_COMMAND)
-        assert data == {"subscriber": "gui"}
+        assert data == {"subscriber": "gui", "scope": "all"}
 
     def test_subscribe_all_also_wires_orchestrator_own_tail(self):
         """«Хочу всё» включает оркестратор — он такой же источник записей."""
@@ -103,7 +105,9 @@ class TestBrokerMechanics:
         own: list[str] = []
         b = _broker(
             t,
-            subscribe_self=lambda s, level=None: own.append(s) or {"success": True, "process": "ProcessManager"},
+            subscribe_self=lambda s, level=None, wholesale=False: (
+                own.append(s) or {"success": True, "process": "ProcessManager"}
+            ),
         )
 
         res = b.subscribe_all("gui")
@@ -116,7 +120,10 @@ class TestBrokerMechanics:
         t = _Transport(reached=4)
         b = _broker(
             t,
-            subscribe_self=lambda s, level=None: {"success": False, "reason": "observability hub не активен"},
+            subscribe_self=lambda s, level=None, wholesale=False: {
+                "success": False,
+                "reason": "observability hub не активен",
+            },
         )
 
         res = b.subscribe_all("gui")
@@ -333,7 +340,7 @@ class TestBrokerWiredIntoPM:
 
         assert res["success"] is True and res["reached"] == 2
         assert [m["command"] for m in sent] == [SUBSCRIBE_COMMAND]
-        assert sent[0]["data"] == {"subscriber": "gui"}
+        assert sent[0]["data"] == {"subscriber": "gui", "scope": "all"}
         assert sent[0]["queue_type"] == "system"
 
     def test_command_unsubscribe_all_requires_an_address(self):
@@ -357,7 +364,7 @@ class TestBrokerWiredIntoPM:
         assert len(sent) == 1
         assert sent[0]["kind"] == "addressed" and sent[0]["target"] == "camera_1"
         assert sent[0]["command"] == SUBSCRIBE_COMMAND
-        assert sent[0]["data"] == {"subscriber": "gui"}
+        assert sent[0]["data"] == {"subscriber": "gui", "scope": "all"}
 
     def test_no_intent_no_traffic_on_process_start(self):
         pm, sent = self._pm_with_comm()
@@ -377,7 +384,7 @@ class TestBrokerWiredIntoPM:
 
         resubs = [m for m in sent if m["command"] == SUBSCRIBE_COMMAND]
         assert len(resubs) == 1
-        assert resubs[0]["target"] == "camera_0" and resubs[0]["data"] == {"subscriber": "gui"}
+        assert resubs[0]["target"] == "camera_0" and resubs[0]["data"] == {"subscriber": "gui", "scope": "all"}
 
     def test_start_process_path_also_resubscribes(self):
         pm, sent = self._pm_with_comm({"camera_0": {"class": "x.Y"}})
@@ -827,7 +834,7 @@ class TestLevelIsPartOfTheIntent:
 
         assert res["level"] == "INFO"
         _kind, _target, _command, data = t.sent[0]
-        assert data == {"subscriber": "gui", "level": "INFO"}, (
+        assert data == {"subscriber": "gui", "level": "INFO", "scope": "all"}, (
             "порог не доехал до процесса — подписка молча вернётся к дефолту ERROR"
         )
 
@@ -848,8 +855,12 @@ class TestLevelIsPartOfTheIntent:
         assert t.sent, "переподписка свежей инкарнации не состоялась вовсе"
         _kind, target, command, data = t.sent[0]
         assert (target, command) == ("camera_1", SUBSCRIBE_COMMAND)
-        assert data == {"subscriber": "gui", "level": "DEBUG"}, (
-            "свежая инкарнация подписана БЕЗ порога — после рестарта хвост молча вернулся к дефолту"
+        # Задача 5.6: replay воспроизводит ОПТОВОЕ намерение брокера, а значит
+        # несёт маркер тоже: без него переподписка свежей инкарнации молча
+        # понижала бы порог, заданный оператором прицельно — тот же блокер Н2-1,
+        # только срабатывающий при рестарте, то есть ещё незаметнее.
+        assert data == {"subscriber": "gui", "level": "DEBUG", "scope": "all"}, (
+            "свежая инкарнация подписана БЕЗ порога либо без маркера оптовости"
         )
 
     def test_level_is_visible_in_the_readback(self):
@@ -899,7 +910,11 @@ class TestLevelIsPartOfTheIntent:
 
         _kind, _target, command, data = t.sent[0]
         assert command == UNSUBSCRIBE_COMMAND
-        assert data == {"subscriber": "gui"}
+        # Задача 5.6: снятие несёт маркер ОПТОВОСТИ (иначе `unsubscribe_all` снёс бы
+        # прицельную подписку — находка Н2-2), но уровня по-прежнему не несёт: его
+        # у снятия нет ни в сигнатуре процесса, ни в смысле.
+        assert data == {"subscriber": "gui", "scope": "all"}
+        assert "level" not in data
 
     def test_own_tail_gets_the_same_level_as_the_children(self):
         """Н-1: свой хвост оркестратора — такой же потребитель порога, как дети.
@@ -916,7 +931,9 @@ class TestLevelIsPartOfTheIntent:
 
         b.subscribe_all("gui", level="INFO")
 
-        assert own.subscribes == [("gui", "INFO")], f"свой хвост подписан не тем порогом, что дети: {own.subscribes}"
+        assert own.subscribes == [("gui", "INFO", True)], (
+            f"свой хвост подписан не тем порогом, что дети: {own.subscribes}"
+        )
         # Пара: конверт детям и свой хвост несут ОДИН И ТОТ ЖЕ порог — расхождение
         # этих двух и было дефектом (A1 положила уровень только в конверт).
         _kind, _target, _command, data = t.sent[0]
@@ -936,7 +953,7 @@ class TestLevelIsPartOfTheIntent:
 
         b.replay()  # без target → веер + свой хвост
 
-        assert own.subscribes == [("gui", "DEBUG")], (
+        assert own.subscribes == [("gui", "DEBUG", True)], (
             f"веерное доигрывание вернуло свой хвост к дефолту: {own.subscribes}"
         )
 
@@ -954,7 +971,9 @@ class TestLevelIsPartOfTheIntent:
 
         b.subscribe_all("gui")
 
-        assert own.subscribes == [("gui", None)], f"брокер подставил своему хвосту собственный дефолт: {own.subscribes}"
+        assert own.subscribes == [("gui", None, True)], (
+            f"брокер подставил своему хвосту собственный дефолт: {own.subscribes}"
+        )
 
     def test_changed_level_reaches_own_tail_too(self):
         """Смена порога — законная операция и для своего хвоста."""
@@ -964,7 +983,7 @@ class TestLevelIsPartOfTheIntent:
         b.subscribe_all("gui", level="ERROR")
         b.subscribe_all("gui", level="INFO")
 
-        assert own.subscribes[-1] == ("gui", "INFO"), f"свой хвост остался на прежнем пороге: {own.subscribes}"
+        assert own.subscribes[-1] == ("gui", "INFO", True), f"свой хвост остался на прежнем пороге: {own.subscribes}"
 
     def test_own_tail_unsubscribe_is_called_with_one_argument(self):
         """Снятие порогом не параметризуется — у процесса его нет в сигнатуре.
@@ -999,13 +1018,13 @@ class TestLevelIsPartOfTheIntent:
         from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
 
         sub = inspect.signature(ProcessModule.subscribe_observability_tail)
-        assert list(sub.parameters) == ["self", "subscriber", "level"]
+        assert list(sub.parameters) == ["self", "subscriber", "level", "wholesale"]
         assert sub.parameters["level"].default is None, (
             "production-дефолт уровня переехал — дубль _OwnTailDouble устарел"
         )
         unsub = inspect.signature(ProcessModule.unsubscribe_observability_tail)
-        assert list(unsub.parameters) == ["self", "subscriber"], (
-            "у снятия появился второй параметр — проверь, не должен ли брокер его нести"
+        assert list(unsub.parameters) == ["self", "subscriber", "wholesale"], (
+            "сигнатура снятия разошлась с дублём — брокер обязан нести ровно то, что процесс принимает"
         )
 
     def test_pm_command_seam_hands_the_level_to_the_broker(self):
@@ -1032,6 +1051,6 @@ class TestLevelIsPartOfTheIntent:
         res = pm._cmd_observability_tail_subscribe_all({"subscriber": "gui", "level": "INFO"})
 
         assert res["success"] is True
-        assert sent[0]["data"] == {"subscriber": "gui", "level": "INFO"}, (
+        assert sent[0]["data"] == {"subscriber": "gui", "level": "INFO", "scope": "all"}, (
             "порог не пережил шов команды ПМ — ровно корень Б-1"
         )

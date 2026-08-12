@@ -2785,7 +2785,14 @@ class BuiltinCommands:
             return {"success": False, "reason": "процесс не поддерживает observability-tail"}
         raw_level = args.get("level")
         level = str(raw_level).upper() if raw_level else None
-        return svc.subscribe_observability_tail(subscriber, level=level)
+        # Задача 5.6: намерение «оптовая раздача» едет НА ПРОВОДЕ. Процесс не может
+        # вывести его из содержимого команды — брокер разворачивает `subscribe_all`
+        # в те же самые `observability.tail.subscribe`, и до 5.6 оптовая раздача
+        # молча понижала прицельный порог (блокер Н2-1). Отсутствие ключа = прицельная
+        # подписка: так ведут себя все существующие вызывающие, и их поведение не
+        # меняется молчанием.
+        wholesale = str(args.get("scope") or "").strip().lower() == "all"
+        return svc.subscribe_observability_tail(subscriber, level=level, wholesale=wholesale)
 
     def _cmd_observability_tail_unsubscribe(self, data=None, **kwargs) -> dict:
         """Снять подписку на live-хвост наблюдаемости (форвардер + error-tap'ы), F1: per-subscriber.
@@ -2798,7 +2805,9 @@ class BuiltinCommands:
         if not hasattr(svc, "unsubscribe_observability_tail"):
             return {"success": False, "reason": "процесс не поддерживает observability-tail"}
         subscriber = str(args.get("subscriber") or "").strip() or None
-        return svc.unsubscribe_observability_tail(subscriber)
+        # Задача 5.6 (Н2-2): маркер оптовости — тот же, что у подписки.
+        wholesale = str(args.get("scope") or "").strip().lower() == "all"
+        return svc.unsubscribe_observability_tail(subscriber, wholesale=wholesale)
 
     @staticmethod
     def _log_tap_name(subscriber: str) -> str:

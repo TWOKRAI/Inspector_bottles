@@ -183,16 +183,10 @@ class TestNoSelfSubscription:
 
     @staticmethod
     def _process(name: str = "camera_0"):
-        from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
-
-        proc = ProcessModule.__new__(ProcessModule)
-        proc.name = name
-        proc.router_manager = FakeRouter()
-        proc.logger_manager = None
-        proc.error_manager = None
-        proc._observability_hub = ObservabilityHub(name)
-        proc._observability_forwarders = {}
-        return proc
+        # Тело — в модульном `_wired_process`: его же зовёт соседний класс
+        # (задача 5.6). Приватная копия фикстуры на этом проекте уже расходилась
+        # с оригиналом молча, и девять красных жили как «не наш» долг.
+        return _wired_process(name)
 
     def test_subscribing_a_process_to_itself_is_refused_with_a_reason(self):
         proc = self._process()
@@ -223,3 +217,127 @@ class TestNoSelfSubscription:
         res = proc.subscribe_observability_tail("camera_0")
 
         assert "петля" in res["reason"]
+
+
+def _wired_process(name: str = "camera_0"):
+    """Процесс с минимальной сшивкой для проверки подписок хвоста.
+
+    ``__new__`` без ``__init__`` — именно поэтому ``_observability_tail_intents``
+    объявлен атрибутом КЛАССА (задача 5.6): объявление только в ``__init__``
+    оставляло механизм без атрибута и у оркестратора, и здесь.
+    """
+    from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+
+    proc = ProcessModule.__new__(ProcessModule)
+    proc.name = name
+    proc.router_manager = FakeRouter()
+    proc.logger_manager = None
+    proc.error_manager = None
+    proc._observability_hub = ObservabilityHub(name)
+    proc._observability_forwarders = {}
+    return proc
+
+
+class TestTargetedBeatsWholesale:
+    """Задача 5.6 — блокер Н2-1 переприёмки F2 раунд 2.
+
+    Воспроизведено на боевом стенде до правки: `subscribe(camera_0, INFO)` плюс
+    `subscribe_all(WARNING)` давали 31 запись `{info}` в 0 info `{error: 6}`,
+    притом что манифест продолжал обещать INFO. Побеждала последняя воля, без
+    единого признака.
+
+    Решение владельца 2026-08-12: объединение по мерилу 1 — прицельная подписка
+    сильнее оптовой.
+    """
+
+    def test_wholesale_does_not_lower_a_targeted_level(self) -> None:
+        proc = _wired_process()
+        proc.subscribe_observability_tail("gui", level="INFO")
+
+        res = proc.subscribe_observability_tail("gui", level="WARNING", wholesale=True)
+
+        assert res["min_level"] == "INFO", res
+        assert res["kept_level"] == "INFO" and res["ignored_level"] == "WARNING", res
+        assert "прицельная" in res.get("reason", ""), res
+
+    def test_targeted_still_lowers_its_own_level(self) -> None:
+        """Пара: ручка, которую нельзя повернуть обратно, — зеркальный дефект.
+
+        Сделай мы правило «берём самый громкий порог всегда» — и оператор
+        перестал бы уметь сделать тише тем же жестом, каким сделал громче.
+        """
+        proc = _wired_process()
+        proc.subscribe_observability_tail("gui", level="INFO")
+
+        res = proc.subscribe_observability_tail("gui", level="ERROR")
+
+        assert res["min_level"] == "ERROR", res
+        assert "kept_level" not in res, res
+
+    def test_wholesale_sets_the_level_when_nothing_was_targeted(self) -> None:
+        """Без прицельного намерения оптовая раздача работает как раньше."""
+        proc = _wired_process()
+
+        res = proc.subscribe_observability_tail("gui", level="WARNING", wholesale=True)
+
+        assert res["min_level"] == "WARNING", res
+        assert "kept_level" not in res, res
+
+    def test_a_second_wholesale_may_change_its_own_level(self) -> None:
+        """Оптовая меняет СВОЙ же порог свободно — запрет касается прицельного."""
+        proc = _wired_process()
+        proc.subscribe_observability_tail("gui", level="DEBUG", wholesale=True)
+
+        res = proc.subscribe_observability_tail("gui", level="ERROR", wholesale=True)
+
+        assert res["min_level"] == "ERROR", res
+
+    def test_wholesale_unsubscribe_does_not_remove_a_targeted_subscription(self) -> None:
+        """Зеркало U4 живого зонда (находка Н2-2), и оно обязано быть юнитом тоже.
+
+        Симметрия закрывается с ДВУХ концов: закрой только подписку — и
+        «объединение» держалось бы до первого `unwatch`, который у драйвера ходит
+        оптовым снятием. Живьём это выглядело так: 28 записей → 28 после снятия
+        профиля, который ни разу не включался.
+        """
+        proc = _wired_process()
+        proc.subscribe_observability_tail("gui", level="INFO")
+
+        res = proc.unsubscribe_observability_tail("gui", wholesale=True)
+
+        assert res["removed"] is False and res["kept_targeted"] is True, res
+        assert list(proc._observability_forwarders) == ["gui"], "прицельный форвардер снят оптовой командой"
+
+    def test_targeted_unsubscribe_still_removes_it(self) -> None:
+        """Пара: иначе «выжила» означало бы «не снимается вовсе»."""
+        proc = _wired_process()
+        proc.subscribe_observability_tail("gui", level="INFO")
+
+        res = proc.unsubscribe_observability_tail("gui")
+
+        assert res["success"] is True, res
+        assert proc._observability_forwarders == {}, res
+
+    def test_wholesale_unsubscribe_removes_a_wholesale_subscription(self) -> None:
+        """И оптовое снятие снимает СВОЁ — запрет касается только прицельного."""
+        proc = _wired_process()
+        proc.subscribe_observability_tail("gui", level="WARNING", wholesale=True)
+
+        res = proc.unsubscribe_observability_tail("gui", wholesale=True)
+
+        assert res["success"] is True and res.get("kept_targeted") is None, res
+        assert proc._observability_forwarders == {}, res
+
+    def test_unsubscribe_forgets_the_intent(self) -> None:
+        """Память об отменённом решении не имеет права пережить само решение.
+
+        Иначе после `untail` следующая оптовая подписка сохранила бы порог снятой
+        прицельной — то есть вернула бы отменённое решение через заднюю дверь.
+        """
+        proc = _wired_process()
+        proc.subscribe_observability_tail("gui", level="INFO")
+        proc.unsubscribe_observability_tail("gui")
+
+        res = proc.subscribe_observability_tail("gui", level="WARNING", wholesale=True)
+
+        assert res["min_level"] == "WARNING", res

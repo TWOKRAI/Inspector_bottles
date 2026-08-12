@@ -259,6 +259,17 @@ class ObservabilitySubscriptionBroker:
             # означал бы «подписчик попросил дефолт», что неотличимо от «не просил».
             if wanted:
                 payload["level"] = wanted
+            # Задача 5.6 (блокер Н2-1): брокер держит ТОЛЬКО оптовые намерения — его
+            # зовёт `observability.tail.subscribe_all` и его же переподписка свежей
+            # инкарнации. Поэтому маркер ставится безусловно, включая адресный
+            # replay: replay воспроизводит оптовое намерение, а не прицельное, и без
+            # маркера он бы молча понижал порог, заданный оператором адресно.
+            payload["scope"] = "all"
+        else:
+            # Снятие помечается по той же причине: брокер снимает ОПТОВОЕ намерение,
+            # и без маркера `unsubscribe_all` сносил бы прицельную подписку соседа
+            # по себе (находка Н2-2 — `unwatch()` глушил хвост, которого не создавал).
+            payload["scope"] = "all"
         out: Dict[str, Any] = {"reached": 0}
         try:
             if target is not None:
@@ -315,13 +326,19 @@ class ObservabilitySubscriptionBroker:
         if command == SUBSCRIBE_COMMAND:
             fn = self._subscribe_self
             args: tuple = (subscriber, level)
+            # Задача 5.6: свой хвост оркестратора — такая же ОПТОВАЯ раздача,
+            # как и конверт детям: его ставит брокер из того же оптового намерения.
+            # Без маркера восемь дорог вели бы себя одинаково, а девятая (своя) — как
+            # прицельная, и порог ПМ зависел бы от того, какой путь стрелял последним.
+            kwargs: dict = {"wholesale": True}
         else:
             fn = self._unsubscribe_self
             args = (subscriber,)
+            kwargs = {}
         if not callable(fn):
             return None
         try:
-            return dict(fn(*args) or {})
+            return dict(fn(*args, **kwargs) or {})
         except Exception as exc:  # noqa: BLE001 — свой хвост не важнее чужих
             if self._log_error:
                 self._log_error(

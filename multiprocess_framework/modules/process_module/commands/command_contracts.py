@@ -270,16 +270,30 @@ class ObservabilityTailSubscribeParams(BaseModel):
     дефолт применяет процесс (см. ``subscribe_observability_tail``); повторять
     здесь константу ``"ERROR"`` нельзя — две позиции одного дефолта расходятся
     молча.
+
+    Задача 5.6: ``scope`` — та же история, что у ``level``, но про НАМЕРЕНИЕ.
+    ``"all"`` кладёт брокер, разворачивая оптовую подписку в адресные команды;
+    процесс по нему знает, что порог, заданный прицельно, понижать нельзя (блокер
+    Н2-1 переприёмки F2). Объявлено здесь потому, что ``extra="forbid"``: поле,
+    которого нет в схеме, дало бы `contract_violation` на каждой оптовой раздаче,
+    а под ``FW_CONTRACTS_STRICT=1`` — молча дропнутое сообщение. Отсутствие ключа
+    означает прицельную подписку, то есть прежнее поведение всех вызывающих.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     subscriber: Optional[str] = None
     level: Optional[str] = None
+    scope: Optional[str] = None
 
 
 class ObservabilityTailUnsubscribeParams(BaseModel):
     """Параметры ``observability.tail.unsubscribe`` (F1: per-subscriber отписка).
+
+    Задача 5.6 добавила ``scope`` — зеркало подписки: ``"all"`` кладёт брокер,
+    разворачивая ОПТОВОЕ снятие, и по нему процесс знает, что прицельную подписку
+    трогать нельзя (находка Н2-2: `unwatch()` глушил хвост, которого не создавал).
+    Объявлено здесь, потому что ``extra="forbid"``.
 
     Форвардер наблюдаемости — per-subscriber (несколько подписчиков сосуществуют на
     одном процессе: GUI + backend_ctl). ``subscriber`` снимает форвардер ТОЛЬКО этого
@@ -289,6 +303,7 @@ class ObservabilityTailUnsubscribeParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     subscriber: Optional[str] = None
+    scope: Optional[str] = None
 
 
 class ObservabilityTailBrokerParams(BaseModel):
