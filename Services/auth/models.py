@@ -15,6 +15,7 @@ to_dict() / model_dump() (правило «Dict at Boundary», ADR-008).
     "auth_session"  → SessionEntry
     "auth_audit"    → AuditEntry
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -151,7 +152,8 @@ class Role(SchemaBase):
         FieldMeta(
             "Legacy-уровень",
             info="Числовой уровень доступа для обратной совместимости (0–10).",
-            min=0, max=10,
+            min=0,
+            max=10,
         ),
     ] = 0
 
@@ -193,8 +195,9 @@ class AuthConfig(SchemaBase):
     """
     Конфигурация системы аутентификации.
 
-    Загружается из env-переменных (INSPECTOR_AUTH_USERS_PATH, …)
-    или передаётся напрямую при инициализации AuthManager.
+    Передаётся напрямую при инициализации AuthManager. Env-ручки читает не эта
+    схема, а ``bootstrap.py`` (пара ``MULTIPROCESS_AUTH_USERS_PATH`` /
+    ``INSPECTOR_AUTH_USERS_PATH``, канон первым — Р-5а).
 
     Вложенные объекты PasswordPolicy и LockoutPolicy — SchemaBase,
     сериализуются вместе с основной конфигурацией.
@@ -204,7 +207,10 @@ class AuthConfig(SchemaBase):
         str,
         FieldMeta(
             "Путь к YAML-файлу пользователей",
-            info="Абсолютный путь. Если не задан — используется INSPECTOR_AUTH_USERS_PATH.",
+            info=(
+                "Абсолютный путь. Если не задан — путь берёт bootstrap из пары "
+                "MULTIPROCESS_AUTH_USERS_PATH / INSPECTOR_AUTH_USERS_PATH."
+            ),
         ),
     ] = ""
 
@@ -213,7 +219,8 @@ class AuthConfig(SchemaBase):
         FieldMeta(
             "Rounds bcrypt",
             info="Переопределяет PasswordPolicy.bcrypt_rounds_prod/test. 0 = брать из политики.",
-            min=0, max=31,
+            min=0,
+            max=31,
         ),
     ] = 0
 
@@ -230,7 +237,8 @@ class AuthConfig(SchemaBase):
             info=(
                 "Абсолютный путь к файлу audit.sqlite. "
                 "Если не задан — аудит в памяти (только для тестов). "
-                "Env: INSPECTOR_AUTH_DB_PATH."
+                "Env-ручки у поля НЕТ: имя INSPECTOR_AUTH_DB_PATH стояло здесь, "
+                "но не читалось ни одной строкой кода (аудит env-пар, задача 5.2)."
             ),
         ),
     ] = ""

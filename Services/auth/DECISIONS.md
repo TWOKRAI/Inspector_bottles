@@ -84,7 +84,8 @@ bcrypt с rounds=12 в production, rounds=4 в тестах.
 
 **Последствия:**
 - `YamlUserStorage` оборачивает atomic write вместо FileStorage (FileStorage — JSON-only).
-- Путь к файлу конфигурируется через `AuthConfig.users_path` или `INSPECTOR_AUTH_USERS_PATH`.
+- Путь к файлу конфигурируется через `AuthConfig.users_path` или env-пару
+  `MULTIPROCESS_AUTH_USERS_PATH` / `INSPECTOR_AUTH_USERS_PATH` (канон первым, 5.2).
 
 ---
 
@@ -96,7 +97,8 @@ bcrypt с rounds=12 в production, rounds=4 в тестах.
 Нельзя хардкодить `admin/admin` — security baseline требует безопасного начального состояния.
 
 **Решение:**
-- Если `users.yaml` отсутствует и задан `INSPECTOR_DEV_PASSWORD` — bootstrap
+- Если `users.yaml` отсутствует и задан `MULTIPROCESS_DEV_PASSWORD` (легаси-алиас
+  `INSPECTOR_DEV_PASSWORD`) — bootstrap
   автоматически создаёт predefined роли (dev/admin/operator/viewer) и dev-пользователя.
 - Если переменная не задана → log warning, требование запустить
   `python -m Services.auth.bootstrap` интерактивно.

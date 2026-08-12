@@ -13,12 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 
 from Services.sql.configs import SQLManagerConfig
+from Services.sql.core.engine_factory import fork_safe_env_flag
 
 
 def _create_async_engine_from_config(config: Union[SQLManagerConfig, Dict[str, Any]]) -> AsyncEngine:
     """Создать async engine с учётом fork-safety."""
-    import os
-
     cfg = config.model_dump() if isinstance(config, SQLManagerConfig) else dict(config)
     url = cfg.get("url", "sqlite:///:memory:")
 
@@ -29,7 +28,9 @@ def _create_async_engine_from_config(config: Union[SQLManagerConfig, Dict[str, A
     elif "mysql" in url and "+" not in url:
         url = url.replace("mysql://", "mysql+aiomysql://", 1)
 
-    use_null_pool = cfg.get("fork_safe") or os.environ.get("INSPECTOR_MULTIPROCESS", "0") == "1"
+    # Пара ручек читается ОДНОЙ функцией с sync-дорогой: две позиции одного решения
+    # разошлись бы молча, и async-адаптер брал бы другой пул (Р-5а, задача 5.2).
+    use_null_pool = bool(cfg.get("fork_safe")) or fork_safe_env_flag()
     if use_null_pool:
         poolclass = NullPool
     elif ":memory:" in url:

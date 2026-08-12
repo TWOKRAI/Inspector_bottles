@@ -648,7 +648,8 @@
   - Отдельный модуль `sql_module` в refactored/modules.
   - SQLManager(BaseManager, ObservableMixin) — единая точка входа.
   - Dual sync/async через адаптеры (ISyncEngineAdapter, IAsyncEngineAdapter).
-  - Fork-safety: NullPool при INSPECTOR_MULTIPROCESS=1, создание engine после fork.
+  - Fork-safety: NullPool при MULTIPROCESS_SQL_FORK_SAFE=1 (легаси INSPECTOR_MULTIPROCESS=1),
+    создание engine после fork.
   - Typed Commands: DBQueryCommand, DBExecuteCommand (Pydantic)
   - Доступ через CommandManager: execute_command(cmd)
   - IRepository[T, ID], IUnitOfWork, IAsyncUnitOfWork, ISchemaMapper

@@ -15,7 +15,8 @@
 - **Дата:** 2026-04-12
 - **Статус:** принято
 - **Контекст:** Фреймворк форкирует процессы — пулы соединений deadlock на fork. Альтернатива: использовать QueuePool с опциями.
-- **Решение:** Детект `INSPECTOR_MULTIPROCESS` env или `config.fork_safe` → используется SQLAlchemy `NullPool`.
+- **Решение:** Детект env-пары `MULTIPROCESS_SQL_FORK_SAFE` / `INSPECTOR_MULTIPROCESS` (канон первым,
+  задача 5.2 roadmap, Р-5а) или `config.fork_safe` → используется SQLAlchemy `NullPool`.
 - **Последствия:** Каждая операция создаёт новое соединение (малый оверхед), но нет deadlock'ов при fork.
 
 ## ADR-SQL-003: SchemaBaseMapper как заменяемый плагин (ISchemaMapper)

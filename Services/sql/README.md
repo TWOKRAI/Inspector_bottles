@@ -146,7 +146,8 @@ exporter.save(rows, "out.xlsx", format=ExportFormat.XLSX)         # требуе
 
 ## Fork-safety
 
-При `INSPECTOR_MULTIPROCESS=1` или `config.fork_safe=True` используется NullPool. Рекомендуется создавать SQLManager и вызывать `initialize()` **внутри дочернего процесса** после fork.
+При `MULTIPROCESS_SQL_FORK_SAFE=1` (легаси-алиас `INSPECTOR_MULTIPROCESS=1`, читается вторым)
+или `config.fork_safe=True` используется NullPool. Рекомендуется создавать SQLManager и вызывать `initialize()` **внутри дочернего процесса** после fork.
 
 ## Auto DDL — автоматическое создание таблиц
 
@@ -163,7 +164,7 @@ class UserSchema(SchemaBase):
         table_name = "users"
         indexes = [("email",)]
         unique_together = [("email",)]
-    
+
     id: Optional[int] = None
     name: Annotated[str, FieldMeta("Имя", max=100)] = ""
     email: Annotated[str, FieldMeta("Email", max=255)] = ""
