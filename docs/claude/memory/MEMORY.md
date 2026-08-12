@@ -277,3 +277,4 @@
 - [Уборка переживает аварийный разрыв](feedback_cleanup_must_survive_abnormal_disconnect.md) — три формы смерти клиента: снятие/close без снятия/RST
 - [Ручка рецепта — в extras](feedback_recipe_knob_must_be_named_in_from_recipe.md) — metadata не доезжает; доказывать сборкой
 - [qt-mcp: флаг сверяется дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — QT_MCP_PROBE=1; «1:9142» промолчало, рендер GUI не проверялся 3 раунда
+- [Позиционный вызов прячет расхождение имён](feedback_positional_call_hides_parameter_name_drift.md) — заглушка падала на `duration=`; тест автора звал позиционно
