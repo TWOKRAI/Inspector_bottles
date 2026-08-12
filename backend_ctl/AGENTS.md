@@ -40,6 +40,20 @@
 | **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 INSPECTOR_GUI_UNATTENDED=1 python multiprocess_prototype/frontend/run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
 | **Совместно** (корреляция UI ↔ бэкенд) | `drv.watch_like_gui()` (весь приёмный профиль GUI: state + логи/observability + авто-переподписка) **+** `drv.ui_tap("gui")` (жесты+команды GUI); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; выключение — `drv.unwatch()` + `drv.ui_untap("gui")` | единый событийный поток с ts/seq: «клик (ui.event kind=button, seq=41) → команда GUI→бэкенд (kind=command, seq=42) → log.record → state.changed» — разрыв между уровнями локализует баг |
 
+**qt-mcp: значение флага сверяется ДОСЛОВНО.** Работает только `QT_MCP_PROBE=1`; порт — не
+часть этой ручки (проба слушает 9142). Задача Т-4: жёсткое ревью 2026-08-12 выставило
+`QT_MCP_PROBE=1:9142`, оба читателя (`qt_mcp_probe.pth` в venv и `frontend/app.py`) сравнили
+значение с `"1"`, не совпало, порт не поднялся — и **молча**, потому что `.pth` глушит любое
+исключение. Рабочая строка целиком:
+
+```
+BACKEND_CTL=1 INSPECTOR_GUI_UNATTENDED=1 QT_MCP_PROBE=1 .venv/Scripts/python.exe multiprocess_prototype/frontend/run.py
+```
+
+Проверка, что дорога жива: в `<log_dir>/gui/system.log` есть `qt-mcp probe installed on
+localhost:9142`, а `mcp__qt-mcp__qt_list_windows` отвечает. Отсутствие строки — теперь WARNING
+с причиной, а не тишина.
+
 **GUI-стенд поднимается ТОЛЬКО боевой точкой входа** (решение владельца 2026-08-11).
 `BackendHarness` — headless-стенд для тестов, и GUI через него не поднимается: попытка
 (презентационный overlay, в т.ч. с боевым `build_launcher` через `launcher_factory`)

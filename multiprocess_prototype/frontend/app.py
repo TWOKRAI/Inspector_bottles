@@ -117,15 +117,29 @@ def run_gui(process: "GuiProcess") -> None:
             lambda: getattr(process, "_ui_command_sender", None),
         )
 
-    # qt-mcp probe — активируется только при QT_MCP_PROBE=1.
-    # Слушает localhost:9142, видимо MCP-сервером qt-mcp для UI-интроспекции.
-    # Прод-поведение не меняется без env-флага.
+    # qt-mcp probe — активируется только при QT_MCP_PROBE=1 (значение сверяется
+    # ДОСЛОВНО, и то же самое делает хук `qt_mcp_probe.pth` в venv).
+    #
+    # Задача Т-4 (находка HR-6): жёсткое ревью 2026-08-12 выставило
+    # `QT_MCP_PROBE=1:9142` — «флаг и порт одной ручкой». Такое значение не равно
+    # `"1"`, обе проверки промолчали, порт не поднялся, и рендер GUI-вкладки
+    # наблюдаемости остался непроверенным ни одним из трёх раундов приёмки.
+    # Порт — НЕ часть этого флага: проба слушает `qt_mcp.probe.DEFAULT_PORT` (9142).
+    #
+    # `install()` возвращает None, если QApplication ещё нет или порт занят. Прежняя
+    # редакция писала «installed» безусловно — то есть отчитывалась о механизме,
+    # которого могло не быть; ровно этот класс лечит весь трек.
     if os.environ.get("QT_MCP_PROBE") == "1":
         try:
-            from qt_mcp.probe import install
+            from qt_mcp.probe import DEFAULT_PORT, install
 
-            install()
-            process._log_info("qt-mcp probe installed on localhost:9142", module="startup")
+            if install() is not None:
+                process._log_info(f"qt-mcp probe installed on localhost:{DEFAULT_PORT}", module="startup")
+            else:
+                process._log_warning(
+                    f"qt-mcp probe requested but not installed (нет QApplication либо порт {DEFAULT_PORT} занят)",
+                    module="startup",
+                )
         except ImportError:
             process._log_warning("qt-mcp probe requested but qt_mcp not installed", module="startup")
 
