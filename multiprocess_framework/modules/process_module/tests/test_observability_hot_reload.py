@@ -59,7 +59,20 @@ def test_on_reload_skips_none_managers() -> None:
 
 
 def test_hot_reload_reconfigures_logger(tmp_path: Path) -> None:
-    """Правка файла → реальный LoggerManager перестроен через watchdog (default_level + кэш)."""
+    """Правка файла → реальный LoggerManager перестроен через watchdog (default_level + кэш).
+
+    Задача Т-3 (находка HR-4). Дедлайн ожидания был 6 с, и на этом числе тест дал
+    1 провал в полной фреймворковой сьюте (7803 теста) при трёх зелёных соло за 0.5 с.
+    Класс известный — «порог по часам меряет кучу»: утверждение теста звучит
+    «файл прочитан и логгер перестроен», а шестисекундный дедлайн незаметно
+    добавлял к нему второе, незаявленное — «уложился в 6 с на машине, которая в
+    этот момент крутит ещё 7800 тестов». Краснело именно второе.
+
+    Поэтому дедлайн поднят до 60 с: цикл выходит по первому же успеху, так что
+    цена штатного прогона не изменилась (те же ~0.5 с), а под нагрузкой тест
+    судит механизм, а не планировщик. Ждать МЕНЬШЕ здесь нечего: не перестроился
+    вовсе — красное придёт всё равно, просто позже.
+    """
     yaml_path = tmp_path / "system.yaml"
     _write_yaml(yaml_path, "INFO")
 
@@ -82,7 +95,7 @@ def test_hot_reload_reconfigures_logger(tmp_path: Path) -> None:
         time.sleep(0.3)  # выйти за дебаунс
         _write_yaml(yaml_path, "DEBUG")
 
-        deadline = time.monotonic() + 6.0
+        deadline = time.monotonic() + 60.0
         while time.monotonic() < deadline:
             if logger.config.default_level == "DEBUG":
                 break
