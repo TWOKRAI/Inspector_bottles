@@ -392,19 +392,44 @@ class PluginContext:
         self._stats_call("histogram", name, value, tags)
 
 
-def _noop_stat(name: str, value: Any = 1, tags: dict | None = None) -> None:
-    """Fallback плоскости stats для SubPluginContext без родителя (этап 6, 1.1).
+# Заглушки плоскости stats для SubPluginContext без родителя (этап 6, 1.1).
+#
+# ЧЕТЫРЕ функции, а не одна общая. Первая редакция ставила одну
+# (``_noop_stat(name, value=1, tags=None)``) с доводом «сигнатуры совпадают по
+# форме» — и довод был неверен: у ``StatsManager`` третий параметр таймингов
+# зовётся ``duration``, а у gauge/histogram значение ОБЯЗАТЕЛЬНО и дефолта не
+# имеет. Плагин, звавший ``sub_ctx.record_timing("frame", duration=0.016)``
+# ровно по эталонной сигнатуре, получал::
+#
+#     TypeError: _noop_stat() got an unexpected keyword argument 'duration'
+#
+# То есть заглушка, поставленная РАДИ безопасности вызова без родителя, сама
+# роняла линию на именованном вызове. Найдено независимым тестером: тест автора
+# звал заглушку позиционно и был зелён — тот самый случай, когда автор проверяет
+# согласие с собственной моделью.
+#
+# ``*args``-заглушкой это не лечится: она принимает любое имя и тем самым
+# перестаёт быть обязательством, которое сторожит оракул сигнатур (тот же довод,
+# по которому у пятёрки ``log_*`` нет ``__getattr__``-проксирования).
 
-    Одна функция на все четыре дороги: сигнатуры совпадают по форме
-    (``name``, значение, ``tags``), а различает их род метода, которого у
-    заглушки нет по определению — заглушка ничего не записывает.
 
-    Молчит намеренно, в отличие от настоящего фасада: у вложенного контекста
-    БЕЗ родителя нет и сервисов, то есть нет ни счётчика, ни логгера, куда
-    сказать. Родитель, чей вложенный плагин считает метрики, пробрасывает свои
-    дороги через ``SubPluginContext.from_parent`` — и тогда работает голос
-    процесса.
-    """
+def _noop_counter(name: str, value: Any = 1, tags: dict | None = None) -> None:
+    """Счётчик в никуда. Молчит намеренно, в отличие от настоящего фасада: у
+    вложенного контекста БЕЗ родителя нет и сервисов, то есть нет ни счётчика,
+    ни логгера, куда сказать. Родитель пробрасывает свои дороги через
+    ``SubPluginContext.from_parent`` — и тогда работает голос процесса."""
+
+
+def _noop_gauge(name: str, value: float, tags: dict | None = None) -> None:
+    """Текущее значение в никуда — сигнатура ``StatsManager.gauge`` дословно."""
+
+
+def _noop_timing(name: str, duration: float, tags: dict | None = None) -> None:
+    """Длительность в никуда — параметр зовётся ``duration``, как у менеджера."""
+
+
+def _noop_histogram(name: str, value: float, tags: dict | None = None) -> None:
+    """Наблюдение в никуда — сигнатура ``StatsManager.histogram`` дословно."""
 
 
 def _noop_log(msg: str) -> None:
@@ -493,10 +518,12 @@ class SubPluginContext:
     # Урок Н-6 дословно: дефект, починенный на одной развилке из двух,
     # воскресает на соседней — вложенный плагин, звавший ctx.histogram, получил
     # бы AttributeError ровно так же, как когда-то ctx.log_warning.
-    record_metric: Callable[..., None] = _noop_stat
-    gauge: Callable[..., None] = _noop_stat
-    record_timing: Callable[..., None] = _noop_stat
-    histogram: Callable[..., None] = _noop_stat
+    # Заглушка у каждой дороги СВОЯ: сигнатуры дословны StatsManager, включая
+    # имя `duration` у таймингов и обязательное значение у gauge/histogram.
+    record_metric: Callable[..., None] = _noop_counter
+    gauge: Callable[..., None] = _noop_gauge
+    record_timing: Callable[..., None] = _noop_timing
+    histogram: Callable[..., None] = _noop_histogram
 
     @classmethod
     def from_parent(cls, parent: Any, **overrides: Any) -> "SubPluginContext":

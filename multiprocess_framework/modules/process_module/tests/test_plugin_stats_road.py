@@ -325,6 +325,37 @@ class TestTheSubContextCarriesTheStatsRoad:
         assert fn("проверка вызова", 1) is None
 
     @pytest.mark.parametrize("road", sorted(_four_roads()))
+    def test_the_parentless_default_keeps_the_signature(self, road: str) -> None:
+        """Заглушка без родителя несёт ТУ ЖЕ сигнатуру, что протокол и менеджер.
+
+        Найдено независимым тестером, и найдено только им. Первая редакция
+        ставила ОДНУ заглушку на все четыре дороги
+        (``_noop_stat(name, value=1, tags=None)``) с доводом «сигнатуры
+        совпадают по форме»; довод был неверен — у менеджера параметр таймингов
+        зовётся ``duration``, а у gauge/histogram значение обязательно. Тест
+        автора рядом звал заглушку ПОЗИЦИОННО и оставался зелёным, то есть
+        подтверждал согласие автора с собственной моделью:
+
+            SubPluginContext().record_timing("frame", duration=0.016)
+            TypeError: _noop_stat() got an unexpected keyword argument 'duration'
+
+        Заглушка, поставленная РАДИ безопасного вызова без родителя, роняла
+        линию на именованном вызове по эталонной сигнатуре.
+        """
+        assert _shape(getattr(SubPluginContext(), road)) == _shape(getattr(IPluginStatsManager, road))
+
+    @pytest.mark.parametrize("road", sorted(_four_roads()))
+    def test_the_parentless_default_accepts_the_reference_keyword_call(self, road: str) -> None:
+        """Пара к предыдущему: вызов ИМЕНОВАННЫМИ аргументами не падает.
+
+        Сигнатура и вызов — разные половины: совпадение форм проверено выше
+        оракулом, а здесь тем, чем пользуется вызывающий. Позиционный вызов
+        соседнего теста этот класс пропустил.
+        """
+        second = "duration" if road == "record_timing" else "value"
+        getattr(SubPluginContext(), road)(name="кадр", **{second: 0.016})
+
+    @pytest.mark.parametrize("road", sorted(_four_roads()))
     def test_from_parent_forwards_every_stats_road(self, road: str) -> None:
         """``from_parent`` пробрасывает ВСЮ четвёрку — не часть.
 
