@@ -652,3 +652,58 @@ class TestReservedPersistIsRefusedLoudly:
     def test_absent_persist_still_applies_as_before(self, svc, handlers) -> None:
         result = handlers["config.reload"]({"observability": {"log_level": "DEBUG"}})
         assert result["success"] is True, result
+
+
+class TestRingOverflowHasAVoice:
+    """Н2-3 (переприёмка F2 раунд 2): вытеснение считалось, но молчало.
+
+    Живьём: 60 законных `config.reload` на `devices` → `audit.dropped` 0 → 22,
+    контроль `seg` = 0, и ни одного слова в логах. Мерило 1 требует счёт И голос:
+    «кто поставил ключ» уезжает из кольца первым, а спрашивают об этом в инциденте,
+    то есть позже всего.
+    """
+
+    @staticmethod
+    def _audit(maxlen: int = 3):
+        from collections import deque
+
+        from ..configs.observability_audit import ObservabilityAudit
+
+        lines: list = []
+        audit = ObservabilityAudit(
+            ring=deque(maxlen=maxlen),
+            log=lambda text, is_error: lines.append((text, is_error)),
+            clock=lambda: 1.0,
+        )
+        return audit, lines
+
+    def _fill(self, audit, count: int) -> None:
+        from ..configs.observability_audit import ACTION_SET
+
+        for i in range(count):
+            audit.record(ACTION_SET, origin="test", key=f"k{i}", value=i)
+
+    def test_overflow_is_announced_once_per_condition(self) -> None:
+        audit, lines = self._audit(maxlen=3)
+        self._fill(audit, 8)
+
+        spoken = [text for text, _err in lines if "кольцо заполнено" in text]
+        assert audit.dropped() == 5, audit.dropped()
+        # ОДИН раз, а не на каждую запись: иначе поток смен превратился бы в поток
+        # строк о потоке смен (тот же довод, что у схлопывания повторов).
+        assert len(spoken) == 1, spoken
+
+    def test_the_voice_is_marked_as_a_loss_not_a_change(self) -> None:
+        audit, lines = self._audit(maxlen=2)
+        self._fill(audit, 5)
+
+        flags = [is_error for text, is_error in lines if "кольцо заполнено" in text]
+        assert flags == [True], flags
+
+    def test_a_ring_that_never_fills_says_nothing(self) -> None:
+        """Пара: голос, звучащий всегда, — шум, а не сигнал."""
+        audit, lines = self._audit(maxlen=50)
+        self._fill(audit, 5)
+
+        assert audit.dropped() == 0
+        assert [text for text, _err in lines if "кольцо заполнено" in text] == []
