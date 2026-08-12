@@ -15,8 +15,18 @@
         (readback `effective.logger.default_level`), а ключ появляется в L3.
     V4  Соседняя плоскость: `errors.level="ЧУШЬ"` отвергается тем же способом
         (дефект, починенный на одной ручке из трёх, воскресает на соседних).
-    V5  Опечатка в ИМЕНИ ключа судится по-прежнему вердиктом, а не отказом:
-        граница правила названа вслух и проверена, а не подразумевается.
+    V5  Опечатка в ИМЕНИ ключа — **отказ той же границы** (задача 5.4, находки
+        Н-C/Н-D приёмки F2). Прежняя редакция зонда закрепляла обратное
+        («судится вердиктом, а не отказом границы») и была зелёной на дефекте:
+        ключ отвечал `success=true`, оседал в L3 со сроком и не действовал, а
+        `verified.verdict="failed"` лежал в том же ответе.
+    V6  Машинная форма ключа (`logger.default_level`) — ровно тот вход, на
+        котором приёмка получила «успех». Отдельно от V5: опечатка и «форма
+        ключа не та» выглядят по-разному и лечатся одинаково, а проверялась
+        только первая.
+    V7  Сосед не отравлен: после двух отказов законная правка проходит и
+        ДЕЙСТВУЕТ (класс Н-4 — отвергнутая правка оставалась в слое и валила
+        следующую команду, которой её никто не подавал).
 
 Запуск: ``python -m backend_ctl.probes.probe_b2_layer_validation_live``
 Стенд одиночный — порт 8765 не терпит двух. Прогон ~1.5 минуты.
@@ -127,14 +137,56 @@ def main() -> int:
             f"session_keys={session_keys(drv)}",
         )
 
-        log("\n--- V5: опечатка в ИМЕНИ ключа — граница правила ---")
+        log("\n--- V5: опечатка в ИМЕНИ ключа — отказ той же границы (5.4) ---")
         res5 = reload(drv, {"log_levl": "DEBUG"})
-        verified = res5.get("verified") or {}
+        reason5 = str(res5.get("reason", ""))
         check(
-            res5.get("success") is True and "log_levl" in (verified.get("unknown_keys") or []),
-            "незнакомый ключ судится вердиктом (unknown_keys), а не отказом границы",
-            f"success={res5.get('success')}, verdict={verified.get('verdict')}, "
-            f"unknown_keys={verified.get('unknown_keys')}",
+            res5.get("success") is False and "log_levl" in reason5,
+            "незнакомое имя отвергнуто с адресом ключа",
+            f"success={res5.get('success')}, reason={reason5[:200]}",
+        )
+        check(
+            "log_levl" not in session_keys(drv),
+            "и оно не осело в L3",
+            f"session_keys={session_keys(drv)}",
+        )
+        check(
+            "verified" not in res5,
+            "отказ не несёт вердикта применения (нечего применять)",
+            f"ключи ответа={sorted(res5)}",
+        )
+
+        log("\n--- V6: машинная форма ключа — вход, давший приёмке «успех» ---")
+        res6 = reload(drv, {"logger": {"default_level": "DEBUG"}})
+        reason6 = str(res6.get("reason", ""))
+        check(
+            res6.get("success") is False and "logger.default_level" in reason6,
+            "машинная форма отвергнута с адресом",
+            f"success={res6.get('success')}, reason={reason6[:200]}",
+        )
+        check(
+            "log_level" in reason6,
+            "отказ называет человеческую форму (выход, а не только проблему)",
+            f"reason={reason6[:200]}",
+        )
+        check(
+            not [k for k in session_keys(drv) if k.startswith("logger.")],
+            "в L3 не осело ничего из машинной формы",
+            f"session_keys={session_keys(drv)}",
+        )
+
+        log("\n--- V7: сосед не отравлен двумя отказами ---")
+        res7 = reload(drv, {"stats": {"flush_interval": 4.0}})
+        eff7 = (res7.get("effective") or {}).get("stats") or {}
+        check(
+            res7.get("success") is True and (res7.get("verified") or {}).get("verdict") != "failed",
+            "законная правка после отказов принята",
+            f"success={res7.get('success')}, verified={res7.get('verified')}",
+        )
+        check(
+            "stats.flush_interval" in session_keys(drv),
+            "и она держится сессией",
+            f"session_keys={session_keys(drv)}, effective.stats={ {k: eff7.get(k) for k in ('flush_interval',)} }",
         )
     finally:
         harness.stop()

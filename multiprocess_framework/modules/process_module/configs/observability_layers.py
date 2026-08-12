@@ -814,12 +814,22 @@ class ObservabilityLayers:
         Возвращает ключи НОВОЙ секции — то, что слой теперь заявляет. Разницу
         со старой аудит не считает: сравнение двух сырых секций дало бы третье
         написание того же факта, а «что действует» отвечает провенанс.
+
+        Задача 5.4 — **незнакомые ключи файла попадают в аудит ЗДЕСЬ**, а не у
+        вызывающих. Отказать файлу нельзя (опечатка в спутнике не имеет права
+        валить switch рецепта), но и промолчать нельзя: ключ, которого нет в
+        контракте, живёт в файле вечно и не делает ничего. Место выбрано по
+        числу дорог: тело в L1/L2 кладут пять (watcher ``system.yaml``, watcher
+        спутника, файловая ветка ``config.reload``, конверт switch'а, перечитка
+        спутника), и запись у каждой из них была бы пятью написаниями одного
+        факта — с гарантией, что одна отстанет.
         """
         body = dict(section) if isinstance(section, dict) else {}
         # B2: проверка ДО того, как тронут слой. Отвергнутая секция не имеет
         # права оставить слой ни в новом состоянии, ни в полупустом — тот же
         # порядок «сперва проверить, потом разрушать», что у CRM.reconfigure (R9).
         validate_layer_section(body, layer=layer)
+        stray = unknown_section_keys(body)
         with self._lock:
             if layer == LAYER_RECIPE:
                 self.recipe = body
@@ -830,7 +840,18 @@ class ObservabilityLayers:
                 if source is not None:
                     self.app_source = source
             keys = tuple(sorted(flatten_section(body).keys()))
-        self.audit.record(ACTION_LAYER, origin=origin, key=layer, keys=keys, source=source or "")
+        self.audit.record(
+            ACTION_LAYER,
+            origin=origin,
+            key=layer,
+            keys=keys,
+            source=source or "",
+            # `or None` — штатный способ сказать «поля нет»: `record` пропускает
+            # None-экстры (см. её тело). Пустой список читался бы как «проверено
+            # и чисто» ровно так же, как отсутствие поля, но выедал бы кольцо
+            # аудита на всех здоровых дорогах.
+            unknown_keys=stray or None,
+        )
         return keys
 
     def session_forget_expiry(self, keys: Iterable[str]) -> Tuple[str, ...]:
@@ -1129,6 +1150,88 @@ def _reject_path_inside_opaque(path: str) -> None:
             )
 
 
+def unknown_section_keys(section: Any) -> list[str]:
+    """Пути секции, которых НЕТ в контракте наблюдаемости (задача 5.4).
+
+    Механизм — round-trip через ТУ ЖЕ схему, из которой считается раскладка:
+    ключ, не выживший в ``model_validate → model_dump(exclude_unset=True)``,
+    схеме неизвестен (``extra`` у Pydantic — ``ignore``, лишнее отбрасывается
+    молча). Второй таблицы «известных имён» здесь нет намеренно: она разошлась
+    бы с первой на первом же новом поле, и тогда «неизвестный ключ» значило бы
+    разное на двух дорогах одной команды.
+
+    Ключ, заданный значением ПО УМОЛЧАНИЮ, выживает (``model_fields_set``),
+    поэтому «совпал с дефолтом» и «опечатка» не путаются.
+
+    Две границы механизма — обе найдены разведкой ДО правки, обе стали бы
+    ложными ОТКАЗАМИ, если бы сверка пошла по сырым путям:
+
+    * **``telemetry``** снимается до сверки. Схема наблюдаемости про эту
+      плоскость не знает вовсе (её ключи разбирает
+      :func:`validate_telemetry_section`, а раскладка снимает ключ в
+      ``_rebuild_and_apply``), и round-trip объявлял незнакомым КАЖДЫЙ путь
+      законной телеметрийной правки (``telemetry.publish.tick_sec``);
+    * **регистр имени скоупа** приводится :func:`~.observability_config.canonical_scope_keys`
+      — тем же правилом, которым его приводит схема. Иначе законное
+      ``scopes.system`` не совпадало бы с выжившим ``scopes.SYSTEM``.
+
+    Значение, отвергнутое схемой, даёт ПУСТОЙ ответ: судить имена там нечем, и
+    об этом входе говорит :func:`validate_layer_section` — своим отказом, с
+    адресом ключа. Иначе один и тот же мусор получил бы два разных объяснения.
+
+    Returns:
+        Отсортированные ПУТИ (``logger.default_level``, ``errors.lvl``), а не
+        голые имена: оператор правит текст, и «где именно» ему нужнее.
+    """
+    if not isinstance(section, dict) or not section:
+        return []
+    from .observability_config import ObservabilityConfig, canonical_scope_keys
+
+    body = {key: value for key, value in section.items() if key != TELEMETRY_KEY}
+    if not body:
+        return []
+    if "scopes" in body:
+        body = {**body, "scopes": canonical_scope_keys(body["scopes"])}
+    try:
+        survived = ObservabilityConfig.model_validate(body).model_dump(exclude_unset=True)
+    except Exception:  # noqa: BLE001 — негодное ЗНАЧЕНИЕ судит validate_layer_section
+        return []
+    return sorted(set(flatten_section(body)) - set(flatten_section(survived)))
+
+
+def format_unknown_keys(keys: Iterable[str], *, layer: str, source: Optional[str] = None) -> str:
+    """Одна формулировка отказа и громкой строки — задача 5.4.
+
+    Текст называет ПОСЛЕДСТВИЕ («ключ есть, эффекта нет»), а не только факт: из-за
+    него опечатку и не замечают. Подсказка о похожих именах считается по полям
+    схемы через ``difflib``, а не по своему списку: список разошёлся бы со схемой.
+    Ровно этот класс и дал находку — оператор подал ``logger.default_level``
+    (машинную форму, которой на этой границе нет) и получил «успех».
+    """
+    from difflib import get_close_matches
+
+    from .observability_config import ObservabilityConfig
+
+    paths = sorted(str(key) for key in keys)
+    known = list(ObservabilityConfig.model_fields)
+    hints: list[str] = []
+    for path in paths:
+        segments = path.split(".")
+        # Ищем похожее и по КОРНЮ пути, и по его листу. Одного корня мало ровно на
+        # том входе, который дал находку: у `logger.default_level` корень похож на
+        # `loggers`/`logger_groups`, а нужное имя — `log_level`, и оно похоже на
+        # ЛИСТ (`default_level`). Подсказка, не называющая человеческую форму
+        # машинной, оставила бы оператора там же, где он стоял.
+        for probe in {segments[0], segments[-1]}:
+            hints.extend(get_close_matches(probe, known, n=2, cutoff=0.6))
+    where = f" ({source})" if source else ""
+    tail = f"; возможно, имелось в виду: {', '.join(sorted(set(hints)))}" if hints else ""
+    return (
+        f"слой {layer} отвергнут{where} — ключей нет в контракте наблюдаемости "
+        f"(ключ есть, эффекта нет): {', '.join(paths)}{tail}"
+    )
+
+
 def validate_layer_section(section: Any, *, layer: str) -> None:
     """Проверить секцию наблюдаемости ДО записи в слой (B2, major-8).
 
@@ -1153,14 +1256,36 @@ def validate_layer_section(section: Any, *, layer: str) -> None:
     — то же правило, а не вторая его реализация; мест применения по-прежнему
     столько, сколько дверей в слой.
 
-    **Что проверяется — ЗНАЧЕНИЯ объявленных ключей.** Незнакомый ключ схемой
-    отбрасывается молча, и ловит его не этот страж, а вердикт ``config.reload``
-    (``unknown_keys`` → ``verdict=failed``). Второй предохранитель на то же
-    место сделал бы неизвестным, который из них держит.
+    **ИМЕНА ключей — с задачи 5.4, и только у слоя сессии.** Прежняя редакция
+    отдавала имена вердикту ``config.reload`` (``unknown_keys`` →
+    ``verdict=failed``) с доводом «второй предохранитель на то же место сделал
+    бы неизвестным, который из них держит». Приёмка F2 (находки Н-C/Н-D)
+    показала цену: незнакомый ключ — включая машинную форму
+    ``logger.default_level``, которой на этой границе нет, — отвечал
+    ``success=true``, оседал в L3 со сроком и не действовал, а честный
+    ``verdict="failed"`` лежал в ТОМ ЖЕ ответе и противоречил ``success``.
+    Оператор читает ``success``. Мерило 2 плана требует буквально: «мусор любого
+    рода (значение, тип, **ключ**) — адресный отказ».
+
+    Разведены не по важности, а **по двери**, и это не второй предохранитель на
+    то же место:
+
+    * ``session`` (ручка оператора: ``config.reload`` inline, ``session_set``) →
+      **отказ ДО записи**. Имя написано руками сейчас, и узнать об опечатке
+      через час по отсутствию логов дороже;
+    * ``framework``/``app``/``recipe`` (файл, спутник, конверт switch'а) →
+      молчание здесь и громкая строка у вызывающего. Отказ означал бы, что
+      опечатка в спутнике валит switch рецепта или старт процесса. Та же
+      политика и по той же причине, что у ссылок без приёмника
+      (:mod:`.observability_refs`), — одна на два соседних класса опечаток.
+
+    Вердикт при этом НЕ становится мёртвым слоем: ``unknown_keys`` по-прежнему
+    единственный ответ на файловой дороге, где отказа нет.
 
     Raises:
-        ValueError: значение не годится; текст несёт адрес ключа и список
-            допустимых значений.
+        ValueError: значение не годится (текст несёт адрес ключа и список
+            допустимых значений) ЛИБО — у слоя сессии — ключа нет в контракте
+            (текст несёт путь и похожие известные имена).
     """
     if not isinstance(section, dict) or not section:
         return
@@ -1184,6 +1309,14 @@ def validate_layer_section(section: Any, *, layer: str) -> None:
             address = ".".join(str(part) for part in err.get("loc", ())) or "<секция>"
             problems.append(f"{address}: {err.get('msg', '')}")
         raise ValueError(f"слой {layer} отвергнут — " + "; ".join(problems)) from exc
+
+    # Задача 5.4: имена — после значений и только у ручки оператора (см. докстринг).
+    # Порядок именно такой: негодное ЗНАЧЕНИЕ известного ключа обязано получить
+    # свой текст со списком допустимых, а не общий «ключа нет в контракте».
+    if layer == LAYER_SESSION:
+        unknown = unknown_section_keys(section)
+        if unknown:
+            raise ValueError(format_unknown_keys(unknown, layer=layer))
 
 
 def validate_telemetry_section(section: Any, *, layer: str) -> None:

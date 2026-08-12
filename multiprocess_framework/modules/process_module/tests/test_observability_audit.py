@@ -427,6 +427,12 @@ class TestFoundByTheReview:
             писатель блокировался, `join` истекал по таймауту, и тест зеленел
             при любой реализации. Найдено слом-инъекцией: тест пережил свой слом
             и потому не существовал.
+
+            Задача 5.4 — ключ гонщика обязан быть НАСТОЯЩИМ (`retention_days`,
+            а не прежний выдуманный `smuggled.key`): ручка оператора теперь
+            отвергает имя вне контракта, и на выдуманном ключе поток гонщика
+            умирал бы исключением. Шов бы «сработал», правка бы не легла, и тест
+            зеленел бы, ничего не проверив.
             """
 
             def __init__(self, real, stack) -> None:
@@ -444,7 +450,7 @@ class TestFoundByTheReview:
                 if self._depth == 0 and self._armed:
                     self._armed = False
                     writer = threading.Thread(
-                        target=lambda: self._stack.session_set("smuggled.key", 1, ttl=0, origin="race"),
+                        target=lambda: self._stack.session_set("retention_days", 1, ttl=0, origin="race"),
                         daemon=True,
                     )
                     writer.start()
@@ -460,10 +466,10 @@ class TestFoundByTheReview:
         apply_observability_layers(layers, origin="test:race")
 
         assert seam.fired, "шов не сработал: чужой писатель не успел вклиниться в окно"
-        assert "smuggled.key" in layers.session_keys(), "правка гонщика вообще не легла"
+        assert "retention_days" in layers.session_keys(), "правка гонщика вообще не легла"
         rebuilt = [e for e in layers.audit.entries() if e["action"] == ACTION_REBUILD]
         assert rebuilt, layers.audit.entries()
-        assert "smuggled.key" not in rebuilt[-1]["keys"], "запись приписала себе чужую правку"
+        assert "retention_days" not in rebuilt[-1]["keys"], "запись приписала себе чужую правку"
 
     def test_sweeper_tick_writes_one_record_not_two(self, svc, handlers) -> None:
         """Замечание 4: две записи на такт выедали кольцо вдвое быстрее.

@@ -1582,7 +1582,11 @@ class BuiltinCommands:
             # `replace_layer`/`session_set` держат ту же проверку у себя, но по
             # этой дороге секция въезжает в L3 напрямую (`layer_merge`), и без
             # проверки здесь мусор попал бы в сессию мимо обоих.
-            from ..configs.observability_layers import validate_layer_section
+            from ..configs.observability_layers import (
+                format_unknown_keys,
+                unknown_section_keys,
+                validate_layer_section,
+            )
 
             try:
                 validate_layer_section(obs_section, layer="session" if source == "inline" else LAYER_APP)
@@ -1607,6 +1611,20 @@ class BuiltinCommands:
                 _unknown_refs = report_unknown_refs(svc, obs_section, source=source)
                 if _unknown_refs:
                     result["unknown_refs"] = _unknown_refs
+                # Задача 5.4, файловая половина правила. Отказа здесь нет (см.
+                # `validate_layer_section`), поэтому голос: ответ инициатору + та
+                # же громкая строка, что у ссылок без приёмника рядом. Долговечный
+                # след кладёт `replace_layer` в аудит — он покрывает и дороги без
+                # ответа (watcher `system.yaml`, watcher спутника).
+                _stray_keys = unknown_section_keys(obs_section)
+                if _stray_keys:
+                    result["unknown_keys"] = _stray_keys
+                    _log_stray = getattr(svc, "_log_error", None)
+                    if callable(_log_stray):
+                        _log_stray(
+                            format_unknown_keys(_stray_keys, layer=LAYER_APP, source=source),
+                            module="lifecycle",
+                        )
 
             # Блокер ревью 5.8: правка слоя и её применение — ОДИН критический
             # блок. Прежняя редакция считала `deep_merge(layers.session, ...)` и

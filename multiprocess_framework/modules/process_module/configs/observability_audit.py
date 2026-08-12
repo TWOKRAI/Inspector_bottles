@@ -386,6 +386,13 @@ def format_entry(entry: Dict[str, Any]) -> str:
         parts.append(f"keys=[{listed}]")
     if "value" in entry:
         parts.append(f"value={entry['value']!r}")
+    # Задача 5.4: ключи вне контракта — в СТРОКЕ, а не только в кольце. Поле
+    # кладёт `replace_layer` на всех пяти файловых дорогах (файлу не отказывают —
+    # опечатка в спутнике не имеет права валить switch рецепта), и без вывода
+    # здесь единственным следом остался бы readback, куда за ним никто не пойдёт:
+    # спрашивают обычно «почему настройка не действует», а не «что в кольце».
+    if entry.get("unknown_keys"):
+        parts.append(f"ВНЕ КОНТРАКТА (ключ есть, эффекта нет): [{', '.join(entry['unknown_keys'])}]")
     if entry.get("ttl_sec") is not None:
         parts.append(f"ttl={entry['ttl_sec']}с")
     if not entry.get("ok", True):

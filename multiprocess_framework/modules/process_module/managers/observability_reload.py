@@ -253,19 +253,21 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     была бы вторым местом, где оно живёт.
     """
     from ..configs.observability_config import ObservabilityConfig, expand_observability
-    from ..configs.observability_layers import flatten_section
+    from ..configs.observability_layers import flatten_section, unknown_section_keys
 
     section = requested if isinstance(requested, dict) else {}
-    flat_request = flatten_section(section)
 
-    # Неизвестные ключи = не выжившие в round-trip через схему. Ключ, заданный
-    # значением по умолчанию, выживает — поэтому «совпал с дефолтом» и «опечатка»
-    # не путаются.
+    # Неизвестные ключи считает ОБЩИЙ сверщик (задача 5.4): та же функция стоит
+    # на границе записи в слой сессии, где отвечает отказом. Пока расчёт был
+    # написан ЗДЕСЬ, он и жил только здесь — то есть имя ключа судил вердикт
+    # ПОСЛЕ того, как ключ уже лёг в L3 со сроком (находки Н-C/Н-D приёмки F2).
+    # Две копии разошлись бы на первом же новом поле схемы, а «неизвестный ключ»
+    # значило бы разное на двух дорогах одной команды.
+    unknown = unknown_section_keys(section)
     try:
         survived = ObservabilityConfig.model_validate(section).model_dump(exclude_unset=True)
     except Exception:  # noqa: BLE001 — невалидную секцию судит применение, не вердикт
         survived = section
-    unknown = sorted(set(flat_request) - set(flatten_section(survived)))
 
     baseline = flatten_section(expand_observability({}))
     expected = flatten_section(expand_observability(survived))
