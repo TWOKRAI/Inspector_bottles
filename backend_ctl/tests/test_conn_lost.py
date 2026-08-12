@@ -47,6 +47,8 @@ class _ToyServer:
         self._srv.settimeout(5.0)
         self.port: int = self._srv.getsockname()[1]
         self._conns: List[socket.socket] = []
+        #: Задача 5.8: accept состоялся. Без него `drop_client` мог не закрыть НИЧЕГО.
+        self._accepted = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
 
@@ -56,12 +58,29 @@ class _ToyServer:
         except OSError:
             return
         self._conns.append(conn)
+        self._accepted.set()
         if self._close_after is not None:
             time.sleep(self._close_after)
             self.drop_client()
 
-    def drop_client(self) -> None:
-        """Закрыть соединение со стороны сервера — ровно это видит reader-поток клиента."""
+    def drop_client(self, *, wait: float = 5.0) -> None:
+        """Закрыть соединение со стороны сервера — ровно это видит reader-поток клиента.
+
+        **Задача 5.8 (флейк Н2-5, ~8–12 % прогонов ФАЙЛА, воспроизведён 2 раза на 27
+        прогонов).** `drv.connect()` возвращается по завершению рукопожатия, а
+        серверный `accept` идёт в ДРУГОМ потоке: список соединений мог быть ещё пуст,
+        и тогда этот метод закрывал ничего. Клиент честно ничего не замечал, тест
+        досиживал полные 5 с в `_wait_conn_lost` и падал `assert False` — причём в
+        РАЗНЫХ тестах файла (приёмка назвала один, воспроизвелось в другом), потому
+        что гонка в общем стенде, а не в драйвере.
+
+        Ожидание с дедлайном, а не `sleep`: молчаливое «подождём немного» вернуло бы
+        тот же флейк на медленной машине. Не дождались — громкий отказ, потому что
+        «закрывать нечего» и «закрыли» дают одинаково зелёный `_wait_conn_lost`
+        только в одном случае: если тест НЕ проверяет разрыв.
+        """
+        if wait > 0 and not self._accepted.wait(wait):
+            raise AssertionError(f"сервер не принял соединение за {wait} с — закрывать нечего")
         for conn in self._conns:
             try:
                 conn.close()
@@ -70,7 +89,9 @@ class _ToyServer:
         self._conns.clear()
 
     def stop(self) -> None:
-        self.drop_client()
+        # `wait=0`: в teardown клиента могло не быть вовсе (тест про «сервер молчит»),
+        # и ожидание accept'а превратило бы уборку в отказ.
+        self.drop_client(wait=0)
         try:
             self._srv.close()
         except OSError:
