@@ -48,11 +48,27 @@ INJECTIONS: List["pytest.ParameterSet"] = [
         [
             (
                 CONTROL_PANEL,
-                "| `observability.tail.unsubscribe` | `subscriber` — **и только он** |",
-                "| `observability.tail.unsubscribe` | `subscriber`, `level` |",
+                "| `observability.tail.unsubscribe` | `subscriber`, `scope` |",
+                "| `observability.tail.unsubscribe` | `subscriber`, `scope`, `level` |",
             )
         ],
         id="F1-2-unsubscribe-объявлен-с-level",
+    ),
+    # Т-1 (2026-08-12): вторая инъекция того же F1-2 — на ПРОТИВОПОЛОЖНОЕ направление
+    # дрифта. Единственная инъекция «документ объявляет лишнее» не сторожила случай
+    # «схема завела поле, документ промолчал» — а именно он и произошёл: коммит 5.6
+    # добавил `scope` в обе схемы, CONTROL_PANEL.md не обновили, и 17 красных прожили
+    # сутки. Проверка это поймала честно; не поймала её собственная батарея сломов.
+    pytest.param(
+        "F1-2",
+        [
+            (
+                CONTROL_PANEL,
+                "| `observability.tail.subscribe` | `subscriber`, `level`, `scope` |",
+                "| `observability.tail.subscribe` | `subscriber`, `level` |",
+            )
+        ],
+        id="F1-2-subscribe-умолчал-о-scope",
     ),
     pytest.param(
         "F1-3",

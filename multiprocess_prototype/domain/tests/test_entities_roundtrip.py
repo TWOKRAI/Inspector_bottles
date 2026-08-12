@@ -398,6 +398,14 @@ class TestExtrasShorthandDriftGuard:
             "формы нет ни в одном yaml репозитория (замер 2026-08-11)"
         ),
         "copy_out_targets": "то же происхождение и та же форма записи, что у frame_ring_depth",
+        "chain_max_lag_items": (
+            "потолок отставания исполнителя (2026-08-12, `9bacd304`): тот же класс, что "
+            "у SHM-ключей выше — extras-only, typed-полем ProcessConfig не заводится "
+            "(рычаг C6 №1). Обе записи в `webcam_sketch.yaml` (lines, points) — явная "
+            "форма `extras: {chain_max_lag_items: N}`; плоской формы нет ни в одном yaml "
+            "репозитория (замер 2026-08-12). Плоский ключ свернулся бы в metadata и стал "
+            "бы нем — это проверено отказом при вводе ручки"
+        ),
     }
 
     @staticmethod
@@ -502,7 +510,7 @@ class TestExtrasShorthandDriftGuard:
         )
 
         extras_only = self._framework_pick_keys() - set(ProcessConfig.model_fields)
-        assert extras_only == {"frame_ring_depth", "copy_out_targets"}, (
+        assert extras_only == {"frame_ring_depth", "copy_out_targets", "chain_max_lag_items"}, (
             f"состав extras-only ключей framework изменился: {sorted(extras_only)}. "
             "Такой ключ живёт только в extras (typed-поля не плодим, рычаг C6 №1) — "
             "проверьте, что домен доносит его форму, и обновите этот список."

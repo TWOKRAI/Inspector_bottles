@@ -199,6 +199,10 @@ class TestGuiNamesTheLevel:
         в подписку БЕЗ ключа, то есть решение о пороге остаётся у процесса.
         Подставь GUI здесь свой ``"ERROR"`` — и совпадение констант замаскировало
         бы вторую позицию дефолта до первого её изменения.
+
+        ``scope="all"`` в конверте ставит САМ брокер (5.6 / ADR-PM-032): GUI-подписка
+        оптовая, и без маркера её снятие сносило бы прицельный хвост соседа. Ключ
+        закреплён здесь намеренно — исчезнет маркер, вернётся находка Н2-2.
         """
         from multiprocess_framework.modules.process_manager_module.process.observability_broker import (
             ObservabilitySubscriptionBroker,
@@ -212,7 +216,9 @@ class TestGuiNamesTheLevel:
 
         broker.subscribe_all(**self._envelope(level=None))
 
-        assert fanned == [{"subscriber": "gui"}], f"«не назван» превратился в конкретный порог по дороге: {fanned}"
+        assert fanned == [{"subscriber": "gui", "scope": "all"}], (
+            f"«не назван» превратился в конкретный порог по дороге: {fanned}"
+        )
 
     def test_the_named_level_is_the_one_the_broker_fans_out(self):
         """Имя ключа GUI = имя ключа, которое читает брокер.
@@ -233,7 +239,7 @@ class TestGuiNamesTheLevel:
 
         broker.subscribe_all(**self._envelope())
 
-        assert fanned == [{"subscriber": "gui", "level": "WARNING"}], (
+        assert fanned == [{"subscriber": "gui", "level": "WARNING", "scope": "all"}], (
             f"порог GUI не доехал до конверта процессам: {fanned}"
         )
 
