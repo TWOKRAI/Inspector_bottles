@@ -22,9 +22,7 @@ class MetricsCollector:
         self._counters: Dict[str, int] = {}
         self._timings: Dict[str, list] = {}
 
-    def record_metric(
-        self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None
-    ):
+    def record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None):
         """
         Записать метрику.
 
@@ -52,9 +50,7 @@ class MetricsCollector:
         key = self._make_key(metric_name, tags)
         self._counters[key] = self._counters.get(key, 0) + 1
 
-    def record_timing(
-        self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None
-    ):
+    def record_timing(self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None):
         """
         Записать время выполнения операции.
 
@@ -66,9 +62,7 @@ class MetricsCollector:
         key = self._make_key(metric_name, tags)
         if key not in self._timings:
             self._timings[key] = []
-        self._timings[key].append(
-            {"duration": duration, "timestamp": time.time(), "tags": tags or {}}
-        )
+        self._timings[key].append({"duration": duration, "timestamp": time.time(), "tags": tags or {}})
 
     def get_metrics(self) -> Dict[str, Any]:
         """
@@ -84,9 +78,7 @@ class MetricsCollector:
                 key: {
                     "count": len(timings),
                     "total": sum(t["duration"] for t in timings),
-                    "avg": sum(t["duration"] for t in timings) / len(timings)
-                    if timings
-                    else 0,
+                    "avg": sum(t["duration"] for t in timings) / len(timings) if timings else 0,
                     "min": min(t["duration"] for t in timings) if timings else 0,
                     "max": max(t["duration"] for t in timings) if timings else 0,
                 }
@@ -94,9 +86,7 @@ class MetricsCollector:
             },
         }
 
-    def get_metric(
-        self, metric_name: str, tags: Optional[Dict[str, str]] = None
-    ) -> Optional[Any]:
+    def get_metric(self, metric_name: str, tags: Optional[Dict[str, str]] = None) -> Optional[Any]:
         """
         Получить конкретную метрику.
 
@@ -133,9 +123,7 @@ def get_metrics_collector() -> MetricsCollector:
     return _metrics_collector
 
 
-def record_metric(
-    metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None
-):
+def record_metric(metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None):
     """Записать метрику (удобная функция)."""
     _metrics_collector.record_metric(metric_name, value, tags)
 
@@ -145,9 +133,7 @@ def increment_metric(metric_name: str, tags: Optional[Dict[str, str]] = None):
     _metrics_collector.increment(metric_name, tags)
 
 
-def record_timing(
-    metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None
-):
+def record_timing(metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None):
     """Записать время выполнения (удобная функция)."""
     _metrics_collector.record_timing(metric_name, duration, tags)
 
@@ -165,15 +151,20 @@ def timed(metric_name: Optional[str] = None, tags: Optional[Dict[str, str]] = No
         @wraps(func)
         def wrapper(*args, **kwargs):
             name = metric_name or f"{func.__module__}.{func.__qualname__}"
-            start_time = time.time()
+            # 2.2 (Р2.2-10): часы длительности — perf_counter. Замеряемый интервал
+            # короче шага time.time()/monotonic на Windows (~15.6 мс), и такие
+            # разности ложатся на сетку часов: по бакетам они разложились бы
+            # двумя столбиками (0.0 и 0.0156) вместо распределения. Значение
+            # используется только как разность — эпоха perf_counter не важна.
+            start_time = time.perf_counter()
             try:
                 result = func(*args, **kwargs)
-                duration = time.time() - start_time
+                duration = time.perf_counter() - start_time
                 record_timing(f"{name}.duration", duration, tags)
                 increment_metric(f"{name}.success", tags)
                 return result
             except Exception:
-                duration = time.time() - start_time
+                duration = time.perf_counter() - start_time
                 record_timing(f"{name}.error_duration", duration, tags)
                 increment_metric(f"{name}.errors", tags)
                 raise

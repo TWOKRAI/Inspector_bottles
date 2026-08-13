@@ -7,6 +7,7 @@
     - ``stats``  → метрики (``self._record_timing`` для каждого record;
                   периодический snapshot p50/p95/p99 через _record_metric)
 """
+
 from __future__ import annotations
 
 import collections
@@ -48,7 +49,21 @@ class LatencyTracker(BaseManager, ObservableMixin):
         buffer_size: Размер скользящего буфера измерений.
         logger: LoggerManager или ObservableMixin-совместимый объект.
         stats: StatsManager — приёмник метрик (опц.).
-        metric_name: Имя метрики в stats (default ``chain.latency_ms``).
+        metric_name: Имя метрики в stats (default ``chain.latency``).
+
+    **Единицы: буфер в миллисекундах, метрика в СЕКУНДАХ** (задача 2.2, Р2.2-10).
+    Это не описка, а граница двух контрактов. Наружу (``record``, ``percentiles``,
+    строка лога) трекер говорит в миллисекундах — так его звали и так читают
+    числа глазами. Внутрь, в ``StatsManager.record_timing``, уходят СЕКУНДЫ,
+    потому что этот API документирован в секундах, и в них же живут границы
+    бакетов (``DEFAULT_DURATION_BUCKETS_SEC``).
+
+    До 2.2 сюда уходили миллисекунды: значение 16.7 (штатный кадр 60 fps) под
+    секундными границами улетало в бакет ``+Inf`` целиком, и p95 стал бы
+    константой при полностью зелёных тестах. Ловушка была латентной — продовых
+    вызывающих у трекера нет, единственные пользователи в дереве это его
+    собственные тесты, — поэтому и имя метрики переименовано вместе с единицей:
+    суффикс ``_ms`` на значении в секундах был бы той же ложью, только тише.
     """
 
     def __init__(
@@ -57,7 +72,7 @@ class LatencyTracker(BaseManager, ObservableMixin):
         buffer_size: int = 1000,
         logger: Any = None,
         stats: Any = None,
-        metric_name: str = "chain.latency_ms",
+        metric_name: str = "chain.latency",
     ) -> None:
         BaseManager.__init__(self, manager_name="LatencyTracker")
         ObservableMixin.__init__(
@@ -80,10 +95,16 @@ class LatencyTracker(BaseManager, ObservableMixin):
         return True
 
     def record(self, e2e_ms: float) -> None:
-        """Записать новое измерение latency в буфер и в stats."""
+        """Записать новое измерение latency (миллисекунды) в буфер и в stats.
+
+        В буфер — как пришло (миллисекунды: перцентили и строка лога говорят в
+        них). В stats — поделённое на 1000: ``record_timing`` принимает секунды,
+        и в секундах же лежат границы бакетов. Пересчёт стоит одного деления и
+        стоит на границе, а не размазан по вызывающим.
+        """
         self._buffer.append(e2e_ms)
         # Сырое значение в stats (агрегация — забота StatsManager).
-        self._record_timing(self._metric_name, e2e_ms)
+        self._record_timing(self._metric_name, e2e_ms / 1000.0)
 
     def percentiles(self) -> dict[str, float]:
         """Вычислить p50, p95, p99 из накопленного буфера (linear interpolation)."""
@@ -97,18 +118,35 @@ class LatencyTracker(BaseManager, ObservableMixin):
         }
 
     def maybe_log(self) -> None:
-        """Периодически залогировать percentiles + опубликовать snapshot в stats."""
+        """Периодически залогировать percentiles + опубликовать snapshot в stats.
+
+        Имена перцентилей сохраняют суффикс ``_ms``, хотя базовое имя метрики
+        его потеряло: перцентили публикуются В МИЛЛИСЕКУНДАХ (это значения из
+        буфера как есть), и единица обязана стоять в имени там, где она
+        отличается от единицы соседа.
+
+        ``time.time()`` здесь оставлен намеренно: интервал 10 с, шаг часов на
+        Windows 15.6 мс погоды не делает. Правилу «короткие интервалы — только
+        ``perf_counter``» (Р2.2-10) это место не подпадает.
+
+        **Известный дефект, задачей 2.2 НЕ чинится и назван, чтобы не выглядеть
+        незамеченным:** перцентили публикуются через ``_record_metric``, а это
+        COUNTER — значения СУММИРУЮТСЯ за окно агрегации, и p95=12 мс,
+        опубликованный трижды, покажет 36. Нужен ``gauge``. Это дефект типа
+        метрики, а не единицы и не часов; правка меняет смысл существующих
+        чисел, и делать её попутно в задаче про пределы значило бы прятать
+        смену поведения внутри чужого коммита. Продовых вызывающих у трекера
+        нет, поэтому цена ожидания — нулевая.
+        """
         now = time.time()
         if now - self._last_log_time < self._log_interval:
             return
 
         p = self.percentiles()
-        self._log_info(
-            f"Latency p50={p['p50']:.1f}ms p95={p['p95']:.1f}ms p99={p['p99']:.1f}ms"
-        )
-        self._record_metric(f"{self._metric_name}.p50", p["p50"])
-        self._record_metric(f"{self._metric_name}.p95", p["p95"])
-        self._record_metric(f"{self._metric_name}.p99", p["p99"])
+        self._log_info(f"Latency p50={p['p50']:.1f}ms p95={p['p95']:.1f}ms p99={p['p99']:.1f}ms")
+        self._record_metric(f"{self._metric_name}_ms.p50", p["p50"])
+        self._record_metric(f"{self._metric_name}_ms.p95", p["p95"])
+        self._record_metric(f"{self._metric_name}_ms.p99", p["p99"])
         self._last_log_time = now
 
 

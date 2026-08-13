@@ -1213,7 +1213,8 @@
           "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
-          "log_line_max_bytes": 2048
+          "log_line_max_bytes": 2048,
+          "max_series": 1000
         }
       },
       "processing": {
@@ -1566,6 +1567,7 @@
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -1937,6 +1939,7 @@
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -2260,6 +2263,7 @@
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -2680,6 +2684,7 @@
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -3058,6 +3063,7 @@
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -4027,6 +4033,7 @@
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -4376,6 +4383,7 @@
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },

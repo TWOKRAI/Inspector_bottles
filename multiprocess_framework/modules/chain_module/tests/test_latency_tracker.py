@@ -1,4 +1,5 @@
 """Тесты LatencyTracker."""
+
 from __future__ import annotations
 
 import time
@@ -89,6 +90,65 @@ class TestLatencyTrackerRecord:
         tracker.record(3.14)
         p = tracker.percentiles()
         assert p["p50"] == pytest.approx(3.14)
+
+
+class TestLatencyTrackerUnits:
+    """Граница двух единиц: буфер в мс, метрика в секундах (задача 2.2, Р2.2-10).
+
+    **Класс добавлен по находке слом-инъекции.** Инъекция «убрать деление на
+    1000 в ``record``» не покраснила НИ ОДНОГО теста во всём корпусе: единицу
+    метрики не сторожило ничто, и трекер годами слал миллисекунды в
+    ``StatsManager.record_timing``, документированный в секундах. Под секундными
+    границами бакетов такое значение целиком уходит в ``+Inf``, и p95 стал бы
+    константой при полностью зелёных тестах.
+    """
+
+    class _SpyStats:
+        """Дубль, ЗАПОМИНАЮЩИЙ значение, а не только имя.
+
+        Шпион на имя метрики сторожил бы имя, а не свойство: 1000-кратная
+        ошибка проходит через любую проверку «метрика записана».
+        """
+
+        def __init__(self) -> None:
+            self.timings: list[tuple[str, float]] = []
+            self.metrics: list[tuple[str, float]] = []
+
+        def record_timing(self, name, duration, tags=None) -> None:
+            self.timings.append((name, duration))
+
+        def record_metric(self, name, value=1, tags=None) -> None:
+            self.metrics.append((name, value))
+
+    def test_record_sends_seconds_to_stats_while_the_buffer_keeps_ms(self):
+        """16.7 мс на входе — 0.0167 с в метрике и 16.7 в перцентилях.
+
+        Число выбрано так, чтобы секунды и миллисекунды РАСХОДИЛИСЬ на три
+        порядка: значение вроде 1.0 совпало бы в обеих единицах и ничего не
+        доказало бы.
+        """
+        stats = self._SpyStats()
+        tracker = LatencyTracker(stats=stats)
+        tracker.record(16.7)
+
+        assert stats.timings == [("chain.latency", pytest.approx(0.0167))]
+        assert tracker.percentiles()["p50"] == pytest.approx(16.7)
+
+    def test_percentile_metrics_keep_the_ms_suffix_because_they_are_ms(self):
+        """Имя обязано нести единицу там, где она отличается от соседской."""
+        stats = self._SpyStats()
+        tracker = LatencyTracker(log_interval_sec=0.0, stats=stats)
+        tracker.record(16.7)
+        tracker._last_log_time = time.time() - 1
+        tracker.maybe_log()
+
+        published = dict(stats.metrics)
+        assert set(published) == {
+            "chain.latency_ms.p50",
+            "chain.latency_ms.p95",
+            "chain.latency_ms.p99",
+        }
+        assert published["chain.latency_ms.p50"] == pytest.approx(16.7)
 
 
 class TestLatencyTrackerMaybeLog:

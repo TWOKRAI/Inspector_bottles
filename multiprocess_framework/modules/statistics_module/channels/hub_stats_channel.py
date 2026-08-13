@@ -74,16 +74,26 @@ class HubStatsChannel(IChannel):
         ``{timestamp, metrics: [агрегаты], total_count}``.
 
         ``total_count`` берётся ИЗ СНАПШОТА, а не считается по списку: это число
-        метрик В ОКНЕ, и когда 2.2 введёт потолок кардинальности, доехавших
-        станет меньше, а «сколько их было» меняться не должно. Разность и есть
-        число опущенных — её называет вслух текст записи (``snapshot_message``).
+        метрик В ОКНЕ, и с потолком кардинальности 2.2 доехавших стало меньше, а
+        «сколько их было» меняться не должно. Разность и есть число опущенных —
+        её называет вслух текст записи (``snapshot_message``).
+
+        **Остальные ключи снапшота едут КАК ЕСТЬ** (2.2). Перечислять их
+        поимённо значило бы завести второе место, где описан состав снапшота, —
+        и потерять новое поле молча: ровно этот довод уже записан у
+        нормализатора display-вида, а здесь стояла его нарушенная копия.
+        Задача 2.2 добавила ``bucket_bounds`` (границы бакетов, один раз на
+        снапшот) и пару ``series_dropped``/``dropped_series``; без сквозного
+        прокида бакеты в сторе были бы нечитаемы, а число опущенных — невидимо.
+        ``timestamp`` не едет своим именем: он переименован в ``window_ts``.
         """
         try:
             if self._hub is None:
                 return {"status": "error", "error": "hub not set", "channel": self.name}
 
             metrics: List[Any] = data.get("metrics") or []
-            result = self._hub.emit_stats_record(
+            payload = {k: v for k, v in data.items() if k not in ("timestamp", "metrics", "total_count")}
+            payload.update(
                 {
                     STATS_AGGREGATE_KEY: True,
                     "metrics": metrics,
@@ -95,6 +105,7 @@ class HubStatsChannel(IChannel):
                     "window_ts": data.get("timestamp"),
                 }
             )
+            result = self._hub.emit_stats_record(payload)
             # Ответ hub'а НЕ переписывается на «success» (находка ревью 2.1):
             # канал bounded, при заторе дренажа он вытесняет, и рапорт об успехе
             # заставлял бы арифметику «эмитировано = доставлено + подавлено»

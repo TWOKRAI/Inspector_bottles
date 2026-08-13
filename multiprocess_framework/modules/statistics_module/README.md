@@ -42,9 +42,15 @@ Key-based `_dispatcher` из базы **снят в Ф4.6** (ADR-CRM-012): че�
 `interfaces.py`, поэтому оно попадает в `declared_sources()` ещё до первой записи.
 
 **Специфика StatsManager:**
-- Типы метрик: `counter`, `gauge`, `timing`, `histogram`
+- Типы метрик: `counter`, `gauge`, `timing`, `histogram`. **`timing` и `histogram` — одна
+  механика (2.2, ADR-SM-011):** `count`/`sum`/`min`/`max` + фиксированные бакеты
+  длительностей в СЕКУНДАХ (`DEFAULT_DURATION_BUCKETS_SEC`). Списков наблюдений больше нет
+  ни у одной из двух дорог — память O(1), перцентиль сливается между окнами и процессами
 - Двойное хранение: `self._metrics` (live-state для `get_metric()`) +
-  `AggregationWindow` (буфер для flush в каналы)
+  `AggregationWindow` (буфер для flush в каналы). **Обе позиции накопительные, у обеих
+  потолок серий** `observability.stats.max_series` (дефолт 1000, `0` — без предела) — один
+  страж `core/cardinality_guard.py`, два экземпляра, стражи независимы: отказ живого слоя
+  не останавливает доставку
 - Sentinel-паттерн: `_enqueue_to_buffer` ставит данные в буфер ОДИН раз,
   `_do_flush` транслирует снапшот во ВСЕ зарегистрированные каналы —
   это предотвращает N-кратный счёт при N каналах
@@ -152,9 +158,9 @@ stats.shutdown() -> bool     # flush + stop + close channels
 ```python
 stats.record_metric(name, value=1, tags=None)   # counter: суммирует значения
 stats.increment(name, tags=None)                 # counter: +1
-stats.record_timing(name, duration, tags=None)   # timing: min/max/avg/p95
+stats.record_timing(name, duration, tags=None)   # timing: СЕКУНДЫ; count/min/max/avg + бакеты
 stats.gauge(name, value, tags=None)              # gauge: последнее значение
-stats.histogram(name, value, tags=None)          # histogram: распределение
+stats.histogram(name, value, tags=None)          # histogram: та же механика бакетов
 ```
 
 ### Чтение метрик
@@ -265,13 +271,37 @@ process.command_manager.handle_command({"command": "flush_stats"})
 {
     "timestamp": 1710000000.0,
     "total_count": 3,
+    "bucket_bounds": [0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.017, 0.034, 0.05, 0.1, 0.25, 1.0],
     "metrics": [
         {"name": "ops.count", "type": "counter", "tags": {"env": "prod"}, "count": 42.0},
-        {"name": "req.duration", "type": "timing", "tags": {}, "count": 5, "min": 0.01, "max": 0.5, "avg": 0.1, "p95": 0.45},
+        {"name": "req.duration", "type": "timing", "tags": {}, "count": 5, "min": 0.01, "max": 0.5, "avg": 0.12, "p95": 0.5,
+         "sum": 0.6, "buckets": [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0]},
         {"name": "mem.used", "type": "gauge", "tags": {}, "value": 1024.0}
     ]
 }
 ```
+
+Что важно знать про эту форму (ADR-SM-011):
+
+- **`total_count` — сколько СЕРИЙ было в окне**, а не сколько доехало. Разность с
+  `len(metrics)` — число РАЗЛИЧНЫХ серий, опущенных потолком кардинальности; при ненулевом
+  отказе рядом появляются `series_dropped` (различные серии), `observations_dropped`
+  (сколько эмиссий при этом отвергнуто — другое число: одну отказанную серию эмитент шлёт
+  снова и снова) и `dropped_series` (первые 5 РАЗЛИЧНЫХ имён).
+- **`series_dropped_is_lower_bound: true`** появляется, когда множество отказанных ключей
+  само упёрлось в `max_series`. Тогда `series_dropped` — оценка СНИЗУ, и это сказано
+  признаком, а не подразумевается: заниженное число без пометки читается как точное.
+- **`bucket_bounds` едут ОДИН раз на снапшот** и только если в нём есть хоть одна
+  timing/histogram-метрика. Границы — семантика `le` (`≤`), единица — СЕКУНДЫ, справа
+  неявный `+Inf` (поэтому счётчиков на один больше, чем границ). В каждой записи границы
+  стоили бы байт на дороге с пределом строки 2048. Три первые границы —
+  под-миллисекундные: все сегодняшние боевые тайминги микросекундные (99.28 % наблюдений
+  ложились ниже 1 мс), и сетка, начинавшаяся с 1 мс, вырождала перцентиль в максимум.
+- **`count`/`min`/`max`/`avg` точные, `p95` — ОЦЕНКА по бакету** (верхняя граница первого
+  бакета, где накоплено `≥ ceil(0.95·count)`, зажатая сверху настоящим `max`). Инвариант
+  `min ≤ p95 ≤ max` держится всегда.
+- `nan_dropped` появляется только ненулевым: NaN-наблюдения отбрасываются со счётом, иначе
+  одно такое значение навсегда отравило бы `sum`/`min`/`max` серии.
 
 ---
 
@@ -287,10 +317,12 @@ statistics_module/
 │   └── stats_config.py          # StatsManagerConfig(ChannelRoutingConfig) @register_schema
 ├── core/
 │   ├── stats_manager.py         # StatsManager(ChannelRoutingManager, IStatsManager)
-│   ├── metric_record.py         # MetricRecord dataclass (counter, gauge, timing, histogram)
+│   ├── metric_record.py         # MetricRecord dataclass + DEFAULT_DURATION_BUCKETS_SEC
+│   ├── cardinality_guard.py     # CardinalityGuard — потолок серий, ОДИН на две позиции
 │   └── aggregation_window.py    # AggregationWindow(IBufferStrategy)
 ├── channels/
 │   ├── log_stats_channel.py     # IChannel → LoggerManager.performance()
+│   ├── hub_stats_channel.py     # IChannel → stats-слот ObservabilityHub (2.1)
 │   └── file_stats_channel.py    # IChannel → JSON/CSV файл
 ├── adapters/
 │   └── stats_adapter.py         # StatsAdapter(BaseAdapter) → CommandManager

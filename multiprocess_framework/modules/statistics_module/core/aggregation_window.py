@@ -12,7 +12,8 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from ...channel_routing_module.interfaces import IBufferStrategy
-from .metric_record import MetricRecord, MetricType
+from .cardinality_guard import CardinalityGuard
+from .metric_record import DEFAULT_DURATION_BUCKETS_SEC, DISTRIBUTION_TYPES, MetricRecord, MetricType
 
 
 def _metric_key(name: str, tags: Optional[Dict] = None) -> str:
@@ -35,6 +36,7 @@ class AggregationWindow(IBufferStrategy):
         self,
         flush_fn: Callable[[str, List[Dict[str, Any]]], Any],
         flush_interval: float = 10.0,
+        guard: Optional[CardinalityGuard] = None,
     ) -> None:
         """
         Args:
@@ -42,9 +44,14 @@ class AggregationWindow(IBufferStrategy):
                       при flush; возвращает, сколько записей каналы ПРИНЯЛИ
                       (контракт Ф0.3). batch содержит один элемент — снапшот.
             flush_interval: Интервал периодического flush, сек.
+            guard: потолок числа серий в окне (2.2). ``None`` — без потолка:
+                   окно, поднятое отдельно от менеджера, не обязано знать про
+                   конфиг. Страж ПЕРЕЖИВАЕТ подмену окна — его владелец
+                   ``StatsManager``, а не окно (см. ``_swap_aggregation_window``).
         """
         self._flush_fn = flush_fn
         self._flush_interval = flush_interval
+        self._guard = guard
 
         self._lock = threading.Lock()
         self._metrics: Dict[str, MetricRecord] = {}
@@ -83,16 +90,21 @@ class AggregationWindow(IBufferStrategy):
         name: str,
         metric_type: MetricType,
         tags: Optional[Dict] = None,
-    ) -> MetricRecord:
-        """Получить или создать MetricRecord."""
+    ) -> Optional[MetricRecord]:
+        """Получить или создать MetricRecord. ``None`` — потолок серий (2.2)."""
         key = _metric_key(name, tags or {})
-        if key not in self._metrics:
-            self._metrics[key] = MetricRecord(
-                name=name,
-                metric_type=metric_type,
-                tags=dict(tags or {}),
-            )
-        return self._metrics[key]
+        record = self._metrics.get(key)
+        if record is not None:
+            return record
+        if self._guard is not None and not self._guard.allow(key, self._metrics, name):
+            return None
+        record = MetricRecord(
+            name=name,
+            metric_type=metric_type,
+            tags=dict(tags or {}),
+        )
+        self._metrics[key] = record
+        return record
 
     def _merge_data(self, data: Dict[str, Any]) -> None:
         """Добавить данные в агрегацию."""
@@ -107,6 +119,11 @@ class AggregationWindow(IBufferStrategy):
             mt = MetricType.COUNTER
 
         rec = self._ensure_record(name, mt, tags)
+        if rec is None:
+            # Потолок серий. Наблюдение в окно не попадает — но эмиссия УЖЕ
+            # состоялась: tap'ы её получили, счётчик ``_total_enqueued`` её
+            # посчитал, и число опущенных поедет в самой записи снапшота.
+            return
 
         if mt == MetricType.COUNTER:
             rec.add_counter(float(value))
@@ -128,6 +145,9 @@ class AggregationWindow(IBufferStrategy):
             self._channels_seen.add(channel)
             self._merge_data(data)
             self._total_enqueued += 1
+        # Голоса стража тут НЕТ сознательно: путь горячий, а предупреждение на
+        # этом такте несло бы числа первой секунды. Говорит страж на закрытии
+        # окна — обоснование в ``CardinalityGuard.speak``.
 
     def flush(self, channel: Optional[str] = None) -> None:
         """Принудительно сбросить буфер."""
@@ -162,21 +182,75 @@ class AggregationWindow(IBufferStrategy):
             # Снаружи по этому счётчику мерят ТЕМП окна (probe_b1_stats_tempo_live),
             # и тихий процесс не имеет права выглядеть как остановившееся окно.
             self._total_flushes += 1
-            if not snapshot["metrics"] and not include_empty:
+            suppressed = not snapshot["metrics"] and not include_empty
+            if suppressed:
                 self._empty_suppressed += 1
-                return
+
+        # Голос стража — ВНЕ лока и ДО подавления пустого снапшота: закрытие
+        # окна состоялось в обоих случаях, а предупреждение про потолок не
+        # имеет права зависеть от того, поехал снапшот или нет.
+        if self._guard is not None:
+            self._guard.speak()
+        if suppressed:
+            return
 
         for ch in channels:
             self._call_flush_fn(ch, [snapshot])
 
     def _build_snapshot(self) -> Dict[str, Any]:
-        """Построить агрегированный снапшот."""
+        """Построить агрегированный снапшот.
+
+        ``total_count`` — сколько СЕРИЙ было в окне, а не сколько доехало:
+        доехавшие плюс РАЗЛИЧНЫЕ опущенные потолком. По этому числу снаружи
+        судят о живости окна (``probe_b3_shutdown_order_live``, заголовок
+        строки ``performance.log``, текст записи в сторе), и арифметика
+        «сколько метрик было» не должна меняться от того, поместились они или
+        нет. Разность ``total_count − len(metrics)`` и есть число опущенных —
+        её называет вслух ``record_display.snapshot_message``, место под неё
+        было оставлено задачей 2.1 заранее.
+
+        **Различные серии, а не отказанные эмиссии** (находка ревью,
+        воспроизведена запуском): страж зовут заново на КАЖДУЮ эмиссию
+        отказанной серии — ключа в словаре так и нет, — поэтому счётчик
+        эмиссий рос без всякой связи с числом серий. Шесть эмиссий трёх
+        отказанных серий давали ``total_count=12`` при шести настоящих, и
+        запись противоречила сама себе: «опущено 9» рядом с тремя именами.
+        Число эмиссий не выброшено — оно отвечает на свой законный вопрос и
+        едет рядом под именем ``observations_dropped``.
+
+        ``bucket_bounds`` едет ОДИН раз на снапшот и ТОЛЬКО когда в нём есть
+        хоть одна timing/histogram-метрика (Р2.2-3). В каждой записи границы
+        стоили бы ~90 байт на метрику на дороге с пределом строки 2048 байт;
+        не ехать вовсе они не могут — константа со временем меняется, а запись
+        живёт в сторе ~93 часа, и бакеты без границ через сутки нечитаемы.
+        """
         metrics_list = [rec.aggregate() for rec in self._metrics.values()]
-        return {
+        has_distribution = any(rec.metric_type in DISTRIBUTION_TYPES for rec in self._metrics.values())
+        refused = (
+            self._guard.take_report()
+            if self._guard is not None
+            else {"series": 0, "observations": 0, "series_is_lower_bound": False, "names": []}
+        )
+        snapshot: Dict[str, Any] = {
             "timestamp": time.time(),
             "metrics": metrics_list,
-            "total_count": len(metrics_list),
+            "total_count": len(metrics_list) + int(refused["series"]),
         }
+        if has_distribution:
+            snapshot["bucket_bounds"] = list(DEFAULT_DURATION_BUCKETS_SEC)
+        if refused["series"] or refused["observations"]:
+            # Ключи появляются только при ненулевом отказе: постоянные нули
+            # весили бы в каждой записи на дороге с пределом строки, а «судить
+            # поимённо» требует именно имён, а не одного числа-суммы.
+            snapshot["series_dropped"] = int(refused["series"])
+            snapshot["observations_dropped"] = int(refused["observations"])
+            snapshot["dropped_series"] = list(refused["names"])
+            if refused["series_is_lower_bound"]:
+                # Множество различных ключей упёрлось в тот же потолок. Признак
+                # едет ТОЛЬКО когда он истинен, но молчать о нём нельзя:
+                # заниженное число, выглядящее точным, читатель примет за факт.
+                snapshot["series_dropped_is_lower_bound"] = True
+        return snapshot
 
     def _flush_channel(self, channel: str, include_empty: bool = False) -> None:
         """Сбросить один канал (отправляет полный снапшот).
@@ -189,9 +263,14 @@ class AggregationWindow(IBufferStrategy):
             snapshot = self._build_snapshot()
             self._metrics.clear()
             self._total_flushes += 1
-            if not snapshot["metrics"] and not include_empty:
+            suppressed = not snapshot["metrics"] and not include_empty
+            if suppressed:
                 self._empty_suppressed += 1
-                return
+
+        if self._guard is not None:
+            self._guard.speak()
+        if suppressed:
+            return
 
         self._call_flush_fn(channel, [snapshot])
 

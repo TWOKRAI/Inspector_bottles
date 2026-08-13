@@ -26,6 +26,7 @@ from ..configs.stats_config import StatsManagerConfig
 from ..interfaces import IStatsManager
 from .metric_record import MetricRecord, MetricType
 from .aggregation_window import AggregationWindow
+from .cardinality_guard import CardinalityGuard
 from ...logger_module.core.log_paths import resolve_log_file_path
 from ..channels.log_stats_channel import DEFAULT_LOG_LINE_MAX_BYTES, LogStatsChannel
 from ..channels.file_stats_channel import FileStatsChannel
@@ -73,6 +74,20 @@ def _schema_default(field_name: str) -> float:
     return float(StatsManagerConfig.model_fields[field_name].default)
 
 
+def resolve_max_series(cfg: Mapping[str, Any]) -> int:
+    """Потолок серий из конфига — ОДНА позиция чтения ключа на обе позиции стража.
+
+    Дефолт берётся из схемы (:data:`DEFAULT_MAX_SERIES` через
+    :class:`StatsManagerConfig`), а не второй копией числа в коде: совпадение
+    значений маскировало бы расхождение до первой правки дефолта.
+    """
+    raw = cfg.get("max_series", StatsManagerConfig.model_fields["max_series"].default)
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return int(StatsManagerConfig.model_fields["max_series"].default)
+
+
 def resolve_tempo(cfg: Mapping[str, Any]) -> Tuple[float, float, float]:
     """``(запрошенный интервал агрегации, пол, действующий темп записи)``.
 
@@ -117,7 +132,22 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             managers = {}
 
         cfg = normalize_config(config, default={})
-        buffer = AggregationWindow(flush_fn=self._do_flush, flush_interval=resolve_tempo(cfg)[2])
+
+        # Стражи кардинальности (2.2) — ДВА экземпляра ОДНОЙ реализации, по
+        # одному на накопительную позицию. Владелец обоих — менеджер, а не
+        # окно: окно подменяется на каждой смене темпа
+        # (``_swap_aggregation_window``), и страж, живущий внутри окна, уезжал
+        # бы вместе с ним — вместе с потолком, счётом опущенных и правом на
+        # голос. Создаются ДО окна, потому что окно берёт свой в конструкторе.
+        limit = resolve_max_series(cfg)
+        self._window_guard = CardinalityGuard(limit, position="окно агрегации", warn=self._log_warning)
+        self._live_guard = CardinalityGuard(limit, position="живой слой", warn=self._log_warning)
+
+        buffer = AggregationWindow(
+            flush_fn=self._do_flush,
+            flush_interval=resolve_tempo(cfg)[2],
+            guard=self._window_guard,
+        )
 
         ChannelRoutingManager.__init__(
             self,
@@ -179,6 +209,15 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         self._config_dict = cfg
         self._default_tags = cfg.get("default_tags") or {}
         self._setup_channels()
+        # Потолок серий обновляется ОТДЕЛЬНО от подмены окна и БЕЗУСЛОВНО.
+        # ``_swap_aggregation_window`` выходит рано, когда темп не изменился, —
+        # и правка одного лишь `max_series` не доехала бы до окна вовсе:
+        # ручка выглядела бы применённой (она в конфиге и в readback'е), а
+        # действовала бы прежняя. Ровно тот класс, которым уже болел темп
+        # (major-3) и предел строки (3.4).
+        limit = resolve_max_series(cfg)
+        self._window_guard.set_limit(limit)
+        self._live_guard.set_limit(limit)
         # Строго ПОСЛЕ каналов: подмена окна делает финальный flush старого, и
         # ему нужно, куда писать, — на этом шаге реестр уже пересобран.
         self._swap_aggregation_window(cfg)
@@ -202,13 +241,17 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
 
         Темп не изменился — окно не трогаем: пересоздание ради того же числа
         обнуляло бы накопленную агрегацию на каждом ``config.reload``.
+
+        **Страж кардинальности переезжает в новое окно** — тот же объект, не
+        копия: его потолок обновляет ``_rebuild_from_config`` до этого вызова,
+        а счёт опущенных и право на голос принадлежат ПРОЦЕССУ, а не окну.
         """
         tempo = resolve_tempo(cfg)[2]
         old = self._buffer
         if old is not None and getattr(old, "flush_interval", None) == tempo:
             return
         was_running = bool(old is not None and old.stats.get("running"))
-        new = AggregationWindow(flush_fn=self._do_flush, flush_interval=tempo)
+        new = AggregationWindow(flush_fn=self._do_flush, flush_interval=tempo, guard=self._window_guard)
         self._buffer = new
         if old is not None:
             old.stop()
@@ -269,6 +312,13 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         max_bytes = getattr(log_channel, "max_bytes", None)
         if max_bytes is not None:
             out["log_line_max_bytes"] = max_bytes
+        # 2.2: потолок серий читается у ЖИВОГО стража, а не из конфига — по той
+        # же причине, что темп и предел строки. Ручка, которую нельзя
+        # прочитать, неотличима от неприменённой (урок 3.4), а пересчёт из
+        # конфига вернул бы запрошенное число даже при несработавшей правке.
+        # Оба стража держат ОДИН потолок, поэтому ключ один; расхождение между
+        # ними было бы дефектом, и его сторожит тест.
+        out["max_series"] = self._live_guard.limit
         return out
 
     # =========================================================================
@@ -486,6 +536,11 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             из Ф0.3). Не «отдано»: живой-но-сломанный сток отдачу принимает, а
             запись теряет — на этом уже обжигались в буфере логгера.
         """
+        # 2.2: такт окна — момент, когда страж ЖИВОГО слоя говорит вслух. Своего
+        # такта у него нет (слой не сбрасывается вовсе), а на горячем пути
+        # предупреждение и стоило бы дорого, и несло бы числа первой секунды.
+        # Страж окна говорит сам, из ``flush_all``. Оба зовутся вне локов.
+        self._live_guard.speak()
         names = self._channel_registry.names()
         accepted = 0
         for item in batch:
@@ -507,17 +562,28 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         name: str,
         metric_type: MetricType,
         merged_tags: Dict[str, str],
-    ) -> MetricRecord:
-        """Получить или создать MetricRecord (thread-safe)."""
+    ) -> Optional[MetricRecord]:
+        """Получить или создать MetricRecord (thread-safe).
+
+        ``None`` — потолок серий живого слоя (2.2). Этот слой не чистится
+        вовсе: ``reset_metrics`` зовут вручную, а на живом стенде за две минуты
+        в нём накапливалось 226 серий, и рос он весь срок процесса. Потолок
+        ограничивает ТОЛЬКО справочник ``get_metric``/``get_all_metrics``:
+        доставка не страдает — эмиссия в окно и в tap'ы происходит в любом
+        случае, и это разделение названо решением Р2.2-7.
+        """
         key = _metric_key(name, merged_tags)
         with self._metrics_lock:
-            if key not in self._metrics:
-                self._metrics[key] = MetricRecord(
-                    name=name,
-                    metric_type=metric_type,
-                    tags=merged_tags,
-                )
-            return self._metrics[key]
+            record = self._metrics.get(key)
+            if record is None:
+                if self._live_guard.allow(key, self._metrics, name):
+                    record = MetricRecord(
+                        name=name,
+                        metric_type=metric_type,
+                        tags=merged_tags,
+                    )
+                    self._metrics[key] = record
+        return record
 
     def _emit_record(self, data: Dict[str, Any]) -> None:
         """Единственная точка эмиссии метрики: tap'ы + буфер агрегации.
@@ -557,10 +623,17 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         value: Any = 1,
         tags: Optional[Dict] = None,
     ) -> None:
-        """Записать счётчик (counter)."""
+        """Записать счётчик (counter).
+
+        ``rec is None`` — серия не пущена в живой справочник потолком 2.2.
+        Эмиссия при этом происходит ВСЕГДА: стражи двух позиций независимы, и
+        отказ справочника не имеет права остановить доставку (Р2.2-7). Так же
+        устроены остальные три дороги ниже.
+        """
         merged = self._merged_tags(tags)
         rec = self._ensure_record(name, MetricType.COUNTER, merged)
-        rec.add_counter(float(value))
+        if rec is not None:
+            rec.add_counter(float(value))
         self._emit_record({"type": "counter", "name": name, "value": float(value), "tags": merged})
 
     def increment(self, name: str, tags: Optional[Dict] = None) -> None:
@@ -573,24 +646,33 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         duration: float,
         tags: Optional[Dict] = None,
     ) -> None:
-        """Записать время выполнения (в секундах)."""
+        """Записать время выполнения (**в секундах**).
+
+        Единица несущая: границы бакетов (``DEFAULT_DURATION_BUCKETS_SEC``)
+        живут в секундах, и миллисекунды, посланные сюда, легли бы в бакет
+        ``+Inf`` целиком — p95 стал бы константой при зелёном тесте памяти
+        (§2-П7 плана этапа 6).
+        """
         merged = self._merged_tags(tags)
         rec = self._ensure_record(name, MetricType.TIMING, merged)
-        rec.add_timing(duration)
+        if rec is not None:
+            rec.add_timing(duration)
         self._emit_record({"type": "timing", "name": name, "value": duration, "tags": merged})
 
     def gauge(self, name: str, value: float, tags: Optional[Dict] = None) -> None:
         """Записать текущее значение (gauge — перезаписывает предыдущее)."""
         merged = self._merged_tags(tags)
         rec = self._ensure_record(name, MetricType.GAUGE, merged)
-        rec.set_gauge(value)
+        if rec is not None:
+            rec.set_gauge(value)
         self._emit_record({"type": "gauge", "name": name, "value": value, "tags": merged})
 
     def histogram(self, name: str, value: float, tags: Optional[Dict] = None) -> None:
-        """Записать значение в гистограмму."""
+        """Записать значение в гистограмму (та же механика бакетов, что у timing)."""
         merged = self._merged_tags(tags)
         rec = self._ensure_record(name, MetricType.HISTOGRAM, merged)
-        rec.add_histogram(value)
+        if rec is not None:
+            rec.add_histogram(value)
         self._emit_record({"type": "histogram", "name": name, "value": value, "tags": merged})
 
     # =========================================================================
@@ -620,9 +702,52 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     # =========================================================================
 
     def get_stats(self) -> Dict[str, Any]:
-        """Полная диагностика: каналы + буфер + метрики."""
+        """Полная диагностика: каналы + буфер + метрики.
+
+        Числа потолка серий (2.2) едут ЗДЕСЬ, а не в ``LOSS_COUNTER_KEYS``
+        (решение Р2.2-8): те пять классов описывают стык «менеджер → канал» и
+        общие для трёх плоскостей, а кардинальность — потеря НА ВХОДЕ и
+        существует только у статистики. В общем кортеже она объявила бы вечный
+        ноль у логгера и у ошибок.
+
+        **Серии и эмиссии — РАЗНЫЕ числа, и ключи названы так, чтобы их нельзя
+        было перепутать.** ``series_dropped`` — сколько различных серий не
+        пущено в справочник; ``observations_dropped`` — сколько эмиссий при
+        этом отвергнуто (одна отказанная серия даёт столько, сколько раз её
+        прислали). Пока это была одна величина, она врала на обоих вопросах.
+
+        Числа живого слоя — за срок процесса: сам слой не чистится, и его
+        отчёт никто не забирает. У окна берётся только счётчик ЭМИССИЙ за срок
+        процесса: «сколько различных серий опущено» — величина окна, она едет
+        в записи снапшота и там же обнуляется, а в диагностике процесса
+        означала бы «в последнем незакрытом окне» и читалась бы как итог.
+        """
         stats = super().get_stats()
+        live = self._live_guard.report()
+        window = self._window_guard.report()
         with self._metrics_lock:
             stats["metrics_count"] = len(self._metrics)
             stats["metric_names"] = sorted({r.name for r in self._metrics.values()})
+        stats["max_series"] = self._live_guard.limit
+        stats["series_dropped"] = live["series"]
+        stats["observations_dropped"] = live["observations"]
+        stats["series_dropped_is_lower_bound"] = live["series_is_lower_bound"]
+        stats["dropped_series"] = live["names"]
+        # Отказы окна названы ОТДЕЛЬНО: слить их с живым слоем в одну сумму
+        # значило бы спрятать, какая из двух позиций уперлась, — а лечатся они
+        # разным (справочник — сбросом, окно — темпом или тегами эмитента).
+        #
+        # **Симметрию имён здесь пробовали завести и откатили — записано, чтобы
+        # не завели снова.** Правка «пусть окно отдаёт ту же четвёрку, что живой
+        # слой» выглядела устранением асимметрии, а на деле смешала ПЕРИОДЫ:
+        # у стража окна `series` и признак оценки снизу живут до ближайшего
+        # `take_report()` (его забирает построение снапшота), а `observations`
+        # и имена — за срок процесса. Воспроизведено ревью: `window_series_dropped=4`
+        # → `flush()` → **0**, при том что `window_observations_dropped` остался 4.
+        # Одноимённые величины с разными периодами хуже названной асимметрии:
+        # первое читается неверно молча, второе хотя бы заставляет спросить.
+        # «Сколько СЕРИЙ опущено за окно» и так едет в КАЖДОЙ записи снапшота
+        # (`total_count − len(metrics)`), где период однозначен по построению.
+        stats["window_observations_dropped"] = window["observations"]
+        stats["window_dropped_series"] = window["names"]
         return stats

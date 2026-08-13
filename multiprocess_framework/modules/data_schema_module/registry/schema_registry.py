@@ -139,15 +139,20 @@ class SchemaRegistry(ISchemaManager):
         if kwargs:
             init_data.update(kwargs)
 
-        start_time = time.time()
+        # 2.2 (Р2.2-10): часы длительности — perf_counter. Замеряемый интервал
+        # короче шага time.time()/monotonic на Windows (~15.6 мс), и такие
+        # разности ложатся на сетку часов: по бакетам они разложились бы
+        # двумя столбиками (0.0 и 0.0156) вместо распределения. Значение
+        # используется только как разность — эпоха perf_counter не важна.
+        start_time = time.perf_counter()
         try:
             instance = schema(**init_data) if init_data else schema()
-            duration = time.time() - start_time
+            duration = time.perf_counter() - start_time
             record_timing("data_schema.instance_created", duration, {"schema_name": schema_name})
             increment_metric("data_schema.instances_created", {"schema_name": schema_name})
             return instance
         except ValidationError as e:
-            duration = time.time() - start_time
+            duration = time.perf_counter() - start_time
             record_timing(
                 "data_schema.instance_creation_failed",
                 duration,

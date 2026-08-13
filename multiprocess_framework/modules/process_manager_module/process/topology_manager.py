@@ -173,6 +173,15 @@ class TopologyManager(BaseManager, ObservableMixin):
         if self._diff_fn is None or self._commands_fn is None:
             return {"success": False, "error": "diff_fn/commands_fn not configured"}
 
+        # 2.2 (Р2.2-10): метрика уезжает в СЕКУНДАХ. До этой правки все три
+        # ветки слали `topology.apply_ms` в миллисекундах в
+        # `StatsManager.record_timing`, документированный в секундах, — это был
+        # ЕДИНСТВЕННЫЙ продовый timing фреймворка, завышенный в 1000 раз, и под
+        # секундными границами бакетов он целиком лёг бы в `+Inf`. Имя
+        # переименовано вместе с единицей (суффикс `_ms` на секундах — та же
+        # ложь): читателей у прежнего имени, кроме собственного теста, нет.
+        # Строка лога по-прежнему показывает миллисекунды — это вид для глаз,
+        # и он от единицы метрики не зависит.
         t_start = time.perf_counter()
         # results объявлен ДО try чтобы exception-ветка могла вернуть
         # частично-собранный список (для _teardown_partial в PM)
@@ -213,9 +222,9 @@ class TopologyManager(BaseManager, ObservableMixin):
                             f"продолжаем cleanup-хвост (компенсация B-4): {result}"
                         )
                         continue
-                    elapsed_ms = (time.perf_counter() - t_start) * 1000
+                    elapsed_sec = time.perf_counter() - t_start
                     self._log_error(f"Топология: команда #{idx} ({cmd_type}) завершилась неуспешно: {result}")
-                    self._record_timing("topology.apply_ms", elapsed_ms)
+                    self._record_timing("topology.apply", elapsed_sec)
                     return {
                         "success": False,
                         "results": results,
@@ -225,10 +234,10 @@ class TopologyManager(BaseManager, ObservableMixin):
             # Все КОНСТРУКТИВНЫЕ команды успешны — коммитим топологию.
             self._current_topology = topology_dict
 
-            elapsed_ms = (time.perf_counter() - t_start) * 1000
-            self._log_info(f"Топология применена: {len(commands)} команд за {elapsed_ms:.1f}ms")
+            elapsed_sec = time.perf_counter() - t_start
+            self._log_info(f"Топология применена: {len(commands)} команд за {elapsed_sec * 1000:.1f}ms")
             self._record_metric("topology.commands", len(commands))
-            self._record_timing("topology.apply_ms", elapsed_ms)
+            self._record_timing("topology.apply", elapsed_sec)
 
             response = {
                 "success": True,
@@ -242,10 +251,10 @@ class TopologyManager(BaseManager, ObservableMixin):
                 response["cleanup_failures"] = cleanup_failures
             return response
         except Exception as e:
-            elapsed_ms = (time.perf_counter() - t_start) * 1000
+            elapsed_sec = time.perf_counter() - t_start
             self._log_error(f"Топология: ошибка apply: {e}")
             self._track_error(e, {"phase": "topology.apply"})
-            self._record_timing("topology.apply_ms", elapsed_ms)
+            self._record_timing("topology.apply", elapsed_sec)
             # results может быть частично заполнен — возвращаем для
             # _teardown_partial в PM (точный откат по факту исполнения)
             return {"success": False, "error": str(e), "results": results}

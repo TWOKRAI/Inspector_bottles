@@ -33,7 +33,7 @@ from pydantic import Field, field_validator, model_validator
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...observability_declarations import declared_rules
 from ...logger_module.configs.logger_manager_config import MIN_BURST_RESET_SEC
-from ...statistics_module import DEFAULT_LOG_LINE_MAX_BYTES
+from ...statistics_module import DEFAULT_LOG_LINE_MAX_BYTES, DEFAULT_MAX_SERIES
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 
 #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
@@ -185,6 +185,17 @@ class ObservabilityStatsConfig(SchemaBase):
         int,
         FieldMeta("Предел объёма строки снапшота, байт (0 — без предела)", min=0, max=1_048_576),
     ] = DEFAULT_LOG_LINE_MAX_BYTES
+
+    # 2.2: потолок уникальных серий (имя × теги) — на окно агрегации И на живой
+    # слой сразу. Живёт здесь по той же причине, что `log_line_max_bytes`: этот
+    # фасад — единственная дорога конфига приложения к плоскости, и ключ,
+    # которого тут нет, схема отбрасывает МОЛЧА. Дорога трёх точек §3.2:
+    # схема → фасад/`expand_observability` → readback живого стража
+    # (`StatsManager.observability_readback`).
+    max_series: Annotated[
+        int,
+        FieldMeta("Потолок уникальных серий метрик (имя × теги); 0 — без предела", min=0, max=1_000_000),
+    ] = DEFAULT_MAX_SERIES
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -538,6 +549,11 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         # 3.4: без прокида ключ существовал бы в фасаде и не доезжал до менеджера —
         # ровно та половинчатость, которой уже был `flush_interval` (Ф6.х.8).
         "log_line_max_bytes": cfg.stats.log_line_max_bytes,
+        # 2.2: третья точка той же дороги. Без этой строки ручка стояла бы в
+        # схеме, показывалась бы оператору и не значила бы ничего — менеджер
+        # брал бы дефолт (тот же дефект, что дважды ловили `flush_interval` и
+        # `log_line_max_bytes`).
+        "max_series": cfg.stats.max_series,
     }
 
     # Task 5.10.b: адресные переопределения каналов двух младших плоскостей —

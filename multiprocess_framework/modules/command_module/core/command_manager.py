@@ -234,7 +234,14 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             }
             result = manager.handle_command(message)
         """
-        start_time = time.time()
+        # 2.2 (Р2.2-10): часы длительности — ``perf_counter``, а не ``time``.
+        # Одна команда на этом пути живёт десятки-сотни микросекунд, а шаг
+        # ``time.time()``/``monotonic`` на Windows ≈ 15.6 мс: все замеры короче
+        # шага давали ровно 0.0 либо ровно 0.0156, то есть по бакетам
+        # длительностей раскладывались бы двумя столбиками вместо распределения.
+        # Значение используется ТОЛЬКО как разность — эпоха ``perf_counter``
+        # (произвольная точка отсчёта) роли не играет.
+        start_time = time.perf_counter()
         command_name = message.get("command", "unknown")
 
         self._log_debug(f"Handling command: {command_name}", module=LOG_SOURCE, command=command_name)
@@ -242,7 +249,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
 
         result = self.dispatcher.dispatch(message, key_field="command", data_field="data")
 
-        duration = time.time() - start_time
+        duration = time.perf_counter() - start_time
         if isinstance(result, dict) and result.get("status") == "error":
             self._log_warning(
                 f"Command '{command_name}' failed: {result.get('reason') or result.get('error')}",
