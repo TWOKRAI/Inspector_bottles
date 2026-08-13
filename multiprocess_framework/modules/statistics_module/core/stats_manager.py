@@ -29,6 +29,7 @@ from .aggregation_window import AggregationWindow
 from ...logger_module.core.log_paths import resolve_log_file_path
 from ..channels.log_stats_channel import DEFAULT_LOG_LINE_MAX_BYTES, LogStatsChannel
 from ..channels.file_stats_channel import FileStatsChannel
+from ..channels.hub_stats_channel import STATS_HUB_CHANNEL, HubStatsChannel
 
 _STATS_SENTINEL = "__stats__"
 
@@ -36,6 +37,14 @@ _STATS_SENTINEL = "__stats__"
 #: вернуть их через ``set_sink_enabled`` оператор вправе так же, как остальные.
 STATS_LOG_CHANNEL = "log_stats"
 STATS_FALLBACK_CHANNEL = "file_stats"
+
+#: Слот менеджеров, в котором лежит hub наблюдаемости процесса (задача 2.1).
+#: Именно СЛОТ, а не поле: канал в hub обязан пережить ``config.reload`` —
+#: базовый ``reconfigure`` чистит реестр каналов и зовёт ``_setup_channels``
+#: заново, поэтому канал, зарегистрированный снаружи, исчез бы на первой же
+#: перезагрузке конфига (тот же класс, что «runtime-конфиг умирает с
+#: процессом»). Пересборка читает hub отсюда и поднимает канал сама.
+HUB_MANAGER_SLOT = "observability_hub"
 
 
 def _metric_key(name: str, tags: Optional[Dict] = None) -> str:
@@ -296,6 +305,21 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
                     continue
                 if not ch_params.get("enabled", True):
                     continue
+                if ch_name == STATS_HUB_CHANNEL:
+                    # У этого имени СВОЙ сборщик (`_build_hub_channel`), а тип по
+                    # умолчанию здесь — "file". Найдено инъекцией 2.1: запись
+                    # `channels.hub_stats.enabled = true` поднимала под этим
+                    # именем FileStatsChannel, то есть дверь оператора включала
+                    # не тот канал, и снаружи разница была не видна — имя в
+                    # реестре то же. Секция `channels` описывает файловые
+                    # приёмники; служебные имена в ней читаются только ключом
+                    # `enabled` (см. `_declaratively_disabled`).
+                    #
+                    # У соседа `log_stats` та же дыра, и она СТАРШЕ этой задачи:
+                    # здесь не трогается намеренно — это смена поведения для
+                    # существующих конфигов без воспроизведённой жалобы. Названа,
+                    # чтобы не выглядеть незамеченной.
+                    continue
                 file_ch = self._build_file_channel(str(ch_name), ch_params)
                 if file_ch is not None:
                     self.register_channel(file_ch)
@@ -315,6 +339,14 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
                 )
             else:
                 self.register_channel(self._build_fallback_channel())
+
+        # Задача 2.1 — СТРОГО после решения о fallback'е. Канал в hub тоже
+        # «куда писать», но зачесть его в этом условии значило бы тихо снять
+        # файловый приёмник у процесса без логгера: hub — bounded-буфер, и его
+        # содержимое живёт до дренажа, а не до конца смены.
+        hub_ch = self._build_hub_channel()
+        if hub_ch is not None and not self._declaratively_disabled(STATS_HUB_CHANNEL):
+            self.register_channel(hub_ch)
 
     # --- сборщики каналов: по одному имени за раз ----------------------------
     # Вынесены из _setup_channels ради Ф0.6: set_sink_enabled(name, True) обязан
@@ -349,6 +381,49 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             name=name,
         )
 
+    def _build_hub_channel(self) -> Optional[HubStatsChannel]:
+        """Канал «снапшот окна → hub наблюдаемости». None, если hub не подключён.
+
+        Процесс без hub'а (не пилот телеметрии) — штатное состояние, а не
+        деградация: у плоскости просто нет этой дороги, остальные работают.
+        """
+        hub = self.get_manager(HUB_MANAGER_SLOT)
+        if hub is None:
+            return None
+        return HubStatsChannel(hub, name=STATS_HUB_CHANNEL)
+
+    def attach_observability_hub(self, hub: Any) -> bool:
+        """Подключить hub процесса: снапшоты окна поедут в стор и живой хвост (2.1).
+
+        Зовётся composition root'ом процесса ПОСЛЕ создания hub'а
+        (``wire_process_observability``) — раньше его просто нет.
+
+        **Запрет из конфига проверяется ЗДЕСЬ, а не в `_recreate_channel`.**
+        Тот намеренно игнорирует ``enabled=false`` — он обслуживает
+        ``sink.enable``, то есть ЯВНЫЙ override оператора над конфигом. Проводка
+        процесса override'ом не является, и без этой проверки дверь
+        ``channels.hub_stats.enabled = false`` не действовала бы на боевой
+        дороге вовсе: на старте `_setup_channels` отрабатывает ДО появления
+        hub'а и просто не доходит до этого канала, а всю работу делает attach.
+        Найдено ревью задачи 2.1 воспроизведением: снятый оператором канал
+        поднимался и слал снапшоты, а `config.reload` потом молча его убирал —
+        поведение менялось само, без команды.
+
+        Returns:
+            Поднялся ли канал. ``False`` штатен и означает «снят конфигом» —
+            об этом сказано в лог; вызывающему решать нечего, значение здесь
+            ради тестов и симметрии с ``_recreate_channel``.
+        """
+        self.register_manager(HUB_MANAGER_SLOT, hub)
+        if self._declaratively_disabled(STATS_HUB_CHANNEL):
+            self._log_info(
+                f"[{self.manager_name}] канал {STATS_HUB_CHANNEL} не поднят: снят конфигом "
+                f"(channels.{STATS_HUB_CHANNEL}.enabled=false) — снапшоты окна в стор и живой "
+                "хвост не поедут"
+            )
+            return False
+        return self._recreate_channel(STATS_HUB_CHANNEL)
+
     def _build_fallback_channel(self) -> FileStatsChannel:
         """Приёмник по умолчанию: у статистики всегда есть куда писать."""
         return FileStatsChannel(
@@ -376,6 +451,8 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             channel = self._build_log_channel()
         elif name == STATS_FALLBACK_CHANNEL:
             channel = self._build_fallback_channel()
+        elif name == STATS_HUB_CHANNEL:
+            channel = self._build_hub_channel()
         else:
             params = (self._config_dict.get("channels") or {}).get(name)
             if not isinstance(params, dict):

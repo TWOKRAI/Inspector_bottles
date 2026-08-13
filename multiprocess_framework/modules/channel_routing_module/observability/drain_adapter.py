@@ -43,6 +43,9 @@ Sink'и передаются в конструктор, вызовы идут п
         Post: по metric_type вызван record_metric(counter)/record_timing(timing)/
               gauge(gauge) на stats-sink'е; True/False по наличию sink.
         Inv:  неизвестный metric_type → record_metric (значение не теряется).
+        Inv:  запись с маркером STATS_AGGREGATE_KEY в sink НЕ идёт (2.1: это
+              снапшот, который построил сам sink — петля) и считается в
+              ``skipped_aggregates``.
 
     apply_drained(drained)
         Pre:  drained — выход hub.drain_all(): {'log':[...],'error':[...],'stats':[...]}.
@@ -59,6 +62,7 @@ from .observability_hub import (
     METRIC_COUNTER,
     METRIC_GAUGE,
     METRIC_TIMING,
+    STATS_AGGREGATE_KEY,
 )
 
 # Разрешённые severity-имена методов на Logger/Error sink'ах — ВЫВЕДЕНЫ из
@@ -87,6 +91,12 @@ class ObservabilityDrainAdapter:
         self._logger = logger
         self._stats = stats
         self._error = error
+        # Задача 2.1: сколько записей-агрегатов предохранитель НЕ отдал в
+        # StatsManager. ``apply_stat`` возвращает False и на «нет стока», и на
+        # «это агрегат» — одно и то же число снаружи означало бы две разные
+        # вещи. Намеренная не-доставка обязана считаться отдельно от отсутствия
+        # получателя (тот же счёт, что у ``empty_suppressed`` окна агрегации).
+        self._skipped_aggregates = 0
 
     # ------------------------------------------------------------------
     # Одиночные записи
@@ -123,6 +133,35 @@ class ObservabilityDrainAdapter:
         return True
 
     def apply_stat(self, record: Dict[str, Any]) -> bool:
+        """Сырую метрику — в ``StatsManager``; АГРЕГАТ — мимо него (задача 2.1).
+
+        Работа адаптера — доносить до менеджера сырые числа ЧУЖИХ владельцев
+        (``WorkerManager`` эмитит в hub, менеджер агрегирует). Снапшот окна
+        приходит с противоположной стороны: его ``StatsManager`` сам и построил.
+
+        **Что происходит без предохранителя — замерено, а не предположено**
+        (прогон со снятой проверкой, 5 окон): у агрегата нет ни ``metric``, ни
+        ``value``, ни ``metric_type``, поэтому инвариант «неизвестный тип не
+        теряем» ниже сворачивает ВЕСЬ снапшот в одну безымянную метрику —
+        ``record_metric("", 1)``. Начиная со второго окна каждый снапшот несёт
+        фантомную серию ``('', 1.0)``, и «сколько метрик было в окне» врёт на
+        каждом процессе до конца смены.
+
+        **Число СТРОК при этом остаётся линейным** (одно окно — один снапшот),
+        поэтому тест, считающий строки, петлю НЕ ловит; красным её делает счёт
+        СЕРИЙ внутри записи. Прежняя редакция этого докстринга обещала «рост
+        каждое окно, пока не упрётся в потолок канала» — правдоподобно и неверно.
+
+        Стор и форвардеры берут пачку целиком: у них агрегат — законная запись,
+        а петли нет, они не эмитенты.
+
+        Различитель — :data:`STATS_AGGREGATE_KEY`, тот же самый, по которому
+        ветвится нормализатор display-вида. Второго признака у этого класса
+        записей нет намеренно (см. докстринг константы).
+        """
+        if record.get(STATS_AGGREGATE_KEY):
+            self._skipped_aggregates += 1
+            return False
         if self._stats is None:
             return False
         name = record.get("metric", "")
@@ -143,6 +182,11 @@ class ObservabilityDrainAdapter:
     # ------------------------------------------------------------------
     # Пакетный дренаж
     # ------------------------------------------------------------------
+
+    @property
+    def skipped_aggregates(self) -> int:
+        """Сколько записей-агрегатов не поехало обратно в ``StatsManager`` (2.1)."""
+        return self._skipped_aggregates
 
     def apply_drained(self, drained: Dict[str, List[Dict[str, Any]]]) -> None:
         for rec in drained.get(KIND_LOG, ()):  # порядок каналов сохранён

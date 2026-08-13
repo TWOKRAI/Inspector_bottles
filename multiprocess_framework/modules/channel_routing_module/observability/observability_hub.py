@@ -44,6 +44,25 @@ METRIC_GAUGE = "gauge"
 METRIC_COUNTER = "counter"
 METRIC_TIMING = "timing"
 
+#: Маркер записи-АГРЕГАТА в stats-слоте (задача 2.1). Ставится тем, кто кладёт
+#: готовый снапшот окна (:meth:`ObservabilityHub.emit_stats_record`), и читается
+#: ТРЕМЯ потребителями сразу:
+#:
+#:   1. :func:`..observability.record_display.hub_record_to_display` — ветка
+#:      нормализатора: у агрегата нет ни ``metric``, ни ``value``, и правило
+#:      «четыре ключа» превратило бы его в пустую строку БД;
+#:   2. :meth:`..observability.drain_adapter.ObservabilityDrainAdapter.apply_stat`
+#:      — предохранитель от петли: агрегат НЕ возвращается в ``StatsManager``,
+#:      иначе весь агрегат свернулся бы там в одну безымянную метрику и
+#:      отравлял бы каждое следующее окно (форма вреда замерена — ADR-CRM-015);
+#:   3. тесты — поимённая проверка класса записей.
+#:
+#: **Признак ровно один на все три места.** Второй независимый признак того же
+#: класса (скажем, «нет ключа metric» у нормализатора против маркера у адаптера)
+#: разошёлся бы с первым молча: запись, для одного агрегат, а для другого сырая
+#: метрика, прошла бы петлёй мимо предохранителя (M2 ревью №3 спеки).
+STATS_AGGREGATE_KEY = "aggregate"
+
 
 def _serialize_exception(error: BaseException) -> Dict[str, Any]:
     """Привести исключение к pickle-safe dict (Dict at Boundary).
@@ -95,11 +114,18 @@ class ObservabilityHub:
     # Внутренняя маршрутизация (in-process route по 'kind')
     # ------------------------------------------------------------------
 
-    def _emit(self, kind: str, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Проставить общий конверт (kind/module/ts), положить в канал kind, вернуть запись."""
+    def _envelope(self, kind: str, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Проставить общий конверт (kind/module/ts) — без записи в канал."""
         record["kind"] = kind
         record["module"] = self._module
         record["ts"] = self._clock()
+        return record
+
+    def _emit(self, kind: str, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Конверт + запись в канал kind. Возвращает ЗАПИСЬ (контракт error-пути:
+        ``track_error``/``record_error`` обязаны вернуть non-None, иначе
+        ``ObservableMixin._track_error`` сделает fallback и запишет ошибку дважды)."""
+        record = self._envelope(kind, record)
         self._channels[kind].write(record)
         return record
 
@@ -158,6 +184,48 @@ class ObservabilityHub:
 
     def gauge(self, metric_name: str, value: Any, tags: Optional[Dict[str, str]] = None) -> None:
         self._emit_stat(metric_name, value, METRIC_GAUGE, tags)
+
+    def emit_stats_record(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Положить в stats-слот ГОТОВУЮ запись — не одну метрику (задача 2.1).
+
+        До этой правки у hub'а был ровно один писатель stats-слота
+        (:meth:`_emit_stat`), и он навязывал форму «одна запись на метрику»:
+        ``{metric, value, metric_type, tags}``. Снапшот окна агрегации в эту
+        форму не ложится — он про НАБОР метрик за окно, а разложить его на
+        записи-по-метрике значило бы 8 процессов × 20 метрик × 360 окон/ч =
+        57 600 строк/ч в стор (в 11 раз больше всего сегодняшнего темпа).
+        Поэтому метод принимает готовый payload и только проставляет общий
+        конверт — ``kind``/``module``/``ts``, как всем остальным записям.
+
+        **Форма payload'а hub не проверяет и не знает** — он примитив уровня 0:
+        его дело положить pickle-safe dict в bounded-канал под правильным
+        ``kind``. Смысл содержимого — договор писателя (``HubStatsChannel``) и
+        читателей (нормализатор, drain-адаптер), и держится он на маркере
+        :data:`STATS_AGGREGATE_KEY`, который писатель обязан поставить сам:
+        поставь его здесь — и «положить готовую запись» стало бы синонимом
+        «положить агрегат», а метод общий.
+
+        Копия входного dict'а, а не он сам: снапшот принадлежит вызывающему,
+        и конверт hub'а не должен появляться в чужом объекте задним числом.
+
+        **Возвращается РЕЗУЛЬТАТ ЗАПИСИ, а не сама запись.** Прежняя редакция
+        отдавала запись с конвертом, и писатель не мог отличить «легло» от
+        «вытеснило старейшую»: канал bounded (ёмкость 1024), при заторе дренажа
+        он вытесняет молча и растит свой счётчик. Замер ревью 2.1 — 1100 окон без
+        дренажа: `hub.dropped['stats'] = 76`, а канал рапортовал `success` 1100
+        раз. Счётчик потерь виден снаружи (`introspect.observability`), но
+        арифметика «эмитировано = доставлено + подавлено» считалась по книгам
+        писателя и сходилась даже при вытеснении.
+
+        Args:
+            payload: содержимое записи (без конверта).
+
+        Returns:
+            То, что вернул bounded-канал: ``{"status": "success"|"dropped",
+            "channel": …, "dropped": <накопленный счётчик>}``. Сам конверт
+            писателю возвращать незачем — ``ts`` он всё равно не выбирает.
+        """
+        return self._channels[KIND_STATS].write(self._envelope(KIND_STATS, dict(payload)))
 
     # ------------------------------------------------------------------
     # ErrorLike

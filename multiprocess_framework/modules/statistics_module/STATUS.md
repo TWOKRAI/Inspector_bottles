@@ -7,8 +7,8 @@
 | Критерий        | Оценка | Комментарий                                                                   |
 |-----------------|--------|-------------------------------------------------------------------------------|
 | Код             | 9      | ChannelRoutingManager + AggregationWindow; sentinel-паттерн для broadcast     |
-| Тесты           | 9      | 81 тест; integration, adapter, thread-safety, tags, подавление пустых, предел строки |
-| Документация    | 10     | DECISIONS.md (ADR-SM-001…009), §6.15 в ARCHITECTURE.md, README fix              |
+| Тесты           | 9      | 102 теста; integration, adapter, thread-safety, tags, подавление пустых, предел строки, канал в hub |
+| Документация    | 10     | DECISIONS.md (ADR-SM-001…010), §6.15 в ARCHITECTURE.md, README fix              |
 | Связанность     | 9      | Наследует CRM; IStatsManager(IChannelRoutingManager); StatsPlugin-совместим   |
 | Дублирование    | 9      | _metric_key дублируется в core/ — приемлемо (изолированные слои)             |
 | Работоспособность | 9    | Все 24 теста проходят; broadcast, теги, flush работают корректно              |
@@ -22,7 +22,7 @@
   - [x] Дублирование buffer.start() / is_initialized в initialize()
 - [x] Этап 1: Архитектура — IStatsManager(IChannelRoutingManager), StatsManagerConfig
 - [x] Этап 2: Ядро — StatsManager(ChannelRoutingManager), AggregationWindow, MetricRecord
-- [x] Этап 3: Каналы — LogStatsChannel, FileStatsChannel
+- [x] Этап 3: Каналы — LogStatsChannel, FileStatsChannel, HubStatsChannel (2.1, ADR-SM-010)
 - [x] Этап 4: Адаптер — StatsAdapter (get_metrics, reset_metrics, stats_snapshot, flush_stats)
 - [x] Этап 5: Формализация — DECISIONS.md (ADR-SM-001…006), ARCHITECTURE.md §6.15, тесты integration/adapter/thread-safety
 - [ ] Этап 6: Интеграция — добавить StatsManager в process_managers.py

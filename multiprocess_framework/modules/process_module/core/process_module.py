@@ -1031,6 +1031,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 self._observability_drain,
                 self._observability_store,
                 [fwd for fwd, _taps in self._observability_forwarders.values()],
+                # 2.1: окно агрегации закрывается ЗДЕСЬ, а не в `shutdown()`
+                # менеджеров ниже — иначе последний снапшот смены родился бы
+                # уже после дренажа и после закрытия стора. См. докстринг.
+                stats_to_flush=self.stats_manager,
             )
         except Exception:  # noqa: BLE001 — потеря телеметрии не должна ронять stop()
             pass

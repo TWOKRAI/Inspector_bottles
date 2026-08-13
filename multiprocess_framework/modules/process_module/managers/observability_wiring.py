@@ -112,7 +112,9 @@ def wire_process_observability(
         - worker.get_manager('logger') is logger  (write-through на ВСЕХ severity);
         - worker.get_manager('stats') is hub  (чистый буфер);
         - worker.get_manager('error') is error  (write-through, НЕ hub);
-        - adapter сконфигурирован на реальные logger/stats/error.
+        - adapter сконфигурирован на реальные logger/stats/error;
+        - у stats-менеджера поднят канал hub_stats (2.1): снапшот окна едет в
+          stats-слот hub'а, а оттуда дренажом в стор и живые хвосты.
     """
     if worker_manager is None:
         return None, None
@@ -132,6 +134,21 @@ def wire_process_observability(
     if error is not None:
         worker_manager.register_manager("error", error)
 
+    # Задача 2.1: обратная дорога — снапшот окна StatsManager'а в stats-слот
+    # hub'а, откуда drain доносит его до стора и живых хвостов. Регистрирует
+    # канал САМ менеджер (его ``_setup_channels``), а не мы: канал, поставленный
+    # снаружи, не пережил бы ``config.reload`` — базовый ``reconfigure`` чистит
+    # реестр каналов и собирает его заново из конфига.
+    #
+    # ``getattr`` не ради вежливости к отсутствию метода, а ради того, что
+    # ``stats`` здесь duck-typed и в тестах бывает дублем: настоящий
+    # ``StatsManager`` метод несёт всегда (контракт-тест
+    # ``test_hub_stats_channel``), поэтому молчаливого no-op на боевом пути тут
+    # нет — есть отсутствие требования к чужим дублям.
+    attach = getattr(stats, "attach_observability_hub", None)
+    if callable(attach):
+        attach(hub)
+
     return hub, adapter
 
 
@@ -140,6 +157,7 @@ def drain_process_observability(
     adapter: Optional[ObservabilityDrainAdapter],
     store: Optional[ObservabilityStore] = None,
     forwarders: Union[Callable[[List[dict]], None], Iterable[Callable[[List[dict]], None]], None] = None,
+    stats_to_flush: Optional[Any] = None,
 ) -> None:
     """Слить буфер hub'а (log/stats) в реальные менеджеры, стор и live-хвосты.
 
@@ -161,6 +179,19 @@ def drain_process_observability(
     """
     if hub is None:
         return
+    # Задача 2.1, ФИНАЛЬНЫЙ дренаж: закрыть окно агрегации ДО того, как забирать
+    # буфер. Порядок останова — `stop_all_workers` → этот дренаж → `shutdown()`
+    # менеджеров, а последний снапшот `StatsManager` рождается в его
+    # ``shutdown()``, то есть ПОСЛЕ. Без этого шага он ложился бы в hub, из
+    # которого уже никто не читает (стор к тому моменту закрыт), и последнее
+    # окно смены пропадало бы молча — на каждом процессе, каждый останов.
+    # На такте heartbeat параметр не передаётся: там окно закрывает свой таймер,
+    # а принудительный сброс сбивал бы темп агрегации.
+    if stats_to_flush is not None:
+        try:
+            stats_to_flush.flush()
+        except Exception:  # nosec B110 — сбой сброса не должен сорвать teardown
+            pass
     drained = hub.drain_all()
     if adapter is not None:
         adapter.apply_drained(drained)
@@ -209,10 +240,12 @@ def wire_observability_forward(
     пуст (см. ниже), то есть подписка «успешна», а событий ноль. Уровень теперь
     задаёт подписчик — тем же правом, что у ``log.tail.subscribe``.
 
-    **Честно про batch-половину:** в проде hub наполняет только stats-слот, и его
-    единственный владелец (``WorkerManager``) метрик не эмитит — ``forwarder``
-    сегодня не вызывается ни разу, stats-плоскость хвоста пуста. Расширение
-    владельцев hub'а — решение Ф8.3 (охват hub'а), не этой правки.
+    **Batch-половина ЖИВА с задачи 2.1.** Раньше здесь стояло «forwarder не
+    вызывается ни разу, stats-плоскость хвоста пуста»: слот stats принадлежал
+    одному владельцу (``WorkerManager``), а метрик он не шлёт. Теперь второй
+    владелец — канал ``hub_stats`` ``StatsManager``'а: он кладёт в слот снапшот
+    окна, и подписчик получает записи ``kind="stats"`` пачкой из drain-петли
+    (ADR-SM-010 / ADR-CRM-015). Проверено живым хвостом на стенде.
 
     Args:
         router: живой RouterManager процесса (``send_async``). None → forwarder-no-op.

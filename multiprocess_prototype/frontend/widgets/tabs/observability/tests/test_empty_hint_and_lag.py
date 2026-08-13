@@ -78,11 +78,20 @@ class TestDeliveryLag:
 
 class TestEmptyHint:
     def test_empty_stats_tab_names_the_reason(self, qtbot) -> None:
+        """Подсказка называет ВЕРНУЮ причину, а не любую.
+
+        До задачи 2.1 здесь пинилось слово «эмитента»: у плоскости метрик его
+        действительно не было. С 2.1 эмитент есть и снапшот доезжает, так что
+        прежний текст стал ложью — и тест, стерегущий именно то слово, держал бы
+        её. Сегодня пустая вкладка означает тихое окно или снятый приёмник.
+        """
         panel = RecordHistoryPanel(_EmptySource(), "stats")
         qtbot.addWidget(panel)
 
+        text = panel._lbl_empty.text()
         assert panel._lbl_empty.isVisibleTo(panel)
-        assert "эмитента" in panel._lbl_empty.text(), "пустота метрик снова молчит"
+        assert "эмитент" not in text, "подсказка снова обещает отсутствующий эмитент — 2.1 его завела"
+        assert "hub_stats" in text, "пустота метрик снова молчит о том, где смотреть"
 
     def test_empty_log_tab_points_at_the_threshold(self, qtbot) -> None:
         panel = RecordHistoryPanel(_EmptySource(), "log")
@@ -93,8 +102,9 @@ class TestEmptyHint:
     def test_hint_disappears_when_rows_arrive(self, qtbot) -> None:
         """Подсказка самоограничивающаяся: с приходом записей она исчезает сама.
 
-        Это и есть защита от устаревания: после Ф8.3 текст про отсутствие эмитента
-        не превратится в ложь — он просто перестанет показываться.
+        Защита частичная, и это выяснилось на 2.1: при НУЛЕ строк подсказка
+        показывается, и устаревший текст врал бы именно тогда, когда его читают.
+        Самоограничение спасает от лжи «поверх данных», не от лжи в пустоте.
         """
         source = _EmptySource()
         panel = RecordHistoryPanel(source, "stats")

@@ -89,6 +89,11 @@ class CapturePlugin(ProcessModulePlugin):
         self._fps_timer = time.monotonic()
         self._actual_fps = 0.0
         self._drops = 0
+        # Задача 2.1: сколько потерь уже отдано в плоскость stats. ``_drops``
+        # накопительный, а counter принимает ПРИРОСТ — отдай мы сумму, окно
+        # сложило бы её с предыдущими и «потерь за смену» вышло бы
+        # квадратичным. Позиция одна, вычитается здесь же.
+        self._drops_reported = 0
 
     # --- Команды (авторегистрация через commands dict) ---
 
@@ -145,6 +150,14 @@ class CapturePlugin(ProcessModulePlugin):
         Возвращает [{"frame": ndarray, "camera_id": int, ...}] или [].
         SHM write и IPC send выполняет SourceProducer.
         """
+        # Такт метрик — ПЕРВЫМ делом, до всех ранних `return`. Раньше он стоял в
+        # ветке успешного кадра, и плоскость слепла ровно в отказном режиме:
+        # при `ret=False` управление уходило по `return []` выше, и на 485
+        # потерянных кадров за 1.4 с не эмитилось НИ ОДНОЙ метрики — ни
+        # `capture.drops`, ни `capture.fps=0`. «Камера умерла» было неотличимо
+        # от «процесс простаивает» (находка ревью 2.1, воспроизведена).
+        self._tick_stats()
+
         # Заморозка: переотправляем последний кадр (новый seq_id), не читая камеру.
         if self._frozen and self._last_frame is not None:
             self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
@@ -178,17 +191,53 @@ class CapturePlugin(ProcessModulePlugin):
         # Инкремент счётчика с rollover
         self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
 
-        # Обновление FPS-метрики раз в секунду
         self._fps_counter += 1
-        now = time.monotonic()
-        elapsed = now - self._fps_timer
-        if elapsed >= 1.0:
-            self._actual_fps = self._fps_counter / elapsed
-            self._fps_counter = 0
-            self._fps_timer = now
-            self._publish_state()
 
         return [self._build_item(frame)]
+
+    def _tick_stats(self) -> None:
+        """Раз в секунду: пересчитать fps, опубликовать состояние, отдать метрики.
+
+        Зовётся в НАЧАЛЕ ``produce``, до любых ранних выходов, — потому что
+        отвечать эта ветка должна и на «кадров нет»: молчание плоскости в
+        отказном режиме и есть тот сигнал, который нужен оператору больше всего.
+        """
+        now = time.monotonic()
+        elapsed = now - self._fps_timer
+        if elapsed < 1.0:
+            return
+        self._actual_fps = self._fps_counter / elapsed
+        self._emit_stats(self._fps_counter)
+        self._fps_counter = 0
+        self._fps_timer = now
+        self._publish_state()
+
+    def _emit_stats(self, frames_in_window: int) -> None:
+        """Отдать бизнес-метрики захвата тем же жестом, что лог (задача 2.1).
+
+        **Первый боевой эмитент плоскости stats.** До него у плоскости не было
+        ни одного: разъём (1.1) существовал, дорога в стор (2.1) существовала, а
+        писать в неё было некому — ``kind=stats`` в сторе стоял на нуле.
+
+        **Раз в секунду, не на кадр.** Точка вызова — существующая ветка
+        пересчёта fps, а не горячий путь ``produce``: при 30 к/с эмиссия на кадр
+        стоила бы 30 вызовов в секунду там, где вся ценность в агрегате за окно
+        (окно ``StatsManager`` всё равно свернёт их в одно число). Своего
+        таймера задача не заводит — ветка уже есть и уже срабатывает по времени.
+
+        Счётчик потерь отдаётся ПРИРОСТОМ: counter суммируется за окно, и сумма
+        накопительного значения дала бы квадратичный рост «потерь за смену».
+        """
+        ctx = self._ctx
+        if ctx is None:
+            return
+        tags = {"camera": str(self._camera_id)}
+        ctx.record_metric("capture.frames", frames_in_window, tags)
+        ctx.gauge("capture.fps", self._actual_fps, tags)
+        drops_delta = self._drops - self._drops_reported
+        if drops_delta:
+            ctx.record_metric("capture.drops", drops_delta, tags)
+            self._drops_reported = self._drops
 
     def _build_item(self, frame) -> dict:
         """Собрать item-словарь кадра (общий для живого захвата и заморозки)."""
