@@ -1,0 +1,296 @@
+# Plan: Виртуальная линия (line_sim) — v1
+
+- **Slug:** line-sim
+- **Дата:** 2026-08-13
+- **Статус:** DRAFT
+- **Ветка:** feat/line-sim (worktree `.claude/worktrees/line-sim`, от main)
+
+## Контекст
+
+`line_sim` — сервис, притворяющийся участком производственной линии: лента везёт
+объекты, датчик срабатывает, «камера» отдаёт кадры из нарисованной сцены, робот и
+инспектор разговаривают с ней по Modbus — тем же протоколом, что с железом.
+Источник истины — согласованное видение владельца: [`vision.md`](vision.md) (ред. 4,
+2026-08-13, все решения закрыты). План реализует его буквально, не пересматривает.
+
+v1: первый пресет — буквы-диски (вид сверху), встроенная сборка в прототип (вкладка +
+штатные дисплеи + source-плагин), запуск механикой SystemLauncher → ProcessManager,
+рецепт единый с боевым (опциональная секция `sim:`). Главный измеряемый инвариант —
+**один объект → одна команда роботу**.
+
+## Цели
+
+- Симулятор поднимается в топологии прототипа (`python multiprocess_prototype/run.py
+  hikvision_letter_robot` с `sim.enabled: true`) — без ручного второго терминала.
+- Буквы-диски едут по виртуальной ленте, робот их забирает через тот же
+  `Services/robot_comm` тракт, что и на железе — без изменений в коде инспектора.
+- Симулятор знает правду (класс/угол/дефект каждого объекта) и умеет сверить её с
+  вердиктом инспектора → счётчики «поймал/пропустил/ложная тревога».
+- Измеримо: за прогон из N объектов дублей заданий роботу (одна деталь → несколько
+  job) — 0 (или ниже явного порога), проверяется уже готовым детектором `SimJournal`.
+- Боевые рецепты (без секции `sim:`) продолжают грузиться и работать без изменений.
+
+## Out of scope (см. также «Deferred» в конце)
+
+- Бутылки (вид сбоку) — следующий проект; интерфейсы слоёв делаем универсальными,
+  контент — нет.
+- Автономная сборка (своё Qt-окно, sim-камера по сети) — разъёмы сохраняются,
+  реализация отложена.
+- Фотореализм, 3D, физика — сим проверяет логику тракта, не рендер.
+- Генерация датасетов — это `Services/dataset_gen`; line_sim переиспользует его
+  примитивы, не дублирует и не меняет его API.
+
+## Переиспользование — что берём готовым (проверено чтением кода)
+
+| Кусок | Даёт | Как используется в v1 |
+|---|---|---|
+| `Services/robot_comm/server` (+ worktree `sim-monitor`) | `SimRobotServer.start()/stop()` — чистый неблокирующий lifecycle; `RobotSimCore` — ядро без Qt/Modbus; `SimJournal` — ГОТОВЫЙ детектор дублей заданий по инварианту трекинга ленты | Обёртывается в новый ProcessModulePlugin (Ф1); `SimJournal.dups_seen` — измерительный инструмент для главного инварианта (Ф5) |
+| `Services/dataset_gen/core/compose.py` | `rotate_expand`, `crop_to_alpha`, `fit_longest_side`, `composite`, `cast_contact_shadow` — чистые функции альфа-композиции | Импортируются напрямую движком `line_sim` (Ф3), не форкаются |
+| `Services/dataset_gen/core/augment.py` | `apply_photometric` — блик/тень/шум/JPEG/виньетка единым проходом | Применяется к готовой сцене line_sim (Ф4) |
+| `Services/dataset_gen/presets/real_letters_disk.yaml` + `core/realcut.py` + `tools/cut_real_disks.py` | Каталог RGBA-эталонов дисков-букв из РЕАЛЬНЫХ фото | Источник спрайтов пресета `real_letters_disk` для line_sim (Ф3) |
+| `Plugins/sources/synthetic_frame_source/plugin.py` | Образец «source-плагин без железа»: `configure`/`produce`, `Port`, `register_plugin` | Прямой образец для `LineSimCameraPlugin` (Ф1) |
+| `multiprocess_framework/modules/display_module` | `DisplayRegistry`, YAML-персистентность, broadcast route в `RouterManager` | Новый дисплей `line_sim`/`line_cam` регистрируется тем же путём, что `main`/`recog`/`mask` в рецепте |
+| `multiprocess_framework/modules/state_store_module` (`StateProxy.set/get/subscribe`) | Кросс-процессный реактивный канал (IPC через `StateStoreManager`) | Канал «один энкодер»: робот-процесс публикует, line-процесс подписывается (Ф2) — БЕЗ второго Modbus-соединения |
+| `multiprocess_prototype/frontend/widgets/tabs/pipeline` | Образец MVP-вкладки: `tab.py` + presenter, `DiffScrollTabLayout`, `AppServices` DI | Образец для вкладки-пульта (Ф6) |
+| `Services/device_hub` (`RobotDriver`, `VfdDriver`, `build_transport`) | Уже умеет говорить с симулятором робота по TCP (см. `server/README.md`) — bridge-транспорт ПЧ уже проходит через мост робота | НЕ меняется вообще — инспектор подключается к sim так же, как к железу, просто по другому host/port (Ф1) |
+| git `6116adf3:Create_bottles/generate_bottle_module.py` | Исторический `LayerImage`/`BottleGroup` — слои с fill-эффектом, поворотом, контуром | Идейная основа `Services/line_sim` (Ф3); код не копируется 1:1 (переиспользуем `dataset_gen.core.compose` вместо самодельного `warpAffine`) |
+
+## Vertical slice (тонкий срез через все слои)
+
+Task 1.1 проходит через recipe → загрузчик рецепта → новый source-плагин → IPC/SHM →
+`display_module` в МИНИМАЛЬНОЙ форме (кадр-заглушка без объектов) — чтобы получить
+обратную связь «картинка дошла до GUI» в первой же задаче, а не в конце фазы 3, когда
+движок слоёв уже написан целиком. Task 1.2 добавляет второй процесс (робот-симулятор)
+в ту же топологию и доказывает, что СУЩЕСТВУЮЩИЙ код инспектора (`devices` →
+`RobotDriver`) подключается к нему без единой правки — это и есть протухаемый риск
+архитектуры, его нужно снять как можно раньше.
+
+## Решения (decisions log)
+
+- **2026-08-13 (владелец, через координатора):** три ранее открытых вопроса закрыты
+  решениями (не рекомендациями):
+  1. Робот — **отдельным процессом**, `robot_comm` как есть; общая с линией — ТОЛЬКО
+     правда о ленте (один энкодер), и именно **через канал** (не через второе
+     Modbus-соединение line→robot).
+  2. Сим-секция — **опциональная секция в том же YAML** рецепта (не парный файл);
+     боевые рецепты без неё не трогаются валидацией.
+  3. ПЧ и датчик в v1 — **через Modbus-фасад** там, где боевой тракт инспектора
+     реально ходит по Modbus (управление ПЧ, опрос датчика); командами фреймворка —
+     только то, что и на железе идёт командами.
+- **2026-08-13 (Manager, находка по коду, уточняет п.1):** в `hikvision_letter_robot`
+  `vfd_belt` УЖЕ является bridge-устройством через `robot_main`
+  (`transport: {type: bridge, bridge: robot_main}`), и `RobotSimCore._handle_vfd`
+  УЖЕ эмулирует зеркало ПЧ (0x1200 команда / 0x1210 статус) с тем же ограничением, что
+  и боевая Lua-прошивка («зеркало только по команде»). Значит Modbus-фасад для ПЧ уже
+  построен — задача Ф2.1 лишь доучивает его: живая команда run/freq должна менять
+  СКОРОСТЬ ЛЕНТЫ (сейчас `enc_rate` фиксируется один раз при старте CLI и не слушает
+  команды). Инспектор при переключении на sim НЕ меняет ни строки кода — только
+  host/port в `devices:`.
+- **2026-08-13 (Manager, находка по коду, уточняет п.3 для датчика):** в рецепте
+  `hikvision_letter_robot` боевой тракт «объект пересёк линию» реализован ЗРЕНИЕМ
+  (`line_filter`, zone_edge-триггер по кадру), а НЕ физическим Modbus-датчиком — в
+  `devices:` этого рецепта нет ни одного устройства kind=sensor. По формулировке
+  решения владельца («там, где боевой тракт ходит по Modbus») для ЭТОГО рецепта новый
+  Modbus-регистр датчика НЕ строится: виртуальный фотоэлемент реализуется тем, что
+  `line_filter` одинаково срабатывает что на реальных кадрах, что на синтетических
+  кадрах `line_sim`. Если понадобится рецепт с боевым Modbus-датчиком (там пригоден
+  `generic_modbus_driver`) — фасад добавляется по образцу задач Ф2.1–2.2, без
+  переделки движка. Зафиксировано как находка, не как переоткрытие вопроса.
+- **2026-08-13 (Manager):** правда о ленте (энкодер) — канал `StateProxy.set/get/
+  subscribe` (`multiprocess_framework/modules/state_store_module`), НЕ отдельный
+  Modbus-клиент line→robot. Причина: `REG_ENC` уже живёт в регистровом пространстве
+  робота (единственный источник истины по коду), второй Modbus-клиент создал бы
+  ВТОРОЕ представление того же счётчика и риск рассинхрона — тот же класс дефекта,
+  которого избегает «один объект → одна команда». `StateProxy` уже используется
+  именно так у `ModbusPlugin._push_state`.
+- **2026-08-13 (Manager):** движок объектов — новый модуль `Services/line_sim`
+  (Services→Services импорт от `dataset_gen`/`robot_comm` — уже устоявшийся паттерн,
+  `robot_comm` импортирует `Services.modbus`). Низкоуровневые функции композиции и
+  фотометрии — импортируются из `dataset_gen`, не форкаются.
+- **2026-08-13 (Manager):** перенос форки sim-monitor (Ф0) — риск конфликтов низкий:
+  `23184cc4` (база ветки `worktree-sim-monitor`) — предок текущего HEAD, и
+  `Services/robot_comm` не менялся на main с той точки (`git log 23184cc4..HEAD --
+  Services/robot_comm` — 0 коммитов).
+
+## Открытые вопросы
+
+Блокирующих владельца вопросов нет — все три пункта закрыты выше. Технические детали,
+не разведанные до конца ходом планирования, переведены в явные Steps-проверки внутри
+задач (не блокируют старт исполнения):
+
+- Точная точка хука «применить `sim:`-оверлей к blueprint до SystemLauncher» —
+  `run.py` не содержит буквальных токенов `safe_load`/`blueprint` (проверено grep) —
+  разведка вынесена в Task 1.1, Step 1.
+- Полное подтверждение, что ВСЕ узлы цепочки `vision→line→recog` прокидывают чужие
+  ключи item (`{**item, ...}`) — подтверждено точечно (`pixel_to_robot`,
+  `ml_inference`), но не для `color_convert/roi_crop/hsv_mask/morphology/
+  circle_detector/line_filter/center_crop` — разведка + запасной план (join-режим)
+  вынесены в Task 5.2, Step 1.
+- Масштаб «частота ПЧ → мм/с ленты» (физическая константа стенда) в коде не найден —
+  Task 2.1 задаёт формулу с новым конфигурируемым параметром вместо жёсткой константы.
+
+## Execution order
+
+### Phase 0: Фундамент — перенос готовой работы
+
+#### Task 0.1 — Закоммитить незакоммиченное из worktree `sim-monitor`
+
+- **Статус:** [PENDING]
+- **Level:** Middle (Sonnet)
+- **Assignee:** developer
+- **Goal:** содержимое worktree `.claude/worktrees/sim-monitor` (детектор дублей
+  `SimJournal`, окно-монитор `SimMonitorWindow`, реалистичный тайминг CLI
+  `--job-ms/--accept-ms/--belt-mm-s`, константы трекинга `FACTOR_MM`/`BELT_UX`/
+  `BELT_UY`, рефактор `SimRobotServer` на чистый `start()/stop()`) — в истории
+  рабочей ветки этого плана (создаётся Director'ом под slug `line-sim`), БЕЗ
+  ручного копирования файлов по одному вслепую.
+- **Context:** это готовая, уже написанная и — по собственному STATUS.md worktree —
+  протестированная работа (детектор дублей проверен break-injection). База ветки
+  worktree (`23184cc4`) — предок текущего HEAD, `Services/robot_comm` не менялся на
+  main с этой точки: `git log 23184cc4..HEAD -- Services/robot_comm` даёт 0
+  коммитов, значит конфликтов при переносе быть не должно. Вся дальнейшая работа
+  плана (Ф1.2, Ф2, Ф5.1) опирается на эти файлы — без Task 0.1 план не стартует.
+- **Files:**
+  - `Services/robot_comm/STATUS.md` — изменён
+  - `Services/robot_comm/core/registers.py` — изменён (+`FACTOR_MM`, `BELT_UX`,
+    `BELT_UY`)
+  - `Services/robot_comm/server/README.md` — изменён
+  - `Services/robot_comm/server/__main__.py` — изменён (`--gui`, `--job-ms`,
+    `--accept-ms`, `--belt-mm-s`)
+  - `Services/robot_comm/server/sim_robot.py` — изменён (`on_write` хук,
+    `SimRobotServer.start()/stop()`, `run_sim_robot(core_kwargs=..., gui=...)`)
+  - `Services/robot_comm/tests/test_sim_e2e.py` — изменён
+  - `Services/robot_comm/server/sim_journal.py` — новый (`SimJournal`)
+  - `Services/robot_comm/server/sim_monitor.py` — новый (`SimMonitorWindow`)
+  - `Services/robot_comm/tests/test_sim_journal.py` — новый
+  - `Services/robot_comm/tests/test_sim_monitor.py` — новый
+- **Steps:**
+  1. Слить/скопировать точный набор файлов выше из worktree `sim-monitor` в текущую
+     рабочую ветку (git merge/cherry-pick ветки `worktree-sim-monitor` в текущую —
+     конфликтов не ожидается по находке выше; если merge инструмент недоступен —
+     ручное копирование содержимого файлов один в один, не «по мотивам»).
+  2. `git status`/`git diff` — сверить, что перенесённый набор файлов ТОЧНО совпадает
+     со списком Files (ни больше, ни меньше — не утащить посторонние
+     незакоммиченные правки из worktree, если такие случайно появились).
+  3. Запустить `pytest Services/robot_comm -q` на текущем HEAD (baseline, ДО
+     переноса) и записать число passed. Перенести файлы. Запустить
+     `pytest Services/robot_comm -q` снова (ПОСЛЕ) — 0 failed, число passed НЕ
+     меньше baseline + количество новых тестов в `test_sim_journal.py` и
+     `test_sim_monitor.py`.
+  4. Закоммитить с trailers `Why:`/`Layer:` (Layer: services) — НЕ amend, обычный
+     новый коммит.
+- **Acceptance criteria:**
+  - [ ] `python -c "from Services.robot_comm.server.sim_journal import SimJournal;
+        from Services.robot_comm.server.sim_monitor import SimMonitorWindow"` —
+        завершается без `ImportError` (PySide6 должен быть доступен в окружении для
+        второго импорта — если недоступен, зафиксировать это явно как известное
+        ограничение окружения, не как провал задачи).
+  - [ ] `python -c "from Services.robot_comm.core.registers import FACTOR_MM,
+        BELT_UX, BELT_UY; assert FACTOR_MM == 0.144473 and (BELT_UX, BELT_UY) ==
+        (0.0, 1.0)"` — завершается без ошибки.
+  - [ ] `python -m Services.robot_comm.server --help` — вывод содержит `--gui`,
+        `--job-ms`, `--accept-ms`, `--belt-mm-s`.
+  - [ ] `python -c "from Services.robot_comm.server.sim_robot import
+        SimRobotServer; assert hasattr(SimRobotServer, 'start') and
+        hasattr(SimRobotServer, 'stop')"` — завершается без ошибки.
+  - [ ] `pytest Services/robot_comm -q` — 0 failed; число passed зафиксировано в
+        сообщении коммита (`Tested:` trailer) как baseline vs после переноса.
+- **Out of scope:** очистка/удаление самого worktree `sim-monitor` (`ExitWorktree`) —
+  это дело вызывающего (Director), не этой задачи; любые НОВЫЕ правки поверх
+  перенесённого кода (это уже Ф1–Ф2).
+- **Dependencies:** нет.
+- **Module contract:** impl-only.
+
+### Phase 1: Вертикальный срез — топология процессов
+
+Файл: [`phase-1-vertical-slice.md`](phase-1-vertical-slice.md)
+
+- Task 1.1: **[VERTICAL SLICE]** Секция `sim:` в рецепте + минимальный source-плагин
+  камеры → картинка в дисплее [PENDING] — **Module contract:** new-lite
+- Task 1.2: Робот-процесс — `SimRobotServer` в топологии, инспектор подключается без
+  правок [PENDING] (зависит от 1.1) — **Module contract:** new-lite
+
+### Phase 2: Общая правда о ленте (один энкодер)
+
+Файл: [`phase-2-belt-truth.md`](phase-2-belt-truth.md)
+
+- Task 2.1: ПЧ-команда → живая скорость энкодера в `RobotSimCore` [PENDING] —
+  **Module contract:** impl-only
+- Task 2.2: Канал энкодера робот→line через `StateProxy`, объект едет синхронно со
+  скоростью [PENDING] (зависит от 1.2, 2.1) — **Module contract:** impl-only
+
+### Phase 3: Движок объектов — слои, буквы-диски, дефекты
+
+Файл: [`phase-3-object-engine.md`](phase-3-object-engine.md)
+
+- Task 3.1: Каркас `Services/line_sim` — слои, объект-паспорт, геометрия ленты
+  [PENDING] — **Module contract:** new-full
+- Task 3.2: Контент пресета `real_letters_disk` + дефект-слой [PENDING] (зависит от
+  3.1) — **Module contract:** impl-only
+- Task 3.3: Поток спавна объектов на ленте [PENDING] (зависит от 3.1, 2.2) —
+  **Module contract:** impl-only
+- Task 3.4: Движок подключён к `LineSimCameraPlugin.produce()` [PENDING] (зависит от
+  1.1, 3.2, 3.3) — **Module contract:** impl-only
+
+### Phase 4: Виртуальная камера
+
+Файл: [`phase-4-virtual-camera.md`](phase-4-virtual-camera.md)
+
+- Task 4.1: Настройки камеры (fps/размер/цвет-моно) [PENDING] (зависит от 3.4) —
+  **Module contract:** impl-only
+- Task 4.2: ROI — бэкенд конфига и live-команд [PENDING] (зависит от 3.4) —
+  **Module contract:** impl-only
+- Task 4.3: Фотометрия сцены (переиспользование `dataset_gen.augment`) [PENDING]
+  (зависит от 3.4) — **Module contract:** impl-only
+
+### Phase 5: Правда и измеримый инвариант
+
+Файл: [`phase-5-ground-truth.md`](phase-5-ground-truth.md)
+
+- Task 5.1: Экспозиция счётчиков дублей (`SimJournal`) через IPC + инвариантный
+  прогон [PENDING] (зависит от 1.2) — **Module contract:** impl-only
+- Task 5.2: Паспорт объекта едет по цепочке, evaluator сверяет с вердиктом [PENDING]
+  (зависит от 3.4) — **Module contract:** new-lite
+- Task 5.3: Счётчики поймал/пропустил/ложная тревога наружу + сквозной прогон
+  [PENDING] (зависит от 5.1, 5.2) — **Module contract:** impl-only
+
+### Phase 6: Пульт (вкладка GUI)
+
+Файл: [`phase-6-pult-gui.md`](phase-6-pult-gui.md)
+
+- Task 6.1: Вкладка-пульт — управление (скорость/поток/брак/пауза) [PENDING]
+  (зависит от 2.2, 3.3) — **Module contract:** new-full
+- Task 6.2: Встроенный журнал обмена (переиспользование панелей `SimMonitorWindow`)
+  [PENDING] (зависит от 6.1, 5.1, 5.3) — **Module contract:** impl-only
+- Task 6.3: ROI мышью на превью сцены [PENDING] (зависит от 6.1, 4.2) —
+  **Module contract:** impl-only
+
+## Deferred (явно НЕ в v1)
+
+- Бутылки (вид сбоку) — контент; интерфейсы слоёв уже универсальны.
+- Автономная сборка: своё Qt-окно с пультом, sim-камера по сети (Modbus TCP как
+  единственный интерфейс). Разъёмы (см. таблицу «Один движок — две сборки» в
+  vision.md) сохраняются в архитектуре Ф3 (`Services/line_sim` не знает про GUI/IPC
+  прототипа), но реализация автономной сборки не делается.
+- 3D/физика, фотореализм.
+- Второй вид сцены (сбоку).
+- Zoom/ресайз ROI с отличным от кадра камеры размером (v1: ROI размер == размер
+  выходного кадра камеры, без промежуточного масштабирования).
+
+## Риски и ограничения
+
+- **Формула частота ПЧ → мм/с** — физическая константа реального стенда в коде не
+  найдена; Task 2.1 вводит явный конфигурируемый параметр вместо угадывания числа.
+  Точность одобрена владельцем как «примерная — достаточно».
+- **Sidecar-допущение (Ф5.2)** — если окажется, что не все узлы цепочки прокидывают
+  чужие ключи item, задача переключается на join-режим (уже рабочий паттерн в этом же
+  рецепте у `recog`/`draw`) — заложено как запасной план, не блокер.
+- **pymodbus SimDevice и несколько клиентов** — Task 1.2 проверяет, что TCP-сервер
+  симулятора обслуживает подключение инспектора (`devices`/`RobotDriver`) без
+  сюрпризов; второй Modbus-клиент со стороны line НЕ появляется (решение — канал),
+  поэтому риск конкурентных клиентов к одному sim-серверу не возникает.
+- **Тестовый канон (STRICT, см. `.claude/CLAUDE.md`):** независимый tester — на КАЖДОЙ
+  задаче ниже, синхронно, только по acceptance criteria (без diff/реализации/тестов
+  автора); break-injection — по каждому заявленному свойству; reviewer — синхронно
+  после каждой задачи. Задачи ниже написаны так, чтобы acceptance criteria были
+  измеримы независимым тестером БЕЗ знания реализации.

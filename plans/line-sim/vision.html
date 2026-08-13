@@ -1,0 +1,637 @@
+<title>Виртуальная линия</title>
+<style>
+  :root {
+    --bg: #F3F4F0;
+    --surface: #FFFFFF;
+    --surface-2: #EBEEE7;
+    --ink: #22282A;
+    --muted: #5C6669;
+    --line: #D6DBD2;
+    --belt: #E2E7DC;
+    --accent: #B25E0F;
+    --accent-soft: #F4E3CE;
+    --teal: #1F6B5E;
+    --teal-soft: #D9EAE5;
+    --bad: #B23A2E;
+    --bad-soft: #F2DCD8;
+    --good: #2E7D46;
+    --chip-static: #E6E9E2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16191A;
+      --surface: #1E2325;
+      --surface-2: #242A2C;
+      --ink: #E3E7E2;
+      --muted: #96A09B;
+      --line: #353D3F;
+      --belt: #222B26;
+      --accent: #EDA24E;
+      --accent-soft: #3A2E1D;
+      --teal: #4FBFAA;
+      --teal-soft: #1E332F;
+      --bad: #E06A5C;
+      --bad-soft: #3A2422;
+      --good: #5BB878;
+      --chip-static: #2B3234;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16191A;
+    --surface: #1E2325;
+    --surface-2: #242A2C;
+    --ink: #E3E7E2;
+    --muted: #96A09B;
+    --line: #353D3F;
+    --belt: #222B26;
+    --accent: #EDA24E;
+    --accent-soft: #3A2E1D;
+    --teal: #4FBFAA;
+    --teal-soft: #1E332F;
+    --bad: #E06A5C;
+    --bad-soft: #3A2422;
+    --good: #5BB878;
+    --chip-static: #2B3234;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    padding: 0 20px 80px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+
+  .mono { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; }
+
+  header { padding: 56px 0 8px; }
+  .eyebrow {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(34px, 5vw, 46px);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .lead {
+    font-size: 18.5px;
+    max-width: 62ch;
+    color: var(--ink);
+    margin: 0 0 10px;
+  }
+  .lead b { color: var(--accent); font-weight: 600; }
+  .meta {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: 18px 0 0;
+  }
+
+  h2 {
+    font-size: 22px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    margin: 56px 0 6px;
+    text-wrap: balance;
+  }
+  h2 .idx {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 13px;
+    color: var(--accent);
+    vertical-align: 3px;
+    margin-right: 8px;
+    letter-spacing: 0.08em;
+  }
+  p { max-width: 68ch; margin: 10px 0; }
+  .dim { color: var(--muted); }
+
+  figure {
+    margin: 22px 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 10px 6px;
+    overflow-x: auto;
+  }
+  figure svg { display: block; min-width: 760px; width: 100%; height: auto; }
+  figcaption {
+    font-size: 13px;
+    color: var(--muted);
+    padding: 8px 10px 8px;
+    max-width: none;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin: 20px 0;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 15.5px;
+    font-weight: 650;
+  }
+  .card h3 .tag {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .card p { font-size: 14px; margin: 6px 0 0; color: var(--muted); }
+  .card p strong { color: var(--ink); font-weight: 600; }
+
+  .chip {
+    display: inline-block;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 11.5px;
+    border-radius: 999px;
+    padding: 2px 10px;
+    margin: 2px 4px 2px 0;
+    white-space: nowrap;
+  }
+  .chip.static { background: var(--chip-static); color: var(--muted); }
+  .chip.aug { background: var(--teal-soft); color: var(--teal); }
+  .chip.defect { background: var(--bad-soft); color: var(--bad); }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 18px 0;
+    font-size: 14.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  td:first-child { font-family: "Cascadia Code", Consolas, monospace; font-size: 13.5px; white-space: nowrap; }
+
+  ul.plain { padding-left: 20px; max-width: 68ch; }
+  ul.plain li { margin: 7px 0; }
+  ul.plain li::marker { color: var(--accent); }
+
+  .qa {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 14px 0;
+  }
+  .qa .q { font-weight: 650; margin: 0 0 6px; }
+  .qa .a { font-size: 14.5px; color: var(--muted); margin: 0; }
+  .qa .a b { color: var(--ink); }
+
+  .svg-label { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; fill: var(--muted); }
+  .svg-label-strong { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; fill: var(--ink); }
+  .svg-panel { font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; letter-spacing: 0.12em; fill: var(--accent); }
+  .svg-obj { font-family: "Segoe UI", system-ui, sans-serif; font-size: 20px; font-weight: 600; fill: var(--ink); }
+  .svg-small { font-family: "Cascadia Code", Consolas, monospace; font-size: 10.5px; fill: var(--muted); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">line_sim · описание продукта · на согласование</p>
+  <h1>Виртуальная линия</h1>
+  <p class="lead">Отдельный сервис, который притворяется участком производственной линии:
+  лента везёт объекты, датчик срабатывает, «камера» отдаёт кадры из нарисованной сцены,
+  а инспектор и робот разговаривают с ним по Modbus — тем же протоколом, что с железом.
+  <b>Прототип не знает, что мир ненастоящий.</b></p>
+  <p class="meta">универсальный движок · первый пресет — буквы под реальный стенд SCARA · v1 — встроенная в прототип сборка · ред. 4 (все решения закрыты), 2026-08-13</p>
+</header>
+
+<h2><span class="idx">01</span>Сцена</h2>
+<p>Окно симулятора — это сцена: лента с фоном из фотографии реальной ленты (зациклена
+для правдоподобия), по ней едут объекты со скоростью виртуального ПЧ. Два пресета вида —
+<strong>сверху</strong> (диски с буквами — первый: этот проект живёт на реальном стенде
+со SCARA, симулятор будет с чем сверять) и <strong>сбоку</strong> (бутылки — следующий
+проект; слои — из наработок <span class="mono">Create_bottles</span>).</p>
+
+<figure>
+<svg viewBox="0 0 880 470" role="img" aria-label="Сцена: вид сверху и вид сбоку">
+  <!-- ================= ВИД СВЕРХУ ================= -->
+  <text x="10" y="20" class="svg-panel">ВИД СВЕРХУ · ПРЕСЕТ «ДИСКИ» · ПЕРВЫЙ</text>
+
+  <!-- стрелка направления -->
+  <line x1="60" y1="46" x2="190" y2="46" stroke="var(--teal)" stroke-width="2"/>
+  <path d="M190 46 l-9 -4.5 v9 z" fill="var(--teal)"/>
+  <text x="200" y="50" class="svg-label">v ленты — из виртуального ПЧ (Modbus)</text>
+
+  <!-- лента -->
+  <rect x="40" y="60" width="650" height="112" rx="4" fill="var(--belt)" stroke="var(--line)"/>
+  <g stroke="var(--line)" stroke-width="1.5">
+    <path d="M85 66 l-14 100"/><path d="M165 66 l-14 100"/><path d="M245 66 l-14 100"/>
+    <path d="M325 66 l-14 100"/><path d="M405 66 l-14 100"/><path d="M485 66 l-14 100"/>
+    <path d="M565 66 l-14 100"/><path d="M645 66 l-14 100"/>
+  </g>
+  <line x1="360" y1="60" x2="360" y2="172" stroke="var(--muted)" stroke-dasharray="3 4"/>
+  <text x="352" y="187" class="svg-small">шов лупа текстуры</text>
+
+  <!-- объекты: диски -->
+  <g>
+    <circle cx="120" cy="116" r="27" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <text x="120" y="124" text-anchor="middle" class="svg-obj">А</text>
+    <circle cx="265" cy="116" r="27" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <text x="265" y="124" text-anchor="middle" class="svg-obj" transform="rotate(38 265 116)">Б</text>
+    <circle cx="450" cy="116" r="27" fill="var(--surface)" stroke="var(--bad)" stroke-width="1.8" stroke-dasharray="5 3"/>
+    <text x="450" y="124" text-anchor="middle" class="svg-obj" fill="var(--bad)">В</text>
+  </g>
+  <!-- правда под объектами -->
+  <text x="120" y="207" text-anchor="middle" class="svg-small">А · 0°</text>
+  <text x="265" y="207" text-anchor="middle" class="svg-small">Б · 38°</text>
+  <text x="450" y="207" text-anchor="middle" class="svg-small" fill="var(--bad)">В · дефект</text>
+  <text x="40" y="228" class="svg-label">симулятор знает правду о каждом объекте — класс, угол, дефект</text>
+
+  <!-- рамка камеры -->
+  <rect x="218" y="70" width="180" height="92" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="7 5"/>
+  <g fill="var(--accent)">
+    <rect x="214" y="66" width="8" height="8"/><rect x="394" y="66" width="8" height="8"/>
+    <rect x="214" y="158" width="8" height="8"/><rect x="394" y="158" width="8" height="8"/>
+  </g>
+  <text x="218" y="40" class="svg-label-strong" fill="var(--accent)">камера — рамка ROI, двигается мышью</text>
+  <path d="M398 82 C 470 30, 560 24, 660 24" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+  <path d="M660 24 l-9 -4 v8 z" fill="var(--accent)"/>
+  <text x="668" y="28" class="svg-label" fill="var(--accent)">кадры → прототипу</text>
+
+  <!-- датчик -->
+  <rect x="576" y="42" width="14" height="14" rx="2" fill="var(--surface)" stroke="var(--teal)" stroke-width="1.5"/>
+  <line x1="583" y1="58" x2="583" y2="172" stroke="var(--teal)" stroke-width="1.5" stroke-dasharray="2 4"/>
+  <text x="598" y="190" class="svg-label" fill="var(--teal)">датчик: фронт + отметка энкодера</text>
+
+  <!-- зона робота -->
+  <path d="M 700 172 A 96 96 0 0 0 700 60" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <circle cx="790" cy="116" r="17" fill="var(--surface-2)" stroke="var(--ink)" stroke-width="1.5"/>
+  <line x1="790" y1="116" x2="742" y2="90" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>
+  <text x="712" y="207" class="svg-label">зона робота (симулятор есть)</text>
+
+  <!-- ================= ВИД СБОКУ ================= -->
+  <text x="10" y="272" class="svg-panel">ВИД СБОКУ · ПРЕСЕТ «БУТЫЛКИ» · СЛЕДУЮЩИЙ ПРОЕКТ</text>
+
+  <!-- лента-полка -->
+  <line x1="40" y1="420" x2="690" y2="420" stroke="var(--ink)" stroke-width="3"/>
+  <g fill="none" stroke="var(--muted)" stroke-width="1.5">
+    <circle cx="70" cy="430" r="7"/><circle cx="360" cy="430" r="7"/><circle cx="650" cy="430" r="7"/>
+  </g>
+  <line x1="60" y1="452" x2="150" y2="452" stroke="var(--teal)" stroke-width="2"/>
+  <path d="M150 452 l-9 -4.5 v9 z" fill="var(--teal)"/>
+  <text x="160" y="456" class="svg-label">та же лента, тот же энкодер</text>
+
+  <!-- бутылки: godная / перекос этикетки / без крышки -->
+  <g>
+    <!-- 1: годная -->
+    <rect x="96" y="330" width="52" height="90" rx="9" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <rect x="112" y="308" width="20" height="24" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <rect x="108" y="296" width="28" height="13" rx="2" fill="var(--teal)"/>
+    <rect x="102" y="358" width="40" height="30" fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1"/>
+    <text x="122" y="463" text-anchor="middle" class="svg-small" fill="var(--good)">✓ годная</text>
+
+    <!-- 2: перекос этикетки -->
+    <rect x="266" y="330" width="52" height="90" rx="9" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <rect x="282" y="308" width="20" height="24" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <rect x="278" y="296" width="28" height="13" rx="2" fill="var(--teal)"/>
+    <g transform="rotate(-12 292 373)">
+      <rect x="272" y="358" width="40" height="30" fill="var(--bad-soft)" stroke="var(--bad)" stroke-width="1.2"/>
+    </g>
+    <text x="292" y="463" text-anchor="middle" class="svg-small" fill="var(--bad)">✗ этикетка</text>
+
+    <!-- 3: нет крышки -->
+    <rect x="436" y="330" width="52" height="90" rx="9" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <rect x="452" y="308" width="20" height="24" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <rect x="448" y="296" width="28" height="13" rx="2" fill="none" stroke="var(--bad)" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <rect x="442" y="358" width="40" height="30" fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1"/>
+    <text x="462" y="463" text-anchor="middle" class="svg-small" fill="var(--bad)">✗ нет крышки</text>
+
+    <!-- 4: годная, edge -->
+    <rect x="606" y="330" width="52" height="90" rx="9" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <rect x="622" y="308" width="20" height="24" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+    <rect x="618" y="296" width="28" height="13" rx="2" fill="var(--teal)"/>
+    <rect x="612" y="358" width="40" height="30" fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1"/>
+    <text x="632" y="463" text-anchor="middle" class="svg-small" fill="var(--good)">✓ годная</text>
+  </g>
+
+  <!-- ROI сбоку -->
+  <rect x="246" y="282" width="264" height="152" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="7 5"/>
+  <g fill="var(--accent)">
+    <rect x="242" y="278" width="8" height="8"/><rect x="506" y="278" width="8" height="8"/>
+    <rect x="242" y="430" width="8" height="8"/><rect x="506" y="430" width="8" height="8"/>
+  </g>
+  <text x="522" y="292" class="svg-label" fill="var(--accent)">ROI</text>
+</svg>
+<figcaption>Одна сцена — два пресета вида. Оранжевая рамка — виртуальная камера: что в рамке,
+то и уходит кадрами в прототип вместо вебки или Hikvision. Пунктирная линия — виртуальный
+фотоэлемент. Правда о каждом объекте (класс, угол, дефект) известна симулятору.</figcaption>
+</figure>
+
+<div class="cards">
+  <div class="card">
+    <h3><span class="tag">ЛЕНТА</span>Фон-луп и честная скорость</h3>
+    <p>Фон — загружаемая картинка ленты, зацикленная. Скорость берётся из
+    <strong>виртуального ПЧ по Modbus</strong> и крутит <strong>тот же энкодер</strong>,
+    который читает робот, — константы трекинга общие с прошивкой. Инспектор может
+    притормозить или остановить конвейер — как на железе.</p>
+  </div>
+  <div class="card">
+    <h3><span class="tag">ДАТЧИК</span>Как в боевом тракте — зрением</h3>
+    <p>Уточнено кодом: в рецепте букв «объект пересёк линию» детектится
+    <strong>зрением</strong> (<span class="mono">line_filter</span> по кадру), физического
+    Modbus-датчика на железе нет. v1 честно повторяет это: <span class="mono">line_filter</span>
+    срабатывает на синтетических кадрах. Modbus-фотоэлемент добавится, когда появится
+    в боевом рецепте.</p>
+  </div>
+  <div class="card">
+    <h3><span class="tag">КАМЕРА</span>Рамка вместо объектива</h3>
+    <p>Прямоугольник на сцене, который <strong>двигаешь и растягиваешь мышью</strong>.
+    Содержимое рамки уходит кадрами в прототип — тот выбирает «sim-камеру» в рецепте
+    как обычный источник. Настраивается как настоящая: <strong>fps, размер кадра,
+    цвет/моно</strong> — та же поверхность настроек, что у боевых камер. Поверх кадра —
+    фотометрия из <span class="mono">dataset_gen</span>: блик, смаз движения, тень,
+    баланс белого, гамма.</p>
+  </div>
+  <div class="card">
+    <h3><span class="tag">ПУЛЬТ</span>Вкладка, не окно</h3>
+    <p><strong>Вкладка в GUI прототипа</strong> по образцу
+    <span class="mono">tabs/pipeline</span> (MVP: tab + presenter): скорость, поток
+    объектов, доля дефектов, пауза, «выпусти брак». Там же <strong>sim-диалог</strong> —
+    две колонки «принято от инспектора ↔ ответила линия». Картинки сцены — в
+    <strong>штатные дисплеи</strong> (<span class="mono">display_module</span>,
+    DisplaysTab / PreviewWindow), свои виджеты не пишем.</p>
+  </div>
+</div>
+
+<h2><span class="idx">02</span>Объект — группа слоёв, а не картинка</h2>
+<p>Движок универсальный: «объект» — это набор спрайтов-слоёв с правилами. Бутылка —
+тара, наполнение, этикетка, крышка, кольцо. Диск с буквой — диск и буква. Любой новый
+продукт — новый пресет из картинок, без правки движка.</p>
+
+<figure>
+<svg viewBox="0 0 880 290" role="img" aria-label="Слои объекта">
+  <text x="10" y="20" class="svg-panel">ОБЪЕКТ «БУТЫЛКА» · ПЯТЬ СЛОЁВ</text>
+
+  <!-- разнесённые слои (сборка слева) -->
+  <g>
+    <!-- тара -->
+    <rect x="70" y="120" width="76" height="130" rx="12" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.6"/>
+    <rect x="94" y="88" width="28" height="34" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.6"/>
+    <!-- наполнение -->
+    <rect x="78" y="168" width="60" height="74" rx="6" fill="var(--teal-soft)" stroke="var(--teal)"/>
+    <!-- этикетка -->
+    <rect x="80" y="180" width="56" height="40" fill="var(--surface-2)" stroke="var(--muted)"/>
+    <!-- крышка -->
+    <rect x="88" y="72" width="40" height="17" rx="3" fill="var(--teal)"/>
+    <!-- кольцо -->
+    <rect x="90" y="92" width="36" height="6" rx="3" fill="var(--muted)"/>
+  </g>
+
+  <!-- линии к строкам -->
+  <g stroke="var(--line)" stroke-width="1">
+    <line x1="128" y1="80" x2="330" y2="64"/>
+    <line x1="126" y1="95" x2="330" y2="110"/>
+    <line x1="136" y1="200" x2="330" y2="156"/>
+    <line x1="138" y1="230" x2="330" y2="202"/>
+    <line x1="146" y1="150" x2="330" y2="248"/>
+  </g>
+
+  <!-- строки слоёв -->
+  <g>
+    <text x="340" y="60" class="svg-label-strong">крышка</text>
+    <text x="470" y="60" class="svg-small" fill="var(--teal)">цвет · наличие</text>
+    <text x="640" y="60" class="svg-small" fill="var(--bad)">дефект: нет крышки</text>
+
+    <text x="340" y="106" class="svg-label-strong">кольцо</text>
+    <text x="470" y="106" class="svg-small">статика</text>
+
+    <text x="340" y="152" class="svg-label-strong">наполнение</text>
+    <text x="470" y="152" class="svg-small" fill="var(--teal)">уровень</text>
+    <text x="640" y="152" class="svg-small" fill="var(--bad)">дефект: недолив</text>
+
+    <text x="340" y="198" class="svg-label-strong">этикетка</text>
+    <text x="470" y="198" class="svg-small" fill="var(--teal)">сдвиг · поворот</text>
+    <text x="640" y="198" class="svg-small" fill="var(--bad)">дефект: перекос</text>
+
+    <text x="340" y="244" class="svg-label-strong">тара</text>
+    <text x="470" y="244" class="svg-small">статика · вариант формы</text>
+  </g>
+  <text x="10" y="280" class="svg-label">каждый слой независимо: статичен · варьируется аугментацией · дефектный вариант</text>
+</svg>
+<figcaption>Идея слоёв — из наработок <span class="mono">Create_bottles</span> (LayerImage /
+BottleGroup, включая эффект наполнения). Там она была ручным стендом — здесь становится
+движком объектов.</figcaption>
+</figure>
+
+<p>Каждый слой в пресете помечен одним из режимов:
+<span class="chip static">статика</span> — одинаковый у всех объектов;
+<span class="chip aug">аугментация</span> — варьируется в заданных пределах (уровень налива,
+сдвиг этикетки, оттенок);
+<span class="chip defect">дефект</span> — вариант-брак, включается вероятностью или по команде
+с пульта («выпусти брак сейчас» — и смотришь, поймает ли инспектор).</p>
+<p><strong>Главный выигрыш слоёв:</strong> симулятор собирал объект сам — значит, он знает
+правду. Каждому объекту прилагается паспорт: класс, угол, какие дефекты. Вердикты инспектора
+можно сверять с истиной автоматически и получать матрицу ошибок — «инспектор пропустил 2
+недолива из 40» вместо «вроде работает».</p>
+<p><strong>Спрайты — в том числе из реальных фото.</strong> Закольцовка с прототипом:
+снял объект боевой камерой → вырезал в RGBA-эталон → положил в каталог пресета — лента
+ездит с настоящей фактурой (блики, износ), без вложений в фотореализм. Для дисков этот
+конвейер уже есть (<span class="mono">dataset_gen/tools/cut_real_disks</span>: детекция
+круга → вырез → приведение к вертикали). Каталог спрайтов общий с генератором датасетов —
+одна съёмка кормит и симулятор, и обучение.</p>
+
+<h2><span class="idx">03</span>Петля целиком</h2>
+
+<figure>
+<svg viewBox="0 0 880 330" role="img" aria-label="Контур: прототип, линия, робот">
+  <!-- Прототип -->
+  <rect x="30" y="70" width="215" height="130" rx="10" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+  <text x="48" y="98" class="svg-label-strong" font-size="14">Прототип-инспектор</text>
+  <text x="48" y="122" class="svg-small">источник кадров (sim-камера)</text>
+  <text x="48" y="140" class="svg-small">детекция · вердикт</text>
+  <text x="48" y="158" class="svg-small">задания роботу · управление ПЧ</text>
+  <text x="48" y="176" class="svg-small">GUI · телеметрия</text>
+
+  <!-- Линия -->
+  <rect x="330" y="46" width="220" height="178" rx="10" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="348" y="74" class="svg-label-strong" font-size="14">Виртуальная линия</text>
+  <text x="348" y="98" class="svg-small">лента + виртуальный ПЧ</text>
+  <text x="348" y="116" class="svg-small">датчик (фронт + E_capture)</text>
+  <text x="348" y="134" class="svg-small">виртуальная камера (ROI)</text>
+  <text x="348" y="152" class="svg-small">объекты из слоёв + дефекты</text>
+  <text x="348" y="170" class="svg-small">пульт + журнал обмена</text>
+  <text x="348" y="194" class="svg-small" fill="var(--accent)">правда об объектах</text>
+
+  <!-- Робот -->
+  <rect x="635" y="70" width="215" height="130" rx="10" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+  <text x="653" y="98" class="svg-label-strong" font-size="14">Симулятор робота</text>
+  <text x="653" y="122" class="svg-small">Services/robot_comm — готов</text>
+  <text x="653" y="140" class="svg-small">pick-place · 5 режимов Lua</text>
+  <text x="653" y="158" class="svg-small">окно-монитор дублей</text>
+  <text x="653" y="176" class="svg-small">трекинг по энкодеру</text>
+
+  <!-- кадры -->
+  <path d="M330 96 C 300 96, 285 96, 250 96" fill="none" stroke="var(--accent)" stroke-width="2"/>
+  <path d="M250 96 l10 -5 v10 z" fill="var(--accent)"/>
+  <text x="252" y="86" class="svg-small" fill="var(--accent)">кадры вместо камеры</text>
+
+  <!-- modbus к линии -->
+  <path d="M245 160 C 285 160, 295 160, 330 160" fill="none" stroke="var(--teal)" stroke-width="2"/>
+  <path d="M330 160 l-10 -5 v10 z" fill="var(--teal)"/>
+  <path d="M245 160 l10 -5 v10 z" fill="var(--teal)"/>
+  <text x="252" y="150" class="svg-small" fill="var(--teal)">Modbus: ПЧ, датчик</text>
+
+  <!-- энкодер линия-робот -->
+  <line x1="550" y1="110" x2="635" y2="110" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="556" y="100" class="svg-small">один энкодер</text>
+
+  <!-- задания прототип-робот (снизу, в обход) -->
+  <path d="M137 200 C 137 268, 742 268, 742 200" fill="none" stroke="var(--teal)" stroke-width="2"/>
+  <path d="M742 200 l-5 10 h10 z" fill="var(--teal)"/>
+  <text x="376" y="262" class="svg-small" fill="var(--teal)">Modbus: задания pick-place</text>
+
+  <!-- оценка -->
+  <rect x="330" y="286" width="220" height="34" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+  <text x="352" y="308" class="svg-label-strong" fill="var(--accent)">оценка: вердикт ↔ правда</text>
+  <line x1="440" y1="224" x2="440" y2="286" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 3"/>
+</svg>
+<figcaption>Линия и робот — два независимых Modbus-собеседника прототипа, но делят одну
+правду о ленте: энкодер один. Забрал робот объект — объект исчез со сцены.</figcaption>
+</figure>
+
+<p>В v1 процессы линии поднимаются <strong>в топологии прототипа</strong> той же механикой
+SystemLauncher → ProcessManager — ещё один процесс рецепта, как devices или gui.
+Автономное мини-приложение с собственным окном — <strong>отложено</strong>: фасад с
+разъёмами делает его сборкой «потом», а не переделкой. Точность мира — примерная, и это
+осознанно; <strong>ключевой измеряемый инвариант: один объект → одна команда роботу</strong>,
+а не «два задания на одну деталь».</p>
+<p><strong>Рецепт — один на два мира.</strong> Симулятор читает тот же YAML, что выбран
+в инспекторе: рецепт <span class="mono">hikvision_letter_robot</span> — на ленте
+буквы-диски; рецепт бутылок — бутылки. Сим-часть рецепта опциональна: без неё рецепт
+остаётся чисто боевым, с ней инспектор и линия гарантированно говорят об одном продукте.
+В рецепте при подмене меняются две вещи: источник кадров — «sim-камера», адреса
+устройств — на симулятор. Остальной прототип о подмене не знает.</p>
+
+<h2><span class="idx">04</span>Один движок — две сборки</h2>
+<p>Ядро одно и не знает, куда воткнуто. <strong>v1 — сборка в прототипе</strong>:
+вкладка, штатные дисплеи, source-плагин. Автономное окно — отложено, но фасад с
+разъёмами держит его возможным: каждая способность выведена на свой разъём, сборки
+отличаются только адаптерами.</p>
+
+<table>
+  <thead><tr><th>Разъём</th><th>Сборка в прототипе — v1</th><th>Автономная — отложена</th></tr></thead>
+  <tbody>
+    <tr><td>управление</td>
+        <td>вкладка → команды фреймворка; Modbus-фасад ленты там, где боевой тракт ходит по Modbus</td>
+        <td>Modbus TCP целиком — неотличимо от железа</td></tr>
+    <tr><td>кадры</td>
+        <td>source-плагин, кадры внутри процесса</td>
+        <td>sim-камера по сети</td></tr>
+    <tr><td>отображение</td>
+        <td>штатные дисплеи (display_module) + вкладка-пульт</td>
+        <td>своё Qt-окно с пультом</td></tr>
+    <tr><td>правда</td>
+        <td>канал в оценку «вердикт ↔ правда»</td>
+        <td>журнал паспортов объектов</td></tr>
+  </tbody>
+</table>
+
+<p class="dim">Ядро при этом одно и не знает, куда воткнуто, — тот же принцип, что у
+RobotSimCore: чистая логика отдельно, транспорт отдельно.</p>
+
+<h2><span class="idx">05</span>Из чего собираем</h2>
+<p class="dim">Принцип: <strong>сначала готовое</strong> — framework, Services, Plugins,
+прототип. Если нужное линии заперто внутри прототипа — оно выделяется в сервис/плагин
+для переиспользования (продолжение carve-out Phase 4–5), а не копируется. Стартовый
+набор уже в репозитории:</p>
+<table>
+  <thead><tr><th>Кусок</th><th>Что даёт</th><th>Статус</th></tr></thead>
+  <tbody>
+    <tr><td>robot_comm/server</td>
+        <td>Modbus-петля, симулятор робота, окно-монитор, реалистичный тайминг</td>
+        <td>готов (worktree sim-monitor — закоммитить)</td></tr>
+    <tr><td>dataset_gen</td>
+        <td>аугментации (блик, смаз, тень, ББ, гамма…), спрайты RGBA, пресеты YAML</td>
+        <td>готов</td></tr>
+    <tr><td>dataset_gen/realcut</td>
+        <td>вырезка реальных фото в RGBA-эталоны (диски — уже целиком)</td>
+        <td>готов</td></tr>
+    <tr><td>Create_bottles</td>
+        <td>слои LayerImage/BottleGroup, наполнение, PyQt-стенд — идейная основа</td>
+        <td>в истории git (авг–сен 2025, свежее бэкапа на D:\)</td></tr>
+    <tr><td>synthetic_frame_source</td>
+        <td>образец source-плагина «кадры без камеры»</td>
+        <td>готов</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="idx">06</span>Чем продукт НЕ является</h2>
+<ul class="plain">
+  <li><strong>Не 3D и не физика.</strong> Спрайты на плоскости; коллизии, освещение по
+  лучам, падения — нет. Геометрию движения проверяет Virtual Robot в DRAStudio.</li>
+  <li><strong>Не фотореализм.</strong> Задача — правдоподобная картинка для тракта
+  детекции, а не рендер.</li>
+  <li><strong>Не генератор датасетов.</strong> Это делает dataset_gen; линия его
+  переиспользует, а не дублирует.</li>
+  <li><strong>Не Rust.</strong> Композиция ROI ~1–2 Мп на 30 fps — рядовая задача
+  OpenCV/NumPy; переписывать не из чего. Если когда-то упрёмся — узкое место одно
+  (сборка кадра), его и ускорим точечно.</li>
+</ul>
+
+<h2><span class="idx">07</span>Что решено — и что осталось</h2>
+
+<p><strong>Решено владельцем (2026-08-13):</strong></p>
+<ul class="plain">
+  <li><strong>Первый пресет — буквы-диски</strong> (вид сверху): проект живёт на реальном
+  стенде со SCARA, симулятор будет с чем сверять. Бутылки — следующий проект; движок
+  универсален с первого дня.</li>
+  <li><strong>v1 — встроенная в прототип сборка</strong>: вкладка управления по образцу
+  <span class="mono">tabs/pipeline</span>, картинки — в штатные дисплеи, кадры — через
+  source-плагин. Своё автономное окно — отложено, разъёмы фасада сохраняются.</li>
+  <li><strong>Запуск — механикой фреймворка</strong>: процессы линии в топологии
+  прототипа через SystemLauncher, не отдельный скрипт.</li>
+  <li><strong>Точность мира — примерная, достаточно.</strong> Ключевой измеряемый
+  инвариант v1: <strong>один объект → одна команда роботу</strong> (не «два задания
+  на одну деталь»).</li>
+  <li><strong>Функция правды — в v1</strong> (одобрена).</li>
+  <li><strong>Виртуальная камера настраивается</strong>: fps, размер, цвет — как настоящая.</li>
+  <li><strong>Рецепты общие с инспектором</strong>: выбранный рецепт определяет и сцену.</li>
+  <li><strong>Спрайты из реальных фото</strong>: боевая камера → вырезка RGBA → каталог
+  пресета (для дисков конвейер готов).</li>
+  <li><strong>Максимум переиспользования</strong>: сначала готовое из framework /
+  Services / Plugins; нужное, но запертое в прототипе — выделяется в сервис/плагин,
+  не копируется.</li>
+  <li><strong>Робот — отдельным процессом</strong> (robot_comm как есть); общая с линией —
+  только правда о ленте (один энкодер) через канал.</li>
+  <li><strong>Сим-секция — в том же YAML</strong>, опциональная; боевые рецепты без неё
+  валидация не трогает.</li>
+  <li><strong>ПЧ и датчик — через Modbus-фасад</strong> там, где боевой тракт ходит
+  по Modbus: проверяется тот же код, что поедет на железо.</li>
+</ul>
+
+<p class="dim">Открытых вопросов не осталось — все решения закрыты владельцем 2026-08-13;
+план — <span class="mono">plans/line-sim/plan.md</span>.</p>
+
+</main>
