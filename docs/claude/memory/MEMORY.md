@@ -278,3 +278,8 @@
 - [Ручка рецепта — в extras](feedback_recipe_knob_must_be_named_in_from_recipe.md) — metadata не доезжает; доказывать сборкой
 - [qt-mcp: флаг сверяется дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — QT_MCP_PROBE=1; «1:9142» промолчало, рендер GUI не проверялся 3 раунда
 - [Позиционный вызов прячет расхождение имён](feedback_positional_call_hides_parameter_name_drift.md) — заглушка падала на `duration=`; тест автора звал позиционно
+- [Тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — «выборочно» выродилось в «никогда»; его зелёный прогон не результат
+- [Счёт строк не ловит петлю](feedback_row_count_never_catches_the_loop.md) — судить серии внутри записи; геометрии не бывает
+- [Одна дверь — две дороги](feedback_one_door_two_roads_needs_two_guards.md) — запрет на обеих; тест по боевой, не в обход
+- [Предсказание инъекции на общем корпусе](feedback_injection_prediction_on_a_shared_corpus.md) — MUST поимённо + потолок красных
+- [drop_oldest отвечает success](feedback_drop_oldest_reports_success.md) — потеря видна приростом счётчика, не статусом
