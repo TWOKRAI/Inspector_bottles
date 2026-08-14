@@ -65,6 +65,7 @@
 ## Инъекции поломок
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — откат stash, счёт арифметикой
 - [Предсказание — после всех тестов](feedback_predict_injections_after_writing_tests.md) · [на общем корпусе — MUST поимённо](feedback_injection_prediction_on_a_shared_corpus.md) + потолок красных
+- [База инъекций = число собранных](feedback_injection_base_needs_a_collected_count.md) — 0 collected читается как зелено; дочерний логгер не глушит
 - [Покрывать ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) · [слишком грубая не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) · [негодная ≠ вакуум](feedback_broken_injection_is_not_a_vacuous_test.md) — ERROR vs FAILED
 - [Откат — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа · [дубль обязан блокировать](feedback_double_must_block_like_the_original.md)
 - [Тест, переживший свой слом](feedback_test_survived_its_own_break.md) — шов сквозь RLock · [ноль красных = лишний слой](feedback_zero_reds_can_mean_a_useless_layer.md)
