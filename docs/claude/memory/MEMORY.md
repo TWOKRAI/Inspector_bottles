@@ -67,8 +67,10 @@
 - [Предсказание — после всех тестов](feedback_predict_injections_after_writing_tests.md) · [на общем корпусе — MUST поимённо](feedback_injection_prediction_on_a_shared_corpus.md) + потолок красных
 - [База инъекций = число собранных](feedback_injection_base_needs_a_collected_count.md) — 0 collected читается как зелено; дочерний логгер не глушит
 - [Покрывать ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) · [слишком грубая не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) · [негодная ≠ вакуум](feedback_broken_injection_is_not_a_vacuous_test.md) — ERROR vs FAILED
-- [Откат — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа · [дубль обязан блокировать](feedback_double_must_block_like_the_original.md)
+- [Откат — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа; эталон протухает от правок ревью · [дубль обязан блокировать](feedback_double_must_block_like_the_original.md)
 - [Тест, переживший свой слом](feedback_test_survived_its_own_break.md) — шов сквозь RLock · [ноль красных = лишний слой](feedback_zero_reds_can_mean_a_useless_layer.md)
+- [Краснеет только от ПАРЫ изломов](feedback_test_reddens_only_under_a_paired_injection.md) — сторож композиции ≠ вакуум; несовпавшее предсказание = находка
+- [ttl в config.reload отказывает по своей причине](feedback_config_reload_ttl_addressing_guard.md) — throttle-only + ttl ложно-зелёный
 
 ## Вакуумные тесты и ассерты
 - [Молчащий детектор](feedback_silent_detector_proves_nothing.md) — сперва покажи красным · [тест, поднимающий ошибку сам](feedback_test_raising_the_error_itself_guards_the_branch.md) — сторожит except
@@ -132,6 +134,7 @@
 - [Один активный план](feedback_one_active_plan_per_tool.md) — иначе воскрешение отменённых задач
 - [Спека может врать](feedback_plan_spec_can_lie.md) — имя поля сверять с кодом · [позиционный вызов прячет имена](feedback_positional_call_hides_parameter_name_drift.md) — падало на duration=
 - [Commit msg format](feedback_commit_msg_format.md) — хук терпит перенос; ruff → re-stage · [commit забирает весь индекс](feedback_commit_takes_the_whole_index.md) · [agent commit quality](feedback_agent_commit_quality.md) — транслит amend
+- [Откат pre-commit ест незастейдженное](feedback_precommit_rollback_drops_unstaged_edits.md) — потеря выглядит как чистый статус; проверять соседей grep'ом
 - [Parallel agents commit race](feedback_parallel_agents_commit_race.md) — макс 2 без worktree; при одном файле — worktree от HEAD
 
 ## Qt / GUI
