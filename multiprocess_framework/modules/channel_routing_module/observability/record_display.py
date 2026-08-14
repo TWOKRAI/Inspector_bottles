@@ -181,8 +181,13 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
     """Нормализовать hub-запись (drain log/stats) в display-вид.
 
     ЕДИНЫЙ нормализатор для live-хвоста И стора: ``extra`` здесь — dict (не
-    JSON-строка), стор сериализует его в JSON только на границе БД. Для stats
-    severity=metric_type, message=metric.
+    JSON-строка), стор сериализует его в JSON только на границе БД.
+
+    У ``stats`` веток ДВЕ, и назвать одну значило бы описать не ту, что едет:
+      * агрегат окна (``aggregate=true``) → ``severity="snapshot"``,
+        ``message`` — строка снапшота; так выглядят ВСЕ записи живого стенда
+        (замер 2026-08-14: 112 строк вкладки, снапшоты раз в 10 с);
+      * одиночная метрика → ``severity=metric_type``, ``message=metric``.
 
     Args:
         record: hub-запись (или tap-запись стора той же формы, с ключом ``context``).

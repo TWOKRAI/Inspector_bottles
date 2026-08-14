@@ -40,7 +40,12 @@ from ...primitives import BaseAdminPanel
 from .record_history_presenter import RecordHistoryPresenter
 from .record_source import RecordSource
 
-# Опции фильтра уровня по kind. stats → None (severity=metric_type, фильтр скрыт).
+# Опции фильтра уровня по kind. stats → None: фильтр скрыт, потому что severity
+# у метрики не уровень логирования. Веток две, и живьём едет ТОЛЬКО первая
+# (замер стенда 2026-08-14, 112 строк вкладки — все агрегаты):
+#   агрегат окна  → severity="snapshot"      (2.1, `hub_record_to_display`)
+#   одна метрика  → severity=<тип метрики>   (counter/gauge/timing/histogram)
+# Список уровней бессмыслен в обоих случаях, поэтому ветку не различаем.
 LEVEL_OPTIONS = {
     "log": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     "error": ["ERROR", "CRITICAL"],
