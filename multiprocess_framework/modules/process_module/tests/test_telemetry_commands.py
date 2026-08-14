@@ -150,12 +150,25 @@ class TestTelemetryReconfigureCommand:
         assert "shm" not in svc._heartbeat._telemetry_gate.due_metrics(now=100.0)
         assert throttle.rules == {"a.b": 1.0}
 
-    def test_throttle_without_store_reports_no_receiver(self) -> None:
-        """Процесс без StateStoreManager → throttle не применён (нет приёмника)."""
+    def test_throttle_without_store_is_refused_with_an_address(self) -> None:
+        """Процесс без StateStoreManager → inline-дверь ОТКАЗЫВАЕТ и называет адрес.
+
+        Task 3.1 перевернула ответ этой пары, и прежняя редакция теста
+        закрепляла ровно тот дефект, который задача снимает: `success=True` при
+        `applied == {"throttle": False}`. Оператор читал «команда прошла», слот
+        L3 при этом занимался дефолтным сроком, а правило не действовало никогда.
+
+        Свойство, которое тест сторожил (**«нет получателя» — это ОТВЕТ, а не
+        молчание**), никуда не делось — сменилась его форма на ЭТОЙ двери:
+        inline — отказ до любой записи. Прежняя форма (`applied.throttle=False`)
+        жива на файловой дороге и сторожится там же
+        (`test_telemetry_layers::test_no_receiver_is_an_answer_not_silence`).
+        """
         svc, cm = _make(throttle=None)  # _state_store_manager is None
         res = cm.dispatch("telemetry.reconfigure", {"throttle": {"a": 1.0}})
-        assert res["success"] is True
-        assert res["applied"] == {"throttle": False}
+        assert res["success"] is False
+        assert res["telemetry_no_receiver"] == ["throttle"]
+        assert "ProcessManager" in res["reason"], "отказ без адреса не говорит, куда слать"
 
     def test_empty_command_is_error(self) -> None:
         _svc, cm = _make()

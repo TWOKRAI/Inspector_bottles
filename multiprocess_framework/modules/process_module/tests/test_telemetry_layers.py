@@ -201,10 +201,48 @@ class TestThrottleDeltaLivesAsOneLeaf:
         assert throttle.rules == {"a.b": 2.0}
 
     def test_no_receiver_is_an_answer_not_silence(self, tmp_path) -> None:
-        """Нет центрального троттла (обычный процесс) → это сказано, а не умолчано."""
-        svc, handlers, _, _ = _wired(tmp_path)  # без throttle
-        res = handlers["telemetry.reconfigure"]({"throttle": {"a.b": 2.0}})
-        assert res["applied"]["throttle"] is False
+        """Нет центрального троттла (обычный процесс) → это сказано, а не умолчано.
+
+        Дорога — ФАЙЛОВАЯ, и это не деталь оформления. Task 3.1 развела две
+        половины правила: inline-дверь теперь отказывает (её сторожит
+        `test_telemetry_commands::test_throttle_without_store_is_refused_with_an_address`),
+        а файловая — применяет остальное и говорит вслух, потому что секция
+        `telemetry.throttle` законна в общем `system.yaml`: её адресат —
+        оркестратор, а читают файл ВСЕ, и отказ валил бы reload у каждого ребёнка.
+
+        Тест переехал сюда, а не удалён: ветка `{"throttle": False}` в
+        `_apply_throttle_from_layers` осталась живой, и без этого прогона её снос
+        прошёл бы незамеченным. Живой путь у неё не один — ревью задачи
+        воспроизвело ту же ветку ещё на дорогах рецепта/switch'а и L1-watcher'а
+        (ADR-PM-034, «Известный долг»); здесь сторожится дорога файла, у которой
+        есть ответ, а значит и наблюдаемый выход.
+        """
+        svc, handlers, _, cfg_path = _wired(tmp_path)  # без throttle
+        cfg_path.write_text(
+            yaml.safe_dump({"observability": {"log_level": "INFO"}, "telemetry": {"throttle": {"a.b": 2.0}}}),
+            encoding="utf-8",
+        )
+        res = handlers["config.reload"]({})  # путь берётся из observability_config_path
+        assert res["success"] is True, "файловая дорога обязана применить остальное, а не отказать"
+        assert res["telemetry_applied"]["throttle"] is False
+        assert res["telemetry_no_receiver"] == ["throttle"], "голос об отсутствии адресата не прозвучал"
+
+    def test_file_road_does_not_capture_ownership_without_a_receiver(self, tmp_path) -> None:
+        """Дельта, доехавшая файлом до процесса без исполнителя, не берёт плоскость во владение.
+
+        Пара к тесту выше: ответ честен И слот не занят. `throttle_owned` —
+        ЛИПКИЙ флаг: захватив его, слои владеют плоскостью навсегда, и истечение
+        срока начинает «возвращать к загрузочным правилам» на процессе, где
+        правил никогда не было. До Task 3.1 присвоение стояло раньше проверки
+        получателя, то есть срабатывало по одному факту «в слое лежит dict».
+        """
+        svc, handlers, _, cfg_path = _wired(tmp_path)  # без throttle
+        cfg_path.write_text(
+            yaml.safe_dump({"observability": {"log_level": "INFO"}, "telemetry": {"throttle": {"a.b": 2.0}}}),
+            encoding="utf-8",
+        )
+        handlers["config.reload"]({})
+        assert process_observability_layers(svc).throttle_owned is False
 
 
 class TestReviewFindings:

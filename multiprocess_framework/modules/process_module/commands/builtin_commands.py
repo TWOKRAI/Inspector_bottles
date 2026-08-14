@@ -1538,7 +1538,65 @@ class BuiltinCommands:
                     "reason": str(exc),
                 }
 
+        # Task 3.1: под-секция, у которой на ЭТОМ процессе нет исполнителя. Ответ
+        # РАЗНЫЙ по месту — та же политика, что у неизвестных ссылок (Task 5.5 /
+        # ADR-PM-031) и по той же причине:
+        #   * inline — ручка оператора, адрес написан руками → отказ ДО любой
+        #     записи в слой. Прежде такая правка отвечала `success=true` при
+        #     `applied.throttle=false`, занимала слот L3 с дефолтным сроком и не
+        #     действовала никогда;
+        #   * файл → голос в ответе, а не отказ: секция `telemetry.throttle`
+        #     совершенно законна в общем `system.yaml` (её адресат — оркестратор),
+        #     а читают этот файл ВСЕ, и отказ здесь валил бы reload у каждого
+        #     ребёнка из-за строчки, адресованной не ему.
+        #     РЕЦЕПТ и switch сюда НЕ входят — они въезжают в слой мимо этой
+        #     двери и голоса не получают (ADR-PM-034, «Известный долг»). Первая
+        #     редакция комментария перечисляла их здесь, и это было неправдой.
+        # Место — здесь, рядом с `validate_telemetry_section`, и по тому же
+        # доводу: секция уже окончательно собрана (inline либо файл + overlay), а
+        # ветка observability ниже кладёт СВОЮ секцию в L3 раньше телеметрии.
+        # Проверь мы её там — отказ приходил бы поверх изменённого состояния, и
+        # существовал бы лишь на одной из ДВУХ дорог этой двери (вторая —
+        # `config.reload` c секцией observability, вливающая телеметрию в слой
+        # вызовом `_merge_telemetry_layer` мимо `_apply_telemetry_section`).
+        # Номер строки здесь не пишется намеренно: прежний указатель «:1820»
+        # протух молча, пока комментарий вокруг него переписывали.
+        telemetry_no_receiver: list[str] = []
+        if isinstance(telemetry_section, dict):
+            from ..managers.observability_reload import (
+                format_telemetry_unaddressable,
+                telemetry_unaddressable,
+            )
+
+            telemetry_no_receiver = telemetry_unaddressable(svc, telemetry_section)
+            if telemetry_no_receiver and source == "inline":
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "source": source,
+                    "reason": format_telemetry_unaddressable(svc, telemetry_no_receiver),
+                    "telemetry_no_receiver": telemetry_no_receiver,
+                }
+
         result: dict = {"success": True, "process": svc.name, "source": source}
+        if telemetry_no_receiver:
+            # Файловая половина правила: применить остальное и сказать ВСЛУХ.
+            # Поле в ответе — образец `unknown_refs` рядом.
+            #
+            # Голос живёт ТОЛЬКО здесь, у ответа. Первая редакция комментария
+            # обещала, что долговечный след кладёт аудит слоёв и покрывает дороги
+            # без ответа (watcher) — ревью воспроизвело обратное: запись
+            # `rebuild` на `observability_reload.py:747` не несёт `applied`, и
+            # факта «получателя не было» в аудите нет ни на одной из тех дорог.
+            # Долг назван в ADR-PM-034 («Известный долг»); обещание снято, чтобы
+            # искать след не шли туда, где его нет.
+            result["telemetry_no_receiver"] = telemetry_no_receiver
+            _log_no_recv = getattr(svc, "_log_error", None)
+            if callable(_log_no_recv):
+                _log_no_recv(
+                    format_telemetry_unaddressable(svc, telemetry_no_receiver),
+                    module="lifecycle",
+                )
         # Секцию телеметрии в слой вливает РОВНО ОДНА из двух веток ниже. Флаг, а
         # не «нет ли поля в ответе»: пустой результат применения — законный
         # (получателей нет), и по его отсутствию вторая ветка влила бы ту же
@@ -2118,6 +2176,29 @@ class BuiltinCommands:
             validate_telemetry_section(section, layer=LAYER_SESSION)
         except ValueError as exc:
             return {"success": False, "process": svc.name, "reason": str(exc)}
+        # Task 3.1: адресат под-секции — тоже ДО правки, по той же причине, что и
+        # содержимое выше. Эта дверь ВСЕГДА inline (ручка оператора), поэтому
+        # половина правила здесь одна — отказ; голос существует только на файловой
+        # дороге соседней двери (`config.reload`, см. там же).
+        #
+        # Отказ ЦЕЛИКОМ, даже когда вторая под-секция применима: `publish` уехал
+        # бы получателю, а `throttle` — нет, и одна команда оставила бы
+        # полу-применённое состояние, про которое ответ говорит «отказ». Ровно от
+        # этого inline-половина ADR-PM-031 и защищает: «состояние не изменилось»
+        # обязано быть правдой целиком, иначе откатывать нечего и непонятно что.
+        from ..managers.observability_reload import (
+            format_telemetry_unaddressable,
+            telemetry_unaddressable,
+        )
+
+        no_receiver = telemetry_unaddressable(svc, section)
+        if no_receiver:
+            return {
+                "success": False,
+                "process": svc.name,
+                "reason": format_telemetry_unaddressable(svc, no_receiver),
+                "telemetry_no_receiver": no_receiver,
+            }
         try:
             applied, ttl_sec = self._apply_telemetry_section(
                 section, source="inline", mode=mode, ttl=ttl, origin=_ORIGIN_TELEMETRY

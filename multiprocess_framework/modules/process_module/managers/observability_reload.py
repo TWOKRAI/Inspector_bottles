@@ -27,6 +27,7 @@ from ..configs.observability_config import expand_observability
 from ..configs.observability_layers import (
     LAYER_APP,
     LAYER_RECIPE,
+    ORCHESTRATOR_PROCESS_NAME,
     TELEMETRY_KEY,
     TELEMETRY_LAYERED_SUBSECTION,
     layer_merge,
@@ -852,6 +853,58 @@ def telemetry_targets(svc: Any) -> Dict[str, Any]:
     }
 
 
+#: Адрес исполнителя каждой под-секции ``telemetry`` — текстом, пригодным для
+#: ответа оператору. Task 3.1: «нет получателя» обязано называть, КУДА слать, а
+#: не только «здесь нельзя»: без адреса оператор узнаёт о промахе по отсутствию
+#: эффекта, то есть позже всего.
+#:
+#: Имя оркестратора берётся из :data:`ORCHESTRATOR_PROCESS_NAME`, а не пишется
+#: строкой второй раз: переименуй его — и зашитый литерал остался бы врать
+#: оператору, а тест приёмки (``assert "ProcessManager" in reason``) остался бы
+#: зелёным, потому что сверял бы литерал с литералом.
+TELEMETRY_SUBSECTION_ADDRESS: Dict[str, str] = {
+    "throttle": (
+        "центральный store-троттл живёт только на оркестраторе — "
+        f"адресуйте под-секцию процессу {ORCHESTRATOR_PROCESS_NAME}"
+    ),
+    "publish": (
+        "publisher-gate собирает ProcessHeartbeat, а у этого процесса heartbeat не поднят — применять publish некому"
+    ),
+}
+
+
+def telemetry_unaddressable(svc: Any, section: Any) -> list[str]:
+    """Под-секции ``telemetry``, у которых на ЭТОМ процессе нет исполнителя.
+
+    Task 3.1. Резолв получателей — ТОТ ЖЕ :func:`telemetry_targets`, которым
+    пользуется применение: разойдись они хоть в одном аргументе, и дверь
+    отказывала бы там, где применение справилось (или наоборот — пропускала
+    туда, где применить некому, ровно тот дефект, который задача закрывает).
+
+    Судится ПРИСУТСТВИЕ ключа, а не истинность значения: ``publish: null`` —
+    законная команда «снять гейт», и снимать его тоже некому, если heartbeat'а
+    нет. Тем же правилом Г3 («ключ есть → владею») здесь уже живут
+    :func:`_apply_telemetry_from_layers` и ``_cmd_telemetry_reconfigure``.
+
+    Возвращает имена под-секций в стабильном порядке (``throttle`` перед
+    ``publish``) — ответ команды не должен менять текст от порядка ключей во
+    входном словаре.
+    """
+    if not isinstance(section, dict):
+        return []
+    targets = telemetry_targets(svc)
+    receivers = {"throttle": targets.get("store_throttle"), "publish": targets.get("heartbeat")}
+    return [sub for sub in ("throttle", "publish") if sub in section and receivers[sub] is None]
+
+
+def format_telemetry_unaddressable(svc: Any, missing: list[str]) -> str:
+    """Собрать причину отказа/голоса по списку под-секций без исполнителя."""
+    where = getattr(svc, "name", "?")
+    return "; ".join(
+        f"telemetry.{sub} не применяется на процессе {where!r}: {TELEMETRY_SUBSECTION_ADDRESS[sub]}" for sub in missing
+    )
+
+
 def apply_telemetry_layers(
     layers: "ObservabilityLayers",
     *,
@@ -1041,15 +1094,27 @@ def _apply_throttle_from_layers(
     появится — это отдельное решение, а не побочный смысл пустого словаря.
     """
     delta = layered.get("throttle") if isinstance(layered, dict) else None
-    if isinstance(delta, dict):
-        layers.throttle_owned = True
-    if not layers.throttle_owned:
+    has_delta = isinstance(delta, dict)
+    if not (has_delta or layers.throttle_owned):
         # Слои дельты не держали ни разу — троттлом владеет файл и его watcher.
+        # Проверка стоит ПЕРВОЙ намеренно: процесс без получателя И без дельты
+        # обязан молчать, а не отчитываться `throttle: False` на каждый reload.
         return None
     if store_throttle is None:
         # Получателя нет (обычный процесс, а не оркестратор) — и это ОТВЕТ, а не
         # молчание: оператор, не увидевший поля, решил бы, что правило применено.
+        #
+        # Task 3.1: возврат стоит ДО присвоения `throttle_owned`, и это несущий
+        # порядок, а не стиль. Прежде владение захватывалось по одному факту
+        # «в слое лежит dict», то есть РАНЬШЕ, чем выяснялось, что применять
+        # некому: плоскость оказывалась во владении слоёв навсегда (флаг
+        # липкий), хотя ни одна дельта никогда не доезжала до исполнителя. Ответ
+        # при этом можно было сделать честным одним текстом — и слот всё равно
+        # остался бы занятым. Владеет тот, кто применил; неприменённая дельта не
+        # владеет ничем.
         return {"throttle": False}
+    if has_delta:
+        layers.throttle_owned = True
 
     effective = dict(boot_rules or {})
     for pattern, value in (delta or {}).items():
