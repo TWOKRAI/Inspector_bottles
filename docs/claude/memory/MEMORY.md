@@ -135,6 +135,7 @@
 
 ## Qt / GUI
 - [Qt widget patterns](feedback_widget_qt_patterns.md) — setFlags recursion, blockSignals, EditTriggers · [qt-mcp smoke+probe](feedback_qt_mcp_smoke_verification.md) — QT_MCP_PROBE=1:9142; чистка по PID
+- [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — окно «невидимо»; snapshot=0 виджетов; кадр только ref-грабом
 - [qt-mcp: флаг дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало; рендер не проверялся 3 раунда
 - [GUI-save сносит yaml-комменты](feedback_gui_save_strips_yaml_comments.md) — git diff перед add
 
