@@ -43,6 +43,7 @@
 - [Commit msg format](feedback_commit_msg_format.md) — хук терпит перенос; ruff → re-stage · [commit забирает весь индекс](feedback_commit_takes_the_whole_index.md) · [agent commit quality](feedback_agent_commit_quality.md) — транслит amend
 - [ruff сносит свежий импорт](feedback_ruff_strips_unused_import.md) — импорт и его использование ОДНИМ Edit
 - [API MCP дрейфует](feedback_mcp_tool_api_drift.md) — ROUTING.md может врать · [sentrux depth непрозрачна](feedback_sentrux_depth_opaque.md) · [sentrux gate сужен](feedback_sentrux_gate_narrowed.md) — блок только циклы↑/god↑
+- [enabled: false не выгружает плагин](feedback_enabled_false_does_not_unload_a_plugin.md) — Claude Code читает .claude/plugins/* напрямую; выгружает только вынос папки; судить по списку, не по флагу
 - [devseed перетирает .claude/](project_devseed_overwrites_claude_dir.md) — preserved: CLAUDE.md, modes/_stack.md, settings.local; перетираются settings.json и остальные modes/* · [миграция на claude-kit](project_claude_kit_migration.md)
 
 ## Ремесло: тесты, инъекции, дефекты, конфиг, Qt → [CRAFT.md](CRAFT.md)

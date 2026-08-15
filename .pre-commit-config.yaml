@@ -4,7 +4,7 @@
 # Обновление версий: pre-commit autoupdate
 
 # robot/ — firmware/PLC/Colab (Lua, экспортированные ноутбуки, pc-скрипты), не модульный Python проекта
-exclude: ^robot/
+exclude: ^(robot/|docs/claude/frozen/)
 
 repos:
   # ── Общие проверки ──
