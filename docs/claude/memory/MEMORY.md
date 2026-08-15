@@ -43,7 +43,8 @@
 - [Commit msg format](feedback_commit_msg_format.md) — хук терпит перенос; ruff → re-stage · [commit забирает весь индекс](feedback_commit_takes_the_whole_index.md) · [agent commit quality](feedback_agent_commit_quality.md) — транслит amend
 - [ruff сносит свежий импорт](feedback_ruff_strips_unused_import.md) — импорт и его использование ОДНИМ Edit
 - [API MCP дрейфует](feedback_mcp_tool_api_drift.md) — ROUTING.md может врать · [sentrux depth непрозрачна](feedback_sentrux_depth_opaque.md) · [sentrux gate сужен](feedback_sentrux_gate_narrowed.md) — блок только циклы↑/god↑
-- [enabled: false не выгружает плагин](feedback_enabled_false_does_not_unload_a_plugin.md) — Claude Code читает .claude/plugins/* напрямую; выгружает только вынос папки; судить по списку, не по флагу
+- [Атрибутируй источник до реза](feedback_attribute_the_source_before_cutting.md) — агенты/команды идут с ДВУХ уровней (.claude/ и ~/.claude/); сверять состав множеств, а не факт присутствия; экономию заявлять после прогона в новой сессии
+- [Dual-write разъехался по содержимому](feedback_plan_dual_save.md) — 64 записи различаются в ОБЕ стороны, правды нет ни в одной копии; сверять перед доверием старой записи
 - [devseed перетирает .claude/](project_devseed_overwrites_claude_dir.md) — preserved: CLAUDE.md, modes/_stack.md, settings.local; перетираются settings.json и остальные modes/* · [миграция на claude-kit](project_claude_kit_migration.md)
 
 ## Ремесло: тесты, инъекции, дефекты, конфиг, Qt → [CRAFT.md](CRAFT.md)
@@ -54,6 +55,8 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — инъекция на КАЖДОЕ заявленное свойство, предсказание до прогона · [молчащий детектор](feedback_silent_detector_proves_nothing.md)
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без воспроизведения вход→выход = совет, не факт
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
+- [Фасад — белый список](feedback_facade_is_a_whitelist_not_a_passthrough.md) — правка схемы/конфига: три точки (схема, фасад+expand, readback) · [model_copy не валидирует](feedback_model_copy_does_not_validate.md) — dict вместо схемы молча
+- [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — qt-mcp: «зонд жив» ≠ «отрисовано» · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало
 
 ## Активные проекты и долги
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; правда в v1; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim

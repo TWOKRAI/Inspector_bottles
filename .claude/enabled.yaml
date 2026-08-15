@@ -62,6 +62,10 @@ plugins:
     enabled: true
   # Knowledge team plugin (Phase 3, Task 3.3) — university/ renamed to knowledge/.
   # Default-off: opt-in for projects that need the science workflow.
+  # FROZEN 2026-08-16: папка вынесена в docs/claude/frozen/knowledge-plugin/.
+  # enabled:false работал корректно — плагин в контекст не грузился; платил
+  # пользовательский уровень (~/.claude/agents/university/), он заморожен отдельно.
+  # Восстановление: git mv docs/claude/frozen/knowledge-plugin .claude/plugins/knowledge
   knowledge:
     enabled: false
   # Python toolchain plugin (Phase 3, Task 3.6) — hooks + templates for Python projects.

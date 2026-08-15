@@ -4,7 +4,12 @@
 # Обновление версий: pre-commit autoupdate
 
 # robot/ — firmware/PLC/Colab (Lua, экспортированные ноутбуки, pc-скрипты), не модульный Python проекта
-exclude: ^(robot/|docs/claude/frozen/)
+exclude: ^robot/
+
+# docs/claude/frozen/ — замороженный чужой код (FREEZE, не KILL). Его нельзя ПРАВИТЬ,
+# поэтому исключён точечно из мутирующих хуков (trailing-whitespace, end-of-file-fixer,
+# ruff, ruff-format, bandit). Детекторы (check-yaml/toml, merge-conflict, large-files,
+# debug-statements) на него работают — зона не должна стать дырой для мусора.
 
 repos:
   # ── Общие проверки ──
@@ -13,7 +18,9 @@ repos:
     hooks:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
+        exclude: ^docs/claude/frozen/
       - id: end-of-file-fixer
+        exclude: ^docs/claude/frozen/
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict
@@ -27,7 +34,9 @@ repos:
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
+        exclude: ^docs/claude/frozen/
       - id: ruff-format
+        exclude: ^docs/claude/frozen/
 
   # ── pyright (type checking, gradual, ADVISORY) ──
   # Конфигурация читается из [tool.pyright] в pyproject.toml.
@@ -51,7 +60,7 @@ repos:
       - id: bandit
         args: [-c, pyproject.toml, -q]
         additional_dependencies: ["bandit[toml]"]
-        exclude: ^(tests/|\.claude/)
+        exclude: ^(tests/|\.claude/|docs/claude/frozen/)
 
   # ── Журнал коммитов в docs/sessions/YYYY-MM-DD.md ──
   # Заменяет старый Stop-хук Claude — теперь запись попадает в сам коммит,
