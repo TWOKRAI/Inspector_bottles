@@ -193,11 +193,6 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/mcp-health-check.sh",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/session-memory-banner.sh",
-            "timeout": 5
           }
         ]
       }
