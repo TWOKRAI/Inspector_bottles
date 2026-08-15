@@ -45,6 +45,8 @@ def build_worker_telemetry(
     workers: dict,
     name: str,
     allowed_metrics: Optional[Iterable[str]] = None,
+    *,
+    include_cycles: bool = False,
 ) -> tuple[str, dict] | None:
     """Собрать (path, merge_data) телеметрии процесса из снимка воркеров.
 
@@ -78,6 +80,17 @@ def build_worker_telemetry(
         name:    имя процесса-владельца (префикс пути в дереве).
         allowed_metrics: разрешённые суффиксы метрик (``None`` → все разрешены,
             обратная совместимость).
+        include_cycles: положить в статус воркера счётчик завершённых циклов
+            ``cycles`` (``CycleMetricsRecorder``, уже лежит в снимке —
+            ``WorkerManager.get_worker_status`` подмешивает его наверх). Только для
+            ОПРОСА уровней и намеренно НЕ для push'а: ``cycles`` — не уровень «для
+            глаз», а **признак движения**, по которому опрашивающий отличает «числа
+            свежие» от «числа стоят, потому что воркер встал» (``snapshot_ts`` этого
+            не даёт — он про возраст ОТВЕТА, ревью-блокер 2, ADR-PM-035). В push он
+            не идёт, чтобы не добавлять лист в дерево каждому воркеру на каждый тик
+            ради того, что нужно только опрашивающему. Асимметрия названа и
+            односторонняя: push остаётся ПОДМНОЖЕСТВОМ опроса, поэтому свойство
+            «числа опроса совпадают с числами push» не нарушено.
 
     Returns:
         ``(path, data)`` для ``proxy.merge`` — ЛИБО ``None``, если публиковать нечего
@@ -122,6 +135,13 @@ def build_worker_telemetry(
             wp["effective_hz"] = round(hz, 1)
         if lat_ok and isinstance(lat, (int, float)) and lat > 0:
             wp["cycle_duration_ms"] = round(lat, 1)
+        # Признак движения для опроса (см. include_cycles). Вне гейта: это не метрика
+        # «сколько сейчас», а счётчик, по которому судят о свежести самих метрик.
+        # Читается из УЖЕ снятого статуса — ни второго обхода, ни нового механизма.
+        if include_cycles:
+            cycles = w.get("cycles")
+            if isinstance(cycles, int) and not isinstance(cycles, bool):
+                wp["cycles"] = cycles
         if wp:
             workers_payload[wname] = wp
 
@@ -147,6 +167,88 @@ def build_worker_telemetry(
     if not data:
         return None
     return f"processes.{name}", data
+
+
+def build_router_shm_telemetry(router: Any) -> dict:
+    """Собрать счётчики кадрового транспорта router'а — те же листья, что уходят в
+    ``processes.<name>.state.shm`` на тике публикации.
+
+    Выделена из ``ProcessHeartbeat._publish_router_shm_stats_to_tree`` (Task 3.2), где
+    жила инлайном вместе с merge'ем. Причина выделения — не красота: у группы ``shm``
+    появился ВТОРОЙ потребитель (опрос уровней, :meth:`ProcessHeartbeat.current_levels_snapshot`),
+    и держать список из тринадцати имён в двух местах значило бы завести две дороги к
+    одной величине — добавленный счётчик появлялся бы у push и молча отсутствовал у
+    опроса (или наоборот).
+
+    **Чистая функция:** ``router.get_stats()`` — только чтение, ничего не мутирует;
+    решение «публиковать ли» (все нули → не грузить дерево) остаётся у ПУБЛИКАТОРА, а
+    не здесь: для опроса «все нули» — это показание «кадрового пути нет / всё чисто»,
+    а не отсутствие данных.
+
+    **Цена названа и измерена.** Предпочитается узкий ``router.get_shm_stats()``: полный
+    ``get_stats()`` ради этих тринадцати int'ов строит ``channel_routes`` /
+    ``message_handler_list`` / ``channels`` и стоил на живом стенде ~45 мс сверх пола
+    транспорта — их платил и опрос уровней, и КАЖДЫЙ push-тик heartbeat'а (ADR-PM-035,
+    ревью-блокер 1). Полный ``get_stats()`` остаётся фолбэком для router'ов без узкого
+    аксессора (duck-typing: фейки тестов, сторонние реализации) — числа те же, дороже
+    только путь.
+
+    Args:
+        router: ``RouterManager`` процесса (duck-typed по ``get_shm_stats()`` либо,
+            фолбэком, по ``get_stats()``).
+
+    Returns:
+        dict ``{счётчик: int}`` — всегда ПОЛНЫЙ набор ключей (нули включительно).
+
+    Raises:
+        Пробрасывает исключения аксессора router'а — оба вызывающих ловят сами
+        (публикатор логирует и пропускает тик; опрос отдаёт секцию ``None``).
+    """
+    narrow = getattr(router, "get_shm_stats", None)
+    if callable(narrow):
+        rs = narrow()
+    else:
+        stats = router.get_stats()
+        rs = stats.get("router", stats) if isinstance(stats, dict) else {}
+
+    def _n(key: str) -> int:
+        return int(rs.get(key, 0) or 0)
+
+    return {
+        "pickle_fallbacks": _n("frame_pickle_fallbacks"),
+        "torn_reads": _n("frame_torn_reads"),
+        "boundary_crossings": _n("frame_boundary_crossings"),
+        "queue_data_evicted": _n("queue_data_evicted"),
+        # Ф7 G.4.a: system-backpressure тоже виден (блокировки вытеснения из полной
+        # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
+        # surface был, но публикации не было — асимметрия с data_evicted).
+        "queue_system_evict_blocked": _n("queue_system_evict_blocked"),
+        # Ф7.3: потери ХВОСТА наблюдаемости. Публикация обязательна, а не «для
+        # симметрии»: пути потери хвоста молчат в логах сознательно (запись о
+        # потерянной записи усиливала бы шторм), поэтому дерево — единственное
+        # место, где оператор эту потерю увидит.
+        "queue_observability_evicted": _n("queue_observability_evicted"),
+        "queue_observability_send_failed": _n("queue_observability_send_failed"),
+        # Ф7.х M-2: ТРЕТЬЯ форма потери хвоста — билет не доехал ни одним из путей
+        # доставки роутера (targets, relay через хаб, канал). Счётчик завела Ф7.3 и
+        # не вывела наружу НИ ОДНИМ путём — класс «проглоченный сбой» внутри починки
+        # того же класса. Проверено живьём: в ``state.shm`` были только evicted и
+        # send_failed.
+        "observability_delivery_failed": _n("observability_delivery_failed"),
+        # Ф7 G.5.c: дроп по post-use re-check zero-copy view (слот перезаписан под
+        # живым view — consumer отстал > глубины кольца).
+        "stale_drops": _n("frame_stale_drops"),
+        # Ф7 G.5.d (В3): исчерпание free-list → drop-на-источнике (back-pressure).
+        "loan_exhausted": _n("frame_loan_exhausted"),
+        # Ф7 G.5 ревью-фикс 15: здоровье loan-цикла (released/reclaimed) — не потери,
+        # но обязательный сигнал: exhausted растёт при released на нуле = release-контур
+        # не замкнут (ревью поймало именно это через отсутствие сигнала).
+        "slots_released": _n("frame_slots_released"),
+        "slots_reclaimed": _n("frame_slots_reclaimed"),
+        # Ф7 G.7 (0.5): размер reader-кэша SHM-handle. НЕ потеря, а health-сигнал:
+        # под zero-copy эвикция отключена → рост на инкарнацию = утечка handle.
+        "cache_size": _n("frame_handle_cache_size"),
+    }
 
 
 def capped_metrics(config: Any, effective_tick: float) -> list[tuple[str, float]]:
@@ -241,4 +343,10 @@ class TelemetryGate:
         return allowed
 
 
-__all__ = ["build_worker_telemetry", "TelemetryGate", "gated_metrics", "capped_metrics"]
+__all__ = [
+    "build_worker_telemetry",
+    "build_router_shm_telemetry",
+    "TelemetryGate",
+    "gated_metrics",
+    "capped_metrics",
+]

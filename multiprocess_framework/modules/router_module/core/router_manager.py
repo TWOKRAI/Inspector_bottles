@@ -1450,6 +1450,63 @@ class RouterManager(ChannelRoutingManager):
     # STATISTICS & MONITORING
     # ================================================================
 
+    def get_shm_stats(self) -> Dict[str, int]:
+        """УЗКИЙ снимок счётчиков кадрового транспорта и потерь в очередях.
+
+        Те же тринадцать чисел, что телеметрия публикует в ``processes.<name>.state.shm``,
+        но БЕЗ цены :meth:`get_stats`: не собираются ``channel_routes`` /
+        ``message_handler_list`` / ``channels`` (обходы реестров каналов, хендлеров и
+        dispatcher'ов), не читаются полные ``_stats``.
+
+        **Зачем узкий путь — цена измерена, а не предположена.** Опрос уровней
+        (``introspect.telemetry``, ADR-PM-035) и push-тик heartbeat'а звали ради этих
+        тринадцати int'ов полный ``get_stats()``. A/B на живом стенде (15 вызовов,
+        медианы): ``introspect.telemetry`` с полным ``get_stats`` — 56.25 мс против
+        11.05 мс у процесса без опроса, при поле транспорта 11 мс и
+        ``introspect.router_stats`` 64.13 мс. То есть весь прирост опроса — цена
+        ``get_stats()``. Шторм опросов 21.7/с просаживал боевой fps camera_0 с 21.31
+        до 19.73 Гц (−7.4 %). Задача 3.3 подключает опрос на восемь процессов.
+
+        **Единственная точка вычисления этих тринадцати.** :meth:`get_stats` splice'ит
+        результат к себе (``**self.get_shm_stats()``), поэтому «узкий» и «полный» пути
+        не могут разойтись: добавленный сюда счётчик появляется в обоих сразу.
+        Эквивалентность сторожит ``tests/test_shm_stats_narrow.py``.
+
+        Returns:
+            dict ``{ключ_источника: int}`` — имена те же, что у соответствующих ключей
+            :meth:`get_stats` (``frame_*`` / ``queue_*`` / ``observability_*``).
+        """
+        mws = self._frame_middlewares
+
+        def _mw(attr: str) -> int:
+            return sum(int(getattr(mw, attr, 0) or 0) for mw in mws)
+
+        qr = self.queue_registry
+
+        def _q(attr: str) -> int:
+            return int(getattr(qr, attr, 0) or 0)
+
+        # Единственное место, где нужен замок: остальное — безлоковые счётчики
+        # middleware и дешёвые property реестра очередей.
+        with self._stats_lock:
+            delivery_failed = int(self._stats.get("observability_delivery_failed", 0) or 0)
+
+        return {
+            "frame_pickle_fallbacks": _mw("frame_pickle_fallbacks"),
+            "frame_torn_reads": _mw("frame_torn_reads"),
+            "frame_boundary_crossings": _mw("frame_boundary_crossings"),
+            "frame_stale_drops": _mw("frame_stale_drops"),
+            "frame_loan_exhausted": _mw("frame_loan_exhausted"),
+            "frame_slots_released": _mw("frame_slots_released"),
+            "frame_slots_reclaimed": _mw("frame_slots_reclaimed"),
+            "frame_handle_cache_size": _mw("frame_handle_cache_size"),
+            "queue_data_evicted": _q("data_evicted"),
+            "queue_system_evict_blocked": _q("system_evict_blocked"),
+            "queue_observability_evicted": _q("observability_evicted"),
+            "queue_observability_send_failed": _q("observability_send_failed"),
+            "observability_delivery_failed": delivery_failed,
+        }
+
     def get_stats(self) -> Dict[str, Any]:
         """Полная статистика: счётчики, каналы, dispatcher'ы, потоки."""
         base = super().get_stats() if hasattr(super(), "get_stats") else {}
@@ -1478,26 +1535,12 @@ class RouterManager(ChannelRoutingManager):
             **stats_snap,
             "errors": stats_snap["errors"] + self._receiver.errors,
             "channels": self._channel_registry.get_info(),
-            # Ф7 G.6 (F5): сумма счётчиков всех зарегистрированных frame-middleware —
-            # не аккумулируется в _stats на send-пути (см. register_frame_middleware).
-            "frame_boundary_crossings": sum(
-                getattr(mw, "frame_boundary_crossings", 0) for mw in self._frame_middlewares
-            ),
-            # Ф7 G.3(d): громкий pickle-fallback — сколько кадров ушло медленным путём
-            # (сбой SHM-write). Тот же безлоковый суммируемый-на-чтении механизм.
-            "frame_pickle_fallbacks": sum(getattr(mw, "frame_pickle_fallbacks", 0) for mw in self._frame_middlewares),
-            # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware).
-            "frame_torn_reads": sum(getattr(mw, "frame_torn_reads", 0) for mw in self._frame_middlewares),
-            # Ф7 G.5.c: post-use re-check zero-copy view — слот перезаписан под живым
-            # view (consumer отстал > глубины кольца), результат дропнут (не порча).
-            "frame_stale_drops": sum(getattr(mw, "frame_stale_drops", 0) for mw in self._frame_middlewares),
-            # Ф7 G.5.d (В3): исчерпание free-list → громкий drop-на-источнике
-            # (back-pressure: читатели отстали, свободных слотов нет).
-            "frame_loan_exhausted": sum(getattr(mw, "frame_loan_exhausted", 0) for mw in self._frame_middlewares),
-            # Ф7 G.5.d-2 (В3): слотов освобождено release'ами (здоровье loan-цикла).
-            "frame_slots_released": sum(getattr(mw, "frame_slots_released", 0) for mw in self._frame_middlewares),
-            # Ф7 G.5.e (В3): займов реклеймлено после смерти читателя (kill-9 без release).
-            "frame_slots_reclaimed": sum(getattr(mw, "frame_slots_reclaimed", 0) for mw in self._frame_middlewares),
+            # Тринадцать счётчиков кадрового транспорта и потерь в очередях считает
+            # УЗКИЙ get_shm_stats() — единственная точка их вычисления (телеметрия
+            # зовёт его напрямую, минуя цену этого метода; ADR-PM-035). Splice здесь
+            # держит оба пути в согласии по построению. Раньше эти суммы стояли
+            # инлайном и были бы вторым вычислением тех же величин.
+            **self.get_shm_stats(),
             # LIVE-2: займов освобождено при вытеснении кадра из полной очереди до прочтения
             # (release-on-evict). Рост = устойчивая перегрузка приёмника (кадры вытесняются);
             # без этого пути займы утекли бы → перманентная смерть кольца. «Потеря видна».
@@ -1508,20 +1551,11 @@ class RouterManager(ChannelRoutingManager):
             # агрегат для introspect.memory pool-секции — чтобы не читать приватный
             # _frame_middlewares второй точкой агрегации.
             "frame_loan_pools": sum(1 for mw in self._frame_middlewares if getattr(mw, "loan_protocol_enabled", False)),
-            # Ф7 G.7 (0.5): суммарный размер reader-кэша SHM-handle — рост на инкарнацию
-            # под zero-copy = утечка handle (эвикция отключена, резидуал G.5). Без кэша — 0.
-            "frame_handle_cache_size": sum(getattr(mw, "frame_handle_cache_size", 0) for mw in self._frame_middlewares),
-            # Ф7 G.4.a: дроп из полных data-очередей (drop_oldest) — surface из
-            # queue_registry (дешёвый property, не полный get_stats), чтобы heartbeat
-            # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
-            "queue_data_evicted": int(getattr(self.queue_registry, "data_evicted", 0) or 0),
-            "queue_system_evict_blocked": int(getattr(self.queue_registry, "system_evict_blocked", 0) or 0),
-            # Ф7.3: потери ХВОСТА наблюдаемости. Отдельные ключи от data-дропа: смешав,
-            # нельзя отличить «теряем кадры» от «теряем диагностику». Единственный
-            # путь наружу — эти счётчики: сами пути потери молчат в логах сознательно
-            # (запись о потерянной записи усиливала бы шторм, петля Б-6).
-            "queue_observability_evicted": int(getattr(self.queue_registry, "observability_evicted", 0) or 0),
-            "queue_observability_send_failed": int(getattr(self.queue_registry, "observability_send_failed", 0) or 0),
+            # frame_handle_cache_size / queue_data_evicted / queue_system_evict_blocked /
+            # queue_observability_evicted / queue_observability_send_failed —
+            # выше, в splice `**self.get_shm_stats()`. Разбор их семантики (потери кадров,
+            # потери ХВОСТА наблюдаемости отдельными ключами от data-дропа, health-сигнал
+            # утечки handle) переехал в докстринг того метода вместе с вычислением.
             # Ф4 Task 4.3 (plans/truth-holes-closure.md): БЕЗВОЗВРАТНЫЕ потери never-drop
             # груза. Счётчик существовал, но уходил только в stdlib-логгер — самая тяжёлая
             # потеря системы была недоступна интроспекции. Тот же дешёвый property-surface,

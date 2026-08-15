@@ -611,6 +611,11 @@ class ProcessHeartbeat:
         PC 1.2: группа ``shm`` проходит publisher-gate. ``allowed_metrics`` не None и
         без ``"shm"`` → выходим сразу (не считаем ``get_stats()`` — экономим источник).
         ``None`` → shm разрешён (обратная совместимость).
+
+        Task 3.2: сами листья собирает :func:`build_router_shm_telemetry` — у группы
+        появился второй потребитель (опрос уровней), и список счётчиков живёт теперь
+        в одном месте. Здесь остаётся ПОЛИТИКА публикатора: гейт, наличие прокси и
+        «все нули → не грузим дерево».
         """
         if allowed_metrics is not None and "shm" not in allowed_metrics:
             return  # shm выключен/зажат частотой — не считаем и не публикуем
@@ -619,83 +624,96 @@ class ProcessHeartbeat:
         if proxy is None or router is None:
             return
         try:
-            stats = router.get_stats()
-            rs = stats.get("router", stats) if isinstance(stats, dict) else {}
-            pickle_fallbacks = int(rs.get("frame_pickle_fallbacks", 0) or 0)
-            torn = int(rs.get("frame_torn_reads", 0) or 0)
-            crossings = int(rs.get("frame_boundary_crossings", 0) or 0)
-            queue_evicted = int(rs.get("queue_data_evicted", 0) or 0)
-            # Ф7 G.4.a: system-backpressure тоже виден (блокировки вытеснения из полной
-            # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
-            # surface был, но публикации не было — асимметрия с data_evicted).
-            sys_blocked = int(rs.get("queue_system_evict_blocked", 0) or 0)
-            # Ф7.3: потери ХВОСТА наблюдаемости. Публикация здесь обязательна, а не
-            # «для симметрии»: пути потери хвоста молчат в логах сознательно (запись
-            # о потерянной записи усиливала бы шторм), поэтому дерево — единственное
-            # место, где оператор эту потерю увидит.
-            obs_evicted = int(rs.get("queue_observability_evicted", 0) or 0)
-            obs_send_failed = int(rs.get("queue_observability_send_failed", 0) or 0)
-            # Ф7.х M-2: ТРЕТЬЯ форма потери хвоста — билет не доехал ни одним из
-            # путей доставки роутера (targets, relay через хаб, канал). Счётчик
-            # завела Ф7.3 и не вывела наружу НИ ОДНИМ путём: ни в heartbeat, ни в
-            # аномалиях — то есть класс «проглоченный сбой» воспроизвёлся внутри
-            # починки того же класса. Проверено живьём: в ``state.shm`` были
-            # только evicted и send_failed.
-            obs_delivery_failed = int(rs.get("observability_delivery_failed", 0) or 0)
-            # Ф7 G.5.c: дроп по post-use re-check zero-copy view (слот перезаписан под
-            # живым view — consumer отстал > глубины кольца). Ещё один сигнал потери
-            # кадра в том же месте для вкладки Pipeline.
-            stale_drops = int(rs.get("frame_stale_drops", 0) or 0)
-            # Ф7 G.5.d (В3): исчерпание free-list → drop-на-источнике (back-pressure,
-            # читатели отстали). Тот же сигнальный набор потери кадра.
-            loan_exhausted = int(rs.get("frame_loan_exhausted", 0) or 0)
-            # Ф7 G.5 ревью-фикс 15: здоровье loan-цикла (released/reclaimed) — не потери,
-            # но обязательный сигнал: если exhausted растёт, а released стоит на нуле —
-            # release-контур не замкнут (ревью поймало именно это через отсутствие сигнала).
-            slots_released = int(rs.get("frame_slots_released", 0) or 0)
-            slots_reclaimed = int(rs.get("frame_slots_reclaimed", 0) or 0)
-            # Ф7 G.7 (0.5): размер reader-кэша SHM-handle. НЕ потеря, а health-сигнал:
-            # под zero-copy эвикция отключена → рост на инкарнацию = утечка handle
-            # (резидуал G.5). Без handle-кэша (флаг off) = 0 → guard ниже сохраняет
-            # прежний no-op (off = бит-в-бит).
-            cache_size = int(rs.get("frame_handle_cache_size", 0) or 0)
-            if (
-                pickle_fallbacks == 0
-                and torn == 0
-                and crossings == 0
-                and queue_evicted == 0
-                and sys_blocked == 0
-                and obs_evicted == 0
-                and obs_send_failed == 0
-                and obs_delivery_failed == 0
-                and stale_drops == 0
-                and loan_exhausted == 0
-                and slots_released == 0
-                and slots_reclaimed == 0
-                and cache_size == 0
-            ):
-                return  # нет кадрового пути / всё чисто — не публикуем
-            proxy.merge(
-                f"processes.{self._services.name}.state.shm",
-                {
-                    "pickle_fallbacks": pickle_fallbacks,
-                    "torn_reads": torn,
-                    "boundary_crossings": crossings,
-                    "queue_data_evicted": queue_evicted,
-                    "queue_system_evict_blocked": sys_blocked,
-                    "queue_observability_evicted": obs_evicted,
-                    "queue_observability_send_failed": obs_send_failed,
-                    "observability_delivery_failed": obs_delivery_failed,
-                    "stale_drops": stale_drops,
-                    "loan_exhausted": loan_exhausted,
-                    "slots_released": slots_released,
-                    "slots_reclaimed": slots_reclaimed,
-                    "cache_size": cache_size,
-                },
-            )
+            from .telemetry import build_router_shm_telemetry
+
+            payload = build_router_shm_telemetry(router)
+            # Все счётчики нулевые → нет кадрового пути / всё чисто — не публикуем.
+            # Проверка по значениям, а не поимённым сравнением с нулём: добавленный
+            # в сборщик счётчик попадает под тот же guard сам, без правки здесь.
+            if not any(payload.values()):
+                return
+            proxy.merge(f"processes.{self._services.name}.state.shm", payload)
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish SHM-счётчиков: {exc}", module="heartbeat")
+
+    def current_levels_snapshot(self) -> dict | None:
+        """Пакетный снимок текущих УРОВНЕЙ процесса — один вызов, все метрики (Task 3.2).
+
+        Отвечает на «сколько сейчас» БЕЗ включённой публикации: publisher-гейт
+        (ADR-PM-018) управляет push'ем в дерево, а не тем, что процесс знает о себе.
+        Поэтому сборщик зовётся с ``allowed_metrics=None`` — гейт закрыт наглухо, а
+        снимок всё равно полон. Обратное («опрос показывает только разрешённое к
+        публикации») сделало бы поле бесполезным ровно в том случае, ради которого оно
+        заводилось: закрытое окно, ноль push-трафика, оператор всё ещё хочет числа.
+
+        **Тот же сборщик, что у тика** (:func:`build_worker_telemetry` +
+        :func:`build_router_shm_telemetry`), и та же форма пути: возвращаемый dict
+        ложится в дерево как ``processes.<name>`` (``workers.*`` + ``state.*``, включая
+        ``state.shm.*``). Второго способа посчитать те же величины не заводится:
+        разойдись они, «опрос отдаёт то же, что push» стало бы ложью, которую видно
+        только на стенде с router'ом (в юнит-тестах router обычно ``None``).
+
+        **Граница названа: снимок — это то, что собирает ТЕЛЕМЕТРИЙНЫЙ ТИК, а не всё,
+        что кто-либо когда-либо писал под ``processes.<name>.state``.** Проверено на
+        живом стенде 2026-08-14: у ``camera_0`` в дереве рядом с ``fps``/``latency_ms``/
+        ``shm`` лежат ``uptime``/``frame_count``/``drops``/``status``/``pid`` — их пишут
+        ДРУГИЕ публикаторы (bootstrap состояния и прикладные процессы прототипа), этот
+        сборщик их не считает и в снимок не кладёт. Потребителю, который сегодня читает
+        их из дерева, опрос их не заменит — резидуал для 3.3 (ADR-PM-035).
+
+        Следствие общего сборщика, принятое осознанно: **округление до 1 знака**
+        (``round(x, 1)``) действует и на опросе. Снимок — вид уровней для глаз, а не
+        измерительный прибор; расхождение push/poll в последнем знаке было бы дороже
+        потерянной точности.
+
+        **Только чтение.** ``get_all_workers_status()`` и узкий ``router.get_shm_stats()``
+        ничего не мутируют, ``_next_due`` гейта НЕ продвигается (``due_metrics()``
+        здесь не зовётся), в дерево не пишется ни одного merge/set. Читать дёшево:
+        узкий аксессор не строит маршруты/хендлеры/каналы — цена измерена в ADR-PM-035.
+
+        **Чем определяется свежесть — и чем НЕ определяется.** ``snapshot_ts`` в ответе
+        команды говорит только «когда собран ЭТОТ ОТВЕТ» — это возраст ответа, НЕ
+        возраст чисел. Воспроизведено: воркер остановлен полностью, два опроса с
+        разницей 4.00 с несут разные ``snapshot_ts`` и **идентичные**
+        ``fps=21.0 / latency_ms=47.7``, а ``status`` при этом ``running``. Признак
+        движения даёт per-worker ``cycles`` (``include_cycles=True`` ниже): счётчик
+        завершённых циклов стоит — числа протухли, растёт — живые. Судить по паре
+        (``snapshot_ts``, ``cycles``), а не по штампу.
+
+        Returns:
+            Поддерево уровней (непустой dict) — ЛИБО ``None``, если показаний нет
+            вовсе (нет ``worker_manager`` / ноль воркеров / нет router'а). ``None``
+            означает «сенсоров нет», а не «команда не сработала».
+
+        Raises:
+            Ничего не поднимает по своей воле: сбой снятия статуса воркеров глотает
+            ``_collect_workers``, сбой ``router.get_stats()`` — секция ``shm``
+            пропускается (best-effort по образцу ``introspect.memory``).
+        """
+        from .telemetry import build_router_shm_telemetry, build_worker_telemetry
+
+        # allowed_metrics=None — намеренно: см. докстринг (гейт про push, не про знание).
+        # include_cycles=True — признак движения, нужный только опрашивающему.
+        result = build_worker_telemetry(self._collect_workers(), self._services.name, None, include_cycles=True)
+        data: dict = dict(result[1]) if result is not None else {}
+
+        router = getattr(self._services, "router_manager", None)
+        if router is not None:
+            try:
+                shm = build_router_shm_telemetry(router)
+            except Exception as exc:  # noqa: BLE001 — best-effort: без секции, не отказ
+                _log = getattr(self._services, "log_debug", self._services.log_info)
+                _log(f"Снимок уровней: SHM-счётчики недоступны: {exc}", module="heartbeat")
+                shm = None
+            if shm:
+                # Нули включительно: для ОПРОСА «все нули» — показание «всё чисто», а не
+                # отсутствие данных (у публикатора наоборот — там нули не грузят дерево).
+                state = dict(data.get("state") or {})
+                state["shm"] = shm
+                data["state"] = state
+
+        return data or None
 
     def _publish_health_to_tree(self) -> None:
         """Опубликовать здоровье процесса (Ф2 Task 2.1) в дерево StateStore.

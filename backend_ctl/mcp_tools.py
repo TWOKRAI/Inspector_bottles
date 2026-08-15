@@ -496,7 +496,19 @@ TOOLS: List[ToolSpec] = [
         "publish-секция, resolved (per-метрика enabled + interval_sec с уже применённым "
         "наследованием), unknown_metrics (опечатки в именах) и throttle_rules центральной "
         "плоскости. Отвечает «публикуется ли fps прямо сейчас» без гадания по эффекту в дереве. "
-        "gate_active=false → секции telemetry.publish нет, все метрики идут каждый тик.",
+        "gate_active=false → секции telemetry.publish нет, все метрики идут каждый тик. "
+        "ПЛЮС опрос уровней: levels — пакетный снимок одним ответом (workers.* и state.*, "
+        "включая state.shm.*). Это то, что собирает ТЕЛЕМЕТРИЙНЫЙ ТИК, а НЕ весь "
+        "processes.<name>.state дерева: uptime/frame_count/drops/error/paused/frozen/pid/status "
+        "пишут ДРУГИЕ публикаторы и опросом не приходят (живьём в дереве 11 ключей, опрос даёт 3). "
+        "levels НЕ зависит от publisher-гейта: гейт про push, снимок есть и при закрытой "
+        "публикации; levels=null означает «сенсоров нет», не «команда не сработала». "
+        "snapshot_ts — эпоха сборки ОТВЕТА, то есть возраст ответа, НЕ возраст чисел: у "
+        "остановленного воркера штамп идёт, а fps/latency стоят. Свежесть уровней судить по "
+        "per-worker cycles внутри levels (счётчик циклов стоит → числа протухли), в паре со "
+        "штампом. Это ЕДИНСТВЕННЫЙ механизм опроса уровней (1 IPC); "
+        "telemetry_snapshot/telemetry_history — другое: локальная read-model по push-дельтам, "
+        "0 IPC, пуста при выключенной публикации.",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _introspect_telemetry,
     ),
