@@ -102,7 +102,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `supervision.status` | Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/status/pid/started_at/instance_restarts. Маркер замены инстанса = pid+instance_restarts (считает и ручные, и авто-рестарты supervision — они идут той же process.restart). incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора | system |
 | `system.shutdown` | Завершить систему | system |
 | `system.stats` | Статистика системы | system |
-| `telemetry.broadcast` | Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), throttle → центральный троттл оркестратора; cap-детекция на обоих путях | system |
+| `telemetry.broadcast` | Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), throttle → центральный троттл оркестратора; cap-детекция на обоих путях. Publish-дельта персистится у PM (глобальная + per-process, ADR-PMM-028) и доигрывается пересозданным детям | system |
 | `telemetry.reconfigure` | Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle) | system |
 | `topology.apply` | Применить топологию процессов | system |
 | `topology.diff` | Вычислить diff топологии (dry-run) | system |

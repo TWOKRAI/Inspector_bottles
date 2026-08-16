@@ -556,11 +556,20 @@ class TestRuntimeDeltaPersist:
         pm._cmd_telemetry_broadcast({"publish": None})  # выключить gate → сброс персиста
         assert pm._telemetry_runtime_delta is None
 
-    def test_addressed_publish_not_persisted(self) -> None:
-        """Адресный (target=процесс) publish — per-child, НЕ системный runtime → не персист."""
+    def test_addressed_publish_goes_to_its_own_level(self) -> None:
+        """Адресный (target=процесс) publish персистится на СВОЁМ уровне, не в глобальном.
+
+        Task 3.4 (ADR-PMM-028) развернула прежнее решение «адресные НЕ персистятся»:
+        теперь они переживают respawn своего адресата. Но остаются АДРЕСНЫМИ — запись
+        журнала несёт имя получателя, и фан-аутного вида (его доигрывают ВСЕМ) у неё нет.
+        Подробности уровня — ``test_telemetry_addressed_delta_hazards.py``.
+        """
         pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
         pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "target": "camera_0"})
         assert getattr(pm, "_telemetry_runtime_delta", None) is None
+        assert pm._telemetry_delta_log == [
+            {"target": "camera_0", "publish": {"metrics": {"fps": {"enabled": False}}}, "mode": "replace"}
+        ]
 
     def test_throttle_only_does_not_persist(self) -> None:
         """throttle-плоскость не publisher-gate → не персистится (её адресат — оркестратор)."""

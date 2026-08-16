@@ -1978,53 +1978,248 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
             return False
 
-    def _replay_telemetry_runtime_delta(self, reason: str, *, target: str | None = None) -> int:
-        """Доиграть сохранённую runtime telemetry publish-дельту детям (Task 3.2).
+    @property
+    def _telemetry_delta_log(self) -> list:
+        """Журнал runtime publish-правок телеметрии В ПОРЯДКЕ ЗАПИСИ (Task 3.4).
 
-        Runtime-правка publisher-gate (``telemetry.broadcast`` fan-out) живёт только в
-        процессах-детях; при hot-swap/respawn пересозданный ребёнок стартует с BOOT-конфига
-        и потерял бы правку. PM хранит последнюю fan-out publish-дельту (``_telemetry_runtime_delta``)
-        и доигрывает её. ``publish=None``-broadcast очистил персист → доигрывать нечего.
+        Одна запись — один операторский конверт: ``{"target": имя|None, "publish": ..., "mode": ...}``.
+        ``target=None`` — фан-аутная правка (её получают ВСЕ дети), имя — адресная (только он).
+        Номер записи не хранится отдельно: порядок списка И ЕСТЬ порядок записи, и рассинхрону
+        с отдельным счётчиком взяться неоткуда.
+
+        Ленивый — по той же причине, что ``_broadcast_generations``: unit-тесты строят PM с
+        no-op ``__init__``.
+        """
+        log = self.__dict__.get("_telemetry_delta_log_list")
+        if log is None:
+            log = []
+            self.__dict__["_telemetry_delta_log_list"] = log
+        return log
+
+    @property
+    def _telemetry_runtime_delta(self) -> dict | None:
+        """Последняя ФАН-АУТНАЯ запись журнала (совместимость с Task 3.2).
+
+        Поле осталось точкой, через которую механизм видят снаружи (и тесты 3.2, и
+        диагностика), но истина теперь в журнале: свойство — вид поверх него, а не
+        второе хранилище. Присваивание пишет в тот же журнал.
+        """
+        for record in reversed(self._telemetry_delta_log):
+            if record["target"] is None:
+                return {"publish": record["publish"], "mode": record["mode"]}
+        return None
+
+    @_telemetry_runtime_delta.setter
+    def _telemetry_runtime_delta(self, delta: dict | None) -> None:
+        log = self._telemetry_delta_log
+        log.clear()
+        if delta is not None:
+            log.append({"target": None, "publish": delta["publish"], "mode": delta.get("mode", "replace")})
+
+    @staticmethod
+    def _telemetry_record_wipes(record: dict) -> bool:
+        """Стирает ли запись всё, что было у её получателя ДО неё.
+
+        Две формы, обе по контракту приёмника (``ProcessHeartbeat.reconfigure_telemetry``):
+        ``mode="replace"`` пересобирает gate из секции целиком, а ``publish=None`` гасит gate
+        НЕЗАВИСИМО от режима. После такой записи предыстория получателя недостижима — значит
+        её можно и нужно выбросить из журнала.
+        """
+        return record["publish"] is None or record["mode"] == "replace"
+
+    def _record_telemetry_delta(self, target: str | None, publish, mode: str) -> None:
+        """Дописать правку в журнал, свернув то, что она делает недостижимым.
+
+        Свёртка — не оптимизация, а условие ограниченности журнала; обе её ветки следуют
+        из семантики приёмника, а не из удобства:
+
+        1. **Стирающая запись убивает предысторию СВОИХ получателей.** Фан-аутная приходит
+           всем → журнал очищается целиком; адресная — только этому ребёнку → выбрасываются
+           прежние записи с тем же ``target`` (фан-аутные между ними трогать нельзя: их ждут
+           остальные дети).
+        2. **Смежные merge-записи одного получателя складываются** (``deep_merge``): дельта
+           поверх дельты эквивалентна дельте от их слияния, но ТОЛЬКО пока между ними никто
+           не вклинился. Складывать «по уровням», через голову чужой записи, нельзя —
+           именно это и было дефектом первой редакции задачи.
+
+        Оператор, крутящий одну ручку подряд (типовой ``telemetry_set`` в merge), даёт одну
+        запись; пара «фан-аут ↔ адресно» вперемешку — по записи на конверт, что и требуется.
+        """
+        log = self._telemetry_delta_log
+        record = {"target": target, "publish": publish, "mode": mode}
+
+        if self._telemetry_record_wipes(record):
+            if target is None:
+                log.clear()
+            else:
+                log[:] = [item for item in log if item["target"] != target]
+        elif log and log[-1]["target"] == target and log[-1]["mode"] == "merge" and mode == "merge":
+            if isinstance(log[-1]["publish"], dict) and isinstance(publish, dict):
+                from ...data_schema_module import deep_merge
+
+                log[-1] = {"target": target, "publish": deep_merge(log[-1]["publish"], publish), "mode": "merge"}
+                return
+        log.append(record)
+
+    def _telemetry_delta_for(self, name: str) -> list[dict]:
+        """Записи журнала, адресованные `name`, В ПОРЯДКЕ ЗАПИСИ (фан-аутные + его личные).
+
+        Это и есть та последовательность конвертов, которую получил бы ребёнок, доживи он
+        до сегодняшнего дня, — поэтому пересозданный, применив её поверх своего boot-конфига,
+        приходит туда же, где выживший сосед.
+        """
+        return [record for record in self._telemetry_delta_log if record["target"] in (None, name)]
+
+    @staticmethod
+    def _telemetry_replay_payload(record: dict) -> dict:
+        """Конверт ``telemetry.reconfigure`` из записи журнала.
+
+        ``publish=None`` (сброс, в т.ч. адресный tombstone) — ПОЛНОЦЕННЫЙ конверт, а не
+        пустота: он гасит publisher-gate, и именно это оператор и просил.
+        """
+        payload: dict[str, Any] = {"publish": record["publish"]}
+        if record["mode"] != "replace":
+            payload["telemetry_mode"] = record["mode"]
+        return payload
+
+    def _replay_telemetry_runtime_delta(self, reason: str, *, target: str | None = None) -> int:
+        """Доиграть журнал runtime telemetry-правок пересозданным детям (Task 3.2 + 3.4).
+
+        Runtime-правка publisher-gate живёт только в процессах-детях; пересозданный
+        hot-swap'ом или рестартом ребёнок стартует с BOOT-конфига и потерял бы её молча.
+        PM ведёт журнал правок и доигрывает адресату его срез (:meth:`_telemetry_delta_for`).
+
+        **Порядок доигрывания — ВРЕМЕННОЙ, а не «узкий уровень поверх широкого».**
+        Прежняя редакция задачи опиралась на аналогию со слоями L0–L3 и слала адресную
+        правку строго после фан-аутной. Аналогия к этому приёмнику неприменима: у ребёнка
+        НЕТ модели слоёв — ``reconfigure_telemetry`` либо ставит секцию целиком, либо мержит
+        поверх текущей эффективной, и приоритет у него ровно один — порядок приёма.
+        Статический приоритет уровней совпадает с истиной лишь тогда, когда адресная правка
+        оказалась хронологически последней; в обратной последовательности (адресно ребёнку,
+        затем общий проход фан-аутом) он давал пересозданному ребёнку ЧУЖОЕ значение при
+        зелёных тестах. Воспроизведено ревью на боевом приёмнике; худший случай — адресный
+        tombstone перед фан-аутной правкой: выживший с включённым gate, пересозданный с
+        выключенной телеметрией.
+
+        Поэтому доигрывается журнал, а не два уровня, и накопление внутри журнала сворачивает
+        ТОЛЬКО смежные записи одного получателя (см. :meth:`_record_telemetry_delta`).
+
+        **Что гарантирует порядок на проводе.** Срез ребёнка уезжает ОДНИМ действием, то
+        есть непрерывно: точки планирования между его конвертами нет, переставить их нечем.
+        FIFO-очередь адресата (:meth:`_run_when_child_ready`, ADR-PMM-024) удерживает порядок
+        относительно ДРУГИХ действий того же ребёнка, включая случай «ребёнок ещё не готов».
+        Область действия этой гарантии — один вызов доигрывания; между ним и параллельной
+        операторской правкой её нет и быть не может: очередь упорядочивает действия, а не
+        решает, чьё намерение свежее. От стейла спасает другое — срез берётся ВНУТРИ колбэка,
+        на момент отправки: правка, случившаяся после планирования, уже лежит в журнале и
+        уезжает в своей хронологической позиции. Именно поэтому здесь НЕТ generation-guard'а
+        (``still_relevant``), какой стоит у досылки ``_redeliver_to_unready_children``: там
+        конверт — снимок прошлого, и снять его правильно, а здесь снятие оставило бы
+        пересозданного ребёнка на boot-конфиге, то есть вернуло бы ровно тот дефект, ради
+        которого задача и делалась.
 
         Args:
             reason: причина доигрывания (для лога).
-            target: имя конкретного процесса → адресно ОДНОМУ ребёнку (``_send_child_command``,
-                напр. single-process ``restart_process`` — краш-рестарт частый, broadcast всем
-                избыточен). ``None`` → fan-out ВСЕМ живым детям (``_broadcast_command``, напр.
-                ``apply_topology`` пересоздал набор). Оба пути идемпотентны (replace/merge
-                повторно на уже настроенном ребёнке даёт то же состояние).
+            target: имя процесса → доиграть ЕМУ одному (напр. ``restart_process``).
+                ``None`` → всем живым детям (напр. ``apply_topology`` пересоздал набор).
 
         Returns:
-            Охват доставки (0 — нет дельты / нет коммуникации / ошибка).
+            Охват ФАН-АУТНОЙ рассылки (сумма ``comm.broadcast``). Адресные конверты сюда НЕ
+            складываются: «сколько детей достала рассылка» и «сколько конвертов ушло» —
+            разные утверждения, и сумма не означает ни того, ни другого (та же дисциплина,
+            что ``"semantics": "delivered"`` в ответе ``telemetry.broadcast``). Адресные
+            считаются отдельно и попадают в лог.
         """
-        delta = getattr(self, "_telemetry_runtime_delta", None)
-        if not delta:
-            return 0
-        payload: dict[str, Any] = {"publish": delta["publish"]}
-        if delta.get("mode", "replace") != "replace":
-            payload["telemetry_mode"] = delta["mode"]
         try:
             if target is not None:
-                # Ревью Fable, находка 2: адресный путь шёл МИМО гейта готовности —
-                # ровно для того процесса, которого только что перезапустили, то есть
-                # для сценария из Why задачи R4. Компенсирующей рассылки за ним нет:
-                # потеря тихая и постоянная (ребёнок остаётся на boot-конфиге).
+                if not self._telemetry_delta_for(target):
+                    return 0
+
+                def _send_journal(name: str = target) -> None:
+                    # ОДНО действие на весь срез: между конвертами нет точки планирования,
+                    # поэтому их порядок не может быть переставлен ничем.
+                    for record in self._telemetry_delta_for(name):
+                        self._send_child_command(name, "telemetry.reconfigure", self._telemetry_replay_payload(record))
+
                 deferred = self._run_when_child_ready(
                     target,
-                    lambda t=target, p=payload: self._send_child_command(t, "telemetry.reconfigure", p),
+                    _send_journal,
                     label="telemetry-replay",
                     deadline_s=self._late_delivery_deadline() or 15.0,
                 )
-                # Охват отложенной отправки неизвестен на этот момент — честнее
-                # вернуть 0, чем выдать намерение за доставку.
-                reached = 0 if deferred else 1
-            else:
-                reached = self._broadcast_command("telemetry.reconfigure", payload)
-            self._log_info(f"telemetry runtime-дельта доиграна ({reason}, target={target!r}): reached={reached}")
-            return int(reached)
+                # Охват отложенной отправки на этот момент неизвестен — честнее вернуть 0,
+                # чем выдать намерение за доставку.
+                self._log_info(f"telemetry-журнал доигран ({reason}, target={target!r}): deferred={deferred}")
+                return 0 if deferred else 1
+
+            # Фан-аут: реестр пережил тех, кого в топологии больше нет (MAJOR 4 ревью).
+            self._forget_telemetry_deltas_of_unknown_children()
+            log = self._telemetry_delta_log
+            if not log:
+                return 0
+
+            if all(record["target"] is None for record in log):
+                # Ни одной адресной правки — журнал одинаков для всех, и одной рассылки
+                # достаточно (дорога Task 3.2, дословно прежняя).
+                reached = 0
+                for record in log:
+                    payload = self._telemetry_replay_payload(record)
+                    reached += int(self._broadcast_command("telemetry.reconfigure", payload))
+                self._log_info(f"telemetry-журнал доигран ({reason}, записей={len(log)}): охват fan-out={reached}")
+                return int(reached)
+
+            # Есть адресные правки → у детей РАЗНЫЕ срезы, и общей рассылки, которая была бы
+            # верна для всех, не существует. Смешивать рассылку с адресными догрузками нельзя:
+            # ребёнок применяет конверты в порядке приёма, и его срез перестал бы быть
+            # непрерывным. Поэтому каждому — его срез целиком, одним действием.
+            addressed = 0
+            for name in sorted(self._live_child_names()):
+                if not self._telemetry_delta_for(name):
+                    continue
+
+                def _send_slice(child: str = name) -> None:
+                    # Срез берётся на момент ОТПРАВКИ: правка, случившаяся после планирования,
+                    # уже лежит в журнале и уедет в своей хронологической позиции.
+                    for record in self._telemetry_delta_for(child):
+                        self._send_child_command(child, "telemetry.reconfigure", self._telemetry_replay_payload(record))
+
+                if not self._run_when_child_ready(
+                    name,
+                    _send_slice,
+                    label="telemetry-replay",
+                    deadline_s=self._late_delivery_deadline() or 15.0,
+                ):
+                    addressed += 1
+            self._log_info(
+                f"telemetry-журнал доигран ({reason}, записей={len(log)}): "
+                f"адресных срезов сразу={addressed}; общей рассылки нет — срезы детей различаются"
+            )
+            return 0
         except Exception as exc:  # noqa: BLE001 — доигрывание не должно ронять lifecycle
             self._log_error(f"_replay_telemetry_runtime_delta({reason}) упал: {exc}")
             return 0
+
+    def _forget_telemetry_deltas_of_unknown_children(self) -> None:
+        """Забыть адресные правки процессов, которых в топологии больше нет (MAJOR 4 ревью).
+
+        Записи живут по ИМЕНИ, а имя переиспользуемо: ревью воспроизвело, как новый процесс
+        с прежним именем и другим классом наследовал чужую операторскую правку. Авторитет —
+        ``_process_configs`` (состав топологии после применения, включает protected), а НЕ
+        живость: процесс, лежащий в перезапуске, из топологии не выбывал, и стирать его
+        правку по мигнувшей живости значило бы терять её на ровном месте.
+
+        Забвение делается только на фан-аутном пути: одноадресное доигрывание не знает
+        состава топологии и не имеет права судить о соседях.
+        """
+        known = getattr(self, "_process_configs", None)
+        if not isinstance(known, dict) or not known:
+            return  # состав неизвестен — не выбрасываем ничего (молчаливая потеря хуже мусора)
+        log = self._telemetry_delta_log
+        stale = sorted({item["target"] for item in log if item["target"] is not None and item["target"] not in known})
+        if not stale:
+            return
+        log[:] = [item for item in log if item["target"] is None or item["target"] in known]
+        self._log_info(f"telemetry-журнал: адресные правки процессов вне топологии забыты: {stale}")
 
     def _compose_own_recipe_layer(self, recipe: dict) -> tuple[dict, str]:
         """Свой слой L2 из конверта switch'а: долька рецепта + спутник ПОВЕРХ (ФР-3).
@@ -2768,37 +2963,30 @@ class ProcessManagerProcess(ProcessModule):
                 "semantics": "delivered",
             }
             self._log_info(f"telemetry.broadcast: publish → target={target!r} reached={reached}/{len(targets)}")
-            # Task 3.2: персист эффективной fan-out publish-дельты — доиграть пересозданным
-            # детям после hot-swap/respawn (иначе новый ребёнок взял бы boot-конфиг, потеряв
-            # рантайм-правку publisher-gate). Адресные (target=процесс) НЕ персистятся — они
-            # per-child, а не системный runtime. publish=None (выключить gate) → сброс персиста.
+            # Task 3.2 + 3.4: правка пишется в ЖУРНАЛ (порядок записи = порядок доигрывания) —
+            # иначе пересозданный ребёнок взял бы boot-конфиг, потеряв рантайм-правку
+            # publisher-gate. Адресная и фан-аутная правки ложатся в ОДИН журнал, а не на два
+            # уровня с приоритетом: у приёмника (ребёнка) модели уровней нет, у него есть
+            # только порядок приёма — см. :meth:`_replay_telemetry_runtime_delta`.
             #
-            # ПОСЛЕДОВАТЕЛЬНЫЕ merge-дельты АККУМУЛИРУЮТСЯ (deep_merge): telemetry_set работает
-            # в merge — частый операторский сценарий из нескольких точечных правок. Хранить лишь
-            # последнюю — потерять предыдущие при respawn (расхождение с выжившими детьми, которые
-            # аккумулировали всё). replace семантически обнуляет прошлое → перезапись целиком.
-            # ИЗВЕСТНЫЙ GAP: смешанные merge→replace→merge-цепочки полной эффективной-от-boot
-            # модели не дают (replace сбрасывает накопленное) — приемлемо для рантайм-правок.
-            if not addressed:
-                if args["publish"] is None:
-                    self._telemetry_runtime_delta = None
-                else:
-                    prev = getattr(self, "_telemetry_runtime_delta", None)
-                    if (
-                        mode == "merge"
-                        and isinstance(prev, dict)
-                        and prev.get("mode") == "merge"
-                        and isinstance(prev.get("publish"), dict)
-                        and isinstance(args["publish"], dict)
-                    ):
-                        from ...data_schema_module import deep_merge
-
-                        self._telemetry_runtime_delta = {
-                            "publish": deep_merge(prev["publish"], args["publish"]),
-                            "mode": "merge",
-                        }
-                    else:
-                        self._telemetry_runtime_delta = {"publish": args["publish"], "mode": mode}
+            # ADR-PMM-028 (Task 3.4): адресные правки переживают respawn своего адресата —
+            # РАЗВОРОТ прежнего решения «адресные НЕ персистятся, они per-child, а не системный
+            # runtime». Довод снят: per-child правка тоже переживает своего ребёнка (оператор
+            # правил ЖИВУЮ систему, а respawn — деталь реализации, а не отмена его намерения);
+            # живое репро 2026-08-16 показало, что после respawn ключ метрики исчезал из gate.
+            if not addressed and args["publish"] is None:
+                # Фан-аутный сброс «выключить gate у ВСЕХ» гасит журнал целиком, включая
+                # адресные записи: пережив сброс, они воскресили бы gate у своих детей при
+                # следующем respawn — то есть ровно то, что оператор только что выключил,
+                # и только у части системы. ЗАПИСИ ПОСЛЕ СЕБЯ НЕ ОСТАВЛЯЕТ (контракт Task 3.2:
+                # «сброс → доигрывать нечего»), и у этого есть названная цена — см. ADR-PMM-028,
+                # раздел про ребёнка с boot-секцией telemetry.publish.
+                self._telemetry_runtime_delta = None
+            else:
+                # Адресный publish=None — tombstone-ЗАПИСЬ, а не забвение: забыть значило бы
+                # доиграть ребёнку одни лишь фан-аутные правки и воскресить gate, который
+                # оператор выключил ИМЕННО У НЕГО (выживший сосед остался бы с gate off).
+                self._record_telemetry_delta(target if addressed else None, args["publish"], mode)
 
         if has_throttle:
             try:
