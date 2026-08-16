@@ -78,7 +78,7 @@ e128b930). **Gen-2** («generic-механизмы», `tabs`/`state`/`components
 - Механизм вкладок (NEW-D1): `TabSpec`, `TabRegistry`, `LazyTab`,
   `AccessContextSource`, `PlaceholderFactory`
 - Read-model телеметрии (FE-005): `TelemetryViewModel`, `TelemetryHistorySource`,
-  `DEFAULT_TRACKED_SUFFIXES`
+  `DEFAULT_TRACKED_SUFFIXES`, `TelemetryPoller` (ADR-139, опрос по видимости)
 - Идентичность приложения (NEW-2): `AppIdentity`, `get_app_identity`, `set_app_identity`
 - Фасады подпакетов: `components`, `widgets` (включая `widgets.tabs`)
 
@@ -184,6 +184,18 @@ layout_composer}`, `schemas.{widget_descriptor,window_config}`, `configs`,
 - `FrontendRegistersBridge` — connection_map, send_callback, subscribe (LEGACY Gen-1)
 - `TabRegistry`/`TabSpec` — generic-механизм вкладок (Gen-2, живое, в фасаде)
 - `TelemetryViewModel`/`TelemetryHistorySource` — read-model телеметрии (Gen-2, живое, в фасаде)
+- `TelemetryPoller` — опрос уровней, пока вкладка видима; вливает `levels` в тот же
+  read-model теми же путями, что и push (ADR-139, Gen-2, живое, в фасаде). Push
+  остаётся дефолтом: publisher-гейт поллером не управляется. Опрос НЕ приносит
+  восемь push-ключей (`status`/`pid`/`frame_count`/`error`/`uptime`/`drops`/
+  `paused`/`frozen`) — их пишут другие публикаторы, и влив их не трогает (K-8);
+  `cycles` есть только у воркеров с `CycleMetricsRecorder` (K-9). Влив идёт
+  ОТДЕЛЬНЫМ входом `TelemetryViewModel.ingest_poll_snapshot` (снимок да, кольцо
+  истории нет) — иначе опрос сокращал бы окно спарклайна вытеснением точек push'а.
+  Требует СВОЕГО `QThreadPool` (не `globalInstance`) и имеет дедлайн на
+  незавершённый запрос: доставка результата исполнителем не гарантирована.
+  Границы: `stop()` терминален; потеря фокуса окна опрос НЕ гасит (гасят
+  скрытие/сворачивание/закрытие)
 - `AppIdentity`/`get_app_identity`/`set_app_identity` — идентичность приложения (Gen-2, живое, в фасаде)
 - Controls: SliderControl, CheckboxControl, SpinBoxControl, NumericControl, CompoundControl (Gen-2, живое)
 - Widgets: BaseWidget[TModel], HeaderWidget, TabWidget, ImagePanelWidget (Gen-2, живое); LoadingWindow (LEGACY Gen-1)

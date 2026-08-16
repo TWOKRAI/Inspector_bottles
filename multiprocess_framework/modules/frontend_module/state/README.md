@@ -14,14 +14,92 @@ Backend публикует телеметрию постоянно в дерев
 | `TelemetryViewModel` | Локальный read-model: снимок (`snapshot`/`get`) + история в кольцевых буферах (`history`). Батч-сигнал `updated` на пачку дельт (коалесинг). |
 | `DEFAULT_TRACKED_SUFFIXES` | Суффиксы штатных gated-метрик фреймворка (дефолт для истории VM). |
 | `TelemetryHistorySource` | Read-only диапазонная выборка из SQLite-таблицы стока телеметрии с даунсемплом. |
+| `TelemetryPoller` | Опрос уровней, пока вкладка ВИДИМА: пакетный снимок `levels` вливается в тот же read-model теми же путями, что и push (ADR-139). |
 
 Импорт — через `interfaces.py` модуля либо напрямую:
 
 ```python
 from multiprocess_framework.modules.frontend_module.state import (
-    TelemetryViewModel, TelemetryHistorySource, DEFAULT_TRACKED_SUFFIXES,
+    TelemetryViewModel, TelemetryHistorySource, TelemetryPoller, DEFAULT_TRACKED_SUFFIXES,
 )
 ```
+
+## Две дороги в один read-model
+
+| | Push (дефолт) | Опрос (`TelemetryPoller`) |
+|---|---|---|
+| Источник | поток дельт `state.changed` под стартовым wildcard'ом | команда `introspect.telemetry` → секция `levels` |
+| Когда идёт | всегда, пока публикация включена | пока вкладка видима |
+| Свежесть | последний опубликованный тик | снимок в момент ответа |
+| Работает при закрытом publisher-гейте | нет | да (гейт про push, ADR-PM-035) |
+| Куда пишет | `on_state_delta` (снимок + история) | `ingest_poll_snapshot` (только снимок) |
+
+Виджет источник не различает: пути и батч-сигнал `updated` одинаковы. Push
+остаётся дефолтом — опрос его не заменяет и publisher-гейтом не управляет.
+
+**Почему у опроса отдельный вход в read-model.** Кольцо истории — `deque` с
+фиксированным `maxlen` (окно × ожидаемая частота ОДНОГО писателя). Опрос пишет
+в те же пути, что и push; вливаясь через общий вход, он вытеснял бы точки
+push'а и молча сокращал окно спарклайна пропорционально своей частоте. Опрос
+отдаёт УРОВЕНЬ, а не точку потока — в кольцо потока ему класть нечего.
+
+### Ноль трафика — что его даёт, а что нет
+
+Гасят опрос скрытие вкладки, сворачивание и закрытие окна. **Потеря фокуса и
+перекрытие другим окном — не гасят**: сигнала об этом Qt не даёт, опрос
+продолжается.
+
+### Что опрос НЕ приносит
+
+`levels` — то, что собирает телеметрийный тик, а не весь `processes.<name>.state`.
+Восемь соседних ключей (`status`, `pid`, `frame_count`, `error`, `uptime`,
+`drops`, `paused`, `frozen`) пишут ДРУГИЕ публикаторы push'ем; влив опроса их не
+трогает (проверено тестом `test_poll_ingest_preserves_push_only_keys`).
+Per-worker `cycles` есть только у воркеров с `CycleMetricsRecorder` — отсутствие
+поля это норма, не «завис».
+
+### Использование
+
+```python
+pool = QThreadPool(); pool.setMaxThreadCount(2)   # СВОЙ пул, не globalInstance
+poller = TelemetryPoller(
+    poll_fn=lambda name: sender.request_command(name, "introspect.telemetry", timeout=3.0),
+    submit=RequestRunner(pool=pool).submit,  # off-main исполнитель; on_result — в main thread
+    view_model=view_model,
+    interval_sec=1.0,
+    exclude=(process.name,),         # себя не опрашиваем: круг gui → PM → gui
+    max_in_flight=2,                 # не больше, чем потоков в пуле
+)
+poller.set_targets(["camera_0"])   # опрашивать только показанное
+poller.set_active(True)            # вкладка показана; False — скрыта
+poller.stop()                      # ТЕРМИНАЛЬНО: set_active(True) больше не оживит
+```
+
+**Свой пул обязателен.** На `QThreadPool.globalInstance()` идут обычные действия
+GUI; неотвечающая цель опроса держит слот до своего таймаута и заставляет
+пользовательский запрос ждать (измерено: 3.02 с). `max_in_flight` и круговой
+обход целей ограничивают это сверху и не дают хвосту списка целей голодать.
+
+**`interval_sec` — период ТИКА, а не период опроса цели.** За тик уходит не
+больше `max_in_flight` запросов, поэтому конкретная цель опрашивается раз в
+
+    interval_sec × ceil(len(targets) / max_in_flight)
+
+Боевая раскладка (6 целей, потолок 2, тик 1 с) → **~3 с на цель, ~0.33/с**
+(замерено: 6–7 опросов на цель за 20.28 с). Карточка процесса показывает числа
+возрастом до трёх секунд. Фактический период — `effective_interval_sec`.
+
+**Ответ может не прийти вовсе.** Доставка идёт через чужой исполнитель и не
+гарантирована (у `RequestRunner` — Qt-сигналом, который на разрушенном
+источнике поднимает `RuntimeError` уже после успешного запроса). Поэтому запись
+о полёте имеет дедлайн `flight_ttl_sec` (дефолт `max(2с, 4×interval)`), а
+выселение считается в `polls_expired`.
+
+Счётчики `polls_started` / `polls_completed` / `polls_failed` / `polls_expired`
+и свойства `in_flight` / `interval_sec` / `is_active` — наблюдаемость самого
+опроса числами, а не «работает/нет». `polls_failed` — единственный способ
+отличить «протухло» от «стабильно»: неудачный опрос ничего не пишет, и на
+экране остаются последние хорошие числа.
 
 ## Границы (generic)
 
@@ -30,6 +108,13 @@ from multiprocess_framework.modules.frontend_module.state import (
 - `TelemetryViewModel` не держит ссылок на router/state-proxy — питается только
   входящими dict-сообщениями (`on_state_delta`). НЕ создаёт серверных подписок
   и не делает блокирующий IPC (инвариант — под тестом).
+- `TelemetryPoller` тоже не держит router/state-proxy: запрос приходит извне
+  как `poll_fn`, исполнение — как `submit`. Структурно отсюда следует **ровно
+  один** инвариант ADR-136 — подписаться нечем. Второй («0 блокирующего IPC из
+  main thread») делегирован: поллер гарантирует лишь, что `poll_fn` идёт
+  ИСКЛЮЧИТЕЛЬНО через `submit`; синхронный `submit` исполнит его в main thread,
+  и поллер этому не помешает. Off-main обеспечивает composition root, передавая
+  `RequestRunner.submit`.
 - Набор путей для истории (`tracked_suffixes`) — параметр конструктора; дефолт
   покрывает штатные метрики фреймворка (`GATED_METRICS`).
 - `TelemetryHistorySource` не хардкодит имя таблицы, whitelist метрик и путь БД —

@@ -161,6 +161,34 @@ class TelemetryViewModel(QObject):
         if not self._flush_timer.isActive():
             self._flush_timer.start()
 
+    def ingest_poll_snapshot(self, values: dict[str, Any]) -> None:
+        """Влить снимок ОПРОСА: обновляется снимок, история — нет (ADR-139).
+
+        Второй вход в read-model рядом с :meth:`on_state_delta`. Отличие ровно
+        одно и оно принципиальное: точки в кольцевые буферы истории НЕ пишутся.
+
+        Почему отдельный вход, а не тот же ``on_state_delta``: кольцо истории —
+        ``deque`` с фиксированным ``maxlen`` (окно × ожидаемая частота ОДНОГО
+        писателя). Опрос пишет в те же пути, что и push, поэтому вливаясь через
+        общий вход он вытеснял бы точки push'а и молча сокращал окно спарклайна
+        пропорционально своей частоте — «10 минут» на графике становились бы
+        меньшим числом минут, и нигде бы это не всплыло. Опрос отдаёт текущий
+        УРОВЕНЬ, а не точку потока: в кольцо потока ему класть нечего.
+
+        Сигнал ``updated`` эмитится так же, как на push-пути (один батч на
+        пачку) — виджеты обновляются одинаково независимо от источника.
+
+        Args:
+            values: плоское ``{path: value}`` уже разложенного снимка.
+        """
+        if not values:
+            return
+        for path, value in values.items():
+            self._model.ingest(path, value, record_history=False)
+            self._pending[path] = value
+        if not self._flush_timer.isActive():
+            self._flush_timer.start()
+
     def _flush(self) -> None:
         """Эмит одного батча за пачку дельт и сброс накопителя."""
         if not self._pending:

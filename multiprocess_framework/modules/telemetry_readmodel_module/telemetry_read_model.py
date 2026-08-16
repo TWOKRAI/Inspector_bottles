@@ -130,13 +130,18 @@ class TelemetryReadModel:
     # Приём дельт (envelope-agnostic)
     # ------------------------------------------------------------------
 
-    def ingest(self, path: str, value: Any, *, deleted: bool = False) -> None:
+    def ingest(self, path: str, value: Any, *, deleted: bool = False, record_history: bool = True) -> None:
         """Внести одну уже разобранную дельту в снимок (+историю числовых точек).
 
         Args:
             path: полный путь узла (``processes.cam.state.fps``).
             value: новое значение (для ``deleted=True`` игнорируется).
             deleted: True → узел удалён, убрать из снимка (в историю не пишем).
+            record_history: False → обновить ТОЛЬКО снимок, кольцо истории не
+                трогать. Нужно источникам, которые дают текущий УРОВЕНЬ, а не
+                точку потока (опрос уровней, ADR-139): кольцо имеет фиксированный
+                ``maxlen``, и второй писатель в тот же путь сокращает окно
+                графика пропорционально своей частоте, ничего об этом не сообщая.
 
         Пишет СИНХРОННО: snapshot/get/history актуальны сразу после вызова.
         """
@@ -147,8 +152,10 @@ class TelemetryReadModel:
             self._purge_subtree(path)
             return
         self._state[path] = value
-        # История — по каждой дельте (все точки важны для графика).
-        self._record_history(path, value)
+        # История — по каждой дельте ПОТОКА (все точки важны для графика).
+        # Источник уровней (record_history=False) в кольцо не пишет: см. Args.
+        if record_history:
+            self._record_history(path, value)
 
     def _purge_subtree(self, path: str) -> None:
         """Убрать путь и всё поддерево под ним из снимка и истории.

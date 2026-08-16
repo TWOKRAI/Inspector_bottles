@@ -10,6 +10,10 @@
 - :class:`TelemetryHistorySource` — read-only диапазонная выборка из SQLite-
   таблицы стока телеметрии (generic: имя таблицы/whitelist метрик/путь БД —
   параметры конструктора).
+- :class:`TelemetryPoller` — опрос уровней по видимости (Task 3.3): пока
+  вкладка видима, пакетный снимок ``levels`` вливается в тот же read-model;
+  скрытая вкладка молчит. Push остаётся дефолтом — это вторая дорога, не
+  замена.
 
 Модуль generic: не знает ни имён процессов, ни прикладного набора метрик, ни
 схемы БД. Приложение передаёт эти параметры тонкой конфигурацией.
@@ -17,6 +21,9 @@
 
 from multiprocess_framework.modules.frontend_module.state.telemetry_history import (
     TelemetryHistorySource,
+)
+from multiprocess_framework.modules.frontend_module.state.telemetry_poller import (
+    TelemetryPoller,
 )
 from multiprocess_framework.modules.frontend_module.state.telemetry_view_model import (
     DEFAULT_TRACKED_SUFFIXES,
@@ -27,4 +34,5 @@ __all__ = [
     "TelemetryViewModel",
     "DEFAULT_TRACKED_SUFFIXES",
     "TelemetryHistorySource",
+    "TelemetryPoller",
 ]

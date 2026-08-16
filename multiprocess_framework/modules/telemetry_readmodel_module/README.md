@@ -41,8 +41,12 @@ m.snapshot("processes.cam")                            # снимок подде
 m.history("processes.cam.state.fps", since=ts)         # спарклайн (ts, value)
 ```
 
-- `ingest(path, value, *, deleted=False)` — envelope-agnostic: обёртка парсит свой
-  конверт и передаёт уже разобранные `(path, value, deleted)`.
+- `ingest(path, value, *, deleted=False, record_history=True)` — envelope-agnostic:
+  обёртка парсит свой конверт и передаёт уже разобранные `(path, value, deleted)`.
+  `record_history=False` — обновить ТОЛЬКО снимок: для источников, дающих текущий
+  УРОВЕНЬ, а не точку потока (опрос уровней, ADR-139). Кольцо имеет фиксированный
+  `maxlen`, поэтому второй писатель в тот же путь молча сокращает окно графика
+  пропорционально своей частоте.
 - `snapshot(prefix)` — граница по точке-разделителю (`processes.cam` не течёт в
   `processes.cam2.*`); пустой prefix → весь снимок.
 - `history(path, since)` — кольцевой буфер (fixed-size deque, `maxlen =

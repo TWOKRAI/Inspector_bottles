@@ -24,6 +24,10 @@ _APP_EXTRA_FIELDS = {
     "persist_active_recipe",
     "topology_session",
     "telemetry",
+    # Task 3.3: опрос уровней по видимости вкладки. App-слой, а не framework:
+    # поллер собирается из прикладного command_sender'а и живёт рядом с
+    # telemetry (тот же read-model), а minimal_app обходится без него.
+    "telemetry_poller",
 }
 
 

@@ -6,7 +6,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
@@ -331,6 +331,53 @@ def run_gui(process: "GuiProcess") -> None:
     # VM регистрируется вторым потребителем ПОСЛЕ bindings (порядок §11.15:
     # сначала bindings _state_cb, затем listener).
     process._bridge.add_state_listener(telemetry_view_model.on_state_delta)
+
+    # 3b.1 Task 3.3: опрос уровней по видимости — ВТОРАЯ дорога в тот же read-model.
+    #     Push остаётся дефолтом и здесь не трогается: publisher-gate живёт своей
+    #     жизнью, GUI им не управляет (отклонённая альтернатива — см. ADR-FE-004).
+    #     Владелец — runtime-слой рядом с VM (ADR-136: один владелец «снимок→виджет»);
+    #     вкладка только двигает set_active/set_targets по видимости.
+    #
+    #     Частота названа: 1 опрос/с. Уровни собираются в момент ответа (снимок
+    #     `get_all_workers_status()`, не последний опубликованный тик) и меняются с
+    #     частотой цикла воркера — живьём 21.2 Гц (ADR-PM-035), так что 1 Гц опроса
+    #     заметно ниже частоты изменений. Таймаут запроса — 3с: короче дефолтных 30с,
+    #     чтобы зависший процесс не держал слот опроса полминуты.
+    from PySide6.QtCore import QThreadPool
+
+    from multiprocess_framework.modules.frontend_module.state import TelemetryPoller
+
+    from .bridge.request_runner import RequestRunner
+
+    # СВОЙ пул, а не QThreadPool.globalInstance(): опрос ходит к N процессам с
+    # таймаутом 3с, и на общем пуле (maxThreadCount = число ядер) неотвечающие
+    # цели занимали бы слоты, через которые идут ОБЫЧНЫЕ действия GUI — кнопка
+    # ждала бы таймаут опроса. Измерено ревью: 2 зависшие цели на общем пуле из
+    # 2 потоков → обычный запрос обслужен за 3.02 с. Два потока: опрос
+    # пакетный (один запрос на процесс), больше параллелизма ему не нужно.
+    _telemetry_pool = QThreadPool()
+    _telemetry_pool.setMaxThreadCount(2)
+    # Создаётся в GUI main thread → _delivered (AutoConnection) доставит результат
+    # обратно сюда же. Живёт по ссылке из bound-метода submit, который держит поллер.
+    _telemetry_request_runner = RequestRunner(pool=_telemetry_pool)
+    telemetry_poller = TelemetryPoller(
+        poll_fn=lambda name: command_sender.request_command(name, "introspect.telemetry", timeout=3.0),
+        submit=_telemetry_request_runner.submit,
+        view_model=telemetry_view_model,
+        interval_sec=1.0,
+        targets=(),  # состав целей задаёт видимая вкладка (set_targets)
+        # Себя не опрашиваем: круг gui → PM → gui по IPC ради чисел, которые
+        # процесс знает локально.
+        exclude=(process.name,),
+        # Потолок ниже числа процессов топологии: цели обходятся по кругу, так
+        # что хвост списка не голодает, а пул из двух потоков не забивается.
+        max_in_flight=2,
+        # Держать СТРОГО больше таймаута запроса выше (3.0 с) — оба числа
+        # стоят рядом намеренно. Выселение освобождает слот поллера, но не
+        # снимает задачу с пула: TTL ниже таймаута заставил бы поллер слать
+        # второй запрос поверх ещё живого первого, пробивая max_in_flight.
+        flight_ttl_sec=4.0,
+    )
 
     # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge
     from .bridge.command_catalog import CommandCatalog
@@ -797,6 +844,7 @@ def run_gui(process: "GuiProcess") -> None:
         data_bridge=process._bridge,
         topology_session=topology_session,  # RS-4: dirty-контур редактора топологии
         telemetry=telemetry_view_model,  # Ф1: локальный read-model телеметрии
+        telemetry_poller=telemetry_poller,  # Task 3.3: опрос уровней по видимости вкладки
     )
 
     tab_factory = TabFactory(
@@ -834,7 +882,7 @@ def run_gui(process: "GuiProcess") -> None:
     )
 
     # 7. Запустить таймеры (fps, safety)
-    _setup_timers(app, process, window)
+    _setup_timers(app, process, window, telemetry_poller)
 
     # 8. Сохранить ссылку на окно в process
     process._window = window
@@ -984,8 +1032,17 @@ def _setup_timers(
     app: QApplication,
     process: "GuiProcess",
     window: MainWindow,
+    telemetry_poller: Any,
 ) -> None:
-    """FPS таймер + safety таймер."""
+    """FPS таймер + safety таймер (+ терминальная остановка опроса телеметрии).
+
+    ``telemetry_poller`` — параметр ОБЯЗАТЕЛЬНЫЙ намеренно, без дефолта ``None``.
+    Ревью №2: с дефолтом потеря аргумента при рефакторинге не дала бы ни ошибки,
+    ни строки в логе — просто опрос перестал бы останавливаться при выходе, а
+    проявилось бы это далёким `RuntimeError: Signal source has been deleted`.
+    Теперь потеря аргумента — немедленный `TypeError` в composition root.
+    Тестом это не покрыто (нужен старт приложения) — страховкой служит сигнатура.
+    """
     # FPS таймер: раз в секунду
     fps_timer = QTimer()
     fps_timer.setInterval(1000)
@@ -1052,6 +1109,14 @@ def _setup_timers(
     app.aboutToQuit.connect(
         lambda: setattr(process, "_stop_requested", True) if not getattr(process, "_restart_ui", False) else None
     )
+
+    # Опрос телеметрии гасим терминально: иначе взведённый таймер успевает
+    # отправить ещё один запрос в пул, пока Qt разрушает объекты, и доставка
+    # результата приходит в уже разрушенный источник сигнала (`RuntimeError:
+    # Signal source has been deleted`). Здесь stop() уместен и безопасен — в
+    # отличие от вкладки, приложение больше не откроется.
+    if telemetry_poller is not None:
+        app.aboutToQuit.connect(telemetry_poller.stop)
 
     # Сохранить ссылки на таймеры чтобы GC не убил их
     window._fps_timer = fps_timer

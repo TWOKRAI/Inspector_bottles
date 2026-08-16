@@ -24,6 +24,7 @@ PySide6-фреймворк виджетов с привязкой к `data_schem
 | ADR-095 | `StructuredTwoLevelTreeWidget` — группа → строки | `../../DECISIONS.md#adr-095` |
 | ADR-097 | Touch-клавиатура — проброс из `FrontendConfig`, делегат по колонкам | `../../DECISIONS.md#adr-097` |
 | ADR-135 | Механизм вкладок → `TabRegistry`; приложение декларирует `TABS: list[TabSpec]`; permissions/roles деривятся из реестра | `../../DECISIONS.md#adr-135` |
+| ADR-139 | `TelemetryPoller` — опрос уровней по видимости вкладки; вторая дорога в тот же read-model, гейт не трогается | `../../DECISIONS.md#adr-139` |
 
 ---
 
