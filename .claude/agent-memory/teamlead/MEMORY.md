@@ -4,6 +4,8 @@
 
 - [seqlock contention semantics](project_seqlock_contention_semantics.md) — seqlock голодает при read≈write (всё дропает, но torn=0); тесты доставки в режиме read<<write, heavy-contention asserts только torn==0
 - [дедуп по имени теряет содержимое](feedback_dedup_by_name_loses_content.md) — «последний побеждает» ключуй на СОДЕРЖИМОЕ конверта, не на имя команды; правило `any`, у «пусто» своя дорожка (ФР-1 / ADR-PMM-022)
+- [второй писатель сокращает кольцо](feedback_second_writer_shrinks_the_ring.md) — второй источник в deque(maxlen) молча режет ОКНО, тесты на значения слепы; отдельный вход, а не пересчёт maxlen
+- [чтение вердикта инъекции](feedback_injection_verdict_reading.md) — «не упало ничего» = предохранителей ДВА (снимай все точки); «упало лишнее» = осколок аварии соседа (перепрогони кандидата в одиночку)
 - [база переживает слой](feedback_base_outlives_the_layer.md) — removal-тест вакуумен, если база пересобирается; injectи КАЖДУЮ точку записи базы; у удаляемого шва бывают побочные эффекты (None→{}) (ФР-3 / ADR-PM-021)
 - [проверка живёт в шве, не в ветке](feedback_check_belongs_to_the_seam.md) — правило по месту = свойство места; ставь в общий шов сборки, верни наружу сменой сигнатуры; не в apply/пересборку (ФР-2 / ADR-PM-022)
 - [commit trailers single-line](feedback_commit_trailers_single_line.md) — Why/Layer/... каждый на ОДНОЙ строке, иначе hook отвергает как «missing trailers»

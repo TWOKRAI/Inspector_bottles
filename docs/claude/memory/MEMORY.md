@@ -54,6 +54,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — инъекция на КАЖДОЕ заявленное свойство, предсказание до прогона · [молчащий детектор](feedback_silent_detector_proves_nothing.md)
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без воспроизведения вход→выход = совет, не факт
+- [Неподключённый драйвер = ровный ноль](feedback_unconnected_driver_reads_as_a_clean_zero.md) — подтверждающий ноль засчитывать только в паре с контролем, дающим ненулевое
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
 - [Фасад — белый список](feedback_facade_is_a_whitelist_not_a_passthrough.md) — правка схемы/конфига: три точки (схема, фасад+expand, readback) · [model_copy не валидирует](feedback_model_copy_does_not_validate.md) — dict вместо схемы молча
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — qt-mcp: «зонд жив» ≠ «отрисовано» · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало
