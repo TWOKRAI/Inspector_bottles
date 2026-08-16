@@ -58,6 +58,9 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Неподключённый драйвер = ровный ноль](feedback_unconnected_driver_reads_as_a_clean_zero.md) — подтверждающий ноль засчитывать только в паре с контролем, дающим ненулевое
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
 - [Фасад — белый список](feedback_facade_is_a_whitelist_not_a_passthrough.md) — правка схемы/конфига: три точки (схема, фасад+expand, readback) · [model_copy не валидирует](feedback_model_copy_does_not_validate.md) — dict вместо схемы молча
+- [Ручка применена ≠ подтверждена](feedback_a_knob_can_be_applied_and_unverifiable.md) — под-секция без менеджера идёт мимо сверщика: `unverifiable` при `checked=0` = никто не смотрел
+- [Инъекция воспроизводит МЕХАНИЗМ, не форму](feedback_injection_must_reproduce_the_mechanism_not_the_shape.md) — реплика дефекта по форме может не ломать ничего (PEP 570); ноль красных проверять руками
+- [Общее дерево делает инъекции флейками](feedback_shared_tree_makes_injections_look_like_flakes.md) — патчи и чужие прогоны в одном дереве врут обеим сторонам; только разные worktree
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — qt-mcp: «зонд жив» ≠ «отрисовано» · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало
 
 ## Активные проекты и долги
