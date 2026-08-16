@@ -286,8 +286,20 @@ class TestReplayFollowsWriteOrder:
     единой строки в журнале.
     """
 
+    #: **Почему сценарий переписан под K-17.** Прежде помощник писал ДВЕ правки в режиме
+    #: `replace` и тесты судили последовательность конвертов `[3.0, 7.0]`. После свёртки
+    #: среза (K-17) `replace` поверх `replace` схлопывается в один конверт — и это верно:
+    #: у выжившего второй `replace` и так стирал первый, то есть последовательность была
+    #: наблюдаема ТОЛЬКО на проводе, а в эффекте — нет. Тест, чей единственный свидетель
+    #: провод, стережёт форму механизма, а не гарантию.
+    #:
+    #: Теперь сценарий даёт срез из ДВУХ конвертов, в котором порядок наблюдаем в ЭФФЕКТЕ:
+    #: адресный tombstone (гасит gate) + два `merge` одной метрики с расходящимися
+    #: значениями. Свёрнутый срез = `[publish=None, merge fps=7.0]`. Инверсия порядка
+    #: внутри свёртки дала бы 3.0, инверсия конвертов — выключенный gate; обе смерти
+    #: видны у боевого приёмника, а не только в списке отправленного.
     def _pm_with_unready_child(self):
-        """PM с журналом из двух правок и ребёнком, который ЕЩЁ не объявил готовность.
+        """PM с журналом из трёх правок и ребёнком, который ЕЩЁ не объявил готовность.
 
         Правки делаются при взведённом событии (иначе досылка примешалась бы к самим
         правкам), затем событие подменяется свежим невзведённым — ровно то, что делает
@@ -301,20 +313,39 @@ class TestReplayFollowsWriteOrder:
         # прийти ТОЛЬКО по объявленной готовности, а не по истечению дедлайна.
         pm.update_config("child_command_ready_timeout_s", 10.0)
 
-        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 3.0}}}})
-        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 7.0}}}, "target": "lines"})
+        pm._cmd_telemetry_broadcast({"publish": None, "target": "lines"})
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 3.0}}}, "telemetry_mode": "merge"})
+        pm._cmd_telemetry_broadcast(
+            {"publish": {"metrics": {"fps": {"interval_sec": 7.0}}}, "target": "lines", "telemetry_mode": "merge"}
+        )
 
         fresh = threading.Event()
         pm._process_registry._ready_events["lines"] = fresh
         pm.communication.log.clear()
         return pm, fresh
 
-    def _addressed_fps(self, pm) -> list[float]:
+    def _addressed(self, pm) -> list[dict]:
+        """Адресные конверты ``telemetry.reconfigure`` в порядке отправки."""
         return [
-            row["data"]["publish"]["metrics"]["fps"]["interval_sec"]
+            row
             for row in pm.communication.log
             if row["kind"] == "addressed" and row.get("command") == "telemetry.reconfigure"
         ]
+
+    def _addressed_fps(self, pm) -> list[float]:
+        """Значения fps по адресным конвертам; конверты без fps (tombstone) пропускаются."""
+        out: list[float] = []
+        for row in self._addressed(pm):
+            metrics = ((row.get("data") or {}).get("publish") or {}).get("metrics") or {}
+            if "fps" in metrics:
+                out.append(metrics["fps"]["interval_sec"])
+        return out
+
+    def _effect_on_child(self, pm) -> dict | None:
+        """Что получится у БОЕВОГО приёмника из реально отправленного — вердикт по эффекту."""
+        child = ProcessHeartbeat(None)
+        _apply_to_child(child, self._addressed(pm))
+        return child.current_telemetry_publish()
 
     def test_fanout_replay_keeps_the_slice_in_write_order(self) -> None:
         pm, ready = self._pm_with_unready_child()
@@ -322,17 +353,20 @@ class TestReplayFollowsWriteOrder:
         pm._replay_telemetry_runtime_delta("topology.apply")
 
         time.sleep(0.3)
-        assert self._addressed_fps(pm) == [], (
+        assert self._addressed(pm) == [], (
             f"конверт ушёл не-готовому ребёнку немедленно, обогнав отложенный глобальный: {pm.communication.log}"
         )
 
         ready.set()
-        assert _wait_for(lambda: len(self._addressed_fps(pm)) == 2), (
+        assert _wait_for(lambda: len(self._addressed(pm)) == 2), (
             f"срез не доехал после объявления готовности: {pm.communication.log}"
         )
-        assert self._addressed_fps(pm) == [3.0, 7.0], (
+        # Порядок судится ЭФФЕКТОМ: 7.0 достижимо только если merge оператора лёг
+        # поверх, а tombstone — раньше него.
+        assert self._addressed_fps(pm) == [7.0], (
             f"срез уехал не в порядке записи оператором, фактически {self._addressed_fps(pm)}"
         )
+        assert ((self._effect_on_child(pm) or {}).get("metrics") or {}).get("fps", {}).get("interval_sec") == 7.0
 
     def test_restart_replay_sends_the_whole_slice_in_one_gated_action(self) -> None:
         """Одноадресный путь: ОДИН колбэк шлёт весь срез — точки перестановки между конвертами нет."""
@@ -341,13 +375,14 @@ class TestReplayFollowsWriteOrder:
         pm._replay_telemetry_runtime_delta("process.restart", target="lines")
 
         time.sleep(0.3)
-        assert self._addressed_fps(pm) == [], f"конверт ушёл не-готовому ребёнку: {pm.communication.log}"
+        assert self._addressed(pm) == [], f"конверт ушёл не-готовому ребёнку: {pm.communication.log}"
 
         ready.set()
-        assert _wait_for(lambda: len(self._addressed_fps(pm)) == 2), (
+        assert _wait_for(lambda: len(self._addressed(pm)) == 2), (
             f"срез не доехал после готовности: {pm.communication.log}"
         )
-        assert self._addressed_fps(pm) == [3.0, 7.0]
+        assert self._addressed_fps(pm) == [7.0]
+        assert ((self._effect_on_child(pm) or {}).get("metrics") or {}).get("fps", {}).get("interval_sec") == 7.0
 
     def test_deferred_replay_carries_the_delta_as_of_send_time(self) -> None:
         """Между планированием досылки и готовностью ребёнка оператор успел правку.
@@ -361,7 +396,7 @@ class TestReplayFollowsWriteOrder:
         pm._record_telemetry_delta("lines", {"metrics": {"fps": {"interval_sec": 9.0}}}, "replace")
 
         ready.set()
-        assert _wait_for(lambda: len(self._addressed_fps(pm)) == 2), f"срез не доехал: {pm.communication.log}"
+        assert _wait_for(lambda: self._addressed_fps(pm) != []), f"срез не доехал: {pm.communication.log}"
         # Судим СОСТАВ отправленного, не его последовательность: за порядок отвечают
         # тесты выше, и цеплять за него ещё и этот ассерт значило бы дать тесту две
         # причины смерти (слом ревьюера убил его инверсией порядка — не тем свойством,
@@ -568,3 +603,191 @@ class TestNoExtraTraffic:
         )
         seg = _envelopes_for(pm, "seg")
         assert seg == [], f"новый процесс с прежним именем унаследовал чужую правку: {seg}"
+
+
+# ---------------------------------------------------------------------------
+# K-17: цена доигрывания ограничена свёрткой СРЕЗА, не свёрткой журнала
+# ---------------------------------------------------------------------------
+
+
+class TestSliceFoldingBoundsTheReplayCost:
+    """Журнал растёт с историей оператора — а конвертов ребёнку уезжает не больше двух.
+
+    Свойство завели после воспроизведения (ревью фазы 3): свёртка ЖУРНАЛА ловит только
+    смежные записи одного получателя, а чередование «адресно ↔ фан-аутом» смежным не
+    бывает. Живьём 20 операторских правок дали 20 конвертов и 20 полных пересборок
+    наблюдаемости у пересозданного ребёнка.
+
+    Мерило здесь — конверты и эффективный gate, а НЕ длина журнала: журнал остаётся
+    длинным намеренно (его порядок и есть истина), ограничена цена.
+    """
+
+    #: Число пар «адресно ↔ фан-аутом». Далеко от любых дефолтов и от потолка ≤2, чтобы
+    #: тест краснел на РАЗНИЦЕ, а не на совпадении с константой реализации.
+    PAIRS = 17
+
+    @staticmethod
+    def _edit(metric: str, value: float, target: str | None = None, mode: str = "merge") -> dict:
+        """Операторский конверт: одна метрика, один интервал, адресно или фан-аутом."""
+        command = {"publish": {"metrics": {metric: {"interval_sec": value}}}, "telemetry_mode": mode}
+        if target is not None:
+            command["target"] = target
+        return command
+
+    def _alternating(self, pm) -> None:
+        """История оператора, в которой свёртка журнала бессильна по построению."""
+        for i in range(self.PAIRS):
+            pm._cmd_telemetry_broadcast(self._edit("fps", 30.0 + i, "lines"))
+            pm._cmd_telemetry_broadcast(self._edit("latency_ms", 50.0 + i))
+
+    def test_slice_folds_to_at_most_two_envelopes(self) -> None:
+        """34 правки → журнал длинный, срез — один конверт."""
+        pm = _pm({"lines": {"class": "m.Lines"}, "seg": {"class": "m.Seg"}})
+        self._alternating(pm)
+
+        assert len(pm._telemetry_delta_log) == 2 * self.PAIRS, "журнал обязан хранить историю целиком"
+        assert len(pm._telemetry_delta_for("lines")) == 1, (
+            f"срез не свёрнут: {len(pm._telemetry_delta_for('lines'))} конвертов на {2 * self.PAIRS} правок"
+        )
+        assert len(pm._telemetry_delta_for("seg")) == 1
+
+    def test_the_wire_carries_the_folded_slice_not_the_journal(self) -> None:
+        """Свёртка обязана дожить до ПРОВОДА, а не остаться свойством геттера."""
+        pm = _pm({"lines": {"class": "m.Lines"}, "seg": {"class": "m.Seg"}})
+        self._alternating(pm)
+        pm.communication.log.clear()
+        _respawn_via_restart(pm, "lines")
+
+        envelopes = _envelopes_for(pm, "lines")
+        assert len(envelopes) <= 2, f"на провод ушло {len(envelopes)} конвертов вместо ≤2"
+
+    @pytest.mark.parametrize("call_site", sorted(_RESPAWNS))
+    def test_folding_preserves_equivalence_with_the_survivor(self, call_site: str) -> None:
+        """Главное: свёртка меняет ЧИСЛО конвертов и не меняет РЕЗУЛЬТАТ.
+
+        Судит боевой приёмник ребёнка, а не модель автора: последняя согласилась бы
+        сама с собой. Выживший получает все 34 конверта, пересозданный — свёрнутый срез;
+        gate обязан совпасть побитово.
+        """
+        pm = _pm({"lines": {"class": "m.Lines"}, "seg": {"class": "m.Seg"}})
+        live = ProcessHeartbeat(None)
+        for i in range(self.PAIRS):
+            for command in (self._edit("fps", 30.0 + i, "lines"), self._edit("latency_ms", 50.0 + i)):
+                pm.communication.log.clear()
+                pm._cmd_telemetry_broadcast(command)
+                _apply_to_child(live, _envelopes_for(pm, "lines"))
+
+        respawned = ProcessHeartbeat(None)
+        pm.communication.log.clear()
+        _RESPAWNS[call_site](pm, "lines")
+        _apply_to_child(respawned, _envelopes_for(pm, "lines"))
+
+        assert respawned.current_telemetry_publish() == live.current_telemetry_publish()
+        # Контроль от вырождения: обе стороны не «пусто == пусто».
+        metrics = (live.current_telemetry_publish() or {}).get("metrics") or {}
+        assert metrics.get("fps", {}).get("interval_sec") == 30.0 + self.PAIRS - 1
+        assert metrics.get("latency_ms", {}).get("interval_sec") == 50.0 + self.PAIRS - 1
+
+    def test_a_wipe_inside_the_slice_drops_only_what_precedes_it(self) -> None:
+        """Стирающая обнуляет предысторию среза — и НЕ трогает то, что после неё.
+
+        Свёртка, забывшая вторую половину, дала бы ребёнку выключённый gate при живой
+        правке оператора; забывшая первую — воскресила бы то, что он погасил.
+        """
+        pm = _pm({"lines": {"class": "m.Lines"}, "seg": {"class": "m.Seg"}})
+        pm._cmd_telemetry_broadcast(self._edit("fps", 41.0, "lines"))
+        pm._cmd_telemetry_broadcast({"publish": None, "target": "lines"})  # tombstone
+        pm._cmd_telemetry_broadcast(self._edit("latency_ms", 62.0, "lines"))
+
+        child = ProcessHeartbeat(None)
+        _apply_to_child(
+            child,
+            [{"data": pm._telemetry_replay_payload(r)} for r in pm._telemetry_delta_for("lines")],
+        )
+        effective = child.current_telemetry_publish() or {}
+        metrics = effective.get("metrics") or {}
+        assert "fps" not in metrics or metrics["fps"].get("interval_sec") != 41.0, "предыстория пережила tombstone"
+        assert metrics.get("latency_ms", {}).get("interval_sec") == 62.0, "правка ПОСЛЕ tombstone потеряна"
+
+    def test_a_wipe_collapses_everything_before_it_into_one_envelope(self) -> None:
+        """Ветка «стирающая обнуляет предысторию» — про ЦЕНУ, и потому нужен счёт.
+
+        Заведена после разбора инъекций: без счёта эта ветка не сторожится ничем.
+        Её снятие эффекта не меняет (``replace`` и так перекрывает всё, что было до
+        него, уже у приёмника) — меняется только число конвертов. Тест на эффект тут
+        зелен по построению, поэтому судить обязан счёт.
+        """
+        pm = _pm({"lines": {"class": "m.Lines"}, "seg": {"class": "m.Seg"}})
+        for i in range(11):
+            pm._cmd_telemetry_broadcast(self._edit("fps", 30.0 + i, "lines"))
+            pm._cmd_telemetry_broadcast(self._edit("latency_ms", 70.0 + i))
+        # Адресный replace: всё, что 'lines' получил до него, он всё равно перестроит с нуля.
+        pm._cmd_telemetry_broadcast(self._edit("shm", 1.0, "lines", mode="replace"))
+
+        assert len(pm._telemetry_delta_for("lines")) == 1, (
+            f"предыстория пережила стирающую запись: {pm._telemetry_delta_for('lines')}"
+        )
+        # Контроль: соседа адресный replace не касается, его срез цел.
+        assert len(pm._telemetry_delta_for("seg")) == 1
+        assert pm._telemetry_delta_for("seg")[0]["publish"]["metrics"]["latency_ms"]["interval_sec"] == 80.0
+
+    def test_folding_does_not_leak_between_children(self) -> None:
+        """Сосед берёт из среза своё и только своё — свёртка не смешивает адресатов."""
+        pm = _pm({"lines": {"class": "m.Lines"}, "seg": {"class": "m.Seg"}})
+        self._alternating(pm)
+
+        seg = pm._telemetry_delta_for("seg")
+        assert len(seg) == 1
+        metrics = seg[0]["publish"]["metrics"]
+        assert "fps" not in metrics, f"адресная правка 'lines' протекла соседу: {metrics}"
+        assert metrics["latency_ms"]["interval_sec"] == 50.0 + self.PAIRS - 1
+
+    def test_the_replay_log_line_names_both_sizes(self) -> None:
+        """Диагностика тоже обязана иметь сторожа (инъекция И5 дала ноль без него).
+
+        Пара «записей / конвертов среза» — единственный способ спросить механизм на
+        самом частом пути, сколько он накопил и работает ли свёртка. Строка без чисел
+        неотличима от строки с числами ровно до того дня, когда числа понадобятся.
+        """
+        pm = _pm({"lines": {"class": "m.Lines"}, "seg": {"class": "m.Seg"}})
+        self._alternating(pm)
+        said: list[str] = []
+        pm._log_info = said.append
+
+        pm._replay_telemetry_runtime_delta("process.restart", target="lines")
+
+        replay = [line for line in said if "telemetry-журнал доигран" in line]
+        assert replay, f"доигрывание промолчало: {said}"
+        assert f"записей={2 * self.PAIRS}" in replay[-1], f"размер журнала не назван: {replay[-1]}"
+        assert "конвертов среза=1" in replay[-1], f"размер среза не назван: {replay[-1]}"
+
+    def test_a_non_associative_pair_is_not_folded(self) -> None:
+        """Свёртка отказывается складывать там, где ``deep_merge`` не ассоциативен.
+
+        Класс найден перебором (20 000 троек, 239 расхождений): ранняя дельта кладёт по
+        общему пути НЕ-словарь, поздняя — словарь. Сложить их значило бы решить за
+        ребёнка, что лежит под этим путём в его базе, — а базы PM не видит.
+
+        **Достижимость названа честно:** на ВАЛИДНОЙ publish-секции этот класс сегодня
+        недостижим — у неё все внутренние узлы словари, а листья скаляры, и приёмник
+        (``TelemetryPublishConfig.from_dict``) отвергает ``{"metrics": None}``
+        ValidationError'ом. Страж защищает не приёмник, а хранилище PM, куда payload
+        попадает ДО всякой валидации, и переживает будущее расширение схемы. Поэтому
+        судится журнал, а не эффект: гонять невалидный конверт через боевой приёмник
+        значило бы проверять его валидатор, а не свёртку.
+
+        Рядом — контроль на ассоциативной паре: не отсеивай страж вообще всё.
+        """
+        pm = _pm({"lines": {"class": "m.Lines"}})
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": None}, "target": "lines", "telemetry_mode": "merge"})
+        pm._cmd_telemetry_broadcast(self._edit("fps", 29.0, "lines"))
+
+        assert len(pm._telemetry_delta_log) == 2, f"небезопасная пара сложена при записи: {pm._telemetry_delta_log}"
+        assert len(pm._telemetry_delta_for("lines")) == 2, (
+            f"небезопасная пара сложена в срезе: {pm._telemetry_delta_for('lines')}"
+        )
+
+        safe = _pm({"lines": {"class": "m.Lines"}})
+        safe._cmd_telemetry_broadcast(self._edit("fps", 29.0, "lines"))
+        safe._cmd_telemetry_broadcast(self._edit("latency_ms", 31.0, "lines"))
+        assert len(safe._telemetry_delta_for("lines")) == 1, "страж отсеял и безопасную пару"

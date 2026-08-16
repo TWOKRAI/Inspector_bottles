@@ -195,20 +195,59 @@ class TestPrecedenceLadder:
         )
 
     def test_mixed_case_global_only_and_addressed_only_metrics_both_survive(self) -> None:
-        """Одна метрика тронута ТОЛЬКО глобально, другая — ТОЛЬКО адресно, один ребёнок сразу."""
-        pm = _pm({"lines": {"class": "m.Lines"}})
-        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"latency_ms": {"interval_sec": 11.0}}}})
-        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 7.0}}}, "target": "lines"})
+        """Одна метрика тронута ТОЛЬКО глобально, другая — ТОЛЬКО адресно, один ребёнок сразу.
 
-        pm.communication.log.clear()
-        _respawn(pm, "lines")
+        **Правлен после очной ставки с автором (ревью фазы 3, K-17) — ровно той, которую
+        предсказала шапка этого файла:** «если реализация резолвит лестницу одним слитым
+        конвертом, часть тестов даст неверный диагноз». Так и вышло, и вскрылось ДВОЙНОЕ
+        расхождение, оба раза не в пользу прежней редакции:
 
-        received = _received_by(pm, "lines")
-        assert 11.0 in _metric_values(received, "latency_ms"), (
-            f"глобальная-only метрика latency_ms потеряна в смешанном случае: {received}"
+        1. тест судил КОНВЕРТЫ на проводе, а не эффект у ребёнка. Прежняя редакция
+           писала обе правки в дефолтном режиме ``replace``, и боевой приёмник на них
+           отвечает ``{fps: 7.0}`` — ``latency_ms`` теряется НЕЗАВИСИМО от доигрывания
+           (``replace`` пересобирает gate из секции целиком, это его документированный
+           смысл). То есть тест был зелён на свойстве, которого у системы нет: лишний
+           первый конверт доезжал, и его эффект тут же перетирался вторым;
+        2. режим ``merge`` — тот, которым ходит операторская дверь (``telemetry_set``), —
+           даёт заявленное «оба выжили» по-настоящему. Живая сверка 2026-08-16: адресно
+           ``fps=7.0`` + фан-аутом ``latency_ms=11.0`` → после respawn пересозданный
+           ``lines`` отдаёт ОБЕ.
+
+        Поэтому проверяется ЭФФЕКТ у боевого приёмника, и в обоих режимах: под ``merge``
+        обе метрики обязаны выжить, под ``replace`` — обязана выжить последняя, и это не
+        дефект, а контракт.
+        """
+        from ...process_module.heartbeat.process_heartbeat import ProcessHeartbeat
+
+        def _effective(mode: str) -> dict:
+            pm = _pm({"lines": {"class": "m.Lines"}})
+            pm._cmd_telemetry_broadcast(
+                {"publish": {"metrics": {"latency_ms": {"interval_sec": 11.0}}}, "telemetry_mode": mode}
+            )
+            pm._cmd_telemetry_broadcast(
+                {"publish": {"metrics": {"fps": {"interval_sec": 7.0}}}, "target": "lines", "telemetry_mode": mode}
+            )
+            pm.communication.log.clear()
+            _respawn(pm, "lines")
+
+            child = ProcessHeartbeat(None)
+            for row in _received_by(pm, "lines"):
+                data = row.get("data", {})
+                child.reconfigure_telemetry(data["publish"], mode=data.get("telemetry_mode", "replace"))
+            return ((child.current_telemetry_publish() or {}).get("metrics")) or {}
+
+        merged = _effective("merge")
+        assert merged.get("latency_ms", {}).get("interval_sec") == 11.0, (
+            f"глобальная-only метрика latency_ms потеряна в смешанном случае (merge): {merged}"
         )
-        assert 7.0 in _metric_values(received, "fps"), (
-            f"адресная-only метрика fps потеряна в смешанном случае: {received}"
+        assert merged.get("fps", {}).get("interval_sec") == 7.0, (
+            f"адресная-only метрика fps потеряна в смешанном случае (merge): {merged}"
+        )
+
+        replaced = _effective("replace")
+        assert replaced.get("fps", {}).get("interval_sec") == 7.0, f"последняя правка потеряна (replace): {replaced}"
+        assert "latency_ms" not in replaced, (
+            f"replace обязан снести неупомянутую метрику — иначе его контракт не тот, что документирован: {replaced}"
         )
 
 

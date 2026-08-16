@@ -16,6 +16,8 @@
 - [Subagent live = синхронно](feedback_subagent_live_test_monitor_hang.md)
 - [Красный — сперва на main](feedback_check_red_on_main_first.md) · [подпись гейта живёт на HEAD](feedback_gate_signature_lives_on_a_head.md) — коммит после подписи = пере-прогон
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — откат stash, счёт арифметикой
+- [Снятие лишней работы красит тесты, мерившие её](feedback_removing_waste_reddens_tests_that_measured_it.md) — красный = вопрос «какое свойство сторожил», а не сигнал откатиться; один из них был зелён на свойстве, которого нет
+- [deep_merge не ассоциативен](feedback_deep_merge_is_not_associative.md) — 239 расхождений из 20 000; свернуть дельты можно, лишь если ранняя не кладёт скаляр туда, где поздняя кладёт словарь
 - [Предсказание — после всех тестов](feedback_predict_injections_after_writing_tests.md) · [на общем корпусе — MUST поимённо](feedback_injection_prediction_on_a_shared_corpus.md) + потолок красных
 - [База инъекций = число собранных](feedback_injection_base_needs_a_collected_count.md) — 0 collected читается как зелено; дочерний логгер не глушит
 - [Покрывать ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) · [слишком грубая не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) · [негодная ≠ вакуум](feedback_broken_injection_is_not_a_vacuous_test.md) — ERROR vs FAILED

@@ -2030,8 +2030,19 @@ class ProcessManagerProcess(ProcessModule):
     def _record_telemetry_delta(self, target: str | None, publish, mode: str) -> None:
         """Дописать правку в журнал, свернув то, что она делает недостижимым.
 
-        Свёртка — не оптимизация, а условие ограниченности журнала; обе её ветки следуют
-        из семантики приёмника, а не из удобства:
+        **Чего эта свёртка НЕ даёт — названо после воспроизведения (K-17, ревью фазы 3).**
+        Прежняя редакция докстринга называла её «условием ограниченности журнала». Это
+        неверно: она сворачивает только СМЕЖНЫЕ В ЖУРНАЛЕ записи одного получателя, а
+        чередование «адресно ↔ фан-аутом» смежным не бывает никогда. Замер: 400 конвертов
+        чередованием дают 400 записей (200 подряд фан-аутных — одну), и на живом стенде
+        20 операторских правок обернулись 20 конвертами и 20 полными пересборками
+        наблюдаемости у пересозданного ребёнка. Журнал в памяти по-прежнему растёт с
+        историей оператора — ограничена ЦЕНА, и ограничена она не здесь, а в
+        :meth:`_telemetry_delta_for`, где срез получателя сворачивается до ≤ 2 конвертов.
+        Здешняя свёртка осталась ровно тем, чем и была: дешёвым отсечением недостижимого
+        на входе.
+
+        Обе её ветки следуют из семантики приёмника, а не из удобства:
 
         1. **Стирающая запись убивает предысторию СВОИХ получателей.** Фан-аутная приходит
            всем → журнал очищается целиком; адресная — только этому ребёнку → выбрасываются
@@ -2054,21 +2065,123 @@ class ProcessManagerProcess(ProcessModule):
             else:
                 log[:] = [item for item in log if item["target"] != target]
         elif log and log[-1]["target"] == target and log[-1]["mode"] == "merge" and mode == "merge":
-            if isinstance(log[-1]["publish"], dict) and isinstance(publish, dict):
+            # Условие ассоциативности — то же, что у свёртки среза, и по той же причине
+            # (K-17): сложить две дельты можно, лишь пока результат не зависит от базы
+            # ребёнка. Здесь оно поначалу отсутствовало, и `{"metrics": None}` + `{"metrics":
+            # {...}}` складывались молча — воспроизведено перебором, не вычитано.
+            if (
+                isinstance(log[-1]["publish"], dict)
+                and isinstance(publish, dict)
+                and self._telemetry_merge_is_associative(log[-1]["publish"], publish)
+            ):
                 from ...data_schema_module import deep_merge
 
                 log[-1] = {"target": target, "publish": deep_merge(log[-1]["publish"], publish), "mode": "merge"}
                 return
         log.append(record)
 
+    @staticmethod
+    def _telemetry_merge_is_associative(earlier: dict, later: dict) -> bool:
+        """Можно ли сложить две merge-дельты, не зная базы получателя.
+
+        ``deep_merge`` ассоциативен НЕ везде. Единственный расходящийся класс (найден
+        перебором 20 000 троек, 239 расхождений): по общему пути ранняя дельта кладёт
+        не-словарь, а поздняя — словарь. Тогда «два конверта» дают чистый словарь
+        поздней, а «свёрнутый» — её же, слитую с поддеревом базы, и база у ребёнка, а
+        не у PM. Условие проверяется по двум дельтам и от базы не зависит — поэтому
+        сложить их можно, ничего о ребёнке не зная.
+
+        Консервативно намеренно: отсеивается класс целиком, а не только те его случаи,
+        где база действительно несёт словарь (проверить это PM нечем). Цена отказа —
+        лишний конверт, цена ошибки — неверный gate.
+        """
+        for key, later_value in later.items():
+            if key not in earlier:
+                continue
+            earlier_value = earlier[key]
+            if isinstance(later_value, dict):
+                if not isinstance(earlier_value, dict):
+                    return False
+                if not ProcessManagerProcess._telemetry_merge_is_associative(earlier_value, later_value):
+                    return False
+        return True
+
+    @staticmethod
+    def _fold_telemetry_slice(records: list[dict]) -> list[dict]:
+        """Свернуть срез ОДНОГО получателя до минимума конвертов (K-17).
+
+        Внутри среза все записи адресованы одному ребёнку и применяются им подряд —
+        значит здесь законно то, что в общем журнале незаконно (там между двумя записями
+        одного получателя стоят записи ЧУЖИХ, и складывать через их голову нельзя: ровно
+        это было дефектом первой редакции задачи 3.4).
+
+        Две свёртки, обе — тождества контракта приёмника
+        (:meth:`ProcessHeartbeat.reconfigure_telemetry`), а не приближения:
+
+        1. **Стирающая запись обнуляет предысторию среза.** ``mode="replace"`` пересобирает
+           gate из секции целиком, ``publish=None`` гасит его независимо от режима — что бы
+           ни применялось до, результат тот же. Значит всё до неё выбрасывается.
+        2. **Смежные merge складываются** — но НЕ всегда, и это измерено, а не предположено.
+           Тождество ``merge(merge(base, A), B) == merge(base, deep_merge(A, B))`` требует
+           ассоциативности ``deep_merge``, а она **не общая**: 20 000 случайных троек дали
+           239 расхождений. Расходится ровно один класс — ранняя дельта кладёт по пути
+           НЕ-словарь (скаляр/``None``), поздняя кладёт по тому же пути словарь: слева
+           словарь поздней затирает скаляр ранней целиком, справа он же сливается с
+           поддеревом ``base``, которого PM не видит. Именно на это указывал довод
+           ADR-PMM-028, отвергавший «слить срез в один конверт».
+           Условие безопасности проверяется по A и B БЕЗ знания ``base``
+           (:meth:`_telemetry_merge_is_associative`) и на 36 285 безопасных тройках дало
+           **0 расхождений**; среди отсеянных расхождение наступает у 528 из 3 763 —
+           страж консервативен, но не холост. Не прошло условие — записи не складываются,
+           уезжают двумя конвертами, и корректность не зависит от свёртки вовсе.
+
+        Отсюда — ПОТОЛОК: срез любого ребёнка сворачивается не более чем в **две** записи
+        (одна стирающая + один накопленный merge). Это и есть настоящая граница цены
+        доигрывания; в самом журнале её нет и быть не может (см. :meth:`_record_telemetry_delta`).
+
+        ``target`` у свёрнутой записи сохраняется от первой из сложенных и смысла не несёт:
+        срез уже принадлежит одному получателю, а до провода доезжают только ``publish`` и
+        ``mode`` (:meth:`_telemetry_replay_payload`).
+        """
+        folded: list[dict] = []
+        for record in records:
+            if ProcessManagerProcess._telemetry_record_wipes(record):
+                folded = [record]
+                continue
+            previous = folded[-1] if folded else None
+            if (
+                previous is not None
+                and previous["mode"] == "merge"
+                and record["mode"] == "merge"
+                and isinstance(previous["publish"], dict)
+                and isinstance(record["publish"], dict)
+                and ProcessManagerProcess._telemetry_merge_is_associative(previous["publish"], record["publish"])
+            ):
+                from ...data_schema_module import deep_merge
+
+                folded[-1] = {
+                    "target": previous["target"],
+                    "publish": deep_merge(previous["publish"], record["publish"]),
+                    "mode": "merge",
+                }
+                continue
+            folded.append(record)
+        return folded
+
     def _telemetry_delta_for(self, name: str) -> list[dict]:
-        """Записи журнала, адресованные `name`, В ПОРЯДКЕ ЗАПИСИ (фан-аутные + его личные).
+        """Конверты, которые надо доиграть `name`, В ПОРЯДКЕ ЗАПИСИ (фан-аутные + его личные).
 
         Это и есть та последовательность конвертов, которую получил бы ребёнок, доживи он
         до сегодняшнего дня, — поэтому пересозданный, применив её поверх своего boot-конфига,
         приходит туда же, где выживший сосед.
+
+        Срез отдаётся СВЁРНУТЫМ (:meth:`_fold_telemetry_slice`): эффективный gate тот же,
+        а конвертов — не больше двух вместо одного на каждую операторскую правку. Разница
+        не косметическая: каждый конверт стоит ребёнку полной пересборки наблюдаемости.
         """
-        return [record for record in self._telemetry_delta_log if record["target"] in (None, name)]
+        return self._fold_telemetry_slice(
+            [record for record in self._telemetry_delta_log if record["target"] in (None, name)]
+        )
 
     @staticmethod
     def _telemetry_replay_payload(record: dict) -> dict:
@@ -2149,7 +2262,16 @@ class ProcessManagerProcess(ProcessModule):
                 )
                 # Охват отложенной отправки на этот момент неизвестен — честнее вернуть 0,
                 # чем выдать намерение за доставку.
-                self._log_info(f"telemetry-журнал доигран ({reason}, target={target!r}): deferred={deferred}")
+                #
+                # Размер журнала и размер СРЕЗА печатаются оба (K-17): раньше на этом —
+                # самом частом — пути в логе стояло одно `deferred`, и спросить механизм
+                # «сколько ты накопил» было нечем. Пара чисел ещё и показывает работу
+                # свёртки: 20/1 — норма, 20/20 — свёртка мертва.
+                self._log_info(
+                    f"telemetry-журнал доигран ({reason}, target={target!r}): "
+                    f"записей={len(self._telemetry_delta_log)}, "
+                    f"конвертов среза={len(self._telemetry_delta_for(target))}, deferred={deferred}"
+                )
                 return 0 if deferred else 1
 
             # Фан-аут: реестр пережил тех, кого в топологии больше нет (MAJOR 4 ревью).
