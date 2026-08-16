@@ -1176,6 +1176,12 @@
           "first_n": 0
         },
         "file": true,
+        "flight": {
+          "enabled": false,
+          "keep": 5,
+          "limit": 0,
+          "sink": ""
+        },
         "log_directory": null,
         "log_level": "INFO",
         "logger_groups": {

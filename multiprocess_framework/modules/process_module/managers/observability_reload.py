@@ -32,6 +32,7 @@ from ..configs.observability_layers import (
     TELEMETRY_LAYERED_SUBSECTION,
     layer_merge,
 )
+from .observability_flight import FLIGHT_SECTION_KEY, apply_flight_recorder
 from .observability_wiring import EVENTS_SECTION_KEY, apply_event_selector
 
 if TYPE_CHECKING:
@@ -119,6 +120,7 @@ def observability_effective(
     error: Any = None,
     stats: Any = None,
     event_selector: Any = None,
+    flight_recorder: Any = None,
 ) -> Dict[str, Any]:
     """Фактическое (readback) состояние менеджеров наблюдаемости — не эхо запроса.
 
@@ -228,6 +230,17 @@ def observability_effective(
         knobs = getattr(event_selector, "knobs", None)
         if isinstance(knobs, tuple) and len(knobs) == 2:
             out["events"] = {"first_n": int(knobs[0]), "every_mth": int(knobs[1])}
+    if flight_recorder is not None:
+        # Ф5 (5.1): ручки дампа — той же дорогой и по тому же уроку, что
+        # `events` строкой выше. Ручка, которую нельзя подтвердить, неотличима
+        # от неприменённой: `config_reload_verified` отвечал бы `unverifiable`
+        # при `checked=0`, и правка «включить flight recorder» уходила бы к
+        # оператору без вердикта.
+        from .observability_flight import flight_effective  # локально: только этой ветке
+
+        section = flight_effective(flight_recorder)
+        if section is not None:
+            out[FLIGHT_SECTION_KEY] = section
     return out
 
 
@@ -294,9 +307,14 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     # применялась. Тождественное соответствие — не «вторая таблица перевода»,
     # которую запрещает докстринг выше: переводить здесь нечего, и разойтись
     # этой строке не с чем.
-    if isinstance(survived.get(EVENTS_SECTION_KEY), dict):
-        for key, want in survived[EVENTS_SECTION_KEY].items():
-            expected[f"{EVENTS_SECTION_KEY}.{key}"] = want
+    # Ф5 (5.1): `flight` — вторая под-секция с тем же свойством и тем же
+    # доводом. Обе идут мимо `expand_observability` (у них нет менеджера, в поля
+    # которого их надо переводить), поэтому обе обязаны быть названы здесь —
+    # иначе вердикт про них молчит, а молчание читается как «не проверено».
+    for section_key in (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY):
+        if isinstance(survived.get(section_key), dict):
+            for key, want in survived[section_key].items():
+                expected[f"{section_key}.{key}"] = want
     flat_effective = flatten_section(effective if isinstance(effective, dict) else {})
 
     mismatches: list = []
@@ -668,6 +686,7 @@ def apply_observability_layers(
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
     event_selector: Any = None,
+    flight_recorder: Any = None,
     origin: str,
     record_rebuild: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
@@ -718,6 +737,12 @@ def apply_observability_layers(
     поэтому здесь он ПЕРЕНАСТРАИВАЕТСЯ, а не пересоздаётся: счёт по родам обязан
     пережить правку конфига (тот же довод, что у ``RateSampler.configure``).
 
+    Ф5 (5.1) — **шестая плоскость, дословно на тех же правах.** ``flight_recorder``
+    необязателен, перенастраивается, а не пересоздаётся, и обязан быть передан
+    на ВСЕХ дорогах пересборки. Находка №1 задачи 4.1 была ровно про это: ручка
+    действовала через ``config.reload`` и НЕ действовала через правку файла, а
+    обе дороги отвечали «применено».
+
     ``record_rebuild=False`` — ровно ОДИН законный вызывающий: такт подметальщика
     (:mod:`.observability_ttl`). Он пишет за весь такт одну запись ``expire``,
     которая уже несёт исход пересборки (``ok`` / ``error`` / ``log_level``), и
@@ -754,6 +779,7 @@ def apply_observability_layers(
                 store_throttle=store_throttle,
                 boot_rules=boot_rules,
                 event_selector=event_selector,
+                flight_recorder=flight_recorder,
             )
             # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
             # была вызвана. Иначе после неудачного возврата и последующего успешного
@@ -797,6 +823,7 @@ def _rebuild_and_apply(
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
     event_selector: Any = None,
+    flight_recorder: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Тело пересборки (вызывается под локом стека — см. вызывающего)."""
     resolved = layers.resolve()
@@ -845,6 +872,13 @@ def _rebuild_and_apply(
     events_applied = apply_event_selector(event_selector, resolved.get(EVENTS_SECTION_KEY))
     if events_applied is not None:
         expanded[EVENTS_SECTION_KEY] = events_applied
+
+    # Ф5 (5.1), та же третья точка у соседней под-секции. Секция `flight`
+    # остаётся в `resolved` по той же причине, что `events`: `ObservabilityConfig`
+    # её знает, а `expand_observability` не раскладывает.
+    flight_applied = apply_flight_recorder(flight_recorder, resolved.get(FLIGHT_SECTION_KEY))
+    if flight_applied is not None:
+        expanded[FLIGHT_SECTION_KEY] = flight_applied
 
     telemetry_applied = _apply_telemetry_from_layers(
         telemetry_layered,
@@ -1221,6 +1255,7 @@ def make_observability_on_reload(
     error: Any = None,
     stats: Any = None,
     event_selector: Any = None,
+    flight_recorder: Any = None,
     section_key: str = "observability",
     log_info: Optional[Callable[[str], None]] = None,
     layers: Optional["ObservabilityLayers"] = None,
@@ -1268,6 +1303,12 @@ def make_observability_on_reload(
             # разошлись бы они молча. Найдено инъекцией по дорогам (2026-08-16),
             # у соседней ручки `stats` этого дефекта нет по построению.
             event_selector=event_selector,
+            # Ф5 (5.1): рекордер дампов — такой же получатель правки ФАЙЛА.
+            # Пропусти мы его здесь, и `observability.flight.enabled`,
+            # выставленный в system.yaml/спутнике, действовал бы только через
+            # `config.reload` — то есть ручка вела бы себя по-разному на двух
+            # дорогах, и разошлись бы они молча (находка 1 задачи 4.1).
+            flight_recorder=flight_recorder,
             log_info=log_info,
             origin=origin,
         )
@@ -1282,6 +1323,7 @@ def start_observability_watcher(
     error: Any = None,
     stats: Any = None,
     event_selector: Any = None,
+    flight_recorder: Any = None,
     section_key: str = "observability",
     debounce_seconds: float = 1.0,
     log_info: Optional[Callable[[str], None]] = None,
@@ -1339,6 +1381,7 @@ def start_observability_watcher(
         error=error,
         stats=stats,
         event_selector=event_selector,
+        flight_recorder=flight_recorder,
         section_key=section_key,
         log_info=log_info,
         layers=layers,

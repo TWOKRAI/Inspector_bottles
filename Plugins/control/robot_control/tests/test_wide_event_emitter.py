@@ -36,7 +36,18 @@ class _Ctx:
         self.process_name = "inspector"
         self.plugin_name = "robot_control"
         self.events: List[Dict[str, Any]] = []
+        self.flights: List[Dict[str, Any]] = []
         self.documents: List[Dict[str, Any]] = []
+
+    def flight_dump(self, reason: str = "", /, **fields: Any) -> bool:
+        """Ф5 (5.1). Дубль обязан нести дорогу, иначе плагин падает AttributeError.
+
+        Сигнатура дословна ``PluginContext.flight_dump``, включая косую черту:
+        дубль «по форме» пропустил бы ровно тот дефект, ради которого ``/``
+        и поставлена (урок 1.1 и 4.1-И8).
+        """
+        self.flights.append({"reason": reason, **fields})
+        return True
 
     def write_document(self, kind: str, summary: str = "", /, **fields: Any) -> bool:
         self.documents.append({"kind": kind, "summary": summary, **fields})

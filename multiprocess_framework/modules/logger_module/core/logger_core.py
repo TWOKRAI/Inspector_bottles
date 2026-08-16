@@ -760,12 +760,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         """
         log_dir = self.config.log_directory
         if self.process is not None and hasattr(self.process, "name"):
-            from pathlib import Path as _Path
+            # Задача 5.1 (Ф5): вычисление переехало в :func:`process_log_directory`,
+            # потому что у него появился ВТОРОЙ клиент — каталог дампов flight
+            # recorder'а. Две одинаковые тройки строк разошлись бы на первой же
+            # правке приоритета каталогов, и дампы легли бы не рядом с журналом
+            # процесса, а куда-нибудь ещё — молча.
+            from .log_paths import process_log_directory
 
-            from .log_paths import default_log_base_directory
-
-            base = _Path(log_dir) if log_dir else default_log_base_directory()
-            log_dir = str(base / self.process.name)
+            log_dir = str(process_log_directory(log_dir, self.process.name))
         return resolve_log_file_path(
             file_path,
             fallback=fallback,

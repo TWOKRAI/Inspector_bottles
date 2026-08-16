@@ -118,6 +118,50 @@ class ObservabilityEventsConfig(SchemaBase):
     ] = 0
 
 
+@register_schema("ObservabilityFlightConfig")
+class ObservabilityFlightConfig(SchemaBase):
+    """Под-секция flight recorder'а — дампа кольца записей по требованию (Ф5, 5.1).
+
+    Кольцо ЗАПИСЕЙ, а не пикселей: дамп отвечает на «что происходило вокруг
+    момента брака» строками плоскости логов этого процесса, включая широкие
+    записи Ф4. Изображения кадров сюда не едут и не поедут — у них свои
+    механизмы (copy_out, датасет).
+
+    **Выключенность выражена ОДНИМ ключом с ОДНИМ адресом** (Р5.1-5). Соблазн
+    был выразить её вторым способом — «нет memory-канала в конфиге процесса», —
+    и он отвергнут: два независимых способа быть выключенным дают ровно тот
+    класс, где оператор гасит один, а действует другой. Здесь нет канала —
+    механизм отвечает ДРУГИМ названным отказом (см. ``sink``), а не тем же
+    самым.
+
+    **Ловушка соседней двери, названная явно** (Р5.1-7). Само кольцо объявляется
+    не здесь, а в ``observability.channels.<имя>`` — и там обязателен
+    ``type: memory``. Без него общий цикл секции каналов строит ФАЙЛОВЫЙ
+    приёмник под тем же именем (дефолт ``LoggerChannelSchema.type == "file"``),
+    и снаружи разница не видна: канал есть, ``sink`` на него указывает, а
+    ``tail()`` у файла отсутствует — дамп отвечает «приёмник записей не хранит».
+    Маршрут в кольцо (``observability.scopes``) обязателен по той же причине:
+    объявленный и не смаршрутизированный канал поднят и вечно пуст.
+    """
+
+    enabled: Annotated[
+        bool,
+        FieldMeta("Писать ли дампы кольца по вызову ctx.flight_dump (единственный выключатель)"),
+    ] = False
+    sink: Annotated[
+        str,
+        FieldMeta("Имя memory-приёмника ЛОГГЕРА, чьё кольцо уходит в дамп (пусто — читать нечего)"),
+    ] = ""
+    keep: Annotated[
+        int,
+        FieldMeta("Сколько последних дампов держать в каталоге flight/ (0 — без предела)", min=0, max=10_000),
+    ] = 5
+    limit: Annotated[
+        int,
+        FieldMeta("Сколько последних записей кольца брать в дамп (0 — всё, что лежит)", min=0, max=1_000_000),
+    ] = 0
+
+
 def canonical_level_or_raise(value: Any, *, field: str) -> Any:
     """Каноничное имя уровня либо громкий отказ с адресом ключа (B2).
 
@@ -432,6 +476,16 @@ class ObservabilityConfig(SchemaBase):
         ObservabilityEventsConfig,
         FieldMeta("Отбор широких записей о единице работы: first_n / every_mth (Ф4)"),
     ] = Field(default_factory=ObservabilityEventsConfig)
+    #: Ф5 (задача 5.1). В manager-конфиги НЕ раскладывается — по тому же доводу,
+    #: что ``documents``/``events``/``session_ttl_sec``: это не параметр менеджера,
+    #: а политика дампа, которую читает живой ``FlightRecorder`` процесса
+    #: (``wire_flight_recorder`` на старте, ``apply_flight_recorder`` на пересборке).
+    #: Ключ живёт в ТОЙ ЖЕ секции ``observability`` — пятой двери конфига этап не
+    #: заводит (правило Б.1), ``telemetry.*`` не трогается.
+    flight: Annotated[
+        ObservabilityFlightConfig,
+        FieldMeta("Дамп кольца записей по вызову: enabled / sink / keep / limit (Ф5)"),
+    ] = Field(default_factory=ObservabilityFlightConfig)
 
     #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
     #: МОЛЧА (проверено), поэтому без этой сверки конфиг с ``enable_batching: true``
@@ -505,7 +559,8 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         политика слоя L3, а не параметр менеджера — её читает
         ``ObservabilityLayers.effective_session_ttl``. По тому же доводу здесь нет
         ни ``documents`` (адрес второй плоскости, читает ``wire_document_sink``),
-        ни ``events`` (политика отбора, читает ``WideEventSelector`` процесса).
+        ни ``events`` (политика отбора, читает ``WideEventSelector`` процесса),
+        ни ``flight`` (политика дампа, читает ``FlightRecorder`` процесса).
     """
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 

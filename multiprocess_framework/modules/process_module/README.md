@@ -122,6 +122,7 @@ process_module/
 │   ├── __init__.py
 │   ├── process_managers.py      # Инициализация менеджеров
 │   ├── observability_wiring.py  # Сшивка плоскостей: hub, стор, tap'ы, документы, отбор широких записей
+│   ├── observability_flight.py  # Flight recorder: дамп кольца записей процесса по вызову (ADR-PM-037)
 │   ├── observability_reload.py  # Пересборка конфига из слоёв + readback + вердикт
 │   └── observability_ttl.py     # Авто-возврат рантайм-правок по истечении срока
 ├── communication/
@@ -527,6 +528,7 @@ graph TD
 | Файл | Что делает | Когда зовётся |
 |---|---|---|
 | `observability_wiring.py` | сшивает `ObservabilityHub`, `ObservabilityStore` + store-tap'ы на **оба** менеджера (`logger` и `error`), forward-tap'ы живого хвоста (keyed по subscriber), плоскость документов (`wire_document_sink`), отбор широких записей (`wire_event_selector` → `WideEventSelector`, ADR-PM-036) и политику истории (`resolve_history_policy`) | **один раз** на `initialize()` (`ProcessModule._wire_observability_hub`); ручки отбора широких записей после этого перенастраиваются пересборкой (`apply_event_selector`) |
+| `observability_flight.py` | flight recorder: политика дампа (`FlightRecorder`), сшивка `wire_flight_recorder`, пересборка `apply_flight_recorder`, readback `flight_plane_report`. Кольцо берёт у логгера (`read_sink_tail`), путь — дорогой файлов журнала (`log_paths.process_log_directory`); своего кольца и своей дороги записи не заводит (ADR-PM-037) | сшивка — **один раз** на `initialize()`; ручки после этого перенастраиваются пересборкой; сам дамп — по вызову `ctx.flight_dump` |
 | `observability_reload.py` | **единственное** место, где секция раскладывается (`expand_observability`) и применяется (`apply_observability_layers`): пересборка из слоёв L0→L3, readback из живых менеджеров, трёхзначный вердикт | и файловый watcher, и IPC-команда `config.reload` |
 | `observability_ttl.py` | авто-возврат правок L3 по истечении срока; исполняет такт heartbeat, а не свой таймер | каждый heartbeat процесса |
 

@@ -68,6 +68,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     #: фронты пишутся, поток нет.
     event_selector: Any = None
 
+    #: Ф5 (задача 5.1): живой хозяин дампов кольца записей. Атрибут КЛАССА со
+    #: значением ``None`` — ТОЙ ЖЕ правкой, что объявление порта
+    #: ``IProcessServices.flight_recorder`` (Р5.1-2), и по тому же доводу, что у
+    #: соседей выше: объявление в протоколе без атрибута ломает
+    #: ``isinstance(process, IProcessServices)`` на штатной конфигурации без
+    #: сшивки. ``None`` — законное «дампов нет», отвечающее тем же названным
+    #: отказом, что и настроенный рекордер с ``enabled=False``.
+    flight_recorder: Any = None
+
     #: Задача 5.6: намерения подписчиков хвоста — атрибут КЛАССА со значением-пустотой
     #: по тому же доводу, что у ``document_sink`` выше: объявление только в ``__init__``
     #: оставляет без механизма тех, кто собирает процесс иначе (оркестратор, тестовые
@@ -446,6 +455,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # `_apply_boot_observability_layers` (см. вызывающего): ручки к этому
         # моменту уже разрешены, и второго резолва не заводится.
         wire_event_selector(self)
+
+        # Ф5 (5.1): рекордер дампов — у каждого процесса и по тому же доводу.
+        # ПОСЛЕ `wire_event_selector` только ради читаемости: обе сшивки читают
+        # одни и те же разрешённые слои и друг о друге не знают.
+        from ..managers.observability_flight import wire_flight_recorder
+
+        wire_flight_recorder(self)
 
         self._observability_hub, self._observability_drain = wire_process_observability(
             self.name,

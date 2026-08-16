@@ -852,21 +852,39 @@ def document_plane_report(svc: Any) -> Dict[str, Any]:
     }
 
 
-def _process_warn(svc: Any, message: str) -> None:
-    """Сказать вслух. Форма повторяет ``make_audit_log``: логгер бывает разный, а
-    молчание недопустимо ни при каком."""
-    warn = (
-        getattr(svc, "_log_warning", None)
-        or getattr(svc, "log_warning", None)
-        or getattr(svc, "_log_info", None)
-        or getattr(svc, "log_info", None)
-    )
-    if not callable(warn):
+#: Порядок поиска голоса по уровню. Пятёрка ``log_*`` есть не у каждого объекта,
+#: который сюда доезжает (дубли в тестах, процесс до подъёма логгера), поэтому
+#: каждый уровень несёт СВОЙ список кандидатов с деградацией вниз: не нашли
+#: предупреждение — скажем информационным, но не промолчим. Таблица, а не две
+#: копии перебора: голосов стало два (задача 5.1 — вытеснение дампа говорит
+#: INFO), и вторая рукописная лесенка разошлась бы с первой.
+_SAY_FALLBACKS: Dict[str, Tuple[str, ...]] = {
+    "WARNING": ("_log_warning", "log_warning", "_log_info", "log_info"),
+    "INFO": ("_log_info", "log_info", "_log_warning", "log_warning"),
+}
+
+
+def process_say(svc: Any, message: str, level: str = "WARNING") -> None:
+    """Сказать вслух на уровне ``level``. Форма повторяет ``make_audit_log``:
+    логгер бывает разный, а молчание недопустимо ни при каком."""
+    for attr in _SAY_FALLBACKS.get(str(level).upper(), _SAY_FALLBACKS["WARNING"]):
+        say = getattr(svc, attr, None)
+        if not callable(say):
+            continue
+        try:
+            say(message, module="observability")
+        except TypeError:  # логгер без kwarg `module` — сообщение важнее формы
+            say(message)
         return
-    try:
-        warn(message, module="observability")
-    except TypeError:  # логгер без kwarg `module` — сообщение важнее формы
-        warn(message)
+
+
+def _process_warn(svc: Any, message: str) -> None:
+    """Предупреждение — тонкая обёртка над :func:`process_say`.
+
+    Имя оставлено: его читают три десятка мест в этом модуле, и переименование
+    ради одного нового вызывающего было бы шумом в диффе, а не смыслом.
+    """
+    process_say(svc, message, "WARNING")
 
 
 def resolve_factory(path: str) -> Callable[..., Any]:

@@ -900,6 +900,10 @@ class BuiltinCommands:
             observability_effective,
             observability_provenance,
         )
+        from ..managers.observability_flight import (
+            FLIGHT_RECORDER_ATTR,
+            flight_plane_report,
+        )
         from ..managers.observability_wiring import (
             EVENT_SELECTOR_ATTR,
             document_plane_report,
@@ -954,6 +958,9 @@ class BuiltinCommands:
                 # счётчики через `event_plane_report`; здесь — действующие ручки,
                 # без которых `config.reload` не может их подтвердить.
                 event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+                # Ф5 (5.1): ручки дампа — тоже часть действующего состояния
+                # плоскости, и без них `config.reload` не может их подтвердить.
+                flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
             ),
             **({"resolve": resolved} if resolved else {}),
             # `flush` (Task 5.7) — просьба о КОГЕРЕНТНОМ снимке: дожать буферы,
@@ -990,6 +997,12 @@ class BuiltinCommands:
             # источника показывал бы согласие всегда, в том числе когда правка
             # до селектора не доехала.
             **event_plane_report(svc),
+            # Ф5 (5.1): единственное место, где видно, сколько дампов сделано,
+            # сколько записей в них легло, сколько файлов вытеснено ретеншеном
+            # и по какому из ТРЁХ разных диагнозов отказано. Читается живой
+            # рекордер, а не конфиг: пересчёт из того же источника показывал бы
+            # согласие всегда, в том числе когда правка до него не доехала.
+            **flight_plane_report(svc),
             "audit": layers.audit.view(audit_limit),
             **extra,
             "layers": {
@@ -1691,6 +1704,7 @@ class BuiltinCommands:
                 observability_effective,
                 telemetry_targets,
             )
+            from ..managers.observability_flight import FLIGHT_RECORDER_ATTR
             from ..managers.observability_wiring import EVENT_SELECTOR_ATTR
 
             layers = process_observability_layers(svc)
@@ -1979,6 +1993,11 @@ class BuiltinCommands:
                         # в слой и не подействовала: селектор создаётся один раз
                         # на старте, и пересборка обязана донести до него ручки.
                         event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+                        # Ф5 (5.1): живой рекордер дампов — получатель ручек
+                        # `observability.flight`. Без него правка легла бы в слой
+                        # и не подействовала: рекордер создаётся один раз на
+                        # старте, и пересборка обязана донести до него ручки.
+                        flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
                         origin=_ORIGIN_SWITCH if obs_clear else _ORIGIN_RELOAD,
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -1987,6 +2006,8 @@ class BuiltinCommands:
                     result["telemetry_applied"] = expanded["telemetry"]
                 if expanded.get("events") is not None:
                     result["events_applied"] = expanded["events"]
+                if expanded.get("flight") is not None:
+                    result["flight_applied"] = expanded["flight"]
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.
@@ -2004,6 +2025,7 @@ class BuiltinCommands:
                 error=_error,
                 stats=_stats,
                 event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+                flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
             )
             # Task 5.7: судить, а не только показывать. Readback лежал в ответе, но
             # `success` означал «применение не упало» — запрошенный ключ, перебитый

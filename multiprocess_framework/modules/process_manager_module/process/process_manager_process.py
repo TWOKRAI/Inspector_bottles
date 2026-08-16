@@ -2457,6 +2457,12 @@ class ProcessManagerProcess(ProcessModule):
                     # доводу, что телеметрия рядом. Switch чистит L3, и отбор
                     # обязан вернуться к нижнему слою вместе со всем остальным.
                     event_selector=getattr(self, "event_selector", None),
+                    # Ф5 (5.1): свой рекордер дампов — тем же доводом. Switch
+                    # чистит L3, и политика дампа обязана вернуться к нижнему
+                    # слою вместе со всем остальным: иначе на оркестраторе она
+                    # держалась бы на снятой правке, а readback честно отвечал
+                    # бы «сессия пуста» — расхождение молча.
+                    flight_recorder=getattr(self, "flight_recorder", None),
                     origin=origin,
                 )
             # Advisory A2 ревью 5.9: у детей та же смена подписана `switch:broadcast`

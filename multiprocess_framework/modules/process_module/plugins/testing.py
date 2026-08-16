@@ -187,6 +187,12 @@ class MockProcessServices:
             с дефолтом ``first_n=0, every_mth=0``. Чтобы судить лесенку отбора,
             передай настоящий ``WideEventSelector`` — фальшивка-всегда-успех
             заглушила бы ровно то свойство, которое проверяют.
+        flight_recorder: Рекордер дампов кольца (Ф5, 5.1). ``None`` по умолчанию
+            — «сшивки не было»: ``flight_dump`` тогда отвечает тем же названным
+            отказом, что и выключённый рекордер (Р5.1-5 — у «выключено» одно
+            состояние). Чтобы судить дорогу дампа, передай настоящий
+            ``FlightRecorder``: он читает кольцо через ``logger_manager``, и
+            фальшивка-всегда-успех заглушила бы именно ту дорогу.
     """
 
     def __init__(
@@ -199,6 +205,7 @@ class MockProcessServices:
         document_sink: Any = None,
         stats_manager: Any = None,
         event_selector: Any = None,
+        flight_recorder: Any = None,
     ) -> None:
         self.name: str = name
         # Ф8.7 / задача 4.2 (Н-9): атрибут ЕСТЬ всегда, значение может быть None.
@@ -212,6 +219,10 @@ class MockProcessServices:
         # Ф4 (4.1): третий порт с тем же доводом — атрибут ЕСТЬ всегда, значение
         # может быть None. Без атрибута дубль перестал бы удовлетворять протоколу.
         self.event_selector: Any = event_selector
+        # Ф5 (5.1): четвёртый порт с тем же доводом — атрибут ЕСТЬ всегда,
+        # значение может быть None. Без атрибута дубль перестал бы удовлетворять
+        # IProcessServices, который порт объявил.
+        self.flight_recorder: Any = flight_recorder
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()

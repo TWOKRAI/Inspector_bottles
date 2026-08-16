@@ -173,6 +173,10 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             # каждый свой: селектор один на процесс, и второй экземпляр вёл бы
             # свой счёт по родам.
             event_selector=getattr(self, "event_selector", None),
+            # Ф5 (5.1): рекордер дампов — по тому же правилу и в ОБА watcher'а.
+            # Экземпляр один на процесс: второй вёл бы свой счёт дампов и свой
+            # ретеншен в том же каталоге.
+            flight_recorder=getattr(self, "flight_recorder", None),
             log_info=self._log_info,
             log_error=self._log_error,
             on_reload_extra=self._compose_fan_out(telemetry_on_reload, {}, "system-конфиг"),
@@ -222,6 +226,7 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             error=self.error_manager,
             stats=self.stats_manager,
             event_selector=getattr(self, "event_selector", None),
+            flight_recorder=getattr(self, "flight_recorder", None),
             log_info=self._log_info,
             log_error=self._log_error,
             on_reload_extra=self._compose_fan_out(None, {"observability_recipe_reload": True}, "спутник рецепта"),
