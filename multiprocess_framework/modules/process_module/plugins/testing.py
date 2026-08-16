@@ -193,6 +193,11 @@ class MockProcessServices:
             состояние). Чтобы судить дорогу дампа, передай настоящий
             ``FlightRecorder``: он читает кольцо через ``logger_manager``, и
             фальшивка-всегда-успех заглушила бы именно ту дорогу.
+        plugin_levels: Хранилище уровней дерева состояния (Task 3.5). ``None`` по
+            умолчанию — и это не «плоскости нет», а нормальный старт: хранилище
+            создаётся лениво на первом ``ctx.publish_metric``. Передавай готовый
+            ``PluginLevels`` только чтобы заглянуть в него из теста, не поднимая
+            ``ProcessHeartbeat``.
     """
 
     def __init__(
@@ -206,6 +211,7 @@ class MockProcessServices:
         stats_manager: Any = None,
         event_selector: Any = None,
         flight_recorder: Any = None,
+        plugin_levels: Any = None,
     ) -> None:
         self.name: str = name
         # Ф8.7 / задача 4.2 (Н-9): атрибут ЕСТЬ всегда, значение может быть None.
@@ -223,6 +229,11 @@ class MockProcessServices:
         # значение может быть None. Без атрибута дубль перестал бы удовлетворять
         # IProcessServices, который порт объявил.
         self.flight_recorder: Any = flight_recorder
+        # Task 3.5: пятый порт с тем же доводом — атрибут ЕСТЬ всегда, значение
+        # может быть None. ``None`` здесь ещё и штатный старт: хранилище уровней
+        # создаётся лениво на первом ``ctx.publish_metric``, и дубль обязан этот
+        # путь пройти, а не получить готовое хранилище задаром.
+        self.plugin_levels: Any = plugin_levels
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()

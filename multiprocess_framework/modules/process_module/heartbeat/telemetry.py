@@ -21,10 +21,11 @@ PC 1.2 (publisher-gate): ``build_worker_telemetry`` принимает ``allowed
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Callable, Iterable, Optional
 
-from ...observability_declarations import declare_metric
+from ...observability_declarations import declare_metric, declared_metrics
 from ..configs.telemetry_publish_config import gated_metrics
 
 # Ф8.1: метрика объявляется ТАМ, ГДЕ СЧИТАЕТСЯ, а не перечисляется кортежем в
@@ -251,6 +252,141 @@ def build_router_shm_telemetry(router: Any) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Task 3.5 — уровень плагина едет ТЕМ ЖЕ сборщиком тика (ADR-PM-038)
+# ---------------------------------------------------------------------------
+
+#: Имя порта на сервисах процесса. Публичный атрибут — как ``document_sink`` /
+#: ``event_selector`` / ``flight_recorder``, и по той же причине: порт объявлен в
+#: ``IProcessServices``, а объявление без атрибута ломает ``isinstance(process,
+#: IProcessServices)`` на штатной конфигурации.
+PLUGIN_LEVELS_ATTR = "plugin_levels"
+
+
+class PluginLevels:
+    """Текущие значения уровней, объявленных плагинами процесса (Task 3.5).
+
+    **Что здесь лежит.** Ровно «сколько СЕЙЧАС» по каждому имени — одно число на
+    имя, перезапись, без истории и без агрегата. Историю и агрегат за окно даёт
+    ДРУГАЯ плоскость (``ctx.gauge`` → ``StatsManager``); соседство имён
+    ``record_metric`` / ``publish_metric`` названо в ADR-PM-038 и в докстрингах
+    обоих фасадов, потому что именно на нём §Ф1 уже обжигался.
+
+    **Почему хранилище, а не прямая запись в дерево.** Прямую запись плагины уже
+    умеют (``state_proxy.merge``) — и ровно она едет мимо publisher-гейта, мимо
+    сборщика тика и мимо опроса. Хранилище разрывает «кто посчитал» и «кто
+    публикует»: считает плагин на своём такте, публикует — сборщик тика процесса,
+    один на всех и уже под гейтом.
+
+    **Блокировка нужна, и не ради атомарности присваивания.** Присваивание в dict
+    под GIL атомарно, а вот ``dict(self._values)`` в момент вставки из другого
+    потока — нет: копирование словаря, растущего одновременно, поднимает
+    ``RuntimeError: dictionary changed size during iteration``. Писатель — поток
+    воркера плагина (``produce``), читатель — поток heartbeat; это разные потоки
+    всегда, а не «в теории».
+    """
+
+    __slots__ = ("_values", "_lock")
+
+    def __init__(self) -> None:
+        self._values: dict[str, Any] = {}
+        self._lock = threading.Lock()
+
+    def publish(self, name: str, value: Any) -> None:
+        """Запомнить текущее значение уровня ``name`` (перезапись предыдущего)."""
+        with self._lock:
+            self._values[str(name)] = value
+
+    def snapshot(self) -> dict[str, Any]:
+        """Копия текущих значений — то, что читает сборщик тика и опрос."""
+        with self._lock:
+            return dict(self._values)
+
+
+def get_or_create_plugin_levels(services: Any) -> Optional[PluginLevels]:
+    """Вернуть (создав при необходимости) единое хранилище уровней процесса.
+
+    Форма — дословно :func:`~..health.get_or_create_health_state`, и по той же
+    причине: и ``PluginContext.publish_metric``, и ``ProcessHeartbeat`` обязаны
+    достать ОДИН И ТОТ ЖЕ экземпляр, а единственное, что у них общего, — объект
+    сервисов процесса.
+
+    Ленивое создание, а не отдельный шаг сшивки, — тоже осознанно: плагин может
+    опубликовать уровень раньше, чем поднимется heartbeat (``configure`` идёт до
+    ``start``), и шаг сшивки пришлось бы ставить в порядок загрузки, где его
+    забудут ровно один раз и молча.
+
+    Returns:
+        Хранилище — либо ``None``, если сервисы не принимают атрибут
+        (иммутабельный дубль, ``__slots__``). ``None`` = названный no-op у
+        вызывающего, а не исключение: уровень не имеет права ронять линию.
+    """
+    existing = getattr(services, PLUGIN_LEVELS_ATTR, None)
+    if isinstance(existing, PluginLevels):
+        return existing
+    store = PluginLevels()
+    try:
+        setattr(services, PLUGIN_LEVELS_ATTR, store)
+    except Exception:  # noqa: BLE001 — иммутабельные services (дубль/слоты)
+        return None
+    return store
+
+
+def build_plugin_levels(
+    levels: dict,
+    allowed_metrics: Optional[Iterable[str]] = None,
+) -> tuple[dict, tuple[str, ...]]:
+    """Отобрать уровни плагинов, которым разрешено уехать на этом тике.
+
+    Тот же сборщик обслуживает push (тик heartbeat) и poll
+    (``current_levels_snapshot``) — второго способа посчитать те же величины не
+    заводится. Разница между ними ровно одна и она уже существует у соседей:
+    опрос зовётся с ``allowed_metrics=None`` (гейт про push, а не про то, что
+    процесс знает о себе — ADR-PM-035).
+
+    **Отбор по каталогу объявлений — не формальность, а условие гейтируемости.**
+    ``TelemetryGate.due_metrics()`` обходит :func:`gated_metrics`, то есть
+    каталог объявлений. Имя, которого в каталоге нет, гейт не вернёт НИКОГДА —
+    значит при активном гейте оно молчало бы, а при выключенном публиковалось.
+    Опубликовать необъявленное — ровно та негейтируемая вторая дорога, ради
+    устранения которой задача и делается, поэтому такое имя не публикуется ни в
+    одном из двух состояний, и вызывающий обязан о нём СКАЗАТЬ (второй элемент
+    возврата) — молчаливый отсев неотличим от опечатки в имени.
+
+    Args:
+        levels: снимок :meth:`PluginLevels.snapshot` (имя → значение).
+        allowed_metrics: разрешённые на этом тике суффиксы (``None`` → все,
+            как у соседних сборщиков).
+
+    Returns:
+        ``(payload, undeclared)`` — листья под ``processes.<name>.state`` и
+        отсортированный кортеж имён, отсеянных как НЕобъявленные.
+
+    Post:
+        - чистая функция: ``levels`` не мутируется;
+        - округление до 1 знака — то же, что у ``build_worker_telemetry``:
+          расхождение push/poll в последнем знаке было бы дороже точности.
+          Нечисловое значение проходит как есть (``round`` на нём — падение
+          сборщика телеметрии из-за прикладной опечатки).
+    """
+    catalog = set(declared_metrics())
+    allowed = None if allowed_metrics is None else set(allowed_metrics)
+
+    payload: dict[str, Any] = {}
+    undeclared: list[str] = []
+    for name, value in levels.items():
+        if name not in catalog:
+            undeclared.append(name)
+            continue
+        if allowed is not None and name not in allowed:
+            continue
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            payload[name] = round(value, 1)
+        else:
+            payload[name] = value
+    return payload, tuple(sorted(undeclared))
+
+
 def capped_metrics(config: Any, effective_tick: float) -> list[tuple[str, float]]:
     """Метрики, чей per-метрика ``interval_sec`` МЕНЬШЕ эффективного телеметрийного тика.
 
@@ -346,6 +482,10 @@ class TelemetryGate:
 __all__ = [
     "build_worker_telemetry",
     "build_router_shm_telemetry",
+    "build_plugin_levels",
+    "PluginLevels",
+    "PLUGIN_LEVELS_ATTR",
+    "get_or_create_plugin_levels",
     "TelemetryGate",
     "gated_metrics",
     "capped_metrics",

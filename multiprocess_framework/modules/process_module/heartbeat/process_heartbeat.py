@@ -64,6 +64,9 @@ class ProcessHeartbeat:
         # «сработает ли авто-возврат TTL» — подметальщик живёт на этом такте, и
         # процесс без него срок принимает, но не исполняет.
         self._started: bool = False
+        # Task 3.5: имена уровней плагинов, про которые «не объявлен» уже сказано.
+        # Голос один раз на имя — тик идёт секундами (см. _warn_undeclared_levels).
+        self._warned_undeclared_levels: set[str] = set()
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -158,6 +161,10 @@ class ProcessHeartbeat:
                 self._publish_metrics_to_tree(workers, allowed_metrics)
                 # Ф7 G.3 H8: SHM-счётчики router'а (pickle-fallback / torn / границы) в дерево.
                 self._publish_router_shm_stats_to_tree(allowed_metrics)
+                # Task 3.5: уровни, объявленные плагинами процесса, — ТЕМ ЖЕ тиком
+                # и под тем же гейтом. ПОСЛЕ агрегата воркеров осознанно: имя,
+                # совпавшее с метрикой фреймворка, побеждает (см. метод).
+                self._publish_plugin_levels_to_tree(allowed_metrics)
 
                 # --- Heartbeat-сообщение + хозяйственные self-publish'ы (частота liveness) ---
                 if self._heartbeat_due(now, tick):
@@ -637,6 +644,82 @@ class ProcessHeartbeat:
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish SHM-счётчиков: {exc}", module="heartbeat")
 
+    def _publish_plugin_levels_to_tree(self, allowed_metrics: Any = None) -> None:
+        """Task 3.5: уровни плагинов → ``processes.<name>.state.<имя>`` (ADR-PM-038).
+
+        Третий публикатор того же тика и той же формы, что метрики воркеров и
+        группа ``shm``: сборщик (:func:`build_plugin_levels`) отбирает, политика
+        остаётся здесь. Плагин отдал значение через ``ctx.publish_metric`` — оно
+        лежит в хранилище процесса и ждёт тика; гейт накрывает его наравне со
+        штатными метриками, потому что имя объявлено ТЕМ ЖЕ ``declare_metric``,
+        по которому гейт и обходит каталог.
+
+        **Порядок относительно ``_publish_metrics_to_tree`` несущий.** Уровень с
+        именем метрики фреймворка (``fps`` у ``CapturePlugin``) ложится ПОСЛЕ
+        агрегата воркеров и потому побеждает. Это не «последний писатель выиграл
+        случайно», а названная политика: до миграции на живом стенде тот же
+        ``state.fps`` перезаписывался плагином напрямую (35 дельт за 41.1 с при
+        закрытом гейте), и оператор видит именно плагинное число. Миграция меняет
+        ДОРОГУ, а не показание; поменяй она заодно и число — расхождение искали бы
+        в камере.
+
+        **Голос об отсеянном.** Имя, которое плагин публикует, не объявив, не
+        едет никуда (см. :func:`build_plugin_levels`) — и об этом говорится ОДИН
+        раз на имя. Тихий отсев неотличим от опечатки, а обратной связи у
+        ``publish_metric`` нет по построению (возврата ``None``, как у stats).
+        Ругаться здесь, а не в ``publish_metric``: на момент публикации порядок
+        «объявил → отдал» ещё не устоялся (плагин вправе отдать значение до
+        объявления в том же ``configure``), а на момент тика — уже.
+
+        Args:
+            allowed_metrics: разрешённые на этом тике суффиксы (``None`` → все).
+        """
+        proxy = getattr(self._services, "_state_proxy", None)
+        if proxy is None:
+            return
+        from .telemetry import PLUGIN_LEVELS_ATTR, build_plugin_levels
+
+        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
+        snapshot = getattr(store, "snapshot", None)
+        if not callable(snapshot):
+            return  # ни один плагин процесса уровней не отдавал — публиковать нечего
+        try:
+            payload, undeclared = build_plugin_levels(snapshot(), allowed_metrics)
+            self._warn_undeclared_levels(undeclared)
+            if not payload:
+                return
+            proxy.merge(f"processes.{self._services.name}.state", payload)
+        except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Не удалось self-publish уровней плагинов: {exc}", module="heartbeat")
+
+    def _warn_undeclared_levels(self, undeclared: tuple[str, ...]) -> None:
+        """Сказать про необъявленный уровень ОДИН раз на имя (Task 3.5).
+
+        Один раз, а не каждый тик: тик идёт секундами, и голос на каждом
+        превратил бы диагностику в поток, к которому перестают прислушиваться —
+        тот же довод, что у ``note_metric_without_plane``. Множество уже
+        названных живёт на heartbeat'е процесса, потому что и хранилище уровней
+        процессное.
+        """
+        if not undeclared:
+            return
+        warned = self._warned_undeclared_levels
+        fresh = [name for name in undeclared if name not in warned]
+        if not fresh:
+            return
+        warned.update(fresh)
+        _warn = getattr(self._services, "log_warning", None) or getattr(self._services, "log_info", None)
+        if _warn is None:
+            return
+        names = ", ".join(fresh)
+        _warn(
+            f"Уровни плагина не объявлены и потому не публикуются: {names} "
+            "— позови ctx.declare_metric(имя) рядом с вычислением, иначе publisher-gate "
+            "не может ими управлять (дальше молчим по этим именам)",
+            module="heartbeat",
+        )
+
     def current_levels_snapshot(self) -> dict | None:
         """Пакетный снимок текущих УРОВНЕЙ процесса — один вызов, все метрики (Task 3.2).
 
@@ -656,11 +739,26 @@ class ProcessHeartbeat:
 
         **Граница названа: снимок — это то, что собирает ТЕЛЕМЕТРИЙНЫЙ ТИК, а не всё,
         что кто-либо когда-либо писал под ``processes.<name>.state``.** Проверено на
-        живом стенде 2026-08-14: у ``camera_0`` в дереве рядом с ``fps``/``latency_ms``/
-        ``shm`` лежат ``uptime``/``frame_count``/``drops``/``status``/``pid`` — их пишут
-        ДРУГИЕ публикаторы (bootstrap состояния и прикладные процессы прототипа), этот
-        сборщик их не считает и в снимок не кладёт. Потребителю, который сегодня читает
-        их из дерева, опрос их не заменит — резидуал для 3.3 (ADR-PM-035).
+        живом стенде 2026-08-14: рядом с ``fps``/``latency_ms``/``shm`` в дереве лежали
+        ключи, которые писали ДРУГИЕ публикаторы (``uptime``/``status``/``pid`` от ПМ,
+        прикладные счётчики от плагинов), и этот сборщик их не считал.
+
+        Task 3.5 сдвинула границу, но не стёрла её. Уровень, который плагин ОБЪЯВИЛ
+        (``ctx.declare_metric``) и ОТДАЁТ (``ctx.publish_metric``), теперь собирается
+        здесь же и приезжает опросом. За границей осталось два РАЗНЫХ класса, и путать
+        их нельзя (ADR-PM-038):
+
+        * ``uptime``/``status``/``pid`` принадлежат **ProcessManager'у** — он публикует
+          их О ЧУЖОМ процессе из своего ``first_seen``, и опрос процесса их отдать не
+          может по построению. Это граница, а не долг;
+        * прикладные ключи, которые плагин публикует **фронтом** (при смене состояния,
+          а не по тику), уровнем не являются: собранный тиком «уровень», который между
+          сменами не обновляется, был бы хуже прямой записи. Такие ключи остаются на
+          прежней дороге сознательно.
+
+        Прикладных имён здесь не перечисляется намеренно (§3.6 «универсальность»):
+        поимённый реестр немигрированных писателей с причинами живёт в ``README.md``
+        модуля, а не в коде фреймворка.
 
         Следствие общего сборщика, принятое осознанно: **округление до 1 знака**
         (``round(x, 1)``) действует и на опросе. Снимок — вид уровней для глаз, а не
@@ -691,12 +789,35 @@ class ProcessHeartbeat:
             ``_collect_workers``, сбой ``router.get_stats()`` — секция ``shm``
             пропускается (best-effort по образцу ``introspect.memory``).
         """
-        from .telemetry import build_router_shm_telemetry, build_worker_telemetry
+        from .telemetry import (
+            PLUGIN_LEVELS_ATTR,
+            build_plugin_levels,
+            build_router_shm_telemetry,
+            build_worker_telemetry,
+        )
 
         # allowed_metrics=None — намеренно: см. докстринг (гейт про push, не про знание).
         # include_cycles=True — признак движения, нужный только опрашивающему.
         result = build_worker_telemetry(self._collect_workers(), self._services.name, None, include_cycles=True)
         data: dict = dict(result[1]) if result is not None else {}
+
+        # Task 3.5: уровни плагинов — ТЕМ ЖЕ сборщиком, что у тика, и в ту же
+        # секцию ``state``. Порядок наложения тот же, что в ``_loop`` (после
+        # агрегата воркеров), иначе имя-дубль показывало бы у опроса одно число,
+        # а в дереве другое — и «опрос отдаёт то же, что push» стало бы ложью.
+        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
+        snapshot = getattr(store, "snapshot", None)
+        if callable(snapshot):
+            try:
+                plugin_levels, _undeclared = build_plugin_levels(snapshot(), None)
+            except Exception as exc:  # noqa: BLE001 — best-effort: без секции, не отказ
+                _log = getattr(self._services, "log_debug", self._services.log_info)
+                _log(f"Снимок уровней: уровни плагинов недоступны: {exc}", module="heartbeat")
+                plugin_levels = {}
+            if plugin_levels:
+                state = dict(data.get("state") or {})
+                state.update(plugin_levels)
+                data["state"] = state
 
         router = getattr(self._services, "router_manager", None)
         if router is not None:

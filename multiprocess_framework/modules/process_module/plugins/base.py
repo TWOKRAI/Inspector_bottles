@@ -624,6 +624,91 @@ class PluginContext:
         """Записать наблюдение в распределение значений."""
         self._stats_call("histogram", name, value, tags)
 
+    # ------------------------------------------------------------------
+    # Task 3.5 — уровни дерева состояния: «сколько СЕЙЧАС» под гейтом
+    # ------------------------------------------------------------------
+
+    def declare_metric(self, name: str) -> str:
+        """Объявить УРОВЕНЬ, который этот плагин будет отдавать (ADR-PM-038).
+
+        Объявление — не бюрократия, а условие управляемости: publisher-gate
+        обходит каталог объявлений (``gated_metrics()``), поэтому именем, которого
+        в каталоге нет, он управлять не может, и такое имя не публикуется вовсе
+        (``ProcessHeartbeat`` скажет о нём один раз). Звать рядом с кодом, который
+        уровень СЧИТАЕТ, обычно в ``configure``.
+
+        Владелец — имя плагина (при его отсутствии имя процесса). Два РАЗНЫХ
+        владельца на одно имя в одном процессе — отказ ``ValueError`` реестра, и
+        отказ этот громкий намеренно: тихий выбор «побеждает последний
+        импортированный» сделал бы показание функцией порядка импортов.
+        Повторное объявление ТЕМ ЖЕ владельцем — не конфликт (reload, spawn).
+
+        **Не путать с** ``record_metric``/``gauge``: те пишут в плоскость stats —
+        агрегат за окно и историю в сторе. Здесь дерево состояния: одно текущее
+        число на имя, перезапись, никакой истории. Имена соседние, плоскости
+        разные — см. ADR-PM-038.
+
+        Args:
+            name: имя уровня = суффикс пути публикации
+                (``processes.<процесс>.state.<name>``) и ключ, которым уровень
+                адресует ``telemetry.publish.metrics``.
+
+        Returns:
+            То же ``name`` — объявление пишется одной строкой рядом с полем.
+
+        Raises:
+            ValueError: имя уже объявлено ДРУГИМ владельцем.
+        """
+        from ...observability_declarations import declare_metric as _declare
+
+        return _declare(name, owner=self.plugin_name or self.process_name or "plugin")
+
+    def publish_metric(self, name: str, value: Any) -> None:
+        """Отдать ТЕКУЩЕЕ значение уровня ``name`` (ADR-PM-038).
+
+        Значение кладётся в хранилище процесса и уезжает в дерево СБОРЩИКОМ ТИКА
+        (``processes.<процесс>.state.<name>``) — под publisher-гейтом и наравне с
+        ``fps``/``latency_ms``; тот же сборщик отдаёт его опросом
+        (``introspect.telemetry`` → ``levels``). Прямой ``state_proxy.merge`` из
+        плагина делал ровно обратное: ехал мимо гейта, мимо тика и мимо опроса —
+        на живом стенде 2026-08-16 гейт ``camera_0`` был закрыт на ``fps``, а путь
+        ``state.fps`` всё равно получил 35 дельт за 41.1 с.
+
+        Звать на СВОЁМ такте, а не на кадре: запись дешёвая (одна вставка в dict
+        под локом), но публикует не она, а тик процесса — эмиссия чаще тика ничего
+        не добавляет. У ``CapturePlugin`` это ветка пересчёта fps, раз в секунду.
+
+        Отключаемость: у процесса без телеметрии значение просто никто не
+        прочитает, а у сервисов, не принимающих атрибут (иммутабельный дубль),
+        вызов — названный no-op со счётом и голосом. Исключения не бросает ни при
+        какой конфигурации: уровень не имеет права ронять линию. Возврата нет —
+        дословно как у четвёрки stats.
+
+        Args:
+            name: имя объявленного уровня. Не объявленное — не публикуется, и
+                ``ProcessHeartbeat`` скажет об этом один раз на тике.
+            value: текущее значение. Числовое округляется сборщиком до 1 знака
+                (та же цена, что у ``fps``); нечисловое едет как есть.
+        """
+        from ..heartbeat.telemetry import PLUGIN_LEVELS_ATTR, get_or_create_plugin_levels
+
+        store = get_or_create_plugin_levels(self.services)
+        if store is None:
+            # Голос ОДИН раз: вызов идёт на такте плагина, и жалоба на каждом
+            # такте — поток, к которому перестают прислушиваться (тот же довод,
+            # что у ``note_metric_without_plane``). Своего счётчика этот случай
+            # не заводит: у stats он нужен, потому что «плоскости нет» —
+            # штатная конфигурация, а сервисы, не принимающие атрибут, штатной
+            # конфигурацией не бывают (иммутабельный дубль в тесте).
+            if not getattr(self, "_levels_without_store_warned", False):
+                self._levels_without_store_warned = True
+                self.log_warning(
+                    f"[levels] уровень {name!r} отдавать некуда: сервисы процесса не принимают "
+                    f"порт {PLUGIN_LEVELS_ATTR!r} — дальше по этому плагину молчим"
+                )
+            return
+        store.publish(name, value)
+
 
 # Заглушки плоскости stats для SubPluginContext без родителя (этап 6, 1.1).
 #
@@ -663,6 +748,35 @@ def _noop_timing(name: str, duration: float, tags: dict | None = None) -> None:
 
 def _noop_histogram(name: str, value: float, tags: dict | None = None) -> None:
     """Наблюдение в никуда — сигнатура ``StatsManager.histogram`` дословно."""
+
+
+def _noop_declare_metric(name: str) -> str:
+    """Объявление в никуда для SubPluginContext без родителя (Task 3.5).
+
+    Сигнатура — **дословно** ``PluginContext.declare_metric``, включая возврат
+    того же имени: объявление пишется одной строкой рядом с полем
+    (``self._level = ctx.declare_metric("...")``), и заглушка, вернувшая ``None``,
+    превратила бы эту строку в тихую потерю имени.
+
+    Своего реестра у вложенного контекста нет и быть не должно: каталог —
+    ресурс процесса, а sub-плагин живёт внутри чужого. Родитель пробрасывает
+    свою дорогу через :meth:`SubPluginContext.from_parent`.
+    """
+    return name
+
+
+def _noop_publish_metric(name: str, value: Any) -> None:
+    """Уровень в никуда для SubPluginContext без родителя (Task 3.5).
+
+    Сигнатура — **дословно** ``PluginContext.publish_metric``: оба параметра
+    обязательны, имени ``value`` заглушка не переименовывает. Урок четырёх
+    заглушек 1.1: общая заглушка «по форме» роняла ``TypeError`` на именованном
+    вызове по эталонной сигнатуре, то есть страховка от падения сама и была
+    падением.
+
+    Молчит намеренно, как ``_noop_counter``: у вложенного контекста без родителя
+    нет ни хранилища, ни логгера, куда об этом сказать.
+    """
 
 
 def _noop_log(msg: str) -> None:
@@ -751,8 +865,9 @@ class SubPluginContext:
 
     Совместим с PluginContext по duck-typing — плагины используют
     ctx.config, всю пятёрку ctx.log_*, ctx.registers, ctx.command_manager,
-    ctx.health, ctx.write_document, ctx.write_event, ctx.flight_dump и четвёрку
-    stats (ctx.record_metric / gauge / record_timing / histogram).
+    ctx.health, ctx.write_document, ctx.write_event, ctx.flight_dump, четвёрку
+    stats (ctx.record_metric / gauge / record_timing / histogram) и пару уровней
+    (ctx.declare_metric / ctx.publish_metric).
 
     Заменяет unittest.mock.MagicMock в production-коде.
 
@@ -811,6 +926,12 @@ class SubPluginContext:
     gauge: Callable[..., None] = _noop_gauge
     record_timing: Callable[..., None] = _noop_timing
     histogram: Callable[..., None] = _noop_histogram
+    # Уровни дерева состояния (Task 3.5): ОБЕ дороги сразу и в этой же правке —
+    # тот же урок Н-6, что у соседей. Объявление без отдачи (или наоборот) дало бы
+    # вложенному плагину половину механизма: он объявил бы имя и получил
+    # AttributeError на публикации — ровно как когда-то на ctx.log_warning.
+    declare_metric: Callable[..., str] = _noop_declare_metric
+    publish_metric: Callable[..., None] = _noop_publish_metric
 
     @classmethod
     def from_parent(cls, parent: Any, **overrides: Any) -> "SubPluginContext":
@@ -824,7 +945,8 @@ class SubPluginContext:
 
         Проброс списком, а не перечислением на каждом вызове: список дорог растёт
         (пятёрка, ``health``, ``write_document``, четвёрка stats — этап 6, 1.1,
-        ``write_event`` — Ф4, 4.1, ``flight_dump`` — Ф5, 5.1),
+        ``write_event`` — Ф4, 4.1, ``flight_dump`` — Ф5, 5.1,
+        ``declare_metric``/``publish_metric`` — Task 3.5),
         и каждый новый обязан появиться в ОДНОМ месте. Три копии этого перечисления
         уже расходились — так и родился Н-6.
 
@@ -853,6 +975,10 @@ class SubPluginContext:
             "gauge",
             "record_timing",
             "histogram",
+            # Task 3.5 — уровни дерева состояния, ЗДЕСЬ же и по тому же правилу:
+            # список дорог живёт в ОДНОМ месте (Н-6).
+            "declare_metric",
+            "publish_metric",
         ):
             value = getattr(parent, road, None)
             if value is not None:

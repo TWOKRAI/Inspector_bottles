@@ -95,6 +95,15 @@ class CapturePlugin(ProcessModulePlugin):
         # квадратичным. Позиция одна, вычитается здесь же.
         self._drops_reported = 0
 
+        # Task 3.5: имена уровней объявляются РЯДОМ с полями, которые их считают, —
+        # только объявленным именем умеет управлять publisher-gate (он обходит
+        # каталог объявлений). ``fps`` в этом списке нет намеренно: имя уже
+        # объявлено фреймворком, который считает одноимённый агрегат по воркерам,
+        # и второе объявление на то же имя — законный отказ реестра
+        # (см. :meth:`_publish_levels`).
+        ctx.declare_metric("frame_count")
+        ctx.declare_metric("drops")
+
     # --- Команды (авторегистрация через commands dict) ---
 
     def cmd_start_capture(self, data: dict) -> dict:
@@ -211,6 +220,7 @@ class CapturePlugin(ProcessModulePlugin):
         self._fps_counter = 0
         self._fps_timer = now
         self._publish_state()
+        self._publish_levels()
 
     def _emit_stats(self, frames_in_window: int) -> None:
         """Отдать бизнес-метрики захвата тем же жестом, что лог (задача 2.1).
@@ -273,6 +283,7 @@ class CapturePlugin(ProcessModulePlugin):
             ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват запущен")
             # Публикуем начальное состояние после старта захвата
             self._publish_state()
+            self._publish_levels()
         else:
             ctx.log_error(f"CapturePlugin[{self._camera_id}]: не удалось открыть камеру {self._device_id}")
 
@@ -281,12 +292,32 @@ class CapturePlugin(ProcessModulePlugin):
         self._is_capturing = False
         self._release_camera()
         ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват остановлен")
-        # Сбрасываем FPS и публикуем финальное состояние
+        # Сбрасываем FPS и публикуем финальное состояние. Уровень отдаём здесь же,
+        # не дожидаясь следующего такта метрик: такта больше не будет (``produce``
+        # не зовут у остановленного захвата), и ``fps`` замер бы на последнем
+        # живом значении — «камера остановлена, а частота идёт».
         self._actual_fps = 0.0
         self._publish_state()
+        self._publish_levels()
 
     def _publish_state(self) -> None:
-        """Опубликовать метрики в StateStore."""
+        """Опубликовать ФРОНТЫ захвата в StateStore (Task 3.5).
+
+        Здесь остались только те ключи, которые меняются СОБЫТИЕМ, а не текут по
+        тику: ``status`` (запущен/остановлен), ``paused`` и ``frozen``. Их и
+        публикуем прямой записью в дерево — уровнем, обновляемым по тику, они не
+        являются, и превращать их в уровень значило бы получить «уровень»,
+        который между сменами состояния не обновляется.
+
+        **Уровни ушли на дорогу фреймворка** (``ctx.publish_metric``, см.
+        :meth:`_publish_levels`): ``fps``, ``frame_count``, ``drops``. Прямая
+        запись уровней отсюда была ВТОРОЙ дорогой в тот же путь дерева — мимо
+        publisher-гейта, мимо сборщика телеметрийного тика и мимо опроса. Живьём
+        это выглядело так: гейт ``camera_0`` закрыт на ``fps`` (readback
+        ``enabled=false``), чисто-тиковые ``latency_ms`` и ``shm`` дают ноль
+        дельт за 41.1 с, а ``state.fps`` за то же окно получает 35 — потому что
+        писал их сюда этот метод.
+        """
         if self._state_proxy is None:
             return
         path = f"processes.{self._ctx.process_name}.state"
@@ -294,13 +325,33 @@ class CapturePlugin(ProcessModulePlugin):
             path,
             {
                 "status": "running" if self._is_capturing else "stopped",
-                "fps": round(self._actual_fps, 1),
-                "frame_count": self._frame_count,
-                "drops": self._drops,
                 "paused": self._paused,
                 "frozen": self._frozen,
             },
         )
+
+    def _publish_levels(self) -> None:
+        """Отдать УРОВНИ захвата сборщику телеметрийного тика (Task 3.5).
+
+        Дорога одна на все три числа: фреймворк собирает их на своём тике, гейтит
+        наравне с ``fps``/``latency_ms`` и отдаёт опросом
+        (``introspect.telemetry`` → ``levels``). Пути в дереве те же, что были
+        (``processes.<процесс>.state.fps`` и соседи), — миграция меняет ДОРОГУ, а
+        не показание.
+
+        ``fps`` здесь НЕ объявляется: имя уже принадлежит фреймворку (агрегат
+        ``max(effective_hz)`` по running-воркерам), и второе объявление на то же
+        имя — законный отказ реестра. Публиковать в него можно: сборщик уровней
+        накладывается ПОСЛЕ агрегата воркеров, поэтому измеренный камерой fps
+        побеждает выведенный из частоты воркера — то же число, что оператор видел
+        до миграции.
+        """
+        ctx = self._ctx
+        if ctx is None:
+            return
+        ctx.publish_metric("fps", round(self._actual_fps, 1))
+        ctx.publish_metric("frame_count", self._frame_count)
+        ctx.publish_metric("drops", self._drops)
 
     def _release_camera(self) -> None:
         """Освободить камеру."""

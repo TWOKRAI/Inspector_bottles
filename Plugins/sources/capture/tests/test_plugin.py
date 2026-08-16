@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from Plugins.sources.capture.plugin import (
     CapturePlugin,
@@ -28,7 +27,7 @@ def _make_fake_cap(width: int = 640, height: int = 480) -> MagicMock:
     cap = MagicMock()
     cap.isOpened.return_value = True
     cap.get.side_effect = lambda prop: {
-        3: float(width),   # CAP_PROP_FRAME_WIDTH
+        3: float(width),  # CAP_PROP_FRAME_WIDTH
         4: float(height),  # CAP_PROP_FRAME_HEIGHT
     }.get(prop, 0.0)
     frame = np.zeros((height, width, 3), dtype=np.uint8)
@@ -57,13 +56,15 @@ class TestConfigure:
     def test_configure_custom_values(self):
         """configure() с кастомным конфигом → значения сохранены."""
         plugin = CapturePlugin()
-        ctx = _make_mock_ctx({
-            "camera_id": 3,
-            "device_id": 1,
-            "fps": 30,
-            "resolution_width": 1280,
-            "resolution_height": 720,
-        })
+        ctx = _make_mock_ctx(
+            {
+                "camera_id": 3,
+                "device_id": 1,
+                "fps": 30,
+                "resolution_width": 1280,
+                "resolution_height": 720,
+            }
+        )
         plugin.configure(ctx)
 
         assert plugin._camera_id == 3
@@ -80,10 +81,7 @@ class TestConfigure:
         plugin._auto_register_commands(ctx)
 
         # Проверяем что все 4 команды зарегистрированы
-        registered = [
-            call[0][0]
-            for call in ctx.command_manager.register_command.call_args_list
-        ]
+        registered = [call[0][0] for call in ctx.command_manager.register_command.call_args_list]
         assert "start_capture" in registered
         assert "stop_capture" in registered
         assert "pause_capture" in registered
@@ -117,11 +115,13 @@ class TestProduceMetadata:
     def test_produce_metadata_fields(self):
         """produce() возвращает item со всеми обязательными полями."""
         plugin = CapturePlugin()
-        ctx = _make_mock_ctx({
-            "camera_id": 7,
-            "resolution_width": 320,
-            "resolution_height": 240,
-        })
+        ctx = _make_mock_ctx(
+            {
+                "camera_id": 7,
+                "resolution_width": 320,
+                "resolution_height": 240,
+            }
+        )
         plugin.configure(ctx)
 
         # Подменяем VideoCapture через mock
@@ -332,6 +332,89 @@ class TestFrameIdCounter:
         # После rollover frame_count должен обнулиться и стать 1
         plugin.produce()
         assert plugin._frame_count == 1
+
+
+class TestLevelsMigration:
+    """Task 3.5: уровни ушли на дорогу фреймворка, фронты остались прямой записью.
+
+    Сторожит ровно то, что легко откатить незаметно: вернуть ``fps`` в
+    ``_publish_state`` — и гейт снова перестанет управлять путём ``state.fps``,
+    при этом ни один тест каденции или кадра не покраснеет.
+    """
+
+    def test_publish_state_carries_only_edges(self):
+        plugin = CapturePlugin()
+        ctx = _make_mock_ctx()
+        plugin.configure(ctx)
+        proxy = MagicMock()
+        plugin._state_proxy = proxy
+
+        plugin._publish_state()
+
+        (_path, payload), _kw = proxy.merge.call_args
+        assert set(payload) == {"status", "paused", "frozen"}, (
+            f"в прямой записи остались уровни: {sorted(set(payload) - {'status', 'paused', 'frozen'})} "
+            "— они обязаны ехать сборщиком тика, иначе гейт ими не управляет"
+        )
+
+    def test_publish_levels_hands_the_three_levels_to_the_framework(self):
+        plugin = CapturePlugin()
+        ctx = _make_mock_ctx()
+        plugin.configure(ctx)
+        plugin._actual_fps = 21.44
+        plugin._frame_count = 7
+        plugin._drops = 3
+
+        plugin._publish_levels()
+
+        handed = {call.args[0]: call.args[1] for call in ctx.publish_metric.call_args_list}
+        assert handed == {"fps": 21.4, "frame_count": 7, "drops": 3}
+
+    def test_configure_declares_its_own_names_but_not_the_frameworks(self):
+        """``fps`` объявляет фреймворк; второе объявление было бы отказом реестра."""
+        plugin = CapturePlugin()
+        ctx = _make_mock_ctx()
+        plugin.configure(ctx)
+
+        declared = [call.args[0] for call in ctx.declare_metric.call_args_list]
+        assert declared == ["frame_count", "drops"]
+
+    def test_real_context_actually_carries_the_level_to_the_store(self):
+        """Тот же путь на НАСТОЯЩЕМ контексте, а не на ``MagicMock``.
+
+        Дубль-мок «успешен» на любом имени метода: переименуй разъём — и три
+        теста выше останутся зелёными, а дорога исчезнет. Одна проверка с живым
+        ``PluginContext`` закрывает ровно это.
+        """
+        from multiprocess_framework.modules.observability_declarations import (
+            KIND_METRIC,
+            forget_declarations,
+        )
+        from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
+            PLUGIN_LEVELS_ATTR,
+        )
+        from multiprocess_framework.modules.process_module.plugins.base import PluginContext
+        from multiprocess_framework.modules.process_module.plugins.testing import (
+            MockProcessServices,
+        )
+
+        services = MockProcessServices(name="capture_real")
+        ctx = PluginContext(services=services, config={}, plugin_name="capture_real_plugin")
+        plugin = CapturePlugin()
+        try:
+            plugin.configure(ctx)
+            plugin._actual_fps = 12.0
+            plugin._frame_count = 4
+            plugin._drops = 1
+            plugin._publish_levels()
+
+            store = getattr(services, PLUGIN_LEVELS_ATTR, None)
+            assert store is not None, "порт уровней не появился на сервисах процесса"
+            assert store.snapshot() == {"fps": 12.0, "frame_count": 4, "drops": 1}
+        finally:
+            # Реестр объявлений процессный: свой мусор убираем точечно, чужие
+            # объявления (fps/latency_ms фреймворка) не трогаем.
+            forget_declarations(KIND_METRIC, names={"frame_count", "drops"})
 
 
 class TestShutdown:

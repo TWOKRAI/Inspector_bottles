@@ -159,6 +159,17 @@ class _ProcServices:
     def log_error(self, msg: str, **k) -> None:
         self.logs.append({"level": "ERROR", "msg": msg})
 
+    # ПРАВКА ВЛАДЕЛЬЦА СПЕКИ (2026-08-16, расхождение Р-1 отчёта teamlead'а).
+    # Дубль тестера нёс четыре log_*, а PluginContext требует ПЯТЬ: конструктор
+    # делает self.log_critical = self._stamped(services.log_critical) без getattr-
+    # фолбэка, и это НАМЕРЕННО — фолбэк открыл бы обратно дефект A2/Б-2, где
+    # ctx.log_warning ронял старт захвата. Пропуск пятого метода ронял четыре
+    # теста задачи 3.5 в AttributeError ДО первой проверяемой строки, то есть
+    # прятал результат за дефектом харнеса. Добавлен пятый — тест не ослаблен,
+    # починен носитель.
+    def log_critical(self, msg: str, **k) -> None:
+        self.logs.append({"level": "CRITICAL", "msg": msg})
+
     # BuiltinCommands (в отличие от ProcessHeartbeat) зовёт _log_info/_log_debug
     # с подчёркиванием — см. test_introspect_telemetry.py._FakeServices. Нужны оба
     # набора имён, раз один носитель играет обе роли.
@@ -206,6 +217,28 @@ def _dispatch_introspect_telemetry(services: _ProcServices) -> dict:
     return services.command_manager.dispatch("introspect.telemetry")
 
 
+def _polled_level(polled: dict, name: str):
+    """Достать уровень из ответа опроса по ФАКТИЧЕСКОЙ форме секции ``levels``.
+
+    ПРАВКА ВЛАДЕЛЬЦА СПЕКИ (2026-08-16, расхождение Р-2 отчёта teamlead'а).
+    Тестер предположил плоскую форму ``levels[name]`` — «симметрично resolved».
+    Форма другая и симметрия у неё иная: уровень лежит там же, где штатный ``fps``,
+    то есть ``levels["state"][name]`` (``levels`` = ``{"workers": {...},
+    "state": {...}}``). Спека говорила «наравне с fps/latency_ms» — вот это место.
+
+    Плоская форма не просто отличалась бы — она СЛОМАЛА бы свойство, которое сам
+    тест защищает: ``TelemetryPoller._flatten_levels`` склеивает ключи ответа с
+    префиксом ``processes.<name>``, поэтому плоское имя уехало бы в
+    ``processes.<p>.<имя>`` — мимо пути ``processes.<p>.state.<имя>``, которым его
+    пишет push. То есть «push и poll совпадают» перестало бы выполняться именно
+    из-за формы, выбранной ради удобства проверки.
+
+    Модель тестера была неверна — это находка, а не шум, и она записана здесь,
+    а не молча исправлена.
+    """
+    return ((polled.get("levels") or {}).get("state") or {}).get(name)
+
+
 # --------------------------------------------------------------------------- #
 # Критерий 1 — одна дорога: push (тик → дерево) и poll (introspect.telemetry.levels)
 # обязаны совпасть составом ключей и значением.
@@ -225,19 +258,39 @@ class TestSingleRoadPushEqualsPoll:
 
         polled = _dispatch_introspect_telemetry(services)
         assert "levels" in polled, "introspect.telemetry не отдаёт секцию 'levels'"
-        assert polled["levels"].get("custom_quality") == 42.0, (
+        assert _polled_level(polled, "custom_quality") == 42.0, (
             f"poll разошёлся с push: дерево содержит 42.0, poll отдал "
-            f"{polled['levels'].get('custom_quality')!r} — расхождение состава/значения ключей"
+            f"{_polled_level(polled, 'custom_quality')!r} — расхождение состава/значения ключей"
         )
 
     def test_builtin_metrics_share_the_same_levels_section(self):
-        """«наравне со штатными fps/latency_ms» — levels не эксклюзивен для плагинных имён."""
+        """«наравне со штатными fps/latency_ms» — уровень плагина лежит В ТОЙ ЖЕ секции.
+
+        ПРАВКА ВЛАДЕЛЬЦА СПЕКИ (2026-08-16, расхождение Р-4 отчёта teamlead'а).
+        Исходный тест падал `TypeError: 'NoneType' is not iterable`: на процессе без
+        воркеров и router'а `levels` = ``None``, и это КОНТРАКТ (ADR-PM-035: «None =
+        сенсоров нет», отличается от «команда не сработала»), а не дефект.
+        Хуже другое: единственное его утверждение было `issuperset(set())` — истина
+        для любого множества, включая пустое. Тест ничего не проверял и при живом
+        `levels` был бы зелен на чём угодно.
+        Переписан на настоящее свойство: уровень плагина обязан лежать в ТОЙ ЖЕ
+        секции ``state``, где сборщик держит штатные метрики, — иначе «наравне» не
+        выполнено, а `TelemetryPoller._flatten_levels` уведёт его мимо пути push'а.
+        """
         services, hb = _boot(name="cam0b")
+        ctx = PluginContext(services=services, config={})
+        ctx.declare_metric("neighbour_level")
+        ctx.publish_metric("neighbour_level", 3.0)
+        _run_plugin_levels_tick(hb, allowed_metrics=None)
+
         polled = _dispatch_introspect_telemetry(services)
-        assert "levels" in polled
-        # Штатные метрики каталога обязаны быть адресуемы тем же ключом 'levels',
-        # а не отдельной параллельной секцией — иначе «наравне» не выполнено.
-        assert set(polled["levels"]).issuperset(set())  # секция существует и адресуема тем же ключом
+        levels = polled.get("levels")
+        assert isinstance(levels, dict), f"ожидали непустую секцию levels при наличии показаний, получили {levels!r}"
+        state_section = levels.get("state") or {}
+        assert state_section.get("neighbour_level") == 3.0, (
+            f"уровень плагина обязан лежать в levels['state'] рядом со штатными "
+            f"метриками; секция state = {state_section!r}"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -258,8 +311,18 @@ class TestGatePairsClosedAndOpen:
             "не защита, если он не парный: закрытый гейт обязан ДАВАТЬ ноль наблюдаемо"
         )
         off_poll = _dispatch_introspect_telemetry(services)
-        assert "custom_level_gated" not in (off_poll.get("levels") or {}), (
-            "закрытый гейт: poll всё равно отдаёт уровень"
+        # ПРАВКА ВЛАДЕЛЬЦА СПЕКИ (2026-08-16, расхождение Р-3 отчёта teamlead'а).
+        # Тестер утверждал ОБРАТНОЕ: «закрытый гейт: poll всё равно отдаёт уровень»
+        # как дефект. Это неверная модель, и она противоречит ADR-PM-035 и приёмке
+        # 3.3 этого же плана: гейт управляет PUSH'ем, а не тем, что процесс знает о
+        # себе; опрос обязан работать ИМЕННО при закрытом гейте — иначе флип РТ-2
+        # ослепляет вкладку, ради которой опрос и заводился.
+        # Его утверждение проходило СЛУЧАЙНО — из-за неверной формы (Р-2): имени не
+        # было на верхнем уровне ответа, и проверка «not in» зеленела ни на чём.
+        # Асимметрия push/poll здесь — контракт, и теперь она проверяется как контракт.
+        assert _polled_level(off_poll, "custom_level_gated") == 7.0, (
+            "закрытый гейт обязан ГАСИТЬ PUSH и НЕ гасить опрос (ADR-PM-035): "
+            f"опрос отдал {_polled_level(off_poll, 'custom_level_gated')!r} вместо 7.0"
         )
 
         hb.reconfigure_telemetry({"metrics": {"custom_level_gated": {"enabled": True}}, "telemetry_mode": "merge"})
@@ -272,7 +335,7 @@ class TestGatePairsClosedAndOpen:
             f"и когда механизм вообще не подключён"
         )
         on_poll = _dispatch_introspect_telemetry(services)
-        assert on_poll["levels"].get("custom_level_gated") == 7.0
+        assert _polled_level(on_poll, "custom_level_gated") == 7.0
 
 
 # --------------------------------------------------------------------------- #
@@ -311,27 +374,58 @@ def _grep_literal(roots: list[pathlib.Path], literal: str) -> list[pathlib.Path]
 
 
 class TestFrameworkDoesNotKnowAppNames:
-    def test_frame_count_absent_framework_wide(self):
-        hits = _grep_literal([_FRAMEWORK_ROOT], "frame_count")
-        assert hits == [], f"'frame_count' просочился во фреймворк (app-specific имя capture-плагина): {hits}"
+    """ПРАВКА ВЛАДЕЛЬЦА СПЕКИ (2026-08-16, расхождение Р-5 отчёта teamlead'а).
 
-    def test_drops_absent_from_plugin_and_telemetry_surface(self):
-        surface = [
-            _FRAMEWORK_ROOT / "modules" / "process_module" / "plugins",
-            _FRAMEWORK_ROOT / "modules" / "process_module" / "heartbeat",
-            _FRAMEWORK_ROOT / "modules" / "observability_declarations.py",
-        ]
-        hits = _grep_literal(surface, "drops")
-        assert hits == [], f"'drops' просочился в поверхность плагинов/телеметрии: {hits}"
+    Три grep-теста сняты и заменены ОДНИМ положительным свойством. Причина —
+    оракул давал 100 % ложных срабатываний, и это проверено поимённо:
 
-    def test_frozen_absent_from_plugin_and_telemetry_surface(self):
-        surface = [
-            _FRAMEWORK_ROOT / "modules" / "process_module" / "plugins",
-            _FRAMEWORK_ROOT / "modules" / "process_module" / "heartbeat",
-            _FRAMEWORK_ROOT / "modules" / "observability_declarations.py",
-        ]
-        hits = _grep_literal(surface, "frozen")
-        assert hits == [], f"'frozen' просочился в поверхность плагинов/телеметрии: {hits}"
+      * `drops` находился в ``heartbeat/telemetry.py:241`` — как подстрока
+        ``frame_stale_drops``, счётчика SHM САМОГО фреймворка;
+      * `frame_count` находился в ``plugins/base.py:1188`` — как подстрока
+        ``frame_counter`` внутри ДОКСТРИНГА.
+
+    Ни одно из двух не является прикладным именем в коде. Слепой grep по слову не
+    отличает докстринг от кода и не отличает целое слово от подстроки, а `paused`/
+    `frozen` живут во фреймворке законно (``ProcessStatus.PAUSED``,
+    ``dataclass(frozen=True)``) — тестер сам это назвал сомнением в контракте, и
+    сомнение оказалось верным.
+
+    Заменяющее свойство сильнее отрицательного грепа: механизм с зашитым списком
+    имён проваливает его ПО ПОСТРОЕНИЮ, потому что выдуманного имени в списке быть
+    не может. Отрицание «имени нет в коде» доказывает меньше, чем утверждение
+    «любое имя работает».
+    """
+
+    def test_a_name_that_exists_nowhere_in_the_repo_still_arrives(self):
+        services, hb = _boot(name="cam2")
+        ctx = PluginContext(services=services, config={})
+        # Имя БЕЗ точек — намеренно. Точечное имя ("zzz.made.up.level") тоже доезжает,
+        # но ложится ЛИТЕРАЛЬНЫМ ключом ``state["zzz.made.up.level"]``, а не вложенными
+        # узлами; проверено разведением 2026-08-16. Это отдельный вопрос (имена stats-
+        # плоскости в проекте точечные: capture.frames), он записан резидуалом задачи и
+        # к свойству универсальности отношения не имеет — тест судил бы форму пути
+        # вместо «фреймворк не знает имён».
+        made_up = "zzz_made_up_level"
+
+        # Страж самого оракула: имя обязано отсутствовать в дереве фреймворка,
+        # иначе тест перестал бы проверять универсальность и стал бы проверять
+        # «имя уже зашито».
+        assert _grep_literal([_FRAMEWORK_ROOT], made_up) == [], (
+            f"{made_up!r} встречается во фреймворке — выдуманное имя перестало быть выдуманным"
+        )
+
+        ctx.declare_metric(made_up)
+        # 1.2, а не 1.25: сборщик округляет до 1 знака (ADR-PM-035, то же и на опросе),
+        # и round(1.25, 1) = 1.2 — литерал 1.25 проверял бы округление, а не универсальность.
+        # Округление имеет собственный тест (критерий 7).
+        ctx.publish_metric(made_up, 1.2)
+        _run_plugin_levels_tick(hb, allowed_metrics=None)
+
+        pushed = services._state_proxy.get(f"processes.cam2.state.{made_up}")
+        assert pushed == 1.2, f"push: выдуманное имя не доехало в дерево ({pushed!r}) — признак зашитого списка имён"
+        assert _polled_level(_dispatch_introspect_telemetry(services), made_up) == 1.2, (
+            "poll: выдуманное имя не доехало в опрос — push и poll разошлись"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -349,10 +443,15 @@ class TestSubPluginContextCarriesBothRoads:
         services, hb = _boot(name="cam3")
         parent = PluginContext(services=services, config={})
 
-        sub = SubPluginContext(
-            declare_metric=parent.declare_metric,
-            publish_metric=parent.publish_metric,
-        )
+        # ПРАВКА ВЛАДЕЛЬЦА СПЕКИ (2026-08-16, находка ИНЪЕКЦИИ И4, а не чтения).
+        # Здесь стояла ручная сборка `SubPluginContext(declare_metric=parent.declare_metric,
+        # publish_metric=parent.publish_metric)`. Она проверяла делегирование, но НЕ
+        # трогала `from_parent` — то самое перечисление дорог, которое урок Н-6 велит
+        # держать в одном месте и которое ломается на практике. Инъекция «обе дороги
+        # убраны из from_parent» оставляла этот тест ЗЕЛЁНЫМ: он собирал контекст в
+        # обход боевой дороги, то есть доказывал собственную проводку теста.
+        # Переведён на `from_parent` — теперь инъекция красит его поимённо.
+        sub = SubPluginContext.from_parent(parent)
         sub.declare_metric("sub_level")
         sub.publish_metric("sub_level", 3.5)
 
@@ -429,6 +528,6 @@ class TestValueRoundingObservedAtOneDecimal:
         assert pushed == pytest.approx(15.3), f"округление сборщика: ожидали 15.3, получили {pushed!r}"
 
         polled = _dispatch_introspect_telemetry(services)
-        assert polled["levels"].get("custom_precise") == pytest.approx(15.3), (
-            f"poll не согласован с push по округлению: получили {polled['levels'].get('custom_precise')!r}"
+        assert _polled_level(polled, "custom_precise") == pytest.approx(15.3), (
+            f"poll не согласован с push по округлению: получили {_polled_level(polled, 'custom_precise')!r}"
         )

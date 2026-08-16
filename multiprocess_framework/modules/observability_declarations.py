@@ -59,7 +59,7 @@ name 'ChannelRoutingConfig' from partially initialized module`. Здесь ли�
 from __future__ import annotations
 
 import threading
-from typing import Dict, Optional, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 __all__ = [
     "declare_log_source",
@@ -245,10 +245,19 @@ def declared_metrics() -> Tuple[str, ...]:
         return tuple(sorted(name for (kind, name) in _DECLARED if kind == KIND_METRIC))
 
 
-def forget_declarations(kind: Optional[str] = None) -> None:
-    """Очистить реестр (целиком либо одну плоскость). **Только для тестов.**
+def forget_declarations(kind: Optional[str] = None, *, names: Optional[Iterable[str]] = None) -> None:
+    """Очистить реестр (целиком, одну плоскость либо перечисленные имена). **Только для тестов.**
 
     Args:
+        names: забыть ТОЛЬКО эти имена (в плоскости ``kind``, либо во всех, если
+            ``kind`` не задан). Это единственная форма очистки, которая НЕ теряет
+            чужие объявления, и потому предпочтительная: сплошная очистка ниже
+            восстановлению не поддаётся (см. предупреждение про ``kind``), а
+            «восстановить руками, объявив заново» подменяет ВЛАДЕЛЬЦА — после
+            такого восстановления настоящий владелец, объявившись повторно
+            (reload, spawn), получил бы ``ValueError`` на ровном месте.
+            Отсутствующее имя — не ошибка: тест не обязан знать, добрался ли он
+            до объявления.
         kind: какую плоскость забыть; ``None`` — все. **Указывать плоскость почти
             всегда обязательно, и вот почему.** Реестр стал общим на три плоскости
             (Ф8.1), а наполняется он ИМПОРТОМ. Лог-источники тест восстанавливает
@@ -268,7 +277,11 @@ def forget_declarations(kind: Optional[str] = None) -> None:
     """
     global _RULES_CONSUMED
     with _LOCK:
-        if kind is None:
+        if names is not None:
+            wanted = set(names)
+            for ключ in [k for k in _DECLARED if k[1] in wanted and (kind is None or k[0] == kind)]:
+                del _DECLARED[ключ]
+        elif kind is None:
             _DECLARED.clear()
         else:
             for ключ in [k for k in _DECLARED if k[0] == kind]:
