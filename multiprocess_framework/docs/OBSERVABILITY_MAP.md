@@ -30,6 +30,12 @@
 днями, поэтому правило допуска там **структурное** (свой приёмник), а не «фильтр по уровню, который
 надо не забыть настроить» (ADR-CRM-013, ADR-PM-028).
 
+**Широкая запись о единице работы (`ctx.write_event`, ADR-PM-036) пятой плоскости НЕ заводит.**
+Она едет плоскостью ЛОГОВ (`BUSINESS`/`INFO`), просто несёт весь контекст единицы в одной записи —
+вердикт, счётчики, ROI, спаны — и `trace_id` в тексте, чтобы находиться поиском. Своё у неё одно:
+отбор (`observability.events`, живой `WideEventSelector` на процессе), потому что дроссель логгера
+ключует пару «уровень + текст», а у широкой записи текст свой у каждой единицы.
+
 **Телеметрия (FPS/latency) — вторая половина плоскости метрик** и живёт мимо `StatsManager`:
 self-publish в дерево состояния по такту heartbeat с publisher-gate (ADR-PM-018), чтение —
 локальный read-model без блокирующего IPC (ADR-136). Их объединение — первая фаза плана телеметрии
@@ -43,7 +49,7 @@ self-publish в дерево состояния по такту heartbeat с pub
 flowchart TB
     subgraph EMIT["Точки эмиссии (в каждом процессе)"]
         MIX["ObservableMixin._log_* / _track_error / _record_metric<br/>676 вызовов в 64 файлах"]
-        CTX["PluginContext: пятёрка log_* + health.report_error<br/>+ write_document — 242 вызова в 59 файлах"]
+        CTX["PluginContext: пятёрка log_* + health.report_error<br/>+ write_document + write_event + четвёрка stats — 242 вызова в 59 файлах"]
         FAC["get_std_logger(name) — ВИД над писателем<br/>116 вызовов в 112 файлах (после Ф6)"]
         BRG["logging.Handler-мост для чужих библиотек<br/>(pymodbus, D7) — propagate=False"]
     end

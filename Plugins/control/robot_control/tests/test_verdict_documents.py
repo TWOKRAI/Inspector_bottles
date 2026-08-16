@@ -37,11 +37,35 @@ class _Ctx:
         self.process_name = "inspector"
         self.plugin_name = "robot_control"
         self.documents: List[Dict[str, Any]] = []
+        self.events: List[Dict[str, Any]] = []
         self.errors: List[str] = []
         self._accept = accept
 
     def write_document(self, kind: str, summary: str = "", /, **fields: Any) -> bool:
         self.documents.append({"kind": kind, "summary": summary, **fields})
+        return self._accept
+
+    def write_event(
+        self,
+        kind: str,
+        summary: str = "",
+        /,
+        *,
+        unit: Any = None,
+        decisive: bool = False,
+        **fields: Any,
+    ) -> bool:
+        """Ф4 (4.1): сигнатура ДОСЛОВНО как у ``PluginContext.write_event``.
+
+        Дубль обязан повторять форму, а не «принимать что дадут»: ``**kwargs``-
+        заглушка приняла бы и переименованный параметр, то есть перестала бы
+        сторожить контракт ровно в тот момент, когда он поедет.
+        """
+        # ``unit`` сохраняется, а не проглатывается: ``trace_id`` в запись кладёт
+        # САМ фасад, читая его отсюда, и дубль, теряющий единицу, был бы зелен
+        # при полностью снятой сборке следа. Что фасад делает с единицей дальше,
+        # судит тест на настоящей проводке (``test_verdict_real_wiring.py``).
+        self.events.append({"kind": kind, "summary": summary, "decisive": decisive, "unit": unit, **fields})
         return self._accept
 
     def log_info(self, message: str, **kwargs: Any) -> None:
@@ -249,3 +273,89 @@ def test_verdict_is_written_before_the_mechanism_delay(monkeypatch: pytest.Monke
     _feed(plugin, [_defect()])
 
     assert order == ["wrote", "slept:0.2"]
+
+
+# ---------------------------------------------------------------------------
+# Ф4 (4.1) — сторожа, поставленные ПОСЛЕ инъекций: оба свойства были заявлены
+# (пункт приёмки «wide event ссылается на вердикт-документ trace_id'ом»;
+# докстринг `_write_unit_event` про потолок ROI) и не сторожились ничем —
+# инъекции И11 и И12 дали ровно НОЛЬ красных на всех 146 тестах задачи.
+# ---------------------------------------------------------------------------
+
+
+def _feed_traced(plugin: RobotControlPlugin, trace_id: str, *frames: list) -> None:
+    """Прогнать кадры со СЛЕДОМ — так их и отдаёт источник (frame_trace)."""
+    for detections in frames:
+        plugin.process([{"frame": _frame(), "detections": detections, "trace_id": trace_id}])
+
+
+class TestTraceIdTiesTheUnitTogether:
+    """Документ и широкая запись одной единицы обязаны сходиться по следу.
+
+    Без следа в документе «покажи всё про это изделие» отвечается сверкой времени,
+    то есть догадкой: у вердикта и у широкой записи разные приёмники (SQLite-стор
+    документов и плоскость логов), и связать их больше нечем.
+    """
+
+    def test_the_verdict_document_carries_the_frame_trace_id(self) -> None:
+        ctx = _Ctx({"min_defect_area": 500})
+        _feed_traced(_plugin(ctx), "aabbccdd11223344", [_defect(1600)])
+
+        assert ctx.documents[0]["trace_id"] == "aabbccdd11223344"
+
+    def test_the_wide_event_and_the_verdict_document_get_the_same_unit(self) -> None:
+        """Пункт приёмки 4.1 со стороны ЭМИТЕНТА: обе двери получают один и тот же кадр.
+
+        Здесь судится ровно то, что в силах дубля: плагин отдал документу
+        ``trace_id`` кадра, а широкой записи — сам кадр. Что след из кадра
+        доедет до записи, судит настоящая проводка: первая редакция этого теста
+        сверяла `event["trace_id"]` и падала `KeyError` — фасада-то в дубле нет,
+        и «сверка» держалась бы на подделке, повторяющей его работу.
+        """
+        ctx = _Ctx({"min_defect_area": 500})
+        _feed_traced(_plugin(ctx), "0f0f0f0f99887766", [_defect(1600)])
+
+        front = [event for event in ctx.events if event["decisive"]]
+        assert len(front) == 1, "фронт вердикта обязан дать РОВНО одну решительную запись"
+        assert front[0]["unit"]["trace_id"] == ctx.documents[0]["trace_id"] == "0f0f0f0f99887766"
+
+    def test_a_frame_without_a_trace_costs_the_link_not_the_line(self) -> None:
+        """Кадр без следа — законное состояние (источник его не назначил): связи нет,
+        но вердикт пишется. Подделывать след нечем, и выдумка была бы хуже пустоты."""
+        ctx = _Ctx({"min_defect_area": 500})
+        _feed(_plugin(ctx), [_defect(1600)])
+
+        assert ctx.documents[0]["trace_id"] == ""
+        assert ctx.documents[0]["action"] == "reject"
+
+
+class TestRoiIsCappedAndTheOmissionIsCounted:
+    """Вес широкой записи не имеет права быть функцией шума маски.
+
+    Кадр с шумной маской даёт сотни блобов; список bbox без потолка уехал бы в
+    плоскость целиком — на ПОТОКОВОМ пути, чью цену задача обязана назвать числом.
+    Усечение при этом обязано быть громким: молчаливое врало бы о числе дефектов.
+    """
+
+    def test_the_cap_is_the_declared_constant(self) -> None:
+        """Константа проверяется ОТДЕЛЬНО от поведения: тест, выводящий ожидание из
+        неё же, согласился бы с любым её значением, включая ноль."""
+        assert RobotControlPlugin.ROI_LIMIT == 8
+
+    def test_a_noisy_mask_is_cut_to_the_cap_and_the_rest_is_counted(self) -> None:
+        ctx = _Ctx({"min_defect_area": 500, "max_detections_for_reject": 0})
+        _feed_traced(_plugin(ctx), "ffee", [[_defect(1600) for _ in range(21)]][0])
+
+        front = [event for event in ctx.events if event["decisive"]][0]
+        assert len(front["roi"]) == 8
+        assert front["roi_omitted"] == 13
+        assert front["defect_count"] == 21, "усечение ROI не имеет права менять число дефектов"
+
+    def test_under_the_cap_nothing_is_omitted(self) -> None:
+        """Пара к предыдущему: без неё «всегда 0 опущено» было бы неотличимо от работы."""
+        ctx = _Ctx({"min_defect_area": 500})
+        _feed_traced(_plugin(ctx), "ffee", [_defect(1600), _defect(1700), _defect(1800)])
+
+        front = [event for event in ctx.events if event["decisive"]][0]
+        assert len(front["roi"]) == 3
+        assert front["roi_omitted"] == 0

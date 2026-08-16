@@ -52,6 +52,7 @@ heartbeat. Отклонённая гейтом запись стоит ~240 нс
 from __future__ import annotations
 
 import importlib
+import threading
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -382,6 +383,398 @@ def stats_plane_report(svc: Any) -> Dict[str, Any]:
         "stats": {
             "declared": callable(getattr(stats, "record_metric", None)),
             "without_plane": int(getattr(svc, _STATS_WITHOUT_PLANE_ATTR, 0) or 0),
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# Ф4 (задача 4.1) — широкая запись о единице работы: живой хозяин отбора
+# ---------------------------------------------------------------------------
+
+#: Адрес ручек отбора в конфиге — он же то, что печатается в предупреждениях.
+#: Константа, а не строка по месту: оператор получает адрес, по которому можно
+#: грепнуть конфиг, и этот адрес обязан совпадать с тем, что читает код.
+EVENTS_CONFIG_ADDRESS = "observability.events"
+
+#: Ключ под-секции внутри разрешённых слоёв ``observability``.
+EVENTS_SECTION_KEY = "events"
+
+#: Атрибут процесса, на котором живёт селектор. Имя объявлено ЗДЕСЬ и читается
+#: отсюда и фасадом (``PluginContext.write_event``), и протоколом
+#: (``IProcessServices.event_selector``): две рукописные копии имени разъезжаются
+#: молча — этим уже был дефект ``document_sink`` (Н-9).
+EVENT_SELECTOR_ATTR = "event_selector"
+
+#: Широкие записи, ПРОШЕДШИЕ отбор и не принятые носителем. Счётчик отдельный от
+#: ``skipped`` намеренно: «прорежено по просьбе оператора» и «отдали, а не взяли»
+#: — разные диагнозы, и лечатся они разным (конфигом против кода вызывающего).
+#: Без него ``selected`` означал бы «передано», а читался бы как «записано» —
+#: названный на этом проекте класс дефекта.
+_EVENTS_REFUSED_ATTR = "_wide_events_refused"
+_EVENTS_WARNED_REFUSED_ATTR = "_wide_events_warned_refused"
+
+#: Ключ отказа носителя широкой записи в бухгалтерии ``ObservableMixin``
+#: (``_call_manager`` пишет её под ``"<менеджер>.<метод>"``). Носитель — ``log_info``,
+#: то есть слот ``logger`` и метод ``info``.
+CARRIER_FAILURE_KEY = "logger.info"
+
+
+def carrier_failures(svc: Any) -> Optional[int]:
+    """Сколько раз носитель отказал — по СЧЁТЧИКУ, а не по исключению (Ф4, 4.1).
+
+    **Зачем вообще смотреть счётчик.** ``ObservableMixin._call_manager`` ловит
+    исключение менеджера сам, считает его в ``manager_call_failures`` и наружу
+    ничего не отдаёт. Поэтому до вызывающего пробиваются НЕ все отказы:
+    воспроизведено на реальном ``LoggerManager`` со строками, считанными с диска
+    (2026-08-16, ревью 4.1)::
+
+        поле=message  write_event=False refused+1 строк+0   (падает на границе _log_info)
+        поле=msg      write_event=False refused+1 строк+0
+        поле=scope    write_event=True  refused+0 строк+0   ← запись потеряна МОЛЧА
+        поле=level    write_event=True  refused+0 строк+0   ← и учёт этого не видел
+
+    Разница в том, ГДЕ имя сталкивается: ``message``/``msg`` — параметр самого
+    ``_log_info``, и ``TypeError`` летит до входа в ``_call_manager``;
+    ``scope``/``level`` — параметры ``LoggerCore.log``, и туда исключение уже
+    внутри try миксина.
+
+    Returns:
+        Число отказов пары ``logger.info`` либо ``None`` — у объекта нет
+        бухгалтерии миксина вовсе (дубль в тесте), сверять нечем.
+
+    Note:
+        Показание СУММАРНОЕ по паре, а не по нашему вызову: отказ ``logger.info``
+        из соседнего потока в окне между двумя снятиями будет приписан широкой
+        записи. Это делает ``refused`` верхней оценкой, а не точным числом; цена
+        принята сознательно — обратная ошибка (потеря, которую никто не считает)
+        уже стоила этой задаче блокера ревью.
+    """
+    if not callable(getattr(svc, "_call_manager", None)):
+        return None
+    failures = getattr(svc, "_manager_call_failures", None)
+    if not isinstance(failures, dict):
+        # Бухгалтерия миксина есть, а словаря ещё нет — отказов не было ни одного.
+        # Читать это как «сверять нечем» значило бы пропустить ПЕРВЫЙ отказ.
+        return 0
+    return int(failures.get(CARRIER_FAILURE_KEY, 0) or 0)
+
+
+class WideEventSelector:
+    """Кому из широких записей достаётся место в плоскости логов (Ф4, 4.1).
+
+    Живёт на процессе один экземпляр, создаётся сшивкой на старте
+    (:func:`wire_event_selector`) и переживает пересборку конфига: правка ручек
+    меняет ПАРАМЕТРЫ, а не состояние — счёт по родам продолжается (тот же довод,
+    что у ``RateSampler.configure``: оператор, дёрнувший конфиг под штормом, не
+    должен получить шторм заново).
+
+    **Отбор — по РОДУ единицы, а не по тексту записи.** Дроссель логгера
+    (``RateSampler``) ключует пару «уровень + текст», а у широкой записи текст
+    свой у каждой единицы — на таком ключе он не задросселировал бы ничего.
+    Поэтому здесь свой счёт: ``kind`` — это род («inspection», «verdict»), и
+    внутри рода работает лесенка ``first_n`` → каждая ``every_mth``-я.
+
+    **Фронт идёт мимо отбора всегда.** ``decisive=True`` — это решение (вердикт,
+    авария), а не такт: прорядить его значило бы потерять ровно тот факт, ради
+    которого широкая запись и заводилась. Счёт фронтов при этом ведётся отдельно
+    от потока и НЕ сдвигает лесенку потока — иначе серия отбраковок меняла бы
+    выборку рядовых единиц, и «каждая 10-я» означало бы разное в разные минуты.
+
+    **Голоса при отсеве нет** (Р4.1-10). Отсев по настройке оператора — не потеря,
+    а запрошенное прореживание, и голос на каждом такте был бы штормом ровно там,
+    где просили тише. Но число обязано быть видно: его отдаёт
+    :func:`event_plane_report` в ``introspect.observability -> events``.
+
+    **Потолок числа родов.** Карта родов растёт от того, что кладёт приложение, и
+    род, собранный из данных (``f"unit_{n}"``), превратил бы её в утечку. После
+    :data:`KIND_CEILING` разных родов новые считаются одним общим родом
+    :data:`OVERFLOW_KIND` — вместе с их лесенкой отбора. Это НЕ отказ и не потеря
+    записи: столько разных родов — уже почти наверняка динамическая строка в
+    ``kind``, и разбирается это по счётчику ``kinds_saturated`` в readback'е.
+    Форма взята у детектора незнакомых групп логгера (``_check_scope_declared``),
+    где насыщаемость уже названа обязательной.
+    """
+
+    #: Разных родов, после которых заводится общий бакет. 64 — с запасом больше,
+    #: чем родов у реального приложения (у документов их сегодня два), и заметно
+    #: меньше, чем цена карты, растущей от данных.
+    KIND_CEILING = 64
+    #: Имя общего бакета. Угловые скобки — чтобы он не совпал с родом приложения.
+    OVERFLOW_KIND = "<переполнение>"
+
+    __slots__ = ("_knobs", "_lock", "_kinds", "kinds_saturated")
+
+    def __init__(self, first_n: int = 0, every_mth: int = 0) -> None:
+        # Лок, а не «атомарность GIL»: решение об отборе — это чтение счётчика,
+        # арифметика и запись обратно, то есть три шага, между которыми поток
+        # может смениться. Без лока два потока получили бы один и тот же номер
+        # единицы, и `first_n` пропустил бы больше, чем просили, а счётчики
+        # readback'а разошлись бы с числом записей в плоскости.
+        self._lock = threading.RLock()
+        #: род → [seen, selected, skipped, decisive]. Списком, а не dataclass'ом:
+        #: путь горячий, а полей четыре и все целые.
+        self._kinds: Dict[str, List[int]] = {}
+        self.kinds_saturated = 0
+        self._knobs: Tuple[int, int] = (0, 0)
+        self.configure(first_n, every_mth)
+
+    # -- Конфигурация ---------------------------------------------------
+
+    def configure(self, first_n: Any, every_mth: Any) -> Tuple[int, int]:
+        """Применить ручки БЕЗ сброса счёта. Возвращает применённую пару.
+
+        Подмена — ОДНИМ кортежем, а не двумя присваиваниями: читатель на горячем
+        пути снимает пару одним чтением и не может застать полусмену («новый
+        ``first_n`` со старым ``every_mth``»). Тот же приём, что у мутабельного
+        publisher-гейта телеметрии (PC 3.1).
+
+        Отрицательное приводится к нулю, а не отвергается: границы держит схема
+        (``ObservabilityEventsConfig``, ``min=0``) на входе в слой, и второй
+        предохранитель здесь сделал бы неизвестным, который из них держит.
+        """
+        knobs = (max(0, int(first_n)), max(0, int(every_mth)))
+        self._knobs = knobs
+        return knobs
+
+    @property
+    def knobs(self) -> Tuple[int, int]:
+        """Действующая пара ``(first_n, every_mth)`` — одним чтением."""
+        return self._knobs
+
+    # -- Горячий путь ---------------------------------------------------
+
+    def select(self, kind: str, decisive: bool = False) -> bool:
+        """Писать ли эту запись. ``decisive`` идёт мимо отбора всегда.
+
+        Args:
+            kind: род единицы. Ключ счёта и ключ лесенки.
+            decisive: фронт решения — мимо отбора, но со своим счётчиком.
+
+        Returns:
+            ``True`` — запись отдаётся плоскости; ``False`` — прорежена.
+        """
+        name = str(kind)
+        first_n, every_mth = self._knobs
+        with self._lock:
+            slot = self._kinds.get(name)
+            if slot is None:
+                if len(self._kinds) >= self.KIND_CEILING:
+                    self.kinds_saturated += 1
+                    name = self.OVERFLOW_KIND
+                    slot = self._kinds.get(name)
+                if slot is None:
+                    slot = [0, 0, 0, 0]
+                    self._kinds[name] = slot
+            if decisive:
+                slot[3] += 1
+                return True
+            slot[0] += 1
+            seen = slot[0]
+            if seen <= first_n:
+                slot[1] += 1
+                return True
+            if every_mth > 0 and (seen - first_n) % every_mth == 0:
+                slot[1] += 1
+                return True
+            slot[2] += 1
+            return False
+
+    # -- Readback -------------------------------------------------------
+
+    def counters(self) -> Dict[str, Dict[str, int]]:
+        """Снимок счётчиков по родам — копия, снятая под локом.
+
+        Копия обязательна: отдай мы сами списки, читатель (команда introspect)
+        разглядывал бы их, пока горячий путь их правит, и в одном ответе
+        оказались бы числа из разных моментов.
+        """
+        with self._lock:
+            return {
+                name: {"selected": slot[1], "skipped": slot[2], "decisive": slot[3]}
+                for name, slot in self._kinds.items()
+            }
+
+
+def note_event_refused(svc: Any, kind: str, reason: str) -> None:
+    """Учесть широкую запись, которую носитель не принял, и сказать это ОДИН раз.
+
+    Форма — дословно :func:`note_document_refused`, довод тот же и здесь сильнее:
+    широкая запись пишется на единицу работы, и строка на каждую превратила бы
+    отказавший путь в поток ровно там, где просили одну запись на изделие.
+    Причина отказа от единицы к единице не меняется — она в ФОРМЕ вызова
+    (прикладное поле названо именем параметра носителя), а не в данных.
+
+    ``reason`` — строка, а не исключение: у половины случаев исключения на руках
+    нет вовсе, оно осталось внутри ``_call_manager`` (см. :func:`carrier_failures`).
+    Единый параметр вместо двух форм — чтобы у отказа не завелось двух написаний.
+
+    Перечня опасных имён здесь НЕТ намеренно: он жил в двух рукописных копиях
+    (тут и в докстринге ``PluginContext.write_event``), они разошлись — в обеих
+    стояло `module`, которое на самом деле не отказывает, а тихо портит штамп
+    (найдено ревью 4.1). Копия осталась одна, в докстринге фасада; здесь —
+    ссылка на неё.
+
+    Счётчик, в отличие от голоса, ведётся всегда: без него ``selected`` в
+    readback'е означал бы «передано», а читался бы как «записано».
+    """
+    try:
+        setattr(svc, _EVENTS_REFUSED_ATTR, int(getattr(svc, _EVENTS_REFUSED_ATTR, 0) or 0) + 1)
+    except Exception:  # noqa: BLE001 — иммутабельный дубль в тесте не должен ронять линию
+        return
+    if getattr(svc, _EVENTS_WARNED_REFUSED_ATTR, False):
+        return
+    try:
+        setattr(svc, _EVENTS_WARNED_REFUSED_ATTR, True)
+    except Exception:  # noqa: BLE001
+        pass
+    _process_warn(
+        svc,
+        f"[events] широкая запись рода {kind!r} НЕ записана: {reason} "
+        "— проверь, не названо ли прикладное поле именем параметра носителя "
+        "(перечень — в докстринге PluginContext.write_event). Дальше считаем молча, "
+        "счётчик в introspect.observability -> events.refused",
+    )
+
+
+def _events_knobs(section: Any, svc: Any, fallback: Tuple[int, int]) -> Tuple[int, int]:
+    """Разобрать под-секцию ``observability.events`` схемой. Мусор → ``fallback`` + голос.
+
+    Отказ здесь НЕ роняет пересборку целиком: ручки отбора широких записей едут в
+    одной секции с уровнем логирования и каталогом логов, и опечатка в них не
+    имеет права стоить оператору применения всего остального. Дорога та же, что у
+    отказавшей фабрики документов: громко, с адресом ключа, и дальше живём на том,
+    что действовало.
+    """
+    from ..configs.observability_config import ObservabilityEventsConfig
+
+    if section is None:
+        return (0, 0)
+    if not isinstance(section, dict):
+        _process_warn(
+            svc,
+            f"[observability] {EVENTS_CONFIG_ADDRESS} не словарь ({type(section).__name__}) "
+            f"— отбор широких записей остаётся прежним {fallback}",
+        )
+        return fallback
+    try:
+        cfg = ObservabilityEventsConfig.model_validate(section)
+    except Exception as exc:  # noqa: BLE001 — см. докстринг
+        _process_warn(
+            svc,
+            f"[observability] {EVENTS_CONFIG_ADDRESS} не принят ({exc!r}) "
+            f"— отбор широких записей остаётся прежним {fallback}",
+        )
+        return fallback
+    return (int(cfg.first_n), int(cfg.every_mth))
+
+
+def wire_event_selector(svc: Any) -> Optional[WideEventSelector]:
+    """Ф4 (4.1): создать селектор широких записей и опубликовать его на процессе.
+
+    Зовётся у КАЖДОГО процесса и создаёт селектор ВСЕГДА — в отличие от
+    :func:`wire_document_sink`, где пустая фабрика означает «плоскости нет».
+    Разница не в стиле: у документов своя плоскость (свой файл, своё соединение),
+    а широкая запись едет плоскостью ЛОГОВ, которая есть у всех. Отсутствие
+    секции ``events`` означает не «механизма нет», а «поток не пишется, фронты
+    пишутся» — то есть ровно дефолт ``first_n=0, every_mth=0``. Создай мы селектор
+    только при наличии ключа, у «выключено» стало бы два разных исполнения, и
+    счётчики фронтов у первого из них было бы негде вести.
+
+    Возвращает селектор либо ``None`` — если слои не прочитались или объект
+    процесса не принимает атрибут (иммутабельный дубль в тесте). ``None``
+    наблюдаем: ``introspect.observability -> events.declared`` отвечает ``false``,
+    и это отличает «селектора нет» от «селектор есть и всё прорежено».
+    """
+    from ..configs.observability_layers import process_observability_layers
+
+    try:
+        layers = process_observability_layers(svc)
+        section = layers.resolve().get(EVENTS_SECTION_KEY)
+    except Exception as exc:  # noqa: BLE001 — процесс без конфига живёт без отбора
+        _process_warn(svc, f"[observability] секция {EVENTS_CONFIG_ADDRESS} не прочитана: {exc!r}")
+        return None
+
+    first_n, every_mth = _events_knobs(section, svc, (0, 0))
+    selector = WideEventSelector(first_n, every_mth)
+    try:
+        setattr(svc, EVENT_SELECTOR_ATTR, selector)
+    except Exception:  # noqa: BLE001 — объект без сеттеров: отбора нет, линия жива
+        return None
+    return selector
+
+
+def apply_event_selector(selector: Any, section: Any, svc: Any = None) -> Optional[Dict[str, int]]:
+    """Пересборка: применить ручки к ЖИВОМУ селектору. Возвращает применённую пару.
+
+    Третья точка дороги ручки (после схемы и сшивки) — та, без которой
+    ``config.reload`` менял бы слой и не менял поведение: селектор создаётся один
+    раз на старте, и правка, не дошедшая до него, осталась бы видимой в
+    провенансе и не действующей.
+
+    Счёт по родам при этом НЕ сбрасывается (см. :meth:`WideEventSelector.configure`).
+    ``None`` на входе (селектора нет) — не отказ: пересборка идёт и на процессах,
+    где широкие записи никто не пишет.
+    """
+    configure = getattr(selector, "configure", None)
+    if not callable(configure):
+        return None
+    fallback = getattr(selector, "knobs", (0, 0))
+    first_n, every_mth = _events_knobs(section, svc, fallback)
+    applied = configure(first_n, every_mth)
+    return {"first_n": applied[0], "every_mth": applied[1]}
+
+
+def event_plane_report(svc: Any) -> Dict[str, Any]:
+    """Секция ``events`` для ``introspect.observability`` (Р4.1-8/Р4.1-10).
+
+    Читает ЖИВОЙ селектор, а не пересчитывает ручки из конфига: расхождение
+    «в слое одно, в работе другое» и есть тот дефект, ради которого readback
+    заводится — пересчёт из того же источника показывал бы согласие всегда.
+
+    Числа:
+
+    * ``declared`` — селектор поднят. Разделитель «нет механизма» и «есть, но всё
+      прорежено»: без него ноль отобранных читался бы как здоровье в обоих
+      случаях;
+    * ``first_n`` / ``every_mth`` — что действует СЕЙЧАС;
+    * ``kinds`` — по родам: ``selected`` (прошло отбор и ОТДАНО носителю),
+      ``skipped`` (прорежено настройкой — не потеря, а запрошенное),
+      ``decisive`` (фронты, прошедшие мимо отбора);
+    * ``refused`` — сколько носитель не принял. Отдельно от ``skipped``, потому
+      что диагнозы разные; ненулевое означает, что ``selected`` больше числа
+      строк в плоскости **не менее чем** на эту величину. Не «ровно»: показание
+      снимается со СУММАРНОГО счётчика пары ``logger.info`` (см.
+      :func:`carrier_failures`), поэтому отказ соседа по процессу в окне между
+      двумя снятиями будет приписан широкой записи. Замер ревью 4.1: сосед
+      ронял ``logger.info``, все 400 широких записей доехали на диск, а
+      ``refused`` показал 164 — ошибка в безопасную сторону (ложная тревога
+      вместо молчащей потери), и она названа здесь, а не подразумевается;
+    * ``kinds_saturated`` — сколько раз новый род не получил своей графы из-за
+      потолка. Ненулевое почти всегда означает динамическую строку в ``kind``.
+    """
+    refused = int(getattr(svc, _EVENTS_REFUSED_ATTR, 0) or 0)
+    selector = getattr(svc, EVENT_SELECTOR_ATTR, None)
+    counters = getattr(selector, "counters", None)
+    if not callable(counters):
+        return {
+            "events": {
+                "declared": False,
+                "first_n": 0,
+                "every_mth": 0,
+                "kinds": {},
+                "refused": refused,
+                "kinds_saturated": 0,
+            }
+        }
+    first_n, every_mth = getattr(selector, "knobs", (0, 0))
+    return {
+        "events": {
+            "declared": True,
+            "first_n": int(first_n),
+            "every_mth": int(every_mth),
+            "kinds": counters(),
+            "refused": refused,
+            "kinds_saturated": int(getattr(selector, "kinds_saturated", 0) or 0),
         }
     }
 

@@ -1171,6 +1171,10 @@
           "include_stacktrace": true,
           "level": "WARNING"
         },
+        "events": {
+          "every_mth": 0,
+          "first_n": 0
+        },
         "file": true,
         "log_directory": null,
         "log_level": "INFO",

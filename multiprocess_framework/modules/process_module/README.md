@@ -121,7 +121,7 @@ process_module/
 ├── managers/
 │   ├── __init__.py
 │   ├── process_managers.py      # Инициализация менеджеров
-│   ├── observability_wiring.py  # Сшивка плоскостей: hub, стор, tap'ы, плоскость документов
+│   ├── observability_wiring.py  # Сшивка плоскостей: hub, стор, tap'ы, документы, отбор широких записей
 │   ├── observability_reload.py  # Пересборка конфига из слоёв + readback + вердикт
 │   └── observability_ttl.py     # Авто-возврат рантайм-правок по истечении срока
 ├── communication/
@@ -526,7 +526,7 @@ graph TD
 
 | Файл | Что делает | Когда зовётся |
 |---|---|---|
-| `observability_wiring.py` | сшивает `ObservabilityHub`, `ObservabilityStore` + store-tap'ы на **оба** менеджера (`logger` и `error`), forward-tap'ы живого хвоста (keyed по subscriber), плоскость документов (`wire_document_sink`) и политику истории (`resolve_history_policy`) | **один раз** на `initialize()` (`ProcessModule._wire_observability_hub`) |
+| `observability_wiring.py` | сшивает `ObservabilityHub`, `ObservabilityStore` + store-tap'ы на **оба** менеджера (`logger` и `error`), forward-tap'ы живого хвоста (keyed по subscriber), плоскость документов (`wire_document_sink`), отбор широких записей (`wire_event_selector` → `WideEventSelector`, ADR-PM-036) и политику истории (`resolve_history_policy`) | **один раз** на `initialize()` (`ProcessModule._wire_observability_hub`); ручки отбора широких записей после этого перенастраиваются пересборкой (`apply_event_selector`) |
 | `observability_reload.py` | **единственное** место, где секция раскладывается (`expand_observability`) и применяется (`apply_observability_layers`): пересборка из слоёв L0→L3, readback из живых менеджеров, трёхзначный вердикт | и файловый watcher, и IPC-команда `config.reload` |
 | `observability_ttl.py` | авто-возврат правок L3 по истечении срока; исполняет такт heartbeat, а не свой таймер | каждый heartbeat процесса |
 

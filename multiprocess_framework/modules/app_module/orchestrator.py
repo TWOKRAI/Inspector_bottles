@@ -168,6 +168,11 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             logger=self.logger_manager,
             error=self.error_manager,
             stats=self.stats_manager,
+            # Ф4 (4.1): отбор широких записей — такой же получатель правки файла,
+            # как менеджеры. Оба watcher'а получают ОДИН селектор процесса, а не
+            # каждый свой: селектор один на процесс, и второй экземпляр вёл бы
+            # свой счёт по родам.
+            event_selector=getattr(self, "event_selector", None),
             log_info=self._log_info,
             log_error=self._log_error,
             on_reload_extra=self._compose_fan_out(telemetry_on_reload, {}, "system-конфиг"),
@@ -216,6 +221,7 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             logger=self.logger_manager,
             error=self.error_manager,
             stats=self.stats_manager,
+            event_selector=getattr(self, "event_selector", None),
             log_info=self._log_info,
             log_error=self._log_error,
             on_reload_extra=self._compose_fan_out(None, {"observability_recipe_reload": True}, "спутник рецепта"),

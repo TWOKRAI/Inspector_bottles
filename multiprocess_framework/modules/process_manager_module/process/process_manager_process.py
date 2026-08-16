@@ -2453,6 +2453,10 @@ class ProcessManagerProcess(ProcessModule):
                     stats=getattr(self, "stats_manager", None),
                     log_info=None,  # своё сообщение об охвате ниже
                     **telemetry_targets(self),
+                    # Ф4 (4.1): свой селектор широких записей — по тому же
+                    # доводу, что телеметрия рядом. Switch чистит L3, и отбор
+                    # обязан вернуться к нижнему слою вместе со всем остальным.
+                    event_selector=getattr(self, "event_selector", None),
                     origin=origin,
                 )
             # Advisory A2 ревью 5.9: у детей та же смена подписана `switch:broadcast`

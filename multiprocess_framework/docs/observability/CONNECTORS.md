@@ -20,6 +20,7 @@
 | Ошибки | `_track_error(error, context)` → слот `error` | `ctx.health.report_error(exc, context=…, throttle=…)` |
 | Метрики | `_record_metric(metric_name, value, tags)`, `_record_timing(metric_name, duration, tags)` → слот `stats` | `ctx.record_metric(name, value=1, tags=None)`, `ctx.gauge(name, value, tags=None)`, `ctx.record_timing(name, duration, tags=None)`, `ctx.histogram(name, value, tags=None)` → `stats_manager` процесса (ADR-PM-033) |
 | Документы | — | `ctx.write_document(kind, summary, **fields)` |
+| Широкая запись о единице | — | `ctx.write_event(kind, summary, *, unit=None, decisive=False, **fields)` → плоскость логов, `BUSINESS`/`INFO` (ADR-PM-036) |
 | Штамп источника | `_observability_source()`: явный `source_name` → `manager_name` → `"main"` | логи — имя плагина через `PluginContext._stamped` (`functools.partial(log_fn, module=…)`); метрики — тег `plugin` с тем же именем |
 
 **Первый аргумент метрики зовётся по-разному на двух разъёмах, и это НЕ опечатка.** У миксина —

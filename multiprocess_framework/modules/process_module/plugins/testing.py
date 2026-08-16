@@ -181,6 +181,12 @@ class MockProcessServices:
             ``StatsManager``: четвёрка тогда считает метрику в
             ``stats.without_plane`` и говорит один раз. Чтобы судить путь
             метрики, передай :class:`MockStatsManager`.
+        event_selector: Селектор широких записей (Ф4, 4.1). ``None`` по
+            умолчанию — «сшивки не было»: ``write_event`` тогда пишет фронты
+            (``decisive=True``) и не пишет поток, ровно как настроенный селектор
+            с дефолтом ``first_n=0, every_mth=0``. Чтобы судить лесенку отбора,
+            передай настоящий ``WideEventSelector`` — фальшивка-всегда-успех
+            заглушила бы ровно то свойство, которое проверяют.
     """
 
     def __init__(
@@ -192,6 +198,7 @@ class MockProcessServices:
         state_proxy: Any = None,
         document_sink: Any = None,
         stats_manager: Any = None,
+        event_selector: Any = None,
     ) -> None:
         self.name: str = name
         # Ф8.7 / задача 4.2 (Н-9): атрибут ЕСТЬ всегда, значение может быть None.
@@ -202,6 +209,9 @@ class MockProcessServices:
         # всегда, значение может быть None. Без атрибута дубль перестал бы
         # удовлетворять IProcessServices, который порт объявил.
         self.stats_manager: Any = stats_manager
+        # Ф4 (4.1): третий порт с тем же доводом — атрибут ЕСТЬ всегда, значение
+        # может быть None. Без атрибута дубль перестал бы удовлетворять протоколу.
+        self.event_selector: Any = event_selector
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()

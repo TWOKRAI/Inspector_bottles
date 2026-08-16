@@ -32,6 +32,7 @@ from ..configs.observability_layers import (
     TELEMETRY_LAYERED_SUBSECTION,
     layer_merge,
 )
+from .observability_wiring import EVENTS_SECTION_KEY, apply_event_selector
 
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
@@ -117,6 +118,7 @@ def observability_effective(
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    event_selector: Any = None,
 ) -> Dict[str, Any]:
     """Фактическое (readback) состояние менеджеров наблюдаемости — не эхо запроса.
 
@@ -215,6 +217,17 @@ def observability_effective(
         section.update(_idle_sinks(stats))
         if section:
             out["stats"] = section
+    if event_selector is not None:
+        # Ф4 (4.1): отбор широких записей читается у ЖИВОГО селектора — той же
+        # дорогой, что темп статистики выше. Без этой ветки ручка применялась, но
+        # оставалась НЕПОДТВЕРЖДАЕМОЙ: `config_reload_verified` на всех восьми
+        # процессах живого стенда отвечал `unverifiable` при `checked=0`, потому
+        # что сравнивать запрошенное было не с чем (замер 2026-08-16). Ручка,
+        # которую нельзя подтвердить, неотличима от неприменённой — тот же урок
+        # 3.4, что и у предела строки снапшота.
+        knobs = getattr(event_selector, "knobs", None)
+        if isinstance(knobs, tuple) and len(knobs) == 2:
+            out["events"] = {"first_n": int(knobs[0]), "every_mth": int(knobs[1])}
     return out
 
 
@@ -272,6 +285,18 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
 
     baseline = flatten_section(expand_observability({}))
     expected = flatten_section(expand_observability(survived))
+    # Ф4 (4.1): секция `events` — единственная, чей путь конфига СОВПАДАЕТ с
+    # путём readback'а один в один (`events.first_n` → `events.first_n`), потому
+    # что у неё нет менеджера, в поля которого её надо переводить. Она идёт мимо
+    # `expand_observability` (как `documents` и `session_ttl_sec`) — и потому
+    # мимо `expected`, а значит и мимо вердикта: живой стенд 2026-08-16 отвечал
+    # `unverifiable` при `checked=0` на всех восьми процессах, хотя ручка
+    # применялась. Тождественное соответствие — не «вторая таблица перевода»,
+    # которую запрещает докстринг выше: переводить здесь нечего, и разойтись
+    # этой строке не с чем.
+    if isinstance(survived.get(EVENTS_SECTION_KEY), dict):
+        for key, want in survived[EVENTS_SECTION_KEY].items():
+            expected[f"{EVENTS_SECTION_KEY}.{key}"] = want
     flat_effective = flatten_section(effective if isinstance(effective, dict) else {})
 
     mismatches: list = []
@@ -642,6 +667,7 @@ def apply_observability_layers(
     telemetry_boot: Optional[Dict[str, Any]] = None,
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
+    event_selector: Any = None,
     origin: str,
     record_rebuild: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
@@ -686,6 +712,12 @@ def apply_observability_layers(
     молчащий отказ здесь — задокументированный на этом проекте класс «следствие
     без причины».
 
+    Ф4 (4.1) — **пятая плоскость в том же стеке.** ``event_selector`` необязателен
+    ровно так же, как менеджеры: нет получателя — ручки отбора широких записей
+    пропускаются. Селектор создаётся сшивкой на старте и живёт весь процесс,
+    поэтому здесь он ПЕРЕНАСТРАИВАЕТСЯ, а не пересоздаётся: счёт по родам обязан
+    пережить правку конфига (тот же довод, что у ``RateSampler.configure``).
+
     ``record_rebuild=False`` — ровно ОДИН законный вызывающий: такт подметальщика
     (:mod:`.observability_ttl`). Он пишет за весь такт одну запись ``expire``,
     которая уже несёт исход пересборки (``ok`` / ``error`` / ``log_level``), и
@@ -721,6 +753,7 @@ def apply_observability_layers(
                 telemetry_boot=telemetry_boot,
                 store_throttle=store_throttle,
                 boot_rules=boot_rules,
+                event_selector=event_selector,
             )
             # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
             # была вызвана. Иначе после неудачного возврата и последующего успешного
@@ -763,6 +796,7 @@ def _rebuild_and_apply(
     telemetry_boot: Optional[Dict[str, Any]] = None,
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
+    event_selector: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Тело пересборки (вызывается под локом стека — см. вызывающего)."""
     resolved = layers.resolve()
@@ -800,6 +834,17 @@ def _rebuild_and_apply(
     if stats is not None:
         stats.reconfigure(expanded["stats"])
         _remark_operator_disabled_sinks(stats, layers, ("stats", "channels"))
+
+    # Ф4 (4.1), третья точка дороги ручки: живой селектор перенастраивается ИЗ
+    # ТЕХ ЖЕ разрешённых слоёв, что прочитала сшивка на старте. Без этой ветки
+    # `config.reload` менял бы слой и не менял поведение — правка была бы видна в
+    # провенансе и не действовала бы, ровно тот класс, который лечит правило
+    # трёх точек. Секция `events` при этом остаётся в `resolved` (в отличие от
+    # `telemetry`, которую снимают выше): `ObservabilityConfig` её знает, а
+    # `expand_observability` не раскладывает — как `documents` и `session_ttl_sec`.
+    events_applied = apply_event_selector(event_selector, resolved.get(EVENTS_SECTION_KEY))
+    if events_applied is not None:
+        expanded[EVENTS_SECTION_KEY] = events_applied
 
     telemetry_applied = _apply_telemetry_from_layers(
         telemetry_layered,
@@ -1175,6 +1220,7 @@ def make_observability_on_reload(
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    event_selector: Any = None,
     section_key: str = "observability",
     log_info: Optional[Callable[[str], None]] = None,
     layers: Optional["ObservabilityLayers"] = None,
@@ -1215,6 +1261,13 @@ def make_observability_on_reload(
             logger=logger,
             error=error,
             stats=stats,
+            # Ф4 (4.1): селектор — такой же получатель пересборки, как менеджеры.
+            # Без него правка ФАЙЛА меняла бы слой и не меняла отбор широких
+            # записей, тогда как та же правка через `config.reload` действовала бы —
+            # то есть одна ручка вела бы себя по-разному на двух дорогах, и
+            # разошлись бы они молча. Найдено инъекцией по дорогам (2026-08-16),
+            # у соседней ручки `stats` этого дефекта нет по построению.
+            event_selector=event_selector,
             log_info=log_info,
             origin=origin,
         )
@@ -1228,6 +1281,7 @@ def start_observability_watcher(
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    event_selector: Any = None,
     section_key: str = "observability",
     debounce_seconds: float = 1.0,
     log_info: Optional[Callable[[str], None]] = None,
@@ -1284,6 +1338,7 @@ def start_observability_watcher(
         logger=logger,
         error=error,
         stats=stats,
+        event_selector=event_selector,
         section_key=section_key,
         log_info=log_info,
         layers=layers,

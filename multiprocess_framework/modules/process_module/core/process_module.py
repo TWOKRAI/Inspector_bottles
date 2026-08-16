@@ -59,6 +59,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     #: падала бы там, где всё правильно. ``None`` — законное «плоскость не поднята».
     document_sink: Any = None
 
+    #: Ф4 (задача 4.1): живой хозяин отбора широких записей. Атрибут КЛАССА со
+    #: значением ``None`` — той же правкой, что объявление порта в
+    #: ``IProcessServices``, и по тому же доводу, что у ``document_sink`` выше:
+    #: объявление в протоколе без атрибута ломает ``isinstance(process,
+    #: IProcessServices)`` на штатной конфигурации, где сшивка не проходила
+    #: (одиночный запуск, тестовый стенд). ``None`` — законное «отбора нет»:
+    #: фронты пишутся, поток нет.
+    event_selector: Any = None
+
     #: Задача 5.6: намерения подписчиков хвоста — атрибут КЛАССА со значением-пустотой
     #: по тому же доводу, что у ``document_sink`` выше: объявление только в ``__init__``
     #: оставляет без механизма тех, кто собирает процесс иначе (оркестратор, тестовые
@@ -421,6 +430,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         from ..managers.observability_wiring import (
             resolve_history_policy,
             wire_document_sink,
+            wire_event_selector,
             wire_observability_store,
             wire_process_observability,
         )
@@ -430,6 +440,12 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # а hub — только у пилота: сшей мы документы внутри условия ниже, «когда
         # включили DEBUG» отвечалось бы ровно на одном процессе из восьми.
         wire_document_sink(self)
+
+        # Ф4 (4.1): отбор широких записей — тоже у каждого процесса и по тому же
+        # доводу. Селектор читает те же разрешённые слои, поэтому идёт ПОСЛЕ
+        # `_apply_boot_observability_layers` (см. вызывающего): ручки к этому
+        # моменту уже разрешены, и второго резолва не заводится.
+        wire_event_selector(self)
 
         self._observability_hub, self._observability_drain = wire_process_observability(
             self.name,

@@ -3,6 +3,9 @@
 - [LIVE-2 release-on-evict](project_live2_release_on_evict.md) — фикс корректен, но на боевой раскладке kind-каналов НЕ исполняется (две двери в очередь); «блокер снят» опровергнуто; план transport-single-policy
 
 - [seqlock contention semantics](project_seqlock_contention_semantics.md) — seqlock голодает при read≈write (всё дропает, но torn=0); тесты доставки в режиме read<<write, heavy-contention asserts только torn==0
+- [инъекции в общем дереве = ложные флейки](feedback_shared_tree_injections_look_like_flakes.md) — падает каждый раз ДРУГОЙ тест, файл на диске цел; хэшировать исходники ВО ВРЕМЯ прогона, чистым считать только стабильный
+- [шторм потоков не доказывает лок](feedback_thread_storm_does_not_prove_a_lock.md) — GIL 3.12 не даёт вклиниться; проверять взаимное исключение барьером ВНУТРИ критической секции (ожидаемый исход — BrokenBarrier)
+- [параметры лесенки бывают слепы](feedback_ladder_params_can_be_coincidence_blind.md) — `(0, M)` совпадает при удвоении счётчика; считать ожидание для СЛОМАННОЙ версии до выбора чисел
 - [дедуп по имени теряет содержимое](feedback_dedup_by_name_loses_content.md) — «последний побеждает» ключуй на СОДЕРЖИМОЕ конверта, не на имя команды; правило `any`, у «пусто» своя дорожка (ФР-1 / ADR-PMM-022)
 - [второй писатель сокращает кольцо](feedback_second_writer_shrinks_the_ring.md) — второй источник в deque(maxlen) молча режет ОКНО, тесты на значения слепы; отдельный вход, а не пересчёт maxlen
 - [чтение вердикта инъекции](feedback_injection_verdict_reading.md) — «не упало ничего» = предохранителей ДВА (снимай все точки); «упало лишнее» = осколок аварии соседа (перепрогони кандидата в одиночку)

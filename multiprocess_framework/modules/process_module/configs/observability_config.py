@@ -79,6 +79,45 @@ class ObservabilityDocumentsConfig(SchemaBase):
     ] = Field(default_factory=dict)
 
 
+@register_schema("ObservabilityEventsConfig")
+class ObservabilityEventsConfig(SchemaBase):
+    """Под-секция отбора широких записей о единице работы (Ф4, задача 4.1).
+
+    Wide event — одна запись со всем контекстом единицы (вердикт, счётчики, ROI,
+    спаны). Фронты решения (``decisive=True``) идут мимо отбора ВСЕГДА; здесь
+    настраивается только ПОТОК — записи о каждой рядовой единице.
+
+    **Дефолт 0/0 = поток не пишется вовсе.** Выключенность выражена параметрами,
+    а не отдельным флагом: два способа сказать «выключено» рано или поздно
+    разъезжаются (правило «флаги не костыли», тот же довод у ``sampling_first_n``).
+
+    **Ловушка имён.** Рядом, в этой же секции, живут ``sampling_first_n`` /
+    ``sampling_every_mth`` логгера — те же слова, но ДРУГОЙ ключ отбора (пара
+    «уровень + текст» записи, а не род единицы) и другой смысл нуля: у дросселя
+    логгера ``every_mth`` имеет ``min=1`` и ноль там невыразим, здесь же ноль —
+    штатное «после первых N не проходит ничего». Слить их в один механизм нельзя:
+    у wide event текст свой у каждой единицы, и дроссель по тексту не дросселирует
+    ничего по построению.
+    """
+
+    first_n: Annotated[
+        int,
+        FieldMeta(
+            "Сколько потоковых записей КАЖДОГО рода пропускать всегда (0 — поток не пишется)",
+            min=0,
+            max=100_000,
+        ),
+    ] = 0
+    every_mth: Annotated[
+        int,
+        FieldMeta(
+            "После первых N проходит каждая M-я запись рода (0 — дальше не проходит ничего)",
+            min=0,
+            max=1_000_000,
+        ),
+    ] = 0
+
+
 def canonical_level_or_raise(value: Any, *, field: str) -> Any:
     """Каноничное имя уровня либо громкий отказ с адресом ключа (B2).
 
@@ -382,6 +421,17 @@ class ObservabilityConfig(SchemaBase):
         ObservabilityDocumentsConfig,
         FieldMeta("Плоскость документов: фабрика стока и её словарь (Ф8.5)"),
     ] = Field(default_factory=ObservabilityDocumentsConfig)
+    #: Ф4 (задача 4.1). В manager-конфиги НЕ раскладывается — ровно как
+    #: ``documents`` и ``session_ttl_sec``: это не параметр менеджера, а политика
+    #: отбора, которую читает живой ``WideEventSelector`` процесса
+    #: (``wire_event_selector`` на старте, ``apply_event_selector`` на пересборке).
+    #: Ключ живёт в ТОЙ ЖЕ секции ``observability``, а не в ``telemetry.*``:
+    #: пятой двери конфига этап не заводит (правило Б.1), а под-секции
+    #: ``observability`` закрытого списка не имеют.
+    events: Annotated[
+        ObservabilityEventsConfig,
+        FieldMeta("Отбор широких записей о единице работы: first_n / every_mth (Ф4)"),
+    ] = Field(default_factory=ObservabilityEventsConfig)
 
     #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
     #: МОЛЧА (проверено), поэтому без этой сверки конфиг с ``enable_batching: true``
@@ -453,7 +503,9 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
 
         Ключ ``session_ttl_sec`` (Task 5.8) сюда НЕ раскладывается сознательно: это
         политика слоя L3, а не параметр менеджера — её читает
-        ``ObservabilityLayers.effective_session_ttl``.
+        ``ObservabilityLayers.effective_session_ttl``. По тому же доводу здесь нет
+        ни ``documents`` (адрес второй плоскости, читает ``wire_document_sink``),
+        ни ``events`` (политика отбора, читает ``WideEventSelector`` процесса).
     """
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 

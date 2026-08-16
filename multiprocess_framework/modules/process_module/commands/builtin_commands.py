@@ -900,7 +900,12 @@ class BuiltinCommands:
             observability_effective,
             observability_provenance,
         )
-        from ..managers.observability_wiring import document_plane_report, stats_plane_report
+        from ..managers.observability_wiring import (
+            EVENT_SELECTOR_ATTR,
+            document_plane_report,
+            event_plane_report,
+            stats_plane_report,
+        )
 
         from ..managers.observability_ttl import ttl_report
 
@@ -940,7 +945,16 @@ class BuiltinCommands:
         return {
             "success": True,
             "process": svc.name,
-            "effective": observability_effective(logger=logger, error=error, stats=stats),
+            "effective": observability_effective(
+                logger=logger,
+                error=error,
+                stats=stats,
+                # Ф4 (4.1): отбор широких записей — часть действующего состояния
+                # плоскости, а не отдельная витрина. Тот же селектор ниже отдаёт
+                # счётчики через `event_plane_report`; здесь — действующие ручки,
+                # без которых `config.reload` не может их подтвердить.
+                event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+            ),
             **({"resolve": resolved} if resolved else {}),
             # `flush` (Task 5.7) — просьба о КОГЕРЕНТНОМ снимке: дожать буферы,
             # чтобы «записано» включало всё уже эмитированное. По умолчанию
@@ -970,6 +984,12 @@ class BuiltinCommands:
             # наблюдаемо ТОЛЬКО отсюда — без этой строки счётчик
             # `without_plane` рос бы в процессе и не читался ничем.
             **stats_plane_report(svc),
+            # Ф4 (4.1): третья точка дороги ручек `observability.events` — и
+            # единственное место, где видно, СКОЛЬКО широких записей прорежено.
+            # Читается ЖИВОЙ селектор, а не конфиг: пересчёт из того же
+            # источника показывал бы согласие всегда, в том числе когда правка
+            # до селектора не доехала.
+            **event_plane_report(svc),
             "audit": layers.audit.view(audit_limit),
             **extra,
             "layers": {
@@ -1671,6 +1691,7 @@ class BuiltinCommands:
                 observability_effective,
                 telemetry_targets,
             )
+            from ..managers.observability_wiring import EVENT_SELECTOR_ATTR
 
             layers = process_observability_layers(svc)
             _logger = getattr(svc, "logger_manager", None)
@@ -1953,12 +1974,19 @@ class BuiltinCommands:
                         stats=_stats,
                         log_info=getattr(svc, "_log_info", None),
                         **telemetry_targets(svc),
+                        # Ф4 (4.1): живой селектор широких записей — получатель
+                        # ручек `observability.events`. Без него правка легла бы
+                        # в слой и не подействовала: селектор создаётся один раз
+                        # на старте, и пересборка обязана донести до него ручки.
+                        event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
                         origin=_ORIGIN_SWITCH if obs_clear else _ORIGIN_RELOAD,
                     )
                 except Exception as exc:  # noqa: BLE001
                     return {"success": False, "reason": f"reconfigure failed: {exc}"}
                 if expanded.get("telemetry") is not None:
                     result["telemetry_applied"] = expanded["telemetry"]
+                if expanded.get("events") is not None:
+                    result["events_applied"] = expanded["events"]
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.
@@ -1971,7 +1999,12 @@ class BuiltinCommands:
                 result["reset_not_held"] = unknown
             # Readback: фактическое состояние менеджеров ПОСЛЕ применения — инициатор
             # видит эффект (пороги скоупов, каталог, активные каналы), а не эхо входа.
-            result["effective"] = observability_effective(logger=_logger, error=_error, stats=_stats)
+            result["effective"] = observability_effective(
+                logger=_logger,
+                error=_error,
+                stats=_stats,
+                event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+            )
             # Task 5.7: судить, а не только показывать. Readback лежал в ответе, но
             # `success` означал «применение не упало» — запрошенный ключ, перебитый
             # вышестоящим слоем, и ОПЕЧАТКА в имени давали тот же успех.
