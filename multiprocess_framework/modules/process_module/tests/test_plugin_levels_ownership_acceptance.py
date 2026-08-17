@@ -552,6 +552,26 @@ class _MinimalPlugin(ProcessModulePlugin):
 
 class TestP6LifecycleFreshness:
     def test_stopped_plugin_level_vanishes_next_tick_sibling_survives(self, declared_names) -> None:
+        """ПРАВКА ПО РЕВЬЮ (2026-08-17, находка Н1) — объектив переведён на ДЕРЕВО.
+
+        Прежняя редакция тикала ТОЛЬКО ПОСЛЕ остановки и собирала дерево из
+        merge'ей этого одного тика. В такой постановке «payload чист» и «в дереве
+        ничего нет» — одно и то же утверждение, поэтому тест не мог увидеть
+        настоящий дефект: ``retract`` снимал публикацию, payload действительно
+        становился чист, а лист в дереве жил вечно с последним значением
+        (воспроизведено ревьюером: тик 1 ``{'state': {'probe_level': 12.5}}``,
+        shutdown, тик 2 — merge не отправлен, в дереве по-прежнему 12.5).
+        Объектив теста совпал с объективом инъекции — дыру не увидел ни тест, ни
+        инъекция.
+
+        Теперь тик идёт ДО остановки (уровень реально попадает в дерево) и ПОСЛЕ,
+        а дерево собирается из обоих. Утверждение сменилось с «ключа нет в
+        payload» на «дерево не отдаёт показания»: снятие говорит дереву ``None``
+        один раз, потому что настоящего удаления листа у ``StateProxy`` нет
+        (``delete`` не существует) — см. ADR-PM-038, Н1. Требование П6 «уровни
+        исчезают» проверяется по НАБЛЮДАЕМОМУ показанию, а не по наличию ключа:
+        оператор видит прочерк, и это то, ради чего критерий писался.
+        """
         NAME_A, NAME_B = "life_level_a", "life_level_b"
         svc = _Services(name="procL1")
         base_ctx = PluginContext(services=svc)
@@ -567,16 +587,22 @@ class TestP6LifecycleFreshness:
         plugin_a = _MinimalPlugin()
         plugin_a.name = "plugin_a"
         plugin_a._do_configure(ctx_a)
-        plugin_a._do_shutdown(ctx_a)
-        assert plugin_a.state == PluginState.STOPPED
 
         clock = FakeClock()
         hb = ProcessHeartbeat(svc, clock=clock)
+        # Тик ДО остановки: без него уровень в дерево не попадал вовсе, и
+        # «исчез» было неотличимо от «никогда не появлялся».
+        _tick(hb, clock)
+        alive = _get_path(_apply_merges(svc._state_proxy.merged), "processes.procL1.state") or {}
+        assert alive.get(NAME_A) == pytest.approx(1.1), f"предпосылка: уровень в дереве, {alive}"
+
+        plugin_a._do_shutdown(ctx_a)
+        assert plugin_a.state == PluginState.STOPPED
         _tick(hb, clock)
 
         tree = _apply_merges(svc._state_proxy.merged)
         state = _get_path(tree, "processes.procL1.state") or {}
-        assert NAME_A not in state, state
+        assert state.get(NAME_A) is None, f"дерево всё ещё отдаёт показание мёртвого плагина: {state}"
         assert state.get(NAME_B) == pytest.approx(2.2), state
 
     def test_stopped_plugin_level_vanishes_from_poll_sibling_survives(self, declared_names) -> None:

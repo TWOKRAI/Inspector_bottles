@@ -63,12 +63,23 @@ from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
 )
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
+    PluginState,
     ProcessModulePlugin,
     SubPluginContext,
 )
 from multiprocess_framework.modules.process_module.plugins.testing import (
     MockProcessServices,
 )
+
+
+class _MinimalHazardPlugin(ProcessModulePlugin):
+    """Плагин без поведения — нужен только его ЖИЗНЕННЫЙ ЦИКЛ."""
+
+    category = "utility"
+
+    def configure(self, ctx: PluginContext) -> None:
+        pass
+
 
 #: Имя, которого нет нигде в репозитории, — положительное свойство §3.6
 #: «универсальность». Механизм с зашитым списком имён провалит его по построению.
@@ -797,10 +808,16 @@ class TestOneMergePerTick:
         """Fail-safe порядок наложения (а НЕ политика разрешения конфликта).
 
         Спор за имя сюда не доходит — его снимает проверка владельца в сборщике,
-        и это сторожит соседний тест. Здесь проверяется само расположение: если
-        отбор когда-нибудь протечёт, поверх ляжет величина ФРЕЙМВОРКА, а не
-        подменённая. Судится сборкой payload'а напрямую, потому что через боевой
-        путь протечка (по построению отбора) не воспроизводится.
+        и это сторожит соседний тест. Здесь проверяется само расположение.
+
+        **Покрывает РОВНО ОДИН случай из пяти** (ревью З1): порядок страхует
+        только ``fps``/``latency_ms`` и только когда агрегат есть на этом же тике.
+        Без воркеров, у ``effective_hz`` и у ``shm`` протёкшее значение доехало бы
+        до дерева — измерено инъекцией, таблица в докстринге
+        ``_publish_telemetry_to_tree``. Поэтому это тест ВТОРОЙ линии, а не
+        доказательство защиты; единственный настоящий предохранитель — владение.
+        Судится сборкой payload напрямую, потому что через боевой путь протечка
+        (по построению отбора) не воспроизводится.
         """
         services = self._services_with_worker("order")
         hb = _boot_hb(services)
@@ -1031,3 +1048,281 @@ class TestPairKeyProtectsTheOwner:
 def store_of(services):
     """Хранилище уровней процесса — читается тем же портом, что и у фреймворка."""
     return getattr(services, PLUGIN_LEVELS_ATTR)
+
+
+# --------------------------------------------------------------------------- #
+# Находки ревью 2026-08-17. Каждый тест судит ТО, ЧТО ПРОПУСТИЛ прежний объектив:
+# дерево вместо payload (Н1), отказную дорогу вместо счастливой (Н2), путь листа
+# вместо значения (Н3), предел вместо факта (З2), боевую форму merge вместо
+# удобной (З3).
+# --------------------------------------------------------------------------- #
+class TestRetractedLevelLeavesTheTree:
+    """Н1: «уровень мёртвого исчезает» — судится ДЕРЕВОМ, а не payload'ом.
+
+    Прежний П6 собирал дерево ТОЛЬКО из merge'ей ПОСЛЕ остановки, поэтому
+    «payload чист» и «в дереве ничего нет» были для него одним и тем же
+    утверждением. Объектив теста совпал с объективом инъекции — дыру не увидел
+    ни тест, ни инъекция. Здесь дерево живёт через ОБА тика.
+    """
+
+    def test_the_tree_stops_reading_after_the_owner_is_stopped(self):
+        services, hb = _boot(name="dead_owner")
+        ctx = PluginContext(services=services, config={}, plugin_name="mortal_plugin")
+        plugin = _MinimalHazardPlugin()
+        plugin.name = "mortal_plugin"
+        ctx.declare_metric("probe_level")
+        ctx.publish_metric("probe_level", 12.5)
+        plugin._do_configure(ctx)
+
+        _tick_levels(hb)
+        assert _tree(services, "probe_level") == pytest.approx(12.5), "предпосылка: значение в дереве"
+
+        plugin._do_shutdown(ctx)
+        _tick_levels(hb)
+
+        assert _tree(services, "probe_level") is None, (
+            f"лист живёт в дереве после остановки владельца: {_tree(services, 'probe_level')!r} — "
+            "снятие публикации дереву ничего не сказало"
+        )
+
+    def test_the_notice_goes_out_once_not_every_tick(self):
+        """«Показания нет» — однократный факт, а не уровень.
+
+        Повторяй его каждым тиком — и получишь бесконечную дельту на мёртвый
+        путь, то есть ровно тот трафик, который задача убирает.
+        """
+        services, hb = _boot(name="once_only")
+        ctx = PluginContext(services=services, config={}, plugin_name="once_plugin")
+        ctx.declare_metric("once_level")
+        ctx.publish_metric("once_level", 3.0)
+        _tick_levels(hb)
+        ctx._retract_metrics()
+
+        _tick_levels(hb)
+        after_notice = len(services._state_proxy.merges)
+        _tick_levels(hb)
+
+        assert len(services._state_proxy.merges) == after_notice, (
+            "второй тик после снятия снова шлёт merge — «нет показания» превратилось в уровень"
+        )
+
+    def test_a_relaunched_plugin_beats_the_pending_notice(self):
+        """Живое значение на том же тике важнее отложенного «нет показания».
+
+        Плагин может быть поднят заново между снятием и тиком; обнулить его
+        свежее показание значило бы заменить одну ложь другой.
+        """
+        services, hb = _boot(name="relaunch")
+        ctx = PluginContext(services=services, config={}, plugin_name="phoenix_plugin")
+        ctx.declare_metric("phoenix_level")
+        ctx.publish_metric("phoenix_level", 1.0)
+        ctx._retract_metrics()
+        ctx.publish_metric("phoenix_level", 2.0)  # поднялся заново до тика
+
+        _tick_levels(hb)
+
+        assert _tree(services, "phoenix_level") == pytest.approx(2.0)
+
+    def test_the_notice_is_not_gated(self):
+        """Гейт управляет ЧАСТОТОЙ уровня, а не однократным снятием.
+
+        Пропусти снятие через гейт — и у выключенной метрики лист остался бы
+        навсегда с мёртвым числом, то есть гейт порождал бы ту самую ложь,
+        которую снятие убирает.
+        """
+        services, hb = _boot(name="gated_retract")
+        ctx = PluginContext(services=services, config={}, plugin_name="gated_mortal")
+        ctx.declare_metric("gated_dead_level")
+        ctx.publish_metric("gated_dead_level", 5.0)
+        _tick_levels(hb)
+        assert _tree(services, "gated_dead_level") == pytest.approx(5.0)
+
+        ctx._retract_metrics()
+        hb.reconfigure_telemetry({"metrics": {"gated_dead_level": {"enabled": False}}})
+        _tick_levels(hb, hb._telemetry_gate.due_metrics(now=0.0))
+
+        assert _tree(services, "gated_dead_level") is None, (
+            "закрытый гейт съел снятие — лист остался с мёртвым числом навсегда"
+        )
+
+
+class _BoomPlugin(ProcessModulePlugin):
+    """Плагин, чей ``shutdown`` бросает. Не гипотеза: «камера не отпустила устройство»."""
+
+    category = "utility"
+
+    def configure(self, ctx: PluginContext) -> None:
+        ctx.declare_metric("boom_level")
+        ctx.publish_metric("boom_level", 7.7)
+
+    def shutdown(self, ctx: PluginContext) -> None:
+        raise RuntimeError("камера не отпустила устройство")
+
+
+class TestShutdownFailureStillRetracts:
+    """Н2: отказная дорога остановки.
+
+    Прежняя редакция ставила снятие ПОСЛЕ незавёрнутого ``self.shutdown(ctx)``,
+    и бросок оставлял уровни навсегда: ``STOPPED`` не наступал, оркестратор
+    бросок логировал и шёл дальше, тики публиковали мёртвое значение. То есть
+    симптом «камера остановлена, а частота идёт» воскресал ровно там, где
+    диагностика нужнее всего.
+    """
+
+    def test_levels_are_retracted_even_when_shutdown_raises(self):
+        services, hb = _boot(name="boom")
+        ctx = PluginContext(services=services, config={}, plugin_name="boom_plugin")
+        plugin = _BoomPlugin()
+        plugin.name = "boom_plugin"
+        plugin._do_configure(ctx)
+        _tick_levels(hb)
+        assert _tree(services, "boom_level") == pytest.approx(7.7), "предпосылка"
+
+        with pytest.raises(RuntimeError, match="камера не отпустила"):
+            plugin._do_shutdown(ctx)
+
+        # Бросок ушёл наружу как раньше — состояние НЕ STOPPED.
+        assert plugin.state != PluginState.STOPPED
+        # ...но уровни сняты, и дерево об этом узнало.
+        assert getattr(services, PLUGIN_LEVELS_ATTR).publications() == {}
+        _tick_levels(hb)
+        assert _tree(services, "boom_level") is None, "уровень пережил отказавший shutdown — снятие стоит вне finally"
+
+
+class TestDottedLevelNameIsRefused:
+    """Н3: точка в имени уровня — отказ, а не резидуал.
+
+    Объединение трёх merge в один сделало достижимыми ОБЕ ветки резолва точки
+    (литеральный ключ на первом тике, вложенный путь со второго), и в дереве
+    оставался вечно-мёртвый лист-двойник без голоса. Двойника добавила эта
+    задача — она его и закрывает.
+    """
+
+    def test_declare_refuses_a_dotted_name_and_says_why(self):
+        services, _hb = _boot(name="dotted")
+        ctx = PluginContext(services=services, config={}, plugin_name="dotted_plugin")
+        with pytest.raises(ValueError) as exc:
+            ctx.declare_metric("a.b.c")
+        text = str(exc.value)
+        assert "a.b.c" in text and "точку" in text, text
+        assert "a_b_c" in text, f"отказ не предложил годного имени: {text}"
+
+    def test_a_dotted_name_never_reaches_the_tree(self):
+        """Отказ на объявлении достаточен: необъявленное имя до дерева не доходит.
+
+        Второй guard в ``publish_metric`` не нужен — публикация в необъявленное
+        имя уже отвергается по владению и получает голос. Проверяется свойство,
+        а не отсутствие второго guard'а.
+        """
+        services, hb = _boot(name="dotted2")
+        ctx = PluginContext(services=services, config={}, plugin_name="dotted_plugin2")
+        ctx.publish_metric("x.y", 1.0)  # объявить нельзя, публикуем всё равно
+
+        _tick_levels(hb)
+
+        assert _tree(services, "x.y") is None
+        assert services._state_proxy.get("processes.dotted2.state.x") is None
+        assert any("x.y" in msg for msg in services.warnings()), services.warnings()
+
+    def test_stats_plane_keeps_dotted_names(self):
+        """Ограничение — только у уровней: в stats имя путём дерева не становится."""
+        services, _hb = _boot(name="dotted3")
+        ctx = PluginContext(services=services, config={}, plugin_name="dotted_plugin3")
+        ctx.gauge("capture.fps", 12.5)  # не бросает — плоскость другая
+
+
+class TestRejectionVoiceHasACeiling:
+    """З2: голос обязан назвать виновника, а не воспроизвести его вход."""
+
+    def test_a_flood_of_rejections_gives_one_bounded_line(self):
+        services, hb = _boot(name="flood")
+        ctx = PluginContext(services=services, config={}, plugin_name="flood_plugin")
+        for i in range(200):
+            ctx.publish_metric(f"flood_level_{i}", float(i))
+
+        _tick_levels(hb)
+
+        said = [msg for msg in services.warnings() if "flood_level_" in msg]
+        assert len(said) == 1, f"ожидали одну строку, получили {len(said)}"
+        assert len(said[0]) < 2000, f"строкаWARNING разрослась до {len(said[0])} символов"
+        assert "и ещё" in said[0], f"масштаб отсева потерян — хвоста нет: {said[0][-200:]}"
+        assert services._state_proxy.merges == [], "необъявленные имена уехали в дерево"
+
+
+# --------------------------------------------------------------------------- #
+# З3 — форма merge, которую реально шлёт тик, а не удобная для теста.
+#
+# Приёмочный П10 мержит прямо в ``processes.<p>.state`` и потому измеряет
+# per-leaf дельты всегда. Тик шлёт ДРУГОЕ: ``merge("processes.<p>",
+# {"state": {...}})`` — на один уровень выше. На СВЕЖЕМ поддереве это даёт одну
+# ГРУБУЮ дельту, и разница видна только здесь.
+# --------------------------------------------------------------------------- #
+class _CapturingRouterZ3:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    def send_async(self, msg: dict, priority: str = "normal") -> None:
+        self.sent.append(msg)
+
+    def register_message_handler(self, key, handler, expects_full_message=True) -> None:
+        pass
+
+
+def _delta_paths(router: _CapturingRouterZ3, subscriber: str = "watcher") -> list[str]:
+    out: list[str] = []
+    for msg in router.sent:
+        if msg.get("targets") == [subscriber]:
+            out.extend(d["path"] for d in msg["data"]["deltas"])
+    router.sent.clear()
+    return sorted(out)
+
+
+class TestProductionMergeShapeDeltas:
+    def test_first_tick_gives_one_coarse_delta_then_per_leaf(self):
+        """Первый тик на свежем поддереве — ОДНА грубая дельта, дальше per-leaf.
+
+        Следствие названо, а не замаскировано: путь ``processes.<p>.state`` имеет
+        ТРИ части, а сток телеметрии берёт только ``len(parts) >= 4``
+        (``Plugins/io/telemetry_sink/plugin.py``), поэтому первый тик после старта
+        процесса он пропускает целиком. До объединения merge это касалось
+        ``fps``/``latency_ms`` (они и раньше ехали под ``processes.<p>``), а
+        группа ``shm`` мержилась ГЛУБЖЕ (``…state.shm``) и была per-leaf с первого
+        тика — теперь она едет вместе с остальными. Один тик, не поток.
+        """
+        from multiprocess_framework.modules.state_store_module.core.delta import (
+            STATE_ENVELOPE_MARKER,
+        )
+        from multiprocess_framework.modules.state_store_module.manager.state_store_manager import (
+            StateStoreManager,
+        )
+
+        router = _CapturingRouterZ3()
+        mgr = StateStoreManager(router=router)
+        mgr.initialize()
+        try:
+            mgr.subscription_manager.subscribe("processes.P.**", "watcher")
+
+            def _tick(payload: dict) -> list[str]:
+                mgr.handle_state_merge(
+                    {
+                        "path": "processes.P",
+                        "data": {"state": payload},
+                        "source": "hb",
+                        STATE_ENVELOPE_MARKER: True,
+                    }
+                )
+                mgr.dispatcher._flush_once()
+                return _delta_paths(router)
+
+            first = _tick({"fps": 8.1, "capture_fps": 12.5})
+            second = _tick({"fps": 9.1, "capture_fps": 13.5})
+        finally:
+            mgr.shutdown()
+
+        assert first == ["processes.P.state"], (
+            f"первый тик дал не одну грубую дельту, а {first} — следствие в ADR описано неверно"
+        )
+        assert second == ["processes.P.state.capture_fps", "processes.P.state.fps"], second
+        # Именно тот предикат, по которому сток отбирает записи.
+        assert len(first[0].split(".")) == 3, first
+        assert all(len(p.split(".")) >= 4 for p in second), second

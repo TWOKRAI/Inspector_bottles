@@ -53,6 +53,7 @@
 Qt-виджеты или гонять qt-mcp. Ядро, которое обязано сработать и без чтения:
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — инъекция на КАЖДОЕ заявленное свойство, предсказание до прогона · [молчащий детектор](feedback_silent_detector_proves_nothing.md)
+- [Инъекция смотрит ДРУГИМ объективом, чем тест](feedback_injection_must_use_a_different_lens_than_the_test.md) — совпали точки наблюдения (payload/дерево) → красный доказывает согласие двух копий одной модели
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без воспроизведения вход→выход = совет, не факт
 - [Транспорт арбитрирует то, чего не понимает](feedback_transport_arbitrates_what_it_cannot_understand.md) — два писателя в один лист; троттл вырезает молча (proceed=true без rejection_reason)
 - [Приоритет у приёмника](feedback_priority_belongs_to_the_receiver.md) — нет модели слоёв → доигрывать порядок ЗАПИСИ, не лестницу уровней · [свойство не проверено у соседа](feedback_property_unchecked_at_the_second_party.md) — и на втором call-site; ноль от инъекции воспроизводить руками
@@ -70,6 +71,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [constructor-master прогресс](project_constructor_master_progress.md) — Ф0–Ф3 + трек F + Ф5-ядро закрыты; NEXT C1-C8 + app_module 5.11-5.13 · [чистка границ C1-C8](project_arch_boundaries_plan.md) — движок миграций 4.5 идёт в recipe, НЕ generic
 - [backend_ctl](project_backend_ctl_framework_module.md) — Phase 0+2 в main, 8.0/10; резидуалы в backend-ctl-hardening · [ловушки](project_backend_ctl_signal_integrity.md) — ложный success/timeout · [сокет мимо receive-мидлвари](project_backend_ctl_socket_bypasses_mw.md) — драйвером нельзя проверять фильтры приёма · [строгий край protocol.py](project_backend_ctl_missing_contract.md) — missing/None/null = три РАЗНЫХ факта · [MCP только через RouterManager](project_backend_control_mcp.md)
 - [Диагностика — через backend_ctl](feedback_diagnose_live_system_with_backend_ctl.md) — соседи как контроль
+- [Рантайм-правка умирает через 300 с](project_runtime_knob_expires_in_300s.md) — L3 TTL молча снимает гейт; посылка «гейт закрыт» имеет срок годности
 - [GUI-стенд боевым входом](project_gui_stand_production_entry_only.md) — INSPECTOR_GUI_UNATTENDED=1; harness виснет в initialize · [два бэкенда конфликтуют](project_concurrent_backends_trap.md) — PID-реестр и SHM-cleanup
 - [Command-engine audit](project_command_engine_audit.md) — ActionBus мёртв; RBAC дыра
 - [Pipeline узлы](project_pipeline_node_plugin_containers.md) — нода=плагин в контейнере; MovePlugin долг · [reuse по plugin_name](feedback_pipeline_reuse_plugins_widgets.md) — gui protected
