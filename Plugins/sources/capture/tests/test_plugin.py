@@ -337,9 +337,15 @@ class TestFrameIdCounter:
 class TestLevelsMigration:
     """Task 3.5: уровни ушли на дорогу фреймворка, фронты остались прямой записью.
 
-    Сторожит ровно то, что легко откатить незаметно: вернуть ``fps`` в
-    ``_publish_state`` — и гейт снова перестанет управлять путём ``state.fps``,
-    при этом ни один тест каденции или кадра не покраснеет.
+    Сторожит ровно то, что легко откатить незаметно: вернуть уровень в
+    ``_publish_state`` — и гейт снова перестанет им управлять, при этом ни один
+    тест каденции или кадра не покраснеет.
+
+    Р3.5-13 добавила сюда второе свойство того же класса: измеренная частота
+    захвата едет под СВОИМ именем ``capture_fps``, а не под ``fps`` фреймворка.
+    Откат так же незаметен — публикация в чужое имя ничего не роняет, её просто
+    молча отбрасывает сборщик, — и так же дорог: оператор при остановленном
+    захвате видел бы 21.4 (частоту цикла воркера) вместо 0.0.
     """
 
     def test_publish_state_carries_only_edges(self):
@@ -368,16 +374,21 @@ class TestLevelsMigration:
         plugin._publish_levels()
 
         handed = {call.args[0]: call.args[1] for call in ctx.publish_metric.call_args_list}
-        assert handed == {"fps": 21.4, "frame_count": 7, "drops": 3}
+        assert handed == {"capture_fps": 21.4, "frame_count": 7, "drops": 3}
+        assert "fps" not in handed, (
+            "публикация в имя фреймворка вернулась — сборщик её отбросит молча, "
+            "а карточка покажет частоту цикла вместо кадров"
+        )
 
     def test_configure_declares_its_own_names_but_not_the_frameworks(self):
-        """``fps`` объявляет фреймворк; второе объявление было бы отказом реестра."""
+        """Плагин объявляет ТОЛЬКО свои имена; ``fps`` принадлежит фреймворку."""
         plugin = CapturePlugin()
         ctx = _make_mock_ctx()
         plugin.configure(ctx)
 
         declared = [call.args[0] for call in ctx.declare_metric.call_args_list]
-        assert declared == ["frame_count", "drops"]
+        assert declared == ["capture_fps", "frame_count", "drops"]
+        assert "fps" not in declared, "объявление чужого имени — законный ValueError реестра"
 
     def test_real_context_actually_carries_the_level_to_the_store(self):
         """Тот же путь на НАСТОЯЩЕМ контексте, а не на ``MagicMock``.
@@ -398,6 +409,17 @@ class TestLevelsMigration:
             MockProcessServices,
         )
 
+        # Реестр объявлений ПРОЦЕССНЫЙ и общий на весь прогон: соседний файл
+        # (приёмка владения, test_plugin_levels_ownership_acceptance.py) поднимает
+        # настоящий CapturePlugin под именем "capture" и своих имён за собой не
+        # убирает. Без очистки ПЕРЕД объявлением этот тест краснеет ValueError-ом
+        # «уже объявлена владельцем capture» — и только в комбинированном прогоне
+        # двух каталогов, то есть выглядит флейком. Очищаем свои три имени с обеих
+        # сторон: чужих объявлений (fps/latency_ms фреймворка) точечная форма не
+        # трогает.
+        _MINE = {"capture_fps", "frame_count", "drops"}
+        forget_declarations(KIND_METRIC, names=_MINE)
+
         services = MockProcessServices(name="capture_real")
         ctx = PluginContext(services=services, config={}, plugin_name="capture_real_plugin")
         plugin = CapturePlugin()
@@ -410,11 +432,14 @@ class TestLevelsMigration:
 
             store = getattr(services, PLUGIN_LEVELS_ATTR, None)
             assert store is not None, "порт уровней не появился на сервисах процесса"
-            assert store.snapshot() == {"fps": 12.0, "frame_count": 4, "drops": 1}
+            assert store.snapshot() == {"capture_fps": 12.0, "frame_count": 4, "drops": 1}
+            # Публикатор помнится вместе со значением (Р3.5-11): без него сборщик
+            # не отличит своё имя от чужого и вернётся к отбору по каталогу.
+            assert {who for _v, who in store.publications().values()} == {"capture_real_plugin"}
         finally:
             # Реестр объявлений процессный: свой мусор убираем точечно, чужие
             # объявления (fps/latency_ms фреймворка) не трогаем.
-            forget_declarations(KIND_METRIC, names={"frame_count", "drops"})
+            forget_declarations(KIND_METRIC, names=_MINE)
 
 
 class TestShutdown:

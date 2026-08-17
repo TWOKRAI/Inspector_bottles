@@ -11,6 +11,7 @@ Acceptance 1.2:
 
 from __future__ import annotations
 
+from multiprocess_framework.modules.observability_declarations import metric_owners
 from multiprocess_framework.modules.process_module.configs import (
     MetricRule,
     TelemetryPublishConfig,
@@ -39,15 +40,29 @@ class TestGatedMetricsLocation:
 
         assert gated_metrics is NEW_LOCATION
 
-    def test_the_catalog_holds_exactly_the_five_declared_metrics(self) -> None:
+    def test_the_catalog_holds_exactly_the_five_framework_metrics(self) -> None:
         """Состав каталога — литералом, а не выводом из самого каталога.
 
         Ожидание, посчитанное через ``declared_metrics()``, согласилось бы с
         любым ответом, включая пустой; поэтому здесь перечень написан руками.
         Пять имён — те же, что были в снятом кортеже ``GATED_METRICS``: Ф8.1
         меняла ВЛАДЕНИЕ каталогом, а не его содержимое.
+
+        **Срез по владельцу, а не весь каталог** (Р3.5-11). Реестр процессный и
+        общий: любой тест, поднявший прикладной плагин, доливает в него СВОИ имена
+        (``capture_fps``/``frame_count``/``drops`` у ``CapturePlugin``), и сплошное
+        равенство краснело бы от ПОРЯДКА тестов — воспроизведено на прогоне
+        2026-08-16: поодиночке зелёный, в полном прогоне красный. Проверяемое
+        свойство при этом не «в процессе ровно пять метрик» (неправда и не нужно),
+        а «фреймворк объявляет ровно эти пять» — и вот оно, теперь адресуемое
+        напрямую через :func:`metric_owners`.
         """
-        assert set(gated_metrics()) == {"fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"}
+        framework_owned = {
+            name for name, owner in metric_owners().items() if owner.startswith("multiprocess_framework.")
+        }
+        assert framework_owned == {"fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"}
+        # Каталог гейта — надмножество: обходя его, гейт видит и прикладные имена.
+        assert framework_owned <= set(gated_metrics())
 
     def test_the_order_is_sorted_not_import_order(self) -> None:
         """Порядок устойчив к порядку импортов — иначе строки GUI переставлялись бы.
@@ -73,7 +88,6 @@ class TestGatedMetricsLocation:
             forget_declarations,
         )
 
-        было = set(gated_metrics())
         declare_metric("прикладная_метрика", owner="тест_приложения")
         try:
             assert "прикладная_метрика" in gated_metrics()
@@ -82,9 +96,12 @@ class TestGatedMetricsLocation:
             assert cfg.unknown_metrics() == set()
             assert cfg.resolve("прикладная_метрика")[0] is False
         finally:
-            forget_declarations(KIND_METRIC)
-            for имя in было:
-                declare_metric(имя, owner="восстановление_после_теста")
+            # ТОЧЕЧНО, а не сплошной очисткой с восстановлением (Р3.5-11).
+            # «Восстановить, объявив заново» подменяет ВЛАДЕЛЬЦА чужих метрик, и
+            # с приходом проверки владения это перестало быть косметикой: после
+            # такого восстановления `fps` числился бы за тестом, а не за
+            # фреймворком — см. предупреждение в docstring forget_declarations.
+            forget_declarations(KIND_METRIC, names={"прикладная_метрика"})
 
 
 # --------------------------------------------------------------------------- #
@@ -302,11 +319,11 @@ class TestUnknownMetricsWarning:
 
 class TestPublishMetricsGated:
     def test_disabled_metric_absent_from_merge(self) -> None:
-        """Через _publish_metrics_to_tree: выключенный effective_hz не в merge."""
+        """Через _publish_telemetry_to_tree: выключенный effective_hz не в merge."""
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServices(proxy))
         allowed = set(gated_metrics()) - {"effective_hz", "cycle_duration_ms"}
-        hb._publish_metrics_to_tree(_workers(2), allowed)
+        hb._publish_telemetry_to_tree(_workers(2), allowed)
         assert proxy.merge_calls == 1
         _, data = proxy.merged[0]
         assert "effective_hz" not in data["workers"]["w0"]
@@ -316,7 +333,7 @@ class TestPublishMetricsGated:
         """allowed=None (дефолт) → полный payload как раньше."""
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServices(proxy))
-        hb._publish_metrics_to_tree(_workers(2))
+        hb._publish_telemetry_to_tree(_workers(2))
         _, data = proxy.merged[0]
         assert "effective_hz" in data["workers"]["w0"]
         assert data["state"] == {"fps": 11.0, "latency_ms": 6.0}
@@ -329,22 +346,23 @@ class TestShmGated:
         """shm не в allowed → нет публикации даже при ненулевых счётчиках."""
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServices(proxy, router=_FakeRouter(dict(self._STATS))))
-        hb._publish_router_shm_stats_to_tree(allowed_metrics={"fps"})  # без shm
+        hb._publish_telemetry_to_tree({}, allowed_metrics={"fps"})  # без shm
         assert proxy.merge_calls == 0
 
     def test_shm_published_when_allowed(self) -> None:
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServices(proxy, router=_FakeRouter(dict(self._STATS))))
-        hb._publish_router_shm_stats_to_tree(allowed_metrics={"shm"})
+        hb._publish_telemetry_to_tree({}, allowed_metrics={"shm"})
         assert proxy.merge_calls == 1
-        path, _ = proxy.merged[0]
-        assert path == "processes.proc.state.shm"
+        path, payload = proxy.merged[0]
+        assert path == "processes.proc"
+        assert set(payload["state"]["shm"]), "группа shm обязана быть в общем payload'е"
 
     def test_shm_none_backward_compatible(self) -> None:
         """allowed=None → shm публикуется (как раньше)."""
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServices(proxy, router=_FakeRouter(dict(self._STATS))))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 1
 
 

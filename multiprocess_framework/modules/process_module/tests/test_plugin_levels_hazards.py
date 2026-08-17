@@ -17,11 +17,24 @@
 * **опрос гейту не подчиняется, а push подчиняется** — это не оплошность, а
   ADR-PM-035: гейт про трафик, а не про то, что процесс знает о себе. Свойство
   парное: закрытый гейт даёт ноль в дереве И ненулевое в опросе;
-* **имя-дубль разрешается порядком наложения, и порядок этот назван.** Уровень
-  плагина ложится ПОСЛЕ агрегата воркеров и в push, и в poll — иначе опрос и
-  дерево показывали бы разные числа под одним путём;
-* **у хранилища два потока.** Писатель — воркер плагина, читатель — heartbeat;
-  копия словаря, растущего одновременно, без лока поднимает ``RuntimeError``.
+* **имя-дубль не разрешается — он отбрасывается.** Р3.5-11 сняла политику
+  наложения («порядок несущий», «плагин побеждает») целиком: лист берётся, только
+  если объявленный владелец имени совпадает с публикатором. Сторожится в ОБЕИХ
+  дорогах — чужое имя не появляется ни в дереве, ни в опросе, и об этом слышно;
+* **весь тик — ОДИН merge, и объединение имеет три ловушки** (Р3.5-12): пустой
+  снимок воркеров не имеет права проглотить уровни и ``shm``; политика публикатора
+  «все счётчики ``shm`` нулевые — не грузим дерево» обязана уцелеть внутри общей
+  сборки; «данных нет вовсе» обязано давать НОЛЬ вызовов merge, а не пустой;
+* **владелец считается в трёх местах — объявлении, публикации и снятии.** Разойдись
+  они хоть в одном звене, уровень либо не поедет (владелец ≠ публикатор), либо не
+  снимется на остановке. Сторожится ЭФФЕКТОМ на боевой тройке, а не чтением кода;
+* **свежесть держится жизненным циклом.** ``retract`` зовёт фреймворк на остановке
+  плагина, ПОСЛЕ пользовательского ``shutdown`` — плагин вправе отдать последнее
+  значение в нём самом (``CapturePlugin`` обнуляет частоту на остановке захвата), и
+  снятие до него оставило бы это значение висеть навсегда;
+* **у хранилища три потока.** Писатель — воркер плагина, читатель — heartbeat,
+  третий снимает уровни на остановке; копия словаря, растущего одновременно, без
+  лока поднимает ``RuntimeError``.
 """
 
 from __future__ import annotations
@@ -50,6 +63,7 @@ from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
 )
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
+    ProcessModulePlugin,
     SubPluginContext,
 )
 from multiprocess_framework.modules.process_module.plugins.testing import (
@@ -58,7 +72,15 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 
 #: Имя, которого нет нигде в репозитории, — положительное свойство §3.6
 #: «универсальность». Механизм с зашитым списком имён провалит его по построению.
-MADE_UP = "zzz.made.up.level"
+#:
+#: БЕЗ ТОЧЕК, и это не косметика. Точечное имя уровня — отдельный, уже записанный
+#: резидуал: ``TreeStore._merge_recursive`` разворачивает точку в ПУТЬ, но только
+#: когда узел ``state`` уже существует как dict; на первом merge тот же ключ ложится
+#: литералом. До Р3.5-12 уровни ехали своим merge прямо в ``processes.<p>.state``, и
+#: первая ветка не встречалась; после объединения встречается обе. Судить тут форму
+#: пути значило бы судить резидуал вместо универсальности — тестер пришёл к тому же
+#: выводу независимо (``zzz_made_up_level`` в его П3).
+MADE_UP = "zzz_made_up_level"
 
 
 @pytest.fixture(autouse=True)
@@ -96,14 +118,20 @@ class _Proxy:
 
     def merge(self, path: str, data: dict) -> None:
         self.merges.append((path, dict(data)))
+        self._merge_recursive(path, data)
+
+    def _merge_recursive(self, path: str, data: dict) -> None:
+        """Дословно ``TreeStore._merge_recursive``: в dict рекурсия, если целевой
+        узел ТОЖЕ dict; иначе — ``set`` по склеенному пути с полным резолвом точек."""
         for key, value in data.items():
-            *head, last = f"{path}.{key}".split(".")
-            node = self.tree
-            for part in head:
-                node = node.setdefault(part, {})
-            if isinstance(value, dict) and isinstance(node.get(last), dict):
-                node[last].update(value)
+            child = f"{path}.{key}" if path else key
+            if isinstance(value, dict) and isinstance(self.get(child), dict):
+                self._merge_recursive(child, value)
             else:
+                *head, last = child.split(".")
+                node = self.tree
+                for part in head:
+                    node = node.setdefault(part, {})
                 node[last] = value
 
     def get(self, path: str, default: Any = None) -> Any:
@@ -145,6 +173,18 @@ def _boot(name: str = "proc") -> tuple[_Services, ProcessHeartbeat]:
     return services, hb
 
 
+def _tick_levels(hb: ProcessHeartbeat, allowed_metrics=None) -> None:
+    """Прогнать сборку тика БЕЗ воркеров — то есть судить ровно уровни.
+
+    Р3.5-12 схлопнула три публикатора тика в один
+    (``_publish_telemetry_to_tree``), и пустой снимок воркеров здесь не оговорка,
+    а ловушка №1 объединения: ранний выход по ``not workers`` жил в прежнем
+    воркерном публикаторе, и в общей сборке он проглотил бы и уровни, и ``shm``.
+    Каждый вызов ниже — заодно проверка, что не проглатывает.
+    """
+    hb._publish_telemetry_to_tree({}, allowed_metrics)
+
+
 def _poll(services: _Services) -> dict:
     bc = BuiltinCommands(services)
     bc._register_introspect_commands()
@@ -179,7 +219,7 @@ class TestFrameworkKnowsNoNames:
         ctx.declare_metric(MADE_UP)
         ctx.publish_metric(MADE_UP, 12.0)
 
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
+        _tick_levels(hb)
         assert _tree(services, MADE_UP) == 12.0
         assert _polled_state(services)[MADE_UP] == 12.0
 
@@ -206,11 +246,11 @@ class TestDeclarationOrder:
         ctx = PluginContext(services=services, config={}, plugin_name="late_plugin")
         ctx.publish_metric("late_level", 1.0)
 
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
+        _tick_levels(hb)
         assert _tree(services, "late_level") is None, "необъявленное имя уехало в дерево"
 
         ctx.declare_metric("late_level")
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
+        _tick_levels(hb)
         assert _tree(services, "late_level") == 1.0
 
     def test_publishing_before_declaring_keeps_the_value_and_says_it_once(self):
@@ -219,14 +259,14 @@ class TestDeclarationOrder:
         ctx = PluginContext(services=services, config={}, plugin_name="early_plugin")
         ctx.publish_metric("early_level", 5.0)
 
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
+        _tick_levels(hb)
+        _tick_levels(hb)
+        _tick_levels(hb)
         said = [msg for msg in services.warnings() if "early_level" in msg]
         assert len(said) == 1, f"ожидали ОДИН голос на имя, получили {len(said)}: {said}"
 
         ctx.declare_metric("early_level")
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
+        _tick_levels(hb)
         assert _tree(services, "early_level") == 5.0, "значение, отданное до объявления, потеряно"
 
 
@@ -268,11 +308,11 @@ class TestGateCoversPushNotPoll:
         ctx.publish_metric("gated_level", 9.0)
 
         hb.reconfigure_telemetry({"metrics": {"gated_level": {"enabled": False}}})
-        hb._publish_plugin_levels_to_tree(allowed_metrics=hb._telemetry_gate.due_metrics(now=0.0))
+        _tick_levels(hb, hb._telemetry_gate.due_metrics(now=0.0))
         assert _tree(services, "gated_level") is None, "закрытый гейт не остановил push"
 
         hb.reconfigure_telemetry({"metrics": {"gated_level": {"enabled": True}}})
-        hb._publish_plugin_levels_to_tree(allowed_metrics=hb._telemetry_gate.due_metrics(now=1.0))
+        _tick_levels(hb, hb._telemetry_gate.due_metrics(now=1.0))
         assert _tree(services, "gated_level") == 9.0, (
             "открытый гейт не дал ненулевого — без этой половины пары закрытый ноль одинаков с 'механизм не подключён'"
         )
@@ -285,7 +325,7 @@ class TestGateCoversPushNotPoll:
         ctx.publish_metric("gated_level2", 4.0)
 
         hb.reconfigure_telemetry({"metrics": {"gated_level2": {"enabled": False}}})
-        hb._publish_plugin_levels_to_tree(allowed_metrics=hb._telemetry_gate.due_metrics(now=0.0))
+        _tick_levels(hb, hb._telemetry_gate.due_metrics(now=0.0))
 
         assert _tree(services, "gated_level2") is None
         assert _polled_state(services)["gated_level2"] == 4.0, (
@@ -314,31 +354,52 @@ class TestPushEqualsPoll:
         ctx.declare_metric("same_level")
         ctx.publish_metric("same_level", 15.34)
 
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
+        _tick_levels(hb)
         assert _tree(services, "same_level") == pytest.approx(15.3)
         assert _polled_state(services)["same_level"] == pytest.approx(15.3), (
             "опрос и push разошлись в округлении — 'одна дорога' стало бы ложью"
         )
 
-    def test_a_plugin_level_named_like_a_framework_metric_wins_in_both_roads(self):
-        """Имя-дубль (``fps``) разрешается ОДИНАКОВО в дереве и в опросе.
+    def test_a_plugin_level_named_like_a_framework_metric_is_rejected_in_both_roads(self):
+        """Имя-дубль (``fps``) ОТБРАСЫВАЕТСЯ, и одинаково в дереве и в опросе.
 
-        Разойдись порядок наложения — оператор видел бы в карточке одно число, а
-        в опросе другое, и расхождение искали бы в камере. Дубль здесь не
-        гипотетический: миграция ``CapturePlugin`` устроена именно так.
+        Здесь стоял ровно обратный тест — «уровень плагина обязан лечь ПОСЛЕ
+        агрегата и победить». Он пинил политику наложения ADR-PM-038, снятую
+        Р3.5-11 целиком, и был зелен, пока политика была объявлена; на живом
+        стенде она при этом НЕ РАБОТАЛА — продовое правило троттла
+        ``processes.**.state.fps: 0.05`` вырезало вторую запись всегда, потому что
+        оба merge тика приходили в одно окно 15.6-мс сетки Windows.
+
+        Свойство, которое тест сторожил, уцелело и усилилось: **дерево и опрос
+        отвечают на имя-дубль ОДИНАКОВО**. Изменился ответ — не «побеждает
+        плагин», а «плагин отброшен, показание владельца цело». Судится значением,
+        а не отсутствием вызова.
         """
         services, hb = _boot(name="dup")
         services.worker_manager.get_all_workers_status = lambda: {  # type: ignore[attr-defined]
             "w": {"status": "running", "effective_hz": 8.0, "cycle_duration_ms": 3.0}
         }
         ctx = PluginContext(services=services, config={}, plugin_name="dup_plugin")
-        ctx.publish_metric("fps", 21.0)  # 'fps' объявлен фреймворком — плагин не объявляет
+        ctx.publish_metric("fps", 21.0)  # 'fps' объявлен фреймворком — чужое имя
 
-        hb._publish_metrics_to_tree(services.worker_manager.get_all_workers_status(), None)
-        assert _tree(services, "fps") == 8.0, "предпосылка: агрегат воркеров пишет свой fps"
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
-        assert _tree(services, "fps") == 21.0, "уровень плагина обязан лечь ПОСЛЕ агрегата"
-        assert _polled_state(services)["fps"] == 21.0, "опрос разошёлся с деревом на имени-дубле"
+        hb._publish_telemetry_to_tree(services.worker_manager.get_all_workers_status(), None)
+        assert _tree(services, "fps") == 8.0, "агрегат воркеров подменён публикацией в чужое имя"
+        assert _polled_state(services)["fps"] == 8.0, "опрос разошёлся с деревом на имени-дубле"
+        assert any("fps" in msg for msg in services.warnings()), (
+            f"отсев чужого имени промолчал — тихий отсев неотличим от опечатки: {services.warnings()}"
+        )
+
+    def test_the_rejection_voice_names_all_three_participants(self):
+        """В голосе — имя, публикатор и владелец: три разных диагноза, три действия."""
+        services, hb = _boot(name="voice")
+        PluginContext(services=services, config={}, plugin_name="loud_plugin").publish_metric("fps", 1.0)
+
+        _tick_levels(hb)
+
+        said = [msg for msg in services.warnings() if "fps" in msg]
+        assert len(said) == 1, said
+        assert "loud_plugin" in said[0], said
+        assert "telemetry" in said[0], f"владелец имени не назван — не отличить чужое имя от опечатки: {said[0]}"
 
 
 # --------------------------------------------------------------------------- #
@@ -367,7 +428,7 @@ class TestSubPluginContext:
 
         sub.declare_metric("sub_level")
         sub.publish_metric("sub_level", 3.5)
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
+        _tick_levels(hb)
         assert _tree(services, "sub_level") == pytest.approx(3.5), (
             "дороги проброшены по имени, но не делегируют в механизм родителя"
         )
@@ -424,7 +485,7 @@ class TestDisabledAndHostile:
         ctx = PluginContext(services=services, config={}, plugin_name="text_plugin")
         ctx.declare_metric("text_level")
         ctx.publish_metric("text_level", "не число")
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)
+        _tick_levels(hb)
         assert _tree(services, "text_level") == "не число"
 
     def test_empty_store_publishes_nothing(self):
@@ -432,20 +493,37 @@ class TestDisabledAndHostile:
         services, hb = _boot(name="empty")
         PluginContext(services=services, config={}, plugin_name="empty_plugin").publish_metric("x", 1)
         before = len(services._state_proxy.merges)
-        hb._publish_plugin_levels_to_tree(allowed_metrics=None)  # 'x' не объявлен
+        _tick_levels(hb)  # 'x' не объявлен
         assert len(services._state_proxy.merges) == before
 
 
 # --------------------------------------------------------------------------- #
 # Два потока вокруг одного хранилища.
 # --------------------------------------------------------------------------- #
+#: Сколько имён писатель успевает добавить до сброса. Предохранитель, а не
+#: параметр механизма: без него тест падал не тем, что ищет, — ``MemoryError``.
+#: Воспроизведено 2026-08-16 на этом же тесте после Р3.5-11: запись стала парой
+#: ``(значение, публикатор)``, чтение — двумя проходами, писатель за 80 с успевал
+#: съесть память раньше, чем читатель заканчивал свои 2000 копий. Сброс через
+#: ``retract`` держит РОСТ (новые ключи — то, что и поднимает RuntimeError)
+#: бесконечным при ограниченном размере.
+_GROWTH_WINDOW = 20_000
+
+
 class TestConcurrency:
-    def test_snapshot_survives_a_writer_growing_the_store(self):
+    def test_a_copy_survives_a_writer_growing_the_store(self):
         """Без лока ``dict(...)`` растущего словаря поднимает RuntimeError.
 
         Писатель здесь — отдельный поток, как в проде (воркер плагина против
         потока heartbeat), и он именно РАСТИТ словарь новыми ключами: перезапись
         существующего ключа копию не ломает, и тест на ней был бы вакуумным.
+
+        Проверяются ОБА чтения. ``publications`` — вход сборщика тика и опроса,
+        то есть тот, чей отказ погасил бы телеметрию; ``snapshot`` — производная
+        проекция, у которой между взятием копии и её обходом лока уже нет, и
+        именно поэтому она обязана обходить КОПИЮ, а не живой словарь.
+        ``retract`` крутится тем же потоком — третий писатель, появившийся с
+        Р3.5-14, ходит в то же хранилище.
         """
         store = PluginLevels()
         stop = threading.Event()
@@ -454,15 +532,18 @@ class TestConcurrency:
         def writer() -> None:
             i = 0
             while not stop.is_set():
-                store.publish(f"level_{i}", i)
+                store.publish(f"level_{i}", i, "writer_plugin")
                 i += 1
+                if i >= _GROWTH_WINDOW:
+                    store.retract("writer_plugin")
+                    i = 0
 
         thread = threading.Thread(target=writer, daemon=True)
         thread.start()
         try:
-            for _ in range(2000):
+            for n in range(2000):
                 try:
-                    store.snapshot()
+                    store.publications() if n % 2 else store.snapshot()
                 except BaseException as exc:  # noqa: BLE001 — ловим ровно то, что ищем
                     errors.append(exc)
                     break
@@ -470,22 +551,31 @@ class TestConcurrency:
             stop.set()
             thread.join(timeout=5.0)
         assert not thread.is_alive(), "поток-писатель не завершился — тест повис бы"
-        assert not errors, f"снимок хранилища не пережил конкурентную запись: {errors!r}"
+        assert not errors, f"чтение хранилища не пережило конкурентную запись: {errors!r}"
 
 
 # --------------------------------------------------------------------------- #
 # Сборщик как чистая функция — без heartbeat и без дерева.
 # --------------------------------------------------------------------------- #
 class TestCollector:
-    def test_undeclared_names_are_reported_sorted_and_not_published(self):
-        payload, undeclared = build_plugin_levels({"b_unknown": 1, "a_unknown": 2}, None)
+    def test_unowned_names_are_reported_sorted_and_not_published(self):
+        payload, rejected = build_plugin_levels({"b_unknown": (1, "pub_b"), "a_unknown": (2, "pub_a")}, None)
         assert payload == {}
-        assert undeclared == ("a_unknown", "b_unknown")
+        # Тройка целиком: имя, публикатор и владелец (None = не объявлено никем).
+        assert rejected == (("a_unknown", "pub_a", None), ("b_unknown", "pub_b", None))
+
+    def test_a_foreign_owner_is_reported_with_the_owners_name(self):
+        """Чужое имя и необъявленное — РАЗНЫЕ диагнозы, различимы третьим элементом."""
+        _payload, rejected = build_plugin_levels({"fps": (99.0, "самозванец")}, None)
+        assert len(rejected) == 1
+        name, publisher, owner = rejected[0]
+        assert (name, publisher) == ("fps", "самозванец")
+        assert owner is not None and owner.startswith("multiprocess_framework."), owner
 
     def test_the_collector_does_not_mutate_its_input(self):
-        levels = {"x": 1}
+        levels = {"x": (1, "p")}
         build_plugin_levels(levels, None)
-        assert levels == {"x": 1}
+        assert levels == {"x": (1, "p")}
 
     def test_booleans_are_not_rounded_into_numbers(self):
         """``round(True, 1)`` вернул бы 1 — фронт, просочившийся в уровни, обязан
@@ -494,7 +584,7 @@ class TestCollector:
         ctx = PluginContext(services=services, config={}, plugin_name="bool_plugin")
         ctx.declare_metric("bool_level")
         ctx.publish_metric("bool_level", True)
-        payload, _ = build_plugin_levels({"bool_level": True}, None)
+        payload, _ = build_plugin_levels({"bool_level": (True, "bool_plugin")}, None)
         assert payload["bool_level"] is True
 
 
@@ -502,11 +592,15 @@ class TestWiringNotJustTheCollector:
     """Провод из ``_loop``, а не только сборщик.
 
     ДОБАВЛЕНО ВЛАДЕЛЬЦЕМ СПЕКИ (2026-08-16). Автор реализации назвал эту дыру сам:
-    инъекция «убрать вызов ``_publish_plugin_levels_to_tree`` из ``_loop``» красила
-    **ноль** тестов — и его набор, и приёмочный набор тестера зовут сборщик НАПРЯМУЮ.
+    инъекция «убрать вызов публикатора уровней из ``_loop``» красила **ноль**
+    тестов — и его набор, и приёмочный набор тестера зовут сборщик НАПРЯМУЮ.
     Механизм при этом остаётся идеальным, а система молча перестаёт публиковать:
     ровно класс «провод не проверен», который на этом проекте уже стоил находки
     «плагин не вызван молча».
+
+    Адрес инъекции после Р3.5-12 — вызов ``_publish_telemetry_to_tree`` в ``_loop``
+    (три прежних публикатора схлопнуты в один). Формулировка выше намеренно
+    осталась про ЭФФЕКТ, а не про имя метода: имя менять можно, провод — нет.
 
     Тест судит ЭФФЕКТ на боевом пути: крутится настоящий ``_loop`` в потоке-демоне
     с дедлайном join (зависший тест хуже отсутствующего), и уровень обязан появиться
@@ -539,3 +633,238 @@ class TestWiringNotJustTheCollector:
             f"боевой _loop не опубликовал уровень плагина (получили {pushed!r}) — "
             f"сборщик может быть исправен, а провод оборван"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Р3.5-12 — три ловушки объединения трёх merge в один.
+#
+# Каждая — не гипотеза, а место, где прежний код имел ранний выход или политику,
+# и где объединение могло их молча потерять. Судится ЧИСЛОМ вызовов merge и
+# составом единственного payload'а, а не формой внутренних функций.
+# --------------------------------------------------------------------------- #
+class _ShmRouter:
+    """Router с одним ненулевым счётчиком — чтобы группа ``shm`` реально ехала."""
+
+    def get_shm_stats(self) -> dict:
+        return {"frame_torn_reads": 3}
+
+
+class _ZeroRouter:
+    """Router со всеми нулями — политика публикатора обязана его промолчать."""
+
+    def get_shm_stats(self) -> dict:
+        return {}
+
+
+def _boot_hb(services: _Services) -> ProcessHeartbeat:
+    hb = ProcessHeartbeat(services)
+    services._heartbeat = hb
+    return hb
+
+
+class TestOneMergePerTick:
+    def _services_with_worker(self, name: str) -> _Services:
+        services = _Services(name=name)
+        services.worker_manager.get_all_workers_status = lambda: {  # type: ignore[attr-defined]
+            "w": {"status": "running", "effective_hz": 8.0, "cycle_duration_ms": 3.0}
+        }
+        return services
+
+    def test_workers_shm_and_levels_ride_one_merge(self):
+        """Три источника → один merge и один путь ``processes.<name>``."""
+        services = self._services_with_worker("one")
+        services.router_manager = _ShmRouter()
+        hb = _boot_hb(services)
+        ctx = PluginContext(services=services, config={}, plugin_name="one_plugin")
+        ctx.declare_metric("one_level")
+        ctx.publish_metric("one_level", 4.0)
+
+        hb._publish_telemetry_to_tree(services.worker_manager.get_all_workers_status(), None)
+
+        assert len(services._state_proxy.merges) == 1, services._state_proxy.merges
+        path, data = services._state_proxy.merges[0]
+        assert path == "processes.one"
+        assert data["workers"]["w"]["status"] == "running"
+        assert data["state"]["fps"] == 8.0
+        assert data["state"]["one_level"] == 4.0
+        assert data["state"]["shm"]["torn_reads"] == 3
+
+    def test_no_workers_does_not_swallow_levels_and_shm(self):
+        """ЛОВУШКА 1: прежний ранний выход по ``not workers`` жил в воркерном
+        публикаторе и глотал только воркерные листья — ``shm`` и уровни ехали
+        своими merge. В общей сборке тот же выход проглотил бы всё."""
+        services = _Services(name="nw")
+        services.worker_manager.get_all_workers_status = lambda: {}  # type: ignore[attr-defined]
+        services.router_manager = _ShmRouter()
+        hb = _boot_hb(services)
+        ctx = PluginContext(services=services, config={}, plugin_name="nw_plugin")
+        ctx.declare_metric("nw_level")
+        ctx.publish_metric("nw_level", 6.0)
+
+        hb._publish_telemetry_to_tree({}, None)
+
+        assert len(services._state_proxy.merges) == 1, services._state_proxy.merges
+        _path, data = services._state_proxy.merges[0]
+        assert "workers" not in data
+        assert data["state"]["nw_level"] == 6.0
+        assert data["state"]["shm"]["torn_reads"] == 3
+
+    def test_all_zero_shm_still_does_not_load_the_tree(self):
+        """ЛОВУШКА 2: «все счётчики нулевые → не грузим дерево» — политика
+        ПУБЛИКАТОРА, и она обязана уцелеть внутри объединённой сборки, а не
+        исчезнуть вместе со снятым методом. Соседний уровень при этом едет."""
+        services = _Services(name="zero")
+        services.worker_manager.get_all_workers_status = lambda: {}  # type: ignore[attr-defined]
+        services.router_manager = _ZeroRouter()
+        hb = _boot_hb(services)
+        ctx = PluginContext(services=services, config={}, plugin_name="zero_plugin")
+        ctx.declare_metric("zero_level")
+        ctx.publish_metric("zero_level", 1.0)
+
+        hb._publish_telemetry_to_tree({}, None)
+
+        assert len(services._state_proxy.merges) == 1, services._state_proxy.merges
+        _path, data = services._state_proxy.merges[0]
+        assert "shm" not in data["state"], data
+        assert data["state"]["zero_level"] == 1.0
+
+    def test_nothing_at_all_sends_zero_merges(self):
+        """ЛОВУШКА 3: данных нет вовсе → НОЛЬ вызовов merge, а не пустой merge."""
+        services = _Services(name="void")
+        services.worker_manager.get_all_workers_status = lambda: {}  # type: ignore[attr-defined]
+        services.router_manager = None
+        hb = _boot_hb(services)
+
+        hb._publish_telemetry_to_tree({}, None)
+
+        assert services._state_proxy.merges == []
+
+    def test_the_framework_aggregate_lies_on_top_of_plugin_levels(self):
+        """Fail-safe порядок наложения (а НЕ политика разрешения конфликта).
+
+        Спор за имя сюда не доходит — его снимает проверка владельца в сборщике,
+        и это сторожит соседний тест. Здесь проверяется само расположение: если
+        отбор когда-нибудь протечёт, поверх ляжет величина ФРЕЙМВОРКА, а не
+        подменённая. Судится сборкой payload'а напрямую, потому что через боевой
+        путь протечка (по построению отбора) не воспроизводится.
+        """
+        services = self._services_with_worker("order")
+        hb = _boot_hb(services)
+        # Подменяем шов сбора уровней так, будто отбор протёк и отдал 'fps'.
+        hb._collect_plugin_levels = lambda allowed, *, voice: {"fps": 999.0}  # type: ignore[assignment]
+
+        hb._publish_telemetry_to_tree(services.worker_manager.get_all_workers_status(), None)
+
+        _path, data = services._state_proxy.merges[0]
+        assert data["state"]["fps"] == 8.0, f"протёкший уровень плагина лёг ПОВЕРХ агрегата фреймворка: {data['state']}"
+
+
+# --------------------------------------------------------------------------- #
+# Р3.5-14 — свежесть жизненным циклом.
+# --------------------------------------------------------------------------- #
+class _ShutdownPublishingPlugin(ProcessModulePlugin):
+    """Плагин, который отдаёт ПОСЛЕДНЕЕ значение в собственном ``shutdown``.
+
+    Не выдумка ради теста: ровно так устроен ``CapturePlugin`` — на остановке
+    захвата он обнуляет частоту и публикует её, потому что следующего такта
+    метрик уже не будет.
+    """
+
+    category = "utility"
+
+    def configure(self, ctx: PluginContext) -> None:
+        ctx.declare_metric("dying_level")
+        ctx.publish_metric("dying_level", 5.0)
+
+    def shutdown(self, ctx: PluginContext) -> None:
+        ctx.publish_metric("dying_level", 0.0)
+
+
+class TestLifecycleRetract:
+    def test_retract_runs_after_the_plugins_own_shutdown(self):
+        """Снятие ПОСЛЕ пользовательского ``shutdown``, а не до.
+
+        До — и последнее значение, отданное в самом ``shutdown``, осталось бы
+        висеть в дереве навсегда: снимать было бы уже нечего. Это единственный
+        порядок, при котором работают обе половины.
+        """
+        services, _hb = _boot(name="dying")
+        ctx = PluginContext(services=services, config={}, plugin_name="dying_plugin")
+        plugin = _ShutdownPublishingPlugin()
+        plugin.name = "dying_plugin"
+        plugin._do_configure(ctx)
+        store = getattr(services, PLUGIN_LEVELS_ATTR)
+        assert store.snapshot() == {"dying_level": 5.0}
+
+        plugin._do_shutdown(ctx)
+
+        assert store.snapshot() == {}, (
+            f"уровень пережил остановку плагина: {store.snapshot()} "
+            "— снятие идёт ДО пользовательского shutdown либо не идёт вовсе"
+        )
+
+    def test_retract_takes_only_this_owners_levels(self):
+        services, _hb = _boot(name="pair")
+        base = PluginContext(services=services, config={})
+        ctx_a = base.with_config({}, plugin_name="pair_a")
+        ctx_b = base.with_config({}, plugin_name="pair_b")
+        ctx_a.declare_metric("pair_level_a")
+        ctx_b.declare_metric("pair_level_b")
+        ctx_a.publish_metric("pair_level_a", 1.0)
+        ctx_b.publish_metric("pair_level_b", 2.0)
+
+        assert ctx_a._retract_metrics() == 1
+        store = getattr(services, PLUGIN_LEVELS_ATTR)
+        assert store.snapshot() == {"pair_level_b": 2.0}
+
+    def test_retract_without_a_store_is_a_named_zero_not_an_error(self):
+        """Процесс без телеметрии останавливает плагины как обычно."""
+        services = MockProcessServices(name="bare_retract")
+        ctx = PluginContext(services=services, config={}, plugin_name="bare_retract_plugin")
+        assert ctx._retract_metrics() == 0
+
+    def test_the_declaration_survives_the_retract(self):
+        """Снимается ПУБЛИКАЦИЯ, не объявление: поднятый заново плагин объявится
+        тем же владельцем (это не конфликт), а забытое объявление восстанавливать
+        было бы некому."""
+        services, hb = _boot(name="redeclare")
+        ctx = PluginContext(services=services, config={}, plugin_name="redeclare_plugin")
+        ctx.declare_metric("survivor_level")
+        ctx.publish_metric("survivor_level", 3.0)
+        ctx._retract_metrics()
+
+        assert "survivor_level" in declared_metrics()
+        ctx.publish_metric("survivor_level", 4.0)
+        _tick_levels(hb)
+        assert _tree(services, "survivor_level") == 4.0
+
+
+# --------------------------------------------------------------------------- #
+# Владелец считается в ОДНОМ месте — судится эффектом на боевой тройке.
+# --------------------------------------------------------------------------- #
+class TestOwnerIsComputedOnce:
+    def test_declare_publish_and_retract_agree_on_the_owner(self):
+        """Три дороги, один владелец. Разойдись хоть одна — уровень либо не
+        поедет (владелец не равен публикатору), либо не снимется на остановке.
+        Судится эффектом: объявил → уехало → сняли → исчезло."""
+        services, hb = _boot(name="triple")
+        ctx = PluginContext(services=services, config={}, plugin_name="triple_plugin")
+        ctx.declare_metric("triple_level")
+        ctx.publish_metric("triple_level", 7.0)
+
+        _tick_levels(hb)
+        assert _tree(services, "triple_level") == 7.0, "объявление и публикация разошлись во владельце"
+
+        assert ctx._retract_metrics() == 1, "снятие разошлось во владельце с публикацией"
+        assert _polled_state(services).get("triple_level") is None
+
+    def test_a_context_without_a_plugin_name_owns_by_process_on_all_three(self):
+        """Тот же треугольник для базового ctx (владелец — имя процесса)."""
+        services, hb = _boot(name="proc_owner")
+        ctx = PluginContext(services=services, config={})
+        ctx.declare_metric("proc_owned_level")
+        ctx.publish_metric("proc_owned_level", 2.0)
+
+        _tick_levels(hb)
+        assert _tree(services, "proc_owned_level") == 2.0
+        assert ctx._retract_metrics() == 1

@@ -6,6 +6,14 @@
   - None когда публиковать нечего;
   - **число сообщений**: публикатор шлёт ОДИН proxy.merge вместо 3W+2 proxy.set
     (снижение ~в W раз) — свойство через fake-proxy со счётчиком.
+
+Р3.5-12 расширила это свойство: тот же ОДИН merge несёт теперь и группу ``shm``, и
+уровни плагинов (раньше — два дополнительных merge того же тика). Публикатор здесь
+один — ``ProcessHeartbeat._publish_telemetry_to_tree``; ``shm`` читается из
+``data["state"]["shm"]`` того же payload'а, а не из отдельного сообщения по пути
+``processes.<name>.state.shm``. Свойства, которые сторожат тесты ниже, прежние:
+полный набор счётчиков, «каждое слагаемое открывает гейт в одиночку», «все нули —
+молчим», «нет router'а — молчим».
 """
 
 from __future__ import annotations
@@ -110,7 +118,7 @@ class TestMergeBatching:
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServices(proxy))
 
-        hb._publish_metrics_to_tree(_workers(W))
+        hb._publish_telemetry_to_tree(_workers(W))
 
         assert proxy.merge_calls == 1, "ожидался ровно один merge (батч)"
         assert proxy.set_calls == 0, "прямых set быть не должно (иначе не батч)"
@@ -123,7 +131,7 @@ class TestMergeBatching:
     def test_no_workers_no_message(self) -> None:
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServices(proxy))
-        hb._publish_metrics_to_tree({})
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 0
         assert proxy.set_calls == 0
 
@@ -154,10 +162,11 @@ class TestH8RouterShmStatsPublish:
         proxy = _CountingProxy()
         router = _FakeRouter({"frame_pickle_fallbacks": 2, "frame_torn_reads": 5, "frame_boundary_crossings": 100})
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 1
-        path, data = proxy.merged[0]
-        assert path == "processes.proc.state.shm"
+        path, payload = proxy.merged[0]
+        assert path == "processes.proc"
+        data = payload["state"]["shm"]
         # Ф7 G.4.a: queue_data_evicted добавлен в тот же publish (0, т.к. в статах нет).
         # Ф7 G.5.c: stale_drops (post-use re-check zero-copy view) в том же наборе.
         # Ф7 G.5.d: loan_exhausted (исчерпание free-list В3) — там же.
@@ -204,10 +213,10 @@ class TestH8RouterShmStatsPublish:
             }
         )
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 1
-        _, data = proxy.merged[0]
-        assert data["cache_size"] == 2
+        _, payload = proxy.merged[0]
+        assert payload["state"]["shm"]["cache_size"] == 2
 
     def test_publishes_when_only_queue_evicted_nonzero(self) -> None:
         """Ф7 G.4.a: дроп data-очереди публикуется, даже если SHM-счётчики нулевые
@@ -217,10 +226,10 @@ class TestH8RouterShmStatsPublish:
             {"frame_pickle_fallbacks": 0, "frame_torn_reads": 0, "frame_boundary_crossings": 0, "queue_data_evicted": 9}
         )
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 1
-        _, data = proxy.merged[0]
-        assert data["queue_data_evicted"] == 9
+        _, payload = proxy.merged[0]
+        assert payload["state"]["shm"]["queue_data_evicted"] == 9
 
     def test_publishes_when_only_system_blocked_nonzero(self) -> None:
         """Ф7 G.4.a: блокировка вытеснения system-очереди публикуется (control-plane
@@ -236,10 +245,10 @@ class TestH8RouterShmStatsPublish:
             }
         )
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 1
-        _, data = proxy.merged[0]
-        assert data["queue_system_evict_blocked"] == 4
+        _, payload = proxy.merged[0]
+        assert payload["state"]["shm"]["queue_system_evict_blocked"] == 4
 
     def test_publishes_when_only_stale_drops_nonzero(self) -> None:
         """Ф7 G.5.c: дроп по post-use re-check zero-copy view публикуется даже при
@@ -256,10 +265,10 @@ class TestH8RouterShmStatsPublish:
             }
         )
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 1
-        _, data = proxy.merged[0]
-        assert data["stale_drops"] == 7
+        _, payload = proxy.merged[0]
+        assert payload["state"]["shm"]["stale_drops"] == 7
 
     def test_publishes_when_only_loan_exhausted_nonzero(self) -> None:
         """Ф7 G.5.d: исчерпание free-list (В3 back-pressure) публикуется даже при нулевых
@@ -277,10 +286,10 @@ class TestH8RouterShmStatsPublish:
             }
         )
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 1
-        _, data = proxy.merged[0]
-        assert data["loan_exhausted"] == 3
+        _, payload = proxy.merged[0]
+        assert payload["state"]["shm"]["loan_exhausted"] == 3
 
     #: Гейт публикации — «все нули → молчим». Каждое слагаемое обязано уметь
     #: открыть его В ОДИНОЧКУ: слагаемое, снятие которого ничего не ломает, и
@@ -314,10 +323,11 @@ class TestH8RouterShmStatsPublish:
         router = _FakeRouter({key: 0 for key, _ in self.GATE_SUMMANDS} | {stat_key: 7})
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
 
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
 
         assert proxy.merge_calls == 1, f"'{stat_key}' не открывает гейт публикации — счётчик наружу не выйдет никогда"
-        _, data = proxy.merged[0]
+        _, payload = proxy.merged[0]
+        data = payload["state"]["shm"]
         assert data[tree_key] == 7, f"'{stat_key}' открыл гейт, но не доехал под именем '{tree_key}'"
 
     def test_noop_when_all_zero(self) -> None:
@@ -326,11 +336,11 @@ class TestH8RouterShmStatsPublish:
             {"frame_pickle_fallbacks": 0, "frame_torn_reads": 0, "frame_boundary_crossings": 0, "queue_data_evicted": 0}
         )
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 0  # чисто → не засоряем дерево
 
     def test_noop_without_router(self) -> None:
         proxy = _CountingProxy()
         hb = ProcessHeartbeat(_FakeServicesRouter(proxy, None))
-        hb._publish_router_shm_stats_to_tree()
+        hb._publish_telemetry_to_tree({})
         assert proxy.merge_calls == 0

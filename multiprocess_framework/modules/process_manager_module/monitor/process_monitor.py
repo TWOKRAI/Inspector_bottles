@@ -266,7 +266,7 @@ class ProcessMonitor:
         # Сохраняем данные о воркерах процесса (для legacy full-status broadcast).
         # Телеметрию (per-worker + агрегат fps/latency) в дерево здесь НЕ публикуем:
         # каждый процесс делает это сам (self-publish — ProcessHeartbeat.
-        # _publish_metrics_to_tree). Heartbeat ProcessManager-у нужен только для
+        # _publish_telemetry_to_tree). Heartbeat ProcessManager-у нужен только для
         # liveness/timeout и переходов paused/running. См.
         # plans/telemetry-self-publish-redesign.md (Task 2).
         workers = msg.get("workers_status")

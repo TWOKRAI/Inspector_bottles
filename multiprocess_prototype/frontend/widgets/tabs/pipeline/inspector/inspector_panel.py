@@ -36,6 +36,13 @@ from .selectors_data import (
 
 logger = get_std_logger(__name__)
 
+#: Плагины-источники кадров, для которых показывается секция «Камера (actual)».
+#: Прикладной список в прикладном слое — фреймворк имён плагинов не знает.
+#: ``camera_service`` пишет ``cam.actual.*`` (cap.get симулятора/вебкамеры),
+#: ``capture`` — измеренную частоту ``state.capture_fps``. В рецептах они
+#: взаимоисключающи, поэтому у каждой ноды часть строк секции — прочерк.
+_CAMERA_PLUGINS = frozenset({"camera_service", "capture"})
+
 
 class NodeInspectorPanel(QWidget):
     """Панель параметров выбранного узла pipeline.
@@ -342,8 +349,17 @@ class NodeInspectorPanel(QWidget):
             # уйдёт SetPluginConfig при правке поля.
             self._params_section.build(plugin_name or node_id, params, plugins)
 
-            # Actual-телеметрия камеры (Phase 3): только для camera_service.
-            if (plugin_name or node_id) == "camera_service":
+            # Actual-телеметрия камеры (Phase 3): для КАМЕРНОЙ ноды.
+            #
+            # Было `== "camera_service"`. Расширено 2026-08-17 (Р3.5-15): секция
+            # получила строку «FPS (измеренный)» по `state.capture_fps`, а пишет
+            # её `CapturePlugin` с plugin_name `capture`. Проверено по всем 14
+            # рецептам: `camera_service` и `capture` НИКОГДА не живут в одном
+            # процессе — это взаимоисключающие источники (симулятор против
+            # реальной вебкамеры). Без расширения новая строка была бы мертва
+            # везде: у `camera_service` листа нет, а `capture`-нода секцию не
+            # показывает вовсе.
+            if (plugin_name or node_id) in _CAMERA_PLUGINS:
                 self._show_camera_actual(self._current_process)
             else:
                 self._hide_camera_actual()

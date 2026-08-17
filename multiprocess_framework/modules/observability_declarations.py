@@ -67,6 +67,7 @@ __all__ = [
     "declared_rules",
     "declare_metric",
     "declared_metrics",
+    "metric_owners",
     "forget_declarations",
 ]
 
@@ -243,6 +244,29 @@ def declared_metrics() -> Tuple[str, ...]:
     """
     with _LOCK:
         return tuple(sorted(name for (kind, name) in _DECLARED if kind == KIND_METRIC))
+
+
+def metric_owners() -> Dict[str, str]:
+    """Объявленные метрики: ``имя → владелец``. Зеркало :func:`declared_sources`.
+
+    Реестр владельца хранил с самого начала (на нём стоит отказ ``_declare``
+    второму объявителю), но наружу отдавал только СПИСОК имён
+    (:func:`declared_metrics`). Из-за этого инвариант «одно имя — один владелец»
+    действовал ровно до конца объявления: дальше публиковать в чужое имя мог кто
+    угодно, потому что спросить «чьё это имя» было не у кого. Воспроизведено
+    2026-08-16: плагин, не объявивший ``fps``, публиковал в него значение, и
+    сборщик уровней его пропускал — имя есть в каталоге, а чьё оно, сборщик не
+    спрашивал.
+
+    Отличие от :func:`declared_metrics` — то же, что у пары
+    ``declared_sources``/список имён: там ответ «что бывает», здесь «чьё это».
+
+    Returns:
+        Копия среза плоскости ``KIND_METRIC`` — мутация результата реестр не
+        трогает.
+    """
+    with _LOCK:
+        return {name: owner for (kind, name), (owner, _rule) in _DECLARED.items() if kind == KIND_METRIC}
 
 
 def forget_declarations(kind: Optional[str] = None, *, names: Optional[Iterable[str]] = None) -> None:

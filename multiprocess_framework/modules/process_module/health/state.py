@@ -4,7 +4,7 @@
 Роль: единый на процесс аккумулятор здоровья, который наполняют плагины через
 ``ctx.health`` (фасад :class:`HealthReporter`), а публикует в state-дерево
 heartbeat процесса (тот же self-publish канал, что и телеметрия fps/latency —
-см. ``ProcessHeartbeat._publish_metrics_to_tree``). Новый IPC-канал НЕ вводится.
+см. ``ProcessHeartbeat._publish_telemetry_to_tree``). Новый IPC-канал НЕ вводится.
 
 Ключевые свойства:
 - **rate-limit.** Публикация — по такту heartbeat (раз в ``heartbeat_interval``),

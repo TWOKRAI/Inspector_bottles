@@ -607,6 +607,7 @@
     "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
     "replace_debounce_s": 1.0,
     "state_throttle_rules": {
+      "processes.**.state.capture_fps": 0.05,
       "processes.**.state.drops": 0.05,
       "processes.**.state.fps": 0.05,
       "processes.**.state.frame_count": 0.05,

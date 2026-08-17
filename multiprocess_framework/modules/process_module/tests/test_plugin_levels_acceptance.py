@@ -20,6 +20,9 @@
      / `_publish_health_to_tree` (все три — реальные, уже существующие методы). Если
      разработчик назвал иначе, `_run_plugin_levels_tick` ниже упадёт с ЯВНЫМ
      сообщением, а не тихим `AttributeError` без контекста.
+     ОБНОВЛЕНО Р3.5-12 (2026-08-16): три публикатора тика схлопнуты в один,
+     `_publish_telemetry_to_tree`. Догадка тестера была верна для своего времени;
+     свойства, которые он сторожил, не изменились — изменился адрес их вызова.
   2. Владелец объявления передаётся `PluginContext` через `plugin_name=...` в
      конструкторе. Если это не так — `TestDeclareConflict._make_ctx` падает с
      сообщением, что нужно переписать способ различения владельцев.
@@ -58,16 +61,19 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 def _metric_registry_guard():
     from multiprocess_framework.modules.observability_declarations import (
         KIND_METRIC,
-        declare_metric,
         declared_metrics,
         forget_declarations,
     )
 
     before = set(declared_metrics())
     yield
-    forget_declarations(KIND_METRIC)
-    for name in before:
-        declare_metric(name, owner="test_restore_plugin_levels_acceptance")
+    # ПРАВКА ВЛАДЕЛЬЦА СПЕКИ (2026-08-16, Р3.5-11): точечно, а не сплошной очисткой
+    # с восстановлением. Прежняя форма возвращала имена, но с ЧУЖИМ владельцем
+    # ("test_restore_..."), и с приходом проверки владения (build_plugin_levels
+    # сверяет публикатора с владельцем имени) это перестало быть косметикой:
+    # после такого teardown `fps` числился бы за тестом, а не за фреймворком, и
+    # соседние тесты судили бы подменённый реестр. См. docstring forget_declarations.
+    forget_declarations(KIND_METRIC, names=set(declared_metrics()) - before)
 
 
 # --------------------------------------------------------------------------- #
@@ -199,16 +205,16 @@ def _run_plugin_levels_tick(hb: ProcessHeartbeat, *, allowed_metrics=None):
     модуля) по конвенции соседей. Отсутствие атрибута = отдельная, явная причина
     падения — не путать с обычным ``AttributeError`` без контекста.
     """
-    fn = getattr(hb, "_publish_plugin_levels_to_tree", None)
+    fn = getattr(hb, "_publish_telemetry_to_tree", None)
     if fn is None:
         pytest.fail(
-            "ProcessHeartbeat не предоставляет '_publish_plugin_levels_to_tree' — "
-            "сборщик уровней плагина ещё не подключён к тику процесса (Task 3.5 не "
-            "реализована, либо метод назван иначе — имя выведено по конвенции "
-            "'_publish_metrics_to_tree' / '_publish_router_shm_stats_to_tree' / "
-            "'_publish_health_to_tree', см. docstring файла)"
+            "ProcessHeartbeat не предоставляет '_publish_telemetry_to_tree' — сборщик телеметрии тика не подключён"
         )
-    return fn(allowed_metrics=allowed_metrics)
+    # Воркеров нет намеренно: этот файл судит УРОВЕНЬ, а не агрегат. До Р3.5-12
+    # уровни ехали своим merge; теперь их несёт общий payload тика, и пустой
+    # снимок воркеров его не отменяет (ровно ловушка №1 объединения — ранний
+    # выход по `not workers` не имеет права проглотить уровни и shm).
+    return fn({}, allowed_metrics=allowed_metrics)
 
 
 def _dispatch_introspect_telemetry(services: _ProcServices) -> dict:

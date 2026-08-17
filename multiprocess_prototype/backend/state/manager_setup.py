@@ -48,6 +48,10 @@ def _default_throttle_rules() -> dict[str, float]:
     return {
         # Метрики карточки процесса (state.*) — мягкий предохранитель, не авторитет частоты.
         "processes.**.state.fps": interval,
+        # Измеренная частота захвата — свой лист, свой предохранитель (Р3.5-13).
+        # Не авторитет частоты: ею управляет publisher-gate, здесь только страховка
+        # от runaway-публикатора (ADR-PM-017).
+        "processes.**.state.capture_fps": interval,
         "processes.**.state.latency_ms": interval,
         "processes.**.state.uptime": interval,
         "processes.**.state.frame_count": interval,

@@ -116,6 +116,23 @@ class _Proxy:
         self.set_calls += 1
 
 
+def _pushed_shm(proxy: "_Proxy") -> list[dict]:
+    """Группы ``shm``, реально уехавшие push'ем за прогон.
+
+    Р3.5-12 сложила три merge тика в один: ``shm`` больше не отдельное сообщение
+    по пути ``processes.<name>.state.shm``, а секция ``state.shm`` внутри общего
+    payload'а под ``processes.<name>``. Свойство, которое сторожат вызывающие,
+    осталось прежним — «группа уехала / не уехала, и в ней полный набор», —
+    поэтому адрес чтения переехал сюда, в одно место, а не в каждый assert.
+    """
+    out: list[dict] = []
+    for _path, data in proxy.merged:
+        shm = (data.get("state") or {}).get("shm")
+        if shm is not None:
+            out.append(shm)
+    return out
+
+
 class _BlockingProxy(_Proxy):
     """Замирает ВНУТРИ первого merge — рандеву на операции публикации (H1)."""
 
@@ -397,8 +414,7 @@ class TestShmPublisherGuardPreserved:
 
         _one_tick(svc._heartbeat)
 
-        paths = [p for p, _ in proxy.merged]
-        assert not any(p.endswith("state.shm") for p in paths), paths
+        assert _pushed_shm(proxy) == [], proxy.merged
 
     def test_single_nonzero_counter_publishes_the_full_set(self) -> None:
         proxy = _Proxy()
@@ -407,7 +423,7 @@ class TestShmPublisherGuardPreserved:
 
         _one_tick(svc._heartbeat)
 
-        shm = [d for p, d in proxy.merged if p.endswith("state.shm")]
+        shm = _pushed_shm(proxy)
         assert len(shm) == 1, proxy.merged
         assert set(shm[0]) == SHM_KEYS
         assert shm[0]["torn_reads"] == 3
@@ -423,7 +439,7 @@ class TestShmPublisherGuardPreserved:
         _one_tick(svc._heartbeat)
 
         assert router.calls == 0
-        assert not any(p.endswith("state.shm") for p, _ in proxy.merged)
+        assert _pushed_shm(proxy) == [], proxy.merged
 
 
 # ============================================================================ #
@@ -436,7 +452,7 @@ class TestShmTravelsWithThePoll:
         svc, cm = _make(workers=WORKERS, proxy=proxy, router=router)
 
         _one_tick(svc._heartbeat)
-        pushed = [d for p, d in proxy.merged if p.endswith("state.shm")][0]
+        pushed = _pushed_shm(proxy)[0]
 
         levels = cm.dispatch("introspect.telemetry")["levels"]
 
@@ -455,7 +471,7 @@ class TestShmTravelsWithThePoll:
         svc._heartbeat.reconfigure_telemetry({"metrics": {"shm": {"enabled": False}}})
 
         _one_tick(svc._heartbeat)
-        assert not any(p.endswith("state.shm") for p, _ in proxy.merged)
+        assert _pushed_shm(proxy) == [], proxy.merged
 
         levels = cm.dispatch("introspect.telemetry")["levels"]
         assert levels["state"]["shm"]["torn_reads"] == 3

@@ -193,6 +193,71 @@ class TestLiveUpdateViaVm:
 
         assert panel._card._metric_labels["Циклов/с"].text() == "42.0"
 
+    def test_camera_card_shows_the_cycle_rate_not_the_capture_rate(self, qtbot) -> None:
+        """Карточка камерного процесса показывает частоту ЦИКЛА, и только её.
+
+        ПЕРЕПИСАН 2026-08-17 (поправка владельца к Р3.5-15). Прежняя редакция
+        требовала ВТОРОЙ слот «Кадров/с» на карточке; слот снят, потому что
+        карточка generic — ``_METRIC_KEYS`` константа на ВСЕ процессы, и
+        прикладное понятие «кадры» в универсальном месте даёт вечный прочерк
+        шести процессам из семи (а следующий домен принёс бы «Изделий/с»).
+
+        Свойство, которое тест сторожил, уцелело и стало строже: обе величины
+        приходят ОДНОВРЕМЕННО и с разными числами, и карточка обязана показать
+        частоту цикла — не частоту захвата. Если кто-нибудь снова свяжет
+        ``capture_fps`` со слотом карточки, тест покраснеет поимённо.
+        """
+        vm = TelemetryViewModel()
+        panel = AllProcessesPanel(_presenter(), None, telemetry=vm)
+        qtbot.addWidget(panel)
+
+        vm.on_state_delta(_delta("processes.camera_0.state.fps", 21.4))
+        vm.on_state_delta(_delta("processes.camera_0.state.capture_fps", 12.5))
+        qtbot.wait(50)
+
+        labels = panel._cards["camera_0"]._metric_labels
+        assert labels["Циклов/с"].text() == "21.4"
+        assert "12.5" not in labels["Циклов/с"].text()
+
+    def test_capture_fps_reaches_no_card_slot_at_all(self, qtbot) -> None:
+        """Негативный: ``capture_fps`` не попадает НИ В ОДИН слот карточки.
+
+        Судится по всем меткам сразу, а не по одной угаданной: слот с прикладным
+        именем мог бы вернуться под любым заголовком, и проверка одного ключа
+        поймала бы только тот, который автор теста угадал. Заодно фиксирует, что
+        слота «Кадров/с» на generic-карточке нет.
+        """
+        vm = TelemetryViewModel()
+        panel = AllProcessesPanel(_presenter(), None, telemetry=vm)
+        qtbot.addWidget(panel)
+
+        vm.on_state_delta(_delta("processes.camera_0.state.capture_fps", 12.5))
+        qtbot.wait(50)
+
+        labels = panel._cards["camera_0"]._metric_labels
+        assert "Кадров/с" not in labels, f"прикладной слот вернулся на generic-карточку: {sorted(labels)}"
+        shown = {key: lbl.text() for key, lbl in labels.items()}
+        assert not any("12.5" in text for text in shown.values()), shown
+
+    def test_single_panel_card_ignores_capture_fps_too(self, qtbot) -> None:
+        """Панель одного процесса — ВТОРАЯ, независимая точка привязки.
+
+        Две панели держат два своих списка setter'ов; снятие привязки в одной не
+        снимает её в другой, и без этого теста забытый возврат слота был бы виден
+        только глазом на живом стенде.
+        """
+        vm = TelemetryViewModel()
+        panel = SingleProcessPanel(_presenter(), None, "camera_0", telemetry=vm)
+        qtbot.addWidget(panel)
+
+        vm.on_state_delta(_delta("processes.camera_0.state.fps", 21.4))
+        vm.on_state_delta(_delta("processes.camera_0.state.capture_fps", 12.5))
+        qtbot.wait(50)
+
+        labels = panel._card._metric_labels
+        assert "Кадров/с" not in labels, sorted(labels)
+        assert labels["Циклов/с"].text() == "21.4"
+
     def test_single_panel_runtime_worker_discovered_and_updated(self, qtbot) -> None:
         """Рантайм-воркер обнаруживается из батча (discover) и обновляется по VM."""
         vm = TelemetryViewModel()

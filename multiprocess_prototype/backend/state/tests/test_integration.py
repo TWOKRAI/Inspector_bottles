@@ -374,6 +374,9 @@ class TestManagerSetup:
     _SAFETY = 0.05
     _DEFAULT_RULES = {
         "processes.**.state.fps": _SAFETY,
+        # Р3.5-13: измеренная частота захвата разведена с частотой цикла воркера
+        # и получила СВОЙ лист — значит и свой мягкий предохранитель.
+        "processes.**.state.capture_fps": _SAFETY,
         "processes.**.state.latency_ms": _SAFETY,
         "processes.**.state.uptime": _SAFETY,
         "processes.**.state.frame_count": _SAFETY,

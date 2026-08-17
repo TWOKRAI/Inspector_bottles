@@ -93,7 +93,7 @@ class TestReconfigureGate:
         )
         gate = hb._telemetry_gate
         allowed = gate.due_metrics(now=0.0)
-        hb._publish_metrics_to_tree(_workers(2), allowed)
+        hb._publish_telemetry_to_tree(_workers(2), allowed)
 
         assert proxy.merged, "нет публикации"
         _, data = proxy.merged[-1]
