@@ -264,9 +264,9 @@ class TestLiveLayerVoiceControlGroup:
 
         live_voices = _voice_texts(mock_logger, _LIVE_POSITION)
         assert len(live_voices) == 1, (
-            f"контроль: живой слой обязан подать РОВНО один голос за непрерывное "
-            f"переполнение (несколько окон подряд, условие не снималось), "
-            f"получено {len(live_voices)}"
+            f"контроль: живой слой обязан подать РОВНО один голос на ПЕРЕХОД в "
+            f"состояние переполнения; в сценарии переход ровно один (одно "
+            f"закрытие окна одним flush), получено {len(live_voices)}"
         )
 
         expected_dropped = total_series - max_series  # = 2, из сценария
