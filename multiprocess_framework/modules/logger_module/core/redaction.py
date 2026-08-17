@@ -209,6 +209,37 @@ def _message_may_carry_secret(message: str) -> bool:
     )
 
 
+def redact_text(text: str) -> str:
+    """Публичная дверь к текстовой поверхности редактора — та же цепочка, что
+    внутри :meth:`SecretRedactor.__call__` применяется к ``message``.
+
+    Заведена задачей S-2 (Ф6, ``observability_flight``): шапка flight-дампа
+    собирает ``reason`` НАПРЯМУЮ из аргумента вызывающего, минуя запись лога и
+    сам ``SecretRedactor`` (см. модульный докстринг ``observability_flight.py``).
+    Вторая копия правил (свой список имён, своя регулярка) молча разошлась бы с
+    этой при первой же правке :data:`SECRET_FIELD_NAMES` — поэтому здесь не
+    копия, а прямой вызов тех же двух регулярок и того же предфильтра.
+
+    Дешёвый путь сохранён: строка без корня секретного имени (и без ``://``)
+    возвращается ТЕМ ЖЕ объектом, без единой аллокации регулярки.
+    """
+    if not _message_may_carry_secret(text):
+        return text
+    return _MESSAGE_RE.sub(_mask_message_match, _URL_CREDENTIALS_RE.sub(_mask_url_credentials, text))
+
+
+def redact_mapping(source: Dict[Any, Any]) -> Dict[Any, Any]:
+    """Публичная дверь к поверхности ``extra`` — копия словаря с замаскированными
+    значениями секретных ключей (рекурсивно, до :data:`MAX_DEPTH`).
+
+    Та же реализация, что :meth:`SecretRedactor.__call__` применяет к ``extra``
+    — не вторая копия набора правил. Свойство копии (не правки на месте)
+    подробно объяснено у :func:`_redact_mapping`, которую эта функция вызывает
+    напрямую.
+    """
+    return _redact_mapping(source)
+
+
 def _has_secret_key(value: Any, depth: int = 0) -> bool:
     """Есть ли что маскировать. Ни одной аллокации — это путь чистой записи."""
     if depth > MAX_DEPTH or not isinstance(value, dict):
@@ -277,11 +308,13 @@ class SecretRedactor:
             # косметическая: слово ``keyboard`` проходит предфильтр, и без
             # сверки результата счётчик ``records_redacted`` считал бы такие
             # записи отредактированными, а копия строилась бы впустую.
+            #
+            # ``redact_text`` внутри сама делает ровно этот предфильтр и при
+            # его молчании возвращает ТОТ ЖЕ объект строки — сверка
+            # ``is not`` ниже поэтому остаётся дешёвой и на message без секрета.
             new_message = message
-            if isinstance(message, str) and _message_may_carry_secret(message):
-                new_message = _MESSAGE_RE.sub(
-                    _mask_message_match, _URL_CREDENTIALS_RE.sub(_mask_url_credentials, message)
-                )
+            if isinstance(message, str):
+                new_message = redact_text(message)
             dirty_message = new_message is not message and new_message != message
 
             if not dirty_extra and not dirty_message:
@@ -292,7 +325,7 @@ class SecretRedactor:
 
             redacted = dict(record)
             if dirty_extra:
-                redacted["extra"] = _redact_mapping(extra)
+                redacted["extra"] = redact_mapping(extra)
             if dirty_message:
                 # Порядок двух подстановок проверен, а не выведен: на четырёх
                 # формах (``dsn=`` с URL, ``token=`` с URL, JSON-пара с URL

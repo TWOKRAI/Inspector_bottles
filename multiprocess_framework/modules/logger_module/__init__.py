@@ -46,6 +46,7 @@ from ..channel_routing_module.levels import (
 # Ранги переехали в общую базу (Ф0.6/R6); здесь остаются в публичном экспорте
 # logger_module — исторические потребители не обязаны знать о переезде.
 from .core.error_floor import ErrorFloor, get_error_floor, reset_error_floors
+from .core.redaction import redact_mapping, redact_text
 from .adapters.std_facade import StdLoggerFacade, get_std_logger
 from .interfaces import ILoggerManager, ILogChannel
 
@@ -76,6 +77,8 @@ __all__ = [
     "ErrorFloor",
     "get_error_floor",
     "reset_error_floors",
+    "redact_text",
+    "redact_mapping",
     "StdLoggerFacade",
     "get_std_logger",
     "ILoggerManager",
