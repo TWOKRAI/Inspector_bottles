@@ -9,7 +9,7 @@ histogram — распределение. При flush() отправляет а
 
 import time
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ...channel_routing_module.interfaces import IBufferStrategy
 from .cardinality_guard import CardinalityGuard
@@ -175,7 +175,7 @@ class AggregationWindow(IBufferStrategy):
         """
         with self._lock:
             channels = list(self._channels_seen)
-            snapshot = self._build_snapshot()
+            snapshot, refused = self._build_snapshot()
             self._metrics.clear()
             # Счётчик сбросов растёт ВСЕГДА, даже когда снапшот подавлен: сброс
             # состоялся (окно опустошено, такт прошёл), не состоялась только доставка.
@@ -188,17 +188,29 @@ class AggregationWindow(IBufferStrategy):
 
         # Голос стража — ВНЕ лока и ДО подавления пустого снапшота: закрытие
         # окна состоялось в обоих случаях, а предупреждение про потолок не
-        # имеет права зависеть от того, поехал снапшот или нет.
+        # имеет права зависеть от того, поехал снапшот или нет. Отчёт передаётся
+        # аргументом — тот САМЫЙ, что уехал в снапшот: страж своё состояние уже
+        # обнулил внутри `_build_snapshot`, и читать его тут было бы чтением
+        # нулей (ровно этим голос окна и врал — «опущено серий 0» при верном
+        # `series_dropped`).
         if self._guard is not None:
-            self._guard.speak()
+            self._guard.speak(refused)
         if suppressed:
             return
 
         for ch in channels:
             self._call_flush_fn(ch, [snapshot])
 
-    def _build_snapshot(self) -> Dict[str, Any]:
-        """Построить агрегированный снапшот.
+    def _build_snapshot(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Построить агрегированный снапшот. Возвращает ``(снапшот, отчёт стража)``.
+
+        **Отчёт возвращается наружу намеренно.** Закрытие окна забирает у стража
+        периодные числа ровно ОДИН раз (``take_report`` чистит множество ключей
+        и имена эпизода), а потребителей у них два: запись снапшота и голос
+        оператору. Пока голос читал состояние стража сам, он читал уже
+        обнулённое — и правильность держалась на порядке двух вызовов, который
+        ничем не принуждался. Возврат парой этот порядок делает невозможным
+        нарушить: у голоса просто нет второго источника.
 
         ``total_count`` — сколько СЕРИЙ было в окне, а не сколько доехало:
         доехавшие плюс РАЗЛИЧНЫЕ опущенные потолком. По этому числу снаружи
@@ -250,7 +262,7 @@ class AggregationWindow(IBufferStrategy):
                 # едет ТОЛЬКО когда он истинен, но молчать о нём нельзя:
                 # заниженное число, выглядящее точным, читатель примет за факт.
                 snapshot["series_dropped_is_lower_bound"] = True
-        return snapshot
+        return snapshot, refused
 
     def _flush_channel(self, channel: str, include_empty: bool = False) -> None:
         """Сбросить один канал (отправляет полный снапшот).
@@ -260,7 +272,7 @@ class AggregationWindow(IBufferStrategy):
         живым на соседней развилке.
         """
         with self._lock:
-            snapshot = self._build_snapshot()
+            snapshot, refused = self._build_snapshot()
             self._metrics.clear()
             self._total_flushes += 1
             suppressed = not snapshot["metrics"] and not include_empty
@@ -268,7 +280,7 @@ class AggregationWindow(IBufferStrategy):
                 self._empty_suppressed += 1
 
         if self._guard is not None:
-            self._guard.speak()
+            self._guard.speak(refused)
         if suppressed:
             return
 
@@ -315,6 +327,11 @@ class AggregationWindow(IBufferStrategy):
         if self._timer_thread and self._timer_thread.is_alive():
             self._timer_thread.join(timeout=5.0)
         self._timer_thread = None
+        # Этот слив тихий ПО ПОСТРОЕНИЮ — он идёт сразу за уже осушённым
+        # буфером. Право на голос он не возвращает, и помечать его для этого не
+        # надо: страж сам видит, что такт не наблюдал ни одной попытки завести
+        # серию (`CardinalityGuard._seen_this_tick`). Через `stop()` идёт и
+        # подмена окна на `config.reload`, где страж переживает окно.
         self.flush_all(include_empty=True)
 
     def _timer_worker(self) -> None:
