@@ -1085,12 +1085,26 @@ class TestRetractedLevelLeavesTheTree:
             "снятие публикации дереву ничего не сказало"
         )
 
-    def test_the_notice_goes_out_once_not_every_tick(self):
-        """«Показания нет» — однократный факт, а не уровень.
+    def test_the_notice_stops_after_the_bounded_reassertion(self):
+        """«Показания нет» — КОНЕЧНЫЙ факт, а не уровень.
 
-        Повторяй его каждым тиком — и получишь бесконечную дельту на мёртвый
-        путь, то есть ровно тот трафик, который задача убирает.
+        ОБНОВЛЕНО S-1 (2026-08-17). Прежняя редакция пинила «ровно один такт», и
+        это было верное утверждение неверного контракта: имя вычёркивалось ДО
+        ``proxy.merge``, обёрнутого в ``except Exception``, поэтому ЛЮБОЙ отказ
+        доставки хоронил снятие навсегда и оставлял в дереве мёртвое число.
+        Тест не удалён, а переведён на новую границу: повтор остался КОНЕЧНЫМ
+        (``RETRACTION_REASSERT_TICKS``), и исходная опасность — «нет показания»
+        превратилось в вечный уровень на мёртвом пути — держится по-прежнему,
+        просто предел теперь не 1, а 3.
+
+        Судится не только «после предела тихо», но и «до предела говорит»: без
+        нижней границы тест был бы зелёным и на реализации, которая не шлёт
+        снятие ВОВСЕ.
         """
+        from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
+            RETRACTION_REASSERT_TICKS,
+        )
+
         services, hb = _boot(name="once_only")
         ctx = PluginContext(services=services, config={}, plugin_name="once_plugin")
         ctx.declare_metric("once_level")
@@ -1098,12 +1112,24 @@ class TestRetractedLevelLeavesTheTree:
         _tick_levels(hb)
         ctx._retract_metrics()
 
-        _tick_levels(hb)
+        for i in range(RETRACTION_REASSERT_TICKS):
+            before = len(services._state_proxy.merges)
+            _tick_levels(hb)
+            assert len(services._state_proxy.merges) > before, (
+                f"такт {i + 1} из {RETRACTION_REASSERT_TICKS}: снятие перестало утверждаться "
+                "раньше предела — потеря одного сообщения снова хоронила бы лист навсегда"
+            )
+            assert services._state_proxy.merges[-1][1].get("state", {}).get("once_level", "нет") is None, (
+                f"такт {i + 1}: в payload нет утверждения None по 'once_level': {services._state_proxy.merges[-1][1]!r}"
+            )
+
         after_notice = len(services._state_proxy.merges)
+        _tick_levels(hb)
         _tick_levels(hb)
 
         assert len(services._state_proxy.merges) == after_notice, (
-            "второй тик после снятия снова шлёт merge — «нет показания» превратилось в уровень"
+            f"после {RETRACTION_REASSERT_TICKS} успешных утверждений тик снова шлёт merge — "
+            "«нет показания» превратилось в бесконечную дельту на мёртвый путь"
         )
 
     def test_a_relaunched_plugin_beats_the_pending_notice(self):

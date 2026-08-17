@@ -9,8 +9,15 @@
   envelope-agnostic `ingest`; `get`/`snapshot`/`history`.
 - `export_history`/`import_history` + инъектируемый `clock` (D.4 flight recorder):
   аддитивно, дефолт `clock=time.time` бит-в-бит (характеризационный пин).
-- `ITelemetryReadModel` (Protocol) — контракт.
-- Unit-тесты (`tests/test_telemetry_read_model.py`), без Qt.
+- `write_seq` + `ingest_poll_snapshot(values, *, requested_at_seq)` (S-1, нога B):
+  **второй инвариант ядра — порядок записи**. Ответ опроса, отправленный до
+  push'а и пришедший после него, больше не воскрешает снятое значение; судится
+  каждый путь отдельно, номер, а не время (Windows-сетка `monotonic` 15.6 мс).
+- `ITelemetryReadModel` (Protocol) — контракт (включая `write_seq` и влив опроса).
+- Unit-тесты (`tests/test_telemetry_read_model.py`), без Qt; опасности сторожа
+  порядка — `tests/test_write_seq_ordering_hazards.py` (18 тестов): граница
+  `>` против `>=`, чистка словаря номеров при удалении узла, реентерантность,
+  пересоздание ядра под висящими запросами.
 
 ## Потребители
 

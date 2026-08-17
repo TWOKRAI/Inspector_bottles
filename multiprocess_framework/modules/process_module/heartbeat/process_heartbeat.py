@@ -700,7 +700,7 @@ class ProcessHeartbeat:
                 if shm and any(shm.values()):
                     state["shm"] = shm
 
-        # (4) Снятые уровни: сказать дереву «показания больше нет» ОДИН раз.
+        # (4) Снятые уровни: сказать дереву «показания больше нет».
         #
         # Без этого шага обещание «уровень мёртвого владельца исчезает в момент
         # смерти» было ложью: `retract` убирал публикацию, payload становился
@@ -723,15 +723,28 @@ class ProcessHeartbeat:
         # уровня, а снятие — однократный факт. Пропусти его гейт (метрика
         # выключена) — и лист остался бы навсегда с мёртвым числом, то есть гейт
         # порождал бы ровно ту ложь, которую этот шаг убирает.
+        #
+        # ЧИТАЕМ без дренажа и СПИСЫВАЕМ только после успешной отправки (S-1,
+        # нога A). Прежняя редакция вычёркивала имя ДО ``proxy.merge``, а тот
+        # обёрнут в ``except Exception`` — любой отказ доставки хоронил снятие
+        # навсегда, и в дереве оставалось мёртвое число. Это единственный payload
+        # тика, который сам не восстанавливается: прочие уровни переотправляются
+        # каждым тиком. Запас конечен (``RETRACTION_REASSERT_TICKS``) и тратится
+        # ТОЛЬКО на успехах — иначе три провала подряд съели бы его целиком.
         store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
-        take = getattr(store, "take_retracted", None)
-        if callable(take):
-            for name in take():
+        pending = getattr(store, "pending_retractions", None)
+        # Подтверждаем РОВНО те имена, которые реально положили в payload: имя,
+        # перебитое живым значением, снятия не утверждало, и списывать ему такт
+        # было бы приписыванием чужой доставки.
+        asserted: list[str] = []
+        if callable(pending):
+            for name in pending():
                 # Живое значение на этом же тике побеждает: плагин мог быть
                 # поднят заново между снятием и тиком, и обнулять его показание
                 # было бы новой ложью.
                 if name not in state:
                     state[name] = None
+                    asserted.append(name)
 
         if state:
             data["state"] = state
@@ -742,6 +755,11 @@ class ProcessHeartbeat:
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish телеметрии процесса: {exc}", module="heartbeat")
+            return  # запас переутверждений НЕ тратится: такт провален
+        if asserted:
+            confirm = getattr(store, "confirm_retracted", None)
+            if callable(confirm):
+                confirm(asserted)
 
     def _warn_rejected_levels(self, rejected: tuple[tuple[str, str, Any], ...]) -> None:
         """Сказать про отсеянный уровень ОДИН раз на имя (Р3.5-11).

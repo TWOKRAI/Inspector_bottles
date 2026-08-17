@@ -62,6 +62,13 @@ on_state_delta``) остаётся дефолтом; поллер добавля
   per-worker ``cycles``, и он едет в read-model как обычный лист. У процесса
   без ``CycleMetricsRecorder`` поля ``cycles`` нет вовсе — это норма (долг K-9),
   а не «завис»: отсутствующий ключ просто не пишется.
+* **Не решает сам, что устарело.** Поллер лишь ЗАПОМИНАЕТ ``view_model.write_seq``
+  в момент отправки и возвращает его во влив (``requested_at_seq``); правило
+  «путь перебит push'ем позже — отбросить» живёт в read-model, потому что там же
+  живут и номера записей. Зачем вообще: оборот запроса меряли 7.5–10 с, и ответ,
+  вылетевший ДО остановки плагина, приходил ПОСЛЕ снятия уровня и воскрешал
+  мёртвое число (``t2 push -> None``, ``t3 poll -> 12.5``). Сторожа порядка не
+  было ни здесь, ни в read-model — S-1, нога B.
 """
 
 from __future__ import annotations
@@ -190,17 +197,24 @@ class TelemetryPoller(QObject):
         self._active = False
         self._stopped = False
 
-        # Цели с незавершённым опросом → monotonic-штамп отправки. Защита от
-        # наложения тиков: медленный ответ не должен порождать очередь запросов
-        # к тому же процессу — опрос отдаёт УРОВЕНЬ, второй одновременный запрос
-        # ничего не добавит, а IPC-нагрузку умножит.
+        # Цели с незавершённым опросом → (monotonic-штамп отправки, write_seq на
+        # момент отправки). Защита от наложения тиков: медленный ответ не должен
+        # порождать очередь запросов к тому же процессу — опрос отдаёт УРОВЕНЬ,
+        # второй одновременный запрос ничего не добавит, а IPC-нагрузку умножит.
         #
         # Штамп, а не просто множество: доставка результата НЕ гарантирована.
         # Исполнитель может потерять callback (у RequestRunner доставка идёт
         # Qt-сигналом, и на разрушенном источнике сигнала emit поднимает
         # RuntimeError уже ПОСЛЕ успешного запроса). Без дедлайна такая запись
         # осталась бы здесь навсегда и цель молча перестала бы опрашиваться.
-        self._in_flight: dict[str, float] = {}
+        #
+        # ВТОРОЕ поле — номер записи read-model на момент отправки (S-1, нога B).
+        # Живёт здесь, а не в замыкании callback'а, потому что запись о полёте —
+        # единственное, что переживает оборот запроса и уже привязано к цели.
+        # Штамп времени для этого не годится: на Windows разрешение monotonic
+        # 15.6 мс, и push с отправкой запроса в одном обороте цикла получают одну
+        # метку — «кто раньше» по ней не восстановить.
+        self._in_flight: dict[str, tuple[float, int]] = {}
         # Круговой курсор по целям: при упёртом потолке одновременных полётов
         # фиксированный порядок обхода уморил бы хвост списка голодом.
         self._cursor = 0
@@ -366,7 +380,7 @@ class TelemetryPoller(QObject):
         единственным следом осталась бы разность счётчиков, которую никто не
         смотрит. Выселение — число (:attr:`polls_expired`), а не тишина.
         """
-        stale = [name for name, sent_at in self._in_flight.items() if now - sent_at > self._flight_ttl_sec]
+        stale = [name for name, (sent_at, _seq) in self._in_flight.items() if now - sent_at > self._flight_ttl_sec]
         for name in stale:
             del self._in_flight[name]
             self._polls_expired += 1
@@ -397,7 +411,9 @@ class TelemetryPoller(QObject):
             name = names[(start + offset) % len(names)]
             if name in self._in_flight:
                 continue
-            self._in_flight[name] = now
+            # Номер снимается ДО отправки: всё, что push запишет позже, обязано
+            # оказаться новее этого запроса.
+            self._in_flight[name] = (now, self._view_model.write_seq)
             self._polls_started += 1
             started += 1
             self._submit(partial(self._poll_fn, name), partial(self._on_result, name))
@@ -409,8 +425,18 @@ class TelemetryPoller(QObject):
         Ответ по снятой цели отбрасывается: пока запрос летел, вкладка могла
         переключиться, и вливать чужие числа в снимок нельзя — виджет показал
         бы значение процесса, который сейчас не показан.
+
+        Номер отправки берётся из записи о полёте и едет во влив: read-model
+        отбросит по нему пути, которые push успел переписать, пока ответ летел
+        (S-1, нога B). Записи может уже не быть — её снял TTL
+        (:meth:`_evict_stale_flights`) или ``set_active(False)``. Тогда номер
+        неизвестен, и вместо него идёт ``-1``: «про этот ответ мы не знаем
+        ничего, кроме того, что он старше TTL». Под таким номером применятся
+        только пути, которых push не трогал ВООБЩЕ, — консервативно и по делу,
+        потому что выселенный ответ и есть самый старый из возможных.
         """
-        self._in_flight.pop(name, None)
+        flight = self._in_flight.pop(name, None)
+        requested_at_seq = flight[1] if flight is not None else -1
         self._polls_completed += 1
 
         if not (isinstance(response, dict) and response.get("success")):
@@ -433,7 +459,7 @@ class TelemetryPoller(QObject):
             # нет. Опрос отдаёт УРОВЕНЬ; вливаясь через общий push-вход, он
             # вытеснял бы точки push'а из deque фиксированной длины и молча
             # сокращал окно спарклайна (ADR-139).
-            self._view_model.ingest_poll_snapshot(flat)
+            self._view_model.ingest_poll_snapshot(flat, requested_at_seq=requested_at_seq)
         except RuntimeError as exc:  # C++-объект read-model уже удалён (вкладка закрыта в полёте)
             _logger.debug("TelemetryPoller: влив снимка %s пропущен — приёмник разрушен: %s", name, exc)
 
