@@ -435,7 +435,7 @@ class TestLevelsMigration:
             assert store.snapshot() == {"capture_fps": 12.0, "frame_count": 4, "drops": 1}
             # Публикатор помнится вместе со значением (Р3.5-11): без него сборщик
             # не отличит своё имя от чужого и вернётся к отбору по каталогу.
-            assert {who for _v, who in store.publications().values()} == {"capture_real_plugin"}
+            assert {who for _name, who in store.publications()} == {"capture_real_plugin"}
         finally:
             # Реестр объявлений процессный: свой мусор убираем точечно, чужие
             # объявления (fps/latency_ms фреймворка) не трогаем.

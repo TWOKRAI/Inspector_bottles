@@ -64,10 +64,10 @@ class ProcessHeartbeat:
         # «сработает ли авто-возврат TTL» — подметальщик живёт на этом такте, и
         # процесс без него срок принимает, но не исполняет.
         self._started: bool = False
-        # Р3.5-11: имена уровней, про отсев которых уже сказано (чужое имя либо
-        # имя, не объявленное никем). Голос один раз на имя — тик идёт секундами
-        # (см. _warn_rejected_levels).
-        self._warned_rejected_levels: set[str] = set()
+        # Р3.5-11: пары (имя, публикатор), про отсев которых уже сказано (чужое
+        # имя либо имя, не объявленное никем). Голос один раз на ПАРУ — тик идёт
+        # секундами (см. _warn_rejected_levels).
+        self._warned_rejected_levels: set[tuple[str, str]] = set()
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -706,10 +706,13 @@ class ProcessHeartbeat:
         if not rejected:
             return
         warned = self._warned_rejected_levels
-        fresh = [item for item in rejected if item[0] not in warned]
+        # Ключ «сказано» — ПАРА (имя, публикатор), а не имя: на одно имя может
+        # прийти несколько перехватчиков, и дедуп по имени озвучил бы только
+        # первого — второй молча пропал бы ровно там, где его и надо назвать.
+        fresh = [item for item in rejected if (item[0], item[1]) not in warned]
         if not fresh:
             return
-        warned.update(name for name, _publisher, _owner in fresh)
+        warned.update((name, publisher) for name, publisher, _owner in fresh)
         _warn = getattr(self._services, "log_warning", None) or getattr(self._services, "log_info", None)
         if _warn is None:
             return

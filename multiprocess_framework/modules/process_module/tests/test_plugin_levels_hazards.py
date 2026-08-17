@@ -389,6 +389,46 @@ class TestPushEqualsPoll:
             f"отсев чужого имени промолчал — тихий отсев неотличим от опечатки: {services.warnings()}"
         )
 
+    def test_a_level_owned_by_ANOTHER_PLUGIN_is_rejected_too(self):
+        """Сосед по процессу не может писать в имя чужого плагина.
+
+        **Тест добавлен инъекцией, а не рассуждением, и это его главное свойство.**
+        Инъекция И1 (проверку владельца заменить назад на членство в общем каталоге)
+        оставила ЗЕЛЁНЫМИ оба теста П1 независимого тестера и соседний тест выше —
+        потому что все трое сторожат имя ФРЕЙМВОРКА (``fps``), а его в дереве
+        защищает не владение, а fail-safe порядок сборки: уровни плагинов ложатся
+        первыми, агрегат фреймворка накрывает их сверху в том же dict'е, и чужое
+        значение до merge просто не доживает.
+
+        Здесь этой страховки нет по построению: оба участника — плагины, оба их
+        уровня едут ОДНИМ проходом ``_collect_plugin_levels`` и ложатся в один и
+        тот же словарь. Без проверки владельца победил бы порядок обхода dict'а —
+        то есть порядок вызовов ``publish_metric``, который никто настройкой не
+        считает. Ровно тот класс, который задача и чинит.
+
+        Судится значением в дереве и в опросе, а не отсутствием вызова.
+        """
+        services, hb = _boot(name="neighbours")
+        owner_ctx = PluginContext(services=services, config={}, plugin_name="plugin_a")
+        owner_ctx.declare_metric("shared_gauge")
+        owner_ctx.publish_metric("shared_gauge", 11.0)
+        # Сосед публикует в ЧУЖОЕ имя ПОЗЖЕ — при победе порядка выиграл бы он.
+        PluginContext(services=services, config={}, plugin_name="plugin_b").publish_metric("shared_gauge", 99.0)
+
+        _tick_levels(hb)
+
+        assert _tree(services, "shared_gauge") == pytest.approx(11.0), (
+            "сосед по процессу подменил уровень чужого плагина — владение не стережётся "
+            "там, где fail-safe порядок не помогает"
+        )
+        assert _polled_state(services)["shared_gauge"] == pytest.approx(11.0), (
+            "опрос разошёлся с деревом на имени, которое перехватил сосед"
+        )
+        said = [msg for msg in services.warnings() if "shared_gauge" in msg]
+        assert len(said) == 1 and "plugin_b" in said[0], (
+            f"перехват чужого имени промолчал либо не назвал перехватчика: {services.warnings()}"
+        )
+
     def test_the_rejection_voice_names_all_three_participants(self):
         """В голосе — имя, публикатор и владелец: три разных диагноза, три действия."""
         services, hb = _boot(name="voice")
@@ -559,23 +599,37 @@ class TestConcurrency:
 # --------------------------------------------------------------------------- #
 class TestCollector:
     def test_unowned_names_are_reported_sorted_and_not_published(self):
-        payload, rejected = build_plugin_levels({"b_unknown": (1, "pub_b"), "a_unknown": (2, "pub_a")}, None)
+        payload, rejected = build_plugin_levels({("b_unknown", "pub_b"): 1, ("a_unknown", "pub_a"): 2}, None)
         assert payload == {}
         # Тройка целиком: имя, публикатор и владелец (None = не объявлено никем).
         assert rejected == (("a_unknown", "pub_a", None), ("b_unknown", "pub_b", None))
 
+    def test_two_claimants_on_one_name_are_both_reported(self):
+        """ОБА публикатора отброшены и ОБА названы — ни один не схлопнут в один.
+
+        Вопрос, заданный вместе с ключом-парой: имя больше не уникально во входе,
+        и «отброшено имя X» без публикатора не говорит оператору, КТО его
+        перехватил. Схлопни сборщик две записи в одну — второй перехватчик стал
+        бы невидим, а искать его пришлось бы грепом по всем плагинам процесса.
+        Сортировка тоже проверяется: ключ теперь ПАРА, иначе порядок двух записей
+        с одним именем зависел бы от обхода словаря.
+        """
+        payload, rejected = build_plugin_levels({("shared", "pub_b"): 2, ("shared", "pub_a"): 1}, None)
+        assert payload == {}
+        assert rejected == (("shared", "pub_a", None), ("shared", "pub_b", None))
+
     def test_a_foreign_owner_is_reported_with_the_owners_name(self):
         """Чужое имя и необъявленное — РАЗНЫЕ диагнозы, различимы третьим элементом."""
-        _payload, rejected = build_plugin_levels({"fps": (99.0, "самозванец")}, None)
+        _payload, rejected = build_plugin_levels({("fps", "самозванец"): 99.0}, None)
         assert len(rejected) == 1
         name, publisher, owner = rejected[0]
         assert (name, publisher) == ("fps", "самозванец")
         assert owner is not None and owner.startswith("multiprocess_framework."), owner
 
     def test_the_collector_does_not_mutate_its_input(self):
-        levels = {"x": (1, "p")}
+        levels = {("x", "p"): 1}
         build_plugin_levels(levels, None)
-        assert levels == {"x": (1, "p")}
+        assert levels == {("x", "p"): 1}
 
     def test_booleans_are_not_rounded_into_numbers(self):
         """``round(True, 1)`` вернул бы 1 — фронт, просочившийся в уровни, обязан
@@ -584,7 +638,7 @@ class TestCollector:
         ctx = PluginContext(services=services, config={}, plugin_name="bool_plugin")
         ctx.declare_metric("bool_level")
         ctx.publish_metric("bool_level", True)
-        payload, _ = build_plugin_levels({"bool_level": (True, "bool_plugin")}, None)
+        payload, _ = build_plugin_levels({("bool_level", "bool_plugin"): True}, None)
         assert payload["bool_level"] is True
 
 
@@ -868,3 +922,112 @@ class TestOwnerIsComputedOnce:
         _tick_levels(hb)
         assert _tree(services, "proc_owned_level") == 2.0
         assert ctx._retract_metrics() == 1
+
+
+# --------------------------------------------------------------------------- #
+# Ключ-пара: перехватчик не может ни подменить, ни УНИЧТОЖИТЬ чужой уровень.
+#
+# Блокер, найденный инъекцией И1 (2026-08-17): хранилище ключевалось одним
+# именем, публикация соседа затирала запись владельца, и сборщик отбрасывал
+# затёртое по несовпадению владельца — лист исчезал ЦЕЛИКОМ. Перехватчик не мог
+# подменить число, но мог его уничтожить одной опечаткой в имени.
+# --------------------------------------------------------------------------- #
+class TestPairKeyProtectsTheOwner:
+    def test_the_interceptor_does_not_erase_the_owners_entry_in_the_store(self):
+        """Уровень сборщика — следствие; здесь проверяется САМА ячейка хранилища.
+
+        Тест на дереве (``..._owned_by_ANOTHER_PLUGIN_...``) покраснел бы и от
+        неверного сборщика, и от затёртой ячейки — он не различает эти причины.
+        Здесь адрес дефекта: обе записи обязаны СУЩЕСТВОВАТЬ порознь.
+        """
+        store = PluginLevels()
+        store.publish("shared", 11.0, "plugin_a")
+        store.publish("shared", 99.0, "plugin_b")
+
+        pubs = store.publications()
+        assert pubs[("shared", "plugin_a")] == 11.0, f"запись владельца затёрта соседом: {pubs}"
+        assert pubs[("shared", "plugin_b")] == 99.0, pubs
+
+    def test_two_claimants_neither_owning_are_both_rejected_and_both_voiced(self):
+        """Ни один не владелец → в дереве листа нет, а голос есть по КАЖДОМУ.
+
+        Вопрос 1 из поручения. Молчание про второго перехватчика было бы тем же
+        тихим отсевом, который задача и убирает, только адресованным другому
+        плагину.
+        """
+        services, hb = _boot(name="claimants")
+        PluginContext(services=services, config={}, plugin_name="claimant_a").publish_metric("orphan_name", 1.0)
+        PluginContext(services=services, config={}, plugin_name="claimant_b").publish_metric("orphan_name", 2.0)
+
+        _tick_levels(hb)
+
+        assert _tree(services, "orphan_name") is None
+        said = " ".join(msg for msg in services.warnings() if "orphan_name" in msg)
+        assert "claimant_a" in said and "claimant_b" in said, f"назван не каждый перехватчик: {services.warnings()}"
+
+    def test_a_later_claimant_on_an_already_voiced_name_is_still_voiced(self):
+        """Голос дедуплицируется по ПАРЕ (имя, публикатор), а не по имени.
+
+        ДОБАВЛЕН ПОСЛЕ ПРОМАХА ПРЕДСКАЗАНИЯ (2026-08-17). Инъекция «дедуп по
+        имени» дала НОЛЬ красных: соседний тест сажает обоих перехватчиков в ОДИН
+        тик, где множество уже названных пусто, и оба варианта дедупа ведут себя
+        одинаково. То есть тот тест сторожит «оба названы», но не сторожит ключ
+        дедупа — расхождение названо, а не замазано.
+
+        Разница видна только во ВРЕМЕНИ: перехватчик, появившийся ПОЗЖЕ (ленивый
+        импорт, hot-apply рецепта), при дедупе по имени молча проглатывается —
+        про его имя уже «сказано», хотя сказано было про другого виновника.
+        """
+        services, hb = _boot(name="late_claimant")
+        PluginContext(services=services, config={}, plugin_name="early_thief").publish_metric("late_orphan", 1.0)
+        _tick_levels(hb)
+        assert any("early_thief" in m for m in services.warnings()), services.warnings()
+
+        before = len(services.logs)
+        PluginContext(services=services, config={}, plugin_name="late_thief").publish_metric("late_orphan", 2.0)
+        _tick_levels(hb)
+
+        fresh = [e["msg"] for e in services.logs[before:] if e["level"] == "WARNING"]
+        assert any("late_thief" in m for m in fresh), f"поздний перехватчик того же имени промолчал: {fresh}"
+        # А первый — повторно НЕ говорит: пара уже названа.
+        assert not any("early_thief" in m for m in fresh), fresh
+
+    def test_retracting_the_owner_does_not_surface_the_interceptors_value(self):
+        """Вопрос 2: снятие владельца при живом перехватчике убирает лист.
+
+        Опасность конкретна: если бы `retract` снимал ПО ИМЕНИ, а не по паре, он
+        либо снёс бы и чужую запись (перехватчик молча «починился» бы), либо
+        оставил её единственной — и после остановки владельца оператор увидел бы
+        ЧУЖОЕ число под тем же путём, не узнав об этом ничем.
+        """
+        services, hb = _boot(name="retract_race")
+        owner_ctx = PluginContext(services=services, config={}, plugin_name="owner_plugin")
+        owner_ctx.declare_metric("guarded_level")
+        owner_ctx.publish_metric("guarded_level", 11.0)
+        PluginContext(services=services, config={}, plugin_name="thief_plugin").publish_metric("guarded_level", 99.0)
+
+        _tick_levels(hb)
+        assert _tree(services, "guarded_level") == pytest.approx(11.0), "предпосылка: владелец виден"
+
+        assert owner_ctx._retract_metrics() == 1, "снято не ровно то, что опубликовал владелец"
+        assert _polled_state(services).get("guarded_level") is None, (
+            "после остановки владельца всплыло значение перехватчика"
+        )
+        # Запись перехватчика жива в хранилище, но наружу не идёт — отвергается
+        # по владению, как и до снятия.
+        assert store_of(services).publications() == {("guarded_level", "thief_plugin"): 99.0}
+
+    def test_retract_takes_only_this_owners_rows_of_a_shared_name(self):
+        """`retract` работает по ВТОРОМУ элементу ключа, а не по имени."""
+        store = PluginLevels()
+        store.publish("shared", 11.0, "plugin_a")
+        store.publish("shared", 99.0, "plugin_b")
+        store.publish("own", 1.0, "plugin_a")
+
+        assert store.retract("plugin_a") == 2
+        assert store.publications() == {("shared", "plugin_b"): 99.0}
+
+
+def store_of(services):
+    """Хранилище уровней процесса — читается тем же портом, что и у фреймворка."""
+    return getattr(services, PLUGIN_LEVELS_ATTR)
