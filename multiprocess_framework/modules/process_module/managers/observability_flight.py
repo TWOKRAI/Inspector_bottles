@@ -140,6 +140,29 @@ _WARNED_DISABLED_ATTR = "_flight_warned_disabled"
 _WARNED_NO_RING_ATTR = "_flight_warned_no_ring"
 _WARNED_FAILED_ATTR = "_flight_warned_failed"
 
+#: С-6: «уже сказали» — это флаг ПЛЮС четвёрка ``knobs``, при которой он взведён,
+#: а не голый буль. :func:`_say_once` сверяет ТЕКУЩИЕ ``knobs`` с этой меткой —
+#: совпали (серия отказов подряд без смены настроек, D6) → молчим; разошлись
+#: (settings поменяли — починили ``sink`` и снова опечатались, D4) → метка
+#: устарела, флаг фактически сброшен, голос звучит заново. Пересборка С ТЕМИ ЖЕ
+#: значениями метку не меняет (она и так совпадает с новой), поэтому спама не
+#: даёт. Это работает БЕЗ протаскивания ``svc`` через
+#: ``FlightRecorder.configure()``/``apply_flight_recorder``: рекордер сам по
+#: себе процесс не знает (см. докстринг класса) — сравнение происходит там, где
+#: ``svc`` и так под рукой, то есть в :meth:`FlightRecorder.dump`.
+_WARNED_DISABLED_KNOBS_ATTR = "_flight_warned_disabled_knobs"
+_WARNED_NO_RING_KNOBS_ATTR = "_flight_warned_no_ring_knobs"
+_WARNED_FAILED_KNOBS_ATTR = "_flight_warned_failed_knobs"
+
+#: Четвёрка-тождество для ЕДИНСТВЕННОГО места, где рекордера нет вовсе (сшивка
+#: не проходила — ``PluginContext.flight_dump`` бьёт этой веткой напрямую, минуя
+#: :meth:`FlightRecorder.dump`). Это НЕ дефолт схемы (см. :func:`_flight_default_knobs`,
+#: S-5) и не живая четвёрка: у «рекордера нет» настроек, которые могли бы
+#: смениться, не существует, поэтому метка постоянна и голос звучит один раз —
+#: до тех пор, пока рекордер не появится (тогда голосом уже заведует
+#: :meth:`FlightRecorder.dump` со своей, живой четвёркой).
+NO_RECORDER_KNOBS: Tuple[bool, str, int, int] = (False, "", 0, 0)
+
 
 def _bump(svc: Any, attr: str) -> None:
     """Прибавить единицу к счётчику на процессе. Иммутабельный дубль не роняет линию."""
@@ -149,65 +172,103 @@ def _bump(svc: Any, attr: str) -> None:
         pass
 
 
-def _say_once(svc: Any, flag: str, message: str) -> None:
-    """Сказать ОДИН раз на процесс. Счётчик при этом ведётся всегда.
+def _say_once(
+    svc: Any,
+    flag: str,
+    knobs_attr: str,
+    knobs: Tuple[bool, str, int, int],
+    message: str,
+) -> None:
+    """Сказать один раз НА ТЕКУЩИЕ НАСТРОЙКИ рекордера (С-6). Счётчик — всегда.
 
-    Довод тот же, что у ``note_document_without_sink``: причина отказа дампа не
-    меняется от вызова к вызову (она в конфиге, а не в данных), и строка на
-    каждый вызов превратила бы ненастроенный механизм в поток, к которому
-    перестают прислушиваться. Число при этом не теряется — его отдаёт
-    :func:`flight_plane_report`.
+    Довод тот же, что у ``note_document_without_sink``: причина отказа не
+    меняется от вызова к вызову, ПОКА не меняются настройки, и строка на
+    каждый вызов превратила бы механизм в поток, к которому перестают
+    прислушиваться (D6 приёмки: серия отказов подряд без смены настроек
+    обязана дать РОВНО один голос).
+
+    Но «уже сказали» держится не голым булем, а булем ПЛЮС четвёркой
+    ``knobs``, при которой он был взведён в прошлый раз. Сменили ``sink`` (или
+    любую из четырёх ручек, не обязательно именно ту, что относится к этому
+    классу отказа) — метка расходится с текущей четвёркой, флаг читается как
+    невзведённый, и голос звучит заново на первом же следующем отказе этого
+    класса. До С-6 флаг не сбрасывался НИКОГДА: опечатка в ``sink`` → голос;
+    починили → дамп проходит; снова опечатка (другая) → счётчик растёт, а
+    новых слов нет — с этого момента каждый фронт брака давал ноль улик и
+    ноль слов (D4 приёмки, воспроизведено ревью).
+
+    Реентерантный сброс не нужен: сравнение происходит здесь, в момент
+    вызова, а не на каждой пересборке конфига — пересборка С ТЕМИ ЖЕ
+    значениями оставляет метку равной себе, и спама не даёт.
     """
-    if getattr(svc, flag, False):
+    if getattr(svc, flag, False) and getattr(svc, knobs_attr, None) == knobs:
         return
     try:
         setattr(svc, flag, True)
+        setattr(svc, knobs_attr, knobs)
     except Exception:  # noqa: BLE001
         pass
     process_say(svc, message, "WARNING")
 
 
-def note_flight_disabled(svc: Any, reason: str) -> None:
-    """Отказ (а) по Р5.1-6: механизм выключен ручкой. Адрес ручки — в тексте."""
+def note_flight_disabled(svc: Any, reason: str, knobs: Tuple[bool, str, int, int]) -> None:
+    """Отказ (а) по Р5.1-6: механизм выключен ручкой. Адрес ручки — в тексте.
+
+    ``knobs`` — действующая четвёрка рекордера В МОМЕНТ отказа
+    (:data:`NO_RECORDER_KNOBS`, если рекордера нет вовсе) — метка для голоса
+    «уже сказали», сброс которой при смене настроек описан в
+    :func:`_say_once` (С-6).
+    """
     _bump(svc, _REFUSED_DISABLED_ATTR)
     _say_once(
         svc,
         _WARNED_DISABLED_ATTR,
+        _WARNED_DISABLED_KNOBS_ATTR,
+        knobs,
         f"[flight] дамп {reason!r} НЕ сделан: flight recorder выключен, ручка "
         f"{FLIGHT_CONFIG_ADDRESS}.enabled — дальше считаем молча, "
         f"счётчик в introspect.observability -> flight.refused_disabled",
     )
 
 
-def note_flight_no_ring(svc: Any, reason: str, detail: str) -> None:
+def note_flight_no_ring(svc: Any, reason: str, detail: str, knobs: Tuple[bool, str, int, int]) -> None:
     """Отказ (б) по Р5.1-6: включён, а кольца нет либо оно записей не хранит.
 
     ``detail`` — текст ``read_sink_tail`` (он несёт И имя приёмника, И имя
     менеджера, у которого его искали). Свой пересказ здесь не сочиняется: два
     описания одного отказа разошлись бы, а лечится он по чужому тексту.
+    ``knobs`` — см. :func:`note_flight_disabled` (С-6).
     """
     _bump(svc, _REFUSED_NO_RING_ATTR)
     _say_once(
         svc,
         _WARNED_NO_RING_ATTR,
+        _WARNED_NO_RING_KNOBS_ATTR,
+        knobs,
         f"[flight] дамп {reason!r} НЕ сделан: {detail} — проверь, что приёмник объявлен с "
         f"type: memory и смаршрутизирован скоупами ({FLIGHT_CONFIG_ADDRESS}.sink). "
         f"Дальше считаем молча, счётчик в introspect.observability -> flight.refused_no_ring",
     )
 
 
-def note_flight_failed(svc: Any, reason: str, detail: str) -> None:
+def note_flight_failed(svc: Any, reason: str, detail: str, knobs: Tuple[bool, str, int, int]) -> None:
     """Третий класс: кольцо прочитано, а файл не написан (диск, права, ФС).
 
     Отдельный счётчик, потому что отдельный диагноз: два первых лечатся
     конфигом, этот — машиной. Слить его с ними значило бы отправить оператора
     править ключ, который в порядке. Р5.1-14 при этом соблюдён буквально —
     линия не падает, решение не меняется: дамп это улика, а не часть решения.
+    ``knobs`` — см. :func:`note_flight_disabled` (С-6): настройки могут
+    поменяться и между двумя отказами записи (например, ``sink`` починили —
+    читается кольцо другого канала), и та же метка, тот же сброс применимы и
+    здесь.
     """
     _bump(svc, _REFUSED_FAILED_ATTR)
     _say_once(
         svc,
         _WARNED_FAILED_ATTR,
+        _WARNED_FAILED_KNOBS_ATTR,
+        knobs,
         f"[flight] дамп {reason!r} НЕ записан: {detail} — кольцо прочитано, отказала ЗАПИСЬ файла. "
         f"Дальше считаем молча, счётчик в introspect.observability -> flight.refused_failed",
     )
@@ -359,10 +420,16 @@ class FlightRecorder:
             (см. :func:`note_flight_disabled` / :func:`note_flight_no_ring` /
             :func:`note_flight_failed`). Ни один из них не тишина, и ни один не
             роняет линию.
+
+        ``self._knobs`` снимается ОДИН раз, в начале, и той же четвёркой едет
+        и в проверки, и в отказы — не только ради консистентности внутри
+        одного вызова: она же метка «уже сказали» (С-6), и голос по ней
+        звучит заново, как только настройки рекордера в самом деле сменились.
         """
-        enabled, sink, keep, limit = self._knobs
+        knobs = self._knobs
+        enabled, sink, keep, limit = knobs
         if not enabled:
-            note_flight_disabled(svc, reason)
+            note_flight_disabled(svc, reason, knobs)
             return False
 
         logger = getattr(svc, "logger_manager", None)
@@ -372,16 +439,17 @@ class FlightRecorder:
                 svc,
                 reason,
                 f"у процесса нет logger_manager с чтением приёмников (искали {sink!r})",
+                knobs,
             )
             return False
         try:
             answer = read(sink, limit or None)
         except Exception as exc:  # noqa: BLE001 — отказ чтения кольца не роняет линию
-            note_flight_no_ring(svc, reason, f"чтение приёмника {sink!r} отказало ({exc!r})")
+            note_flight_no_ring(svc, reason, f"чтение приёмника {sink!r} отказало ({exc!r})", knobs)
             return False
         if not isinstance(answer, dict) or not answer.get("success"):
             detail = (answer or {}).get("reason") if isinstance(answer, dict) else None
-            note_flight_no_ring(svc, reason, str(detail or f"приёмник {sink!r} недоступен"))
+            note_flight_no_ring(svc, reason, str(detail or f"приёмник {sink!r} недоступен"), knobs)
             return False
 
         records = list(answer.get("records") or [])
@@ -399,7 +467,7 @@ class FlightRecorder:
                 path = self._resolve_path(svc, logger, safe_reason)
                 written, unreadable = self._write(path, svc, safe_reason, source, records, info, fields)
             except Exception as exc:  # noqa: BLE001 — см. note_flight_failed
-                note_flight_failed(svc, reason, repr(exc))
+                note_flight_failed(svc, reason, repr(exc), knobs)
                 return False
             self.dumps += 1
             self.records += written
@@ -598,10 +666,32 @@ def _dumps(obj: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _flight_default_knobs() -> Tuple[bool, str, int, int]:
+    """Дефолт-четвёрка ЖИВЫМ чтением схемы — единственный источник (S-5).
+
+    До этой правки тот же кортеж ``(False, "", 5, 0)`` был захардкожен ТРИЖДЫ
+    (ветка «секции нет» в :func:`_flight_knobs`, вызов :func:`wire_flight_recorder`,
+    fallback :func:`apply_flight_recorder`) — и ЧЕТВЁРТЫЙ раз жил в самой схеме
+    (``ObservabilityFlightConfig``). Ревью 5.1 показало цену: инъекция «секции
+    нет → считаем включённым» проходит МИМО ``ObservabilityFlightConfig.model_validate``
+    целиком и даёт 76 passed при живом побочном эффекте (``dumps=1``, файл на
+    диске у процесса, который улик не заказывал) — сторожить «тот самый»
+    дефолт было нечего, копий четыре.
+
+    Здесь — не переписанный вручную дубль, а вызов ``ObservabilityFlightConfig()``:
+    патч дефолта схемы (как в приёмке D3, ``model_fields["enabled"].default``)
+    долетает досюда ТЕМ ЖЕ путём, что и до валидации explicit-секции ниже.
+    """
+    from ..configs.observability_config import ObservabilityFlightConfig
+
+    cfg = ObservabilityFlightConfig()
+    return (bool(cfg.enabled), str(cfg.sink), int(cfg.keep), int(cfg.limit))
+
+
 def _flight_knobs(
     section: Any,
     svc: Any,
-    fallback: Tuple[bool, str, int, int],
+    fallback: Optional[Tuple[bool, str, int, int]] = None,
 ) -> Tuple[bool, str, int, int]:
     """Разобрать под-секцию ``observability.flight`` схемой. Мусор → ``fallback`` + голос.
 
@@ -611,26 +701,40 @@ def _flight_knobs(
     ``_events_knobs``, — и это не копипаста, а одинаковое правило у соседних
     под-секций одной двери: разойдись они, мусор в ``flight`` и мусор в
     ``events`` вели бы себя по-разному в одной команде.
+
+    **«Секции нет» — это ``{}``, а не отдельная ветка с захардкоженным
+    кортежем** (S-5). Пустой словарь для ``model_validate`` даёт ровно «все
+    поля из дефолтов схемы» — тот же путь, каким проходит частично заполненная
+    секция (``{"sink": "x"}`` добирает ``enabled``/``keep``/``limit`` из
+    схемы тем же вызовом). Второй развилки на «нет» не нужно, и патч дефолта
+    схемы теперь виден ОБЕИМ дорогам (стартовая сшивка и пересборка) одним и
+    тем же способом — раньше видел ни одной.
+
+    ``fallback`` — ``None`` по умолчанию: явное значение вычисляется лениво
+    (:func:`_flight_default_knobs`), только когда секция реально мусор или не
+    прошла валидацию — на счастливом пути лишний экземпляр схемы не строится.
     """
     from ..configs.observability_config import ObservabilityFlightConfig
 
     if section is None:
-        return (False, "", 5, 0)
-    if not isinstance(section, dict):
+        section = {}
+    elif not isinstance(section, dict):
+        resolved = fallback if fallback is not None else _flight_default_knobs()
         process_say(
             svc,
             f"[observability] {FLIGHT_CONFIG_ADDRESS} не словарь ({type(section).__name__}) "
-            f"— политика дампа остаётся прежней {fallback}",
+            f"— политика дампа остаётся прежней {resolved}",
         )
-        return fallback
+        return resolved
     try:
         cfg = ObservabilityFlightConfig.model_validate(section)
     except Exception as exc:  # noqa: BLE001 — см. докстринг
+        resolved = fallback if fallback is not None else _flight_default_knobs()
         process_say(
             svc,
-            f"[observability] {FLIGHT_CONFIG_ADDRESS} не принят ({exc!r}) — политика дампа остаётся прежней {fallback}",
+            f"[observability] {FLIGHT_CONFIG_ADDRESS} не принят ({exc!r}) — политика дампа остаётся прежней {resolved}",
         )
-        return fallback
+        return resolved
     return (bool(cfg.enabled), str(cfg.sink), int(cfg.keep), int(cfg.limit))
 
 
@@ -648,6 +752,12 @@ def wire_flight_recorder(svc: Any) -> Optional[FlightRecorder]:
     процесса не принимает атрибут (иммутабельный дубль в тесте). ``None``
     наблюдаем: ``introspect.observability -> flight.declared`` отвечает
     ``false``, и это отличает «рекордера нет» от «рекордер есть и выключен».
+
+    S-5: fallback у :func:`_flight_knobs` здесь не передаётся — при
+    отсутствующей секции ``resolve().get(...)`` вернёт ``None``, а
+    :func:`_flight_knobs` превратит его в ``{}`` и прочитает дефолт ЖИВЫМ
+    ``ObservabilityFlightConfig.model_validate({})``, а не захардкоженным
+    кортежем.
     """
     from ..configs.observability_layers import process_observability_layers
 
@@ -658,7 +768,7 @@ def wire_flight_recorder(svc: Any) -> Optional[FlightRecorder]:
         process_say(svc, f"[observability] секция {FLIGHT_CONFIG_ADDRESS} не прочитана: {exc!r}")
         return None
 
-    recorder = FlightRecorder(*_flight_knobs(section, svc, (False, "", 5, 0)))
+    recorder = FlightRecorder(*_flight_knobs(section, svc))
     try:
         setattr(svc, FLIGHT_RECORDER_ATTR, recorder)
     except Exception:  # noqa: BLE001 — объект без сеттеров: дампов нет, линия жива
@@ -679,11 +789,17 @@ def apply_flight_recorder(recorder: Any, section: Any, svc: Any = None) -> Optio
     Счётчики при этом НЕ сбрасываются (см. :meth:`FlightRecorder.configure`).
     ``None`` на входе (рекордера нет) — не отказ: пересборка идёт и на процессах,
     где дампов никто не просил.
+
+    S-5: fallback на мусорную/непринятую секцию — «прежняя живая политика»
+    (``recorder.knobs``), а не захардкоженный кортеж; последний использовался
+    ТОЛЬКО если бы у переданного объекта не было самого атрибута ``knobs``
+    вовсе (духовный дубль без реального рекордера) — на этот редкий случай
+    :func:`_flight_knobs` сам обратится к :func:`_flight_default_knobs`.
     """
     configure = getattr(recorder, "configure", None)
     if not callable(configure):
         return None
-    fallback = getattr(recorder, "knobs", (False, "", 5, 0))
+    fallback = getattr(recorder, "knobs", None)
     enabled, sink, keep, limit = _flight_knobs(section, svc, fallback)
     applied = configure(enabled, sink, keep, limit)
     return {"enabled": applied[0], "sink": applied[1], "keep": applied[2], "limit": applied[3]}

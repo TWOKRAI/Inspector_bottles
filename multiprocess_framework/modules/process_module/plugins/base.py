@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
-from ..managers.observability_flight import FLIGHT_RECORDER_ATTR, note_flight_disabled
+from ..managers.observability_flight import FLIGHT_RECORDER_ATTR, NO_RECORDER_KNOBS, note_flight_disabled
 from ..managers.observability_wiring import (
     CARRIER_FAILURE_KEY,
     DOCUMENT_SINK_ATTR,
@@ -550,7 +550,7 @@ class PluginContext:
             # выключенный рекордер, и это Р5.1-5 в исполнении: у «выключено»
             # одно состояние с одним адресом. Второй текст здесь означал бы, что
             # оператор чинит наличие механизма вместо ручки.
-            note_flight_disabled(self.services, str(reason))
+            note_flight_disabled(self.services, str(reason), NO_RECORDER_KNOBS)
             return False
         return dump(
             self.services,
