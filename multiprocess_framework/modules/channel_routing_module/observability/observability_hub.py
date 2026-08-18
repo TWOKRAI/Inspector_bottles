@@ -174,7 +174,29 @@ class ObservabilityHub:
         )
 
     def record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
-        self._emit_stat(metric_name, value, METRIC_GAUGE, tags)
+        """Прибавить ПРИРОСТ к счётчику (counter) — эмитит METRIC_COUNTER, не уровень.
+
+        Задача S-4: до этой правки метод эмитил METRIC_GAUGE и дублировал
+        :meth:`gauge` — одно значение под двумя именами. Хуже того, имя
+        совпадало с :meth:`StatsManager.record_metric
+        <...statistics_module.core.stats_manager.StatsManager.record_metric>`,
+        а тот метод ВСЕГДА означает counter. Оба объекта — hub и реальный
+        ``StatsManager`` — духк-тайпово садятся в один слот ``"stats"``
+        :class:`~...base_manager.mixins.observable_mixin.ObservableMixin`
+        (см. шапку модуля), и вызывающий, который зовёт
+        ``self._record_metric(...)``, не может по месту вызова узнать, кто
+        сейчас за слотом. Свип S-4 (перепроверен) не нашёл ни одного боевого
+        вызывающего на момент правки — но слот духк-тайпован, и первый же
+        ``self._record_metric(...)`` внутри ``worker_manager`` получил бы
+        молчаливую перезапись там, где ждал сумму за окно.
+
+        Совпадение имени со ``StatsManager.record_metric`` — НЕ случайность,
+        а обязательный инвариант: одно имя обязано значить одну и ту же вещь
+        под обоими менеджерами. Нужен снимок текущего значения (перезапись,
+        а не сумма) — зови :meth:`gauge`; не «чини» этот метод обратно на
+        GAUGE, если понадобится точечное значение.
+        """
+        self._emit_stat(metric_name, value, METRIC_COUNTER, tags)
 
     def increment(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
         self._emit_stat(metric_name, value, METRIC_COUNTER, tags)

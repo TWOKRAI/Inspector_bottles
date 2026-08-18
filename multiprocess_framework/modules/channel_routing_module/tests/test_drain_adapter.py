@@ -116,6 +116,47 @@ def test_apply_stat_counter_timing_gauge():
     assert stats.calls[2][1][1] == 42
 
 
+# ---------------------------------------------------------------------------
+# S-4: record_metric (COUNTER) vs gauge — какой РОД метрики реально доехал
+# до приёмника (sink), а не то, что на hub'е вызвался метод с именем
+# "record_metric" (это имя не менялось ни до, ни после правки — спай на него
+# доказал бы имя, не свойство).
+# ---------------------------------------------------------------------------
+
+
+def test_hub_record_metric_reaches_sink_as_counter():
+    """S-4: hub.record_metric — ПРИРОСТ, доезжает до sink'а КАК record_metric.
+
+    До S-4 hub.record_metric эмитил METRIC_GAUGE, и та же цепочка привела бы
+    к вызову sink.gauge(...) — значение легло бы в "текущий уровень", а не в
+    счётчик. Смотрим на метод, реально вызванный на приёмнике (sink — дублёр
+    StatsManager), это и есть наблюдаемое следствие. Без парного теста ниже
+    этот тест прошёл бы и в мире, где ВСЁ роутится в record_metric.
+    """
+    hub = _hub()
+    hub.record_metric("orders", 4, {"line": "a"})
+    rec = hub.drain_stats()[0]
+
+    stats = RecordingSink()
+    ObservabilityDrainAdapter(stats=stats).apply_stat(rec)
+
+    assert stats.calls[0][0] == "record_metric"
+    assert stats.calls[0][1] == ("orders", 4, {"line": "a"})
+
+
+def test_hub_gauge_reaches_sink_as_gauge():
+    """Парный контроль: gauge не стал counter заодно с правкой record_metric."""
+    hub = _hub()
+    hub.gauge("temp", 21, {"line": "a"})
+    rec = hub.drain_stats()[0]
+
+    stats = RecordingSink()
+    ObservabilityDrainAdapter(stats=stats).apply_stat(rec)
+
+    assert stats.calls[0][0] == "gauge"
+    assert stats.calls[0][1] == ("temp", 21, {"line": "a"})
+
+
 def test_apply_stat_unknown_type_falls_back_to_record_metric():
     stats = RecordingSink()
     adapter = ObservabilityDrainAdapter(stats=stats)

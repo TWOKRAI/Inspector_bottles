@@ -167,8 +167,11 @@ def test_worker_stat_buffered_then_drained():
     worker._record_metric("hits", 5)
     assert _metric_calls(stats) == []
     drain_process_observability(hub, adapter)
-    # hub.record_metric помечает запись METRIC_GAUGE → адаптер → stats.gauge;
-    # тест буфера/дренажа проверяет приход метрики по имени, не тип-роутинг.
+    # hub.record_metric (S-4: METRIC_COUNTER) → адаптер → stats.record_metric;
+    # тест буфера/дренажа проверяет приход метрики по имени, не тип-роутинг —
+    # тип-роутинг доказан отдельно, на уровне приёмника (стат-sink'а), в
+    # test_drain_adapter.py::test_hub_record_metric_reaches_sink_as_counter
+    # и его паре ...as_gauge.
     assert any(c[1] and c[1][0] == "hits" for c in stats.calls)
 
 
