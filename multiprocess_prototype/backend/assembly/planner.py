@@ -33,6 +33,106 @@ from typing import Any, Callable
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 
 
+#: Мета-поля записи плагина: они определяют, КАКОЙ плагин грузится, но в
+#: ``ctx.config`` не попадают (их отбрасывает сам рантайм). В каноне держим их
+#: отдельно от параметров — смена ``plugin_class`` обязана считаться расхождением,
+#: хотя параметры при этом не изменились.
+_PLUGIN_META_KEYS = ("plugin_class", "plugin_name", "category")
+
+#: Максимальная глубина спуска голоса по дереву конфига. Реальный proc_dict —
+#: единицы уровней; ограничитель стоит не от глубины, а от ЦИКЛА: proc_dict
+#: приходит из yaml, а якорь ``&r {k: 1, self: *r}`` даёт самоссылку, на которой
+#: рекурсия без предохранителя роняет ``commands()`` изнутри, без перехвата.
+#: Дословное сравнение dict'ов цикл переживало — значит предохранитель здесь
+#: закрывает поверхность, которой до этой правки не было.
+_MAX_VOICE_DEPTH = 12
+
+
+def _diverged_paths(live: Any, new: Any, prefix: str = "", depth: int = 0) -> list[str]:
+    """Пути ключей, по которым два канонических конфига разошлись.
+
+    Нужен не для вердикта (его выносит сравнение целиком), а для ГОЛОСА:
+    сообщение «конфиг отличается» без указания ЧЕМ отправляет чинить наугад.
+    Именно этот голос назвал третью причину расхождения на живом стенде, которой
+    не было видно в разборе на столе.
+
+    Спуск идёт и по dict, и по СПИСКУ (по индексу): плагины лежат списком, и без
+    этого главный случай — расхождение внутри плагина — сворачивался в
+    бесполезное ``config.plugins``. Порядок устойчив (``sorted``), чтобы
+    сообщение не плясало между прогонами.
+    """
+    if depth >= _MAX_VOICE_DEPTH:
+        return [] if live == new else [f"{prefix}… (глубже {_MAX_VOICE_DEPTH})"]
+    if isinstance(live, dict) and isinstance(new, dict):
+        paths: list[str] = []
+        for key in sorted(set(live) | set(new), key=str):
+            here = f"{prefix}{key}"
+            if key not in live:
+                paths.append(f"{here} (только в новом)")
+            elif key not in new:
+                paths.append(f"{here} (только в живом)")
+            else:
+                paths.extend(_diverged_paths(live[key], new[key], f"{here}.", depth + 1))
+        return paths
+    if isinstance(live, list) and isinstance(new, list):
+        if len(live) != len(new):
+            return [f"{prefix[:-1]} (длина {len(live)} против {len(new)})"]
+        paths = []
+        for i, (a, b) in enumerate(zip(live, new)):
+            paths.extend(_diverged_paths(a, b, f"{prefix[:-1]}[{i}].", depth + 1))
+        return paths
+    return [] if live == new else [prefix[:-1] if prefix else "<корень>"]
+
+
+def _canonicalize_plugin_entry(entry: Any) -> Any:
+    """Канонизировать ОДНУ запись плагина — ровно так, как её читает рантайм.
+
+    Параметры плагина пишутся двумя способами: плоско (стиль ``base.yaml``) или
+    вложенно в ``"config"`` (стиль рецептов), и сборка оставляет обе записи
+    рядом. Неоднозначности при этом НЕТ:
+    :meth:`PluginOrchestrator._extract_plugin_config` — единственная граница, за
+    которой рождается ``ctx.config``, — отбрасывает мета-поля и разворачивает
+    вложенный ``config`` ПОВЕРХ плоского. Значит «плоско A, вложенно B» означает
+    не противоречие, а «дефолт, перекрытый рецептом», и означает ровно ``B``.
+
+    Поэтому канон берётся у рантайма, а не изобретается здесь: своя копия правила
+    разошлась бы с ним на первой же правке, и сравнение начало бы отвечать не про
+    ту систему, которая работает. Ревью 2026-08-18 (блокер 1) поймало ровно это:
+    выдуманный «сторож противоречия» возвращал ложный конфликт на паре
+    «дефолт ассемблера плоско + значение рецепта вложенно», побитово одинаковой в
+    рантайме.
+
+    Чистая функция: новый dict, вход не мутируется (``_extract_plugin_config``
+    строит свой словарь и во входной ``pdef`` не пишет).
+    """
+    if not isinstance(entry, dict):
+        return entry  # не-dict элемент списка — без изменений
+    from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import (
+        PluginOrchestrator,
+    )
+
+    meta = {k: entry[k] for k in _PLUGIN_META_KEYS if k in entry}
+    return {**meta, "config": PluginOrchestrator._extract_plugin_config(entry)}
+
+
+def _canonicalize_proc_dict_for_comparison(proc_dict: dict) -> dict:
+    """Привести proc_dict к канонической форме ТОЛЬКО для сравнения.
+
+    Канонизируется единственно ``proc_dict["config"]["plugins"]`` (если есть
+    и это список) — остальные ключи proc_dict сравниваются дословно, как
+    раньше. Чистая функция: строит новые dict'ы, ничего не мутирует во
+    входе (ни ``proc_dict``, ни вложенные записи плагинов).
+    """
+    config = proc_dict.get("config")
+    if not isinstance(config, dict):
+        return proc_dict
+    plugins = config.get("plugins")
+    if not isinstance(plugins, list):
+        return proc_dict
+    canonical_plugins = [_canonicalize_plugin_entry(p) for p in plugins]
+    return {**proc_dict, "config": {**config, "plugins": canonical_plugins}}
+
+
 class FullReplacePlanner(BaseManager, ObservableMixin):
     """Стратегия полной замены: diff + commands в одном классе.
 
@@ -225,10 +325,20 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
             live = self._protected_config_provider(name)
             if live is None:
                 continue  # нет живого (первый boot протектеда) — нечего сравнивать
-            if live != proc_dicts[name]:
+            # Сравнение смысла, а не написания: плоская и вложенная запись
+            # одного параметра плагина — одно и то же значение (см.
+            # _canonicalize_plugin_entry). Дословное сравнение целых dict'ов
+            # давало ложный конфликт на КАЖДОМ switch — воспроизведено
+            # повторным apply той же топологии (applied=0, конфликты те же).
+            if _canonicalize_proc_dict_for_comparison(live) != _canonicalize_proc_dict_for_comparison(proc_dicts[name]):
                 conflicts.append(name)
+                paths = _diverged_paths(
+                    _canonicalize_proc_dict_for_comparison(live),
+                    _canonicalize_proc_dict_for_comparison(proc_dicts[name]),
+                )
+                where = ", ".join(paths[:8]) + (f" и ещё {len(paths) - 8}" if len(paths) > 8 else "")
                 self._log_error(
-                    f"protected '{name}': конфиг нового рецепта отличается от живого — "
+                    f"protected '{name}': конфиг нового рецепта отличается от живого по [{where}] — "
                     f"protected не рестартится, изменения НЕ будут применены (switch не тихо успешен)"
                 )
         return conflicts
