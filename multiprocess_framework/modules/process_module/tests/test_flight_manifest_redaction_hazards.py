@@ -15,13 +15,22 @@ C1-C7 от независимого тестировщика и её трога�
   ``note_flight_no_ring`` — эти голоса вне контракта задачи S-2 (они уже едут
   через обычную цепочку логгера в проде, редактировать их здесь — вторая копия
   правил);
-* вложенный словарь в ``fields`` маскируется на глубине.
+* вложенный словарь в ``fields`` маскируется на глубине;
+* сам факт «голос едет через обычную цепочку логгера в проде» (предыдущий
+  пункт) доказан ЗАПУСКОМ, а не только фейковым харнессом ``_Services`` ниже
+  (ревью 6, tests-gap): один тест проводит голос отказа через РЕАЛЬНЫЙ
+  ``ProcessModule`` -> ``_log_warning`` -> ``_call_manager("logger", ...)`` ->
+  ``LoggerCore._run_processors`` -> ``SecretRedactor`` и проверяет, что секрет
+  в итоговой записи замаскирован.
 
 Харнесс — независимая копия минимального харнесса приёмки (не импортируется
 оттуда: этот файл не обязан зависеть от внутреннего устройства приёмки, и
 наоборот). Проводка настоящая: реальный ``LoggerManager`` с memory-каналом,
 реальный ``FlightRecorder``, реальный ``PluginContext`` — fake-harness здесь
-доказывал бы только harness.
+доказывал бы только harness. Ниже, у ``TestRealLoggerChainMasksTheSecretInTheRefusalVoice``,
+проводка НАСТОЯЩАЯ и по стороне процесса: реальный ``ProcessModule``, а не
+``_Services`` — потому что предмет теста ровно то, что ``_Services.log_warning``
+у остальных классов этого файла обходит (``_call_manager`` целиком).
 """
 
 from __future__ import annotations
@@ -33,7 +42,12 @@ from typing import Any, Dict, List
 
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.logger_module.core.redaction import MASK
-from multiprocess_framework.modules.process_module.managers.observability_flight import FlightRecorder
+from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+from multiprocess_framework.modules.process_module.managers.observability_flight import (
+    NO_RECORDER_KNOBS,
+    FlightRecorder,
+    note_flight_disabled,
+)
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 
 
@@ -249,3 +263,73 @@ class TestNestedDictInFieldsIsMaskedAtDepth:
             assert header["outer"]["inner"]["neighbor"] == "keep_me", "сосед на той же глубине пострадал"
         finally:
             logger.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Ревью 6 (tests-gap): голос отказа проходит через РЕАЛЬНУЮ цепочку логгера
+# (не фейковый _Services выше), и секрет в итоговой записи замаскирован.
+# ---------------------------------------------------------------------------
+
+
+def _real_process_and_logger(tmp_path: Path, *, channel: str = "a") -> "tuple[ProcessModule, LoggerManager]":
+    """Реальный ``ProcessModule`` + реальный ``LoggerManager`` с ФАЙЛОВЫМ каналом.
+
+    Не ``_Services`` (фейк выше): предмет этого теста — ровно то, что фейк
+    обходит целиком, а именно продовый путь ``ObservableMixin._log_warning``
+    -> ``_call_manager("logger", "warning", ...)`` -> зарегистрированный
+    ``LoggerManager`` -> ``LoggerCore._run_processors`` -> ``SecretRedactor``
+    (``self._processors = (self._redactor, self._sampler)`` заведён
+    БЕЗУСЛОВНО в ``LoggerCore.__init__``, ``logger_core.py:409``). Файловый
+    канал, а не ``memory``: голос отказа читается текстом из файла на диске,
+    той же дорогой, что и у ``test_flight_recorder_default_and_revoice_hazards.py``.
+    """
+    config: Dict[str, Any] = {"app_name": "flight_refusal_redaction_hazard"}
+    proc = ProcessModule("inspector", config=config)
+    logger_config: Dict[str, Any] = {
+        "app_name": "flight_refusal_redaction_hazard",
+        "log_directory": str(tmp_path),
+        "modules": {},
+        "channels": {channel: {"type": "file", "enabled": True, "file_path": f"{channel}.log"}},
+        "scopes": {
+            "SYSTEM": {"channels": [channel]},
+            "BUSINESS": {"channels": [channel]},
+            "DEBUG": {"channels": [channel]},
+        },
+    }
+    logger = LoggerManager(manager_name="FlightRefusalRedactionHazardProbe", config=logger_config, process=proc)
+    logger.initialize()
+    proc.logger_manager = logger
+    proc.register_manager("logger", logger, enabled=True)
+    return proc, logger
+
+
+class TestRealLoggerChainMasksTheSecretInTheRefusalVoice:
+    """``TestRedactionDoesNotCorruptRefusalVoices`` (выше) доказывает, что голос
+    отказа несёт СЫРУЮ причину — и это правда на уровне самого модуля. Но её
+    харнесс — ``_Services.log_warning``, фейк, который аппендит строку в список
+    МИМО ``_call_manager`` целиком: сломай кто-нибудь роутинг ``_call_manager``
+    или выключи ``SecretRedactor`` из цепочки процессоров — ни один тест того
+    класса не покраснеет, потому что ни один не проходит через них.
+
+    Здесь голос идёт через РЕАЛЬНЫЙ ``ProcessModule`` -> ``_log_warning`` ->
+    ``_call_manager`` -> зарегистрированный ``LoggerManager`` -> ``SecretRedactor``,
+    и утверждение — что в проде секрет из ``reason`` всё равно замаскирован,
+    даже при том что ``note_flight_disabled`` сам его не редактирует (см.
+    класс выше и модульный докстринг ``observability_flight.py`` про Р5.1-12/S-2:
+    редакция ``reason``/``fields`` там — только для ТЕЛА дампа, а голос отказа
+    в контракт S-2 не входит и полагается на общую цепочку логгера)."""
+
+    def test_disabled_refusal_voice_is_masked_by_the_real_processor_chain(self, tmp_path: Path) -> None:
+        proc, logger = _real_process_and_logger(tmp_path)
+        try:
+            raw_reason = "token=SEKRET_XYZ_REAL_CHAIN"
+            note_flight_disabled(proc, raw_reason, NO_RECORDER_KNOBS)
+            said = (tmp_path / "inspector" / "a.log").read_text(encoding="utf-8", errors="replace")
+        finally:
+            logger.shutdown()
+
+        assert "SEKRET_XYZ_REAL_CHAIN" not in said, (
+            "секрет из reason доехал до файла НЕотредактированным — реальная цепочка "
+            "_log_warning -> _call_manager -> SecretRedactor не сработала"
+        )
+        assert "token=***" in said, f"ожидалась маска 'token=***' в записи, получено: {said!r}"

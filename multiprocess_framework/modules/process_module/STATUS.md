@@ -4,6 +4,36 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-08-18 (S-19/S-20, `plans/QUEUE.md`, две находки синхронного ревью этапа 6):**
+  **S-20 (major).** `NO_RECORDER_KNOBS = (False, "", 0, 0)` — метка «рекордера нет вовсе»
+  (`plugins/base.py:553`, `flight_dump` бьёт этой веткой мимо `FlightRecorder.dump`) — совпадала
+  побайтово с легальным конфигом (`enabled=false`/`sink=""`/`limit=0` — дефолты схемы, `keep=0` —
+  документированное «без предела», `min=0`). `_say_once` сравнивает метку «уже сказали» по `==`, и
+  совпадение молчало на переходе «сшивки не было» → «рекордер есть, но выключен ТОЙ ЖЕ
+  комбинацией»: репро ревью дало `voices=1` при ожидаемых 2. Закрыто заменой значения на singleton
+  `_NoRecorderKnobsSentinel` — тип, структурно несовместимый с `tuple`
+  (`tuple.__eq__`/`object.__eq__` откатываются к `is`, значит совпадение с ЛЮБОЙ живой четвёркой
+  невозможно доказуемо, не по перечислению значений), при этом сам с собой синглтон равен всегда
+  (`is`), поэтому серия «рекордера нет» подряд по-прежнему даёт один голос. Тесты: 2 новых hazard
+  автора в `tests/test_flight_recorder_default_and_revoice_hazards.py` (было 8, стало 10) — репро
+  ревью (2 голоса) + контроль на спам (1 голос у двух подряд). **S-19 (tests-gap).**
+  `TestRedactionDoesNotCorruptRefusalVoices` (`tests/test_flight_manifest_redaction_hazards.py`)
+  доказывала, что голос отказа несёт сырой `reason`, фейковым харнессом `_Services.log_warning`,
+  который обходит `_call_manager` целиком — сломай роутинг или выключи `SecretRedactor` из цепочки
+  (`self._processors = (self._redactor, self._sampler)`, `logger_core.py:409`, заведена БЕЗУСЛОВНО)
+  — ни один тест сьюта не покраснел бы. Добавлен 1 новый тест (было 6, стало 7) с настоящим
+  `ProcessModule` + настоящим `LoggerManager` (файловый канал), проходящий через
+  `_log_warning → _call_manager("logger", "warning", …) → LoggerCore._run_processors →
+  SecretRedactor`; фейковые тесты не тронуты (доказывают своё — что модуль сам голос не
+  редактирует). Инъекции (предсказание → факт): (а) возврат `NO_RECORDER_KNOBS` к `(False, "", 0,
+  0)` → красит ровно новый тест S-20 (1/10), остальные 9 зелёные — подтверждено; (б) снятие
+  `SecretRedactor` из `self._processors` в `logger_core.py` → красит ровно новый тест S-19 (1/7),
+  все 6 фейковых тестов остаются зелёными (доказывает находку: они не видят этот класс дефекта) —
+  подтверждено. Гейты без новых красных: `process_module` **2284 passed** (было 2281, +3 новых
+  теста), `logger_module` 819 passed / 2 skipped. Правки только в
+  `managers/observability_flight.py` (тип метки + докстринги) и в двух файлах hazard-тестов автора;
+  `plugins/base.py`, приёмочные тесты, `heartbeat/`, `frontend_module/`, `telemetry_readmodel_module/`
+  не тронуты.
 - **2026-08-17 (задачи S-5/S-6, `plans/QUEUE.md`, сквозное ревью этапа 6):** дефолт «flight
   выключен» жил в ЧЕТЫРЁХ рукописных копиях (`_flight_knobs` на ветке «секции нет», литерал в
   вызове `wire_flight_recorder`, fallback `apply_flight_recorder`, схема) — инъекция «секции нет →

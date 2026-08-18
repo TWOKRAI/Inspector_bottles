@@ -19,7 +19,11 @@
 * единый источник дефолта (S-5) обязан отдавать СХЕМНЫЕ значения остальных
   трёх ручек, если секция задаёт только одну (``sink``) — а не нули;
 * мусорная секция (не словарь: строка/число/список) обязана вести себя
-  ТАК ЖЕ, как до правки: голос + прежняя (схемная) политика, реестр не падает.
+  ТАК ЖЕ, как до правки: голос + прежняя (схемная) политика, реестр не падает;
+* метка «рекордера нет вовсе» (:data:`NO_RECORDER_KNOBS`) не совпадает с
+  РЕАЛЬНОЙ четвёркой ручек ни при каких их значениях (ревью 6, находка major):
+  переход «сшивки не было» -> «рекордер есть, но выключен ручкой» обязан дать
+  ВТОРОЙ голос, а серия отказов «рекордера нет» подряд — по-прежнему один.
 
 Проводка настоящая (реальный ``LoggerManager`` с memory-каналом, реальный
 ``ProcessModule``, реальный ``PluginContext``) — ровно тот же фикстурный
@@ -36,8 +40,10 @@ import pytest
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
 from multiprocess_framework.modules.process_module.managers.observability_flight import (
+    NO_RECORDER_KNOBS,
     apply_flight_recorder,
     flight_plane_report,
+    note_flight_disabled,
 )
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 
@@ -240,3 +246,60 @@ class TestGarbageSectionBehavesAsBefore:
 
         assert knobs == (False, "", 5, 0), f"мусорная секция {garbage!r} обязана дать прежнюю политику"
         assert GARBAGE_SECTION_MARKER in said, "мусорная секция обязана быть названа голосом, а не молчанием"
+
+
+# ---------------------------------------------------------------------------
+# Ревью 6 (major): NO_RECORDER_KNOBS не имеет права совпасть ни с какой РЕАЛЬНОЙ
+# четвёркой ручек — «сшивки не было» и «рекордер есть, но выключен» два разных
+# диагноза, и слияние их в один голос молчаливо стоило оператору второй улики.
+# ---------------------------------------------------------------------------
+
+
+class TestNoRecorderLabelNeverCollidesWithARealDisabledConfig:
+    """До правки :data:`NO_RECORDER_KNOBS` был четвёркой ``(False, "", 0, 0)`` —
+    ровно то же значение, что и легальный конфиг ``enabled=false`` (дефолт),
+    ``sink=""`` (дефолт), ``limit=0`` (дефолт), ``keep=0`` (легальное «без
+    предела», ``ObservabilityFlightConfig.keep`` min=0). :func:`_say_once`
+    сравнивал метки по ``==`` и на переходе «сшивки не было» -> «рекордер
+    появился, но выключен ТОЙ ЖЕ комбинацией значений» молчал — второй голос не
+    звучал. Здесь — репро ревью буквально: два вызова :func:`note_flight_disabled`
+    напрямую, минуя ``wire_flight_recorder``/``ctx.flight_dump`` (низкоуровневая
+    точка входа, которой пользуется и сам механизм)."""
+
+    def test_wiring_never_happened_then_recorder_appears_disabled_gives_two_voices(self, tmp_path: Path) -> None:
+        proc, _ctx, logger = _boot(tmp_path, None)
+        try:
+            note_flight_disabled(proc, "wiring failed, no recorder yet", NO_RECORDER_KNOBS)
+            first = _said_text(tmp_path).count(DISABLED_MARKER)
+            assert first == 1, "первый отказ «рекордера нет» обязан дать голос"
+
+            note_flight_disabled(proc, "recorder exists now but disabled by config", (False, "", 0, 0))
+            second = _said_text(tmp_path).count(DISABLED_MARKER)
+        finally:
+            logger.shutdown()
+
+        assert second == 2, (
+            f"переход «сшивки не было» -> «рекордер есть, но выключен ручкой» обязан дать "
+            f"ВТОРОЙ голос — было {first}, стало {second} (найдено ревью 6, major)"
+        )
+
+
+class TestNoRecorderLabelStaysStableAcrossRepeatedRefusals:
+    """Контроль к предыдущему тесту: починка не имеет права превратить голос
+    «рекордера нет» в спам. Серия отказов ЭТОГО ЖЕ класса подряд, БЕЗ появления
+    реального рекордера, обязана по-прежнему дать ОДИН голос — singleton
+    :data:`NO_RECORDER_KNOBS` равен самому себе по ``==`` (тот же объект)."""
+
+    def test_two_consecutive_no_recorder_refusals_give_one_voice(self, tmp_path: Path) -> None:
+        proc, _ctx, logger = _boot(tmp_path, None)
+        try:
+            note_flight_disabled(proc, "first", NO_RECORDER_KNOBS)
+            note_flight_disabled(proc, "second", NO_RECORDER_KNOBS)
+            said = _said_text(tmp_path)
+        finally:
+            logger.shutdown()
+
+        assert said.count(DISABLED_MARKER) == 1, (
+            "два отказа «рекордера нет» подряд без смены настроек обязаны дать РОВНО "
+            "один голос — иначе починка находки 6 превратила бы голос в спам"
+        )

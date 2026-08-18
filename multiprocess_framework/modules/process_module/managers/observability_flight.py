@@ -80,7 +80,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .observability_wiring import process_say
 
@@ -154,14 +154,48 @@ _WARNED_DISABLED_KNOBS_ATTR = "_flight_warned_disabled_knobs"
 _WARNED_NO_RING_KNOBS_ATTR = "_flight_warned_no_ring_knobs"
 _WARNED_FAILED_KNOBS_ATTR = "_flight_warned_failed_knobs"
 
-#: Четвёрка-тождество для ЕДИНСТВЕННОГО места, где рекордера нет вовсе (сшивка
-#: не проходила — ``PluginContext.flight_dump`` бьёт этой веткой напрямую, минуя
-#: :meth:`FlightRecorder.dump`). Это НЕ дефолт схемы (см. :func:`_flight_default_knobs`,
-#: S-5) и не живая четвёрка: у «рекордера нет» настроек, которые могли бы
-#: смениться, не существует, поэтому метка постоянна и голос звучит один раз —
-#: до тех пор, пока рекордер не появится (тогда голосом уже заведует
-#: :meth:`FlightRecorder.dump` со своей, живой четвёркой).
-NO_RECORDER_KNOBS: Tuple[bool, str, int, int] = (False, "", 0, 0)
+
+#: Метка «рекордера нет вовсе» (сшивка не проходила — ``PluginContext.flight_dump``
+#: бьёт этой веткой напрямую, минуя :meth:`FlightRecorder.dump`; см. вызов в
+#: ``plugins/base.py``). До ревью 6 (находка «заглушка неотличима от легального
+#: конфига») это была четвёрка ``(False, "", 0, 0)`` — РОВНО то же значение, какое
+#: даёт легальный конфиг: ``enabled=false`` (дефолт схемы), ``sink=""`` (дефолт),
+#: ``limit=0`` (дефолт) и ``keep=0`` — а ``keep=0`` схема
+#: :class:`ObservabilityFlightConfig` документирует как легальное «без предела»
+#: (``min=0``), не как мусор. :func:`_say_once` сравнивал метки по ``==``, и
+#: совпадение молчало на переходе «сшивки не было» -> «рекордер есть, но выключен
+#: ручкой» — двух РАЗНЫХ диагнозов (репро ревью: ``voices == 1`` при ожидаемых 2).
+#:
+#: Метка теперь — singleton ДРУГОГО ТИПА (:class:`_NoRecorderKnobsSentinel`), не
+#: четвёрка чисел, и совпадение с ней невозможно СТРУКТУРНО, а не по удачно
+#: подобранным значениям: живая четвёрка, которую строит
+#: :meth:`FlightRecorder.configure`, — всегда ``tuple`` из ровно четырёх
+#: элементов. ``tuple.__eq__`` против объекта несовместимого типа возвращает
+#: ``NotImplemented``, дефолтный ``object.__eq__`` синглтона тоже не совпадает ни
+#: с чем, кроме самого себя, — значит для сравнения ``tuple == NO_RECORDER_KNOBS``
+#: Python откатывается к ``is`` и получает ``False`` для ЛЮБОЙ четвёрки, каким бы
+#: конфигом она ни была получена (доказано типом, не перечислением значений).
+#: Одновременно ``NO_RECORDER_KNOBS == NO_RECORDER_KNOBS`` истинно (тот же
+#: объект-синглтон), поэтому серия отказов «рекордера нет» подряд без появления
+#: рекордера по-прежнему даёт ОДИН голос — проверено тестом-контролем в
+#: ``test_flight_recorder_default_and_revoice_hazards.py``.
+class _NoRecorderKnobsSentinel:
+    """Singleton-маркер «рекордера нет вовсе». Не ``tuple``, не строится ни из
+    какого конфига и не совпадает по ``==`` ни с чем, кроме самого себя."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<no-recorder>"
+
+
+NO_RECORDER_KNOBS: "_NoRecorderKnobsSentinel" = _NoRecorderKnobsSentinel()
+
+#: Тип метки, которую принимают :func:`_say_once` и :func:`note_flight_disabled`:
+#: либо живая четвёрка ручек рекордера, либо singleton :data:`NO_RECORDER_KNOBS`.
+#: Названо явно одним алиасом, чтобы объединение типов не расползлось копией по
+#: местам вызова.
+FlightKnobsLabel = Union[Tuple[bool, str, int, int], "_NoRecorderKnobsSentinel"]
 
 
 def _bump(svc: Any, attr: str) -> None:
@@ -176,7 +210,7 @@ def _say_once(
     svc: Any,
     flag: str,
     knobs_attr: str,
-    knobs: Tuple[bool, str, int, int],
+    knobs: FlightKnobsLabel,
     message: str,
 ) -> None:
     """Сказать один раз НА ТЕКУЩИЕ НАСТРОЙКИ рекордера (С-6). Счётчик — всегда.
@@ -211,13 +245,14 @@ def _say_once(
     process_say(svc, message, "WARNING")
 
 
-def note_flight_disabled(svc: Any, reason: str, knobs: Tuple[bool, str, int, int]) -> None:
+def note_flight_disabled(svc: Any, reason: str, knobs: FlightKnobsLabel) -> None:
     """Отказ (а) по Р5.1-6: механизм выключен ручкой. Адрес ручки — в тексте.
 
     ``knobs`` — действующая четвёрка рекордера В МОМЕНТ отказа
-    (:data:`NO_RECORDER_KNOBS`, если рекордера нет вовсе) — метка для голоса
-    «уже сказали», сброс которой при смене настроек описан в
-    :func:`_say_once` (С-6).
+    (:data:`NO_RECORDER_KNOBS` — singleton другого типа, если рекордера нет
+    вовсе, см. докстринг константы про структурную несовместимость с любой
+    живой четвёркой) — метка для голоса «уже сказали», сброс которой при смене
+    настроек описан в :func:`_say_once` (С-6).
     """
     _bump(svc, _REFUSED_DISABLED_ATTR)
     _say_once(
