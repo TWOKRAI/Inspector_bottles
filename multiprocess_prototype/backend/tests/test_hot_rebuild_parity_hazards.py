@@ -12,10 +12,19 @@
    Инъекция И7 предсказывала красный A10 («вход не мутируется») — и промахнулась.
    Замер объяснил почему: ``normalize_blueprint`` дописывает per-category
    defaults **in place**, но только тем плагинам, у чьей категории эти дефолты
-   вообще есть. У ``processing`` появляется ``worker_pool_size``; у ``sources``,
-   ``hub`` и ``utility`` в боевом ``system.yaml`` не появляется ничего. В
-   рецептах приёмки плагинов категории ``processing`` нет — потому она и была
-   зелена.
+   вообще есть. Пересчитано по всем 9 категориям, встречающимся в рецептах:
+   ``source`` получает пять ключей (``fps``, ``source_type``, две ``resolution_*``,
+   ``ring_buffer_size``) и встречается в 17 рецептах из 17; ``processing`` —
+   ``worker_pool_size``; ``output`` — ``enabled``; у остальных шести
+   (``calibration``, ``filter``, ``hub``, ``io``, ``rendering``, ``sink``)
+   дефолтов нет. В рецептах приёмки плагины только категории ``hub`` — потому
+   она и была зелена.
+
+   Первая редакция этого объяснения была НЕВЕРНА и названа ревью: я замерял
+   категории по именам ``sources`` и ``utility``, которых не существует, и
+   пустой ответ ``defaults_for_category`` прочёл как «у категории нет дефолтов»
+   вместо «такой категории нет». Вывод уцелел, объяснение — нет; оставить
+   уверенное неверное объяснение опаснее, чем не написать никакого.
 
 2. **Рецепт без ключа ``name``.** Инъекция И8 (``bp.get("name")`` →
    ``bp["name"]``) не убила никого: у всех рецептов приёмки имя есть. Фолбэк на
@@ -135,10 +144,12 @@ def test_deepcopy_of_the_input_is_load_bearing() -> None:
     обогащался бы на каждом switch, и следующий switch видел бы уже не то,
     что прислал инициатор.
 
-    Категория здесь несущая, а не декоративная: у ``sources``, ``hub`` и
-    ``utility`` per-category defaults в боевом ``system.yaml`` пусты, и тот же
-    тест на них прошёл бы при полностью снятом ``deepcopy`` — именно поэтому
-    приёмка тестера осталась зелёной под инъекцией И7.
+    Категория здесь несущая, а не декоративная: у ``hub`` — единственной, что
+    есть в рецептах приёмки, — per-category defaults пусты, и тот же тест на ней
+    прошёл бы при полностью снятом ``deepcopy``; именно поэтому приёмка тестера
+    осталась зелёной под инъекцией И7. Годился бы и любой ``source``-плагин (пять
+    дописываемых ключей вместо одного); ``processing`` выбран потому, что
+    ``color_inspect.yaml`` — самый маленький настоящий рецепт с ним.
     """
     import yaml
 
@@ -226,3 +237,85 @@ def test_the_real_launcher_ships_a_thin_sys_config() -> None:
         f"слой L1 материализовался: ключа нет в system.yaml, но он уехал в ПМ — {sorted(shipped)}"
     )
     assert "log_level" in shipped, "заданный в system.yaml ключ обязан уцелеть"
+
+
+# ---------------------------------------------------------------------------
+# Опасность 4 — паритет двух дорог никто не сверяет
+# ---------------------------------------------------------------------------
+
+
+def _boot_devices_entry(manifest_path: Path, pipeline: str | None) -> dict[str, Any]:
+    """Запись плагина ``device_hub`` так, как её собирает BOOT-дорога."""
+    from multiprocess_prototype.backend.config.manifest import load_manifest
+    from multiprocess_prototype.backend.launch import SystemBuilder
+
+    app = load_manifest(manifest_path)
+    launcher = SystemBuilder.from_manifest(app, pipeline).build()
+    procs = dict(launcher._processes)
+    for plugin in procs["devices"]["config"]["plugins"]:
+        if plugin.get("plugin_name") == "device_hub":
+            return plugin
+    raise AssertionError("boot не собрал плагин device_hub")
+
+
+def test_boot_and_hot_rebuild_agree_on_recipe_devices() -> None:
+    """Две дороги обязаны прийти к одному по устройствам рецепта.
+
+    Сборка живёт в ДВУХ местах — ``launch.from_manifest`` (boot) и
+    ``orchestrator_hooks._build_proc_dicts`` (switch), — и до этого коммита они
+    расходились: горячая не инжектила устройства вовсе. Ни один тест сравнения
+    между дорогами не делал, поэтому расхождение и дожило до живого стенда.
+    Здесь берётся один и тот же настоящий рецепт и прогоняется обеими.
+    """
+    import yaml
+
+    recipe_file = PROJECT_ROOT / "multiprocess_prototype" / "recipes" / "phone_sketch.yaml"
+    raw = yaml.safe_load(recipe_file.read_text(encoding="utf-8"))
+
+    boot = _boot_devices_entry(PROJECT_ROOT / "multiprocess_prototype" / "app.yaml", "phone_sketch")
+    hot = _hub_entry(_rebuild(raw, recipe_path=str(recipe_file)))
+
+    assert hot.get("recipe_devices") == boot.get("recipe_devices")
+    assert hot.get("recipe_origin") == boot.get("recipe_origin")
+    assert boot.get("recipe_devices"), "рецепт обязан нести устройства — иначе тест сверяет два пустых места"
+
+
+def test_a_recipe_without_a_name_value_gets_the_same_origin_on_both_roads(tmp_path) -> None:
+    """`name:` без значения — и происхождение всё равно одно на обеих дорогах.
+
+    Найдено ревью: boot читал имя как ``raw.get("name", bp_path.stem)``, а такой
+    вызов при ключе со значением ``None`` возвращает ``None``, а не имя файла —
+    происхождение молча не проставлялось. Горячая дорога подставляла имя файла.
+    На таком рецепте ``devices`` (он protected) числился бы разошедшимся при
+    каждом switch — ровно тот вечный шум, который этот коммит и убирает.
+    """
+    import shutil
+
+    import yaml
+
+    proto = PROJECT_ROOT / "multiprocess_prototype"
+    raw = yaml.safe_load((proto / "recipes" / "phone_sketch.yaml").read_text(encoding="utf-8"))
+    raw["name"] = None
+
+    (tmp_path / "recipes").mkdir()
+    recipe_file = tmp_path / "recipes" / "noname.yaml"
+    recipe_file.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    app_raw = yaml.safe_load((proto / "app.yaml").read_text(encoding="utf-8"))
+    app_raw["pipeline"] = "recipes/noname.yaml"
+    for key in ("system", "base", "presentation"):
+        if app_raw.get(key):
+            app_raw[key] = str((proto / app_raw[key]).resolve())
+    manifest = tmp_path / "app.yaml"
+    manifest.write_text(yaml.safe_dump(app_raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    try:
+        boot = _boot_devices_entry(manifest, None)
+        hot = _hub_entry(_rebuild(raw, recipe_path=str(recipe_file)))
+
+        assert boot.get("recipe_origin") == "recipe:noname", (
+            f"boot обязан взять имя от файла, когда `name:` пуст — получено {boot.get('recipe_origin')!r}"
+        )
+        assert hot.get("recipe_origin") == boot.get("recipe_origin")
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)

@@ -232,3 +232,26 @@ def test_presenter_no_upsert_without_devices() -> None:
 
     # upsert НЕ вызван (нет devices), apply вызван
     assert call_order == ["apply"], f"Порядок вызовов: {call_order}"
+
+
+def test_devices_section_not_a_list_is_announced(caplog) -> None:
+    """`devices:` мапой вместо списка — отказ обязан быть слышен.
+
+    У битых ЭЛЕМЕНТОВ списка warning был всегда, а у битой самой секции не было:
+    правдоподобная опечатка автора рецепта означала «устройства просто не
+    приехали», и в логе не оставалось ни строки. Парный конец — отсутствие
+    секции: там молчание законно, и без этой пары тест прошёл бы на «ругаемся
+    всегда». Найдено ревью S-25.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        assert extract_recipe_devices({"devices": {"id": "a", "kind": "robot"}}) == []
+    assert any("не список" in r.message % r.args if r.args else "не список" in r.message for r in caplog.records), (
+        f"голоса нет: {[r.getMessage() for r in caplog.records]}"
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        assert extract_recipe_devices({}) == []
+    assert not caplog.records, "отсутствие секции — законное молчание"

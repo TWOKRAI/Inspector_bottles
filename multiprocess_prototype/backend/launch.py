@@ -373,10 +373,18 @@ def sys_config_for_orchestrator(sys_config: "SystemConfig") -> dict:
     Измерено на боевом ``system.yaml``: у лончера L1 — **12** ключей, у ПМ
     после полного дампа — **23**; из ниоткуда появлялись ``flight``,
     ``events``, ``scopes``, ``commands``, ``log_directory``, ``session_ttl_sec``,
-    ``compress_rotated`` и четыре ``sampling_*``. С этого момента рецепт
-    (слой L2) уже нечем перебить, а ``provenance`` никогда не отвечает
-    ``framework`` — ровно то, что запрещает комментарий у ``obs_section``
-    в :meth:`SystemBuilder.build`.
+    ``compress_rotated`` и четыре ``sampling_*``.
+
+    Что при этом ломалось — сказано точно, потому что соблазн сказать шире
+    велик и один раз уже сработал. Переопределить ключ рецептом было можно и
+    так: ``LAYER_ORDER`` кладёт L2 **над** L1, и ``resolve()`` отдаёт значение
+    рецепта при любой толщине L1 (воспроизведено ревью: значение совпадает,
+    расходится только объяснение). Ломались двое других: ``provenance`` называл
+    дефолт схемы слоем ``app`` с адресом ``system.yaml`` — то есть врал про
+    происхождение, — и **дефолт фреймворка становился недостижим**: вернуться к
+    нему, сняв ключ из рецепта, было уже нельзя, L1 держал своё значение всегда.
+    Ровно то, что запрещает комментарий у ``obs_section`` в
+    :meth:`SystemBuilder.build` словами «слой обязан уметь молчать».
 
     Значения при этом не теряются: недостающие ключи восстанавливает та же
     схема при ``model_validate`` на той стороне. Проверено — полный дамп
@@ -560,7 +568,12 @@ class SystemBuilder:
 
         recipe_devices = extract_recipe_devices(raw)
         if recipe_devices:
-            recipe_name = raw.get("name", bp_path.stem)
+            # `or`, а не дефолт словаря: `name:` без значения даёт ключ со
+            # значением None, и `raw.get("name", bp_path.stem)` возвращал бы
+            # None — происхождение молча не проставлялось. Горячая дорога
+            # (orchestrator_hooks) на том же рецепте имя файла подставляла, и
+            # `devices` расходился с живым при каждом switch. Найдено ревью.
+            recipe_name = raw.get("name") or bp_path.stem
             blueprint = inject_recipe_devices(blueprint, recipe_devices, recipe_name)
 
         return cls(

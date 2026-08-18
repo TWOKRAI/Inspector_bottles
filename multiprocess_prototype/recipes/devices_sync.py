@@ -35,7 +35,17 @@ def extract_recipe_devices(raw: dict[str, Any]) -> list[dict[str, Any]]:
         Список валидных device-dict'ов (может быть пуст).
     """
     devices_raw = raw.get("devices")
+    if devices_raw is None:
+        return []
     if not isinstance(devices_raw, list):
+        # Голос, а не тихий возврат: у битых ЭЛЕМЕНТОВ списка warning есть, а у
+        # битой самой секции не было — правдоподобная опечатка автора рецепта
+        # (`devices:` мапой вместо списка) означала «устройства просто не
+        # приехали», и в логе не оставалось ни строки. Найдено ревью S-25.
+        logger.warning(
+            "devices_sync: секция devices рецепта — %s, а не список; устройства не извлечены",
+            type(devices_raw).__name__,
+        )
         return []
 
     result: list[dict[str, Any]] = []

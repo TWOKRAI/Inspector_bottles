@@ -17,6 +17,7 @@ from typing import Any
 
 import multiprocess_prototype.backend.assembly as assembly_pkg
 from multiprocess_prototype.backend.config.schemas import SystemConfig
+from multiprocess_prototype.backend.launch import sys_config_for_orchestrator
 from multiprocess_prototype.backend.orchestrator_hooks import configure_topology_engine
 
 
@@ -119,7 +120,7 @@ def test_hot_swap_forwards_global_telemetry(monkeypatch) -> None:
             "telemetry": {"publish": {"default_interval_sec": 2.0, "metrics": {"fps": {"enabled": False}}}},
         }
     )
-    orch = _StubOrchestrator(sys_config.model_dump())
+    orch = _StubOrchestrator(sys_config_for_orchestrator(sys_config))
 
     configure_topology_engine(orch)
     _build(orch)
@@ -133,7 +134,7 @@ def test_hot_swap_no_telemetry_passes_none(monkeypatch) -> None:
     """Нет глобальной telemetry.publish → telemetry_dict=None (backward-compat)."""
     _patch_engine(monkeypatch)
     sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
-    orch = _StubOrchestrator(sys_config.model_dump())
+    orch = _StubOrchestrator(sys_config_for_orchestrator(sys_config))
 
     configure_topology_engine(orch)
     _build(orch)
@@ -145,7 +146,7 @@ def test_hot_swap_configures_topology_manager(monkeypatch) -> None:
     """Sanity: хук всё ещё конфигурирует TopologyManager (diff/commands из планировщика)."""
     _patch_engine(monkeypatch)
     sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
-    orch = _StubOrchestrator(sys_config.model_dump())
+    orch = _StubOrchestrator(sys_config_for_orchestrator(sys_config))
 
     configure_topology_engine(orch)
 
@@ -161,7 +162,7 @@ def test_hot_swap_forwards_layer_addresses(monkeypatch) -> None:
     _patch_engine(monkeypatch)
     sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
     orch = _StubOrchestrator(
-        sys_config.model_dump(),
+        sys_config_for_orchestrator(sys_config),
         extra_config={
             "observability_recipe_path": "recipes/demo.yaml",
             "observability_config_path": "backend/config/system.yaml",
@@ -180,7 +181,9 @@ def test_hot_swap_resolves_recipe_path_per_build(monkeypatch) -> None:
     а рецепт меняется каждым switch — зашитый в конструктор путь остался бы от первого."""
     _patch_engine(monkeypatch)
     sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
-    orch = _StubOrchestrator(sys_config.model_dump(), extra_config={"observability_recipe_path": "recipes/a.yaml"})
+    orch = _StubOrchestrator(
+        sys_config_for_orchestrator(sys_config), extra_config={"observability_recipe_path": "recipes/a.yaml"}
+    )
 
     configure_topology_engine(orch)
     _build(orch)
@@ -223,7 +226,9 @@ class TestCompanionStaysOutOfTheRebuiltBase:
         _patch_engine(monkeypatch)
         recipe = self._recipe(tmp_path, companion_section)
         sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
-        orch = _StubOrchestrator(sys_config.model_dump(), extra_config={"observability_recipe_path": str(recipe)})
+        orch = _StubOrchestrator(
+            sys_config_for_orchestrator(sys_config), extra_config={"observability_recipe_path": str(recipe)}
+        )
         configure_topology_engine(orch)
         orch._full_replace_planner.kwargs["proc_dicts_fn"](
             {"processes": [], "wires": [], "observability": dict(self._SECTION)}
