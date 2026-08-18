@@ -200,6 +200,112 @@ def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:
     return merged
 
 
+#: Вход, поднимающий окно. Назван в голосе ниже дословно: без него сообщение
+#: «окна не будет» оставляет оператора ровно там, где он застрял (S-22).
+PRESENTATION_ENTRY_POINT = "multiprocess_prototype/frontend/run.py"
+
+#: Имя процесса презентации. Тот же ключ, которым его патчит overlay.
+_PRESENTATION_PROCESS = "gui"
+
+#: Класс, который overlay подставляет процессу презентации. Продублирован здесь
+#: НЕ из лени: голос обязан отличать «рисовать некому» от «топология объявила
+#: Qt-класс сама», а в ветке «overlay не задан» файла overlay'я на руках нет —
+#: сравнивать не с чем. Дрейф константы против ``frontend/presentation.yaml``
+#: сторожит отдельный контракт-тест (``test_presentation_voice.py``), потому что
+#: константа, которую никто не сверяет, врёт ровно так же тихо, как молчание.
+PRESENTATION_PROCESS_CLASS = "multiprocess_prototype.frontend.process.GuiProcess"
+
+
+def announce_presentation_absent(
+    topology: dict,
+    *,
+    overlay_declared: bool,
+    headless_flag: bool,
+    overlay_path: "Path | None",
+) -> None:
+    """Сказать вслух, что презентационный overlay не наложен, и назвать ПОЧЕМУ (S-22).
+
+    Молчание здесь неотличимо от штатного бута: процессы живые, команды отвечают,
+    Гц идут — а окна нет и не будет. Замер по журналу ПМ на 2026-08-18: **174**
+    создания ``gui`` в дренирующем воплощении против **6** в Qt-шном, и ни одно
+    не было названо вслух; диагностика упиралась в Qt и зонд, хотя класс лежал
+    строкой в журнале.
+
+    **Поводов ТРИ, а не два** (ревью 2026-08-18, находка с воспроизведением).
+    Отрицание ``include_presentation and app.presentation`` распадается на три
+    состояния, и первая редакция складывала третье в первое, отчего оператор
+    получал совет, который ему не помогал:
+
+    ==================== ============ ====================================
+    overlay задан        headless-флаг повод
+    ==================== ============ ====================================
+    нет                  нет          взят не тот вход → назвать верный
+    да                   да           осознанный headless → подтвердить
+    нет                  да           И то, и другое → назвать оба шага
+    ==================== ============ ====================================
+
+    **Исход выводится из топологии, а не из повода.** «Окна не будет» — это
+    утверждение о классе процесса, и первая редакция печатала его константой:
+    на топологии, которая объявила ``gui`` Qt-классом сама (``topology/archive/
+    gui.yaml``, и то же может сделать рука в редакторе рецептов), голос уверенно
+    говорил «окна не будет» ровно там, где окно будет. Тот же класс дефекта, что
+    чинится, только с обратным знаком.
+
+    **Совет печатается, только если сработает.** Вход ``frontend/run.py``
+    бесполезен, когда процесса ``gui`` в топологии нет вовсе, и обманчив, когда
+    в окружении висит ``INSPECTOR_HEADLESS``: тот вход выставит overlay, а флаг
+    всё равно останется главнее — оператор потратил бы бут, чтобы узнать это.
+    """
+    declared = next(
+        (
+            proc
+            for proc in topology.get("processes") or []
+            if isinstance(proc, dict) and proc.get("process_name") == _PRESENTATION_PROCESS
+        ),
+        None,
+    )
+    declared_class = str((declared or {}).get("process_class") or "")
+    window_anyway = declared is not None and declared_class == PRESENTATION_PROCESS_CLASS
+
+    if overlay_declared and headless_flag:
+        head = (
+            f"[launch] presentation: overlay {overlay_path} задан, но перебит headless-флагом "
+            "вызывающего (--headless / INSPECTOR_HEADLESS)"
+        )
+        advice = " Снимите headless-флаг (--headless / INSPECTOR_HEADLESS), чтобы overlay применился."
+    elif headless_flag:
+        head = (
+            "[launch] presentation: overlay не задан И выставлен headless-флаг вызывающего "
+            "(--headless / INSPECTOR_HEADLESS) — два повода сразу"
+        )
+        advice = (
+            " Снимите headless-флаг (--headless / INSPECTOR_HEADLESS) И возьмите вход "
+            f"{PRESENTATION_ENTRY_POINT} — одного из двух шагов не хватит."
+        )
+    else:
+        head = "[launch] presentation: overlay не задан (ни манифестом, ни env INSPECTOR_PRESENTATION)"
+        advice = f" Окно даёт отдельный вход: {PRESENTATION_ENTRY_POINT}"
+
+    if declared is None:
+        outcome = f" — процесса '{_PRESENTATION_PROCESS}' в активной топологии нет вовсе, рисовать нечему"
+        advice = ""
+    elif window_anyway:
+        outcome = (
+            f" — но топология объявила '{_PRESENTATION_PROCESS}' Qt-классом "
+            f"{declared_class} сама, поэтому окно всё-таки будет"
+        )
+        advice = ""
+    elif not declared_class:
+        outcome = (
+            f" — окна не будет: класс процесса '{_PRESENTATION_PROCESS}' "
+            "в топологии не задан (поедет тем, что подставит схема)"
+        )
+    else:
+        outcome = f" — окна не будет: процесс '{_PRESENTATION_PROCESS}' поедет классом {declared_class}"
+
+    print(head + outcome + advice, file=sys.stderr)
+
+
 def apply_presentation_overlay(topology: dict, overlay: dict) -> dict:
     """Наложить презентационный overlay ПАТЧЕМ на слитую топологию (план D8, 2026-08-10).
 
@@ -394,6 +500,17 @@ class SystemBuilder:
         # иначе объявление рецепта победило бы патч и окно не поднялось бы.
         if include_presentation and app.presentation:
             blueprint = apply_presentation_overlay(blueprint, load_topology_dict(app.presentation))
+        else:
+            # S-22: overlay не наложен — сказать это ровно один раз за сборку.
+            # `else`, а не два `if`: из ЭТОГО места тихого пути нет. Но поводов
+            # внутри ТРИ (см. докстринг функции) — оба флага передаются сырыми,
+            # и разбор состояний живёт там, а не здесь.
+            announce_presentation_absent(
+                blueprint,
+                overlay_declared=bool(app.presentation),
+                headless_flag=not include_presentation,
+                overlay_path=app.presentation,
+            )
 
         # Boot-инжект recipe_devices в конфиг device_hub (Р11 device-hub)
         from multiprocess_prototype.recipes.devices_sync import (
@@ -417,7 +534,15 @@ class SystemBuilder:
 
     @classmethod
     def from_topology_path(cls, system_path: Path, topology_path: Path) -> "SystemBuilder":
-        """LEGACY: из явного system.yaml + topology (без манифеста/фундамента)."""
+        """LEGACY: из явного system.yaml + topology (без манифеста/фундамента).
+
+        **Презентации эта дорога не знает никогда.** Overlay накладывает только
+        :meth:`from_manifest`, поэтому собранная здесь система окна не даёт при
+        любом окружении — и голоса S-22 тоже не подаёт, потому что подавать его
+        не о чем: выбора между воплощениями тут не делается. Живых вызывающих
+        нет (``main.bootstrap()`` «сохранено для тестов и README» + тесты);
+        появится первый — решать, звать ли голос и отсюда.
+        """
         from .config.schemas import load_system_config
 
         return cls(
