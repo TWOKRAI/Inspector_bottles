@@ -46,6 +46,8 @@ from multiprocess_prototype.backend.config.schemas import SystemConfig, load_sys
 from multiprocess_prototype.backend.launch import sys_config_for_orchestrator
 from multiprocess_prototype.backend.orchestrator_hooks import configure_topology_engine
 
+from ._orchestrator_stub_contract import assert_stub_speaks_the_real_class_surface
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 GENERIC_CLASS = "multiprocess_prototype.generic_process_app.GenericProcessApp"
 DEVICE_HUB_CLASS = "Plugins.hub.device_hub.plugin.DeviceHubPlugin"
@@ -319,3 +321,25 @@ def test_a_recipe_without_a_name_value_gets_the_same_origin_on_both_roads(tmp_pa
         assert hot.get("recipe_origin") == boot.get("recipe_origin")
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Опасность 5 (S-29) — дублёр оркестратора обязан совпадать по именам с настоящим
+# ---------------------------------------------------------------------------
+
+
+def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
+    """`_OrchestratorStub` этого файла обязан совпадать по именам с НАСТОЯЩИМ
+    `GenericProcessManagerApp` — иначе переименование в проде остаётся
+    незамеченным.
+
+    Этот файл — авторские hazard-тесты, они целятся в опасности механизма
+    пересборки (deepcopy, фолбэк на имя рецепта, тонкий sys_config, паритет
+    boot/hot), но ни один из них не сверяет ИМЕНА дублёра с настоящим классом —
+    все гоняют `configure_topology_engine` против `_OrchestratorStub`, объявленного
+    выше в этом же файле (СВОЯ копия, отдельная от `test_hot_rebuild_parity_
+    acceptance.py`). Измерено (S-29, 2026-08-18): переименование
+    `live_process_config` в `process_manager_process.py` не покрасило ни одного
+    теста этого файла. Общая проверка — `_orchestrator_stub_contract.py` (S-26).
+    """
+    assert_stub_speaks_the_real_class_surface(_OrchestratorStub)

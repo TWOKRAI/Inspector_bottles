@@ -24,6 +24,8 @@ import yaml
 from multiprocess_prototype.backend.config.schemas import load_system_config
 from multiprocess_prototype.backend.orchestrator_hooks import configure_topology_engine
 
+from ._orchestrator_stub_contract import assert_stub_speaks_the_real_class_surface
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 QT_CLASS = "multiprocess_prototype.frontend.process.GuiProcess"
 HEADLESS_CLASS = "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess"
@@ -223,3 +225,24 @@ def test_hot_rebuild_does_not_mutate_the_stored_overlay() -> None:
     orch._full_replace_planner._proc_dicts_fn(RECIPE)  # второй switch — на нём и вылезало
 
     assert overlay == snapshot, "патч в конфиге оркестратора не имеет права обогащаться сборкой"
+
+
+# ---------------------------------------------------------------------------
+# S-29 — дублёр оркестратора обязан совпадать по именам с настоящим классом
+# ---------------------------------------------------------------------------
+
+
+def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
+    """`_OrchestratorStub` этого файла обязан совпадать по именам с НАСТОЯЩИМ
+    `GenericProcessManagerApp` — иначе переименование в проде остаётся
+    незамеченным.
+
+    Этот файл проверяет, что презентационный патч переживает горячую пересборку
+    (класс `gui`, принесённый плагин, отсутствие мутации хранимого overlay) — но
+    каждый тест гоняет `configure_topology_engine` против `_OrchestratorStub`,
+    объявленного выше, и ни разу не заглядывает в оркестратор по имени.
+    Измерено (S-29, 2026-08-18): переименование `live_process_config` в
+    `process_manager_process.py` не покрасило ни одного теста этого файла.
+    Общая проверка — `_orchestrator_stub_contract.py` (S-26).
+    """
+    assert_stub_speaks_the_real_class_surface(_OrchestratorStub)

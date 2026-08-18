@@ -30,6 +30,7 @@ from multiprocess_prototype.backend.config.schemas import SystemConfig, load_sys
 from multiprocess_prototype.backend.launch import load_topology_dict, sys_config_for_orchestrator
 from multiprocess_prototype.backend.orchestrator_hooks import configure_topology_engine
 
+from ._orchestrator_stub_contract import ORCHESTRATOR_SURFACE_THE_HOOK_USES
 from .test_hot_rebuild_provenance_acceptance import (
     BASE_TOPOLOGY_PATH,
     PROCESS_NAME,
@@ -272,18 +273,10 @@ def test_two_processes_of_one_build_do_not_share_mutable_layer_state() -> None:
 #: "orchestrator\.[_a-zA-Z]*" orchestrator_hooks.py``, 2026-08-18). Плюс
 #: ``_active_recipe_from_manifest`` — его хук берёт через ``getattr`` внутри
 #: ``_active_recipe_path``, поэтому в списке присваиваний он не виден.
-ORCHESTRATOR_SURFACE_THE_HOOK_USES = (
-    "get_config",
-    "_log_info",
-    "_get_protected_names",
-    "_topology_current_names",
-    "live_process_config",
-    "logger_manager",
-    "error_manager",
-    "stats_manager",
-    "_topology_manager",
-    "_active_recipe_from_manifest",
-)
+#: Поверхность оркестратора берётся из ОДНОГО места — ``_orchestrator_stub_contract``
+#: (импорт выше). Здесь до 2026-08-18 жила вторая, дословно совпадающая копия списка;
+#: две копии одного факта — ровно тот класс дефекта, который закрывает S-29, поэтому
+#: копия снята, а не оставлена «на всякий случай».
 
 
 def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
@@ -308,6 +301,7 @@ def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
     исполняется не та, и знать об этом лучше из теста, чем из инцидента.
     """
     import inspect
+    import re
 
     from multiprocess_framework.modules.app_module.orchestrator import GenericProcessManagerApp
 
@@ -326,10 +320,15 @@ def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
             continue
     blob = "\n".join(sources)
 
+    # Граница слова, а не подстрока: переименование `_get_protected_names` ->
+    # `_get_protected_names_RENAMED` оставляет старое имя ПРЕФИКСОМ нового, подстрока
+    # находится, и сторож молчит. Измерено инъекцией 2026-08-18 (S-29): hasattr вернул
+    # False, прогон дал 74 passed при предсказанных 5 failed.
     missing = [
         name
         for name in ORCHESTRATOR_SURFACE_THE_HOOK_USES
-        if not hasattr(GenericProcessManagerApp, name) and f"self.{name}" not in blob
+        if not hasattr(GenericProcessManagerApp, name)
+        and not re.search(rf"self\.{re.escape(name)}(?![A-Za-z0-9_])", blob)
     ]
     assert not missing, (
         f"configure_topology_engine читает у оркестратора имена, которых у настоящего класса нет: "

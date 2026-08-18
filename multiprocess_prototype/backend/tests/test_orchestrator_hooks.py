@@ -20,6 +20,8 @@ from multiprocess_prototype.backend.config.schemas import SystemConfig
 from multiprocess_prototype.backend.launch import sys_config_for_orchestrator
 from multiprocess_prototype.backend.orchestrator_hooks import configure_topology_engine
 
+from ._orchestrator_stub_contract import assert_stub_speaks_the_real_class_surface
+
 
 class _CaptureAssembler:
     """Перехват конструктора BlueprintAssembler — фиксирует kwargs, assemble → {}."""
@@ -252,3 +254,24 @@ class TestCompanionStaysOutOfTheRebuiltBase:
         recipe = self._build_with(monkeypatch, tmp_path, {"processes": {"seg": {"log_level": "DEBUG"}}})
 
         assert _CaptureAssembler.last["recipe_path"] == str(recipe)
+
+
+# ---------------------------------------------------------------------------
+# S-29 — дублёр оркестратора обязан совпадать по именам с настоящим классом
+# ---------------------------------------------------------------------------
+
+
+def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
+    """`_StubOrchestrator` этого файла обязан совпадать по именам с НАСТОЯЩИМ
+    `GenericProcessManagerApp` — иначе переименование в проде остаётся
+    незамеченным.
+
+    Этот файл проверяет hot-swap телеметрии, адреса слоёв и то, что спутник
+    рецепта не домерживается в базу (`TestCompanionStaysOutOfTheRebuiltBase`) —
+    но каждый тест гоняет `configure_topology_engine` против `_StubOrchestrator`,
+    объявленного выше, и ни разу не заглядывает в оркестратор по имени.
+    Измерено (S-29, 2026-08-18): переименование `live_process_config` в
+    `process_manager_process.py` не покрасило ни одного теста этого файла.
+    Общая проверка — `_orchestrator_stub_contract.py` (S-26).
+    """
+    assert_stub_speaks_the_real_class_surface(_StubOrchestrator)

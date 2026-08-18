@@ -31,6 +31,8 @@ from multiprocess_prototype.backend.config.schemas import SystemConfig, load_sys
 from multiprocess_prototype.backend.launch import sys_config_for_orchestrator
 from multiprocess_prototype.backend.orchestrator_hooks import configure_topology_engine
 
+from ._orchestrator_stub_contract import assert_stub_speaks_the_real_class_surface
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 HEADLESS_CLASS = "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess"
 GENERIC_CLASS = "multiprocess_prototype.generic_process_app.GenericProcessApp"
@@ -464,3 +466,23 @@ def test_a10_hot_rebuild_is_idempotent_and_does_not_mutate_the_input() -> None:
 
     assert first == second, "два вызова подряд на одном blueprint обязаны совпасть"
     assert recipe == snapshot, "вход пересборки не имеет права мутироваться сборкой"
+
+
+# ============================================================================
+# S-29 — дублёр оркестратора обязан совпадать по именам с настоящим классом
+# ============================================================================
+
+
+def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
+    """`_OrchestratorStub` этого файла обязан совпадать по именам с НАСТОЯЩИМ
+    `GenericProcessManagerApp` — иначе переименование в проде остаётся
+    незамеченным.
+
+    Измерено (S-29, 2026-08-18): переименование `live_process_config` в
+    `process_manager_process.py` не красило НИ ОДИН из десяти тестов A1-A10
+    этого файла — все они гоняют `configure_topology_engine` против ЭТОГО
+    дублёра, а не настоящего класса, и ни разу не заглядывают в оркестратор по
+    имени. Общая проверка — `_orchestrator_stub_contract.py` (S-26, тот же
+    дублёр-класс защищён впервые в `test_hot_rebuild_provenance_hazards.py`).
+    """
+    assert_stub_speaks_the_real_class_surface(_OrchestratorStub)
