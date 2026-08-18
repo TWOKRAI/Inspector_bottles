@@ -32,5 +32,21 @@ timeout при живых соседях, очередь данных переп
 названный вопрос получает ответ «не сохранять» до показа окна, прочие модалки закрывает
 сторож с записью в лог.
 
+**Как за одну строку узнать, Qt-стенд или дренирующий** (добавлено 2026-08-18, S-21):
+вход `multiprocess_prototype/run.py` — это вход **бэкенда**, он `INSPECTOR_PRESENTATION` не
+выставляет, а `app.yaml` ключа `presentation:` не содержит вовсе → процесс `gui` едет
+`HeadlessGuiProcess`, у которого `run_gui` нет как метода. Снаружи это неотличимо от
+штатного бута: 8 процессов, живые Гц, команды отвечают, окна нет. Отличать так —
+
+```
+grep "Creating process 'gui' from" logs/<прогон>/ProcessManager/system.log | tail -1
+```
+
+`…frontend.process.GuiProcess` — окно будет; `…headless_process.HeadlessGuiProcess` — не будет.
+Второй отпечаток: воркер `data_drain` в журнале `gui` вместо `data_receiver`. Не искать
+причину в Qt, зонде и `QT_MCP_PROBE`, пока эта строка не прочитана: сессия 2026-08-18 сузила
+диагноз до `app.py:61` при том, что класс был назван в журнале на каждом прогоне с 11.08
+(174 headless-строки против 6 Qt).
+
 Родня: [[feedback_diagnose_live_system_with_backend_ctl]],
 [[feedback_modal_dialog_waits_instead_of_failing]], [[project_backend_ctl_framework_module]].
