@@ -51,6 +51,9 @@ from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
     build_worker_telemetry,
     gated_metrics,
 )
+from multiprocess_framework.modules.process_module.managers.telemetry_reload import (
+    apply_telemetry_reconfigure,
+)
 
 
 class _Services:
@@ -228,3 +231,84 @@ class TestRoundTripPreservesDefaultEnabledFalse:
         assert restored.default_enabled is False
         assert restored.resolve("fps") == (True, 0.2)
         assert restored.resolve("shm") == (False, 3.0)  # неперечисленная молчит и после round-trip
+
+
+class TestReplaceModeDropsDefaultEnabledSilently:
+    """Блокер Б1 (ревью 2026-08-18): рантайм-правка в дефолтном режиме ``replace``
+    молча СНИМАЕТ флип ``default_enabled=False``.
+
+    Воспроизведено ревьюером на боевых ``ProcessHeartbeat._build_telemetry_gate`` +
+    ``apply_telemetry_reconfigure`` (то же, что и у соседних тестов файла — прямые
+    вызовы механизма, не дублёр)::
+
+        boot:   telemetry.publish = {default_enabled: false, metrics: {fps: {enabled: true}}}
+        затем:  apply_telemetry_reconfigure({"publish": {"metrics": {"fps": {...}}}})
+                БЕЗ mode= (дефолт функции — "replace", тот же дефолт, что у команды
+                при отсутствующем ``telemetry_mode``, ``builtin_commands.py:2279``)
+        выход:  [boot]   default_enabled=False, due_metrics=['fps']            (1 имя)
+                [после]  default_enabled=True,  due_metrics=['cycle_duration_ms',
+                         'effective_hz', 'fps', 'latency_ms', 'shm']            (5 имён)
+
+    Семантика ``replace`` сама по себе КОРРЕКТНА и документирована (Task 5.10.f —
+    ``replace`` заменяет секцию целиком, находка ревью там же) — она не меняется этим
+    тестом. Ломается посылка СОСЕДНЕЙ ручки (ADR-PM-039): флип, поставленный на boot
+    ``default_enabled=False``, не переживает точечную правку другой метрики в режиме
+    по умолчанию, потому что тело правки не обязано (и обычно не будет) повторять
+    ``default_enabled`` — отсутствующий в dict ключ берёт схемный дефолт ``True``
+    (``TelemetryPublishConfig.from_dict`` → ``model_validate``), а не текущее
+    значение гейта. Голоса при этом нет: ``apply_telemetry_reconfigure`` возвращает
+    ``{"publish": True}`` — успех без какого-либо намёка на то, что ``default_enabled``
+    перевернулся.
+    """
+
+    def test_replace_without_default_enabled_key_reverts_the_flip(self) -> None:
+        assert gated_metrics(), "каталог метрик пуст — тест не докажет ничего про default_enabled"
+        hb = ProcessHeartbeat(
+            _Services({"telemetry": {"publish": {"default_enabled": False, "metrics": {"fps": {"enabled": True}}}}})
+        )
+        # Мимикрируем ProcessHeartbeat.start() (process_heartbeat.py:97) — там гейт
+        # собирается и присваивается атрибуту; _build_telemetry_gate() сама по себе
+        # чистая фабрика и self._telemetry_gate не трогает.
+        hb._telemetry_gate = hb._build_telemetry_gate()
+        assert hb._telemetry_gate.due_metrics(now=0.0) == {"fps"}, "boot: только точечный opt-in разрешён"
+
+        applied = apply_telemetry_reconfigure(
+            {"publish": {"metrics": {"fps": {"enabled": True, "interval_sec": 0.5}}}},
+            heartbeat=hb,
+            # mode НЕ передан — воспроизводит отсутствие telemetry_mode в команде.
+        )
+        assert applied == {"publish": True}, "отказа нет — успех без следа перевёрнутого default_enabled"
+
+        assert hb.current_telemetry_publish()["default_enabled"] is True, (
+            "replace без default_enabled в теле вернул поле к схемному дефолту — "
+            "флип, поставленный на boot, снят соседней правкой"
+        )
+        assert hb._telemetry_gate.due_metrics(now=0.0) == {
+            "cycle_duration_ms",
+            "effective_hz",
+            "fps",
+            "latency_ms",
+            "shm",
+        }, "каталог разрешённых расширился со ВСЕХ пяти фреймворковых имён — не только fps"
+
+    def test_merge_mode_preserves_the_flip(self) -> None:
+        """Контроль: тот же сценарий с явным ``telemetry_mode: merge`` держит флип.
+
+        Без этого контроля предыдущий тест мог бы с тем же успехом ловить баг в
+        ``deep_merge``/``resolve()`` вообще, а не именно в дефолте режима.
+        """
+        hb = ProcessHeartbeat(
+            _Services({"telemetry": {"publish": {"default_enabled": False, "metrics": {"fps": {"enabled": True}}}}})
+        )
+        hb._telemetry_gate = hb._build_telemetry_gate()
+
+        applied = apply_telemetry_reconfigure(
+            {"publish": {"metrics": {"fps": {"enabled": True, "interval_sec": 0.5}}}},
+            heartbeat=hb,
+            mode="merge",
+        )
+        assert applied == {"publish": True}
+        assert hb.current_telemetry_publish()["default_enabled"] is False, (
+            "merge держит флип — регрессия здесь означала бы, что сломаны ОБА режима"
+        )
+        assert hb._telemetry_gate.due_metrics(now=0.0) == {"fps"}, "каталог разрешённых НЕ расширился"

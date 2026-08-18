@@ -173,6 +173,10 @@ observability:
 # правила: true (дефолт, как сейчас) — включена; false — секция становится белым
 # списком, включают только явные metrics.<имя>.enabled=true. Это и есть ручка
 # флипа РТ-2 (plans/telemetry-stage6.md) — сама задача его НЕ переключает.
+# ВНИМАНИЕ (находка ревью Б1, 2026-08-18): telemetry.reconfigure/config.reload в
+# режиме по умолчанию (replace) без default_enabled в теле возвращают его к true —
+# флип переживает только правки с telemetry_mode: merge либо повторяющие
+# default_enabled: false явно (README.md модуля, раздел default_enabled).
 #
 # throttle — центральный store-троттл (Фаза 2, IPC-страховка вторым рубежом):
 # {glob_pattern: min_interval_sec} для ThrottleMiddleware StateStoreManager.

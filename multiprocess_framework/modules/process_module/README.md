@@ -582,6 +582,15 @@ publisher-gate: какие метрики процесс считает и пу�
 Флип push-публикации уровней на опрос (РТ-2, `plans/telemetry-stage6.md`) — отдельный шаг:
 эта ручка делает флип ВЫРАЗИМЫМ одним полем, но сама его не включает.
 
+**Рантайм-правка в режиме `replace` (по умолчанию) СНИМАЕТ флип, если тело правки не повторяет
+`default_enabled`.** `telemetry.reconfigure`/расширенный `config.reload` без `telemetry_mode:
+merge` пересобирают `publish` ЦЕЛИКОМ из присланного тела; отсутствующий в теле `default_enabled`
+берёт схемный дефолт (`true`), а не текущее значение живого гейта. Чтобы точечная правка (включить
+одну метрику, поправить интервал) пережила флип — присылайте `telemetry_mode: merge`, либо
+повторяйте `default_enabled: false` в каждой `replace`-правке. Голоса об этом нет: ответ команды
+не отражает смену `default_enabled` (находка ревью Б1, закреплено
+`test_telemetry_default_enabled_hazards.py::TestReplaceModeDropsDefaultEnabledSilently`).
+
 ---
 
 ## Уровни плагина: объявить и отдать (Task 3.5, ADR-PM-038)

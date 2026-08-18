@@ -30,7 +30,7 @@ from multiprocess_prototype.backend.config.schemas import SystemConfig, load_sys
 from multiprocess_prototype.backend.launch import load_topology_dict, sys_config_for_orchestrator
 from multiprocess_prototype.backend.orchestrator_hooks import configure_topology_engine
 
-from ._orchestrator_stub_contract import ORCHESTRATOR_SURFACE_THE_HOOK_USES
+from ._orchestrator_stub_contract import assert_stub_speaks_the_real_class_surface
 from .test_hot_rebuild_provenance_acceptance import (
     BASE_TOPOLOGY_PATH,
     PROCESS_NAME,
@@ -269,14 +269,17 @@ def test_two_processes_of_one_build_do_not_share_mutable_layer_state() -> None:
 # --------------------------------------------------------------------------- Х5
 
 
-#: Всё, что ``configure_topology_engine`` читает у оркестратора (``grep -o
-#: "orchestrator\.[_a-zA-Z]*" orchestrator_hooks.py``, 2026-08-18). Плюс
-#: ``_active_recipe_from_manifest`` — его хук берёт через ``getattr`` внутри
-#: ``_active_recipe_path``, поэтому в списке присваиваний он не виден.
-#: Поверхность оркестратора берётся из ОДНОГО места — ``_orchestrator_stub_contract``
-#: (импорт выше). Здесь до 2026-08-18 жила вторая, дословно совпадающая копия списка;
-#: две копии одного факта — ровно тот класс дефекта, который закрывает S-29, поэтому
-#: копия снята, а не оставлена «на всякий случай».
+#: Поверхность оркестратора и сама проверка берутся из ОДНОГО места —
+#: ``_orchestrator_stub_contract`` (импорт выше). Список имён здесь не дублируется
+#: с 2026-08-18 (S-29); тело проверки — тоже с 2026-08-18 (ревью, находки Д1/З2):
+#: до этой правки здесь жила самостоятельная копия ``assert_stub_speaks_the_real_
+#: class_surface`` (заведена первой, S-26, до появления общего хелпера в S-29) —
+#: те же 137 строк, тот же текстовый поиск по ``blob`` исходников, та же слепота к
+#: комментарию, упоминающему старое имя текстом (парная инъекция 2026-08-18 красила
+#: эту копию так же ложно-зелёно, как и хелпер). Две копии одного факта — ровно тот
+#: класс дефекта, который закрывает S-29, поэтому копия снята в пользу вызова
+#: общей функции; докстринг теста сохранён — история и цена измерения остаются
+#: здешними, а не хелпера.
 
 
 def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
@@ -300,47 +303,7 @@ def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
     ассерты это не влияет (``recipe_source`` никто не проверяет), но ветка
     исполняется не та, и знать об этом лучше из теста, чем из инцидента.
     """
-    import inspect
-    import re
-
-    from multiprocess_framework.modules.app_module.orchestrator import GenericProcessManagerApp
-
-    # Часть имён — методы (видны на классе), часть — атрибуты экземпляра, которые
-    # рождаются в __init__ и на классе не видны вовсе. Первую же попытку сверить
-    # всё через hasattr(cls, ...) это и поймало: logger_manager/error_manager/
-    # stats_manager/_topology_manager отсутствовали, хотя в проде они есть.
-    # Поэтому вторая линия — текст исходников всей иерархии: `self.<имя> =`.
-    sources = []
-    for cls in GenericProcessManagerApp.__mro__:
-        if cls is object:
-            continue
-        try:
-            sources.append(inspect.getsource(cls))
-        except (OSError, TypeError):  # класс без доступного исходника — пропускаем молча
-            continue
-    blob = "\n".join(sources)
-
-    # Граница слова, а не подстрока: переименование `_get_protected_names` ->
-    # `_get_protected_names_RENAMED` оставляет старое имя ПРЕФИКСОМ нового, подстрока
-    # находится, и сторож молчит. Измерено инъекцией 2026-08-18 (S-29): hasattr вернул
-    # False, прогон дал 74 passed при предсказанных 5 failed.
-    missing = [
-        name
-        for name in ORCHESTRATOR_SURFACE_THE_HOOK_USES
-        if not hasattr(GenericProcessManagerApp, name)
-        and not re.search(rf"self\.{re.escape(name)}(?![A-Za-z0-9_])", blob)
-    ]
-    assert not missing, (
-        f"configure_topology_engine читает у оркестратора имена, которых у настоящего класса нет: "
-        f"{missing} — либо их переименовали в проде (тогда горячая пересборка падает "
-        f"AttributeError на первом же switch), либо список свидетелей протух"
-    )
-
-    stub_has = {name for name in ORCHESTRATOR_SURFACE_THE_HOOK_USES if hasattr(_StubOrchestrator, name)}
-    assert "_active_recipe_from_manifest" not in stub_has, (
-        "дублёр обзавёлся _active_recipe_from_manifest — перечитайте докстринг: тогда "
-        "_active_recipe_path идёт другой веткой, и это надо решать осознанно, а не молча"
-    )
+    assert_stub_speaks_the_real_class_surface(_StubOrchestrator)
 
 
 if __name__ == "__main__":  # pragma: no cover — ручной прогон
