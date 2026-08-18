@@ -166,7 +166,13 @@ observability:
 # и публикует в дерево StateStore и как часто (per-метрика вкл/выкл + интервал).
 # Раскомментируйте, чтобы включить управляемую публикацию для ВСЕХ процессов;
 # per-process override — в blueprint.processes[].telemetry конкретного рецепта
-# (мержится поверх этих значений).
+# (мержится deep_merge'ом поверх этих значений — default_enabled из рецепта,
+# не тронувшего этот ключ, НЕ стирается, ADR-PM-039).
+#
+# default_enabled (ADR-PM-039) — что делать с метрикой, для которой в metrics нет
+# правила: true (дефолт, как сейчас) — включена; false — секция становится белым
+# списком, включают только явные metrics.<имя>.enabled=true. Это и есть ручка
+# флипа РТ-2 (plans/telemetry-stage6.md) — сама задача его НЕ переключает.
 #
 # throttle — центральный store-троттл (Фаза 2, IPC-страховка вторым рубежом):
 # {glob_pattern: min_interval_sec} для ThrottleMiddleware StateStoreManager.
@@ -175,6 +181,7 @@ observability:
 # на себя весь список правил. Пусто/отсутствует → прежние хардкод-дефолты.
 # telemetry:
 #   publish:
+#     default_enabled: true              # false = белый список (флип РТ-2), см. выше
 #     default_interval_sec: 1.0          # дефолтная частота публикации метрики, сек
 #     metrics:
 #       fps:               {enabled: true,  interval_sec: 1.0}

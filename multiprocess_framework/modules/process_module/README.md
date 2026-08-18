@@ -550,6 +550,40 @@ graph TD
 
 ---
 
+## `telemetry.publish.default_enabled`: белый список одним полем (ADR-PM-039)
+
+Секция `telemetry.publish` (`TelemetryPublishConfig`, `configs/telemetry_publish_config.py`) —
+publisher-gate: какие метрики процесс считает и публикует в дерево StateStore и как часто (см.
+также «Уровни плагина» ниже). До этой ручки «выключить» означало перечислить ВЕСЬ каталог метрик
+поимённо — каталог per-process (5-8+ имён) и растёт молча на каждом `declare_metric`, поэтому
+перечисление протухало без единого голоса.
+
+`default_enabled: bool = True` отвечает на вопрос «что делать с метрикой, для которой в `metrics`
+нет правила»:
+
+| `default_enabled` | Поведение неперечисленной метрики |
+|---|---|
+| `True` (дефолт, обратная совместимость) | ВКЛЮЧЕНА с `default_interval_sec` — конфиг только сужает/переопределяет |
+| `False` | ВЫКЛЮЧЕНА — секция становится белым списком; включают только явные `metrics.<имя>.enabled: true` |
+
+**Обратная совместимость трёхзначна, а не двузначна.** Секции `telemetry` нет вовсе →
+`_build_telemetry_gate()` возвращает `None` (гейта нет, легаси-путь: публикуется всё без
+рейт-лимита). `telemetry.publish.default_enabled: false` → гейт ЕСТЬ и активно молчит на весь
+каталог. Эти состояния выглядят похоже на первый взгляд, но физически противоположны: `_loop`
+передаёт в `build_worker_telemetry` `allowed_metrics=None` («всё разрешено») в первом случае и
+`allowed_metrics=set()` («ничего не разрешено») во втором.
+
+**Слияние с рецептом.** Глобальный `telemetry.publish` (`system.yaml`) и per-process
+`blueprint.processes[].telemetry` конкретного рецепта сливаются `deep_merge`'ом
+(`BlueprintAssembler._resolve_telemetry`,
+`multiprocess_prototype/backend/assembly/assembler.py:206-226`) — рецепт, переопределяющий только
+`metrics`, НЕ стирает глобальный `default_enabled`, если сам его не задаёт.
+
+Флип push-публикации уровней на опрос (РТ-2, `plans/telemetry-stage6.md`) — отдельный шаг:
+эта ручка делает флип ВЫРАЗИМЫМ одним полем, но сама его не включает.
+
+---
+
 ## Уровни плагина: объявить и отдать (Task 3.5, ADR-PM-038)
 
 > Сверено **2026-08-16** живым стендом `frontend/run.py` (webcam_sketch, 7 процессов + ПМ).

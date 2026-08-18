@@ -69,15 +69,31 @@ class MetricRule(SchemaBase):
 class TelemetryPublishConfig(SchemaBase):
     """Секция публикации телеметрии процесса (per-метрика вкл/выкл + частота).
 
+    - ``default_enabled`` — что делать с метрикой, для которой в ``metrics`` нет
+      правила. ``True`` (дефолт, обратная совместимость) — конфиг только
+      сужает/переопределяет: неизвестная метрика включена. ``False`` —
+      переворачивает секцию в белый список: неизвестная метрика ВЫКЛЮЧЕНА, и
+      публикуют только те, что явно перечислены в ``metrics`` с ``enabled=True``.
     - ``default_interval_sec`` — интервал публикации по умолчанию для метрик без
       явного ``interval_sec`` (и для неизвестных метрик).
     - ``metrics`` — per-метрика/группа override по суффиксу пути публикации.
 
-    Неизвестная (не перечисленная в ``metrics``) метрика по умолчанию ВКЛЮЧЕНА с
-    ``default_interval_sec`` — конфиг только сужает/переопределяет, а не «включает
-    белый список».
+    Неизвестная (не перечисленная в ``metrics``) метрика резолвится в
+    ``(default_enabled, default_interval_sec)`` — при дефолтном
+    ``default_enabled=True`` это дословно прежнее поведение («по умолчанию
+    ВКЛЮЧЕНА»); при ``default_enabled=False`` конфиг работает белым списком.
     """
 
+    default_enabled: Annotated[
+        bool,
+        FieldMeta(
+            "Публиковать неперечисленные метрики по умолчанию",
+            info="False переворачивает секцию в белый список: метрика без "
+            "явного правила в metrics не публикуется и не считается, пока её "
+            "не включит metrics[<имя>].enabled=true. True (по умолчанию) — "
+            "прежнее поведение: неизвестная метрика включена.",
+        ),
+    ] = True
     default_interval_sec: Annotated[
         float,
         FieldMeta("Интервал публикации метрики по умолчанию, сек", min=0.0),
@@ -103,8 +119,9 @@ class TelemetryPublishConfig(SchemaBase):
         """Разрешить (enabled, interval_sec) для метрики по её суффиксу.
 
         Наследование:
-          - метрика не в ``metrics`` → ``(True, default_interval_sec)`` (по умолчанию
-            включена — конфиг не «белый список»);
+          - метрика не в ``metrics`` → ``(default_enabled, default_interval_sec)``
+            (по умолчанию ``default_enabled=True`` — конфиг не «белый список»;
+            при ``default_enabled=False`` неперечисленная метрика выключена);
           - правило есть, ``interval_sec is None`` → интервал = ``default_interval_sec``;
           - правило есть, ``interval_sec`` задан → его значение.
 
@@ -114,7 +131,7 @@ class TelemetryPublishConfig(SchemaBase):
         """
         rule = self.metrics.get(metric_name)
         if rule is None:
-            return True, self.default_interval_sec
+            return self.default_enabled, self.default_interval_sec
         interval = rule.interval_sec if rule.interval_sec is not None else self.default_interval_sec
         return rule.enabled, interval
 
