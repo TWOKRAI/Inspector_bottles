@@ -18,6 +18,7 @@
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — откат stash, счёт арифметикой
 - [Снятие лишней работы красит тесты, мерившие её](feedback_removing_waste_reddens_tests_that_measured_it.md) — красный = вопрос «какое свойство сторожил», а не сигнал откатиться; один из них был зелён на свойстве, которого нет
 - [deep_merge не ассоциативен](feedback_deep_merge_is_not_associative.md) — 239 расхождений из 20 000; свернуть дельты можно, лишь если ранняя не кладёт скаляр туда, где поздняя кладёт словарь
+- [Дублёр глушит имена, которые код ЧИТАЕТ](feedback_a_stub_silences_the_names_it_is_read_for.md) — переименование читаемого имени: 69 тестов зелены; записываемого — все падают. Контракт-тест на имена, включая `self.<имя> =` по иерархии
 - [Предсказание — после всех тестов](feedback_predict_injections_after_writing_tests.md) · [на общем корпусе — MUST поимённо](feedback_injection_prediction_on_a_shared_corpus.md) + потолок красных
 - [База инъекций = число собранных](feedback_injection_base_needs_a_collected_count.md) — 0 collected читается как зелено; дочерний логгер не глушит
 - [Покрывать ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) · [слишком грубая не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) · [негодная ≠ вакуум](feedback_broken_injection_is_not_a_vacuous_test.md) — ERROR vs FAILED
@@ -88,6 +89,8 @@
 - [Ручка рецепта — в extras](feedback_recipe_knob_must_be_named_in_from_recipe.md) — metadata не доезжает; доказывать сборкой · [путь сверять с публикатором](feedback_default_path_must_match_publisher.md) — drops_count vs drops
 - [Ключ из уже едущей секции](feedback_read_the_key_from_the_section_already_travelling.md) — model_dump выбросит
 - [«Не деградировало» = идентичность сборки](feedback_no_regression_proved_by_identical_build.md) — proc_dict ключ-в-ключ
+
+- [Сравнивать ВАЛИДИРОВАННЫЕ значения, не сырой YAML](feedback_compare_validated_values_not_raw_config.md) — «равно ли дефолту» спрашивают у модели; замер по сырому файлу занижает (4 вместо 5). Пространств имён два: 5 потерь секции = 9 листьев провенанса
 
 ## Qt / GUI
 
