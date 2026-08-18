@@ -94,3 +94,4 @@
 - [qt-mcp smoke+probe](feedback_qt_mcp_smoke_verification.md) — QT_MCP_PROBE=1:9142; чистка по PID · [зонд только с env](reference_qt_mcp_launch.md) · [стенд всегда с зондом](feedback_qt_mcp_always_probe.md) · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало, рендер не проверялся 3 раунда
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — окно «невидимо»; snapshot=0 виджетов; кадр только ref-грабом
 - [GUI-save сносит yaml-комменты](feedback_gui_save_strips_yaml_comments.md) — git diff перед add
+- [Инъекция зелёная, когда подмена совпала с фактом](feedback_injection_green_when_the_substitute_equals_the_fact.md) — «зашить константу» ничего не сторожит, пока нет фикстуры с ТРЕТЬИМ значением
