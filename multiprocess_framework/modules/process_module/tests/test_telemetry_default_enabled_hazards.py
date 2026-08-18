@@ -150,6 +150,24 @@ class TestNoGateIsNotTheSameAsDefaultEnabledFalse:
         hb = ProcessHeartbeat(_Services({}))
         assert hb._build_telemetry_gate() is None
 
+    def test_telemetry_section_without_publish_is_also_no_gate(self) -> None:
+        """Второй выход в ``None`` — отдельная ветка, и до этого теста её не было.
+
+        ``_build_telemetry_gate`` отдаёт ``None`` ДВАЖДЫ: когда ключа ``telemetry``
+        нет вовсе (сосед выше) и когда секция есть, а под-секции ``publish`` в ней
+        нет — например конфиг задаёт только ``throttle``. Ветки разные, и сосед
+        вторую не покрывает: он выходит на ПЕРВОМ страже (``telemetry`` не dict) и
+        до второго не доходит.
+
+        Измерено инъекцией 2026-08-18 (И5c): подмена ``publish is None`` на
+        ``publish = {"default_enabled": False}`` не покрасила НИ ОДНОГО из 15
+        тестов — гейт строился там, где по контракту обратной совместимости его
+        быть не должно, и никто не возражал. Этот тест обязан покраснеть ровно на
+        той подмене.
+        """
+        hb = ProcessHeartbeat(_Services({"telemetry": {"throttle": {"processes.**.state.fps": 1.0}}}))
+        assert hb._build_telemetry_gate() is None
+
     def test_default_enabled_false_gate_exists_and_is_silent(self) -> None:
         assert gated_metrics(), "каталог метрик пуст — тест не докажет ничего про default_enabled"
         hb = ProcessHeartbeat(_Services({"telemetry": {"publish": {"default_enabled": False}}}))
