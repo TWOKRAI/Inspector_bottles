@@ -158,41 +158,78 @@ observability:
     log_level: INFO
 
 # --- Телеметрия (PC 1.3/2.1, план plans/telemetry-publish-control.md) ---
-# Две независимые плоскости, обе ПО УМОЛЧАНИЮ отключены (обратная совместимость —
-# нет секции/подсекции → поведение как раньше). Errors/status — публикуются ВСЕГДА,
-# этой секцией не управляются.
+# Две независимые плоскости StateStore. Errors/status — публикуются ВСЕГДА, ни
+# publish, ни throttle ими не управляют (полный список — ниже).
 #
 # publish — publisher-gate (Фаза 1, ГЛАВНЫЙ рычаг): какие метрики процесс СЧИТАЕТ
 # и публикует в дерево StateStore и как часто (per-метрика вкл/выкл + интервал).
-# Раскомментируйте, чтобы включить управляемую публикацию для ВСЕХ процессов;
 # per-process override — в blueprint.processes[].telemetry конкретного рецепта
 # (мержится deep_merge'ом поверх этих значений — default_enabled из рецепта,
 # не тронувшего этот ключ, НЕ стирается, ADR-PM-039).
 #
+# СЕКЦИЯ НИЖЕ ДЕЙСТВУЕТ, default_enabled: false — исполненный флип РТ-2
+# (plans/telemetry-stage6.md, 2026-08-18, ADR-PM-040). Push уровней в дерево
+# StateStore погашен для ВСЕХ процессов по умолчанию. Числа никуда не делись —
+# GUI живёт ОПРОСОМ (introspect.telemetry → levels, TelemetryPoller, раз в секунду),
+# опрос этой секцией не гейтуется вовсе. Включить публикацию конкретной метрики
+# обратно — явным metrics.<имя>.enabled: true; ниже metrics пуст — белого списка
+# нет, push'ом не публикуется НИЧЕГО.
+#
+# Этой секцией НЕ управляются (публикуются всегда, минуя publisher-gate):
+# status, error, pid, uptime, paused, frozen — это ЛИСТЬЯ state.
+# Мимо гейта идут и ЦЕЛЫЕ плоскости, не только листья (уточнено по находке ревью
+# 2026-08-18, прежний текст обещал «полный список» и им не был):
+#   - processes.<p>.plugins.<plugin>.io_peek — пишется плагинным зондом напрямую
+#     через StateProxy (Plugins io_peek), при закрытом гейте измерено 13.6 дельт/с;
+#   - processes.<p>.state.uptime — пишет ProcessMonitor внутри ProcessManager про
+#     ЧУЖИЕ процессы, и рантайм-команда telemetry.reconfigure с process='all' до
+#     оркестратора не доходит вовсе (fan-out = семь ДЕТЕЙ), 16 дельт/с;
+#   - devices.state.<устройство>.* — плоскость device-hub, 4 дельты/с.
+# Практический вывод: «закрытый гейт = ноль телеметрийного трафика» неверно для
+# ВСЕЙ плоскости уровней и верно только для путей, которыми гейт владеет.
+#
+# ЦЕНА флипа, которую надо знать оператору (замерено 2026-08-18):
+#   - гаснет 32 пути: fps, latency_ms, shm.*, frame_count, effective_hz,
+#     cycle_duration_ms по пяти работающим процессам;
+#   - гаснет ПРОИЗВОДНАЯ system.health.avg_fps, которой нет ни в одном каталоге
+#     процесса: она считается из fps детей и умирает следствием;
+#   - числа не пропадают — они приходят ОПРОСОМ (introspect.telemetry -> levels),
+#     и множество «что опрос не отдаёт» с множеством «что гасит гейт» не пересекается.
+#
 # default_enabled (ADR-PM-039) — что делать с метрикой, для которой в metrics нет
-# правила: true (дефолт, как сейчас) — включена; false — секция становится белым
-# списком, включают только явные metrics.<имя>.enabled=true. Это и есть ручка
-# флипа РТ-2 (plans/telemetry-stage6.md) — сама задача его НЕ переключает.
+# правила: true (схемный дефолт класса TelemetryPublishConfig) — включена с
+# default_interval_sec; false (значение НИЖЕ, флип РТ-2) — секция становится
+# белым списком, включают только явные metrics.<имя>.enabled=true.
 # ВНИМАНИЕ (находка ревью Б1, 2026-08-18): telemetry.reconfigure/config.reload в
 # режиме по умолчанию (replace) без default_enabled в теле возвращают его к true —
 # флип переживает только правки с telemetry_mode: merge либо повторяющие
 # default_enabled: false явно (README.md модуля, раздел default_enabled).
 #
+# Пример СИНТАКСИСА точечного override (НЕ действующая конфигурация — metrics
+# в активной секции ниже пуст; так выглядела бы точечная настройка одной-двух
+# метрик, если бы понадобилась вместо полного флипа):
+#   metrics:
+#     fps:               {enabled: true,  interval_sec: 1.0}
+#     latency_ms:        {enabled: true,  interval_sec: 1.0}
+#     effective_hz:      {enabled: true,  interval_sec: 1.0}
+#     cycle_duration_ms: {enabled: false}                      # тяжёлая метрика — opt-in
+#     shm:               {enabled: true,  interval_sec: 5.0}
+#
 # throttle — центральный store-троттл (Фаза 2, IPC-страховка вторым рубежом):
 # {glob_pattern: min_interval_sec} для ThrottleMiddleware StateStoreManager.
+# Флип РТ-2 throttle НЕ трогает — подсекция ниже остаётся закомментированной.
 # Заданный (непустой) throttle ПОЛНОСТЬЮ ЗАМЕНЯЕТ хардкод-дефолты
-# build_throttle_rules (не мержится поверх них) — раскомментировав, владелец берёт
-# на себя весь список правил. Пусто/отсутствует → прежние хардкод-дефолты.
-# telemetry:
-#   publish:
-#     default_enabled: true              # false = белый список (флип РТ-2), см. выше
-#     default_interval_sec: 1.0          # дефолтная частота публикации метрики, сек
-#     metrics:
-#       fps:               {enabled: true,  interval_sec: 1.0}
-#       latency_ms:        {enabled: true,  interval_sec: 1.0}
-#       effective_hz:      {enabled: true,  interval_sec: 1.0}
-#       cycle_duration_ms: {enabled: false}                      # тяжёлая метрика — opt-in
-#       shm:               {enabled: true,  interval_sec: 5.0}
+# build_throttle_rules (не мержится поверх них) — сейчас это ВОСЕМЬ правил
+# (_default_throttle_rules, multiprocess_prototype/backend/state/manager_setup.py:48-64 —
+# путь полный намеренно: файлов с этим именем в дереве пять); закомментированный пример
+# ниже содержит только ТРИ, и раскомментирование сузило бы центральный троттл
+# с восьми дефолтных правил до этих трёх. Пусто/отсутствует → прежние восемь
+# хардкод-дефолтов.
+telemetry:
+  publish:
+    default_enabled: false
+    default_interval_sec: 1.0
+    metrics: {}
 #   throttle:
 #     # строгий потолок: поднятие частоты через publisher выше него всплывёт как
 #     # `capped_by_throttle` в результате команды, троттл не срежет тихо (ADR-PM-017)

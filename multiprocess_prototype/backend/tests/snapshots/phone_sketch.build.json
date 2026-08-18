@@ -43,8 +43,8 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
+            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -92,8 +92,8 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
+            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -106,8 +106,8 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
+            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -217,8 +217,8 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
+            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -285,8 +285,8 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
+            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -942,8 +942,8 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
+            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -982,8 +982,8 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
+            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -1214,6 +1214,13 @@
         "log_dir": "logs/prototype_2",
         "shm_budget_mb": 512,
         "stop_timeout": 5.0
+      },
+      "telemetry": {
+        "publish": {
+          "default_enabled": false,
+          "default_interval_sec": 1.0,
+          "metrics": {}
+        }
       }
     }
   },
@@ -1334,7 +1341,15 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {},
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -1706,7 +1721,15 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {},
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -2030,7 +2053,15 @@
         "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
         "plugins": [],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {},
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -2451,7 +2482,15 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {},
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -2830,7 +2869,15 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {},
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -3800,7 +3847,15 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {},
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -4150,7 +4205,15 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {},
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {

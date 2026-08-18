@@ -579,8 +579,16 @@ publisher-gate: какие метрики процесс считает и пу�
 `multiprocess_prototype/backend/assembly/assembler.py:206-226`) — рецепт, переопределяющий только
 `metrics`, НЕ стирает глобальный `default_enabled`, если сам его не задаёт.
 
-Флип push-публикации уровней на опрос (РТ-2, `plans/telemetry-stage6.md`) — отдельный шаг:
-эта ручка делает флип ВЫРАЗИМЫМ одним полем, но сама его не включает.
+**Флип РТ-2 исполнен** (`plans/telemetry-stage6.md`, 2026-08-18, ADR-PM-040 в `DECISIONS.md`
+этого модуля): боевой конфиг прототипа `multiprocess_prototype/backend/config/system.yaml`
+с этой даты держит секцию `telemetry.publish` активной с `default_enabled: false` — push
+уровней в дерево StateStore погашен по умолчанию для ВСЕХ процессов (GUI живёт опросом,
+`introspect.telemetry` → `levels`). Каталог метрик — per-process и растёт молча импортом
+(`declare_metric` на каждый импорт производителя), поэтому включать метрику обратно нужно
+ИМЕНЕМ (`metrics.<имя>.enabled: true`) — перечислять весь каталог для восстановления
+публикации не нужно и вредно: список протухнет без единого голоса на первом же новом
+`declare_metric`, тот же аргумент, которым выше отвергли явное перечисление («Отвергнуто с
+причиной»).
 
 **Рантайм-правка в режиме `replace` (по умолчанию) СНИМАЕТ флип, если тело правки не повторяет
 `default_enabled`.** `telemetry.reconfigure`/расширенный `config.reload` без `telemetry_mode:

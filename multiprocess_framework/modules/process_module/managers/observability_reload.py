@@ -909,16 +909,29 @@ def telemetry_targets(svc: Any) -> Dict[str, Any]:
     аргументе — и возврат по сроку применялся бы не туда, куда правка.
 
     ``telemetry_boot`` читается ТЕМ ЖЕ способом, что и на старте
-    (``ProcessHeartbeat._build_telemetry_gate`` → ``get_config("telemetry")``):
+    (``ProcessHeartbeat._build_telemetry_gate`` → :func:`read_process_config`):
     L0 обязан совпадать с тем, из чего собран загрузочный гейт, иначе «вернуть
     как было» вернёт не то, что было.
 
+    **Ред. 2026-08-18.** Здесь стоял голый ``get_config(TELEMETRY_KEY, None)`` — тот
+    же плоский читатель, что и в загрузочном гейте, и обещание выше выполнялось
+    буквально: оба ОДИНАКОВО не видели вложенный адрес ``config.telemetry``, под
+    которым ключ приезжает дочернему процессу (весь ``proc_dict`` идёт конфигом).
+    Обе точки переведены на :func:`read_process_config` ОДНОВРЕМЕННО и намеренно:
+    почини одну — и обещание рвётся молча, а возврат по сроку отдаст не тот L0, из
+    которого собран гейт. Живое измерение дефекта — докстринг
+    ``ProcessHeartbeat._build_telemetry_gate``.
+
+    ``state_throttle_rules`` остаётся ПЛОСКИМ читателем сознательно: это ключ
+    оркестратора (``orchestrator_config``, ``backend/launch.py``), у детей его нет.
+
     Центрального троттла здесь нет намеренно — см. ``TELEMETRY_LAYERED_SUBSECTION``.
     """
+    from ..configs.observability_layers import read_process_config
     from .telemetry_reload import resolve_store_throttle
 
     get_config = getattr(svc, "get_config", None)
-    raw = get_config(TELEMETRY_KEY, None) if callable(get_config) else None
+    raw = read_process_config(svc, TELEMETRY_KEY) if callable(get_config) else None
     rules = get_config("state_throttle_rules", None) if callable(get_config) else None
     return {
         "heartbeat": getattr(svc, "_heartbeat", None),

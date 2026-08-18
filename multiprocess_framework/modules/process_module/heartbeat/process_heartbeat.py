@@ -433,18 +433,48 @@ class ProcessHeartbeat:
 
         Обратная совместимость: нет секции ``telemetry`` / нет под-секции ``publish``
         → ``None`` (гейт неактивен, все метрики публикуются каждый тик — поведение как
-        раньше). Плумбинг значений из ``system.yaml``/blueprint — отдельная задача
-        (PC 1.3); здесь читаем уже доставленный ``get_config("telemetry")``.
+        раньше). Это ТРЕТЬЕ состояние, отличное и от «всё выключено»
+        (``default_enabled: false``), и от «всё включено»: в :meth:`_loop`
+        ``allowed_metrics=None`` значит «разрешено всё», а ``set()`` — «ничего».
+
+        **Адрес ключа — два, и оба законны (исправлено 2026-08-18).** Оркестратор
+        получает конфиг ПЛОСКИМ (спавнер мержит ``orchestrator_config`` в корень), а
+        дочерний процесс — ВЕСЬ ``proc_dict``, поэтому его ключи лежат под ``config.``.
+        Голый ``get_config("telemetry")`` работал только у оркестратора и у ДЕТЕЙ
+        ВОЗВРАЩАЛ ``None`` молча. Измерено живым стендом 2026-08-18
+        (``logs_live/rt2_config_flip``): при действующей секции
+        ``telemetry.publish.default_enabled: false`` в боевом ``system.yaml`` семь из
+        семи детей рапортовали ``gate_active: false``, а тот же процесс после
+        ``config.reload`` того же файла — ``gate_active: true``; reload читает YAML сам
+        (``builtin_commands.py``) и потому мимо сломанного звена проезжал. Читаем через
+        :func:`read_process_config` — он пробует плоский адрес, затем ``config.<ключ>``,
+        то есть обе формы. Тот же класс дефекта до этого кусал ``observability.persist``
+        (5.12) и ``telemetry_override`` (находка C задачи 2.2).
+
+        **L0 обязан читаться ТЕМ ЖЕ способом.** ``telemetry_targets`` в
+        ``managers/observability_reload.py`` достаёт ``telemetry_boot`` для возврата
+        рантайм-правок по сроку и обещает докстрингом совпадение с загрузочным гейтом.
+        Чинить адрес здесь и забыть там — значит порвать это обещание молча: истечение
+        срока вернуло бы не то, из чего гейт собран.
         """
+        from ..configs.observability_layers import read_process_config
+
         try:
-            telemetry = self._services.get_config("telemetry", None)
+            telemetry = read_process_config(self._services, "telemetry")
         except Exception:  # noqa: BLE001 — отсутствие/битость конфига не должна ронять heartbeat
             telemetry = None
-        if not isinstance(telemetry, dict):
+        if not isinstance(telemetry, dict) or telemetry.get("publish") is None:
+            # Голос на ОТКАЗЕ — обязателен и симметричен голосу на успехе (ниже).
+            # До 2026-08-18 обе ветки молчали, и неработающий флип выглядел как
+            # штатный дефолт: на стенде это стоило полного расследования.
+            # Формулировка — ФАКТ («не найдена по адресам»), а не вывод («секции нет»):
+            # секция в конфиге БЫЛА, просто по другому адресу, и вывод увёл диагностику.
+            self._log_heartbeat(
+                "[telemetry] publisher-gate ВЫКЛЮЧЕН: секция publish не найдена ни по "
+                "'telemetry', ни по 'config.telemetry' — все метрики публикуются каждый тик"
+            )
             return None
-        publish = telemetry.get("publish")
-        if publish is None:
-            return None
+        publish = telemetry["publish"]
         from ..configs.telemetry_publish_config import TelemetryPublishConfig
         from .telemetry import TelemetryGate
 
@@ -458,9 +488,26 @@ class ProcessHeartbeat:
         self._warn_capped_metrics(config)
         # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
         self._warn_unknown_metrics(config)
+        # Голос на УСПЕХЕ — вторая половина пары. Лог только на отказе не отличает
+        # «гейт выключен» от «код не исполнялся вовсе».
+        self._log_heartbeat(
+            f"[telemetry] publisher-gate активен: default_enabled={config.default_enabled}, "
+            f"явных правил {len(config.metrics)}, интервал по умолчанию "
+            f"{config.default_interval_sec} с"
+        )
         # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
         # fake-clock тестов каденции; в проде обоим — time.monotonic).
         return TelemetryGate(config, clock=self._clock)
+
+    def _log_heartbeat(self, message: str) -> None:
+        """Сказать вслух, не уронив такт: у дублёров ``services`` логгера может не быть."""
+        log = getattr(self._services, "log_info", None)
+        if not callable(log):
+            return
+        try:
+            log(message, module="heartbeat")
+        except Exception:  # noqa: BLE001 — голос не смеет ронять сборку гейта
+            pass
 
     def current_unknown_metrics(self) -> list[str]:
         """Отсортированный список неизвестных ключей ``metrics`` текущего живого gate (Task 2.3).
@@ -539,8 +586,17 @@ class ProcessHeartbeat:
             base = self.current_telemetry_publish() or {}
             publish_section = deep_merge(base, publish_section)
 
+        # Голос на ОБОИХ исходах — тот же парный контракт, что у загрузочного
+        # ``_build_telemetry_gate`` (блокер 2 ревью 2026-08-18). Раньше рантайм-снятие
+        # гейта молчало, и ответ ``introspect.telemetry`` посылал оператора к строке
+        # лога, которой при этом пути не существовало: «gate не собран … почему —
+        # в логе» при пустом логе читается как «диагностика соврала».
         if publish_section is None:
             self._telemetry_gate = None
+            self._log_heartbeat(
+                "[telemetry] publisher-gate СНЯТ рантайм-командой: секция передана как null — "
+                "все метрики снова публикуются каждый тик"
+            )
             return
         from ..configs.telemetry_publish_config import TelemetryPublishConfig
         from .telemetry import TelemetryGate
@@ -553,6 +609,11 @@ class ProcessHeartbeat:
         # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
         # Gate использует clock heartbeat'а (fake-clock тесты; в проде time.monotonic).
         self._telemetry_gate = TelemetryGate(config, clock=self._clock)
+        self._log_heartbeat(
+            f"[telemetry] publisher-gate пересобран рантайм-командой (mode={mode}): "
+            f"default_enabled={config.default_enabled}, явных правил {len(config.metrics)}, "
+            f"интервал по умолчанию {config.default_interval_sec} с"
+        )
 
     def _collect_plugin_levels(self, allowed_metrics: Any = None, *, voice: bool) -> dict:
         """Листья уровней плагинов для секции ``state`` (общий шов push и poll).

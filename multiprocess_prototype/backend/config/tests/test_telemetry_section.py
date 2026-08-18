@@ -5,6 +5,12 @@
 ``telemetry.publish`` — ``TelemetryGate`` в heartbeat строится только если она реально
 задана. Поэтому дефолт ``SystemConfig().telemetry.publish`` ОБЯЗАН быть ``None``, а не
 пустым ``TelemetryPublishConfig()`` — иначе гейт молча включился бы на всех процессах.
+
+Ред. 2026-08-18 (исполнение флипа РТ-2, ADR-PM-040): инвариант выше про СХЕМНЫЙ дефолт
+и остаётся в силе — ``SystemConfig().telemetry.publish`` по-прежнему ``None``. А вот
+боевой ``system.yaml`` теперь секцию ЗАДАЁТ, со значением ``default_enabled: false``.
+Это два разных факта, и путать их нельзя: «схема не включает гейт сама» (обратная
+совместимость) против «владелец включил его явно и выключил в нём всё» (флип).
 """
 
 from __future__ import annotations
@@ -45,10 +51,37 @@ def test_model_dump_publish_none_serializes_to_null() -> None:
     assert dumped["telemetry"] == {"publish": None, "throttle": {}}
 
 
-def test_yaml_default_does_not_activate_gate() -> None:
-    """Реальный system.yaml прототипа НЕ включает telemetry.publish по умолчанию."""
+def test_yaml_activates_the_gate_with_default_enabled_false() -> None:
+    """Реальный system.yaml прототипа ВКЛЮЧАЕТ telemetry.publish, и ровно с false.
+
+    Контракт перевёрнут сознательно — исполнение флипа РТ-2 (2026-08-18, ADR-PM-040,
+    plans/telemetry-stage6.md). До флипа тест назывался
+    ``test_yaml_default_does_not_activate_gate`` и требовал ``publish is None``.
+
+    Сторожевая роль при этом НЕ изменилась, изменилось охраняемое значение: раньше
+    страховал от того, что гейт включится случайно, теперь — от того, что флип молча
+    отвалится (секцию закомментируют обратно) или уползёт в ``true``. Второе опаснее
+    первого: ``true`` вернёт публикацию всех уровней, ничего не сломав видимо, и
+    заметить это можно будет только по трафику.
+
+    Разделение с соседями по файлу тут существенное и оно же — причина держать тест
+    именно здесь: ``test_default_publish_is_none`` про СХЕМНЫЙ дефолт (он остался
+    ``None``, backward-compat не тронут), а этот — про БОЕВОЙ YAML. Совпадение по
+    смыслу с ``multiprocess_prototype/backend/tests/test_rt2_config_flip_acceptance.py``
+    (критерий A1) намеренное: приёмка задачи уедет в историю, а сторож конфига
+    остаётся там, где его ищет читатель конфига.
+
+    Как упадёт, если свойство исчезнет: закомментируют секцию — ``publish is None``,
+    красный на первом ассерте; переставят на ``true`` — красный на втором.
+    """
     sc = load_system_config()
-    assert sc.telemetry.publish is None
+    assert sc.telemetry.publish is not None, (
+        "секция telemetry.publish в боевом system.yaml не действует — флип РТ-2 отвалился"
+    )
+    assert sc.telemetry.publish.default_enabled is False, (
+        f"default_enabled={sc.telemetry.publish.default_enabled}, ожидался False — "
+        "флип РТ-2 уполз в дефолт, публикация уровней снова идёт push'ем"
+    )
 
 
 def test_explicit_publish_validates_as_telemetry_publish_config() -> None:
