@@ -359,6 +359,36 @@ def _merge_observability(base: dict | None, pipeline: dict | None) -> dict | Non
     return deep_merge(base or {}, pipeline or {})
 
 
+def sys_config_for_orchestrator(sys_config: "SystemConfig") -> dict:
+    """Дамп ``SystemConfig`` для переезда в процесс ProcessManager (S-24).
+
+    ``exclude_unset=True`` здесь — не экономия байтов, а условие существования
+    слоёв наблюдаемости на ТОЙ стороне границы. ПМ пересобирает топологию у
+    себя и берёт слой L1 как ``observability.model_dump(exclude_unset=True)``.
+    Но ``exclude_unset`` отвечает не на вопрос «что написано в файле», а на
+    «какие поля были заданы при валидации ЭТОЙ модели»: после round-trip
+    модель → dict → модель полный дамп делает заданными ВСЕ поля схемы, и
+    слой перестаёт уметь молчать.
+
+    Измерено на боевом ``system.yaml``: у лончера L1 — **12** ключей, у ПМ
+    после полного дампа — **23**; из ниоткуда появлялись ``flight``,
+    ``events``, ``scopes``, ``commands``, ``log_directory``, ``session_ttl_sec``,
+    ``compress_rotated`` и четыре ``sampling_*``. С этого момента рецепт
+    (слой L2) уже нечем перебить, а ``provenance`` никогда не отвечает
+    ``framework`` — ровно то, что запрещает комментарий у ``obs_section``
+    в :meth:`SystemBuilder.build`.
+
+    Значения при этом не теряются: недостающие ключи восстанавливает та же
+    схема при ``model_validate`` на той стороне. Проверено — полный дамп
+    пересозданной модели равен полному дампу исходной.
+
+    Отдельной функцией, а не выражением по месту, чтобы шов был назван: это
+    единственная точка, где ``SystemConfig`` пересекает границу процессов, и
+    тест обязан наблюдать именно её, а не свою копию правила.
+    """
+    return sys_config.model_dump(exclude_unset=True)
+
+
 def _resolve_pipeline(app: "AppManifest", override: str | None) -> Path:
     """Активный pipeline: CLI-override (имя или путь) > ``app.pipeline``."""
     if not override:
@@ -713,7 +743,9 @@ class SystemBuilder:
                 # SystemConfig dict для configure_topology_engine (Dict at Boundary —
                 # пиклится через spawn). Планировщик использует его для нормализации
                 # blueprint (per-category defaults) + observability overlay + log_dir.
-                "sys_config": sys_config.model_dump(),
+                # Дамп — ТОЛЬКО через шов: полный model_dump() материализует слой L1
+                # на той стороне и рецепт перестаёт что-либо переопределять (S-24).
+                "sys_config": sys_config_for_orchestrator(sys_config),
                 # Тот же патч презентации, что лёг на boot-топологию (или None).
                 # Горячая замена собирает топологию с нуля из рецепта, а рецепт
                 # объявляет `gui` в дренирующем воплощении — без патча switch

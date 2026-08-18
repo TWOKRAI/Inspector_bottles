@@ -55,6 +55,10 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         apply_presentation_overlay,
         unwrap_recipe,
     )
+    from multiprocess_prototype.recipes.devices_sync import (
+        extract_recipe_devices,
+        inject_recipe_devices,
+    )
 
     sys_config = SystemConfig.model_validate(sys_config_dict)
 
@@ -145,6 +149,23 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
             # Измерено: после одной сборки запись плагина в overlay вырастала с 3
             # ключей до 8.
             unwrapped = apply_presentation_overlay(unwrapped, copy.deepcopy(presentation_overlay))
+        # Устройства рецепта (S-25). Секция `devices:` — top-level, сосед
+        # `blueprint:`, и `unwrap_recipe` её выбрасывает — поэтому извлечение
+        # идёт от СЫРОГО `bp`, а не от `unwrapped`. Без этого шага пересобранный
+        # `devices` поднимался бы с пустым хабом: живьём это не жгло только
+        # потому, что `devices` во всех рецептах `protected` и не рестартится,
+        # — то есть дефект ждал первого снятия флага. Побочно он же был вечным
+        # шумом в сигнале расхождения protected: живой конфиг нёс
+        # `recipe_devices`, свежая сборка — нет, и `devices` числился
+        # разошедшимся при ЛЮБОМ switch, даже на тот же самый рецепт.
+        #
+        # Место — после патча презентации, до normalize: паритет с boot
+        # (`launch.from_manifest`), и только паритет. Никакой проверенной
+        # зависимости от порядка тут нет, поэтому и не защищаем её тестом.
+        recipe_devices = extract_recipe_devices(bp)
+        if recipe_devices:
+            recipe_name = str(bp.get("name") or (Path(recipe_path).stem if recipe_path else ""))
+            unwrapped = inject_recipe_devices(unwrapped, recipe_devices, recipe_name)
         topology = normalize_blueprint(unwrapped, sys_config)
         # Task 5.13, шаг 7 — что эта пересборка делает с долькой ОРКЕСТРАТОРА:
         # ничего, и это решение, а не пропуск. Она возвращает proc_dict'ы ДЕТЕЙ,

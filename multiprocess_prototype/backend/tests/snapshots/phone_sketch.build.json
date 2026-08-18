@@ -1151,10 +1151,6 @@
             "type": "file"
           }
         },
-        "commands": {
-          "log_success": false
-        },
-        "compress_rotated": false,
         "console": true,
         "documents": {
           "config": {
@@ -1168,23 +1164,11 @@
           "factory": "Services.documents.wiring:make_document_sink"
         },
         "errors": {
-          "channels": {},
           "enabled": true,
           "include_stacktrace": true,
           "level": "WARNING"
         },
-        "events": {
-          "every_mth": 0,
-          "first_n": 0
-        },
         "file": true,
-        "flight": {
-          "enabled": false,
-          "keep": 5,
-          "limit": 0,
-          "sink": ""
-        },
-        "log_directory": null,
         "log_level": "INFO",
         "logger_groups": {
           "служебное": [
@@ -1213,20 +1197,10 @@
         "retention_days": 7,
         "retention_sweep_interval_sec": 3600.0,
         "retention_total_mb": 200,
-        "sampling_burst_reset_sec": 5.0,
-        "sampling_every_mth": 100,
-        "sampling_first_n": 0,
-        "sampling_max_level": "DEBUG",
-        "scopes": {},
-        "session_ttl_sec": 300.0,
         "stats": {
           "aggregation_interval": 10.0,
-          "channels": {},
           "enabled": true,
-          "flush_interval": 10.0,
-          "log_level": "INFO",
-          "log_line_max_bytes": 2048,
-          "max_series": 1000
+          "log_level": "INFO"
         }
       },
       "processing": {
@@ -1240,10 +1214,6 @@
         "log_dir": "logs/prototype_2",
         "shm_budget_mb": 512,
         "stop_timeout": 5.0
-      },
-      "telemetry": {
-        "publish": null,
-        "throttle": {}
       }
     }
   },
