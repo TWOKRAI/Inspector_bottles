@@ -24,6 +24,8 @@
 - [Покрывать ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) · [слишком грубая не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) · [негодная ≠ вакуум](feedback_broken_injection_is_not_a_vacuous_test.md) — ERROR vs FAILED
 - [Откат — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа; эталон протухает от правок ревью · [дубль обязан блокировать](feedback_double_must_block_like_the_original.md)
 - [Тест, переживший свой слом](feedback_test_survived_its_own_break.md) — шов сквозь RLock · [ноль красных = лишний слой](feedback_zero_reds_can_mean_a_useless_layer.md)
+- [У нуля красных ТРИ чтения](feedback_a_zero_under_injection_has_three_readings.md) — плохая реплика / промах ВЫБОРКИ тестов / незастережённая ветка; спутал (б) с (в) — завёл ложную находку против верного утверждения. Плюс: у одного выхода бывает несколько стражей, тест покрывает лишь тот, до которого доходит
+- [Суффиксное переименование слепо](feedback_suffix_rename_is_a_blind_injection.md) — `foo→foo_RENAMED` оставляет старое ПРЕФИКСОМ нового: 74 passed при предсказанных 5 failed. Брать несовпадающее имя; сторожа имён — по границе слова, не подстрокой
 - [Краснеет только от ПАРЫ изломов](feedback_test_reddens_only_under_a_paired_injection.md) — сторож композиции ≠ вакуум; несовпавшее предсказание = находка
 - [ttl в config.reload отказывает по своей причине](feedback_config_reload_ttl_addressing_guard.md) — throttle-only + ttl ложно-зелёный
 - [Константа из физики, а не из замера](feedback_constant_from_domain_physics_not_measured.md) — 99.28 % наблюдений ниже первой границы; инъекции такое не ловят
