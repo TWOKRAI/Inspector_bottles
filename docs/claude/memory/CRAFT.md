@@ -30,6 +30,7 @@
 ## Вакуумные тесты и ассерты
 
 - [Молчащий детектор](feedback_silent_detector_proves_nothing.md) — сперва покажи красным · [тест, поднимающий ошибку сам](feedback_test_raising_the_error_itself_guards_the_branch.md) — сторожит except
+- [Вечно горящий детектор](feedback_detector_comparing_representation_fires_always.md) — сравнение целых dict'ов сравнивает написание, а не смысл; прогони на «ничего не изменилось» и потребуй тишины
 - [Ассерт по подстроке](feedback_substring_assert_passes_on_the_wrong_branch.md) — текст+уровень, инъекция в соседнюю ветку · [отсутствие при extra=ignore](feedback_absence_assertion_under_extra_ignore_is_vacuous.md) — model_fields_set
 - [Числа рядом с дефолтом](feedback_test_values_near_defaults_test_the_default.md) · [совпадение констант](feedback_coinciding_constants_hide_opposite_implementations.md) — брать где расходятся · [одна функция — две позиции](feedback_one_function_two_positions.md) · [параметр закрывает окно дефекта](feedback_test_params_hide_defect_window.md) — backoff_sec=0.0, adapter=None
 - [Дубль фикстуры](feedback_duplicate_fixture_verifies_itself.md) — расходится с conftest молча · [параметризация из испытуемого](feedback_parametrization_built_from_the_subject_collapses_with_it.md)
