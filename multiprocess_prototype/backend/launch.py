@@ -452,6 +452,7 @@ class SystemBuilder:
         manifest_path: Path | None = None,
         system_path: Path | None = None,
         theme: str | None = None,
+        presentation_overlay: dict | None = None,
     ) -> None:
         self._sys_config = sys_config
         self._blueprint = blueprint
@@ -459,6 +460,13 @@ class SystemBuilder:
         self._manifest_path = manifest_path
         self._system_path = system_path
         self._theme = theme
+        # Overlay, РЕАЛЬНО наложенный на boot-топологию (или None). Едет в
+        # оркестратор, потому что горячая замена пересобирает топологию заново и
+        # обязана наложить тот же патч: иначе `gui` получил бы класс из рецепта,
+        # то есть дренирующее воплощение — окно умерло бы посреди работы, а
+        # сегодня, пока `gui` protected во всех рецептах, это же расхождение
+        # вечно горит в сигнале конфликта.
+        self._presentation_overlay = presentation_overlay
 
     # --- Фабрики ---
 
@@ -498,8 +506,10 @@ class SystemBuilder:
         # рецепт (в headless-воплощении), overlay подменяет ему класс на Qt-шный.
         # Порядок «после слияния», а не «до»: патчить нужно то, что реально поедет,
         # иначе объявление рецепта победило бы патч и окно не поднялось бы.
+        presentation_overlay: dict | None = None
         if include_presentation and app.presentation:
-            blueprint = apply_presentation_overlay(blueprint, load_topology_dict(app.presentation))
+            presentation_overlay = load_topology_dict(app.presentation)
+            blueprint = apply_presentation_overlay(blueprint, presentation_overlay)
         else:
             # S-22: overlay не наложен — сказать это ровно один раз за сборку.
             # `else`, а не два `if`: из ЭТОГО места тихого пути нет. Но поводов
@@ -530,6 +540,7 @@ class SystemBuilder:
             manifest_path=app.source,
             system_path=app.system,
             theme=app.styles.active if app.styles else None,
+            presentation_overlay=presentation_overlay,
         )
 
     @classmethod
@@ -703,6 +714,11 @@ class SystemBuilder:
                 # пиклится через spawn). Планировщик использует его для нормализации
                 # blueprint (per-category defaults) + observability overlay + log_dir.
                 "sys_config": sys_config.model_dump(),
+                # Тот же патч презентации, что лёг на boot-топологию (или None).
+                # Горячая замена собирает топологию с нуля из рецепта, а рецепт
+                # объявляет `gui` в дренирующем воплощении — без патча switch
+                # раздал бы пересобранному процессу headless-класс.
+                "presentation_overlay": self._presentation_overlay,
             },
             stop_timeout=sys_config.system.stop_timeout,
         )

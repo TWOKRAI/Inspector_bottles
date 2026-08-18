@@ -50,7 +50,11 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
     from multiprocess_prototype.backend.assembly import BlueprintAssembler, FullReplacePlanner
     from multiprocess_prototype.backend.assembly.normalize import normalize_blueprint
     from multiprocess_prototype.backend.config.schemas import SystemConfig
-    from multiprocess_prototype.backend.launch import PROJECT_ROOT, unwrap_recipe
+    from multiprocess_prototype.backend.launch import (
+        PROJECT_ROOT,
+        apply_presentation_overlay,
+        unwrap_recipe,
+    )
 
     sys_config = SystemConfig.model_validate(sys_config_dict)
 
@@ -106,15 +110,42 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
                 return str(resolved)
         return str(orchestrator.get_config("observability_recipe_path") or "")
 
+    # Патч презентации, наложенный на boot-топологию (None, если презентации нет:
+    # бэкенд-вход, --headless, отсутствующий overlay в манифесте). Резолвится ОДИН
+    # раз здесь: он свойство запуска, а не рецепта, и от switch к switch не меняется.
+    presentation_overlay = orchestrator.get_config("presentation_overlay")
+
     def _build_proc_dicts(bp: dict) -> dict[str, dict]:
-        """unwrap рецепта v3 → normalize → assemble (единая сборка boot+switch).
+        """unwrap рецепта v3 → presentation-патч → normalize → assemble.
+
+        Та же цепочка, что boot (`launch.SystemBuilder.from_manifest`), включая
+        презентационный патч. Без него горячая замена раздавала бы `gui` класс,
+        объявленный рецептом, — дренирующее воплощение: сегодня `gui` во всех
+        рецептах `protected`, поэтому окно переживает switch, и расхождение лишь
+        вечно горит в сигнале конфликта; сними кто-нибудь `protected` — и окно
+        Порядок «патч после unwrap, до normalize» взят паритетом с boot, и
+        только паритетом: инъекция, переворачивающая его, не изменила НИЧЕГО в
+        собранных proc_dict'ах — ассемблер добирает дефолты плагина сам, и
+        разница, видимая на промежуточном blueprint (3 ключа против 8), к
+        результату исчезает. Написано здесь, чтобы следующий не принял паритет за
+        инвариант и не начал его защищать.
 
         deepcopy входа: unwrap_recipe отдаёт shallow-copy (ссылки внутрь
         исходного blueprint), normalize_blueprint мутирует in-place →
         без deepcopy повторный switch накапливал бы side-effect на IPC-рецепте.
         """
         recipe_path = _active_recipe_path()
-        topology = normalize_blueprint(copy.deepcopy(unwrap_recipe(bp)), sys_config)
+        unwrapped = copy.deepcopy(unwrap_recipe(bp))
+        if presentation_overlay:
+            # deepcopy ПАТЧА, а не только рецепта. `apply_presentation_overlay`
+            # сливает пополям поверхностно, поэтому список плагинов патча попадает
+            # в топологию ССЫЛКОЙ, а `normalize_blueprint` мутирует его in-place:
+            # без копии хранимый overlay обогащался бы per-category defaults на
+            # первом же switch и приезжал бы на следующий уже не тем, чем объявлен.
+            # Измерено: после одной сборки запись плагина в overlay вырастала с 3
+            # ключей до 8.
+            unwrapped = apply_presentation_overlay(unwrapped, copy.deepcopy(presentation_overlay))
+        topology = normalize_blueprint(unwrapped, sys_config)
         # Task 5.13, шаг 7 — что эта пересборка делает с долькой ОРКЕСТРАТОРА:
         # ничего, и это решение, а не пропуск. Она возвращает proc_dict'ы ДЕТЕЙ,
         # а свой слой оркестратор берёт из конверта switch'а
