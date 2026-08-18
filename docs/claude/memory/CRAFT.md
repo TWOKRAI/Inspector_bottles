@@ -96,3 +96,5 @@
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — окно «невидимо»; snapshot=0 виджетов; кадр только ref-грабом
 - [GUI-save сносит yaml-комменты](feedback_gui_save_strips_yaml_comments.md) — git diff перед add
 - [Инъекция зелёная, когда подмена совпала с фактом](feedback_injection_green_when_the_substitute_equals_the_fact.md) — «зашить константу» ничего не сторожит, пока нет фикстуры с ТРЕТЬИМ значением
+- [Критерий, где тест сам преобразует](feedback_a_criterion_that_transforms_observes_the_library.md) — наблюдает библиотеку, неисполним ничем; чинить швом, не подгонкой
+- [Зонд обязан перечислить до того, как спросит](feedback_a_probe_must_enumerate_before_it_asks.md) — пустой ответ про несуществующее имя = «ничего нет»
