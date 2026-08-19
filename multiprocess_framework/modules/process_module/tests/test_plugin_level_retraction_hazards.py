@@ -34,10 +34,53 @@ import threading
 
 import pytest
 
+from multiprocess_framework.modules.observability_declarations import (
+    KIND_METRIC,
+    declare_metric,
+    forget_declarations,
+)
 from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
     RETRACTION_REASSERT_TICKS,
     PluginLevels,
 )
+
+#: Пул имён потокового теста. Пул, а не бесконечная последовательность: с Ф0
+#: Task 0.2 снятие откладывается ТОЛЬКО для объявленных имён своего владельца, а
+#: объявить неограниченно много имён значило бы засорить процессный реестр
+#: (`forget_declarations` пришлось бы звать по списку, которого нет). Рост
+#: словаря запасов пул сохраняет: первый проход растит его с 0 до 64, дальше
+#: publish/retract гоняют ключи туда-обратно.
+_LEVEL_POOL = tuple(f"level_{i}" for i in range(64))
+
+#: Имя → владелец для ВСЕХ имён этого файла.
+#:
+#: Появилось в Ф0 Task 0.2: ``retract`` откладывает снятие только для имён, где
+#: уходящий — объявленный владелец (иначе уход соседа, опечатавшегося в чужом
+#: имени, клал ``None`` на живой лист владельца — дефекты Д1/Д2'). Прежняя
+#: редакция этих тестов работала с НЕОБЪЯВЛЕННЫМИ именами, то есть проверяла
+#: арифметику запаса на входе, которого у механизма больше нет. Предмет тестов
+#: (бухгалтерия запаса) не изменился — изменилась предпосылка, и она теперь
+#: выражена явно.
+_DECLARED: dict[str, str] = {
+    "probe": "plugin_a",
+    "a": "p",
+    "b": "p",
+    **{name: "writer_plugin" for name in _LEVEL_POOL},
+}
+
+
+@pytest.fixture(autouse=True)
+def _declared_names():
+    """Объявить имена файла перед тестом и забыть после.
+
+    Сначала ``forget``, потом ``declare``: реестр процессный, и остаток от
+    соседнего модуля с ДРУГИМ владельцем сделал бы объявление отказом.
+    """
+    forget_declarations(KIND_METRIC, names=set(_DECLARED))
+    for name, owner in _DECLARED.items():
+        declare_metric(name, owner=owner)
+    yield
+    forget_declarations(KIND_METRIC, names=set(_DECLARED))
 
 
 def _store_with_one_level(name: str = "probe", owner: str = "plugin_a") -> PluginLevels:
@@ -119,15 +162,29 @@ class TestBudgetLifecycle:
             "живая публикация лишь уменьшила счётчик — поднятый плагин получит 'None' вдогонку"
         )
 
-    def test_a_live_value_from_ANOTHER_publisher_also_cancels_by_name(self) -> None:
-        """Отмена идёт по ИМЕНИ, потому что лист в дереве один.
+    def test_a_live_value_from_ANOTHER_publisher_does_NOT_cancel(self) -> None:
+        """ПЕРЕВЁРНУТО в Ф0 Task 0.2 — прежняя редакция пинила дефект как контракт.
 
-        Утверждать «показания нет» по имени, в которое кто-то прямо сейчас
-        пишет, значило бы гасить живой лист чужим снятием.
+        Было: «отмена идёт по ИМЕНИ, кто бы ни публиковал» — с доводом «лист в
+        дереве один». Довод верен, вывод из него — нет: чужая публикация до
+        дерева не доезжает (отбор по владению), а запас утверждений она
+        обнуляла, и снятие владельца не доезжало НИ РАЗУ, пока сосед публикует
+        в его имя. Воспроизведено сторожем Д3
+        (``test_d3_owner_retraction_survives_despite_impostor_writes``: 3 тика
+        подряд лист жив, хотя владелец снят).
+
+        Стало: отменяет только ВЛАДЕЛЕЦ имени. Якорь существования в этом же
+        тесте — его публикация запас снимает.
         """
         store = _store_with_one_level(name="probe", owner="plugin_a")
         store.publish("probe", 5.0, "plugin_b")
-        assert store.pending_retractions() == set(), store._retracted
+        assert store.pending_retractions() == {"probe"}, (
+            f"публикация не-владельца утопила снятие владельца: {store._retracted!r}"
+        )
+        store.publish("probe", 5.0, "plugin_a")
+        assert store.pending_retractions() == set(), (
+            f"ЯКОРЬ: публикация ВЛАДЕЛЬЦА обязана снять запас, осталось {store._retracted!r}"
+        )
 
     def test_confirming_an_unknown_name_is_silent(self) -> None:
         """Гонка «отменили, пока merge летел» — законное событие, не сбой."""
@@ -170,7 +227,7 @@ def test_reading_the_budget_while_it_grows_does_not_raise() -> None:
         try:
             i = 0
             while not stop.is_set():
-                store.publish(f"level_{i}", float(i), "writer_plugin")
+                store.publish(_LEVEL_POOL[i % len(_LEVEL_POOL)], float(i), "writer_plugin")
                 store.retract("writer_plugin")
                 i += 1
         except BaseException as exc:  # noqa: BLE001
@@ -178,9 +235,10 @@ def test_reading_the_budget_while_it_grows_does_not_raise() -> None:
 
     thread = threading.Thread(target=_writer, daemon=True)
     thread.start()
+    max_seen = 0
     try:
         for _ in range(2000):
-            store.pending_retractions()
+            max_seen = max(max_seen, len(store.pending_retractions()))
             store.confirm_retracted(["level_0"])
     finally:
         stop.set()
@@ -188,6 +246,10 @@ def test_reading_the_budget_while_it_grows_does_not_raise() -> None:
 
     assert not thread.is_alive(), "поток-писатель не завершился за 5с"
     assert not errors, f"писатель упал: {errors[0]!r}"
+    # ЯКОРЬ существования: словарь запасов реально РОС во время чтения. Без него
+    # тест зелен и при механизме, который не откладывает снятие вовсе, — то есть
+    # проверял бы «копия пустого словаря не падает».
+    assert max_seen > 1, f"запасы не росли во время чтения (максимум {max_seen}) — тест ничего не сторожит"
 
 
 if __name__ == "__main__":

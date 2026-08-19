@@ -13,6 +13,7 @@ from __future__ import annotations
 import queue
 
 from ..core.process_module import ProcessModule
+from ..plugins.base import PluginState
 from .data_receiver import DataReceiver
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .collector_registry import build_collector
@@ -84,8 +85,19 @@ class GenericProcess(ProcessModule):
         auto_reset = app_cfg.get("error_auto_reset_sec", 60.0)
         critical = app_cfg.get("error_critical_plugins", [])
 
-        # Плагины через orchestrator
-        all_plugins = self._orchestrator.plugins
+        # Плагины через orchestrator — ТОЛЬКО дошедшие до RUNNING (Ф0 Task 0.2,
+        # вторая половина Д4). ``orchestrator.plugins`` — реестр для shutdown, а
+        # не список живых: по инварианту H-2 в нём остаётся и плагин, чей
+        # configure() бросил (иначе shutdown не увидит захваченный им ресурс).
+        # Читать его как «живые» значило раздать рабочий поток неподнятому
+        # плагину: воспроизведено — при упавшем configure() проводка всё равно
+        # создавала воркер ``source_producer_<имя>``, и SourceProducer звал
+        # produce() у плагина в IDLE, у которого ресурсы не разложены
+        # (test_plugin_levels_defect_quartet_hazards.py). Решение «кому нельзя
+        # работать» принимается ЗДЕСЬ, на проводке, а не внутри воркера: воркер
+        # — тупой цикл над переданным ему плагином, и таким его пинят
+        # test_cycle_metrics / test_frame_log_correlation.
+        all_plugins = [p for p in self._orchestrator.plugins if p.state == PluginState.RUNNING]
 
         # Разделить плагины на source и processing
         source_plugins = [p for p in all_plugins if p.is_source]
