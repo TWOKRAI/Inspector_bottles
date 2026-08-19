@@ -269,6 +269,30 @@ def metric_owners() -> Dict[str, str]:
         return {name: owner for (kind, name), (owner, _rule) in _DECLARED.items() if kind == KIND_METRIC}
 
 
+def metric_owner(name: str) -> Optional[str]:
+    """Владелец ОДНОГО имени метрики — точечное чтение без копии реестра.
+
+    Зачем отдельно от :func:`metric_owners`, если ответ тот же. ``publish``
+    уровня спрашивает владение на КАЖДОМ вызове, из потоков воркеров, а
+    ``metric_owners`` строит копию всего среза под тем же локом — цена линейна
+    по размеру реестра. Замер ревью (20 000 вызовов ``PluginLevels.publish``):
+    **0.27 мкс** до правки владения, **1.14** с ``metric_owners()`` при 3
+    объявленных метриках, **4.52** при 50, **33.35** при 500. Сегодня безобидно
+    (боевой capture — 3 метрики на 21 Гц), но зависимость от числа объявлений
+    у горячего пути публикации быть не должна.
+
+    Массовым потребителям (сборщик тика, :meth:`PluginLevels.retract`) нужна вся
+    карта, и они по-прежнему зовут :func:`metric_owners` — точечная функция им
+    обошлась бы дороже.
+
+    Returns:
+        Владелец имени либо ``None``, если имя не объявлено никем.
+    """
+    with _LOCK:
+        entry = _DECLARED.get((KIND_METRIC, str(name)))
+    return None if entry is None else entry[0]
+
+
 def forget_declarations(kind: Optional[str] = None, *, names: Optional[Iterable[str]] = None) -> None:
     """Очистить реестр (целиком, одну плоскость либо перечисленные имена). **Только для тестов.**
 

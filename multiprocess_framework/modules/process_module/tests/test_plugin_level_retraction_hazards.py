@@ -133,6 +133,10 @@ class TestReadingDoesNotSpend:
         воскрешают имя и не роняют вызов.
         """
         store = _store_with_one_level()
+        # ЯКОРЬ: запас реально заказан. Без него весь тест — отрицания, и под
+        # инъекцией «retract перестал откладывать» он зелен на пустом словаре
+        # (найдено ревью Ф0 Task 0.2).
+        assert store.pending_retractions() == {"probe"}
         for _ in range(RETRACTION_REASSERT_TICKS + 20):
             store.confirm_retracted(["probe"])
         assert store.pending_retractions() == set()
@@ -157,6 +161,7 @@ class TestBudgetLifecycle:
 
     def test_a_live_value_removes_the_name_entirely(self) -> None:
         store = _store_with_one_level()
+        assert store.pending_retractions() == {"probe"}, "ЯКОРЬ: снимать обязано быть что"
         store.publish("probe", 9.9, "plugin_a")
         assert store.pending_retractions() == set(), (
             "живая публикация лишь уменьшила счётчик — поднятый плагин получит 'None' вдогонку"
@@ -189,6 +194,7 @@ class TestBudgetLifecycle:
     def test_confirming_an_unknown_name_is_silent(self) -> None:
         """Гонка «отменили, пока merge летел» — законное событие, не сбой."""
         store = _store_with_one_level()
+        assert store.pending_retractions() == {"probe"}, "ЯКОРЬ: снимать обязано быть что"
         store.publish("probe", 9.9, "plugin_a")  # отмена, пока merge летел
         store.confirm_retracted(["probe", "никогда_не_снималось"])  # не должно бросить
         assert store.pending_retractions() == set()
@@ -209,12 +215,24 @@ class TestBudgetLifecycle:
 # Три потока вокруг словаря запасов
 # --------------------------------------------------------------------------- #
 def test_reading_the_budget_while_it_grows_does_not_raise() -> None:
-    """Тот же класс, что уже обжёг ``_values``: копия растущего словаря.
+    """Три потока вокруг словаря запасов: чтение под ростом не роняет и не теряет.
 
-    ``dict(self._retracted)`` / ``set(...)`` в момент вставки из другого потока
-    поднимает ``RuntimeError: dictionary changed size during iteration``.
-    Писателей у запасов столько же, сколько у значений, — значит и лок нужен тот
-    же. Тест держит РОСТ (новые ключи), потому что именно рост поднимает ошибку.
+    **Чего этот тест НЕ доказывает — и прежний докстринг это утверждал зря**
+    (ревью Ф0 Task 0.2). Было написано, что ``set(self._retracted)`` под вставкой
+    из другого потока поднимает ``RuntimeError: dictionary changed size during
+    iteration``, то есть тест ловит снятый лок. Измерено инъекцией «лок снят»:
+    **10 из 10 прогонов зелёные** в обеих редакциях теста — в CPython 3.12
+    ``set(d)`` идёт одной C-итерацией под GIL и вклиниться туда нечем. Уверенное
+    объяснение без воспроизведения живёт дольше бага, поэтому оно снято, а не
+    подпёрто оговоркой.
+
+    Что тест сторожит на самом деле:
+      * три роли (публикация из потока воркера, чтение и подтверждение из тика,
+        снятие из потока остановки) ходят по хранилищу одновременно и ни одна
+        не падает — исключение любого потока становится красным;
+      * ``pending_retractions`` под этим движением отдаёт непустое множество
+        (якорь ``max_seen > 1``): при механизме, который снятие не откладывает,
+        тест краснеет, а не проходит на пустом словаре.
 
     Поток-писатель — daemon с дедлайном join: тест, который вместо падения
     зависает, хуже отсутствующего.

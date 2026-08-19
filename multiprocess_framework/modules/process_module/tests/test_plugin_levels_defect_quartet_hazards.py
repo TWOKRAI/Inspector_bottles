@@ -120,16 +120,61 @@ class GoodSource(ProcessModulePlugin):
         return [{"frame": "good", "camera_id": 0}]
 
 
+class CriticalBrokenProcessing(ProcessModulePlugin):
+    """Критический processing-плагин: ``configure()`` бросает, ``process()`` — тоже.
+
+    Не выдумка: ресурс инспекции (модель, соединение) раскладывается в
+    ``configure``, и без него обработка отказывает каждый батч. Именно на таком
+    плагине живёт предохранитель конвейера — тег ``not_inspected`` и, после
+    открытия breaker'а, ``suspect`` на его ПОЗИЦИИ.
+    """
+
+    name = "hazard_critical_inspector"
+    category = "processing"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ready = False
+
+    def configure(self, ctx: PluginContext) -> None:
+        raise RuntimeError("нарочный сбой configure() критического инспектора")
+
+    def start(self, ctx: PluginContext) -> None: ...
+
+    def process(self, items: list[dict]) -> list[dict]:
+        if not self._ready:
+            raise RuntimeError("инспектор не сконфигурирован")
+        return items
+
+
+class PassthroughProcessing(ProcessModulePlugin):
+    """Целый сосед по конвейеру — якорь существования."""
+
+    name = "hazard_passthrough"
+    category = "processing"
+
+    def configure(self, ctx: PluginContext) -> None: ...
+
+    def start(self, ctx: PluginContext) -> None: ...
+
+    def process(self, items: list[dict]) -> list[dict]:
+        return items
+
+
 _MODULE = "multiprocess_framework.modules.process_module.tests.test_plugin_levels_defect_quartet_hazards"
 _BAD_PATH = f"{_MODULE}.BadConfigureSource"
 _GOOD_PATH = f"{_MODULE}.GoodSource"
+_CRITICAL_PATH = f"{_MODULE}.CriticalBrokenProcessing"
+_PASSTHROUGH_PATH = f"{_MODULE}.PassthroughProcessing"
 
 
-def _boot_orchestrator() -> tuple[PluginOrchestrator, MockProcessServices]:
+def _boot_orchestrator(defs: list[dict] | None = None) -> tuple[PluginOrchestrator, MockProcessServices]:
     services = MockProcessServices(name="hazard_proc")
     orch = PluginOrchestrator(services=services)
     orch.load_and_configure_managers(
-        [
+        defs
+        if defs is not None
+        else [
             {"plugin_class": _BAD_PATH, "plugin_name": "hazard_bad_source"},
             {"plugin_class": _GOOD_PATH, "plugin_name": "hazard_good_source"},
         ]
@@ -138,7 +183,7 @@ def _boot_orchestrator() -> tuple[PluginOrchestrator, MockProcessServices]:
     return orch, services
 
 
-def _wire_data_pipeline(orch: PluginOrchestrator, services: MockProcessServices):
+def _wire_data_pipeline(orch: PluginOrchestrator, services: MockProcessServices, app_cfg: dict | None = None):
     """Позвать НАСТОЯЩИЙ ``GenericProcess._init_data_pipeline`` на заглушке процесса.
 
     Заглушка, а не живой процесс: поднимать IPC/SHM ради вопроса «кому раздали
@@ -151,11 +196,13 @@ def _wire_data_pipeline(orch: PluginOrchestrator, services: MockProcessServices)
     proc.worker_manager = services.worker_manager
     proc.router_manager = None
     proc.memory_manager = None
-    proc.get_config = lambda key, default=None: {"chain_targets": ["out"]} if key == "config" else default
+    cfg = {"chain_targets": ["out"], **(app_cfg or {})}
+    proc.get_config = lambda key, default=None: cfg if key == "config" else default
     proc.send_message = lambda target, msg: None
     proc.receive_message = lambda *a, **k: None
     proc._log_info = lambda *a, **k: None
-    proc._log_error = lambda *a, **k: None
+    proc.errors = []  # журнал проводки: выпадение плагина обязано быть слышно
+    proc._log_error = lambda msg, *a, **k: proc.errors.append(str(msg))
     proc._log_debug = lambda *a, **k: None
     proc._init_data_pipeline()
     return proc
@@ -196,6 +243,14 @@ def test_failed_configure_gets_neither_start_nor_a_worker_on_the_production_road
         f"проводка раздала воркеры не тем: {workers!r} (упавший плагин обязан остаться без потока)"
     )
 
+    said = [line for line in proc.errors if "hazard_bad_source" in line]
+    assert len(said) == 1 and "не поднят" in said[0], (
+        f"выпадение источника прошло молча — оператор увидит только «камера не отдаёт кадры»: {proc.errors!r}"
+    )
+    assert not [line for line in proc.errors if "hazard_good_source" in line], (
+        f"ЯКОРЬ: про поднятый источник проводка жаловаться не имеет права: {proc.errors!r}"
+    )
+
     producers = {p._plugin.name: p for p in proc._source_producers}
     assert set(producers) == {"hazard_good_source"}, f"SourceProducer построен не только соседу: {sorted(producers)}"
 
@@ -213,6 +268,57 @@ def test_failed_configure_gets_neither_start_nor_a_worker_on_the_production_road
         f"плагин с упавшим configure() отдал {bad.produce_calls} вызовов produce() — "
         f"рабочий поток всё-таки подключили к неподнятому плагину"
     )
+
+
+def test_a_broken_critical_processing_plugin_keeps_its_position_and_its_tag() -> None:
+    """Граница фильтра: processing-плагин остаётся в конвейере, даже не поднявшись.
+
+    Найдено ревью Ф0 Task 0.2 (блокер). Фильтр «только RUNNING» стоял ДО
+    разделения на source/processing и снимал механизм фреймворка: у критического
+    processing-плагина позиция в списке — это дорога предохранителя
+    (``PipelineExecutor._build_active_steps`` ставит ``SuspectTagStep`` НА ЕГО
+    ПОЗИЦИЮ, а ``PluginOperationStep`` тегирует ``inspection_status``). Убрав
+    плагин, мы убрали и позицию, и тег — батч уезжал молча, как будто инспекция
+    была.
+
+    Кванторный (2 прохода): проход 1 — ``not_inspected`` (плагин отказал),
+    проход 2 — ``suspect`` (breaker открылся при ``max_consecutive_fails=1``).
+    Якорь существования — литералы в самом item'е и целый сосед, чей вклад
+    доезжает на обоих проходах.
+    """
+    orch, services = _boot_orchestrator(
+        [
+            {"plugin_class": _CRITICAL_PATH, "plugin_name": "hazard_critical_inspector"},
+            {"plugin_class": _PASSTHROUGH_PATH, "plugin_name": "hazard_passthrough"},
+        ]
+    )
+    broken = next(p for p in orch.plugins if p.name == "hazard_critical_inspector")
+    neighbour = next(p for p in orch.plugins if p.name == "hazard_passthrough")
+    assert broken.state == PluginState.IDLE, f"предпосылка: инспектор не поднят, получено {broken.state!r}"
+    assert neighbour.state == PluginState.RUNNING, f"ЯКОРЬ: сосед поднят, получено {neighbour.state!r}"
+
+    proc = _wire_data_pipeline(
+        orch,
+        services,
+        {"error_critical_plugins": ["hazard_critical_inspector"], "error_max_consecutive_fails": 1},
+    )
+    executor = proc._pipeline_executor
+    assert [p.name for p in executor._plugins] == ["hazard_critical_inspector", "hazard_passthrough"], (
+        f"неподнятый processing-плагин выпал из конвейера вместе со своей позицией: "
+        f"{[p.name for p in executor._plugins]}"
+    )
+
+    first = executor._execute_chain([{"bottle_id": 1, "frame": "f"}])
+    assert first and first[0].get("inspection_status") == "not_inspected", (
+        f"проход 1: отказ критического инспектора не оставил тега — батч уехал как инспектированный: {first!r}"
+    )
+    assert first[0]["bottle_id"] == 1, f"ЯКОРЬ: сосед потерял содержимое item'а: {first!r}"
+
+    second = executor._execute_chain([{"bottle_id": 2, "frame": "f"}])
+    assert second and second[0].get("inspection_status") == "suspect", (
+        f"проход 2: breaker открыт, но SuspectTagStep на позиции не отработал: {second!r}"
+    )
+    assert second[0]["bottle_id"] == 2, f"ЯКОРЬ: сосед потерял содержимое item'а: {second!r}"
 
 
 # =========================================================================== #

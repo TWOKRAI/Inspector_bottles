@@ -25,7 +25,7 @@ import threading
 import time
 from typing import Any, Callable, Iterable, Optional
 
-from ...observability_declarations import declare_metric, metric_owners
+from ...observability_declarations import declare_metric, metric_owner, metric_owners
 from ..configs.telemetry_publish_config import gated_metrics
 
 # Ф8.1: метрика объявляется ТАМ, ГДЕ СЧИТАЕТСЯ, а не перечисляется кортежем в
@@ -380,7 +380,12 @@ class PluginLevels:
         owner = str(owner)
         # Каталог спрашивается ДО лока: он живёт под своим замком, и держать наш
         # на время чужого — лишний порядок блокировок на ровном месте.
-        owns_name = metric_owners().get(name) == owner
+        #
+        # ТОЧЕЧНОЕ чтение, а не копия среза: publish зовут потоки воркеров на
+        # каждом такте плагина, и ``metric_owners()`` платил бы за копию всего
+        # реестра линейно по числу объявлений (замер ревью — в докстринге
+        # :func:`metric_owner`). ``retract`` редкий и берёт всю карту.
+        owns_name = metric_owner(name) == owner
         with self._lock:
             self._values[(name, owner)] = value
             if owns_name:
