@@ -128,26 +128,59 @@ def test_a1_default_enabled_is_literally_false() -> None:
 # ===========================================================================
 
 
-def test_a2a_gate_disables_every_known_catalog_metric_name() -> None:
-    """A2(а): для ЛЮБОГО имени, известного каталогу gated_metrics() (т.е. "перечисленного
-    где угодно" — реального имени метрики фреймворка), боевой гейт отдаёт
-    enabled=False. Проверяется НАБЛЮДАЕМЫЙ результат resolve(), а не наличие ключа
-    в config.metrics.
+def test_a2a_gate_disables_every_catalog_metric_except_the_dashboard_whitelist() -> None:
+    """A2(а): боевой гейт отдаёт enabled=False для любого каталожного имени, КРОМЕ
+    объявленного белого списка дашборда — и ровно кроме него.
 
-    Как упадёт: если A1 не выполнен — упадёт на "gate is not None" (гейта нет вовсе,
-    т.к. publish отсутствует). Если гейт есть, но default_enabled не False или
-    какое-то каталожное имя тайно включено override'ом — упадёт на конкретном имени.
+    Прежняя формулировка («enabled=False для ЛЮБОГО имени») была верна на момент
+    исполнения флипа РТ-2 (``ee842a1a``) и стала ложью на ``cb79d884``: живой стенд
+    показал, что кольцо истории read-model наполняет ТОЛЬКО push-дорога (опрос пишет
+    ``record_history=False``, ADR-139), поэтому при пустом белом списке секция
+    «Дашборд телеметрии» пуста НАВСЕГДА. ``fps``/``latency_ms`` внесены в
+    ``telemetry.publish.metrics`` как ЯВНОЕ исключение (``system.yaml:261-269``), и
+    исключение это сторожит пара тестов в
+    ``multiprocess_prototype/backend/config/tests/test_telemetry_section.py:115,186``.
+    Тест держался красным с ``cb79d884`` до 2026-08-19 — его никто не привёл в
+    соответствие с решением, которое сам же конфиг документирует.
+
+    Гарантия флипа при этом НЕ ослаблена, а сужена до проверяемой: множество
+    включённых каталожных имён обязано СОВПАДАТЬ с белым списком. Третье имя,
+    просочившееся в ``metrics``, красит тест — ровно то, ради чего пункт A2(а) и
+    заводился.
+
+    Оракул белого списка — ``_DASHBOARD_METRICS`` из виджета, НЕ ``system.yaml``:
+    список, вычитанный из проверяемого файла, согласился бы с любым его состоянием.
+    Тот же оракул, что у сторожей в ``test_telemetry_section.py`` — второго источника
+    правды о белом списке в репозитории нет.
+
+    Как упадёт: гейта нет вовсе → "gate is not None". Включено имя вне белого списка
+    (ослабили ``default_enabled`` или добавили override) → множества разойдутся с
+    показом лишнего имени. Метрику дашборда убрали из ``metrics`` → разойдутся с
+    показом недостающего, и график дашборда молча опустеет.
     """
+    # Локальный импорт — оракул целиком из виджета, не из yaml, который проверяем.
+    from multiprocess_prototype.frontend.widgets.tabs.processes._system_dashboard import (
+        _DASHBOARD_METRICS,
+    )
+
     gate = _build_real_gate()
     assert gate is not None, (
         "publisher-gate не собрался из боевого system.yaml (см. A1/A2) — _build_telemetry_gate() вернул None"
     )
-    still_enabled = []
-    for metric in gated_metrics():
-        enabled, _interval = gate.config.resolve(metric)
-        if enabled:
-            still_enabled.append(metric)
-    assert still_enabled == []
+    whitelist = {key for key, _label in _DASHBOARD_METRICS}
+    assert whitelist, "оракул сломан: у виджета дашборда пуст список метрик"
+    catalog = set(gated_metrics())
+    assert whitelist <= catalog, (
+        f"белый список дашборда вышел за каталог gated_metrics(): {sorted(whitelist - catalog)} — "
+        "либо метрика переименована, либо её производитель не импортирован"
+    )
+
+    still_enabled = {metric for metric in catalog if gate.config.resolve(metric)[0]}
+    assert still_enabled == whitelist, (
+        f"включены не те каталожные метрики: лишние {sorted(still_enabled - whitelist)}, "
+        f"недостающие {sorted(whitelist - still_enabled)}; белый список — "
+        f"{sorted(whitelist)} (system.yaml:261-269, исключение из флипа РТ-2)"
+    )
 
 
 def test_a2b_gate_disables_a_name_absent_from_metrics_entirely() -> None:
