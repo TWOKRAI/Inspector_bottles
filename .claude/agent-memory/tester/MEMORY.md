@@ -9,3 +9,6 @@
 - [negative wording assertion needs an existence anchor](feedback_negative_wording_assertion_needs_an_existence_anchor.md) — "must not falsely claim X" is vacuous if nothing was logged; pair with `assert logs` in the same test
 - [addressing fake needs general dot-notation](feedback_addressing_fake_needs_general_dot_notation.md) — flat dict.get fake proves its own shape, not a nested-key property; copy the real Config._traverse contract + add one real-object test
 - [ownership test needs silent-owner case](feedback_ownership_test_needs_silent_owner_case.md) — live-owner-vs-impostor alone stays green under pure overlay order; add the "owner declared but didn't publish" case to actually test ownership
+- [Read tool can't skip forbidden docstrings](feedback_read_tool_cannot_skip_forbidden_docstrings.md) — use Bash+inspect.signature for "signature OK, docstring not"; disclose loudly if Read already leaked it
+- [reused ProcessHeartbeat required for retraction ticks](feedback_reused_heartbeat_required_for_retraction_ticks.md) — a fresh hb per tick loses per-instance bookkeeping → false RED on retraction propagation
+- [_do_shutdown on unbooted plugin is a silent no-op](feedback_do_shutdown_on_unbooted_plugin_is_a_silent_noop.md) — drive full configure->start->shutdown lifecycle before trusting shutdown-triggered assertions
