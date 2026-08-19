@@ -20,6 +20,8 @@
 - [deep_merge не ассоциативен](feedback_deep_merge_is_not_associative.md) — 239 расхождений из 20 000; свернуть дельты можно, лишь если ранняя не кладёт скаляр туда, где поздняя кладёт словарь
 - [Дублёр глушит имена, которые код ЧИТАЕТ](feedback_a_stub_silences_the_names_it_is_read_for.md) — переименование читаемого имени: 69 тестов зелены; записываемого — все падают. Контракт-тест на имена, включая `self.<имя> =` по иерархии
 - [Предсказание — после всех тестов](feedback_predict_injections_after_writing_tests.md) · [на общем корпусе — MUST поимённо](feedback_injection_prediction_on_a_shared_corpus.md) + потолок красных
+- [Генератор инъекций ≠ автор критериев](feedback_injection_generator_must_differ_from_criteria_author.md) — инверсии критериев ловятся гарантированно; обязателен второй род «нуль/тотал» от другой головы
+- [Отрицательный критерий требует якоря существования](feedback_negative_criterion_needs_an_existence_anchor.md) — «листа нет» удовлетворяется пустотой; выдавать парой «есть литерал / нет»
 - [База инъекций = число собранных](feedback_injection_base_needs_a_collected_count.md) — 0 collected читается как зелено; дочерний логгер не глушит
 - [Покрывать ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) · [слишком грубая не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) · [негодная ≠ вакуум](feedback_broken_injection_is_not_a_vacuous_test.md) — ERROR vs FAILED
 - [Откат — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа; эталон протухает от правок ревью · [дубль обязан блокировать](feedback_double_must_block_like_the_original.md)

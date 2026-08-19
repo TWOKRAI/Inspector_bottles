@@ -19,7 +19,7 @@
 - qex: [таймаут реиндекса](project_qex_reindex_timeout.md) — свежесть по last_indexed · [бюджет = выгрузка эмбеддера](feedback_qex_reindex_budget.md) — keep_alive=-1 → 12 мин
 
 ## Стоящие правила владельца
-- [Приоритет: ДВИЖОК первым](project_priority_engine_first.md) — прототип = параллельный стенд
+- [Приоритет — маятник по свободному времени](project_priority_engine_first.md) — 2026-08-18: к стенду за видимым результатом; фреймворк — вторая полоса; окно codemod — по паузе, не по дате
 - [Framework-first](feedback_framework_first.md) — framework универсален, прототип расходный · [Fix forward](feedback_fix_framework_forward.md) — улучшение, не удаление · [FREEZE, не KILL](feedback_freeze_over_kill.md) — мёртвый код замораживать
 - [Fewer layers](feedback_fewer_layers.md) — меньше слоёв строго лучше · [всё через BaseManager](feedback_all_components_base_manager.md) · [три менеджера — одна база](feedback_three_managers_share_base.md) · [Logger/Error/Stats через менеджеры](feedback_logger_error_stats_managers.md) — ObservableMixin
 - [Constructor modularity](feedback_constructor_modularity.md) — pluggable/testable/composable · [неиспользуемый путь = контракт](feedback_unused_paths_are_contracts.md) — «нет вызывающих» ≠ «не нужен», квалифицировать громко
