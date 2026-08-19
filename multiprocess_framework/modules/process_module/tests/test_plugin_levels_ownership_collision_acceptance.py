@@ -351,6 +351,11 @@ class TestO1OwnerWinsWhileAlive:
         hb = ProcessHeartbeat(svc, clock=clock)
         _tick(hb, clock)
 
+        tree = _apply_merges(svc._state_proxy.merged)
+        assert _get_path(tree, f"processes.procO1b.state.{NAME}") == pytest.approx(11.0), (
+            "ЯКОРЬ: без живого листа владельца отсутствие чужого числа доказывается пустотой",
+            svc._state_proxy.merged,
+        )
         assert _value_absent_everywhere(svc._state_proxy.merged, 22.0), svc._state_proxy.merged
 
 
@@ -361,6 +366,7 @@ class TestO1OwnerWinsWhileAlive:
 class TestO2SilentOwnerBlocksImpostor:
     def test_leaf_absent_when_owner_did_not_publish(self, declared_names) -> None:
         NAME = "collision_x_o2"
+        ANCHOR = "collision_x_o2_anchor"
         svc = _Services(name="procO2")
         base_ctx = PluginContext(services=svc)
         ctx_a = base_ctx.with_config({}, plugin_name="owner_a2")
@@ -368,6 +374,9 @@ class TestO2SilentOwnerBlocksImpostor:
 
         ctx_a.declare_metric(NAME)  # объявил, но НЕ публиковал на этом тике
         declared_names.append(NAME)
+        ctx_a.declare_metric(ANCHOR)  # ЯКОРЬ: своё имя, опубликованное на том же тике
+        declared_names.append(ANCHOR)
+        ctx_a.publish_metric(ANCHOR, 12.5)
         ctx_b.publish_metric(NAME, 33.0)
 
         clock = FakeClock()
@@ -376,10 +385,16 @@ class TestO2SilentOwnerBlocksImpostor:
 
         tree = _apply_merges(svc._state_proxy.merged)
         state = _get_path(tree, "processes.procO2.state") or {}
+        assert state.get(ANCHOR) == pytest.approx(12.5), (
+            "ЯКОРЬ: на этом же тике лист владельца обязан БЫТЬ с литералом — "
+            "иначе отсутствие подменённого имени доказывается молчанием механизма",
+            state,
+        )
         assert NAME not in state, state
 
     def test_impostor_value_absent_from_every_merge_when_owner_silent(self, declared_names) -> None:
         NAME = "collision_x_o2b"
+        ANCHOR = "collision_x_o2b_anchor"
         svc = _Services(name="procO2b")
         base_ctx = PluginContext(services=svc)
         ctx_a = base_ctx.with_config({}, plugin_name="owner_a2b")
@@ -387,12 +402,20 @@ class TestO2SilentOwnerBlocksImpostor:
 
         ctx_a.declare_metric(NAME)
         declared_names.append(NAME)
+        ctx_a.declare_metric(ANCHOR)
+        declared_names.append(ANCHOR)
+        ctx_a.publish_metric(ANCHOR, 12.5)
         ctx_b.publish_metric(NAME, 33.0)
 
         clock = FakeClock()
         hb = ProcessHeartbeat(svc, clock=clock)
         _tick(hb, clock)
 
+        tree = _apply_merges(svc._state_proxy.merged)
+        assert _get_path(tree, f"processes.procO2b.state.{ANCHOR}") == pytest.approx(12.5), (
+            "ЯКОРЬ: пустой payload удовлетворил бы проверку ниже целиком",
+            svc._state_proxy.merged,
+        )
         assert _value_absent_everywhere(svc._state_proxy.merged, 33.0), svc._state_proxy.merged
 
 
@@ -463,6 +486,7 @@ class TestO4PollAgreesWithTree:
 
     def test_poll_silent_owner_hides_leaf(self, declared_names) -> None:
         NAME = "collision_x_o4b"
+        ANCHOR = "collision_x_o4b_anchor"
         svc = _Services(name="procO4b")
         base_ctx = PluginContext(services=svc)
         ctx_a = base_ctx.with_config({}, plugin_name="owner_a4b")
@@ -470,11 +494,19 @@ class TestO4PollAgreesWithTree:
 
         ctx_a.declare_metric(NAME)  # объявил, не публиковал
         declared_names.append(NAME)
+        ctx_a.declare_metric(ANCHOR)
+        declared_names.append(ANCHOR)
+        ctx_a.publish_metric(ANCHOR, 12.5)
         ctx_b.publish_metric(NAME, 88.0)
 
         hb = ProcessHeartbeat(svc, clock=FakeClock())
         snap = hb.current_levels_snapshot() or {}
         state = snap.get("state", {})
+        assert state.get(ANCHOR) == pytest.approx(12.5), (
+            "ЯКОРЬ: снимок опроса обязан нести живой лист владельца — иначе пустой "
+            "снимок удовлетворяет проверку ниже сам по себе",
+            snap,
+        )
         assert NAME not in state, state
 
 
@@ -532,6 +564,13 @@ class TestO6OwnerDeparts:
         hb = ProcessHeartbeat(svc, clock=clock)
         _tick(hb, clock)  # тик ПРИ живом владельце — устанавливает предпосылку
 
+        tree_alive = _apply_merges(svc._state_proxy.merged)
+        assert _get_path(tree_alive, f"processes.procO6.state.{NAME}") == pytest.approx(9.0), (
+            "ЯКОРЬ: предпосылка обязана быть проверена, а не только заявлена комментарием — "
+            "без неё проверка после ухода владельца зелена и при мёртвом механизме",
+            svc._state_proxy.merged,
+        )
+
         plugin_a._do_shutdown(ctx_a)
         assert plugin_a.state == PluginState.STOPPED
 
@@ -548,9 +587,13 @@ class TestO6OwnerDeparts:
 # воркеров: framework "fps" не считает вовсе) — подделка листа не даёт
 # --------------------------------------------------------------------------- #
 class TestO7FrameworkNameWithoutFrameworkValue:
-    def test_forged_fps_absent_when_framework_has_no_value_this_tick(self) -> None:
+    def test_forged_fps_absent_when_framework_has_no_value_this_tick(self, declared_names) -> None:
+        ANCHOR = "collision_x_o7_anchor"
         svc = _Services(name="procO7")  # БЕЗ воркеров => framework fps не считает
         ctx = _plugin_ctx(svc, "impostor_fps_o7")
+        ctx.declare_metric(ANCHOR)  # ЯКОРЬ: СВОЁ имя тот же плагин публикует законно
+        declared_names.append(ANCHOR)
+        ctx.publish_metric(ANCHOR, 12.5)
         ctx.publish_metric("fps", 999.9)  # прикладной плагин, имени не объявлял
 
         clock = FakeClock()
@@ -559,14 +602,27 @@ class TestO7FrameworkNameWithoutFrameworkValue:
 
         tree = _apply_merges(svc._state_proxy.merged)
         state = _get_path(tree, "processes.procO7.state") or {}
+        assert state.get(ANCHOR) == pytest.approx(12.5), (
+            "ЯКОРЬ: тик обязан довезти законный лист того же плагина — иначе отсутствие "
+            "подделки доказывает лишь, что до дерева не доехало ничего",
+            state,
+        )
         assert "fps" not in state, state
 
-    def test_forged_fps_absent_from_poll_when_framework_has_no_value_this_tick(self) -> None:
+    def test_forged_fps_absent_from_poll_when_framework_has_no_value_this_tick(self, declared_names) -> None:
+        ANCHOR = "collision_x_o7b_anchor"
         svc = _Services(name="procO7b")  # БЕЗ воркеров
         ctx = _plugin_ctx(svc, "impostor_fps_o7b")
+        ctx.declare_metric(ANCHOR)
+        declared_names.append(ANCHOR)
+        ctx.publish_metric(ANCHOR, 12.5)
         ctx.publish_metric("fps", 999.9)
 
         hb = ProcessHeartbeat(svc, clock=FakeClock())
         snap = hb.current_levels_snapshot() or {}
         state = snap.get("state", {})
+        assert state.get(ANCHOR) == pytest.approx(12.5), (
+            "ЯКОРЬ: пустой снимок опроса удовлетворяет проверку ниже сам по себе",
+            snap,
+        )
         assert "fps" not in state, state
