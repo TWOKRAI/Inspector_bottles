@@ -286,8 +286,192 @@ convention»), с дополнениями из разбора S-8:
 4. Каждому читателю — вердикт: «не задет» / «мигрирует в Task 1.4» / «неизвестный — СТОП фазы»
    (стоп остаётся только для читателей, которых план не знает).
 **Acceptance criteria:**
-- [ ] таблица читателей в плане; неизвестных нет, либо фаза остановлена с описанием
+- [x] таблица читателей в плане (ниже); неизвестных не осталось. **Три** были неизвестны плану —
+      `alert_rules.py:104` (`drops_growing` читает `state.drops`), `bootstrap.py:64-70` (засев
+      кладёт плоский `frame_count`), `telemetry_reload.py:227-231` (потолок троттла матчится по
+      последнему сегменту); все три классифицированы «мигрирует в Task 1.4», фаза не остановлена
 **Out of scope:** правки читателей.
+
+#### Результат Task 1.1 — таблица читателей (снято 2026-08-19, HEAD `ff0308f4`)
+
+> Ред. 2 — после ревью итерации 1 (`CHANGES REQUESTED`). Ревью нашло три пропуска
+> (`bootstrap.py`, регресс-страж `test_alerting.py`, два build-снапшота) и пять съехавших
+> якорей; один читатель (`frontend/app.py:314`) оказался комментарием, а не подпиской, и снят.
+> Всё внесено ниже; расхождения ред. 1 в тексте не сохраняются — сохраняются в git.
+
+**Первый факт, без которого таблица не читается: сегодня переезжают РОВНО ТРИ листа.**
+Каталог `declared_metrics()` (`observability_declarations.py:234`) наполняется вызовами
+`declare_metric(`; вне тестов их восемь, и владельцы разные:
+
+| Имя | Владелец | Якорь | Переезжает в Ф1? |
+|---|---|---|---|
+| `fps`, `latency_ms` | фреймворк | `process_module/heartbeat/telemetry.py:39-40` | нет |
+| `effective_hz`, `cycle_duration_ms` | фреймворк (поддерево `workers.`) | `telemetry.py:41-42` | нет |
+| `shm` | фреймворк | `process_module/heartbeat/process_heartbeat.py:21` | нет |
+| **`capture_fps`, `frame_count`, `drops`** | **плагин `capture`** | `Plugins/sources/capture/plugin.py:103-105`, публикация `:359-361` | **да** |
+
+Инвариант тут прочнее, чем «список объявлений»: `build_plugin_levels`
+(`heartbeat/telemetry.py:661-664`) отбрасывает лист, если `owners.get(name) != publisher` —
+недекларированная публикация в дерево не попадает **по построению**. Четвёртой плагинной
+метрики на боевом коде не существует (подтверждено независимым grep ревьюера).
+
+Всё остальное, что лежит под `processes.<P>.state.*` (`cam.actual.*`, `phone.*`,
+`control_panel.controls`, `status`/`paused`/`frozen`, `word_layout`), пишется плагинами
+**напрямую** через `state_proxy.merge`, а не разъёмом `publish_metric`
+(`Plugins/sources/camera_service/plugin.py:364`, `Services/phone_gateway/plugin/plugin.py:234,260,296`,
+`Services/control_panel/plugin/plugin.py:122`, `Plugins/sources/capture/plugin.py:323`,
+`Plugins/processing/word_layout/plugin.py:414`, `Plugins/utility/pilot_widgets/plugin.py:113`,
+`Plugins/processing/color_mask/plugin.py:129`, `Services/ml_inference/plugin/plugin.py:318`).
+Ревью открыло все десять якорей: ни один не идёт через `PluginLevels`. Ф1 трогает сборщик тика,
+а не прямую дорогу `merge` — эти поддеревья остаются на месте, их читатели **не задеты**. Прямая
+дорога — предмет Ф5; здесь названа, чтобы её читателей не считали дважды.
+
+**Таблица читателей.**
+
+| Читатель (`файл:строка`) | Что читает | Вердикт |
+|---|---|---|
+| `multiprocess_prototype/frontend/widgets/tabs/processes/_telemetry_controls.py:181` | `f"processes.{proc}.state.{metric}"` для КАЖДОЙ метрики каталога — список из `_panels.py:792` (`list(gated_metrics())`), а каталог содержит все три переезжающих | **мигрирует в Task 1.4** |
+| `multiprocess_prototype/frontend/widgets/tabs/pipeline/inspector/cam_actual_section.py:143` | bind `processes.{proc}.state.capture_fps` → метка «FPS (измеренный)» | **мигрирует в Task 1.4** |
+| `multiprocess_prototype/backend/state/manager_setup.py:54,57,58` | glob-правила троттла `processes.**.state.{capture_fps,frame_count,drops}` (54 — `capture_fps`, 57 — `frame_count`, 58 — `drops`; 55/56 — `latency_ms`/`uptime`, не переезжают) | **мигрирует в Task 1.4** |
+| **`multiprocess_framework/modules/process_manager_module/core/alert_rules.py:104-105`** + потребители `alert_rules.py:66-74` (`paths_for`), `monitor/process_monitor.py:381-387` (`_check_counter_alerts`: `current = self._read_state_int(path)`, `if current is None: continue`) | правило `drops_growing` читает `processes.{process}.state.drops` / `.drops_count` точным путём | **мигрирует в Task 1.4 — ПЛАН ЕГО НЕ ЗНАЛ** (разбор ниже) |
+| **`multiprocess_prototype/backend/state/bootstrap.py:64-70`** | засев начального дерева: `state = {"status","pid","fps","frame_count","error"}` — **плоский `frame_count: None` каждому процессу**; боевая дорога (`backend/launch.py:653` → `build_initial_state`) | **мигрирует в Task 1.4** (разбор ниже) |
+| `multiprocess_framework/modules/process_module/managers/telemetry_reload.py:212` (`_central_rule_for_metric`, тело `:227-231`: `pattern.rsplit(".", 1)[-1] == metric`) + потребитель `detect_throttle_caps` (`:281`) | сопоставление правила троттла с именем метрики **по последнему сегменту**. Докстринг `:215-218` объявляет это посылкой: «central-правила троттла авторятся как листовые глобы вида `processes.**.state.fps` — последний сегмент == имя метрики… framework не знает layout дерева прототипа — это app-specific» | **мигрирует в Task 1.4**: суффикс-матч переезд переживёт, и в этом дефект — `processes.**.state.capture_fps` станет мёртвым глобом (в дереве не матчит ничего), а `detect_throttle_caps` продолжит рапортовать его как действующий потолок |
+| `Plugins/io/telemetry_sink/plugin.py:216-226` | `parts = path.split(".")` (`:216`); `len(parts)==4 and parts[3] in _STATE_COLS` → колонка (`:223-224`); иначе `_extra[".".join(parts[2:])]` (`:226`). `_STATE_COLS = ("fps","latency_ms","uptime","status")` (`:192`) | не задет структурно (три имени и сегодня идут в `_extra`); **ключ `_extra` меняется** `state.capture_fps` → `state.plugins.capture.capture_fps` — принятая цена §10 |
+| `multiprocess_framework/modules/telemetry_readmodel_module/telemetry_read_model.py:49-51`, матчер `:339` (`path.endswith(suffix)`) | `DEFAULT_TRACKED_SUFFIXES` = `.state.fps`, `.state.latency_ms`, `.state.uptime` (+ per-worker) | не задет — ни одного переезжающего имени в наборе |
+| `multiprocess_framework/modules/frontend_module/state/telemetry_poller.py:97-113` | `_flatten_levels` — рекурсивная раскладка ответа опроса в плоские пути | не задет **по построению**: вложенный `plugins` раскроется сам, без правки |
+| `multiprocess_framework/modules/process_module/configs/telemetry_publish_config.py:118` | `resolve(metric_name)` — гейт публикации ключуется **ИМЕНЕМ метрики**, не путём дерева | не задет; названо явно, чтобы ключ гейта и адрес дерева не разошлись по семантике молча |
+| `multiprocess_framework/modules/process_manager_module/monitor/process_monitor.py:497` | `handle_state_get("processes.{p}.state.fps")` → `system.health.avg_fps` | не задет (`fps` остаётся) |
+| `multiprocess_framework/modules/process_manager_module/monitor/process_monitor.py:465,1555` | пишет `state.uptime` / `state.status` | не задет (писатель-фреймворк, не переезжает) |
+| `backend_ctl/driver.py:1283-1290` | `_telemetry_matches_metric`: `path == metric or path.endswith("." + metric)` | не задет: `metric="capture_fps"` матчит и новый путь. **Нюанс:** форма `metric="state.capture_fps"`, названная в докстринге `:1286`, матчить перестанет |
+| `multiprocess_prototype/frontend/widgets/tabs/processes/_panels.py:587-595,664,919-921,1208-1221,1244-1245` | VM-сеттеры и `history()` по `state.{fps,latency_ms,status,uptime}` | не задет |
+| `multiprocess_prototype/frontend/widgets/tabs/processes/_system_dashboard.py:120` | `state.{fps,latency_ms}` (хардкод `_DASHBOARD_METRICS`) | не задет |
+| `multiprocess_framework/modules/process_module/plugins/io_peek.py:155` | `f"processes.{proc}.plugins.{plugin}.io_peek"` — узел `plugins` **рядом** со `state` | не задет; но узлов `plugins` после Ф1 будет **четыре**, и ближайший — не этот: корневой каталог `plugins`, `processes.<P>.**config**.plugins` (оба есть уже в засеве, `bootstrap.py`), `processes.<P>.plugins.<плагин>.io_peek` (рантайм) и новый `processes.<P>.**state**.plugins.*`. С конфигурационным разница ровно в одном сегменте, и паттерн `processes.**.plugins.**` ловит **три из четырёх** (прогнано: `config.plugins` → True, `io_peek` → True, новый узел Ф1 → True, корневой `plugins` → False). Имя-коллизия названа здесь, чтобы Ф3 не считала её случайной |
+| `multiprocess_prototype/frontend/process.py:102`, `Plugins/io/telemetry_sink/plugin.py:126` | подписки `processes.**` | не задет — wildcard покрывает любую глубину |
+| `state_store_module/middleware/topology_gate.py:85-88` | `parts[0]=="processes"`, `parts[1]` — имя процесса | не задет — читает только два первых сегмента |
+| `state_store_module/{middleware/throttle.py:345,588-606; middleware/logging_mw.py:112-125; core/subscription_manager.py:325; manager/state_store_manager.py:507,529-533; proxy/state_proxy.py:838-841,959; selectors/selector.py:270; health/monitor.py:150-155}` | один и тот же сегментный матчер `match_pattern` | не задет **сам по себе**; ломается только через ТЕКСТЫ паттернов, которые авторятся снаружи |
+| `state_store_module/devtools/inspector.py:112-117` | `value = store.get(path)`; **если dict — возврат на `:113`**; ветка `:116-117` (обёртка по последнему сегменту) — только для скаляра | не задет; но **форма ответа `inspect("processes.<P>.state")` меняется**: в dict появится узел `plugins` рядом с плоскими листьями |
+
+**Механика промаха — прогнана, не выведена.** Паттерн `processes.**.state.frame_count`
+разбирается в `["processes","**","state","frame_count"]`; путь после переезда —
+`["processes","camera_0","state","plugins","capture","frame_count"]` (второй сегмент — имя
+ПРОЦЕССА, четвёртый-пятый — новые). `**` поглощает 0..N сегментов, но требует, чтобы `state` и
+`frame_count` шли **подряд**. Прогон `_match_pattern` (`core/subscription_manager.py:66-106`):
+
+```
+pat=processes.**.state.frame_count  path=processes.camera_0.state.frame_count                  -> True
+pat=processes.**.state.frame_count  path=processes.camera_0.state.plugins.capture.frame_count  -> False
+контроль: pat=processes.**          path=processes.camera_0.state.plugins.capture.frame_count  -> True
+```
+
+Контрольная строка обязательна: без неё `False` неотличим от сломанного матчера.
+
+**Неизвестных читателей не осталось — но их было три, и каждый стоит абзаца.**
+
+**(1) `alert_rules.py:104` (`drops_growing`).** В §1 плана не назван. Его собственный комментарий
+(`:96-102`) описывает ровно тот класс, которым переезд его и убьёт: «путь обязан совпадать с тем,
+что РЕАЛЬНО публикуют источники… иначе правило молча мертво (находка ревью NEW-7: дефолт указывал
+на `drops_count` под `processes.*`, который не публикует НИКТО)». Правило уже было мёртвым по этой
+причине и было починено — Ф1 без правки убивает его вторично. Хуже: докстринг `paths_for`
+(`:70-73`) обещает «монитор берёт ПЕРВЫЙ путь, который реально резолвится, — правило не умирает
+молча от переименования». После переезда **не резолвится ни один** из двух кандидатов, и обещание
+становится ложью — класс «уверенное неверное объяснение переживает баг». Правку докстринга внести
+вместе с путём в Task 1.4.
+
+**(2) `bootstrap.py:64-70` — писатель мигрирующего имени по старому адресу.** Найдено ревью;
+не попадает ни в одну половину развилки «переезжает / пишется прямой дорогой». Сегодня сборщик
+тика перетирает засеянный `frame_count: None` живым числом. После Ф1 не перетрёт: имя окажется по
+двум адресам сразу — вечный `processes.<P>.state.frame_count = None` рядом с настоящим
+`state.plugins.capture.frame_count`. Диагноз «пути нет» превращается в «путь есть, но мёртв», а
+это разные диагнозы. Требование к Task 1.4: после переезда плоского `frame_count` в засеве быть не
+должно — либо решение оставить его записано с доводом. `drops`/`capture_fps` в засеве нет
+(проверено grep'ом и прогоном самого засева).
+
+**(3) `telemetry_reload.py:212` (`_central_rule_for_metric`) — посылка задокументирована, и Ф1 её
+ломает.** Функция ищет central-правило троттла для метрики по ПОСЛЕДНЕМУ сегменту паттерна, и её
+докстринг (`:215-218`) объясняет почему: «framework не знает layout дерева прототипа
+(`processes.**.state.*`) — это app-specific. Суффикс-матч оставляет framework generic». Довод
+верный, и именно он делает дефект незаметным: после переезда `processes.**.state.capture_fps`
+перестаёт матчить дерево (прогон выше), но суффикс `capture_fps` у паттерна остаётся, поэтому
+`detect_throttle_caps` (`:281`) продолжит считать правило действующим потолком и рапортовать
+`capped_by_throttle`. Оператор увидит «капнуто» там, где не капается ничего. Расхождение молчаливое
+с обеих сторон: и глоб не жалуется на промах, и сверщик не жалуется на глоб.
+
+**Отказ немой — у ПЯТИ читателей из шести, и у двух по разным механизмам.** Мигрантов в таблице
+шесть. Четыре умирают промахом glob'а (несовпавший паттерн не ошибка: троттл перестаёт троттлить,
+метка застывает на «—», потолок рапортуется несуществующий). `bootstrap.py:64-70` — **другой**
+механизм: не промах, а живой лист-призрак по старому адресу, который никто больше не перетирает.
+Шестой, `drops_growing`, немым не будет — у него регресс-страж **есть** и он выстрелит:
+`multiprocess_framework/modules/process_manager_module/tests/test_alerting.py:48-58`
+(`assert rule.counter_paths[0].endswith(".state.drops")`) — сейчас зелёный
+(`pytest … -k drops` → `1 passed`), после переезда красный обоими ассертами. Поставлен он прошлым
+ревью против того же класса дефекта.
+
+**Чем Task 1.4 НЕ может доказать переезд.** Тесты
+`multiprocess_prototype/backend/state/tests/test_integration.py:376-386` и
+`multiprocess_prototype/backend/tests/test_rt2_config_flip_acceptance.py:44-53` сверяют СЛОВАРЬ
+правил троттла с эталоном, а не факт совпадения правила с живым путём: поправь писателя, забудь
+glob — оба останутся зелёными при снятом предохранителе. Приёмка Task 1.4 обязана нести пару
+«правило матчит реально опубликованный путь», а не сверку словаря.
+
+**Два build-снапшота пиннят плоские правила — и КРАСНЫ до начала фазы.**
+`multiprocess_prototype/backend/tests/snapshots/hikvision_letter_robot.build.json:611-614` и
+`phone_sketch.build.json:1101-1104` держат полный набор плоских `state_throttle_rules` и
+сверяются бит-в-бит (`test_build_characterization.py:138`, `assert actual == expected`). На HEAD
+`ff0308f4` оба теста **уже падают** (`2 failed in 4.16s`), и причина к путям отношения не имеет:
+golden протух относительно правки `telemetry.publish` — сборка добавляет
+`telemetry.publish.metrics.fps` и `.latency_ms` (`{"enabled": true, "interval_sec": 1.0}`) в
+`sys_config` и в конфиг КАЖДОГО процесса (7 процессов в `phone_sketch`, 10 в
+`hikvision_letter_robot`), а в golden этих ключей нет. Следствие двойное: (а) опереться на
+снапшоты как на сигнал Ф1 нельзя, пока красный не снят; (б) регенерация golden
+(`UPDATE_BUILD_SNAPSHOTS=1`) **зафиксирует заодно и плоские правила троттла** — то есть выполнить
+её надо ДО переезда либо ПОСЛЕ правки правил, но не между.
+
+**Тесты, пиннящие плоский путь переезжающих имён** (станут красными — ожидаемо; список для
+Task 1.4): `test_alerting.py:48-58` (framework); от `multiprocess_prototype/` —
+`backend/state/tests/test_integration.py:376-386`,
+`backend/tests/test_rt2_config_flip_acceptance.py:44-53`,
+`backend/tests/snapshots/{hikvision_letter_robot,phone_sketch}.build.json` (красны и сейчас),
+`frontend/widgets/tabs/pipeline/tests/test_cam_actual_section.py:59,66-96,189-192,202`,
+`frontend/widgets/tabs/pipeline/tests/test_inspector_characterization.py:218`,
+`frontend/widgets/tabs/processes/tests/test_telemetry_vm_panels.py:215,222-254`.
+Тесты `backend/state/tests/test_capture_state.py:94-118` проверяют контракт `ctx.publish_metric`,
+а не адрес в дереве, и остаются зелёными.
+
+**ТРИ места с протухшей моделью — вне таблицы, но под ногами у Task 1.4.**
+(1) `multiprocess_framework/modules/frontend_module/tests/state/test_telemetry_poller_hazards.py:41-52`
+держит `_PUSH_ONLY_KEYS` с литералами `frame_count`/`drops` под комментарием «восемь ключей
+дерева, которых опрос НЕ приносит». (2) `backend_ctl/driver.py:414-416` — докстринг утверждает то
+же самое: «`uptime`/`frame_count`/`drops`/… пишут другие публикаторы и опросом не приходят».
+Обе посылки уже неверны, и опровергает их сосед по репозиторию — `backend_ctl/mcp_tools.py:509`
+прямо пишет, что `frame_count` и `drops` мигрировали в опрос задачей 3.5. (3) Там же
+`mcp_tools.py:508` перечисляет состав опроса плоскими именами — тот же класс, что нюанс докстринга
+`driver.py:1286`. Красными от переезда эти места, скорее всего, не станут; опасны они не поломкой,
+а тем, что уверенное неверное объяснение переживает баг. Найдено ревью: третье место лежало в
+файле, который сам же раздел объявлял проверенным.
+
+**Где не смотрели (честно).** Не открывались построчно тестовые файлы широкого grep-хита
+(`test_history_graph`, `test_system_dashboard`, `test_telemetry_controls`,
+`test_telemetry_poll_visibility`, `test_bindings`, `test_delta_message`, `test_glob_match`,
+`test_gui_process`, `test_tail_activator`, `test_topology_bridge`, `test_schema`,
+`test_topology_schemas`, `test_connection_map`, `test_demo_recipe`) — ни один не назван читателем
+в таблице. Не вычитаны построчно `backend_ctl/{recorder,conditions,watch,registers,dispatch,
+transport}.py` и `backend_ctl/probes/*` — из `backend_ctl` построчно подтверждён только `driver.py`
+(и он же дал третье место протухшей модели, `:414-416`). Не вычитаны построчно `Services/auth`,
+`Services/sql`, `scripts/{arch_graph,message_contracts,channel_map}`, `Plugins/runtime/*`,
+`Plugins/hub/device_hub` — по ним сделан только целевой grep трёх переезжающих имён, и он пуст:
+единственные вхождения во всех этих зонах — `driver.py:414` и `mcp_tools.py:508-509`.
+`.claude/worktrees/` исключены явно (чужие копии репозитория).
+
+**Что подтверждено прогоном, а что чтением.** Живого прогона системы не было — Task 1.1 статичен
+по определению, и последствия переезда (лист-призрак `frame_count`, мёртвый глоб, коллизия
+`plugins`) остаются предсказаниями по коду. Прогонами подтверждены четыре факта: `-k drops` →
+`1 passed`; `test_build_characterization` → `2 failed`; ключ-в-ключ диагноз протухшего golden
+(32 добавленных ключа в `phone_sketch` = (7 процессов + sys_config) × 2 метрики × 2 поля; 44 в
+`hikvision_letter_robot` = (10 + 1) × 2 × 2; изменённых значений и пропавших ключей — ноль, то
+есть правила троттла в actual и golden идентичны); прогон `_match_pattern` с контрольной строкой
+(выше). Регенерация golden под `UPDATE_BUILD_SNAPSHOTS=1` не запускалась — следствие «заморозит
+заодно плоские правила троттла» выведено из кода (`test_build_characterization.py:122-124`,
+`_dump_golden` дампит весь канонический срез), не наблюдено.
 
 ### Task 1.2 — Хранилище и сборка: писатель → имя → значение, арбитр удалён
 **Level:** Senior+ · **Assignee:** teamlead
