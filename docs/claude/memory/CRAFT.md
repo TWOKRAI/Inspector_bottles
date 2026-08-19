@@ -23,6 +23,7 @@
 - [Предсказание — после всех тестов](feedback_predict_injections_after_writing_tests.md) · [на общем корпусе — MUST поимённо](feedback_injection_prediction_on_a_shared_corpus.md) + потолок красных
 - [Генератор инъекций ≠ автор критериев](feedback_injection_generator_must_differ_from_criteria_author.md) — инверсии критериев ловятся гарантированно; обязателен второй род «нуль/тотал» от другой головы
 - [Отрицательный критерий требует якоря существования](feedback_negative_criterion_needs_an_existence_anchor.md) — «листа нет» удовлетворяется пустотой; выдавать парой «есть литерал / нет»
+- [Живой критерий требует боевого триггера](feedback_acceptance_criterion_needs_a_live_trigger.md) — «на стенде видно X» проверять грепом по вызывающим ДО записи в план; нет вызывающего вне teardown — критерий недостижим
 - [База инъекций = число собранных](feedback_injection_base_needs_a_collected_count.md) — 0 collected читается как зелено; дочерний логгер не глушит
 - [Покрывать ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) · [слишком грубая не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) · [негодная ≠ вакуум](feedback_broken_injection_is_not_a_vacuous_test.md) — ERROR vs FAILED
 - [Откат — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа; эталон протухает от правок ревью · [дубль обязан блокировать](feedback_double_must_block_like_the_original.md)
@@ -53,6 +54,7 @@
 ## Предохранители и механизмы
 
 - [Два предохранителя](feedback_two_safeguards_hide_which_one_holds.md) — снимай все кроме проверяемого · [новый страж ослабляет старого](feedback_a_new_guard_can_weaken_an_old_one.md)
+- [Правка по находке не шире находки](feedback_a_fix_on_a_finding_must_not_outgrow_it.md) — фильтр «поднят» срезал и processing, сняв тег not_inspected; файл вне поля Files задачи = сигнал выхода за спеку
 - [Защита достижима](feedback_guard_must_be_reachable.md) — TypeError раньше защиты · [защита базы мертва у наследника](feedback_base_guard_dead_in_heir.md) — config=None обходит
 - [Страж существования ≠ содержимого](feedback_guard_on_existence_is_not_a_guard_on_content.md) — ложь прожила 3 месяца · [зонный страж не закрывает класс](feedback_zone_guard_never_closes_the_class.md) — реестр исключений
 - [Порог-сумма прячет слепоту](feedback_guard_threshold_hides_partial_blindness.md) — судить поимённо · [процессный счётчик — не по ключу](feedback_process_counter_is_not_per_key.md) — атрибуция эмитентом

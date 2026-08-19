@@ -68,6 +68,7 @@ __all__ = [
     "declare_metric",
     "declared_metrics",
     "metric_owners",
+    "metric_owner",
     "forget_declarations",
 ]
 
