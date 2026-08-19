@@ -107,3 +107,99 @@ def test_explicit_empty_publish_is_not_none() -> None:
     sc = SystemConfig.model_validate({"telemetry": {"publish": {}}})
     assert sc.telemetry.publish is not None
     assert isinstance(sc.telemetry.publish, TelemetryPublishConfig)
+
+
+def test_dashboard_metrics_are_explicitly_whitelisted_in_boot_config() -> None:
+    """Метрики «Дашборда телеметрии» обязаны быть РАЗРЕШЕНЫ явным правилом, не дефолтом.
+
+    Сторожит ровно тот путь данных, который описан в критерии приёмки: гейт закрыт
+    (``default_enabled=False``) → метрика не публикуется → в GUI не доезжает поток
+    дельт → кольцо read-model не наполняется → график дашборда пуст. Метрики
+    дашборда — единственное объявленное исключение из этого флипа, и исключение
+    обязано быть явным правилом в ``metrics``, а не побочным следствием ослабленного
+    гейта.
+
+    Оракул списка метрик — ``_DASHBOARD_METRICS`` из самого виджета
+    (``_system_dashboard.py``), НЕ ``system.yaml``: список, вычитанный из проверяемого
+    файла, соглашается с любым его состоянием, включая пустое. Проверяемая сторона —
+    реально загруженный боевой конфиг (``load_system_config()``), как это уже делает
+    сосед ``test_yaml_activates_the_gate_with_default_enabled_false``.
+
+    Ассерты по конструкции разнесены так, что ослабление гейта их не удовлетворяет
+    одновременно: первый требует ``default_enabled is False`` (гейт закрыт), второй —
+    ``enabled is True`` через ``resolve()`` для каждой метрики дашборда (публикация
+    разрешена). Если бы гейт был открыт (``default_enabled=True``), первый ассерт
+    упал бы раньше, чем второй успел бы "случайно" сойтись за счёт дефолта.
+
+    Как упадёт, если кто-то «почистит» конфиг: удалят строку ``fps:``/``latency_ms:``
+    из ``metrics`` — ``resolve()`` откатится к ``default_enabled=False`` и вернёт
+    ``enabled=False`` — красный на втором ассерте, до GUI трафик не доедет молча.
+    """
+    # Локальный импорт — оракул целиком из виджета, не из yaml, который проверяем.
+    from multiprocess_prototype.frontend.widgets.tabs.processes._system_dashboard import (
+        _DASHBOARD_METRICS,
+    )
+
+    sc = load_system_config()
+    publish = sc.telemetry.publish
+    assert publish is not None, (
+        "секция telemetry.publish в боевом system.yaml не действует — белый список метрик дашборда проверять не на чем"
+    )
+    assert publish.default_enabled is False, (
+        f"default_enabled={publish.default_enabled}, ожидался False — гейт публикации "
+        "обязан быть закрыт по умолчанию, метрики дашборда разрешены отдельным правилом"
+    )
+
+    dashboard_metric_keys = [key for key, _label in _DASHBOARD_METRICS]
+    assert dashboard_metric_keys, "у виджета дашборда пуст список метрик — оракул сломан"
+
+    for metric_key in dashboard_metric_keys:
+        # Правило обязано существовать явно в metrics — не молчаливым default_enabled.
+        assert metric_key in publish.metrics, (
+            f"метрика '{metric_key}' рисуется на «Дашборде телеметрии», но для неё нет "
+            "явного правила в telemetry.publish.metrics боевого system.yaml — при закрытом "
+            "гейте она резолвится в enabled=False, график останется пустым"
+        )
+        enabled, _interval = publish.resolve(metric_key)
+        assert enabled is True, (
+            f"telemetry.publish.resolve('{metric_key}') вернул enabled={enabled} — метрика "
+            "дашборда должна быть явно разрешена независимо от закрытого default_enabled"
+        )
+
+
+def test_metric_absent_from_dashboard_and_whitelist_stays_forbidden() -> None:
+    """Метрика ВНЕ дашборда и ВНЕ белого списка обязана оставаться запрещённой.
+
+    Контрольная пара к :func:`test_dashboard_metrics_are_explicitly_whitelisted_in_boot_config`:
+    подтверждающий ноль (``enabled=False``) засчитывается только вместе с соседом,
+    который на тех же данных даёт ненулевое (``enabled=True`` для метрик дашборда
+    выше). Без этой пары тест мог бы молча пройти и при полностью открытом гейте,
+    и при полностью закрытом — не будучи привязан к КОНКРЕТНОМУ белому списку.
+
+    ``shm`` выбран намеренно: это существующая в каталоге метрика (счётчики
+    транспорта кадров, см. docstring ``TelemetryPublishConfig``), которую дашборд
+    не рисует и явного правила для неё в боевом ``system.yaml`` нет.
+
+    Как упадёт: если кто-то по ошибке добавит ``shm`` в белый список «за компанию»
+    с fps/latency_ms — красный здесь, симметрично основному тесту.
+    """
+    from multiprocess_prototype.frontend.widgets.tabs.processes._system_dashboard import (
+        _DASHBOARD_METRICS,
+    )
+
+    sc = load_system_config()
+    publish = sc.telemetry.publish
+    assert publish is not None
+
+    dashboard_metric_keys = {key for key, _label in _DASHBOARD_METRICS}
+    control_metric = "shm"
+    assert control_metric not in dashboard_metric_keys, (
+        "контрольная метрика оказалась в списке дашборда — выбери другую, "
+        "иначе проверка ничего не отличает от основного теста"
+    )
+
+    enabled, _interval = publish.resolve(control_metric)
+    assert enabled is False, (
+        f"telemetry.publish.resolve('{control_metric}') вернул enabled={enabled} — метрика "
+        "вне дашборда и вне белого списка обязана оставаться запрещённой закрытым гейтом"
+    )
