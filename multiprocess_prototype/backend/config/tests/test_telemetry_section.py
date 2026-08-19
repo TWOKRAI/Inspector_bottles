@@ -19,6 +19,9 @@ from multiprocess_framework.modules.process_module.configs import (
     MetricRule,
     TelemetryPublishConfig,
 )
+from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+    gated_metrics,
+)
 
 from multiprocess_prototype.backend.config.schemas import (
     SystemConfig,
@@ -196,6 +199,18 @@ def test_metric_absent_from_dashboard_and_whitelist_stays_forbidden() -> None:
     assert control_metric not in dashboard_metric_keys, (
         "контрольная метрика оказалась в списке дашборда — выбери другую, "
         "иначе проверка ничего не отличает от основного теста"
+    )
+    # Сторож СОБСТВЕННОГО обоснования (находка ревью R3, 2026-08-19). Докстринг
+    # утверждает «shm — существующая в каталоге метрика», и без этой строки
+    # утверждение не подкреплено ничем: ``resolve()`` тотальна и на любое имя вне
+    # ``metrics`` возвращает ``(default_enabled, default_interval_sec)``. Проверено
+    # инъекцией ревьюера: переименование ``declare_metric("shm")`` в каталоге и даже
+    # подстановка заведомо несуществующего имени оставляли тест ЗЕЛЁНЫМ — контроль
+    # молча вырождался в проверку пустоты.
+    assert control_metric in gated_metrics(), (
+        f"контрольная метрика '{control_metric}' исчезла из каталога объявленных "
+        f"(gated_metrics() = {gated_metrics()}) — контроль выродился в проверку "
+        "несуществующего имени и больше ничего не отличает; выбери живую метрику"
     )
 
     enabled, _interval = publish.resolve(control_metric)
