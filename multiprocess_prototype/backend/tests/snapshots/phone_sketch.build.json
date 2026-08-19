@@ -1219,7 +1219,16 @@
         "publish": {
           "default_enabled": false,
           "default_interval_sec": 1.0,
-          "metrics": {}
+          "metrics": {
+            "fps": {
+              "enabled": true,
+              "interval_sec": 1.0
+            },
+            "latency_ms": {
+              "enabled": true,
+              "interval_sec": 1.0
+            }
+          }
         }
       }
     }
@@ -1346,7 +1355,16 @@
           "publish": {
             "default_enabled": false,
             "default_interval_sec": 1.0,
-            "metrics": {},
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
             "tick_sec": null
           }
         }
@@ -1726,7 +1744,16 @@
           "publish": {
             "default_enabled": false,
             "default_interval_sec": 1.0,
-            "metrics": {},
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
             "tick_sec": null
           }
         }
@@ -2058,7 +2085,16 @@
           "publish": {
             "default_enabled": false,
             "default_interval_sec": 1.0,
-            "metrics": {},
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
             "tick_sec": null
           }
         }
@@ -2487,7 +2523,16 @@
           "publish": {
             "default_enabled": false,
             "default_interval_sec": 1.0,
-            "metrics": {},
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
             "tick_sec": null
           }
         }
@@ -2874,7 +2919,16 @@
           "publish": {
             "default_enabled": false,
             "default_interval_sec": 1.0,
-            "metrics": {},
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
             "tick_sec": null
           }
         }
@@ -3852,7 +3906,16 @@
           "publish": {
             "default_enabled": false,
             "default_interval_sec": 1.0,
-            "metrics": {},
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
             "tick_sec": null
           }
         }
@@ -4210,7 +4273,16 @@
           "publish": {
             "default_enabled": false,
             "default_interval_sec": 1.0,
-            "metrics": {},
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
             "tick_sec": null
           }
         }
