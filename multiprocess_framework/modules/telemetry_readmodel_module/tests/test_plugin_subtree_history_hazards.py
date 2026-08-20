@@ -344,8 +344,19 @@ class TestAgainstRealProducerOutput:
         которое наполнил производитель. Переименуй сегмент у производителя —
         свёртка перестанет его узнавать, и тест покраснеет здесь, а не на стенде.
         """
-        from multiprocess_framework.modules.observability_declarations import forget_declarations
+        from multiprocess_framework.modules.observability_declarations import (
+            KIND_METRIC,
+            declared_metrics,
+            forget_declarations,
+        )
 
+        # Забываем ТОЛЬКО то, что объявил этот тест. Прежняя редакция снимала
+        # ``fps`` безусловно, а ``fps`` объявляет ФРЕЙМВОРК импортом
+        # (heartbeat/telemetry.py:39); с Ф1 повторное объявление — идемпотентный
+        # no-op, поэтому тест ничего не добавлял и только разрушал каталог
+        # процесса до конца прогона. Красило соседа в прототипе и только в
+        # совмещённом прогоне — оба гейта по отдельности оставались зелёными.
+        before = set(declared_metrics())
         try:
             m = _model()
             for value in (10.0, 20.0):
@@ -362,4 +373,4 @@ class TestAgainstRealProducerOutput:
                 f"истории не накопилось — свёртка и производитель разошлись: {tracked!r}"
             )
         finally:
-            forget_declarations("metric", names={"fps"})
+            forget_declarations(KIND_METRIC, names=set(declared_metrics()) - before)
