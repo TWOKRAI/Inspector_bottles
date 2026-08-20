@@ -43,7 +43,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -100,7 +99,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -137,7 +135,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -151,7 +148,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -205,7 +201,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -236,7 +231,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -262,7 +256,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -299,7 +292,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -371,7 +363,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -458,7 +449,6 @@
           "state": {
             "error": null,
             "fps": null,
-            "frame_count": null,
             "pid": null,
             "status": "stopped"
           }
@@ -613,6 +603,9 @@
       "processes.**.state.fps": 0.05,
       "processes.**.state.frame_count": 0.05,
       "processes.**.state.latency_ms": 0.05,
+      "processes.**.state.plugins.*.capture_fps": 0.05,
+      "processes.**.state.plugins.*.drops": 0.05,
+      "processes.**.state.plugins.*.frame_count": 0.05,
       "processes.**.state.uptime": 0.05,
       "processes.**.workers.*.cycle_duration_ms": 0.05,
       "processes.**.workers.*.effective_hz": 0.05

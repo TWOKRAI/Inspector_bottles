@@ -68,6 +68,12 @@ def test_measured_fps_binds_outside_the_cam_actual_subtree(qtbot):
     Уедь он под `base`, путь стал бы `…state.cam.actual.capture_fps` — туда никто
     не пишет, и строка была бы вечным прочерком. Проверяется адрес, а не факт
     вызова: адрес — это всё, чем строка отличается от неработающей.
+
+    Ред. 2026-08-20 (Ф1 «порта наблюдений», Task 1.4): адрес стал ГЛОБОМ —
+    метрика уехала в поддерево СВОЕГО писателя (`state.plugins.<писатель>.…`),
+    и имя писателя в GUI не зашивается. Плоский адрес обязан ИСЧЕЗНУТЬ, а не
+    остаться рядом: две подписки на одну строку — это двойная публикация, ровно
+    тот класс, который фаза хоронит.
     """
     section = CamActualSection()
     qtbot.addWidget(section)
@@ -76,7 +82,8 @@ def test_measured_fps_binds_outside_the_cam_actual_subtree(qtbot):
 
     section.show_for("camera_0")
 
-    assert "processes.camera_0.state.capture_fps" in b.formatters
+    assert "processes.camera_0.state.plugins.*.capture_fps" in b.formatters
+    assert "processes.camera_0.state.capture_fps" not in b.formatters
     assert "processes.camera_0.state.cam.actual.capture_fps" not in b.formatters
 
 
@@ -93,7 +100,7 @@ def test_measured_fps_keeps_one_decimal(qtbot):
     section.set_bindings(b)
     section.show_for("camera_0")
 
-    fmt = b.formatters["processes.camera_0.state.capture_fps"]
+    fmt = b.formatters["processes.camera_0.state.plugins.*.capture_fps"]
     assert fmt(12.5) == "12.5 fps"
     assert fmt(0.0) == "0.0 fps"
 
@@ -189,7 +196,7 @@ def test_reshow_does_not_leak(qtbot):
     # Подписка на capture_fps перевешена на НОВЫЙ процесс, а не осталась на старом:
     # она биндится вне `base`, то есть мимо общего префикса — самое вероятное место
     # забыть подстановку имени процесса.
-    assert "processes.camera_1.state.capture_fps" in b.formatters
+    assert "processes.camera_1.state.plugins.*.capture_fps" in b.formatters
 
 
 def test_resolution_combines_width_and_height(qtbot):

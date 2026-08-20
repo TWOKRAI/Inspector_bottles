@@ -20,7 +20,10 @@ enabled, interval_sec)`` (одно из значений — актуально�
 (панель через command-result-bridge, presenter строит конверт).
 
 Чтение статуса — из read-model: :meth:`update_readouts` тянет process-level значения
-(``processes.<P>.state.<metric>``) из :class:`TelemetryViewModel` и показывает их в строке.
+из :class:`TelemetryViewModel` и показывает их в строке. Адресов ДВА: агрегат
+фреймворка — плоско (``processes.<P>.state.<metric>``), метрика плагина — в поддереве
+писателя (``processes.<P>.state.plugins.<писатель>.<metric>``, Ф1 «порта наблюдений»);
+во втором случае строка печатает и имя писателя.
 """
 
 from __future__ import annotations
@@ -171,6 +174,11 @@ class TelemetryControlsSection(QGroupBox):
         Тянет ``processes.<P>.state.<metric>`` — доступно для агрегатных fps/latency_ms;
         остальные метрики (per-worker) остаются с эхом настройки. Каппинг-предупреждение,
         выставленное :meth:`show_result`, НЕ затирается (приоритет у явного потолка).
+
+        Адресов у метрики ДВА (Ф1 «порта наблюдений»): агрегат фреймворка лежит
+        плоско в ``state``, метрика плагина — в поддереве СВОЕГО писателя
+        (``state.plugins.<писатель>.<metric>``). Плоский адрес пробуется первым,
+        поддерево писателя — вторым; см. :meth:`_plugin_readout`.
         """
         if telemetry is None:
             return
@@ -179,7 +187,42 @@ class TelemetryControlsSection(QGroupBox):
             if row.readout.property("capped"):
                 continue
             value = telemetry.get(f"processes.{self._process_name}.state.{metric}")
-            row.readout.setText("—" if value is None else str(value))
+            if value is not None:
+                row.readout.setText(str(value))
+                continue
+            row.readout.setText(self._plugin_readout(telemetry, metric))
+
+    def _plugin_readout(self, telemetry: "TelemetryViewModel", metric: str) -> str:
+        """Показание метрики из поддеревьев писателей: ``«писатель: значение»`` или ``«—»``.
+
+        **Писатель в тексте строки — не украшение.** Одноимённый лист у двух
+        писателей после Ф1 законен (арбитраж имён удалён), и строка «17» тогда
+        не отвечала бы на вопрос, чьи это 17. Поэтому имя писателя печатается
+        ВСЕГДА, когда значение пришло из поддерева, — и при одном писателе тоже:
+        иначе появление второго молча меняло бы смысл уже привычной строки.
+
+        Писателем считается РОВНО ОДИН сегмент после ``plugins`` — глубже
+        вложенные узлы (напр. ``plugins.<w>.workers.<x>.<metric>``) сюда не
+        попадают: это не process-level показание, и печатать его в строке
+        каталога было бы подменой величины.
+
+        Модель без ``snapshot`` (урезанный дубль в тестах вызывающего) даёт
+        прочерк, а не исключение: панель не имеет права падать из-за читалки.
+        """
+        snapshot = getattr(telemetry, "snapshot", None)
+        if snapshot is None:
+            return "—"
+        prefix = f"processes.{self._process_name}.state.plugins"
+        tail = f".{metric}"
+        found: list[str] = []
+        for path, value in snapshot(prefix).items():
+            if not path.startswith(prefix + ".") or not path.endswith(tail):
+                continue
+            writer = path[len(prefix) + 1 : -len(tail)]
+            if not writer or "." in writer or value is None:
+                continue
+            found.append(f"{writer}: {value}")
+        return ", ".join(sorted(found)) if found else "—"
 
     def show_result(self, metric: str, result: dict[str, Any]) -> None:
         """Показать результат записи метрики (command-result-bridge).

@@ -381,6 +381,15 @@ class TestManagerSetup:
         "processes.**.state.uptime": _SAFETY,
         "processes.**.state.frame_count": _SAFETY,
         "processes.**.state.drops": _SAFETY,
+        # Ф1 «порта наблюдений» (Task 1.4): те же три плагинных имени приехали
+        # ВТОРОЙ формой адреса — в поддереве писателя. Плоская форма оставлена
+        # для прямой записи мимо `publish_metric` (дорога Ф5), новая накрывает
+        # разъём. Сторож совпадения по СВОЙСТВУ (правило матчит живой путь) —
+        # `test_throttle_rules_cover_plugin_paths.py`; здесь характеризация
+        # словаря, и она про состав, а не про матч.
+        "processes.**.state.plugins.*.capture_fps": _SAFETY,
+        "processes.**.state.plugins.*.frame_count": _SAFETY,
+        "processes.**.state.plugins.*.drops": _SAFETY,
         "processes.**.workers.*.effective_hz": _SAFETY,
         "processes.**.workers.*.cycle_duration_ms": _SAFETY,
     }

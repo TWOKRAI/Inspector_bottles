@@ -50,6 +50,11 @@ _EXPECTED_DEFAULT_THROTTLE_RULES = {
     "processes.**.state.drops": 0.05,
     "processes.**.workers.*.effective_hz": 0.05,
     "processes.**.workers.*.cycle_duration_ms": 0.05,
+    # Ф1 «порта наблюдений» (Task 1.4): плагинные имена приехали ВТОРОЙ формой
+    # адреса — в поддереве писателя. Восемь стало одиннадцать.
+    "processes.**.state.plugins.*.capture_fps": 0.05,
+    "processes.**.state.plugins.*.frame_count": 0.05,
+    "processes.**.state.plugins.*.drops": 0.05,
 }
 
 
@@ -252,13 +257,17 @@ def test_a3_build_throttle_rules_returns_the_full_unnarrowed_default_set() -> No
     полный дефолтный набор правил. Проверено ЧИСЛОМ и точным набором ключей.
 
     НАХОДКА про сам критерий (не про код): задание утверждает «их девять» правил.
-    Прямым счётом по multiprocess_prototype/backend/state/manager_setup.py:48-61
-    (_default_throttle_rules) их ВОСЕМЬ — см. отчёт тестера, раздел 3. Ниже
-    пришпилен литеральный набор из восьми пар, переписанный вручную при чтении
+    Прямым счётом по _default_throttle_rules их было ВОСЕМЬ — см. отчёт тестера,
+    раздел 3. Ниже пришпилен литеральный набор, переписанный вручную при чтении
     кода (не вызовом _default_throttle_rules() — иначе сравнение было бы
-    тавтологией). Расхождение 8 vs 9 не патчится под критерий: если девятая
-    запись когда-нибудь появится в коде намеренно — этот тест обязан покраснеть
-    и заставить обновить и код, и число в задании синхронно.
+    тавтологией). Расхождение 8 vs 9 не патчилось под критерий.
+
+    Ред. 2026-08-20 (Ф1 «порта наблюдений», Task 1.4): стало ОДИННАДЦАТЬ. Три
+    плагинных имени (capture_fps/frame_count/drops) уехали в поддерево писателя
+    и получили вторую форму адреса `processes.**.state.plugins.*.<имя>`; плоская
+    форма оставлена для прямой записи мимо publish_metric. Этот тест — про
+    СОСТАВ словаря; про то, что новая форма реально матчит живой путь, отвечает
+    multiprocess_prototype/backend/state/tests/test_throttle_rules_cover_plugin_paths.py.
 
     Как упадёт: если A1 протащит с собой АКТИВНЫЙ throttle (сузит правила) —
     build_throttle_rules вернёт другой набор ключей/значений, и assert равенства
@@ -268,4 +277,4 @@ def test_a3_build_throttle_rules_returns_the_full_unnarrowed_default_set() -> No
     sc = load_system_config()
     rules = build_throttle_rules(sc)
     assert rules == _EXPECTED_DEFAULT_THROTTLE_RULES
-    assert len(rules) == 8  # ЛИТЕРАЛ по факту чтения кода. Задание пишет 9 — расхождение.
+    assert len(rules) == 11  # ЛИТЕРАЛ по факту чтения кода (8 до Ф1 + 3 формы писателя).

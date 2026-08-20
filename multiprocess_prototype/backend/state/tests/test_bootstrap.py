@@ -210,8 +210,14 @@ def test_one_process_with_capture_plugin(topology_one_process, default_sys_confi
     assert state["status"] == "stopped"
     assert state["pid"] is None
     assert state["fps"] is None, "посев fps обязан быть None («не измерено»), а не 0.0"
-    assert state["frame_count"] is None, "посев frame_count обязан быть None, а не 0"
     assert state["error"] is None
+    # Ред. 2026-08-20 (Ф1 «порта наблюдений», Task 1.4): `frame_count` из посева
+    # УБРАН — имя публикует плагин, и его лист уехал в поддерево писателя
+    # (`state.plugins.<писатель>.frame_count`). Перетирать плоский адрес стало
+    # нечему, посеянный `None` остался бы вечным листом-призраком рядом с
+    # настоящим числом. Отдельный сторож с парой позитив/негатив —
+    # `test_observation_port_ghost_seed.py`.
+    assert "frame_count" not in state, "плоский посев frame_count вернулся — призрак навсегда"
 
 
 # ---------------------------------------------------------------------------

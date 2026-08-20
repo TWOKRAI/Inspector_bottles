@@ -103,6 +103,25 @@
 - Экспортируются: ISystemLauncher, IProcessManagerProcess, IProcessRegistry
 - Экспортируются: ProcessRegistry, ProcessPriority, ProcessStatusMonitor, ProcessMonitor, ProcessSchemaAdapter (алиас ProcessStatus → ProcessStatusMonitor удалён 2026-05-02, Tier-1 п.1.3)
 
+## Обновление 2026-08-20 (Ф1 «порта наблюдений», Task 1.4, ADR-PMM-021 доп.)
+
+- **Правило супервизии `drops_growing` было убито переездом плагинных метрик в поддерево
+  писателя** (`processes.<P>.state.plugins.<писатель>.drops`): оба кандидата резолвились в
+  `None`, `_check_counter_alerts` делал `continue`. Флаг `FW_SUPERVISOR_ALERTS` при этом ON
+  по умолчанию, то есть отказ был полностью немым.
+- **Путь правила получил подстановочный сегмент** `…state.plugins.*.drops`; разрешает его
+  `ProcessMonitor._read_state_counter` (читает поддерево, СУММИРУЕТ одноимённые целые листья
+  всех писателей). Имя плагина в фреймворковом правиле не появляется. Плоские кандидаты
+  оставлены следом — прямая запись мимо `publish_metric` существует.
+- **Регресс-страж переписан:** `test_default_drops_rule_uses_real_published_field` сверял
+  СТРОКОВУЮ КОНСТАНТУ и остался зелёным на мёртвом правиле. Взамен —
+  `TestDropsRuleAgainstRealTickOutput` (настоящий тик heartbeat → настоящий StateStore →
+  настоящий `_check_counter_alerts` → алерт в дереве), плюс
+  `tests/test_counter_wildcard_hazards.py` (19 hazard-тестов резолвера: нет поддерева,
+  пустое поддерево, нечисловой лист, два писателя, сброс, форма пути).
+- Не проверено на живом стенде: критерий «алерт при росте дропов в бою» остаётся открытым
+  (см. `plans/observation-port/plan.md`, Task 1.4).
+
 ## Конфигурация (2026-03-17)
 
 - **ProcessSchemaAdapter** делегирует в `config_to_dict` (data_schema_module) при наличии `build()` — один источник правды

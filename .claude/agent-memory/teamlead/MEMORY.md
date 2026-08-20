@@ -15,6 +15,8 @@
 - [база переживает слой](feedback_base_outlives_the_layer.md) — removal-тест вакуумен, если база пересобирается; injectи КАЖДУЮ точку записи базы; у удаляемого шва бывают побочные эффекты (None→{}) (ФР-3 / ADR-PM-021)
 - [проверка живёт в шве, не в ветке](feedback_check_belongs_to_the_seam.md) — правило по месту = свойство места; ставь в общий шов сборки, верни наружу сменой сигнатуры; не в apply/пересборку (ФР-2 / ADR-PM-022)
 - [приоритет уровней ≠ порядок времени](feedback_order_has_two_implementations.md) — если у приёмника нет модели слоёв, у него один приоритет: порядок приёма; храни ЖУРНАЛ правок, проверяй ОБЕ последовательности пары
+- [слепая приёмка может пришпилить несуществующий механизм](feedback_blind_acceptance_can_pin_a_nonexistent_mechanism.md) — красный тестера не всегда дефект кода; переформулировка — решение владельца, позитивный якорь в том же тесте
+- [резолвер `*`: пусто = None, агрегация = сумма](feedback_wildcard_resolver_empty_must_read_none.md) — ноль заслоняет запасных кандидатов; «первый резолвящийся» теряет рост второго писателя
 - [commit trailers single-line](feedback_commit_trailers_single_line.md) — Why/Layer/... каждый на ОДНОЙ строке, иначе hook отвергает как «missing trailers»
 - [switch live survivor](project_switch_live_survivor.md) — live-тест выжившего после topology.apply: брать protected `devices`, НЕ camera_0 (FullReplacePlanner + strip_gui)
 - [hardware recipes no headless boot](project_hardware_recipes_no_headless_boot.md) — phone_sketch/hikvision не бутятся headless (блок на железе); валидируй через assemble + механизм на region_pipeline

@@ -227,3 +227,99 @@ class TestPanelIntegration:
         qtbot.addWidget(panel)
         assert hasattr(panel, "_telemetry_controls")
         assert set(panel._telemetry_controls._rows) == set(gated_metrics())
+
+
+# ------------------------------------------------------------------ #
+#  6. Второй адрес метрики: поддерево писателя (Ф1 «порта наблюдений»)#
+# ------------------------------------------------------------------ #
+
+
+class TestPluginSubtreeReadout:
+    """У метрики ДВА адреса, и строка обязана понимать оба.
+
+    Опасное здесь — не «нашлось значение», а ЧЬЁ оно. Арбитраж имён снят Ф1:
+    два писателя с одноимённым листом законны, и строка «17» перестала быть
+    ответом на вопрос. Поэтому проверяется текст с именем писателя, а не факт
+    непустоты. Второе опасное — приоритет: плоский агрегат фреймворка не должен
+    подменяться плагинным листом того же имени и наоборот.
+    """
+
+    def test_plugin_leaf_is_shown_with_its_writer(self, qtbot) -> None:
+        vm = TelemetryViewModel()
+        vm.on_state_delta(_delta("processes.cam.state.plugins.capture.drops", 17))
+        section = TelemetryControlsSection("cam", ["drops"])
+        qtbot.addWidget(section)
+        section.update_readouts(vm)
+        assert section._rows["drops"].readout.text() == "capture: 17"
+
+    def test_two_writers_are_both_visible(self, qtbot) -> None:
+        """Оба писателя в строке, оба со своим литералом — иначе один молча исчезнет."""
+        vm = TelemetryViewModel()
+        vm.on_state_delta(_delta("processes.cam.state.plugins.capture.drops", 17))
+        vm.on_state_delta(_delta("processes.cam.state.plugins.mask.drops", 4))
+        section = TelemetryControlsSection("cam", ["drops"])
+        qtbot.addWidget(section)
+        section.update_readouts(vm)
+        assert section._rows["drops"].readout.text() == "capture: 17, mask: 4"
+
+    def test_flat_aggregate_still_wins_and_shows_no_writer(self, qtbot) -> None:
+        """Регресс-якорь: `fps` — агрегат фреймворка, он плоский и без писателя."""
+        vm = TelemetryViewModel()
+        vm.on_state_delta(_delta("processes.cam.state.fps", 21.0))
+        section = TelemetryControlsSection("cam", ["fps"])
+        qtbot.addWidget(section)
+        section.update_readouts(vm)
+        assert section._rows["fps"].readout.text() == "21.0"
+
+    def test_a_neighbour_process_subtree_does_not_leak_in(self, qtbot) -> None:
+        """Граница — точка-разделитель: `cam2` не протекает в строку `cam`."""
+        vm = TelemetryViewModel()
+        vm.on_state_delta(_delta("processes.cam2.state.plugins.capture.drops", 99))
+        section = TelemetryControlsSection("cam", ["drops"])
+        qtbot.addWidget(section)
+        section.update_readouts(vm)
+        assert section._rows["drops"].readout.text() == "—"
+
+    def test_deeper_node_under_a_writer_is_not_a_process_level_readout(self, qtbot) -> None:
+        """Писатель — РОВНО один сегмент: `plugins.<w>.workers.<x>.drops` сюда не идёт.
+
+        Иначе строка каталога показала бы per-worker величину под именем
+        process-level метрики — подмена величины, а не мелочь отображения.
+        """
+        vm = TelemetryViewModel()
+        vm.on_state_delta(_delta("processes.cam.state.plugins.capture.workers.w1.drops", 5))
+        section = TelemetryControlsSection("cam", ["drops"])
+        qtbot.addWidget(section)
+        section.update_readouts(vm)
+        assert section._rows["drops"].readout.text() == "—"
+
+    def test_none_leaf_reads_as_no_value(self, qtbot) -> None:
+        """Снятое показание рисуется прочерком, а не строкой «capture: None»."""
+        vm = TelemetryViewModel()
+        vm.on_state_delta(_delta("processes.cam.state.plugins.capture.drops", None))
+        section = TelemetryControlsSection("cam", ["drops"])
+        qtbot.addWidget(section)
+        section.update_readouts(vm)
+        assert section._rows["drops"].readout.text() == "—"
+
+    def test_caps_warning_is_not_overwritten_by_a_plugin_leaf(self, qtbot) -> None:
+        """Приоритет потолка сохраняется и для второго адреса (у первого он уже был)."""
+        vm = TelemetryViewModel()
+        vm.on_state_delta(_delta("processes.cam.state.plugins.capture.drops", 17))
+        section = TelemetryControlsSection("cam", ["drops"])
+        qtbot.addWidget(section)
+        section.show_result("drops", {"publish": {"capped_by_throttle": {"drops": {"throttle_interval_sec": 2.0}}}})
+        section.update_readouts(vm)
+        assert "троттл" in section._rows["drops"].readout.text()
+
+    def test_model_without_snapshot_degrades_to_a_dash(self, qtbot) -> None:
+        """Урезанный дубль read-model не роняет панель."""
+
+        class _NoSnapshot:
+            def get(self, path, default=None):
+                return None
+
+        section = TelemetryControlsSection("cam", ["drops"])
+        qtbot.addWidget(section)
+        section.update_readouts(_NoSnapshot())
+        assert section._rows["drops"].readout.text() == "—"

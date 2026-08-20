@@ -215,7 +215,7 @@ class TestCameraActualBindBalance:
         )
 
         assert not panel._cam_section.isHidden(), "камерная секция скрыта для ноды capture"
-        assert "processes.camera_0.state.capture_fps" in binds.paths, sorted(binds.paths)
+        assert "processes.camera_0.state.plugins.*.capture_fps" in binds.paths, sorted(binds.paths)
 
     def test_non_camera_node_still_gets_no_camera_section(self, qtbot):
         """Обратная половина пары: расширение гейта не открыло его всем подряд."""

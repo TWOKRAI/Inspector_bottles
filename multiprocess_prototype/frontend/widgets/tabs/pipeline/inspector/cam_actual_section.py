@@ -7,7 +7,7 @@ Read-only телеметрия того, что камера реально пр
 КАМЕРНОЙ ноды — ``camera_service`` либо ``capture`` (см. ``inspector_panel``).
 
 Р3.5-15 (поправка владельца 2026-08-17) добавила седьмую строку — «FPS
-(измеренный)» по пути ``processes.{proc}.state.capture_fps``, ВНЕ поддерева
+(измеренный)» по глобу ``processes.{proc}.state.plugins.*.capture_fps``, ВНЕ поддерева
 ``cam.actual``. Место выбрано взамен слота на карточке процесса: карточка
 generic и не имеет права селить у себя прикладное понятие «кадры», а здесь уже
 известно, что перед нами камера.
@@ -31,8 +31,8 @@ from PySide6.QtWidgets import QFormLayout, QLabel, QWidget
 # не говорила, какая именно:
 #   «FPS (по драйверу)» — ``cam.actual.fps``, то есть ``cap.get(CAP_PROP_FPS)``:
 #       что камера СООБЩАЕТ О СЕБЕ. Пишет ``camera_service`` (`_publish_actual`);
-#   «FPS (измеренный)»  — ``state.capture_fps``: сколько кадров в секунду реально
-#       прочитано. Считает и публикует ``CapturePlugin``.
+#   «FPS (измеренный)»  — ``state.plugins.<писатель>.capture_fps``: сколько кадров
+#       в секунду реально прочитано. Считает и публикует ``CapturePlugin``.
 # «Настроенный» для первой не годится: настройка живёт в конфиге плагина, а
 # `cap.get` возвращает то, что драйвер применил, — это ответ камеры, не запрос.
 _ROWS = (
@@ -91,8 +91,8 @@ class CamActualSection(QWidget):
         """Показать блок и привязать метки к state store.
 
         Пути: processes.{proc}.state.cam.actual.{fps,width,height,exposure,gain,fourcc}
-        плюс processes.{proc}.state.capture_fps (вне ``cam.actual`` — это уровень
-        процесса, а не actual-параметр камеры).
+        плюс глоб processes.{proc}.state.plugins.*.capture_fps (вне ``cam.actual`` —
+        это уровень процесса, а не actual-параметр камеры; писатель в путь не зашит).
         Разрешение собирается из width+height отдельным форматтером на оба пути.
 
         Строка, которой в текущей раскладке некому писать, остаётся прочерком:
@@ -124,9 +124,10 @@ class CamActualSection(QWidget):
         )
         self._handles.append(self._bindings.bind(f"{base}.fourcc", self._labels["fourcc"], "text"))
 
-        # Измеренная частота захвата — НЕ под ``base``: ``capture_fps`` лежит прямо
-        # в ``processes.<proc>.state``, потому что это уровень процесса под
-        # publisher-гейтом (ADR-PM-038), а не actual-параметр камеры. Прецедент
+        # Измеренная частота захвата — НЕ под ``base``: ``capture_fps`` живёт в
+        # ``processes.<proc>.state`` (с Ф1 — в поддереве писателя), потому что это
+        # уровень процесса под publisher-гейтом (ADR-PM-038), а не actual-параметр
+        # камеры. Прецедент
         # особой обработки в этой же секции — ``resolution`` из width+height.
         # Дескриптор идёт в ТОТ ЖЕ ``self._handles``: подписка мимо него — ровно
         # утечка Н-4, ради закрытия которой секция и инкапсулировала подписки.
@@ -138,9 +139,16 @@ class CamActualSection(QWidget):
         def _measured(v: Any) -> str:
             return f"{float(v):.1f} fps" if isinstance(v, (int, float)) else str(v)
 
+        # Адрес — ГЛОБ, а не точный путь: с Ф1 «порта наблюдений» плагинная
+        # метрика лежит в поддереве СВОЕГО писателя
+        # (`…state.plugins.<писатель>.capture_fps`). Имя писателя сюда не
+        # зашивается: `bind` принимает glob (`match_glob`), и `*` покрывает
+        # любого публикатора этого имени — включая того, которого в рецептах
+        # сегодня нет. Точный путь пришлось бы чинить при каждом переименовании
+        # плагина, и промах глоба немой: метка просто застыла бы на «—».
         self._handles.append(
             self._bindings.bind(
-                f"processes.{process_name}.state.capture_fps",
+                f"processes.{process_name}.state.plugins.*.capture_fps",
                 self._labels["capture_fps"],
                 "text",
                 formatter=_measured,

@@ -44,6 +44,8 @@ from typing import Any, Callable
 # Форма суффикса — по телеметрийному поддереву (``build_worker_telemetry``): агрегат
 # ``processes.<P>.state.fps`` → ``.state.fps``, per-worker ``…workers.<w>.effective_hz``
 # → ``.effective_hz`` (матч по СУФФИКСУ, независимо от имени процесса/воркера).
+# Плагинная метрика Ф1 «порта наблюдений» лежит на ``…state.plugins.<писатель>.<имя>``
+# и матчится ТЕМ ЖЕ набором — через каноническую свёртку пути, см. ``_is_tracked``.
 # Потребитель задаёт свой набор истории через ``tracked_suffixes``.
 DEFAULT_TRACKED_SUFFIXES: tuple[str, ...] = (
     ".state.fps",
@@ -52,6 +54,28 @@ DEFAULT_TRACKED_SUFFIXES: tuple[str, ...] = (
     ".effective_hz",
     ".cycle_duration_ms",
 )
+
+
+def _canonical_plugin_path(path: str) -> str | None:
+    """``…state.plugins.<писатель>.<имя>`` → ``…state.<имя>``; иначе ``None``.
+
+    Единственная точка, знающая про раскладку поддерева писателя (Ф1 «порта
+    наблюдений»). Свёртка НАРОЧНО узкая — ровно хвост из четырёх сегментов
+    ``state.plugins.<писатель>.<имя>``: узел ``plugins`` в дереве не один
+    (``processes.<P>.config.plugins``, ``processes.<P>.plugins.<плагин>.io_peek``,
+    корневой каталог ``plugins``), и широкий матч по «есть сегмент plugins»
+    свернул бы чужие пути в несуществующие имена метрик.
+
+    Вложенных под писателем уровней свёртка не поддерживает намеренно:
+    ``…plugins.<писатель>.workers.<w>.effective_hz`` останется несвёрнутым, и
+    поймает его прямой суффикс ``.effective_hz`` — тот от раскладки не зависит.
+    """
+    segments = path.split(".")
+    if len(segments) < 4:
+        return None
+    if segments[-4] != "state" or segments[-3] != "plugins":
+        return None
+    return ".".join(segments[:-3] + segments[-1:])
 
 
 class TelemetryReadModel:
@@ -335,8 +359,26 @@ class TelemetryReadModel:
     # ------------------------------------------------------------------
 
     def _is_tracked(self, path: str) -> bool:
-        """Отслеживается ли путь для истории (совпадение по суффиксу)."""
-        return any(path.endswith(suffix) for suffix in self._tracked)
+        """Отслеживается ли путь для истории (совпадение по суффиксу).
+
+        Две формы адреса, ОДИН набор суффиксов. Плагинная метрика с Ф1 «порта
+        наблюдений» живёт в поддереве писателя
+        (``processes.<P>.state.plugins.<писатель>.<имя>``), и голый ``endswith``
+        по ``.state.<имя>`` её не ловит: между ``state`` и листом появились два
+        сегмента. Поэтому у пути такой формы дополнительно проверяется его
+        КАНОНИЧЕСКИЙ вид — тот же путь без пары ``plugins.<писатель>``
+        (:func:`_canonical_plugin_path`). Так набор суффиксов остаётся про ИМЯ
+        МЕТРИКИ, а не про раскладку дерева, и потребителю не приходится
+        перечислять писателей, которых он не знает.
+
+        Ключ кольца при этом остаётся ПОЛНЫМ путём — с сегментом писателя. Два
+        писателя с одноимённой метрикой получают ДВА независимых кольца, и в
+        выдаче ``history``/``snapshot`` видно, ЧЕЙ это лист.
+        """
+        if any(path.endswith(suffix) for suffix in self._tracked):
+            return True
+        canonical = _canonical_plugin_path(path)
+        return canonical is not None and any(canonical.endswith(s) for s in self._tracked)
 
     @staticmethod
     def _as_number(value: Any) -> float | None:

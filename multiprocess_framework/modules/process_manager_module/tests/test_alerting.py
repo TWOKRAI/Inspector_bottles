@@ -45,17 +45,16 @@ class TestRuleSelection:
     def test_paths_for_empty_when_event_rule(self) -> None:
         assert AlertRule("r", events=("crashed",)).paths_for("cam") == []
 
-    def test_default_drops_rule_uses_real_published_field(self) -> None:
-        """Регресс-страж находки ревью: путь обязан совпадать с реальным публикатором.
+    def test_paths_for_keeps_the_wildcard_segment_unformatted(self) -> None:
+        """``{process}`` подставляется, ``*`` — нет: подстановку разрешает читатель.
 
-        Живой публикатор — capture-плагин: merge в ``processes.<name>.state`` с полем
-        ``drops``. Дефолт, указывающий на непубликуемое имя, делает правило молча
-        мёртвым (алерт «дропы растут» не сработает никогда).
+        Не дублирует сторож ниже (``TestDropsRuleAgainstRealTickOutput``): тот
+        проверяет СВОЙСТВО (алерт вышел), этот — что ``str.format`` не давится
+        на ``*`` и не съедает его. Разные отказы: сломай format — упадёт этот,
+        сломай резолвер — упадёт тот.
         """
-        rule = next(r for r in DEFAULT_RULES if r.name == "drops_growing")
-        assert "processes.{process}.state.drops" in rule.counter_paths
-        # первым кандидатом идёт реально публикуемое имя
-        assert rule.counter_paths[0].endswith(".state.drops")
+        rule = AlertRule("r", counter_paths=("processes.{process}.state.plugins.*.drops",))
+        assert rule.paths_for("cam") == ["processes.cam.state.plugins.*.drops"]
 
 
 class TestShouldFire:
@@ -290,3 +289,176 @@ class TestAlertHardening:
         store["processes.cam.state.drops"] = 20  # прирост 17 ≥ 5
         mon._check_counter_alerts()
         assert any("big_drops.severity" in p for p, _ in published)
+
+
+# ── Сторож правила против ВЫХЛОПА НАСТОЯЩЕГО ТИКА ────────────────────────────
+#
+# Прежний сторож (`test_default_drops_rule_uses_real_published_field`) сверял
+# СТРОКОВУЮ КОНСТАНТУ в DEFAULT_RULES — шпион на имени, а не на свойстве. Ф1
+# «порта наблюдений» увезла лист в поддерево писателя, правило стало мёртвым
+# (оба кандидата → None, `_check_counter_alerts` делал `continue`), а сторож
+# остался ЗЕЛЁНЫМ: константа-то на месте. Заменён на прогон целиком —
+# настоящий heartbeat-тик наполняет настоящий StateStore, монитор читает его
+# своим настоящим `_check_counter_alerts`, наблюдаемый эффект — алерт в дереве.
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, dt: float) -> None:
+        self.t += float(dt or 0.0)
+
+
+class _StopAfter:
+    def __init__(self, clock: _FakeClock, t_end: float) -> None:
+        self._clock = clock
+        self._t_end = t_end
+
+    def is_set(self) -> bool:
+        return self._clock() >= self._t_end
+
+    def wait(self, timeout: float | None = None) -> None:
+        self._clock.advance(timeout)
+
+
+class _NeverPaused:
+    def is_set(self) -> bool:
+        return False
+
+
+class _SsmBackedProxy:
+    """state-proxy писателя: merge/set уходят в НАСТОЯЩИЙ StateStoreManager."""
+
+    def __init__(self, ssm, source: str) -> None:
+        self._ssm = ssm
+        self._source = source
+
+    def merge(self, path: str, data: dict) -> None:
+        from ...state_store_module.core.delta import STATE_ENVELOPE_MARKER
+
+        self._ssm.handle_state_merge({"path": path, "data": data, "source": self._source, STATE_ENVELOPE_MARKER: True})
+
+    def set(self, path: str, value) -> None:
+        self._ssm.handle_state_set({"data": {"path": path, "value": value, "source": self._source}})
+
+
+class _WriterServices:
+    """Минимальные сервисы процесса-писателя для ProcessHeartbeat/PluginContext."""
+
+    def __init__(self, name: str, ssm) -> None:
+        self.name = name
+        self.worker_manager = None
+        self.router_manager = None
+        self.command_manager = None
+        self.memory_manager = None
+        self._config: dict = {}
+        self._state_proxy = _SsmBackedProxy(ssm, source=name)
+
+    def get_config(self, key: str, default=None):
+        return self._config.get(key, default)
+
+    def log_debug(self, *a, **k) -> None: ...
+    def log_info(self, *a, **k) -> None: ...
+    def log_warning(self, *a, **k) -> None: ...
+    def log_error(self, *a, **k) -> None: ...
+    def log_critical(self, *a, **k) -> None: ...
+
+    def send_message(self, target: str, message: dict) -> bool:
+        return True
+
+
+class TestDropsRuleAgainstRealTickOutput:
+    """`drops_growing` против дерева, наполненного НАСТОЯЩИМ тиком heartbeat.
+
+    Ни одной строки пути в ассертах: тест не знает, как правило адресует лист, —
+    он знает только, что публикация была и что алерт обязан выйти. Переименуй
+    сегмент дерева, поменяй кандидатов правила, сломай резолвер подстановки —
+    покраснеет здесь, а не «зелено, но мертво».
+    """
+
+    @staticmethod
+    def _env(proc: str = "cam"):
+        from ...process_module.heartbeat.process_heartbeat import ProcessHeartbeat
+        from ...state_store_module.manager.state_store_manager import StateStoreManager
+
+        ssm = StateStoreManager()
+        clock = _FakeClock()
+        hb = ProcessHeartbeat(_WriterServices(proc, ssm), clock=clock)
+
+        pm = MagicMock()
+        pm._process_configs = {}
+        pm._state_store_manager = ssm
+        os_proc = MagicMock()
+        os_proc.name = proc
+        pm._process_registry.os_processes = [os_proc]
+        mon = ProcessMonitor(pm, restart_policy=RestartPolicy(enabled=True))
+        published: list[tuple[str, object]] = []
+        mon._publish_state = lambda p, v: published.append((p, v))  # type: ignore[assignment]
+        return ssm, hb, clock, mon, published
+
+    @staticmethod
+    def _tick(hb, clock: _FakeClock, writer: str, value: int) -> None:
+        from ...process_module.plugins.base import PluginContext
+
+        ctx = PluginContext(services=hb._services, plugin_name=writer)
+        ctx.declare_metric("drops")
+        ctx.publish_metric("drops", value)
+        hb._loop(_StopAfter(clock, t_end=clock.t + 0.01), _NeverPaused())
+        clock.advance(0.05)
+
+    def test_alert_fires_on_growth_published_by_a_real_tick(self) -> None:
+        from ...observability_declarations import forget_declarations
+
+        ssm, hb, clock, mon, published = self._env()
+        try:
+            self._tick(hb, clock, "capture", 5)
+            mon._check_counter_alerts()  # база
+            self._tick(hb, clock, "capture", 41)
+            mon._check_counter_alerts()
+
+            sev = [v for p, v in published if p.endswith("drops_growing.severity")]
+            assert sev == ["warning"], (
+                "правило drops_growing не увидело лист, положенный НАСТОЯЩИМ тиком; "
+                f"опубликовано в дерево: {ssm.store.get_subtree('processes.cam.state')!r}"
+            )
+            reasons = [v for p, v in published if p.endswith("drops_growing.reason")]
+            assert "вырос на 36" in str(reasons[0]), f"неверная величина прироста: {reasons!r}"
+        finally:
+            forget_declarations("metric", names={"drops"})
+
+    def test_no_alert_when_the_real_tick_publishes_the_same_value(self) -> None:
+        """Пара-контроль: без роста алерта нет — иначе «стреляет всегда»."""
+        from ...observability_declarations import forget_declarations
+
+        _ssm, hb, clock, mon, published = self._env()
+        try:
+            self._tick(hb, clock, "capture", 5)
+            mon._check_counter_alerts()
+            self._tick(hb, clock, "capture", 5)
+            mon._check_counter_alerts()
+            assert not any("drops_growing" in p for p, _ in published)
+        finally:
+            forget_declarations("metric", names={"drops"})
+
+    def test_growth_of_the_second_writer_is_not_swallowed_by_the_first(self) -> None:
+        """Сумма, а не «первый резолвящийся»: стоящий писатель не глушит растущего."""
+        from ...observability_declarations import forget_declarations
+
+        _ssm, hb, clock, mon, published = self._env()
+        try:
+            self._tick(hb, clock, "alpha", 5)
+            self._tick(hb, clock, "bravo", 5)
+            mon._check_counter_alerts()  # база = 10
+            self._tick(hb, clock, "alpha", 5)  # стоит
+            self._tick(hb, clock, "bravo", 12)  # растёт
+            mon._check_counter_alerts()
+
+            reasons = [v for p, v in published if p.endswith("drops_growing.reason")]
+            assert reasons, "рост второго писателя потерян"
+            assert "вырос на 7" in str(reasons[0]), f"величина прироста неверна: {reasons!r}"
+        finally:
+            forget_declarations("metric", names={"drops"})
