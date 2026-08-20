@@ -93,12 +93,29 @@ answer; follow it and only speak up when deviating.
 
 | Stage | Who | Notes |
 |---|---|---|
-| 1. Independent acceptance tests | `tester`, **always** | synchronous, from acceptance criteria only, forbidden paths named explicitly. Runs before the author's tests where the order allows. |
+| 1. Independent acceptance tests | `tester`, **once per mechanism, before the implementation** | synchronous, from acceptance criteria only. Runs in a **git worktree at the pre-implementation commit** — blindness is enforced by the tree, not by prose (see below). Its tests are expected RED; they are the spec handed to stage 2. |
 | 2. Implementation | `developer` (Middle) / `teamlead` (Senior+) | per the threshold rule in the global CLAUDE.md. I keep the spec, the acceptance and the measurements. |
 | 3. Break-injection | me, never delegated | against **both** test sets — the author's and the tester's. Predictions written before the run. |
 | 4. Live stand | me | numbers, not adjectives; `backend_ctl` over reading source. |
 | 5. Review | `reviewer`, **after every task** | synchronous (`run_in_background: false`), findings must carry input → observed output. |
 | 6. Live defect that is not obvious | `investigator` | instead of digging in the main context. |
+
+**Stage 1 refined 2026-08-20 (owner's decision), and it is NOT a carve-out.** The tester still runs on
+every mechanism — what is banned is running it TWICE on the same one. Measured on Ф1 of
+`observation-port`: Task 1.2 and Task 1.3 both commissioned an independent tester over the same
+subtree mechanism. The first (before/with the implementation) found real defects; the second cost
+**479k tokens and 16 minutes to find zero** — it re-accepted what a tester and a reviewer had already
+accepted. A second acceptance pass over an already-tested mechanism is now **my injection matrix plus
+`reviewer`**, never a second tester. The tester's own value comes from arriving BEFORE the code:
+on Task 1.4 the same role, run first, returned 6 red tests that became the implementer's spec.
+
+**Blindness is enforced by the worktree, not by the prompt (same decision).** Both testers that day
+confessed leaks — one ran a wide `grep` across the tests directory and pulled in forbidden files, the
+other imported the forbidden `alert_rules` through `python -c` and printed the rule table. Both
+disclosed honestly, both swear they did not use it, and **neither claim is checkable**. Naming
+forbidden paths in prose stays (it is still the instruction), but the tester now works in a
+`git worktree` at the commit before the implementation lands: there is nothing to leak, and its tests
+are red by construction. Carry the file back into the main tree afterwards.
 
 Solo (no subagent for stage 2) stays legitimate only for genuinely trivial work — 1–3 files,
 under ~80 lines, no new mechanism — and **must be said out loud** in the task write-up. It is

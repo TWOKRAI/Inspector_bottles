@@ -52,6 +52,7 @@
 вердикт ревью · писать «не может сломаться» · править конфиг/схему Pydantic · трогать
 Qt-виджеты или гонять qt-mcp. Ядро, которое обязано сработать и без чтения:
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
+- [Тестер один раз на механизм и ДО кода](feedback_tester_once_per_mechanism_before_the_code.md) — второй заход по тому же механизму нашёл ноль за 479k; красный набор до кода = ТЗ · [слепоту даёт worktree, не проза](feedback_tester_blindness_needs_a_worktree.md) — оба тестера признались в утечке, проверить нельзя
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — инъекция на КАЖДОЕ заявленное свойство, предсказание до прогона · [молчащий детектор](feedback_silent_detector_proves_nothing.md)
 - [Инъекция смотрит ДРУГИМ объективом, чем тест](feedback_injection_must_use_a_different_lens_than_the_test.md) — совпали точки наблюдения (payload/дерево) → красный доказывает согласие двух копий одной модели
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без воспроизведения вход→выход = совет, не факт
