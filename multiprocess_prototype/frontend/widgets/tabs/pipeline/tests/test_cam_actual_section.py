@@ -222,3 +222,117 @@ def test_no_bindings_is_noop(qtbot):
     assert section.isHidden()
     assert section._handles == []
     section.dispose()  # тоже не падает
+
+
+# =========================================================================== #
+#  Настоящая проводка — против фейк-харнесса выше                              #
+#                                                                             #
+#  Находка фазового ревью Ф1 (Task 1.5): все тесты этого файла сверяют СТРОКУ  #
+#  адреса в `_FakeBindings.formatters`. Переименуй метод у настоящих           #
+#  GuiStateBindings или сломай матчер глоба — здесь останется зелено.          #
+#  Правило проекта: «фейк-харнесс доказывает харнесс», поэтому один тест       #
+#  обязан провести настоящую дельту через настоящий объект до текста метки.    #
+# =========================================================================== #
+
+
+class _FakeBridge:
+    """Двойник DataReceiverBridge: отдаёт свой state_callback обратно тесту."""
+
+    def __init__(self) -> None:
+        self.state_callback = None
+
+    def set_state_callback(self, cb) -> None:
+        self.state_callback = cb
+
+
+def _real_bindings_section(qtbot):
+    """Настоящие GuiStateBindings + настоящая секция. Возвращает (section, feed)."""
+    from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
+
+    bridge = _FakeBridge()
+    bindings = GuiStateBindings(bridge)
+    section = CamActualSection()
+    qtbot.addWidget(section)
+    section.set_bindings(bindings)
+    section.show_for("camera_0")
+
+    def feed(path: str, value):
+        bridge.state_callback({"data_type": "state_delta", "path": path, "value": value})
+
+    return section, feed
+
+
+def test_a_real_delta_reaches_the_measured_fps_label(qtbot):
+    """Дельта по пути писателя → текст метки. Наблюдаемый эффект, не адрес.
+
+    Якорь существования в паре с отрицанием: сначала метка пуста (прочерк),
+    потом на настоящей дельте становится литералом «12.5 fps». Без первой
+    половины тест был бы зелен и у метки, которая с рождения показывает всё
+    подряд.
+    """
+    section, feed = _real_bindings_section(qtbot)
+    label = section._labels["capture_fps"]
+    before = label.text()
+
+    feed("processes.camera_0.state.plugins.capture.capture_fps", 12.5)
+
+    assert before != "12.5 fps", f"метка показывала результат ДО дельты: {before!r}"
+    assert label.text() == "12.5 fps", (
+        f"настоящая дельта по пути писателя не доехала до метки: {label.text()!r}. "
+        "Фейк-тесты выше этого не увидят — они сверяют строку адреса, а не доставку"
+    )
+
+
+def test_the_coarse_subtree_delta_does_not_feed_the_leaf_glob(qtbot):
+    """Грубая дельта на корень поддерева листовой глоб НЕ матчит — измерено.
+
+    Так выглядит первый тик после появления писателя: стор отдаёт
+    ``…state.plugins`` целиком (значение — dict), и только со второго тика идут
+    листовые дельты. Метка поэтому оживает НЕ на первом тике. Свойство записано
+    тестом, а не комментарием: если матчер однажды начнёт разворачивать dict-
+    значения, красное здесь скажет, что задержка исчезла (это улучшение — тест
+    придётся переписать осознанно, а не обнаружить расхождение на стенде).
+    """
+    section, feed = _real_bindings_section(qtbot)
+    label = section._labels["capture_fps"]
+
+    feed("processes.camera_0.state.plugins", {"capture": {"capture_fps": 12.5}})
+    after_coarse = label.text()
+    feed("processes.camera_0.state.plugins.capture.capture_fps", 12.5)
+
+    assert after_coarse != "12.5 fps", "грубая дельта неожиданно накормила листовой глоб"
+    assert label.text() == "12.5 fps", "листовая дельта следом обязана доехать"
+
+
+def test_two_writers_of_capture_fps_share_one_label(qtbot):
+    """Два писателя одного имени → одна метка, побеждает последняя дельта.
+
+    **Это ОГРАНИЧЕНИЕ, а не гарантия, и оно здесь зафиксировано нарочно.**
+    Ф1 хоронит спор за имя в ДЕРЕВЕ (писатель — сегмент пути, два писателя = два
+    разных листа), но в этой строке инспектора глоб ``plugins.*`` сводит их
+    обратно в один QLabel, и имя писателя не видно. Соседний виджет
+    (``_telemetry_controls._plugin_readout``) на тот же вопрос отвечает иначе —
+    печатает «писатель: значение» всегда.
+
+    Довод, почему здесь оставлено так: секция показывается ТОЛЬКО для камерной
+    ноды (``camera_service`` либо ``capture``, см. докстринг модуля), и второго
+    писателя ``capture_fps`` в этом процессе рецепты не заводят. Лекарство, если
+    заведут, уже есть в API и названо: ``GuiStateBindings.bind_fanout`` — та же
+    дорога, которой пользуются строки рантайм-воркеров.
+
+    Тест краснеет в день, когда поведение изменят, — и это ровно то, чего от
+    него ждут: молча такое менять нельзя.
+    """
+    section, feed = _real_bindings_section(qtbot)
+    label = section._labels["capture_fps"]
+
+    feed("processes.camera_0.state.plugins.capture.capture_fps", 12.5)
+    first = label.text()
+    feed("processes.camera_0.state.plugins.capture_two.capture_fps", 30.0)
+
+    assert first == "12.5 fps"
+    assert label.text() == "30.0 fps", (
+        "поведение двух писателей в этой строке изменилось — перечитай докстринг "
+        "теста и реши осознанно (bind_fanout с именем писателя либо новый довод)"
+    )
+    assert "capture_two" not in label.text(), "имя писателя в этой строке не печатается (см. довод)"
