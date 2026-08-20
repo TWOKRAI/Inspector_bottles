@@ -269,6 +269,12 @@ class TestPathShape:
         pm, mon, _ssm = _monitor_over(_plugins(alpha={"drops": 4}))
         assert mon._read_state_counter("*.state.drops") is None
         assert pm._log_warning.called, "ведущая подстановка отвергнута молча"
+        # Содержимое, а не только факт вызова: инъекция координатора (2026-08-20)
+        # заменила ТЕКСТ сообщения пустой строкой, оставив вызов, — и тест остался
+        # зелёным. «Громкий отказ» с пустым сообщением не громче тишины: оператор
+        # обязан увидеть, КАКОЙ путь отвергнут.
+        said = " ".join(str(c) for c in pm._log_warning.call_args_list)
+        assert "*.state.drops" in said, f"в сообщении нет отвергнутого пути: {said}"
 
     def test_wildcard_at_the_tail_collects_the_writer_names_not_leaves(self) -> None:
         """``*`` последним сегментом собирает ДЕТЕЙ, а не одноимённые листья.
