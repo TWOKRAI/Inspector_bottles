@@ -272,7 +272,22 @@ class TestPluginSubtreeReadout:
         assert section._rows["fps"].readout.text() == "21.0"
 
     def test_a_neighbour_process_subtree_does_not_leak_in(self, qtbot) -> None:
-        """Граница — точка-разделитель: `cam2` не протекает в строку `cam`."""
+        """Граница — точка-разделитель: `cam2` не протекает в строку `cam`.
+
+        **Это регресс-якорь композиции, а не сторож читалки — и сказано это
+        потому, что молча оставить нельзя** (ревью Task 1.4, находка 7). Границу
+        держит `TelemetryReadModel.snapshot`, и своей проверки в `_plugin_readout`
+        больше нет: снятие давало 61 зелёный, то есть она ничего не охраняла.
+
+        Сделать тест несущим на ЭТОМ префиксе невозможно: имя процесса входит в
+        сам префикс (`processes.cam.state.plugins`), поэтому даже выродись
+        `snapshot` до голого `startswith`, ключ соседа
+        `processes.cam2.state.plugins…` всё равно не совпал бы. Дыру границы
+        `snapshot` ловят её собственные тесты в telemetry_readmodel_module, где
+        префикс короче (`processes.cam` против `processes.cam2`). Здесь остаётся
+        проверка, что строка панели не показывает чужой процесс, — дёшево и
+        по-прежнему полезно как якорь.
+        """
         vm = TelemetryViewModel()
         vm.on_state_delta(_delta("processes.cam2.state.plugins.capture.drops", 99))
         section = TelemetryControlsSection("cam", ["drops"])

@@ -61,10 +61,26 @@ def _canonical_plugin_path(path: str) -> str | None:
 
     Единственная точка, знающая про раскладку поддерева писателя (Ф1 «порта
     наблюдений»). Свёртка НАРОЧНО узкая — ровно хвост из четырёх сегментов
-    ``state.plugins.<писатель>.<имя>``: узел ``plugins`` в дереве не один
-    (``processes.<P>.config.plugins``, ``processes.<P>.plugins.<плагин>.io_peek``,
-    корневой каталог ``plugins``), и широкий матч по «есть сегмент plugins»
-    свернул бы чужие пути в несуществующие имена метрик.
+    ``state.plugins.<писатель>.<имя>``.
+
+    **Из двух половин проверки несущая ОДНА — про ``plugins``** (ревью Task 1.4,
+    находка 1; прежний докстринг подавал их как необходимую пару, и это было
+    неправдой). Она держит живой промах: ``processes.<P>.state.cam.actual.fps``
+    пишет ``camera_service``, и без неё путь свернулся бы в
+    ``processes.<P>.state.fps`` — то есть actual-параметр камеры начал бы копить
+    кольцо истории под суффиксом АГРЕГАТА. Узлов ``plugins`` в дереве четыре
+    (``config.plugins``, ``plugins.<плагин>.io_peek``, корневой каталог,
+    ``state.plugins``), поэтому широкий матч по «есть сегмент plugins» тоже не
+    годится — нужна именно позиция.
+
+    Половина про ``state`` — **оборона в глубину, а не несущая проверка**:
+    свёртка ``segments[:-3] + segments[-1:]`` делает хвост ``.state.<имя>``
+    возможным ТОЛЬКО когда ``segments[-4] == "state"``, значит через
+    :meth:`TelemetryReadModel._is_tracked` её снятие ненаблюдаемо. Оставлена,
+    потому что функция обещает адрес ИМЕННО из ``state``, и без неё вернула бы
+    свёртку для ``config.plugins.<x>.<y>`` — ложь про собственный контракт.
+    Наблюдаема она только прямой проверкой этой функции, и такая проверка есть
+    (``TestFoldingIsNarrow::test_config_plugins_returns_none_from_the_folder_itself``).
 
     Вложенных под писателем уровней свёртка не поддерживает намеренно:
     ``…plugins.<писатель>.workers.<w>.effective_hz`` останется несвёрнутым, и
@@ -73,7 +89,9 @@ def _canonical_plugin_path(path: str) -> str | None:
     segments = path.split(".")
     if len(segments) < 4:
         return None
-    if segments[-4] != "state" or segments[-3] != "plugins":
+    if segments[-3] != "plugins":  # несущая: держит state.cam.actual.<метрика>
+        return None
+    if segments[-4] != "state":  # оборона в глубину, см. докстроку
         return None
     return ".".join(segments[:-3] + segments[-1:])
 

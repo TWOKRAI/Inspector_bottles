@@ -90,15 +90,52 @@ class TestMissingAndEmpty:
         _pm, mon, _ssm = _monitor_over(_plugins(capture={"fps": 12}, mask={"frame_count": 3}))
         assert mon._read_state_counter(_WILDCARD) is None
 
-    def test_falls_through_to_the_flat_candidate_when_the_subtree_is_silent(self) -> None:
+    def test_falls_through_to_the_flat_candidate_when_the_subtree_is_absent(self) -> None:
         """Свойство, ради которого «пусто» = ``None``, а не ``0``.
 
         Плоский писатель (прямая запись в ``state``, дорога мимо
         ``publish_metric``) обязан оставаться видимым, пока плагинного поддерева
         нет. Если резолвер вернёт ``0``, монитор возьмёт его первым и плоский
         кандидат не будет опрошен НИКОГДА.
+
+        Бьёт по ветке «поддерева НЕТ» — ранний выход по ``not isinstance(dict)``.
+        Соседние два теста бьют по веткам «поддерево ЕСТЬ, но пусто» и «писатели
+        есть, листа нет», и это ДРУГОЙ код: узкая инъекция «пусто → 0» в самом
+        накопителе оставляет этот тест зелёным (измерено ревью Task 1.4,
+        находка 7), а те — нет.
         """
         _pm, mon, ssm = _monitor_over({})
+        ssm.store.set("processes.cam.state.drops", 9)
+        rule = AlertRule(
+            "r",
+            counter_paths=(_WILDCARD.replace("cam", "{process}"), "processes.{process}.state.drops"),
+        )
+        resolved = [mon._read_state_counter(p) for p in rule.paths_for("cam")]
+        assert resolved == [None, 9]
+
+    def test_falls_through_to_the_flat_candidate_when_the_subtree_is_empty(self) -> None:
+        """Тот же вывод по ДРУГОЙ ветке: поддерево есть, писателей в нём нет.
+
+        Добавлен по ревью Task 1.4 (находка 7): один тест выше покрывал только
+        ранний выход, поэтому узкая инъекция в накопитель суммы свойство
+        «плоский кандидат остаётся достижим» не убивала.
+        """
+        _pm, mon, ssm = _monitor_over(_plugins())
+        ssm.store.set("processes.cam.state.drops", 9)
+        rule = AlertRule(
+            "r",
+            counter_paths=(_WILDCARD.replace("cam", "{process}"), "processes.{process}.state.drops"),
+        )
+        resolved = [mon._read_state_counter(p) for p in rule.paths_for("cam")]
+        assert resolved == [None, 9]
+
+    def test_falls_through_when_writers_exist_but_none_carries_the_leaf(self) -> None:
+        """Третья ветка: писатели есть, листа ``drops`` нет ни у кого.
+
+        Здесь обход доходит до конца и ``total`` остаётся ``None`` — ровно то
+        место, куда бьёт инъекция «пусто → 0».
+        """
+        _pm, mon, ssm = _monitor_over(_plugins(capture={"fps": 12}))
         ssm.store.set("processes.cam.state.drops", 9)
         rule = AlertRule(
             "r",
@@ -223,6 +260,16 @@ class TestPathShape:
         assert mon._read_state_counter("processes.cam.state.drops") == 7
         assert mon._read_state_counter("processes.cam.state.nope") is None
 
+    def test_leading_wildcard_is_refused_loudly(self) -> None:
+        """Ведущая ``*``: префикса нет — отказ ТОТ ЖЕ громкий, что у двух подстановок.
+
+        Ревью Task 1.4, находка 5: умирал молча (``None`` без единой записи в
+        лог), хотя весь механизм затевался против «правило мертво и не жалуется».
+        """
+        pm, mon, _ssm = _monitor_over(_plugins(alpha={"drops": 4}))
+        assert mon._read_state_counter("*.state.drops") is None
+        assert pm._log_warning.called, "ведущая подстановка отвергнута молча"
+
     def test_wildcard_at_the_tail_collects_the_writer_names_not_leaves(self) -> None:
         """``*`` последним сегментом собирает ДЕТЕЙ, а не одноимённые листья.
 
@@ -232,3 +279,67 @@ class TestPathShape:
         """
         _pm, mon, _ssm = _monitor_over(_plugins(alpha={"drops": 4}))
         assert mon._read_state_counter("processes.cam.state.plugins.*") is None
+
+
+class TestNewWriterArrival:
+    """ПРИХОД писателя — названный потолок, а не проверенная гарантия.
+
+    Уход писателя прощён ``counter_growth``'ом (уменьшение суммы = сброс, роста
+    нет). Приход — НЕ прощён: новый писатель с ненулевым первым значением
+    поднимает сумму скачком, и правило прочтёт это как рост. Найдено ревью
+    Task 1.4 (находка 2); докстринг ``_read_state_counter`` называл только уход.
+
+    Тесты ПРИШПИЛИВАЮТ сегодняшнее — ложное — поведение, а не объявляют его
+    правильным. Приём осознанный: базу пер-писателя в Task 1.4 не делаем (она
+    меняет форму ``_counter_baseline``, общую с плоскими кандидатами), и без
+    такого теста будущая починка выглядела бы случайной регрессией. Когда базу
+    заведут — тест обязан покраснеть, и красным он скажет «ожидание пора
+    менять», а не «что-то сломалось».
+    """
+
+    @staticmethod
+    def _armed(tree: dict):
+        pm, mon, ssm = _monitor_over(tree)
+        os_proc = MagicMock()
+        os_proc.name = "cam"
+        pm._process_registry.os_processes = [os_proc]
+        published: list[tuple[str, Any]] = []
+        mon._publish_state = lambda p, v: published.append((p, v))  # type: ignore[assignment]
+        return mon, ssm, published
+
+    def test_arriving_writer_with_a_nonzero_first_value_raises_a_false_alert(self) -> None:
+        """Сегодня: приезд второго писателя с ``drops=500`` → алерт «вырос на 500».
+
+        Достижимо не гипотетически: ``RingBuffer.drops_count`` — величина
+        КУМУЛЯТИВНАЯ, такой писатель приедет с ненулевым первым значением.
+        ``CapturePlugin`` стартует с нуля и этой дорогой не ходит.
+        """
+        mon, ssm, published = self._armed(_plugins(alpha={"drops": 0}))
+
+        mon._check_counter_alerts()  # база = 0
+        ssm.store.set("processes.cam.state.plugins.bravo.drops", 500)  # ПРИХОД
+        mon._check_counter_alerts()
+
+        reasons = [v for p, v in published if p.endswith("drops_growing.reason")]
+        assert reasons, (
+            "поведение изменилось: приход писателя больше не даёт алерт. Если "
+            "заведена база пер-писателя — это ПОЧИНКА: обнови ожидание теста, "
+            "снятый потолок в докстринге _read_state_counter и в ADR-PMM-021"
+        )
+        assert "вырос на 500" in str(reasons[0]), (
+            f"величина ложного алерта изменилась: {reasons!r} — механизм суммы поменялся, потолок надо перепроверить"
+        )
+
+    def test_a_writer_arriving_at_zero_is_silent(self) -> None:
+        """Пара-контроль: приход писателя с нулём алерта НЕ даёт.
+
+        Без него предыдущий тест неотличим от «любой приход шумит» — а шумит
+        именно ненулевое первое значение. Это и есть граница потолка.
+        """
+        mon, ssm, published = self._armed(_plugins(alpha={"drops": 7}))
+
+        mon._check_counter_alerts()  # база = 7
+        ssm.store.set("processes.cam.state.plugins.bravo.drops", 0)  # приход с нулём
+        mon._check_counter_alerts()
+
+        assert not any("drops_growing" in p for p, _ in published)
