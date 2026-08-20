@@ -462,3 +462,50 @@ class TestDropsRuleAgainstRealTickOutput:
             assert "вырос на 7" in str(reasons[0]), f"величина прироста неверна: {reasons!r}"
         finally:
             forget_declarations("metric", names={"drops"})
+
+    def test_the_monitor_iteration_itself_reaches_the_counter_rules(self) -> None:
+        """Проводка цикла монитора до счётчиковых правил — а не только сам хелпер.
+
+        **Написано по находке инъекции рода 2 (Task 1.5), а не заранее.** Слепой
+        генератор предложил снять единственный боевой вызов
+        ``self._check_counter_alerts()`` из ``_run_iteration`` — и все 4297 тестов
+        охвата фазы остались ЗЕЛЁНЫМИ: каждый сторож звал хелпер напрямую.
+        Правило было бы живо, а никто бы его не звал, и ни один тест этого не
+        замечал. Здесь дёргается ``_run_iteration()`` — тело настоящей итерации.
+
+        Якорь существования в паре с наблюдаемым эффектом: первая итерация берёт
+        базу и алерта НЕ даёт, вторая (после роста) даёт. Обрыв итерации ловится
+        отдельно: ``_run_iteration`` глотает исключение в ``except Exception`` и
+        логирует его строкой «Error in monitoring loop» — тест обязан отличать
+        «правило не сработало» от «итерация упала раньше, чем до него дошла».
+        Прочие ошибки лога сюда не считаются: `_broadcast_status_change`
+        (`process_monitor.py:1677`) ловит своё исключение САМ и итерацию не
+        рвёт, а на MagicMock-двойнике `communication` оно неизбежно.
+        """
+        from ...observability_declarations import forget_declarations
+
+        _ssm, hb, clock, mon, published = self._env()
+        # Реестр процессов пуст: итерации нужны только хвостовые шаги, а
+        # наполнение дерева уже сделал настоящий тик heartbeat.
+        mon.process.shared_resources.process_state_registry.get_all_process_data.return_value = {}
+        errors: list[str] = []
+        mon.process._log_error = errors.append
+        try:
+            self._tick(hb, clock, "capture", 5)
+            mon._run_iteration()  # база
+            after_baseline = [p for p, _ in published if "drops_growing" in p]
+
+            self._tick(hb, clock, "capture", 41)
+            mon._run_iteration()
+
+            aborted = [e for e in errors if "Error in monitoring loop" in e]
+            assert not aborted, f"итерация монитора упала, а не дошла до правил: {aborted!r}"
+            assert not after_baseline, f"алерт на первой итерации, до всякого роста: {after_baseline!r}"
+            sev = [v for p, v in published if p.endswith("drops_growing.severity")]
+            assert sev == ["warning"], (
+                "итерация монитора не дошла до счётчиковых правил — вызов "
+                "_check_counter_alerts() из _run_iteration потерян или закрыт "
+                f"ранним return. Опубликовано: {[p for p, _ in published]!r}"
+            )
+        finally:
+            forget_declarations("metric", names={"drops"})
