@@ -111,3 +111,5 @@
 - [Вторую половину пары мог сделать таймер](feedback_the_off_half_of_a_pair_can_be_done_by_a_timer.md) — success подтверждает доставку, не причину; атрибуцию доказывать журналом адресата
 - [Выключил писателя — заглушка стала утверждением](feedback_switching_off_a_writer_promotes_its_placeholder_to_a_claim.md) — посев 0.0 при погашенной публикации = уверенное враньё; семь ложных аномалий
 - [Дублёры подают конфиг плоским](feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible.md) — класс «ключ по неверному адресу» тестам структурно невидим; нужен тест на настоящем ProcessConfigHandler
+- [Решение осиротило то, что кодировало прежнее](feedback_a_decision_orphans_what_encoded_the_previous_one.md) — одна правка конфига дала ТРИ протухших артефакта; корневой гейт был красен две недели
+- [Критерий гейта спорит с решением владельца](feedback_gate_criterion_can_contradict_an_owner_decision.md) — три класса провалов, у каждого свой адресат; третий кодом не чинится
