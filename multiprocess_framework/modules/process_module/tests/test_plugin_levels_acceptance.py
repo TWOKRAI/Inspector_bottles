@@ -14,6 +14,15 @@
     `processes.<процесс>.state.<name>`, под тем же publisher-gate, что и штатные
     метрики. Тот же сборщик обслуживает `introspect.telemetry` (секция `levels`).
 
+ОБНОВЛЕНО Ф1 «порт наблюдений» (Task 1.2): путь листа стал
+`processes.<процесс>.state.plugins.<писатель>.<name>` — писатель есть СЕГМЕНТ ПУТИ, и
+владение именем удалено вместе с арбитражем. Свойства, которые этот файл сторожил
+(push == poll, гейт по имени листа, фреймворк не знает прикладных имён, обе дороги у
+SubPluginContext, округление до 1 знака), не изменились — изменилась ФОРМА пути, и
+проверки переписаны под неё. Критерий 6 («разные владельцы = отказ») удалён: механизма
+больше нет (§9 плана, блок Ф1), на его месте — новое свойство «два писателя, одно имя,
+два листа».
+
 Что ПРИШЛОСЬ предположить (см. также раздел «сомнения в контракте» в отчёте тестера):
   1. Метод-триггер тика на `ProcessHeartbeat` назван `_publish_plugin_levels_to_tree`
      по конвенции соседних `_publish_metrics_to_tree` / `_publish_router_shm_stats_to_tree`
@@ -223,26 +232,32 @@ def _dispatch_introspect_telemetry(services: _ProcServices) -> dict:
     return services.command_manager.dispatch("introspect.telemetry")
 
 
-def _polled_level(polled: dict, name: str):
+def _pushed_level(services: "_ProcServices", proc: str, writer: str, name: str):
+    """Лист уровня в дереве по НОВОМУ пути ``state.plugins.<писатель>.<имя>`` (Ф1)."""
+    return services._state_proxy.get(f"processes.{proc}.state.plugins.{writer}.{name}")
+
+
+def _polled_level(polled: dict, writer: str, name: str):
     """Достать уровень из ответа опроса по ФАКТИЧЕСКОЙ форме секции ``levels``.
 
     ПРАВКА ВЛАДЕЛЬЦА СПЕКИ (2026-08-16, расхождение Р-2 отчёта teamlead'а).
     Тестер предположил плоскую форму ``levels[name]`` — «симметрично resolved».
     Форма другая и симметрия у неё иная: уровень лежит там же, где штатный ``fps``,
-    то есть ``levels["state"][name]`` (``levels`` = ``{"workers": {...},
+    то есть внутри ``levels["state"]`` (``levels`` = ``{"workers": {...},
     "state": {...}}``). Спека говорила «наравне с fps/latency_ms» — вот это место.
 
     Плоская форма не просто отличалась бы — она СЛОМАЛА бы свойство, которое сам
     тест защищает: ``TelemetryPoller._flatten_levels`` склеивает ключи ответа с
     префиксом ``processes.<name>``, поэтому плоское имя уехало бы в
-    ``processes.<p>.<имя>`` — мимо пути ``processes.<p>.state.<имя>``, которым его
-    пишет push. То есть «push и poll совпадают» перестало бы выполняться именно
-    из-за формы, выбранной ради удобства проверки.
+    ``processes.<p>.<имя>`` — мимо пути, которым его пишет push. То есть «push и
+    poll совпадают» перестало бы выполняться именно из-за формы, выбранной ради
+    удобства проверки.
 
-    Модель тестера была неверна — это находка, а не шум, и она записана здесь,
-    а не молча исправлена.
+    Ф1 добавила ОДИН уровень вложенности: ``levels["state"]["plugins"][писатель]``.
+    Тот же довод действует и здесь — читаем ровно тот путь, которым пишет push.
     """
-    return ((polled.get("levels") or {}).get("state") or {}).get(name)
+    state = (polled.get("levels") or {}).get("state") or {}
+    return ((state.get("plugins") or {}).get(writer) or {}).get(name)
 
 
 # --------------------------------------------------------------------------- #
@@ -257,16 +272,16 @@ class TestSingleRoadPushEqualsPoll:
         ctx.publish_metric("custom_quality", 42.0)
 
         _run_plugin_levels_tick(hb, allowed_metrics=None)
-        pushed = services._state_proxy.get("processes.cam0.state.custom_quality")
+        pushed = _pushed_level(services, "cam0", "cam0", "custom_quality")
         assert pushed == 42.0, (
-            f"push: ожидали 42.0 в дереве по processes.cam0.state.custom_quality, получили {pushed!r}"
+            f"push: ожидали 42.0 в дереве по processes.cam0.state.plugins.cam0.custom_quality, получили {pushed!r}"
         )
 
         polled = _dispatch_introspect_telemetry(services)
         assert "levels" in polled, "introspect.telemetry не отдаёт секцию 'levels'"
-        assert _polled_level(polled, "custom_quality") == 42.0, (
+        assert _polled_level(polled, "cam0", "custom_quality") == 42.0, (
             f"poll разошёлся с push: дерево содержит 42.0, poll отдал "
-            f"{_polled_level(polled, 'custom_quality')!r} — расхождение состава/значения ключей"
+            f"{_polled_level(polled, 'cam0', 'custom_quality')!r} — расхождение состава/значения ключей"
         )
 
     def test_builtin_metrics_share_the_same_levels_section(self):
@@ -293,9 +308,9 @@ class TestSingleRoadPushEqualsPoll:
         levels = polled.get("levels")
         assert isinstance(levels, dict), f"ожидали непустую секцию levels при наличии показаний, получили {levels!r}"
         state_section = levels.get("state") or {}
-        assert state_section.get("neighbour_level") == 3.0, (
-            f"уровень плагина обязан лежать в levels['state'] рядом со штатными "
-            f"метриками; секция state = {state_section!r}"
+        assert ((state_section.get("plugins") or {}).get("cam0b") or {}).get("neighbour_level") == 3.0, (
+            f"уровень плагина обязан лежать в levels['state']['plugins'][писатель] — в ТОЙ ЖЕ "
+            f"секции, где сборщик держит штатные метрики; секция state = {state_section!r}"
         )
 
 
@@ -312,7 +327,7 @@ class TestGatePairsClosedAndOpen:
         hb.reconfigure_telemetry({"metrics": {"custom_level_gated": {"enabled": False}}})
         allowed_off = hb._telemetry_gate.due_metrics(now=0.0)
         _run_plugin_levels_tick(hb, allowed_metrics=allowed_off)
-        assert services._state_proxy.get("processes.cam1.state.custom_level_gated") is None, (
+        assert _pushed_level(services, "cam1", "cam1", "custom_level_gated") is None, (
             "гейт закрыт, а значение всё равно попало в дерево — подтверждающий ноль "
             "не защита, если он не парный: закрытый гейт обязан ДАВАТЬ ноль наблюдаемо"
         )
@@ -326,22 +341,22 @@ class TestGatePairsClosedAndOpen:
         # Его утверждение проходило СЛУЧАЙНО — из-за неверной формы (Р-2): имени не
         # было на верхнем уровне ответа, и проверка «not in» зеленела ни на чём.
         # Асимметрия push/poll здесь — контракт, и теперь она проверяется как контракт.
-        assert _polled_level(off_poll, "custom_level_gated") == 7.0, (
+        assert _polled_level(off_poll, "cam1", "custom_level_gated") == 7.0, (
             "закрытый гейт обязан ГАСИТЬ PUSH и НЕ гасить опрос (ADR-PM-035): "
-            f"опрос отдал {_polled_level(off_poll, 'custom_level_gated')!r} вместо 7.0"
+            f"опрос отдал {_polled_level(off_poll, 'cam1', 'custom_level_gated')!r} вместо 7.0"
         )
 
         hb.reconfigure_telemetry({"metrics": {"custom_level_gated": {"enabled": True}}, "telemetry_mode": "merge"})
         allowed_on = hb._telemetry_gate.due_metrics(now=1.0)
         _run_plugin_levels_tick(hb, allowed_metrics=allowed_on)
-        pushed = services._state_proxy.get("processes.cam1.state.custom_level_gated")
+        pushed = _pushed_level(services, "cam1", "cam1", "custom_level_gated")
         assert pushed == 7.0, (
             f"гейт открыт — ожидали ненулевое 7.0 в дереве, получили {pushed!r}. "
             f"Без этой половины пары закрытый-ноль ничего не доказывает: он одинаков "
             f"и когда механизм вообще не подключён"
         )
         on_poll = _dispatch_introspect_telemetry(services)
-        assert _polled_level(on_poll, "custom_level_gated") == 7.0
+        assert _polled_level(on_poll, "cam1", "custom_level_gated") == 7.0
 
 
 # --------------------------------------------------------------------------- #
@@ -427,9 +442,9 @@ class TestFrameworkDoesNotKnowAppNames:
         ctx.publish_metric(made_up, 1.2)
         _run_plugin_levels_tick(hb, allowed_metrics=None)
 
-        pushed = services._state_proxy.get(f"processes.cam2.state.{made_up}")
+        pushed = _pushed_level(services, "cam2", "cam2", made_up)
         assert pushed == 1.2, f"push: выдуманное имя не доехало в дерево ({pushed!r}) — признак зашитого списка имён"
-        assert _polled_level(_dispatch_introspect_telemetry(services), made_up) == 1.2, (
+        assert _polled_level(_dispatch_introspect_telemetry(services), "cam2", made_up) == 1.2, (
             "poll: выдуманное имя не доехало в опрос — push и poll разошлись"
         )
 
@@ -462,7 +477,7 @@ class TestSubPluginContextCarriesBothRoads:
         sub.publish_metric("sub_level", 3.5)
 
         _run_plugin_levels_tick(hb, allowed_metrics=None)
-        pushed = services._state_proxy.get("processes.cam3.state.sub_level")
+        pushed = _pushed_level(services, "cam3", "cam3", "sub_level")
         assert pushed == pytest.approx(3.5), (
             "SubPluginContext.declare_metric/publish_metric присутствуют по имени, но "
             "не делегируют в реальный механизм родителя — значение не дошло до дерева. "
@@ -486,9 +501,16 @@ class TestNoOpWithoutTelemetryConfigured:
 
 
 # --------------------------------------------------------------------------- #
-# Критерий 6 — конфликт объявлений: разные владельцы = отказ; тот же владелец = не конфликт.
+# Критерий 6 (ПЕРЕПИСАН Ф1) — одно имя у двух плагинов больше не конфликт, а два листа.
 #
-# Предположение (см. докстринг файла): владелец передаётся PluginContext через
+# Прежний критерий требовал ``ValueError`` на втором объявлении. Механизм удалён
+# (§9 плана, блок Ф1): писатель — сегмент пути, спорить за имя не о чем. Свойство
+# заменено на прямо противоположное и ПРОВЕРЯЕМОЕ ПО ЭФФЕКТУ: оба литерала обязаны
+# оказаться в дереве, каждый в своём поддереве. Отказ, ставший no-op'ом, проверяется
+# рядом — но одного его мало: no-op зелен и у механизма, который просто ничего не
+# делает (тогда и листьев бы не было).
+#
+# Предположение (см. докстринг файла): писатель передаётся PluginContext через
 # plugin_name=... в конструкторе. Если это не так — _make_ctx падает с явным
 # сообщением вместо того, чтобы тихо утвердить неверный контракт.
 # --------------------------------------------------------------------------- #
@@ -506,17 +528,33 @@ class TestDeclareConflict:
                 "реальный способ различения владельцев."
             )
 
-    def test_two_different_owners_conflict(self):
-        ctx_a = self._make_ctx(plugin_name="plugin_a")
-        ctx_b = self._make_ctx(plugin_name="plugin_b")
-        ctx_a.declare_metric("shared_name")
-        with pytest.raises(ValueError):
-            ctx_b.declare_metric("shared_name")
+    def test_two_writers_of_one_name_get_two_leaves_not_a_refusal(self):
+        """Одно имя у двух плагинов ОДНОГО процесса — два листа, оба с литералами.
 
-    def test_same_owner_redeclared_is_not_a_conflict(self):
+        Пара к «объявление стало no-op'ом»: сам по себе no-op неотличим от
+        механизма, который вообще ничего не публикует. Здесь наблюдаемый эффект —
+        ДВА разных числа по ДВУМ разным путям, а не отсутствие исключения.
+        """
+        services, hb = _boot(name="cam6")
+        ctx_a = PluginContext(services=services, config={}, plugin_name="plugin_a")
+        ctx_b = PluginContext(services=services, config={}, plugin_name="plugin_b")
+        ctx_a.declare_metric("shared_name")
+        ctx_b.declare_metric("shared_name")  # прежде — ValueError, теперь идемпотентный no-op
+        ctx_a.publish_metric("shared_name", 11.0)
+        ctx_b.publish_metric("shared_name", 22.0)
+
+        _run_plugin_levels_tick(hb, allowed_metrics=None)
+        assert _pushed_level(services, "cam6", "plugin_a", "shared_name") == 11.0
+        assert _pushed_level(services, "cam6", "plugin_b", "shared_name") == 22.0
+
+        polled = _dispatch_introspect_telemetry(services)
+        assert _polled_level(polled, "plugin_a", "shared_name") == 11.0
+        assert _polled_level(polled, "plugin_b", "shared_name") == 22.0
+
+    def test_same_writer_redeclared_is_not_a_conflict(self):
         ctx_a = self._make_ctx(plugin_name="plugin_a2")
         ctx_a.declare_metric("shared_name_2")
-        ctx_a.declare_metric("shared_name_2")  # повторное объявление тем же владельцем — не конфликт
+        ctx_a.declare_metric("shared_name_2")  # повторное объявление тем же писателем — не конфликт
 
 
 # --------------------------------------------------------------------------- #
@@ -530,10 +568,10 @@ class TestValueRoundingObservedAtOneDecimal:
         ctx.publish_metric("custom_precise", 15.34)
 
         _run_plugin_levels_tick(hb, allowed_metrics=None)
-        pushed = services._state_proxy.get("processes.cam2.state.custom_precise")
+        pushed = _pushed_level(services, "cam2", "cam2", "custom_precise")
         assert pushed == pytest.approx(15.3), f"округление сборщика: ожидали 15.3, получили {pushed!r}"
 
         polled = _dispatch_introspect_telemetry(services)
-        assert _polled_level(polled, "custom_precise") == pytest.approx(15.3), (
-            f"poll не согласован с push по округлению: получили {_polled_level(polled, 'custom_precise')!r}"
+        assert _polled_level(polled, "cam2", "custom_precise") == pytest.approx(15.3), (
+            f"poll не согласован с push по округлению: получили {_polled_level(polled, 'cam2', 'custom_precise')!r}"
         )

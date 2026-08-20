@@ -500,7 +500,11 @@ transport}.py` и `backend_ctl/probes/*` — из `backend_ctl` построчн
 **Goal:** `PluginLevels` ключуется писателем; сборщик строит поддерево `plugins.<писатель>.*`
 без проверки владения; арбитраж и голос удалены.
 **Files:** `multiprocess_framework/modules/process_module/heartbeat/telemetry.py`,
-`.../heartbeat/process_heartbeat.py`, `multiprocess_framework/modules/observability_declarations.py`
+`.../heartbeat/process_heartbeat.py`, `multiprocess_framework/modules/observability_declarations.py`,
+`.../process_module/plugins/base.py` (дописан по ревью Ф1: Ф1 сама открывает дыру — точка в имени
+листа ИЛИ в имени писателя рвёт путь на два сегмента и оставляет вечно-мёртвый лист-двойник,
+потому что до Ф1 точечное имя не пропускал арбитр, а теперь пропускать некому; guard живёт там же,
+где `publish_metric`)
 **Steps:**
 1. `PluginLevels._values` → `dict[писатель][имя] = значение` (лок сохраняется — писатели в
    потоках воркеров, читатель в тике; довод из докстринга `telemetry.py:302-308` остаётся).
@@ -527,9 +531,17 @@ transport}.py` и `backend_ctl/probes/*` — из `backend_ctl` построчн
 8. Удалить тесты умершего механизма (список — §9, блок Ф1), взамен — авторские hazard-тесты
    новой формы (потокобезопасность per-писатель, вложенная проекция, гейт по суффиксу).
 **Acceptance criteria:**
-- [ ] в `heartbeat/` не осталось ни `metric_owners`, ни сравнения владельца с публикатором (grep)
-- [ ] два писателя с одинаковым именем листа дают ДВА листа в двух поддеревьях, оба с литералами
-- [ ] правила гейта из прод-конфига работают без единой правки конфига
+- [x] в `heartbeat/` не осталось ни `metric_owners`, ни сравнения владельца с публикатором —
+      `grep -E "metric_owner"` вне тестов пуст; `_warn_rejected_levels`, `_warned_rejected_levels`,
+      `RETRACTION_REASSERT_TICKS`, `pending_retractions`, `confirm_retracted`, `owned_now`,
+      `PluginLevels.snapshot()` — ноль вхождений (сверено ревью независимо)
+- [x] два писателя с одинаковым именем листа дают ДВА листа в двух поддеревьях, оба с литералами —
+      приёмка тестера `TestTwoWritersSameLeafName` (push и poll), 7/7 зелёные; инъекция «ключевание
+      писателем снято» убивает 10 из 20 авторских hazard и 2 из 7 тестерских
+- [x] правила гейта из прод-конфига работают без единой правки конфига — на нетронутом
+      `system.yaml`: `fps=777.5` проходит, `unknown_probe_metric_xyz=888.5` не проходит (пара
+      снята и тестером, и авторским `TestProdGateSectionWorksUnedited`); инъекция «гейт пропускает
+      всё» красит ровно 1 тестерский тест
 **Out of scope:** механизм снятия поддеревом (приходит в Ф2; старое снятие вырезано шагом 6,
 интерима НЕТ — прежняя формулировка «до Ф2 работает поимённое снятие с Ф0-фильтром» была ложной
 посылкой, её вскрыло ревью: фильтр Ф0 умирает вместе с `metric_owners`); менеджер-слот (Ф3).
@@ -560,8 +572,15 @@ transport}.py` и `backend_ctl/probes/*` — из `backend_ctl` построчн
 **Level:** Middle · **Assignee:** developer
 **Goal:** Единственный читатель GUI понимает поддерево `plugins.*`; фреймворковые суффиксы не тронуты.
 **Files:** `multiprocess_framework/modules/telemetry_readmodel_module/telemetry_read_model.py`
-(+ его тесты), `multiprocess_prototype/frontend/widgets/tabs/processes/_telemetry_controls.py`
-(если читает пути, по итогам Task 1.1)
+(+ его тесты), `multiprocess_prototype/frontend/widgets/tabs/processes/_telemetry_controls.py`,
+`multiprocess_prototype/frontend/widgets/tabs/pipeline/inspector/cam_actual_section.py`,
+`multiprocess_prototype/backend/state/manager_setup.py`,
+**`multiprocess_framework/modules/process_manager_module/core/alert_rules.py`** +
+`.../monitor/process_monitor.py` + `.../tests/test_alerting.py`,
+`multiprocess_prototype/backend/state/bootstrap.py`,
+`multiprocess_framework/modules/process_module/managers/telemetry_reload.py`
+*(список дополнен по ревью Task 1.2: раньше здесь стояли двое, а инвентарь Task 1.1 нашёл шестерых —
+и `alert_rules.py` не входил в Files НИ ОДНОЙ задачи, то есть план его починить не мог в принципе)*
 **Steps:**
 1. К суффиксам `:49-51` добавить обход `.state.plugins.<писатель>.<метрика>` — строка метрики
    получает писателя как источник (ADR-136 — read-model остаётся единственным читателем).
@@ -576,9 +595,38 @@ transport}.py` и `backend_ctl/probes/*` — из `backend_ctl` построчн
 3. Переходный период — НЕТ: двойная публикация (плоско + поддерево) запрещена, она возвращает
    двух писателей одного листа — ровно тот класс, который хороним. Флип атомарный, в одной ветке
    с Task 1.2.
+4. **Правило супервизии `drops_growing` — БЛОКЕР, найден ревью Task 1.2.**
+   `alert_rules.py:104` читает `processes.{process}.state.drops` точным путём; после Ф1 лист лежит
+   на `state.plugins.capture.drops`, оба кандидата резолвятся в `None`, `_check_counter_alerts`
+   (`process_monitor.py:383`) делает `continue` — алерт «дропы растут» не сработает НИКОГДА, при
+   `FW_SUPERVISOR_ALERTS` по умолчанию включённом. Воспроизведено ревью на настоящем `TreeStore`:
+   дерево `{'state': {'plugins': {'capture': {'drops': 7}}}}`, оба запроса правила → `None`,
+   фактический лист → 7. Починить путь И **переписать сторож**: `test_alerting.py:48` сверяет
+   строковую константу в `DEFAULT_RULES` и потому остался ЗЕЛЁНЫМ на мёртвом правиле — шпион на
+   имени, а не на свойстве. Новый сторож обязан заполнить `TreeStore` выхлопом настоящего тика и
+   убедиться, что `_read_state_int` вернул число.
+5. **Предохранитель троттла** (`manager_setup.py:54,57,58`): правила
+   `processes.**.state.{capture_fps,frame_count,drops}` после Ф1 не матчат ничего (измерено ревью:
+   новый путь → пустой список правил, агрегат `state.fps` цел). Publisher-гейт частоту держит, так
+   что это потеря второго эшелона, — но либо дописать правила под новым путём здесь, либо явно
+   записать, что предохранитель снят до Ф4, и не делать вид, что он есть.
+6. **Засев `bootstrap.py:64-70`** кладёт плоский `frame_count: None` каждому процессу: после Ф1 его
+   больше некому перетереть, и он остаётся вечным листом-призраком рядом с настоящим. Убрать —
+   либо оставить с записанным доводом. Регенерация golden сборки идёт В ПАРЕ с этой правкой,
+   иначе корневой гейт покраснеет (снапшоты пиннят засев).
+7. `telemetry_reload.py` (`_central_rule_for_metric`, `:212`) матчит правило по последнему сегменту
+   — мёртвый глоб продолжит рапортоваться действующим потолком через `detect_throttle_caps` (`:281`).
 **Acceptance criteria:**
+- [ ] **`drops_growing` стреляет на живом стенде**: рост `drops` → алерт; пара-контроль — при
+  отсутствии роста алерта нет. Сторож переписан на наблюдаемый эффект (значение из `TreeStore`),
+  а не на строковую константу
 - [ ] живой стенд (`backend_ctl`): вкладка Processes показывает `capture_fps` под новым путём с
-  ненулевым числом; `introspect_telemetry` отдаёт вложенную форму
+  ненулевым числом; `introspect_telemetry` отдаёт вложенную форму.
+  **Внимание — критерий недостижим на НЕТРОНУТОМ прод-конфиге** (находка ревью Task 1.2):
+  `telemetry.publish` имеет `default_enabled: false` и белый список `{fps, latency_ms}`, то есть
+  `capture_fps`/`frame_count`/`drops` закрыты гейтом и в дерево не едут ни при каком пути.
+  Либо стенд поднимается с расширенным белым списком (и это записывается), либо критерий
+  переформулируется на метрику из белого списка. Молча «не получилось» — не вариант
 - [ ] тесты read-model: старые фреймворковые суффиксы + новые plugin-пути, с литералами
 **Out of scope:** правки sink-схемы БД (если понадобятся — отдельная задача по итогам 1.1).
 

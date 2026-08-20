@@ -9,32 +9,42 @@
 
 Что каждый тест сторожит, если сформулировать до прогона:
 
-* **порядок «объявил → отдал» не обязан соблюдаться, а «отдал, но не объявил» не
-  обязан молчать.** Первое — потому что ``configure`` плагина вправе отдать
-  стартовое значение раньше, чем дойдёт до объявления; второе — потому что
-  необъявленное имя гейту неизвестно, публиковаться не будет НИКОГДА, и тихий
-  отсев неотличим от опечатки в имени;
+ОБНОВЛЕНО Ф1 «порт наблюдений» (Task 1.2). Уровни переехали в поддерево писателя
+``state.plugins.<писатель>.<имя>``; арбитраж владения, голос про самозванца и
+поимённое снятие с ``None``-надгробиями удалены целиком (§9 плана, блок Ф1).
+Классы, сторожившие ИМЕННО эти механизмы, ушли вместе с ними; классы, сторожившие
+свойства, которые Ф1 не трогает, переписаны под новую ФОРМУ пути. Опасности самой
+новой формы — в ``test_writer_subtree_hazards.py``.
+
+* **необъявленное имя едет легально, и это не дыра, а тотальность гейта.**
+  ``TelemetryPublishConfig.resolve`` тотальна, гейт спрашивает её и про имена, о
+  которых каталог не знает. Прежний порядок («объявил → поехало») больше не
+  свойство: объявление стало каталожной записью для гейта и авто-строк GUI;
 * **опрос гейту не подчиняется, а push подчиняется** — это не оплошность, а
   ADR-PM-035: гейт про трафик, а не про то, что процесс знает о себе. Свойство
   парное: закрытый гейт даёт ноль в дереве И ненулевое в опросе;
-* **имя-дубль не разрешается — он отбрасывается.** Р3.5-11 сняла политику
-  наложения («порядок несущий», «плагин побеждает») целиком: лист берётся, только
-  если объявленный владелец имени совпадает с публикатором. Сторожится в ОБЕИХ
-  дорогах — чужое имя не появляется ни в дереве, ни в опросе, и об этом слышно;
+* **имя-дубль не разрешается и не отбрасывается — его больше не бывает.** Писатель
+  есть сегмент пути: ``fps`` плагина лежит под ``state.plugins.<он>.fps``, агрегат
+  фреймворка — под ``state.fps``, ключа для спора нет. Сторожится в ОБЕИХ дорогах
+  значениями обоих листьев;
 * **весь тик — ОДИН merge, и объединение имеет три ловушки** (Р3.5-12): пустой
   снимок воркеров не имеет права проглотить уровни и ``shm``; политика публикатора
   «все счётчики ``shm`` нулевые — не грузим дерево» обязана уцелеть внутри общей
   сборки; «данных нет вовсе» обязано давать НОЛЬ вызовов merge, а не пустой;
-* **владелец считается в трёх местах — объявлении, публикации и снятии.** Разойдись
-  они хоть в одном звене, уровень либо не поедет (владелец ≠ публикатор), либо не
-  снимется на остановке. Сторожится ЭФФЕКТОМ на боевой тройке, а не чтением кода;
+* **писатель считается в трёх местах — объявлении, публикации и снятии.** Разойдись
+  они хоть в одном звене, публикация уехала бы в одно поддерево, а снятие чистило
+  бы другое. Сторожится ЭФФЕКТОМ на боевой тройке, а не чтением кода;
 * **свежесть держится жизненным циклом.** ``retract`` зовёт фреймворк на остановке
   плагина, ПОСЛЕ пользовательского ``shutdown`` — плагин вправе отдать последнее
   значение в нём самом (``CapturePlugin`` обнуляет частоту на остановке захвата), и
   снятие до него оставило бы это значение висеть навсегда;
 * **у хранилища три потока.** Писатель — воркер плагина, читатель — heartbeat,
   третий снимает уровни на остановке; копия словаря, растущего одновременно, без
-  лока поднимает ``RuntimeError``.
+  лока поднимает ``RuntimeError``. С поддеревом писателя копия стала ДВУХУРОВНЕВОЙ,
+  то есть гонок стало две — внешняя (новый писатель) и внутренняя (новое имя);
+* **точка в имени — отказ и на ПУБЛИКАЦИИ, не только на объявлении** (дыра,
+  открытая Ф1). Пока необъявленное имя до дерева не доходило, guard'а на объявлении
+  хватало; с Ф1 точечное имя поехало бы и дало вечно-мёртвый лист-двойник.
 """
 
 from __future__ import annotations
@@ -203,20 +213,33 @@ def _poll(services: _Services) -> dict:
 
 
 def _tree(services: _Services, leaf: str) -> Any:
+    """Лист секции ``state`` НАПРЯМУЮ — для агрегатов фреймворка (``fps``, ``shm``)."""
     return services._state_proxy.get(f"processes.{services.name}.state.{leaf}")
+
+
+def _level(services: _Services, writer: str, leaf: str) -> Any:
+    """Уровень плагина по НОВОМУ пути ``state.plugins.<писатель>.<имя>`` (Ф1)."""
+    return services._state_proxy.get(f"processes.{services.name}.state.plugins.{writer}.{leaf}")
 
 
 def _polled_state(services: _Services) -> dict:
     """Секция ``state`` снимка уровней — ТА ЖЕ форма пути, что у тика.
 
     ``levels`` зеркалит поддерево ``processes.<name>`` (``workers.*`` + ``state.*``),
-    поэтому уровень адресуется ``levels["state"][имя]``, ровно как ``fps``.
-    Плоского ``levels[имя]`` быть не может: ``TelemetryPoller._flatten_levels``
-    склеивает ключи ответа с префиксом ``processes.<name>``, и плоское имя
-    уехало бы в ``processes.<name>.<имя>`` — мимо пути, которым его пишет push.
+    поэтому уровень адресуется ``levels["state"]["plugins"][писатель][имя]``, ровно
+    там же, где его пишет push. Плоского ``levels[имя]`` быть не может:
+    ``TelemetryPoller._flatten_levels`` склеивает ключи ответа с префиксом
+    ``processes.<name>``, и плоское имя уехало бы в ``processes.<name>.<имя>`` —
+    мимо пути push'а.
     """
     levels = _poll(services).get("levels") or {}
     return levels.get("state") or {}
+
+
+def _polled_level(services: _Services, writer: str, leaf: str) -> Any:
+    """Тот же лист опросом — по той же форме пути, что у push'а."""
+    plugins = _polled_state(services).get("plugins") or {}
+    return (plugins.get(writer) or {}).get(leaf)
 
 
 # --------------------------------------------------------------------------- #
@@ -231,8 +254,8 @@ class TestFrameworkKnowsNoNames:
         ctx.publish_metric(MADE_UP, 12.0)
 
         _tick_levels(hb)
-        assert _tree(services, MADE_UP) == 12.0
-        assert _polled_state(services)[MADE_UP] == 12.0
+        assert _level(services, "made_up_plugin", MADE_UP) == 12.0
+        assert _polled_level(services, "made_up_plugin", MADE_UP) == 12.0
 
     def test_the_made_up_name_enters_the_gate_catalog(self):
         """И оно же становится управляемым: гейт обходит каталог объявлений."""
@@ -243,46 +266,7 @@ class TestFrameworkKnowsNoNames:
 
 
 # --------------------------------------------------------------------------- #
-# Порядок: объявление после первого тика; публикация до объявления.
-# --------------------------------------------------------------------------- #
-class TestDeclarationOrder:
-    def test_declaring_after_the_first_tick_starts_flowing_on_the_next(self):
-        """Каталог читается НА ТИКЕ, а не кэшируется при сборке публикатора.
-
-        Снимок каталога, взятый один раз, оставил бы плагин, объявившийся позже
-        (ленивый импорт, hot-apply рецепта), без публикации навсегда — и симптом
-        искали бы в гейте, где всё верно.
-        """
-        services, hb = _boot(name="late")
-        ctx = PluginContext(services=services, config={}, plugin_name="late_plugin")
-        ctx.publish_metric("late_level", 1.0)
-
-        _tick_levels(hb)
-        assert _tree(services, "late_level") is None, "необъявленное имя уехало в дерево"
-
-        ctx.declare_metric("late_level")
-        _tick_levels(hb)
-        assert _tree(services, "late_level") == 1.0
-
-    def test_publishing_before_declaring_keeps_the_value_and_says_it_once(self):
-        """Значение не теряется, а отсев не молчит — и голос ровно один на имя."""
-        services, hb = _boot(name="early")
-        ctx = PluginContext(services=services, config={}, plugin_name="early_plugin")
-        ctx.publish_metric("early_level", 5.0)
-
-        _tick_levels(hb)
-        _tick_levels(hb)
-        _tick_levels(hb)
-        said = [msg for msg in services.warnings() if "early_level" in msg]
-        assert len(said) == 1, f"ожидали ОДИН голос на имя, получили {len(said)}: {said}"
-
-        ctx.declare_metric("early_level")
-        _tick_levels(hb)
-        assert _tree(services, "early_level") == 5.0, "значение, отданное до объявления, потеряно"
-
-
-# --------------------------------------------------------------------------- #
-# Повторное объявление и конфликт владельцев.
+# Повторное объявление: конфликта больше нет — есть два поддерева.
 # --------------------------------------------------------------------------- #
 class TestRedeclaration:
     def test_same_plugin_may_redeclare(self):
@@ -292,20 +276,35 @@ class TestRedeclaration:
         ctx.declare_metric("re_level")
         ctx.declare_metric("re_level")
 
-    def test_two_plugins_of_one_process_conflict(self):
-        services, _hb = _boot(name="conf")
+    def test_two_plugins_of_one_process_share_a_name_and_get_two_leaves(self):
+        """Прежде ``ValueError``, теперь — два листа (Ф1: писатель = сегмент пути).
+
+        Пара к «объявление стало no-op'ом»: отсутствие исключения само по себе
+        неотличимо от механизма, который вообще ничего не публикует. Судится
+        ЭФФЕКТОМ — оба литерала в дереве, каждый под своим писателем.
+        """
+        services, hb = _boot(name="conf")
         a = PluginContext(services=services, config={}, plugin_name="plugin_a")
         b = PluginContext(services=services, config={}, plugin_name="plugin_b")
         a.declare_metric("conf_level")
-        with pytest.raises(ValueError):
-            b.declare_metric("conf_level")
+        b.declare_metric("conf_level")  # прежде отказ — теперь идемпотентный no-op
+        a.publish_metric("conf_level", 1.0)
+        b.publish_metric("conf_level", 2.0)
 
-    def test_context_without_plugin_name_owns_by_process(self):
-        """Базовый ctx без имени плагина объявляет от имени ПРОЦЕССА, не 'None'."""
-        services, _hb = _boot(name="owner_proc")
-        PluginContext(services=services, config={}).declare_metric("owner_level")
-        second = PluginContext(services=_Services(name="owner_proc"), config={})
-        second.declare_metric("owner_level")  # тот же владелец — не конфликт
+        _tick_levels(hb)
+        assert _level(services, "plugin_a", "conf_level") == 1.0
+        assert _level(services, "plugin_b", "conf_level") == 2.0
+
+    def test_context_without_plugin_name_writes_under_the_process(self):
+        """Базовый ctx без имени плагина пишет от имени ПРОЦЕССА, не 'None'."""
+        services, hb = _boot(name="owner_proc")
+        ctx = PluginContext(services=services, config={})
+        ctx.declare_metric("owner_level")
+        ctx.publish_metric("owner_level", 5.0)
+        _tick_levels(hb)
+        assert _level(services, "owner_proc", "owner_level") == 5.0, (
+            "писатель без имени плагина обязан назваться именем процесса"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -320,11 +319,11 @@ class TestGateCoversPushNotPoll:
 
         hb.reconfigure_telemetry({"metrics": {"gated_level": {"enabled": False}}})
         _tick_levels(hb, hb._telemetry_gate.due_metrics(now=0.0))
-        assert _tree(services, "gated_level") is None, "закрытый гейт не остановил push"
+        assert _level(services, "gated_plugin", "gated_level") is None, "закрытый гейт не остановил push"
 
         hb.reconfigure_telemetry({"metrics": {"gated_level": {"enabled": True}}})
         _tick_levels(hb, hb._telemetry_gate.due_metrics(now=1.0))
-        assert _tree(services, "gated_level") == 9.0, (
+        assert _level(services, "gated_plugin", "gated_level") == 9.0, (
             "открытый гейт не дал ненулевого — без этой половины пары закрытый ноль одинаков с 'механизм не подключён'"
         )
 
@@ -338,8 +337,8 @@ class TestGateCoversPushNotPoll:
         hb.reconfigure_telemetry({"metrics": {"gated_level2": {"enabled": False}}})
         _tick_levels(hb, hb._telemetry_gate.due_metrics(now=0.0))
 
-        assert _tree(services, "gated_level2") is None
-        assert _polled_state(services)["gated_level2"] == 4.0, (
+        assert _level(services, "gated_plugin2", "gated_level2") is None
+        assert _polled_level(services, "gated_plugin2", "gated_level2") == 4.0, (
             "закрытый гейт погасил и опрос — вкладка при флипе РТ-2 ослепла бы"
         )
 
@@ -366,91 +365,73 @@ class TestPushEqualsPoll:
         ctx.publish_metric("same_level", 15.34)
 
         _tick_levels(hb)
-        assert _tree(services, "same_level") == pytest.approx(15.3)
-        assert _polled_state(services)["same_level"] == pytest.approx(15.3), (
+        assert _level(services, "same_road", "same_level") == pytest.approx(15.3)
+        assert _polled_level(services, "same_road", "same_level") == pytest.approx(15.3), (
             "опрос и push разошлись в округлении — 'одна дорога' стало бы ложью"
         )
 
-    def test_a_plugin_level_named_like_a_framework_metric_is_rejected_in_both_roads(self):
-        """Имя-дубль (``fps``) ОТБРАСЫВАЕТСЯ, и одинаково в дереве и в опросе.
+    def test_a_plugin_level_named_like_a_framework_metric_coexists_with_the_aggregate(self):
+        """Имя-дубль (``fps``) больше не спор: ДВА листа, оба со своими числами.
 
-        Здесь стоял ровно обратный тест — «уровень плагина обязан лечь ПОСЛЕ
-        агрегата и победить». Он пинил политику наложения ADR-PM-038, снятую
-        Р3.5-11 целиком, и был зелен, пока политика была объявлена; на живом
-        стенде она при этом НЕ РАБОТАЛА — продовое правило троттла
-        ``processes.**.state.fps: 0.05`` вырезало вторую запись всегда, потому что
-        оба merge тика приходили в одно окно 15.6-мс сетки Windows.
+        Здесь стояло два предыдущих теста, и оба — про арбитраж. Первый требовал
+        «уровень плагина обязан лечь ПОСЛЕ агрегата и победить» (политика наложения
+        ADR-PM-038); Р3.5-11 сменила его на «плагин отброшен, показание владельца
+        цело» (отбор по владению). Ф1 сняла и это: писатель — сегмент пути, и
+        столкнуться двум ``fps`` больше негде.
 
-        Свойство, которое тест сторожил, уцелело и усилилось: **дерево и опрос
-        отвечают на имя-дубль ОДИНАКОВО**. Изменился ответ — не «побеждает
-        плагин», а «плагин отброшен, показание владельца цело». Судится значением,
-        а не отсутствием вызова.
+        Свойство, которое тест сторожил всё это время, уцелело и стало сильнее:
+        **дерево и опрос отвечают на имя-дубль ОДИНАКОВО**. Изменился ответ — не
+        «побеждает плагин» и не «плагин отброшен», а «оба на месте, каждый под
+        своим путём». Судится значениями ОБОИХ листьев, а не отсутствием вызова;
+        голоса нет вовсе — отсеивать нечего.
         """
         services, hb = _boot(name="dup")
         services.worker_manager.get_all_workers_status = lambda: {  # type: ignore[attr-defined]
             "w": {"status": "running", "effective_hz": 8.0, "cycle_duration_ms": 3.0}
         }
         ctx = PluginContext(services=services, config={}, plugin_name="dup_plugin")
-        ctx.publish_metric("fps", 21.0)  # 'fps' объявлен фреймворком — чужое имя
+        ctx.publish_metric("fps", 21.0)  # 'fps' объявлен фреймворком — раньше «чужое имя»
 
         hb._publish_telemetry_to_tree(services.worker_manager.get_all_workers_status(), None)
-        assert _tree(services, "fps") == 8.0, "агрегат воркеров подменён публикацией в чужое имя"
-        assert _polled_state(services)["fps"] == 8.0, "опрос разошёлся с деревом на имени-дубле"
-        assert any("fps" in msg for msg in services.warnings()), (
-            f"отсев чужого имени промолчал — тихий отсев неотличим от опечатки: {services.warnings()}"
+
+        assert _tree(services, "fps") == 8.0, "агрегат воркеров подменён публикацией плагина"
+        assert _level(services, "dup_plugin", "fps") == 21.0, (
+            "уровень плагина с именем метрики фреймворка потерялся — поддерево писателя не работает"
+        )
+        assert _polled_state(services)["fps"] == 8.0, "опрос разошёлся с деревом на агрегате"
+        assert _polled_level(services, "dup_plugin", "fps") == 21.0, "опрос разошёлся с деревом на уровне"
+        assert not [msg for msg in services.warnings() if "fps" in msg], (
+            f"голос про имя-дубль звучит, хотя спорить не о чем: {services.warnings()}"
         )
 
-    def test_a_level_owned_by_ANOTHER_PLUGIN_is_rejected_too(self):
-        """Сосед по процессу не может писать в имя чужого плагина.
+    def test_two_plugins_on_one_name_land_in_two_subtrees_in_both_roads(self):
+        """Два плагина процесса, одно имя листа — ДВА листа, оба с литералами.
 
-        **Тест добавлен инъекцией, а не рассуждением, и это его главное свойство.**
-        Инъекция И1 (проверку владельца заменить назад на членство в общем каталоге)
-        оставила ЗЕЛЁНЫМИ оба теста П1 независимого тестера и соседний тест выше —
-        потому что все трое сторожат имя ФРЕЙМВОРКА (``fps``), а его в дереве
-        защищает не владение, а fail-safe порядок сборки: уровни плагинов ложатся
-        первыми, агрегат фреймворка накрывает их сверху в том же dict'е, и чужое
-        значение до merge просто не доживает.
+        **Тест наследует адрес инъекции И1** (2026-08-17), которая вскрыла, что
+        соседние сторожа держались не на владении, а на fail-safe порядке сборки:
+        все они брали имя ФРЕЙМВОРКА (``fps``), а его в дереве накрывал агрегат.
+        Здесь этой страховки нет по построению — оба участника плагины, оба листа
+        едут ОДНИМ проходом сборщика. До Ф1 победил бы порядок обхода dict'а (то
+        есть порядок вызовов ``publish_metric``), после Ф1 побеждать некому: ключ
+        первого уровня — писатель.
 
-        Здесь этой страховки нет по построению: оба участника — плагины, оба их
-        уровня едут ОДНИМ проходом ``_collect_plugin_levels`` и ложатся в один и
-        тот же словарь. Без проверки владельца победил бы порядок обхода dict'а —
-        то есть порядок вызовов ``publish_metric``, который никто настройкой не
-        считает. Ровно тот класс, который задача и чинит.
-
-        Судится значением в дереве и в опросе, а не отсутствием вызова.
+        Порядок публикаций намеренно ОБРАТНЫЙ алфавитному: совпади он с порядком
+        вставки, тест был бы зелен и у механизма, который просто берёт последнего.
         """
         services, hb = _boot(name="neighbours")
-        owner_ctx = PluginContext(services=services, config={}, plugin_name="plugin_a")
-        owner_ctx.declare_metric("shared_gauge")
-        owner_ctx.publish_metric("shared_gauge", 11.0)
-        # Сосед публикует в ЧУЖОЕ имя ПОЗЖЕ — при победе порядка выиграл бы он.
-        PluginContext(services=services, config={}, plugin_name="plugin_b").publish_metric("shared_gauge", 99.0)
+        ctx_a = PluginContext(services=services, config={}, plugin_name="plugin_a")
+        ctx_a.declare_metric("shared_gauge")
+        ctx_b = PluginContext(services=services, config={}, plugin_name="plugin_b")
+        ctx_b.publish_metric("shared_gauge", 99.0)  # сосед публикует ПЕРВЫМ
+        ctx_a.publish_metric("shared_gauge", 11.0)
 
         _tick_levels(hb)
 
-        assert _tree(services, "shared_gauge") == pytest.approx(11.0), (
-            "сосед по процессу подменил уровень чужого плагина — владение не стережётся "
-            "там, где fail-safe порядок не помогает"
-        )
-        assert _polled_state(services)["shared_gauge"] == pytest.approx(11.0), (
-            "опрос разошёлся с деревом на имени, которое перехватил сосед"
-        )
-        said = [msg for msg in services.warnings() if "shared_gauge" in msg]
-        assert len(said) == 1 and "plugin_b" in said[0], (
-            f"перехват чужого имени промолчал либо не назвал перехватчика: {services.warnings()}"
-        )
-
-    def test_the_rejection_voice_names_all_three_participants(self):
-        """В голосе — имя, публикатор и владелец: три разных диагноза, три действия."""
-        services, hb = _boot(name="voice")
-        PluginContext(services=services, config={}, plugin_name="loud_plugin").publish_metric("fps", 1.0)
-
-        _tick_levels(hb)
-
-        said = [msg for msg in services.warnings() if "fps" in msg]
-        assert len(said) == 1, said
-        assert "loud_plugin" in said[0], said
-        assert "telemetry" in said[0], f"владелец имени не назван — не отличить чужое имя от опечатки: {said[0]}"
+        assert _level(services, "plugin_a", "shared_gauge") == pytest.approx(11.0)
+        assert _level(services, "plugin_b", "shared_gauge") == pytest.approx(99.0)
+        assert _polled_level(services, "plugin_a", "shared_gauge") == pytest.approx(11.0)
+        assert _polled_level(services, "plugin_b", "shared_gauge") == pytest.approx(99.0)
+        assert not [msg for msg in services.warnings() if "shared_gauge" in msg], services.warnings()
 
 
 # --------------------------------------------------------------------------- #
@@ -480,16 +461,25 @@ class TestSubPluginContext:
         sub.declare_metric("sub_level")
         sub.publish_metric("sub_level", 3.5)
         _tick_levels(hb)
-        assert _tree(services, "sub_level") == pytest.approx(3.5), (
+        assert _level(services, "parent_plugin", "sub_level") == pytest.approx(3.5), (
             "дороги проброшены по имени, но не делегируют в механизм родителя"
         )
 
-    def test_sub_level_is_owned_by_the_parent_plugin(self):
-        """Вложенный объявляет ОТ ИМЕНИ родителя — своего владельца у него нет."""
-        services, _hb = _boot(name="sub2")
+    def test_sub_level_is_written_under_the_parent_plugin(self):
+        """Вложенный пишет В ПОДДЕРЕВО родителя — своего сегмента пути у него нет.
+
+        Судится ЭФФЕКТОМ, а не отсутствием исключения: прежняя редакция проверяла
+        «повторное объявление тем же владельцем не конфликт», и после Ф1 такой тест
+        стал бы вакуумным — конфликта нет ни у кого. Здесь адрес листа: публикация
+        родителя и публикация вложенного обязаны попасть в ОДНУ ветку.
+        """
+        services, hb = _boot(name="sub2")
         parent = PluginContext(services=services, config={}, plugin_name="parent_plugin2")
-        SubPluginContext.from_parent(parent).declare_metric("sub_owned")
-        parent.declare_metric("sub_owned")  # тот же владелец — не конфликт
+        SubPluginContext.from_parent(parent).publish_metric("sub_owned", 1.0)
+        parent.publish_metric("parent_owned", 2.0)
+        _tick_levels(hb)
+        assert _level(services, "parent_plugin2", "sub_owned") == 1.0
+        assert _level(services, "parent_plugin2", "parent_owned") == 2.0, "ЯКОРЬ: родитель пишет туда же"
 
 
 # --------------------------------------------------------------------------- #
@@ -537,15 +527,25 @@ class TestDisabledAndHostile:
         ctx.declare_metric("text_level")
         ctx.publish_metric("text_level", "не число")
         _tick_levels(hb)
-        assert _tree(services, "text_level") == "не число"
+        assert _level(services, "text_plugin", "text_level") == "не число"
 
-    def test_empty_store_publishes_nothing(self):
-        """Ни одного уровня — ни одного merge: не грузим дерево пустым сообщением."""
+    def test_a_gate_that_holds_everything_publishes_nothing(self):
+        """Гейт придержал всё — ни одного merge: не грузим дерево пустым сообщением.
+
+        Прежде тот же ноль давало «имя не объявлено» — с Ф1 необъявленное имя едет
+        легально, и прежняя посылка стала ложной (тест зеленел бы, публикуя лист).
+        Причина закрытого гейта здесь не важна; важно, что ПУСТОЙ payload не шлётся.
+        ЯКОРЬ рядом: тот же вход при открытом гейте даёт ровно один merge с листом.
+        """
         services, hb = _boot(name="empty")
         PluginContext(services=services, config={}, plugin_name="empty_plugin").publish_metric("x", 1)
-        before = len(services._state_proxy.merges)
-        _tick_levels(hb)  # 'x' не объявлен
-        assert len(services._state_proxy.merges) == before
+
+        _tick_levels(hb, allowed_metrics=set())  # гейт закрыт наглухо
+        assert services._state_proxy.merges == [], services._state_proxy.merges
+
+        _tick_levels(hb, allowed_metrics=None)  # ЯКОРЬ: механизм подключён и работает
+        assert len(services._state_proxy.merges) == 1
+        assert _level(services, "empty_plugin", "x") == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -558,7 +558,7 @@ class TestDisabledAndHostile:
 #: съесть память раньше, чем читатель заканчивал свои 2000 копий. Сброс через
 #: ``retract`` держит РОСТ (новые ключи — то, что и поднимает RuntimeError)
 #: бесконечным при ограниченном размере.
-_GROWTH_WINDOW = 20_000
+_GROWTH_WINDOW = 5_000
 
 
 class TestConcurrency:
@@ -570,11 +570,15 @@ class TestConcurrency:
         существующего ключа копию не ломает, и тест на ней был бы вакуумным.
 
         Проверяются ОБА чтения. ``publications`` — вход сборщика тика и опроса,
-        то есть тот, чей отказ погасил бы телеметрию; ``snapshot`` — производная
-        проекция, у которой между взятием копии и её обходом лока уже нет, и
-        именно поэтому она обязана обходить КОПИЮ, а не живой словарь.
-        ``retract`` крутится тем же потоком — третий писатель, появившийся с
-        Р3.5-14, ходит в то же хранилище.
+        то есть тот, чей отказ погасил бы телеметрию; ``names`` — дешёвое чтение
+        имён, которым тик кормит гейт ДО сборки, и у него свой обход (два уровня
+        вложенности вместо одного). ``retract`` крутится тем же потоком — третий
+        писатель, появившийся с Р3.5-14, ходит в то же хранилище.
+
+        **С Ф1 гонок стало ДВЕ, и тест растит обе.** Внешний словарь растёт новыми
+        ПИСАТЕЛЯМИ, внутренний — новыми ИМЕНАМИ у одного писателя. Расти только
+        внутренний — и копия ``{w: dict(v) for ...}`` не ломалась бы на внешнем
+        обходе; расти только внешний — не ломалась бы на внутреннем.
         """
         store = PluginLevels()
         stop = threading.Event()
@@ -583,10 +587,14 @@ class TestConcurrency:
         def writer() -> None:
             i = 0
             while not stop.is_set():
+                # чётные — новое ИМЯ у одного писателя, нечётные — новый ПИСАТЕЛЬ
                 store.publish(f"level_{i}", i, "writer_plugin")
+                store.publish("same_leaf", i, f"writer_{i}")
                 i += 1
                 if i >= _GROWTH_WINDOW:
                     store.retract("writer_plugin")
+                    for k in range(i):
+                        store.retract(f"writer_{k}")
                     i = 0
 
         thread = threading.Thread(target=writer, daemon=True)
@@ -594,7 +602,7 @@ class TestConcurrency:
         try:
             for n in range(2000):
                 try:
-                    store.publications() if n % 2 else store.snapshot()
+                    store.publications() if n % 2 else store.names()
                 except BaseException as exc:  # noqa: BLE001 — ловим ровно то, что ищем
                     errors.append(exc)
                     break
@@ -609,48 +617,47 @@ class TestConcurrency:
 # Сборщик как чистая функция — без heartbeat и без дерева.
 # --------------------------------------------------------------------------- #
 class TestCollector:
-    def test_unowned_names_are_reported_sorted_and_not_published(self):
-        payload, rejected = build_plugin_levels({("b_unknown", "pub_b"): 1, ("a_unknown", "pub_a"): 2}, None)
-        assert payload == {}
-        # Тройка целиком: имя, публикатор и владелец (None = не объявлено никем).
-        assert rejected == (("a_unknown", "pub_a", None), ("b_unknown", "pub_b", None))
+    def test_two_writers_of_one_name_give_two_branches(self):
+        """Проекция, а не отбор: одно имя у двух писателей — две ветки.
 
-    def test_two_claimants_on_one_name_are_both_reported(self):
-        """ОБА публикатора отброшены и ОБА названы — ни один не схлопнут в один.
-
-        Вопрос, заданный вместе с ключом-парой: имя больше не уникально во входе,
-        и «отброшено имя X» без публикатора не говорит оператору, КТО его
-        перехватил. Схлопни сборщик две записи в одну — второй перехватчик стал
-        бы невидим, а искать его пришлось бы грепом по всем плагинам процесса.
-        Сортировка тоже проверяется: ключ теперь ПАРА, иначе порядок двух записей
-        с одним именем зависел бы от обхода словаря.
+        Здесь стояли три теста отсева (``rejected``-тройки, сортировка пар,
+        «чужое имя против необъявленного»). Отсева больше нет — сборщик вернулся
+        к тому, чем и должен быть: чистой проекции хранилища в поддерево.
+        Порядок вставки обратный алфавитному намеренно — чтобы тест краснел и у
+        механизма, который просто берёт последнего.
         """
-        payload, rejected = build_plugin_levels({("shared", "pub_b"): 2, ("shared", "pub_a"): 1}, None)
-        assert payload == {}
-        assert rejected == (("shared", "pub_a", None), ("shared", "pub_b", None))
+        out = build_plugin_levels({"pub_b": {"shared": 2}, "pub_a": {"shared": 1}}, None)
+        assert out == {"plugins": {"pub_b": {"shared": 2}, "pub_a": {"shared": 1}}}
 
-    def test_a_foreign_owner_is_reported_with_the_owners_name(self):
-        """Чужое имя и необъявленное — РАЗНЫЕ диагнозы, различимы третьим элементом."""
-        _payload, rejected = build_plugin_levels({("fps", "самозванец"): 99.0}, None)
-        assert len(rejected) == 1
-        name, publisher, owner = rejected[0]
-        assert (name, publisher) == ("fps", "самозванец")
-        assert owner is not None and owner.startswith("multiprocess_framework."), owner
+    def test_a_writer_whose_every_leaf_is_gated_out_leaves_no_empty_branch(self):
+        """Пустая ветка — запись в дерево, которая ничего не сообщает.
+
+        ``{"plugins": {"тихий": {}}}`` создал бы узел и дельту на КАЖДОМ тике,
+        не неся ни одного показания. Якорь в том же тесте: сосед, чей лист гейт
+        пропустил, ветку получает.
+        """
+        out = build_plugin_levels({"тихий": {"off": 1}, "громкий": {"on": 2}}, {"on"})
+        assert out == {"plugins": {"громкий": {"on": 2}}}, out
+
+    def test_nothing_survived_gives_an_empty_dict_not_an_empty_subtree(self):
+        """Ноль уцелевших листьев — ПУСТО, а не ``{"plugins": {}}``.
+
+        Иначе публикатор увидел бы непустую секцию ``state`` и послал бы merge,
+        то есть «нечего слать — не шлём» перестало бы работать этажом выше.
+        """
+        assert build_plugin_levels({"w": {"x": 1}}, set()) == {}
+        assert build_plugin_levels({}, None) == {}
 
     def test_the_collector_does_not_mutate_its_input(self):
-        levels = {("x", "p"): 1}
+        levels = {"p": {"x": 1}}
         build_plugin_levels(levels, None)
-        assert levels == {("x", "p"): 1}
+        assert levels == {"p": {"x": 1}}, "сборщик обязан быть чистым — вход тот же"
 
     def test_booleans_are_not_rounded_into_numbers(self):
         """``round(True, 1)`` вернул бы 1 — фронт, просочившийся в уровни, обязан
         остаться распознаваемым как фронт, а не превратиться в число."""
-        services, _hb = _boot(name="bool")
-        ctx = PluginContext(services=services, config={}, plugin_name="bool_plugin")
-        ctx.declare_metric("bool_level")
-        ctx.publish_metric("bool_level", True)
-        payload, _ = build_plugin_levels({("bool_level", "bool_plugin"): True}, None)
-        assert payload["bool_level"] is True
+        out = build_plugin_levels({"bool_plugin": {"bool_level": True}}, None)
+        assert out["plugins"]["bool_plugin"]["bool_level"] is True
 
 
 class TestWiringNotJustTheCollector:
@@ -686,7 +693,7 @@ class TestWiringNotJustTheCollector:
             deadline = time.time() + 5.0
             pushed = None
             while time.time() < deadline:
-                pushed = services._state_proxy.get("processes.wire.state.wired_level")
+                pushed = services._state_proxy.get("processes.wire.state.plugins.wire_plugin.wired_level")
                 if pushed is not None:
                     break
                 time.sleep(0.05)
@@ -751,7 +758,7 @@ class TestOneMergePerTick:
         assert path == "processes.one"
         assert data["workers"]["w"]["status"] == "running"
         assert data["state"]["fps"] == 8.0
-        assert data["state"]["one_level"] == 4.0
+        assert data["state"]["plugins"]["one_plugin"]["one_level"] == 4.0
         assert data["state"]["shm"]["torn_reads"] == 3
 
     def test_no_workers_does_not_swallow_levels_and_shm(self):
@@ -771,7 +778,7 @@ class TestOneMergePerTick:
         assert len(services._state_proxy.merges) == 1, services._state_proxy.merges
         _path, data = services._state_proxy.merges[0]
         assert "workers" not in data
-        assert data["state"]["nw_level"] == 6.0
+        assert data["state"]["plugins"]["nw_plugin"]["nw_level"] == 6.0
         assert data["state"]["shm"]["torn_reads"] == 3
 
     def test_all_zero_shm_still_does_not_load_the_tree(self):
@@ -791,7 +798,7 @@ class TestOneMergePerTick:
         assert len(services._state_proxy.merges) == 1, services._state_proxy.merges
         _path, data = services._state_proxy.merges[0]
         assert "shm" not in data["state"], data
-        assert data["state"]["zero_level"] == 1.0
+        assert data["state"]["plugins"]["zero_plugin"]["zero_level"] == 1.0
 
     def test_nothing_at_all_sends_zero_merges(self):
         """ЛОВУШКА 3: данных нет вовсе → НОЛЬ вызовов merge, а не пустой merge."""
@@ -804,30 +811,33 @@ class TestOneMergePerTick:
 
         assert services._state_proxy.merges == []
 
-    def test_the_framework_aggregate_lies_on_top_of_plugin_levels(self):
-        """Fail-safe порядок наложения (а НЕ политика разрешения конфликта).
+    def test_the_aggregate_and_a_same_named_level_no_longer_share_a_key(self):
+        """Столкновение имён исчезло структурно — сторожится ОБОИМИ листьями.
 
-        Спор за имя сюда не доходит — его снимает проверка владельца в сборщике,
-        и это сторожит соседний тест. Здесь проверяется само расположение.
+        Здесь стоял тест fail-safe порядка наложения («агрегат фреймворка ложится
+        ПОВЕРХ уровня плагина»). Ревью З1 честно измерило эту страховку: она
+        покрывала **1 случай из 5** — только ``fps``/``latency_ms`` и только когда
+        агрегат есть на том же тике. Единственным настоящим предохранителем была
+        проверка владельца в сборщике; Ф1 убрала её вместе с поводом, потому что
+        ключа для спора больше нет: уровень плагина живёт в
+        ``state.plugins.<писатель>.<имя>``, агрегат — в ``state.<имя>``.
 
-        **Покрывает РОВНО ОДИН случай из пяти** (ревью З1): порядок страхует
-        только ``fps``/``latency_ms`` и только когда агрегат есть на этом же тике.
-        Без воркеров, у ``effective_hz`` и у ``shm`` протёкшее значение доехало бы
-        до дерева — измерено инъекцией, таблица в докстринге
-        ``_publish_telemetry_to_tree``. Поэтому это тест ВТОРОЙ линии, а не
-        доказательство защиты; единственный настоящий предохранитель — владение.
-        Судится сборкой payload напрямую, потому что через боевой путь протечка
-        (по построению отбора) не воспроизводится.
+        Прежний тест подменял шов сбора (``hb._collect_plugin_levels = ...``),
+        то есть проверял вторую линию на выдуманной протечке. Здесь протечку
+        выдумывать не нужно: боевой путь публикует ОБА листа, и оба проверяются
+        литералами.
         """
         services = self._services_with_worker("order")
         hb = _boot_hb(services)
-        # Подменяем шов сбора уровней так, будто отбор протёк и отдал 'fps'.
-        hb._collect_plugin_levels = lambda allowed, *, voice: {"fps": 999.0}  # type: ignore[assignment]
+        PluginContext(services=services, config={}, plugin_name="order_plugin").publish_metric("fps", 999.0)
 
         hb._publish_telemetry_to_tree(services.worker_manager.get_all_workers_status(), None)
 
         _path, data = services._state_proxy.merges[0]
-        assert data["state"]["fps"] == 8.0, f"протёкший уровень плагина лёг ПОВЕРХ агрегата фреймворка: {data['state']}"
+        assert data["state"]["fps"] == 8.0, f"агрегат фреймворка подменён уровнем плагина: {data['state']}"
+        assert data["state"]["plugins"]["order_plugin"]["fps"] == 999.0, (
+            f"уровень плагина потерян — поддерево писателя не отделило его от агрегата: {data['state']}"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -865,12 +875,12 @@ class TestLifecycleRetract:
         plugin.name = "dying_plugin"
         plugin._do_configure(ctx)
         store = getattr(services, PLUGIN_LEVELS_ATTR)
-        assert store.snapshot() == {"dying_level": 5.0}
+        assert store.publications() == {"dying_plugin": {"dying_level": 5.0}}
 
         plugin._do_shutdown(ctx)
 
-        assert store.snapshot() == {}, (
-            f"уровень пережил остановку плагина: {store.snapshot()} "
+        assert store.publications() == {}, (
+            f"уровень пережил остановку плагина: {store.publications()} "
             "— снятие идёт ДО пользовательского shutdown либо не идёт вовсе"
         )
 
@@ -886,7 +896,7 @@ class TestLifecycleRetract:
 
         assert ctx_a._retract_metrics() == 1
         store = getattr(services, PLUGIN_LEVELS_ATTR)
-        assert store.snapshot() == {"pair_level_b": 2.0}
+        assert store.publications() == {"pair_b": {"pair_level_b": 2.0}}, "снятие писателя задело соседнее поддерево"
 
     def test_retract_without_a_store_is_a_named_zero_not_an_error(self):
         """Процесс без телеметрии останавливает плагины как обычно."""
@@ -907,269 +917,53 @@ class TestLifecycleRetract:
         assert "survivor_level" in declared_metrics()
         ctx.publish_metric("survivor_level", 4.0)
         _tick_levels(hb)
-        assert _tree(services, "survivor_level") == 4.0
+        assert _level(services, "redeclare_plugin", "survivor_level") == 4.0
 
 
 # --------------------------------------------------------------------------- #
 # Владелец считается в ОДНОМ месте — судится эффектом на боевой тройке.
 # --------------------------------------------------------------------------- #
-class TestOwnerIsComputedOnce:
-    def test_declare_publish_and_retract_agree_on_the_owner(self):
-        """Три дороги, один владелец. Разойдись хоть одна — уровень либо не
-        поедет (владелец не равен публикатору), либо не снимется на остановке.
-        Судится эффектом: объявил → уехало → сняли → исчезло."""
+class TestWriterIsComputedOnce:
+    def test_publish_and_retract_agree_on_the_writer(self):
+        """Три дороги, один писатель. Разойдись публикация со снятием — уровень
+        уехал бы в одно поддерево, а чистилось бы другое, и лист остановленного
+        плагина жил бы вечно. Судится эффектом: уехало под ИМЕНЕМ писателя →
+        сняли → в опросе поддерева нет."""
         services, hb = _boot(name="triple")
         ctx = PluginContext(services=services, config={}, plugin_name="triple_plugin")
         ctx.declare_metric("triple_level")
         ctx.publish_metric("triple_level", 7.0)
 
         _tick_levels(hb)
-        assert _tree(services, "triple_level") == 7.0, "объявление и публикация разошлись во владельце"
+        assert _level(services, "triple_plugin", "triple_level") == 7.0, (
+            "публикация уехала не под именем писателя — объявление и публикация разошлись"
+        )
 
-        assert ctx._retract_metrics() == 1, "снятие разошлось во владельце с публикацией"
-        assert _polled_state(services).get("triple_level") is None
+        assert ctx._retract_metrics() == 1, "снятие разошлось с публикацией в имени писателя"
+        assert _polled_level(services, "triple_plugin", "triple_level") is None
 
-    def test_a_context_without_a_plugin_name_owns_by_process_on_all_three(self):
-        """Тот же треугольник для базового ctx (владелец — имя процесса)."""
+    def test_a_context_without_a_plugin_name_writes_under_the_process_on_all_three(self):
+        """Тот же треугольник для базового ctx (писатель — имя процесса)."""
         services, hb = _boot(name="proc_owner")
         ctx = PluginContext(services=services, config={})
         ctx.declare_metric("proc_owned_level")
         ctx.publish_metric("proc_owned_level", 2.0)
 
         _tick_levels(hb)
-        assert _tree(services, "proc_owned_level") == 2.0
+        assert _level(services, "proc_owner", "proc_owned_level") == 2.0
         assert ctx._retract_metrics() == 1
 
 
 # --------------------------------------------------------------------------- #
-# Ключ-пара: перехватчик не может ни подменить, ни УНИЧТОЖИТЬ чужой уровень.
+# Ключ-пара, поимённое снятие и голос про самозванца — механизмы удалены Ф1.
 #
-# Блокер, найденный инъекцией И1 (2026-08-17): хранилище ключевалось одним
-# именем, публикация соседа затирала запись владельца, и сборщик отбрасывал
-# затёртое по несовпадению владельца — лист исчезал ЦЕЛИКОМ. Перехватчик не мог
-# подменить число, но мог его уничтожить одной опечаткой в имени.
+# Здесь стояли ДЕВЯТЬ тестов: «перехватчик не стирает ячейку владельца» (ключ-пара),
+# «снятый уровень уходит из дерева» (``None``-надгробия с запасом переутверждений) и
+# «голос отсева имеет потолок». Все три механизма срезаны §9 плана (блок Ф1): спорить
+# за имя нельзя синтаксически, отсеивать нечего, а поимённое надгробие во вложенной
+# форме легло бы на плоский путь при живом писателе. Снятие ПОДДЕРЕВА и его сторожа
+# приносит Ф2 — Ф1 и Ф2 поставляются одной парой (§11.7).
 # --------------------------------------------------------------------------- #
-class TestPairKeyProtectsTheOwner:
-    def test_the_interceptor_does_not_erase_the_owners_entry_in_the_store(self):
-        """Уровень сборщика — следствие; здесь проверяется САМА ячейка хранилища.
-
-        Тест на дереве (``..._owned_by_ANOTHER_PLUGIN_...``) покраснел бы и от
-        неверного сборщика, и от затёртой ячейки — он не различает эти причины.
-        Здесь адрес дефекта: обе записи обязаны СУЩЕСТВОВАТЬ порознь.
-        """
-        store = PluginLevels()
-        store.publish("shared", 11.0, "plugin_a")
-        store.publish("shared", 99.0, "plugin_b")
-
-        pubs = store.publications()
-        assert pubs[("shared", "plugin_a")] == 11.0, f"запись владельца затёрта соседом: {pubs}"
-        assert pubs[("shared", "plugin_b")] == 99.0, pubs
-
-    def test_two_claimants_neither_owning_are_both_rejected_and_both_voiced(self):
-        """Ни один не владелец → в дереве листа нет, а голос есть по КАЖДОМУ.
-
-        Вопрос 1 из поручения. Молчание про второго перехватчика было бы тем же
-        тихим отсевом, который задача и убирает, только адресованным другому
-        плагину.
-        """
-        services, hb = _boot(name="claimants")
-        PluginContext(services=services, config={}, plugin_name="claimant_a").publish_metric("orphan_name", 1.0)
-        PluginContext(services=services, config={}, plugin_name="claimant_b").publish_metric("orphan_name", 2.0)
-
-        _tick_levels(hb)
-
-        assert _tree(services, "orphan_name") is None
-        said = " ".join(msg for msg in services.warnings() if "orphan_name" in msg)
-        assert "claimant_a" in said and "claimant_b" in said, f"назван не каждый перехватчик: {services.warnings()}"
-
-    def test_a_later_claimant_on_an_already_voiced_name_is_still_voiced(self):
-        """Голос дедуплицируется по ПАРЕ (имя, публикатор), а не по имени.
-
-        ДОБАВЛЕН ПОСЛЕ ПРОМАХА ПРЕДСКАЗАНИЯ (2026-08-17). Инъекция «дедуп по
-        имени» дала НОЛЬ красных: соседний тест сажает обоих перехватчиков в ОДИН
-        тик, где множество уже названных пусто, и оба варианта дедупа ведут себя
-        одинаково. То есть тот тест сторожит «оба названы», но не сторожит ключ
-        дедупа — расхождение названо, а не замазано.
-
-        Разница видна только во ВРЕМЕНИ: перехватчик, появившийся ПОЗЖЕ (ленивый
-        импорт, hot-apply рецепта), при дедупе по имени молча проглатывается —
-        про его имя уже «сказано», хотя сказано было про другого виновника.
-        """
-        services, hb = _boot(name="late_claimant")
-        PluginContext(services=services, config={}, plugin_name="early_thief").publish_metric("late_orphan", 1.0)
-        _tick_levels(hb)
-        assert any("early_thief" in m for m in services.warnings()), services.warnings()
-
-        before = len(services.logs)
-        PluginContext(services=services, config={}, plugin_name="late_thief").publish_metric("late_orphan", 2.0)
-        _tick_levels(hb)
-
-        fresh = [e["msg"] for e in services.logs[before:] if e["level"] == "WARNING"]
-        assert any("late_thief" in m for m in fresh), f"поздний перехватчик того же имени промолчал: {fresh}"
-        # А первый — повторно НЕ говорит: пара уже названа.
-        assert not any("early_thief" in m for m in fresh), fresh
-
-    def test_retracting_the_owner_does_not_surface_the_interceptors_value(self):
-        """Вопрос 2: снятие владельца при живом перехватчике убирает лист.
-
-        Опасность конкретна: если бы `retract` снимал ПО ИМЕНИ, а не по паре, он
-        либо снёс бы и чужую запись (перехватчик молча «починился» бы), либо
-        оставил её единственной — и после остановки владельца оператор увидел бы
-        ЧУЖОЕ число под тем же путём, не узнав об этом ничем.
-        """
-        services, hb = _boot(name="retract_race")
-        owner_ctx = PluginContext(services=services, config={}, plugin_name="owner_plugin")
-        owner_ctx.declare_metric("guarded_level")
-        owner_ctx.publish_metric("guarded_level", 11.0)
-        PluginContext(services=services, config={}, plugin_name="thief_plugin").publish_metric("guarded_level", 99.0)
-
-        _tick_levels(hb)
-        assert _tree(services, "guarded_level") == pytest.approx(11.0), "предпосылка: владелец виден"
-
-        assert owner_ctx._retract_metrics() == 1, "снято не ровно то, что опубликовал владелец"
-        assert _polled_state(services).get("guarded_level") is None, (
-            "после остановки владельца всплыло значение перехватчика"
-        )
-        # Запись перехватчика жива в хранилище, но наружу не идёт — отвергается
-        # по владению, как и до снятия.
-        assert store_of(services).publications() == {("guarded_level", "thief_plugin"): 99.0}
-
-    def test_retract_takes_only_this_owners_rows_of_a_shared_name(self):
-        """`retract` работает по ВТОРОМУ элементу ключа, а не по имени."""
-        store = PluginLevels()
-        store.publish("shared", 11.0, "plugin_a")
-        store.publish("shared", 99.0, "plugin_b")
-        store.publish("own", 1.0, "plugin_a")
-
-        assert store.retract("plugin_a") == 2
-        assert store.publications() == {("shared", "plugin_b"): 99.0}
-
-
-def store_of(services):
-    """Хранилище уровней процесса — читается тем же портом, что и у фреймворка."""
-    return getattr(services, PLUGIN_LEVELS_ATTR)
-
-
-# --------------------------------------------------------------------------- #
-# Находки ревью 2026-08-17. Каждый тест судит ТО, ЧТО ПРОПУСТИЛ прежний объектив:
-# дерево вместо payload (Н1), отказную дорогу вместо счастливой (Н2), путь листа
-# вместо значения (Н3), предел вместо факта (З2), боевую форму merge вместо
-# удобной (З3).
-# --------------------------------------------------------------------------- #
-class TestRetractedLevelLeavesTheTree:
-    """Н1: «уровень мёртвого исчезает» — судится ДЕРЕВОМ, а не payload'ом.
-
-    Прежний П6 собирал дерево ТОЛЬКО из merge'ей ПОСЛЕ остановки, поэтому
-    «payload чист» и «в дереве ничего нет» были для него одним и тем же
-    утверждением. Объектив теста совпал с объективом инъекции — дыру не увидел
-    ни тест, ни инъекция. Здесь дерево живёт через ОБА тика.
-    """
-
-    def test_the_tree_stops_reading_after_the_owner_is_stopped(self):
-        services, hb = _boot(name="dead_owner")
-        ctx = PluginContext(services=services, config={}, plugin_name="mortal_plugin")
-        plugin = _MinimalHazardPlugin()
-        plugin.name = "mortal_plugin"
-        ctx.declare_metric("probe_level")
-        ctx.publish_metric("probe_level", 12.5)
-        plugin._do_configure(ctx)
-
-        _tick_levels(hb)
-        assert _tree(services, "probe_level") == pytest.approx(12.5), "предпосылка: значение в дереве"
-
-        plugin._do_shutdown(ctx)
-        _tick_levels(hb)
-
-        assert _tree(services, "probe_level") is None, (
-            f"лист живёт в дереве после остановки владельца: {_tree(services, 'probe_level')!r} — "
-            "снятие публикации дереву ничего не сказало"
-        )
-
-    def test_the_notice_stops_after_the_bounded_reassertion(self):
-        """«Показания нет» — КОНЕЧНЫЙ факт, а не уровень.
-
-        ОБНОВЛЕНО S-1 (2026-08-17). Прежняя редакция пинила «ровно один такт», и
-        это было верное утверждение неверного контракта: имя вычёркивалось ДО
-        ``proxy.merge``, обёрнутого в ``except Exception``, поэтому ЛЮБОЙ отказ
-        доставки хоронил снятие навсегда и оставлял в дереве мёртвое число.
-        Тест не удалён, а переведён на новую границу: повтор остался КОНЕЧНЫМ
-        (``RETRACTION_REASSERT_TICKS``), и исходная опасность — «нет показания»
-        превратилось в вечный уровень на мёртвом пути — держится по-прежнему,
-        просто предел теперь не 1, а 3.
-
-        Судится не только «после предела тихо», но и «до предела говорит»: без
-        нижней границы тест был бы зелёным и на реализации, которая не шлёт
-        снятие ВОВСЕ.
-        """
-        from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
-            RETRACTION_REASSERT_TICKS,
-        )
-
-        services, hb = _boot(name="once_only")
-        ctx = PluginContext(services=services, config={}, plugin_name="once_plugin")
-        ctx.declare_metric("once_level")
-        ctx.publish_metric("once_level", 3.0)
-        _tick_levels(hb)
-        ctx._retract_metrics()
-
-        for i in range(RETRACTION_REASSERT_TICKS):
-            before = len(services._state_proxy.merges)
-            _tick_levels(hb)
-            assert len(services._state_proxy.merges) > before, (
-                f"такт {i + 1} из {RETRACTION_REASSERT_TICKS}: снятие перестало утверждаться "
-                "раньше предела — потеря одного сообщения снова хоронила бы лист навсегда"
-            )
-            assert services._state_proxy.merges[-1][1].get("state", {}).get("once_level", "нет") is None, (
-                f"такт {i + 1}: в payload нет утверждения None по 'once_level': {services._state_proxy.merges[-1][1]!r}"
-            )
-
-        after_notice = len(services._state_proxy.merges)
-        _tick_levels(hb)
-        _tick_levels(hb)
-
-        assert len(services._state_proxy.merges) == after_notice, (
-            f"после {RETRACTION_REASSERT_TICKS} успешных утверждений тик снова шлёт merge — "
-            "«нет показания» превратилось в бесконечную дельту на мёртвый путь"
-        )
-
-    def test_a_relaunched_plugin_beats_the_pending_notice(self):
-        """Живое значение на том же тике важнее отложенного «нет показания».
-
-        Плагин может быть поднят заново между снятием и тиком; обнулить его
-        свежее показание значило бы заменить одну ложь другой.
-        """
-        services, hb = _boot(name="relaunch")
-        ctx = PluginContext(services=services, config={}, plugin_name="phoenix_plugin")
-        ctx.declare_metric("phoenix_level")
-        ctx.publish_metric("phoenix_level", 1.0)
-        ctx._retract_metrics()
-        ctx.publish_metric("phoenix_level", 2.0)  # поднялся заново до тика
-
-        _tick_levels(hb)
-
-        assert _tree(services, "phoenix_level") == pytest.approx(2.0)
-
-    def test_the_notice_is_not_gated(self):
-        """Гейт управляет ЧАСТОТОЙ уровня, а не однократным снятием.
-
-        Пропусти снятие через гейт — и у выключенной метрики лист остался бы
-        навсегда с мёртвым числом, то есть гейт порождал бы ту самую ложь,
-        которую снятие убирает.
-        """
-        services, hb = _boot(name="gated_retract")
-        ctx = PluginContext(services=services, config={}, plugin_name="gated_mortal")
-        ctx.declare_metric("gated_dead_level")
-        ctx.publish_metric("gated_dead_level", 5.0)
-        _tick_levels(hb)
-        assert _tree(services, "gated_dead_level") == pytest.approx(5.0)
-
-        ctx._retract_metrics()
-        hb.reconfigure_telemetry({"metrics": {"gated_dead_level": {"enabled": False}}})
-        _tick_levels(hb, hb._telemetry_gate.due_metrics(now=0.0))
-
-        assert _tree(services, "gated_dead_level") is None, (
-            "закрытый гейт съел снятие — лист остался с мёртвым числом навсегда"
-        )
 
 
 class _BoomPlugin(ProcessModulePlugin):
@@ -1202,17 +996,28 @@ class TestShutdownFailureStillRetracts:
         plugin.name = "boom_plugin"
         plugin._do_configure(ctx)
         _tick_levels(hb)
-        assert _tree(services, "boom_level") == pytest.approx(7.7), "предпосылка"
+        assert _level(services, "boom_plugin", "boom_level") == pytest.approx(7.7), "предпосылка"
 
         with pytest.raises(RuntimeError, match="камера не отпустила"):
             plugin._do_shutdown(ctx)
 
         # Бросок ушёл наружу как раньше — состояние НЕ STOPPED.
         assert plugin.state != PluginState.STOPPED
-        # ...но уровни сняты, и дерево об этом узнало.
-        assert getattr(services, PLUGIN_LEVELS_ATTR).publications() == {}
+        # ...но уровни сняты из ХРАНИЛИЩА, и следующий тик их уже не публикует.
+        assert getattr(services, PLUGIN_LEVELS_ATTR).publications() == {}, (
+            "уровень пережил отказавший shutdown — снятие стоит вне finally"
+        )
+        before = len(services._state_proxy.merges)
         _tick_levels(hb)
-        assert _tree(services, "boom_level") is None, "уровень пережил отказавший shutdown — снятие стоит вне finally"
+        assert len(services._state_proxy.merges) == before, "тик после снятия всё ещё публикует уровни ушедшего плагина"
+        # ЛИСТ В ДЕРЕВЕ ПРИ ЭТОМ ОСТАЁТСЯ, и это НЕ дефект, а известная цена
+        # неделимой поставки Ф1+Ф2: поимённые ``None``-надгробия вырезаны вместе с
+        # арбитражем (их Ф0-фильтр стоял на каталоге владения), а удаление ПОДДЕРЕВА
+        # дорогой ``state.delete`` приносит Ф2. Утверждение зафиксировано ЯВНО, а не
+        # оставлено как молчание: иначе Ф2 не с чем было бы сравнивать.
+        assert _level(services, "boom_plugin", "boom_level") == pytest.approx(7.7), (
+            "лист исчез из дерева раньше Ф2 — значит снятие завелось интеримом, которого план не заказывал"
+        )
 
 
 class TestDottedLevelNameIsRefused:
@@ -1234,45 +1039,45 @@ class TestDottedLevelNameIsRefused:
         assert "a_b_c" in text, f"отказ не предложил годного имени: {text}"
 
     def test_a_dotted_name_never_reaches_the_tree(self):
-        """Отказ на объявлении достаточен: необъявленное имя до дерева не доходит.
+        """Отказа на ОБЪЯВЛЕНИИ больше не достаточно — guard стоит и на публикации.
 
-        Второй guard в ``publish_metric`` не нужен — публикация в необъявленное
-        имя уже отвергается по владению и получает голос. Проверяется свойство,
-        а не отсутствие второго guard'а.
+        **Дыру открыл шаг 5 самой Ф1, и она воспроизведена, а не предположена.**
+        Прежний довод звучал так: «второй guard не нужен — публикация в
+        необъявленное имя уже отвергается по владению». Ф1 сняла и владение, и
+        требование объявления: необъявленное имя стало ехать легально, а вместе с
+        ним поехало бы и точечное. Прогон на дубле ``TreeStore._merge_recursive``
+        (тот же резолв, что у настоящего стора) дал ровно тот лист-двойник, ради
+        которого точка запрещена::
+
+            тик 1: {'plugins': {'dotter': {'a.b.c': 1.0}}}
+            тик 2: {'plugins': {'dotter': {'a.b.c': 1.0, 'a': {'b': {'c': 2.0}}}}}
+                                            ^^^^^^^^^^^^ заморожен навсегда
+
+        Поэтому ``publish_metric`` отвергает точку сам — голосом, а не исключением
+        (уровень не имеет права ронять линию), один раз на имя.
+
+        ЯКОРЬ в том же тесте: соседнее имя БЕЗ точки от того же плагина едет.
+        Без него тест зелен и у механизма, который не публикует вовсе.
         """
         services, hb = _boot(name="dotted2")
         ctx = PluginContext(services=services, config={}, plugin_name="dotted_plugin2")
         ctx.publish_metric("x.y", 1.0)  # объявить нельзя, публикуем всё равно
+        ctx.publish_metric("x.y", 2.0)  # второй тик — та ветка, что рождала двойника
+        ctx.publish_metric("plain", 3.0)
 
         _tick_levels(hb)
 
-        assert _tree(services, "x.y") is None
-        assert services._state_proxy.get("processes.dotted2.state.x") is None
-        assert any("x.y" in msg for msg in services.warnings()), services.warnings()
+        assert _level(services, "dotted_plugin2", "x.y") is None
+        assert services._state_proxy.get("processes.dotted2.state.plugins.dotted_plugin2.x") is None
+        assert _level(services, "dotted_plugin2", "plain") == 3.0, "ЯКОРЬ: годное имя того же плагина едет"
+        said = [msg for msg in services.warnings() if "x.y" in msg]
+        assert len(said) == 1, f"ожидали ОДИН голос на имя, получили {len(said)}: {said}"
 
     def test_stats_plane_keeps_dotted_names(self):
         """Ограничение — только у уровней: в stats имя путём дерева не становится."""
         services, _hb = _boot(name="dotted3")
         ctx = PluginContext(services=services, config={}, plugin_name="dotted_plugin3")
         ctx.gauge("capture.fps", 12.5)  # не бросает — плоскость другая
-
-
-class TestRejectionVoiceHasACeiling:
-    """З2: голос обязан назвать виновника, а не воспроизвести его вход."""
-
-    def test_a_flood_of_rejections_gives_one_bounded_line(self):
-        services, hb = _boot(name="flood")
-        ctx = PluginContext(services=services, config={}, plugin_name="flood_plugin")
-        for i in range(200):
-            ctx.publish_metric(f"flood_level_{i}", float(i))
-
-        _tick_levels(hb)
-
-        said = [msg for msg in services.warnings() if "flood_level_" in msg]
-        assert len(said) == 1, f"ожидали одну строку, получили {len(said)}"
-        assert len(said[0]) < 2000, f"строкаWARNING разрослась до {len(said[0])} символов"
-        assert "и ещё" in said[0], f"масштаб отсева потерян — хвоста нет: {said[0][-200:]}"
-        assert services._state_proxy.merges == [], "необъявленные имена уехали в дерево"
 
 
 # --------------------------------------------------------------------------- #

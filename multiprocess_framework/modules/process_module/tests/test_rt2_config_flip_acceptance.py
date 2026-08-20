@@ -301,18 +301,25 @@ def test_a5_polled_levels_cover_every_name_the_gate_can_turn_off(
     services.worker_manager = _FakeWorkerManager(workers)
     services.router_manager = _FakeRouter({})  # даже нули → непустой "shm" на опросе
 
-    owner = capture_plugin_metrics_declared
+    writer = capture_plugin_metrics_declared
     levels_store = PluginLevels()
-    levels_store.publish("capture_fps", 24.7, owner=owner)
-    levels_store.publish("frame_count", 1234, owner=owner)
-    levels_store.publish("drops", 3, owner=owner)
+    levels_store.publish("capture_fps", 24.7, writer)
+    levels_store.publish("frame_count", 1234, writer)
+    levels_store.publish("drops", 3, writer)
     setattr(services, PLUGIN_LEVELS_ATTR, levels_store)
 
     hb = ProcessHeartbeat(services)
     snapshot = hb.current_levels_snapshot()
     assert snapshot is not None, "current_levels_snapshot() вернул None — сенсоров нет вовсе"
 
-    observed_names: set[str] = set(snapshot.get("state", {}).keys())
+    # Ф1 «порт наблюдений»: уровни плагинов лежат под state.plugins.<писатель>.<имя>,
+    # агрегаты фреймворка — по-прежнему прямо в state. Собираем ИМЕНА ЛИСТЬЕВ с обоих
+    # ярусов: критерий A5 про имена, которые гейт умеет выключать, а гейт матчит
+    # по имени листа независимо от глубины пути.
+    state_section = snapshot.get("state", {})
+    observed_names: set[str] = set(state_section.keys()) - {"plugins"}
+    for _writer, leaves in (state_section.get("plugins") or {}).items():
+        observed_names |= set(leaves.keys())
     for _wname, wdata in snapshot.get("workers", {}).items():
         observed_names |= set(wdata.keys()) - {"status", "cycles"}
 

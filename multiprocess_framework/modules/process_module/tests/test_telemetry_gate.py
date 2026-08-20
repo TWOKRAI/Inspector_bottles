@@ -11,7 +11,6 @@ Acceptance 1.2:
 
 from __future__ import annotations
 
-from multiprocess_framework.modules.observability_declarations import metric_owners
 from multiprocess_framework.modules.process_module.configs import (
     MetricRule,
     TelemetryPublishConfig,
@@ -40,7 +39,7 @@ class TestGatedMetricsLocation:
 
         assert gated_metrics is NEW_LOCATION
 
-    def test_the_catalog_holds_exactly_the_five_framework_metrics(self) -> None:
+    def test_the_framework_declares_exactly_the_five_metrics(self) -> None:
         """Состав каталога — литералом, а не выводом из самого каталога.
 
         Ожидание, посчитанное через ``declared_metrics()``, согласилось бы с
@@ -48,21 +47,45 @@ class TestGatedMetricsLocation:
         Пять имён — те же, что были в снятом кортеже ``GATED_METRICS``: Ф8.1
         меняла ВЛАДЕНИЕ каталогом, а не его содержимое.
 
-        **Срез по владельцу, а не весь каталог** (Р3.5-11). Реестр процессный и
-        общий: любой тест, поднявший прикладной плагин, доливает в него СВОИ имена
-        (``capture_fps``/``frame_count``/``drops`` у ``CapturePlugin``), и сплошное
-        равенство краснело бы от ПОРЯДКА тестов — воспроизведено на прогоне
-        2026-08-16: поодиночке зелёный, в полном прогоне красный. Проверяемое
-        свойство при этом не «в процессе ровно пять метрик» (неправда и не нужно),
-        а «фреймворк объявляет ровно эти пять» — и вот оно, теперь адресуемое
-        напрямую через :func:`metric_owners`.
+        **Объектив сменён: раньше срез реестра по владельцу, теперь — места
+        объявления в исходниках** (Ф1 «порт наблюдений»). Прежняя редакция звала
+        ``metric_owners()`` и фильтровала по владельцу, потому что реестр
+        процессный и общий: любой тест, поднявший прикладной плагин, доливает в
+        него СВОИ имена (``capture_fps``/``frame_count``/``drops`` у
+        ``CapturePlugin``), и сплошное равенство краснело бы от ПОРЯДКА тестов
+        (воспроизведено 2026-08-16: поодиночке зелёный, в полном прогоне
+        красный). Ф1 удалила у метрик владение целиком — спрашивать «чьё это имя»
+        больше не у кого.
+
+        Свойство при этом ЖИВО и звучит буквально так же: «фреймворк объявляет
+        ровно эти пять». Оно проверяется по местам вызова ``declare_metric`` в
+        дереве фреймворка — это тот же вопрос, заданный другому свидетелю, и он
+        к загрязнению реестра прикладными плагинами невосприимчив по построению.
+        Ослабить тест до «пять имён есть среди gated_metrics()» было бы тихой
+        потерей: шестая метрика фреймворка проехала бы молча.
+
+        Скан привязан к КОНВЕНЦИИ имени константы (``METRIC_* = declare_metric(...)``),
+        а не к любому упоминанию: голый ``declare_metric(`` ловил ещё и докстринг
+        ``plugins/base.py`` и давал шесть мест на пяти метриках.
         """
-        framework_owned = {
-            name for name, owner in metric_owners().items() if owner.startswith("multiprocess_framework.")
-        }
-        assert framework_owned == {"fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"}
+        import re
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[3]  # multiprocess_framework/
+        assert root.name == "multiprocess_framework", root
+        declared_in_sources: set[str] = set()
+        sites = 0
+        pattern = re.compile(r"""^\s*METRIC_\w+\s*=\s*declare_metric\(\s*["']([^"']+)["']""", re.MULTILINE)
+        for path in root.rglob("*.py"):
+            if "tests" in path.parts:
+                continue
+            for name in pattern.findall(path.read_text(encoding="utf-8")):
+                declared_in_sources.add(name)
+                sites += 1
+        assert sites == 5, f"мест объявления метрик во фреймворке стало {sites}, а не 5"
+        assert declared_in_sources == {"fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"}
         # Каталог гейта — надмножество: обходя его, гейт видит и прикладные имена.
-        assert framework_owned <= set(gated_metrics())
+        assert declared_in_sources.issubset(set(gated_metrics()))
 
     def test_the_order_is_sorted_not_import_order(self) -> None:
         """Порядок устойчив к порядку импортов — иначе строки GUI переставлялись бы.
