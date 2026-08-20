@@ -15,6 +15,8 @@
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) · [вердикт по одному маркеру врёт](feedback_single_marker_verdict_lies.md) — пара маркеров + признак жизни
 - [Subagent live = синхронно](feedback_subagent_live_test_monitor_hang.md)
 - [Красный — сперва на main](feedback_check_red_on_main_first.md) · [подпись гейта живёт на HEAD](feedback_gate_signature_lives_on_a_head.md) — коммит после подписи = пере-прогон
+- [Два зелёных гейта прячут красную пару](feedback_two_green_gates_can_hide_a_red_pair.md) — уборка сняла ЧУЖОЕ объявление; нарушитель и жертва в разных testpaths, красное только в совмещённом прогоне
+- [Инъектировать место ВЫЗОВА, не только тело](feedback_inject_the_call_site_not_only_the_helper.md) — снял единственный боевой вызов: ноль красных из 4297, тридцать сторожей звали хелпер напрямую
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — откат stash, счёт арифметикой
 - [Неубиваемая правка — ставь состояние руками](feedback_unkillable_fix_needs_a_hand_set_state.md) — правка, недостижимая после соседних правок ТОГО ЖЕ пакета, инъекцией не красит ничего; предсказывать «ноль» честно, а сторожить белым ящиком
 - [Снятие лишней работы красит тесты, мерившие её](feedback_removing_waste_reddens_tests_that_measured_it.md) — красный = вопрос «какое свойство сторожил», а не сигнал откатиться; один из них был зелён на свойстве, которого нет
