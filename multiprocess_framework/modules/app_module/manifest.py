@@ -52,7 +52,11 @@ class AppManifest(BaseModel):
         extras:    App-специфика pass-through (тема/брендинг/…); framework не читает.
         system:    Системные настройки (``system.yaml``); ``None`` — приложение без них.
         pipeline:  Активный запускаемый pipeline (runnable-топология или рецепт).
-        base:      Фундамент-топология (always-on); ``None`` — только ``pipeline``.
+        base:      Фундамент — КОРТЕЖ топологий always-on инфраструктуры,
+                   склеиваемых по порядку. Пустой кортеж — только ``pipeline``.
+                   В манифесте допустимы обе формы: строка (исторический вид,
+                   так написаны все существующие app.yaml) и список (композиция
+                   инфраструктуры без правки общего фундамента).
         recipes:   Каталог GUI-редактируемых рецептов; ``None`` — не используется.
         discovery: Пути авто-скана плагинов/сервисов (абсолютные после загрузки).
     """
@@ -63,9 +67,38 @@ class AppManifest(BaseModel):
     extras: dict[str, Any] = Field(default_factory=dict)
     system: Path | None = None
     pipeline: Path
-    base: Path | None = None
+    base: tuple[Path, ...] = ()
     recipes: Path | None = None
     discovery: DiscoverySpec = Field(default_factory=DiscoverySpec)
+
+
+def _resolve_base(base_dir: Path, raw: object) -> tuple[Path, ...]:
+    """Разобрать ключ ``base``: строка, список строк или отсутствие.
+
+    Обе формы равноправны и обе обязаны работать: существующие манифесты
+    написаны строкой, а подключение инфраструктурного кирпича (сток истории,
+    рекордер, профайлер) требует списка. Порядок значим — фрагменты склеиваются
+    слева направо, как ``base`` с ``pipeline``.
+
+    Зачем список, а не процесс, вписанный в общий ``base.yaml``: вписанный
+    платят ВСЕ сборки. Замерено 2026-08-23 — один side-effect процесс в общем
+    фундаменте раздул golden-снимки рецептов на 375 строк каждый и удвоил
+    состав минимального ``hello_world``.
+
+    Отказ громкий и с адресом ключа: молча проглоченный ``base: 42`` дал бы
+    систему БЕЗ фундамента, и заметили бы это по отсутствующему процессу на
+    стенде, а не по конфигу.
+    """
+    if raw is None or raw == "" or raw == []:
+        return ()
+    if isinstance(raw, str):
+        return (_resolve(base_dir, raw),)
+    if isinstance(raw, (list, tuple)):
+        bad = [x for x in raw if not isinstance(x, str) or not x]
+        if bad:
+            raise ValueError(f"base: элементы списка должны быть непустыми строками-путями, получено: {bad!r}")
+        return tuple(_resolve(base_dir, x) for x in raw)
+    raise ValueError(f"base: ожидалась строка или список строк, получено {type(raw).__name__}: {raw!r}")
 
 
 def _resolve(base_dir: Path, value: str) -> Path:
@@ -113,7 +146,7 @@ def load_manifest(path: Path | str) -> AppManifest:
         extras=dict(raw.get("extras") or {}),
         system=_resolve(base_dir, system_raw) if system_raw else None,
         pipeline=_resolve(base_dir, raw["pipeline"]),
-        base=_resolve(base_dir, base_raw) if base_raw else None,
+        base=_resolve_base(base_dir, base_raw),
         recipes=_resolve(base_dir, recipes_raw) if recipes_raw else None,
         discovery=discovery,
     )

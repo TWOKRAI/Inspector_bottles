@@ -252,8 +252,12 @@ def run_gui(process: "GuiProcess") -> None:
         from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
 
         _topology_dict = unwrap_recipe(_yaml.safe_load(_manifest.pipeline.read_text(encoding="utf-8")) or {})
-        if _manifest.base:
-            _base_dict = unwrap_recipe(_yaml.safe_load(_manifest.base.read_text(encoding="utf-8")) or {})
+        # Фундамент — СПИСОК фрагментов, склеиваемых по порядку (тот же цикл, что в
+        # backend/launch.py::from_manifest). Зеркалить обязательно: разойдись эти
+        # два места — GUI показывал бы граф, отличный от запущенного, и «Перезапустить»
+        # применял бы не то, что видно на экране.
+        for _фрагмент in _manifest.base:
+            _base_dict = unwrap_recipe(_yaml.safe_load(_фрагмент.read_text(encoding="utf-8")) or {})
             _topology_dict = merge_topologies(_base_dict, _topology_dict)
     except Exception as e:
         process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")

@@ -206,3 +206,67 @@ class TestCachePurgesBySubtree:
             ]
         )
         assert proxy.get(ПИСАТЕЛЬ + ".fps", ОТСУТСТВУЕТ) is ОТСУТСТВУЕТ
+
+
+class TestNonLeafDeltaIsExpanded:
+    """Кэш держит ЛИСТЬЯ — инвариант, который половина кода нарушала.
+
+    ``_apply_resync_snapshot`` словари пропускает явно, а приёмная сторона
+    дельт клала ``delta.new_value`` сырым. Дельта СОЗДАНИЯ поддерева приходит
+    словарём целиком — и такая запись протухала (обновления идут полистовыми
+    дельтами) и переживала префикс-чистку: удаление ``…plugins.capture``
+    снимает лист, но ПРЕДКА ``…plugins`` не трогает.
+    """
+
+    def test_dict_delta_lands_as_leaves_not_as_one_entry(self):
+        proxy = StateProxy("camera_0", router=MockRouter())
+        родитель = "processes.camera_0.state.plugins"
+
+        proxy._update_cache(
+            [
+                Delta(
+                    path=родитель,
+                    old_value=MISSING,
+                    new_value={"capture": {"fps": 21.3}, "capture2": {"fps": 852.3}},
+                    source="hb",
+                )
+            ]
+        )
+
+        assert proxy.get(родитель + ".capture.fps", ОТСУТСТВУЕТ) == 21.3
+        assert proxy.get(родитель + ".capture2.fps", ОТСУТСТВУЕТ) == 852.3
+        # Нелистовой записи в кэше не появилось.
+        assert proxy.get(родитель, ОТСУТСТВУЕТ) is ОТСУТСТВУЕТ
+
+    def test_the_expanded_leaves_are_purged_by_a_subtree_delete(self):
+        """Развёрнутые листья уходят по дельте корня — призрака не остаётся."""
+        proxy = StateProxy("camera_0", router=MockRouter())
+        родитель = "processes.camera_0.state.plugins"
+
+        proxy._update_cache(
+            [
+                Delta(
+                    path=родитель,
+                    old_value=MISSING,
+                    new_value={"capture": {"fps": 21.3}, "capture2": {"fps": 852.3}},
+                    source="hb",
+                )
+            ]
+        )
+        assert proxy.get(родитель + ".capture.fps", ОТСУТСТВУЕТ) == 21.3
+
+        proxy._update_cache(
+            [Delta(path=родитель + ".capture", old_value={"fps": 21.3}, new_value=MISSING, source="hb")]
+        )
+
+        assert proxy.get(родитель + ".capture.fps", ОТСУТСТВУЕТ) is ОТСУТСТВУЕТ
+        assert proxy.get(родитель + ".capture2.fps", ОТСУТСТВУЕТ) == 852.3
+
+    def test_empty_dict_puts_nothing_in_the_cache(self):
+        """Пустой словарь листьев не даёт — в кэш не кладём вовсе."""
+        proxy = StateProxy("camera_0", router=MockRouter())
+        путь = "processes.camera_0.state.plugins"
+
+        proxy._update_cache([Delta(path=путь, old_value=MISSING, new_value={}, source="hb")])
+
+        assert proxy.get(путь, ОТСУТСТВУЕТ) is ОТСУТСТВУЕТ

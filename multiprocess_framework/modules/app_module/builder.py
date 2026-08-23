@@ -101,8 +101,11 @@ def default_blueprint_loader(manifest: "AppManifest") -> dict[str, Any]:
     pipeline = _load_yaml_or_json(manifest.pipeline)
     blueprint = (nested_blueprint_data(pipeline) or {}) if has_top_level_blueprint(pipeline) else pipeline
 
-    if manifest.base is not None:
-        base = _load_yaml_or_json(manifest.base)
+    # Фундамент — КОРТЕЖ фрагментов, склеиваемых по порядку тем же merge, что и
+    # pipeline поверх фундамента: отдельного механизма для инфраструктуры нет.
+    # Порядок значим и читается сверху вниз в манифесте.
+    for base_path in manifest.base:
+        base = _load_yaml_or_json(base_path)
         base_bp = (nested_blueprint_data(base) or {}) if has_top_level_blueprint(base) else base
         blueprint = _merge_topologies(base_bp, blueprint)
 

@@ -184,3 +184,71 @@ class TestEvictHazards:
         )[0]
         assert row["fps"] == 21.3, f"колонка фреймворка не задета: {row}"
         assert "state.plugins.capture.fps" not in _extra_of(plugin)
+
+
+class TestNonLeafDeltaDoesNotCreateAGhost:
+    """Дельта СОЗДАНИЯ поддерева приходит словарём — и это ломало Ф2.
+
+    Найдено на живом стенде 2026-08-23: в строке БД одновременно жили
+    ``state.plugins = {'capture': {'capture_fps': 14.5}}`` и
+    ``state.plugins.capture.capture_fps = 14.3``. Словарь протухал (обновления
+    идут полистовыми дельтами), дублировал число и — главное — переживал уход
+    писателя: ``_cache_evict`` режет по границе-точке, поэтому удаление
+    ``…plugins.capture`` снимало лист, но не трогало ПРЕДКА ``…plugins``.
+    Числа ушедшего писателя оставались в строках навсегда, то есть ровно тот
+    дефект, который Ф2 и убирает.
+    """
+
+    def test_subtree_creation_delta_is_expanded_into_leaves(self):
+        plugin = make_plugin()
+        plugin._on_deltas([_лист(f"processes.{ПРОЦЕСС}.state.fps", 21.3)])
+        plugin._on_deltas(
+            [
+                Delta(
+                    path=КОРЕНЬ.rsplit(".", 1)[0],
+                    old_value=MISSING,
+                    new_value={"capture": {"capture_fps": 14.5}},
+                    source="hb",
+                )
+            ]
+        )
+        plugin._sample_once()
+        до = _extra_of(plugin)
+
+        # Развёрнуто в ЛИСТ, а не положено словарём под родительским ключом.
+        assert до["state.plugins.capture.capture_fps"] == 14.5, до
+        assert "state.plugins" not in до, f"нелистовая запись в накопителе: {до}"
+
+    def test_the_ghost_does_not_survive_the_writer_departure(self):
+        plugin = make_plugin()
+        plugin._on_deltas([_лист(f"processes.{ПРОЦЕСС}.state.fps", 21.3)])
+        plugin._on_deltas(
+            [
+                Delta(
+                    path=КОРЕНЬ.rsplit(".", 1)[0],
+                    old_value=MISSING,
+                    new_value={"capture": {"capture_fps": 14.5}},
+                    source="hb",
+                ),
+                _лист(КОРЕНЬ + ".capture_fps", 14.3),
+            ]
+        )
+        plugin._sample_once()
+        строк_до = len(plugin._sql.query(f"SELECT id FROM telemetry_snapshots WHERE process_name='{ПРОЦЕСС}'"))
+        assert _extra_of(plugin)["state.plugins.capture.capture_fps"] == 14.3
+
+        plugin._on_deltas([_удаление(КОРЕНЬ, {"capture_fps": 14.3})])
+        plugin._sample_once()
+
+        строк_после = len(plugin._sql.query(f"SELECT id FROM telemetry_snapshots WHERE process_name='{ПРОЦЕСС}'"))
+        после = _extra_of(plugin)
+        # Якорь наблюдения: новая строка ДЕЙСТВИТЕЛЬНО написана. Без него
+        # «ключей нет» читалось бы со СТАРОЙ строки — процесс без единого ключа
+        # строку не пишет вовсе, и проверка стала бы вакуумной.
+        assert строк_после > строк_до, "новая строка не написана — проверка была бы вакуумной"
+        assert not [k for k in после if "plugins" in k], f"призрак ушедшего писателя выжил: {после}"
+        # Пара-контроль: колонка фреймворка не задета.
+        row = plugin._sql.query(
+            f"SELECT fps FROM telemetry_snapshots WHERE process_name='{ПРОЦЕСС}' ORDER BY id DESC LIMIT 1"
+        )[0]
+        assert row["fps"] == 21.3, row

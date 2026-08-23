@@ -538,8 +538,12 @@ class SystemBuilder:
         raw = _load_raw_dict(bp_path)
         blueprint = unwrap_recipe(raw)
 
-        if app.base:
-            blueprint = merge_topologies(load_topology_dict(app.base), blueprint)
+        # Фундамент — СПИСОК фрагментов, склеиваемых по порядку. Каждый следующий
+        # ложится поверх предыдущих тем же merge_topologies, что и pipeline поверх
+        # фундамента, — отдельного механизма для инфраструктуры не заводим.
+        # Порядок значим и он же читается сверху вниз в манифесте.
+        for fragment in app.base:
+            blueprint = merge_topologies(load_topology_dict(fragment), blueprint)
         # Overlay — ПАТЧ поверх УЖЕ СЛИТОЙ топологии (D8): процесс `gui` объявляет
         # рецепт (в headless-воплощении), overlay подменяет ему класс на Qt-шный.
         # Порядок «после слияния», а не «до»: патчить нужно то, что реально поедет,

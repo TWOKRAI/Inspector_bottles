@@ -1223,6 +1223,38 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             self._log_error(f"StateProxy '{self._process_name}': ошибка десериализации дельт: {exc}")
             return []
 
+    def _cache_put(self, path: str, value: Any) -> None:
+        """Положить значение в кэш, РАЗВЕРНУВ словарь в листья.
+
+        Инвариант «в кэше только листья» в этом классе уже существовал, но
+        соблюдался лишь половиной кода: :meth:`_apply_resync_snapshot` словари
+        пропускает явно (``not isinstance(value, dict)``), а приёмная сторона
+        дельт клала ``delta.new_value`` сырым. Дельта СОЗДАНИЯ поддерева
+        приходит со словарём целиком, поэтому нелистовая запись в кэше
+        появлялась и жила там вечно.
+
+        Чем это плохо (воспроизведено на живом стенде 2026-08-23, дефект
+        наблюдался у DB-стока, разделяющего ту же модель кэша):
+
+        * запись протухает — дальнейшие обновления идут полистовыми дельтами
+          и словаря не касаются (в строках БД жили ``14.5`` в словаре и
+          ``14.3`` в листе одновременно);
+        * префикс-чистка по MISSING-дельте её не видит: удаление
+          ``…plugins.capture`` снимает лист ``…plugins.capture.capture_fps``,
+          но ПРЕДКА ``…plugins`` не трогает — числа ушедшего писателя
+          переживают собственное снятие.
+
+        Пустой словарь листьев не даёт вовсе и в кэш не кладётся: узел есть,
+        значений нет.
+        """
+        if isinstance(value, dict):
+            if not value:
+                return
+            for key, nested in value.items():
+                self._cache_put(f"{path}.{key}", nested)
+            return
+        self._cache[path] = value
+
     def _update_cache(self, deltas: list[Delta]) -> None:
         """Обновить кэш на основе списка дельт.
 
@@ -1261,7 +1293,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 for key in stale:
                     del self._cache[key]
             else:
-                self._cache[delta.path] = delta.new_value
+                self._cache_put(delta.path, delta.new_value)
 
     def _invoke_callbacks(self, deltas: list[Delta]) -> None:
         """Вызвать callbacks, фильтруя дельты по pattern каждой подписки.

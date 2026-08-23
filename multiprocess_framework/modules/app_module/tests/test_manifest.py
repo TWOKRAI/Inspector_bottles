@@ -43,7 +43,10 @@ def test_relative_paths_resolved_from_manifest_dir(tmp_path: Path) -> None:
         "pipeline: pipeline.yaml\nbase: base.yaml\nsystem: sys.yaml\nrecipes: recipes\n",
     )
     m = load_manifest(path)
-    assert m.base == (tmp_path / "base.yaml").resolve()
+    # base с 2026-08-23 — КОРТЕЖ фрагментов (композиция always-on инфраструктуры
+    # без правки общего base.yaml). Строковая форма манифеста осталась валидной и
+    # даёт кортеж из одного элемента — именно её этот тест и проверяет.
+    assert m.base == ((tmp_path / "base.yaml").resolve(),)
     assert m.system == (tmp_path / "sys.yaml").resolve()
     assert m.recipes == (tmp_path / "recipes").resolve()
 

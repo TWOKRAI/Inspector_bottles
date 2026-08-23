@@ -48,9 +48,26 @@ class AppManifest(BaseModel):
                       который их не читает; см. Ф2 frontend-constructor T2.3).
         pipeline:     Активный запускаемый pipeline (runnable-топология).
         recipes:      Каталог GUI-редактируемых рецептов (editor-слой).
-        base:         Фундамент-топология (always-on инфра, БЕЗ презентации).
-                      ``None`` — фундамент не используется (запуск читает
-                      только ``pipeline``).
+        base:         Фундамент — СПИСОК топологий always-on инфраструктуры (БЕЗ
+                      презентации), склеиваемых по порядку. Пустой список —
+                      фундамент не используется (запуск читает только ``pipeline``).
+
+                      В манифесте допустимы обе формы, и это не «на всякий
+                      случай»: одна строка — исторический вид, который читают все
+                      существующие app.yaml; список — способ подключить ОТДЕЛЬНЫЙ
+                      кирпич инфраструктуры, не трогая общий фундамент::
+
+                          base: backend/topology/base.yaml          # как было
+                          base:                                     # композиция
+                            - backend/topology/base.yaml
+                            - backend/topology/observability_sink.yaml
+
+                      Зачем список, а не процесс, вписанный в ``base.yaml``:
+                      вписанный платят ВСЕ сборки. Замерено 2026-08-23 — добавление
+                      одного side-effect процесса в общий фундамент раздуло
+                      golden-снимки рецептов на 375 строк каждый и удвоило состав
+                      минимального ``hello_world``. Со списком не подключивший не
+                      платит ничем, а подключение и отключение — одна строка.
         presentation: Презентационный overlay-ПАТЧ (GUI): подменяет процессу ``gui``
                       класс на Qt-шный. ``None`` — headless: тот же процесс живёт в
                       дренирующем воплощении, объявленном рецептом (план D8). См.
@@ -62,8 +79,32 @@ class AppManifest(BaseModel):
     styles: StylesRef | None = None
     pipeline: Path
     recipes: Path
-    base: Path | None = None
+    base: tuple[Path, ...] = ()
     presentation: Path | None = None
+
+
+def _resolve_base(base_dir: Path, raw: object) -> tuple[Path, ...]:
+    """Разобрать ключ ``base``: строка, список строк или отсутствие.
+
+    Обе формы равноправны и обе обязаны работать — существующие манифесты
+    написаны строкой, а композиция инфраструктуры требует списка. Порядок
+    списка значим: фрагменты склеиваются слева направо, как ``base`` с
+    ``pipeline``.
+
+    Отказ громкий и с адресом ключа: молча проглоченный ``base: 42`` дал бы
+    систему без фундамента, и заметили бы это по отсутствующему процессу, а не
+    по конфигу.
+    """
+    if raw is None or raw == "" or raw == []:
+        return ()
+    if isinstance(raw, str):
+        return (_resolve(base_dir, raw),)
+    if isinstance(raw, (list, tuple)):
+        bad = [x for x in raw if not isinstance(x, str) or not x]
+        if bad:
+            raise ValueError(f"base: элементы списка должны быть непустыми строками-путями, получено: {bad!r}")
+        return tuple(_resolve(base_dir, x) for x in raw)
+    raise ValueError(f"base: ожидалась строка или список строк, получено {type(raw).__name__}: {raw!r}")
 
 
 def _resolve(base_dir: Path, value: str) -> Path:
@@ -112,6 +153,6 @@ def load_manifest(path: Path | str) -> AppManifest:
         styles=styles,
         pipeline=_resolve(base_dir, raw["pipeline"]),
         recipes=_resolve(base_dir, raw["recipes"]),
-        base=_resolve(base_dir, base_raw) if base_raw else None,
+        base=_resolve_base(base_dir, base_raw),
         presentation=_resolve(base_dir, presentation_raw) if presentation_raw else None,
     )

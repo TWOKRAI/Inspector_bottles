@@ -306,8 +306,15 @@ def test_a_recipe_without_a_name_value_gets_the_same_origin_on_both_roads(tmp_pa
     app_raw = yaml.safe_load((proto / "app.yaml").read_text(encoding="utf-8"))
     app_raw["pipeline"] = "recipes/noname.yaml"
     for key in ("system", "base", "presentation"):
-        if app_raw.get(key):
-            app_raw[key] = str((proto / app_raw[key]).resolve())
+        value = app_raw.get(key)
+        if not value:
+            continue
+        # ``base`` с 2026-08-23 — список фрагментов (композиция инфраструктуры);
+        # строковая форма осталась валидной, поэтому поддерживаем обе.
+        if isinstance(value, list):
+            app_raw[key] = [str((proto / item).resolve()) for item in value]
+        else:
+            app_raw[key] = str((proto / value).resolve())
     manifest = tmp_path / "app.yaml"
     manifest.write_text(yaml.safe_dump(app_raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
