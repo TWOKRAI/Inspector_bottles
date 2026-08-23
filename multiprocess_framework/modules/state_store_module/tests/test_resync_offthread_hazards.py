@@ -666,3 +666,74 @@ class TestContractViolationIsNotFailOpen:
         proxy = self._proxy_with_router(_BrokenTransportRouter())
 
         assert proxy._send_sync({"command": "state.get_subtree", "data": {}}) is None
+
+
+# ===========================================================================
+# F2 (ревью 2026-08-23): защита окна и НЕЛИСТОВЫЕ дельты
+# ===========================================================================
+
+
+def test_dict_delta_in_the_window_is_protected_leaf_by_leaf():
+    """Дельта-СЛОВАРЬ в окне защищена так же, как листовая.
+
+    Регресс, найденный ревью: `_cache_put` раскладывает словарь в листья, а
+    журнал защиты помечал КОРЕНЬ. Протектор записей матчит точно, поэтому листья
+    оставались беззащитными, и снимок постарше стирал более новое живое значение.
+    Дельта создания поддерева приходит словарём при первом появлении узла —
+    то есть сценарий не экзотический, а обычный старт писателя.
+    """
+    stand = _Stand("dict_window")
+    try:
+        _open_window(stand)
+        # Дельта окна — СЛОВАРЁМ (создание поддерева), revision свежее снимка.
+        stand.deliver(
+            [_d("foo.plugins", {"capture": {"fps": 21.3}}, revision=6, old=MISSING)],
+            first_revision=6,
+            revision=6,
+        )
+        assert stand.proxy.cache.get("foo.plugins.capture.fps") == 21.3, (
+            f"dict-дельта не разложена в листья — сценарий не воспроизведён: {stand.proxy.cache!r}"
+        )
+
+        # Снимок ПОСТАРШЕ, с другим значением того же листа + посторонний лист.
+        stand.answer_resync({"foo": {"plugins": {"capture": {"fps": 10.0}}, "extra": 42}}, revision=5)
+        cache = stand.proxy.cache
+    finally:
+        stand.close()
+
+    # Якорь существования: снимок реально применён.
+    assert cache.get("foo.extra") == 42, (
+        f"снимок не применён вовсе (кэш={cache!r}) — проверка «не откатили» была бы пустой"
+    )
+    assert cache.get("foo.plugins.capture.fps") == 21.3, (
+        f"снимок (revision=5) откатил лист живой dict-дельты (revision=6): "
+        f"{cache.get('foo.plugins.capture.fps')!r}, ожидалось 21.3"
+    )
+
+
+def test_dict_delta_in_the_window_is_not_erased_by_a_snapshot_without_that_path():
+    """Второй сценарий ревьюера: снимок без этого пути не стирает лист окна.
+
+    Здесь снимок ЛЕГАЛЬНО не содержит путь (сервер снял его до появления узла).
+    Стирание «устаревших» ключей под паттерном не имеет права трогать то, что
+    защищено окном, — иначе писатель, поднявшийся в окне, исчезает молча.
+    """
+    stand = _Stand("dict_window_erase")
+    try:
+        _open_window(stand)
+        stand.deliver(
+            [_d("foo.plugins", {"capture": {"fps": 21.3}}, revision=6, old=MISSING)],
+            first_revision=6,
+            revision=6,
+        )
+        assert stand.proxy.cache.get("foo.plugins.capture.fps") == 21.3
+
+        stand.answer_resync({"foo": {"extra": 42}}, revision=5)
+        cache = stand.proxy.cache
+    finally:
+        stand.close()
+
+    assert cache.get("foo.extra") == 42, f"снимок не применён вовсе: {cache!r}"
+    assert cache.get("foo.plugins.capture.fps") == 21.3, (
+        f"лист, созданный dict-дельтой в окне, стёрт снимком: {cache!r}"
+    )

@@ -1116,15 +1116,50 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         подклассе было бы нечем поймать).
         """
         for delta in deltas:
-            target = self._resync_dirty_deletes if delta.new_value is MISSING else self._resync_dirty
-            known = target.get(delta.path)
-            if known is None:
-                if len(self._resync_dirty) + len(self._resync_dirty_deletes) >= self._RESYNC_DIRTY_MAX:
-                    self._resync_dirty_overflow = True
+            if delta.new_value is MISSING:
+                # Удаление адресуется КОРНЕМ поддерева, и защита от снимка тоже:
+                # протектор удалений сравнивает по префиксу (см. _make_resync_protector).
+                self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)
+                continue
+            # ЗАПИСЬ помечается ТЕМИ ЖЕ путями, какие реально легли в кэш.
+            # Дельта создания поддерева приходит СЛОВАРЁМ, а `_cache_put`
+            # раскладывает её в листья: пометить корень значило бы защитить путь,
+            # которого в кэше нет, и оставить незащищёнными все листья под ним —
+            # старый снимок стёр бы более новое живое значение. Найдено ревью
+            # 2026-08-23 (F2), воспроизведение: dict-дельта rev 10 в открытом окне,
+            # снимок rev 7 → лист исчезал из кэша либо откатывался 21.3 → 10.0.
+            for path in self._expand_leaf_paths(delta.path, delta.new_value):
+                self._mark_resync_dirty(self._resync_dirty, path, delta.revision)
+                if self._resync_dirty_overflow:
                     return
-                target[delta.path] = delta.revision
-            elif delta.revision > known:
-                target[delta.path] = delta.revision
+
+    @staticmethod
+    def _expand_leaf_paths(path: str, value: Any) -> list[str]:
+        """Пути, которые ``_cache_put`` реально запишет для этого значения.
+
+        Один обход на двоих с :meth:`_cache_put` по смыслу: разъедься они — журнал
+        защиты снова начнёт охранять не то, что лежит в кэше.
+        """
+        if not isinstance(value, dict):
+            return [path]
+        if not value:
+            # Пустой словарь листьев не даёт и в кэш не попадает — защищать нечего.
+            return []
+        leaves: list[str] = []
+        for key, nested in value.items():
+            leaves.extend(StateProxy._expand_leaf_paths(f"{path}.{key}", nested))
+        return leaves
+
+    def _mark_resync_dirty(self, target: dict, path: str, revision: int) -> None:
+        """Отметить один путь в журнале защиты, соблюдая потолок ``_RESYNC_DIRTY_MAX``."""
+        known = target.get(path)
+        if known is None:
+            if len(self._resync_dirty) + len(self._resync_dirty_deletes) >= self._RESYNC_DIRTY_MAX:
+                self._resync_dirty_overflow = True
+                return
+            target[path] = revision
+        elif revision > known:
+            target[path] = revision
 
     def _apply_resync_snapshot(
         self,
