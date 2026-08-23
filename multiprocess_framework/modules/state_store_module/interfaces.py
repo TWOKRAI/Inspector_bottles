@@ -228,6 +228,19 @@ class IStateProxy(ABC):
         ...
 
     @abstractmethod
+    def delete(self, path: str) -> None:
+        """Отправить state.delete в StateStoreManager через IPC.
+
+        Удаляет узел/поддерево целиком. Идемпотентен на стороне сервера:
+        повторное удаление отсутствующего пути — не ошибка.
+
+        Args:
+            path: точечный путь к узлу/поддереву, например
+                'processes.cam0.state.plugins.capture'.
+        """
+        ...
+
+    @abstractmethod
     def subscribe(
         self,
         pattern: str,

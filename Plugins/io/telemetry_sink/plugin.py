@@ -159,11 +159,43 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         """
         with self._cache_lock:
             for d in deltas:
-                # Удаление узла (new_value is MISSING) → убираем из кэша.
                 if d.is_delete:
-                    self._cache.pop(d.path, None)
+                    self._cache_evict(d.path)
                 else:
                     self._cache[d.path] = d.new_value
+
+    def _cache_evict(self, path: str) -> None:
+        """Убрать ``path`` и его ПОДДЕРЕВО из кэша по MISSING-дельте.
+
+        Почему поддерево, а не только точное совпадение: кэш хранит ЛИСТЬЯ
+        (``self._cache["...plugins.capture.fps"] = value`` — по одной записи на
+        MERGE-лист), а снятие писателя целиком идёт ОДНОЙ дельтой на КОРЕНЬ
+        поддерева — ``TreeStore.delete`` снимает ровно один узел по пути и
+        возвращает одну ``Delta`` с ``new_value=MISSING`` на этом пути (не по
+        дельте на лист, `core/tree_store.py`). Путь дельты тогда —
+        ``processes.<P>.state.plugins.<writer>``, а ключи кэша —
+        ``processes.<P>.state.plugins.<writer>.fps`` и т.п.: точного совпадения
+        никогда не будет, и точечный ``pop(path)`` — молчаливый no-op, из-за
+        которого сток бессрочно пишет последние числа ушедшего писателя
+        (воспроизведено C5-тестом, `test_f2_acceptance_writer_subtree_cleanup.py`).
+
+        Точечное удаление (MISSING-дельта самого листа — тоже валидный путь,
+        например прямое снятие одного значения) остаётся нужным и покрыто тем
+        же вызовом: ``pop(path)`` снимает точное совпадение, цикл ниже — детей.
+
+        Граница — точка-разделитель, тот же приём, что
+        ``TelemetryReadModel._purge_subtree`` (``telemetry_read_model.py``) и
+        ``StateProxy._update_cache`` (Task 2.1, `proxy/state_proxy.py`): чистим
+        ``path`` и ключи с префиксом ``path + "."``, а НЕ ``path`` как голую
+        подстроку — иначе уход ``...plugins.capture`` задел бы и
+        ``...plugins.capture2.fps`` (общий текстовый префикс "capture", разный
+        сегмент пути).
+        """
+        self._cache.pop(path, None)
+        dotted_prefix = path + "."
+        stale = [p for p in self._cache if p.startswith(dotted_prefix)]
+        for p in stale:
+            del self._cache[p]
 
     # --- Семпл ---
 

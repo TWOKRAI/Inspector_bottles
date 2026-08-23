@@ -182,6 +182,36 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         }
         self._send(msg)
 
+    def delete(self, path: str) -> None:
+        """Отправить state.delete в StateStoreManager через IPC.
+
+        Зеркало set()/merge() — тот же транспорт (fire-and-forget через
+        _send), тот же source (имя процесса-отправителя). Приёмная сторона
+        (TreeStore.delete, StateStoreManager.handle_state_delete, маршрут
+        'state.delete', прун троттла) уже существует — этот метод достраивает
+        единственное недостающее звено: клиентский вызов.
+
+        Идемпотентен на сервере: удаление уже отсутствующего пути не
+        ошибка (TreeStore.delete возвращает None, handler отвечает
+        changed=False). На стороне прокси эквивалентно set()/merge() —
+        асинхронная команда, без ожидания ответа.
+
+        Args:
+            path: точечный путь к узлу/поддереву, например
+                'processes.cam0.state.plugins.capture'.
+        """
+        msg = {
+            "type": "command",
+            "sender": self._process_name,
+            "targets": [self._server_target],
+            "command": "state.delete",
+            "data": {
+                "path": path,
+                "source": self._process_name,
+            },
+        }
+        self._send(msg)
+
     # -------------------------------------------------------------------
     # Чтение
     # -------------------------------------------------------------------
@@ -903,16 +933,34 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         """Обновить кэш на основе списка дельт.
 
         Правила:
-        - delta.new_value is MISSING → удалить path из кэша
+        - delta.new_value is MISSING → удалить path И ВСЁ ПОДДЕРЕВО под ним
         - иначе → записать delta.new_value в кэш
+
+        Почему поддерево, а не точечный ``pop(delta.path)``: кэш держит ЛИСТЬЯ
+        (merge порождает по дельте на лист, ключ кэша — полный путь листа), а
+        удаление узла приходит ОДНОЙ дельтой на КОРЕНЬ поддерева —
+        :meth:`TreeStore.delete` снимает ровно один узел и возвращает одну
+        ``Delta`` с ``new_value=MISSING`` на его пути (``core/tree_store.py``).
+        Точного совпадения с ключами-листьями тогда не бывает никогда, и
+        точечный ``pop`` — молчаливый no-op: кэш продолжает отдавать показания
+        писателя, которого в дереве уже нет.
+
+        Граница — точка-разделитель, как в ``TelemetryReadModel._purge_subtree``
+        (``telemetry_read_model.py:256``): чистятся ``path`` и ключи с префиксом
+        ``path + "."``, а не ``path`` как голая подстрока — иначе удаление
+        ``...plugins.capture`` снесло бы и ``...plugins.capture2.fps``.
 
         Args:
             deltas: список Delta для обновления кэша.
         """
         for delta in deltas:
             if delta.new_value is MISSING:
-                # Удаление узла
+                # Удаление узла — вместе с поддеревом (см. докстринг).
                 self._cache.pop(delta.path, None)
+                dotted = delta.path + "."
+                stale = [key for key in self._cache if key.startswith(dotted)]
+                for key in stale:
+                    del self._cache[key]
             else:
                 self._cache[delta.path] = delta.new_value
 
