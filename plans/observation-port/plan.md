@@ -796,8 +796,59 @@ transport}.py` и `backend_ctl/probes/*` — из `backend_ctl` построчн
 3. Вердикт каждому: «чистит по префиксу — готов» / «нужна префикс-чистка (Task 2.1 для кэша
    прокси, Task 2.3 для стока)» / «неизвестный — СТОП фазы».
 **Acceptance criteria:**
-- [ ] таблица потребителей с вердиктами в плане; неизвестных нет, либо фаза остановлена
+- [x] таблица потребителей с вердиктами в плане; неизвестных нет, либо фаза остановлена
 **Out of scope:** правки потребителей (Task 2.1 / Task 2.3).
+
+#### Результат Task 2.0 — таблица потребителей (снято 2026-08-23)
+
+**Якоря трёх заявленных плану сверены с HEAD `48d4ed09` — разошлись только вторым знаком, смысл
+не изменился.** `TreeStore.delete` конструирует ОДНУ `Delta` на `return` (`core/tree_store.py:346-353`,
+план указывал `346-352` — на одну строку короче, тот же блок). `StateProxy._update_cache` — метод
+с `902`, точечный `pop(delta.path, None)` на `915` (план: `914-916`, диапазон верный, точная строка
+на единицу ниже центра). `Plugins/io/telemetry_sink/plugin.py._on_deltas` — метод с `154`, точечный
+`pop` на `164` (план: `162-166`, диапазон верный, `is_delete` на `163`). `TelemetryReadModel._purge_subtree`
+подтверждён на `256` (вызов из `ingest(deleted=True)` — `232`): чистит по границе `path` /
+`path + "."`, готов.
+
+**Поиск остальных.** `qex:search_code` по «subscribe to state store delta path cache pop» дал
+только сам `Delta`/тесты (индекс не разрешил по символам) — рабочим инструментом оказался grep по
+`\.subscribe\(` и `is_delete|delta\.path|new_value is MISSING` на весь репозиторий
+(`multiprocess_framework/`, `Services/`, `Plugins/`, `multiprocess_prototype/`, `backend_ctl/`),
+затем ручная проверка каждого файла (что подписка держит, как чистит). Найдено **14 потребителей
+дельт/MISSING** (включая три названных плану) — **11 новых плану неизвестны**. Неизвестных
+(«нельзя установить чтением») — **0**: поведение каждого определено чтением callback'а.
+
+| Потребитель (`файл:строка`) | Что держит / делает | Вердикт |
+|---|---|---|
+| `state_store_module/proxy/state_proxy.py:902-917` (`_update_cache`, pop `:915`) | Клиентский кэш прокси: `pop(delta.path, None)` — точечно | **нужна префикс-чистка → Task 2.1** (уже в плане) |
+| `Plugins/io/telemetry_sink/plugin.py:154-166` (`_on_deltas`, pop `:164`) | Кэш стока перед семплом: `pop(d.path, None)` — точечно | **нужна префикс-чистка → Task 2.3** (уже в плане) |
+| `telemetry_readmodel_module/telemetry_read_model.py:213-238,256-278` (`ingest(deleted=True)` → `_purge_subtree`) | Снимок/история/`_push_seq` read-model | **чистит по префиксу — готов** (уже в плане) |
+| `frontend_module/state/telemetry_view_model.py:154-168` (`on_state_delta`, накопитель `_pending`) | Батч-буфер Qt-сигнала `updated`: `_pending[path] = _REMOVED`, сбрасывается КАЖДЫЙ тик (`_flush`, `:211-218`); долгоживущее состояние — делегат в `TelemetryReadModel` (строка выше) | **готов** — тонкий passthrough, сам не кэширует дольше одного тика; риск уже закрыт read-model'ю |
+| `multiprocess_prototype/frontend/state/bindings.py:407-483` (`GuiStateBindings._on_state_msg`) — `match_glob(handle.pattern, path)` точным путём дельты | Реестр `bind()`/`bind_fanout()` виджетов по glob-паттерну; при `deleted=True` без точного совпадения паттерна с `delta.path` виджет НЕ трогается (заморозка на последнем значении) | **тот же класс дефекта, что у прокси/стока, но НЕ задет сегодня**: grep всех вызовов `.bind(`/`.bind_fanout(` в `frontend/` — ни один не адресует `processes.*.state.plugins.*`. **НОВЫЙ адресат вне периметра Ф2** — при появлении виджета, привязанного напрямую к листу под `state.plugins.<писатель>`, точечный `match_glob` пропустит удаление корня. Называю вслух, не блокирую (replay при `bind()` берёт снимок из уже безопасного `TelemetryReadModel` — `:170-178`, живой канал `_on_state_msg` — нет) |
+| `multiprocess_prototype/frontend/widgets/tabs/processes/_panels.py:587-595,1208-1245` (`_vm_setters` в `ProcessesPanel`/`SingleProcessPanel`) | Статический словарь `{точный_путь: setter}`, наполняется ОДИН раз в конструкторе, не растёт от дельт | **не задет структурно**: ключи — только framework-агрегаты (`state.fps/latency_ms/uptime`, `system.*`), под `state.plugins.<писатель>` сеттеров нет вообще (grep подтверждён) |
+| `multiprocess_prototype/backend/state/adapters/registers_adapter.py:24-214` (`RegistersStateAdapter`, `_reverse_mapping`) | Обратный маппинг `state_path → (register, field)`, подписка `"**"`, точный `dict.get(path)` (`:203`) | **нужна префикс-чистка (тот же класс), НО неиспользуемый путь**: класс НЕ инстанцируется нигде в проде (только докстринг-пример и smoke-тест) — грамкая квалификация по правилу «нет вызывающих ≠ не нужен», фазу не блокирует |
+| `multiprocess_prototype/backend/state/adapters/camera_state_adapter.py:188-226` (`_on_state_deltas`, `self._camera_states`) | Локальный кэш `{camera_id: {field: value}}`; матч `_CAMERA_STATE_RE` — при несовпадении (делит корня короче листа) `continue`, кэш НЕ чистится (`:203-205`, воспроизведено чтением) | **нужна префикс-чистка (тот же класс), НО неиспользуемый путь**: `CameraStateAdapter` нигде не инстанцируется в проде (только тесты) — квалифицирую громко, не блокирую |
+| `multiprocess_prototype/backend/state/adapters/display_state_adapter.py:71-93,158-` (`_on_state_deltas`) | Подписка `displays.*.status` — терминальный лист (детей глубже `.status` не существует по схеме) | **готов структурно** (уязвимого поддерева нет); также неиспользуемый путь в проде (только тесты) |
+| `multiprocess_prototype/backend/state/adapters/service_state_adapter.py:31-93` (`ServiceStateAdapter`) | Подписка `services.*.status` — терминальный лист; **подключён в проде** (`frontend/app.py:452`) | **готов структурно, вне периметра Ф2** (домен `services`, не `processes.*.state.plugins.*`) |
+| `multiprocess_prototype/backend/state/adapters/recipe_adapter.py:34-90` (`RecipeStateAdapter`) | Подписка на ровно `recipes.active` — один путь, детей нет; **подключён в проде** (`frontend/app.py:507`) | **готов структурно, вне периметра Ф2** |
+| `multiprocess_prototype/frontend/bridge/topology_bridge.py:268-283` (`TopologyBridge.on_state_delta`) | Не кэширует — форвардит `processes.<P>.config.<field>` в `RegistersManager.set_value`; ветка `state.plugins.*` явно не парсится (комментарий `:283`) | **вне периметра**: другое поддерево (`config`, не `state.plugins`), и не кэш-потребитель |
+| `state_store_module/selectors/selector.py:228-263` (`SelectorRegistry.handle_delta`, `Selector.cached_value`) | `_find_affected` матчит `delta.path` о паттерн ЗАВИСИМОСТИ фиксированной глубины; корень-делит короче паттерна зависимости — селектор не пересчитается, `cached_value`/опубликованный `selectors.<name>` замирают | **тот же класс дефекта, НО неиспользуемый путь**: `SelectorRegistry`/`Selector` нигде не инстанцируются в `multiprocess_prototype`/`Services`/`Plugins` (только тесты фреймворка) — квалифицирую громко, не блокирую. **Отдельно:** `unregister()` сам зовёт `_store.delete(f"selectors.{name}")` (`:207`) — но публикует значения через `set()` (не `merge()`), поэтому НИКОГДА не создаёт многолистовое поддерево под `selectors.<name>` — единственная когда-либо испущенная дельта совпадает с той, что чистит `pop`; для этого конкретного вызывающего риска нет вообще |
+| `state_store_module/persistence/persistence_manager.py` (`PersistenceMiddleware`, `after_set`/`after_merge` определены, `after_delete` — НЕТ, наследуется no-op база `middleware/base.py:97-99`) | Debounced YAML-персист секций дерева, помечает `dirty` только на `after_set`/`after_merge` | **НОВАЯ находка — отдельный подкласс того же корня («корень-делит теряется»), но не «точечный кэш», а «пропущенный хук»**: удаление узла НИКОГДА не помечает секцию dirty → персист не увидит исчезновение → при рестарте узел ресуррект(ир)уется из старого YAML. **Неиспользуемый путь**: `PersistenceManager`/`PersistenceMiddleware` не инстанцируются нигде вне `state_store_module` (не в `multiprocess_prototype`) — квалифицирую громко, фазу не блокирует, но это самостоятельный дефект framework-модуля, достойный отдельного тикета вне периметра этого плана |
+
+**Итог по числам.** Найдено потребителей дельт/MISSING всего — **14**. Планом не покрыто (т.е. новых
+для Task 2.0) — **11** из 14. Из них: 2 требуют реальной доработки живого прод-кода помимо уже
+названных Task 2.1/2.3 (`GuiStateBindings` и статические `_vm_setters` — но оба **структурно не
+задеты сегодня**, т.к. ни один виджет не привязан под `state.plugins.<писатель>`); 4 несут тот же
+класс дефекта, но код мёртв (не инстанцируется в проде) — `RegistersStateAdapter`, `CameraStateAdapter`,
+`SelectorRegistry`, `PersistenceMiddleware`; 5 безопасны структурно или вне периметра
+(`TelemetryViewModel._pending`, `DisplayStateAdapter`, `ServiceStateAdapter`, `RecipeStateAdapter`,
+`TopologyBridge`). **Неизвестных («нельзя установить чтением») — 0.**
+
+**Вердикт: стоп-условие фазы СНЯТО.** Ни один потребитель не остался неопределённым; два новых
+находки (`GuiStateBindings`, dead-code адаптеры/`PersistenceMiddleware`) названы громко по правилу
+владельца («нет вызывающих ≠ не нужен»), но ни один не задет живым механизмом Ф2 (единственный
+источник root-delete по плану — `processes.{p}.state.plugins.{писатель}` через будущий
+`proxy.delete()` из Task 2.1/2.2), поэтому фаза продолжается без расширения периметра Task 2.1/2.3.
 
 ### Task 2.1 — `StateProxy.delete` — достроить существующую дорогу
 **Level:** Middle+ · **Assignee:** developer
