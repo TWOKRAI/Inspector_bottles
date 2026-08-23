@@ -37,14 +37,14 @@ from base_manager import BaseManager, ObservableMixin, BaseAdapter
 class RouterManager(BaseManager, ObservableMixin):
     def __init__(self, name, logger=None, stats=None):
         BaseManager.__init__(self, name)
-        
+
         # Регистрируем сервисы (менеджеры)
         managers = {}
         if logger:
             managers['logger'] = logger
         if stats:
             managers['stats'] = stats
-        
+
         ObservableMixin.__init__(
             self,
             managers=managers,
@@ -140,6 +140,39 @@ if manager.has_adapter("command"):
 1. `manager._call_manager('logger', ...)` (если ObservableMixin)
 2. Прямой доступ к `process.logger_manager`
 3. `print()` как последняя линия защиты
+
+---
+
+## Контракт слота: что можно класть в `logger`/`stats`/`error`
+
+`_call_manager` вызывает менеджер по **каноничному** имени метода: у слота
+`logger` это `debug/info/warning/error/critical`, у `stats` —
+`record_metric`/`record_timing`, у `error` — `track_error`/`record_error`.
+Публичные алиасы самого `ObservableMixin` называются иначе (`log_debug`,
+`log_info`, …), поэтому **носитель `ObservableMixin` НЕ является годным
+логгером**: `SomeComponent(..., logger=self)` кладёт в слот объект чужого
+протокола, и записи компонента теряются. Отдавайте реальный `LoggerManager`
+(`self.logger_manager`, доступен после шага 3 `ProcessModule.initialize()`).
+
+Четыре исхода вызова (ADR-BM-005):
+
+| Состояние слота | Поведение |
+|---|---|
+| слот не зарегистрирован | тихо `None` — законный допуск |
+| менеджер `None` | тихо `None` — законный допуск |
+| слот выключен (`disable`) | тихо `None` — законный допуск |
+| менеджер есть, метода нет | **счётчик + один WARNING** — дефект проводки |
+| менеджер есть, метод бросил | **счётчик + один WARNING** — дефект приёмника |
+
+Счётчики читаются снаружи: `manager.manager_call_failures` → `{"logger.warning": 3}`
+(и попадают в `get_state()`). WARNING пишется один раз на пару `manager.method`
+через stdlib `logging` — `_call_manager` стоит на hot-path каждой записи, и
+спам там недопустим; отказать мог сам logger-менеджер, поэтому лог идёт мимо
+`_log_*`, иначе была бы рекурсия.
+
+Компоненты, которые зовут `logger._log_*` **напрямую** (а не через свой слот),
+с носителем `ObservableMixin` работают штатно: у них indirection через чужой
+миксин, и слот резолвится в момент вызова.
 
 ---
 

@@ -212,6 +212,7 @@ class MockProcessServices:
         event_selector: Any = None,
         flight_recorder: Any = None,
         plugin_levels: Any = None,
+        logger_manager: Any = None,
     ) -> None:
         self.name: str = name
         # Ф8.7 / задача 4.2 (Н-9): атрибут ЕСТЬ всегда, значение может быть None.
@@ -234,6 +235,10 @@ class MockProcessServices:
         # создаётся лениво на первом ``ctx.publish_metric``, и дубль обязан этот
         # путь пройти, а не получить готовое хранилище задаром.
         self.plugin_levels: Any = plugin_levels
+        # Task Т.1: шестой порт с тем же доводом — атрибут ЕСТЬ всегда, значение
+        # может быть None. Без атрибута дубль перестал бы удовлетворять
+        # IProcessServices, который порт объявил.
+        self.logger_manager: Any = logger_manager
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()

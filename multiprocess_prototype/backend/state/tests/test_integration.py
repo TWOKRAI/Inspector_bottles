@@ -100,6 +100,11 @@ def _make_pm_app(router, initial_state, throttle_rules):
     pm.config_handler = None
     pm.router_manager = router
     pm.command_manager = MagicMock()
+    # Task Т.1: у настоящего объекта logger_manager ставит ProcessModule.__init__
+    # (None) и переприсваивает _init_managers; __new__ обходит оба шага.
+    # _setup_state_store отдаёт его в слот logger StateStoreManager вместо self —
+    # процесс каноничного debug/info/warning/… не несёт.
+    pm.logger_manager = None
     pm._state_store_manager = None
 
     return pm

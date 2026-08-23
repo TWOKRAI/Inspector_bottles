@@ -151,6 +151,13 @@ class _MockServices:
     command_manager = None
     router_manager = None
     memory_manager = None
+    # Task Т.1: порт объявлен в IProcessServices, и PluginOrchestrator читает
+    # его, чтобы отдать РЕАЛЬНЫЙ LoggerManager в слот RegistersManager (сам
+    # объект сервисов каноничного протокола не несёт). Атрибут ЕСТЬ всегда,
+    # значение может быть None — иначе дубль перестаёт удовлетворять протоколу,
+    # а AttributeError глохнет в except внутри _build_registers_manager и
+    # менеджер регистров молча становится None.
+    logger_manager = None
 
     def __init__(self):
         self.log_info = MagicMock()

@@ -71,12 +71,18 @@ class GuiProcess(ProcessModule):
             GuiStateProxy,
         )
 
+        # logger=self.logger_manager, а НЕ logger=self (Task Т.1): GuiStateProxy —
+        # носитель ObservableMixin, слот 'logger' вызывается каноничным
+        # протоколом warning()/error()/…, которого у GuiProcess нет (только
+        # log_warning()/…). При logger=self весь лог прокси уходил в никуда.
+        # Порядок: _init_application_threads — шаг 6 initialize(), logger_manager
+        # готов с шага 3.
         self._gui_state_proxy = GuiStateProxy(
             process_name=self.name,
             router=self.router_manager,
             delta_sink=self._on_state_deltas_to_bridge,
             server_target="ProcessManager",
-            logger=self,
+            logger=self.logger_manager,
         )
         self._gui_state_proxy.initialize()
         if self.router_manager:

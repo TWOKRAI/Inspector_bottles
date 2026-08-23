@@ -342,7 +342,13 @@ class PluginOrchestrator:
         try:
             from multiprocess_framework.modules.registers_module import RegistersManager
 
-            rm = RegistersManager(registers=schemas, logger=self._services)
+            # logger=реальный LoggerManager, а НЕ self._services (Task Т.1):
+            # RegistersManager — носитель ObservableMixin и зовёт слот каноничным
+            # протоколом warning()/error()/…, которого у процесса-сервисов нет
+            # (только log_warning()/…). Раньше весь его лог исчезал молча.
+            # Момент безопасен: _init_custom_managers — шаг 6 initialize(),
+            # менеджеры процесса созданы на шаге 3.
+            rm = RegistersManager(registers=schemas, logger=self._services.logger_manager)
             self._registers_manager = rm
             return rm
         except Exception as e:

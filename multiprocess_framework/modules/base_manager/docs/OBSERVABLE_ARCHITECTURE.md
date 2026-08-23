@@ -20,7 +20,7 @@ class RouterManager(BaseManager, ObservableMixin):
             self,
             managers={'logger': logger_mgr}
         )
-    
+
     def route(self, msg):
         self._log_info(f"Routing {msg}")  # ← приватный метод класса
         self._record_metric("router.messages", 1)
@@ -61,7 +61,7 @@ class MyManager(BaseManager, ObservableMixin):
             managers={'logger': logger_mgr},
             auto_proxy=True  # ← создавать публичные методы
         )
-    
+
     def work(self):
         self.log_info("work started")  # ← публичный прокси-метод
 ```
@@ -85,7 +85,7 @@ class WorkerManager(BaseManager, ObservableMixin):
             self,
             managers={'logger': logger_mgr}
         )
-    
+
     def restore_after_unpickle(self, logger_mgr):
         """Вызвать в новом процессе после unpickle."""
         self.register_manager('logger', logger_mgr)
@@ -109,8 +109,16 @@ ObservableMixin._log_info(self, msg):
 _call_manager(service_name, method_name, *args):
     manager = self._registry.get(service_name)
     if not manager or not self.is_enabled(service_name):
+        return None                      # допуск: тишина, ничего не считаем
+    method = getattr(manager, method_name, None)
+    if method is None or not callable(method):
+        _note_manager_call_failure(...)  # ADR-BM-005: ДЕФЕКТ, не допуск
         return None
-    return getattr(manager, method_name)(*args)
+    try:
+        return method(*args)
+    except Exception as exc:
+        _note_manager_call_failure(..., exc)   # Ф2.3: счётчик + WARNING
+        return None
             ↓
 ManagerRegistry.get('logger') → LoggerManager
             ↓

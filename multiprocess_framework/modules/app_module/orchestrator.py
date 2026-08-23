@@ -380,10 +380,17 @@ class GenericProcessManagerApp(ProcessManagerProcess):
         # ниже), kind-router в receive() диспатчит их туда по type=="command",
         # reply делает транспорт. RAW-копии в event_dispatcher были бы dead-path.
         # router всё равно нужен DeltaDispatcher'у (push дельт).
+        # logger=self.logger_manager, а НЕ logger=self (Task Т.1). StateStoreManager
+        # кладёт объект в слот 'logger' своего ObservableMixin и зовёт каноничные
+        # warning()/error()/…; у оркестратора их нет — только log_warning()/….
+        # Порядок: _setup_state_store() вызывается из initialize() ПОСЛЕ
+        # super().initialize(), где отработал _init_managers (шаг 3) —
+        # logger_manager уже присвоен. Пиновка порядка — в
+        # tests/test_state_store_logger_wiring.py.
         self._state_store_manager = StateStoreManager(
             router=self.router_manager,
             initial_state=initial_state,
-            logger=self,
+            logger=self.logger_manager,
             auto_register_ipc=False,
         )
 

@@ -212,6 +212,27 @@ class IProcessServices(Protocol):
         ...
 
     @property
+    def logger_manager(self) -> Any | None:
+        """LoggerManager процесса или ``None``, если плоскость логов не поднята.
+
+        Объявлено по тому же доводу, что и ``stats_manager`` ниже (Task Т.1):
+        ``PluginOrchestrator`` читает менеджер ИМЕННО с сервисов, чтобы отдать
+        его в слот ``logger`` создаваемого ``RegistersManager``. Пока протокол о
+        нём не знал, дорога логов регистров существовала в коде и отсутствовала
+        в контракте.
+
+        Почему не ``self._services`` в слот напрямую: слот ``ObservableMixin``
+        вызывается КАНОНИЧНЫМ протоколом ``debug/info/warning/error/critical``,
+        а процесс экспонирует только ``log_*``-алиасы — запись уходила в никуда
+        (до Т.1 — ещё и молча).
+
+        Своего имени порт не заводит: атрибут — существующий ``logger_manager``
+        процесса (``ProcessModule.__init__`` ставит его всегда, ``bundle.logger``
+        — при initialize).
+        """
+        ...
+
+    @property
     def stats_manager(self) -> IPluginStatsManager | None:
         """StatsManager процесса или ``None``, если плоскость stats не поднята.
 

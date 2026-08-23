@@ -40,6 +40,11 @@ def _make_orchestrator(config: dict) -> GenericProcessManagerApp:
     orch.config_handler = None
     orch.router_manager = InMemoryRouter()
     orch.command_manager = MagicMock()
+    # Task Т.1: у настоящего объекта logger_manager ставит ProcessModule.__init__
+    # (None) и переприсваивает _init_managers; __new__ обходит оба шага.
+    # _setup_state_store отдаёт его в слот logger StateStoreManager вместо self —
+    # процесс каноничного debug/info/warning/… не несёт.
+    orch.logger_manager = None
     orch._state_store_manager = None
     return orch
 
