@@ -436,6 +436,92 @@ class TestStartForkSafe:
 
 
 # ---------------------------------------------------------------------------
+# TestStartDoesNotBlockOnSubscription — НАСТОЯЩИЕ объекты (не MagicMock)
+# ---------------------------------------------------------------------------
+
+
+class TestStartDoesNotBlockOnSubscription:
+    """Подписка из start() на НАСТОЯЩИХ StateProxy + RouterManager без приёмного цикла.
+
+    Соседние тесты подписки собраны на MagicMock-прокси — они доказывают, что
+    плагин зовёт subscribe(), но НЕ то, что этот вызов возвращает управление:
+    мок отвечает мгновенно всегда. Здесь честный стенд — ровно та ситуация, что
+    в проде: ``start()`` плагина исполняется шагом 6 ``ProcessModule.initialize()``,
+    а приёмный поток процесса создаётся шагом 7, то есть ПОЗЖЕ; ответить на
+    синхронную подписку физически некому.
+
+    Замер на живом стенде 2026-08-23 до правки: старт простаивал 10.03 с =
+    два таймаута по 5 с, и обе подписки всё равно оставались неподтверждёнными.
+    """
+
+    @staticmethod
+    def _pumpless_router(name: str):
+        """RouterManager с system/state каналами, который НИКТО не опрашивает."""
+        from queue import Queue
+        from types import SimpleNamespace
+
+        from multiprocess_framework.modules.router_module import QueueChannel, RouterManager
+
+        class _Registry:
+            def __init__(self) -> None:
+                self.sent: list[dict] = []
+
+            def send_to_queue(self, _target: str, _qtype: str, msg: dict) -> bool:
+                self.sent.append(msg)
+                return True
+
+        registry = _Registry()
+        router = RouterManager(
+            manager_name=name,
+            process=SimpleNamespace(name=name),
+            queue_registry=registry,
+        )
+        router.register_channel(QueueChannel(f"{name}_system", Queue()))
+        router.register_channel(QueueChannel(f"{name}_state", Queue()))
+        router.initialize()
+        return router, registry
+
+    def test_start_returns_fast_and_both_subscriptions_are_on_the_wire(self):
+        """start() не платит таймаутами за подписки, но команды реально уходят."""
+        from multiprocess_framework.modules.state_store_module.proxy.state_proxy import StateProxy
+
+        router, registry = self._pumpless_router("telemetry_sink_proc")
+        try:
+            proxy = StateProxy("telemetry_sink_proc", router=router, server_target="ProcessManager")
+            plugin = TelemetrySinkPlugin()
+            ctx = make_ctx({}, state_proxy=proxy)
+            plugin.configure(ctx)
+
+            with patch("Plugins.io.telemetry_sink.plugin.SQLManager"):
+                t0 = time.monotonic()
+                plugin.start(ctx)
+                elapsed = time.monotonic() - t0
+
+            # Якорь существования: обе подписки РЕАЛЬНО уходят на провод. Без
+            # него «быстро вернулось» означало бы всего лишь «ничего не сделали».
+            # Ждём с дедлайном ДО shutdown роутера: fire-and-forget отправка идёт
+            # фоновым AsyncSender'ом (замер 2026-08-23: билет появляется в
+            # реестре в пределах ~0.5 с), а shutdown его останавливает.
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                if len([m for m in registry.sent if m.get("command") == "state.subscribe"]) >= 2:
+                    break
+                time.sleep(0.02)
+            patterns = [m["data"]["pattern"] for m in registry.sent if m.get("command") == "state.subscribe"]
+        finally:
+            router.shutdown()
+
+        assert sorted(patterns) == ["processes.**", "system.**"], (
+            f"на провод ушли не те подписки: {patterns!r} — серверных подписок не будет, плагин запишет пустую историю"
+        )
+        assert elapsed < 0.5, (
+            f"start() плагина занял {elapsed:.3f} с — подписка снова ждёт ответа, "
+            "разобрать который в этот момент некому (приёмный поток процесса ещё не создан)"
+        )
+        assert plugin._sub_id and plugin._sub_id_system, "локальные sub_id не выданы"
+
+
+# ---------------------------------------------------------------------------
 # TestWriteRace — _write_lock сериализует семплы (worker vs flush)
 # ---------------------------------------------------------------------------
 

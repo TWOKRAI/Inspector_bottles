@@ -4,6 +4,7 @@ router_module — менеджер маршрутизации сообщений
 
 Публичный API:
     RouterManager   — основной класс; создавайте один на процесс/поток
+    RouterReentrantRequestError — request() позван с приёмного потока (контракт)
     MessageChannel  — базовый класс для всех каналов
     QueueChannel    — канал поверх multiprocessing.Queue / queue.Queue
     RouterAdapter   — интеграционный адаптер для process_module
@@ -11,7 +12,7 @@ router_module — менеджер маршрутизации сообщений
     IMessageChannel — интерфейс канала
 """
 
-from .core.router_manager import RouterManager
+from .core.router_manager import RouterManager, RouterReentrantRequestError
 from .channels.base_channel import MessageChannel
 from .channels.queue_channel import QueueChannel
 from .adapters.router_adapter import RouterAdapter
@@ -32,6 +33,7 @@ from .routing import (
 
 __all__ = [
     "RouterManager",
+    "RouterReentrantRequestError",
     "MessageChannel",
     "QueueChannel",
     "RouterAdapter",

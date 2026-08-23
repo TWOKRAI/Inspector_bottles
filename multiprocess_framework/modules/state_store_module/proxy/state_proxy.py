@@ -18,6 +18,14 @@ import uuid
 from typing import Any, Callable
 
 from ...base_manager import BaseManager, ObservableMixin
+
+# Единственная конкретная зависимость модуля от router_module. Развязка через
+# ``IRouter`` сохраняется для ВСЕГО остального: прокси по-прежнему работает с
+# любым дублем роутера, а этот тип нужен ровно для того, чтобы ОТЛИЧИТЬ ошибку
+# программиста (вызов с приёмного потока) от отказа транспорта — их политики
+# противоположны (см. :meth:`StateProxy._send_sync`). Цикла нет: router_module
+# не импортирует state_store_module ни в одной точке (проверено 2026-08-23).
+from ...router_module.core.router_manager import RouterReentrantRequestError
 from ..core import iter_matches, match_pattern, pattern_covers, split_pattern
 from ..core.delta import MISSING, STATE_ENVELOPE_MARKER, Delta
 from ..interfaces import IRouter, IStateProxy
@@ -116,6 +124,34 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         # одного пакета с revision (либо proxy только создан, либо все
         # входящие пакеты были от старых отправителей без revision).
         self._last_revision: int | None = None
+
+        # --- Неблокирующая ресинхронизация (ADR-SS-022, 2026-08-23) ---
+        # request_id ресинхронизации, ответ на которую ещё не пришёл. Не None =
+        # «идёт ресинк»: второй запрос не отправляем (иначе на каждый разрыв в
+        # шторме летел бы свой снимок всего поддерева).
+        self._resync_inflight_id: str | None = None
+        # Паттерны, снимок которых заказан текущей ресинхронизацией.
+        self._resync_patterns: list[str] = []
+        # Пути, изменённые дельтами ЗА ОКНО ожидания снимка: path → максимальная
+        # revision дельты. Снимок не имеет права затереть значение свежее себя.
+        self._resync_dirty: dict[str, int] = {}
+        # То же для дельт-удалений: удаление приходит ОДНОЙ дельтой на корень
+        # поддерева (TreeStore.delete), поэтому защищать надо и корень, и всё
+        # под ним — иначе снимок воскресит листья снятого писателя.
+        self._resync_dirty_deletes: dict[str, int] = {}
+        # Журнал переполнен (см. _RESYNC_DIRTY_MAX) — защиту гарантировать больше
+        # нельзя, снимок в этом заходе не применяется.
+        self._resync_dirty_overflow: bool = False
+        # Разрыв, обнаруженный ПОКА снимок в полёте: после его применения делаем
+        # ровно один догоняющий заход (не N по числу разрывов).
+        self._resync_again_pending: bool = False
+        # Наблюдаемость ресинхронизации (сверяется с логом и метриками).
+        self._resync_started_count: int = 0
+        self._resync_coalesced_count: int = 0
+        self._resync_completed_count: int = 0
+        self._resync_failed_count: int = 0
+        self._resync_overflow_count: int = 0
+        self._resync_protected_paths_total: int = 0
 
     def initialize(self) -> bool:
         self.is_initialized = True
@@ -811,19 +847,78 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             patterns = list(dict.fromkeys(self._sub_patterns.values()))
             self._resync(patterns)
 
+    #: Потолок журнала защищённых путей на одно окно ресинхронизации.
+    #: Журнал — это РАЗНЫЕ пути (не дельты), поэтому потолок бьётся только при
+    #: обходе очень широкого поддерева за одно окно (~5 с). Дойдя до него,
+    #: гарантию «снимок не затрёт свежее» держать нечем — и мы предпочитаем
+    #: НЕ применять снимок вовсе (см. _on_resync_response), а не применить его
+    #: наполовину.
+    _RESYNC_DIRTY_MAX = 10_000
+
     def _resync(self, patterns: list[str]) -> None:
         """Ресинк кэша: запросить свежий снапшот поддеревьев по patterns.
 
         Переиспользует существующий канал state.get_subtree (не заводит
         отдельную команду — ADR-SS-015): передаёт data.paths вместо data.path,
         сервер (handle_state_get_subtree) распознаёт это и строит снимок через
-        TreeStore.snapshot(paths). Полностью замещает в кэше все пути,
-        попадающие под patterns, свежими значениями с сервера и обновляет
-        self._last_revision до серверной revision на момент ответа.
+        TreeStore.snapshot(paths).
 
-        No-op при router=None или пустом patterns (нечего ресинкать).
+        ПОЧЕМУ НЕБЛОКИРУЮЩЕ (ADR-SS-022, 2026-08-23). Этот метод вызывается из
+        ``on_state_changed``, то есть НА ПРИЁМНОМ ПОТОКЕ процесса: единственный
+        ``message_processor`` синхронно диспатчит ``state.changed`` внутри
+        ``router.receive()``. Блокирующий ``request()`` отсюда ждал ответа,
+        который обязан был разобрать он сам, — то есть гарантированно досиживал
+        до таймаута (5 с), и всё это время системная почта процесса не
+        разбиралась. Замер на живом стенде 2026-08-23 (9 процессов): вытеснено
+        93.7% дельт очереди ``{proc}_state`` (drop_oldest), «опоздавшая» почта
+        раз в 5.06 с, ``fps`` доходил до подписчика через 16 минут. Причём петля
+        самоусиливающаяся: реже читаешь → больше вытеснений → больше разрывов →
+        больше пятисекундных простоев.
+
+        Поэтому запрос уходит через ``router.request_async``: приёмный поток
+        возвращается в цикл немедленно, а снимок применяет
+        :meth:`_on_resync_response` — тем же приёмным потоком, когда ответ
+        реально придёт. Отдельного потока НЕТ намеренно: весь кэш так и остаётся
+        собственностью одного потока, лишних локов не появляется.
+
+        ЧТО С ДЕЛЬТАМИ, ПРИШЕДШИМИ ВО ВРЕМЯ РЕСИНХРОНИЗАЦИИ. Они больше не ждут
+        ответа: применяются к кэшу и доставляются в callbacks штатным путём
+        (инвариант (б)) — раньше их держал заблокированный приёмный поток. Ценой
+        этого снимок (сделанный сервером в момент S) может оказаться СТАРШЕ уже
+        применённой дельты. Поэтому каждая дельта окна помечает свой путь в
+        ``_resync_dirty`` вместе со своей revision, и при применении снимка
+        путь с ``revision >= S`` не трогается: живой поток дельт всегда
+        побеждает более старый снимок. Обратный случай (дельта старше снимка,
+        ``revision < S``) — снимок побеждает, ради него ресинк и затевался.
+
+        Цена названа явно, три штуки:
+          1. дельта с ``revision == 0`` (отправитель без revision, default
+             ``Delta.revision``) считается СТАРЫМ — снимок её перекроет;
+          2. если сервер не вернул revision (не int), сравнивать не с чем —
+             защищаются ВСЕ пути окна, снимок применяется только к остальным;
+          3. если путей в окне больше ``_RESYNC_DIRTY_MAX``, снимок не
+             применяется вовсе (``_resync_overflow_count``) — восстановление
+             откладывается до следующего разрыва, но регресса кэша не будет.
+
+        No-op при router=None или пустом patterns (нечего ресинкать). Второй
+        вызов, пока ответ первого не пришёл, НЕ шлёт второго запроса: он только
+        помечает ``_resync_again_pending`` — догоняющий заход будет ровно один.
         """
         if self._router is None or not patterns:
+            return
+
+        if self._resync_inflight_id is not None:
+            # Ресинк уже в полёте. Параллельный второй запрос не ускорил бы
+            # сходимость (снимок строится по тому же дереву), но удвоил бы
+            # трафик и дал бы два снимка, применяемых в неизвестном порядке.
+            self._resync_coalesced_count += 1
+            self._resync_again_pending = True
+            self._record_metric("state_proxy.resync_coalesced")
+            self._log_debug(
+                f"StateProxy '{self._process_name}': ресинк уже идёт "
+                f"(id={self._resync_inflight_id}) — новый запрос не шлю, "
+                f"догоняющий заход помечен (совмещено={self._resync_coalesced_count})"
+            )
             return
 
         request_id = str(uuid.uuid4())
@@ -834,23 +929,209 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             "command": "state.get_subtree",
             "data": {"paths": patterns, "request_id": request_id},
         }
+
+        request_async = getattr(self._router, "request_async", None)
+        if not callable(request_async):
+            # Роутер без неблокирующего запроса (тестовые дубли IRouter, у
+            # которых send() сам по себе request-reply) — прежний синхронный
+            # путь. Приёмного потока у таких роутеров нет, блокировать нечего.
+            self._resync_blocking_fallback(patterns, msg)
+            return
+
+        # Порядок важен: помечаем «идёт» ДО отправки. Отправка может провалиться
+        # и позвать колбэк синхронно, ещё изнутри request_async — колбэк обязан
+        # застать флаг взведённым, иначе снимет чужой (следующий) ресинк.
+        self._resync_inflight_id = request_id
+        self._resync_patterns = list(patterns)
+        self._resync_dirty.clear()
+        self._resync_dirty_deletes.clear()
+        self._resync_dirty_overflow = False
+        self._resync_again_pending = False
+        self._resync_started_count += 1
+        self._record_metric("state_proxy.resync_started")
+        try:
+            request_async(
+                msg,
+                on_response=self._on_resync_response,
+                timeout=self._SYNC_REQUEST_TIMEOUT,
+                correlation_id=request_id,
+            )
+        except Exception as exc:
+            self._resync_inflight_id = None
+            self._resync_patterns = []
+            self._log_error(f"StateProxy '{self._process_name}': ресинк не отправлен: {exc}")
+
+    def _resync_blocking_fallback(self, patterns: list[str], msg: dict) -> None:
+        """Старый синхронный ресинк — для роутеров без ``request_async``.
+
+        Такие роутеры (тестовые дубли ``InMemoryRouter``/``MockRouter``/
+        ``_RelayRouter``, а также любой сторонний ``IRouter``) исполняют запрос
+        прямо в вызове send()/request(), приёмного потока у них нет вовсе — и
+        блокировать здесь нечего. Держится ради обратной совместимости
+        контракта ``IRouter``: он не обязывает никого иметь ``request_async``.
+        """
         response = self._send_sync(msg)
         if response is None or response.get("status") != "ok":
+            self._resync_failed_count += 1
             self._log_warning(f"StateProxy '{self._process_name}': resync не удался: {response}")
             return
 
         snapshot = response.get("value", {})
         revision = response.get("revision")
         self._apply_resync_snapshot(patterns, snapshot if isinstance(snapshot, dict) else {})
-        if isinstance(revision, int):
-            # max(...) — resync никогда не должен ОТКАТЫВАТЬ _last_revision назад
-            # (ревью 2026-07-11): к моменту ответа resync'а _last_revision мог
-            # уже уйти вперёд за счёт пакетов, доставленных и применённых, пока
-            # resync-запрос был в полёте (инвариант (б) — они не ждут resync).
-            self._last_revision = max(self._last_revision, revision) if self._last_revision is not None else revision
+        self._advance_revision_after_resync(revision)
+        self._resync_completed_count += 1
         self._log_debug(f"StateProxy '{self._process_name}': resync выполнен, revision={revision}")
 
-    def _apply_resync_snapshot(self, patterns: list[str], snapshot: dict) -> None:
+    def _on_resync_response(self, envelope: dict) -> None:
+        """Применить снимок ресинхронизации. Зовётся ПРИЁМНЫМ потоком из receive().
+
+        Ровно один вызов на один ресинк — гарантию держит RouterManager
+        (``_take_pending`` снимает слот под локом): ответ, таймаут и провал
+        отправки взаимоисключающи.
+
+        Порядок операций здесь и есть ответ на вопрос «не теряются ли дельты
+        окна»: к этому моменту они УЖЕ в кэше и уже доставлены подписчикам, а
+        снимок кладётся поверх только там, где он новее (см. докстринг
+        :meth:`_resync`). Ничего не откладывается «на потом» и не переигрывается.
+
+        Args:
+            envelope: конверт ответа RouterManager
+                (``{"success": bool, "result": {...}}`` или ``{"success": False,
+                "error": "timeout"}``).
+        """
+        patterns = self._resync_patterns
+        dirty = dict(self._resync_dirty)
+        dirty_deletes = dict(self._resync_dirty_deletes)
+        overflow = self._resync_dirty_overflow
+        again = self._resync_again_pending
+
+        # Снимаем «идёт» ДО применения: следующий разрыв должен иметь право
+        # запустить новый ресинк, а не совместиться с уже завершённым.
+        self._resync_inflight_id = None
+        self._resync_patterns = []
+        self._resync_dirty = {}
+        self._resync_dirty_deletes = {}
+        self._resync_dirty_overflow = False
+        self._resync_again_pending = False
+
+        response = self._unwrap_envelope(envelope)
+        if response is None or response.get("status") != "ok":
+            # Ответа нет (таймаут/провал отправки/отказ сервера). Кэш не трогаем:
+            # он и так живёт потоком дельт, а _last_revision продвигается по
+            # реально применённым пакетам (MED-4) — «замораживания» не будет.
+            self._resync_failed_count += 1
+            self._record_metric("state_proxy.resync_failed")
+            self._log_warning(
+                f"StateProxy '{self._process_name}': resync не удался: {envelope} "
+                f"(всего неудач={self._resync_failed_count}); кэш оставлен как есть, "
+                "дельты продолжают применяться штатно"
+            )
+            return
+
+        snapshot = response.get("value", {})
+        revision = response.get("revision")
+
+        if overflow:
+            self._resync_overflow_count += 1
+            self._record_metric("state_proxy.resync_overflow")
+            self._log_warning(
+                f"StateProxy '{self._process_name}': за окно ресинка изменено больше "
+                f"{self._RESYNC_DIRTY_MAX} путей — снимок НЕ применён (иначе часть путей "
+                f"откатилась бы к устаревшим значениям); восстановление отложено до "
+                f"следующего разрыва (всего переполнений={self._resync_overflow_count})"
+            )
+        else:
+            self._apply_resync_snapshot(
+                patterns,
+                snapshot if isinstance(snapshot, dict) else {},
+                protected=self._make_resync_protector(dirty, dirty_deletes, revision),
+            )
+            self._resync_completed_count += 1
+
+        self._advance_revision_after_resync(revision)
+        self._log_debug(
+            f"StateProxy '{self._process_name}': resync выполнен, revision={revision}, "
+            f"защищено путей={len(dirty) + len(dirty_deletes)}"
+        )
+
+        if again:
+            # Разрыв, случившийся пока снимок был в полёте: один догоняющий заход.
+            self._log_debug(f"StateProxy '{self._process_name}': догоняющий ресинк после совмещённого разрыва")
+            self._resync(patterns)
+
+    def _advance_revision_after_resync(self, revision: object) -> None:
+        """Продвинуть _last_revision по серверной revision снимка, НИКОГДА не назад.
+
+        max(...) — resync не должен ОТКАТЫВАТЬ _last_revision (ревью
+        2026-07-11): к моменту ответа он мог уйти вперёд за счёт пакетов,
+        доставленных и применённых, пока запрос был в полёте (инвариант (б) —
+        они не ждут resync). После перевода ресинка в неблокирующий режим это не
+        редкий случай, а НОРМА: окно ожидания теперь целиком открыто для дельт.
+        """
+        if isinstance(revision, int):
+            self._last_revision = max(self._last_revision, revision) if self._last_revision is not None else revision
+
+    def _make_resync_protector(
+        self,
+        dirty: dict[str, int],
+        dirty_deletes: dict[str, int],
+        revision: object,
+    ) -> Callable[[str], bool]:
+        """Построить предикат «этот путь снимку трогать нельзя».
+
+        Защищается путь, изменённый живой дельтой за окно ожидания, ЕСЛИ эта
+        дельта не старше снимка (``delta.revision >= revision снимка``). Дельта
+        старше — снимок новее, он и должен победить.
+
+        Удаления защищают поддерево: ``TreeStore.delete`` шлёт ОДНУ дельту на
+        корень, а кэш держит листья — без защиты префикса снимок вернул бы
+        листья снятого писателя (тот же разбор, что в :meth:`_update_cache`).
+
+        Если сервер не вернул revision (не int), сравнивать не с чем: защищаем
+        ВСЕ пути окна. Это осознанный перекос в сторону «не откатить живое».
+        """
+        snapshot_revision = revision if isinstance(revision, int) else None
+        self._resync_protected_paths_total += len(dirty) + len(dirty_deletes)
+
+        def _protected(path: str) -> bool:
+            rev = dirty.get(path)
+            if rev is not None and (snapshot_revision is None or rev >= snapshot_revision):
+                return True
+            for root, del_rev in dirty_deletes.items():
+                if snapshot_revision is not None and del_rev < snapshot_revision:
+                    continue
+                if path == root or path.startswith(root + "."):
+                    return True
+            return False
+
+        return _protected
+
+    def _record_resync_dirty(self, deltas: list[Delta]) -> None:
+        """Пометить пути, изменённые дельтами, пока снимок ресинка в полёте.
+
+        Зовётся из :meth:`_update_cache` — то есть на ЛЮБОМ пути применения
+        дельт, включая GuiStateProxy с его собственным ``on_state_changed``
+        (иначе защита работала бы только в базовом прокси, а забыть про неё в
+        подклассе было бы нечем поймать).
+        """
+        for delta in deltas:
+            target = self._resync_dirty_deletes if delta.new_value is MISSING else self._resync_dirty
+            known = target.get(delta.path)
+            if known is None:
+                if len(self._resync_dirty) + len(self._resync_dirty_deletes) >= self._RESYNC_DIRTY_MAX:
+                    self._resync_dirty_overflow = True
+                    return
+                target[delta.path] = delta.revision
+            elif delta.revision > known:
+                target[delta.path] = delta.revision
+
+    def _apply_resync_snapshot(
+        self,
+        patterns: list[str],
+        snapshot: dict,
+        protected: Callable[[str], bool] | None = None,
+    ) -> None:
         """Сойти кэш с серверным снимком для путей, попадающих под patterns.
 
         1. Удаляет из кэша все закэшированные пути, матчащие любой из patterns
@@ -861,19 +1142,24 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         Args:
             patterns: glob-паттерны (те же, что переданы в _resync()).
             snapshot: dict, полученный от TreeStore.snapshot(paths=patterns).
+            protected: предикат «путь трогать нельзя» — пути, изменённые живыми
+                дельтами свежее снимка (см. :meth:`_make_resync_protector`).
+                None — снимок применяется целиком (синхронный fallback-путь, где
+                окна для дельт нет по построению).
         """
+        is_protected = protected if protected is not None else (lambda _path: False)
         pattern_segs_list = [split_pattern(p) for p in patterns]
         stale_keys = [
             path
             for path in self._cache
-            if any(match_pattern(segs, tuple(path.split("."))) for segs in pattern_segs_list)
+            if any(match_pattern(segs, tuple(path.split("."))) for segs in pattern_segs_list) and not is_protected(path)
         ]
         for key in stale_keys:
             del self._cache[key]
 
         for pattern in patterns:
             for path, value in iter_matches(snapshot, pattern):
-                if not isinstance(value, dict):
+                if not isinstance(value, dict) and not is_protected(path):
                     self._cache[path] = value
 
     # -------------------------------------------------------------------
@@ -904,6 +1190,14 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._sub_id_pattern.clear()
         self._covered_sub_ids.clear()
         self._confirmed_patterns.clear()
+        # Ресинк в полёте больше некуда применять: подписок нет, кэш очищен.
+        # Ответ, если придёт после shutdown, разберётся как «ресинк без окна»
+        # (_resync_patterns пуст → снимок применять не к чему).
+        self._resync_inflight_id = None
+        self._resync_patterns = []
+        self._resync_dirty.clear()
+        self._resync_dirty_deletes.clear()
+        self._resync_again_pending = False
         self.is_initialized = False
         self._log_debug(f"StateProxy '{self._process_name}': shutdown, все подписки удалены")
         return True
@@ -953,6 +1247,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         Args:
             deltas: список Delta для обновления кэша.
         """
+        if self._resync_inflight_id is not None:
+            # Окно ресинхронизации открыто: запоминаем, что этот путь только что
+            # изменился живой дельтой — снимок не должен его откатить (ADR-SS-022).
+            self._record_resync_dirty(deltas)
+
         for delta in deltas:
             if delta.new_value is MISSING:
                 # Удаление узла — вместе с поддеревом (см. докстринг).
@@ -1037,6 +1336,23 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     # с дефолтом RouterManager.request(), чтобы поведение не расходилось.
     _SYNC_REQUEST_TIMEOUT = 5.0
 
+    @staticmethod
+    def _unwrap_envelope(envelope: object) -> dict | None:
+        """Развернуть конверт ответа RouterManager в ответ ОБРАБОТЧИКА.
+
+        Конверт ``reply_to_request``: ``{"success": bool, "result": <ответ
+        handler'а>}``. Неуспех/не-dict → None («ответа нет»), это и есть
+        fail-open политика вызывающих (см. :meth:`_send_sync`).
+
+        Общий для синхронного (:meth:`_send_sync`) и асинхронного
+        (:meth:`_on_resync_response`) путей — иначе два разбора одного конверта
+        разъехались бы при первой же правке протокола.
+        """
+        if not isinstance(envelope, dict) or envelope.get("success") is False:
+            return None
+        result = envelope.get("result")
+        return result if isinstance(result, dict) else envelope
+
     def _send_sync(self, msg: dict) -> dict | None:
         """Отправить IPC-сообщение синхронно и вернуть ОТВЕТ ОБРАБОТЧИКА.
 
@@ -1074,16 +1390,33 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         if callable(request_fn):
             try:
                 envelope = request_fn(msg, timeout=self._SYNC_REQUEST_TIMEOUT)
+            except RouterReentrantRequestError:
+                # НЕ fail-open: нарушение контракта — ошибка программиста, а не
+                # отказ транспорта. Проглотить его здесь значит превратить
+                # ГРОМКИЙ отказ роутера в тихий no-op: вызывающий получит None,
+                # прочитает его как «ответа нет» и поедет дальше с пустым
+                # снимком. Ровно это показала инъекция INJ-9 при починке 2026-08-23
+                # (откат ухода resync с приёмного потока ПРИ живой проверке
+                # контракта дал не простой, а молча отключённый resync).
+                #
+                # Логом здесь не обойтись, и это измерено, а не предположено:
+                # за 22-минутный прогон на стенде StateProxy обязан был написать
+                # ~260 предупреждений о таймаутах, а в 60 файлах логов нет НИ ОДНОГО
+                # упоминания 'StateProxy' (при том что WARNING других источников
+                # есть в 17 файлах). Пока эта немота не разобрана, единственный
+                # способ сделать отказ заметным — дать исключению пройти:
+                # диспетчер роутера ловит его и пишет СВОИМ логгером, который
+                # в логах виден.
+                raise
             except Exception as exc:
                 self._log_error(f"StateProxy '{self._process_name}': ошибка request() '{msg.get('command')}': {exc}")
                 return None
-            if not isinstance(envelope, dict) or envelope.get("success") is False:
+            unwrapped = self._unwrap_envelope(envelope)
+            if unwrapped is None:
                 self._log_warning(
                     f"StateProxy '{self._process_name}': request() '{msg.get('command')}' не получил ответа: {envelope}"
                 )
-                return None
-            result = envelope.get("result")
-            return result if isinstance(result, dict) else envelope
+            return unwrapped
 
         try:
             return self._router.send(msg)

@@ -21,7 +21,7 @@
 | StateStoreManager | manager/state_store_manager.py | Готов | Server-фасад: TreeStore + SubscriptionManager + DeltaDispatcher + 7 IPC-handlers; **не-IPC вход `forget_session(session_id)`** — снятие подписок мёртвого соединения по сигналу `on_session_closed` (Т-2, ADR-PMM-027) |
 | DeltaDispatcher | manager/delta_dispatcher.py | Готов | Адресная рассылка дельт подписчикам через `targets`, дедупликация по subscriber; **доставка коалесцированная** — буфер per-subscriber + daemon-flusher (~120 мс, cap ~200), очередь класса `state`, переключателей нет (ADR-SS-020) |
 | **proxy/** | | | |
-| StateProxy | proxy/state_proxy.py | Готов | Client-прокси: локальный кэш + IPC + per-pattern фильтрация callbacks (ADR-SS-012); watch-from-revision + resync (Ф4.9, ADR-SS-015) |
+| StateProxy | proxy/state_proxy.py | Готов | Client-прокси: локальный кэш + IPC + per-pattern фильтрация callbacks (ADR-SS-012); watch-from-revision + resync (Ф4.9, ADR-SS-015); **ресинк неблокирующий** — уходит через `router.request_async`, снимок применяет приёмный поток, пути, изменённые за окно ожидания, защищены по revision (ADR-SS-022) |
 | GuiStateProxy | proxy/gui_state_proxy.py | Готов | Qt-safe: callbacks через `QMetaObject.invokeMethod(QueuedConnection)`, ленивый PySide6; наследует watch-from-revision из StateProxy |
 | **middleware/** | | | |
 | StateMiddleware (ABC) | middleware/base.py | Готов | Базовый класс middleware |
@@ -114,6 +114,7 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 | **2026-05-07** | **ADR-SS-012: StateProxy — per-pattern фильтрация callbacks** | **✅ Готово** |
 | **2026-05-07** | **README.md / STATUS.md приведены в соответствие с реальным API** | **✅ Готово** |
 | **2026-07-11** | **ADR-SS-014/015: revision дерева + watch-from-revision resync (Ф4.9)** | **✅ Готово** |
+| **2026-08-23** | **ADR-SS-022: ресинк снят с приёмного потока (был простой 5 с на каждый разрыв revision, 93.7% дельт вытеснялось); окно ожидания снимка защищено по revision** | **✅ Готово** |
 
 ---
 
@@ -121,8 +122,8 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 
 - **Файлов Python (без тестов):** ~22
 - **Строк кода (без тестов):** ~3300
-- **Файлов тестов:** 17
+- **Файлов тестов:** 28
 - **Строк тестов:** ~4900
-- **Тестов:** 496 (все зелёные, ~4.3 с)
+- **Тестов:** 671 (все зелёные, ~7 с)
 - **Зависимости:** stdlib, `pyyaml`, `multiprocess_framework.modules.base_manager`, опционально `PySide6` (lazy)
-- **Внутренние ADR:** 15
+- **Внутренние ADR:** 22

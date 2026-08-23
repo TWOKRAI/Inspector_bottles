@@ -53,18 +53,49 @@ class RouterSendError(Exception):
     """
 
 
-class _PendingRequest:
-    """Слот ожидания ответа на синхронный request (P0.5).
+class RouterReentrantRequestError(RuntimeError):
+    """:meth:`RouterManager.request` вызван из потока, который сам крутит ``receive()``.
 
-    Поток-инициатор блокируется на ``event.wait(timeout)``; приёмный поток
-    (``receive``) кладёт ответ в ``response`` и взводит ``event``.
+    Контракт ``request()`` был записан только в докстринге, и его нарушение
+    выглядело как обычный таймаут: ответ некому разобрать — приёмный поток стоит
+    внутри собственного запроса, — поэтому вызов молча досиживал до конца
+    ``timeout`` и возвращал ``{"success": False, "error": "timeout"}``. Живьём это
+    дало 5 с простоя всей системной почты процесса на каждую ресинхронизацию
+    ``StateProxy`` (замер на стенде из 9 процессов, 2026-08-23: вытеснено 93.7%
+    дельт, «опоздавшая» почта раз в 5.06 с — отпечаток того самого таймаута).
+
+    Исключение, а не dict с кодом ошибки: нарушение делает не транспорт, а
+    ВЫЗЫВАЮЩИЙ КОД, и починить его можно только зная место вызова — traceback
+    показывает его, поле ``error`` не показывает никогда.
     """
 
-    __slots__ = ("event", "response")
 
-    def __init__(self) -> None:
+class _PendingRequest:
+    """Слот ожидания ответа на request (P0.5).
+
+    Два режима, различаются наличием ``callback``:
+
+    - синхронный (``callback is None``): поток-инициатор блокируется на
+      ``event.wait(timeout)``; приёмный поток (``receive``) кладёт ответ в
+      ``response`` и взводит ``event``;
+    - асинхронный (``callback`` задан, :meth:`RouterManager.request_async`):
+      никто не блокируется, ответ отдаётся ``callback`` ПРЯМО НА ПРИЁМНОМ
+      ПОТОКЕ, а ``deadline`` (monotonic) нужен, чтобы слот не остался в реестре
+      навсегда, если ответ не придёт никогда — просроченные подметает
+      :meth:`RouterManager._expire_async_pending`.
+    """
+
+    __slots__ = ("event", "response", "callback", "deadline")
+
+    def __init__(
+        self,
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        deadline: Optional[float] = None,
+    ) -> None:
         self.event = threading.Event()
         self.response: Optional[Dict[str, Any]] = None
+        self.callback = callback
+        self.deadline = deadline
 
 
 def _result_is_success(result: Any) -> bool:
@@ -260,6 +291,21 @@ class RouterManager(ChannelRoutingManager):
         # горячем приёмном пути (guard `if self._pending_requests`).
         self._pending_requests: Dict[str, _PendingRequest] = {}
         self._pending_lock = threading.Lock()
+        # Число АСИНХРОННЫХ pending-слотов (request_async). Отдельно от общего
+        # реестра: guard на горячем приёмном пути (`if self._async_pending_count`)
+        # — пока асинхронных запросов нет, подметание просроченных не стоит ничего.
+        self._async_pending_count: int = 0
+
+        # Исполняемый контракт request() (2026-08-23). Приёмный поток обязан быть
+        # виден роутеру, иначе «нельзя вызывать из receive()» остаётся комментарием:
+        #  - _recv_local.depth — глубина входа В receive() ДЛЯ ТЕКУЩЕГО потока;
+        #    >0 значит «этот поток сейчас и есть приёмный» → request() из него
+        #    отвечать некому (RouterReentrantRequestError);
+        #  - _pump_seen — «приёмный цикл на этом роутере хоть раз крутился».
+        #    Взводится в receive() и больше не гаснет. Пока не взведён, ждать
+        #    ответа бессмысленно: разбирать его некому.
+        self._recv_local = threading.local()
+        self._pump_seen = threading.Event()
 
         # Ф6.7: троттлинг записей об ошибках отправки — по причине, а не общий.
         # Отдельное окно на причину: шторм «нет маршрута» не имеет права
@@ -914,6 +960,44 @@ class RouterManager(ChannelRoutingManager):
             return data.get("correlation_id")
         return None
 
+    #: Сколько ждать ПОЯВЛЕНИЯ приёмного цикла, если на этом роутере его ещё ни
+    #: разу не было (см. ``_pump_seen``). Не таймаут ответа, а окно на гонку
+    #: старта: вызвавший поток мог опередить создание ``message_processor`` на
+    #: доли секунды — тогда ждать ответ законно. Если за окно приёмник так и не
+    #: появился, разбирать ответ некому и ждать дальше нечего.
+    #:
+    #: 0.5 с: приёмный цикл процесса поднимается шагом 7 ``initialize()`` сразу
+    #: за плагинами (``process_module.py``), запас к реальному разбегу — два
+    #: порядка (тики цикла 10 мс). Цена ошибки в БОЛЬШУЮ сторону — простой на
+    #: старте (ровно то, что чинится), в МЕНЬШУЮ — ложный отказ живому запросу,
+    #: поэтому окно не 0.
+    _NO_PUMP_GRACE_SEC = 0.5
+
+    def _assert_not_receive_thread(self, what: str) -> None:
+        """Исполнить контракт: блокирующее ожидание нельзя вести с приёмного потока.
+
+        Единственный, кто мог бы разобрать ответ, — приёмный цикл; если он и есть
+        вызывающий, ответ не разберёт никто, и ожидание гарантированно досидит до
+        таймаута. Раньше это был абзац в докстринге :meth:`request` — теперь
+        проверка. Отказ громкий (исключение с местом вызова), а не тихий таймаут.
+
+        Args:
+            what: имя операции для сообщения (``request``/``…``).
+
+        Raises:
+            RouterReentrantRequestError: если текущий поток сейчас внутри
+                :meth:`receive` этого роутера.
+        """
+        if getattr(self._recv_local, "depth", 0) > 0:
+            raise RouterReentrantRequestError(
+                f"{self.manager_name}.{what}() вызван из приёмного потока "
+                f"({threading.current_thread().name}), который сам крутит receive(): "
+                "ответ разобрать некому, ожидание досидело бы до таймаута и всё это "
+                "время системная почта процесса не разбиралась бы. Отправьте команду "
+                "неблокирующим send_async()/request_async(callback=…) — ответ придёт "
+                "штатным приёмным путём."
+            )
+
     def request(
         self,
         message: Union["Message", Dict[str, Any]],
@@ -926,17 +1010,34 @@ class RouterManager(ChannelRoutingManager):
         отправляет через обычный транспорт (:meth:`send`) и блокирует поток до
         прихода ответа с тем же id (резолвится в :meth:`receive`) или таймаута.
 
-        ВАЖНО (контракт): нельзя вызывать из того же потока, который крутит
-        :meth:`receive`/``start_listening`` — ответ некому будет разобрать
-        (дедлок до таймаута). Инициатор (GUI/driver) обязан звать request() из
-        потока, отдельного от приёмного цикла процесса.
+        ВАЖНО (контракт, ПРОВЕРЯЕТСЯ): нельзя вызывать из того же потока, который
+        крутит :meth:`receive`/``start_listening`` — ответ некому будет разобрать.
+        Такой вызов теперь не досиживает до таймаута молча, а сразу бросает
+        :class:`RouterReentrantRequestError` (см. :meth:`_assert_not_receive_thread`);
+        сообщение при этом НЕ отправляется — иначе ответ на него приехал бы в
+        пустой pending-слот и лёг «опоздавшей почтой» в системную очередь.
+        Неблокирующая альтернатива для приёмного потока — :meth:`request_async`.
+
+        Второй случай, когда ответа не будет никогда: приёмного цикла на этом
+        роутере ещё не было вовсе (вызов из ``start()`` плагина, до шага 7
+        ``ProcessModule.initialize()``). Здесь отказ мягче — сообщение УХОДИТ
+        (fire-and-forget-деградация: команда доедет и исполнится, мы просто не
+        узнаем результата), а ждать перестаём через ``_NO_PUMP_GRACE_SEC``.
 
         Returns:
             dict ответа (содержит ``success``/``result``, у PM-пути ещё
             вложенный ``data``). При таймауте — ``{"success": False,
-            "error": "timeout", "correlation_id": cid}``. При ошибке отправки —
-            ``{"success": False, "error": <reason>, "correlation_id": cid}``.
+            "error": "timeout", "correlation_id": cid}``; если ждать было заведомо
+            некому, к нему добавляется ``"reason": "no_receive_pump"`` (поле
+            ``error`` намеренно осталось ``timeout``: для вызывающего это
+            по-прежнему «ответа нет», ломать разбор ошибки ради причины незачем).
+            При ошибке отправки — ``{"success": False, "error": <reason>,
+            "correlation_id": cid}``.
+
+        Raises:
+            RouterReentrantRequestError: вызов с приёмного потока.
         """
+        self._assert_not_receive_thread("request")
         msg = self._to_dict(message)
         cid = correlation_id or self._extract_correlation_id(msg) or str(uuid.uuid4())
         msg["request_id"] = cid
@@ -957,7 +1058,23 @@ class RouterManager(ChannelRoutingManager):
                     "error": send_result.get("reason", "send failed"),
                     "correlation_id": cid,
                 }
-            if not pending.event.wait(timeout):
+            deadline = time.monotonic() + timeout
+            if not self._pump_seen.is_set() and not self._pump_seen.wait(min(timeout, self._NO_PUMP_GRACE_SEC)):
+                # Приёмного цикла нет — ответ разобрать некому. Ждать полный
+                # таймаут значит просто задержать вызвавший поток на ровном месте.
+                self._log_warning(
+                    f"request('{msg.get('command')}'): приёмный цикл на роутере "
+                    f"'{self.manager_name}' ещё не запускался — ответ разобрать некому. "
+                    f"Сообщение отправлено, ожидание прервано через "
+                    f"{min(timeout, self._NO_PUMP_GRACE_SEC)} с вместо {timeout} с."
+                )
+                return {
+                    "success": False,
+                    "error": "timeout",
+                    "reason": "no_receive_pump",
+                    "correlation_id": cid,
+                }
+            if not pending.event.wait(max(deadline - time.monotonic(), 0.0)):
                 return {"success": False, "error": "timeout", "correlation_id": cid}
             return (
                 pending.response
@@ -972,18 +1089,139 @@ class RouterManager(ChannelRoutingManager):
             with self._pending_lock:
                 self._pending_requests.pop(cid, None)
 
-    def _resolve_pending(self, correlation_id: str, response: Dict[str, Any]) -> bool:
-        """Доставить ответ ожидающему request() по correlation_id.
+    def request_async(
+        self,
+        message: Union["Message", Dict[str, Any]],
+        on_response: Callable[[Dict[str, Any]], None],
+        timeout: float = 5.0,
+        correlation_id: Optional[str] = None,
+    ) -> str:
+        """Неблокирующий request-response: отправить и получить ответ КОЛБЭКОМ.
 
-        Returns True, если pending-слот найден и взведён; False — если такого
+        То же, что :meth:`request`, но никто не ждёт: pending-слот держит колбэк,
+        и приёмный цикл, разобрав ответ, зовёт его сам — ПРЯМО НА ПРИЁМНОМ ПОТОКЕ,
+        внутри :meth:`receive`. Отсюда два обязательства колбэка: он должен быть
+        коротким (пока он работает, почта процесса не разбирается) и не имеет
+        права звать блокирующий :meth:`request` (получит
+        :class:`RouterReentrantRequestError`).
+
+        Плата за неблокируемость — ответ приходит ПОЗЖЕ, чем вызывающий код
+        вернул управление; всё, что случилось между отправкой и ответом, обязан
+        учитывать сам вызывающий (пример — ``StateProxy._resync``, который
+        помечает пути, изменённые за окно ожидания, и не даёт снимку их затереть).
+
+        Колбэк вызывается РОВНО ОДИН РАЗ, в одном из трёх случаев:
+          - пришёл ответ → конверт ответа (как у :meth:`request`);
+          - истёк ``timeout`` → ``{"success": False, "error": "timeout", …}``
+            (подметает :meth:`_expire_async_pending` на ближайшем ``receive()``);
+          - отправка не удалась → ``{"success": False, "error": <reason>, …}``
+            СИНХРОННО, ещё внутри этого вызова.
+        Гарантию «ровно один раз» держит не соглашение, а арбитраж: и ответ, и
+        подметание СНИМАЮТ слот из реестра под ``_pending_lock``, и зовёт колбэк
+        только тот, кому слот достался.
+
+        Returns:
+            correlation_id запроса (для сопоставления с логами/трассой).
+        """
+        msg = self._to_dict(message)
+        cid = correlation_id or self._extract_correlation_id(msg) or str(uuid.uuid4())
+        msg["request_id"] = cid
+        data = msg.get("data")
+        if isinstance(data, dict):
+            data.setdefault("correlation_id", cid)
+
+        pending = _PendingRequest(callback=on_response, deadline=time.monotonic() + timeout)
+        with self._pending_lock:
+            self._pending_requests[cid] = pending
+            self._async_pending_count += 1
+
+        send_result = self.send(msg)
+        if isinstance(send_result, dict) and send_result.get("status") == "error":
+            failure = {
+                "success": False,
+                "error": send_result.get("reason", "send failed"),
+                "correlation_id": cid,
+            }
+            if self._take_pending(cid) is not None:
+                self._invoke_pending_callback(on_response, failure, cid)
+            return cid
+        return cid
+
+    def _take_pending(self, correlation_id: str) -> Optional[_PendingRequest]:
+        """Снять pending-слот из реестра под локом — арбитр «кто завершает запрос».
+
+        Возвращает слот тому, кто снял его первым (ответ ИЛИ подметание таймаутов),
+        и None всем остальным. Именно этим держится «колбэк ровно один раз».
+        """
+        with self._pending_lock:
+            pending = self._pending_requests.pop(correlation_id, None)
+            if pending is not None and pending.callback is not None:
+                self._async_pending_count -= 1
+        return pending
+
+    def _invoke_pending_callback(
+        self,
+        callback: Callable[[Dict[str, Any]], None],
+        response: Dict[str, Any],
+        correlation_id: str,
+    ) -> None:
+        """Позвать колбэк асинхронного запроса, не давая ему уронить приёмный цикл."""
+        try:
+            callback(response)
+        except Exception as exc:  # noqa: BLE001 — приёмный цикл не имеет права падать
+            self._log_error(f"request_async callback error (cid={correlation_id}): {exc}")
+
+    def _expire_async_pending(self) -> None:
+        """Подмести асинхронные слоты, чей ответ не пришёл к дедлайну.
+
+        Зовётся из :meth:`receive` и только когда асинхронные слоты вообще есть
+        (``_async_pending_count``). Без этого запрос, ответ на который не придёт
+        НИКОГДА (адресат умер, ответ вытеснен из очереди), оставил бы слот в
+        реестре навсегда, а вызывающего — в состоянии «ресинхронизация всё ещё
+        идёт», где он не начнёт следующую. Просроченному колбэку отдаётся тот же
+        конверт таймаута, что вернул бы :meth:`request`.
+        """
+        now = time.monotonic()
+        with self._pending_lock:
+            expired = [
+                cid
+                for cid, pending in self._pending_requests.items()
+                if pending.callback is not None and pending.deadline is not None and pending.deadline <= now
+            ]
+        for cid in expired:
+            pending = self._take_pending(cid)
+            if pending is None or pending.callback is None:
+                continue  # ответ успел прийти между сбором списка и снятием — не наш случай
+            self._invoke_pending_callback(
+                pending.callback,
+                {"success": False, "error": "timeout", "correlation_id": cid},
+                cid,
+            )
+
+    def _resolve_pending(self, correlation_id: str, response: Dict[str, Any]) -> bool:
+        """Доставить ответ ожидающему request()/request_async() по correlation_id.
+
+        Синхронный слот взводится событием (снимет его сам инициатор в ``finally``),
+        асинхронный — СНИМАЕТСЯ здесь (:meth:`_take_pending`) и его колбэк
+        вызывается прямо на приёмном потоке.
+
+        Returns True, если pending-слот найден и обработан; False — если такого
         запроса нет (чужой/просроченный ответ, билет идёт обычным путём).
         """
         with self._pending_lock:
             pending = self._pending_requests.get(correlation_id)
         if pending is None:
             return False
-        pending.response = response
-        pending.event.set()
+        if pending.callback is None:
+            pending.response = response
+            pending.event.set()
+            return True
+        # Асинхронный слот: снимаем его первыми — тогда параллельное подметание
+        # таймаутов уже ничего не найдёт и колбэк не сработает дважды.
+        taken = self._take_pending(correlation_id)
+        if taken is None or taken.callback is None:
+            return True  # успело подмести по таймауту: билет всё равно наш, дальше не диспатчим
+        self._invoke_pending_callback(taken.callback, response, correlation_id)
         return True
 
     def reply_to_request(
@@ -1119,68 +1357,86 @@ class RouterManager(ChannelRoutingManager):
         Это устраняет гонку между system_thread и worker: system_thread опрашивает
         только system, worker — только data.
         """
-        from ...message_module import Message
+        # Исполняемый контракт request() (2026-08-23): приёмный цикл обязан быть
+        # виден роутеру. depth — вход В receive() для ТЕКУЩЕГО потока (счётчик, а
+        # не флаг: вложенный вызов не имеет права снять отметку, поставленную
+        # внешним). _pump_seen взводится один раз и не гаснет — «приёмник тут
+        # есть», без него request() ждать нечего.
+        local = self._recv_local
+        depth = getattr(local, "depth", 0)
+        local.depth = depth + 1
+        if depth == 0:
+            if not self._pump_seen.is_set():
+                self._pump_seen.set()
+            # Просроченные асинхронные запросы (request_async): подметаются на
+            # приёмном такте и только когда такие запросы есть — иначе ноль работы.
+            if self._async_pending_count:
+                self._expire_async_pending()
+        try:
+            from ...message_module import Message
 
-        raw = self._poll_all_channels(
-            timeout,
-            input_channels_only=input_channels_only,
-            channel_types=channel_types,
-        )
-        result = []
+            raw = self._poll_all_channels(
+                timeout,
+                input_channels_only=input_channels_only,
+                channel_types=channel_types,
+            )
+            result = []
 
-        for msg_dict in raw:
-            try:
-                processed = self._recv_mw.apply(msg_dict)
-                if processed is None:
-                    self._inc_stat("middleware_dropped")
-                    continue
+            for msg_dict in raw:
+                try:
+                    processed = self._recv_mw.apply(msg_dict)
+                    if processed is None:
+                        self._inc_stat("middleware_dropped")
+                        continue
 
-                processed.setdefault("_receive_info", {}).update(
-                    {
-                        "router_id": self.router_id,
-                        "receive_time": time.time(),
-                    }
-                )
+                    processed.setdefault("_receive_info", {}).update(
+                        {
+                            "router_id": self.router_id,
+                            "receive_time": time.time(),
+                        }
+                    )
 
-                # P0.5 (request-response): входящий билет с correlation_id,
-                # совпадающим с нашим pending-запросом → это ОТВЕТ на наш
-                # request(). Резолвим pending и потребляем билет (дальше не
-                # диспетчеризуем). Guard на пустой реестр = ноль оверхеда,
-                # когда request() не используется. Чужие запросы с
-                # correlation_id безопасны: их id нет в нашем реестре.
-                #
-                # ВАЖНО (self-resolve guard): резолвим ТОЛЬКО билеты type="response".
-                # Без этого самоадресованный запрос (targets=[host], когда адаптер
-                # и приёмник в одном процессе — driver→ProcessManager) ловился бы
-                # собственным pending как «ответ» и НЕ доходил до handler'а
-                # (process.command → system.shutdown/process.stop молча эхо-резолвились).
-                # Все билдеры ответов (reply_to_request/адаптер/_handle_process_command)
-                # ставят type="response", запросы — type="command"/"data".
-                if self._pending_requests and processed.get("type") == "response":
-                    cid = self._extract_correlation_id(processed)
-                    if cid and self._resolve_pending(cid, processed):
+                    # P0.5 (request-response): входящий билет с correlation_id,
+                    # совпадающим с нашим pending-запросом → это ОТВЕТ на наш
+                    # request(). Резолвим pending и потребляем билет (дальше не
+                    # диспетчеризуем). Guard на пустой реестр = ноль оверхеда,
+                    # когда request() не используется. Чужие запросы с
+                    # correlation_id безопасны: их id нет в нашем реестре.
+                    #
+                    # ВАЖНО (self-resolve guard): резолвим ТОЛЬКО билеты type="response".
+                    # Без этого самоадресованный запрос (targets=[host], когда адаптер
+                    # и приёмник в одном процессе — driver→ProcessManager) ловился бы
+                    # собственным pending как «ответ» и НЕ доходил до handler'а
+                    # (process.command → system.shutdown/process.stop молча эхо-резолвились).
+                    # Все билдеры ответов (reply_to_request/адаптер/_handle_process_command)
+                    # ставят type="response", запросы — type="command"/"data".
+                    if self._pending_requests and processed.get("type") == "response":
+                        cid = self._extract_correlation_id(processed)
+                        if cid and self._resolve_pending(cid, processed):
+                            self._inc_stat("received")
+                            continue
+
+                    # P2.2 (Гибрид, control-plane): билет с адресом до воркера
+                    # (proc.worker[.…]) и НЕ data-кадр → доставляем worker-handler'у
+                    # (модель «почта»). Кадры остаются на data-пути (трубы).
+                    if self._route_to_worker(processed):
+                        result.append(Message.from_dict(processed) if return_messages else processed)
                         self._inc_stat("received")
                         continue
 
-                # P2.2 (Гибрид, control-plane): билет с адресом до воркера
-                # (proc.worker[.…]) и НЕ data-кадр → доставляем worker-handler'у
-                # (модель «почта»). Кадры остаются на data-пути (трубы).
-                if self._route_to_worker(processed):
+                    # P4.4 (B2): kind-router — регулировщик по виду `type`.
+                    self._route_by_kind(processed)
+
                     result.append(Message.from_dict(processed) if return_messages else processed)
                     self._inc_stat("received")
-                    continue
 
-                # P4.4 (B2): kind-router — регулировщик по виду `type`.
-                self._route_by_kind(processed)
+                except Exception as e:
+                    self._inc_stat("errors")
+                    self._log_error(f"receive error: {e}")
 
-                result.append(Message.from_dict(processed) if return_messages else processed)
-                self._inc_stat("received")
-
-            except Exception as e:
-                self._inc_stat("errors")
-                self._log_error(f"receive error: {e}")
-
-        return result
+            return result
+        finally:
+            local.depth = depth
 
     def _route_to_worker(self, processed: Dict[str, Any]) -> bool:
         """P2.2 (Гибрид, control-plane): доставить билет worker-handler'у по адресу.

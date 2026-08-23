@@ -123,10 +123,21 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
                 "плагин работает как no-op (история не пишется)"
             )
         else:
-            self._sub_id = ctx.state_proxy.subscribe("processes.**", self._on_deltas, exclude_self=True)
+            # sync=False — ОБЯЗАТЕЛЬНО, а не оптимизация (2026-08-23). start()
+            # плагина исполняется шагом 6 ProcessModule.initialize(), а приёмный
+            # поток процесса (message_processor) создаётся шагом 7 — то есть
+            # ПОЗЖЕ. Синхронная подписка ждала бы ответ, разобрать который в этот
+            # момент физически некому: замер на живом стенде дал ровно 10.03 с
+            # простоя старта = два таймаута по 5 с, и обе подписки всё равно
+            # оставались неподтверждёнными. Fire-and-forget отправляет ту же
+            # команду тем же каналом, серверная подписка создаётся так же;
+            # разница только в том, что серверный sub_id не возвращается —
+            # он здесь и не нужен: снимает подписки shutdown() прокси через
+            # state.unsubscribe_all по имени процесса.
+            self._sub_id = ctx.state_proxy.subscribe("processes.**", self._on_deltas, exclude_self=True, sync=False)
             # system.** — сводное здоровье (avg_fps/active/broken_wires) для строки
             # process_name='system'. Тот же callback кладёт листья в общий кэш.
-            self._sub_id_system = ctx.state_proxy.subscribe("system.**", self._on_deltas, exclude_self=True)
+            self._sub_id_system = ctx.state_proxy.subscribe("system.**", self._on_deltas, exclude_self=True, sync=False)
             ctx.log_info(
                 f"TelemetrySinkPlugin: подписка 'processes.**'/'system.**' sub_id={self._sub_id}/{self._sub_id_system}"
             )
