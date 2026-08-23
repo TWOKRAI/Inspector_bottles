@@ -39,7 +39,7 @@ logger = get_std_logger(__name__)
 #: Плагины-источники кадров, для которых показывается секция «Камера (actual)».
 #: Прикладной список в прикладном слое — фреймворк имён плагинов не знает.
 #: ``camera_service`` пишет ``cam.actual.*`` (cap.get симулятора/вебкамеры),
-#: ``capture`` — измеренную частоту ``state.capture_fps``. В рецептах они
+#: ``capture`` — измеренную частоту ``processes.{proc}.state.plugins.*.capture_fps``. В рецептах они
 #: взаимоисключающи, поэтому у каждой ноды часть строк секции — прочерк.
 _CAMERA_PLUGINS = frozenset({"camera_service", "capture"})
 
@@ -352,7 +352,7 @@ class NodeInspectorPanel(QWidget):
             # Actual-телеметрия камеры (Phase 3): для КАМЕРНОЙ ноды.
             #
             # Было `== "camera_service"`. Расширено 2026-08-17 (Р3.5-15): секция
-            # получила строку «FPS (измеренный)» по `state.capture_fps`, а пишет
+            # получила строку «FPS (измеренный)» по `processes.{proc}.state.plugins.*.capture_fps`, а пишет
             # её `CapturePlugin` с plugin_name `capture`. Проверено по всем 14
             # рецептам: `camera_service` и `capture` НИКОГДА не живут в одном
             # процессе — это взаимоисключающие источники (симулятор против
