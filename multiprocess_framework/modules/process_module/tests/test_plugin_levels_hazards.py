@@ -131,11 +131,21 @@ class _Proxy:
     ``node.update(data)`` и клала точечное имя ОДНИМ литеральным ключом; тест
     универсальности с именем ``zzz.made.up.level`` из-за этого краснел на
     исправном механизме — дубль не умел того, что умеет стор.
+
+    **``delete`` появился с Ф2, и его отсутствие было дырой ХАРНЕССА, а не
+    экономией.** Тик стал утверждать снятие поддерева ушедшего писателя через
+    ``proxy.delete``; дубль без этого метода отвечал на него ``AttributeError``,
+    который публикатор ловит как отказ транспорта, — и тест ниже
+    (``TestShutdownFailureStillRetracts``) оставался зелёным на утверждении
+    «лист живёт в дереве», проверяя на самом деле пробел дубля, а не поведение
+    механизма. Форма — дословно ``TreeStore.delete``: снимается РОВНО последний
+    сегмент пути у его родителя, никогда не подстрока соседнего ключа.
     """
 
     def __init__(self) -> None:
         self.tree: dict[str, Any] = {}
         self.merges: list[tuple[str, dict]] = []
+        self.deletes: list[str] = []
 
     def merge(self, path: str, data: dict) -> None:
         self.merges.append((path, dict(data)))
@@ -162,6 +172,25 @@ class _Proxy:
                 return default
             node = node[part]
         return node
+
+    def delete(self, path: str) -> bool:
+        """Снять ровно последний сегмент пути у родителя — как ``TreeStore.delete``.
+
+        Идемпотентен, как настоящий: путь отсутствует → ``False``, а не
+        исключение (``TreeStore.delete`` возвращает None, обработчик отвечает
+        ``changed=False``).
+        """
+        self.deletes.append(path)
+        *head, last = path.split(".")
+        node: Any = self.tree
+        for part in head:
+            if not isinstance(node, dict) or part not in node:
+                return False
+            node = node[part]
+        if not isinstance(node, dict) or last not in node:
+            return False
+        del node[last]
+        return True
 
 
 class _Services(MockProcessServices):
@@ -220,6 +249,11 @@ def _tree(services: _Services, leaf: str) -> Any:
 def _level(services: _Services, writer: str, leaf: str) -> Any:
     """Уровень плагина по НОВОМУ пути ``state.plugins.<писатель>.<имя>`` (Ф1)."""
     return services._state_proxy.get(f"processes.{services.name}.state.plugins.{writer}.{leaf}")
+
+
+def _writer_subtree(services: _Services, writer: str) -> Any:
+    """ВЕСЬ узел писателя — адрес, которым Ф2 снимает показания ушедшего."""
+    return services._state_proxy.get(f"processes.{services.name}.state.plugins.{writer}")
 
 
 def _polled_state(services: _Services) -> dict:
@@ -1010,13 +1044,15 @@ class TestShutdownFailureStillRetracts:
         before = len(services._state_proxy.merges)
         _tick_levels(hb)
         assert len(services._state_proxy.merges) == before, "тик после снятия всё ещё публикует уровни ушедшего плагина"
-        # ЛИСТ В ДЕРЕВЕ ПРИ ЭТОМ ОСТАЁТСЯ, и это НЕ дефект, а известная цена
-        # неделимой поставки Ф1+Ф2: поимённые ``None``-надгробия вырезаны вместе с
-        # арбитражем (их Ф0-фильтр стоял на каталоге владения), а удаление ПОДДЕРЕВА
-        # дорогой ``state.delete`` приносит Ф2. Утверждение зафиксировано ЯВНО, а не
-        # оставлено как молчание: иначе Ф2 не с чем было бы сравнивать.
-        assert _level(services, "boom_plugin", "boom_level") == pytest.approx(7.7), (
-            "лист исчез из дерева раньше Ф2 — значит снятие завелось интеримом, которого план не заказывал"
+        # И ЛИСТ УХОДИТ ИЗ ДЕРЕВА — с Ф2 отказная дорога остановки доводится до
+        # конца, а не до половины. До Ф2 здесь стояло обратное утверждение («лист
+        # остаётся — известная цена неделимой поставки Ф1+Ф2»), и оно было верным
+        # ровно до появления ``state.delete``: снятие ПОДДЕРЕВА писателя ставит
+        # тик, а тик после отказавшего ``shutdown`` идёт как обычно — плагин не
+        # STOPPED, но писателя в порту уже нет и его ведомость взведена.
+        assert _writer_subtree(services, "boom_plugin") is None, (
+            f"поддерево писателя пережило отказавший shutdown и тик Ф2 — снятие держится "
+            f"на успешном пути остановки. Дерево: {services._state_proxy.tree}"
         )
 
 
