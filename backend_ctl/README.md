@@ -81,7 +81,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `worker_status(process)` → `WorkerStatus` | типизированно: `process`/`status`/`workers` (+ `.raw`) |
 | `introspect_capabilities(process)` | карточка процесса: команды+descriptions, регистры (поля), handlers |
 | `capabilities()` → `Capabilities` | «контактная книжка»: свод по ВСЕМ процессам (fan-out) — топология, каналы, карточки |
-| `system_overview(timeout=)` | **B.3**: «один вызов = вся картина» — компактная сводка процессов + anomalies-подсказки; ноль новых IPC-команд |
+| `system_overview(timeout=)` | **B.3**: «один вызов = вся картина» — компактная сводка процессов + anomalies-подсказки; ноль новых IPC-команд. Т.2: `queue_data_loss` (вытеснение data-очереди получателя) и `control_plane_loss` (сорванная гарантия never-drop — строго хуже) — были в `RouterStats`, но не всплывали в `anomalies` |
 | `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
 | `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
 | `set_register(..., confirm_within=N)` | **D.5** commit-confirmed: запись авто-откатится через `N` сек без `register_confirm(commit_id)` (аналог Juniper `commit confirmed`) |
@@ -92,7 +92,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `subscribe(callback)` / `unsubscribe(callback)` | колбэк на каждое push-событие (зовётся в reader-потоке) |
 | `events_page(plane=None, cursor=None, limit=None)` | **B.1**: курсорная страница событий плоскости — недеструктивно, несколько читателей не мешают друг другу; ответ несёт `next_cursor`/`dropped`/`bookmark` |
 | `events_stats()` | счётчики hub'а: per-plane seq/размер/вытеснено (вход для overview B.3) |
-| `await_condition(kind, spec, timeout=)` | **B.2**: дождаться условия одним вызовом вместо поллинга — `state_path`/`event_matches`/`metric_threshold`; таймаут → диагноз (что ждали/что видели), не пустота |
+| `await_condition(kind, spec, timeout=)` | **B.2**: дождаться условия одним вызовом вместо поллинга — `state_path`/`event_matches`/`metric_threshold`; таймаут → диагноз (что ждали/что видели), не пустота. Т.2: удаление ПРЕДКА наблюдаемого пути (сегментно, не текстовый префикс) тоже ложится в `last_seen` таймаута как диагноз `{deleted: True, ancestor: ...}` — не совпадение условия |
 | `record_start(name, max_events=)` / `record_stop()` | **D.4 flight recorder**: запись потока событий в файл (`BACKEND_CTL_RECORD_DIR`) → offline-реплей; лимит → авто-стоп (footer valid) |
 | `record_load(name, position=, ring_maxlen=)` / `record_unload()` | загрузить запись в offline-реплей (сессия → replay) / вернуть live; `position="end"` (финал) \| `"start"` (тайм-трэвел) |
 | `record_status()` / `record_dump(name)` | статус записи/реплея; one-shot дамп arrival-кольца (`reason=dump`) |

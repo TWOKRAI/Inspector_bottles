@@ -113,3 +113,38 @@ Phase B (P0-эргономика: cursor list-watch B.1, await_condition, system
 + `tests/test_eviction_voice_hazards.py` (7, автор механизма). Корпус доказан: при снятом
 голосе краснеют **12 из 13**, тринадцатый — отрицательный контроль, доказан отдельной
 инъекцией «детектор срабатывает на событие раньше».
+
+## Task Т.2 observation-port (2026-08-23) — два молчащих класса потерь + слепота waiter'ов к удалению предка
+
+**overview.py.** `queue_data_evicted` и `queue_never_drop_loss_total` `RouterStats`
+уже разбирал (`protocol.py:203`/`:216`), но `system_overview` их не называл нигде —
+ни в карточке процесса, ни в `anomalies`. Асимметрия: транспортные потери ХВОСТА
+наблюдаемости (`obs_transport`) уже были видны, а потеря на очереди ПОЛУЧАТЕЛЯ —
+нет, хотя `queue_never_drop_loss_total` строже (сорвана гарантия «не дропаем»,
+control-плоскость), чем `queue_data_evicted` (ожидаемое вытеснение data-очереди,
+тот же счётчик, что `data_receiver.py:120` называет по имени на живом инциденте
+2026-08-12: 1646 вытесненных кадров у `seg`). Два новых kind — `queue_data_loss` и
+`control_plane_loss` — не пересекаются с `router_dropped`/`router_errors`
+(middleware/обработка сообщений, не очередь получателя). Отсутствующий счётчик
+(старая сборка router'а) по-прежнему уходит в существующий `counter_missing`,
+дублирования нет.
+
+**conditions.py.** `_setup_state_path`/`_setup_metric_threshold` сравнивали путь
+дельты с наблюдаемым БУКВАЛЬНО — удаление ПРЕДКА (`processes.gui` целиком, пока
+ждём `processes.gui.state.plugins.capture.capture_fps`) проходило незамеченным:
+`last_seen` оставался `None`, таймаут отдавал пустой hint вместо диагноза. Общий
+хелпер `_is_ancestor_path` (сегментная проверка через `candidate + "."`, не
+`str.startswith` — иначе `processes.gu` ложно считался бы предком
+`processes.gui.x`) используется в обоих настройщиках: удаление предка ложится в
+`last_seen` как `{deleted: True, ancestor: ...}`, но НЕ засчитывается совпадением
+условия. Стоимость на дельту, не совпавшую с наблюдаемым путём буквально: одна
+строковая конкатенация + `startswith`, и только для дельт с
+`new_value == MISSING_MARKER` — до сравнения предка доходят не все дельты подряд.
+
+Стражи: `tests/test_overview_loss_counters.py` (7) + `tests/test_conditions_ancestor_deletion.py`
+(6) — независимый тестер, писались до реализации, 13/13 зелёных. + `tests/test_t2_author_hazards.py`
+(7, автор механизма) — грани хелпера предка (корневой предок, путь не предок сам
+себе, наблюдаемый путь сам корень), различение `MISSING_MARKER` от легитимного
+`None` на пути предка, и форма/порядок аномалий на нескольких процессах разом.
+Полный `backend_ctl/tests`: 618 passed / 6 failed / 44 skipped → 624 passed / 0
+failed / 44 skipped (регрессий нет, прирост ровно на 6 бывших красных).
