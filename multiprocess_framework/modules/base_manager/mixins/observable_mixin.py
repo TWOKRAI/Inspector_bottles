@@ -416,7 +416,15 @@ class ObservableMixin(IObservableMixin):
             return None
 
         manager = registry.get(manager_name)
-        if not manager:
+        # `is None`, а не truthiness — по тому же доводу, что ниже у метода, и
+        # найдено матрицей инъекций Т.1: заплата «считать отказом и manager
+        # is None» не покраснила НИ ОДНОГО теста, потому что до этой строки
+        # None не доходит вообще (``ManagerRegistry`` ставит
+        # ``_enabled[name] = manager is not None and enabled``, и такой слот
+        # отсекается гейтом выше). Значит единственный достижимый случай здесь —
+        # менеджер НАСТОЯЩИЙ, но с ложным ``__bool__``/``__len__``: его записи
+        # уходили в никуда и НЕ считались, потому что выглядели как «слот пуст».
+        if manager is None:
             return None
 
         try:

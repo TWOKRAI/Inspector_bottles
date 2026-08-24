@@ -285,3 +285,80 @@ class TestBothKindsShareOneCounterKey:
 
         assert probe.manager_call_failures == {"logger.warning": 2}
         assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+
+
+class TestFalsyManagerIsStillAManager:
+    """Находка матрицы инъекций Т.1: ложь на САМОМ менеджере, не на методе.
+
+    Заплата «считать отказом ещё и ``manager is None``» не покраснила ни одного
+    теста — и это оказалось не пробелом в тестах, а доказательством, что до
+    строки ``if not manager`` ``None`` вообще не доходит: ``ManagerRegistry``
+    ставит ``_enabled[name] = manager is not None and enabled``, и слот с
+    ``None`` отсекается гейтом ``is_enabled`` выше.
+
+    Значит единственный достижимый случай той строки — менеджер НАСТОЯЩИЙ, но
+    ложный по ``__bool__``/``__len__``. Truthiness читала его как «слот пуст»:
+    запись исчезала и НЕ считалась, то есть ровно тот дефект, который Т.1
+    чинила одной строкой ниже — у метода, — оставался живым у менеджера.
+    """
+
+    class _FalsyLogger:
+        """Настоящий логгер, у которого ``bool(...)`` — ложь (контейнерный протокол)."""
+
+        def __init__(self) -> None:
+            self.seen: list = []
+
+        def __len__(self) -> int:
+            return 0
+
+        def warning(self, message, **kwargs) -> str:
+            self.seen.append(message)
+            return "записано"
+
+    def _make(self, logger):
+        class Comp(ObservableMixin):
+            def __init__(self, mgr):
+                ObservableMixin.__init__(self, managers={"logger": mgr})
+
+        return Comp(logger)
+
+    def test_falsy_manager_still_receives_the_record(self) -> None:
+        logger = self._FalsyLogger()
+        assert bool(logger) is False, "дубль обязан быть ложным, иначе тест ни о чём"
+
+        comp = self._make(logger)
+        comp._log_warning("запись через ложный менеджер")
+
+        assert logger.seen == ["запись через ложный менеджер"], logger.seen
+
+    def test_falsy_manager_is_not_counted_as_a_failure(self) -> None:
+        logger = self._FalsyLogger()
+        comp = self._make(logger)
+        comp._log_warning("запись")
+
+        assert comp.__dict__.get("_manager_call_failures") is None, comp.__dict__.get("_manager_call_failures")
+
+    def test_none_in_the_slot_stays_silent_and_uncounted(self) -> None:
+        """Контроль: ``None`` по-прежнему тихий допуск, а не отказ."""
+        comp = self._make(None)
+        comp._log_warning("запись")
+
+        assert comp.__dict__.get("_manager_call_failures") is None
+        assert comp._call_manager("logger", "warning", "x") is None
+
+    def test_falsy_manager_without_the_method_is_loud(self) -> None:
+        """Ложный менеджер БЕЗ метода обязан считаться — иначе тишина вернулась."""
+
+        class FalsyNoWarning:
+            def __len__(self) -> int:
+                return 0
+
+            def log_warning(self, message, **kwargs) -> None:
+                pass
+
+        comp = self._make(FalsyNoWarning())
+        comp._log_warning("запись")
+
+        assert comp.__dict__.get("_manager_call_failures") == {"logger.warning": 1}, comp.__dict__.get(
+            "_manager_call_failures"
+        )
