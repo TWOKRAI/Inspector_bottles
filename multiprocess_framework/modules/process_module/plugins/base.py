@@ -650,6 +650,35 @@ class PluginContext:
         """
         return self.plugin_name or self.process_name or "plugin"
 
+    def _observation_port(self, create: bool = False) -> Any:
+        """Порт наблюдений процесса — дорога контекста к плоскости уровней (Ф3).
+
+        ОДНО место на три дороги (объявление, публикация, снятие) по тому же
+        доводу, что у :meth:`_metric_writer`: разойдись они, публикация уехала бы
+        в один порт, а снятие чистило бы другой.
+
+        **Ленивость обязана пережить Ф3, и это named-фолбэк, а не костыль.**
+        ``observation_port`` отдаёт менеджер из слота ``observation``, а при его
+        отсутствии — вид на то же самое хранилище, заведённое прежней
+        ``get_or_create_plugin_levels``. Отказаться от второй ступени нельзя не
+        из вежливости к старому коду: плагин публикует уровни из ``configure()``,
+        то есть РАНЬШЕ ``start()`` — раньше, чем у процесса вообще созданы
+        менеджеры. Требуй эта дорога зарегистрированного слота, и первые
+        публикации каждого плагина исчезали бы молча.
+
+        Импорт ЛЕНИВЫЙ — тем же жестом и по той же причине, что у соседей ниже:
+        ``plugins.base`` импортируется РАНЬШЕ heartbeat'а, и тянуть его наверх
+        значило бы менять порядок загрузки ради трёх строк.
+
+        Args:
+            create: завести хранилище значений, если его ещё нет. ``True``
+                только у публикации: объявлению и снятию хранилище на пустом
+                месте не нужно.
+        """
+        from ...statistics_module.observation.observation_manager import observation_port
+
+        return observation_port(self.services, create=create)
+
     def declare_metric(self, name: str) -> str:
         """Внести УРОВЕНЬ в каталог имён телеметрии (ADR-PM-038 + Ф1).
 
@@ -707,8 +736,6 @@ class PluginContext:
         Плоскость stats точечные имена принимает и дальше (``capture.fps``) —
         там имя не становится путём дерева. Ограничение только здесь.
         """
-        from ...observability_declarations import declare_metric as _declare
-
         if "." in str(name):
             raise ValueError(
                 f"имя уровня {name!r} содержит точку. Уровень становится путём дерева "
@@ -718,7 +745,21 @@ class PluginContext:
                 f"Возьми имя без точек (например {str(name).replace('.', '_')!r}); "
                 f"точечные имена законны в плоскости stats (ctx.gauge/record_metric)"
             )
-        return _declare(name, owner=self._metric_writer())
+
+        # Ф3: объявление идёт ЧЕРЕЗ ПОРТ, как и публикация, — чтобы у контекста
+        # не осталось дороги к плоскости уровней в обход слота. Действие обеих
+        # веток дословно одно (каталог объявлений процессный и общий), поэтому
+        # ``create=False``: заводить хранилище значений ради объявления ИМЕНИ
+        # незачем, и сегодняшнее «объявил, но ещё ничего не опубликовал» не
+        # должно менять наблюдаемое состояние процесса.
+        writer = self._metric_writer()
+        port = self._observation_port()
+        if port is not None:
+            return port.for_plugin(writer).declare(name)
+
+        from ...observability_declarations import declare_metric as _declare
+
+        return _declare(name, owner=writer)
 
     def publish_metric(self, name: str, value: Any) -> None:
         """Отдать ТЕКУЩЕЕ значение уровня ``name`` (ADR-PM-038).
@@ -759,7 +800,7 @@ class PluginContext:
             value: текущее значение. Числовое округляется сборщиком до 1 знака
                 (та же цена, что у ``fps``); нечисловое едет как есть.
         """
-        from ..heartbeat.telemetry import PLUGIN_LEVELS_ATTR, get_or_create_plugin_levels
+        from ..heartbeat.telemetry import PLUGIN_LEVELS_ATTR
 
         # Точка в СЕГМЕНТЕ ПУТИ — отказ, и проверяются ОБА сегмента: имя листа и
         # имя писателя. Ф1 сделала достижимыми обе дыры сразу.
@@ -811,8 +852,14 @@ class PluginContext:
                 )
             return
 
-        store = get_or_create_plugin_levels(self.services)
-        if store is None:
+        # Ф3: публикация идёт ЧЕРЕЗ ПОРТ — слот ``observation``, а при его
+        # отсутствии прежняя ленивая ``get_or_create_plugin_levels`` (см.
+        # :meth:`_observation_port`). Точка назначения от маршрута не зависит:
+        # менеджер в слоте обслуживает ТО ЖЕ хранилище процесса, а не своё, —
+        # иначе значения, отданные до появления менеджера, стали бы невидимы
+        # после его регистрации.
+        port = self._observation_port(create=True)
+        if port is None:
             # Голос ОДИН раз: вызов идёт на такте плагина, и жалоба на каждом
             # такте — поток, к которому перестают прислушиваться (тот же довод,
             # что у ``note_metric_without_plane``). Своего счётчика этот случай
@@ -826,7 +873,7 @@ class PluginContext:
                     f"порт {PLUGIN_LEVELS_ATTR!r} — дальше по этому плагину молчим"
                 )
             return
-        store.publish(name, value, writer)
+        port.for_plugin(writer).publish(name, value)
 
     def _retract_metrics(self) -> int:
         """Снять все уровни, опубликованные этим владельцем. Возвращает их число.
@@ -847,19 +894,19 @@ class PluginContext:
         отсутствие хранилища уже названо один раз в :meth:`publish_metric`, а
         второй голос на том же факте звучал бы на КАЖДОЙ остановке плагина.
         """
-        # Ленивый импорт — тем же жестом, что у ``publish_metric`` выше, и по той
-        # же причине: `plugins.base` импортируется РАНЬШЕ heartbeat'а (проверено —
-        # после импорта одного только `plugins.base` модуля `heartbeat.telemetry`
-        # в `sys.modules` нет), и тянуть его наверх значило бы менять порядок
-        # загрузки ради трёх строк. Кольцо здесь не воспроизводилось — довод про
-        # порядок, а не про цикл.
-        from ..heartbeat.telemetry import PLUGIN_LEVELS_ATTR as _LEVELS_ATTR
-
-        levels = getattr(self.services, _LEVELS_ATTR, None)
-        retract = getattr(levels, "retract", None)
-        if not callable(retract):
+        # Ф3: снятие идёт ЧЕРЕЗ ПОРТ, той же дорогой, что публикация и
+        # объявление (:meth:`_observation_port`). Оставь эту дорогу на сыром
+        # ``getattr`` — и она читала бы ДРУГОЙ источник, чем публикация, ровно в
+        # том случае, ради которого порт и заводится: снятие чистило бы
+        # хранилище, в которое никто не писал, а уровни остановленного плагина
+        # продолжали бы ехать.
+        #
+        # ``create=False``: снимать в хранилище, которого нет, нечего, и заводить
+        # его на остановке плагина было бы работой ради пустого узла.
+        port = self._observation_port()
+        if port is None:
             return 0
-        return int(retract(self._metric_writer()))
+        return int(port.for_plugin(self._metric_writer()).retract())
 
 
 # Заглушки плоскости stats для SubPluginContext без родителя (этап 6, 1.1).

@@ -326,13 +326,54 @@ statistics_module/
 │   └── file_stats_channel.py    # IChannel → JSON/CSV файл
 ├── adapters/
 │   └── stats_adapter.py         # StatsAdapter(BaseAdapter) → CommandManager
+├── observation/
+│   └── observation_manager.py   # ObservationManager — порт уровней, слот `observation` (ADR-SM-012)
 └── tests/
     ├── test_stats_manager.py    # lifecycle, метрики, теги, N-count, flush
     ├── test_stats_integration.py # каналы, get_metric+tags, thread-safety
     ├── test_stats_adapter.py     # CommandManager registration
     ├── test_aggregation_window.py
+    ├── test_observation_port_hazards.py  # hazard'ы порта наблюдений (ADR-SM-012)
     └── test_stats_config.py
 ```
+
+---
+
+## Второй житель модуля: порт наблюдений (`observation/`, ADR-SM-012)
+
+Модуль держит **две плоскости метрик, а не одну**, и они соседи по оси, а не слои друг друга
+(ADR-PM-038):
+
+| | `StatsManager` (агрегат) | `ObservationManager` (уровни) |
+|---|---|---|
+| Вопрос | «сколько было за окно» | «сколько СЕЙЧАС» |
+| Хранение | `AggregationWindow` + live-слой, история в сторе | одно значение на имя, перезапись, без истории |
+| Адрес | серия метрики (`name` + теги) | лист дерева `state.plugins.<писатель>.<имя>` |
+| Кто публикует | сам менеджер, по своему темпу flush | тик `ProcessHeartbeat`, под publisher-гейтом |
+| Фасад плагина | `ctx.gauge` / `record_metric` / `record_timing` | `ctx.publish_metric` / `declare_metric` |
+
+`ObservationManager(ChannelRoutingManager, ObservationPort)` — четвёртый канонический слот
+`observation` рядом с logger/stats/error, регистрируется в `ProcessManagers.register_all`
+**безусловно**. Хранилище (`PluginLevels`) он **оборачивает**, а не заводит: живёт оно
+по-прежнему в `process_module/heartbeat/telemetry.py` и остаётся атрибутом процесса — порт
+резолвит его на каждом обращении, поэтому держатель один и разъехаться не с чем.
+
+```python
+port = process.get_manager("observation")
+port.for_plugin("capture").publish("fps", 30.0)   # identity — у хендла, не в аргументе
+port.collect_subtree(allowed_metrics)             # то, что тик кладёт в дерево
+port.departed_writers()                           # чьи поддеревья положено снять (Ф2)
+```
+
+Читателю, у которого может не быть слота (шаг тика, дубль сервисов), дорога одна —
+`observation_port(services)`: слот, а при его отсутствии короткоживущий вид над тем же
+хранилищем. Флаг `create` разделяет читателя (`False` — тик не заводит хранилище) и писателя
+(`True` — публикация из `configure()` идёт раньше, чем у процесса созданы менеджеры; это
+**named-фолбэк**, а не костыль).
+
+Границы: в `observation/` нет ни агрегации, ни каналов — записи в хаб наблюдаемости
+(`kind=observation`) приносит задача 3.2, а `AggregationWindow` остаётся у `StatsManager` и
+никуда не переезжает.
 
 ---
 

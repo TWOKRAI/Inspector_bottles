@@ -26,7 +26,7 @@
 | `router_module` | доставка сообщений **между процессами** | выбором handler внутри процесса (`dispatch`) |
 | `logger_module` | логирование (scope-based routing) | ошибками (наследник `error_module`) и метриками (`statistics`) |
 | `error_module` | ошибки с severity-routing | обычными логами |
-| `statistics_module` | метрики/**агрегация** (counter/gauge/timing, `AggregationWindow`) | логами, ошибками; **транспортом/персистентностью** снапшотов между рестартами (это `channel_routing_module/observability/`, D8 — ADR-SM-007) |
+| `statistics_module` | метрики: **агрегация** (counter/gauge/timing, `AggregationWindow`) **и уровни** — `observation/ObservationManager`, порт слота `observation`, «сколько СЕЙЧАС» (ADR-SM-012) | логами, ошибками; **транспортом/персистентностью** снапшотов между рестартами (это `channel_routing_module/observability/`, D8 — ADR-SM-007); **хранением** уровней (`PluginLevels` живёт в `process_module/heartbeat/`, порт его оборачивает) и **моментом их публикации** (это тик `ProcessHeartbeat`: часы у него, правда у порта) |
 | `shared_resources_module` | **межпроцессные** ресурсы: очереди, SHM, `EventManager`, `ConfigStore`, PSR | внутрипроцессным состоянием/подписками GUI |
 | `config_module` | runtime-**конфигурация** (dot-notation, env-fallback, subscribe) | доменным состоянием, регистрами |
 | `state_store_module` | **глобальное реактивное дерево** состояния (glob-подписки, дельты) | статической конфигурацией, доменными регистрами |

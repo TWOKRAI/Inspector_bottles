@@ -416,3 +416,27 @@ fps 21.2–21.4 — дельта счётчика делится на время
 новые секции приезжают без правок драйвера. `telemetry_snapshot` / `telemetry_history` —
 по-прежнему локальная read-model (ADR-136, 0 IPC) и с опросом не путаются: у них push-дельты
 под активной подпиской, у `levels` — поход в процесс, работающий при закрытой публикации.
+
+## Обновление 2026-08-24 — Ф3/3.1: уровни достаются через порт, а не сырым `getattr`
+
+Плоскость уровней дерева состояния (`state.plugins.<писатель>.<имя>`) получила владельца —
+`ObservationManager` в `statistics_module/observation/` (ADR-SM-012). Для `process_module`
+это значит четыре правки, все про МАРШРУТ, ни одной про форму данных:
+
+- `ManagersBundle` — новое поле `observation` (дефолт `None`); `ProcessManagers.create_all`
+  создаёт порт **безусловно** (как logger/stats, не как error), `register_all` кладёт его в
+  слот `observation`. `ProcessModule.observation_manager` — атрибут рядом с тремя братьями.
+- `ProcessHeartbeat` стал КЛИЕНТОМ порта: `_level_names` / `_collect_plugin_levels` /
+  `_delete_departed_subtrees` ходят через `_observation_port_of(services)`. Константы
+  `PLUGIN_LEVELS_ATTR` в этом файле больше нет — она осталась только у самого хранилища
+  (`heartbeat/telemetry.py`) и у голоса про непринятый атрибут в `plugins/base.py`.
+  Часы остались здесь (тик, publisher-гейт, ОДИН merge за такт), правда переехала в порт.
+- `PluginContext` маршрутизирует через слот все три дороги — `declare_metric`,
+  `publish_metric`, `_retract_metrics` — одним швом `_observation_port(create=…)`.
+  При отсутствующем слоте работает прежняя ленивая `get_or_create_plugin_levels`: это
+  **named-фолбэк**, потому что публикация плагина идёт из `configure()`, то есть раньше,
+  чем у процесса вообще созданы менеджеры.
+- Форма записи, ключ-писатель (Ф1), ведомость ушедших (Ф2), publisher-гейт и число merge за
+  тик — не тронуты. Хранилище `PluginLevels` НЕ переезжало.
+
+Гейт каталога: 2339 → 2345 passed, 1 xfailed (прирост — файл приёмки, регресса нет).

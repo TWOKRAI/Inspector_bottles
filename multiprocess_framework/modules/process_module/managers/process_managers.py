@@ -34,7 +34,8 @@ class ProcessManagers:
 
         Порядок создания менеджеров определён зависимостями:
         worker → logger → error → router(нужен logger) →
-        stats(нужен logger) → command(нужен logger, stats) → console.
+        stats(нужен logger) → observation(нужен logger) →
+        command(нужен logger, stats) → console.
 
         Returns:
             ManagersBundle — контейнер созданных менеджеров.
@@ -46,6 +47,7 @@ class ProcessManagers:
         error = self._create_error_manager(managers_config)
         router = self._create_router_manager(managers_config, logger=logger)
         stats = self._create_stats_manager(managers_config, logger=logger)
+        observation = self._create_observation_manager(logger=logger)
         command = self._create_command_manager(
             managers_config,
             logger=logger,
@@ -61,6 +63,7 @@ class ProcessManagers:
             stats=stats,
             console=console,
             error=error,
+            observation=observation,
             config_manager=self.process.config_manager,
             console_enabled=console_enabled,
         )
@@ -130,6 +133,22 @@ class ProcessManagers:
         process.register_manager("worker", bundle.worker, enabled=True)
         process.register_manager("logger", bundle.logger, enabled=True)
         process.register_manager("stats", bundle.stats, enabled=True)
+        # Ф3, задача 3.1: порт наблюдений — четвёртый канонический слот.
+        #
+        # Регистрация БЕЗУСЛОВНАЯ, как у logger/stats, а не условная, как у
+        # error ниже. Развилка настоящая, и выбор такой: error бывает НЕ СОЗДАН
+        # (его секции нет в конфиге — ``_create_error_manager`` возвращает
+        # None), а порт наблюдений своей секции не имеет вовсе и создаётся
+        # всегда. Условие ``if bundle.observation is not None`` сторожило бы
+        # случай, которого сборка не производит, и в тот день, когда порт
+        # перестал бы создаваться из-за дефекта, оно превратило бы отказ в
+        # тихий фолбэк — ровно тот класс, который эта фаза и разбирает.
+        #
+        # ``None`` в слоте при этом безопасен: ``ManagerRegistry.register``
+        # ставит ``_enabled = enabled and manager is not None``, а ``has()``
+        # отвечает False на None-менеджер. Bundle, собранный вручную без этого
+        # поля (тесты соседних модулей), остаётся рабочим.
+        process.register_manager("observation", bundle.observation, enabled=True)
         process.register_manager("command", bundle.command, enabled=True)
         process.register_manager("router", bundle.router, enabled=True)
         process.register_manager("console", bundle.console, enabled=bundle.console_enabled)
@@ -345,6 +364,30 @@ class ProcessManagers:
         )
         stats.initialize()
         return stats
+
+    def _create_observation_manager(self, logger: Any) -> Any:
+        """Порт наблюдений процесса (Ф3, задача 3.1).
+
+        Конфига у порта пока нет и секции в ``managers`` он не читает: частоту
+        публикации уровней задаёт publisher-гейт (``telemetry.publish``), а
+        каналы придут в задаче 3.2. Пустая секция, заведённая «на будущее», была
+        бы ручкой, которая ничего не делает, — а такие ручки выглядят
+        применёнными.
+
+        Хранилище уровней здесь НЕ создаётся: менеджер резолвит его лениво, по
+        первому обращению (см. ``ObservationManager.levels``). У процесса без
+        плагинов оно так и не появится, и «атрибута нет» останется отличимым от
+        «атрибут пуст».
+        """
+        from ...statistics_module.observation.observation_manager import ObservationManager
+
+        observation = ObservationManager(
+            manager_name=f"observation_{self.process.name}",
+            process=self.process,
+            managers={"logger": logger},
+        )
+        observation.initialize()
+        return observation
 
     def _create_command_manager(
         self,

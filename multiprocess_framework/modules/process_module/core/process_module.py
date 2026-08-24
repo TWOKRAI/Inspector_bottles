@@ -156,6 +156,8 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.router_manager = None
         self.stats_manager = None
         self.console_manager = None
+        # Ф3, задача 3.1: порт наблюдений — четвёртый канонический слот.
+        self.observation_manager = None
 
         # Внутренние компоненты (композиция)
         self._lifecycle = ProcessLifecycle(self)
@@ -333,6 +335,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.stats_manager = bundle.stats
         self.command_manager = bundle.command
         self.console_manager = bundle.console
+        self.observation_manager = bundle.observation
         self._process_managers.register_all(bundle, self)
         self._process_managers.attach_adapters(bundle, self)
         self._process_managers.connect_event_manager(self)

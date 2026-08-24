@@ -21,6 +21,39 @@ if TYPE_CHECKING:
 METRIC_SHM = declare_metric("shm", owner=__name__)
 
 
+def _observation_port_of(services: Any) -> Any:
+    """Порт наблюдений процесса — ЕДИНСТВЕННАЯ дорога heartbeat к уровням (Ф3).
+
+    До задачи 3.1 состояние доставалось сырым ``getattr(services,
+    PLUGIN_LEVELS_ATTR)`` в трёх местах этого файла, и в каждом стояла своя
+    duck-typed проверка «а есть ли у него нужный метод». Три копии одного
+    вопроса — три места, где ответ может разойтись; теперь вопрос задаётся один
+    раз и не здесь. Часы остались у heartbeat (тик, publisher-гейт, один merge
+    за такт), правда переехала в порт.
+
+    ``create=False``: тик не заводит хранилище. У процесса без единой публикации
+    его нет, и заводить пустое на каждом такте значило бы стереть разницу между
+    «плагины уровней не отдавали» и «отдавали, но всё придержал гейт».
+
+    Свободная функция, а не метод, и это не мелочь: три шага тика обязаны
+    зависеть от ``self`` ровно тем, чем зависели до Ф3, — одним ``_services``.
+    Сделай резолв методом — и минимальный носитель ``SimpleNamespace(_services=…)``,
+    которым существующие тесты зовут шаг снятия напрямую, потребовал бы
+    собственной копии резолва, то есть фейк доказывал бы фейк.
+
+    Импорт ЛЕНИВЫЙ — тем же жестом, что у соседних ``from .telemetry import …``
+    ниже: ``statistics_module`` и ``process_module`` тянут друг друга, и порядок
+    загрузки не должен решать, кто получит частично инициализированный пакет.
+
+    Returns:
+        Порт либо ``None`` — «уровней у процесса нет», обычное состояние
+        процесса без плагинов, а не сбой.
+    """
+    from ...statistics_module.observation.observation_manager import observation_port
+
+    return observation_port(services)
+
+
 class ProcessHeartbeat:
     """Heartbeat sender через IProcessServices.
 
@@ -628,17 +661,14 @@ class ProcessHeartbeat:
         имена вообще есть (каталог объявлений знает только объявленные — см.
         ``TelemetryGate.due_metrics``). Значения сюда не копируются.
 
-        Хранилища нет (процесс без плагинов, иммутабельный дубль сервисов) →
-        пустое множество: гейт тогда работает ровно по каталогу, как раньше.
+        Порта нет (процесс без плагинов, иммутабельный дубль сервисов) → пустое
+        множество: гейт тогда работает ровно по каталогу, как раньше.
         """
-        from .telemetry import PLUGIN_LEVELS_ATTR
-
-        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
-        names: Any = getattr(store, "names", None)
-        if not callable(names):
+        port = _observation_port_of(self._services)
+        if port is None:
             return set()
         try:
-            return set(names())
+            return set(port.level_names())
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Имена уровней плагинов недоступны: {exc}", module="heartbeat")
@@ -662,17 +692,14 @@ class ProcessHeartbeat:
                 все).
 
         Returns:
-            ``{"plugins": {писатель: {имя: значение}}}`` — пусто, если хранилища
-            нет, оно пусто или всё придержал гейт.
+            ``{"plugins": {писатель: {имя: значение}}}`` — пусто, если порта
+            нет, хранилище пусто или всё придержал гейт.
         """
-        from .telemetry import PLUGIN_LEVELS_ATTR, build_plugin_levels
-
-        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
-        publications: Any = getattr(store, "publications", None)
-        if not callable(publications):
+        port = _observation_port_of(self._services)
+        if port is None:
             return {}  # ни один плагин процесса уровней не отдавал
         try:
-            return build_plugin_levels(publications(), allowed_metrics)
+            return port.collect_subtree(allowed_metrics)
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Уровни плагинов недоступны: {exc}", module="heartbeat")
@@ -729,14 +756,13 @@ class ProcessHeartbeat:
         # Путь строится ТОЙ ЖЕ константой, что и поддерево в сборщике: снятие,
         # адресующее другой ключ, чем публикация, чистило бы не то место — и
         # разъезд был бы виден только на стенде.
-        from .telemetry import PLUGIN_LEVELS_ATTR, PLUGINS_SUBTREE_KEY
+        from .telemetry import PLUGINS_SUBTREE_KEY
 
-        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
-        departed: Any = getattr(store, "departed_writers", None)
-        if not callable(departed):
+        port = _observation_port_of(self._services)
+        if port is None:
             return  # процесс без порта уровней — снимать нечего
         try:
-            writers = tuple(departed())
+            writers = tuple(port.departed_writers())
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Ведомость ушедших писателей недоступна: {exc}", module="heartbeat")
@@ -750,7 +776,7 @@ class ProcessHeartbeat:
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Снятие поддерева писателя {writer!r} не ушло: {exc}", module="heartbeat")
                 continue
-            store.note_delete_delivered(writer)
+            port.note_delete_delivered(writer)
 
     def _publish_telemetry_to_tree(self, workers: dict, allowed_metrics: Any = None) -> None:
         """Вся телеметрия процесса за тик — ОДНИМ ``proxy.merge`` (Р3.5-12).
