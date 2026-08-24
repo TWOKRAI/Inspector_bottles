@@ -110,6 +110,23 @@ sub_id = proxy.subscribe(
 proxy.unsubscribe(sub_id)
 ```
 
+**Параметр `sync` (Task Т.3, ADR-SS-023).** `subscribe(..., sync=True)` (дефолт) —
+блокирующий `request()`-раундтрип до `sub_id` сервера, таймаут
+`StateProxy._SYNC_REQUEST_TIMEOUT = 5.0` с; используйте, только когда на вызывающем
+потоке уже есть кому дождаться ответа. `subscribe(..., sync=False)` — fire-and-forget,
+не блокирует вызывающий поток; обязателен там, где приёмный поток для ответа сервера
+ещё не создан (пример — старт GUI, `frontend/process.py._init_application_threads`).
+Async-подписки НЕ подтверждаются сервером (не попадают в `_confirmed_patterns`) и
+поэтому не могут покрывать более узкие паттерны в `ensure_subscription` —
+подтверждение для coverage-check остаётся строго server-ack-only (по дельте не
+подтверждается: конверт `state.changed` не несёт `sub_id`, см. ADR-SS-023).
+Публично прочитать состояние подтверждений можно без доступа к приватным полям:
+
+```python
+proxy.confirmed_pattern_count  # число ПОДТВЕРЖДЁННЫХ сервером паттернов
+proxy.async_subscribe_count    # число отправленных async-подписок (монотонно растёт)
+```
+
 ---
 
 ## Параметр server_target (ADR-SS-002)

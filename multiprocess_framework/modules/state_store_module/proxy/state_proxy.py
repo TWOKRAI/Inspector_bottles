@@ -52,6 +52,14 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
 
         # Чтение (из кэша или IPC fallback)
         fps = proxy.get("cameras.0.config.fps", default=25)
+
+    Coverage-check (`ensure_subscription` не шлёт второй `state.subscribe` под
+    уже покрытым паттерном) работает ТОЛЬКО поверх `_confirmed_patterns` —
+    паттернов, подтверждённых sync-подпиской. Если у процесса ни одной такой
+    подписки нет (например GUI, где стартовые подписки sync=False — Task Т.3,
+    `frontend/process.py`), coverage-check честно вырождается в «ничего не
+    покрывает», см. `_find_covering_pattern`; `confirmed_pattern_count`
+    позволяет увидеть это снаружи, не читая приватные поля.
     """
 
     def __init__(
@@ -170,6 +178,31 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     def cache(self) -> dict[str, Any]:
         """Копия текущего кэша (только для чтения/тестов)."""
         return dict(self._cache)
+
+    @property
+    def confirmed_pattern_count(self) -> int:
+        """Число паттернов, реально подтверждённых сервером (Task Т.3).
+
+        Единственный публичный способ снаружи отличить живую coverage-проверку
+        от мёртвой: до этого свойства `_confirmed_patterns` было приватным, и
+        оператор не мог узнать, покрывает ли что-нибудь хоть один паттерн, не
+        читая внутренности прокси. Растёт только на подтверждённом sync=True
+        `subscribe()` (валидный `sub_id` от сервера) — см. `_find_covering_pattern`.
+        """
+        return len(self._confirmed_patterns)
+
+    @property
+    def async_subscribe_count(self) -> int:
+        """Число async-подписок (sync=False), отправленных с момента создания прокси.
+
+        Публичная витрина `_async_subscribe_count` (Task Т.3): вместе с
+        `confirmed_pattern_count` даёт оператору снаружи полную картину —
+        сколько подписок ушло без ожидания подтверждения и сколько из НИХ (или
+        из sync-подписок) сервер реально подтвердил. Монотонно растёт, не
+        уменьшается при unsubscribe (это счётчик отправленных запросов, а не
+        текущих активных подписок).
+        """
+        return self._async_subscribe_count
 
     # -------------------------------------------------------------------
     # Запись
@@ -580,6 +613,19 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         узкий не получил своей подписки, а покрывающая не стримит дельт).
         Coverage-проверка консервативна (см. pattern_covers): ложное «покрыто»
         невозможно.
+
+        ЧЕСТНО ОБЪЯВЛЕННАЯ ДЕГРАДАЦИЯ (Task Т.3, plans/observation-port/plan.md):
+        если `_confirmed_patterns` пуст (ни одна подписка данного процесса не
+        подтверждена sync-путём — ровно так у GUI после перевода четырёх
+        стартовых подписок на sync=False, Task Т.3), эта функция ВСЕГДА
+        возвращает None — «ничего ничего не покрывает». Проверка при этом не
+        падает и не логирует ничего особого: она молча и честно вырождается.
+        Следствие для `ensure_subscription`: КАЖДЫЙ её вызов создаёт свою
+        серверную подписку — цена дублирующихся серверных подписок платится
+        оператором. Это НЕ чинится в рамках Т.3 — задача называет цену, а не
+        устраняет её (перенос подписки туда, где уже есть приёмник, снят из
+        рамок правкой шагов `ProcessModule.initialize()`, которая сама вне
+        рамок Т.3 по формулировке ТЗ).
 
         Args:
             new_pattern: паттерн, для которого ищем покрытие.

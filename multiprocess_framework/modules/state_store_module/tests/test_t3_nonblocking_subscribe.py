@@ -21,6 +21,18 @@
 имя контракта ``StateProxy.confirmed_pattern_count`` (по аналогии с
 существующими публичными ``@property`` — ``process_name``, ``cache``) — это
 дизайн-решение тестера, а не факт из кода.
+
+Правка (реализация Task Т.3, решение 3 постановки): исходный
+``test_evidence_based_confirmation_variant_pattern_becomes_covering_after_delta``
+был условным — «зелёный, ЕСЛИ реализация выберет evidence-based
+подтверждение». Реализация закрыла развилку в пользу строго server-ack-only
+(единственного пути, где подтверждение не зависит от того, что конверт
+``state.changed`` не несёт ``sub_id`` — см. решение 3 в ТЗ). Тест переписан
+(единственное разрешённое исключение из «остальные тесты — byte-identical») в
+``test_delta_evidence_does_not_confirm_a_pattern_for_coverage`` — строго
+СИЛЬНЕЕ исходного, а не слабее: конструирует ИМЕННО опасность из решения 3
+(подтверждённая узкая + неподтверждённая широкая подписки совпадают по дельте)
+и доказывает, что широкая подписка не становится покрывающей.
 """
 
 from __future__ import annotations
@@ -252,33 +264,68 @@ class TestCoverageHonesty:
             "стать 1 — оператор обязан видеть это БЕЗ обращения к приватным полям"
         )
 
-    def test_evidence_based_confirmation_variant_pattern_becomes_covering_after_delta(self):
-        """Условный вариант из критерия 3 («evidence-based confirmation»).
+    def test_delta_evidence_does_not_confirm_a_pattern_for_coverage(self):
+        """Реализация ЗАКРЫЛА условный вариант критерия 3 (см. Task Т.3, решение 3
+        в постановке — plans/observation-port/plan.md): подтверждение паттерна для
+        coverage-check остаётся СТРОГО server-ack-only, приход дельты НЕ
+        подтверждает паттерн. Это усиление исходного (условного) теста, а не
+        ослабление: было «зелёный ЕСЛИ реализация выберет evidence-based» — стало
+        «зелёный, потому что evidence-based here считается дефектом, и тест это
+        доказывает инъекцией конкретного механизма».
 
-        ЕСЛИ реализация подтверждает async-подписку ПРИХОДОМ дельты (а не только
-        явным server-ack) — то после такой дельты широкий паттерн обязан начать
-        покрывать более узкий (наблюдаемый эффект: повторный ensure_subscription
-        на узкий паттерн НЕ шлёт второй state.subscribe).
-
-        Это ОДИН из двух допустимых по ТЗ путей. Если реализация останется
-        строго server-ack-only (доказательство только явным ответом сервера —
-        тоже валидное прочтение критерия 3), этот тест закономерно останется
-        красным — это находка для разбора на ревью, а не дефект теста.
+        Причина запрета названа явно в ТЗ и воспроизводится здесь: конверт
+        ``state.changed`` не несёт ``sub_id`` (см. ``StateProxy.on_state_changed``,
+        ``_deserialize_deltas`` — дельта знает path/old/new/source, но НЕ то, какая
+        подписка её вызвала). Дельта, попавшая под широкий async-паттерн, могла в
+        реальности быть порождена СОВСЕМ ДРУГОЙ, более узкой подпиской — сервер
+        рассылает дельты по адресату (``targets``), а не по подписке-источнику.
+        Если бы приход такой дельты подтверждал широкий паттерн как покрывающий,
+        `_find_covering_pattern` начал бы считать его источником потока для всех
+        более узких паттернов — включая те, на которые сервер в реальности НИКОГДА
+        не создавал подписку для этого широкого паттерна, — и последующий
+        `ensure_subscription` на них тихо пропустил бы РЕАЛЬНО нужный
+        `state.subscribe`. Ровно этот сценарий и воспроизводит тест ниже: узкая
+        `processes.cam0.state.status` подтверждена СВОЕЙ отдельной sync-подпиской
+        (легитимный источник дельты), широкая `processes.**` остаётся
+        неподтверждённой async-подпиской; после того как та же дельта прогоняется
+        через `on_state_changed` (что при evidence-based подтверждении «доказало»
+        бы широкий паттерн), повторный `ensure_subscription` на ДРУГОЙ узкий
+        паттерн (`processes.cam1.**`, для которого своей подписки ещё нет) обязан
+        уйти на сервер — если бы широкий паттерн тихо стал покрывающим, эта
+        строка нашла бы мнимое покрытие и не отправила бы нужный state.subscribe.
         """
         router = _NeverRepliesRouter()
         proxy = StateProxy("gui", router=router, server_target="ProcessManager")
         proxy.initialize()
 
-        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True, sync=False)
+        # Легитимный источник дельты: узкая подписка ДЕЙСТВИТЕЛЬНО подтверждена
+        # сервером (echo-роутер вернул бы sub_id; здесь важно, что confirmed).
+        echo_proxy_confirms = StateProxy("gui-confirm-helper", router=_EchoRouter(), server_target="ProcessManager")
+        echo_proxy_confirms.initialize()
+        echo_proxy_confirms.subscribe("processes.cam0.state.status", lambda _d: None, exclude_self=True, sync=True)
+        assert "processes.cam0.state.status" in echo_proxy_confirms._confirmed_patterns
 
+        # Широкий паттерн — async, сервер НЕ подтвердил (as в проде GUI, Task Т.3).
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True, sync=False)
+        assert "processes.**" not in proxy._confirmed_patterns
+
+        # Дельта, которая матчит и узкий (реальный источник), и широкий паттерн —
+        # неотличимая по конверту от «пришла благодаря широкому».
         delta = Delta(path="processes.cam0.state.status", old_value=None, new_value="running", source="cam0")
         proxy.on_state_changed({"command": "state.changed", "data": {"deltas": [delta.to_dict()]}})
 
+        # Широкий паттерн ОБЯЗАН остаться неподтверждённым — дельта не сервер-ack.
+        assert "processes.**" not in proxy._confirmed_patterns, (
+            "приход дельты не должен добавлять паттерн в _confirmed_patterns — "
+            "конверт state.changed не несёт sub_id, дельта могла прийти от чужой подписки"
+        )
+
         before = len(router.subscribe_messages)
-        proxy.ensure_subscription("processes.cam0.**", lambda _d: None, exclude_self=True)
+        proxy.ensure_subscription("processes.cam1.**", lambda _d: None, exclude_self=True)
         after = len(router.subscribe_messages)
 
-        assert after == before, (
-            "узкий паттерн должен был найти покрытие широким ПОСЛЕ дельты-свидетельства "
-            f"(before={before}, after={after}) — ушёл отдельный state.subscribe"
+        assert after == before + 1, (
+            "processes.cam1.** не имеет собственной подписки и не покрыт НИЧЕМ "
+            "подтверждённым — 'processes.**' не имеет права выступить покрывающим "
+            f"на основании дельты-свидетельства (before={before}, after={after})"
         )

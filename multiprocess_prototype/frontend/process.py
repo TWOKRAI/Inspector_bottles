@@ -103,26 +103,43 @@ class GuiProcess(ProcessModule):
             self.router_manager.register_message_handler("process.command.response", self._on_command_response)
             # Серверная подписка на телеметрию (callback пуст — доставку в виджеты
             # делает emitter через bridge; подписка нужна, чтобы DeltaDispatcher слал
-            # дельты на 'gui'). Не блокирует старт: subscribe — fire-and-forget.
+            # дельты на 'gui'). sync=False ОБЯЗАТЕЛЕН (Task Т.3,
+            # plans/observation-port/plan.md): на этом шаге (шаг 6 initialize())
+            # приёмный поток data_receiver ещё не создан — он заводится НИЖЕ, —
+            # поэтому sync=True (дефолт) блокировал бы главный поток на полный
+            # request-таймаут (StateProxy._SYNC_REQUEST_TIMEOUT = 5.0 с) НА КАЖДУЮ
+            # из четырёх подписок: отвечать было буквально некому. Замер на живом
+            # стенде: 20.03 с до несвязанной починки грейса, 2.02 с после — и в
+            # ОБОИХ случаях подтверждённых подписок было 0. Терялось при этом НЕ
+            # сообщение: `RouterManager.request` при отсутствии приёмного цикла
+            # сообщение ОТПРАВЛЯЕТ и сам называет это fire-and-forget-деградацией
+            # (router_manager.py:1021-1025) — не приезжало только ПОДТВЕРЖДЕНИЕ,
+            # а платой был чистый простой главного потока. При sync=False подписка
+            # действительно fire-and-forget: комментарий ниже стал верным вместе
+            # с кодом, а не отдельно от него. Плата — все четыре паттерна
+            # остаются НЕподтверждёнными (не попадают в _confirmed_patterns), и
+            # coverage-check (_find_covering_pattern) для GUI-процесса вырождается
+            # в «ничего не покрывает» — см. докстринг класса StateProxy и
+            # _find_covering_pattern; это не чинится здесь (см. Out of scope Т.3).
             try:
-                self._gui_state_proxy.subscribe("processes.**", lambda _deltas: None, exclude_self=True)
+                self._gui_state_proxy.subscribe("processes.**", lambda _deltas: None, exclude_self=True, sync=False)
                 # system.** — сводное здоровье (system.health.active/avg_fps/broken_wires)
                 # для health-панели вкладки «Процессы». Без неё дельты system.* не
                 # доходят до GUI и панель показывает дефолты («Активно: 0», «—»).
-                self._gui_state_proxy.subscribe("system.**", lambda _deltas: None, exclude_self=True)
+                self._gui_state_proxy.subscribe("system.**", lambda _deltas: None, exclude_self=True, sync=False)
                 # devices.** — реестр устройств, conn-статусы, телеметрия.
                 # Без этой подписки DeviceHubPlugin публикует devices.registry.*
                 # / devices.state.* в DeltaDispatcher, но дельты не доходят до GUI:
                 # DeltaDispatcher шлёт дельты только подписчикам; GUI не в списке →
                 # комбо остаётся пустым и push-обновления conn мертвы.
                 # При подписке сработает _replay_initial_state — комбо заполнится сразу.
-                self._gui_state_proxy.subscribe("devices.**", lambda _deltas: None, exclude_self=True)
+                self._gui_state_proxy.subscribe("devices.**", lambda _deltas: None, exclude_self=True, sync=False)
                 # calibration.** — прогресс визарда калибровки камера↔робот.
                 # CameraRobotCalibrationPlugin публикует calibration.state.<camera_id>.progress;
                 # без этой подписки DeltaDispatcher не шлёт дельты в GUI (GUI не в списке
                 # подписчиков) → подвкладка «Калибровка» (Services → Робот) «висит»: «найдено
                 # N/5», собранные точки, reproj и активация «Сохранить» не обновляются.
-                self._gui_state_proxy.subscribe("calibration.**", lambda _deltas: None, exclude_self=True)
+                self._gui_state_proxy.subscribe("calibration.**", lambda _deltas: None, exclude_self=True, sync=False)
             except Exception as exc:
                 self._log_warning(
                     f"GuiProcess '{self.name}': подписка на processes.**/system.**/devices.**/"

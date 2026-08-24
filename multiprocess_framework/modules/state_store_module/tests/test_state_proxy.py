@@ -1668,3 +1668,123 @@ class TestCoveredSubscriptionReadoption:
         proxy.unsubscribe(narrower_sub_id)
         assert router.count(router.async_calls, "state.subscribe") == subs_before + 1  # теперь узкий осиротел
         assert narrow_sub_id not in proxy._covered_sub_ids
+
+
+# ---------------------------------------------------------------------------
+# Task Т.3 (plans/observation-port/plan.md) — авторские hazard-тесты механизма.
+# Независимая приёмка живёт в test_t3_nonblocking_subscribe.py; здесь —
+# внутренние риски, которые видит только автор реализации: публичные
+# счётчики (confirmed_pattern_count/async_subscribe_count), реальный контракт
+# unsubscribe для «голой» async-подписки (не через ensure_subscription) и
+# сохранение доставки через delta_sink у GuiStateProxy после перевода
+# стартовых подписок на sync=False.
+# ---------------------------------------------------------------------------
+
+
+class TestT3PublicCounters:
+    """confirmed_pattern_count / async_subscribe_count — публичная витрина Т.3."""
+
+    def test_confirmed_pattern_count_ignores_async_subscriptions(self):
+        """Async-подписки не должны просачиваться в confirmed-счётчик."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        proxy.subscribe("processes.**", lambda _d: None, sync=False)
+        proxy.subscribe("system.**", lambda _d: None, sync=False)
+
+        assert proxy.confirmed_pattern_count == 0
+        assert proxy.async_subscribe_count == 2
+
+    def test_confirmed_pattern_count_tracks_sync_confirm_and_unsubscribe(self):
+        """Счётчик растёт на подтверждённом sync-subscribe и падает на unsubscribe
+        ПОСЛЕДНЕГО sub_id паттерна (см. unsubscribe(): _confirmed_patterns.discard
+        только когда паттерн не остался ни у одного другого sub_id)."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        sub_a = proxy.subscribe("processes.**", lambda _d: None, sync=True)
+        assert proxy.confirmed_pattern_count == 1
+
+        sub_b = proxy.subscribe("processes.**", lambda _d: None, sync=True)  # второй sub на тот же pattern
+        assert proxy.confirmed_pattern_count == 1  # тот же паттерн — счётчик не задваивается
+
+        proxy.unsubscribe(sub_a)
+        assert proxy.confirmed_pattern_count == 1  # держит sub_b
+
+        proxy.unsubscribe(sub_b)
+        assert proxy.confirmed_pattern_count == 0  # паттерн больше никем не держится
+
+    def test_async_subscribe_count_is_monotonic_across_unsubscribe(self):
+        """async_subscribe_count считает ОТПРАВЛЕННЫЕ запросы, а не текущие
+        активные подписки — unsubscribe не должен его уменьшать (иначе счётчик
+        перестал бы отвечать на вопрос «сколько async-запросов реально ушло»)."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        sub_id = proxy.subscribe("devices.**", lambda _d: None, sync=False)
+        assert proxy.async_subscribe_count == 1
+
+        proxy.unsubscribe(sub_id)
+        assert proxy.async_subscribe_count == 1, "unsubscribe не откатывает счётчик отправленных async-запросов"
+
+
+class TestT3BareAsyncSubscribeUnsubscribeContract:
+    """Реальный (не предполагаемый) контракт unsubscribe для async-подписки.
+
+    В отличие от covered-подписок (_covered_sub_ids, заводятся только через
+    ensure_subscription при найденном покрытии — у них НЕТ серверной подписки,
+    и unsubscribe для них намеренно не шлёт IPC), «голая» async-подписка
+    (subscribe(..., sync=False), путь Task Т.3 в frontend/process.py) РЕАЛЬНО
+    отправила на сервер state.subscribe (fire-and-forget, ответа не ждали, но
+    запрос ушёл) — поэтому unsubscribe ОБЯЗАН отправить парный
+    state.unsubscribe, иначе на сервере остаётся подписка-сирота. Проверено
+    по коду unsubscribe(): ветка `if sub_id in self._covered_sub_ids` для
+    голой async-подписки не срабатывает (её там нет), поэтому исполнение
+    доходит до IPC-отписки внизу метода — это и есть предмет теста ниже.
+    """
+
+    def test_unsubscribe_of_bare_async_subscription_sends_server_unsubscribe(self):
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        sub_id = proxy.subscribe("processes.**", lambda _d: None, exclude_self=True, sync=False)
+        assert sub_id not in proxy._covered_sub_ids, "голая async-подписка не должна попадать в covered"
+
+        proxy.unsubscribe(sub_id)
+
+        assert router.count(router.async_calls, "state.unsubscribe") == 1, (
+            "async-подписка реально дошла до сервера (state.subscribe ушёл) — "
+            "unsubscribe обязан отправить парный state.unsubscribe, иначе подписка "
+            "останется висеть на сервере"
+        )
+        unsub_msgs = [m for m in router.async_calls if m.get("command") == "state.unsubscribe"]
+        assert unsub_msgs[0]["data"]["sub_id"] == sub_id
+
+
+class TestT3GuiStateProxyAsyncSubscribeStillDelivers:
+    """GuiStateProxy: перевод стартовых подписок на sync=False (Task Т.3) не
+    должен ломать реальный путь доставки — delta_sink, а не локальный callback
+    (GuiStateProxy.on_state_changed вызывает delta_sink БЕЗУСЛОВНО для всех
+    дельт пакета, локальный per-pattern callback у него не участвует — см.
+    gui_state_proxy.py). Хазард: если бы async-ветка subscribe() по ошибке не
+    регистрировала sub_id/pattern локально (например, ранний return), это
+    здесь никак не проявилось бы САМО ПО СЕБЕ — но именно поэтому важно
+    зафиксировать сквозной путь: подписка ушла асинхронно → сервер (гипотетически)
+    прислал дельту → сборка обновила кэш и дошла до sink, как в проде."""
+
+    def test_async_subscribe_then_delta_reaches_delta_sink(self):
+        router = _SpyRouter()
+        received: list = []
+        proxy = GuiStateProxy("gui", router=router, delta_sink=received.extend, server_target="ProcessManager")
+        proxy.initialize()
+
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True, sync=False)
+        assert router.count(router.async_calls, "state.subscribe") == 1
+        assert "processes.**" not in proxy._confirmed_patterns  # честно неподтверждён
+
+        delta = Delta(path="processes.cam0.state.status", old_value=None, new_value="running", source="cam0")
+        proxy.on_state_changed({"command": "state.changed", "data": {"deltas": [delta.to_dict()]}})
+
+        assert len(received) == 1, "async-подписка не должна ломать доставку через delta_sink"
+        assert received[0].path == "processes.cam0.state.status"
+        assert proxy.cache["processes.cam0.state.status"] == "running"
