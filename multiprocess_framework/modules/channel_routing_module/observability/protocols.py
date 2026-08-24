@@ -52,9 +52,11 @@ class StatsLike(Protocol):
 class ErrorLike(Protocol):
     """Слот 'error': трекинг ошибок с контекстом.
 
-    Возврат — Any: ObservableMixin._track_error трактует non-None как «обработано»
-    и НЕ делает fallback track_error → record_error (иначе на слоте с обоими
-    методами ошибка записалась бы дважды).
+    Возврат — Any и НИ НА ЧТО не влияет (Т.1, `a7d7cb60`): ``_track_error``
+    выбирает ступень по протоколу приёмника, а не по возвращённому значению.
+    Прежняя формулировка («non-None гасит fallback») описывала лесенку, которая
+    и была дефектом — ``ErrorManager.track_error`` возвращает None на ШТАТНОЙ
+    записи, так что запасная ступень срабатывала всегда.
     """
 
     def track_error(self, error: BaseException, context: Optional[Dict[str, Any]] = None) -> Any: ...

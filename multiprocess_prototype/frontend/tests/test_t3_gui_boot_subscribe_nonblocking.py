@@ -26,6 +26,10 @@ from unittest.mock import MagicMock
 # Таймаут синхронного request() — StateProxy._SYNC_REQUEST_TIMEOUT (прочитан
 # как контекст механизма, пинуется литералом, не читается из атрибута класса).
 SYNC_REQUEST_TIMEOUT_LITERAL = 5.0
+#: Грейс RouterManager._NO_PUMP_GRACE_SEC (router_manager.py:974) — реальная
+#: цена sync-запроса, когда приёмного цикла ещё не было. Правка Н2 ревью Ф1+Ф2:
+#: фейк со sleep(timeout) пинал 5 с, которых у прода нет ни сейчас, ни на базе.
+NO_PUMP_GRACE_LITERAL = 0.5
 EXPECTED_PATTERNS = {"processes.**", "system.**", "devices.**", "calibration.**"}
 
 
@@ -48,7 +52,9 @@ class _NeverRepliesRouter:
     def request(self, msg: dict, timeout: float = 5.0, correlation_id: str | None = None) -> dict:
         if msg.get("command") == "state.subscribe":
             self.subscribe_messages.append(msg)
-        time.sleep(timeout)
+        # Н2: настоящий RouterManager обрывает ожидание грейсом и возвращает
+        # reason="no_receive_pump" — фейк обязан повторять это, а не полный таймаут.
+        time.sleep(min(timeout, NO_PUMP_GRACE_LITERAL))
         return {"success": False, "error": "timeout"}
 
     def register_message_handler(self, *args, **kwargs) -> None:
@@ -117,10 +123,12 @@ class TestSyncPathControl:
         )
 
         assert finished, f"контрольная sync-подписка не завершилась даже за {SYNC_REQUEST_TIMEOUT_LITERAL + 3.0:.1f} с"
-        assert elapsed >= SYNC_REQUEST_TIMEOUT_LITERAL - 0.5, (
-            f"sync-подписка GuiStateProxy к недостижимому серверу обязана стоить полный "
-            f"таймаут ({SYNC_REQUEST_TIMEOUT_LITERAL} с), заняла {elapsed:.2f} с — "
-            "контроль недостоверен"
+        assert elapsed >= NO_PUMP_GRACE_LITERAL * 0.8, (
+            f"контрольная sync-подписка обязана списать грейс ({NO_PUMP_GRACE_LITERAL} с), "
+            f"заняла {elapsed:.2f} с — эталонный больной путь сам сломан"
+        )
+        assert elapsed < SYNC_REQUEST_TIMEOUT_LITERAL, (
+            f"заняла {elapsed:.2f} с — полный таймаут: фейк разошёлся с контрактом роутера"
         )
 
 
@@ -138,7 +146,7 @@ class TestGuiBootSubscriptionsDoNotBlock:
 
         assert finished, (
             "_init_application_threads не завершился даже за 3.0 с — при старте GUI на "
-            f"недостижимом сервере эталонный больной путь стоил бы ~{4 * SYNC_REQUEST_TIMEOUT_LITERAL:.0f} с "
+            f"недостижимом сервере эталонный больной путь стоил бы ~{4 * NO_PUMP_GRACE_LITERAL:.1f} с "
             "(измерено на живом стенде: 20.03 с); подписки всё ещё блокируют поток, "
             "хотя приёмный поток на этот момент ещё не создан и ответить некому"
         )

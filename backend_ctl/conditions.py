@@ -133,6 +133,12 @@ class _Waiter:
         # Т.2: отказы предиката — считаемый факт, а не тишина (см. ``offer``).
         self.predicate_failures = 0
         self.first_predicate_error: Optional[str] = None
+        # Н4 (ревью Ф1+Ф2): удаление ПРЕДКА живёт отдельно от ``last_seen``.
+        # Раньше оно писалось тем же ``note`` и затирало последнее наблюдённое
+        # ЗНАЧЕНИЕ, если стояло в пакете позже него: ответ по таймауту терял
+        # «видел 25 по нужному пути» и показывал только «поддерево удалено».
+        # Это два разных факта, и оба нужны для разбора — храним оба.
+        self.subtree_deleted: Optional[Dict[str, Any]] = None
         # Доп. диагностика, собранная на этапе setup_condition (сейчас — unknown_metric
         # у metric_threshold); пусто для остальных kind — их ответ не меняется ни на байт.
         self.diagnostics: Dict[str, Any] = {}
@@ -174,6 +180,25 @@ class _Waiter:
         """Запомнить последнее релевантное наблюдение для таймаут-диагноза."""
         with self._lock:
             self.last_seen = observation
+
+    def note_subtree_deletion(self, observation: Dict[str, Any]) -> None:
+        """Запомнить удаление ПРЕДКА — не затирая наблюдённое значение (Н4).
+
+        Первое удаление и побеждает: последующие ничего не добавляют к
+        диагнозу («поддерево уже снесли»), а перезапись прятала бы самый
+        ранний — то есть объясняющий — момент.
+        """
+        with self._lock:
+            if self.subtree_deleted is None:
+                self.subtree_deleted = observation
+            # В ``last_seen`` удаление попадает ТОЛЬКО если там пусто. Так
+            # выполняются оба требования разом: приёмка Т.2 хочет видеть
+            # диагноз вместо пустоты, а Н4 запрещает затирать им наблюдённое
+            # ЗНАЧЕНИЕ. Обратный порядок (сначала снос, потом значение) не
+            # ломается: ``note`` перезапишет ``last_seen`` значением, а снос
+            # останется в своём ключе.
+            if self.last_seen is None:
+                self.last_seen = observation
 
     def wait(self, timeout: float) -> bool:
         return self._hit.wait(timeout)
@@ -217,6 +242,7 @@ def await_condition(
         matched, events_seen, last_seen = waiter.matched, waiter.events_seen, waiter.last_seen
         predicate_failures = waiter.predicate_failures
         first_predicate_error = waiter.first_predicate_error
+        subtree_deleted = waiter.subtree_deleted
     if matched is not None:
         return {"success": True, "kind": kind, "matched": matched, "elapsed_sec": elapsed}
 
@@ -229,6 +255,12 @@ def await_condition(
         "events_seen": events_seen,
         "last_seen": last_seen,
     }
+    # Н4: удаление предка — отдельный ключ, а не замена last_seen. Пустой
+    # last_seen рядом с ним читается «значения не видели, зато видели снос»;
+    # непустой — «видели и значение, и снос», и порядок больше не решает,
+    # какой из двух фактов доживёт до ответа.
+    if subtree_deleted is not None:
+        out["subtree_deleted"] = subtree_deleted
     # Т.2: отказавший предикат объясняет пустой last_seen — без этой строки
     # «наблюдений не было» и «наблюдения были, но их разбор упал» неотличимы.
     if predicate_failures:
@@ -309,7 +341,7 @@ def _setup_state_path(drv: Any, spec: Dict[str, Any]):
                 and delta.get("new_value") == MISSING_MARKER
                 and _is_ancestor_path(delta_path, path)
             ):
-                waiter.note({"path": path, "deleted": True, "ancestor": delta_path, "source": "delta"})
+                waiter.note_subtree_deletion({"path": path, "deleted": True, "ancestor": delta_path, "source": "delta"})
         return None
 
     def initial_check() -> Optional[Dict[str, Any]]:
@@ -362,7 +394,7 @@ def _setup_metric_threshold(drv: Any, spec: Dict[str, Any]):
                 and delta.get("new_value") == MISSING_MARKER
                 and _is_ancestor_path(delta_path, path)
             ):
-                waiter.note({"path": path, "deleted": True, "ancestor": delta_path, "source": "delta"})
+                waiter.note_subtree_deletion({"path": path, "deleted": True, "ancestor": delta_path, "source": "delta"})
         return None
 
     def initial_check() -> Optional[Dict[str, Any]]:

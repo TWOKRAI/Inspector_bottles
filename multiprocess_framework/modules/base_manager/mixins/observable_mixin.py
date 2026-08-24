@@ -383,7 +383,18 @@ class ObservableMixin(IObservableMixin):
         if registry is None or not registry.is_enabled(manager_name):
             return False
         manager = registry.get(manager_name)
-        if not manager:
+        # `is None`, а не truthiness — тот же довод, что в ``_call_manager``, и
+        # здесь он ЖЁСТЧЕ: эта функция ВЫБИРАЕТ ВЕТКУ в ``_track_error``.
+        # Менеджер с ложным ``__bool__``/``__len__`` (например error-менеджер,
+        # у которого ``__len__`` — «сколько ошибок накоплено»: пустой = ложь)
+        # читался как «слота нет», ветка падала на запасную ступень
+        # ``record_error``, которой у него может не быть, и запись терялась —
+        # а счётчик отказов приписывал потере ЛОЖНУЮ причину («в слот подан
+        # объект чужого протокола»), хотя протокол объект как раз реализует.
+        # Найдено ревью Ф1+Ф2: правка `0c06712d` убрала truthiness в
+        # ``_call_manager``, но эта функция появилась в том же коммите Т.1 и
+        # осталась со старым сравнением.
+        if manager is None:
             return False
         return callable(getattr(manager, method_name, None))
 

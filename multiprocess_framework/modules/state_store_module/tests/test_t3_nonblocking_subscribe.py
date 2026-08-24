@@ -46,6 +46,9 @@ from multiprocess_framework.modules.state_store_module.proxy.state_proxy import 
 # Таймаут синхронного request() — см. StateProxy._SYNC_REQUEST_TIMEOUT в
 # proxy/state_proxy.py (прочитан как контекст механизма, ПИНУЕТСЯ литералом).
 SYNC_REQUEST_TIMEOUT_LITERAL = 5.0
+#: Грейс RouterManager._NO_PUMP_GRACE_SEC — столько (а НЕ полный таймаут)
+#: стоит sync-запрос, когда приёмного цикла на роутере ещё не было.
+NO_PUMP_GRACE_LITERAL = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +85,14 @@ class _NeverRepliesRouter:
         self.request_calls.append((msg, timeout))
         if msg.get("command") == "state.subscribe":
             self.subscribe_messages.append(msg)
-        time.sleep(timeout)  # честная блокировка — ответа не будет НИКОГДА
-        return {"success": False, "error": "timeout"}
+        # Н2 (ревью Ф1+Ф2): грейс, а НЕ полный таймаут — так ведёт себя
+        # настоящий RouterManager.request без приёмного цикла
+        # (router_manager.py:1062, _NO_PUMP_GRACE_SEC=0.5; константа была уже
+        # на базе 44cb7065 — сверено git show). Прежний sleep(timeout) делал
+        # фейк расходящимся с продом, и контрольный тест пинал свойство,
+        # которого у прода нет: набор доказывал сам себя.
+        time.sleep(min(timeout, NO_PUMP_GRACE_LITERAL))
+        return {"success": False, "error": "timeout", "reason": "no_receive_pump"}
 
 
 class _EchoRouter:
@@ -142,9 +151,16 @@ class TestSyncSubscribeChargesTimeoutControl:
             f"sync-подписка не завершилась даже за {SYNC_REQUEST_TIMEOUT_LITERAL + 3.0:.1f} с — "
             "контрольный (эталонный) путь сам сломан, сравнение с async-путём недостоверно"
         )
-        assert elapsed >= SYNC_REQUEST_TIMEOUT_LITERAL - 0.5, (
-            f"sync-подписка к серверу, который никогда не ответит, обязана стоить ПОЛНЫЙ "
-            f"таймаут запроса ({SYNC_REQUEST_TIMEOUT_LITERAL} с), а заняла {elapsed:.2f} с"
+        # Н2: сравниваем с ГРЕЙСОМ, а не с полным таймаутом. Контроль не ослаб —
+        # async-путь ниже укладывается в тысячные доли секунды, разрыв остаётся
+        # трёхпорядковым; зато перестал пиниться несуществующий контракт.
+        assert elapsed >= NO_PUMP_GRACE_LITERAL * 0.8, (
+            f"sync-подписка к серверу без приёмного цикла обязана списать грейс "
+            f"({NO_PUMP_GRACE_LITERAL} с), а заняла {elapsed:.2f} с — контрольный путь сам сломан"
+        )
+        assert elapsed < SYNC_REQUEST_TIMEOUT_LITERAL, (
+            f"заняла {elapsed:.2f} с — это ПОЛНЫЙ таймаут: фейк-роутер разошёлся с контрактом "
+            f"RouterManager (грейс {NO_PUMP_GRACE_LITERAL} с), и набор доказывает сам себя"
         )
         assert "processes.**" not in proxy._confirmed_patterns, (
             "сервер не подтвердил подписку (ответа не было) — паттерн не имеет права попасть в подтверждённые"

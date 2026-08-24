@@ -160,3 +160,75 @@ class TestPredicateFailureIsCountedNotSwallowed:
         assert res["timed_out"] is True, res
         assert "predicate_failures" not in res, res
         assert "first_predicate_error" not in res, res
+
+
+class TestAncestorDeletionDoesNotMaskAValueObservation:
+    """Находка Н4 ревью Ф1+Ф2: диагноз сноса затирал наблюдённое значение.
+
+    ``waiter.note`` пишет безусловно, поэтому в пакете
+    ``[значение 25 по нужному пути, удаление предка]`` удаление, стоящее
+    позже, стирало из ``last_seen`` тот единственный факт, ради которого
+    ``last_seen`` и существует: «значение по пути ВИДЕЛИ, оно было не то».
+    Оператор получал «поддерево удалено» и не узнавал, что до сноса система
+    отдавала 25 — а именно это отличает «не дожили» от «дожили, но не то».
+
+    Теперь снос живёт в своём ключе ``subtree_deleted``, а в ``last_seen``
+    попадает только когда там пусто (иначе приёмка Т.2 осталась бы без
+    диагноза вместо пустоты — оба требования выполняются разом).
+    """
+
+    def _wait_with(self, deltas):
+        d = BackendDriver()
+        th = _feed_later(d, [_deltas_line(deltas)])
+        res = d.await_condition(
+            "state_path",
+            {"path": "processes.gui.state.plugins.capture.capture_fps", "value": "недостижимо"},
+            timeout=1.0,
+        )
+        th.join(timeout=5.0)
+        return res
+
+    def test_value_then_ancestor_deletion_keeps_both_facts(self) -> None:
+        res = self._wait_with(
+            [
+                {"path": "processes.gui.state.plugins.capture.capture_fps", "new_value": 25},
+                {"path": "processes.gui", "new_value": MISSING},
+            ]
+        )
+        assert res["timed_out"] is True, res
+        assert res["last_seen"] == {
+            "path": "processes.gui.state.plugins.capture.capture_fps",
+            "value": 25,
+            "source": "delta",
+        }, res["last_seen"]
+        assert res["subtree_deleted"] == {
+            "path": "processes.gui.state.plugins.capture.capture_fps",
+            "deleted": True,
+            "ancestor": "processes.gui",
+            "source": "delta",
+        }, res.get("subtree_deleted")
+
+    def test_deletion_alone_still_fills_last_seen_not_emptiness(self) -> None:
+        """Контроль приёмки Т.2: без значения диагноз обязан остаться на виду."""
+        res = self._wait_with([{"path": "processes.gui", "new_value": MISSING}])
+
+        assert res["last_seen"] is not None, res
+        assert res["last_seen"]["deleted"] is True, res["last_seen"]
+        assert res["subtree_deleted"]["ancestor"] == "processes.gui", res
+
+    def test_deletion_then_value_lets_the_value_win_last_seen(self) -> None:
+        """Обратный порядок: значение вытесняет снос из last_seen, снос остаётся."""
+        res = self._wait_with(
+            [
+                {"path": "processes.gui", "new_value": MISSING},
+                {"path": "processes.gui.state.plugins.capture.capture_fps", "new_value": 25},
+            ]
+        )
+        assert res["last_seen"]["value"] == 25, res["last_seen"]
+        assert res["subtree_deleted"]["ancestor"] == "processes.gui", res
+
+    def test_healthy_run_has_no_subtree_deleted_key(self) -> None:
+        """Контроль: без сноса ключа в ответе нет вообще."""
+        res = self._wait_with([{"path": "processes.gui.state.plugins.capture.capture_fps", "new_value": 25}])
+
+        assert "subtree_deleted" not in res, res

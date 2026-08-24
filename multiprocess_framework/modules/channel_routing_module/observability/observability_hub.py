@@ -122,9 +122,18 @@ class ObservabilityHub:
         return record
 
     def _emit(self, kind: str, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Конверт + запись в канал kind. Возвращает ЗАПИСЬ (контракт error-пути:
-        ``track_error``/``record_error`` обязаны вернуть non-None, иначе
-        ``ObservableMixin._track_error`` сделает fallback и запишет ошибку дважды)."""
+        """Конверт + запись в канал kind. Возвращает ЗАПИСЬ.
+
+        Прежняя редакция объясняла возврат так: «non-None обязателен, иначе
+        ``ObservableMixin._track_error`` сделает fallback и запишет ошибку
+        дважды». Объяснение ОТМЕНЕНО (Т.1, `a7d7cb60`): ``_track_error``
+        больше не смотрит на возвращённое значение вовсе — ступень выбирается
+        по протоколу приёмника (``_manager_has_method("error", "track_error")``).
+        Прежняя лесенка и была дефектом: ``ErrorManager.track_error`` объявлен
+        ``-> None`` и возвращает None ИМЕННО на штатной записи, поэтому вторая
+        ступень срабатывала всегда. Возврат записи здесь сохранён как полезное
+        значение для вызывающего, а не как условие однократности.
+        """
         record = self._envelope(kind, record)
         self._channels[kind].write(record)
         return record
@@ -263,10 +272,10 @@ class ObservabilityHub:
         record["severity"] = severity
         return self._emit(KIND_ERROR, record)
 
-    # ВАЖНО: track_error/record_error возвращают non-None (запись). ObservableMixin.
-    # _track_error при None-возврате делает fallback track_error → record_error на
-    # ТОМ ЖЕ слоте; так как hub реализует оба метода, None привёл бы к ДВОЙНОЙ
-    # записи ошибки. Truthy-возврат гасит fallback → ровно одна запись.
+    # Однократность записи держится НЕ возвращаемым значением (Т.1, `a7d7cb60`):
+    # ``ObservableMixin._track_error`` выбирает ступень по протоколу приёмника, а
+    # не по тому, что вернула первая. Hub реализует оба метода, поэтому зовётся
+    # ровно ``track_error`` — ровно один раз, независимо от возврата.
     def track_error(self, error: BaseException, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return self._emit_error(error, context)
 

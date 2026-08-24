@@ -362,3 +362,73 @@ class TestFalsyManagerIsStillAManager:
         assert comp.__dict__.get("_manager_call_failures") == {"logger.warning": 1}, comp.__dict__.get(
             "_manager_call_failures"
         )
+
+
+class TestFalsyErrorManagerPicksTheRightBranch:
+    """Находка Н1 ревью Ф1+Ф2: truthiness жила в функции, ВЫБИРАЮЩЕЙ ветку.
+
+    ``_manager_has_method`` появилась в коммите Т.1 и осталась со сравнением
+    ``if not manager``, тогда как ``_call_manager`` в тот же день перевели на
+    ``is None``. Разница здесь дороже: эта функция не пропускает запись, а
+    ВЫБИРАЕТ ступень лесенки в ``_track_error``.
+
+    Сценарий не выдуманный: error-менеджер, у которого ``__len__`` означает
+    «сколько ошибок накоплено», — обычный дизайн. Пустой такой менеджер ложен
+    по ``bool()``, и `_manager_has_method` отвечала «метода нет» про объект,
+    у которого метод ЕСТЬ. Ветка падала на запасную ступень ``record_error``,
+    запись терялась, а счётчик отказов называл причиной «объект чужого
+    протокола» — то есть витрина, ради которой Т.1 писалась, врала о причине.
+    """
+
+    class _FalsyErrorManager:
+        """Ошибки копит в списке; ``__len__`` — их число, значит пустой = ложь."""
+
+        def __init__(self) -> None:
+            self.tracked: list = []
+
+        def __len__(self) -> int:
+            return len(self.tracked)
+
+        def track_error(self, error, context=None) -> None:
+            self.tracked.append(error)
+
+    def _make(self, mgr):
+        class Comp(ObservableMixin):
+            def __init__(self, m):
+                ObservableMixin.__init__(self, managers={"error": m})
+
+        return Comp(mgr)
+
+    def test_empty_falsy_error_manager_still_gets_track_error(self) -> None:
+        mgr = self._FalsyErrorManager()
+        assert bool(mgr) is False, "дубль обязан быть ложным, иначе тест ни о чём"
+
+        comp = self._make(mgr)
+        boom = ValueError("боевая ошибка")
+        comp._track_error(boom)
+
+        assert mgr.tracked == [boom], mgr.tracked
+
+    def test_the_loss_is_not_blamed_on_a_wiring_defect(self) -> None:
+        """Счётчик не должен приписывать потере ложную причину."""
+        mgr = self._FalsyErrorManager()
+        comp = self._make(mgr)
+        comp._track_error(ValueError("боевая ошибка"))
+
+        assert comp.__dict__.get("_manager_call_failures") is None, comp.__dict__.get("_manager_call_failures")
+
+    def test_control_non_empty_manager_behaved_correctly_even_before(self) -> None:
+        """Контроль: тот же менеджер с ошибкой внутри истинен и работал всегда.
+
+        Без этой пары «зелёный» выше не доказывал бы, что дело было именно в
+        ложности объекта, а не в чём-то ещё.
+        """
+        mgr = self._FalsyErrorManager()
+        mgr.tracked.append("затравка")
+        assert bool(mgr) is True
+
+        comp = self._make(mgr)
+        boom = ValueError("вторая")
+        comp._track_error(boom)
+
+        assert mgr.tracked == ["затравка", boom], mgr.tracked
