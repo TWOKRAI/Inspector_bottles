@@ -55,7 +55,7 @@ class _NeverRepliesRouter:
         # Н2: настоящий RouterManager обрывает ожидание грейсом и возвращает
         # reason="no_receive_pump" — фейк обязан повторять это, а не полный таймаут.
         time.sleep(min(timeout, NO_PUMP_GRACE_LITERAL))
-        return {"success": False, "error": "timeout"}
+        return {"success": False, "error": "timeout", "reason": "no_receive_pump"}
 
     def register_message_handler(self, *args, **kwargs) -> None:
         pass
