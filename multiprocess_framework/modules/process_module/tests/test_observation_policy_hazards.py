@@ -467,3 +467,52 @@ class TestVerdictReadsTheLiveGate:
         verdict = observability_verified({"observation": {"subtree_interval_sec": 0.5}}, effective)
         assert verdict["verdict"] == "failed", verdict
         assert verdict["mismatches"], verdict
+
+
+# =========================================================================== #
+# Опасность 8 — «применено» против «действует» (находка матрицы инъекций)
+# =========================================================================== #
+class TestGateActiveSeparatesAppliedFromEffective:
+    """``gate_active`` — единственный сигнал, отличающий «применено» от «действует».
+
+    Найдено МАТРИЦЕЙ ИНЪЕКЦИЙ, не чтением: заплата «``gate_active`` всегда
+    True» — все три точки (два ответа команды и readback) — оставляла набор
+    из 2385 тестов ПОЛНОСТЬЮ зелёным. То есть докстринг обещал оператору
+    различение, которого не держал ни один сторож.
+
+    Почему это не косметика. У процесса без секции ``telemetry.publish`` гейта
+    нет вовсе (``_build_telemetry_gate`` → ``None``, обратная совместимость), и
+    политика порта запоминается, но НЕ действует: частота-предохранитель к
+    публикации не применяется, потому что применять её некому. Ответ команды
+    при этом честно говорит ``success``. Отличить «правило легло» от «правило
+    работает» можно ровно по этому полю — и обе половины пары проверяются
+    здесь рядом.
+    """
+
+    def test_policy_without_a_gate_is_applied_but_not_active(self) -> None:
+        svc = _FakeServices(logger=_FakeLogger())
+        heartbeat = svc._heartbeat
+        # Секции telemetry.publish нет — паритет с боевым процессом, её не настроившим.
+        assert heartbeat._build_telemetry_gate() is None, "предпосылка теста: гейта быть не должно"
+        heartbeat._telemetry_gate = None
+
+        applied = heartbeat.apply_observation_policy({"subtree_interval_sec": 7.0})
+
+        assert applied["gate_active"] is False, f"политика без гейта обязана называться НЕ действующей: {applied}"
+        # Якорь существования: она именно ПРИМЕНЕНА, а не отвергнута.
+        assert applied["subtree_interval_sec"] == 7.0, applied
+        assert applied["subtree"] == PORT_SUBTREE_PATTERN, applied
+        # Readback — третья точка того же поля, и она врала вместе с первыми двумя.
+        assert heartbeat.current_observation_policy()["gate_active"] is False
+
+    def test_policy_with_a_live_gate_is_active(self, tmp_path) -> None:
+        svc, _handlers, _clock = _wired(tmp_path)
+        heartbeat = svc._heartbeat
+        assert heartbeat._telemetry_gate is not None, "предпосылка теста: гейт живой"
+
+        applied = heartbeat.apply_observation_policy({"subtree_interval_sec": 7.0})
+
+        assert applied["gate_active"] is True, applied
+        assert heartbeat.current_observation_policy()["gate_active"] is True
+        # Литерал тот же, что в паре выше — различает пару ровно gate_active.
+        assert applied["subtree_interval_sec"] == 7.0, applied
