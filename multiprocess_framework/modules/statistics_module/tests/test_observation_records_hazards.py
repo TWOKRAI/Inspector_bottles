@@ -52,10 +52,58 @@
    свойство «не падает» для kind'а, который НИКТО не готовился рендерить (не
    ``observation`` — тот теперь первоклассный, а произвольная строка).
 
+   **Правка по инъекции I4 (ревью, итерация 2, 2026-08-25).** Первая редакция
+   класса выше строила payload РУКАМИ (``hub.emit_observation_record({"writer":
+   ..., "metric": ..., "value": ...})``) вместо того, чтобы взять запись,
+   которую реально произвёл боевой путь (порт → тик → канал). Заплата I4
+   («выбросить ``writer`` из ``records_for_hub``») красила ровно A4 приёмки и
+   НИ ОДНОГО теста этого файла — тест про читаемую строку собирал запись сам
+   и потому не мог увидеть дефект в том, что СОБИРАЕТ ``records_for_hub``.
+   Обе проверки теперь читают запись из канала ПОСЛЕ реального тика.
+
+5. **Дорога хаб → стор → живой хвост не проверялась вовсе.** Оба существующих
+   теста (приёмка и класс 4 выше) касаются стора/хаба каждый со своей
+   стороны — приёмка дренирует канал хаба НАПРЯМУЮ, класс 4 кладёт запись в
+   стор РУКАМИ — и ни один не проходит через ``drain_process_observability``,
+   строку, ради которой задача существует (обещание Task 3.1 «хвост и стор
+   видят уровни без второго механизма»). Инъекция I8 (снять
+   ``KIND_OBSERVATION`` из объединения в ``drain_process_observability``) дала
+   0 красных на всей матрице при подтверждённом контролем разрыве дороги
+   (стор: 1→0 строк, хвост: 1→0 записей) —
+   :class:`TestHubToStoreAndLiveTailWiringIsNotBypassed` закрывает это.
+
+6. **Критерий A6 «без нового словаря команд» — вакуумен ровно наполовину.**
+   Приёмочный тест снимает ``commands_before`` ПОСЛЕ регистрации, поэтому
+   сравнение ``commands_after == commands_before`` доказывает только, что
+   ПОВТОРНЫЙ вызов команды ничего не регистрирует — не то, что регистрация
+   САМОЙ секции обошлась без новой команды. Инъекция I7 (зарегистрировать
+   ``observability.observation.introspect`` рядом с ``introspect.observability``)
+   дала 0 красных при подтверждённом контролем составе словаря (10 → 11).
+   :class:`TestIntrospectCommandDictionaryStaysAtExactlyTenNames` сверяет
+   состав с ЛИТЕРАЛЬНЫМ списком имён (не пересчётом из кода — производный
+   список согласился бы с любым ответом).
+
 Потоков здесь нет — механизм синхронный (один тик, один поток), поэтому
 дедлайн join'а не требуется; хазарды этого файла — про ФОРМУ данных и путь
 записи, не про гонки (гонки резолвера уже покрыты
 ``test_observation_port_hazards.py``).
+
+**Две измеренные границы приёмки, НЕ починенные здесь** (записаны, не
+закрыты — ADR-SM-013, «разрешающая способность приёмки — измерена»):
+
+- **I5** (снять ``if hub is None: return`` в ``_emit_observation_hub_records``)
+  → 0 красных. Собственный ``except Exception`` метода гасит ``AttributeError``
+  от ``None.get_channel`` тем же жестом, что и любой другой сбой хаба —
+  половина A5 «хаб отсутствует» неотличима от «хаб отказал», и это
+  СТРУКТУРНОЕ свойство обработки ошибок метода, а не дыра теста: сторожить
+  здесь нечего без изобретения проверки на конкретное исключение, которая
+  проверяла бы текст сообщения, а не поведение.
+- **I10** (снять ``KIND_OBSERVATION`` из явной ветки ``severity_number_for``)
+  → 0 красных. ``severity_number_for('observation', 'level')`` даёт ``0``
+  что через объявленную ветку («у плоскости нет оси важности»), что через
+  побочную (``severity_of('level')`` не опознаёт строку → ``UNSPECIFIED``) —
+  по ЗНАЧЕНИЮ пути неразличимы, разница только в ПРИЧИНЕ. Свойство «через
+  объявленную ветку, а не совпадением» проверяется чтением кода, не прогоном.
 """
 
 from __future__ import annotations
@@ -72,7 +120,9 @@ from ...channel_routing_module.observability import (
     ObservabilityStore,
     hub_record_to_display,
 )
+from ...process_module.commands.builtin_commands import BuiltinCommands
 from ...process_module.heartbeat.process_heartbeat import ProcessHeartbeat
+from ...process_module.managers.observability_wiring import drain_process_observability
 from ..observation.observation_manager import ObservationManager, observation_port
 
 
@@ -296,8 +346,14 @@ class TestObservationRecordRendersAReadableRow:
     """
 
     def test_hub_record_to_display_names_the_leaf_and_keeps_the_value(self) -> None:
+        # Запись — ПРОИЗВЕДЕНА боевым путём (порт → тик → канал), не собрана
+        # руками: сцепка «что кладёт тик» → «что читает оператор» обязана
+        # проверяться на записи ИЗ тика, иначе тест доказывает форму, которую
+        # сам же и придумал (найдено ревью, инъекция I4).
         hub = ObservabilityHub("proc_display", capacity=16)
-        hub.emit_observation_record({"writer": "capture", "metric": "fps", "value": 7.0})
+        services, port, heartbeat = _wired(hub)
+        port.for_plugin("capture").publish("fps", 7.0)
+        heartbeat._publish_telemetry_to_tree({}, None)
         record = hub.get_channel(KIND_OBSERVATION).drain()[0]
 
         display = hub_record_to_display(record)
@@ -324,12 +380,17 @@ class TestObservationRecordRendersAReadableRow:
         «вставка не упала». Поиск смотрит в ``message``/``module``/``process``
         и НЕ смотрит в ``extra`` (см. докстринг ``snapshot_message`` в
         ``record_display.py``) — если бы имя метрики осталось только в
-        ``extra``, эта проверка честно бы не нашла ничего."""
+        ``extra``, эта проверка честно бы не нашла ничего.
+
+        Запись — ПРОИЗВЕДЕНА боевым путём (порт → тик → канал), той же
+        причиной, что у соседнего теста (инъекция I4)."""
         db_path = str(tmp_path / "obs_store_hazard.sqlite3")
         store = ObservabilityStore(db_path)
         try:
             hub = ObservabilityHub("proc_store", capacity=16)
-            hub.emit_observation_record({"writer": "capture", "metric": "fps", "value": 15.5})
+            services, port, heartbeat = _wired(hub)
+            port.for_plugin("capture").publish("fps", 15.5)
+            heartbeat._publish_telemetry_to_tree({}, None)
             record = hub.get_channel(KIND_OBSERVATION).drain()[0]
 
             inserted = store.append_records([record])
@@ -407,3 +468,142 @@ class TestGenuinelyUnknownKindStillSurvives:
             close = getattr(store, "close", None)
             if callable(close):
                 close()
+
+
+# =============================================================== #
+# 6. Дорога хаб → стор → живой хвост — не байпассится               #
+# =============================================================== #
+
+
+class TestHubToStoreAndLiveTailWiringIsNotBypassed:
+    """Та строка, ради которой задача существует: ``drain_process_observability``
+    несёт ``kind=observation`` И в стор, И живому подписчику — ТЕМ ЖЕ вызовом,
+    что дренирует такт heartbeat на живом стенде.
+
+    Найдено ревью 2026-08-25 (итерация 2), инъекция I8 (снять
+    ``drained.get(KIND_OBSERVATION, [])`` из объединения ``records`` в
+    ``drain_process_observability``): 0 красных на всей матрице, при этом
+    контроль (реальные объекты, без матрицы) показал разрыв дороги дословно:
+
+        чисто   -> строк в сторе: 1 | в хвост уехало: 1
+        заплата -> строк в сторе: 0 | в хвост уехало: 0
+
+    Ни приёмка (дренирует канал хаба НАПРЯМУЮ, ``hub.get_channel(...).drain()``),
+    ни соседний класс этого файла (кладёт запись в стор РУКАМИ,
+    ``store.append_records([record])``) эту строку не проходят — оба
+    заходят В стор/хаб каждый со своей стороны провода, минуя разъём между
+    ними. Здесь — весь путь: писатель → тик → ``drain_process_observability``
+    → стор И форвардер, читается ОБРАТНО из обоих.
+    """
+
+    def test_tick_reaches_the_store_and_the_forwarder_through_drain(self, tmp_path) -> None:
+        hub = ObservabilityHub("proc_wiring", capacity=16)
+        services, port, heartbeat = _wired(hub)
+        port.for_plugin("capture").publish("fps", 55.0)
+        heartbeat._publish_telemetry_to_tree({}, None)
+
+        db_path = str(tmp_path / "wiring_hazard.sqlite3")
+        store = ObservabilityStore(db_path)
+        forwarded: List[dict] = []
+        try:
+            # adapter=None — та же форма контроля, каким это свойство мерил
+            # ревьюер: adapter не участвует в этой дороге (он бьёт в
+            # logger/error/stats sink'и, а observation-записи туда не идут,
+            # см. TestDrainDoesNotLoopIntoAManager), проверяется только store+forwarders.
+            drain_process_observability(hub, None, store, [forwarded.extend])
+
+            store_rows = store.list_records(kind=KIND_OBSERVATION)
+            assert len(store_rows) == 1, f"дорога до стора разорвана: {store_rows!r}"
+            assert store_rows[0]["message"] == "capture.fps", store_rows[0]
+            assert store_rows[0]["extra"]["value"] == 55.0
+
+            observation_forwarded = [r for r in forwarded if r.get("kind") == KIND_OBSERVATION]
+            assert len(observation_forwarded) == 1, f"дорога до живого хвоста разорвана: {forwarded!r}"
+            assert observation_forwarded[0]["value"] == 55.0
+            assert observation_forwarded[0]["writer"] == "capture"
+        finally:
+            close = getattr(store, "close", None)
+            if callable(close):
+                close()
+
+
+# =============================================================== #
+# 7. Словарь introspect.* не растёт секцией порта                  #
+# =============================================================== #
+
+
+#: Литерал, а не пересчёт из кода (найдено ревью 2026-08-25, итерация 2):
+#: производный список (например ``set(specs)`` изнутри
+#: ``_register_introspect_commands``) согласился бы с ЛЮБЫМ числом команд —
+#: он не может увидеть 11-ю команду, потому что 11-я команда УЖЕ была бы в
+#: нём, случись такая правка. Приёмочный тест A6 сравнивает состав ДО и
+#: ПОСЛЕ повторного вызова той же регистрации (``commands_before`` снят
+#: ПОСЛЕ ``_register_introspect_commands()``) — это доказывает «повторный
+#: вызов идемпотентен», а не «сама регистрация не завела нового имени».
+_EXPECTED_INTROSPECT_COMMANDS = frozenset(
+    {
+        "introspect.handlers",
+        "introspect.registers",
+        "introspect.status",
+        "introspect.router_stats",
+        "introspect.queues",
+        "introspect.memory",
+        "introspect.capabilities",
+        "introspect.plugins",
+        "introspect.telemetry",
+        "introspect.observability",
+    }
+)
+
+
+class _FakeCommandManager:
+    """Минимальный CommandManager: хранит хендлеры по имени, как в приёмке."""
+
+    def __init__(self) -> None:
+        self.handlers: Dict[str, Any] = {}
+
+    def register_command(self, name: str, handler: Any, metadata: Any = None, tags: Any = None) -> None:
+        self.handlers[name] = handler
+
+
+class _IntrospectServices:
+    """Минимальный носитель для регистрации ``introspect.*`` — форма приёмки."""
+
+    def __init__(self) -> None:
+        self.command_manager = _FakeCommandManager()
+        self.name = "proc_intro_hazard"
+        self._current_process_status = "running"
+
+    def _log_debug(self, *a: Any, **k: Any) -> None:
+        pass
+
+    def _log_info(self, *a: Any, **k: Any) -> None:
+        pass
+
+    def _log_warning(self, *a: Any, **k: Any) -> None:
+        pass
+
+
+class TestIntrospectCommandDictionaryStaysAtExactlyTenNames:
+    """A6 «секция порта — без нового словаря команд» держится ЛИТЕРАЛОМ.
+
+    Найдено ревью 2026-08-25 (итерация 2), инъекция I7 (зарегистрировать
+    ``observability.observation.introspect`` рядом с ``introspect.observability``
+    внутри ``_register_introspect_commands``): 0 красных при подтверждённом
+    контролем составе словаря (10 → 11 команд, новая на месте). Причина —
+    приёмочный тест снимает ``commands_before`` ПОСЛЕ регистрации и потому
+    доказывает только идемпотентность повторного вызова, не состав самой
+    регистрации.
+    """
+
+    def test_registering_introspect_commands_yields_exactly_the_known_ten(self) -> None:
+        services = _IntrospectServices()
+
+        BuiltinCommands(services)._register_introspect_commands()
+
+        registered = set(services.command_manager.handlers)
+        assert registered == _EXPECTED_INTROSPECT_COMMANDS, (
+            f"словарь introspect.* разошёлся с ожидаемыми 10 именами: "
+            f"лишние={sorted(registered - _EXPECTED_INTROSPECT_COMMANDS)!r}, "
+            f"пропавшие={sorted(_EXPECTED_INTROSPECT_COMMANDS - registered)!r}"
+        )
