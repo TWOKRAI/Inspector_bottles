@@ -160,6 +160,15 @@ class ProcessLifecycle:
             # stats гасится ДО логгера не по алфавиту: его канал `log_stats`
             # пишет ЧЕРЕЗ логгер, и обратный порядок отправил бы финальный
             # снапшот метрик в уже закрытый приёмник.
+            #
+            # Ф3, задача 3.1: плоскостей стало ЧЕТЫРЕ — `observation` поднимается
+            # в `_create_observation_manager` (`observation.initialize()`), и без
+            # строки ниже гасились бы по-прежнему две. Сегодня цена нулевая (у
+            # порта пустой буфер и пустой реестр каналов), но задача 3.2 понесёт
+            # в тот же реестр записи `kind=observation`, и несброшенный буфер
+            # стал бы молчаливой потерей ровно на останове — там, где потерю уже
+            # никто не увидит. Место — ДО логгера, по тому же доводу, что у
+            # stats: канал порта будет писать через него.
             if self.process.console_manager:
                 self.process.console_manager.shutdown()
             if self.process.command_manager:
@@ -173,6 +182,9 @@ class ProcessLifecycle:
             if self.process.stats_manager:
                 self.process.stats_manager.shutdown()
                 stopped_planes.append("stats")
+            if self.process.observation_manager:
+                self.process.observation_manager.shutdown()
+                stopped_planes.append("observation")
             # Названо ФАКТИЧЕСКОЕ, а не заявленное: список собирается из того,
             # что действительно погашено. Без этой строки гашение младших
             # плоскостей не наблюдаемо в журнале вовсе — собственная запись

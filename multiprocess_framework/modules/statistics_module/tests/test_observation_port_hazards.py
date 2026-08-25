@@ -211,13 +211,21 @@ class TestLocalStoreRace:
 
         def probe() -> None:
             gate.wait()
-            store = manager.levels()
+            # ``create=True`` — дорога ПИСАТЕЛЯ: только она заводит хранилище, и
+            # только на ней есть гонка первого создания. Читательский
+            # ``levels()`` вернул бы четыре ``None``, и «одно хранилище на всех»
+            # выполнилось бы тождеством ``id(None) == id(None)`` — сторож,
+            # зелёный и без лока, и без хранилища вовсе.
+            store = manager.levels(create=True)
             with seen_lock:
                 seen.append(store)
 
         _run_in_daemons(probe, 4)
 
         assert len(seen) == 4, f"не все пробы отчитались: {len(seen)}"
+        assert all(isinstance(store, PluginLevels) for store in seen), (
+            f"проба получила не хранилище: {[type(s).__name__ for s in seen]}"
+        )
         assert len({id(store) for store in seen}) == 1, (
             f"первый доступ из четырёх потоков породил {len({id(s) for s in seen})} хранилищ вместо одного"
         )
@@ -347,29 +355,153 @@ class TestForeignObjectInSlot:
 
 
 class TestCreateFlagIsNotDecoration:
-    """``create`` разделяет читателя и писателя, и разница наблюдаема."""
+    """``create`` разделяет читателя и писателя, и разница наблюдаема.
 
-    def test_reader_does_not_create_the_store(self) -> None:
-        """Ломается, если тик начнёт звать резолвер с ``create=True``: у
-        процесса без единой публикации появился бы пустой ``plugin_levels``, и
-        «атрибута нет» (плагины уровней не отдавали) перестало бы отличаться от
-        «атрибут пуст» (отдавали, но всё сняли или придержал гейт) — различие,
-        по которому и читают этот атрибут."""
+    **Читательская половина спрашивает через настоящий ``ProcessHeartbeat``, а
+    не через резолвер напрямую, и это ремонт по ревью 2026-08-25.** Прежняя
+    редакция звала ``observation_port(host)`` по хосту БЕЗ слота — то есть
+    проверяла ступень 2 резолвера, а не читателя. Заплата, которую сторож обязан
+    был ловить (``observation_port(services, create=True)`` в
+    ``process_heartbeat.py``), не задевала его вовсе: он этой строки не
+    исполнял. Красный, которым тогда отчитались, был получен ДРУГОЙ заплатой —
+    переворотом дефолта в сигнатуре, — то есть инъекцией тем же объективом, что
+    и сам тест.
+
+    Два теста, и первый второго не заменяет: заводить хранилище можно с ДВУХ
+    сторон, и каждая живёт на своей раскладке.
+
+    * слот ЗАРЕГИСТРИРОВАН (боевая сборка) — резолвер отдаёт менеджера первой же
+      ступенью, и создаёт или нет уже он, своим ``levels(create=…)``;
+    * слота НЕТ (публикация из ``configure()``, дубли сервисов) — решает сам
+      резолвер, ступенью 2.
+
+    Заплата в одной стороне другую не красит, поэтому сторожей тоже двое.
+    """
+
+    @staticmethod
+    def _ask_the_reader_questions(host: _Host) -> None:
+        """Три вопроса тика — теми же методами, которыми их задаёт heartbeat.
+
+        Не ``observation_port(host)``: точка наблюдения обязана отличаться от
+        точки инъекции, иначе красный доказывает согласие двух копий одной
+        модели. Заплата ставится в ``_observation_port_of`` и в ``levels`` — и
+        обе лежат ПОД этими тремя вызовами, а не рядом с ними.
+        """
+        hb = ProcessHeartbeat(host)
+        proxy = SimpleNamespace(delete=lambda path: (_ for _ in ()).throw(AssertionError("нечего снимать")))
+        hb._level_names()
+        hb._collect_plugin_levels()
+        hb._delete_departed_subtrees(proxy)
+
+    def test_reader_does_not_create_the_store_with_the_slot_registered(self) -> None:
+        """БОЕВАЯ раскладка: слот зарегистрирован, тик прошёл, хранилища нет.
+
+        Ломается, если хоть одна читательская дорога порта позовёт
+        ``levels(create=True)``: у процесса без единой публикации появился бы
+        пустой ``plugin_levels``, и «атрибута нет» (плагины уровней не отдавали)
+        перестало бы отличаться от «атрибут пуст» (отдавали, но всё сняли или
+        придержал гейт) — различие, по которому этот атрибут и читают.
+
+        Это ровно тот дефект, который ревью воспроизвело на настоящем
+        ``ProcessModule``: после ``initialize()`` — ``None``, после ОДНОГО
+        ``_level_names()`` — готовый ``PluginLevels``.
+        """
         host = _Host()
+        _registered_manager(host)
         assert getattr(host, PLUGIN_LEVELS_ATTR, None) is None, "предпосылка: хранилища нет"
 
-        assert observation_port(host) is None
+        self._ask_the_reader_questions(host)
+
+        assert getattr(host, PLUGIN_LEVELS_ATTR, None) is None, (
+            "тик завёл хранилище при зарегистрированном слоте — create=False соблюдается только там, где порта нет"
+        )
+
+    def test_reader_does_not_create_the_store_without_the_slot(self) -> None:
+        """Вторая сторона: слота нет, решает резолвер.
+
+        Ломается, если ``_observation_port_of`` начнёт звать резолвер с
+        ``create=True`` — заплата, на которую прежняя редакция этого класса была
+        слепа.
+        """
+        host = _Host()
+        assert host.get_manager(OBSERVATION_SLOT) is None, "предпосылка: слота нет"
+        assert getattr(host, PLUGIN_LEVELS_ATTR, None) is None, "предпосылка: хранилища нет"
+
+        self._ask_the_reader_questions(host)
+
         assert getattr(host, PLUGIN_LEVELS_ATTR, None) is None, "читатель завёл хранилище"
 
-    def test_writer_creates_the_store(self) -> None:
-        """Пара-контроль к тесту выше: без него «не создаёт» удовлетворялось бы
-        версией, которая не создаёт НИКОГДА, — то есть публикация из
-        ``configure()`` исчезала бы молча."""
+    def test_writer_creates_the_store_without_the_slot(self) -> None:
+        """Пара-контроль: без него «не создаёт» удовлетворялось бы версией,
+        которая не создаёт НИКОГДА, — то есть публикация из ``configure()``
+        исчезала бы молча."""
         host = _Host()
         port = observation_port(host, create=True)
 
         assert port is not None
         assert isinstance(getattr(host, PLUGIN_LEVELS_ATTR, None), PluginLevels)
+
+    def test_writer_creates_the_store_with_the_slot_registered(self) -> None:
+        """Пара-контроль на БОЕВОЙ раскладке — там же, где живёт первый тест.
+
+        Без него читательский сторож удовлетворялся бы менеджером, который не
+        заводит хранилище никогда: публикация ушла бы в никуда, а тик отдавал бы
+        пустоту — и оба теста остались бы зелёными.
+        """
+        host = _Host()
+        _registered_manager(host)
+        assert getattr(host, PLUGIN_LEVELS_ATTR, None) is None, "предпосылка: хранилища нет"
+
+        PluginContext(services=host, plugin_name="P").publish_metric("fps", 44.0)
+
+        store = getattr(host, PLUGIN_LEVELS_ATTR, None)
+        assert isinstance(store, PluginLevels), "публикация через слот не завела хранилище процесса"
+        assert store.publications() == {"P": {"fps": 44.0}}
+
+    def test_readers_return_an_empty_projection_when_there_is_no_store(self) -> None:
+        """Цена ``create=False``: читатель обязан пережить ОТСУТСТВИЕ хранилища.
+
+        ``levels()`` теперь может вернуть ``None``, и каждая читательская дорога
+        отвечает пустой проекцией СВОЕЙ формы — множество, dict, кортеж, no-op.
+        Отказ здесь означал бы, что тик процесса без плагинов падает по штатной
+        конфигурации.
+
+        Спрашивается У ПОРТА НАПРЯМУЮ, а не через heartbeat, и это существенно:
+        у тика стоит собственный предохранитель («телеметрия не критична для
+        такта»), который проглотил бы ``AttributeError: 'NoneType' …`` и вернул
+        ту же пустоту. Сквозь него отсутствие guard'а не видно вовсе — свойство
+        проверяется там, где оно живёт.
+        """
+        host = _Host()
+        manager = _registered_manager(host)
+        assert getattr(host, PLUGIN_LEVELS_ATTR, None) is None, "предпосылка: хранилища нет"
+        assert manager.levels() is None, "предпосылка: резолв читателя отдаёт «показаний нет»"
+
+        assert manager.level_names() == set()
+        assert manager.collect_subtree() == {}
+        assert manager.publications() == {}
+        assert manager.departed_writers() == ()
+        manager.note_delete_delivered("P")  # no-op, не отказ
+
+        assert getattr(host, PLUGIN_LEVELS_ATTR, None) is None, "читательский вопрос завёл хранилище"
+
+    def test_retraction_does_not_create_the_store(self) -> None:
+        """Снятие — дорога пишущая, но ``create=False``, и вот почему.
+
+        ``PluginContext._retract_metrics`` резолвит порт с ``create=False``.
+        Заведи снятие хранилище на стороне менеджера — остановка плагина, ни
+        разу ничего не опубликовавшего, оставляла бы пустой ``plugin_levels``
+        ПРИ слоте и не оставляла бы БЕЗ него: один сценарий, два разных следа.
+        Ровно то, что запрещает приёмочный П1 «маршрут не меняет наблюдаемое».
+
+        Ломается, если ``ObservationPort.retract`` позовёт ``levels(create=True)``.
+        """
+        host = _Host()
+        _registered_manager(host)
+        ctx = PluginContext(services=host, plugin_name="P")
+
+        assert ctx._retract_metrics() == 0, "снятие с пустого места отчиталось не нулём"
+        assert getattr(host, PLUGIN_LEVELS_ATTR, None) is None, "снятие завело хранилище"
 
 
 # --------------------------------------------------------------------------- #

@@ -11,10 +11,21 @@
   нигде (grep по репозиторию — пусто), то есть финальный сброс двух плоскостей
   из трёх оставался на совести ОС.
 
+Ф3, задача 3.1 (правка по ревью 2026-08-25): плоскостей стало ЧЕТЫРЕ —
+``observation`` поднимается сборкой (``observation.initialize()``), а гасились
+по-прежнему две. Блок «финальный сброс двух из трёх на совести ОС» повторился
+слово в слово, просто про четвёртую.
+
 Проверяется НАБЛЮДАЕМЫЙ ЭФФЕКТ, а не имя вызванного метода: дубль логгера
 умеет ОТКАЗАТЬ — после своего ``shutdown`` он не принимает записи, а считает их
 потерянными. Спай на имени сторожил бы имя; счётчик потерь сторожит свойство
 «записи уборки доезжают».
+
+**Дубли доказывают дубли, поэтому в конце файла один тест на НАСТОЯЩЕЙ сборке.**
+Харнесс ниже расставляет менеджеры по атрибутам руками, и переименуй сборка
+атрибут ``observation_manager`` — все тесты на дублях остались бы зелёными, а
+плоскость снова гасилась бы нигде. Живой тест поднимает ``ProcessModule`` целиком
+и спрашивает у слотов ``is_initialized``.
 """
 
 from __future__ import annotations
@@ -96,6 +107,7 @@ def _process_ready_to_stop() -> tuple:
         "logger": logger,
         "error": _RecordingManager(journal, "error"),
         "stats": _RecordingManager(journal, "stats"),
+        "observation": _RecordingManager(journal, "observation"),
         "command": _RecordingManager(journal, "command"),
         "router": _RecordingManager(journal, "router"),
         "console": _RecordingManager(journal, "console"),
@@ -103,6 +115,7 @@ def _process_ready_to_stop() -> tuple:
     process.logger_manager = logger
     process.error_manager = managers["error"]
     process.stats_manager = managers["stats"]
+    process.observation_manager = managers["observation"]
     process.command_manager = managers["command"]
     process.router_manager = managers["router"]
     process.console_manager = managers["console"]
@@ -130,6 +143,31 @@ def test_error_and_stats_planes_are_shut_down_at_all() -> None:
     assert "stats" in journal.order, f"плоскость статистики не гасится: {journal.order}"
     assert managers["error"].flushed == 1
     assert managers["stats"].flushed == 1
+
+
+def test_the_observation_plane_is_shut_down_at_all() -> None:
+    """Ф3: четвёртая плоскость. До правки ревью 2026-08-25 гасились две из четырёх.
+
+    Ломается, если строку гашения ``observation`` убрать из шага 4: цена сегодня
+    нулевая (у порта пустой буфер и пустой реестр каналов), но задача 3.2
+    понесёт в тот же реестр записи ``kind=observation``, и несброшенный буфер
+    станет молчаливой потерей ровно на останове.
+    """
+    process, _logger, managers, journal = _process_ready_to_stop()
+    process.shutdown()
+    assert "observation" in journal.order, f"плоскость наблюдений не гасится: {journal.order}"
+    assert managers["observation"].flushed == 1
+
+
+def test_observation_dies_before_the_logger_it_will_write_through() -> None:
+    """Тот же довод, что у stats: канал порта (3.2) пишет ЧЕРЕЗ логгер.
+
+    Погаси логгер раньше — и финальный сброс уехал бы в мёртвый приёмник, то
+    есть «гасим observation» существовало бы, а эффекта не давало.
+    """
+    process, _logger, _managers, journal = _process_ready_to_stop()
+    process.shutdown()
+    assert journal.order.index("observation") < journal.order.index("logger"), journal.order
 
 
 def test_the_planes_that_were_stopped_are_named_in_the_journal() -> None:
@@ -203,3 +241,53 @@ def test_a_failing_logger_shutdown_is_not_swallowed() -> None:
         lifecycle.emergency_log = original
     assert heard, "отказ гашения логгера проглочен молча"
     assert any("канал не закрылся" in line for line in heard), heard
+
+
+# --------------------------------------------------------------------------- #
+# Настоящая сборка — один тест, чтобы дубли выше не доказывали сами себя.
+# --------------------------------------------------------------------------- #
+
+#: Плоскости наблюдаемости в том порядке, в каком их поднимает сборка. Список
+#: один на весь тест: разойдись «поднято» и «погашено», расхождение обязано быть
+#: видно в одном месте, а не в двух перечислениях.
+OBSERVABILITY_PLANES = ("logger", "stats", "error", "observation")
+
+
+def test_all_four_planes_of_a_real_process_are_stopped(monkeypatch, tmp_path) -> None:
+    """ЧЕТЫРЕ плоскости настоящего ``ProcessModule`` погашены после ``shutdown``.
+
+    Тест на НАСТОЯЩЕЙ сборке, а не на дублях: харнесс выше расставляет менеджеры
+    по атрибутам руками, поэтому он остался бы зелёным и в том случае, когда
+    сборка кладёт менеджера в слот, а шаг гашения ищет его под другим именем —
+    ровно так плоскость и не гасилась до правки ревью 2026-08-25.
+
+    **Якорь СУЩЕСТВОВАНИЯ, а не «не упало»:** каждая плоскость сперва
+    предъявляется живой (``is_initialized is True``), и только потом
+    проверяется, что она погашена. Без первой половины «все погашены»
+    удовлетворял бы процесс, у которого их вовсе не подняли, — и ``None`` в
+    слоте прошёл бы за успех.
+
+    Секция ``error`` в конфиге не для красоты: без неё ``_create_error_manager``
+    возвращает ``None``, плоскостей живых оказывается три, и утверждение про
+    ЧЕТЫРЕ проверяло бы три.
+
+    Ломается, если убрать гашение любой из четырёх (для ``observation`` — ту
+    самую строку шага 4, которой не было).
+    """
+    monkeypatch.setenv("MULTIPROCESS_LOG_DIR", str(tmp_path / "logs"))
+    process = ProcessModule("obs_teardown_probe", config={"managers": {"error": {"enabled": True}}})
+    assert process.initialize() is True
+
+    before = {name: process.get_manager(name) for name in OBSERVABILITY_PLANES}
+    not_raised = [name for name, manager in before.items() if getattr(manager, "is_initialized", None) is not True]
+    assert not not_raised, f"плоскости не подняты вовсе, гасить нечего: {not_raised}"
+
+    assert process.shutdown() is True
+
+    still_running = [
+        name for name in OBSERVABILITY_PLANES if getattr(process.get_manager(name), "is_initialized", None) is not False
+    ]
+    assert not still_running, (
+        f"после shutdown() процесса плоскости остались поднятыми: {still_running} "
+        f"(их финальный сброс остаётся на совести ОС)"
+    )
