@@ -184,6 +184,12 @@ def test_the_planes_that_were_stopped_are_named_in_the_journal() -> None:
     named = [line for line in logger.written if "observability planes stopped" in line]
     assert named, f"погашенные плоскости не названы: {logger.written}"
     assert "error" in named[0] and "stats" not in named[0], named[0]
+    # Плоскостей четыре, и порт — единственная, чьё ИМЯ в этой строке не
+    # сторожилось ничем: заплата «убрать только append, гашение оставить»
+    # давала ноль красных на всём scope (находка ревью, итерация 2). Само
+    # гашение закрыто соседними тестами — здесь охраняется ЖУРНАЛЬНЫЙ след,
+    # объявленный докстрингом модуля единственным наблюдаемым.
+    assert "observation" in named[0], named[0]
 
 
 def test_stats_dies_before_the_logger_it_writes_through() -> None:
