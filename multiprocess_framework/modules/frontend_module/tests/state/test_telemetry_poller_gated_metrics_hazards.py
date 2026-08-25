@@ -76,8 +76,20 @@ class TestGatedMetricsSurvivesAbsentLevels:
         assert vm.get("processes.proc_a.state.fps") is None
 
     def test_gated_metrics_and_levels_land_in_one_flush(self, qtbot) -> None:
-        """Когда оба листа непустые — один ответ даёт один батч ``updated``,
-        а не два ingest-вызова подряд (коалесинг read-model не нарушен)."""
+        """Когда оба листа непустые — ОДИН ответ даёт ОДИН батч ``updated``,
+        а не два ingest-вызова подряд (коалесинг read-model не нарушен).
+
+        **Ред. по находке З4 ревью Ф4.** Прежняя редакция считала батчи за окно
+        ожидания при периоде поллера 20 мс и окне ``qtbot.wait(20)``, то есть
+        мерила ВРЕМЯ, а не заявленное свойство. Воспроизведено: 20 мс → 2 батча,
+        60 мс → 3, 140 мс → 7 — тест был зелёным по совпадению чисел.
+
+        Здесь ответ РОВНО один по построению: ``ImmediateSubmit`` исполняет
+        работу синхронно внутри ``set_active(True)`` (тот делает первый опрос
+        немедленно), поллер сразу останавливается, и только потом даётся такт
+        коалесинг-таймеру. Число ответов не выводится из тайминга — оно
+        утверждается литералом рядом.
+        """
         vm = TelemetryViewModel()
         batches: list[list] = []
         vm.updated.connect(batches.append)
@@ -87,18 +99,50 @@ class TestGatedMetricsSurvivesAbsentLevels:
             poll_fn=lambda name: _response(levels={"state.fps": 21.3}, gated_metrics=["fps"]),
             submit=submit,
             view_model=vm,
-            interval_sec=0.02,
+            # Период заведомо длиннее окна коалесинга: второй опрос по таймеру
+            # физически не успеет, даже не будь `stop()` ниже.
+            interval_sec=30.0,
             targets=("proc_a",),
         )
         poller.set_active(True)
-        _wait_until(qtbot, lambda: poller.polls_completed >= 1)
-        qtbot.wait(20)  # дать коалесинг-таймеру (0 мс) сработать
+        assert poller.polls_completed == 1, (
+            f"предпосылка теста: синхронный submit даёт РОВНО один ответ, получено {poller.polls_completed}"
+        )
         poller.stop()
+        qtbot.wait(20)  # дать коалесинг-таймеру (0 мс) сработать
 
+        assert poller.polls_completed == 1, "после stop() прилетел ещё ответ — счёт батчей ниже не про один ответ"
         assert len(batches) == 1, f"один ответ дал {len(batches)} батчей updated вместо одного"
         paths = {path for path, _ in batches[0]}
         assert "processes.proc_a.state.fps" in paths
         assert "processes.proc_a.telemetry.gated_metrics" in paths
+
+    def test_two_answers_give_two_batches(self, qtbot) -> None:
+        """Пара-контроль к предыдущему: «один батч» — про ОДИН ответ, а не всегда.
+
+        Без этой половины тест выше зелен и у read-model, которая склеивает
+        любое число ответов в один батч, — то есть теряет обновления.
+        """
+        vm = TelemetryViewModel()
+        batches: list[list] = []
+        vm.updated.connect(batches.append)
+
+        submit = ImmediateSubmit()
+        poller = TelemetryPoller(
+            poll_fn=lambda name: _response(levels={"state.fps": 21.3}, gated_metrics=["fps"]),
+            submit=submit,
+            view_model=vm,
+            interval_sec=30.0,
+            targets=("proc_a",),
+        )
+        poller.set_active(True)
+        qtbot.wait(20)  # первый батч слит
+        poller._tick()  # второй ответ — синхронно, тем же submit
+        poller.stop()
+        qtbot.wait(20)
+
+        assert poller.polls_completed == 2, poller.polls_completed
+        assert len(batches) == 2, f"два ответа дали {len(batches)} батчей вместо двух"
 
 
 class TestMalformedGatedMetricsIsIgnored:

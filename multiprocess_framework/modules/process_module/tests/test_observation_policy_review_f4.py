@@ -1,0 +1,347 @@
+# -*- coding: utf-8 -*-
+"""Сторожа находок РЕВЬЮ фазы Ф4 плана «порт наблюдений» (итерация 1).
+
+Отдельный файл, а не дописка к ``test_observation_policy_hazards.py``, по одной
+причине: там сторожа МЕХАНИЗМА, поставленные автором до ревью, а здесь —
+свойства, которых механизм не имел и которые названы снаружи. Смешав их, через
+месяц нельзя ответить на вопрос «что именно нашло ревью», а матрица инъекций в
+этом проекте и есть доказательство.
+
+Каждый класс называет находку, воспроизведение и вторую половину пары:
+
+* **Б1 / З2** — явное заявление оператора проигрывало УМОЛЧАНИЮ. Порядок стал
+  «явность → longest-prefix»; критерий М1 обязан выжить и сторожится тут же;
+* **Б2** — отчёт «нет молчаливых потолков» считался и выбрасывался; сторож
+  читает ОТВЕТ КОМАНДЫ, а не внутренний словарь;
+* **З1** — сверщик потолков был слеп к целым классам правил, включая
+  назначенный предохранитель (дефолт поддерева);
+* **З3** — диагностика меняла показание, а чужая правка стирала улику.
+"""
+
+from __future__ import annotations
+
+import pytest
+import yaml
+
+from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
+from multiprocess_framework.modules.process_module.configs.observability_layers import (
+    process_observability_layers,
+)
+from multiprocess_framework.modules.process_module.configs.observation_policy import (
+    PORT_SUBTREE_PATTERN,
+    SOURCE_RULE,
+    SOURCE_SUBTREE_DEFAULT,
+    SOURCE_WHITELIST,
+    TIER_LEGACY_ENTRY,
+    TIER_RULE,
+    TIER_SUBTREE_DEFAULT,
+    TIER_UMBRELLA,
+    ObservationPolicy,
+    ObservationPolicyConfig,
+    cap_candidates,
+    resolution_key,
+)
+from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+    TelemetryPublishConfig,
+)
+from multiprocess_framework.modules.process_module.heartbeat.telemetry import capped_metrics
+from multiprocess_framework.modules.process_module.managers.observability_reload import (
+    apply_observation_policy,
+)
+from multiprocess_framework.modules.process_module.managers.telemetry_reload import detect_throttle_caps
+
+from .test_telemetry_commands import _FakeLogger, _FakeServices
+from .test_telemetry_layers import BOOT_PUBLISH
+
+PROC = "cam1"
+
+
+def _policy(observation: dict | None = None, publish: dict | None = None) -> ObservationPolicy:
+    legacy = None if publish is None else TelemetryPublishConfig.from_dict(publish)
+    return ObservationPolicy(ObservationPolicyConfig.from_dict(observation), legacy)
+
+
+def _wired(tmp_path):
+    """Процесс с настоящим ``ProcessHeartbeat``, живым гейтом и командами."""
+    svc = _FakeServices(logger=_FakeLogger())
+    svc._config["telemetry"] = {"publish": BOOT_PUBLISH}
+    svc._heartbeat._services._config["telemetry"] = {"publish": BOOT_PUBLISH}
+    svc._heartbeat._telemetry_gate = svc._heartbeat._build_telemetry_gate()
+
+    cfg_path = tmp_path / "system.yaml"
+    cfg_path.write_text(yaml.safe_dump({"observability": {"log_level": "INFO"}}), encoding="utf-8")
+    svc._config["observability_config_path"] = str(cfg_path)
+
+    bc = BuiltinCommands(svc)
+    bc._register_observability_commands()
+    process_observability_layers(svc)
+    return svc, svc.command_manager.handlers
+
+
+class _Throttle:
+    """Центральный троттл оркестратора: одно правило на плагинный fps."""
+
+    rules = {"processes.**.state.plugins.*.fps": 2.0}
+
+
+# =========================================================================== #
+# Б1 + З2 — ЯВНОЕ заявление оператора против УМОЛЧАНИЯ
+# =========================================================================== #
+class TestExplicitOperatorEntryBeatsADefault:
+    """Порядок разрешения: явность старше специфичности.
+
+    Воспроизведение до правки (ревью Ф4): оператор запретил ``fps`` записью
+    ``telemetry.publish.metrics.fps.enabled: false``, а плагинный лист
+    ``…state.plugins.capture.fps`` резолвился ``enabled=True`` источником
+    ``subtree_default`` — у дефолта поддерева (3 литерала, 5 сегментов)
+    специфичность выше суффиксной формы ``**.fps`` (1 литерал, 2 сегмента).
+    Живое следствие: чекбокс и частота ПЛАГИННЫХ строк пульта не делали ничего,
+    а команда отвечала ``success``.
+
+    Владелец согласился на «два умолчания в одной секции», но НЕ на «умолчание
+    перебивает явное заявление оператора» (решение 2026-08-25).
+    """
+
+    #: Оператор ЗАПРЕТИЛ имя руками — и запретил при закрытом общем умолчании.
+    LEGACY = {"default_enabled": False, "metrics": {"fps": {"enabled": False}}}
+    PLUGIN_FPS = f"processes.{PROC}.state.plugins.capture.fps"
+    #: Метрика, которой нет НИГДЕ: ни в белом списке, ни в правилах (критерий М1).
+    PLUGIN_NEW = f"processes.{PROC}.state.plugins.capture.brand_new_metric"
+
+    def test_an_explicit_legacy_entry_wins_over_the_subtree_default(self) -> None:
+        decision = _policy({}, publish=self.LEGACY).resolve(self.PLUGIN_FPS)
+        assert decision.enabled is False, (
+            f"оператор ЗАПРЕТИЛ fps, а лист порта едет: {decision} — умолчание перебило заявление"
+        )
+        assert decision.source == SOURCE_WHITELIST, decision
+        assert decision.pattern == "**.fps", decision
+
+    def test_a_brand_new_metric_still_travels_on_the_subtree_default(self) -> None:
+        """Вторая половина пары: критерий М1 цел — ноль правок конфига.
+
+        Без неё «явность старше» можно было бы исполнить, вернув всё поддерево
+        под deny-by-default, и тест выше остался бы зелёным.
+        """
+        decision = _policy({}, publish=self.LEGACY).resolve(self.PLUGIN_NEW)
+        assert decision.enabled is True, (
+            f"новая метрика плагина не поехала при НУЛЕВЫХ правках конфига: {decision} — критерий М1 сломан"
+        )
+        assert decision.source == SOURCE_SUBTREE_DEFAULT, decision
+        assert decision.interval_sec == 1.0, decision
+
+    def test_the_legacy_umbrella_does_not_leak_onto_the_framework_plane(self) -> None:
+        """Пара-контроль плоскостей: тот же конфиг, другой путь — другой ответ.
+
+        Зонтик ``default_enabled: false`` на фреймворковой плоскости остаётся
+        единственным кандидатом и решает; переворот варианта «в» ограничен
+        поддеревом писателей.
+        """
+        framework = _policy({}, publish=self.LEGACY).resolve(f"processes.{PROC}.state.brand_new_metric")
+        assert framework.enabled is False, f"переворот протёк на плоскость фреймворка: {framework}"
+        assert framework.pattern == "**", framework
+
+    def test_a_path_rule_still_beats_the_explicit_legacy_entry(self) -> None:
+        """Верхняя ступень цела: правило по ПУТИ старше явной записи белого списка."""
+        policy = _policy(
+            {"rules": {"processes.*.state.plugins.*.fps": {"enabled": True, "interval_sec": 0.5}}},
+            publish=self.LEGACY,
+        )
+        decision = policy.resolve(self.PLUGIN_FPS)
+        assert (decision.enabled, decision.interval_sec, decision.source) == (True, 0.5, SOURCE_RULE), decision
+
+    def test_the_order_lives_in_one_key_not_in_branches(self) -> None:
+        """Ступени сравнимы ОДНИМ ключом — иначе порядок не проверить одним местом."""
+        assert resolution_key(TIER_RULE, "**") > resolution_key(TIER_LEGACY_ENTRY, PORT_SUBTREE_PATTERN)
+        assert resolution_key(TIER_LEGACY_ENTRY, "**.fps") > resolution_key(TIER_SUBTREE_DEFAULT, PORT_SUBTREE_PATTERN)
+        assert resolution_key(TIER_SUBTREE_DEFAULT, PORT_SUBTREE_PATTERN) > resolution_key(TIER_UMBRELLA, "**")
+        # Внутри ОДНОЙ ступени порядок прежний — longest-prefix (ADR-PM-042).
+        assert resolution_key(TIER_RULE, "processes.*.state.plugins.capture.fps") > resolution_key(
+            TIER_RULE, "processes.*.state.plugins.*.fps"
+        )
+
+
+# =========================================================================== #
+# Б2 — отчёт о потолках доезжает до ОТВЕТА КОМАНДЫ
+# =========================================================================== #
+class TestCapReportReachesTheCommandAnswer:
+    """Сторож читает ответ ``config.reload``, а не внутренний ``expanded``.
+
+    Прежний сторож (``test_observation_policy_hazards.py``) смотрел в словарь,
+    который команда не отдаёт наружу, — то есть доказывал харнесс. Воспроизведение
+    ревью: ответ ``config.reload`` не содержал НИ ``observation_applied``, НИ
+    ``throttle_checked``, НИ ``capped_by_throttle``.
+    """
+
+    def test_observation_applied_is_a_key_of_the_answer(self, tmp_path) -> None:
+        svc, handlers = _wired(tmp_path)
+        res = handlers["config.reload"]({"observability": {"observation": {"subtree_interval_sec": 0.5}}})
+        assert res["success"] is True, res
+        assert "observation_applied" in res, sorted(res)
+        applied = res["observation_applied"]
+        assert applied["subtree_interval_sec"] == 0.5, applied
+        assert applied["subtree"] == PORT_SUBTREE_PATTERN, applied
+        # «Сверять было не с чем» — тоже показание, и оно тоже в ОТВЕТЕ.
+        assert applied["throttle_checked"] is False, applied
+        assert "capped_by_throttle" not in applied, applied
+
+    def test_a_silent_cap_is_named_in_the_answer(self, tmp_path) -> None:
+        """Пара к предыдущему: есть троттл — отчёт непустой и лежит там же.
+
+        Без этой половины «ключ есть» доказано только на случае, когда сверять
+        не с чем, и всеядный ноль прошёл бы за показание.
+        """
+        svc, handlers = _wired(tmp_path)
+        svc._state_store_manager = _FakeStoreManager(_Throttle())
+        res = handlers["config.reload"](
+            {"observability": {"observation": {"rules": {"processes.*.state.plugins.*.fps": {"interval_sec": 0.02}}}}}
+        )
+        assert res["success"] is True, res
+        applied = res["observation_applied"]
+        assert applied["throttle_checked"] is True, applied
+        # Оба кандидата: правило оператора И дефолт поддерева. Второй попал сюда
+        # находкой З1 — этот синтетический троттл (2.0 с) строже и его дефолтной
+        # секунды. В бою предохранитель мягкий (0.05 с, `manager_setup.py`), и
+        # дефолт поддерева в отчёт не попадает — ложной тревоги нет.
+        assert applied["capped_by_throttle"] == {
+            "processes.*.state.plugins.*.fps": {"publisher_interval_sec": 0.02, "throttle_interval_sec": 2.0},
+            PORT_SUBTREE_PATTERN: {"publisher_interval_sec": 1.0, "throttle_interval_sec": 2.0},
+        }, applied
+
+
+class _FakeStoreManager:
+    """Держатель central-троттла (у обычного процесса его нет — он у оркестратора)."""
+
+    def __init__(self, throttle) -> None:
+        self._throttle = throttle
+
+    def get_middleware(self, name: str):
+        return self._throttle if name == "throttle" else None
+
+
+# =========================================================================== #
+# З1 — охват сверщиков потолков
+# =========================================================================== #
+class TestThrottleCapsSeeEveryRuleClass:
+    """Сверка правила по ПУТИ с central-правилом — ПЕРЕСЕЧЕНИЕМ глобов.
+
+    Измерено на прежней редакции (суффикс ``pattern.rsplit(".", 1)[-1]``):
+    ``…plugins.*.fps`` судилось, а ``…plugins.capture.*``, ``…plugins.**`` и
+    ``…plugins.*.f*`` возвращали ``{}`` МОЛЧА. Дефолт поддерева не судился
+    вовсе — он не лежит в ``rules``, — при том что соседний ``capped_metrics``
+    его учитывал: два отчёта о потолках расходились в охвате, и несовпавшей
+    половиной был назначенный предохранитель варианта «в».
+    """
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "processes.*.state.plugins.*.fps",
+            "processes.*.state.plugins.capture.*",
+            "processes.*.state.plugins.**",
+            "processes.**",
+        ],
+        ids=["leaf-literal", "wildcard-leaf", "double-star-tail", "everything"],
+    )
+    def test_a_wildcard_leaf_is_judged_too(self, pattern: str) -> None:
+        caps = detect_throttle_caps(
+            None,
+            _Throttle(),
+            observation_rules={pattern: {"enabled": True, "interval_sec": 0.05}},
+        )
+        assert caps == {pattern: {"publisher_interval_sec": 0.05, "throttle_interval_sec": 2.0}}, caps
+
+    def test_a_rule_that_cannot_touch_the_throttled_paths_is_not_reported(self) -> None:
+        """Пара-контроль: матчер не всеяден — иначе «судится» доказано только «да»."""
+        caps = detect_throttle_caps(
+            None,
+            _Throttle(),
+            observation_rules={"processes.*.workers.*.fps": {"enabled": True, "interval_sec": 0.05}},
+        )
+        assert caps == {}, caps
+
+    def test_the_subtree_default_reaches_the_throttle_report(self, tmp_path) -> None:
+        """Назначенный предохранитель судится ТЕМ ЖЕ отчётом, что и правила оператора."""
+        svc, _handlers = _wired(tmp_path)
+        applied = apply_observation_policy(svc._heartbeat, {"subtree_interval_sec": 0.05}, store_throttle=_Throttle())
+        assert applied["throttle_checked"] is True, applied
+        assert applied["capped_by_throttle"] == {
+            PORT_SUBTREE_PATTERN: {"publisher_interval_sec": 0.05, "throttle_interval_sec": 2.0}
+        }, applied
+
+    def test_both_cap_reports_agree_on_the_subtree_default(self) -> None:
+        """Один сборщик кандидатов — один охват у ОБОИХ сверщиков."""
+        legacy = TelemetryPublishConfig.from_dict({})
+        policy = _policy({"subtree_interval_sec": 0.05})
+        tick_caps = dict(capped_metrics(legacy, 5.0, policy))
+        throttle_caps = detect_throttle_caps(
+            None, _Throttle(), observation_rules=cap_candidates(policy.effective_view())
+        )
+        assert PORT_SUBTREE_PATTERN in tick_caps, tick_caps
+        assert PORT_SUBTREE_PATTERN in throttle_caps, throttle_caps
+
+
+# =========================================================================== #
+# З3 — диагностика не смеет менять показание, чужая правка не стирает улику
+# =========================================================================== #
+class TestRuleHitsSurviveDiagnosticsAndRebuilds:
+    RULE = "processes.*.state.plugins.*.fps"
+    PATH = f"processes.{PROC}.state.plugins.capture.fps"
+
+    def test_provenance_does_not_count_hits(self) -> None:
+        """Два подряд диагностических чтения не двигают счёт ни на единицу.
+
+        Воспроизведено на стенде: два ``introspect.observability`` с разницей
+        0.3 с БЕЗ единого такта процесса между ними убирали работающее правило
+        из списка «не совпало ни с чем» — наблюдатель менял то, что наблюдает.
+        """
+        policy = _policy({"rules": {self.RULE: {"interval_sec": 1.0}}}, publish={})
+        assert policy.rules_matched_nothing() == [self.RULE], "предпосылка: правило ещё ни с чем не совпало"
+
+        policy.provenance_for([self.PATH])
+        policy.provenance_for([self.PATH])
+
+        assert policy.rule_hits() == {self.RULE: 0}, policy.rule_hits()
+        assert policy.rules_matched_nothing() == [self.RULE], (
+            "диагностическое чтение засчиталось попаданием — правило исчезло из списка само собой"
+        )
+
+    def test_a_real_resolve_does_count(self) -> None:
+        """Якорь существования: боевой резолв счёт ВЕДЁТ, иначе тест выше вакуумен."""
+        policy = _policy({"rules": {self.RULE: {"interval_sec": 1.0}}}, publish={})
+        policy.resolve(self.PATH)
+        policy.resolve(self.PATH)
+        assert policy.rule_hits() == {self.RULE: 2}, policy.rule_hits()
+        assert policy.rules_matched_nothing() == []
+
+    def test_a_foreign_edit_does_not_erase_the_evidence(self, tmp_path) -> None:
+        """Пересборка гейта ЧУЖОЙ правкой не возвращает здоровое правило в «не совпало».
+
+        ``telemetry.reconfigure`` (любое движение пульта) зовёт ``_make_gate``,
+        а тот собирает НОВЫЙ ``ObservationPolicy``. До правки счёт обнулялся, и
+        единственный голос про опечатку в ПУТИ начинал кричать на работающие
+        правила.
+        """
+        svc, handlers = _wired(tmp_path)
+        hb = svc._heartbeat
+        hb.apply_observation_policy({"rules": {self.RULE: {"interval_sec": 1.0}}})
+        hb._observation_policy.resolve(f"processes.{svc.name}.state.plugins.capture.fps")
+        assert hb.current_observation_policy()["rules_matched_nothing"] == [], "предпосылка: правило уже совпало"
+
+        res = handlers["telemetry.reconfigure"]({"publish": {"metrics": {"fps": {"enabled": True}}}})
+        assert res["success"] is True, res
+
+        view = hb.current_observation_policy()
+        assert view["rules_matched_nothing"] == [], (
+            f"чужая правка стёрла улику — правило вернулось в «ни разу не совпало»: {view}"
+        )
+        assert view["rule_hits"][self.RULE] >= 1, view
+
+    def test_a_rewritten_rule_starts_from_zero(self) -> None:
+        """Пара-контроль: перенос не всеяден — другой текст правила = другое правило."""
+        first = ObservationPolicy(ObservationPolicyConfig.from_dict({"rules": {self.RULE: {"interval_sec": 1.0}}}))
+        first.resolve(self.PATH)
+        second = ObservationPolicy(
+            ObservationPolicyConfig.from_dict({"rules": {"processes.*.state.plugins.*.drops": {}}}),
+            hits=first.rule_hits(),
+        )
+        assert second.rule_hits() == {"processes.*.state.plugins.*.drops": 0}, second.rule_hits()

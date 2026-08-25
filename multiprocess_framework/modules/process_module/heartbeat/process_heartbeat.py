@@ -577,6 +577,13 @@ class ProcessHeartbeat:
         ``config.reload`` с секцией порта): разойдись они хоть в одном
         аргументе — и правка одной дороги давала бы гейт без политики, то есть
         молча возвращала бы плоскость порта под старое решение по имени.
+
+        **Счёт попаданий правил переносится в новый объект** (находка З3 ревью
+        Ф4). Сюда приходит КАЖДАЯ правка легаси-плоскости — то есть каждое
+        движение пульта, — а правила порта при этом не менялись. Без переноса
+        соседняя правка обнуляла бы счёт, и работающее правило возвращалось бы
+        в ``rules_matched_nothing``: единственный голос про опечатку в ПУТИ
+        начинал бы кричать на здоровые правила.
         """
         from ..configs.observation_policy import ObservationPolicy
         from .telemetry import TelemetryGate
@@ -588,7 +595,7 @@ class ProcessHeartbeat:
         else:
             # Легаси-секция могла смениться этой же командой — политика обязана
             # держать АКТУАЛЬНУЮ: она читает из неё умолчание и белый список.
-            policy = ObservationPolicy(policy.config, config)
+            policy = ObservationPolicy(policy.config, config, hits=policy.rule_hits())
             self._observation_policy = policy
         return TelemetryGate(
             config,
@@ -665,7 +672,8 @@ class ProcessHeartbeat:
             applied = dict(live.effective_view())
             applied["gate_active"] = gate is not None
             return applied
-        policy = ObservationPolicy(config, legacy)
+        # Счёт попаданий переживает пересборку — см. `_make_gate` (находка З3).
+        policy = ObservationPolicy(config, legacy, hits=live.rule_hits() if live is not None else None)
         self._observation_policy = policy
         if gate is not None:
             # Сборка завершена — только теперь подменяем ссылку (см. докстринг).
@@ -701,7 +709,43 @@ class ProcessHeartbeat:
         view = dict(policy.effective_view())
         view["gate_active"] = self._telemetry_gate is not None
         view["rules_matched_nothing"] = policy.rules_matched_nothing()
+        # Счёт, а не «ноль/не ноль»: правило, совпадающее раз в час, и правило,
+        # совпадающее каждый такт, — разные факты (открытый вопрос З3 ревью Ф4).
+        view["rule_hits"] = policy.rule_hits()
         return view
+
+    def current_resolved_metrics(self) -> Optional[Dict[str, Any]]:
+        """Решение ЖИВОГО гейта по каждому имени каталога — с ПУТЁМ, о котором оно.
+
+        Существует из-за блокера Б1 ревью Ф4: ``introspect.telemetry.resolved``
+        считался из одной легаси-секции и выдавал вердикт про ИМЯ, а решение по
+        плагинному листу с тем же именем принимает политика порта по ПУТИ. На
+        стенде это дало два взаимно противоречащих readback'а об одном листе:
+        ``resolved`` показывал ``enabled: false`` для ``frame_count``, а лист
+        продолжал шагать. Теперь ответ (а) считается тем же гейтом, что и решает,
+        и (б) НАЗЫВАЕТ путь, к которому относится, — плоскость фреймворка
+        ``processes.<P>.state.<имя>``. Про листья поддерева порта отвечает
+        ``introspect.observability`` → ``observation.provenance``.
+
+        Расписание не двигается: ``decide(..., count=False)`` — ни ``_next_due``,
+        ни счёт попаданий правил.
+
+        Returns:
+            ``{имя: {enabled, interval_sec, path}}`` либо ``None``, если гейта нет.
+        """
+        gate = self._telemetry_gate
+        if gate is None:
+            return None
+        from ..configs.telemetry_publish_config import gated_metrics
+        from .telemetry import state_metric_path
+
+        process = str(getattr(self._services, "name", "") or "")
+        out: Dict[str, Any] = {}
+        for metric in gated_metrics():
+            path = state_metric_path(process, metric)
+            enabled, interval = gate.decide(path, metric, count=False)
+            out[metric] = {"enabled": bool(enabled), "interval_sec": float(interval), "path": path}
+        return out
 
     def _log_heartbeat(self, message: str) -> None:
         """Сказать вслух, не уронив такт: у дублёров ``services`` логгера может не быть."""

@@ -752,19 +752,22 @@ def capped_metrics(config: Any, effective_tick: float, policy: Any = None) -> li
             out.append((metric, interval))
     if policy is None:
         return out
-    cfg = getattr(policy, "config", None)
-    if cfg is None:
+    view = policy.effective_view() if hasattr(policy, "effective_view") else None
+    if not isinstance(view, dict):
         return out
-    default_interval = getattr(config, "default_interval_sec", 0.0)
-    for pattern, rule in getattr(cfg, "rules", {}).items():
-        interval = rule.interval_sec if rule.interval_sec is not None else default_interval
-        if rule.enabled and interval < effective_tick:
-            out.append((str(pattern), float(interval)))
-    if cfg.subtree_enabled and cfg.subtree_interval_sec < effective_tick:
-        from ..configs.observation_policy import PORT_SUBTREE_PATTERN
+    from ..configs.observation_policy import cap_candidates
 
-        if PORT_SUBTREE_PATTERN not in getattr(cfg, "rules", {}):
-            out.append((PORT_SUBTREE_PATTERN, float(cfg.subtree_interval_sec)))
+    default_interval = getattr(config, "default_interval_sec", 0.0)
+    # Охват — ТОТ ЖЕ сборщик, что у соседнего сверщика `detect_throttle_caps`
+    # (находка З1 ревью Ф4: два отчёта о потолках расходились в охвате, и
+    # НЕсовпадавшей половиной был назначенный предохранитель — дефолт поддерева).
+    for pattern, rule in cap_candidates(view).items():
+        if rule.get("enabled") is False:
+            continue
+        raw = rule.get("interval_sec")
+        interval = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else default_interval
+        if interval < effective_tick:
+            out.append((str(pattern), float(interval)))
     return out
 
 
@@ -910,17 +913,24 @@ class TelemetryGate:
             out[str(writer)] = granted
         return out
 
-    def decide(self, path: str, metric: str) -> tuple[bool, float]:
+    def decide(self, path: str, metric: str, *, count: bool = True) -> tuple[bool, float]:
         """``(enabled, interval_sec)`` для пути — БЕЗ продвижения расписания.
 
         Отдельно от :meth:`_grant`, потому что на этот же вопрос отвечают
         readback и провенанс, а они не имеют права двигать ``_next_due``: опрос
         состояния, меняющий состояние, — это наблюдатель, который врёт о том,
         что наблюдает.
+
+        Args:
+            count: считать ли попадание правила политики. У ``_next_due``
+                обещание выше выполнялось с самого начала, а вот СЧЁТЧИК
+                политики диагностическое чтение всё-таки двигало (находка З3
+                ревью Ф4) — вторая половина того же принципа теперь выражена
+                этим флагом, а не подразумевается.
         """
         if self._policy is None:
             return self._config.resolve(metric)
-        decision = self._policy.resolve(path)
+        decision = self._policy.resolve(path, count=count)
         return decision.enabled, decision.interval_sec
 
     def _grant(self, path: str, metric: str, now: float) -> bool:

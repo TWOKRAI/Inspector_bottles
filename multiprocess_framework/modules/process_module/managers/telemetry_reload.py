@@ -22,7 +22,9 @@ Fan-out на ВСЕХ детей (broadcast ``process=all``) — Task 3.2, зд�
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+
+from ...state_store_module import split_pattern
 
 if TYPE_CHECKING:
     from ...config_module.core.config import Config
@@ -248,6 +250,66 @@ def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Optional[flo
     return max(candidates)
 
 
+def _globs_intersect(a: Tuple[str, ...], b: Tuple[str, ...]) -> bool:
+    """Существует ли путь, который матчат ОБА паттерна (пересечение непусто).
+
+    Нужно там, где сравниваются два ГЛОБА, а не глоб и путь: правило порта по
+    пути против central-правила троттла. Суффиксное сравнение (сосед
+    :func:`_central_rule_for_metric`) на такой паре слепо, и слепота была не
+    частной: ``…plugins.capture.*``, ``…plugins.**`` и дефолтное правило
+    поддерева ``processes.*.state.plugins.**`` возвращали ПУСТО молча — то есть
+    «no silent caps» не действовало ровно для назначенного предохранителя
+    (находка З1 ревью Ф4).
+
+    Семантика сегментов — та же, что у матчера стора
+    (``state_store_module.match_pattern``): ``*`` — ровно один любой сегмент,
+    ``**`` — ноль и больше. Частичных wildcard'ов (``f*``) движок не знает: такой
+    сегмент — обычный литерал, и здесь он сравнивается литералом же.
+
+    Returns:
+        ``True``, если пересечение множеств путей непусто.
+    """
+    if not a and not b:
+        return True
+    if not a or not b:
+        # Хвост из одних `**` поглощает пустоту — иначе пересечения нет.
+        return all(seg == "**" for seg in (a or b))
+    head_a, head_b = a[0], b[0]
+    if head_a == "**":
+        return _globs_intersect(a[1:], b) or _globs_intersect(a, b[1:])
+    if head_b == "**":
+        return _globs_intersect(a, b[1:]) or _globs_intersect(a[1:], b)
+    if head_a == "*" or head_b == "*" or head_a == head_b:
+        return _globs_intersect(a[1:], b[1:])
+    return False
+
+
+def _central_rule_for_path_pattern(pattern: str, rules: Dict[str, Any]) -> Optional[float]:
+    """Строжайшее central-правило, чьи пути ПЕРЕСЕКАЮТСЯ с правилом порта.
+
+    Отличается от :func:`_central_rule_for_metric` не капризом, а входом: там
+    ключ — ИМЯ метрики (``metrics.fps``), и что это имя значит в дереве, знает
+    только прикладной слой, поэтому framework обязан остаться на суффиксе. Здесь
+    ключ — сам ПУТЬ, выраженный на языке того же матчера, что и central-правила;
+    сравнивать их напрямую не только можно, но и единственно честно.
+
+    Строжайшее (макс. интервал, ``0`` = полная блокировка) — по тому же доводу,
+    что у соседа: узкое место оператору называется то, которое реально сработает.
+    """
+    candidates = [
+        float(interval)
+        for throttle_pattern, interval in rules.items()
+        if isinstance(interval, (int, float))
+        and not isinstance(interval, bool)
+        and _globs_intersect(split_pattern(str(pattern)), split_pattern(str(throttle_pattern)))
+    ]
+    if not candidates:
+        return None
+    if any(c == 0 for c in candidates):
+        return 0.0
+    return max(candidates)
+
+
 def detect_throttle_caps(
     publish_section: Any,
     store_throttle: Any,
@@ -273,24 +335,32 @@ def detect_throttle_caps(
     До неё функция читала ТОЛЬКО ``metrics.<имя>.interval_sec``, и правило
     ``processes.*.state.plugins.*.fps: {interval_sec: 0.02}`` не доходило сюда
     вовсе: обещание «no silent caps» тихо переставало действовать ровно для
-    языка, которым фаза и вводит политику. Имя метрики у правила по пути — его
-    ПОСЛЕДНИЙ сегмент, то есть ровно тот ключ, по которому
-    :func:`_central_rule_for_metric` уже ищет central-правило; второй копии
-    сопоставления не заводится. Ключ отчёта — сам паттерн, чтобы оператор увидел
-    ИМЕННО своё правило, а не имя метрики, под которое подпало несколько правил.
+    языка, которым фаза и вводит политику. Ключ отчёта — сам паттерн, чтобы
+    оператор увидел ИМЕННО своё правило, а не имя метрики, под которое подпало
+    несколько правил.
 
-    Названный потолок (тот же, что у :func:`_central_rule_for_metric`): сравнение
-    идёт по СУФФИКСУ, а не по совпадению глобов. Правило по пути и central-правило
-    могут иметь один последний сегмент и при этом адресовать разные поддеревья —
-    тогда отчёт назовёт потолок, которого на этом пути нет. Ошибка в безопасную
-    сторону (ложная тревога вместо молчащего среза) и названа здесь, а не
-    подразумевается.
+    **Ред. по находке З1 ревью Ф4: правила по пути судятся ПЕРЕСЕЧЕНИЕМ ГЛОБОВ**
+    (:func:`_central_rule_for_path_pattern`), а не по последнему сегменту.
+    Прежняя редакция брала ``pattern.rsplit(".", 1)[-1]``, и это молча не судило
+    целые классы: ``…plugins.capture.*``, ``…plugins.**``, ``…plugins.*.f*`` —
+    и, главное, ДЕФОЛТНОЕ ПРАВИЛО ПОДДЕРЕВА, то есть назначенный предохранитель
+    варианта «в». Измерено на прежней редакции: ``…plugins.*.fps`` судилось,
+    три перечисленных формы возвращали ``{}``. Заодно ушёл названный потолок
+    «отчёт назовёт потолок, которого на этом пути нет»: он был следствием
+    суффикса и для правил по пути больше не действует.
+
+    Разные способы сопоставления у двух половин функции — не разнобой, а разный
+    ВХОД: ключ ``metrics.<имя>`` — это ИМЯ, и что оно значит в дереве, знает
+    только прикладной слой (framework обязан остаться generic); ключ правила
+    порта — сам ПУТЬ на языке того же матчера, что и central-правила. Довод
+    целиком — ADR-PM-042.
 
     Args:
         publish_section: publish-под-секция команды (dict с опциональным ``metrics``).
         store_throttle: живой центральный ``ThrottleMiddleware`` оркестратора (или ``None``).
         observation_rules: правила порта по пути ``{glob: {enabled, interval_sec}}``
-            (``ObservationPolicy.rules_view``) либо ``None``.
+            — ожидается :func:`~..configs.observation_policy.cap_candidates`
+            (правила оператора ПЛЮС дефолт поддерева) либо ``None``.
 
     Returns:
         ``{метрика-или-паттерн: {"publisher_interval_sec": p, "throttle_interval_sec": t}}``
@@ -328,7 +398,17 @@ def detect_throttle_caps(
         for pattern, rule in observation_rules.items():
             if not isinstance(rule, dict) or rule.get("enabled") is False:
                 continue
-            _judge(str(pattern), str(pattern).rsplit(".", 1)[-1], rule.get("interval_sec"))
+            pub_interval = rule.get("interval_sec")
+            if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
+                continue
+            throttle_interval = _central_rule_for_path_pattern(str(pattern), rules)
+            if throttle_interval is None:
+                continue
+            if throttle_interval == 0 or throttle_interval > pub_interval:
+                caps[str(pattern)] = {
+                    "publisher_interval_sec": float(pub_interval),
+                    "throttle_interval_sec": float(throttle_interval),
+                }
 
     return caps
 

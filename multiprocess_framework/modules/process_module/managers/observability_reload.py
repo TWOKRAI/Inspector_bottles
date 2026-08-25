@@ -966,6 +966,16 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
     центрального троттла — он живёт только на оркестраторе), и это НЕ то же
     самое, что «потолков нет»: пустой отчёт без этого признака читался бы как
     подтверждение, которого никто не давал.
+
+    **Возвращённое читается снаружи** (``config.reload`` → ключ
+    ``observation_applied``). До находки Б2 ревью Ф4 отчёт вычислялся и
+    выбрасывался: за пределами тестов его не потреблял никто, а единственный
+    сторож смотрел во внутренний ``expanded`` — то есть доказывал харнесс.
+
+    **Охват сверки — ``cap_candidates``, а не ``rules``** (находка З1 того же
+    ревью): дефолт правила поддерева в ``rules`` не лежит, и назначенный
+    предохранитель варианта «в» не судился вовсе, при том что соседний
+    ``capped_metrics`` его учитывал — два отчёта о потолках расходились в охвате.
     """
     apply = getattr(heartbeat, "apply_observation_policy", None)
     if not callable(apply):
@@ -973,10 +983,11 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
     applied = dict(apply(section) or {})
     applied["throttle_checked"] = store_throttle is not None
     if store_throttle is not None:
+        from ..configs.observation_policy import cap_candidates
         from .telemetry_reload import detect_throttle_caps
 
         applied["capped_by_throttle"] = detect_throttle_caps(
-            None, store_throttle, observation_rules=applied.get("rules")
+            None, store_throttle, observation_rules=cap_candidates(applied)
         )
     return applied
 

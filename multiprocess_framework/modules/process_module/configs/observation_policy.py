@@ -30,12 +30,39 @@
   ``ProcessHeartbeat._build_telemetry_gate`` → ``None``: вне поддерева порта
   гейта нет, метрика едет каждый тик.
 
-**Порядок разрешения при пересечении — longest-prefix**, и он ОТЛИЧАЕТСЯ от
-соседа ``telemetry_reload._central_rule_for_metric`` (тот берёт СТРОЖАЙШИЙ
-интервал). Расхождение намеренное, довод — в ``DECISIONS.md`` (ADR-PM-042):
-у соседа предохранитель IPC, где строжайший ответ безопасен, а здесь — заявка
-оператора, где выигрывать обязан ТОЧНЕЕ АДРЕСОВАННЫЙ, иначе широкое правило
-поддерева навсегда перебивало бы точечное.
+**Порядок разрешения — ЯВНОСТЬ, затем longest-prefix** (ред. 2026-08-25, решение
+владельца по блокеру Б1 ревью Ф4). Старший разряд ключа — ступень явности
+источника (:func:`resolution_key`), и только внутри одной ступени спор решает
+специфичность паттерна:
+
+1. :data:`TIER_RULE` — явное правило оператора по пути (``observation.rules``);
+2. :data:`TIER_LEGACY_ENTRY` — ЯВНАЯ запись легаси-белого-списка
+   (``telemetry.publish.metrics.<имя>``): оператор написал это имя намеренно;
+3. :data:`TIER_SUBTREE_DEFAULT` — дефолтное правило поддерева порта;
+4. :data:`TIER_UMBRELLA` — зонтичные умолчания (``default_enabled`` легаси-секции,
+   а также «легаси-секции нет вовсе»).
+
+**Почему явность выше специфичности.** Владелец согласился на «два умолчания в
+одной секции», но НЕ на «умолчание перебивает явное заявление оператора».
+Воспроизведение до правки (ревью Ф4): при ``{"default_enabled": false,
+"metrics": {"fps": {"enabled": false}}}`` — то есть оператор ЗАПРЕТИЛ ``fps`` —
+путь ``processes.cam1.state.plugins.capture.fps`` резолвился в ``enabled=True``
+источником ``subtree_default``, потому что у дефолта поддерева (3 литерала,
+5 сегментов) специфичность выше, чем у суффиксной формы ``**.fps`` (1 литерал,
+2 сегмента). Живое следствие: чекбокс и частота ПЛАГИННЫХ строк пульта не делали
+ничего, а команда отвечала ``success``.
+
+Критерий М1 при этом цел и сторожится тестом: у НОВОЙ метрики записи в
+``metrics`` нет вовсе, поэтому легаси отвечает зонтиком
+(:data:`TIER_UMBRELLA`), и дефолт поддерева его перекрывает — новая метрика
+плагина по-прежнему едет при нулевых правках конфига.
+
+Внутри :data:`TIER_RULE` порядок прежний и ОТЛИЧАЕТСЯ от соседа
+``telemetry_reload._central_rule_for_metric`` (тот берёт СТРОЖАЙШИЙ интервал).
+Расхождение намеренное, довод — в ``DECISIONS.md`` (ADR-PM-042): у соседа
+предохранитель IPC, где строжайший ответ безопасен, а здесь — заявка оператора,
+где выигрывать обязан ТОЧНЕЕ АДРЕСОВАННЫЙ, иначе широкое правило поддерева
+навсегда перебивало бы точечное.
 """
 
 from __future__ import annotations
@@ -68,6 +95,15 @@ SOURCE_UNGATED = "ungated"
 #: Имя легаси-источника в провенансе — адрес, по которому оператор его грепнет.
 LEGACY_SOURCE_NAME = "telemetry.publish"
 
+#: **Ступени ЯВНОСТИ — старший разряд ключа разрешения** (:func:`resolution_key`).
+#: Числа сравниваются, а не перечисляются по месту: порядок обязан быть один на
+#: все ветки :meth:`ObservationPolicy.resolve`, иначе он превращается в набор
+#: частных случаев, разъезжающихся при первой же правке.
+TIER_RULE = 3  #: явное правило оператора по пути (`observation.rules`)
+TIER_LEGACY_ENTRY = 2  #: явная запись `telemetry.publish.metrics.<имя>`
+TIER_SUBTREE_DEFAULT = 1  #: дефолтное правило поддерева порта
+TIER_UMBRELLA = 0  #: зонтик: `default_enabled` либо «легаси-секции нет вовсе»
+
 #: Плейсхолдер имени процесса, когда гейт собран без него (прямая конструкция в
 #: тесте). Один сегмент, поэтому ``processes.*.…`` продолжает совпадать, а
 #: адресное ``processes.cam1.…`` — нет, и это честно: имени нам не сообщили.
@@ -91,9 +127,10 @@ class ObservationPolicyConfig(SchemaBase):
       порта (:data:`PORT_SUBTREE_PATTERN`). Живёт отдельными полями, а не записью
       внутри ``rules``, по прозаичной причине: Pydantic заменяет словарь целиком,
       и первый же операторский ``rules: {…}`` снёс бы дефолт вместе с
-      предохранителем. Разрешается оно в ТОМ ЖЕ glob-множестве и тем же
-      longest-prefix (см. :meth:`ObservationPolicy.resolve`) — операторское
-      правило перекрывает его порядком, а не особым случаем в коде;
+      предохранителем. Разрешается оно в ТОМ ЖЕ glob-множестве и тем же ключом
+      (:func:`resolution_key`, см. :meth:`ObservationPolicy.resolve`) —
+      операторское правило перекрывает его ПОРЯДКОМ (ступень явности), а не
+      особым случаем в коде;
     - ``rules`` — правила оператора: ``{glob-путь: {enabled, interval_sec}}``.
       Значение правила — тот же :class:`MetricRule`, что у легаси-секции: две
       схемы для одной формы разошлись бы на первом же новом поле.
@@ -195,6 +232,22 @@ def pattern_specificity(pattern: str) -> Tuple[int, int, str]:
     return (literals, len(segments), pattern)
 
 
+def resolution_key(tier: int, pattern: str) -> Tuple[int, int, int, str]:
+    """Полный ключ разрешения кандидата: **явность, затем longest-prefix**.
+
+    Старший разряд — ступень явности источника (``TIER_*``), младшие три —
+    :func:`pattern_specificity`. Порядок живёт ЗДЕСЬ, одной функцией, а не
+    ветками в :meth:`ObservationPolicy.resolve`: правило «явное заявление
+    оператора не проигрывает умолчанию» — свойство ПОРЯДКА, и спрятанное в
+    ветку оно перестаёт быть проверяемым одним местом.
+
+    Почему явность старше специфичности — в докстринге модуля (воспроизведение
+    блокера Б1: дефолт поддерева перебивал операторский запрет ``metrics.fps``).
+    """
+    literals, segments, text = pattern_specificity(pattern)
+    return (int(tier), literals, segments, text)
+
+
 class ObservationPolicy:
     """Разрешение «поедет ли ЭТОТ путь и как часто» — одним glob-множеством.
 
@@ -213,6 +266,8 @@ class ObservationPolicy:
         self,
         config: Optional[ObservationPolicyConfig] = None,
         legacy: Optional[TelemetryPublishConfig] = None,
+        *,
+        hits: Optional[Dict[str, int]] = None,
     ) -> None:
         """
         Args:
@@ -220,12 +275,24 @@ class ObservationPolicy:
                 то есть дефолтное правило поддерева включено).
             legacy: секция ``telemetry.publish`` как ИМЕНОВАННЫЙ источник
                 (``None`` → гейта вне поддерева порта нет вовсе).
+            hits: счёт попаданий ПРЕДЫДУЩЕЙ политики (``{паттерн: сколько раз}``).
+                Переносятся только те паттерны, которые есть и в новом наборе:
+                правило с тем же текстом — то же правило, а переписанное
+                оператором начинается с нуля честно.
+
+                **Зачем перенос** (находка З3 ревью Ф4): политику пересобирает
+                КАЖДАЯ соседняя правка (``telemetry.reconfigure``, любое движение
+                пульта — ``_make_gate`` собирает новый объект). Без переноса
+                чужая правка обнуляла бы счёт, и работающее правило возвращалось
+                бы в ``rules_matched_nothing``, то есть единственный голос про
+                опечатку в пути кричал бы на здоровые правила.
         """
         self._config = config if config is not None else ObservationPolicyConfig()
         self._legacy = legacy
         self._rules: Dict[str, MetricRule] = dict(self._config.rules)
         # Ключи фиксированы здесь и больше не меняются — см. докстринг класса.
-        self._hits: Dict[str, int] = {pattern: 0 for pattern in self._rules}
+        carried = hits or {}
+        self._hits: Dict[str, int] = {pattern: int(carried.get(pattern, 0)) for pattern in self._rules}
 
     # ------------------------------------------------------------------ чтение
 
@@ -239,24 +306,34 @@ class ObservationPolicy:
         """Легаси-секция ``telemetry.publish``, если она есть."""
         return self._legacy
 
-    def resolve(self, path: str) -> PolicyDecision:
+    def resolve(self, path: str, *, count: bool = True) -> PolicyDecision:
         """Решение по полному пути дерева (``processes.cam1.state.plugins.a.fps``).
 
-        Кандидаты собираются ВСЕ, победитель — самый специфичный
-        (:func:`pattern_specificity`). Явное правило оператора и дефолт поддерева
-        живут в одном множестве: если оператор написал ровно
-        :data:`PORT_SUBTREE_PATTERN`, его запись просто вытесняет дефолт по
-        специфичности-и-литералу (равные ключи → выше по третьей ступени только
-        одна из двух записей, поэтому дефолт добавляется лишь когда такого
-        паттерна нет в ``rules``).
+        Кандидаты собираются ВСЕ, победитель — старший по :func:`resolution_key`:
+        сначала ступень ЯВНОСТИ (``TIER_*``), внутри неё — специфичность
+        паттерна. Явное правило оператора и дефолт поддерева живут в одном
+        множестве: если оператор написал ровно :data:`PORT_SUBTREE_PATTERN`, его
+        запись вытесняет дефолт СТУПЕНЬЮ (правило явное, дефолт — нет), поэтому
+        дефолт добавляется лишь когда такого паттерна нет в ``rules``.
+
+        Args:
+            path: полный путь листа в дереве состояния.
+            count: считать ли попадания правил (``rules_matched_nothing``).
+                ``False`` — для ДИАГНОСТИЧЕСКОГО чтения (:meth:`provenance_for`).
+                Собственный докстринг соседа ``TelemetryGate.decide`` объявляет
+                этот принцип дословно — «опрос состояния, меняющий состояние, это
+                наблюдатель, который врёт о том, что наблюдает», — и до находки
+                З3 ревью Ф4 нарушался ровно здесь: два подряд
+                ``introspect.observability`` без единого такта процесса между
+                ними убирали работающее правило из списка «не совпало ни с чем».
         """
         segments = tuple(str(path).split("."))
-        best_key: Optional[Tuple[int, int, str]] = None
+        best_key: Optional[Tuple[int, int, int, str]] = None
         best: Optional[PolicyDecision] = None
 
-        def _offer(pattern: str, enabled: bool, interval: float, source: str) -> None:
+        def _offer(pattern: str, enabled: bool, interval: float, source: str, tier: int) -> None:
             nonlocal best_key, best
-            key = pattern_specificity(pattern)
+            key = resolution_key(tier, pattern)
             if best_key is None or key > best_key:
                 best_key = key
                 best = PolicyDecision(
@@ -267,9 +344,10 @@ class ObservationPolicy:
 
         for pattern, rule in self._rules.items():
             if match_pattern(split_pattern(pattern), segments):
-                self._hits[pattern] = self._hits.get(pattern, 0) + 1
+                if count:
+                    self._hits[pattern] = self._hits.get(pattern, 0) + 1
                 interval = rule.interval_sec if rule.interval_sec is not None else default_interval
-                _offer(pattern, rule.enabled, interval, SOURCE_RULE)
+                _offer(pattern, rule.enabled, interval, SOURCE_RULE, TIER_RULE)
 
         cfg = self._config
         if (
@@ -277,20 +355,31 @@ class ObservationPolicy:
             and PORT_SUBTREE_PATTERN not in self._rules
             and match_pattern(split_pattern(PORT_SUBTREE_PATTERN), segments)
         ):
-            _offer(PORT_SUBTREE_PATTERN, True, cfg.subtree_interval_sec, SOURCE_SUBTREE_DEFAULT)
+            _offer(
+                PORT_SUBTREE_PATTERN,
+                True,
+                cfg.subtree_interval_sec,
+                SOURCE_SUBTREE_DEFAULT,
+                TIER_SUBTREE_DEFAULT,
+            )
 
         if self._legacy is None:
             # Легаси-секции нет — гейта нет: паритет с `_build_telemetry_gate` → None.
-            _offer("**", True, 0.0, SOURCE_UNGATED)
+            # Зонтик: это НЕ заявление про имя, а отсутствие механизма.
+            _offer("**", True, 0.0, SOURCE_UNGATED, TIER_UMBRELLA)
         else:
             leaf = segments[-1] if segments else ""
             rule = self._legacy.metrics.get(leaf)
             if rule is not None:
                 interval = rule.interval_sec if rule.interval_sec is not None else default_interval
                 # Суффиксное правило `имя` ≡ `**.имя` — старые правила валидны буквально.
-                _offer(f"**.{leaf}", rule.enabled, interval, SOURCE_WHITELIST)
+                # Ступень ЯВНАЯ: оператор написал это имя руками (блокер Б1).
+                _offer(f"**.{leaf}", rule.enabled, interval, SOURCE_WHITELIST, TIER_LEGACY_ENTRY)
             else:
-                _offer("**", self._legacy.default_enabled, default_interval, SOURCE_WHITELIST)
+                # `default_enabled` — зонтик над ВСЕМИ именами, а не заявление про
+                # это. Поэтому дефолт поддерева порта его перекрывает, и критерий
+                # М1 («новая метрика — ноль правок конфига») цел.
+                _offer("**", self._legacy.default_enabled, default_interval, SOURCE_WHITELIST, TIER_UMBRELLA)
 
         # `best` не может остаться None: последняя ветка всегда предлагает `**`.
         assert best is not None  # noqa: S101 — инвариант тотальности, а не проверка ввода
@@ -312,8 +401,22 @@ class ObservationPolicy:
         Показание НАКОПИТЕЛЬНОЕ и читается «ни разу с момента применения
         политики»: правило, чей писатель ещё не появился, будет здесь до его
         первой публикации — это не ложная тревога, а честное «пока не совпало».
+        Счёт ПЕРЕЖИВАЕТ пересборку политики соседней правкой (см. ``hits=`` у
+        конструктора) и не растёт от диагностического чтения
+        (:meth:`provenance_for` резолвит с ``count=False``) — обе половины
+        находки З3 ревью Ф4.
         """
         return sorted(pattern for pattern, hits in self._hits.items() if hits == 0)
+
+    def rule_hits(self) -> Dict[str, int]:
+        """``{паттерн: сколько путей он рассудил}`` — счёт, а не «ноль/не ноль».
+
+        Выбрано вместо булева ответа осознанно (открытый вопрос З3 ревью Ф4):
+        «ноль» отличает опечатку от здорового правила, но НЕ отличает правило,
+        совпадающее раз в час, от совпадающего каждый такт. Оператор с числом
+        видит и то, и другое; цена — одно поле в readback'е.
+        """
+        return dict(self._hits)
 
     def rules_view(self) -> Dict[str, Dict[str, Any]]:
         """Правила оператора в НОРМАЛИЗОВАННОЙ форме — для readback'а и сверки.
@@ -340,11 +443,13 @@ class ObservationPolicy:
 
         Считается ТЕМ ЖЕ :meth:`resolve`, которым решение и принимается: свой
         пересчёт «по смыслу» показывал бы согласие всегда, в том числе когда
-        живой гейт решает иначе.
+        живой гейт решает иначе. Но ``count=False``: диагностика не имеет права
+        менять то, что показывает (находка З3 ревью Ф4 — воспроизведение в
+        докстринге :meth:`resolve`).
         """
         out: Dict[str, Dict[str, Any]] = {}
         for path in paths:
-            decision = self.resolve(str(path))
+            decision = self.resolve(str(path), count=False)
             out[str(path)] = {
                 "source": decision.source,
                 "pattern": decision.pattern,
@@ -352,6 +457,38 @@ class ObservationPolicy:
                 "interval_sec": decision.interval_sec,
             }
         return out
+
+
+def cap_candidates(view: Any) -> Dict[str, Dict[str, Any]]:
+    """Правила, чью частоту обязаны сверять с потолками, — ВКЛЮЧАЯ дефолт поддерева.
+
+    Один сборщик на обоих сверщиков (:func:`~..heartbeat.telemetry.capped_metrics`
+    и :func:`~..managers.telemetry_reload.detect_throttle_caps`). До находки З1
+    ревью Ф4 их охват РАЗЛИЧАЛСЯ: первый учитывал дефолт поддерева, второй
+    получал только ``rules`` и о нём не знал вовсе — два отчёта о потолках,
+    расходящихся в охвате, при том что дефолт поддерева и есть НАЗНАЧЕННЫЙ
+    предохранитель варианта «в».
+
+    Args:
+        view: :meth:`ObservationPolicy.effective_view` (или любой dict той же
+            формы: ``subtree`` / ``subtree_enabled`` / ``subtree_interval_sec`` /
+            ``rules``).
+
+    Returns:
+        ``{паттерн: {"enabled": bool, "interval_sec": float|None}}``. Дефолт
+        поддерева не добавляется, если оператор написал такой паттерн сам, —
+        та же оговорка, что в :meth:`ObservationPolicy.resolve`.
+    """
+    if not isinstance(view, dict):
+        return {}
+    rules = view.get("rules")
+    out: Dict[str, Dict[str, Any]] = {
+        str(pattern): dict(rule) for pattern, rule in (rules or {}).items() if isinstance(rule, dict)
+    }
+    subtree = str(view.get("subtree") or PORT_SUBTREE_PATTERN)
+    if view.get("subtree_enabled") and subtree not in out:
+        out[subtree] = {"enabled": True, "interval_sec": view.get("subtree_interval_sec")}
+    return out
 
 
 def normalized_observation_section(section: Any) -> Dict[str, Any]:
@@ -389,9 +526,15 @@ __all__ = [
     "SOURCE_SUBTREE_DEFAULT",
     "SOURCE_UNGATED",
     "SOURCE_WHITELIST",
+    "TIER_LEGACY_ENTRY",
+    "TIER_RULE",
+    "TIER_SUBTREE_DEFAULT",
+    "TIER_UMBRELLA",
     "ObservationPolicy",
     "ObservationPolicyConfig",
     "PolicyDecision",
+    "cap_candidates",
     "normalized_observation_section",
     "pattern_specificity",
+    "resolution_key",
 ]

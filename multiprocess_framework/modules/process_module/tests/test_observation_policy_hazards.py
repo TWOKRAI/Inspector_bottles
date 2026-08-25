@@ -9,8 +9,10 @@
   переприсваиваться на ПОЛНОСТЬЮ собранный объект;
 * **срок L3 и возврат к нижнему слою** — кванторно, ≥2 применения слоёв
   (прямое требование задачи, независимым тестером не покрыто вовсе);
-* **порядок при пересечении правил** — решение исполнителя (longest-prefix,
-  ADR-PM-042), закреплённое двумя пересекающимися правилами и литералом;
+* **порядок при пересечении правил ОДНОЙ СТУПЕНИ** — longest-prefix (ADR-PM-042),
+  закреплённый двумя пересекающимися правилами и литералом. Старший разряд ключа —
+  СТУПЕНЬ ЯВНОСТИ (ред. по блокеру Б1 ревью Ф4), и его сторожа живут в
+  test_observation_policy_review_f4.py;
 * **правило против легаси-источника** — кто кого перекрывает;
 * **голос про правило, не совпавшее ни с чем** — единственная диагностика
   опечатки в ПУТИ (схема её не судит и судить не может);
@@ -181,8 +183,16 @@ class TestSessionTtlReturnsPolicyToTheLowerLayer:
     L1_INTERVAL = 7.0
     L3_INTERVAL = 0.5
 
-    @staticmethod
-    def _grants_over_two_ticks(hb) -> int:
+    #: Лист, решение по которому принимает ИМЕННО дефолт поддерева. Имени нет в
+    #: белом списке ``BOOT_PUBLISH`` — и это условие теста, а не деталь: с
+    #: порядком «явность → longest-prefix» (блокер Б1 ревью Ф4) явная запись
+    #: ``metrics.fps`` перекрывает дефолт поддерева, и на листе ``fps`` темп
+    #: перестал бы зависеть от ``subtree_interval_sec`` вовсе — тест мерил бы
+    #: чужое правило и молчал бы про своё.
+    PORT_ONLY_LEAF = "port_only_metric"
+
+    @classmethod
+    def _grants_over_two_ticks(cls, hb) -> int:
         """Сколько раз лист порта проехал за ДВА тика с шагом 1 с — НАБЛЮДАЕМЫЙ темп.
 
         Читать ``current_observation_policy`` мало: инъекция «частота дефолтного
@@ -192,7 +202,7 @@ class TestSessionTtlReturnsPolicyToTheLowerLayer:
         гейте, чтобы расписание не тянулось из прошлой фазы теста.
         """
         gate = hb._telemetry_gate
-        return sum(1 for t in (100.0, 101.0) if gate.due_plugin_metrics({"w": ["fps"]}, now=t)["w"])
+        return sum(1 for t in (100.0, 101.0) if gate.due_plugin_metrics({"w": [cls.PORT_ONLY_LEAF]}, now=t)["w"])
 
     def test_policy_returns_to_the_app_layer_after_the_deadline(self, tmp_path) -> None:
         svc, handlers, clock = _wired(tmp_path)
@@ -433,10 +443,17 @@ class TestCapsSeePathRules:
         }, caps
 
     def test_no_central_throttle_is_not_a_confirmed_zero(self, tmp_path) -> None:
-        """«Сверять было не с чем» и «потолков нет» — разные факты, разные поля."""
-        svc, _, _ = _wired(tmp_path)
-        applied = _apply(svc).get("observation")
-        assert applied is not None, "политика порта не поехала в ответ пересборки"
+        """«Сверять было не с чем» и «потолков нет» — разные факты, разные поля.
+
+        **Читается ОТВЕТ КОМАНДЫ, а не внутренний ``expanded``** (блокер Б2 ревью
+        Ф4). Прежняя редакция смотрела в словарь, который наружу не отдавался
+        вовсе: отчёт вычислялся и выбрасывался, а сторож доказывал харнесс.
+        """
+        svc, handlers, _ = _wired(tmp_path)
+        res = handlers["config.reload"]({"observability": {"observation": {"subtree_interval_sec": 0.5}}})
+        assert res["success"] is True, res
+        applied = res.get("observation_applied")
+        assert applied is not None, f"политика порта не доехала до ОТВЕТА команды: {sorted(res)}"
         assert applied["throttle_checked"] is False, applied
         assert "capped_by_throttle" not in applied, (
             "пустой отчёт о потолках при отсутствующем троттле читался бы как подтверждение"

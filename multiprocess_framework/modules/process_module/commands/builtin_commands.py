@@ -1346,7 +1346,14 @@ class BuiltinCommands:
             else:
                 result["gate_active"] = True
                 result["publish"] = publish
-                result["resolved"] = self._resolve_gated_metrics(publish)
+                # Блокер Б1 ревью Ф4: вердикт обязан быть про ТОТ путь, решение
+                # по которому эта секция и принимает. Считает ЖИВОЙ гейт (то же
+                # `decide`, что и выдаёт разрешение на тике); readback без гейта
+                # сюда не попадает — ветка под `publish is None` выше.
+                live = getattr(heartbeat, "current_resolved_metrics", None)
+                resolved = live() if callable(live) else None
+                result["resolved"] = resolved if resolved is not None else self._resolve_gated_metrics(publish)
+                result["resolved_plane"] = self._resolved_plane()
                 try:
                     result["unknown_metrics"] = heartbeat.current_unknown_metrics()
                 except Exception:  # noqa: BLE001 — best-effort секция
@@ -1358,6 +1365,28 @@ class BuiltinCommands:
         if isinstance(rules, dict):
             result["throttle_rules"] = dict(rules)
         return result
+
+    @staticmethod
+    def _resolved_plane() -> dict:
+        """Про КАКИЕ пути говорит ``resolved`` — и про какие НЕ говорит.
+
+        Блокер Б1 ревью Ф4: два readback'а одной живой системы противоречили
+        друг другу об ОДНОМ листе. ``resolved`` называл ``frame_count``
+        выключенным (решение легаси-секции по ИМЕНИ), а плагинный лист
+        ``processes.<P>.state.plugins.capture.frame_count`` продолжал шагать —
+        решение по нему принимает политика порта по ПУТИ. Вердикт без адреса
+        читается как вердикт про всё, поэтому адрес называется вслух, а имя
+        поддерева берётся из константы, а не переписывается сюда руками.
+        """
+        from ..configs.observation_policy import PORT_SUBTREE_PATTERN
+
+        return {
+            "paths": "processes.<процесс>.state.<имя>",
+            "decided_by": "telemetry.publish (+ observability.observation, если правило адресует этот путь)",
+            "not_covered": PORT_SUBTREE_PATTERN,
+            "not_covered_decided_by": "observability.observation",
+            "see": "introspect.observability → observation.provenance.sources (решение ПО ПУТИ, с источником)",
+        }
 
     @staticmethod
     def _resolve_gated_metrics(publish: dict) -> dict:
@@ -2040,6 +2069,14 @@ class BuiltinCommands:
                     result["events_applied"] = expanded["events"]
                 if expanded.get("flight") is not None:
                     result["flight_applied"] = expanded["flight"]
+                # Блокер Б2 ревью Ф4: отчёт «нет молчаливых потолков» считался
+                # `apply_observation_policy` и выбрасывался — за пределами тестов
+                # его не читал никто, а единственный сторож смотрел во внутренний
+                # словарь `expanded`, то есть доказывал харнесс. Форма — дословно
+                # соседние `events_applied`/`flight_applied`, чтобы у оператора не
+                # завелось третьего способа спросить одно и то же.
+                if expanded.get("observation") is not None:
+                    result["observation_applied"] = expanded["observation"]
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.
