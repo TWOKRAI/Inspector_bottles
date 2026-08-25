@@ -712,6 +712,38 @@ class ProcessHeartbeat:
             _log(f"Уровни плагинов недоступны: {exc}", module="heartbeat")
             return {}
 
+    def _emit_observation_hub_records(self, plugin_levels: dict) -> None:
+        """Ф3.2: те же уровни плагинов — записями ``kind=observation`` в ``ObservabilityHub``.
+
+        **Под тем же гейтом, что и лист дерева, и БЕЗ второго гейта.** Аргумент
+        ``plugin_levels`` — РОВНО то поддерево, которое этот же тик уже положил
+        в ``state["plugins"]`` (см. вызов в :meth:`_publish_telemetry_to_tree`,
+        шаг 1) — не пересчитывается и не собирается заново. Разойдись «что в
+        дереве» и «что в хабе» здесь могли бы только два независимых сборщика;
+        второго нет, поэтому и расходиться нечему (Task 3.2, шаг 2).
+
+        **Хаб отсутствует → именованный no-op** (Task 3.2, критерий A5): уровни
+        в дерево едут как ехали (шаг ниже по коду уже отработал), а запись в
+        хаб просто не случается — не заводим второй хаб и не роняем такт.
+
+        Исключения глушим тем же жестом, что и весь такт HB: наблюдаемость
+        порта не критична для доставки самого уровня в дерево, а `hub` —
+        общий ресурс процесса, который могут дренировать конкурентно.
+        """
+        if not plugin_levels:
+            return
+        hub = getattr(self._services, "_observability_hub", None)
+        if hub is None:
+            return
+        from ...statistics_module.observation.observation_manager import records_for_hub
+
+        try:
+            for record in records_for_hub(plugin_levels):
+                hub.emit_observation_record(record)
+        except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Записи наблюдений (kind=observation) не ушли в hub: {exc}", module="heartbeat")
+
     def _delete_departed_subtrees(self, proxy: Any) -> None:
         """Утвердить удаление поддеревьев писателей, ушедших с процесса (Ф2).
 
@@ -867,7 +899,13 @@ class ProcessHeartbeat:
         # ``state``, а не россыпь плоских имён. Столкнуться с агрегатом
         # фреймворка оно больше не может по построению — ``fps`` плагина лежит
         # под ``plugins.<он>.fps``, а не рядом с ``state.fps``.
-        state.update(self._collect_plugin_levels(allowed_metrics))
+        plugin_levels = self._collect_plugin_levels(allowed_metrics)
+        state.update(plugin_levels)
+        # Ф3.2: те же уровни — ВТОРЫМ адресатом, записями kind=observation в
+        # ObservabilityHub процесса (см. :meth:`_emit_observation_hub_records`).
+        # Вход — ТО ЖЕ поддерево, что только что легло в ``state`` — второго
+        # гейта здесь нет (шаг 2 задачи 3.2: хаб не становится дорогой мимо гейта).
+        self._emit_observation_hub_records(plugin_levels)
 
         # (2) Воркеры + агрегат фреймворка — поверх.
         if workers:

@@ -18,6 +18,7 @@ from .bounded_channel import DROP_NEWEST, DROP_OLDEST, BoundedChannel
 from .observability_hub import (
     KIND_ERROR,
     KIND_LOG,
+    KIND_OBSERVATION,
     KIND_STATS,
     METRIC_COUNTER,
     METRIC_GAUGE,
@@ -51,6 +52,7 @@ __all__ = [
     "KIND_LOG",
     "KIND_ERROR",
     "KIND_STATS",
+    "KIND_OBSERVATION",
     "METRIC_GAUGE",
     "METRIC_COUNTER",
     "METRIC_TIMING",

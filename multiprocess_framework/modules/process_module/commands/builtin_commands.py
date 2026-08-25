@@ -908,6 +908,7 @@ class BuiltinCommands:
             EVENT_SELECTOR_ATTR,
             document_plane_report,
             event_plane_report,
+            observation_plane_report,
             stats_plane_report,
         )
 
@@ -991,6 +992,11 @@ class BuiltinCommands:
             # наблюдаемо ТОЛЬКО отсюда — без этой строки счётчик
             # `without_plane` рос бы в процессе и не читался ничем.
             **stats_plane_report(svc),
+            # Ф3 (задача 3.2, шаг 0): секция порта наблюдений — та же тройка
+            # `effective`/`provenance`/`counters`, что у логгера. `writers`
+            # строится независимо от hub'а (закрывает критерий П4 задачи 3.3
+            # целиком), `counters` читают потери канала `kind=observation`.
+            **observation_plane_report(svc),
             # Ф4 (4.1): третья точка дороги ручек `observability.events` — и
             # единственное место, где видно, СКОЛЬКО широких записей прорежено.
             # Читается ЖИВОЙ селектор, а не конфиг: пересчёт из того же

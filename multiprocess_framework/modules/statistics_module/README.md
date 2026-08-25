@@ -327,13 +327,15 @@ statistics_module/
 ├── adapters/
 │   └── stats_adapter.py         # StatsAdapter(BaseAdapter) → CommandManager
 ├── observation/
-│   └── observation_manager.py   # ObservationManager — порт уровней, слот `observation` (ADR-SM-012)
+│   └── observation_manager.py   # ObservationManager — порт уровней, слот `observation` (ADR-SM-012);
+│                                 # + ObservationRecord/records_for_hub — запись kind=observation (ADR-SM-013)
 └── tests/
     ├── test_stats_manager.py    # lifecycle, метрики, теги, N-count, flush
     ├── test_stats_integration.py # каналы, get_metric+tags, thread-safety
     ├── test_stats_adapter.py     # CommandManager registration
     ├── test_aggregation_window.py
-    ├── test_observation_port_hazards.py  # hazard'ы порта наблюдений (ADR-SM-012)
+    ├── test_observation_port_hazards.py    # hazard'ы порта наблюдений (ADR-SM-012)
+    ├── test_observation_records_hazards.py # hazard'ы записи kind=observation в хаб (ADR-SM-013)
     └── test_stats_config.py
 ```
 
@@ -378,9 +380,29 @@ port.departed_writers()                           # чьи поддеревья 
 РОВНО ОДНА дорога — `publish`; `retract` этого не делает, иначе остановка плагина, ни разу
 ничего не опубликовавшего, оставляла бы разный след со слотом и без него.
 
-Границы: в `observation/` нет ни агрегации, ни каналов — записи в хаб наблюдаемости
-(`kind=observation`) приносит задача 3.2, а `AggregationWindow` остаётся у `StatsManager` и
-никуда не переезжает.
+Границы: в `observation/` нет ни агрегации, ни каналов — `AggregationWindow` остаётся у
+`StatsManager` и никуда не переезжает.
+
+### Записи в хабе наблюдаемости (`kind=observation`, задача 3.2, ADR-SM-013)
+
+Те же уровни, что тик кладёт в дерево, дублируются записями в `ObservabilityHub` процесса —
+ЧЕТВЁРТЫМ каналом рядом с `log`/`error`/`stats`, под ТЕМ ЖЕ publisher-гейтом (второго гейта
+нет). Хвост (`observability.tail.*`) и стор видят уровни без второго механизма — существующим
+дренажом, тем же путём, что и `stats`:
+
+```python
+from multiprocess_framework.modules.channel_routing_module.observability import KIND_OBSERVATION
+
+hub.get_channel(KIND_OBSERVATION).drain()   # [{"kind": "observation", "writer": "capture",
+                                             #   "metric": "fps", "value": 30.0, ...}, ...]
+```
+
+Форма записи — `ObservationRecord(SchemaBase)` (`observation/observation_manager.py`), плоские
+поля `writer`/`metric`/`value`, наружу — `to_dict()` (Dict at Boundary). Цена — верхняя
+граница, не измеренное число: записей за тик не больше, чем гейтованных листьев, то есть
+**≤ (число метрик × число писателей)**. `introspect.observability` называет плоскость секцией
+`"observation"` (`effective`/`provenance`/`counters` — та же тройка, что у логгера) без единой
+новой команды в словаре.
 
 ---
 

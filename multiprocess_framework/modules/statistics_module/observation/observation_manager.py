@@ -44,17 +44,20 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
 
 from ...channel_routing_module import ChannelRoutingManager
+from ...data_schema_module import FieldMeta, SchemaBase
 from ...observability_declarations import declare_metric as _declare_metric
 
 __all__ = [
     "OBSERVATION_SLOT",
     "ObservationManager",
     "ObservationPort",
+    "ObservationRecord",
     "PluginObservationHandle",
     "observation_port",
+    "records_for_hub",
 ]
 
 #: Имя канонического слота ``ObservableMixin`` — четвёртого рядом с
@@ -534,3 +537,77 @@ def observation_port(services: Any, *, create: bool = False) -> Optional[Observa
         if not isinstance(store, telemetry.PluginLevels):
             store = None
     return None if store is None else ObservationPort(store)
+
+
+# ====================================================================== #
+#  Задача 3.2 — форма записи для ObservabilityHub (kind=observation)      #
+# ====================================================================== #
+
+
+class ObservationRecord(SchemaBase):
+    """Одна публикация уровня — форма записи хаба наблюдаемости (``kind=observation``).
+
+    Dict at Boundary (правило проекта №1): наружу отдаётся только
+    :meth:`to_dict` — plain pickle-safe dict, который и уходит в
+    :meth:`~...channel_routing_module.observability.observability_hub.ObservabilityHub.emit_observation_record`.
+    Внутри процесса — Pydantic-модель, как у всех регистров/конфигов на
+    ``SchemaBase`` (см. ``process_module/plugins/port.py`` — тот же приём).
+
+    Поля плоские и совпадают с сегментами пути дерева (``state.plugins.<writer>.<metric>``
+    = ``значение``), а не вложенным payload'ом: приёмка (Task 3.2, критерий A4)
+    ищет имя писателя и метрики ЧЛЕНСТВОМ в ``record.values()``, и вложенный
+    dict сделал бы их невидимыми для такой проверки — то же самое требование,
+    что уже определило форму stats-записи хаба (``metric``/``value``/…).
+    """
+
+    writer: Annotated[
+        str,
+        FieldMeta("Писатель", info="Сегмент пути — плагин/компонент, опубликовавший уровень"),
+    ]
+    metric: Annotated[
+        str,
+        FieldMeta("Метрика", info="Имя листа — то же имя, что и в дереве StateStore"),
+    ]
+    value: Annotated[
+        Any,
+        FieldMeta("Значение", info="Текущее значение уровня на момент тика"),
+    ]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Plain dict для границы процесса — Dict at Boundary."""
+        return self.model_dump()
+
+
+def records_for_hub(plugin_levels_subtree: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Плоский список hub-записей (``kind=observation``) из поддерева тика.
+
+    Вход — РОВНО то, что :meth:`ObservationPort.collect_subtree` отдаёт
+    сборщику дерева (``{"plugins": {writer: {metric: value}}}``), уже
+    отфильтрованное publisher-гейтом тика. Второго гейта здесь нет и не
+    заводится (Task 3.2, шаг 2: «запись в хаб идёт ПОД ТЕМ ЖЕ гейтом, что и
+    лист в дерево») — вызывающий (``ProcessHeartbeat``) передаёт СЮДА тот же
+    словарь, что уже ушёл в ``state["plugins"]``, поэтому расхождение между
+    «что в дереве» и «что в хабе» невозможно по построению: разошлись бы
+    только если бы завели ВТОРОЙ сборщик, а его здесь нет.
+
+    Пустое/чужое поддерево (не dict, нет ключа ``plugins``) → пустой список,
+    а не исключение: вызывающий и так не станет звать hub на пустом тике.
+
+    Returns:
+        Список plain dict (:meth:`ObservationRecord.to_dict`), готовых для
+        ``hub.emit_observation_record``. Порядок — порядок обхода
+        ``dict.items()`` поддерева (детерминирован в CPython 3.7+, но не
+        часть контракта — приёмка проверяет МНОЖЕСТВО записей, не порядок).
+    """
+    plugins = (
+        plugin_levels_subtree.get(_telemetry().PLUGINS_SUBTREE_KEY) if isinstance(plugin_levels_subtree, dict) else None
+    )
+    if not isinstance(plugins, dict):
+        return []
+    records: List[Dict[str, Any]] = []
+    for writer, metrics in plugins.items():
+        if not isinstance(metrics, dict):
+            continue
+        for metric, value in metrics.items():
+            records.append(ObservationRecord(writer=str(writer), metric=str(metric), value=value).to_dict())
+    return records

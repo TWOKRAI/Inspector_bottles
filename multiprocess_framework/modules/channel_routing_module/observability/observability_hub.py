@@ -38,6 +38,11 @@ from .bounded_channel import DROP_OLDEST, BoundedChannel
 KIND_LOG = "log"
 KIND_ERROR = "error"
 KIND_STATS = "stats"
+#: Четвёртый род (Ф3, задача 3.2): записи порта наблюдений (уровни плагинов,
+#: ``state.plugins.<писатель>.<имя>``). Хаб об уровнях ничего не знает — это
+#: такой же примитив уровня 0, как и три соседних канала; форма записи и гейт
+#: публикации — забота вызывающего (``ProcessHeartbeat``/``observation_manager``).
+KIND_OBSERVATION = "observation"
 
 # Типы метрик — фиксируем в записи, чтобы StatsManager роутил без догадок.
 METRIC_GAUGE = "gauge"
@@ -104,10 +109,12 @@ class ObservabilityHub:
         self._log_channel = BoundedChannel(f"{module_name}.{KIND_LOG}", capacity, overflow)
         self._error_channel = BoundedChannel(f"{module_name}.{KIND_ERROR}", capacity, overflow)
         self._stats_channel = BoundedChannel(f"{module_name}.{KIND_STATS}", capacity, overflow)
+        self._observation_channel = BoundedChannel(f"{module_name}.{KIND_OBSERVATION}", capacity, overflow)
         self._channels: Dict[str, BoundedChannel] = {
             KIND_LOG: self._log_channel,
             KIND_ERROR: self._error_channel,
             KIND_STATS: self._stats_channel,
+            KIND_OBSERVATION: self._observation_channel,
         }
 
     # ------------------------------------------------------------------
@@ -259,6 +266,30 @@ class ObservabilityHub:
         return self._channels[KIND_STATS].write(self._envelope(KIND_STATS, dict(payload)))
 
     # ------------------------------------------------------------------
+    # ObservationLike (задача 3.2)
+    # ------------------------------------------------------------------
+
+    def emit_observation_record(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Положить в observation-слот ГОТОВУЮ запись уровня порта наблюдений.
+
+        Форма — дословно :meth:`emit_stats_record`: payload уже собран
+        вызывающим (``ObservationPort``/``ProcessHeartbeat``), hub здесь —
+        примитив уровня 0, содержимого не проверяет и не знает, только
+        проставляет общий конверт (``kind``/``module``/``ts``) и пишет в
+        bounded-канал. Копия входного dict'а — та же причина, что у
+        ``emit_stats_record``: снимок принадлежит вызывающему.
+
+        Args:
+            payload: содержимое записи (без конверта) — например
+                ``{"writer": "capture", "metric": "fps", "value": 30.0}``.
+
+        Returns:
+            То, что вернул bounded-канал: ``{"status": "success"|"dropped",
+            "channel": …, "dropped": <накопленный счётчик>}``.
+        """
+        return self._channels[KIND_OBSERVATION].write(self._envelope(KIND_OBSERVATION, dict(payload)))
+
+    # ------------------------------------------------------------------
     # ErrorLike
     # ------------------------------------------------------------------
 
@@ -295,12 +326,23 @@ class ObservabilityHub:
     def drain_stats(self) -> List[Dict[str, Any]]:
         return self._stats_channel.drain()
 
+    def drain_observations(self) -> List[Dict[str, Any]]:
+        return self._observation_channel.drain()
+
     def drain_all(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Забрать всё разом: {'log': [...], 'error': [...], 'stats': [...]}."""
+        """Забрать всё разом: {'log': [...], 'error': [...], 'stats': [...], 'observation': [...]}.
+
+        Четвёртый ключ добавлен задачей 3.2. Потребители, читающие фиксированный
+        список ``(KIND_LOG, KIND_ERROR, KIND_STATS)`` (адаптер, дренаж
+        composition root), продолжают работать без правки — они читают drained
+        по ИМЕНИ ключа, а не по числу ключей в словаре; ``observation`` они
+        просто не спрашивали до задачи 3.2.
+        """
         return {
             KIND_LOG: self._log_channel.drain(),
             KIND_ERROR: self._error_channel.drain(),
             KIND_STATS: self._stats_channel.drain(),
+            KIND_OBSERVATION: self._observation_channel.drain(),
         }
 
     # ------------------------------------------------------------------

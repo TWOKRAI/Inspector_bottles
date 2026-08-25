@@ -59,6 +59,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from ...channel_routing_module.levels import normalize_level_name
 from ...channel_routing_module.observability import (
     KIND_LOG,
+    KIND_OBSERVATION,
     KIND_STATS,
     ObservabilityDrainAdapter,
     ObservabilityHub,
@@ -160,7 +161,7 @@ def drain_process_observability(
     forwarders: Union[Callable[[List[dict]], None], Iterable[Callable[[List[dict]], None]], None] = None,
     stats_to_flush: Optional[Any] = None,
 ) -> None:
-    """Слить буфер hub'а (log/stats) в реальные менеджеры, стор и live-хвосты.
+    """Слить буфер hub'а (log/stats/observation) в реальные менеджеры, стор и live-хвосты.
 
     Зовётся по такту heartbeat и финально на graceful-teardown. `drain_all()`
     осушает каналы — вызываем ОДИН раз и разветвляем: adapter → sink-менеджеры,
@@ -199,7 +200,13 @@ def drain_process_observability(
     # stats из hub'а — общий срез для стора и live-хвоста. KIND_LOG у пилота пуст
     # (logger-слот write-through), но ключ читаем: hub — примитив уровня 0, и лог
     # в него вправе положить другой владелец. Пустой список безвреден.
-    records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, [])
+    #
+    # KIND_OBSERVATION (задача 3.2) — записи порта наблюдений (уровни плагинов,
+    # kind=observation), эмитированные heartbeat'ом ПОД ТЕМ ЖЕ гейтом, что и лист
+    # дерева. Адаптер их не трогает (см. docstring apply_drained) — они едут в
+    # стор и живые хвосты той же дорогой, что stats: «хвост и стор видят уровни
+    # без второго механизма» (Task 3.1 §5, обещание, которое эта строка выполняет).
+    records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, []) + drained.get(KIND_OBSERVATION, [])
     if store is not None and records:
         try:
             store.append_records(records)
@@ -383,6 +390,63 @@ def stats_plane_report(svc: Any) -> Dict[str, Any]:
         "stats": {
             "declared": callable(getattr(stats, "record_metric", None)),
             "without_plane": int(getattr(svc, _STATS_WITHOUT_PLANE_ATTR, 0) or 0),
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# Ф3 (задача 3.2, шаг 0) — секция порта наблюдений
+# ---------------------------------------------------------------------------
+
+
+def observation_plane_report(svc: Any) -> Dict[str, Any]:
+    """Секция ``observation`` для ``introspect.observability`` (Ф3, задача 3.2, шаг 0).
+
+    Тройка ``effective``/``provenance``/``counters`` — та же форма, что у логгера
+    (перенесено сюда из Task 3.1 шагом 0: у секции не было владельца, а
+    ``counters`` до этой задачи физически не существовали).
+
+    ``writers`` — число писателей порта СЕЙЧАС, строится через
+    :func:`~...statistics_module.observation.observation_manager.observation_port`
+    и НЕЗАВИСИМО от hub'а: критерий П4 задачи 3.3 обязан выполняться и у процесса
+    без ``ObservabilityHub`` (readback не смеет отвечать «писателей нет» только
+    потому, что хаб не поднят — это два разных факта). Поле продублировано и на
+    верхнем уровне секции, и внутри ``effective``: приёмка 3.3 (критерий П4)
+    читает его напрямую с секции, а вложенный ``effective.writers`` держит форму
+    тройки, обещанную шагом 0.
+
+    ``counters`` читает СЧЁТЧИКИ КАНАЛА (``written``/``dropped`` у
+    ``BoundedChannel.get_info()``), а не длину только что слитой пачки: число
+    обязано быть видно и между дренажами, а не только в момент вызова
+    ``introspect`` сразу после такта heartbeat.
+
+    ``provenance`` у порта сегодня пуст осознанно, а не забыт: у порта нет ни
+    одной секции конфига до Ф4 (Ф4 заводит первую — «политика одним glob»), и
+    правдоподобный пустой граф провенанса соврал бы о механизме, которого ещё
+    нет. Вместо этого — явная строка-причина.
+    """
+    from ...statistics_module.observation.observation_manager import observation_port
+
+    port = observation_port(svc)
+    writers = len(port.publications()) if port is not None else 0
+
+    hub = getattr(svc, "_observability_hub", None)
+    get_channel = getattr(hub, "get_channel", None) if hub is not None else None
+    channel = get_channel(KIND_OBSERVATION) if callable(get_channel) else None
+    info = channel.get_info() if channel is not None else None
+
+    return {
+        "observation": {
+            "writers": writers,
+            "effective": {"writers": writers},
+            "provenance": {
+                "declared": False,
+                "reason": "у порта наблюдений нет ни одной секции конфига до Ф4",
+            },
+            "counters": {
+                "records": int(info.get("written", 0)) if isinstance(info, dict) else 0,
+                "dropped": int(info.get("dropped", 0)) if isinstance(info, dict) else 0,
+            },
         }
     }
 

@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from ..levels import ERROR_SEVERITY, UNKNOWN_SEVERITY, UNSPECIFIED, severity_of
-from .observability_hub import KIND_STATS, STATS_AGGREGATE_KEY
+from .observability_hub import KIND_OBSERVATION, KIND_STATS, STATS_AGGREGATE_KEY
 
 KIND_ERROR = "error"  # локальная константа (не тянем observability_store → без цикла store↔display)
 KIND_LOG = "log"
@@ -56,6 +56,13 @@ STATS_SNAPSHOT_SEVERITY = "snapshot"
 SNAPSHOT_METRICS_KEY = "metrics"
 SNAPSHOT_TOTAL_KEY = "total_count"
 
+#: Значение колонки ``severity`` у записи порта наблюдений (задача 3.2, находка
+#: ревью — было пусто из общего ``else``). У уровня плагина оси важности нет
+#: ровно по той же причине, что у stats (см. :func:`severity_number_for`): это
+#: «сколько СЕЙЧАС», а не событие с уровнем тревожности. Слово называет класс
+#: записи вместо пустой строки, которая читалась бы как «severity не проставлен».
+OBSERVATION_LEVEL_SEVERITY = "level"
+
 
 def severity_number_for(kind: str, severity: str) -> int:
     """``SeverityNumber`` строки display-вида (Ф3.6).
@@ -63,18 +70,25 @@ def severity_number_for(kind: str, severity: str) -> int:
     Выводится, а не хранится вторым источником правды: таблица чисел одна на
     весь слой (:data:`..levels.SEVERITY_NUMBERS`), здесь только применение.
 
-    **У плоскости статистики оси важности нет вовсе**, и число берётся по
-    ``kind``, а НЕ по неудаче ранжирования: в колонке ``severity`` у stats лежит
-    ``metric_type`` (``gauge``/``counter``), и «не отранжировалось» там значит
-    «это не уровень», а у лога — «опечатка в имени уровня». Считай мы их одним
-    способом, метрика и опечатка стали бы неразличимы (:data:`..levels.UNSPECIFIED`
-    ровно для первого случая и заведён).
+    **У плоскостей статистики и наблюдений оси важности нет вовсе**, и число
+    берётся по ``kind``, а НЕ по неудаче ранжирования: в колонке ``severity`` у
+    stats лежит ``metric_type`` (``gauge``/``counter``), у observation —
+    :data:`OBSERVATION_LEVEL_SEVERITY`, и «не отранжировалось» там значит «это
+    не уровень тревожности», а у лога — «опечатка в имени уровня». Считай мы их
+    одним способом, метрика/уровень и опечатка стали бы неразличимы
+    (:data:`..levels.UNSPECIFIED` ровно для первого случая и заведён).
+    Задача 3.2 (находка ревью): до явного branch'а ``KIND_OBSERVATION`` в
+    :func:`hub_record_to_display` записи уровня приходили сюда с ``severity=""``
+    (общий ``else`` не знал этого kind) и попадали на ``UNSPECIFIED`` ВТОРОЙ,
+    неранжированной дорогой — тем же числом, что и по правильной, но по
+    случайной причине, готовой разойтись в день, когда кто-нибудь тронет
+    ``severity_of``.
 
     Считается в ЕДИНОМ нормализаторе, а не в сторе: форма живого хвоста и формa
     истории обязаны совпадать по построению — иначе вкладка знала бы два формата,
     и пороговый фильтр работал бы на одной половине данных.
     """
-    if kind == KIND_STATS:
+    if kind in (KIND_STATS, KIND_OBSERVATION):
         return UNSPECIFIED
     number = severity_of(severity)
     return UNSPECIFIED if number == UNKNOWN_SEVERITY else number
@@ -189,6 +203,20 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
         (замер 2026-08-14: 112 строк вкладки, снапшоты раз в 10 с);
       * одиночная метрика → ``severity=metric_type``, ``message=metric``.
 
+    ``observation`` (задача 3.2) — уровень порта наблюдений, СВОЯ ветка, а не
+    общий ``else``. До этой ветки запись падала в ``else`` и читала ключи
+    ``message``/``severity``, которых у неё нет (форма — ``writer``/``metric``/
+    ``value``): в БД и в живом хвосте уезжала строка с ПУСТЫМ ``message`` —
+    ровно тот класс дефекта, что уже описан у stats-агрегата парой абзацев
+    выше («в БД уехала бы строка message="" … живой прогон его бы не
+    заметил»), только найденный ЗАПУСКОМ, не чтением (ревью 2026-08-25).
+    ``message = "<writer>.<metric>"`` — та же identity, что несёт лист дерева
+    (``state.plugins.<writer>.<metric>``), и это НЕ косметика: полнотекстовый
+    индекс стора построен по ``message``/``module``/``process`` и в ``extra``
+    не смотрит (см. :func:`snapshot_message`), поэтому запись без имени
+    метрики в ``message`` ненаходима поиском НАВСЕГДА, для каждого уровня,
+    на каждом тике.
+
     Args:
         record: hub-запись (или tap-запись стора той же формы, с ключом ``context``).
         process: имя процесса-источника; пусто → ``record['process']`` → ``module``.
@@ -214,6 +242,19 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
         severity = str(record.get("metric_type", "")).lower()
         message = record.get("metric", "")
         extra = {"value": record.get("value"), "tags": record.get("tags", {})}
+    elif kind == KIND_OBSERVATION:
+        severity = OBSERVATION_LEVEL_SEVERITY
+        writer = record.get("writer", "")
+        metric = record.get("metric", "")
+        # "<writer>.<metric>" — идентичность листа дерева
+        # (``state.plugins.<writer>.<metric>``) без префикса "plugins": он
+        # одинаков у КАЖДОЙ записи этого kind и не несёт поисковой ценности,
+        # а вот "writer" и "metric" — несут (FTS5 токенизирует по "." отдельно).
+        message = f"{writer}.{metric}" if (writer or metric) else ""
+        # Правило конверта общее: всё, что не конверт, — в extra (writer/metric
+        # дублируются сюда же — не вредно, а `value` иначе было бы недостижимо
+        # ни живым хвостом, ни стором).
+        extra = {k: v for k, v in record.items() if k not in _ENVELOPE_KEYS}
     else:
         severity = str(record.get("severity", "")).lower()
         message = record.get("message", "")
