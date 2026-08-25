@@ -48,6 +48,8 @@
 - [mp.Queue асинхронна](feedback_mp_queue_is_async_in_tests.md) — учёт на queue.Queue · [порог по часам меряет кучу](feedback_wallclock_threshold_measures_the_heap.md) — по времени лечит gc.disable, по ПАМЯТИ он делает хуже; поднять порог можно лишь от разделения с контролем + инъекция
 - [Глобальный патч часов = флейк](feedback_global_clock_patch_flake.md) — часы — зависимость объекта
 - [Дельта, а не размер](feedback_measure_delta_not_file_size.md) · [счёт строк не ловит петлю](feedback_row_count_never_catches_the_loop.md) — судить серии внутри записи
+- [Baseline снят ПОСЛЕ действия](feedback_baseline_taken_after_the_act_proves_nothing.md) — сторож доказывает идемпотентность повтора, а не само действие; заплата в регистрацию дала 0 красных при контроле 10→11 команд. Состав сторожить ЛИТЕРАЛОМ, не разностью
+- [Два теста входят с разных концов провода](feedback_two_tests_enter_from_both_sides_and_miss_the_connector.md) — приёмка дренирует источник, авторский пишет в приёмник руками, сам перенос не зовёт никто; 0 красных при контроле «1 строка в сторе → 0». Грепни функцию переноса: только в проде = сторожа нет
 - [Тесты-невидимки](feedback_tests_invisible_to_testpaths.md) — судить по конфигу прогона · [выключатель дискриминатора](feedback_discriminator_switch_must_be_verified.md) — счётчик collected
 - [Зелёный прогон и синхронность](feedback_green_run_hides_synchronous_only_correctness.md) — замыкание дефолт-аргументом
 - [Барьер на входе ≠ гонка](feedback_barrier_at_entry_does_not_reproduce_the_race.md) — рандеву на операцию
