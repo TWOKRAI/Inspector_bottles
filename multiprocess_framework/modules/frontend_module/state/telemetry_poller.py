@@ -8,6 +8,14 @@ on_state_delta``) остаётся дефолтом; поллер добавля
 же снимок. Виджеты читают ``view_model.get(path)`` и не различают, push это
 был или опрос — путь и значение идентичны.
 
+Тот же ответ несёт и вторую секцию — ``gated_metrics``, каталог ЛОКАЛЬНО
+объявленных метрик опрошенного процесса (Task 4.2, план ``observation-port``).
+Поллер вливает её отдельным листом (``processes.<name>.telemetry.gated_metrics``)
+в тот же read-model — не новая дорога, тот же ``introspect.telemetry``, тот же
+влив. Потребитель — ``TelemetryControlsSection.apply_readback`` в GUI, которая
+достраивает по нему строки пульта для метрик, объявленных только в бэкенд-
+процессе (плагин приложения), и которых импортный каталог фреймворка не знает.
+
 **Период на цель — НЕ ``interval_sec``, когда целей больше потолка.** Раз в
 ``interval_sec`` срабатывает ТИК, а за тик уходит не больше ``max_in_flight``
 запросов (цели обходятся по кругу). Поэтому каждая отдельная цель опрашивается
@@ -446,11 +454,19 @@ class TelemetryPoller(QObject):
             return
 
         levels = self._extract_levels(response)
-        if not levels:
-            return
+        gated_metrics = self._extract_gated_metrics(response)
 
         flat: dict[str, Any] = {}
-        _flatten_levels(f"processes.{name}", levels, flat)
+        if levels:
+            _flatten_levels(f"processes.{name}", levels, flat)
+        if gated_metrics:
+            # Task 4.2 (observation-port): каталог ЛОКАЛЬНО объявленных метрик
+            # бэкенд-процесса — тот же ответ ``introspect.telemetry``, второй лист
+            # рядом с ``levels``. Владелец секции телеметрии (``_panels.py``)
+            # достраивает по нему строки пульта для метрик, объявленных только в
+            # бэкенде (``TelemetryControlsSection.apply_readback``). Путь плоский
+            # (не под ``state.*``): это не показание метрики, а каталог имён.
+            flat[f"processes.{name}.telemetry.gated_metrics"] = gated_metrics
         if not flat:
             return
 
@@ -503,3 +519,22 @@ class TelemetryPoller(QObject):
             payload = response
         levels = payload.get("levels")
         return levels if isinstance(levels, dict) and levels else None
+
+    @staticmethod
+    def _extract_gated_metrics(response: Any) -> list[str] | None:
+        """Достать ``gated_metrics`` из ответа (Task 4.2), той же осторожностью,
+        что и :meth:`_extract_levels` — обе формы конверта, не верим форме листа.
+
+        Пустой/отсутствующий каталог → ``None`` (нечего добавлять), не сбой:
+        у процесса без объявленных метрик (или до первого объявления) каталог
+        законно пуст.
+        """
+        if not isinstance(response, dict) or not response.get("success"):
+            return None
+        payload = response.get("result")
+        if not isinstance(payload, dict):
+            payload = response
+        raw = payload.get("gated_metrics")
+        if not isinstance(raw, list) or not raw:
+            return None
+        return [metric for metric in raw if isinstance(metric, str) and metric]

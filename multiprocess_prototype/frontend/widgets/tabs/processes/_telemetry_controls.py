@@ -8,12 +8,23 @@
 
 Объявили метрику (`declare_metric`) — строка появилась автоматически, без правки UI.
 
-**Предел, названный вслух (Ф8.1).** Каталог наполняется ИМПОРТОМ производителя, а
-GUI — отдельный процесс. Пять метрик фреймворка сюда доезжают, потому что их
-производителей GUI импортирует сам; метрика, объявленная только в бэкенд-процессе
-(плагин приложения), строки здесь не получит, пока секция строится из импорта, а не
-из readback `introspect_telemetry(process).gated_metrics`. Это резидуал Ф8.1, а не
-недосмотр: до неё каталог был литералом и такой развилки не существовало.
+**Резидуал Ф8.1 закрыт задачей 4.2.** Каталог строк больше не только импортный:
+конструктор принимает ``readback`` — секцию ответа `introspect_telemetry(process)`
+(``{"gated_metrics": [...]}``), а runtime-приход того же readback (поздний, через
+:class:`TelemetryPoller`/``TelemetryViewModel`` — см. `_panels.py`) добавляет строки
+методом :meth:`apply_readback`. Метрика, объявленная ТОЛЬКО в бэкенд-процессе, теперь
+получает строку, как только readback с ней долетел; импортный каталог (``metrics``) —
+ТОЛЬКО фолбэк на время до первого такого ответа (холодный GUI не остаётся пустым).
+``apply_readback`` лишь ДОБАВЛЯЕТ отсутствующие строки — уже построенные (в т.ч. из
+импортного фолбэка) не трогает, чтобы повторный readback не сбрасывал состояние
+чекбокса/частоты, выставленное оператором.
+
+**Непроверено на живом стенде.** Доставка `gated_metrics` реальным вторым процессом
+через реальный IPC/`introspect.telemetry` покрыта только со стороны поставщика
+(`telemetry_poller.py`) и юнит-тестами этой секции с dict, подставленным напрямую —
+живой прогон «второй процесс объявил метрику → строка появилась в открытом окне»
+не проводился.
+
 Секция ничего не знает о транспорте: на изменение зовёт колбэк ``on_change(metric,
 enabled, interval_sec)`` (одно из значений — актуальное, другое ``None`` = «не менялось»).
 Запись команды и разбор результата (``capped_by_throttle``) — на стороне владельца
@@ -75,6 +86,11 @@ class TelemetryControlsSection(QGroupBox):
         labels: {метрика: русская метка} (отсутствует → сам ключ метрики).
         defaults: {метрика: дефолтный interval_sec} (отсутствует → ``_DEFAULT_INTERVAL``).
         on_change: колбэк изменения (запись делает владелец, не секция).
+        readback: секция ответа `introspect_telemetry(process)` — ``{"gated_metrics":
+            [...]}`` (Task 4.2). Метрики, которых нет в ``metrics``, получают
+            дополнительные строки СВЕРХ импортного каталога; ``None`` (дефолт) —
+            каталог остаётся ровно ``metrics`` (фолбэк, поведение до 4.2). Тот же
+            приход ПОЗЖЕ, во время жизни секции, — через :meth:`apply_readback`.
         parent: Qt-родитель.
     """
 
@@ -88,6 +104,7 @@ class TelemetryControlsSection(QGroupBox):
         labels: Optional[dict[str, str]] = None,
         defaults: Optional[dict[str, float]] = None,
         on_change: Optional[ChangeCallback] = None,
+        readback: Optional[dict[str, Any]] = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__("Телеметрия", parent)
@@ -105,6 +122,7 @@ class TelemetryControlsSection(QGroupBox):
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(4)
         grid.setColumnStretch(3, 1)  # столбец статуса тянется
+        self._grid = grid  # нужен apply_readback — дописывает строки ПОСЛЕ __init__
 
         # Шапка (компактная) — читаемость сетки.
         for col, title in enumerate(("Вкл", "Метрика", "Частота, с", "Статус")):
@@ -113,8 +131,15 @@ class TelemetryControlsSection(QGroupBox):
             grid.addWidget(header, 0, col)
 
         # ГЛАВНОЕ: строки строятся В ЦИКЛЕ по списку метрик — не хардкод.
-        for r, metric in enumerate(metrics, start=1):
-            self._build_row(grid, r, metric)
+        row = 1
+        for metric in metrics:
+            self._build_row(grid, row, metric)
+            row += 1
+        self._next_row = row
+
+        # Task 4.2: readback, если уже известен на момент конструирования, —
+        # добавляет строки СВЕРХ метрик выше (не заменяет их, см. apply_readback).
+        self.apply_readback(readback)
 
     # ------------------------------------------------------------------ #
     #  Build (шаблон одной строки)                                        #
@@ -147,6 +172,51 @@ class TelemetryControlsSection(QGroupBox):
         grid.addWidget(readout, row, 3)
 
         self._rows[metric] = _MetricRow(metric, enable, interval, readout)
+
+    # ------------------------------------------------------------------ #
+    #  Readback (Task 4.2) — строки метрик, объявленных ТОЛЬКО в бэкенде   #
+    # ------------------------------------------------------------------ #
+
+    def apply_readback(self, readback: Optional[dict[str, Any]]) -> None:
+        """Достроить строки для метрик из readback backend-процесса.
+
+        ``readback`` — секция ответа `introspect_telemetry(process)`, форма
+        ``{"gated_metrics": ["fps", "letter_confidence", ...]}``. Метод ТОЛЬКО
+        добавляет строки для имён, которых ещё нет в :attr:`_rows` — уже
+        построенную строку (в т.ч. из импортного каталога) не трогает: иначе
+        повторный (или более поздний) readback сбрасывал бы чекбокс/частоту,
+        которые оператор уже выставил руками.
+
+        Вызывается дважды с разным поводом: из ``__init__`` (readback уже
+        известен на момент постройки секции — late-binding снимок VM) и
+        владельцем секции ПОЗЖЕ, когда readback приходит уже после открытия
+        карточки (`_panels.py`, тот же батч-путь, что и у ``update_readouts``).
+
+        Malformed/пустой/``None`` readback — тихий no-op. Секция не имеет
+        права упасть из-за формы ответа readback-дороги (правило 5 CLAUDE.md):
+        ``readback`` может быть не dict, без ключа ``gated_metrics``, с
+        не-list значением или списком, где не все элементы — непустые строки.
+        """
+        for metric in self._extract_gated_metrics(readback):
+            if metric in self._rows:
+                continue
+            self._build_row(self._grid, self._next_row, metric)
+            self._next_row += 1
+
+    @staticmethod
+    def _extract_gated_metrics(readback: Optional[dict[str, Any]]) -> list[str]:
+        """Достать список имён метрик из ``readback["gated_metrics"]`` робастно.
+
+        Та же осторожность, что у :func:`_extract_caps` ниже: readback приходит
+        по IPC (через ``TelemetryPoller`` → ``TelemetryViewModel``), и его форма
+        не гарантирована статической типизацией на этой стороне границы.
+        """
+        if not isinstance(readback, dict):
+            return []
+        raw = readback.get("gated_metrics")
+        if not isinstance(raw, list):
+            return []
+        return [metric for metric in raw if isinstance(metric, str) and metric]
 
     # ------------------------------------------------------------------ #
     #  Emit (изменения пользователя → колбэк владельца)                   #

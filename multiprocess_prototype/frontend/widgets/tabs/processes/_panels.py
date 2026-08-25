@@ -1243,6 +1243,7 @@ class SingleProcessPanel(QWidget):
         """
         fps_path = f"processes.{self._process_name}.state.fps"
         latency_path = f"processes.{self._process_name}.state.latency_ms"
+        gated_metrics_path = f"processes.{self._process_name}.telemetry.gated_metrics"
         graph_touched = False
         for path, value in items:
             setter = self._vm_setters.get(path)
@@ -1257,6 +1258,13 @@ class SingleProcessPanel(QWidget):
                 self._on_worker_discovered(path, value)
             if path == fps_path or path == latency_path:
                 graph_touched = True
+            # Ф4.2 (резидуал Ф8.1): readback-каталог метрик бэкенд-процесса,
+            # доставленный TelemetryPoller'ом, — достроить строки пульта для
+            # имён, которых нет в импортном каталоге. Приходит и здесь (поздний
+            # ответ ПОСЛЕ открытия карточки), и в первичном late-binding-снимке
+            # VM (_connect_bindings), который прогоняется через этот же метод.
+            if path == gated_metrics_path and hasattr(self, "_telemetry_controls"):
+                self._telemetry_controls.apply_readback({"gated_metrics": value})
         # График 10 мин читает ring-буфер VM — обновляем ТОЛЬКО когда этот
         # диапазон активен (1ч/1д не трогаем: они читают БД по кнопке/таймеру,
         # не по каждому батчу). Дешёвая O(k)-выборка буфера, не I/O.
