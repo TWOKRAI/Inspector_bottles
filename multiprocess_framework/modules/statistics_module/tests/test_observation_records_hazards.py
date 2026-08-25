@@ -607,3 +607,90 @@ class TestIntrospectCommandDictionaryStaysAtExactlyTenNames:
             f"лишние={sorted(registered - _EXPECTED_INTROSPECT_COMMANDS)!r}, "
             f"пропавшие={sorted(_EXPECTED_INTROSPECT_COMMANDS - registered)!r}"
         )
+
+
+# =============================================================== #
+# 8. Ноль в диагностике обязан уметь сказать, ноль ли это           #
+# =============================================================== #
+
+
+class TestSectionDistinguishesNoHubFromEmptyHub:
+    """``counters`` секции ``observation`` отличает «писать некуда» от «записей не было».
+
+    Найдено ревью 2026-08-25 запуском: ``observation_plane_report(svc)`` для
+    процесса БЕЗ ``_observability_hub`` и для процесса С пустым хабом отдавал
+    два байт-в-байт одинаковых ответа, оба ``{"records": 0, "dropped": 0}``.
+    Оператор читает такой ноль как показание («механизм есть, записей не
+    было»), тогда как это могло значить «механизма нет вовсе» — два разных
+    факта одним числом, класс «ноль наблюдений выглядит как результат
+    наблюдения».
+
+    Довод, почему это дефект, а не вкус: соседняя секция ``history`` в ответе
+    ТОЙ ЖЕ команды этот случай различает (``builtin_commands._history_report``
+    отдаёт ``{"enabled": False, "reason": …}``). Две секции одного ответа,
+    трактующие «механизма нет» противоположно, — это и был дефект.
+
+    Инъекция, которая красит ЭТОТ тест: убрать ключ ``hub`` из ``counters``
+    (предсказание записано до прогона — ровно 1 красный, приёмка зелёная,
+    потому что её носитель хаба не имеет и ноль её устраивает).
+    """
+
+    def test_no_hub_and_empty_hub_are_two_different_answers(self) -> None:
+        from ...process_module.managers.observability_wiring import observation_plane_report
+
+        without_hub, port_a, _ = _wired(None)
+        port_a.for_plugin("capture").publish("fps", 1.0)
+        with_empty_hub, port_b, _ = _wired(ObservabilityHub("proc_empty", capacity=8))
+        port_b.for_plugin("capture").publish("fps", 1.0)
+
+        absent = observation_plane_report(without_hub)["observation"]["counters"]
+        empty = observation_plane_report(with_empty_hub)["observation"]["counters"]
+
+        # Оба показывают ноль записей — и это правда в обоих случаях.
+        assert absent["records"] == 0 and empty["records"] == 0, (absent, empty)
+        # Но ответы обязаны РАЗЛИЧАТЬСЯ: без этого ноль неотличим от показания.
+        assert absent != empty, f"«хаба нет» и «хаб пуст» отвечают одинаково: {absent!r}"
+        assert absent["hub"] is False, absent
+        assert empty["hub"] is True, empty
+        assert "reason" in absent, absent
+        assert "reason" not in empty, empty
+
+
+class TestHistoryRowsCountsTheWholeTable:
+    """``history.rows`` считает ЧЕТЫРЕ рода, а не буквальную тройку.
+
+    Найдено ревью 2026-08-25 на живом стенде: секция называла
+    ``{"log": 16252, "error": 661, "stats": 1911}`` = 18 824, тогда как в том
+    же файле лежало 18 938 строк — двадцать три ``observation`` не считал никто.
+
+    Не косметика витрины: ``ObservabilityStore.purge`` режет по ``id`` БЕЗ
+    разбора рода, бюджет ``max_rows`` общий на все роды и все процессы, и эта
+    секция — единственное место, откуда оператор видит, кто его съедает.
+
+    Инъекция, которая красит ЭТОТ тест: вернуть перечень в ``("log", "error",
+    "stats")`` (предсказание до прогона — ровно 1 красный).
+    """
+
+    def test_rows_sum_equals_the_row_count_of_the_table(self, tmp_path) -> None:
+        db_path = str(tmp_path / "history_rows_hazard.sqlite3")
+        store = ObservabilityStore(db_path)
+        try:
+            hub = ObservabilityHub("proc_rows", capacity=16)
+            hub.info("строка лога")
+            hub.record_metric("fps", 1.0)
+            hub.emit_observation_record({"writer": "capture", "metric": "fps", "value": 2.0})
+            drained = hub.drain_all()
+            store.append_records(drained["log"] + drained["stats"] + drained[KIND_OBSERVATION])
+
+            services = _IntrospectServices()
+            services._observability_store = store
+            services._observability_history_policy = {"level": "INFO", "max_rows": 1000}
+            report = BuiltinCommands(services)._history_report()["history"]
+
+            rows = report["rows"]
+            assert rows.get(KIND_OBSERVATION) == 1, f"род observation не считается вовсе: {rows!r}"
+            # Сумма секции обязана совпасть с числом строк ТАБЛИЦЫ: литерал 3 —
+            # ровно то, что мы положили (лог + метрика + уровень).
+            assert sum(rows.values()) == 3, f"секция недосчитывает строки таблицы: {rows!r}"
+        finally:
+            store.close()

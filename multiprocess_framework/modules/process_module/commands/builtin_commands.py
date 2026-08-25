@@ -1065,7 +1065,14 @@ class BuiltinCommands:
                 }
             )
         try:
-            report["rows"] = {kind: store.count(kind) for kind in ("log", "error", "stats")}
+            # Ф3.2 (находка ревью 2026-08-25): род `observation` добавлен в перечень.
+            # Список был буквальной тройкой, и с появлением четвёртого рода секция
+            # перестала быть счётом ТАБЛИЦЫ: на стенде она называла 18 824 строки,
+            # тогда как в файле лежало 18 938 — двадцать три observation-строки не
+            # считал никто. Это не косметика витрины: `purge` режет по `id` БЕЗ
+            # разбора рода, бюджет `max_rows` общий на все роды и все процессы, и
+            # эта секция — единственное место, откуда оператор видит, кто его съедает.
+            report["rows"] = {kind: store.count(kind) for kind in ("log", "error", "stats", "observation")}
         except Exception as exc:  # noqa: BLE001 — читающая команда не падает из-за счёта
             report["rows_error"] = str(exc)
         return {"history": report}
