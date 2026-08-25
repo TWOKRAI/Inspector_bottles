@@ -35,6 +35,7 @@ from ...observability_declarations import declared_rules
 from ...logger_module.configs.logger_manager_config import MIN_BURST_RESET_SEC
 from ...statistics_module import DEFAULT_LOG_LINE_MAX_BYTES, DEFAULT_MAX_SERIES
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
+from .observation_policy import ObservationPolicyConfig
 
 #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
 #: МОЛЧА (проверено), поэтому без сверки конфиг с ``enable_batching: true`` после
@@ -486,6 +487,18 @@ class ObservabilityConfig(SchemaBase):
         ObservabilityFlightConfig,
         FieldMeta("Дамп кольца записей по вызову: enabled / sink / keep / limit (Ф5)"),
     ] = Field(default_factory=ObservabilityFlightConfig)
+    #: Ф4 плана «порт наблюдений» (задача 4.1). В manager-конфиги НЕ
+    #: раскладывается — по тому же доводу, что ``documents``/``events``/``flight``:
+    #: это не параметр менеджера, а политика публикации порта, которую читает
+    #: живой ``TelemetryGate`` процесса (``_build_telemetry_gate`` на старте,
+    #: ``apply_observation_policy`` на пересборке). Ключ живёт в ТОЙ ЖЕ секции
+    #: ``observability`` — пятой двери конфига этап не заводит (правило Б.1);
+    #: легаси-секция ``telemetry.publish`` при этом остаётся ИМЕНОВАННЫМ
+    #: источником той же сборки, а не второй дверью (ADR-PM-041).
+    observation: Annotated[
+        ObservationPolicyConfig,
+        FieldMeta("Политика порта наблюдений: glob-правила по пути дерева (Ф4)"),
+    ] = Field(default_factory=ObservationPolicyConfig)
 
     #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
     #: МОЛЧА (проверено), поэтому без этой сверки конфиг с ``enable_batching: true``

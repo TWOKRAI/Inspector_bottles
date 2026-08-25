@@ -962,6 +962,11 @@ class BuiltinCommands:
                 # Ф5 (5.1): ручки дампа — тоже часть действующего состояния
                 # плоскости, и без них `config.reload` не может их подтвердить.
                 flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
+                # Фв4 плана «порт наблюдений» (4.1): действующая политика порта
+                # читается у ЖИВОГО гейта heartbeat'а — без неё правка
+                # ручки порта не может быть подтверждена (`unverifiable`
+                # при `checked=0` читалось бы как норма).
+                heartbeat=getattr(svc, "_heartbeat", None),
             ),
             **({"resolve": resolved} if resolved else {}),
             # `flush` (Task 5.7) — просьба о КОГЕРЕНТНОМ снимке: дожать буферы,
@@ -2053,6 +2058,9 @@ class BuiltinCommands:
                 stats=_stats,
                 event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
                 flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
+                # Фв4 (4.1): без этой строки вердикт по секции порта был бы
+                # `unverifiable` при `checked=0` — «никто не смотрел» вместо проверки.
+                heartbeat=getattr(svc, "_heartbeat", None),
             )
             # Task 5.7: судить, а не только показывать. Readback лежал в ответе, но
             # `success` означал «применение не упало» — запрошенный ключ, перебитый

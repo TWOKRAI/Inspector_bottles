@@ -56,6 +56,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 from ...data_schema_module import deep_merge
+from .observation_policy import OBSERVATION_SECTION_KEY
 from .observability_audit import (
     ACTION_CLEAR,
     ACTION_EXPIRE,
@@ -169,7 +170,22 @@ TELEMETRY_THROTTLE_PATH = f"{TELEMETRY_KEY}.{TELEMETRY_THROTTLE_SUBSECTION}"
 #: маркером ``THROTTLE_REMOVE`` (контракт задач 1.1/1.2 не тронут ни строкой).
 #: Цена названа: per-rule срок и per-rule провенанс недоступны — срок один на
 #: всю операторскую дельту.
-OPAQUE_LAYER_PATHS = frozenset({TELEMETRY_THROTTLE_PATH})
+#:
+#: **Ф4 (задача 4.1): второй непрозрачный путь — ``observation.rules``.** Довод
+#: ДОСЛОВНО тот же, и он не аналогия, а то же построение: ключи набора — это
+#: glob-паттерны по дереву (``processes.*.state.plugins.*.fps``), точки внутри
+#: них — часть ИМЕНИ, а бухгалтерия слоёв режет путь по точкам. Без
+#: непрозрачности ``session_touch`` поставил бы срок ключу
+#: ``observation.rules.processes.*.state.plugins.*.fps.interval_sec``, а
+#: ``expire_due`` пошёл бы снимать его обходом ``observation → rules →
+#: processes → …`` и НЕ НАШЁЛ БЫ ничего: под ``rules`` лежит один ключ, чьё имя
+#: и есть весь паттерн. Возврат по сроку объявлялся бы и не случался — то самое
+#: «следствие без причины», ради которого путь троттла и стал непрозрачным.
+#: Цена та же и названа: срок и слой-владелец — один на ВЕСЬ набор правил, а не
+#: на правило.
+OBSERVATION_RULES_PATH = f"{OBSERVATION_SECTION_KEY}.rules"
+
+OPAQUE_LAYER_PATHS = frozenset({TELEMETRY_THROTTLE_PATH, OBSERVATION_RULES_PATH})
 
 #: Кольца возвратов больше нет (Task 5.9): возвраты — это записи аудита с
 #: ``action="expire"``, а ``session_reverts`` стал выборкой из него. Глубину

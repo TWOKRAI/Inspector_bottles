@@ -347,7 +347,7 @@ class TestProdGateRulesWorkUnedited:
         assert "fps" in publish.get("metrics", {}), publish
         return publish
 
-    def test_fps_leaf_passes_and_unlisted_leaf_is_blocked_by_real_config(self) -> None:
+    def test_port_subtree_passes_unedited_and_framework_whitelist_still_denies(self) -> None:
         publish = self._load_real_publish_section()
         svc = _Services(config={"telemetry": {"publish": publish}})
         clock = _FakeClock()
@@ -370,12 +370,33 @@ class TestProdGateRulesWorkUnedited:
         values = set(pushed.values())
 
         assert 777.5 in values, (
-            f"метрика 'fps' плагина обязана пройти гейт прод-конфига (явное правило "
-            f"metrics.fps.enabled=true) без единой правки конфига: {pushed}"
+            f"метрика 'fps' плагина обязана пройти гейт прод-конфига без единой правки конфига: {pushed}"
         )
-        assert 888.5 not in values, (
-            f"'unknown_probe_metric_xyz' обязана быть отсеяна ДЕФОЛТНЫМ правилом прод-конфига "
-            f"(default_enabled=false, явного правила нет): {pushed}"
+        # Ф4 (задача 4.1, вариант «в» — решение владельца 2026-08-25). Здесь
+        # стояло `888.5 not in values`: белый список прод-конфига отсеивал НОВОЕ
+        # имя плагина, и цена новой метрики была строкой конфига. Владелец эту
+        # развилку решил в обратную сторону — умолчание переворачивается ПО
+        # ПОДДЕРЕВУ ПИСАТЕЛЕЙ (`processes.*.state.plugins.**`), поэтому новое имя
+        # обязано ехать при НУЛЕВЫХ правках. Утверждение перевёрнуто вслед за
+        # решением, а не ослаблено: литерал остался тот же и по-прежнему
+        # обязателен, только с другим знаком.
+        assert 888.5 in values, (
+            f"'unknown_probe_metric_xyz' обязана проехать дефолтным правилом поддерева порта "
+            f"(вариант «в»: ноль правок конфига под новое имя): {pushed}"
+        )
+        # Вторая половина пары — та, ради которой тест и остаётся: переворот НЕ
+        # распространяется на фреймворковую плоскость. `effective_hz` есть в
+        # каталоге метрик, но НЕ в белом списке прод-конфига (`{fps, latency_ms}`),
+        # и обязана молчать ровно как до Ф4. Без этой половины тест был бы зелен
+        # и при перевороте всего дерева.
+        hz_leaves = [path for path in pushed if "effective_hz" in path]
+        assert not hz_leaves, (
+            f"'effective_hz' вне белого списка прод-конфига обязана молчать во фреймворковой "
+            f"плоскости — переворот варианта «в» на неё не распространяется: {pushed}"
+        )
+        # Якорь существования той же плоскости: она жива и публикует разрешённое.
+        assert any("status" in path for path in pushed), (
+            f"фреймворковая плоскость обязана быть жива (status вне гейта): {pushed}"
         )
 
 

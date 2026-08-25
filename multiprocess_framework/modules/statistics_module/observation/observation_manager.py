@@ -218,6 +218,27 @@ class ObservationPort:
         store = self.levels()
         return set() if store is None else set(store.names())
 
+    def level_names_by_writer(self) -> Dict[str, set]:
+        """Имена листьев ПО ПИСАТЕЛЯМ — адресная форма :meth:`level_names` (Ф4).
+
+        Гейт Ф4 решает по ПУТИ, а путь несёт сегмент писателя: правило
+        ``processes.*.state.plugins.capture.fps`` адресует одного писателя, и
+        плоское множество имён этот адрес теряет. Значения по-прежнему не
+        копируются — вопрос задаётся ДО сборки, каждым тиком.
+
+        Хранилища нет → пустой словарь: у процесса без единой публикации нет ни
+        писателей, ни имён, и заводить хранилище вопросом «кто сейчас пишет»
+        значило бы стереть разницу между «не писали» и «писали и сняли».
+        """
+        store = self.levels()
+        if store is None:
+            return {}
+        by_writer = getattr(store, "names_by_writer", None)
+        if callable(by_writer):
+            return dict(by_writer())
+        # Хранилище-дубль без адресного метода: собираем из снимка публикаций.
+        return {writer: set(values) for writer, values in store.publications().items()}
+
     def collect_subtree(self, allowed_metrics: Optional[Iterable[str]] = None) -> Dict[str, Any]:
         """Поддерево ``{"plugins": {писатель: {имя: значение}}}`` для секции ``state``.
 

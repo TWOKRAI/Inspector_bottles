@@ -399,6 +399,51 @@ def stats_plane_report(svc: Any) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _observation_policy_report(svc: Any, publications: Dict[str, Any]) -> tuple:
+    """``(действующая политика, провенанс)`` порта — читается ЖИВОЙ гейт (Ф4, 4.1).
+
+    Провенанс строится по путям, которые процесс публикует ПРЯМО СЕЙЧАС
+    (``processes.<имя>.state.plugins.<писатель>.<лист>``), а не по перечню
+    правил: оператор спрашивает «почему ЭТОТ лист едет так», и ответ обязан быть
+    про лист, а не про правило, которое, может, ни с чем и не совпало. Про
+    правила, не совпавшие ни с чем, отвечает отдельное поле
+    ``rules_matched_nothing`` — единственный голос про опечатку в ПУТИ.
+    """
+    heartbeat = getattr(svc, "_heartbeat", None)
+    policy_fn = getattr(heartbeat, "current_observation_policy", None)
+    view = policy_fn() if callable(policy_fn) else None
+    if not isinstance(view, dict):
+        return {}, {
+            "declared": False,
+            "reason": (
+                "у процесса нет heartbeat'а с политикой порта — спрашивать некого; "
+                "пустой граф правил ниже означал бы «правил нет», а это другой факт"
+            ),
+        }
+
+    policy = getattr(heartbeat, "_observation_policy", None)
+    sources: Dict[str, Any] = {}
+    if policy is not None and publications:
+        from ..heartbeat.telemetry import plugin_metric_path
+
+        process = str(getattr(svc, "name", "") or "")
+        paths = [
+            plugin_metric_path(process, str(writer), str(leaf))
+            for writer, values in publications.items()
+            for leaf in values
+        ]
+        sources = policy.provenance_for(paths)
+
+    provenance = {
+        "declared": True,
+        "section": "observability.observation",
+        "sources": sources,
+        "rules_matched_nothing": view.get("rules_matched_nothing", []),
+        "legacy_source": view.get("legacy_source"),
+    }
+    return view, provenance
+
+
 def observation_plane_report(svc: Any) -> Dict[str, Any]:
     """Секция ``observation`` для ``introspect.observability`` (Ф3, задача 3.2, шаг 0).
 
@@ -430,29 +475,37 @@ def observation_plane_report(svc: Any) -> Dict[str, Any]:
     ``reason``; две секции одного ответа, трактующие «механизма нет»
     по-разному, — это и был дефект.
 
-    ``provenance`` у порта сегодня пуст осознанно, а не забыт: у порта нет ни
-    одной секции конфига до Ф4 (Ф4 заводит первую — «политика одним glob»), и
-    правдоподобный пустой граф провенанса соврал бы о механизме, которого ещё
-    нет. Вместо этого — явная строка-причина.
+    ``provenance`` до Ф4 был пуст осознанно (у порта не было ни одной секции
+    конфига) и с задачей 4.1 наполнился: секция ``observability.observation``
+    существует, и провенанс отвечает на операторский вопрос «КАКОЕ правило
+    решило» — тремя литералами источника (дефолт поддерева / белый список
+    легаси-секции / явное правило). Это не косметика: в секции с ДВУМЯ разными
+    умолчаниями (названная цена варианта «в») отличить «разрешено дефолтом» от
+    «разрешено руками» больше нечем.
+
+    Гейт не поднят (нет heartbeat'а / нет ``telemetry.publish``) → ``declared:
+    false`` с причиной: пустой граф правил читался бы как «правил нет», тогда
+    как это «спрашивать некого». Два разных факта одним видом — тот самый класс,
+    которым уже болел соседний ``counters.hub``.
     """
     from ...statistics_module.observation.observation_manager import observation_port
 
     port = observation_port(svc)
-    writers = len(port.publications()) if port is not None else 0
+    publications = port.publications() if port is not None else {}
+    writers = len(publications)
 
     hub = getattr(svc, "_observability_hub", None)
     get_channel = getattr(hub, "get_channel", None) if hub is not None else None
     channel = get_channel(KIND_OBSERVATION) if callable(get_channel) else None
     info = channel.get_info() if channel is not None else None
 
+    policy_view, provenance = _observation_policy_report(svc, publications)
+
     return {
         "observation": {
             "writers": writers,
-            "effective": {"writers": writers},
-            "provenance": {
-                "declared": False,
-                "reason": "у порта наблюдений нет ни одной секции конфига до Ф4",
-            },
+            "effective": {"writers": writers, **policy_view},
+            "provenance": provenance,
             "counters": {
                 "hub": isinstance(info, dict),
                 "records": int(info.get("written", 0)) if isinstance(info, dict) else 0,

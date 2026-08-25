@@ -248,7 +248,12 @@ def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Optional[flo
     return max(candidates)
 
 
-def detect_throttle_caps(publish_section: Any, store_throttle: Any) -> Dict[str, Dict[str, float]]:
+def detect_throttle_caps(
+    publish_section: Any,
+    store_throttle: Any,
+    *,
+    observation_rules: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, float]]:
     """Найти метрики publish-дельты, чью частоту central-троттл молча срезал бы.
 
     Инвариант ADR-PM-017: **publisher-gate — единственный авторитет частоты**, central-троттл
@@ -264,40 +269,67 @@ def detect_throttle_caps(publish_section: Any, store_throttle: Any) -> Dict[str,
     наследование default — не флагуем, неоднозначно). Central-правило метрики ищется по
     суффиксу паттерна (:func:`_central_rule_for_metric`).
 
+    **Ф4 плана «порт наблюдений» (задача 4.1): правила по ПУТИ судятся здесь же.**
+    До неё функция читала ТОЛЬКО ``metrics.<имя>.interval_sec``, и правило
+    ``processes.*.state.plugins.*.fps: {interval_sec: 0.02}`` не доходило сюда
+    вовсе: обещание «no silent caps» тихо переставало действовать ровно для
+    языка, которым фаза и вводит политику. Имя метрики у правила по пути — его
+    ПОСЛЕДНИЙ сегмент, то есть ровно тот ключ, по которому
+    :func:`_central_rule_for_metric` уже ищет central-правило; второй копии
+    сопоставления не заводится. Ключ отчёта — сам паттерн, чтобы оператор увидел
+    ИМЕННО своё правило, а не имя метрики, под которое подпало несколько правил.
+
+    Названный потолок (тот же, что у :func:`_central_rule_for_metric`): сравнение
+    идёт по СУФФИКСУ, а не по совпадению глобов. Правило по пути и central-правило
+    могут иметь один последний сегмент и при этом адресовать разные поддеревья —
+    тогда отчёт назовёт потолок, которого на этом пути нет. Ошибка в безопасную
+    сторону (ложная тревога вместо молчащего среза) и названа здесь, а не
+    подразумевается.
+
     Args:
         publish_section: publish-под-секция команды (dict с опциональным ``metrics``).
         store_throttle: живой центральный ``ThrottleMiddleware`` оркестратора (или ``None``).
+        observation_rules: правила порта по пути ``{glob: {enabled, interval_sec}}``
+            (``ObservationPolicy.rules_view``) либо ``None``.
 
     Returns:
-        ``{metric: {"publisher_interval_sec": p, "throttle_interval_sec": t}}`` — только для
-        метрик, где троттл строже (``t > p`` или ``t == 0`` полная блокировка). Пусто →
-        поднятие частоты дойдёт до дерева без среза (страховка мягче публикатора).
+        ``{метрика-или-паттерн: {"publisher_interval_sec": p, "throttle_interval_sec": t}}``
+        — только там, где троттл строже (``t > p`` или ``t == 0`` полная блокировка).
+        Пусто → поднятие частоты дойдёт до дерева без среза (страховка мягче публикатора).
     """
-    if not isinstance(publish_section, dict) or store_throttle is None:
-        return {}
-    metrics = publish_section.get("metrics")
-    if not isinstance(metrics, dict):
+    if store_throttle is None:
         return {}
     rules = getattr(store_throttle, "rules", None)
     if not isinstance(rules, dict) or not rules:
         return {}
 
     caps: Dict[str, Dict[str, float]] = {}
-    for metric, rule in metrics.items():
-        if not isinstance(rule, dict):
-            continue
-        pub_interval = rule.get("interval_sec")
+
+    def _judge(key: str, metric: str, pub_interval: Any) -> None:
         if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
-            continue
+            return
         throttle_interval = _central_rule_for_metric(metric, rules)
         if throttle_interval is None:
-            continue
+            return
         # Троттл строже: больший min-интервал (реже пропускает) ИЛИ 0 (полная блокировка).
         if throttle_interval == 0 or throttle_interval > pub_interval:
-            caps[metric] = {
+            caps[key] = {
                 "publisher_interval_sec": float(pub_interval),
                 "throttle_interval_sec": float(throttle_interval),
             }
+
+    metrics = publish_section.get("metrics") if isinstance(publish_section, dict) else None
+    if isinstance(metrics, dict):
+        for metric, rule in metrics.items():
+            if isinstance(rule, dict):
+                _judge(str(metric), str(metric), rule.get("interval_sec"))
+
+    if isinstance(observation_rules, dict):
+        for pattern, rule in observation_rules.items():
+            if not isinstance(rule, dict) or rule.get("enabled") is False:
+                continue
+            _judge(str(pattern), str(pattern).rsplit(".", 1)[-1], rule.get("interval_sec"))
+
     return caps
 
 

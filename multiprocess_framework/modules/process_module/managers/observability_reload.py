@@ -32,6 +32,7 @@ from ..configs.observability_layers import (
     TELEMETRY_LAYERED_SUBSECTION,
     layer_merge,
 )
+from ..configs.observation_policy import OBSERVATION_SECTION_KEY, normalized_observation_section
 from .observability_flight import FLIGHT_SECTION_KEY, apply_flight_recorder
 from .observability_wiring import EVENTS_SECTION_KEY, apply_event_selector
 
@@ -121,6 +122,7 @@ def observability_effective(
     stats: Any = None,
     event_selector: Any = None,
     flight_recorder: Any = None,
+    heartbeat: Any = None,
 ) -> Dict[str, Any]:
     """Фактическое (readback) состояние менеджеров наблюдаемости — не эхо запроса.
 
@@ -241,6 +243,21 @@ def observability_effective(
         section = flight_effective(flight_recorder)
         if section is not None:
             out[FLIGHT_SECTION_KEY] = section
+    if heartbeat is not None:
+        # Ф4 плана «порт наблюдений» (4.1): действующая политика порта — той же
+        # дорогой и по тому же уроку, что `events`/`flight`. Ручка, которую
+        # нельзя подтвердить, неотличима от неприменённой: без этой ветки КАЖДАЯ
+        # правка политики отвечала бы `unverifiable` при `checked=0`, то есть
+        # «никто не смотрел», и AC задачи прямо требует сторожить эту ловушку.
+        #
+        # Читается ЖИВОЙ гейт (`current_observation_policy`), а не разрешённые
+        # слои: пересчёт из того же источника показывал бы согласие всегда — в
+        # том числе когда правка до гейта не доехала.
+        policy_fn = getattr(heartbeat, "current_observation_policy", None)
+        if callable(policy_fn):
+            section = policy_fn()
+            if section is not None:
+                out[OBSERVATION_SECTION_KEY] = section
     return out
 
 
@@ -315,6 +332,18 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
         if isinstance(survived.get(section_key), dict):
             for key, want in survived[section_key].items():
                 expected[f"{section_key}.{key}"] = want
+    # Ф4 плана «порт наблюдений» (4.1): третья под-секция с тем же свойством и тем
+    # же доводом — она идёт мимо `expand_observability` (её получатель — гейт
+    # heartbeat'а, а не менеджер), и без явного упоминания здесь вердикт про неё
+    # молчал бы, а молчание читается как «не проверено».
+    #
+    # Отдельная функция, а не строка в цикле выше: у набора правил ключи —
+    # glob-паттерны с точками, и НОРМАЛИЗАЦИЯ обоих берегов (частичная запись
+    # `{interval_sec: 1.0}` против полной формы живого объекта) обязана быть
+    # ОДНА. Разойдись берега — и всякая правка порта отвечала бы провалом там,
+    # где всё применилось.
+    if isinstance(survived.get(OBSERVATION_SECTION_KEY), dict):
+        expected.update(normalized_observation_section(survived[OBSERVATION_SECTION_KEY]))
     flat_effective = flatten_section(effective if isinstance(effective, dict) else {})
 
     mismatches: list = []
@@ -880,6 +909,18 @@ def _rebuild_and_apply(
     if flight_applied is not None:
         expanded[FLIGHT_SECTION_KEY] = flight_applied
 
+    # Ф4 плана «порт наблюдений» (4.1), та же третья точка у политики порта.
+    # Секция `observation` остаётся в `resolved` по тому же доводу, что `events`
+    # и `flight`. Получатель — живой гейт heartbeat'а: без этой ветки правка
+    # легла бы в слой, была бы видна в провенансе и НЕ действовала.
+    observation_applied = apply_observation_policy(
+        heartbeat,
+        resolved.get(OBSERVATION_SECTION_KEY),
+        store_throttle=store_throttle,
+    )
+    if observation_applied is not None:
+        expanded[OBSERVATION_SECTION_KEY] = observation_applied
+
     telemetry_applied = _apply_telemetry_from_layers(
         telemetry_layered,
         layers=layers,
@@ -899,6 +940,45 @@ def _rebuild_and_apply(
             f"(log_level={expanded['logger'].get('default_level')}; держится сессией: {held})"
         )
     return expanded
+
+
+def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: Any = None) -> Optional[Dict[str, Any]]:
+    """Донести политику порта до ЖИВОГО гейта и вернуть применённое (Ф4, 4.1).
+
+    ``None`` на входе (``heartbeat`` не поднят) — не отказ: пересборка идёт и на
+    процессах, где телеметрию никто не публикует. Секция при этом ВСЕГДА
+    непустая по смыслу, даже когда слои о ней молчат: дефолтное правило поддерева
+    порта — это решение владельца (вариант «в»), а не «механизма нет». Поэтому
+    применяем и при ``section is None`` — иначе снятие ключа из слоя оставляло бы
+    гейт на прошлой правке, ровно та невыразимость, ради устранения которой 5.12
+    развернула семантику на «пересборку из источников».
+
+    **Голос про потолок IPC — здесь, а не только у соседней плоскости.**
+    ``detect_throttle_caps`` судит per-метрика правила ``telemetry.publish`` по
+    ИМЕНИ и правила по ПУТИ не видит вовсе; без этой ветки обещание проекта «no
+    silent caps» (ADR-PM-017) стало бы неправдой ровно для тех правил, ради
+    которых фаза делалась: оператор просит частоту выше центрального потолка,
+    получает ``success=true`` и молча срезанный темп. Отчёт кладётся в ответ, а
+    троттл НЕ трогается — операторская страховка остаётся нетронутой (auto-relax
+    отвергнут тем же ADR).
+
+    ``throttle_checked=False`` означает «сверять было не с чем» (у процесса нет
+    центрального троттла — он живёт только на оркестраторе), и это НЕ то же
+    самое, что «потолков нет»: пустой отчёт без этого признака читался бы как
+    подтверждение, которого никто не давал.
+    """
+    apply = getattr(heartbeat, "apply_observation_policy", None)
+    if not callable(apply):
+        return None
+    applied = dict(apply(section) or {})
+    applied["throttle_checked"] = store_throttle is not None
+    if store_throttle is not None:
+        from .telemetry_reload import detect_throttle_caps
+
+        applied["capped_by_throttle"] = detect_throttle_caps(
+            None, store_throttle, observation_rules=applied.get("rules")
+        )
+    return applied
 
 
 def telemetry_targets(svc: Any) -> Dict[str, Any]:

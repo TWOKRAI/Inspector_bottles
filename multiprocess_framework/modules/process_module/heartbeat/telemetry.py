@@ -23,10 +23,29 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional
 
 from ...observability_declarations import declare_metric
+from ..configs.observation_policy import PROCESS_UNKNOWN
 from ..configs.telemetry_publish_config import gated_metrics
+
+#: Префикс пути публикации телеметрии процесса в дереве состояния. Собран здесь
+#: ОДИН раз: язык политики Ф4 — путь, и «где лежит метрика» обязано иметь одно
+#: написание у гейта и у сборщика (иначе правило оператора адресовало бы не то,
+#: что публикуется, а разошлись бы они молча).
+STATE_PATH_TEMPLATE = "processes.{process}.state.{leaf}"
+PLUGIN_PATH_TEMPLATE = "processes.{process}.state.plugins.{writer}.{leaf}"
+
+
+def state_metric_path(process: str, metric: str) -> str:
+    """Путь метрики ФРЕЙМВОРКОВОЙ плоскости (``processes.<P>.state.<имя>``)."""
+    return STATE_PATH_TEMPLATE.format(process=process, leaf=metric)
+
+
+def plugin_metric_path(process: str, writer: str, metric: str) -> str:
+    """Путь метрики ПОРТА (``processes.<P>.state.plugins.<писатель>.<имя>``)."""
+    return PLUGIN_PATH_TEMPLATE.format(process=process, writer=writer, leaf=metric)
+
 
 # Ф8.1: метрика объявляется ТАМ, ГДЕ СЧИТАЕТСЯ, а не перечисляется кортежем в
 # configs/. Четыре ниже собирает `build_worker_telemetry` в этом же файле; `shm`
@@ -424,6 +443,20 @@ class PluginLevels:
         with self._lock:
             return {name for values in self._values.values() for name in values}
 
+    def names_by_writer(self) -> dict[str, set[str]]:
+        """Имена листьев ПО ПИСАТЕЛЯМ — тот же вопрос, что :meth:`names`, но адресный.
+
+        Ф4 (задача 4.1): решение гейта принимается по ПУТИ, а путь включает
+        сегмент писателя. Плоское множество имён на этот вопрос не отвечает —
+        правило ``processes.*.state.plugins.capture.fps`` адресует ОДНОГО
+        писателя, и склеенное множество имён потеряло бы адрес.
+
+        Значения по-прежнему не копируются: вопрос задаётся каждым тиком ДО
+        сборки, и платить за копию значений ради решения незачем.
+        """
+        with self._lock:
+            return {writer: set(values) for writer, values in self._values.items()}
+
     def retract(self, writer: str) -> int:
         """Снять всё, что опубликовал ``writer``. Возвращает число снятых записей.
 
@@ -600,16 +633,28 @@ def build_plugin_levels(
     стало синтаксически не о чем, а значит и отсеивать нечего, и голосу нечего
     сказать.
 
-    **Гейт матчит по ИМЕНИ ЛИСТА (суффиксу), а не по пути.** Правило конфига
-    ``metrics.fps`` действует на ``plugins.<любой>.fps`` — так прод-конфиг
-    работает без единой правки после переезда листьев в поддерево. Glob по пути
-    (``processes.*.state.plugins.*.fps``) — язык Ф4, здесь его нет.
+    **Форма разрешения — ДВЕ, и обе законны (Ф4, задача 4.1).**
+
+    * ``set``/``Iterable`` имён — прежний контракт: гейт решал по ИМЕНИ ЛИСТА
+      (суффиксу), правило ``metrics.fps`` действовало на ``plugins.<любой>.fps``.
+      Так прод-конфиг работал без единой правки после переезда листьев в
+      поддерево, и так же продолжают звать все прямые вызывающие;
+    * ``Mapping`` ``{писатель: имена}`` — язык Ф4: решение принято ПО ПУТИ
+      (``processes.<P>.state.plugins.<писатель>.<имя>``), поэтому оно РАЗНОЕ у
+      разных писателей, и плоским множеством имён его не выразить. Такую форму
+      отдаёт :meth:`TelemetryGate.due_plugin_metrics`.
+
+    Две формы, а не одна, потому что вторая не заменяет первую: опрос
+    (``current_levels_snapshot``) по-прежнему зовётся с ``None``, а прямые
+    вызывающие с плоским множеством никуда не делись и переписывать их значило
+    бы менять контракт ради формы аргумента.
 
     Args:
         levels: снимок :meth:`PluginLevels.publications` — ``писатель → {имя →
             значение}``.
-        allowed_metrics: разрешённые на этом тике ИМЕНА ЛИСТЬЕВ (``None`` → все,
-            как у соседних сборщиков).
+        allowed_metrics: ``None`` → разрешено всё (как у соседних сборщиков);
+            множество имён → прежний матч по имени листа; mapping
+            ``{писатель: имена}`` → разрешение по писателю (Ф4).
 
     Returns:
         ``{"plugins": {писатель: {имя: значение}}}`` — либо **пустой** dict, если
@@ -646,12 +691,16 @@ def build_plugin_levels(
           дерева, а Ф1 меняет адрес, не форму значения; это граница фазы, а не
           цена.
     """
-    allowed = None if allowed_metrics is None else set(allowed_metrics)
+    per_writer: Optional[Mapping[str, Any]] = allowed_metrics if isinstance(allowed_metrics, Mapping) else None
+    allowed = None if (allowed_metrics is None or per_writer is not None) else set(allowed_metrics)
 
     subtree: dict[str, dict[str, Any]] = {}
     for writer, values in levels.items():
         branch: dict[str, Any] = {}
+        writer_allowed = None if per_writer is None else set(per_writer.get(writer) or ())
         for name, value in values.items():
+            if writer_allowed is not None and name not in writer_allowed:
+                continue
             if allowed is not None and name not in allowed:
                 continue
             if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -663,7 +712,7 @@ def build_plugin_levels(
     return {PLUGINS_SUBTREE_KEY: subtree} if subtree else {}
 
 
-def capped_metrics(config: Any, effective_tick: float) -> list[tuple[str, float]]:
+def capped_metrics(config: Any, effective_tick: float, policy: Any = None) -> list[tuple[str, float]]:
     """Метрики, чей per-метрика ``interval_sec`` МЕНЬШЕ эффективного телеметрийного тика.
 
     Task 1.2: телеметрийный тик (``min(heartbeat_interval, tick_sec)``) — верхняя
@@ -675,14 +724,24 @@ def capped_metrics(config: Any, effective_tick: float) -> list[tuple[str, float]
     Чистая функция (тестируется без Qt/IPC): принимает уже вычисленный ``effective_tick``
     (``ProcessHeartbeat`` знает ``heartbeat_interval``, config — только ``tick_sec``).
 
+    **Ф4 (задача 4.1): то же предупреждение по glob-множеству.** Правило по ПУТИ
+    просит частоту так же, как правило по имени, и упирается в тот же потолок
+    тика — но через ``config.resolve`` не проходит вовсе (там ключ — суффикс).
+    Без второй половины обещание «недостижимая частота названа вслух» стало бы
+    неправдой ровно для тех правил, ради которых фаза и делалась. Дефолтное
+    правило поддерева считается наравне с операторскими: его частота — такое же
+    значение, и упереться в тик она может так же.
+
     Args:
         config: объект с ``resolve(metric) -> (enabled, interval_sec)``
             (``TelemetryPublishConfig``).
         effective_tick: эффективный тик публикации, сек (``min(heartbeat_interval, tick_sec)``).
+        policy: :class:`~..configs.observation_policy.ObservationPolicy` или
+            ``None``. ``None`` → только каталог имён, как до Ф4.
 
     Returns:
-        Список ``(metric, interval_sec)`` включённых метрик с ``interval_sec < effective_tick``
-        (пустой — ни одна метрика тиком не ограничена).
+        Список ``(имя-или-паттерн, interval_sec)`` включённых правил с
+        ``interval_sec < effective_tick`` (пустой — ни одно тиком не ограничено).
     """
     out: list[tuple[str, float]] = []
     for metric in gated_metrics():
@@ -691,6 +750,21 @@ def capped_metrics(config: Any, effective_tick: float) -> list[tuple[str, float]
         enabled, interval = config.resolve(metric)
         if enabled and interval < effective_tick:
             out.append((metric, interval))
+    if policy is None:
+        return out
+    cfg = getattr(policy, "config", None)
+    if cfg is None:
+        return out
+    default_interval = getattr(config, "default_interval_sec", 0.0)
+    for pattern, rule in getattr(cfg, "rules", {}).items():
+        interval = rule.interval_sec if rule.interval_sec is not None else default_interval
+        if rule.enabled and interval < effective_tick:
+            out.append((str(pattern), float(interval)))
+    if cfg.subtree_enabled and cfg.subtree_interval_sec < effective_tick:
+        from ..configs.observation_policy import PORT_SUBTREE_PATTERN
+
+        if PORT_SUBTREE_PATTERN not in getattr(cfg, "rules", {}):
+            out.append((PORT_SUBTREE_PATTERN, float(cfg.subtree_interval_sec)))
     return out
 
 
@@ -714,14 +788,39 @@ class TelemetryGate:
     следующая публикация подождёт интервал. Для телеметрии (данные на каждом тике
     активного процесса) это несущественно и держит gate чистым/тестируемым.
 
+    **Ф4 (задача 4.1): решение принимается по ПУТИ, а расписание ведётся по
+    пути ВСЕГДА.** До Ф4 ``_next_due`` ключевался ИМЕНЕМ, и это была не деталь
+    реализации, а сам дефект: агрегат фреймворка ``processes.<P>.state.fps`` и
+    лист плагина ``processes.<P>.state.plugins.<w>.fps`` делили одну запись
+    расписания, поэтому «зажать частоту плагинных fps, не трогая фреймворковый»
+    было невыразимо в принципе. Ключ по пути разводит их по построению — и когда
+    :attr:`_policy` есть, и когда её нет.
+
     Args:
         config: объект с методом ``resolve(metric_name) -> (enabled, interval_sec)``.
         clock:  источник монотонного времени (для тестов с фейк-часами).
+        policy: :class:`~..configs.observation_policy.ObservationPolicy` — политика
+            по путям. ``None`` → решение принимает ``config`` по имени листа,
+            бит-в-бит как до Ф4 (так гейт и собирается в прямых конструкциях
+            тестов). Живой гейт процесса собирается С политикой.
+        process: имя процесса — сегмент пути. Не сообщено →
+            :data:`~..configs.observation_policy.PROCESS_UNKNOWN`: ``processes.*.…``
+            продолжает совпадать, адресное ``processes.cam1.…`` — нет, и это
+            честнее подстановки правдоподобного имени.
     """
 
-    def __init__(self, config: Any, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        config: Any,
+        clock: Callable[[], float] = time.monotonic,
+        *,
+        policy: Any = None,
+        process: str = PROCESS_UNKNOWN,
+    ) -> None:
         self._config = config
         self._clock = clock
+        self._policy = policy
+        self._process = str(process or PROCESS_UNKNOWN)
         self._next_due: dict[str, float] = {}
 
     @property
@@ -765,14 +864,84 @@ class TelemetryGate:
             now = self._clock()
         allowed: set[str] = set()
         for metric in set(gated_metrics()) | {str(name) for name in extra}:
-            enabled, interval = self._config.resolve(metric)
-            if not enabled:
-                continue
-            if now < self._next_due.get(metric, 0.0):
-                continue
-            allowed.add(metric)
-            self._next_due[metric] = now + interval
+            if self._grant(state_metric_path(self._process, metric), metric, now):
+                allowed.add(metric)
         return allowed
+
+    def due_plugin_metrics(
+        self,
+        names_by_writer: Mapping[str, Iterable[str]],
+        now: Optional[float] = None,
+    ) -> dict[str, set[str]]:
+        """Разрешённые на этом тике листья ПОРТА — по писателям (Ф4, задача 4.1).
+
+        Отдельный метод, а не ``extra=`` у соседа, потому что вопрос ДРУГОЙ:
+        сосед спрашивает про плоскость ``processes.<P>.state.<имя>``, а здесь —
+        про ``processes.<P>.state.plugins.<писатель>.<имя>``. Слить их обратно в
+        один вызов значило бы вернуть общее множество ``allowed`` на два
+        сборщика, то есть ровно ту невыразимость, которую фаза устраняет: правило
+        одной плоскости неизбежно задевало бы другую.
+
+        Расписание (``_next_due``) ведётся по ПОЛНОМУ пути, поэтому два писателя
+        с одинаковым именем листа зреют независимо — как и положено писателям
+        разных поддеревьев (Ф1, «владение = путь»).
+
+        Args:
+            names_by_writer: ``{писатель: имена листьев}`` — дешёвое чтение имён
+                без значений (:meth:`PluginLevels.names_by_writer`).
+            now: момент решения; ``None`` → ``clock()``.
+
+        Returns:
+            ``{писатель: множество разрешённых имён}``. Писатель без единого
+            разрешённого имени в результат попадает с ПУСТЫМ множеством: разница
+            между «писателя нет» и «всё придержано гейтом» видна сборщику, а
+            склеить их значило бы потерять её (пустая ветка в дерево всё равно
+            не поедет — это решает :func:`build_plugin_levels`).
+        """
+        if now is None:
+            now = self._clock()
+        out: dict[str, set[str]] = {}
+        for writer, names in names_by_writer.items():
+            granted: set[str] = set()
+            for name in names:
+                leaf = str(name)
+                if self._grant(plugin_metric_path(self._process, str(writer), leaf), leaf, now):
+                    granted.add(leaf)
+            out[str(writer)] = granted
+        return out
+
+    def decide(self, path: str, metric: str) -> tuple[bool, float]:
+        """``(enabled, interval_sec)`` для пути — БЕЗ продвижения расписания.
+
+        Отдельно от :meth:`_grant`, потому что на этот же вопрос отвечают
+        readback и провенанс, а они не имеют права двигать ``_next_due``: опрос
+        состояния, меняющий состояние, — это наблюдатель, который врёт о том,
+        что наблюдает.
+        """
+        if self._policy is None:
+            return self._config.resolve(metric)
+        decision = self._policy.resolve(path)
+        return decision.enabled, decision.interval_sec
+
+    def _grant(self, path: str, metric: str, now: float) -> bool:
+        """Выдать разрешение по пути и продвинуть его расписание."""
+        enabled, interval = self.decide(path, metric)
+        if not enabled:
+            return False
+        if now < self._next_due.get(path, 0.0):
+            return False
+        self._next_due[path] = now + interval
+        return True
+
+    @property
+    def policy(self) -> Any:
+        """Политика порта, из которой гейт решает по путям (``None`` — её нет)."""
+        return self._policy
+
+    @property
+    def process(self) -> str:
+        """Имя процесса — сегмент пути, по которому гейт адресует правила."""
+        return self._process
 
 
 __all__ = [
@@ -786,4 +955,6 @@ __all__ = [
     "TelemetryGate",
     "gated_metrics",
     "capped_metrics",
+    "state_metric_path",
+    "plugin_metric_path",
 ]
