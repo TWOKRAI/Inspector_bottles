@@ -63,6 +63,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Транспорт арбитрирует то, чего не понимает](feedback_transport_arbitrates_what_it_cannot_understand.md) — два писателя в один лист; троттл вырезает молча (proceed=true без rejection_reason)
 - [Приоритет у приёмника](feedback_priority_belongs_to_the_receiver.md) — нет модели слоёв → доигрывать порядок ЗАПИСИ, не лестницу уровней · [свойство не проверено у соседа](feedback_property_unchecked_at_the_second_party.md) — и на втором call-site; ноль от инъекции воспроизводить руками
 - [Неподключённый драйвер = ровный ноль](feedback_unconnected_driver_reads_as_a_clean_zero.md) — подтверждающий ноль засчитывать только в паре с контролем, дающим ненулевое
+- [Контрол может существовать и быть мёртвым](feedback_a_control_can_exist_and_be_dead.md) — критерий «строка есть» зелен и у холостого тумблера; писать вторым предложением «и его движение меняет ЧИСЛО»
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
 - [Корневой гейт не видит модули фреймворка](project_root_gate_misses_framework_modules.md) — из 82 новых тестов в него попали 6; сверять прирост сбора, гонять ОБА гейта
 - [Фасад — белый список](feedback_facade_is_a_whitelist_not_a_passthrough.md) — правка схемы/конфига: три точки (схема, фасад+expand, readback) · [model_copy не валидирует](feedback_model_copy_does_not_validate.md) — dict вместо схемы молча
