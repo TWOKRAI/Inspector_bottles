@@ -437,3 +437,107 @@ class TestResolvedNamesThePathsWhereTheMetricActuallyLives:
         # Якорь существования: запись жива и несёт вердикт своей плоскости.
         assert entry["path"] == "processes.camera_0.state.shm", entry
         assert isinstance(entry["enabled"], bool), entry
+
+
+# =========================================================================== #
+# Итерация 2 ревью — правило БЕЗ явной частоты и утвердительный ноль
+# =========================================================================== #
+class TestInheritedIntervalIsJudgedToo:
+    """``interval_sec: None`` — это «возьми дефолт», а не «неизвестно».
+
+    Блокер итерации 2. Сверщик делал ``continue`` на правиле без явной частоты,
+    и ответ команды отдавал ``throttle_checked: true`` с ПУСТЫМ списком — то
+    есть утверждал «сверено, потолков нет» там, где троттл резал 0.05 с до
+    2.0 с. Сосед (``capped_metrics``) ту же форму судил, подставляя
+    ``default_interval_sec``: два сверщика снова расходились, теперь не охватом
+    кандидатов, а разрешением частоты.
+
+    Форма не экзотическая: ``{"enabled": true}`` — обычный способ переоткрыть
+    лист при ``subtree_enabled: false``, и ``MetricRule.interval_sec`` по схеме
+    равен ``None``.
+    """
+
+    def test_a_rule_without_an_explicit_interval_is_judged_by_the_inherited_one(self) -> None:
+        caps = detect_throttle_caps(
+            {"default_interval_sec": 0.05},
+            _Throttle(),
+            observation_rules={"processes.*.state.plugins.*.fps": {"enabled": True}},
+        )
+        assert caps == {
+            "processes.*.state.plugins.*.fps": {
+                "publisher_interval_sec": 0.05,
+                "throttle_interval_sec": 2.0,
+            }
+        }, caps
+
+    def test_a_disabled_rule_is_still_not_judged(self) -> None:
+        """Пара: выключенное правило ничего не публикует — потолок ему не нужен."""
+        caps = detect_throttle_caps(
+            {"default_interval_sec": 0.05},
+            _Throttle(),
+            observation_rules={"processes.*.state.plugins.*.fps": {"enabled": False}},
+        )
+        assert caps == {}, caps
+
+    def test_inherited_interval_matches_the_schema_default(self) -> None:
+        """Литерал сверщика и схемный дефолт — одно число, и это проверяется.
+
+        Сверщик не импортирует схему ради одного значения; расхождение было бы
+        молчаливым, поэтому оно пришпилено здесь.
+        """
+        from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+            TelemetryPublishConfig,
+        )
+
+        schema_default = TelemetryPublishConfig.from_dict({}).default_interval_sec
+        assert schema_default == 1.0, schema_default
+        # Секции нет вовсе → сверщик обязан взять то же число.
+        caps = detect_throttle_caps(
+            None,
+            _Throttle(),
+            observation_rules={"processes.*.state.plugins.*.fps": {"enabled": True}},
+        )
+        assert caps["processes.*.state.plugins.*.fps"]["publisher_interval_sec"] == schema_default, caps
+
+
+class TestAWhitelistEntryOutranksTheSubtreeFrequencyToo:
+    """Зеркало Б1: запись имени перекрывает дефолт поддерева и по ЧАСТОТЕ.
+
+    Названо ревью (итерация 2) и измерено на БОЕВОЙ секции прототипа
+    (`system.yaml`: `default_enabled: false`, белый список `{fps, latency_ms}`).
+    Ступень явности решала блокер про `enabled`, но действует она на весь
+    кандидат целиком — значит `subtree_interval_sec`, назначенный предохранителем
+    варианта «в», не управляет листьями, чьи ИМЕНА попали в белый список.
+
+    Это цена решения владельца, а не дефект, — и потому она пришпилена
+    литералами: молчаливое изменение здесь выглядело бы как «предохранитель
+    работает», пока кто-нибудь не замерит темп.
+    """
+
+    PROD = {
+        "default_enabled": False,
+        "default_interval_sec": 1.0,
+        "metrics": {
+            "fps": {"enabled": True, "interval_sec": 1.0},
+            "latency_ms": {"enabled": True, "interval_sec": 1.0},
+        },
+    }
+
+    def test_the_subtree_frequency_does_not_reach_a_whitelisted_name(self) -> None:
+        policy = _policy({"subtree_interval_sec": 0.2}, publish=self.PROD)
+
+        listed = policy.resolve(f"processes.{PROC}.state.plugins.capture.fps")
+        assert (listed.interval_sec, listed.source) == (1.0, SOURCE_WHITELIST), listed
+
+        # Якорь существования той же ручки: имя ВНЕ белого списка ускоряется.
+        free = policy.resolve(f"processes.{PROC}.state.plugins.capture.drops")
+        assert (free.interval_sec, free.source) == (0.2, SOURCE_SUBTREE_DEFAULT), free
+
+    def test_a_path_rule_is_the_named_way_out(self) -> None:
+        """Выход выразим существующим языком — ступень 3 перекрывает запись имени."""
+        policy = _policy(
+            {"subtree_interval_sec": 0.2, "rules": {"processes.*.state.plugins.*.fps": {"interval_sec": 0.2}}},
+            publish=self.PROD,
+        )
+        listed = policy.resolve(f"processes.{PROC}.state.plugins.capture.fps")
+        assert (listed.interval_sec, listed.source) == (0.2, SOURCE_RULE), listed

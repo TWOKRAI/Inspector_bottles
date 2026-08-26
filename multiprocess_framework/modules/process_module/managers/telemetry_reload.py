@@ -345,9 +345,17 @@ def detect_throttle_caps(
     целые классы: ``…plugins.capture.*``, ``…plugins.**``, ``…plugins.*.f*`` —
     и, главное, ДЕФОЛТНОЕ ПРАВИЛО ПОДДЕРЕВА, то есть назначенный предохранитель
     варианта «в». Измерено на прежней редакции: ``…plugins.*.fps`` судилось,
-    три перечисленных формы возвращали ``{}``. Заодно ушёл названный потолок
-    «отчёт назовёт потолок, которого на этом пути нет»: он был следствием
-    суффикса и для правил по пути больше не действует.
+    три перечисленных формы возвращали ``{}``. Названный потолок «отчёт назовёт потолок, которого на этом пути нет»
+    СУЗИЛСЯ, но не исчез: пересечение считается в языке ПАТТЕРНОВ, а не по живому
+    дереву. Воспроизведение (ревью Ф4, итерация 2): ``processes.*.state.plugins.**``
+    против central-правила ``**.state.actual_fps`` пересекаются свидетелем
+    ``processes.cam1.state.plugins.capture.state.actual_fps`` — путём, которого в
+    дереве нет, — и отчёт назовёт потолок. Ошибка в безопасную сторону (лишнее
+    предупреждение, не молчание), поэтому оставлена, а не спрятана.
+
+    **Ред. по итерации 2 ревью:** правило БЕЗ явного ``interval_sec`` судится по
+    унаследованному ``default_interval_sec`` — как у соседа. До правки оно
+    пропускалось, и ответ утверждал «сверено, потолков нет» при живом срезе.
 
     Разные способы сопоставления у двух половин функции — не разнобой, а разный
     ВХОД: ключ ``metrics.<имя>`` — это ИМЯ, и что оно значит в дереве, знает
@@ -375,6 +383,22 @@ def detect_throttle_caps(
 
     caps: Dict[str, Dict[str, float]] = {}
 
+    def _default_interval_of(section: Any) -> float:
+        """Частота, которую унаследует правило без явного ``interval_sec``.
+
+        Схемный дефолт ``TelemetryPublishConfig.default_interval_sec`` — 1.0;
+        секции может не быть вовсе (процесс её не настраивал), и тогда действует
+        он же. Литерал здесь, а не импорт схемы: сверщик не должен зависеть от
+        порядка загрузки конфигов ради одного числа — но если схема сменит
+        дефолт, разойдётся с ней молча, и это названо в тесте
+        ``test_inherited_interval_matches_the_schema_default``.
+        """
+        if isinstance(section, dict):
+            raw = section.get("default_interval_sec")
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                return float(raw)
+        return 1.0
+
     def _judge(key: str, metric: str, pub_interval: Any) -> None:
         if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
             return
@@ -395,12 +419,23 @@ def detect_throttle_caps(
                 _judge(str(metric), str(metric), rule.get("interval_sec"))
 
     if isinstance(observation_rules, dict):
+        # Унаследованная частота судится ТАК ЖЕ, как у соседа (`capped_metrics`,
+        # `heartbeat/telemetry.py`): `interval_sec: None` — не «неизвестно», а
+        # «возьми `default_interval_sec`», и публикатор именно её и попросит.
+        # Находка ревью Ф4, итерация 2: прежняя редакция делала здесь `continue`,
+        # и правило вида `{"enabled": true}` (обычный способ переоткрыть лист при
+        # `subtree_enabled: false`) уходило из-под сверки. Отчёт при этом отвечал
+        # `throttle_checked: true` с ПУСТЫМ списком — то есть утверждал «сверено,
+        # потолков нет» там, где троттл резал 0.05 с до 2.0 с, в сорок раз.
+        # Подтверждающий ноль без контроля — худшая форма молчания: его читают
+        # как факт.
+        default_interval = _default_interval_of(publish_section)
         for pattern, rule in observation_rules.items():
             if not isinstance(rule, dict) or rule.get("enabled") is False:
                 continue
             pub_interval = rule.get("interval_sec")
             if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
-                continue
+                pub_interval = default_interval
             throttle_interval = _central_rule_for_path_pattern(str(pattern), rules)
             if throttle_interval is None:
                 continue
