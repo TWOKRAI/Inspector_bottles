@@ -1819,7 +1819,7 @@ ADR-PM-035 — якорь: poll отдаёт литерал при закрыт�
 **Видимый результат:** М5 на живом стенде — заглушенный порт глушит и уровни, и агрегаты;
 живой — даёт оба вида.
 
-### Task 5.1 — Инвентарь потребителей stats-плоскости (стоп-условие фазы)
+### Task 5.1 ✅ — Инвентарь потребителей stats-плоскости (стоп-условие фазы)
 **Level:** Middle · **Assignee:** developer
 **Goal:** Поимённый список всех, кто зовёт четвёрку stats-фасада и кто читает stats-записи и
 окна, — до любой правки.
@@ -1841,7 +1841,169 @@ ADR-PM-035 — якорь: poll отдаёт литерал при закрыт�
 3. Вердикт каждому: «не задет» / «мигрирует (какой задачей)» / «неизвестный — СТОП фазы».
    Отдельно зафиксировать: завязан ли кто-то на ФОРМУ stats-записи из окна (вход риска §11.8).
 **Acceptance criteria:**
-- [ ] таблица с вердиктами; неизвестных нет, либо фаза остановлена с эскалацией владельцу
+- [x] таблица с вердиктами; неизвестных нет, либо фаза остановлена с эскалацией владельцу
+
+
+#### Инвентарь Task 5.1 — исполнен 2026-08-26, вердикты
+
+Метод: `Grep`/`rg` + чтение файла. **qex в инвентаре не участвовал**: `last_indexed` = 2026-08-06,
+двадцать дней, индекс не видел ни Ф3, ни Ф4 (правило свежести закреплено в `CLAUDE.md` и памяти).
+Все числа ниже посчитаны грепом по рабочему дереву и перепроверены вторым счётом; расхождения
+названы.
+
+**База прогона на момент инвентаря:** фреймворк 8882 passed / 8 skipped / 1 xfailed (зелено,
+совпадает с числами закрытия Ф4).
+
+##### Писатели чисел — не три дороги, а ЧЕТЫРЕ
+
+| # | Дорога | Боевых вызовов | Файлов | Вердикт |
+|---|---|---|---|---|
+| 1 | фасад плагина `ctx.record_metric/gauge/record_timing/histogram` | **3** | **1** (`Plugins/sources/capture/plugin.py:245,246,249`) | мигрирует Task 5.2 |
+| 2 | прямой `StatsManager` мимо фасада и мимо миксина | **4** | **1** (`channel_routing_module/observability/drain_adapter.py:178,180,182,185`) | мигрирует Task 5.2 — **с оговоркой о петле, см. ниже** |
+| 3 | слот миксина `_record_metric` / `_record_timing` | **57** | **11** | мигрирует Task 5.2 шаг 2b |
+| 4 | `MetricsCollector` в `data_schema_module` (S-27) | **14** | **2** | Task 5.4 — **посылка плана опровергнута, см. ниже** |
+
+Фасад `histogram` и `StatsManager.increment` боевых вызывающих не имеют вовсе (0 и 0) — это
+контракты, не дороги; квалифицировать при исполнении, не срезать молча.
+
+##### Дорога 3: число плана 42/13 неверно — сегодня 57/11
+
+Замер 2026-08-19, записанный в шаге 1b, считал **только `_record_metric`** и не считал
+`_record_timing` отдельным паттерном. Сегодня `_record_metric` = ровно **42** — то самое число, —
+а `_record_timing` даёт ещё **15**, и они в инвентарь не попали. Итог: **57 боевых вызовов в 11
+файлах**. (Мой первый счёт дал 60/13; разница — три совпадения в ДОКСТРИНГАХ:
+`observability_hub.py:203,206` и `scripts/docs_verify/docs_check.py:474`. После вычета — 57/11,
+сошлось с независимым счётом агента.)
+
+Почему это важно, а не бухгалтерия: пятнадцать невидимых `_record_timing` — это ровно тот класс,
+из-за которого «единственный писатель» становится ложным по построению. Число подвижно
+(`state_proxy.py` прирос четырьмя вызовами 2026-08-23, `f22b7c64`), поэтому **пересчитать перед
+закрытием фазы**, а не сослаться на эту таблицу.
+
+Разложение 57 по владельцам: `dispatch_module/core/dispatcher.py` — 17,
+`command_module/core/command_manager.py` — 9, `state_store_module/proxy/state_proxy.py` — 6,
+`chain_module/worker_pool/dispatcher.py` — 6, `Services/sql/core/sql_manager.py` — 4,
+`chain_module/metrics/latency.py` — 4, `process_manager_module/process/topology_manager.py` — 4,
+`Services/auth/manager.py` — 3, `multiprocess_prototype/frontend/process.py` — 2,
+`multiprocess_prototype/frontend/app.py` — 1, `multiprocess_prototype/backend/assembly/planner.py` — 1.
+
+##### Цена шага 2b оказалась не там, где план её искал
+
+Шаг 2b обещает: «42 боевых вызова не переписываются — меняется адресат слота». Про **вызовы** это
+верно (их 57, и они действительно не трогаются). Но адресат слота решается **не в одном месте**:
+строка `"stats"` резолвится через `ManagerRegistry.get`
+(`base_manager/mixins/core/manager_registry.py:63-65`), а что в неё положено — решают **13 точек**
+вне тестов:
+
+- 11 сайтов внедрения `managers={… "stats": …}` — `planner.py:166`,
+  `chain_module/worker_pool/dispatcher.py:66`, `state_store_manager.py:61`,
+  `chain_module/metrics/latency.py:80`, `plugins/manager.py:95`, `process_managers.py:408-410`,
+  `dispatch_module/core/dispatcher.py:72`, `command_manager.py:45`, `topology_manager.py:93`,
+  `registers_module/core/manager.py:76`;
+- 2 регистрации — `process_managers.py:135` (`bundle.stats`) и **`observability_wiring.py:134`**.
+
+Последняя — отдельный факт: `worker_manager.register_manager("stats", hub)` кладёт в слот
+`ObservabilityHub`, **а не `StatsManager`**. То есть слот `"stats"` в системе резолвится в ДВА
+разных объекта, и именно это делает требование S-4 (шаг 3 Task 5.2) не формальностью: паритет
+`record_metric` между хабом и менеджером обязан быть тестом с литералами. Живых
+`_record_metric`-вызывающих у `worker_manager` сегодня нет (свип S-4 это уже фиксировал) — то есть
+хаб-в-слоте сейчас **контракт, а не дорога**; правило «неиспользуемый путь = контракт»
+применяется, срезать нельзя.
+
+##### Дорога 2: названный риск петли, которого в плане нет
+
+`drain_adapter.apply_stat` читает записи хаба рода `stats` и пишет их в `StatsManager`. Сегодня
+петля разомкнута предохранителем: окно возвращается в хаб через `HubStatsChannel.write` с ключом
+`STATS_AGGREGATE_KEY="aggregate"`, и адаптер такие записи пропускает (`drain_adapter.py:141-186`).
+**Ф5 обязана предъявить тот же предохранитель заново**: если порт начнёт класть
+counter/timing/histogram записями в хаб, а `StatsManager` (Task 5.3) станет подписчиком потока
+порта — маршрут «порт → хаб → drain_adapter → StatsManager → окно → хаб» замыкается, и
+существующий ключ его не разомкнёт, потому что род записи будет другой. Это вход в Task 5.2/5.3,
+а не замечание.
+
+##### Дорога 4 (S-27): посылка «боевых вызывающих нет» ОПРОВЕРГНУТА воспроизведением
+
+Task 5.4 написан от посылки «`MetricsCollector.record_metric` — перезапись под counter-именем,
+боевых вызывающих нет». Боевые вызывающие есть — **14 сайтов в 2 файлах**:
+`data_schema_module/factory/model_factory.py` (8: строки 80, 81, 86, 87, 160, 222, 223, 228) и
+`data_schema_module/registry/schema_registry.py` (6: строки 96, 151, 152, 156, 161 — через
+try-импорт с no-op заглушками).
+
+Воспроизведение (не чтение), `.venv`, скрипт в scratchpad:
+
+```
+до:  _timings пусто | counters: 22 записи data_schema.schema_registered_*   ← УЖЕ на импорте
+после 5000 «созданий модели»: {'data_schema.factory.create_schema_name=Foo': 5000}
+вес _timings: 175130 байт на 5000 вызовов = 35.0 байт/вызов
+читателей get_metrics() в боевом коде: 0
+вызовов reset() в боевом коде: 0
+```
+
+Три факта, каждый меняет содержание задачи:
+
+1. **Сборщик живой с первого импорта** — 22 счётчика набегают ещё до старта процессов, дорога не
+   спящая;
+2. **`_timings` растёт неограниченно** — список на КАЖДЫЙ вызов `record_timing`, 35 байт/вызов, на
+   дороге `model_factory.create`;
+3. **читателей ноль, сброса ноль** — числа копятся в никуда.
+
+То есть S-27 — не «выровнять имя», а живой накопитель без читателя и без потолка. Task 5.4
+переоценивается: решение (выровнять / заморозить с голосом / удалить) принимается в DECISIONS с
+этими числами на руках, а не с посылкой «вызывающих нет». Темп роста на боевой нагрузке померить
+на живом стенде — «горячая» ли `model_factory.create` в реальности, инвентарь не утверждает.
+
+##### Читатели — неизвестных нет, фаза НЕ останавливается
+
+Завязаны на форму: `record_display.py:229-261` (`metric`/`value`/`metric_type`/`tags`, для
+агрегата `metrics`/`total_count`), `drain_adapter.py:141-186` (те же поля + ветвление по
+`METRIC_COUNTER/TIMING/GAUGE`), `hub_stats_channel.py:70-131`, `log_stats_channel.py:75-142` и
+CSV-ветка `file_stats_channel.py:41-56` (по 3 ключа окна: `metrics`/`total_count`/`timestamp`),
+`console_module/commands/system_commands.py:181-232`. Прозрачны (транзит, полей не именуют):
+`stats_manager.get_metric/get_all_metrics`, `stats_adapter.py:41-65`, `observability_store.py`
+(`extra` — JSON-блоб), GUI `record_history_presenter.py` и `record_history_panel.py`.
+
+**Проверено и НЕ является читателем stats-плоскости** (иначе список выглядел бы подозрительно
+коротким): `introspect_telemetry` / `telemetry_snapshot` / `telemetry_history` — это дерево
+StateStore, другая плоскость; `introspect_router_stats` — транспортные счётчики RouterManager,
+третья; `TelemetryViewModel` (`frontend_module/state/telemetry_view_model.py:134-168`) читает
+`state_delta`, не `MetricRecord`.
+
+**Вердикт стоп-условия: неизвестных читателей нет, фаза продолжается.** Риск §11.8 (совместимость
+формы) остаётся живым, но управляемым: форма записана дословно, адаптер Task 5.3 обязан её
+удержать.
+
+##### Находка ревью-класса: читатель, написанный под форму, которой нет
+
+`console_module/commands/system_commands.py:283-303` (`_format_metric_value`) читает поля с
+фолбэками на имена, **отсутствующие в текущей форме** `MetricRecord.aggregate()`: `total` для
+counter (в форме — `count`), `last_value` для gauge (в форме — `value`), `mean` для
+timing/histogram (в форме — `avg`). Сегодня спасают фолбэки второго-третьего приоритета. Но это
+значит, что при переименовании полей код **тихо перейдёт на `"?"` вместо ошибки** — ровно тот
+класс, ради которого §11.8 требует держать форму. Занести в критерии Task 5.3: паритет проверять и
+через эту команду тоже, а не только через окно.
+
+##### Форма, которую Task 5.3 обязан удержать дословно
+
+Сырая запись `kind=stats` (`observability_hub.py:181-190`):
+`{"metric": …, "value": …, "metric_type": …, "tags": {…}}` + конверт `kind`/`module`/`ts`.
+
+Агрегат `MetricRecord.aggregate()` (`metric_record.py:322-369`): `name`, `type`, `tags`; counter —
+`count`; gauge — `value`; timing/histogram — `count`, `min`, `max`, `avg`, `p95`, `sum`, `buckets`,
+`nan_dropped` (последнее — только при `!= 0`). **Ловушка, названная в докстринге класса (:104-109)
+и повторённая здесь:** `count` у counter — это СУММА значений, а у timing/histogram — ЧИСЛО
+наблюдений. Разные величины под одним ключом; паритетный тест обязан проверять обе.
+
+Окно (`aggregation_window.py:204-265`): `timestamp`, `metrics[]`, `total_count`, плюс условные
+`bucket_bounds`, `series_dropped`, `observations_dropped`, `dropped_series`,
+`series_dropped_is_lower_bound`. `HubStatsChannel` добавляет `aggregate: True` и переименовывает
+`timestamp` → `window_ts`.
+
+##### Смежная находка, вне Ф5
+
+GUI-вкладки наблюдаемости (`observability_tabs.py:_TABS`) заводят только `log`/`error`/`stats`.
+Записи `kind=observation` (Ф3) доезжают до стора и живого хвоста (`observability_wiring.py:209`),
+но **ни один GUI-читатель их не показывает**. Это не поломка формы и не долг Ф5 — это
+отсутствующий читатель. Занести в хвосты фазы.
 
 ### Task 5.2 — Фасад чисел — в порт; маршрутизация родом данных
 **Level:** Senior+ · **Assignee:** teamlead
