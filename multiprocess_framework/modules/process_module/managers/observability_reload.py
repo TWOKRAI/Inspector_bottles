@@ -986,8 +986,29 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
         from ..configs.observation_policy import cap_candidates
         from .telemetry_reload import detect_throttle_caps
 
+        # ЖИВОЕ значение гейта, а не константа: правило без явного `interval_sec`
+        # унаследует именно его, и сверять надо то, что попросит публикатор.
+        # Второй проход ревью итерации 2: здесь стоял `None`, поэтому сверщик
+        # никогда не видел `default_interval_sec` процесса и судил по литералу —
+        # при 0.5 против троттла 0.8 срез был реален, а отчёт отдавал пустой
+        # список рядом с `throttle_checked: true`.
+        live_publish = None
+        current = getattr(heartbeat, "current_telemetry_publish", None)
+        if callable(current):
+            try:
+                live_publish = current()
+            except Exception:  # noqa: BLE001 — readback не смеет ронять применение политики
+                live_publish = None
+        inherited = None
+        if isinstance(live_publish, dict):
+            raw = live_publish.get("default_interval_sec")
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                inherited = float(raw)
         applied["capped_by_throttle"] = detect_throttle_caps(
-            None, store_throttle, observation_rules=cap_candidates(applied)
+            None,
+            store_throttle,
+            observation_rules=cap_candidates(applied),
+            default_interval_sec=inherited,
         )
     return applied
 

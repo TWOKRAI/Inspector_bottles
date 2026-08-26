@@ -479,25 +479,75 @@ class TestInheritedIntervalIsJudgedToo:
         )
         assert caps == {}, caps
 
-    def test_inherited_interval_matches_the_schema_default(self) -> None:
-        """Литерал сверщика и схемный дефолт — одно число, и это проверяется.
+    def test_with_nothing_to_inherit_the_fallback_agrees_with_the_neighbours(self) -> None:
+        """Нечего наследовать → ``0.0``, как у соседа и у самого решения.
 
-        Сверщик не импортирует схему ради одного значения; расхождение было бы
-        молчаливым, поэтому оно пришпилено здесь.
+        **Этот тест был написан наоборот и закреплял дефект.** Первая редакция
+        пришпиливала схемный литерал ``1.0`` как «правильный ответ» — то есть
+        объявляла контрактом то самое число, которым сверщик подменял живое
+        значение. Нашёл второй проход ревью; переписан на согласие с ДВУМЯ
+        соседями, решающими ту же задачу на том же входе:
+        ``capped_metrics`` (``getattr(config, "default_interval_sec", 0.0)``) и
+        ``ObservationPolicy.resolve`` (``... if self._legacy is not None else 0.0``).
+        «Частоты нет» значит «каждый тик», и любой троттл тогда строже.
         """
-        from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
-            TelemetryPublishConfig,
-        )
-
-        schema_default = TelemetryPublishConfig.from_dict({}).default_interval_sec
-        assert schema_default == 1.0, schema_default
-        # Секции нет вовсе → сверщик обязан взять то же число.
         caps = detect_throttle_caps(
             None,
             _Throttle(),
             observation_rules={"processes.*.state.plugins.*.fps": {"enabled": True}},
         )
-        assert caps["processes.*.state.plugins.*.fps"]["publisher_interval_sec"] == schema_default, caps
+        assert caps["processes.*.state.plugins.*.fps"]["publisher_interval_sec"] == 0.0, caps
+
+    def test_the_live_default_reaches_the_report_through_the_command(self, tmp_path) -> None:
+        """Кейс B ревьюера — через ОТВЕТ КОМАНДЫ, а не прямым вызовом.
+
+        Прямой вызов кормит сверщик секцией, которой боевой вызывающий не
+        передаёт: первая редакция правки чинила функцию, а вызов на
+        ``observability_reload`` продолжал слать ``None`` — и сторож,
+        доказывающий харнесс, этого не видел. Полоса дефекта:
+        ``default_interval_sec`` меньше троттла, но не больше подменявшего
+        литерала 1.0 — здесь 0.5 против 0.8.
+        """
+        svc, handlers = _wired(tmp_path)
+        prod = {"default_enabled": True, "default_interval_sec": 0.5, "metrics": {}}
+        svc._config["telemetry"] = {"publish": prod}
+        svc._heartbeat._services._config["telemetry"] = {"publish": prod}
+        svc._heartbeat._telemetry_gate = svc._heartbeat._build_telemetry_gate()
+
+        class _Soft:
+            rules = {"processes.**.state.plugins.**": 0.8}
+
+        svc._state_store_manager = _FakeStoreManager(_Soft())
+        res = handlers["config.reload"](
+            {"observability": {"observation": {"rules": {"processes.*.state.plugins.*.drops": {"enabled": True}}}}}
+        )
+        applied = res["observation_applied"]
+        assert applied["throttle_checked"] is True, applied
+        cap = (applied.get("capped_by_throttle") or {}).get("processes.*.state.plugins.*.drops")
+        assert cap == {"publisher_interval_sec": 0.5, "throttle_interval_sec": 0.8}, applied
+
+    def test_a_rule_the_soft_throttle_cannot_cut_is_not_reported(self, tmp_path) -> None:
+        """Пара к предыдущему: троттл мягче публикатора — потолка НЕТ.
+
+        Без неё «отчёт назвал» доказано только со стороны «да», и всеядный
+        сверщик (называющий потолок всегда) прошёл бы обе проверки.
+        """
+        svc, handlers = _wired(tmp_path)
+        prod = {"default_enabled": True, "default_interval_sec": 3.0, "metrics": {}}
+        svc._config["telemetry"] = {"publish": prod}
+        svc._heartbeat._services._config["telemetry"] = {"publish": prod}
+        svc._heartbeat._telemetry_gate = svc._heartbeat._build_telemetry_gate()
+
+        class _Soft:
+            rules = {"processes.**.state.plugins.**": 0.8}
+
+        svc._state_store_manager = _FakeStoreManager(_Soft())
+        res = handlers["config.reload"](
+            {"observability": {"observation": {"rules": {"processes.*.state.plugins.*.drops": {"enabled": True}}}}}
+        )
+        applied = res["observation_applied"]
+        assert applied["throttle_checked"] is True, applied
+        assert "processes.*.state.plugins.*.drops" not in (applied.get("capped_by_throttle") or {}), applied
 
 
 class TestAWhitelistEntryOutranksTheSubtreeFrequencyToo:

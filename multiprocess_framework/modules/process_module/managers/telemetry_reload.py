@@ -315,6 +315,7 @@ def detect_throttle_caps(
     store_throttle: Any,
     *,
     observation_rules: Optional[Dict[str, Any]] = None,
+    default_interval_sec: Optional[float] = None,
 ) -> Dict[str, Dict[str, float]]:
     """Найти метрики publish-дельты, чью частоту central-троттл молча срезал бы.
 
@@ -383,21 +384,31 @@ def detect_throttle_caps(
 
     caps: Dict[str, Dict[str, float]] = {}
 
-    def _default_interval_of(section: Any) -> float:
+    def _inherited_interval() -> float:
         """Частота, которую унаследует правило без явного ``interval_sec``.
 
-        Схемный дефолт ``TelemetryPublishConfig.default_interval_sec`` — 1.0;
-        секции может не быть вовсе (процесс её не настраивал), и тогда действует
-        он же. Литерал здесь, а не импорт схемы: сверщик не должен зависеть от
-        порядка загрузки конфигов ради одного числа — но если схема сменит
-        дефолт, разойдётся с ней молча, и это названо в тесте
-        ``test_inherited_interval_matches_the_schema_default``.
+        Источник — ЖИВОЕ значение гейта, переданное вызывающим
+        (``default_interval_sec``), затем секция запроса, и только потом ``0.0``.
+
+        **Почему не схемный литерал 1.0** (ред. по второму проходу ревью
+        итерации 2). Первая редакция этой правки брала 1.0 «схемным дефолтом» —
+        и была неверна дважды. Во-первых, боевой вызывающий передавал сюда
+        ``None`` вместо секции, поэтому живое число не доходило НИКОГДА и
+        сверщик судил по константе: при ``default_interval_sec: 0.5`` и троттле
+        0.8 реальный срез существовал, а отчёт отдавал пустой список — тот же
+        утвердительный ноль, ради которого пункт и был блокером. Во-вторых,
+        сосед (``capped_metrics``, ``heartbeat/telemetry.py``) и само решение
+        (``ObservationPolicy.resolve``) откатываются к ``0.0``, а не к 1.0:
+        «частоты нет» значит «каждый тик», и любой троттл тогда строже.
+        Разойтись с ними значило бы завести третью дисциплину на том же входе.
         """
-        if isinstance(section, dict):
-            raw = section.get("default_interval_sec")
+        if isinstance(default_interval_sec, (int, float)) and not isinstance(default_interval_sec, bool):
+            return float(default_interval_sec)
+        if isinstance(publish_section, dict):
+            raw = publish_section.get("default_interval_sec")
             if isinstance(raw, (int, float)) and not isinstance(raw, bool):
                 return float(raw)
-        return 1.0
+        return 0.0
 
     def _judge(key: str, metric: str, pub_interval: Any) -> None:
         if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
@@ -429,7 +440,7 @@ def detect_throttle_caps(
         # потолков нет» там, где троттл резал 0.05 с до 2.0 с, в сорок раз.
         # Подтверждающий ноль без контроля — худшая форма молчания: его читают
         # как факт.
-        default_interval = _default_interval_of(publish_section)
+        default_interval = _inherited_interval()
         for pattern, rule in observation_rules.items():
             if not isinstance(rule, dict) or rule.get("enabled") is False:
                 continue
