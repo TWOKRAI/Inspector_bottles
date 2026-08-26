@@ -47,6 +47,45 @@ STATS_FALLBACK_CHANNEL = "file_stats"
 #: процессом»). Пересборка читает hub отсюда и поднимает канал сама.
 HUB_MANAGER_SLOT = "observability_hub"
 
+#: Префикс имени tap'а на порту наблюдений (Ф5, задача 5.3) — по одному на
+#: менеджера, идемпотентно (``add_tap`` идемпотентен по имени сам).
+_OBSERVATION_TAP_PREFIX = "stats_agg_"
+
+#: Род записи → тип метрики. Соответствие значениям
+#: ``observation_manager.RECORD_KIND_*`` (импорт констант, а не дублирование
+#: строк — расхождение стало бы немым: tap получал бы записи, которые эта
+#: таблица не узнаёт, и молча их отбрасывал).
+_METRIC_KIND_TO_TYPE: Dict[str, MetricType] = {
+    "counter": MetricType.COUNTER,
+    "gauge": MetricType.GAUGE,
+    "timing": MetricType.TIMING,
+    "histogram": MetricType.HISTOGRAM,
+}
+
+
+class _PortTap:
+    """Адаптер CRM-tap: канал с ``write()``, транслирующий запись менеджеру.
+
+    :meth:`~...channel_routing_module.core.channel_routing_manager.ChannelRoutingManager.add_tap`
+    ждёт объект с ``write(dict)`` (и best-effort ``close()`` — см. ``remove_tap``,
+    исключение там гасится). Метод менеджера сам этому протоколу не
+    удовлетворяет (сигнатура кода зовущего — ``_on_port_record(self, record)``,
+    а не свободная функция), поэтому нужен тонкий адаптер, а не bound-method
+    напрямую.
+    """
+
+    __slots__ = ("_sink", "name")
+
+    def __init__(self, sink: Any, name: str) -> None:
+        self._sink = sink
+        self.name = name
+
+    def write(self, record: Dict[str, Any]) -> None:
+        self._sink(record)
+
+    def close(self) -> None:  # pragma: no cover — best-effort хук remove_tap
+        pass
+
 
 def _metric_key(name: str, tags: Optional[Dict] = None) -> str:
     """Ключ для словаря метрик: name или name|k1:v1|k2:v2 (sorted)."""
@@ -163,6 +202,23 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         self._default_tags: Dict[str, str] = cfg.get("default_tags") or {}
         self._metrics: Dict[str, MetricRecord] = {}
         self._metrics_lock = threading.Lock()
+        # Ф5, задача 5.3 — порт наблюдений: пока не подключён явно
+        # (:meth:`attach_observation_port`), менеджер работает СТАРОЙ прямой
+        # дорогой (см. докстринг ``record_metric``). Это фолбэк для
+        # МЕНЕДЖЕРА, ПОСТРОЕННОГО ВНЕ СБОРКИ — standalone-конструирование в
+        # тестах соседних модулей, ручной `StatsManager(...)` без
+        # `ProcessManagers.create_all`. В боевой сборке слот "stats" (57
+        # боевых вызывающих дороги 3, инвентарь Task 5.1) резолвится в ЭТОТ
+        # ЖЕ экземпляр, которому `create_all` уже вызвал `attach_observation_port`
+        # — фолбэк им не нужен вовсе, они просто попадают на подключённый
+        # менеджер. Обход СЧИТАЕТСЯ и ГОВОРИТСЯ (см. `_note_observation_bypass`,
+        # `observation_bypasses`) — ровно потому, что тихий обход здесь означал
+        # бы «единственный писатель» на честном слове, а не на факте.
+        self._observation_port: Optional[Any] = None
+        #: Обходы порта — по методу (``record_metric``/``gauge``/``record_timing``/
+        #: ``histogram``). Ноль в боевой сборке — проверяемый факт (см.
+        #: `observation_bypasses`), не предположение.
+        self._observation_bypass_counts: Dict[str, int] = {}
 
     # =========================================================================
     # ЖИЗНЕННЫЙ ЦИКЛ
@@ -622,6 +678,168 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         if self._buffer is not None:
             self._buffer.enqueue(_STATS_SENTINEL, data)
 
+    # =========================================================================
+    # Ф5, задача 5.3 — порт наблюдений: агрегация как ВИД поверх его потока
+    # =========================================================================
+
+    @property
+    def _observation_tap_name(self) -> str:
+        return f"{_OBSERVATION_TAP_PREFIX}{self.manager_name}"
+
+    def attach_observation_port(self, port: Any) -> bool:
+        """Подключить порт наблюдений — числа этого менеджера едут ЧЕРЕЗ него (Ф5, 5.3).
+
+        До этого вызова ``record_metric``/``gauge``/``record_timing``/``histogram``
+        пишут по СТАРОЙ прямой дороге (см. их докстринги) — это фолбэк для
+        менеджера, ПОСТРОЕННОГО ВНЕ СБОРКИ (standalone-конструирование в
+        тестах соседних модулей, ручной ``StatsManager(...)`` без
+        ``ProcessManagers.create_all``), а не постоянное состояние боевого
+        экземпляра: ``create_all`` зовёт ЭТОТ метод сразу после создания
+        обоих менеджеров, и слот ``"stats"`` (57 боевых вызывающих дороги 3,
+        инвентарь Task 5.1) резолвится в УЖЕ ПОДКЛЮЧЁННЫЙ экземпляр — фолбэк
+        им не нужен вовсе. После вызова менеджер становится ВИДОМ: те же
+        четыре метода перестают писать в справочник и буфер напрямую, а
+        форвардят вызов порту; порт раздаёт запись СИНХРОННО ВСЕМ tap'ам
+        (:meth:`ObservationManager._deliver_number` → ``_emit_to_taps``),
+        один из которых — :meth:`_on_port_record` этого же менеджера,
+        зарегистрированный здесь. Тот же самый жест, что
+        :meth:`attach_observability_hub` делает для СТОКА снапшотов — здесь же
+        подключается ВХОД.
+
+        **Обход фолбэка не тихий (владелец, итерация 2).** Запись по прямой
+        дороге БЕЗ attach увеличивает :attr:`observation_bypasses` и один раз
+        говорит WARNING — тем же жестом, что
+        ``ObservableMixin._note_manager_call_failure``. Без этого «единственный
+        писатель чисел» был бы свойством ПРОВОДКИ («там, где не забыли
+        подключить»), а не построения: `attach` мог бы не вызваться нигде — и
+        ни один голос, ни один счётчик этого бы не заметил.
+
+        **Заглушенный порт молчит и здесь, и это не отдельная ветка, а
+        следствие построения.** Замени порт после attach на объект, чей
+        ``_deliver_number``/``_route_number`` не доставляет (муте — М5,
+        Task 5.2 acceptance) — tap этого менеджера просто не получит записи,
+        и ``get_metric``/окно агрегации не увидят числа НИ РАЗУ, хотя
+        ``record_metric`` формально был вызван. Ни второй ветки, ни
+        специального кода для этого случая нет: он покрыт тем же путём, что
+        и живой порт.
+
+        Идемпотентно: повторный ``attach`` тем же объектом — no-op; другим —
+        снимает tap со старого порта (best-effort, ``remove_tap`` глушит
+        исключение сама) и ставит на новый. Без снятия старый порт продолжал
+        бы держать tap на менеджера, который его больше не слушает —
+        накопление мёртвых подписок при каждой пересборке топологии.
+
+        Args:
+            port: объект с ``add_tap``/``remove_tap`` (типично —
+                :class:`~...statistics_module.observation.observation_manager.ObservationManager`
+                из слота ``observation``) либо ``None`` — явно ОТКЛЮЧИТЬ
+                подписку и вернуться к прямой дороге.
+
+        Returns:
+            ``port is not None`` — подключён ли РЕАЛЬНЫЙ порт. ``False`` у
+            ``port=None`` не отказ, а законный способ отвязаться.
+        """
+        if port is self._observation_port:
+            return port is not None
+        old = self._observation_port
+        tap_name = self._observation_tap_name
+        if old is not None:
+            remove = getattr(old, "remove_tap", None)
+            if callable(remove):
+                remove(tap_name)
+        self._observation_port = port
+        if port is not None:
+            add_tap = getattr(port, "add_tap", None)
+            if callable(add_tap):
+                add_tap(_PortTap(self._on_port_record, tap_name), min_level="DEBUG", name=tap_name)
+        return port is not None
+
+    @property
+    def observation_bypasses(self) -> Dict[str, int]:
+        """Число записей, ушедших МИМО порта, — по методу (Ф5, владелец, итерация 2).
+
+        В боевой сборке (после ``ProcessManagers.create_all``) этот словарь
+        обязан быть пустым: обход возможен только у менеджера, у которого
+        :meth:`attach_observation_port` не вызывался, а create_all зовёт его
+        всегда. Ноль здесь — проверяемый ФАКТ («один писатель» — свойство
+        построения), а не вера в то, что attach никто не забыл; см.
+        `test_boot_assembly_has_zero_observation_bypasses` (process_module).
+        """
+        return dict(self._observation_bypass_counts)
+
+    def _note_observation_bypass(self, method_name: str) -> None:
+        """Считать и ОДИН раз сказать об обходе порта (Ф5, владелец, итерация 2).
+
+        Образец — ``ObservableMixin._note_manager_call_failure``: счётчик
+        растёт на КАЖДОМ обходе (без него после первого WARNING потери
+        продолжали бы копиться незримо), голос — один раз на метод (иначе
+        горячий путь эмиссии метрики захлебнулся бы логом).
+        """
+        counts = self._observation_bypass_counts
+        first = method_name not in counts
+        counts[method_name] = counts.get(method_name, 0) + 1
+        if first:
+            self._log_warning(
+                f"[{self.manager_name}] {method_name}() записан МИМО порта наблюдений — "
+                "attach_observation_port не вызывался. Штатно у менеджера, построенного "
+                "вне ProcessManagers.create_all (standalone, тесты соседних модулей); "
+                "в боевой сборке слот 'stats' резолвится в УЖЕ подключённый экземпляр, "
+                "и этот голос значит дефект проводки. Дальнейшие обходы этого метода "
+                "считаются в observation_bypasses без повторного голоса."
+            )
+
+    def _on_port_record(self, record: Dict[str, Any]) -> None:
+        """CRM-tap колбэк — единственный вход агрегации, когда порт подключён (Ф5).
+
+        Зовётся СИНХРОННО, в потоке эмитента (``ObservationManager._deliver_number``
+        не буферизует). Слияние ``default_tags`` — ЗДЕСЬ, а не на call-site: запись
+        могла прийти не от этого объекта вовсе (facade ``PluginContext`` тоже
+        пишет в тот же порт и ничего не знает о ``default_tags`` ЭТОГО менеджера) —
+        единая точка слияния для ЛЮБОГО источника и есть то самое «один
+        писатель», ради которого Ф5 существует.
+
+        Незнакомый ``metric_kind`` — молчим: порт раздаёт запись ВСЕМ tap'ам
+        синхронно, а не только stats-агрегатору; фильтр по роду — дело
+        ПРИЁМНИКА, а не признак отказа отправителя.
+        """
+        metric_type = _METRIC_KIND_TO_TYPE.get(record.get("metric_kind"))
+        if metric_type is None:
+            return
+        name = record.get("name", "")
+        value = record.get("value", 1)
+        merged = self._merged_tags(record.get("tags"))
+        self._apply_metric(name, metric_type, value, merged)
+
+    def _apply_metric(self, name: str, metric_type: MetricType, value: Any, merged_tags: Dict[str, str]) -> None:
+        """Общее ядро записи: старая прямая дорога И tap-колбэк порта сходятся сюда.
+
+        Было четыре почти одинаковых тела (по методу); стало одно,
+        диспетчеризуемое ПО ДАННЫМ (``metric_type``) — образец
+        ``ErrorManager._route()`` (``error_manager.py:178``): род значения не
+        заводит вторую машину, а выбирает ветку в одной.
+
+        ``rec is None`` — серия не пущена в живой справочник потолком 2.2.
+        Эмиссия при этом происходит ВСЕГДА: стражи двух позиций независимы, и
+        отказ справочника не имеет права остановить доставку (Р2.2-7).
+        """
+        if metric_type is MetricType.COUNTER:
+            value = float(value)
+        rec = self._ensure_record(name, metric_type, merged_tags)
+        if rec is not None:
+            if metric_type is MetricType.COUNTER:
+                rec.add_counter(value)
+            elif metric_type is MetricType.GAUGE:
+                rec.set_gauge(value)
+            elif metric_type is MetricType.TIMING:
+                rec.add_timing(value)
+            else:
+                rec.add_histogram(value)
+        self._emit_record({"type": metric_type.value, "name": name, "value": value, "tags": merged_tags})
+
+    # =========================================================================
+    # ЗАПИСЬ МЕТРИК — фасад (Ф5: пересылка в порт, если подключён; иначе прямая дорога)
+    # =========================================================================
+
     def record_metric(
         self,
         name: str,
@@ -630,16 +848,23 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     ) -> None:
         """Записать счётчик (counter).
 
-        ``rec is None`` — серия не пущена в живой справочник потолком 2.2.
-        Эмиссия при этом происходит ВСЕГДА: стражи двух позиций независимы, и
-        отказ справочника не имеет права остановить доставку (Р2.2-7). Так же
-        устроены остальные три дороги ниже.
+        **Ф5.** Порт подключён (:meth:`attach_observation_port`) — форвард
+        ``port.record_metric(...)``, без слияния тегов и без прямой записи:
+        порт синхронно раздаст запись tap'ам, и ЭТОТ ЖЕ менеджер получит её
+        обратно через :meth:`_on_port_record`, где слияние и происходит. Порта
+        нет — старая прямая дорога (:meth:`_apply_metric`), СЧИТАННАЯ и
+        ПОИМЕНОВАННАЯ (:meth:`_note_observation_bypass`,
+        :attr:`observation_bypasses`) — фолбэк для менеджера вне сборки
+        (``ProcessManagers.create_all`` подключает порт всегда), не для 57
+        боевых вызывающих дороги 3, которые в боевой сборке приходят на УЖЕ
+        подключённый экземпляр.
         """
-        merged = self._merged_tags(tags)
-        rec = self._ensure_record(name, MetricType.COUNTER, merged)
-        if rec is not None:
-            rec.add_counter(float(value))
-        self._emit_record({"type": "counter", "name": name, "value": float(value), "tags": merged})
+        port = self._observation_port
+        if port is not None:
+            port.record_metric(name, value, tags)
+            return
+        self._note_observation_bypass("record_metric")
+        self._apply_metric(name, MetricType.COUNTER, value, self._merged_tags(tags))
 
     def increment(self, name: str, tags: Optional[Dict] = None) -> None:
         """Увеличить счётчик на 1."""
@@ -657,28 +882,42 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         живут в секундах, и миллисекунды, посланные сюда, легли бы в бакет
         ``+Inf`` целиком — p95 стал бы константой при зелёном тесте памяти
         (§2-П7 плана этапа 6).
+
+        Ф5: см. :meth:`record_metric` — тот же выбор дороги (порт/прямая), тот же
+        учёт обхода (:meth:`_note_observation_bypass`).
         """
-        merged = self._merged_tags(tags)
-        rec = self._ensure_record(name, MetricType.TIMING, merged)
-        if rec is not None:
-            rec.add_timing(duration)
-        self._emit_record({"type": "timing", "name": name, "value": duration, "tags": merged})
+        port = self._observation_port
+        if port is not None:
+            port.record_timing(name, duration, tags)
+            return
+        self._note_observation_bypass("record_timing")
+        self._apply_metric(name, MetricType.TIMING, duration, self._merged_tags(tags))
 
     def gauge(self, name: str, value: float, tags: Optional[Dict] = None) -> None:
-        """Записать текущее значение (gauge — перезаписывает предыдущее)."""
-        merged = self._merged_tags(tags)
-        rec = self._ensure_record(name, MetricType.GAUGE, merged)
-        if rec is not None:
-            rec.set_gauge(value)
-        self._emit_record({"type": "gauge", "name": name, "value": value, "tags": merged})
+        """Записать текущее значение (gauge — перезаписывает предыдущее).
+
+        Ф5: см. :meth:`record_metric` — тот же выбор дороги (порт/прямая), тот же
+        учёт обхода (:meth:`_note_observation_bypass`).
+        """
+        port = self._observation_port
+        if port is not None:
+            port.gauge(name, value, tags)
+            return
+        self._note_observation_bypass("gauge")
+        self._apply_metric(name, MetricType.GAUGE, value, self._merged_tags(tags))
 
     def histogram(self, name: str, value: float, tags: Optional[Dict] = None) -> None:
-        """Записать значение в гистограмму (та же механика бакетов, что у timing)."""
-        merged = self._merged_tags(tags)
-        rec = self._ensure_record(name, MetricType.HISTOGRAM, merged)
-        if rec is not None:
-            rec.add_histogram(value)
-        self._emit_record({"type": "histogram", "name": name, "value": value, "tags": merged})
+        """Записать значение в гистограмму (та же механика бакетов, что у timing).
+
+        Ф5: см. :meth:`record_metric` — тот же выбор дороги (порт/прямая), тот же
+        учёт обхода (:meth:`_note_observation_bypass`).
+        """
+        port = self._observation_port
+        if port is not None:
+            port.histogram(name, value, tags)
+            return
+        self._note_observation_bypass("histogram")
+        self._apply_metric(name, MetricType.HISTOGRAM, value, self._merged_tags(tags))
 
     # =========================================================================
     # ЧТЕНИЕ МЕТРИК

@@ -48,6 +48,14 @@ class ProcessManagers:
         router = self._create_router_manager(managers_config, logger=logger)
         stats = self._create_stats_manager(managers_config, logger=logger)
         observation = self._create_observation_manager(logger=logger)
+        # Ф5, задача 5.2/5.3: боевая проводка «StatsManager — вид поверх
+        # порта». Без этого вызова весь механизм (attach_observation_port,
+        # CRM-tap, _on_port_record) существовал бы только в тестах —
+        # ``ProcessManagers`` единственное место, где оба объекта рождаются в
+        # одной сборке. ``observation`` создаётся БЕЗУСЛОВНО (см. довод в
+        # ``register_all`` ниже, «своей секции не имеет вовсе»), поэтому
+        # проверка на ``None`` здесь не нужна.
+        stats.attach_observation_port(observation)
         command = self._create_command_manager(
             managers_config,
             logger=logger,

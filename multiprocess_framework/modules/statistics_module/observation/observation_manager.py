@@ -52,6 +52,10 @@ from ...observability_declarations import declare_metric as _declare_metric
 
 __all__ = [
     "OBSERVATION_SLOT",
+    "RECORD_KIND_COUNTER",
+    "RECORD_KIND_GAUGE",
+    "RECORD_KIND_HISTOGRAM",
+    "RECORD_KIND_TIMING",
     "ObservationManager",
     "ObservationPort",
     "ObservationRecord",
@@ -59,6 +63,17 @@ __all__ = [
     "observation_port",
     "records_for_hub",
 ]
+
+#: Роды числовых записей (Ф5, задача 5.2) — ДАННЫЕ маршрутизации, а не вторая
+#: машина. Строки совпадают дословно со значениями
+#: ``statistics_module.core.metric_record.MetricType`` (импорт оттуда сюда не
+#: заводится — этот модуль и так идёт против общего направления зависимости,
+#: см. докстринг файла, а дублирование четырёх строковых констант дешевле
+#: третьего кольца импорта). Совпадение значений проверяется тестом паритета.
+RECORD_KIND_COUNTER = "counter"
+RECORD_KIND_GAUGE = "gauge"
+RECORD_KIND_TIMING = "timing"
+RECORD_KIND_HISTOGRAM = "histogram"
 
 #: Имя канонического слота ``ObservableMixin`` — четвёртого рядом с
 #: ``logger``/``stats``/``error``.
@@ -310,6 +325,60 @@ class ObservationPort:
         store = self.levels()
         return 0 if store is None else int(store.retract(writer))
 
+    # ------------------------------------------------------------------
+    # Запись — числа (Ф5, задача 5.2). Один маршрутизатор на четыре рода,
+    # образец — ErrorManager._level_to_channel/_route (error_manager.py:178):
+    # род значения — ДАННЫЕ (поле ``metric_kind``), а не вторая машина рядом
+    # с публикацией уровней выше. Событие, а не «сколько сейчас»: каждый
+    # вызов значим (сумма/p95), тиком его схлопнуть нельзя — поэтому у чисел
+    # СВОЯ, по-вызовная дорога записи, отдельная от ``publish``.
+    # ------------------------------------------------------------------
+
+    def record_metric(self, name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
+        """Прибавить к счётчику ``name`` — сигнатура дословно ``StatsManager.record_metric``."""
+        self._route_number(RECORD_KIND_COUNTER, name, value, tags)
+
+    def increment(self, name: str, tags: Optional[Dict[str, str]] = None) -> None:
+        """Увеличить счётчик на 1."""
+        self.record_metric(name, 1, tags)
+
+    def record_timing(self, name: str, duration: float, tags: Optional[Dict[str, str]] = None) -> None:
+        """Записать длительность (секунды) — форма дословно ``StatsManager.record_timing``."""
+        self._route_number(RECORD_KIND_TIMING, name, duration, tags)
+
+    def gauge(self, name: str, value: Any, tags: Optional[Dict[str, str]] = None) -> None:
+        """Записать текущее значение (перезапись у агрегатора, не публикация уровня)."""
+        self._route_number(RECORD_KIND_GAUGE, name, value, tags)
+
+    def histogram(self, name: str, value: Any, tags: Optional[Dict[str, str]] = None) -> None:
+        """Записать наблюдение в распределение — та же механика бакетов, что у timing."""
+        self._route_number(RECORD_KIND_HISTOGRAM, name, value, tags)
+
+    def _route_number(self, metric_kind: str, name: str, value: Any, tags: Optional[Dict[str, str]]) -> None:
+        """Один шов на все четыре рода — не четыре копии одной и той же сборки dict."""
+        self._deliver_number(
+            {
+                "metric_kind": metric_kind,
+                "name": str(name),
+                "value": value,
+                "tags": dict(tags or {}),
+            }
+        )
+
+    def _deliver_number(self, record: Dict[str, Any]) -> None:
+        """Доставка числовой записи — no-op у голого вида.
+
+        :class:`ObservationPort` без менеджера — вид без жизненного цикла и без
+        CRM (см. докстринг класса): ни tap'ов, ни каналов у него нет и не
+        заводится, а значит и числу здесь физически некуда лечь. Молчание тут
+        не расходится с молчанием :meth:`publish` в этом же положении: у
+        бесхозного вида (шаг 2 резолвера ``observation_port`` — процесс, не
+        поднятый через ``ProcessManagers.register_all``) числа НЕ имеют дороги
+        мимо этого no-op — ``ObservationManager`` переопределяет метод на
+        реальную доставку через CRM-tap (:meth:`ChannelRoutingManager._emit_to_taps`).
+        """
+        return
+
     def declare(self, name: str, writer: str) -> str:
         """Внести имя уровня в каталог телеметрии от имени ``writer``.
 
@@ -482,12 +551,49 @@ class ObservationManager(ChannelRoutingManager, ObservationPort):
                 self._levels = telemetry.PluginLevels()
             return self._levels
 
-    # Чтение/запись наследуются от ObservationPort целиком — они обращаются к
-    # хранилищу ТОЛЬКО через ``self.levels()``, поэтому override одного метода
-    # переводит на резолв все СЕМЬ дорог сразу. Мимо шва идут ровно две:
-    # ``declare`` (процессный каталог имён, хранилища не касается) и
+    # Чтение/запись УРОВНЕЙ наследуются от ObservationPort целиком — они
+    # обращаются к хранилищу ТОЛЬКО через ``self.levels()``, поэтому override
+    # одного метода переводит на резолв все СЕМЬ дорог сразу. Мимо шва идут
+    # ровно две: ``declare`` (процессный каталог имён, хранилища не касается) и
     # ``for_plugin`` (отдаёт хендл, который ходит сюда же). Обе названы
     # поимённо в докстринге ``ObservationPort.levels``.
+
+    def _deliver_number(self, record: Dict[str, Any]) -> None:
+        """Доставка числовой записи — CRM-tap, а НЕ ``ObservabilityHub`` (Ф5, задача 5.3).
+
+        ``ObservationManager`` — наследник ``ChannelRoutingManager``, и у него
+        есть готовая, СИНХРОННАЯ, небюджетируемая дорога «раздать запись всем
+        подписчикам» —
+        :meth:`~...channel_routing_module.core.channel_routing_manager.ChannelRoutingManager._emit_to_taps`
+        (Ф0.6, тот же механизм, которым ``StatsManager`` уже отдаёт tap'ам свои
+        собственные сырые записи). Выбор ИМЕННО этого механизма, а не хаба —
+        решение владельца Ф5, и причина не про удобство:
+
+        1. **Потеря.** ``ObservabilityHub`` — bounded-канал с политикой
+           ``drop_oldest`` (см. ``bounded_channel.py``); кормить агрегаты окна
+           через него значило бы тихо терять слагаемые сумм под нагрузкой —
+           регрессия против сегодняшнего синхронного счёта ``StatsManager``.
+           Tap здесь ничем не ограничен: раздача синхронная, в вызывающем
+           потоке, отказ ОДНОГО tap'а не останавливает остальных
+           (``_emit_to_taps`` глушит исключение приёмника, не эмитента).
+        2. **Петля.** ``drain_adapter.apply_stat`` читает hub-записи рода
+           ``stats`` и сам зовёт ``StatsManager.record_metric`` — заведи числа
+           порта через хаб, и петля «порт → хаб → drain_adapter →
+           StatsManager → окно → хаб» замкнулась бы, а существующий
+           предохранитель (:data:`~...channel_routing_module.observability.STATS_AGGREGATE_KEY`,
+           фильтр в ``drain_adapter.apply_stat``) её НЕ разомкнул бы: он
+           различает СЫРУЮ запись от АГРЕГАТА внутри рода ``stats``, а не род
+           ``observation`` от рода ``stats`` — второй предохранитель пришлось
+           бы городить заново. Не через хаб — и вопрос снят по построению,
+           не заплатой.
+
+        ``min_level`` у tap-подписки роли не играет (числа не несут уровня —
+        см. ``record_severity``), но подписчик обязан назвать порог САМ,
+        достаточно низкий, чтобы его не срезало ``_emit_to_taps`` по умолчанию
+        ("ERROR"); порт здесь не решает за подписчика ничего — только
+        раздаёт.
+        """
+        self._emit_to_taps(record)
 
     def __repr__(self) -> str:  # pragma: no cover — диагностика
         return f"ObservationManager(manager_name={self.manager_name!r})"

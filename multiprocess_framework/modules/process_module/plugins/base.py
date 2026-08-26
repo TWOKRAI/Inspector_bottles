@@ -564,18 +564,27 @@ class PluginContext:
     # ------------------------------------------------------------------
 
     def _stats_call(self, method: str, name: str, value: Any, tags: dict | None) -> None:
-        """Общая дорога всех четырёх метрик: штамп, менеджер, голос при его отсутствии.
+        """Общая дорога всех четырёх метрик: штамп, порт, голос при его отсутствии.
 
         Одно место, а не четыре копии, ровно по той причине, по которой
         ``SubPluginContext.from_parent`` перечисляет дороги списком: три копии
         перечисления в этом файле уже расходились (Н-6, A2/Б-2).
 
+        **Ф5, задача 5.2 (шаг 1): четвёрка фасада едет в ПОРТ, не в
+        ``self.services.stats_manager`` напрямую.** ``StatsManager`` перестал
+        быть входом данных (см. его докстринги, задача 5.3) — числа
+        доставляются ему ЧЕРЕЗ порт (CRM-tap), и писать мимо порта означало бы
+        второй писатель чисел с этого call-site, ровно то, что фаза хоронит.
+        ``create=False``: числа не трогают хранилище УРОВНЕЙ (``PluginLevels``),
+        которое резолвер заводит по этому флагу — заводить его ради метрики
+        было бы посторонним побочным эффектом на чужом шве.
+
         Исключение наружу не выпускается ни при каком исходе: метрика — не то,
         ради чего останавливают линию. Но и не молчит — отказ считается и
         называется, потому что возврата у метрики нет (см. ``record_metric``).
         """
-        manager = getattr(self.services, "stats_manager", None)
-        fn = getattr(manager, method, None)
+        port = self._observation_port(create=False)
+        fn = getattr(port, method, None) if port is not None else None
         if not callable(fn):
             note_metric_without_plane(self.services, str(name), self.plugin_name or self.process_name or "")
             return

@@ -159,6 +159,55 @@ class MockStatsManager:
         self._put("histogram", name, value, tags)
 
 
+class _MockObservationPort:
+    """Тестовый двойник порта наблюдений — числа фасада форвардит в ``stats_manager``.
+
+    Ф5, задача 5.2: ``PluginContext`` больше не пишет в
+    ``services.stats_manager`` напрямую — четвёрка едет через порт
+    (``_observation_port(create=False)``, резолвер
+    ``observation_manager.observation_port``, ступень 1: ``services.get_manager("observation")``).
+    Существующий парк тестов дороги 1 (``test_plugin_stats_road.py``,
+    ``test_stats_connector_acceptance.py``) строит
+    ``MockProcessServices(stats_manager=...)`` и судит СОДЕРЖИМОЕ записей у
+    :class:`MockStatsManager` — их контракт про то, ЧТО дошло, а не ЧЕРЕЗ ЧТО
+    именно. Этот двойник — тестовый аналог боевой проводки
+    ``ProcessManagers.create_all`` (``stats.attach_observation_port(observation)``):
+    прямой форвард без CRM/tap-механики, чтобы существующий парк остался
+    про контракт фасада, а не про внутренний механизм доставки Ф5.
+
+    ``collect_subtree`` — не для доставки чисел, а для того, чтобы
+    РЕЗОЛВЕР (``observation_port()``) вообще принял этот объект: ступень 1
+    отбирает менеджера по протоколу (``callable(getattr(manager,
+    "collect_subtree", None))``), тем же доводом, что у
+    ``ObservableMixin._manager_has_method`` — без метода двойник считался бы
+    посторонним объектом и резолвер провалился бы на ступень 2 (уровни, не
+    числа), где стенду взяться неоткуда.
+    """
+
+    __slots__ = ("_stats",)
+
+    def __init__(self, stats_manager: Any) -> None:
+        self._stats = stats_manager
+
+    def collect_subtree(self, allowed_metrics: Any = None) -> dict:
+        return {}
+
+    def record_metric(self, name: str, value: Any = 1, tags: dict | None = None) -> None:
+        self._stats.record_metric(name, value, tags)
+
+    def increment(self, name: str, tags: dict | None = None) -> None:
+        self.record_metric(name, 1, tags)
+
+    def record_timing(self, name: str, duration: float, tags: dict | None = None) -> None:
+        self._stats.record_timing(name, duration, tags)
+
+    def gauge(self, name: str, value: float, tags: dict | None = None) -> None:
+        self._stats.gauge(name, value, tags)
+
+    def histogram(self, name: str, value: float, tags: dict | None = None) -> None:
+        self._stats.histogram(name, value, tags)
+
+
 class MockProcessServices:
     """Лёгкий mock IProcessServices для изолированного тестирования плагинов.
 
@@ -239,6 +288,12 @@ class MockProcessServices:
         # может быть None. Без атрибута дубль перестал бы удовлетворять
         # IProcessServices, который порт объявил.
         self.logger_manager: Any = logger_manager
+        # Ф5, задача 5.2: седьмой порт, тем же доводом. ``None`` при
+        # ``stats_manager=None`` — «плоскости нет» ровно как раньше (см.
+        # :class:`_MockObservationPort`): без него ``get_manager("observation")``
+        # отдавал бы объект, форвардящий в ``None``, и падал бы там, где раньше
+        # штатно срабатывал ``note_metric_without_plane``.
+        self._observation_port_double: Any = _MockObservationPort(stats_manager) if stats_manager is not None else None
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()
@@ -290,6 +345,22 @@ class MockProcessServices:
     def log_critical(self, msg: str, **kwargs: Any) -> None:
         """Записать CRITICAL-сообщение в self.logs."""
         self._record("CRITICAL", msg, kwargs)
+
+    # --- Слоты менеджеров (Ф5, задача 5.2) ---
+
+    def get_manager(self, name: str) -> Any:
+        """Слот-резолвер — сегодня отвечает ТОЛЬКО за ``"observation"``.
+
+        Единственный вызывающий у боевого кода —
+        ``PluginContext._observation_port`` (через резолвер
+        ``observation_manager.observation_port``, ступень 1). Остальные
+        менеджеры дубль отдаёт своими прямыми атрибутами
+        (``services.worker_manager`` и т.д.) — заводить для них слот-резолвер
+        значило бы вторую дорогу к тем же объектам без единого читателя.
+        """
+        if name == "observation":
+            return self._observation_port_double
+        return None
 
     # --- IPC ---
 

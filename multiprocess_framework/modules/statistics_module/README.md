@@ -383,6 +383,34 @@ port.departed_writers()                           # чьи поддеревья 
 Границы: в `observation/` нет ни агрегации, ни каналов — `AggregationWindow` остаётся у
 `StatsManager` и никуда не переезжает.
 
+### Ф5: `StatsManager` — вид поверх порта; числа — через ОДИН узкий шов (ADR-SM-014)
+
+Порт получил и числовой фасад: `record_metric`/`increment`/`record_timing`/`gauge`/`histogram`
+на `ObservationPort` — тем же жестом, что `publish` для уровней. `StatsManager` подключается к
+нему явно:
+
+```python
+stats.attach_observation_port(observation)   # ProcessManagers.create_all делает это боевым путём
+
+stats.record_metric("checks.ok", 1)          # форвардится порту, доставляется CRM-tap'ом
+observation.record_metric("checks.ok", 1)    # тот же счётчик — любой источник, один порт
+```
+
+После `attach` числа `StatsManager` идут ЧЕРЕЗ порт: доставка — `ChannelRoutingManager.add_tap`/
+`_emit_to_taps` (тот же CRM-tap, что и у логгера/ошибок), а НЕ `ObservabilityHub` — хаб как
+транспорт для чисел дал бы либо потерю (`drop_oldest`), либо петлю через
+`ObservabilityDrainAdapter.apply_stat`. Хаб остаётся СТОКОМ агрегатных снапшотов
+(`HubStatsChannel`, `kind=stats`) — форма не меняется.
+
+**Без `attach` — старая прямая дорога, и это фолбэк для менеджера ВНЕ СБОРКИ** (ручной
+`StatsManager(...)` в тестах соседних модулей), **не для 57 боевых вызывающих слота `"stats"`**
+(инвентарь Task 5.1 плана `observation-port`) — те приходят в боевой сборке на экземпляр,
+которому `ProcessManagers.create_all` уже вызвал `attach_observation_port`, и фолбэк им не
+нужен. Обход СЧИТАЕТСЯ и ГОВОРИТСЯ, а не тихий: `stats.observation_bypasses` — словарь
+`{метод: число}`, растёт при каждой записи мимо порта, WARNING — один раз на метод. В боевой
+сборке `observation_bypasses` обязан быть пустым — это проверяемый факт («единственный писатель»
+— свойство ПОСТРОЕНИЯ), не предположение, см. `test_boot_assembly_has_zero_observation_bypasses`.
+
 ### Записи в хабе наблюдаемости (`kind=observation`, задача 3.2, ADR-SM-013)
 
 Те же уровни, что тик кладёт в дерево, дублируются записями в `ObservabilityHub` процесса —
