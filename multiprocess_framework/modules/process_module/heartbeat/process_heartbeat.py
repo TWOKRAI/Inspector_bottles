@@ -724,27 +724,63 @@ class ProcessHeartbeat:
         ``resolved`` показывал ``enabled: false`` для ``frame_count``, а лист
         продолжал шагать. Теперь ответ (а) считается тем же гейтом, что и решает,
         и (б) НАЗЫВАЕТ путь, к которому относится, — плоскость фреймворка
-        ``processes.<P>.state.<имя>``. Про листья поддерева порта отвечает
-        ``introspect.observability`` → ``observation.provenance``.
+        ``processes.<P>.state.<имя>``.
+
+        **Второй заход, живой стенд 2026-08-26.** Одного пути мало: имя из
+        каталога может не жить в этой плоскости вовсе. ``capture_fps`` стоял
+        здесь как ``enabled: false`` по пути ``…state.capture_fps``, куда не
+        пишет никто, — при работающем 21.3 по ``…state.plugins.capture.capture_fps``.
+        Отсылка в соседнюю команду предупреждала, но вердикт всё равно читался
+        как «погашена». Поэтому у имени, живущего в поддереве писателя, рядом
+        стоит ``port_paths`` — вердикт по КАЖДОМУ реальному пути, посчитанный
+        ТЕМ ЖЕ гейтом, — и флаг ``also_decided_by_port``.
 
         Расписание не двигается: ``decide(..., count=False)`` — ни ``_next_due``,
         ни счёт попаданий правил.
 
         Returns:
-            ``{имя: {enabled, interval_sec, path}}`` либо ``None``, если гейта нет.
+            ``{имя: {enabled, interval_sec, path[, port_paths, also_decided_by_port]}}``
+            либо ``None``, если гейта нет.
         """
         gate = self._telemetry_gate
         if gate is None:
             return None
         from ..configs.telemetry_publish_config import gated_metrics
-        from .telemetry import state_metric_path
+        from .telemetry import plugin_metric_path, state_metric_path
 
         process = str(getattr(self._services, "name", "") or "")
+        by_writer = self._level_names_by_writer()
         out: Dict[str, Any] = {}
         for metric in gated_metrics():
             path = state_metric_path(process, metric)
             enabled, interval = gate.decide(path, metric, count=False)
-            out[metric] = {"enabled": bool(enabled), "interval_sec": float(interval), "path": path}
+            entry: Dict[str, Any] = {
+                "enabled": bool(enabled),
+                "interval_sec": float(interval),
+                "path": path,
+            }
+            # Второй адрес того же ИМЕНИ. Живой стенд 2026-08-26: `capture_fps`
+            # стоял здесь как `enabled: false` по пути `…state.capture_fps`,
+            # которого не пишет никто, — рядом с работающим 21.3 по пути
+            # `…state.plugins.capture.capture_fps`. Вердикт был верен для СВОЕЙ
+            # плоскости и читался как «метрика погашена». Отсылка к соседней
+            # команде (`resolved_plane`) — предупреждение, а не ответ; ответ —
+            # вердикт по КАЖДОМУ реальному пути, посчитанный тем же гейтом.
+            writers = sorted(w for w, names in by_writer.items() if metric in names)
+            if writers:
+                port_paths: Dict[str, Any] = {}
+                for writer in writers:
+                    port_path = plugin_metric_path(process, writer, metric)
+                    p_enabled, p_interval = gate.decide(port_path, metric, count=False)
+                    port_paths[port_path] = {
+                        "enabled": bool(p_enabled),
+                        "interval_sec": float(p_interval),
+                    }
+                entry["port_paths"] = port_paths
+                # Прямая подсказка оператору: вердикт выше — не про то место,
+                # где это имя реально живёт у ЭТОГО процесса.
+                entry["also_decided_by_port"] = True
+            out[metric] = entry
         return out
 
     def _log_heartbeat(self, message: str) -> None:

@@ -345,3 +345,95 @@ class TestRuleHitsSurviveDiagnosticsAndRebuilds:
             hits=first.rule_hits(),
         )
         assert second.rule_hits() == {"processes.*.state.plugins.*.drops": 0}, second.rule_hits()
+
+
+# =========================================================================== #
+# Б1, третий заход — вердикт о ПУТИ, которого не существует
+# =========================================================================== #
+class TestResolvedNamesThePathsWhereTheMetricActuallyLives:
+    """Имя из каталога может не жить в плоскости, о которой отвечает ``resolved``.
+
+    Найдено ЖИВЫМ СТЕНДОМ 2026-08-26, уже после ремонта Б1. Ответ
+    ``introspect.telemetry`` нёс ``capture_fps: {enabled: false, path:
+    processes.camera_0.state.capture_fps}`` — по этому пути не пишет никто, —
+    в то время как в дереве по пути ``processes.camera_0.state.plugins.capture.
+    capture_fps`` стояло живое 21.3. Первый ремонт добавил путь и предупреждение
+    ``resolved_plane``; предупреждение — не ответ, и отрицательный вердикт рядом
+    с работающим числом продолжал читаться как «метрика погашена».
+
+    Пара обязательна: имя, живущее у писателя, несёт вердикты по РЕАЛЬНЫМ путям,
+    а имя, у писателей не живущее, их НЕ несёт — иначе тест зелен и у реализации,
+    которая приписывает ``port_paths`` каждому имени подряд.
+    """
+
+    @staticmethod
+    @pytest.fixture
+    def wired_with_port(tmp_path):
+        """Процесс, у которого метрика ОБЪЯВЛЕНА плагином и ПУБЛИКУЕТСЯ писателем.
+
+        Каталог наполняется объявлением (``declare_metric``), а не литералом —
+        иначе имени не будет в ``gated_metrics()`` и тест доказывал бы отсутствие
+        имени, а не форму вердикта. Объявление снимается по имени
+        (``forget_declarations(names=...)``): сплошная очистка унесла бы чужие.
+        """
+        from multiprocess_framework.modules.observability_declarations import (
+            declare_metric,
+            forget_declarations,
+        )
+        from multiprocess_framework.modules.statistics_module.observation.observation_manager import (
+            observation_port,
+        )
+
+        declare_metric("capture_fps", owner="tests.review_f4")
+        try:
+            svc, handlers = _wired(tmp_path)
+            # БОЕВАЯ форма секции: `default_enabled: false` + белый список из двух
+            # имён (`system.yaml` прототипа). Без неё зонтик легаси разрешает всё,
+            # плоскость и порт отвечают одинаково — и расхождение, ради которого
+            # тест написан, не воспроизводится вовсе.
+            prod = {
+                "default_enabled": False,
+                "default_interval_sec": 1.0,
+                "metrics": {
+                    "fps": {"enabled": True, "interval_sec": 1.0},
+                    "latency_ms": {"enabled": True, "interval_sec": 1.0},
+                },
+            }
+            svc._config["telemetry"] = {"publish": prod}
+            svc._heartbeat._services._config["telemetry"] = {"publish": prod}
+            svc._heartbeat._telemetry_gate = svc._heartbeat._build_telemetry_gate()
+            port = observation_port(svc._heartbeat._services, create=True)
+            port.publish("capture_fps", 21.3, "capture")
+            yield svc, handlers
+        finally:
+            forget_declarations(names=["capture_fps"])
+
+    def test_a_writer_owned_name_carries_verdicts_for_its_real_paths(self, wired_with_port) -> None:
+        svc, _handlers = wired_with_port
+        resolved = svc._heartbeat.current_resolved_metrics()
+
+        entry = resolved["capture_fps"]
+        assert entry["path"] == "processes.camera_0.state.capture_fps", entry
+        assert entry.get("also_decided_by_port") is True, entry
+        port_paths = entry.get("port_paths") or {}
+        real = "processes.camera_0.state.plugins.capture.capture_fps"
+        assert real in port_paths, f"вердикт по реальному пути отсутствует: {entry}"
+        # Дефолт поддерева порта разрешает лист — ровно то, что видно в дереве.
+        assert port_paths[real]["enabled"] is True, port_paths
+        assert port_paths[real]["interval_sec"] == 1.0, port_paths
+        # И вердикты РАЗНЫЕ — иначе находка не воспроизведена: именно расхождение
+        # «плоскость молчит / путь работает» вводило оператора в заблуждение.
+        assert entry["enabled"] is False, entry
+        assert entry["enabled"] != port_paths[real]["enabled"], entry
+
+    def test_a_name_no_writer_owns_carries_no_port_paths(self, wired_with_port) -> None:
+        svc, _handlers = wired_with_port
+        resolved = svc._heartbeat.current_resolved_metrics()
+
+        # `shm` объявлен фреймворком и ни одним писателем порта не публикуется.
+        entry = resolved["shm"]
+        assert "port_paths" not in entry, entry
+        assert "also_decided_by_port" not in entry, entry
+        # Якорь существования: запись жива и несёт вердикт своей плоскости.
+        assert entry["path"] == "processes.camera_0.state.shm", entry
+        assert isinstance(entry["enabled"], bool), entry
