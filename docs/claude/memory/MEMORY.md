@@ -63,6 +63,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Транспорт арбитрирует то, чего не понимает](feedback_transport_arbitrates_what_it_cannot_understand.md) — два писателя в один лист; троттл вырезает молча (proceed=true без rejection_reason)
 - [Приоритет у приёмника](feedback_priority_belongs_to_the_receiver.md) — нет модели слоёв → доигрывать порядок ЗАПИСИ, не лестницу уровней · [свойство не проверено у соседа](feedback_property_unchecked_at_the_second_party.md) — и на втором call-site; ноль от инъекции воспроизводить руками
 - [Неподключённый драйвер = ровный ноль](feedback_unconnected_driver_reads_as_a_clean_zero.md) — подтверждающий ноль засчитывать только в паре с контролем, дающим ненулевое
+- [«Сверено» отвечает за вызов, не за охват](feedback_checked_true_answers_for_the_call_not_the_coverage.md) — checked=true с пустым списком: сверщик пропускал класс входа, троттл резал в 40 раз
 - [Контрол может существовать и быть мёртвым](feedback_a_control_can_exist_and_be_dead.md) — критерий «строка есть» зелен и у холостого тумблера; писать вторым предложением «и его движение меняет ЧИСЛО»
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
 - [Корневой гейт не видит модули фреймворка](project_root_gate_misses_framework_modules.md) — из 82 новых тестов в него попали 6; сверять прирост сбора, гонять ОБА гейта
