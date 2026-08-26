@@ -33,6 +33,7 @@ from typing import Any
 
 from ...base_manager import ObservableMixin
 from ...statistics_module import StatsManager
+from ..plugins.testing import MockProcessServices
 from ..managers.process_managers import ProcessManagers
 
 
@@ -213,3 +214,95 @@ def test_a_manager_with_attach_never_bypasses_regardless_of_a_neighbor_without_i
         attached.shutdown()
         detached.shutdown()
         port.shutdown()
+
+
+# --------------------------------------------------------------------------- #
+# Дыра матрицы инъекций P9 (владелец, 2026-08-26): фасад плагина мог писать
+# МИМО порта, и НИ ОДИН тест этого не замечал.
+# --------------------------------------------------------------------------- #
+
+
+class _ServicesWithRealPort(MockProcessServices):
+    """Сервисы, у которых порт и менеджер — РАЗНЫЕ наблюдаемые объекты.
+
+    Существующий парк дороги 1 строит ``MockProcessServices``, чей
+    ``_MockObservationPort`` форвардит числа прямо в ``stats_manager``. Из-за
+    этого «фасад пишет через порт» и «фасад пишет в менеджер напрямую» дают
+    ОДИНАКОВЫЙ наблюдаемый результат — фейковый харнесс доказывает харнесс.
+    Матрица инъекций это и показала: заплата «вернуть фасаду прямую дорогу к
+    ``services.stats_manager``» (как было до Ф5) не покрасила НИ ОДНОГО теста
+    из 2704.
+
+    Здесь порт настоящий и НЕ подключён к менеджеру, поэтому дороги
+    различимы: через порт число не долетит никуда (у порта нет подписчиков),
+    а мимо порта — долетит в менеджер. Разница и есть предмет теста.
+    """
+
+    def __init__(self, stats_manager: Any, port: Any) -> None:
+        super().__init__(name="p9_probe", stats_manager=stats_manager)
+        self._real_port = port
+
+    def get_manager(self, slot: str) -> Any:
+        """Слот ``observation`` — НАСТОЯЩИЙ порт вместо форвардящего двойника."""
+        if slot == "observation":
+            return self._real_port
+        return super().get_manager(slot)
+
+
+def test_the_plugin_facade_goes_THROUGH_the_port_not_past_it() -> None:
+    """Фасад обязан идти ЧЕРЕЗ порт — иначе он второй писатель чисел.
+
+    Пара, как требует правило отрицательных критериев:
+
+    * **отрицание** — порт настоящий, но НЕ подключён к менеджеру: у него нет
+      ни одного подписчика, поэтому число не долетает никуда, и в менеджере
+      метрики НЕТ. Напиши фасад мимо порта — число окажется в менеджере, и
+      этот assert покраснеет;
+    * **якорь существования** — тот же менеджер, тот же вызов, но порт
+      ПОДКЛЮЧЁН: метрика есть и равна литералу ``3.0``. Без этой половины тест
+      был бы зелен и на стенде, где не работает вообще ничего.
+
+    Закрывает заплату P9 матрицы инъекций Ф5 (ноль красных из 2704 до этого
+    теста).
+    """
+    from ...statistics_module.observation.observation_manager import ObservationManager
+    from ..plugins.base import PluginContext
+
+    # --- отрицание: порт не подключён, дорога через порт никуда не ведёт ---
+    mgr = StatsManager(
+        manager_name="p9_detached",
+        config={"enable_logging": False, "aggregation_interval": 300.0, "flush_interval": 300.0},
+    )
+    assert mgr.initialize(), "стенд сломан ДО нагрузки: initialize() вернул False"
+    port = ObservationManager(manager_name="p9_port_detached")
+    assert port.initialize(), "стенд сломан ДО нагрузки: порт не поднялся"
+
+    ctx = PluginContext(services=_ServicesWithRealPort(mgr, port), config={}, plugin_name="p9_plugin")
+    for _ in range(3):
+        ctx.record_metric("p9.ops")
+
+    assert mgr.get_metric("p9.ops") is None, (
+        "фасад написал МИМО порта: порт не подключён к менеджеру, значит через "
+        "порт число долететь не могло, а метрика в менеджере есть — "
+        f"{mgr.get_metric('p9.ops')!r}. Это второй писатель чисел с call-site фасада."
+    )
+    mgr.shutdown()
+
+    # --- якорь существования: тот же вызов при ПОДКЛЮЧЁННОМ порте доезжает ---
+    mgr2 = StatsManager(
+        manager_name="p9_attached",
+        config={"enable_logging": False, "aggregation_interval": 300.0, "flush_interval": 300.0},
+    )
+    assert mgr2.initialize(), "стенд сломан ДО нагрузки: initialize() вернул False"
+    port2 = ObservationManager(manager_name="p9_port_attached")
+    assert port2.initialize(), "стенд сломан ДО нагрузки: порт не поднялся"
+    assert mgr2.attach_observation_port(port2), "порт не подключился — стенд сломан ДО нагрузки"
+
+    ctx2 = PluginContext(services=_ServicesWithRealPort(mgr2, port2), config={}, plugin_name="p9_plugin")
+    for _ in range(3):
+        ctx2.record_metric("p9.ops")
+
+    landed = mgr2.get_metric("p9.ops")
+    assert landed is not None, "якорь существования: при подключённом порте метрика обязана быть, а её нет"
+    assert landed["count"] == 3.0, f"якорь существования: ожидалось 3.0, отдано {landed['count']!r}"
+    mgr2.shutdown()

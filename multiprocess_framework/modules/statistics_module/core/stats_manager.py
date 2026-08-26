@@ -17,6 +17,7 @@ StatsManager — менеджер статистики и метрик.
 StatsManager не держит ссылку на router (см. ADR comm-system-target-architecture §9.7).
 """
 
+import logging
 import threading
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
@@ -774,12 +775,25 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         растёт на КАЖДОМ обходе (без него после первого WARNING потери
         продолжали бы копиться незримо), голос — один раз на метод (иначе
         горячий путь эмиссии метрики захлебнулся бы логом).
+
+        **Голос идёт через stdlib ``logging``, а НЕ через ``self._log_warning``,
+        и это не стилистика.** ``_log_warning`` уходит в
+        ``_call_manager("logger", ...)``, у которого три ТИХИХ допуска: слота
+        нет, менеджер ``None``, слот выключен — во всех трёх вызов молча
+        возвращает ``None``. А обход порта случается ровно у менеджера,
+        построенного ВНЕ сборки, — у него слота ``logger`` обычно тоже нет.
+        Первая редакция звала ``_log_warning``, и голос молчал именно там, где
+        был нужен: воспроизведено 2026-08-26 (standalone-менеджер, три обхода,
+        ``observation_bypasses == {'record_metric': 2, 'gauge': 1}`` при НУЛЕ
+        строк лога). Счётчик существовал, контрол был мёртв. Брат
+        ``_note_manager_call_failure`` пишет через stdlib по той же причине
+        (у него — чтобы не рекурсировать через отказавший logger).
         """
         counts = self._observation_bypass_counts
         first = method_name not in counts
         counts[method_name] = counts.get(method_name, 0) + 1
         if first:
-            self._log_warning(
+            logging.getLogger(__name__).warning(
                 f"[{self.manager_name}] {method_name}() записан МИМО порта наблюдений — "
                 "attach_observation_port не вызывался. Штатно у менеджера, построенного "
                 "вне ProcessManagers.create_all (standalone, тесты соседних модулей); "
