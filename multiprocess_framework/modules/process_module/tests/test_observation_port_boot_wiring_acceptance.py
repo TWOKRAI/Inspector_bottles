@@ -146,7 +146,20 @@ def _standalone_manager() -> StatsManager:
 def test_boot_assembly_has_zero_observation_bypasses() -> None:
     """Половина пары: боевая сборка — ноль обходов, буквально повтор основной
     проверки выше отдельным, узким тестом (для читателя, который ищет ИМЕННО
-    этот критерий, а не весь сценарий проводки)."""
+    этот критерий, а не весь сценарий проводки).
+
+    **Находка ревью Ф5 (З8, владелец, 2026-08-26).** Ноль обходов сам по себе
+    не отличим от полностью мёртвого механизма: воспроизведено — если
+    ``StatsManager.record_metric``/``gauge`` заменить на полный no-op (запись
+    не происходит вовсе, ``_note_observation_bypass`` тоже не зовётся), этот
+    тест как был зелёным, так и остаётся, хотя оба соседа по файлу
+    (``test_create_all_wires_stats_to_the_observation_manager_end_to_end`` и
+    ``test_standalone_manager_without_attach_counts_and_names_every_bypass``)
+    краснеют. Пара-якорь ниже — по образцу
+    ``test_create_all_wires_stats_to_the_observation_manager_end_to_end``
+    (``count == 3.0``): запись обязана не только НЕ обойти порт, но и
+    реально долететь до ``get_metric``/``get_metric``-значения gauge.
+    """
     process = _BootProcess("boot_zero_bypasses")
     bundle = ProcessManagers(process).create_all()
     try:
@@ -156,6 +169,17 @@ def test_boot_assembly_has_zero_observation_bypasses() -> None:
         assert bundle.stats.observation_bypasses == {}, (
             f"боевая сборка: writes через слот 'stats' не обязаны обходить порт, а обошли: "
             f"{bundle.stats.observation_bypasses!r}"
+        )
+
+        # Якорь существования (З8): ноль обходов не должен быть неотличим от
+        # мёртвого механизма — обе записи обязаны реально долететь.
+        counter = bundle.stats.get_metric("any.metric")
+        assert counter is not None and counter["count"] == 1.0, (
+            f"якорь существования: record_metric обязан долететь до get_metric(), а получено {counter!r}"
+        )
+        gauge_metric = bundle.stats.get_metric("any.gauge")
+        assert gauge_metric is not None and gauge_metric["value"] == 1.0, (
+            f"якорь существования: gauge обязан долететь до get_metric(), а получено {gauge_metric!r}"
         )
     finally:
         _shutdown_bundle(bundle)

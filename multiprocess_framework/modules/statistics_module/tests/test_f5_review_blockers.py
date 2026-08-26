@@ -165,6 +165,21 @@ class TestB2AttachRefusesAHalfConnection:
 # =========================================================================== #
 
 
+class _CountingTap:
+    """Живой приёмник: считает принятые записи. Пара-якорь к счётчикам порта."""
+
+    name = "counting_tap"
+
+    def __init__(self) -> None:
+        self.writes = 0
+
+    def write(self, record: Dict[str, Any]) -> None:
+        self.writes += 1
+
+    def close(self) -> None:  # pragma: no cover — best-effort хук remove_tap
+        pass
+
+
 class _RaisingTap:
     """Приёмник, чей ``write()`` всегда бросает — симулирует «bad-число»."""
 
@@ -196,12 +211,24 @@ class _ReentrantTap:
 
 class TestB3OwnCountersOnTheNumbersPlane:
     def test_a_healthy_number_is_counted_as_delivered(self) -> None:
+        """Здоровый стенд — это стенд С ПРИЁМНИКОМ (правлено Ф5-добором, блокер Б1).
+
+        Прежняя редакция этого теста не подключала ни одного tap'а и всё равно
+        ждала ``numbers_delivered == 1``: она пришпиливала ровно ту модель,
+        которую добор снял, — «delivered считает ВЫЗОВЫ». Теперь приёмник
+        живой, и его ``writes`` названы литералом рядом со счётчиком: без этой
+        пары «единица в delivered» снова была бы совместима с нулём доставок.
+        """
         port = ObservationManager(manager_name="b3_healthy")
         assert port.initialize()
+        tap = _CountingTap()
+        port.add_tap(tap, min_level="DEBUG", name="healthy")
         try:
             port.record_metric("ok", 1)
             stats = port.get_stats()
+            assert tap.writes == 1, f"приёмник обязан получить запись, получено {tap.writes}"
             assert stats["numbers_delivered"] == 1
+            assert stats["numbers_dropped_no_sink"] == 0
             assert stats["numbers_dropped_by_sink_error"] == 0
             assert stats["numbers_suppressed_reentrant"] == 0
         finally:

@@ -558,6 +558,11 @@ class ObservationManager(ChannelRoutingManager, ObservationPort):
         # соседние плоскости получили бы вечный ноль без причины (тот же
         # довод, по которому 2.2 держит кардинальность вне ``LOSS_COUNTER_KEYS``).
         self._numbers_delivered_count = 0
+        # Ф5-добор, блокер Б1: пара к счётчику выше — раздача СОСТОЯЛАСЬ, но не
+        # дошла ни до одного приёмника. Без него `numbers_delivered` считал
+        # ВЫЗОВЫ, а не доставки, и «плоскость живая» было неотличимо от
+        # «tap'ов ноль» (5 записей → delivered=5 в обоих случаях).
+        self._numbers_dropped_no_sink_count = 0
 
     # ``_levels`` объявлен в ``__slots__`` у ObservationPort, и слот-дескриптор
     # приоритетнее ``__dict__``: значение лежит в СЛОТЕ, а не в словаре
@@ -719,37 +724,80 @@ class ObservationManager(ChannelRoutingManager, ObservationPort):
         положительно при живой доставке»; для точного счёта существуют локи
         соседних методов ЭТОГО же файла на пути ПОТЕРИ, где цена лока не на
         горячем пути.
+
+        **Исход раздачи спрашивается У РАЗДАЧИ, а не предполагается (Ф5-добор,
+        блокер Б1).** Прежняя редакция инкрементила ``numbers_delivered`` ПОСЛЕ
+        вызова, ничего о его исходе не зная, — а ``_emit_to_taps`` выходит на
+        ``if not self._tap_sinks: return`` раньше всякого учёта. Воспроизведено
+        владельцем, пара вход→выход:
+
+            5 записей, tap'ов ноль → delivered=5, приёмник получил 0
+            5 записей, tap живой   → delivered=5, приёмник получил 5
+
+        То есть счётчик, заведённый ОТЛИЧАТЬ живую плоскость чисел от мёртвой,
+        отвечал на вопрос «сколько раз звали» и был к этому различию слеп;
+        вторая пара (ревьюер) — ``attach`` → 1 число → ``remove_tap`` →
+        4 записи: ``delivered`` вырос на 4, все шесть счётчиков говорили «всё
+        хорошо», четыре числа исчезли молча. Теперь исход разведён: ноль
+        принявших — ``numbers_dropped_no_sink``, а не ``numbers_delivered``.
+
+        **Реентрантный вход считается как раньше** — ни туда, ни сюда: он уже
+        назван своим счётчиком (``tap_reentrant_suppressed``), и записать его
+        ещё и в «не дошло до приёмников» значило бы считать одну потерю дважды.
+        Флаг снимается ДО вызова тем же предикатом, что и у самой раздачи
+        (см. абзац выше про диff общего счётчика).
         """
         depth_state = self._tap_depth
         reentrant = bool(getattr(depth_state, "active", False))
-        self._emit_to_taps(record)
-        if not reentrant:
+        accepted = self._emit_to_taps(record)
+        if reentrant:
+            return
+        if accepted:
             self._numbers_delivered_count += 1
+        else:
+            self._numbers_dropped_no_sink_count += 1
 
     def get_stats(self) -> Dict[str, Any]:
         """Диагностика порта + СОБСТВЕННЫЕ счётчики плоскости чисел (Ф5, ревью-блокер B3).
 
-        Три ключа, которых нет у трёх соседних плоскостей CRM (логгер/ошибки/
+        Четыре ключа, которых нет у трёх соседних плоскостей CRM (логгер/ошибки/
         stats) — «числа» осмысленны только у порта наблюдений:
 
-        * ``numbers_delivered`` — сколько чисел реально ушло в раздачу tap'ам
-          (не подавлено реентерабельностью). **Без лока на горячем пути**
-          (см. докстринг :meth:`_deliver_number`) — под конкуренцией МОЖЕТ
-          недосчитать единицы (GIL не даёт исказить порядки величины). Годится
-          отличить «плоскость живая» от «мертва» (см. ниже), не годится как
-          точный аудит;
+        * ``numbers_delivered`` — числа, которые ПРИНЯЛ хотя бы один tap.
+          Не «сколько раз звали ``record_metric``»: раздача с нулём приёмников
+          сюда НЕ идёт (Ф5-добор, блокер Б1 — именно этим счётчик был слеп к
+          мёртвой плоскости). **Без лока на горячем пути** (см. докстринг
+          :meth:`_deliver_number`) — под конкуренцией МОЖЕТ недосчитать единицы
+          (GIL не даёт исказить порядки величины): годится как счётный ФАКТ,
+          не годится как точный аудит;
+        * ``numbers_dropped_no_sink`` — раздача состоялась и не дошла НИ ДО
+          КОГО. Три причины сливаются в одну цифру намеренно: приёмников нет
+          вовсе; порог единственного tap'а выше уровня записи; приёмник бросил
+          (эта причина названа отдельно соседним ключом). Общее у них одно и
+          то же и именно оно важно — число потеряно. Тот же счётчик без лока;
         * ``numbers_dropped_by_sink_error`` — alias ``tap_write_errors``: tap
           бросил при записи (раздача глушит отказ ПРИЁМНИКА, но считает его) —
           точный, под ``_miss_lock`` ``ChannelRoutingManager``, путь потери;
         * ``numbers_suppressed_reentrant`` — alias ``tap_reentrant_suppressed``:
           вход был реентерабельным, раздача подавлена целиком (D1) — тоже точный.
+          В ``numbers_dropped_no_sink`` НЕ идёт: одна потеря — один счётчик.
 
-        Пара к :attr:`StatsManager.observation_bypasses` (B2): «в боевой
+        **Различитель живой и мёртвой плоскости — ПАРА, а не одно число:**
+        ``numbers_delivered > 0`` И ``numbers_dropped_no_sink == 0``. Пара к
+        :attr:`StatsManager.observation_bypasses` (B2), у которого «в боевой
         сборке обходов ноль» само по себе неотличимо от «портом никто не
-        пользовался» — а ``numbers_delivered > 0`` отличимо.
+        пользовался».
+
+        Прежняя редакция этого докстринга утверждала, что различителем
+        достаточно одного ``numbers_delivered > 0``. Это было ЛОЖНО и
+        воспроизведено дважды (пары вход→выход — в :meth:`_deliver_number`):
+        счётчик рос одинаково при живом приёмнике и при их отсутствии, а на
+        этом утверждении, как на посылке, объявлялись закрытыми ревью-блокеры
+        B2/B3. Утверждение убрано, а не смягчено.
         """
         stats = super().get_stats()
         stats["numbers_delivered"] = self._numbers_delivered_count
+        stats["numbers_dropped_no_sink"] = self._numbers_dropped_no_sink_count
         stats["numbers_dropped_by_sink_error"] = stats.get("tap_write_errors", 0)
         stats["numbers_suppressed_reentrant"] = stats.get("tap_reentrant_suppressed", 0)
         return stats
@@ -811,7 +859,25 @@ def observation_port(services: Any, *, create: bool = False) -> Optional[Observa
 
     get_manager = getattr(services, "get_manager", None)
     if callable(get_manager):
-        manager = get_manager(OBSERVATION_SLOT)
+        # Отказ САМОГО резолва слота — не исключение вызывающему (Ф5-добор,
+        # найдено сквозным тестом блокера З6). ``get_manager`` вызываем не
+        # значит «безопасен»: на ``ProcessManagerProcess`` он бросает
+        # ``AttributeError: … no attribute '_registry'`` (латентный дефект
+        # соседнего процесса), и через ``observation_plane_report`` это роняло
+        # ВСЮ команду ``introspect.observability`` — то есть диагностика
+        # умирала ровно там, где её и зовут разбирать инцидент. Правка S2
+        # закрыла этим же доводом путь СЧЁТЧИКОВ (``_safe_get_manager``), а
+        # путь УРОВНЕЙ, идущий сюда, остался открытым.
+        #
+        # Молчание здесь не прячет причину: тем же ответом той же команды
+        # причина едет секцией ``counters.observation.error`` (маркер
+        # ``_ManagerLookupFailed``). А контракт этой функции — «``None`` =
+        # названный no-op, уровень не имеет права ронять линию» (см. Returns);
+        # исключение из ступени 1 ему противоречило.
+        try:
+            manager = get_manager(OBSERVATION_SLOT)
+        except Exception:  # noqa: BLE001 — резолв слота не роняет читателя уровней
+            manager = None
         if manager is not None and callable(getattr(manager, "collect_subtree", None)):
             return manager
 

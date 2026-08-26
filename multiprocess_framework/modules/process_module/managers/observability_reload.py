@@ -553,6 +553,12 @@ PLANE_COUNTER_KEYS: tuple = (
     # ноль» (``observation_bypasses == {}``) неотличимо от «портом никто не
     # пользовался» — см. ``ObservationManager.get_stats``.
     "numbers_delivered",
+    # Ф5-добор, блокер Б1 — раздача состоялась и не дошла НИ ДО КОГО.
+    # Пара к ``numbers_delivered``: сам по себе он рос одинаково при живом
+    # приёмнике и при нуле приёмников, то есть различитель живой и мёртвой
+    # плоскости чисел — только ПАРА (delivered > 0 И no_sink == 0). Без этого
+    # ключа спросить у ЖИВОГО процесса нечем: он есть только здесь.
+    "numbers_dropped_no_sink",
     "numbers_dropped_by_sink_error",
     "numbers_suppressed_reentrant",
     # Ф4.1 — цепочка процессоров. Поглощение записи процессором ЗАКОННО

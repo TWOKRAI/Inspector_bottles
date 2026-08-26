@@ -301,7 +301,16 @@ def test_m5_muted_port_silences_levels_and_all_process_windows_live_port_gives_b
     hub = ObservabilityHub("f5-tester-process")
 
     # ---------------------------------------------------------------- mute
-    muted_level_port = _MutedObservationPort(None)
+    # Находка ревью Ф5 (З7, владелец, 2026-08-26): порт БЕЗ хранилища вовсе
+    # (`_MutedObservationPort(None)`) даёт `muted_levels == {}` структурно —
+    # `collect_subtree()`/`level_names()` отвечают «показаний нет» уже потому,
+    # что хранилища нет, а не потому, что `publish` заглушен. Воспроизведено:
+    # `ObservationPort(None).publish(...)` БЕЗ единой заглушки даёт ТОТ ЖЕ
+    # ноль — пара мьют/живой отличалась ДВУМЯ переменными сразу (наличие
+    # хранилища + жив ли `publish`), а не одной. `telemetry.PluginLevels()`
+    # уравнивает хранилище с живым плечом (`_make_live_port` ниже) — единственная
+    # оставшаяся разница между парой снова именно «жив publish или нет».
+    muted_level_port = _MutedObservationPort(telemetry.PluginLevels())
     muted_port_a = _MutedNumberManager(manager_name="muted_port_a")
     muted_port_b = _MutedNumberManager(manager_name="muted_port_b")
     assert muted_port_a.initialize() and muted_port_b.initialize(), "стенд сломан ДО нагрузки"
@@ -440,9 +449,18 @@ def test_s4_record_metric_means_counter_on_either_object_behind_the_stats_slot()
             f"S-4 (ObservabilityHub за слотом): сумма значений ожидалась 3.0 (было бы 1.0 при "
             f"gauge-перезаписи), отдано {hub_side_sum!r}"
         )
-        assert hub_side_sum == manager_side["count"], (
-            "S-4 паритет: два объекта за одним духк-тайп слотом разошлись в счёте — "
-            f"StatsManager={manager_side['count']!r}, ObservabilityHub={hub_side_sum!r}"
+        # Находка ревью Ф5 (МЕЛОЧЬ, владелец, 2026-08-26): `hub_side_sum ==
+        # manager_side["count"]` — это 3.0 == 3.0, ПЕРЕСКАЗ двух литералов,
+        # уже проверенных по отдельности двумя строками выше (не проверка
+        # паритета, а его повтор). Заменено на сверку РОДА записи: hub-сторона
+        # уже проверена построчно (`metric_type == "counter"` для каждой сырой
+        # записи, выше), а сторона StatsManager своего "рода" не проверяла
+        # вовсе — S-4 именно про то, что ОБА объекта трактуют слот как
+        # counter, а не про совпадение конкретных чисел (то отдельно пиновано
+        # литералами 3.0 по каждой стороне).
+        assert manager_side["type"] == "counter", (
+            "S-4 паритет по РОДУ записи: StatsManager за слотом обязан отдавать "
+            f"тип 'counter' (тот же род, что уже проверен у ObservabilityHub), получено {manager_side.get('type')!r}"
         )
     finally:
         mgr.shutdown()

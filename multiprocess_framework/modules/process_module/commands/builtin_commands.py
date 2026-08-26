@@ -101,6 +101,34 @@ def _parse_ttl(args: dict) -> tuple[float | None, str | None]:
         return None, str(exc)
 
 
+class _ManagerLookupFailed:
+    """Маркер: слот не удалось СПРОСИТЬ (Ф5-добор, блокер З6).
+
+    Не ``None`` и не «пусто»: у потребителя (``_plane_counters``) это два
+    РАЗНЫХ факта, и различает он их намеренно (его собственный комментарий:
+    «менеджер сломан» и «менеджера нет» — разные вещи, диагностическая команда
+    не имеет права прятать отказ диагностируемого).
+
+    ``get_stats`` здесь БРОСАЕТ, и это не трюк ради трюка: у ``_plane_counters``
+    уже есть ровно та дорога, по которой отказ доезжает до оператора с
+    причиной (``{"error": repr(exc)}``), и маркер въезжает в неё как обычный
+    сломанный менеджер — вместо того чтобы заводить второй, параллельный
+    словарь причин на этаж выше.
+    """
+
+    __slots__ = ("_slot", "_cause")
+
+    def __init__(self, slot: str, cause: BaseException) -> None:
+        self._slot = slot
+        self._cause = cause
+
+    def get_stats(self) -> dict[str, Any]:
+        raise RuntimeError(f"get_manager({self._slot!r}) бросил {self._cause!r}")
+
+    def __repr__(self) -> str:  # pragma: no cover — диагностика
+        return f"_ManagerLookupFailed(slot={self._slot!r}, cause={self._cause!r})"
+
+
 def _safe_get_manager(svc: Any, name: str) -> Any:
     """``svc.get_manager(name)`` — не роняет диагностическую команду (Ф5, ревью-блокер S2).
 
@@ -112,14 +140,31 @@ def _safe_get_manager(svc: Any, name: str) -> Any:
     '_registry'``. Диагностика (``introspect.observability``/``config.reload``)
     не имеет права падать из-за состояния СОСЕДНЕГО механизма — тот же довод,
     по которому ``_plane_counters`` глушит отказ ``get_stats()``.
+
+    **Отказ и отсутствие — РАЗНЫЕ возвраты (Ф5-добор, блокер З6).** Первая
+    редакция глушила исключение в ``None``, и этажом ниже секция ``observation``
+    пропадала из ответа ЦЕЛИКОМ. Воспроизведено:
+
+        вход:     services, чей get_manager бросает AttributeError
+        выход:    observability_counters(...).keys() == []  — «плоскости нет»
+        контроль: services, чей get_stats бросает →
+                  {'observation': {'error': "RuntimeError(...)"}}
+
+    То есть правка S2, чинившая падение команды, взамен сделала отказ
+    невидимым — тот самый класс, ради которого написан весь план. Теперь
+    возврат — :class:`_ManagerLookupFailed`, и секция остаётся С ПРИЧИНОЙ.
+
+    ``None`` сохранён ровно за «менеджера нет»: держатель без ``get_manager``
+    или слот, отдавший ``None``. Это НЕ отказ, и секции у такого процесса
+    правильно не быть.
     """
     get_manager = getattr(svc, "get_manager", None)
     if not callable(get_manager):
         return None
     try:
         return get_manager(name)
-    except Exception:  # noqa: BLE001 — диагностика не должна падать из-за чужого состояния
-        return None
+    except Exception as exc:  # noqa: BLE001 — диагностика не должна падать из-за чужого состояния
+        return _ManagerLookupFailed(name, exc)
 
 
 #: Команды, чьи параметры судятся ПО ТИПАМ до входа в хендлер (Task 2.2, Р-3а).

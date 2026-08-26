@@ -88,6 +88,32 @@ class _PortTap:
         pass
 
 
+def _tap_is_registered(port: Any, tap_name: str) -> Optional[bool]:
+    """Жива ли подписка ``tap_name`` на ``port`` — ФАКТ, а не форма (Ф5-добор, З3).
+
+    Три ответа, и третий не сводится к первым двум:
+
+    * ``True`` / ``False`` — порт умеет ``has_tap`` и ответил;
+    * ``None`` — спросить НЕЧЕМ (duck-typed дубль без ``has_tap``).
+
+    ``None`` не приравнено к ``False`` намеренно: «подписки нет» и «порт не
+    умеет о ней рассказать» — разные факты, и слив их в один сделал бы
+    :meth:`StatsManager.attach_observation_port` отказывающим у всех дублей
+    сразу. Решение по ``None`` принимает вызывающий, у него для этого есть
+    второй, более слабый признак (возврат ``add_tap``).
+
+    Отказ самого ``has_tap`` читается как ``False``: порт, который не может
+    ответить на читающий вопрос о себе, доверия к подписке не прибавляет.
+    """
+    has_tap = getattr(port, "has_tap", None)
+    if not callable(has_tap):
+        return None
+    try:
+        return bool(has_tap(tap_name))
+    except Exception:  # noqa: BLE001 — сломанный порт не подтверждает подписку
+        return False
+
+
 def _metric_key(name: str, tags: Optional[Dict] = None) -> str:
     """Ключ для словаря метрик: name или name|k1:v1|k2:v2 (sorted)."""
     if not tags:
@@ -745,11 +771,36 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         ПРЕЖНЕЙ прямой дороге (учтено и посчитано :meth:`_note_observation_bypass`),
         а не наполовину подключённым к порту, который его никогда не услышит.
 
-        Идемпотентно: повторный ``attach`` тем же объектом — no-op; другим —
-        снимает tap со старого порта (best-effort, ``remove_tap`` глушит
-        исключение сама) и ставит на новый. Без снятия старый порт продолжал
-        бы держать tap на менеджера, который его больше не слушает —
-        накопление мёртвых подписок при каждой пересборке топологии.
+        Идемпотентно: повторный ``attach`` тем же объектом — no-op, ЕСЛИ
+        подписка на нём жива; другим — снимает tap со старого порта
+        (best-effort, ``remove_tap`` глушит исключение сама) и ставит на новый.
+        Без снятия старый порт продолжал бы держать tap на менеджера, который
+        его больше не слушает — накопление мёртвых подписок при каждой
+        пересборке топологии.
+
+        **Успех докладывается по ФАКТУ подписки, а не по форме вызова
+        (Ф5-добор, блокер З3).** Три дыры, все воспроизведены ревьюером:
+
+        1. ранняя ветка судила по ТОЖДЕСТВУ объекта (``port is
+           self._observation_port``) и ``add_tap`` не звала вовсе.
+           Вход: ``attach(port)`` → ``port.remove_tap(tap_name)`` →
+           ``attach(тот же port)``. Выход: ``True`` при НУЛЕ приёмников;
+        2. ``callable(add_tap)`` — проверка формы: вызываемый no-op давал
+           ``True``, ``get_all_metrics() == {}``, ``bypasses == {}``;
+        3. ``self._observation_port = port`` присваивался ДО ``add_tap``:
+           брошенное из ``add_tap`` исключение оставляло менеджера навсегда
+           полуподключённым (метрик нет, обходы не считаются — оба нуля
+           читаются как «всё хорошо»).
+
+        Теперь: присвоение — только ПОСЛЕ успешной подписки (при исключении
+        состояние не мутируется, менеджер остаётся на прежней дороге), а сам
+        факт подписки спрашивается у порта — :meth:`ChannelRoutingManager.has_tap`.
+        Порт, который ответить не умеет (duck-typed дубль без ``has_tap``),
+        судится по возврату ``add_tap``: настоящий отдаёт имя tap'а, no-op —
+        ``None``. Это заведомо СЛАБЕЕ (дубль, возвращающий имя и не хранящий
+        ничего, пройдёт), и потому названо здесь, а не подразумевается;
+        боевая дорога — всегда ``ObservationManager``, то есть всегда сильная
+        ветка.
 
         Args:
             port: объект с ``add_tap``/``remove_tap`` (типично —
@@ -763,32 +814,52 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             ``port`` не умеет ``add_tap`` (B2: половинчатое подключение хуже
             отказа, и отказом оно и оформлено).
         """
-        if port is self._observation_port:
-            return port is not None
         tap_name = self._observation_tap_name
-        if port is not None:
-            add_tap = getattr(port, "add_tap", None)
-            if not callable(add_tap):
-                # B2: НЕ трогаем self._observation_port — старая прямая дорога
-                # (посчитанная bypass'ом) честнее подмены на порт, который
-                # никогда не вернёт число обратно.
-                return False
+        if port is None:
+            # Явное отключение, см. Args выше.
             old = self._observation_port
             if old is not None:
                 remove = getattr(old, "remove_tap", None)
                 if callable(remove):
                     remove(tap_name)
-            self._observation_port = port
-            add_tap(_PortTap(self._on_port_record, tap_name), min_level="DEBUG", name=tap_name)
+            self._observation_port = None
+            return False
+
+        add_tap = getattr(port, "add_tap", None)
+        if not callable(add_tap):
+            # B2: НЕ трогаем self._observation_port — старая прямая дорога
+            # (посчитанная bypass'ом) честнее подмены на порт, который
+            # никогда не вернёт число обратно.
+            return False
+
+        # Дыра 1: короткое замыкание разрешено ТОЛЬКО когда порт сам
+        # подтвердил живую подписку. «Не подтвердил» и «подтвердил отказ»
+        # ведут в одно место — переподписаться (``add_tap`` идемпотентен по
+        # имени, второго tap'а не появится).
+        if port is self._observation_port and _tap_is_registered(port, tap_name) is True:
             return True
-        # port is None — явное отключение, см. Args выше.
+
+        # Порядок: СНАЧАЛА подписаться на новый, ПОТОМ снять со старого. Обратный
+        # (он и был здесь) на отказе нового оставлял менеджера при СТАРОМ порте,
+        # с которого tap уже снят, — числа честно форвардились в порт и не
+        # возвращались никуда, при нулевых `observation_bypasses`. Ровно тот
+        # полуподключённый вид, ради которого написана эта правка, только
+        # въезжающий в него с другой стороны.
+        try:
+            handle = add_tap(_PortTap(self._on_port_record, tap_name), min_level="DEBUG", name=tap_name)
+        except Exception:  # noqa: BLE001 — дыра 3: подписка не состоялась, состояние НЕ мутируем
+            return False
+        registered = _tap_is_registered(port, tap_name)
+        if registered is False or (registered is None and handle is None):
+            # Дыра 2: ``add_tap`` вызвался и не подписал никого.
+            return False
         old = self._observation_port
-        if old is not None:
+        if old is not None and old is not port:
             remove = getattr(old, "remove_tap", None)
             if callable(remove):
                 remove(tap_name)
-        self._observation_port = None
-        return False
+        self._observation_port = port
+        return True
 
     @property
     def observation_bypasses(self) -> Dict[str, int]:

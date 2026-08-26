@@ -95,11 +95,12 @@ def test_ceiling_and_drop_counter_survive_concurrent_writes():
         for _ in range(calls_per_thread):
             collector.record_timing(name, 0.001)
 
-    threads = [threading.Thread(target=worker) for _ in range(threads_n)]
+    threads = [threading.Thread(target=worker, daemon=True) for _ in range(threads_n)]
     for t in threads:
         t.start()
     for t in threads:
-        t.join()
+        t.join(timeout=30.0)
+        assert not t.is_alive(), "поток не завершился за 30с — подозрение на дедлок в записи тайминга"
 
     agg = collector.get_metrics()["timings"][name]
     assert agg["count"] == TIMINGS_CEILING, (
@@ -147,17 +148,21 @@ def test_voice_sounds_exactly_once_under_concurrent_first_calls(caplog):
     caplog.set_level(logging.DEBUG)
     collector = MetricsCollector()
     threads_n = 8
-    barrier = threading.Barrier(threads_n)
+    # З2 (ревью Ф5, владелец): таймаут на барьере обязателен — без него
+    # регрессия дисциплины лока (взаимная блокировка) вешает barrier.wait()
+    # НАВСЕГДА вместо падения, и тест прячет дефект за общим таймаутом раннера.
+    barrier = threading.Barrier(threads_n, timeout=30.0)
 
     def worker(i: int) -> None:
         barrier.wait()
         collector.record_metric(f"hazard.voice.metric.{i}", 1)
 
-    threads = [threading.Thread(target=worker, args=(i,)) for i in range(threads_n)]
+    threads = [threading.Thread(target=worker, args=(i,), daemon=True) for i in range(threads_n)]
     for t in threads:
         t.start()
     for t in threads:
-        t.join()
+        t.join(timeout=30.0)
+        assert not t.is_alive(), "поток не завершился за 30с — подозрение на дедлок в записи метрики"
 
     hits = [r for r in caplog.records if _VOICE_RE.search(r.getMessage())]
     assert len(hits) == 1, (
@@ -189,11 +194,12 @@ def test_record_metric_additive_sum_survives_concurrent_writers():
         for _ in range(calls_per_thread):
             collector.record_metric(name, 1)
 
-    threads = [threading.Thread(target=worker) for _ in range(threads_n)]
+    threads = [threading.Thread(target=worker, daemon=True) for _ in range(threads_n)]
     for t in threads:
         t.start()
     for t in threads:
-        t.join()
+        t.join(timeout=30.0)
+        assert not t.is_alive(), "поток не завершился за 30с — подозрение на дедлок в записи метрики"
 
     stored = collector.get_metric(name)
     assert stored is not None
@@ -311,15 +317,40 @@ def test_std_logger_returns_none_instead_of_raising_on_a_circular_import():
 # снятие ВСЕХ семи локов не красило ни одного теста из 12.
 # --------------------------------------------------------------------------- #
 
+#: Единый источник имён «дорог» — таблица теста ниже и сторож полноты
+#: (:func:`test_roads_table_names_every_public_mutating_method`, МЕЛОЧЬ ревью
+#: Ф5) читают ОДНО и то же имя, а не два независимых списка: восьмая дорога
+#: без лока красила таблицу, но список имён руками правился отдельно и разошёлся
+#: бы молча. Здесь разойтись негде — константа одна.
+_ROAD_METHOD_NAMES = ("record_metric", "increment", "record_timing", "get_metrics", "get_metric", "reset")
+
 
 class _CountingLock:
     """Прокси над настоящим ``RLock``, считающий входы в критическую секцию.
 
     Не подменяет семантику: внутрь уходит тот же самый лок, поэтому
-    взаимное исключение и реентрантность остаются настоящими. Считается
-    ровно факт входа — то есть НАБЛЮДАЕМЫЙ эффект «мутация прошла под
-    локом», а не наличие строки ``with self._lock`` в исходнике. Разница
-    принципиальная: шпион на тексте сторожил бы написание, а этот — поведение.
+    взаимное исключение и реентрантность остаются настоящими.
+
+    **Честная переформулировка (находка ревью Ф5, З1, владелец, 2026-08-26):
+    прежняя редакция этого докстринга утверждала больше, чем прокси
+    наблюдает.** Она называла подсчёт «НАБЛЮДАЕМЫМ эффектом "мутация прошла
+    под локом"» — это неверно: считается ФАКТ ВХОДА в критическую секцию
+    (``__enter__``/``acquire``), а не то, что мутация состояния физически
+    произошла МЕЖДУ ``__enter__`` и ``__exit__``. Разница воспроизведена
+    инъекцией: ``MetricsCollector.increment`` переписан как
+
+        with self._lock:
+            pass
+        self._counters[key] = self._counters.get(key, 0) + 1
+
+    (лок взят РОВНО столько раз, сколько ожидает таблица ниже, но сама
+    мутация вынесена ЗА секцию) — набор из 8 тестов остаётся полностью
+    зелёным, ноль красных. То есть этот класс сторожит дисциплину «дорога
+    входит в лок», а не «мутация защищена локом» — третье, промежуточное
+    свойство, которое отличимо от первого только гонкой (см.
+    ``test_increment_survives_concurrent_writes_even_if_mutation_escapes_the_lock_body``
+    ниже, закрывающей ИМЕННО эту дыру для ``increment`` через литеральную
+    сумму под конкуренцией — подсчётом входов её закрыть нельзя).
     """
 
     __slots__ = ("_inner", "entries")
@@ -394,6 +425,10 @@ def test_every_mutating_method_actually_takes_the_lock():
     ]
 
     assert probe.entries == 0, f"стенд сломан ДО нагрузки: счётчик входов в лок уже {probe.entries}, ожидался 0"
+    assert [name for name, _c, _e in roads] == list(_ROAD_METHOD_NAMES), (
+        "таблица `roads` разошлась с единым списком имён `_ROAD_METHOD_NAMES` — "
+        "правь оба разом (см. сторож полноты test_roads_table_names_every_public_mutating_method)"
+    )
 
     taken = {}
     for name, call, _expected in roads:
@@ -436,4 +471,121 @@ def test_the_voice_flag_is_set_under_the_lock_too():
     )
     assert collector._voice_sounded is True, (
         "якорь существования: после первой записи флаг голоса обязан быть выставлен"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Находка ревью Ф5 (З1, владелец, 2026-08-26): _CountingLock считает ВХОДЫ,
+# а не «мутация прошла под локом» — мутация, вынесенная ЗА `with self._lock:`
+# при сохранённом числе входов, остаётся невидимой таблице roads (см. честную
+# переформулировку докстринга _CountingLock выше). Дешёвого способа закрыть
+# дыру подсчётом входов НЕТ по построению (подсчёт входов и есть протекающая
+# абстракция) — закрывается ГОНКОЙ на литеральной сумме, как Х2/Х4 этого же
+# файла, но не искусственным sleep в критической секции (тот приём владелец
+# явно запретил рядом, в докстринге Х3, — он делает тест зависимым от правки,
+# которой в коде нет).
+# --------------------------------------------------------------------------- #
+
+
+def test_increment_survives_concurrent_writes_even_if_mutation_escapes_the_lock_body():
+    """``increment`` — литеральная сумма под конкуренцией, а не подсчёт входов в лок.
+
+    **Почему этот тест нужен ОТДЕЛЬНО от `test_every_mutating_method_actually_takes_the_lock`.**
+    Тот тест считает входы в критическую секцию и НЕ различает «мутация внутри
+    `with`» от «мутация снаружи `with`, но сам вход всё ещё на месте» — второе
+    воспроизведено инъекцией (см. докстринг `_CountingLock`): `increment`
+    переписан как `with self._lock: pass`, затем `self._counters[key] = ...`
+    ПОСЛЕ выхода из секции — таблица входов остаётся верной, `8 passed`.
+
+    **Почему литеральная сумма ловит именно эту дыру.** Когда мутация вынесена
+    за пределы удерживаемой секции, read-modify-write (`get(key, 0) + 1`,
+    затем запись) снова становится НЕЗАЩИЩЁННЫМ — конкурентные потоки могут
+    перечитать одно и то же промежуточное значение и потерять часть
+    приращений (классический lost update), РОВНО как в Х4 этого файла.
+    Разница с Х3 (флаг голоса): там окно гонки — два соседних байткода и
+    ``sys.setswitchinterval`` его не расширяет заметно; здесь окно — целый
+    `get()` + вычисление + `__setitem__` СНАРУЖИ лока, и под пониженным
+    `sys.setswitchinterval` оно ловится НАДЁЖНО (см. ниже, воспроизведено).
+
+    **Честно измерено, не выведено из головы (владелец, 2026-08-26).** С
+    инъекцией «`increment` мутирует за пределами `with`» и пониженным
+    `sys.setswitchinterval(1e-7)`: 3/3 прогона по 16×2000 вызовов дали
+    рассинхрон (типично ~16000-18000 вместо 32000, всегда СТРОГО меньше).
+    БЕЗ инъекции (боевой код, тот же пониженный интервал): 5/5 прогонов дали
+    РОВНО 32000 — ложных срабатываний не найдено. Ожидание ниже — литерал
+    `== total`, как и у Х2/Х4 этого файла (правило «литерал, а не диапазон»),
+    а не порог: измерение показало, что сходится либо точно, либо заметно
+    расходится, промежуточных значений не наблюдалось.
+
+    **Честная оговорка.** 3 инъекции / 5 контролей — не доказательство
+    отсутствия флаки на КАЖДОЙ машине; техника (пониженный `setswitchinterval`)
+    та же, что уже стоит в Х2/Х4/Х3 этого файла, и Х3 рядом прямо говорит, что
+    для окна в два соседних байткода она не помогает. Здесь окно шире (целый
+    `get()`+`+1`+`__setitem__` СНАРУЖИ лока), поэтому измерение сошлось, но
+    гарантии «на любой машине» это не даёт — только воспроизведение на этой.
+    """
+    import sys as _sys
+
+    collector = MetricsCollector()
+    name = "hazard.increment.concurrent"
+    threads_n = 16
+    calls_per_thread = 2000
+    total = threads_n * calls_per_thread
+
+    def worker() -> None:
+        for _ in range(calls_per_thread):
+            collector.increment(name)
+
+    threads = [threading.Thread(target=worker, daemon=True) for _ in range(threads_n)]
+    original_interval = _sys.getswitchinterval()
+    _sys.setswitchinterval(1e-7)  # учащает переключения потоков — см. Х3 этого же файла
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30.0)
+            assert not t.is_alive(), "поток не завершился за 30с — подозрение на дедлок в increment"
+    finally:
+        _sys.setswitchinterval(original_interval)
+
+    stored = collector._counters.get(name, 0)
+    assert stored == total, (
+        f"сумма {threads_n} потоков × {calls_per_thread} increment(name) обязана быть ЛИТЕРАЛОМ "
+        f"{total}, получено {stored!r} — мутация, вынесенная за пределы критической секции, "
+        f"теряет часть приращений под гонкой"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# МЕЛОЧЬ ревью Ф5 (владелец, 2026-08-26): таблица `roads` — рукописный список,
+# восьмая мутирующая дорога без лока не красила ни одного из 14 тестов.
+# --------------------------------------------------------------------------- #
+
+
+def test_roads_table_names_every_public_mutating_method():
+    """Множество публичных методов класса обязано СОВПАСТЬ с таблицей `roads`.
+
+    Сверка МНОЖЕСТВ через интроспекцию класса (`inspect.getmembers`), а не
+    подсчёт: если у `MetricsCollector` появится восьмой публичный метод
+    (мутирующий или нет) и его забудут дописать в `_ROAD_METHOD_NAMES` (и,
+    транзитивно, в таблицу `roads` теста дисциплины лока — сверка между ними
+    стоит отдельной строкой в том тесте), этот тест покраснеет ДО того, как
+    новая дорога останется непроверенной дисциплиной лока молча.
+
+    Воспроизведено (владелец, 2026-08-26): восьмая рукописная дорога (мутирующий
+    метод БЕЗ лока, добавленный в таблицу теста дисциплины напрямую, минуя этот
+    сторож) даёт `14 passed`, ноль красных — рукописная таблица сама по себе не
+    замечает, что интроспекция класса разошлась с её содержимым.
+    """
+    import inspect
+
+    public_methods = {
+        name
+        for name, _member in inspect.getmembers(MetricsCollector, predicate=inspect.isfunction)
+        if not name.startswith("_")
+    }
+    assert public_methods == set(_ROAD_METHOD_NAMES), (
+        f"класс MetricsCollector и таблица `roads` разошлись по составу публичных методов: "
+        f"класс={sorted(public_methods)!r}, таблица={sorted(_ROAD_METHOD_NAMES)!r} — "
+        f"добавленный/удалённый метод не отражён в дисциплине лока"
     )

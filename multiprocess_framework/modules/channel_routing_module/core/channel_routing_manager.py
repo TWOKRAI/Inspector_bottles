@@ -827,6 +827,19 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         self._tap_sinks[tap_name] = (channel, threshold_severity(min_level))
         return tap_name
 
+    def has_tap(self, name: str) -> bool:
+        """Подписка с таким именем ЕСТЬ прямо сейчас (Ф5-добор, блокер З3).
+
+        Спрашивают об этом те, кому «я позвал ``add_tap``» недостаточно:
+        ``StatsManager.attach_observation_port`` докладывал успех по ТОЖДЕСТВУ
+        объекта порта и по ``callable(add_tap)`` — обе проверки формы, обе
+        зелены при нуле приёмников (``attach`` → ``remove_tap`` → повторный
+        ``attach`` возвращал ``True``, не подписав никого). Читающий вопрос
+        без побочных эффектов — в отличие от ``remove_tap``, которым факт
+        подписки пришлось бы проверять её разрушением.
+        """
+        return name in self._tap_sinks
+
     def remove_tap(self, name: str) -> bool:
         """Отключить tap по имени. Возвращает True, если он был."""
         entry = self._tap_sinks.pop(name, None)
@@ -1046,7 +1059,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         """
         return self._channel_registry.get(name)
 
-    def _emit_to_taps(self, record_dict: Dict[str, Any], level: Any = None) -> None:
+    def _emit_to_taps(self, record_dict: Dict[str, Any], level: Any = None) -> int:
         """Разослать запись всем tap'ам, чей порог ≤ уровня записи.
 
         Ошибка доставки в один tap не мешает остальным и не роняет эмитента:
@@ -1065,26 +1078,49 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         глубже первого уровня раздача не идёт, а число подавленных видно в
         ``get_stats()['tap_reentrant_suppressed']`` — молчаливое подавление
         отличалось бы от исправной работы ровно ничем.
+
+        **Возврат — ЧИСЛО принявших, а не ``None`` (Ф5-добор, блокер Б1).**
+        Раньше метод не отдавал наружу ничего, и вызывающий не мог отличить
+        «раздали пятерым» от «приёмников не было вовсе»: воспроизведено на
+        плоскости чисел порта наблюдений — ``numbers_delivered`` рос одинаково
+        и при живом tap'е, и при нуле tap'ов (5 записей → ``delivered=5`` в
+        обоих случаях), то есть счётчик, заведённый ОТЛИЧАТЬ живую плоскость
+        от мёртвой, отвечал на другой вопрос — «сколько раз звали».
+
+        Что именно считается принятым: ``write()`` вызван и НЕ бросил.
+        Не идут в счёт три случая — приёмников нет; порог tap'а выше уровня
+        записи; приёмник бросил (он учтён отдельно, ``tap_write_errors``).
+        **Потолок: возврат ``write()`` здесь не судится** — на плоскости
+        tap'ов его не судили никогда (в отличие от ``_write_to_channels``,
+        где есть ``channel_accepted``), и приёмник, вернувший ``False``, будет
+        засчитан как принявший. Отдельный класс потерь, эта правка его не
+        трогает.
+
+        Returns:
+            Число tap'ов, реально принявших запись. Ноль = запись не легла
+            никуда (в том числе при раннем выходе и при подавлении).
         """
         if not self._tap_sinks:
-            return
+            return 0
         # Ссылка берётся один раз: на горячем пути каждый лишний поиск атрибута
         # по `self` стоит наравне с самой проверкой (замер D1).
         depth_state = self._tap_depth
         if getattr(depth_state, "active", False):
             with self._miss_lock:
                 self.stats["tap_reentrant_suppressed"] += 1
-            return
+            return 0
         # Позиция ЗАПИСИ: уровня может не быть вовсе (плоскость статистики) или
         # он может быть не опознан — и то, и другое считается самым низким
         # уровнем, а не нулём. См. :func:`record_severity`.
         severity = record_severity(level)
         depth_state.active = True
+        accepted = 0
         try:
             for channel, min_severity in list(self._tap_sinks.values()):
                 if severity >= min_severity:
                     try:
                         channel.write(record_dict)
+                        accepted += 1
                     except Exception:  # nosec B110 — tail не должен влиять на наблюдаемое
                         # Ф5, ревью-блокер B3: контракт остаётся «не роняем
                         # эмитента», но «глушим» и «не считаем» — РАЗНЫЕ вещи.
@@ -1097,6 +1133,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             # (KeyboardInterrupt, SystemExit): иначе поток остался бы навсегда
             # «внутри раздачи» и tail замолчал бы для него целиком.
             depth_state.active = False
+        return accepted
 
     # =========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ (для использования наследниками)
