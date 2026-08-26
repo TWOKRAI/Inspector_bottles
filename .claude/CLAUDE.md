@@ -168,6 +168,26 @@ claimed property, the three test-authorship roles, `README.md` + `STATUS.md` + `
 module, `Why:`/`Layer:` trailers. ponytail governs **what gets built**, never what gets
 proven or documented.
 
+## Standing rules injected into every project agent prompt
+
+Appended verbatim to all 12 files in `.claude/agents/dev/` (no shared-include mechanism exists —
+each file is standalone, so the block is duplicated; keep them in sync by editing all twelve).
+
+1. **Check qex freshness before using it.** `get_indexing_status` first, compare `last_indexed`
+   with today. The index here is deliberately stale and does not say so. Stale → qex is a hint,
+   `Grep` is truth; counts come from grep only. **Announce the index age before any review verdict
+   and ask whether to refresh.** Pass the age as a number into subagent prompts.
+2. **Honesty is the rewarded outcome, not a failure.** Don't invent a plausible explanation, don't
+   stay silent about unfinished or shaky work, don't pass a green run off as proof when the test is
+   known to be weak. Every final report carries a non-empty "what I left open and what I know is
+   unreliable in my own work". Questions that outlive the task go to
+   [`docs/claude/OPEN_QUESTIONS.md`](../docs/claude/OPEN_QUESTIONS.md).
+
+Both added 2026-08-26 at the owner's request. The second one has a measured origin: in Ф5 of
+`observation-port` an agent handed back its own hazard test as unreliable ("it only goes red when
+the race window is widened artificially"), which stopped a false guarantee from being counted —
+while a confident "М5 cannot pass" in the same phase survived until it was checked by hand.
+
 ## Language policy (STRICT)
 
 **All user-facing output MUST be in Russian. No exceptions.**
