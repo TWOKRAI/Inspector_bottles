@@ -374,33 +374,39 @@ def test_every_mutating_method_actually_takes_the_lock():
     probe = _CountingLock(collector._lock)
     collector._lock = probe
 
-    # (имя дороги, что вызвать) — каждая обязана войти в лок хотя бы раз
+    # (имя дороги, вызов, СКОЛЬКО входов в лок обязано быть) — литералами.
+    #
+    # Почему не «хотя бы один вход»: первая редакция этого теста так и
+    # проверяла, и инъекция её опрокинула. Три пишущих метода сперва зовут
+    # ``_announce_no_reader_once``, а тот берёт лок ВСЕГДА — даже когда голос
+    # уже прозвучал, потому что проверка флага сама сидит внутри ``with``.
+    # Значит «вошли хотя бы раз» истинно и у метода, с которого лок сняли:
+    # заплата «убрать лок только у ``record_timing``» оставляла набор зелёным
+    # (567 passed). Отсюда литералы: у пишущих дорог ДВА входа (голос +
+    # собственная секция), у читающих и у ``reset`` — ОДИН.
     roads = [
-        ("record_metric", lambda: collector.record_metric("s5.counter", 1)),
-        ("increment", lambda: collector.increment("s5.counter")),
-        ("record_timing", lambda: collector.record_timing("s5.timing", 0.01)),
-        ("get_metrics", lambda: collector.get_metrics()),
-        ("get_metric", lambda: collector.get_metric("s5.counter")),
-        ("reset", lambda: collector.reset()),
+        ("record_metric", lambda: collector.record_metric("s5.counter", 1), 2),
+        ("increment", lambda: collector.increment("s5.counter"), 2),
+        ("record_timing", lambda: collector.record_timing("s5.timing", 0.01), 2),
+        ("get_metrics", lambda: collector.get_metrics(), 1),
+        ("get_metric", lambda: collector.get_metric("s5.counter"), 1),
+        ("reset", lambda: collector.reset(), 1),
     ]
 
     assert probe.entries == 0, f"стенд сломан ДО нагрузки: счётчик входов в лок уже {probe.entries}, ожидался 0"
 
     taken = {}
-    for name, call in roads:
+    for name, call, _expected in roads:
         before = probe.entries
         call()
         taken[name] = probe.entries - before
 
-    silent = [name for name, n in taken.items() if n == 0]
-    assert not silent, (
-        f"эти дороги меняют/читают состояние МИМО лока: {silent}. "
-        f"Полная таблица входов: {taken}. Заявление докстринга класса про "
-        f"«RLock на всё мутируемое состояние» для них не выполняется."
-    )
-    assert probe.entries >= len(roads), (
-        f"якорь существования: суммарных входов {probe.entries} при {len(roads)} дорогах — "
-        f"счётчик не считает, стенд бесполезен. Таблица: {taken}"
+    wrong = {name: (taken[name], exp) for name, _c, exp in roads if taken[name] != exp}
+    assert not wrong, (
+        f"дороги вошли в лок не столько раз, сколько обязаны, {{дорога: (факт, ожидание)}}: "
+        f"{wrong}. Полная таблица: {taken}. Недобор означает, что состояние трогается МИМО "
+        f"лока; перебор — что на горячем пути завелась лишняя критическая секция (в этой же "
+        f"фазе такое уже роняло бюджет цены)."
     )
 
 
