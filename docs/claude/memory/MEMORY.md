@@ -51,6 +51,7 @@
 **Читать CRAFT.md целиком ПЕРЕД тем, как** писать тесты · планировать инъекции · выносить
 вердикт ревью · писать «не может сломаться» · править конфиг/схему Pydantic · трогать
 Qt-виджеты или гонять qt-mcp. Ядро, которое обязано сработать и без чтения:
+- [Сторож «хотя бы раз» слеп к точечной поломке](feedback_a_guard_that_counts_at_least_once_is_blind.md) — за сломанный метод лок брал СОСЕД; литералы по дорогам · [разность прячет то, что по обе стороны](feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md) — бюджет «цены прохода через порт» порт не мерил · [«не разобрал» ≠ «данных нет»](feedback_unparsed_is_not_absent.md) — молчащий парсер дал зелёный validate и 7 невидимых ADR
 - [Ноль наблюдений = результат наблюдения](feedback_zero_observations_looks_like_a_result.md) — сторож обязан требовать passed>0/mtime/собранность, а не только failed==0; сработало 3 раза за день
 - [Ноль в инъекции = сторожа не собрались](feedback_injection_zero_may_mean_the_guards_were_not_collected.md) — база матрицы БЕЗ -k, collected записать числом до заплат; имена от лица (test_writer_*) теряются предметным фильтром
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
