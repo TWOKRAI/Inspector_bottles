@@ -6,7 +6,12 @@
 - Ошибку при модуле, не зарегистрированном в MODULE_LAYERS.
 - Детерминированность render_index.
 - Форматирование статуса для 1/2/3 ADR (_format_status).
+- Ревью Ф5, З4: сторож заголовков сравнивает СТРОКУ ЦЕЛИКОМ, а не префиксом —
+  формы, которые обязаны падать (дубль с "-"/"—", номер-подстрока, кривые
+  пробелы), и формы, которые обязаны молча проходить (легитимный раздел без
+  код-номера, пример внутри ```-фенса, заголовок уровня ###).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -30,9 +35,7 @@ def test_scan_with_was_suffix(tmp_path):
     """Заголовок '## ADR-CHN-001 (was ADR-114): Title' парсится корректно."""
     decisions = tmp_path / "DECISIONS.md"
     decisions.write_text(
-        "# Решения\n\n"
-        "## ADR-CHN-001 (was ADR-114): Some Title\n\n"
-        "- Статус: принято\n",
+        "# Решения\n\n## ADR-CHN-001 (was ADR-114): Some Title\n\n- Статус: принято\n",
         encoding="utf-8",
     )
 
@@ -41,9 +44,7 @@ def test_scan_with_was_suffix(tmp_path):
     assert result.code == "CHN", f"Ожидался код CHN, получен '{result.code}'"
     assert len(result.adrs) == 1, f"Ожидался 1 ADR, получено {len(result.adrs)}"
     assert result.adrs[0].num == 1, f"Ожидался номер 1, получен {result.adrs[0].num}"
-    assert result.adrs[0].title == "Some Title", (
-        f"Ожидался заголовок 'Some Title', получен '{result.adrs[0].title}'"
-    )
+    assert result.adrs[0].title == "Some Title", f"Ожидался заголовок 'Some Title', получен '{result.adrs[0].title}'"
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +74,7 @@ def test_detect_duplicate_code(tmp_path):
 
     msg = str(exc_info.value)
     assert "CM" in msg, "Сообщение должно содержать дублирующийся код CM"
-    assert "module_a" in msg or "module_b" in msg, (
-        "Сообщение должно содержать имена конфликтующих модулей"
-    )
+    assert "module_a" in msg or "module_b" in msg, "Сообщение должно содержать имена конфликтующих модулей"
 
 
 # ---------------------------------------------------------------------------
@@ -99,9 +98,7 @@ def test_detect_missing_in_layers(tmp_path):
         )
 
     msg = str(exc_info.value)
-    assert "_adr_layers.py" in msg, (
-        "Сообщение должно содержать подсказку '_adr_layers.py'"
-    )
+    assert "_adr_layers.py" in msg, "Сообщение должно содержать подсказку '_adr_layers.py'"
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +161,7 @@ def test_format_status_variants(adrs, code, expected_fragment):
     """Формат статуса для 1/2/3 ADR содержит ожидаемые фрагменты."""
     result = _format_status(adrs, code)
 
-    assert expected_fragment in result, (
-        f"Ожидался фрагмент '{expected_fragment}' в '{result}'"
-    )
+    assert expected_fragment in result, f"Ожидался фрагмент '{expected_fragment}' в '{result}'"
 
     if len(adrs) == 1:
         # 1 ADR: "ADR-XX-001 (T1)"
@@ -181,3 +176,91 @@ def test_format_status_variants(adrs, code, expected_fragment):
         assert "T1" in result, "Первый заголовок T1 должен быть в статусе"
         assert "T3" in result, "Последний заголовок T3 должен быть в статусе"
         assert "..." in result, "Должно быть многоточие '...' для 3+ ADR"
+
+
+# ---------------------------------------------------------------------------
+# Тест 6: заголовки, которые ОБЯЗАНЫ уронить scan_module (сравнение целиком,
+# не префиксом) — ревью Ф5, З4.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name, text",
+    [
+        (
+            "duplicate_dash",
+            "## ADR-PM-038: настоящий\n\n## ADR-PM-038 - дубль\n",
+        ),
+        (
+            "duplicate_emdash",
+            "## ADR-PM-038: настоящий\n\n## ADR-PM-038 — дубль\n",
+        ),
+        (
+            "number_is_substring",
+            "## ADR-XX-001: живой\n\n## ADR-XX-0012(S-27): кривой\n",
+        ),
+        (
+            "double_space_after_hashes",
+            "## ADR-XX-001: живой\n\n##  ADR-XX-002: два пробела\n",
+        ),
+        (
+            "leading_indent",
+            "## ADR-XX-001: живой\n\n ## ADR-XX-002: отступ\n",
+        ),
+    ],
+    ids=[
+        "duplicate_dash",
+        "duplicate_emdash",
+        "number_is_substring",
+        "double_space_after_hashes",
+        "leading_indent",
+    ],
+)
+def test_scan_raises_on_unparsed_header(tmp_path, name, text):
+    """Кривой заголовок ADR-уровня ## обязан уронить scan_module, а не пройти
+    молча из-за префиксного сравнения со строкой валидного заголовка."""
+    decisions = tmp_path / "DECISIONS.md"
+    decisions.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc_info:
+        scan_module(decisions)
+
+    assert "не разобран" in str(exc_info.value), (
+        f"[{name}] ожидалось сообщение о неразобранном заголовке, получено: {exc_info.value}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Тест 7: формы, которые ОБЯЗАНЫ молча пройти — не заголовок ADR или
+# заведомо легитимный контент (ревью Ф5, З4).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name, text",
+    [
+        (
+            "section_without_code_number",
+            "## ADR-коды модуля\n\n## ADR-XX-001: живой\n",
+        ),
+        (
+            "fenced_example",
+            "## ADR-XX-001: живой\n\n```\n## ADR-XX-002 - пример\n```\n",
+        ),
+        (
+            "level3_nested_header",
+            "## ADR-XX-001: живой\n\n### ADR-XX-002 — дополнение\n",
+        ),
+    ],
+    ids=["section_without_code_number", "fenced_example", "level3_nested_header"],
+)
+def test_scan_does_not_raise_on_legitimate_content(tmp_path, name, text):
+    """Раздел без код-номера, пример внутри ```-фенса и заголовок уровня ###
+    не должны роняться сторожем — все три формы уже используются в
+    репозитории легитимно."""
+    decisions = tmp_path / "DECISIONS.md"
+    decisions.write_text(text, encoding="utf-8")
+
+    # Не должно бросить ValueError.
+    result = scan_module(decisions)
+    assert result.code == "XX", f"[{name}] код должен разобраться из валидного заголовка"
