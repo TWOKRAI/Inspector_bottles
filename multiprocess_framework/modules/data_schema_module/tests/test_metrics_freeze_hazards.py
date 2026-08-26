@@ -202,3 +202,105 @@ def test_record_metric_additive_sum_survives_concurrent_writers():
         f"обязана быть ЛИТЕРАЛОМ {total}, получено {stored['value']!r} — "
         f"read-modify-write без блокировки потерял часть прибавлений"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Находка инъекции J3 (владелец, 2026-08-26): голос ходит в logger_module
+# ЛЕНИВО и вызывается уже на импорте пакета — кольцо импорта роняло всё.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_voice_never_kills_the_package_when_the_logger_is_unreachable():
+    """Недоступный логгер откладывает голос, а не роняет пакет и не глотает его.
+
+    **Почему этот тест существует.** Голос звучит уже НА ИМПОРТЕ пакета:
+    ``schema_registry``/``model_factory`` зовут ``increment_metric`` на своём
+    старте, и к концу ``import data_schema_module`` в сборщике 22 счётчика,
+    ``_voice_sounded is True``, ленивый логгер резолвнут. То есть ленивый
+    ``from ...logger_module import get_std_logger`` выполняется ВНУТРИ импорта
+    пакета и сегодня проходит только по счастливому порядку.
+
+    Инъекция J3 (2026-08-26) показала порядок, в котором не проходит: со
+    сломанным флагом «сказать один раз» голос зовётся на каждом вызове, и
+    второй ловит кольцо — прогон падает целиком на conftest с
+    ``ImportError: cannot import name 'get_std_logger' from partially
+    initialized module``. Это был не «ноль красных», а сломанный сбор: 0
+    собранных тестов вместо 563.
+
+    Пара, как требует правило отрицательных критериев:
+
+    * **отрицание** — логгер недоступен: вызов не бросает, флаг НЕ выставлен
+      (иначе единственный голос был бы проглочен молча и не прозвучал бы уже
+      никогда);
+    * **якорь существования** — логгер вернулся: тот же сборщик говорит, и
+      РОВНО один раз на двух вызовах (кванторная часть — на двух, не на одном).
+    """
+    from ..core import metrics as metrics_mod
+
+    collector = metrics_mod.MetricsCollector()
+    original = metrics_mod._std_logger
+    said = []
+
+    try:
+        # --- отрицание: логгер недоступен ---
+        metrics_mod._std_logger = lambda: None
+        try:
+            collector.record_metric("j3.probe", 1)
+            collector.record_metric("j3.probe", 1)
+        except Exception as exc:  # pragma: no cover — падение здесь и есть дефект
+            raise AssertionError(f"недоступный логгер уронил запись метрики: {exc!r}") from exc
+
+        assert collector._voice_sounded is False, (
+            "флаг голоса выставлен при недоступном логгере — голос проглочен молча и не прозвучит уже никогда"
+        )
+        landed = collector.get_metric("j3.probe")
+        assert landed["value"] == 2, f"запись метрики пострадала от недоступного логгера: {landed!r}"
+
+        # --- якорь существования: логгер вернулся, голос звучит ровно один раз ---
+        metrics_mod._std_logger = lambda: type("L", (), {"warning": lambda _s, *a, **k: said.append(a)})()
+        collector.record_metric("j3.probe", 1)
+        collector.record_metric("j3.probe", 1)
+    finally:
+        # Восстановление ОБЯЗАНО быть в finally, а не только в except: тест,
+        # упавший на ассерте после подмены, оставил бы глобальную функцию
+        # подменённой и отравил соседей. Поймано на себе же 2026-08-26 —
+        # сосед ниже получал None вместо логгера и краснел по чужой причине.
+        metrics_mod._std_logger = original
+
+    assert len(said) == 1, f"голос прозвучал {len(said)} раз на двух вызовах, ожидался ровно 1"
+    assert collector._voice_sounded is True, "после успешного голоса флаг обязан быть выставлен"
+
+
+def test_std_logger_returns_none_instead_of_raising_on_a_circular_import():
+    """``_std_logger`` обязан вернуть ``None``, а не пробросить ImportError.
+
+    Прямой сторож на ветку ``except ImportError``: без неё кольцо импорта
+    (воспроизведено J3) роняет весь пакет, а не одну строчку лога.
+
+    Якорь существования — во второй половине: при исправном импорте та же
+    функция отдаёт настоящий логгер с методом ``warning``.
+    """
+    import builtins
+
+    from ..core import metrics as metrics_mod
+
+    metrics_mod._logger = None
+    real_import = builtins.__import__
+
+    def _boom(name, *args, **kwargs):
+        if "logger_module" in name:
+            raise ImportError("partially initialized module (имитация кольца J3)")
+        return real_import(name, *args, **kwargs)
+
+    builtins.__import__ = _boom
+    try:
+        assert metrics_mod._std_logger() is None, "при кольце импорта ожидался None, а не логгер"
+    finally:
+        builtins.__import__ = real_import
+        metrics_mod._logger = None
+
+    # Якорь существования: импорт исправен → настоящий логгер.
+    got = metrics_mod._std_logger()
+    assert got is not None and callable(getattr(got, "warning", None)), (
+        f"при исправном импорте ожидался логгер с warning(), получено {got!r}"
+    )

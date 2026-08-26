@@ -59,8 +59,19 @@ def _std_logger():
     """
     global _logger
     if _logger is None:
-        from ...logger_module import get_std_logger
-
+        try:
+            from ...logger_module import get_std_logger
+        except ImportError:
+            # Частично инициализированный logger_module — голос ОТКЛАДЫВАЕТСЯ,
+            # а не роняет пакет. Воспроизведено 2026-08-26 инъекцией J3: со
+            # сломанным флагом «сказать один раз» голос звучит на КАЖДОМ
+            # вызове, включая 22 вызова на импорте пакета, и второй из них
+            # ловит кольцо — pytest падает на conftest с
+            # ``ImportError: cannot import name 'get_std_logger' from
+            # partially initialized module``. Сегодня это не срабатывает лишь
+            # по счастливому порядку импорта; вернуть ``None`` дешевле, чем
+            # зависеть от удачи.
+            return None
         _logger = get_std_logger(__name__)
     return _logger
 
@@ -111,8 +122,13 @@ class MetricsCollector:
         with self._lock:
             if self._voice_sounded:
                 return
+            log = _std_logger()
+            if log is None:
+                # Логгер ещё недоступен — флаг НЕ ставим, скажем на следующем
+                # вызове. Иначе единственный голос был бы проглочен молча.
+                return
             self._voice_sounded = True
-        _std_logger().warning(
+        log.warning(
             "MetricsCollector (data_schema_module): собранные метрики никто не "
             "читает — get_metrics() ни разу не вызывается в боевом коде (S-27, "
             "инвентарь Task 5.1: 14 вызывающих record_timing/increment_metric, "
