@@ -44,10 +44,12 @@
 from __future__ import annotations
 
 import threading
+import weakref
 from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
 
 from ...channel_routing_module import ChannelRoutingManager
 from ...data_schema_module import FieldMeta, SchemaBase
+from ...logger_module import get_std_logger
 from ...observability_declarations import declare_metric as _declare_metric
 
 __all__ = [
@@ -60,6 +62,7 @@ __all__ = [
     "ObservationPort",
     "ObservationRecord",
     "PluginObservationHandle",
+    "bare_port_number_losses",
     "observation_port",
     "records_for_hub",
 ]
@@ -84,6 +87,36 @@ RECORD_KIND_HISTOGRAM = "histogram"
 #: литерал дал бы «порт зарегистрирован, но никто его не находит» — отказ,
 #: который выглядит как штатный фолбэк и потому не виден ни по одному голосу.
 OBSERVATION_SLOT = "observation"
+
+#: Учёт чисел, потерянных ВИДОМ БЕЗ МЕНЕДЖЕРА — ступень 2 резолвера
+#: :func:`observation_port` (слот ``observation`` не зарегистрирован, процесс
+#: не поднят через ``ProcessManagers.register_all``) — Ф5, ревью-блокер B1.
+#: Ключ — САМО хранилище (``PluginLevels``), а не экземпляр
+#: :class:`ObservationPort`: резолвер минтит новый бесхозный вид на КАЖДЫЙ
+#: вызов ``observation_port(create=False)``, а хранилище живёт весь срок
+#: процесса — дедуп на эфемерном виде не дедуплицировал бы НИЧЕГО (WARNING на
+#: каждый вызов ``_stats_call``). ``WeakKeyDictionary``, а не голый ``dict`` по
+#: ``id()``: совпадение ``id()`` у собранного мусором хранилища и нового —
+#: ровно тот класс «тихой лжи», ради которого весь блокер B1 и пишется.
+_BARE_PORT_NUMBER_LOSSES_LOCK = threading.Lock()
+_BARE_PORT_NUMBER_LOSSES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def bare_port_number_losses(store: Any) -> int:
+    """Сколько чисел потерял бесхозный вид (ступень 2) над ЭТИМ хранилищем (B1).
+
+    Диагностика и тест-опора: у бесхозного вида нет ни ``services``, ни
+    долгоживущего экземпляра (резолвер минтит новый на каждый вызов) — считать
+    некуда, кроме привязки к самому хранилищу. ``store`` — обычно
+    ``services.plugin_levels``.
+
+    ``0`` означает «потерь не было ЛИБО хранилище этому счётчику не
+    встречалось вовсе» — различить эти два факта здесь нечем (то же огрубление,
+    что у :func:`~...process_module.managers.observability_wiring.carrier_failures`).
+    """
+    with _BARE_PORT_NUMBER_LOSSES_LOCK:
+        entry = _BARE_PORT_NUMBER_LOSSES.get(store)
+        return int(entry["count"]) if entry else 0
 
 
 def _telemetry():
@@ -366,18 +399,58 @@ class ObservationPort:
         )
 
     def _deliver_number(self, record: Dict[str, Any]) -> None:
-        """Доставка числовой записи — no-op у голого вида.
+        """Доставка числовой записи — считаемая потеря у голого вида (Ф5, ревью-блокер B1).
 
         :class:`ObservationPort` без менеджера — вид без жизненного цикла и без
         CRM (см. докстринг класса): ни tap'ов, ни каналов у него нет и не
-        заводится, а значит и числу здесь физически некуда лечь. Молчание тут
-        не расходится с молчанием :meth:`publish` в этом же положении: у
-        бесхозного вида (шаг 2 резолвера ``observation_port`` — процесс, не
-        поднятый через ``ProcessManagers.register_all``) числа НЕ имеют дороги
-        мимо этого no-op — ``ObservationManager`` переопределяет метод на
-        реальную доставку через CRM-tap (:meth:`ChannelRoutingManager._emit_to_taps`).
+        заводится, а значит и числу здесь физически некуда лечь.
+        ``ObservationManager`` переопределяет метод на реальную доставку через
+        CRM-tap (:meth:`ChannelRoutingManager._emit_to_taps`); здесь дороги нет
+        и не заводится (отклонённая альтернатива — см.
+        ``statistics_module/DECISIONS.md``, ADR-SM-014).
+
+        **Тихий ``return`` здесь БЫЛ, и это был отдельный дефект, а не
+        то же самое молчание, что у :meth:`publish`.** У ``publish`` молчание
+        честное: значение НЕКУДА положить, и вызывающий узнаёт об этом по
+        отсутствию значения в дереве при опросе. У чисел ``fn = getattr(port,
+        method, None)`` в ``PluginContext._stats_call`` находит метод (он ЕСТЬ
+        на :class:`ObservationPort`, унаследован), считает его успешным
+        (``callable`` истинно) и вызывает — три числа исчезали БЕЗ единого
+        следа: ``note_metric_without_plane`` не срабатывал (метод же нашёлся),
+        ``observation_bypasses`` не рос (это счётчик ``StatsManager``, а не
+        порта, и запись до него не доходила вовсе). Воспроизведено ревью
+        (реальный ``PluginContext`` + реальный ``StatsManager``, слот
+        ``observation`` не зарегистрирован, ``plugin_levels`` заведён
+        публикацией из ``configure()``): три метрики — ``get_all_metrics() ==
+        {}``.
+
+        Считать и один раз сказать — тем же жестом, что
+        :meth:`StatsManager._note_observation_bypass` — но БЕЗ доступа к
+        ``services`` (порт его не держит): дедуп ведётся по хранилищу
+        (:func:`bare_port_number_losses`), а не по ``services`` или по
+        экземпляру этого вида (эфемерен — новый на каждый вызов резолвера).
         """
-        return
+        store = self._levels
+        if store is None:
+            # Вырожденная конструкция (``ObservationPort(None)`` напрямую, не
+            # через резолвер) — считать негде и незачем: в боевой сборке
+            # резолвер такой порт никогда не строит (см. ``observation_port``).
+            return
+        with _BARE_PORT_NUMBER_LOSSES_LOCK:
+            entry = _BARE_PORT_NUMBER_LOSSES.get(store)
+            if entry is None:
+                entry = {"count": 0, "warned": False}
+                _BARE_PORT_NUMBER_LOSSES[store] = entry
+            entry["count"] += 1
+            first = not entry["warned"]
+            entry["warned"] = True
+        if first:
+            get_std_logger(__name__).warning(
+                f"[observation] число {record.get('name')!r} потеряно: слот 'observation' "
+                "не зарегистрирован (резолвер отдал ступень 2 — вид без менеджера), а "
+                "бесхозный вид умеет доставлять только уровни, не числа. Дальше считаем "
+                "молча — bare_port_number_losses(store)."
+            )
 
     def declare(self, name: str, writer: str) -> str:
         """Внести имя уровня в каталог телеметрии от имени ``writer``.
@@ -476,6 +549,15 @@ class ObservationManager(ChannelRoutingManager, ObservationPort):
         # запросу: у процесса без плагинов оно так и не понадобится.
         ObservationPort.__init__(self, None)
         self._levels_lock = threading.Lock()
+        # Ф5, ревью-блокер B3: числа, реально ушедшие в раздачу tap'ам —
+        # НЕ каждый вызов :meth:`_deliver_number`, а только те, что раздача
+        # не подавила реентерабельностью (см. override ниже). Свой счётчик,
+        # а не запись в ``self.stats`` (``LOSS_COUNTER_KEYS``/
+        # ``DELIVERY_COUNTER_KEYS``): та пара общая для ВСЕХ ЧЕТЫРЁХ плоскостей
+        # CRM, а «числа» осмысленны только у порта — заведи его там, три
+        # соседние плоскости получили бы вечный ноль без причины (тот же
+        # довод, по которому 2.2 держит кардинальность вне ``LOSS_COUNTER_KEYS``).
+        self._numbers_delivered_count = 0
 
     # ``_levels`` объявлен в ``__slots__`` у ObservationPort, и слот-дескриптор
     # приоритетнее ``__dict__``: значение лежит в СЛОТЕ, а не в словаре
@@ -592,8 +674,85 @@ class ObservationManager(ChannelRoutingManager, ObservationPort):
         достаточно низкий, чтобы его не срезало ``_emit_to_taps`` по умолчанию
         ("ERROR"); порт здесь не решает за подписчика ничего — только
         раздаёт.
+
+        **Контракт ``_emit_to_taps`` — «tail не работа», и это правильный
+        контракт (Ф5, ревью-блокер B3): раздача НЕ должна ронять эмитента ни
+        отказом одного tap'а, ни реентерабельным входом.** Но «не роняет» не
+        значит «не считается» — до этой правки оба класса потерь у ЧИСЕЛ были
+        видны только строкой ``tap_reentrant_suppressed``/``tap_write_errors``
+        в ``self.stats``, ОБЩЕЙ для всех четырёх плоскостей CRM и не названной
+        применительно к числам нигде. Три счётчика ниже (:meth:`get_stats`) —
+        не смена механизма (второй, «не глушащий» шов для чисел ОТКЛОНЁН, см.
+        ``DECISIONS.md``), а его наблюдаемость: раздача остаётся ОДНОЙ, просто
+        теперь считаема с обеих сторон — сколько ушло, сколько подавлено,
+        сколько отказал приёмник.
+
+        **«Доставлено» проверяется ДО вызова, флагом глубины, а НЕ диффом
+        общего счётчика ПОСЛЕ.** Первая редакция сравнивала
+        ``self.stats["tap_reentrant_suppressed"]`` до/после вызова —
+        воспроизведено собственным тестом (``test_f5_review_blockers.py``):
+        реентерабельный tap, зовущий ``record_metric`` ИЗНУТРИ своего
+        ``write()``, поднимает ЭТОТ счётчик на вложенном вызове, и внешний,
+        честно доставленный вызов после возврата видит «счётчик изменился»,
+        хотя изменил его НЕ он — 5 внешних вызовов ошибочно давали
+        ``numbers_delivered == 0`` вместо ``5``. Счётчик — общий на менеджер, а
+        не per-call, и диффом его читать нельзя. Флаг ``_tap_depth.active``
+        снят ИМЕННО тем же условием, которым сам ``_emit_to_taps`` решает
+        «подавлять или нет» — тот же предикат, а не его приближение.
+
+        **Инкремент — БЕЗ ``self._miss_lock`` (умышленно, второй раунд правки).**
+        Первая редакция брала лок на КАЖДОЙ доставке — прямое нарушение
+        собственного инварианта этого файла: `_miss_lock` «берётся ТОЛЬКО на
+        пути потери, поэтому на здоровом пути не стоит ничего»
+        (``ChannelRoutingManager.__init__``, комментарий у объявления лока).
+        Доставка — ЗДОРОВЫЙ путь по определению (это его противоположность
+        потере), и лок на нём был РОВНО тем классом «появления новой работы на
+        горячем пути», который стережёт
+        ``test_plugin_stats_road.py::TestTheCostOfTheHotPath`` — воспроизведено:
+        полный гейт (8928 тестов, машина под нагрузкой) покраснел на бюджете
+        5.0 мкс, хотя тест этого файла в изоляции проходил. Плата за снятие
+        лока — **``+= 1`` не атомарен под конкуренцией** (GIL сериализует
+        байткод, но read-modify-write из двух потоков может потерять один
+        инкремент). Для СЧЁТНОГО ФАКТА «плоскость чисел живая» (пара к
+        :attr:`StatsManager.observation_bypasses`, B2) это приемлемо и не
+        заявляется как точное число — не «гарантировано точно», а «заведомо
+        положительно при живой доставке»; для точного счёта существуют локи
+        соседних методов ЭТОГО же файла на пути ПОТЕРИ, где цена лока не на
+        горячем пути.
         """
+        depth_state = self._tap_depth
+        reentrant = bool(getattr(depth_state, "active", False))
         self._emit_to_taps(record)
+        if not reentrant:
+            self._numbers_delivered_count += 1
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Диагностика порта + СОБСТВЕННЫЕ счётчики плоскости чисел (Ф5, ревью-блокер B3).
+
+        Три ключа, которых нет у трёх соседних плоскостей CRM (логгер/ошибки/
+        stats) — «числа» осмысленны только у порта наблюдений:
+
+        * ``numbers_delivered`` — сколько чисел реально ушло в раздачу tap'ам
+          (не подавлено реентерабельностью). **Без лока на горячем пути**
+          (см. докстринг :meth:`_deliver_number`) — под конкуренцией МОЖЕТ
+          недосчитать единицы (GIL не даёт исказить порядки величины). Годится
+          отличить «плоскость живая» от «мертва» (см. ниже), не годится как
+          точный аудит;
+        * ``numbers_dropped_by_sink_error`` — alias ``tap_write_errors``: tap
+          бросил при записи (раздача глушит отказ ПРИЁМНИКА, но считает его) —
+          точный, под ``_miss_lock`` ``ChannelRoutingManager``, путь потери;
+        * ``numbers_suppressed_reentrant`` — alias ``tap_reentrant_suppressed``:
+          вход был реентерабельным, раздача подавлена целиком (D1) — тоже точный.
+
+        Пара к :attr:`StatsManager.observation_bypasses` (B2): «в боевой
+        сборке обходов ноль» само по себе неотличимо от «портом никто не
+        пользовался» — а ``numbers_delivered > 0`` отличимо.
+        """
+        stats = super().get_stats()
+        stats["numbers_delivered"] = self._numbers_delivered_count
+        stats["numbers_dropped_by_sink_error"] = stats.get("tap_write_errors", 0)
+        stats["numbers_suppressed_reentrant"] = stats.get("tap_reentrant_suppressed", 0)
+        return stats
 
     def __repr__(self) -> str:  # pragma: no cover — диагностика
         return f"ObservationManager(manager_name={self.manager_name!r})"

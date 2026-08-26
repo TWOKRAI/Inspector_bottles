@@ -4,6 +4,22 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-08-26 (Ф5, доработка по синхронному ревью — `plans/observation-port/plan.md`, полное
+  решение в `statistics_module/DECISIONS.md`, ADR-SM-014):** три правки со стороны этого модуля.
+  **S1** — `_MockObservationPort` (`plugins/testing.py`) стал наследником `ObservationPort` над
+  реальным приватным `PluginLevels()`: до правки `ctx.declare_metric`/`publish_metric`/
+  `_retract_metrics` роняли `AttributeError` при первом же вызове через
+  `MockProcessServices(stats_manager=...)`, и гейт был зелёным только потому, что ни один тест не
+  гонял уровни через ЭТУ комбинацию (новый файл `tests/test_mock_observation_port_levels.py`, 5
+  тестов + break-injection). **S2** — `observability_counters()` (`managers/observability_reload.py`)
+  получил параметр `observation` (рядом с `logger`/`error`/`stats`), оба вызывающих в
+  `commands/builtin_commands.py` резолвят менеджер через новый `_safe_get_manager()`: живой прогон
+  ПОЛНОГО гейта (не модульного) вскрыл, что `svc.get_manager` бывает `callable`, но БРОСАЕТ у
+  `ProcessManagerProcess` (`AttributeError: ... no attribute '_registry'`, латентный дефект
+  соседнего процесса вне скоупа задачи) — диагностическая команда не имеет права падать из-за этого.
+  Шесть новых имён в `PLANE_COUNTER_KEYS`. **Побочная правка** — `heartbeat/telemetry.py`:
+  `PluginLevels.__slots__` получил `__weakref__` (нужен `statistics_module`'у для дедупа B1, см.
+  ADR-SM-014).
 - **2026-08-25 (Ф4 «порт наблюдений», Task 4.1, `plans/observation-port/plan.md`,
   [ADR-PM-041](DECISIONS.md) / [ADR-PM-042](DECISIONS.md)):** политика порта — glob-правилами по
   ПУТИ дерева, в панели L0–L3 логирования, без пятой двери конфига. Решение «поедет ли лист»

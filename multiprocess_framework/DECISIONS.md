@@ -2477,7 +2477,7 @@
 | Модуль | Файл | Слой | Статус |
 |--------|------|------|--------|
 | `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-BM-001…005 (Удаление PluginRegistry/ObservablePlugin из base_manager, ..., Отсутствующий метод менеджера — считанный отказ, а не допуск) |
-| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…008 (Удаление `_compat.py`, ..., UI-hints каталог FieldMeta (`ui_group`/`ui_order`/`ui_hidden`) — без отдельного `ui_widget`) |
+| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…009 (Удаление `_compat.py`, ..., `core/metrics.py` — заморозка S-27 с голосом и потолком) |
 | `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-DSP-001…004 (Извлечение ScenarioManager из Dispatcher, ..., Асимметрия дефолта `expects_full_message` (Dispatcher vs RouterManager)) |
 | `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…015 (Паттерн CRM (ChannelRoutingManager), ..., запись-АГРЕГАТ в stats-слоте hub'а — один маркер на трёх потребителей) |
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-LOG-001…010 (Удаление LogDispatcher, ..., У порога одна ось — скоуп перестаёт быть гейтом (Ф8.1)) |
@@ -2500,7 +2500,7 @@
 | `service_module` | [`modules/service_module/DECISIONS.md`](modules/service_module/DECISIONS.md) | Services & Lifecycle | ADR-SVC-001…003 (Singleton ServiceRegistry через `__new__` + Lock, ..., `ServiceRegistry` хранит классы, не экземпляры) |
 | `display_module` | [`modules/display_module/DECISIONS.md`](modules/display_module/DECISIONS.md) | Services & Lifecycle | ADR-DM-001…004 (DisplayEntry generic: без vision-полей, ..., `reload` = только метаданные, render-поля игнорируются) |
 | `event_module` | [`modules/event_module/DECISIONS.md`](modules/event_module/DECISIONS.md) | Messaging |  |
-| `app_module` | [`modules/app_module/DECISIONS.md`](modules/app_module/DECISIONS.md) | Composition / App |  |
+| `app_module` | [`modules/app_module/DECISIONS.md`](modules/app_module/DECISIONS.md) | Composition / App | ADR-APP-001…006 (app_module как верхний композиционный ярус (не 4-й корень), ..., `GenericProcessManagerApp` + двухсортные хук-точки (Ф5.12)) |
 <!-- ADR-INDEX:END -->
 
 ---

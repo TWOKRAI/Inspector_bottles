@@ -101,6 +101,27 @@ def _parse_ttl(args: dict) -> tuple[float | None, str | None]:
         return None, str(exc)
 
 
+def _safe_get_manager(svc: Any, name: str) -> Any:
+    """``svc.get_manager(name)`` — не роняет диагностическую команду (Ф5, ревью-блокер S2).
+
+    ``get_manager`` объявлен ``ObservableMixin`` и обычно безопасен, но не у
+    ВСЕХ держателей ``services`` его база инициализирована одинаково —
+    воспроизведено на ``ProcessManagerProcess`` (латентный, не связанный с этой
+    задачей дефект соседнего процесса): атрибут ``callable``, а вызов бросает
+    ``AttributeError: 'ProcessManagerProcess' object has no attribute
+    '_registry'``. Диагностика (``introspect.observability``/``config.reload``)
+    не имеет права падать из-за состояния СОСЕДНЕГО механизма — тот же довод,
+    по которому ``_plane_counters`` глушит отказ ``get_stats()``.
+    """
+    get_manager = getattr(svc, "get_manager", None)
+    if not callable(get_manager):
+        return None
+    try:
+        return get_manager(name)
+    except Exception:  # noqa: BLE001 — диагностика не должна падать из-за чужого состояния
+        return None
+
+
 #: Команды, чьи параметры судятся ПО ТИПАМ до входа в хендлер (Task 2.2, Р-3а).
 #:
 #: Список **явный**, а не «все команды с контрактом», и это решение владельца
@@ -919,6 +940,12 @@ class BuiltinCommands:
         logger = getattr(svc, "logger_manager", None)
         error = getattr(svc, "error_manager", None)
         stats = getattr(svc, "stats_manager", None)
+        # Ф5, ревью-блокер S2: та же дорога, которой резолвер порта достаёт
+        # слот ``observation`` (``observation_port`` ступень 1) — здесь нужен
+        # именно МЕНЕДЖЕР (у него есть ``get_stats()``), а не бесхозный вид
+        # ступени 2, поэтому напрямую через ``get_manager``, а не через
+        # ``observation_port(svc)``.
+        observation = _safe_get_manager(svc, "observation")
         layers = process_observability_layers(svc)
         try:
             audit_limit = int(args.get("audit_limit", 20))
@@ -978,6 +1005,7 @@ class BuiltinCommands:
                 logger=logger,
                 error=error,
                 stats=stats,
+                observation=observation,
                 hub=getattr(svc, "_observability_hub", None),
                 flush=bool(args.get("flush")),
             ),
@@ -1772,6 +1800,8 @@ class BuiltinCommands:
             _logger = getattr(svc, "logger_manager", None)
             _error = getattr(svc, "error_manager", None)
             _stats = getattr(svc, "stats_manager", None)
+            # Ф5, ревью-блокер S2 — тот же геттер, что и в introspect.observability.
+            _observation = _safe_get_manager(svc, "observation")
 
             # Task 5.5: ссылки, за которыми нет приёмника. Ответ РАЗНЫЙ по месту, и
             # это не вкус:
@@ -2130,7 +2160,9 @@ class BuiltinCommands:
             # самой этой команды (эмитированы до снимка, посчитаны после него —
             # батчинг), и на молчащем процессе поток выглядел бы ненулевым.
             # Замер цены одного опроса — в docstring `observability_counters`.
-            result["counters"] = observability_counters(logger=_logger, error=_error, stats=_stats, flush=True)
+            result["counters"] = observability_counters(
+                logger=_logger, error=_error, stats=_stats, observation=_observation, flush=True
+            )
             # Task 5.8: сроки — в ответе КАЖДОГО reload, включая файловый. Файл L3 не
             # трогает, но именно после reload оператор и спрашивает «что у меня ещё
             # висит»; молчание здесь читалось бы как «ничего не висит».

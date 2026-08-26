@@ -38,6 +38,7 @@
 | **CHN** | `chain_module` | `modules/chain_module/DECISIONS.md` |
 | **SVC** | `service_module` | `modules/service_module/DECISIONS.md` |
 | **DM** | `display_module` | `modules/display_module/DECISIONS.md` |
+| **APP** | `app_module` | `modules/app_module/DECISIONS.md` |
 <!-- ADR-CODES:END -->
 
 ## Маппинг старых → новых (модульные ADR)

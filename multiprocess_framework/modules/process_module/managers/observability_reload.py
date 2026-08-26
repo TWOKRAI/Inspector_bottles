@@ -538,6 +538,23 @@ PLANE_COUNTER_KEYS: tuple = (
     # предела рекурсии, — но невидимым быть не вправе: «хвост тихий» и «хвост
     # глушит сам себя» лечатся разным, а выглядят одинаково.
     "tap_reentrant_suppressed",
+    # Ф5, ревью-блокер B3 — tap хвоста бросил при записи; глушится (эмитент не
+    # роняется), но не молчит счётчиком.
+    "tap_write_errors",
+    # Ф5, ревью-блокер B2 — числа плоскости stats, ушедшие МИМО порта наблюдений
+    # (attach_observation_port не вызывался/не удался). В боевой сборке обязан
+    # быть пустым словарём; словарь по МЕТОДУ (record_metric/gauge/…), а не
+    # единое число — см. ``StatsManager.observation_bypasses``.
+    "observation_bypasses",
+    # Ф5, ревью-блокер B3 — собственные счётчики порта наблюдений (только у
+    # ``ObservationManager``, три соседние плоскости их не заводят вовсе):
+    # сколько чисел реально ушло в раздачу tap'ам, сколько потеряно отказом
+    # приёмника и сколько подавлено реентерабельностью. Без них «обходов
+    # ноль» (``observation_bypasses == {}``) неотличимо от «портом никто не
+    # пользовался» — см. ``ObservationManager.get_stats``.
+    "numbers_delivered",
+    "numbers_dropped_by_sink_error",
+    "numbers_suppressed_reentrant",
     # Ф4.1 — цепочка процессоров. Поглощение записи процессором ЗАКОННО
     # (ради него заводится сэмплинг Ф7.1), но невидимым быть не вправе:
     # иначе «уровень включён, а записей нет» неотличимо от сломанного
@@ -648,10 +665,19 @@ def observability_counters(
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    observation: Any = None,
     hub: Any = None,
     flush: bool = False,
 ) -> Dict[str, Any]:
-    """Потери и глубина буферов трёх плоскостей — «сколько наблюдаемости не доехало».
+    """Потери и глубина буферов ЧЕТЫРЁХ плоскостей — «сколько наблюдаемости не доехало».
+
+    ``observation`` — Ф5, ревью-блокер S2. До этой правки кортеж называл только
+    ``logger``/``error``/``stats``: секция ``observation`` в ответе
+    ``introspect.observability`` существовала (``observation_plane_report``), но
+    отвечала ТОЛЬКО за гейт УРОВНЕЙ (``writers``/``publications``) — счётчиков
+    ЧИСЕЛ порта (``numbers_delivered`` и соседи, B3; ``observation_bypasses``
+    менеджера stats, B2) в ответе не было вовсе, и «один писатель» проверялся
+    только тестами: спросить у ЖИВОГО процесса было нечем.
 
     Отвечает на вопросы, которые до Ф0.3 нельзя было задать живому процессу
     снаружи вообще: ``get_stats()`` менеджеров не читал никто, кроме тестов.
@@ -688,7 +714,7 @@ def observability_counters(
                     # потерять весь снимок из-за одной несжатой плоскости.
                     pass
     out: Dict[str, Any] = {}
-    for name, manager in (("logger", logger), ("error", error), ("stats", stats)):
+    for name, manager in (("logger", logger), ("error", error), ("stats", stats), ("observation", observation)):
         section = _plane_counters(manager)
         if section is not None:
             out[name] = section

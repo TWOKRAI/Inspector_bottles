@@ -1152,3 +1152,101 @@ Break-injection (`del StatsManager.attach_observation_port`, имитация п
   доставлять синхронно ничего, кроме as-is при помощи менеджера; оставлен no-op, названо явно
   (докстринг `ObservationPort._deliver_number`) как расхождение с плоскостью УРОВНЕЙ, где та же
   ступень 2 отдаёт РАБОТАЮЩИЙ вид на `PluginLevels`.
+
+### Доработка по синхронному ревью Ф5 (владелец → TeamLead, 2026-08-26, три блокера + два значительных)
+
+Ревью нашло, что «один писатель чисел» было ДОКАЗАНО тестами, но НЕ выдерживало три
+воспроизведения запуском. Три блокера (B1/B2/B3) и два значительных (S1/S2) закрыты этой правкой,
+каждый — с before/after числами (см. отчёт задачи, здесь — решения и их обоснование).
+
+**B1 — тихий `return` у `ObservationPort._deliver_number` (голый вид, ступень 2 резолвера).**
+Выбор из двух предложенных: **base `_deliver_number` считает потерю и говорит один раз** — НЕ
+вариант «ступень 2 не отдаёт числовую четвёрку вовсе». Причина отказа от второго варианта —
+`test_f5_independent_acceptance.py::test_s4_...` и авторский hazard-файл
+(`test_observation_port_aggregation_hazards.py`) строят `_MutedObservationPort`/муте-порты как
+наследники ГОЛОГО `ObservationPort`, у которых числовая четвёрка **обязана присутствовать** (иначе
+не на чем муте демонстрировать «числа уходят в никуда, а не падают `AttributeError`'ом») — снятие
+методов со ступени 2 сломало бы оба существующих файла. Дедуп «сказано один раз» ведётся
+`WeakKeyDictionary`, ключ — САМО хранилище (`PluginLevels`), а не экземпляр `ObservationPort`:
+резолвер минтит новый бесхозный вид на КАЖДЫЙ вызов (см. докстринг `observation_port()`), и дедуп
+на эфемерном виде не дедуплицировал бы НИЧЕГО — WARNING сыпался бы на каждый вызов `_stats_call`.
+`PluginLevels.__slots__` получил `__weakref__` ради этого одной строкой (`heartbeat/telemetry.py`).
+Новая функция `bare_port_number_losses(store)` — диагностика и тест-опора, не readback: у
+бесхозного вида нет `services`, чтобы адресоваться в `introspect.observability` (это и есть
+структурная причина, по которой B1 — «эфемерный, non-boot-assembly» случай, а не боевой).
+
+**B2 — `attach_observation_port` докладывал `True` без состоявшейся подписки.** Требование ревью —
+`False` при несостоявшейся подписке. Реализовано буквально: `port is not None and not
+callable(getattr(port, "add_tap", None))` → `False`, `self._observation_port` НЕ подменяется
+(менеджер остаётся на прежней прямой дороге, посчитанной `observation_bypasses`). **Побочный
+эффект, названный, а не подразумеваемый:** это сделало НЕВЫПОЛНИМЫМ прежний способ строить
+«муте-порт для attach» в `test_f5_independent_acceptance.py::test_m5_...` — `_MutedObservationPort`
+там голый (без `add_tap`), и `attach(bare) -> True` было ЕГО собственным механизмом мьютинга.
+Тест правлен (третья запись в истории этого теста, см. докстринг `_MutedNumberManager` в файле):
+свойство М5 («заглуши порт — молчат ВСЕ окна») не изменилось, изменился ТОЛЬКО объект, которым
+достигается муте — с голого `ObservationPort` на `ObservationManager`-наследника, глушащего
+исключительно `_deliver_number` (тот же жест, что `_MutedAfterAttachPort` в соседнем авторском
+hazard-файле). `muted_level_port` (плоскость УРОВНЕЙ, к `StatsManager` не подключается) не тронут.
+Пара к `observation_bypasses` — положительный счётчик `ObservationManager.numbers_delivered` (B3).
+
+**B3 — доставка чисел через `_emit_to_taps`, чей контракт глушит отказы.** Выбор из двух
+предложенных: **у порта появляются собственные счётчики**, а НЕ второй, не глушащий шов для чисел
+(тот отдельно ОТКЛОНЁН — второй маршрутизатор рядом с CRM-tap воспроизвёл бы ровно тот класс
+дублирующихся дорог, который весь ADR-SM-014 закрывает). `tap_write_errors` — НОВЫЙ, ПЯТЫЙ класс
+`LOSS_COUNTER_KEYS` в БАЗОВОМ `ChannelRoutingManager` (не только у `ObservationManager` — контракт
+«tail не роняет, но считает» одинаково верен у ВСЕХ четырёх наследников: любой tap любой плоскости
+может бросить при записи). `ObservationManager.get_stats()` добавляет три СВОИХ ключа поверх общих:
+`numbers_delivered`, `numbers_dropped_by_sink_error` (alias `tap_write_errors`),
+`numbers_suppressed_reentrant` (alias `tap_reentrant_suppressed`) — не заведены в `self.stats`
+общим списком, потому что «числа» осмысленны только у порта наблюдений (тот же довод, по которому
+2.2 держит кардинальность вне `LOSS_COUNTER_KEYS`). **Найденный и исправленный СОБСТВЕННЫЙ дефект
+реализации, не только review-финдинг:** первая редакция `numbers_delivered` сравнивала
+`self.stats["tap_reentrant_suppressed"]` до/после вызова `_emit_to_taps` — счётчик ОБЩИЙ на
+менеджер, и вложенный реентерабельный echo (tap, зовущий `record_metric` из своего `write()`)
+поднимал его НЕ на том вызове, который проверяли: 5 внешних, честно доставленных вызовов ошибочно
+получали `numbers_delivered == 0`. Найдено СОБСТВЕННЫМ авторским тестом
+(`test_f5_review_blockers.py::test_reentrant_delivery_is_suppressed_and_counted_not_lost_silently`)
+на этапе разработки, а не после сдачи. Правка — проверка `self._tap_depth.active` ДО вызова (тот же
+предикат, которым сам `_emit_to_taps` решает «подавлять или нет»), а не дифф общего счётчика.
+
+**Второй собственный дефект той же правки, найден полным гейтом, не модульным.** Первая редакция
+инкремента `numbers_delivered` брала `self._miss_lock` на КАЖДОЙ доставке — лок на ЗДОРОВОМ пути,
+прямое нарушение собственного, уже задокументированного инварианта `_miss_lock` («берётся ТОЛЬКО на
+пути потери, поэтому на здоровом пути не стоит ничего», `channel_routing_manager.py`). Модульный гейт
+`statistics_module` этого не поймал — цена одного лока тонет в шуме pytest; `process_module/tests/
+test_plugin_stats_road.py::TestTheCostOfTheHotPath` (бюджет 5.0 мкс, замерено Ф5 ДО этой правки:
+2.88–3.35 мкс) покраснел ТОЛЬКО в ПОЛНОМ гейте (8928 тестов, машина под нагрузкой) — тот самый класс,
+из-за которого репозиторий требует гонять оба гейта, а не один. Правка — `numbers_delivered` больше
+не под локом; счётчик — **не атомарный** под конкуренцией (GIL сериализует байткод, но
+read-modify-write из двух потоков может потерять инкремент), это ЗАЯВЛЕНО в докстринге
+`get_stats()`, а не подразумевается: годится отличить «плоскость живая» от «мертва» (пара к
+`observation_bypasses`), не годится как точный аудит — для точного счёта есть локи соседних методов
+на пути ПОТЕРИ, где цена лока законна.
+
+**S1 — `_MockObservationPort` не имел `for_plugin`.** `PluginContext.declare_metric`/
+`publish_metric`/`_retract_metrics` падали `AttributeError` на первом же вызове через
+`MockProcessServices(stats_manager=...)`; гейт был зелёным только потому, что ни один тест не гонял
+уровни через ЭТУ комбинацию. Реализовано по предложенному в ревью пути: двойник наследует
+`ObservationPort` над РЕАЛЬНЫМ (приватным, не разделяемым со `services.plugin_levels`)
+`PluginLevels()` — `for_plugin`/`declare`/`publish`/`retract`/`collect_subtree`/`level_names`
+настоящие; переопределены ТОЛЬКО числовые методы (`record_metric`/`gauge`/`record_timing`/
+`histogram`), ради которых класс изначально заводился. Тест — `test_mock_observation_port_levels.py`
+(`process_module/tests/`), включая ломающую инъекцию (снятие `for_plugin` с `ObservationPort`
+воспроизводит исходный `AttributeError`).
+
+**S2 — плоскость порта не отдавала наружу НИ ОДНОГО счётчика через `introspect.observability`.**
+`observability_counters()` (`process_module/managers/observability_reload.py`) получил четвёртый
+именованный параметр `observation` (рядом с `logger`/`error`/`stats`), оба вызывающих в
+`builtin_commands.py` резолвят менеджер тем же `get_manager("observation")`, которым уже пользуется
+резолвер порта (ступень 1), — ЗАЩИЩЕНО через новый `_safe_get_manager()`, а не голым
+`getattr(svc, "get_manager")(...)`: живой прогон гейта вскрыл, что `get_manager` бывает `callable`,
+но БРОСАЕТ у соседнего держателя `services` (`ProcessManagerProcess` — `AttributeError:
+'ProcessManagerProcess' object has no attribute '_registry'`, латентный дефект СОСЕДНЕГО процесса,
+не в скоупе этой задачи, но диагностика не имеет права падать из-за чужого состояния — тот же довод,
+которым `_plane_counters` уже глушит отказ `get_stats()`). `PLANE_COUNTER_KEYS` получил шесть новых
+имён (`tap_write_errors`, `observation_bypasses`, `numbers_delivered`,
+`numbers_dropped_by_sink_error`, `numbers_suppressed_reentrant` — плюс существующий
+`tap_reentrant_suppressed` теперь виден и в секции `observation`, не только `logger`/`error`/`stats`).
+`StatsManager.get_stats()` публикует `observation_bypasses` (раньше — только Python-свойство, снаружи
+непроверяемое). Живой стенд — см. отчёт задачи (`introspect.observability` → секция `observation`
+на `camera_0`).

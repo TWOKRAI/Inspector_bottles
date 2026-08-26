@@ -360,7 +360,13 @@ class PluginLevels:
     видно снаружи.
     """
 
-    __slots__ = ("_values", "_lock", "_departed")
+    # ``__weakref__`` добавлен ради Ф5 (ревью-блокер B1,
+    # ``statistics_module/observation/observation_manager.py``): дедуп потерь
+    # чисел у бесхозного вида (ступень 2 резолвера) ведётся
+    # ``WeakKeyDictionary``, ключ — ЭТО хранилище. Без слота объект без
+    # ``__dict__`` не поддерживает слабые ссылки (``TypeError: cannot create
+    # weak reference``), и связка развалилась бы на первом же вызове.
+    __slots__ = ("_values", "_lock", "_departed", "__weakref__")
 
     def __init__(self) -> None:
         #: писатель → {имя → значение}

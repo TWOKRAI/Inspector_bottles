@@ -62,6 +62,32 @@ class _MutedObservationPort(ObservationPort):
         pass
 
 
+class _MutedNumberManager(ObservationManager):
+    """Заглушенный ЧИСЛОВОЙ порт для ``attach_observation_port`` (Ф5, ревью-блокер B2).
+
+    Правка B2 сделала ``attach_observation_port`` отказывающим у порта БЕЗ
+    ``add_tap`` (см. ``StatsManager.attach_observation_port`` — бывший
+    ``_MutedObservationPort`` этого файла не проходит: он голый
+    :class:`ObservationPort`, ``add_tap`` не имеет вовсе). М5 при этом
+    проверяет ДРУГОЕ свойство — «порт ПОДКЛЮЧЁН и молчит на своём шве», а не
+    «порт не может подключиться»; для ЭТОГО свойства нужен порт, который
+    ``add_tap`` ИМЕЕТ (настоящий :class:`ObservationManager` — подписка
+    состоится, ``attach`` вернёт ``True``), но глушит именно
+    :meth:`_deliver_number`, ровно как это уже делает ``_MutedAfterAttachPort``
+    в соседнем авторском hazard-файле
+    (``test_observation_port_aggregation_hazards.py``) — тот же жест, что и
+    там, тем же доводом.
+
+    Свойство М5 («заглуши порт — молчат агрегаты ВСЕХ окон») от этой замены не
+    меняется ни на бит: mute остаётся mute, просто честнее ОТНОСИТЕЛЬНО B2 —
+    он ПОДПИСАН и решает молчать, а не притворяется подключённым, не умея
+    подписаться вовсе.
+    """
+
+    def _deliver_number(self, record: Any) -> None:  # noqa: D401
+        pass
+
+
 def _make_live_port() -> ObservationPort:
     """Живой порт поверх настоящего ``PluginLevels`` — пара-контроль М5, плоскость УРОВНЕЙ.
 
@@ -215,9 +241,9 @@ def test_m5_muted_port_silences_levels_and_all_process_windows_live_port_gives_b
 
     Пара:
     - ``mute``: числовой порт КАЖДОГО писателя заглушен
-      (:class:`_MutedObservationPort`, теперь глушит и ``_deliver_number``);
-      уровень публикуется через ОТДЕЛЬНЫЙ, тоже заглушенный порт (плоскость
-      уровней стенду не нужно смешивать с плоскостью чисел писателей — она
+      (:class:`_MutedNumberManager` — правка B2, ниже); уровень публикуется
+      через ОТДЕЛЬНЫЙ, тоже заглушенный БЕСХОЗНЫЙ порт (плоскость уровней
+      стенду не нужно смешивать с плоскостью чисел писателей — она
       проверяется тем же классом, но независимо). Целевой контракт М5 —
       заглушенный порт молчит ВЕЗДЕ: ни одна из двух counter-метрик не
       долетает ни до одного окна, а уровень в дереве (``fps``) не появляется
@@ -226,13 +252,33 @@ def test_m5_muted_port_silences_levels_and_all_process_windows_live_port_gives_b
       (:func:`_make_number_port`/:func:`_make_live_port`). И уровень
       публикуется литералом, и ОБА окна (``writer_a``/``writer_b``) отдают
       литерал ``count == 3.0``.
+
+    **Правка B2 (ревью Ф5, TeamLead, экспресс-реализация — история продолжена,
+    третья запись).** ``attach_observation_port`` стал отказывающим у порта БЕЗ
+    ``add_tap`` (см. ``StatsManager.attach_observation_port`` — воспроизведено:
+    ``bare = ObservationPort(...); attach(bare) -> True`` докладывал успех,
+    хотя число НИКОГДА не возвращалось этому менеджеру обратно). Прежний
+    ``muted_port_a``/``muted_port_b`` были голыми :class:`_MutedObservationPort`
+    (``ObservationPort`` без CRM, без ``add_tap``) — с правкой B2
+    ``attach_observation_port(muted_port_a)`` вернул бы ``False``, и стенд
+    остался бы на СТАРОЙ прямой дороге StatsManager, которая как раз ДОСТАВЛЯЕТ
+    (не мьютит) — тест противоречил бы сам себе. Свойство, которое здесь
+    проверяется («порт ПОДКЛЮЧЁН и молчит»), а не «порт не может
+    подключиться» — заменено на :class:`_MutedNumberManager` (настоящий
+    ``ObservationManager``, ``add_tap`` есть, подписка СОСТОИТСЯ, глушит
+    только ``_deliver_number``) — тот же жест, что уже стоит в соседнем
+    авторском hazard-файле (``_MutedAfterAttachPort``,
+    ``test_observation_port_aggregation_hazards.py``). ``muted_level_port``
+    (плоскость УРОВНЕЙ, не подключается к ``StatsManager`` вовсе) не тронут —
+    B2 про ``attach_observation_port``, к нему это не относится.
     """
     hub = ObservabilityHub("f5-tester-process")
 
     # ---------------------------------------------------------------- mute
     muted_level_port = _MutedObservationPort(None)
-    muted_port_a = _MutedObservationPort(None)
-    muted_port_b = _MutedObservationPort(None)
+    muted_port_a = _MutedNumberManager(manager_name="muted_port_a")
+    muted_port_b = _MutedNumberManager(manager_name="muted_port_b")
+    assert muted_port_a.initialize() and muted_port_b.initialize(), "стенд сломан ДО нагрузки"
 
     writer_a_mute = _make_stats_manager("writer_a_mute", hub, port=muted_port_a)
     writer_b_mute = _make_stats_manager("writer_b_mute", hub, port=muted_port_b)
@@ -270,7 +316,10 @@ def test_m5_muted_port_silences_levels_and_all_process_windows_live_port_gives_b
     finally:
         writer_a_mute.shutdown()
         writer_b_mute.shutdown()
-        # muted_port_a/b — бесхозные ObservationPort (без CRM), у них нет shutdown().
+        # B2: muted_port_a/b теперь настоящие ObservationManager (CRM-база) —
+        # в отличие от прежних бесхозных ObservationPort, у них ЕСТЬ shutdown().
+        muted_port_a.shutdown()
+        muted_port_b.shutdown()
 
     # ---------------------------------------------------------------- live (пара-контроль)
     live_level_port = _make_live_port()

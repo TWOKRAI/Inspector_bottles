@@ -22,6 +22,16 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+# Ф5, ревью-блокер S1: импорт МОДУЛЬНЫЙ, не ленивый, в отличие от
+# ``PluginContext._observation_port``/``process_managers._create_observation_manager``
+# (те лениво импортируют ``statistics_module`` из горячего пути боевого
+# процесса — здесь его нет). Цикла тоже нет: ``observation_manager.py`` тянет
+# ``process_module`` обратно ТОЛЬКО лениво (``_telemetry()``), а этот файл —
+# тестовая утилита, которую боевая загрузка процесса не импортирует вовсе
+# (не часть ``process_module/__init__.py``).
+from ...statistics_module.observation.observation_manager import ObservationPort
+from ..heartbeat.telemetry import PluginLevels
+
 
 # ---------------------------------------------------------------------------
 # Mock-менеджеры
@@ -159,7 +169,7 @@ class MockStatsManager:
         self._put("histogram", name, value, tags)
 
 
-class _MockObservationPort:
+class _MockObservationPort(ObservationPort):
     """Тестовый двойник порта наблюдений — числа фасада форвардит в ``stats_manager``.
 
     Ф5, задача 5.2: ``PluginContext`` больше не пишет в
@@ -175,22 +185,28 @@ class _MockObservationPort:
     прямой форвард без CRM/tap-механики, чтобы существующий парк остался
     про контракт фасада, а не про внутренний механизм доставки Ф5.
 
-    ``collect_subtree`` — не для доставки чисел, а для того, чтобы
-    РЕЗОЛВЕР (``observation_port()``) вообще принял этот объект: ступень 1
-    отбирает менеджера по протоколу (``callable(getattr(manager,
-    "collect_subtree", None))``), тем же доводом, что у
-    ``ObservableMixin._manager_has_method`` — без метода двойник считался бы
-    посторонним объектом и резолвер провалился бы на ступень 2 (уровни, не
-    числа), где стенду взяться неоткуда.
+    **Наследник настоящего ``ObservationPort`` над РЕАЛЬНЫМ ``PluginLevels``
+    (Ф5, ревью-блокер S1), а не дубль по форме.** До этой правки класс не
+    наследовал ``ObservationPort`` вовсе и не имел ``for_plugin`` — резолвер
+    ступени 1 принимал его по протоколу (``collect_subtree`` был, отдавал
+    заглушку ``{}``), но ТРИ дороги уровней (``declare_metric``/
+    ``publish_metric``/``_retract_metrics``, все они зовут
+    ``port.for_plugin(writer)``) падали ``AttributeError`` при первом же
+    вызове через ``MockProcessServices`` с непустым ``stats_manager``. Гейт
+    был зелёным только потому, что НИ ОДИН тест не гонял уровни через мок —
+    дыра пряталась за отсутствием пробы, а не за прошедшей проверкой.
+    Наследование от ``ObservationPort`` закрывает её целиком: ``for_plugin``/
+    ``declare``/``publish``/``retract``/``collect_subtree``/``level_names``
+    теперь настоящие, работающие поверх приватного (не разделяемого со
+    ``services.plugin_levels``) хранилища этого двойника — переопределены
+    только ЧИСЛА, ради которых класс и заводился.
     """
 
     __slots__ = ("_stats",)
 
     def __init__(self, stats_manager: Any) -> None:
+        super().__init__(PluginLevels())
         self._stats = stats_manager
-
-    def collect_subtree(self, allowed_metrics: Any = None) -> dict:
-        return {}
 
     def record_metric(self, name: str, value: Any = 1, tags: dict | None = None) -> None:
         self._stats.record_metric(name, value, tags)

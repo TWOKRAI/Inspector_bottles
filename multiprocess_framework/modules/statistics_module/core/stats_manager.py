@@ -722,7 +722,28 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         и ``get_metric``/окно агрегации не увидят числа НИ РАЗУ, хотя
         ``record_metric`` формально был вызван. Ни второй ветки, ни
         специального кода для этого случая нет: он покрыт тем же путём, что
-        и живой порт.
+        и живой порт. **Условие для этого — подписка ДОЛЖНА состояться**
+        (см. блокер B2 ниже): муте — это порт, который ПОДПИСАН и молчит на
+        своём шве, а не порт, который вовсе не смог подписаться.
+
+        **Подписка обязана СОСТОЯТЬСЯ, иначе attach — отказ (Ф5, ревью-блокер
+        B2).** До этой правки метод докладывал ``True`` и подменял
+        :attr:`_observation_port` даже когда ``port`` не имел ``add_tap`` —
+        числа честно форвардились в ``port.record_metric(...)``, но обратно
+        В ЭТОТ менеджер уже не возвращались никаким швом (``_on_port_record``
+        не был подписан ни на что), и ``get_metric``/окно не видели их
+        НИКОГДА, при том что ``observation_bypasses`` оставался ``{}`` —
+        ИДЕАЛЬНЫЙ ноль ровно там, где им проверяют «единственного писателя».
+        Воспроизведено (владелец, ревью Ф5, итерация 3): ``bare =
+        ObservationPort(PluginLevels()); attach_observation_port(bare) ->
+        True``, дальше три записи (``record_metric``/``gauge``/
+        ``record_timing``) — ``get_all_metrics() == {}``. Разница с муте-случаем
+        абзацем выше СТРУКТУРНАЯ, а не эмоциональная: муте подписан и решает
+        молчать НА СВОЁМ шве (``_deliver_number``) осознанно — это его контракт,
+        и он назван; порт без ``add_tap`` не может решить ничего, он просто не
+        умеет говорить ни туда, ни обратно. Отказ здесь — менеджер остаётся на
+        ПРЕЖНЕЙ прямой дороге (учтено и посчитано :meth:`_note_observation_bypass`),
+        а не наполовину подключённым к порту, который его никогда не услышит.
 
         Идемпотентно: повторный ``attach`` тем же объектом — no-op; другим —
         снимает tap со старого порта (best-effort, ``remove_tap`` глушит
@@ -737,23 +758,37 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
                 подписку и вернуться к прямой дороге.
 
         Returns:
-            ``port is not None`` — подключён ли РЕАЛЬНЫЙ порт. ``False`` у
-            ``port=None`` не отказ, а законный способ отвязаться.
+            ``True`` — подписка СОСТОЯЛАСЬ (``add_tap`` реально вызван).
+            ``False`` — либо ``port=None`` (законное явное отключение), либо
+            ``port`` не умеет ``add_tap`` (B2: половинчатое подключение хуже
+            отказа, и отказом оно и оформлено).
         """
         if port is self._observation_port:
             return port is not None
-        old = self._observation_port
         tap_name = self._observation_tap_name
+        if port is not None:
+            add_tap = getattr(port, "add_tap", None)
+            if not callable(add_tap):
+                # B2: НЕ трогаем self._observation_port — старая прямая дорога
+                # (посчитанная bypass'ом) честнее подмены на порт, который
+                # никогда не вернёт число обратно.
+                return False
+            old = self._observation_port
+            if old is not None:
+                remove = getattr(old, "remove_tap", None)
+                if callable(remove):
+                    remove(tap_name)
+            self._observation_port = port
+            add_tap(_PortTap(self._on_port_record, tap_name), min_level="DEBUG", name=tap_name)
+            return True
+        # port is None — явное отключение, см. Args выше.
+        old = self._observation_port
         if old is not None:
             remove = getattr(old, "remove_tap", None)
             if callable(remove):
                 remove(tap_name)
-        self._observation_port = port
-        if port is not None:
-            add_tap = getattr(port, "add_tap", None)
-            if callable(add_tap):
-                add_tap(_PortTap(self._on_port_record, tap_name), min_level="DEBUG", name=tap_name)
-        return port is not None
+        self._observation_port = None
+        return False
 
     @property
     def observation_bypasses(self) -> Dict[str, int]:
@@ -1025,4 +1060,10 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         # (`total_count − len(metrics)`), где период однозначен по построению.
         stats["window_observations_dropped"] = window["observations"]
         stats["window_dropped_series"] = window["names"]
+        # Ф5, ревью-блокер S2: `observation_bypasses` был свойством ТОЛЬКО
+        # Python-объекта — ни один тест снаружи (introspect.observability)
+        # не мог его прочитать. Публикуется здесь, а не в `self.stats`
+        # (`LOSS_COUNTER_KEYS`): счётчик по МЕТОДУ и общий для ТРЁХ соседних
+        # плоскостей смысла не имеет — «числа» есть только у stats/observation.
+        stats["observation_bypasses"] = self.observation_bypasses
         return stats

@@ -4,7 +4,7 @@
 
 ---
 
-## ADR-APP-001 — app_module как верхний композиционный ярус (не 4-й корень)
+## ADR-APP-001: app_module как верхний композиционный ярус (не 4-й корень)
 
 **Контекст.** Композиционный код (assembly, launch, manifest, discover) исторически
 застрял в прототипе. Нужен дом для generic-«рыбы» (Ф5.11).
@@ -25,7 +25,7 @@ framework. **Инвариант:** только композиция, ноль �
 
 ---
 
-## ADR-APP-002 — манифест под движок миграций с первого дня (`version` + `extras`)
+## ADR-APP-002: манифест под движок миграций с первого дня (`version` + `extras`)
 
 **Решение.** `AppManifest` несёт `version: int` (дефолт 1) + `extras: dict` (pass-through).
 `extras` валидирует приложение, НЕ framework — туда складывается app-специфика
@@ -39,7 +39,7 @@ framework. **Инвариант:** только композиция, ноль �
 
 ---
 
-## ADR-APP-003 — ManifestStore: единственная сериализованная точка read/write app.yaml (NEW-1)
+## ADR-APP-003: ManifestStore: единственная сериализованная точка read/write app.yaml (NEW-1)
 
 **Контекст.** Манифест — разделяемое состояние двух процессов: backend
 (`persist_pipeline_choice`) и GUI (`_persist_active_recipe`) независимо писали ключ
@@ -58,7 +58,7 @@ torn-read; комментарии сохраняются (ruamel round-trip). О
 
 ---
 
-## ADR-APP-004 — единый `discover()`: плагины по `plugin.py`, сервисы по маркеру `service.yaml`
+## ADR-APP-004: единый `discover()`: плагины по `plugin.py`, сервисы по маркеру `service.yaml`
 
 **Контекст.** Плагины сканировались в ДВУХ местах (boot `launch.py` + switch
 `orchestrator`), сервисы объявлялись вручную в топологии (A6).
@@ -77,7 +77,7 @@ torn-read; комментарии сохраняются (ruamel round-trip). О
 
 ---
 
-## ADR-APP-005 — два режима сборки; carve прикладного BlueprintAssembler отложен (вход Ф5.12)
+## ADR-APP-005: два режима сборки; carve прикладного BlueprintAssembler отложен (вход Ф5.12)
 
 **Решение.** `SystemBuilder` двухрежимный:
 - **generic** — granular build-time хуки с framework-defaults (`default_blueprint_loader`
@@ -101,7 +101,7 @@ torn-read; комментарии сохраняются (ruamel round-trip). О
 
 ---
 
-## ADR-APP-006 — `GenericProcessManagerApp` + двухсортные хук-точки (Ф5.12)
+## ADR-APP-006: `GenericProcessManagerApp` + двухсортные хук-точки (Ф5.12)
 
 **Контекст.** Прототипный оркестратор `ProcessManagerProcessApp` (~250 LOC) смешивал
 generic-плумбинг (StateStore из конфига, observability-watcher, shutdown) с

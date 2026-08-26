@@ -211,7 +211,7 @@
 
 ---
 
-## ADR-DS-009 (S-27): `core/metrics.py` — заморозка с голосом и потолком
+## ADR-DS-009: `core/metrics.py` — заморозка S-27 с голосом и потолком
 - Дата: 2026-08-26
 - Статус: принято
 - Контекст (Ф5 плана `plans/observation-port/plan.md`, Task 5.1/5.4): `MetricsCollector`
