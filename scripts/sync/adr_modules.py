@@ -121,9 +121,12 @@ def scan_module(decisions_path: Path) -> ModuleAdrs:
     # ожидаемо, индекс строится только по заголовкам уровня "## ADR-...".
     valid_lines = {m.group(0) for m in header_matches}
     in_fence = False
-    for line in text.splitlines():
+    fence_opened_at = 0
+    for lineno, line in enumerate(text.splitlines(), start=1):
         if line.strip().startswith("```"):
             in_fence = not in_fence
+            if in_fence:
+                fence_opened_at = lineno
             continue
         if in_fence:
             continue
@@ -142,6 +145,18 @@ def scan_module(decisions_path: Path) -> ModuleAdrs:
             f"Ожидаемая форма: '## ADR-{{КОД}}-{{NNN}}: заголовок' "
             f"(допустим суффикс '(was ADR-...)'). Уточнения вроде '(S-27)' "
             f"переносить в тело ADR, а не в заголовок."
+        )
+
+    # НЕЗАКРЫТЫЙ фенс ослеплял сторожа до конца файла: флаг ``in_fence``
+    # оставался поднятым, и КАЖДЫЙ последующий заголовок проходил без
+    # проверки — ровно тот исход, против которого сторож и написан («ADR
+    # есть, и его не увидит индекс»). Молчать здесь нельзя: сторож, который
+    # не может посмотреть, обязан сказать об этом, а не отчитаться зелёным.
+    if in_fence:
+        raise ValueError(
+            f"В файле '{decisions_path}' не закрыт блок ``` (открыт на строке "
+            f"{fence_opened_at}). Заголовки ADR после него НЕ проверены — "
+            f"сторож ослеп бы молча. Закрой блок и повтори."
         )
 
     if not matches:

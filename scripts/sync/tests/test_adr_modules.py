@@ -264,3 +264,51 @@ def test_scan_does_not_raise_on_legitimate_content(tmp_path, name, text):
     # Не должно бросить ValueError.
     result = scan_module(decisions)
     assert result.code == "XX", f"[{name}] код должен разобраться из валидного заголовка"
+
+
+# ---------------------------------------------------------------------------
+# Тест 9: НЕЗАКРЫТЫЙ ```-фенс не имеет права ослепить сторожа (ревью Ф5-добора,
+# находка И1 — внесена самой правкой З4).
+# ---------------------------------------------------------------------------
+
+
+def test_scan_raises_on_unclosed_fence_instead_of_going_blind(tmp_path):
+    """Незакрытый ``` держал флаг ``in_fence`` поднятым до конца файла, и КАЖДЫЙ
+    последующий заголовок проходил без проверки.
+
+    Красный без правки доказан заплатой: со снятой проверкой ``if in_fence`` в
+    конце ``scan_module`` этот тест зеленеет, а кривой заголовок ниже фенса
+    молча теряется — то есть сторож отчитывается зелёным ровно там, где он
+    ничего не видел. Литерал ниже — кривой заголовок ПОСЛЕ незакрытого блока;
+    парный контроль (закрытый блок) живёт в тесте 7.
+    """
+    decisions = tmp_path / "DECISIONS.md"
+    decisions.write_text(
+        "## ADR-XX-001: живой\n\n```\nпример, блок не закрыт\n\n## ADR-XX-002 - кривой заголовок ниже фенса\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        scan_module(decisions)
+
+    assert "не закрыт блок" in str(exc_info.value), (
+        f"ожидалось сообщение о незакрытом блоке, получено: {exc_info.value}"
+    )
+
+
+def test_scan_still_sees_a_broken_header_after_a_CLOSED_fence(tmp_path):
+    """Парный якорь к тесту выше: с ЗАКРЫТЫМ блоком сторож обязан не ослепнуть,
+    а именно поймать кривой заголовок — иначе «падает на незакрытом фенсе»
+    сошло бы и за «падает на любом файле с фенсом»."""
+    decisions = tmp_path / "DECISIONS.md"
+    decisions.write_text(
+        "## ADR-XX-001: живой\n\n```\nпример\n```\n\n## ADR-XX-002 - кривой заголовок ниже закрытого блока\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        scan_module(decisions)
+
+    assert "не разобран" in str(exc_info.value), (
+        f"ожидалось сообщение о неразобранном заголовке, получено: {exc_info.value}"
+    )
