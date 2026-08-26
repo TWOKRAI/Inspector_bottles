@@ -141,11 +141,11 @@ data_schema_module/
 _default_registry = SchemaRegistry()
 def get_default_registry() -> SchemaRegistry:
     return _default_registry
-    
+
 @register_schema("my_schema")  # Использует default
 class MySchema(SchemaBase):
     pass
-    
+
 # В тестах
 test_registry = SchemaRegistry()
 ```
@@ -393,6 +393,7 @@ class ConfigSchemaAdapter:
 
 | Дата | Версия | Что сделано | Этап |
 |------|--------|-----------|------|
+| 2026-08-26 | 2.0 | S-27 (ADR-DS-009): `core/metrics.py` заморожен — потолок `_timings` (1000/ключ), явная потеря, разовый голос WARNING, `record_metric` → counter-семантика | Ф5 (observation-port) |
 | 2026-04-09 | 2.0 | Shim cleanup: удалены fields/, utils/, _compat, tests_backup; канон storage/, discovery | 11/11 |
 | 2026-03-13 | 2.0 | Обновлена документация (README, STATUS, MIGRATION) | 10/11 |
 | 2026-03-12 | 2.0 | Завершены тесты + интеграция модулей | 9/11 |

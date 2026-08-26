@@ -357,7 +357,7 @@ from data_schema_module import FieldMeta, SchemaBase
 
 class DrawRegisters(SchemaBase):
     """Параметры рисования."""
-    
+
     dp: Annotated[float, FieldMeta(
         "Разрешение",
         info="Детальность растеризации линий",
@@ -365,7 +365,7 @@ class DrawRegisters(SchemaBase):
         unit="px",
         transfer_k=0.1,
     )] = 1.4
-    
+
     enabled: Annotated[bool, FieldMeta("Включено")] = True
 
 # Использование
@@ -377,7 +377,7 @@ print(r.model_dump())                    # → {"dp": 1.4, "enabled": True}
 success, error = r.update_field("dp", 2.0)
 if success:
     print(f"Новое значение: {r.dp}")     # → Новое значение: 2.0
-    
+
 # Валидация
 success, error = r.update_field("dp", 999.0)
 if not success:
@@ -470,34 +470,34 @@ if registry.has("draw_config"):
 FieldMeta(
     description="Краткое описание (UI-лейбл)",
     info="Подробное описание (UI-подсказка, help text)",
-    
+
     # Диапазон для числовых полей
     min=0.0,
     max=100.0,
-    
+
     # Единица измерения
     unit="px",
-    
+
     # Шаг слайдера (step = 1 / transfer_k)
     transfer_k=1.0,
-    
+
     # Округление (знаков после запятой)
     round_k=2,
-    
+
     # Маршрутизация (FieldRouting или dict)
     routing=FieldRouting(channel="control_draw"),
-    
+
     # Уровень доступа (0 = все, 1 = опытные, 2 = эксперты)
     access_level=0,
-    
+
     # Флаги
     readonly=False,
     hidden=False,
-    
+
     # Интернационализация
     description_i18n={"ru": "...", "en": "...", "de": "..."},
     info_i18n={"ru": "...", "en": "..."},
-    
+
     # Примеры значений
     examples=[1.0, 2.0, 5.0],
 )
@@ -678,7 +678,7 @@ from data_schema_module import ISchemaAdapter
 
 class RouterSchemaAdapter:
     """Преобразует Schema в описание маршрутов."""
-    
+
     def adapt(self, schema_class: Type) -> Dict[str, Any]:
         routes = {}
         for name, meta in schema_class.get_all_fields_meta().items():
@@ -696,7 +696,7 @@ from data_schema_module import ISchemaAdapter
 
 class ConfigSchemaAdapter:
     """Преобразует Schema в параметры конфигурации."""
-    
+
     def adapt(self, schema_class: Type) -> Dict[str, Any]:
         result = {}
         for name, meta in schema_class.get_all_fields_meta().items():
@@ -750,30 +750,30 @@ from data_schema_module import (
     SchemaMixin,           # Миксин с методами
     FieldMeta,             # Аннотированный дескриптор
     FieldRouting,          # Маршрутизация полей
-    
+
     # Type aliases (Percent, HsvHue, Pixels, ...)
     Percent, NormalizedFloat, Scale, Milliseconds, Seconds,
     Pixels, ImageScale, HsvHue, HsvChannel, NetworkPort, FpsLimit,
-    
+
     # Реестр
     SchemaRegistry,        # Класс реестра
     register_schema,       # Декоратор регистрации
     get_default_registry,  # Получить глобальный реестр
-    
+
     # Сериализация
     DataConverter,         # Конвертер (dict/JSON/YAML)
     FileStorage,           # JSON хранилище
     RegistersContainer,    # Контейнер регистров
-    
+
     # Config (Dict at Boundary)
     config_to_dict,        # Преобразование конфига
     process,               # process(config, worker_config) → (name, dict)
-    
+
     # Исключения
     DataSchemaError,
     SchemaValidationError,
     SchemaRegistrationError,
-    
+
     # Интерфейсы
     ISchema,
     ISchemaRegistry,
@@ -813,6 +813,17 @@ from data_schema_module.extensions.tools import (
 from data_schema_module.extensions.factory import ModelFactory
 from data_schema_module.extensions.metrics import RegistrationMetrics
 ```
+
+> **`core/metrics.py` (`MetricsCollector`) заморожен с 2026-08-26 (ADR-DS-009,
+> S-27).** 14 боевых вызывающих (`factory/model_factory.py`,
+> `registry/schema_registry.py`) продолжают писать через
+> `record_timing`/`increment_metric`, но у сборщика по-прежнему нет боевого
+> читателя `get_metrics()`. Потолок `TIMINGS_CEILING = 1000` записей на ключ
+> `_timings`, потеря сверх потолка считается явно
+> (`get_metrics()["timings"][key]["dropped"]`), и при первой записи звучит
+> один WARNING «никто не читает» через `get_std_logger`. `record_metric` —
+> counter-семантика (прибавляет, не перезаписывает). Подробности и
+> отклонённые альтернативы — [`DECISIONS.md`](DECISIONS.md#adr-ds-009-s-27-coremetricspy--заморозка-с-голосом-и-потолком).
 
 ---
 

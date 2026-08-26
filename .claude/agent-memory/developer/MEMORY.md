@@ -14,3 +14,5 @@
 - [state_store TestLazyPrune flake](project_state_store_lazy_prune_flake.md) — red only inside full 5150-test run, never isolated; pre-existing, unrelated to logger/command_module work
 - [Rename-injection substring trap](feedback_rename_injection_substring_trap.md) — word-boundary regex fixed the prefix trap, not the sibling comment-text trap; sequel 2026-08-18 replaced the guard with AST (`ast.Attribute`)
 - [Orchestrator stub contract S-29](project_orchestrator_stub_contract_s29.md) — 4 new guards via shared helper; provenance_hazards.py's copy folded in too on 2026-08-18 (review forced touching the guard anyway)
+- [Metrics freeze S-27](project_metrics_freeze_s27.md) — ceiling+voice on MetricsCollector; concurrent-voice hazard test unproven by break-injection (TOCTOU too narrow)
+- [Lazy import for LAYER 0 data_schema files](feedback_lazy_import_for_layer0_data_schema_files.md) — core/*.py can't import get_std_logger at module level, verified circular ImportError
