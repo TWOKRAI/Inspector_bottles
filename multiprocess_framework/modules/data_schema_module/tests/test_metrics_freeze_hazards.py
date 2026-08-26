@@ -144,7 +144,7 @@ def test_voice_sounds_exactly_once_under_concurrent_first_calls(caplog):
     Корректность в этой точке опирается на code review (лок физически
     покрывает check-then-set), а не только на этот прогон.
     """
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.DEBUG)
     collector = MetricsCollector()
     threads_n = 8
     barrier = threading.Barrier(threads_n)
@@ -257,7 +257,7 @@ def test_the_voice_never_kills_the_package_when_the_logger_is_unreachable():
         assert landed["value"] == 2, f"запись метрики пострадала от недоступного логгера: {landed!r}"
 
         # --- якорь существования: логгер вернулся, голос звучит ровно один раз ---
-        metrics_mod._std_logger = lambda: type("L", (), {"warning": lambda _s, *a, **k: said.append(a)})()
+        metrics_mod._std_logger = lambda: type("L", (), {"debug": lambda _s, *a, **k: said.append(a)})()
         collector.record_metric("j3.probe", 1)
         collector.record_metric("j3.probe", 1)
     finally:
@@ -278,7 +278,7 @@ def test_std_logger_returns_none_instead_of_raising_on_a_circular_import():
     (воспроизведено J3) роняет весь пакет, а не одну строчку лога.
 
     Якорь существования — во второй половине: при исправном импорте та же
-    функция отдаёт настоящий логгер с методом ``warning``.
+    функция отдаёт настоящий логгер с методом ``debug``.
     """
     import builtins
 
@@ -301,6 +301,133 @@ def test_std_logger_returns_none_instead_of_raising_on_a_circular_import():
 
     # Якорь существования: импорт исправен → настоящий логгер.
     got = metrics_mod._std_logger()
-    assert got is not None and callable(getattr(got, "warning", None)), (
-        f"при исправном импорте ожидался логгер с warning(), получено {got!r}"
+    assert got is not None and callable(getattr(got, "debug", None)), (
+        f"при исправном импорте ожидался логгер с debug(), получено {got!r}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Находка ревью Ф5 (S5): заявленная потокобезопасность не сторожилась ничем —
+# снятие ВСЕХ семи локов не красило ни одного теста из 12.
+# --------------------------------------------------------------------------- #
+
+
+class _CountingLock:
+    """Прокси над настоящим ``RLock``, считающий входы в критическую секцию.
+
+    Не подменяет семантику: внутрь уходит тот же самый лок, поэтому
+    взаимное исключение и реентрантность остаются настоящими. Считается
+    ровно факт входа — то есть НАБЛЮДАЕМЫЙ эффект «мутация прошла под
+    локом», а не наличие строки ``with self._lock`` в исходнике. Разница
+    принципиальная: шпион на тексте сторожил бы написание, а этот — поведение.
+    """
+
+    __slots__ = ("_inner", "entries")
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.entries = 0
+
+    def __enter__(self):
+        self.entries += 1
+        return self._inner.__enter__()
+
+    def __exit__(self, *exc):
+        return self._inner.__exit__(*exc)
+
+    def acquire(self, *a, **kw):  # pragma: no cover — модуль ходит через with
+        self.entries += 1
+        return self._inner.acquire(*a, **kw)
+
+    def release(self):  # pragma: no cover — модуль ходит через with
+        return self._inner.release()
+
+
+def test_every_mutating_method_actually_takes_the_lock():
+    """Каждый метод, трогающий состояние, обязан войти в критическую секцию.
+
+    **Зачем.** Докстринг класса заявляет «экземпляр потокобезопасен (`RLock` на
+    всё мутируемое состояние + флаг голоса)». Ревью Ф5 (S5) показало, что это
+    утверждение не сторожилось ничем: инъекция «`with self._lock:` → `if True:`
+    во всех СЕМИ позициях» оставляла набор из 12 тестов полностью зелёным, при
+    живом позитивном контроле (снятие потолка давало 3 красных). То есть слепа
+    была именно строка о потокобезопасности, а не набор целиком.
+
+    **Почему нельзя проверить гонкой.** Автор пробовал: 8 и 16 потоков через
+    `threading.Barrier` при заниженном `sys.setswitchinterval` не дают
+    расхождения — окно между чтением и записью флага составляет два соседних
+    байткода, и CPython почти никогда не переключает поток внутри него.
+    Красный получался ТОЛЬКО при искусственно расширенном окне (`sleep` внутри
+    критической секции), то есть при поломке, которой в коде нет. Тест на
+    гонку остаётся (`test_voice_sounds_exactly_once_under_concurrent_first_calls`),
+    но сторожем против снятия лока он не является — и это сказано в нём самом.
+
+    Здесь проверяется то, что проверить МОЖНО и что и есть предмет заявления:
+    дисциплина взятия лока на каждой дороге, меняющей состояние. Снятие лока с
+    любого одного метода красит ровно его строку таблицы.
+
+    Якорь существования — в той же таблице: до вызова счётчик равен нулю,
+    после — строго больше. Тест из одних сравнений «стало не меньше» был бы
+    зелен и на сборщике, который не делает вообще ничего.
+    """
+    collector = MetricsCollector()
+    probe = _CountingLock(collector._lock)
+    collector._lock = probe
+
+    # (имя дороги, что вызвать) — каждая обязана войти в лок хотя бы раз
+    roads = [
+        ("record_metric", lambda: collector.record_metric("s5.counter", 1)),
+        ("increment", lambda: collector.increment("s5.counter")),
+        ("record_timing", lambda: collector.record_timing("s5.timing", 0.01)),
+        ("get_metrics", lambda: collector.get_metrics()),
+        ("get_metric", lambda: collector.get_metric("s5.counter")),
+        ("reset", lambda: collector.reset()),
+    ]
+
+    assert probe.entries == 0, f"стенд сломан ДО нагрузки: счётчик входов в лок уже {probe.entries}, ожидался 0"
+
+    taken = {}
+    for name, call in roads:
+        before = probe.entries
+        call()
+        taken[name] = probe.entries - before
+
+    silent = [name for name, n in taken.items() if n == 0]
+    assert not silent, (
+        f"эти дороги меняют/читают состояние МИМО лока: {silent}. "
+        f"Полная таблица входов: {taken}. Заявление докстринга класса про "
+        f"«RLock на всё мутируемое состояние» для них не выполняется."
+    )
+    assert probe.entries >= len(roads), (
+        f"якорь существования: суммарных входов {probe.entries} при {len(roads)} дорогах — "
+        f"счётчик не считает, стенд бесполезен. Таблица: {taken}"
+    )
+
+
+def test_the_voice_flag_is_set_under_the_lock_too():
+    """Флаг голоса — тоже под локом, иначе два потока сказали бы дважды.
+
+    Отдельным тестом, а не строкой предыдущей таблицы: голос звучит ОДИН раз
+    за жизнь экземпляра, поэтому в таблице выше он неотличим от дороги, которая
+    просто не была вызвана. Здесь берётся СВЕЖИЙ сборщик, у которого голос ещё
+    не звучал, и проверяется, что первая же запись входит в лок ДО того, как
+    флаг стал `True`.
+
+    Якорь существования — вторая половина: у того же сборщика флаг после вызова
+    действительно выставлен (иначе тест был бы зелен и на сборщике, который
+    голос не подаёт вовсе).
+    """
+    collector = MetricsCollector()
+    probe = _CountingLock(collector._lock)
+    collector._lock = probe
+
+    assert collector._voice_sounded is False, "стенд сломан ДО нагрузки: голос уже прозвучал"
+    collector.record_metric("s5.voice", 1)
+
+    assert probe.entries >= 2, (
+        f"первая запись обязана войти в лок минимум дважды (голос + сама запись), "
+        f"а вошла {probe.entries} раз — флаг голоса выставляется мимо лока"
+    )
+    assert collector._voice_sounded is True, (
+        "якорь существования: после первой записи флаг голоса обязан быть выставлен"
     )

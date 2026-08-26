@@ -153,8 +153,18 @@ _NO_READER_VOICE_RE = re.compile(r"читател|читает|no reader|not rea
 
 
 def test_k3_no_reader_voice_sounds_exactly_once_not_per_call(caplog):
-    """К3: предупреждение «меня никто не читает» — одноразовое, не на каждый вызов (кванторное: 2 вызова)."""
-    caplog.set_level(logging.WARNING)
+    """К3: голос «меня никто не читает» — одноразовый, не на каждый вызов (кванторное: 2 вызова).
+
+    **Уровень изменён на DEBUG решением владельца по ревью Ф5 (S7), 2026-08-26.**
+    Тест написан независимым тестером ДО реализации и требовал WARNING — это
+    была разумная догадка о контракте, но ревью измерило её цену: голос звучит
+    на импорте пакета, то есть восемь WARNING на каждый подъём системы,
+    бессрочно, при том что сообщение описывает статический факт кода, а не
+    происшествие. Свойство, которое сторожит тест, не изменилось ни на букву:
+    голос обязан прозвучать РОВНО один раз на два вызова. Изменился только
+    уровень, на котором его ловят.
+    """
+    caplog.set_level(logging.DEBUG)
     collector = MetricsCollector()
 
     collector.record_metric("k3.voice.metric.a", 1)
@@ -165,8 +175,8 @@ def test_k3_no_reader_voice_sounds_exactly_once_not_per_call(caplog):
         f"голос «никто не читает эти метрики» обязан прозвучать РОВНО один раз (на первую "
         f"запись в жизни сборщика), а не на каждый вызов и не ни разу; после 2 вызовов на "
         f"свежем MetricsCollector() найдено {len(voice_hits)} совпадений с "
-        f"/{_NO_READER_VOICE_RE.pattern}/i среди WARNING-записей: "
-        f"{[r.getMessage() for r in voice_hits]!r} (все WARNING+: "
+        f"/{_NO_READER_VOICE_RE.pattern}/i среди DEBUG+-записей: "
+        f"{[r.getMessage() for r in voice_hits]!r} (все DEBUG+: "
         f"{[r.getMessage() for r in caplog.records]!r})"
     )
 

@@ -1072,7 +1072,7 @@ observation ТУ ЖЕ проверку, что и для по-настоящем
    они просто попадают на подключённый менеджер. Настоящая причина фолбэка —
    **менеджер, построенный ВНЕ СБОРКИ**: standalone-конструирование в тестах соседних модулей,
    ручной `StatsManager(...)` без `ProcessManagers.create_all` (в т.ч. регрессионный якорь S-4,
-   `test_f5_independent_acceptance.py::test_s4_...`, который строит менеджер именно так).
+   `test_f5_single_writer_acceptance.py::test_s4_...`, который строит менеджер именно так).
    Named-фолбэк, без которого сломался бы S-4 — но название причины было ложным, и его правка
    отдельная от факта фолбэка.
 6. **Обход фолбэка — СЧИТАЕТСЯ и ГОВОРИТСЯ, не тихий (владелец, итерация 2).** Опциональность
@@ -1087,7 +1087,7 @@ observation ТУ ЖЕ проверку, что и для по-настоящем
 
 ### Спор разобран (владелец, 2026-08-26, итерация 2 — решение окончательное)
 
-Первая итерация этой задачи нашла и доказала: `test_f5_independent_acceptance.py::test_m5_...`
+Первая итерация этой задачи нашла и доказала: `test_f5_single_writer_acceptance.py::test_m5_...`
 в исходной редакции строил `StatsManager` БЕЗ `attach_observation_port` в обоих плечах пары и
 ожидал, что состояние ДВУХ ЛОКАЛЬНЫХ, никогда не переданных менеджеру объектов `ObservationPort`
 (`muted_port`/`live_port`) повлияет на его агрегаты — структурно невыполнимо ОДНОВРЕМЕННО с
@@ -1162,7 +1162,7 @@ Break-injection (`del StatsManager.attach_observation_port`, имитация п
 **B1 — тихий `return` у `ObservationPort._deliver_number` (голый вид, ступень 2 резолвера).**
 Выбор из двух предложенных: **base `_deliver_number` считает потерю и говорит один раз** — НЕ
 вариант «ступень 2 не отдаёт числовую четвёрку вовсе». Причина отказа от второго варианта —
-`test_f5_independent_acceptance.py::test_s4_...` и авторский hazard-файл
+`test_f5_single_writer_acceptance.py::test_s4_...` и авторский hazard-файл
 (`test_observation_port_aggregation_hazards.py`) строят `_MutedObservationPort`/муте-порты как
 наследники ГОЛОГО `ObservationPort`, у которых числовая четвёрка **обязана присутствовать** (иначе
 не на чем муте демонстрировать «числа уходят в никуда, а не падают `AttributeError`'ом») — снятие
@@ -1180,7 +1180,7 @@ Break-injection (`del StatsManager.attach_observation_port`, имитация п
 callable(getattr(port, "add_tap", None))` → `False`, `self._observation_port` НЕ подменяется
 (менеджер остаётся на прежней прямой дороге, посчитанной `observation_bypasses`). **Побочный
 эффект, названный, а не подразумеваемый:** это сделало НЕВЫПОЛНИМЫМ прежний способ строить
-«муте-порт для attach» в `test_f5_independent_acceptance.py::test_m5_...` — `_MutedObservationPort`
+«муте-порт для attach» в `test_f5_single_writer_acceptance.py::test_m5_...` — `_MutedObservationPort`
 там голый (без `add_tap`), и `attach(bare) -> True` было ЕГО собственным механизмом мьютинга.
 Тест правлен (третья запись в истории этого теста, см. докстринг `_MutedNumberManager` в файле):
 свойство М5 («заглуши порт — молчат ВСЕ окна») не изменилось, изменился ТОЛЬКО объект, которым
