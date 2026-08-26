@@ -182,6 +182,9 @@ each file is standalone, so the block is duplicated; keep them in sync by editin
    known to be weak. Every final report carries a non-empty "what I left open and what I know is
    unreliable in my own work". Questions that outlive the task go to
    [`docs/claude/OPEN_QUESTIONS.md`](../docs/claude/OPEN_QUESTIONS.md).
+   The prompt argues it as self-interest, not morals: a hidden guess comes back as a review
+   finding, a re-run, a second iteration — naming it costs one sentence, hiding it costs the work
+   twice. Both outcomes were measured in Ф5 on the same day (see the block in any agent file).
 
 Both added 2026-08-26 at the owner's request. The second one has a measured origin: in Ф5 of
 `observation-port` an agent handed back its own hazard test as unreliable ("it only goes red when
