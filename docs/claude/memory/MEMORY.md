@@ -76,7 +76,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 
 ## Активные проекты и долги
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; правда в v1; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim
-- [observation-port: Ф0–Ф3 закрыты](project_observation_port_progress.md) — владение=путь; порт = 4-й слот + kind=observation; цена 3.00 записи/тик при потолке; NEXT Ф4 (открытый вопрос владельцу) и обязательная Ф5
+- [observation-port: Ф0–Ф5 ЗАКРЫТЫ](project_observation_port_progress.md) — порт = единственный писатель чисел, StatsManager стал видом; ревью вернуло 3 блокера, все закрыты; гейт 8930
 - [constructor-master прогресс](project_constructor_master_progress.md) — Ф0–Ф3 + трек F + Ф5-ядро закрыты; NEXT C1-C8 + app_module 5.11-5.13 · [чистка границ C1-C8](project_arch_boundaries_plan.md) — движок миграций 4.5 идёт в recipe, НЕ generic
 - [backend_ctl](project_backend_ctl_framework_module.md) — Phase 0+2 в main, 8.0/10; резидуалы в backend-ctl-hardening · [ловушки](project_backend_ctl_signal_integrity.md) — ложный success/timeout · [сокет мимо receive-мидлвари](project_backend_ctl_socket_bypasses_mw.md) — драйвером нельзя проверять фильтры приёма · [строгий край protocol.py](project_backend_ctl_missing_contract.md) — missing/None/null = три РАЗНЫХ факта · [MCP только через RouterManager](project_backend_control_mcp.md)
 - [Диагностика — через backend_ctl](feedback_diagnose_live_system_with_backend_ctl.md) — соседи как контроль
