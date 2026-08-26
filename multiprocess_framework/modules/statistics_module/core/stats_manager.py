@@ -17,11 +17,11 @@ StatsManager — менеджер статистики и метрик.
 StatsManager не держит ссылку на router (см. ADR comm-system-target-architecture §9.7).
 """
 
-import logging
 import threading
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from ...channel_routing_module import ChannelRoutingManager
+from ...logger_module import get_std_logger
 from ...channel_routing_module.core.config_normalizer import normalize_config
 from ..configs.stats_config import StatsManagerConfig
 from ..interfaces import IStatsManager
@@ -776,8 +776,8 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         продолжали бы копиться незримо), голос — один раз на метод (иначе
         горячий путь эмиссии метрики захлебнулся бы логом).
 
-        **Голос идёт через stdlib ``logging``, а НЕ через ``self._log_warning``,
-        и это не стилистика.** ``_log_warning`` уходит в
+        **Голос идёт через ``get_std_logger``, а НЕ через ``self._log_warning``
+        и не через голый ``logging.getLogger``.** ``_log_warning`` уходит в
         ``_call_manager("logger", ...)``, у которого три ТИХИХ допуска: слота
         нет, менеджер ``None``, слот выключен — во всех трёх вызов молча
         возвращает ``None``. А обход порта случается ровно у менеджера,
@@ -785,15 +785,24 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         Первая редакция звала ``_log_warning``, и голос молчал именно там, где
         был нужен: воспроизведено 2026-08-26 (standalone-менеджер, три обхода,
         ``observation_bypasses == {'record_metric': 2, 'gauge': 1}`` при НУЛЕ
-        строк лога). Счётчик существовал, контрол был мёртв. Брат
-        ``_note_manager_call_failure`` пишет через stdlib по той же причине
-        (у него — чтобы не рекурсировать через отказавший logger).
+        строк лога). Счётчик существовал, контрол был мёртв.
+
+        **Почему вид, а не голый ``logging.getLogger``.** У stdlib-root в
+        процессах фреймворка НЕТ хендлеров — голый логгер пишет в никуда; на
+        этом стояли инцидент 645 МБ (молчащая ротация) и 23% невидимых ошибок,
+        и Ф6.2/Ф6.3 перевели плоскость на вид ``get_std_logger``. Вторая
+        редакция этой правки звала именно голый ``logging.getLogger`` и была
+        поймана двумя сторожами плоскости
+        (``test_no_bare_stdlib_logger_outside_whitelist``,
+        ``test_plane_has_exactly_two_direct_stdlib_writers``): голос звучал бы
+        в тесте под ``caplog`` и молчал бы в бою — тот же класс мёртвого
+        контрола, который эта правка и чинила, только этажом ниже.
         """
         counts = self._observation_bypass_counts
         first = method_name not in counts
         counts[method_name] = counts.get(method_name, 0) + 1
         if first:
-            logging.getLogger(__name__).warning(
+            get_std_logger(__name__).warning(
                 f"[{self.manager_name}] {method_name}() записан МИМО порта наблюдений — "
                 "attach_observation_port не вызывался. Штатно у менеджера, построенного "
                 "вне ProcessManagers.create_all (standalone, тесты соседних модулей); "
