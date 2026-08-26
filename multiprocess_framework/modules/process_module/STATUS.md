@@ -17,9 +17,20 @@
   ПОЛНОГО гейта (не модульного) вскрыл, что `svc.get_manager` бывает `callable`, но БРОСАЕТ у
   `ProcessManagerProcess` (`AttributeError: ... no attribute '_registry'`, латентный дефект
   соседнего процесса вне скоупа задачи) — диагностическая команда не имеет права падать из-за этого.
-  Шесть новых имён в `PLANE_COUNTER_KEYS`. **Побочная правка** — `heartbeat/telemetry.py`:
+  Пять новых имён в `PLANE_COUNTER_KEYS`. **Побочная правка** — `heartbeat/telemetry.py`:
   `PluginLevels.__slots__` получил `__weakref__` (нужен `statistics_module`'у для дедупа B1, см.
   ADR-SM-014).
+- **2026-08-26 (Ф5-добор по синхронному ревью, блокер З6):** `_safe_get_manager()`
+  (`commands/builtin_commands.py`) больше не глушит отказ резолва слота в `None` — тем самым
+  ранняя редакция S2 (выше) чинила падение команды ценой того, что секция `observation`
+  пропадала из ответа `introspect.observability` ЦЕЛИКОМ, неотличимо от «слота нет и не должно
+  быть». Новый маркер `_ManagerLookupFailed` (тот же файл) въезжает в СУЩЕСТВУЮЩУЮ дорогу отказа
+  `_plane_counters` (`get_stats()` маркера бросает `RuntimeError` с причиной) — второй словарь
+  причин не заведён. `None` сохранён ровно за законное «менеджера нет». `PLANE_COUNTER_KEYS`
+  получил ещё одно, ШЕСТОЕ по счёту с учётом правки выше, имя — `numbers_dropped_no_sink`
+  (парный различитель к `numbers_delivered`, см. `statistics_module/DECISIONS.md`, ADR-SM-015) —
+  без него секция `observation` живого процесса не могла бы отдать вторую половину пары. **ADR-PM-043.**
+  6 новых тестов (`tests/test_f5_followup_manager_lookup.py`).
 - **2026-08-25 (Ф4 «порт наблюдений», Task 4.1, `plans/observation-port/plan.md`,
   [ADR-PM-041](DECISIONS.md) / [ADR-PM-042](DECISIONS.md)):** политика порта — glob-правилами по
   ПУТИ дерева, в панели L0–L3 логирования, без пятой двери конфига. Решение «поедет ли лист»

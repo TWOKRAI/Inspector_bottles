@@ -821,9 +821,9 @@ from data_schema_module.extensions.metrics import RegistrationMetrics
 > читателя `get_metrics()`. Потолок `TIMINGS_CEILING = 1000` записей на ключ
 > `_timings`, потеря сверх потолка считается явно
 > (`get_metrics()["timings"][key]["dropped"]`), и при первой записи звучит
-> один WARNING «никто не читает» через `get_std_logger`. `record_metric` —
+> один DEBUG «никто не читает» через `get_std_logger`. `record_metric` —
 > counter-семантика (прибавляет, не перезаписывает). Подробности и
-> отклонённые альтернативы — [`DECISIONS.md`](DECISIONS.md#adr-ds-009-s-27-coremetricspy--заморозка-с-голосом-и-потолком).
+> отклонённые альтернативы — [`DECISIONS.md`](DECISIONS.md#adr-ds-009-coremetricspy-заморозка-s-27-с-голосом-и-потолком).
 
 ---
 
