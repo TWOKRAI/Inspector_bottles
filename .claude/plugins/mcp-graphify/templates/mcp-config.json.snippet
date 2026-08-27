@@ -3,17 +3,32 @@
 //
 // Canonical launcher: the upstream `graphify-mcp` console script (shipped in
 // graphifyy >= 0.8.36; MCP extra `graphifyy[mcp]`). Pin `graphifyy >= 0.8.42`.
-// This matches `.claude-plugin/plugin.json` -> mcpServers.graphify.
 //
 // Prerequisites:
-//   1. uv tool install 'graphifyy[mcp]'   (>= 0.8.42)
-//   2. graphify .                          (produces graphify-out/graph.json — the server reads it)
+//   1. uv tool install graphifyy --with mcp     (see the two traps below)
+//   2. graphify .                                (produces graphify-out/graph.json — the server reads it)
+//
+// TRAP 1 — do NOT launch via `uvx` / `uv tool run --from graphifyy`.
+//   Both spin up an EPHEMERAL environment from the uv cache and never see the
+//   `mcp` package baked into the installed tool-env, so the server dies with
+//   `ModuleNotFoundError: No module named 'mcp'`. Call the shim on PATH instead
+//   (`~/.local/bin/graphify-mcp`), which is what the snippet below does.
+//   Diagnosed 2026-08-27 on Inspector_bottles.
+//
+// TRAP 2 — there is NO `serve` subcommand.
+//   `graphify-mcp serve <path>` exits 2 (argparse: unrecognized arguments).
+//   The graph path is a positional argument: `graphify-mcp <path>`.
+//
+// TRAP 3 — `mcp` is NOT in graphifyy's dependencies (upstream bug), so it must
+//   be baked in ONCE: `uv tool install graphifyy --with mcp --force`.
+//   Do not pass `--with mcp` at runtime: it builds an overlay env and re-resolves
+//   it on EVERY start, and the MCP connect handshake then misses its timeout.
 //
 // graphify MCP is OPTIONAL (enabled.yaml -> mcp-graphify.enabled: false). The
 // `/graphify` skill stays the primary path; the MCP adds a live-query layer.
 {
   "graphify": {
-    "command": "uvx",
-    "args": ["graphify-mcp", "serve", "graphify-out/graph.json"]
+    "command": "graphify-mcp",
+    "args": ["graphify-out/graph.json"]
   }
 }
