@@ -41,7 +41,9 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent
 
 IS_WIN = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
-MODEL = "qwen3-embedding:4b"  # macOS переведён на 4b 2026-07-05 (было 8b) — см. qex-launcher.py
+# Win — 0.6b (2026-08-27: 4b не влезала в 4 ГБ VRAM), macOS — 4b (2026-07-05, было 8b).
+# Источник истины — qex-launcher.py; здесь дубль нужен только для прогрева keep-alive.
+MODEL = "qwen3-embedding:0.6b" if IS_WIN else "qwen3-embedding:4b"
 OLLAMA = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 KEEP_ALIVE = os.environ.get("QEX_KEEP_ALIVE", "60m")
 REWARM_EVERY = 180

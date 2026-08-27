@@ -9,7 +9,7 @@
 гибридный (BM25 + dense) семантический поиск по кодовой базе. Встраивается в Claude Code через MCP.
 
 - **BM25** индексирует Tantivy — локальный файл в `~/.qex/`.
-- **Dense-векторы** считает Ollama (`qwen3-embedding:4b`, 2560-dim) и складывает в `~/.qex/` (JSON-файл, brute-force cosine).
+- **Dense-векторы** считает Ollama (`qwen3-embedding:0.6b`, 1024-dim) и складывает в `~/.qex/` (JSON-файл, brute-force cosine).
 - **Чанкинг** — tree-sitter по AST (классы, функции, методы).
 - **Ignore-правила** читаются из `.gitignore` и `.ignore` (как у ripgrep) автоматически.
 

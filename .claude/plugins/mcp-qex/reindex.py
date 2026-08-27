@@ -27,8 +27,12 @@ PROJECT_ROOT = MCP_DIR.parent.parent  # корень проекта
 IS_WIN = platform.system() == "Windows"
 
 if IS_WIN:
-    model = "qwen3-embedding:4b"
-    dimensions = "2560"
+    # 0.6b вместо 4b (2026-08-27): 4b весит 3.8-3.9 из 4 ГБ карты, каждый батч
+    # бьётся в зашитый ~10с таймаут qex.exe. Подробности — в qex-launcher.py.
+    # ОБЯЗАНО совпадать с qex-launcher.py: расхождение = векторы чужой
+    # размерности в существующем индексе, гибрид молча деградирует до BM25.
+    model = "qwen3-embedding:0.6b"
+    dimensions = "1024"
     default_bin = Path.home() / ".cargo" / "bin" / "qex.exe"
 else:
     # macOS: 4b выбрана 2026-07-05 (2× скорость, точность на коде ~= 8b). См. qex-launcher.py.

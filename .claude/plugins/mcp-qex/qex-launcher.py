@@ -52,9 +52,12 @@ if not os.path.exists(_ignore_target) and os.path.exists(_ignore_template):
 if platform.system() == "Windows":
     base_url = "http://localhost:11434/v1"
     api_key = "ollama"
-    model = "qwen3-embedding:4b"
-    dimensions = "2560"
-    expected_num_ctx = 2048  # см. setup-embedding-model.sh — Win 4b → 2048
+    # 0.6b вместо 4b (2026-08-27): 4b весит 3.8-3.9 из 4 ГБ карты (RTX 3050 Laptop) —
+    # запаса под compute-буферы не остаётся, каждый батч эмбеддингов бьётся в
+    # зашитый ~10с таймаут qex.exe. 0.6b занимает ~1.5 ГБ, таймаутов не даёт.
+    model = "qwen3-embedding:0.6b"
+    dimensions = "1024"  # нативный максимум 0.6b (у 4b было 2560)
+    expected_num_ctx = 2048
     default_bin = os.path.join(os.path.expanduser("~"), ".cargo", "bin", "qex.exe")
 else:
     # macOS: Ollama (qwen3-embedding:4b, dim=2560) на :11434 (GUI Ollama.app).
