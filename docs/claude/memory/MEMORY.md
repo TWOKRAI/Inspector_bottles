@@ -16,7 +16,7 @@
 - [monotonic Win = 15.6 мс](project_monotonic_resolution_windows.md) — разности <100 мс на сетку
 - [No global taskkill](feedback_no_global_taskkill.md) — только TaskStop или PID
 - [CUDA torch](project_cuda_torch_setup.md) — cu124 колесом; PyPI даёт +cpu · [GPU-мониторинг Win](reference_gpu_monitoring_windows.md) — Task Manager прячет CUDA, смотреть nvidia-smi/Compute_0
-- qex: **[СНАЧАЛА сверить свежесть](feedback_check_qex_freshness_before_use.md)** — last_indexed vs сегодня, индекс живёт старым НАМЕРЕННО и отвечает уверенно · [таймаут реиндекса](project_qex_reindex_timeout.md) — свежесть по last_indexed · [бюджет = выгрузка эмбеддера](feedback_qex_reindex_budget.md) — keep_alive=-1 → 12 мин
+- qex: **[СНАЧАЛА сверить свежесть](feedback_check_qex_freshness_before_use.md)** — last_indexed vs сегодня, устаревший отвечает уверенно и старым; посылка «намеренно старый» СНЯТА 2026-08-27 · [таймаут реиндекса](project_qex_reindex_timeout.md) — свежесть по last_indexed · [бюджет = выгрузка эмбеддера](feedback_qex_reindex_budget.md) — keep_alive=-1 → 12 мин · [эмбеддер 0.6B, запросы по-английски](feedback_qex_query_english_code_bias.md) — RU-перефраз мимо, EN в точку
 
 ## Стоящие правила владельца
 - [Приоритет — маятник по свободному времени](project_priority_engine_first.md) — 2026-08-18: к стенду за видимым результатом; фреймворк — вторая полоса; окно codemod — по паузе, не по дате
