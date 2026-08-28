@@ -33,6 +33,7 @@
 
 ## Агенты, ревью, git
 - [Model economy](feedback_model_economy_scheme.md) — Fable на вердикты; финдеры Sonnet/Opus · [сплит исполнение/ревью](feedback_model_split_impl_vs_review.md) — Sonnet 5 дефолт, Opus 4.8 верхний край, Fable план/свод · [три уровня ревью](feedback_review_economy_tiers.md) — полное 8-угловое только на рисковые
+- [claude-cli бэкенд = полная сессия за вызов](feedback_claude_cli_backend_costs_a_full_session.md) — 53 вызова съели дневной лимит; считать вызовы × ~50k ДО запуска, мельчить батчи = множить накладные
 - [Оформленное ревью до merge](feedback_formal_review_before_merge.md) — классификатор блокирует merge без /code-review в транскрипте
 - [Отлаживать через backend_ctl](feedback_backend_ctl_for_agents.md) — не через GUI и не через qt-mcp · [Layer: mixed](feedback_backend_ctl_layer_mixed.md) — хук не знает значения tools
 - [Оффскрин для агентских прогонов](feedback_no_qt_popups_offscreen.md) — QT_QPA_PLATFORM=offscreen, иначе Qt-окно вешает агента
