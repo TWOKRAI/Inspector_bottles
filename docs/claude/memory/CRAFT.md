@@ -8,6 +8,7 @@
 конкретными провалами.
 
 ## Канон тестирования и инъекции
+- [pytest владеет threading.excepthook на всю сессию](feedback_pytest_owns_threading_excepthook_for_the_session.md) — «прежний хук печатает в stderr» недостижимо под pytest (0 байт против 648); восстанавливать предпосылку в тесте, проброс проверять спаем, детектор — число PytestUnhandledThreadExceptionWarning
 
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
@@ -37,6 +38,7 @@
 - [Константа из физики, а не из замера](feedback_constant_from_domain_physics_not_measured.md) — 99.28 % наблюдений ниже первой границы; инъекции такое не ловят
 
 ## Вакуумные тесты и ассерты
+- [Страж-обходчик не видит удалённого элемента](feedback_a_list_walking_guard_cannot_see_a_removed_item.md) — ключ снят из OBSERVABILITY_LOSS_KEYS, обходчик зелен; держит только литерал «ключ в реестре»; в матрице всегда заплатка «элемент удалён»
 
 - [Молчащий детектор](feedback_silent_detector_proves_nothing.md) — сперва покажи красным · [тест, поднимающий ошибку сам](feedback_test_raising_the_error_itself_guards_the_branch.md) — сторожит except
 - [Вечно горящий детектор](feedback_detector_comparing_representation_fires_always.md) — сравнение целых dict'ов сравнивает написание, а не смысл; прогони на «ничего не изменилось» и потребуй тишины

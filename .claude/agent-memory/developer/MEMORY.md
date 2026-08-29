@@ -16,3 +16,4 @@
 - [Orchestrator stub contract S-29](project_orchestrator_stub_contract_s29.md) — 4 new guards via shared helper; provenance_hazards.py's copy folded in too on 2026-08-18 (review forced touching the guard anyway)
 - [Metrics freeze S-27](project_metrics_freeze_s27.md) — ceiling+voice on MetricsCollector; concurrent-voice hazard test unproven by break-injection (TOCTOU too narrow)
 - [Lazy import for LAYER 0 data_schema files](feedback_lazy_import_for_layer0_data_schema_files.md) — core/*.py can't import get_std_logger at module level, verified circular ImportError
+- [Concurrent agent writes outside git index](feedback_concurrent_agent_writes_outside_git_index.md) — sibling agent wrote memory files mid-task in shared checkout; scope final diff to exact paths, not bare `git status`
