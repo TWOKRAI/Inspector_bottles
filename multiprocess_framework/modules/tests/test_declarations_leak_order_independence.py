@@ -46,8 +46,17 @@ _PROCESS_DIR = "multiprocess_framework/modules/process_module/tests"
 #: вызова). Он не имеет отношения к реестру объявлений — исключён из ОБОИХ
 #: прогонов ОДИНАКОВО, чтобы шум таймингов не маскировал и не имитировал
 #: свойство, которое тест на самом деле проверяет.
+#:
+#: **Путь — от ROOTDIR подпроцесса, а не от корня репозитория, и это не педантизм.**
+#: `pytest` резолвит `--deselect` по nodeid, а rootdir здесь —
+#: `multiprocess_framework/modules/` (там свой конфиг), поэтому настоящий nodeid
+#: начинается с `process_module/`. Репо-относительный путь `--deselect` принимает
+#: МОЛЧА и не исключает ничего: замер `--collect-only` давал `41 collected` и с
+#: флагом, и без него — совпади путь, было бы `40 collected, 1 deselected`.
+#: Найдено ревьюером Ф0.5; до того флаг стоял мёртвым, а прогоны выглядели
+#: успешными просто потому, что перф-флейк зависит от нагрузки и не всегда стрелял.
 _DESELECT_UNRELATED_TIMING_FLAKE = (
-    "multiprocess_framework/modules/process_module/tests/test_plugin_stats_road.py"
+    "process_module/tests/test_plugin_stats_road.py"
     "::TestTheCostOfTheHotPath::test_the_facade_adds_little_over_a_direct_call"
 )
 
@@ -64,6 +73,14 @@ def _run_order(first: str, second: str) -> tuple[dict[str, int], str]:
     """
     env = dict(os.environ)
     env["QT_QPA_PLATFORM"] = "offscreen"
+    # Ребёнок печатает кириллицу, родитель по умолчанию декодирует локалью (cp1251
+    # на этой машине) — на первом же русском traceback'е чтение падало
+    # `UnicodeDecodeError` в reader-потоке, `proc.stdout` приезжал `None`, и тест
+    # умирал `TypeError: unsupported operand +: NoneType and str` вместо того, чтобы
+    # сообщить про порядок сборки. Рецепт взят у соседа
+    # (`process_module/tests/test_metric_catalog_order_gate.py`), где он уже был.
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     cmd = [
         sys.executable,
         "-m",
@@ -80,6 +97,8 @@ def _run_order(first: str, second: str) -> tuple[dict[str, int], str]:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=_SUBPROCESS_TIMEOUT_SEC,
     )
     output = proc.stdout + "\n" + proc.stderr
@@ -99,6 +118,23 @@ def test_statistics_then_process_module_order_matches_the_reverse_order() -> Non
     """
     forward, forward_output = _run_order(_STATS_DIR, _PROCESS_DIR)
     reverse, reverse_output = _run_order(_PROCESS_DIR, _STATS_DIR)
+
+    # АБСОЛЮТНЫЙ ПОЛ — прежде сравнения. Одно лишь `forward == reverse` истинно и
+    # тогда, когда оба прогона не собрали НИ ОДНОГО теста: замер ревьюера Ф0.5 —
+    # переименуй каталоги, и тест зеленеет на `{} == {}` при «no tests ran» с обеих
+    # сторон. Ноль наблюдений выглядел результатом наблюдения. Литерал числа тут
+    # по-прежнему не нужен (он ориентир, не контракт), а вот «прогон СОСТОЯЛСЯ и не
+    # содержал поломок» — обязан проверяться отдельно от совпадения.
+    for имя, сводка, вывод in (("прямой", forward, forward_output), ("обратный", reverse, reverse_output)):
+        assert сводка.get("passed", 0) > 0, (
+            f"{имя} порядок не собрал ни одного пройденного теста ({сводка}) — сравнивать нечего, "
+            f"а совпадение двух пустот прочиталось бы как успех.\n--- хвост ---\n{вывод[-2000:]}"
+        )
+        for поломка in ("failed", "error", "errors"):
+            assert поломка not in сводка, (
+                f"{имя} порядок содержит {поломка}={сводка[поломка]} — свойство «оба порядка одинаковы» "
+                f"выполнимо и на двух одинаково сломанных прогонах.\n--- хвост ---\n{вывод[-2000:]}"
+            )
 
     assert forward == reverse, (
         "результат прогона зависит от порядка директорий в командной строке:\n"

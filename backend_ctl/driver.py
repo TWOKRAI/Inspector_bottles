@@ -582,6 +582,36 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """
         import time
 
+        # Начало ВСЕГО вызова — до первого обращения к PM. Из него считается `elapsed`
+        # (ревью Ф0.5, находка 3): прежде отметка бралась ПОСЛЕ до-снимка, а тот ходит
+        # к PM и может тянуться до `timeout`. Воспроизведение ревьюера: до-снимок 40.0с,
+        # окно 0.5с → реально 40.5с от входа в метод, а `elapsed` показывал 0.5.
+        began = time.monotonic()
+        #: Дедлайн окна подтверждения. До входа в цикл его нет — до тех пор опросов и не
+        #: бывает; `_poll_timeout` это учитывает и отдаёт `timeout` как есть.
+        deadline: Optional[float] = None
+
+        def _poll_timeout() -> Optional[float]:
+            """Таймаут ОДНОГО опроса — не больше остатка окна `wait` (ревью Ф0.5, находка 2).
+
+            Прежде каждый опрос уходил с ПОЛНЫМ `timeout` вызывающего, и при
+            `timeout > wait` один молчащий `supervision.status` съедал окно и вылезал за
+            бюджет оператора. Воспроизведение ревьюера на виртуальных часах:
+            `wait=60, timeout=90`, PM молчит → `polls=1`, `elapsed=90.5`,
+            `restarted=False` при РЕАЛЬНО перезапущенном процессе (pid 100→200,
+            `instance_restarts` 0→1, `alive`). То есть ровно тот класс M4, который задача
+            и закрывала, — просто с другой ноги.
+
+            Опросов при этом НЕ становится больше: молчащий PM законно расходует окно
+            одним долгим опросом, и лишние обращения к молчащему собеседнику ничего не
+            добавляют. Чинится перерасход бюджета, а не число попыток — это разные вещи,
+            и первая редакция сторожа (`polls >= 2`) требовала второго, а не первого.
+            """
+            if deadline is None:
+                return timeout
+            остаток = max(0.0, deadline - time.monotonic())
+            return остаток if timeout is None else min(timeout, остаток)
+
         def _snapshot() -> Dict[str, Any]:
             """Запись процесса из supervision-снимка + провенанс неудачи чтения.
 
@@ -589,7 +619,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             Схлопывать их нельзя (ревью Фазы 4, находка 8): при лежащем PM подсказка
             «проверь имя» уводит разбор в сторону.
             """
-            res = _leaf_result(self.supervision_status(process, pm_name=pm_name, timeout=timeout))
+            res = _leaf_result(self.supervision_status(process, pm_name=pm_name, timeout=_poll_timeout()))
             if not isinstance(res, dict) or res.get("success") is False or "processes" not in res:
                 return {"__error__": res}
             procs = res.get("processes")
@@ -613,13 +643,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         restarts_before = before.get("instance_restarts")
 
         # Две отметки времени, а не одна, и это не педантизм (Task 0.2, M4).
-        # `began` — начало ВСЕГО вызова, из него считается `elapsed`: оператору нужна
-        # полная цена «проверенного рестарта», включая отправку.
+        # `began` (взят в начале метода, ДО до-снимка) — начало ВСЕГО вызова, из него
+        # считается `elapsed`: оператору нужна полная цена «проверенного рестарта».
         # `started` — начало окна ПОДТВЕРЖДЕНИЯ, из него считается дедлайн `wait`.
         # Пока обе роли исполняла одна отметка, взятая ДО отправки, медленный запрос
         # съедал окно опроса целиком: цикл не делал ни одной итерации, и живой заново
         # поднявшийся процесс отдавался как `restarted: false`.
-        began = time.monotonic()
         request_timeout = _RESTART_REQUEST_TIMEOUT_S if timeout is None else min(timeout, _RESTART_REQUEST_TIMEOUT_S)
         restart_reply = self.system_command(
             {"cmd": "process.restart", "process_name": process}, timeout=request_timeout
@@ -635,6 +664,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             return isinstance(restarts_now, int) and isinstance(restarts_before, int) and restarts_now > restarts_before
 
         after: Dict[str, Any] = before
+        # С этого момента `_poll_timeout()` режет таймаут опроса остатком окна.
         deadline = started + max(0.0, wait)
         polls = 0
         while time.monotonic() < deadline:
