@@ -52,6 +52,8 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 @pytest.fixture(autouse=True)
 def _clean_registry():
     PluginRegistry.clear()
+    yield
+    PluginRegistry.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -76,8 +78,6 @@ def _clean_declarations():
     state = snapshot()
     yield
     restore(state)
-    yield
-    PluginRegistry.clear()
 
 
 # ---------------------------------------------------------------------------
