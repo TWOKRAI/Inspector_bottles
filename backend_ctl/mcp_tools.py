@@ -177,6 +177,64 @@ def _introspect_telemetry(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.introspect_telemetry(args["process"], **_kw_timeout(args))
 
 
+#: Секции ответа ``introspect.observability``, которыми умеет сужать
+#: :func:`_introspect_observability`. Список ЗАКРЫТ намеренно: реальный ответ шире
+#: (``documents``/``stats``/``events``/``flight`` и оркестраторская добавка), но эти
+#: семь — те, что названы контрактом Task 0.4, и enum схемы обязан совпадать с тем,
+#: что фильтр реально умеет. Не ставший здесь именем ключ доедет полным ответом
+#: (без ``section``), а не тихой пустотой.
+OBSERVABILITY_SECTIONS: tuple = (
+    "effective",
+    "counters",
+    "provenance",
+    "history",
+    "observation",
+    "audit",
+    "layers",
+)
+
+#: Ключи-конверт, переживающие сужение по ``section``: без них ответ перестал бы
+#: быть ответом (``success`` читает и сервер, и агент).
+_OBSERVABILITY_ENVELOPE: tuple = ("success", "process", "error")
+
+
+def _introspect_observability(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    """Зеркало команды ``introspect.observability`` (M3, Task 0.4).
+
+    До этой задачи полный ответ команды читал ТОЛЬКО драйвер, да и тот через
+    :meth:`~backend_ctl.driver.BackendDriver.observability_counters` — то есть
+    одну секцию из четырнадцати. Агент, живущий MCP-инструментами, о слоях,
+    провенансе, аудите и порте наблюдений узнать не мог вовсе.
+
+    ``section`` — сужение до ОДНОЙ секции (:data:`OBSERVABILITY_SECTIONS`).
+    Фильтр — БЕЛЫЙ список: доезжает конверт (``success``/``process``) плюс
+    запрошенная секция, всё остальное отсекается. Это решение, а не побочный
+    эффект: ответ команды шире семи названных секций, и «сузил до counters, а
+    приехало ещё пять» означало бы, что сужение не работает — ради него
+    инструмент и зовут (контекст агента).
+
+    Секция названа верно, но её нет в ответе процесса (плоскость не поднята) →
+    ответ несёт ``sections_present``: «процесс её не отдал» и «фильтр съел» —
+    разные факты, и различить их обязан ответ, а не догадка читателя.
+    """
+    section = args.get("section")
+    if section is not None and section not in OBSERVABILITY_SECTIONS:
+        return {
+            "success": False,
+            "error": f"неизвестная section {section!r}: ожидаю одну из {list(OBSERVABILITY_SECTIONS)}",
+        }
+    result = drv.send_command(args["process"], "introspect.observability", **_kw_timeout(args))
+    if section is None or not isinstance(result, dict):
+        return result
+    narrowed = {key: result[key] for key in _OBSERVABILITY_ENVELOPE if key in result}
+    narrowed["section"] = section
+    if section in result:
+        narrowed[section] = result[section]
+    else:
+        narrowed["sections_present"] = sorted(k for k in result if k not in _OBSERVABILITY_ENVELOPE)
+    return narrowed
+
+
 def _introspect_memory(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return _jsonable(drv.introspect_memory(args["process"], **_kw_timeout(args)))
 
@@ -526,6 +584,36 @@ TOOLS: List[ToolSpec] = [
         _introspect_telemetry,
     ),
     ToolSpec(
+        "introspect_observability",
+        "Плоскости наблюдаемости процесса ОДНИМ ответом: что настроено и что уже потеряно. "
+        "Зеркало команды introspect.observability — до Task 0.4 её полный ответ читал только "
+        "driver, и то одной секцией counters. Секции: effective (действующая конфигурация — "
+        "пороги скоупов, каналы, ручки истории/событий/дампов), counters (ПОТЕРИ: buffer.dropped, "
+        "errors_to_floor, потери hub'а — «что уже не доехало»), provenance (какой из четырёх слоёв "
+        "framework/app/recipe/session выиграл КАЖДЫЙ действующий ключ и из какого файла — ответ на "
+        "«почему у меня INFO»), history (почему вкладка логов пуста: порог, стор, ретеншен), "
+        "observation (порт наблюдений: политика по ПУТИ, правила, не совпавшие ни с чем, и ещё не "
+        "оценённые), audit (когда и ЧЕМ меняли наблюдаемость, включая неудавшиеся попытки), "
+        "layers (что держит сессия L3 и когда истечёт TTL). "
+        "section=<имя> сужает ответ до одной секции (белый список: конверт + она); неизвестное имя — "
+        "отказ с перечнем, а не молчание. Ответ шире этих семи (documents/stats/events/flight и "
+        "добавка оркестратора) — без section приезжает целиком. Крупный ответ усекается: full=true "
+        "снимает потолок. Не мутирует состояние процесса.",
+        _obj(
+            {
+                "process": _PROCESS,
+                "section": {
+                    "type": "string",
+                    "enum": list(OBSERVABILITY_SECTIONS),
+                    "description": "Сузить ответ до одной секции. Опц. (по умолчанию — весь ответ).",
+                },
+                "timeout": _TIMEOUT,
+            },
+            ["process"],
+        ),
+        _introspect_observability,
+    ),
+    ToolSpec(
         "introspect_memory",
         "Инвентарь памяти процесса: SHM / пул займов / очереди — только СТАТИСТИКА "
         "(read-only; кадры/содержимое SHM не отдаёт). Секции memory/pool/queues/shm_registry "
@@ -594,7 +682,11 @@ TOOLS: List[ToolSpec] = [
         "Рестарт процесса с PID-ДОКАЗАТЕЛЬСТВОМ за один вызов: pid до → process.restart → "
         "поллинг supervision до живого процесса с ДРУГИМ pid. Ответ команды не судится "
         "(медленный рестарт штатно отвечает timeout'ом при доставленной команде) — вердикт "
-        "выносит факт: {restarted, pid_before, pid_after, instance_restarts_*, elapsed}. "
+        "выносит факт: {restarted, pid_before, pid_after, instance_restarts_*, elapsed, polls}. "
+        "`timeout` и `wait` — РАЗНЫЕ бюджеты (Task 0.2, M4): `timeout` ограничивает только "
+        "отправку process.restart (внутри ещё занижен потолком 5с — ответ всё равно не судится), "
+        "`wait` — окно подтверждения, его дедлайн стартует ПОСЛЕ возврата запроса, а не до отправки. "
+        "`polls` — сколько снимков supervision.status сделано в этом окне (не бывает молча пустым). "
         "Несуществующий процесс → restarted=false + reason. Разрушающий (перезапускает процесс).",
         _obj(
             {
@@ -1188,6 +1280,39 @@ TOOLS: List[ToolSpec] = [
 ]
 
 
+def tool_is_capped(name: str) -> bool:
+    """Касается ли инструмента байтовый потолок ответа (:func:`~backend_ctl.dispatch._cap_heavy`)."""
+    return name not in _UNCAPPED_TOOLS
+
+
+def _declare_full_param(tools: List[ToolSpec]) -> List[ToolSpec]:
+    """Добавить ``full`` в схему КАЖДОГО инструмента, которого касается усечение (M2, Task 0.4).
+
+    **Почему механизм, а не 44 правки руками.** ``_cap_heavy`` читает
+    ``args.get("full")`` у ЛЮБОГО инструмента, кроме :data:`_UNCAPPED_TOOLS`, а
+    ``full`` был объявлен ровно в трёх схемах из пятидесяти. Схема при этом
+    закрыта (``additionalProperties: false``), то есть подсказка об усечении
+    советовала агенту передать параметр, который схема ОТВЕРГАЕТ. Две стороны
+    одного факта — «кого урезают» и «кто может попросить полное» — обязаны
+    выводиться из одного списка, иначе они разъезжаются молча: именно так это и
+    произошло, когда политику усечения инвертировали (Task 3.2), а схемы
+    остались от белого списка тяжёлых.
+
+    ``setdefault``, а не присваивание: три инструмента объявили ``full`` со своим
+    описанием (``system_overview``, ``state_get_subtree``, ``telemetry_history``),
+    и затирать их автодобавкой значило бы менять документацию инструмента ради
+    единообразия. ``required`` не трогается вовсе — параметр опциональный.
+    """
+    for spec in tools:
+        if not tool_is_capped(spec.name):
+            continue
+        spec.input_schema.setdefault("properties", {}).setdefault("full", dict(_FULL))
+    return tools
+
+
+TOOLS = _declare_full_param(TOOLS)
+
+
 # ---------------------------------------------------------------------------
 # Классификация безопасности (Task 3.2) + MCP-annotations (Task 3.1)
 # ---------------------------------------------------------------------------
@@ -1216,6 +1341,9 @@ TOOL_SAFETY: Dict[str, str] = {
     "introspect_plugins": SAFETY_READ,
     "introspect_memory": SAFETY_READ,
     "introspect_telemetry": SAFETY_READ,
+    # Task 0.4 (M3): зеркало introspect.observability. Команда объявлена
+    # читающей (аудит она не пополняет), класс тот же — read.
+    "introspect_observability": SAFETY_READ,
     "supervision_status": SAFETY_READ,
     "register_snapshot": SAFETY_READ,
     "register_rollback_log": SAFETY_READ,

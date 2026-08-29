@@ -91,7 +91,19 @@ target = merge(base, expand(layers.resolve()))            # L1 → L2 → L3
 
 Через `backend_ctl` те же ручки доступны как `config_reload`, `config_reload_verified`,
 `logger_sink_enable` / `logger_sink_disable`, `log_tail` / `log_untail`, `observability_tail` /
-`observability_untail`, `introspect_telemetry`, `system_overview`, `events_page`, `watch_like_gui`.
+`observability_untail`, `introspect_observability`, `introspect_telemetry`, `system_overview`,
+`events_page`, `watch_like_gui`.
+
+**MCP-зеркало команды — `introspect_observability(process, section=None, full=false)`** (Ф0.4, M3).
+До него полный ответ `introspect.observability` читал только драйвер, и то одной секцией `counters`:
+агент, живущий MCP-инструментами, про слои, провенанс, аудит и порт наблюдений узнать не мог.
+`section` сужает ответ до ОДНОЙ из семи — `effective` · `counters` · `provenance` · `history` ·
+`observation` · `audit` · `layers`, — и сужение **белым списком**: доезжает конверт
+(`success`/`process`) плюс запрошенная секция. Неизвестное имя секции — отказ с перечнем, а не
+молчание. Ответ команды **шире** этих семи (`documents`, `stats`, `events`, `flight` и добавка
+оркестратора) — без `section` он приезжает целиком, `full=true` снимает байтовый потолок. Секция
+названа верно, но процесс её не отдал → в ответе `sections_present`: «плоскость не поднята» и
+«фильтр съел» — разные факты.
 
 **Каноничное имя и алиас судятся ОДНИМ контрактом** (Task 5.10.e): разные схемы у двух имён одной
 команды означали бы, что через алиас проходит то, что канон отвергает.

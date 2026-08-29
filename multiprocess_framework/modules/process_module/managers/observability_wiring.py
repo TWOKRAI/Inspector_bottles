@@ -439,6 +439,11 @@ def _observation_policy_report(svc: Any, publications: Dict[str, Any]) -> tuple:
         "section": "observability.observation",
         "sources": sources,
         "rules_matched_nothing": view.get("rules_matched_nothing", []),
+        # Ф0.4 (m6): правила, ещё не дожившие до цикла оценки, и возраст самой
+        # политики. Без второй пары пустой `rules_matched_nothing` читается
+        # одинаково в двух РАЗНЫХ случаях — «правила здоровы» и «судить рано».
+        "rules_pending": view.get("rules_pending", []),
+        "evaluated_ticks": view.get("evaluated_ticks", 0),
         "legacy_source": view.get("legacy_source"),
     }
     return view, provenance

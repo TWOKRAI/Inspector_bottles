@@ -224,6 +224,15 @@ class ProcessHeartbeat:
                 if gate is not None:
                     allowed_metrics = gate.due_metrics()
                     allowed_levels: Any = gate.due_plugin_metrics(self._level_names_by_writer())
+                    # Ф0.4 (m6): цикл оценки завершён — правила поддерева порта
+                    # получили свой шанс совпасть, и только теперь «ноль
+                    # попаданий» у правила означает «не совпало», а не «ещё не
+                    # спрашивали». Отметка ЯВНАЯ, а не счётчик резолвов:
+                    # диагностическое чтение (`provenance_for`) резолвит с
+                    # `count=False` и тиком не является.
+                    observation_policy = self._observation_policy
+                    if observation_policy is not None:
+                        observation_policy.mark_tick()
                 else:
                     allowed_metrics = None
                     allowed_levels = None
@@ -557,7 +566,16 @@ class ProcessHeartbeat:
             return None
         # Task 1.2: WARNING по метрикам, чей interval_sec < эффективного тика (не тихий no-op).
         self._warn_capped_metrics(config)
+        # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
+        # fake-clock тестов каденции; в проде обоим — time.monotonic).
+        gate = self._make_gate(config)
         # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
+        # ПОСЛЕ `_make_gate` (Ф0.3, находка M1) — той же причины, что у соседнего
+        # `_warn_capped_metrics` в `reconfigure_telemetry`: голос судит конфиг по
+        # каталогу, а каталог наполняется ИМПОРТОМ, и именно `_make_gate` тянет
+        # `.telemetry` — производителя четырёх из пяти метрик фреймворка. Голос
+        # раньше импорта видел каталог из одной `shm` и объявлял живые `fps` /
+        # `latency_ms` опечатками (семь ложных WARNING за boot webcam_sketch).
         self._warn_unknown_metrics(config)
         # Голос на УСПЕХЕ — вторая половина пары. Лог только на отказе не отличает
         # «гейт выключен» от «код не исполнялся вовсе».
@@ -566,9 +584,7 @@ class ProcessHeartbeat:
             f"явных правил {len(config.metrics)}, интервал по умолчанию "
             f"{config.default_interval_sec} с"
         )
-        # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
-        # fake-clock тестов каденции; в проде обоим — time.monotonic).
-        return self._make_gate(config)
+        return gate
 
     def _make_gate(self, config: Any) -> Any:
         """Собрать ``TelemetryGate`` из легаси-секции и действующей политики порта.
@@ -595,7 +611,15 @@ class ProcessHeartbeat:
         else:
             # Легаси-секция могла смениться этой же командой — политика обязана
             # держать АКТУАЛЬНУЮ: она читает из неё умолчание и белый список.
-            policy = ObservationPolicy(policy.config, config, hits=policy.rule_hits())
+            # Возраст правил переносится вместе со счётом (Ф0.4, m6): иначе
+            # чужая правка возвращала бы все правила в `rules_pending`.
+            policy = ObservationPolicy(
+                policy.config,
+                config,
+                hits=policy.rule_hits(),
+                evaluated_ticks=policy.evaluated_ticks,
+                rule_first_tick=policy.rule_first_tick(),
+            )
             self._observation_policy = policy
         return TelemetryGate(
             config,
@@ -673,7 +697,17 @@ class ProcessHeartbeat:
             applied["gate_active"] = gate is not None
             return applied
         # Счёт попаданий переживает пересборку — см. `_make_gate` (находка З3).
-        policy = ObservationPolicy(config, legacy, hits=live.rule_hits() if live is not None else None)
+        # Вместе с ним переносится ВОЗРАСТ каждого правила (Ф0.4, m6): правило,
+        # которое эта же правка ДОБАВИЛА, в переносе отсутствует и честно
+        # начинает возраст с нуля — то есть едет в `rules_pending`, а не в
+        # обвиняемые.
+        policy = ObservationPolicy(
+            config,
+            legacy,
+            hits=live.rule_hits() if live is not None else None,
+            evaluated_ticks=live.evaluated_ticks if live is not None else 0,
+            rule_first_tick=live.rule_first_tick() if live is not None else None,
+        )
         self._observation_policy = policy
         if gate is not None:
             # Сборка завершена — только теперь подменяем ссылку (см. докстринг).
@@ -709,6 +743,11 @@ class ProcessHeartbeat:
         view = dict(policy.effective_view())
         view["gate_active"] = self._telemetry_gate is not None
         view["rules_matched_nothing"] = policy.rules_matched_nothing()
+        # Ф0.4 (m6): правила, ещё не дожившие до цикла оценки, — отдельным
+        # полем. «Свежее» и «не совпало ни с чем» — разные диагнозы, и до этой
+        # задачи они ехали одним списком: правило обвинялось в тот же миг, когда
+        # его применили.
+        view["rules_pending"] = policy.rules_pending()
         # Счёт, а не «ноль/не ноль»: правило, совпадающее раз в час, и правило,
         # совпадающее каждый такт, — разные факты (открытый вопрос З3 ревью Ф4).
         view["rule_hits"] = policy.rule_hits()
@@ -891,13 +930,19 @@ class ProcessHeartbeat:
         from ..configs.telemetry_publish_config import TelemetryPublishConfig
 
         config = TelemetryPublishConfig.from_dict(publish_section)
-        # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
-        self._warn_unknown_metrics(config)
         # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
         # Gate использует clock heartbeat'а (fake-clock тесты; в проде time.monotonic).
         # Ф4: политика порта ПЕРЕЖИВАЕТ пересборку легаси-секции — `_make_gate`
         # пересобирает её поверх новой легаси-секции, а не выбрасывает.
         gate = self._make_gate(config)
+        # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
+        # ПОСЛЕ `_make_gate` (Ф0.3, находка M1): каталог наполняется импортом, а
+        # `.telemetry` — производителя `fps`/`latency_ms`/`effective_hz`/
+        # `cycle_duration_ms` — тянет именно `_make_gate`. Второй вход сюда попадает
+        # первым, если рантайм-команда пришла раньше первой сборки гейта (гейт при
+        # старте не собран, когда секции `telemetry.publish` в конфиге нет вовсе), —
+        # тогда порядок значит здесь ровно то же, что и на буте.
+        self._warn_unknown_metrics(config)
         # Task 1.2: WARNING по метрикам, чья частота ограничена телеметрийным тиком.
         # ПОСЛЕ `_make_gate`: голос считает и glob-правила порта, а они живут в
         # политике, которую `_make_gate` только что и пересобрал.

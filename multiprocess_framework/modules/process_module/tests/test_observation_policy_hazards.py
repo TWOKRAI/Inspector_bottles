@@ -389,15 +389,25 @@ class TestTypoInAPathRuleHasAVoice:
             },
             publish={},
         )
-        assert policy.rules_matched_nothing() == [
+        # Ф0.4 (m6) РАЗВЕРНУЛА это ожидание. Прежняя редакция требовала обоих
+        # правил в `rules_matched_nothing` ДО первого резолва — то есть обвиняла
+        # правило в тот же миг, когда его применили. Теперь «ещё не оценивалось»
+        # и «оценивалось и не совпало» — два РАЗНЫХ поля, и до первого тика оба
+        # правила едут в `rules_pending`, а обвиняемых нет.
+        assert policy.rules_pending() == [
             "procesess.*.state.plugins.*.fps",
             "processes.*.state.plugins.*.fps",
-        ], "до первого резолва «не совпало ни с чем» обязано включать ОБА правила"
+        ], "до первого тика оценки оба правила обязаны быть «ещё не оценивались»"
+        assert policy.rules_matched_nothing() == [], (
+            "правило без единого цикла оценки обвинять не за что — у него не было шанса совпасть"
+        )
 
         policy.resolve(f"processes.{PROC}.state.plugins.capture.fps")
+        policy.mark_tick()
         assert policy.rules_matched_nothing() == ["procesess.*.state.plugins.*.fps"], (
             "правило с опечаткой не названо, либо названо совпавшее — счётчик врёт в одну из сторон"
         )
+        assert policy.rules_pending() == [], "после первого тика «ещё не оценивалось» пусто"
 
     def test_empty_segment_in_a_pattern_is_rejected_by_the_schema(self) -> None:
         """Пустой сегмент — отказ, а не «правило про экзотику»."""

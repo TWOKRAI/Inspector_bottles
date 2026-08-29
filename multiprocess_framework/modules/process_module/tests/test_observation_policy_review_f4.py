@@ -295,6 +295,11 @@ class TestRuleHitsSurviveDiagnosticsAndRebuilds:
         из списка «не совпало ни с чем» — наблюдатель менял то, что наблюдает.
         """
         policy = _policy({"rules": {self.RULE: {"interval_sec": 1.0}}}, publish={})
+        # Ф0.4 (m6): «не совпало ни с чем» судится только после цикла оценки —
+        # до него правило едет в `rules_pending`. Предпосылка теста от этого не
+        # изменилась (правило ни с чем не совпало), но теперь её надо создать
+        # явно: один тик прошёл, шанс у правила был.
+        policy.mark_tick()
         assert policy.rules_matched_nothing() == [self.RULE], "предпосылка: правило ещё ни с чем не совпало"
 
         policy.provenance_for([self.PATH])

@@ -98,6 +98,14 @@ _LOG_SEVERITY_RANK: Dict[str, int] = {
 #: Метасимволы, при которых адрес процесса читается как узор (Task 5.4).
 _PROCESS_GLOB_METACHARS = "*?["
 
+#: Таймаут ОТПРАВКИ `process.restart` в `process_restart_verified` (Task 0.2, M4).
+#: Сама команда не судится по ответу (graceful-stop штатно дольше) — это не бюджет
+#: ожидания эффекта, а верхняя граница на то, сколько мы готовы стоять на строке
+#: `system_command()`, прежде чем перейти к поллингу подтверждения. 5 секунд — с
+#: запасом на «команда доставлена, ProcessManager принял её в обработку» при любой
+#: разумной нагрузке очереди; дальше решает окно `wait`, а не эта константа.
+_RESTART_REQUEST_TIMEOUT_S = 5.0
+
 
 def _is_process_batch(process: Any) -> bool:
     """Просил ли оператор БАТЧ — или адресовал один процесс (Task 5.4).
@@ -545,9 +553,32 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         ``reason`` и ``replaced=True`` — она не должна читаться ни как успех, ни как
         «ничего не произошло».
 
+        **``timeout`` vs ``wait`` (Task 0.2, M4) — это два РАЗНЫХ бюджета, не один.**
+        ``timeout`` ограничивает только ОТПРАВКУ команды `process.restart` (сколько мы
+        готовы стоять на сокете, ожидая ответа, который всё равно не судим) — на неё
+        и не завязан дальше ничего. Она ходит с потолком ``min(timeout, 5.0)``
+        (:data:`_RESTART_REQUEST_TIMEOUT_S`), а не с полным ``timeout`` вызывающего —
+        иначе дедлайн окна подтверждения, отсчитанный ДО отправки, оказывался бы
+        частично или полностью съеден медленным запросом ещё до первого опроса.
+        ``wait`` — это окно ПОДТВЕРЖДЕНИЯ, и его дедлайн стартует ПОСЛЕ того, как запрос
+        вернулся (неважно, ответом или таймаутом). Пример на буквальных значениях из
+        acceptance criteria: ``wait=60.0, timeout=90.0`` — запрос честно тянется 70с
+        (graceful-stop, уложился в ``timeout`` вызывающего, но дольше ``wait``); при
+        отсчёте дедлайна ДО отправки (0.0+60.0=60.0) окно оказалось бы уже пройдено
+        к моменту возврата запроса (t=70.0) — ни одного опроса, живой заново поднявшийся
+        процесс отдавался бы как ``restarted: false``. При отсчёте ПОСЛЕ возврата
+        (70.0+60.0=130.0) окно доступно целиком, и `restarted: true` — то, что реально
+        произошло.
+
         Returns:
             ``{restarted, replaced, alive, pid_before, pid_after,
-            instance_restarts_before/after, elapsed, process}`` (+ ``reason`` при неуспехе).
+            instance_restarts_before/after, elapsed, polls, process}``
+            (+ ``reason`` при неуспехе). ``polls`` — сколько снимков ``supervision.status``
+            сделано в окне подтверждения; ноль не может случиться молча (поле есть
+            всегда, даже когда ``wait<=0`` и оно честно равно 0). Опрос, вернувший
+            ``__error__`` («PM моргнул на рестарте»), тоже считается в ``polls`` —
+            это была реальная попытка и реальная секунда из бюджета ``wait``, просто
+            без результата, а не «опроса не было».
         """
         import time
 
@@ -581,9 +612,19 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         pid_before = before.get("pid")
         restarts_before = before.get("instance_restarts")
 
+        # Две отметки времени, а не одна, и это не педантизм (Task 0.2, M4).
+        # `began` — начало ВСЕГО вызова, из него считается `elapsed`: оператору нужна
+        # полная цена «проверенного рестарта», включая отправку.
+        # `started` — начало окна ПОДТВЕРЖДЕНИЯ, из него считается дедлайн `wait`.
+        # Пока обе роли исполняла одна отметка, взятая ДО отправки, медленный запрос
+        # съедал окно опроса целиком: цикл не делал ни одной итерации, и живой заново
+        # поднявшийся процесс отдавался как `restarted: false`.
+        began = time.monotonic()
+        request_timeout = _RESTART_REQUEST_TIMEOUT_S if timeout is None else min(timeout, _RESTART_REQUEST_TIMEOUT_S)
+        restart_reply = self.system_command(
+            {"cmd": "process.restart", "process_name": process}, timeout=request_timeout
+        )
         started = time.monotonic()
-        # Ответ команды НЕ судим: timeout здесь — норма для медленного рестарта.
-        restart_reply = self.system_command({"cmd": "process.restart", "process_name": process}, timeout=timeout)
 
         def _replaced(snap: Dict[str, Any]) -> bool:
             """Инстанс заменён: сменился pid ЛИБО вырос счётчик замен (маркер Task 2.1)."""
@@ -595,9 +636,14 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         after: Dict[str, Any] = before
         deadline = started + max(0.0, wait)
+        polls = 0
         while time.monotonic() < deadline:
             time.sleep(0.5)
             snap = _snapshot()
+            # Опрос — реальная попытка и реальная секунда бюджета `wait`, считаем его в
+            # `polls` даже когда PM моргнул на рестарте (см. докстроку метода): молчаливого
+            # нуля не будет ни в успешном, ни в целиком неудачном окне подтверждения.
+            polls += 1
             if "__error__" in snap:
                 continue  # PM моргнул на рестарте — это не вердикт, продолжаем ждать
             after = snap
@@ -618,7 +664,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "instance_restarts_before": restarts_before,
             "instance_restarts_after": after.get("instance_restarts"),
             "alive": alive,
-            "elapsed": round(time.monotonic() - started, 2),
+            # От `began`, а не от `started`: это цена ВСЕГО вызова для оператора
+            # (отправка + подтверждение), а не длина одного лишь окна опроса.
+            "elapsed": round(time.monotonic() - began, 2),
+            # Сколько снимков supervision.status сделано в окне ПОДТВЕРЖДЕНИЯ (после
+            # возврата запроса). Не включает ДО-снимок — тот не часть ожидания.
+            "polls": polls,
             # Ответ команды сохранён как СПРАВКА, а не как вердикт: он мог быть timeout'ом
             # при успешном рестарте (и наоборот — success при неудавшемся старте нового).
             "restart_reply": restart_reply if isinstance(restart_reply, dict) else None,

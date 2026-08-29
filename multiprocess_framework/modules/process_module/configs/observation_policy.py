@@ -256,10 +256,11 @@ class ObservationPolicy:
 
     Потокобезопасность: объект НЕИЗМЕНЯЕМ после сборки (правки прилетают новым
     объектом и атомарной подменой ссылки — тот же приём, что у
-    ``ProcessHeartbeat._telemetry_gate``). Единственное изменяемое состояние —
-    счётчик попаданий :attr:`_hits`, и его НАБОР КЛЮЧЕЙ фиксирован конструктором:
-    поток такта только увеличивает значения, поэтому читатель ``introspect``
-    обходит словарь, чей размер не меняется.
+    ``ProcessHeartbeat._telemetry_gate``). Изменяемого состояния два, и оба
+    пишет ОДИН поток такта: счётчик попаданий :attr:`_hits` (набор ключей
+    фиксирован конструктором) и счётчик тиков :attr:`_evaluated_ticks` (обычный
+    ``int += 1``). Читатель ``introspect`` обходит словарь, чей размер не
+    меняется, и читает целое, которое не рвётся под GIL.
     """
 
     def __init__(
@@ -268,6 +269,8 @@ class ObservationPolicy:
         legacy: Optional[TelemetryPublishConfig] = None,
         *,
         hits: Optional[Dict[str, int]] = None,
+        evaluated_ticks: int = 0,
+        rule_first_tick: Optional[Dict[str, int]] = None,
     ) -> None:
         """
         Args:
@@ -286,6 +289,20 @@ class ObservationPolicy:
                 чужая правка обнуляла бы счёт, и работающее правило возвращалось
                 бы в ``rules_matched_nothing``, то есть единственный голос про
                 опечатку в пути кричал бы на здоровые правила.
+            evaluated_ticks: сколько ЦИКЛОВ оценки прожила предыдущая политика
+                (Ф0.4, m6). Переносится по той же причине, что и ``hits``.
+            rule_first_tick: ``{паттерн: номер тика, на котором правило впервые
+                увидено}`` предыдущей политики.
+
+                **Почему возраст живёт на ПРАВИЛЕ, а не на политике** (правка
+                исполнителя к дизайну тестера, Ф0.4). Один счётчик на политику
+                возвращает ровно тот ложноположительный ответ, ради которого
+                задача и делается: правило, ДОБАВЛЕННОЕ пересборкой на 50-м
+                тике, унаследовало бы «уже оценено» и в тот же миг стало бы
+                обвиняемым в ``rules_matched_nothing``, ни разу не будучи
+                оценённым. Паттерн, которого нет в переносе, — новый, и его
+                возраст начинается с ТЕКУЩЕГО тика; переживший пересборку свой
+                возраст сохраняет.
         """
         self._config = config if config is not None else ObservationPolicyConfig()
         self._legacy = legacy
@@ -293,6 +310,11 @@ class ObservationPolicy:
         # Ключи фиксированы здесь и больше не меняются — см. докстринг класса.
         carried = hits or {}
         self._hits: Dict[str, int] = {pattern: int(carried.get(pattern, 0)) for pattern in self._rules}
+        self._evaluated_ticks = int(evaluated_ticks)
+        carried_first = rule_first_tick or {}
+        self._first_tick: Dict[str, int] = {
+            pattern: int(carried_first.get(pattern, self._evaluated_ticks)) for pattern in self._rules
+        }
 
     # ------------------------------------------------------------------ чтение
 
@@ -305,6 +327,30 @@ class ObservationPolicy:
     def legacy(self) -> Optional[TelemetryPublishConfig]:
         """Легаси-секция ``telemetry.publish``, если она есть."""
         return self._legacy
+
+    @property
+    def evaluated_ticks(self) -> int:
+        """Сколько ЦИКЛОВ оценки политика прожила (Ф0.4, m6).
+
+        Растёт :meth:`mark_tick`, а не :meth:`resolve`: количество резолвов —
+        это количество ПУТЕЙ, а не циклов, и диагностическое чтение
+        (:meth:`provenance_for`) резолвит с ``count=False`` вовсе. Тик и чтение
+        обязаны различаться явно, иначе «правило дожило до оценки» опять стало
+        бы выводом из чужого числа.
+        """
+        return self._evaluated_ticks
+
+    def mark_tick(self) -> None:
+        """Отметить завершение одного цикла оценки (зовёт поток такта heartbeat'а)."""
+        self._evaluated_ticks += 1
+
+    def rule_first_tick(self) -> Dict[str, int]:
+        """``{паттерн: тик, на котором правило впервые увидено}`` — перенос при пересборке."""
+        return dict(self._first_tick)
+
+    def _rule_ticks(self, pattern: str) -> int:
+        """Сколько циклов оценки ПРОЖИЛО конкретное правило (возраст, не счёт попаданий)."""
+        return self._evaluated_ticks - self._first_tick.get(pattern, self._evaluated_ticks)
 
     def resolve(self, path: str, *, count: bool = True) -> PolicyDecision:
         """Решение по полному пути дерева (``processes.cam1.state.plugins.a.fps``).
@@ -405,8 +451,35 @@ class ObservationPolicy:
         конструктора) и не растёт от диагностического чтения
         (:meth:`provenance_for` резолвит с ``count=False``) — обе половины
         находки З3 ревью Ф4.
+
+        **Правило моложе одного тика сюда не попадает** (Ф0.4, m6): «ноль
+        попаданий» у только что применённого правила означает «ещё не
+        спрашивали», а не «не совпало ни с чем», и обвинять его не за что. Такие
+        едут отдельным :meth:`rules_pending` — два РАЗНЫХ факта в двух полях, а
+        не один список, который читатель обязан домысливать.
         """
-        return sorted(pattern for pattern, hits in self._hits.items() if hits == 0)
+        return sorted(pattern for pattern, hits in self._hits.items() if hits == 0 and self._rule_ticks(pattern) >= 1)
+
+    def rules_pending(self) -> list[str]:
+        """Правила, ещё не дожившие до цикла оценки (Ф0.4, m6).
+
+        Возраст считается ПО ПРАВИЛУ: правило, добавленное пересборкой на 50-м
+        тике политики, ещё не оценивалось ни разу — сколько бы тиков ни прожили
+        его соседи (см. ``rule_first_tick`` у конструктора).
+
+        **Правило с попаданиями сюда не попадает даже в нулевом возрасте**, и это
+        не перестраховка. Возраст растёт отметкой :meth:`mark_tick`, а попадания —
+        вызовом :meth:`resolve`; сегодня оба делает ОДИН вызывающий
+        (``TelemetryGate``) в одной ветке такта, поэтому «есть попадания, а тиков
+        ноль» не воспроизводится. Держится это на том, что вызывающий один, —
+        а не на устройстве полей: второй вызывающий, резолвящий мимо такта, дал бы
+        readback, где ``rule_hits`` показывает совпадения, а ``rules_pending``
+        рядом утверждает «ещё не оценивалось». Совпадение — доказательство того,
+        что правило оценивали, и оно сильнее счётчика тиков.
+        """
+        return sorted(
+            pattern for pattern in self._rules if self._rule_ticks(pattern) < 1 and self._hits.get(pattern, 0) == 0
+        )
 
     def rule_hits(self) -> Dict[str, int]:
         """``{паттерн: сколько путей он рассудил}`` — счёт, а не «ноль/не ноль».
@@ -436,6 +509,10 @@ class ObservationPolicy:
             "subtree_interval_sec": self._config.subtree_interval_sec,
             "rules": self.rules_view(),
             "legacy_source": LEGACY_SOURCE_NAME if self._legacy is not None else None,
+            # Ф0.4 (m6): возраст политики в ответе `config.reload`. Без него
+            # пустой `rules_matched_nothing` не отличить: «правила здоровы» и
+            # «судить ещё рано» выглядят одинаково.
+            "evaluated_ticks": self._evaluated_ticks,
         }
 
     def provenance_for(self, paths: Iterable[str]) -> Dict[str, Dict[str, Any]]:

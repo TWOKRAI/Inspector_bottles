@@ -264,6 +264,21 @@ def _cap_dict(result: Dict[str, Any], budget: int) -> Dict[str, Any]:
     return kept
 
 
+def _tool_accepts_full(name: str) -> bool:
+    """Объявляет ли СХЕМА инструмента параметр ``full`` (источник подсказки об усечении).
+
+    Читается схема, а не список: реестр закрыт ``additionalProperties: false``, и
+    единственный честный ответ на «можно ли попросить полный объём» — тот, по
+    которому клиента и провалидируют. Неизвестное имя (инструмент не из реестра)
+    → ``False``: не обещать того, чего не проверили.
+    """
+    try:
+        spec = build_registry()[name]
+    except KeyError:
+        return False
+    return "full" in spec.input_schema.get("properties", {})
+
+
 def _cap_heavy(name: str, result: Any, args: Dict[str, Any]) -> Any:
     """Усечь тяжёлый ответ, если он превышает потолок и не запрошен ``full``.
 
@@ -280,7 +295,13 @@ def _cap_heavy(name: str, result: Any, args: Dict[str, Any]) -> Any:
         return result
     if size <= RESPONSE_BYTE_CAP:
         return result
-    hint = f"ответ усечён по размеру ({size}B > {RESPONSE_BYTE_CAP}B). full=true — полный объём"
+    hint = f"ответ усечён по размеру ({size}B > {RESPONSE_BYTE_CAP}B)"
+    # Task 0.4 (M2): обещание строится из ФАКТИЧЕСКОЙ схемы, а не из константы.
+    # Прежний текст советовал `full=true` всем поровну — включая 44 инструмента,
+    # чья схема (закрытая, `additionalProperties: false`) этот аргумент
+    # отвергала. Подсказка и возможность обязаны быть ОДНИМ фактом; сверяясь со
+    # схемой, они не могут разъехаться снова, чем бы ни кончилась правка реестра.
+    hint += ". full=true — полный объём" if _tool_accepts_full(name) else " и параметра full у этого инструмента НЕТ"
     if isinstance(result, dict):
         return {
             "_truncated": True,
