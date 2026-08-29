@@ -94,6 +94,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     #: классовый словарь не может стать общим состоянием двух процессов.
     _observability_tail_intents: dict = {}
 
+    #: Ф1.1 (C3): установленные процессные хуки (``ProcessHooks``). Атрибут КЛАССА
+    #: со значением ``None`` — по тому же доводу, что у соседей выше: процесс,
+    #: собранный без ``initialize()`` (тестовый стенд, частичная сборка), обязан
+    #: отвечать на ``_uninstall_process_hooks()`` штатным «нечего снимать», а не
+    #: AttributeError. ``None`` — законное «хуки не ставили».
+    _process_hooks: Any = None
+
     def __init__(
         self,
         name: str,
@@ -268,6 +275,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         except Exception as e:
             import traceback as _tb
 
+            # Ф1.1 (C3): провал подъёма НЕ зовёт shutdown() — он возвращает False
+            # (см. вызывающих). Без этой строки хуки, поставленные в
+            # ``_apply_managers_bundle``, пережили бы непонявшийся процесс:
+            # слоты интерпретатора остались бы занятыми объектом, чей адресат
+            # доставки полуразобран, и следующий ``install`` в том же
+            # интерпретаторе увидел бы их занятыми.
+            self._uninstall_process_hooks()
             self._log_error(f"Failed to initialize process '{self.name}': {e}")
             self._log_error(f"Traceback: {_tb.format_exc()}")
             return False
@@ -341,6 +355,61 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._process_managers.connect_event_manager(self)
         self._apply_boot_observability_layers()
         self._wire_observability_hub()
+        self._install_process_hooks()
+
+    def _install_process_hooks(self) -> None:
+        """Ф1.1 (C3): поставить три процессных хука — ПОСЛЕ подъёма менеджеров.
+
+        Порядок несущий. До подъёма плоскостей доставлять инцидент было бы
+        некуда, и первое же исключение потока ушло бы в
+        ``hook_delivery_failures`` — счётчик, который в норме обязан стоять на
+        нуле; окно «менеджеров ещё нет» превратилось бы в постоянный ложный
+        сигнал «маршрут ошибок сломан».
+
+        Ставятся и тогда, когда ``ErrorManager`` НЕ создан (``config={}``:
+        секции ошибок нет, ``_create_error_manager`` вернул None). Это не
+        снисхождение к неполной сборке: дорога инцидента —
+        :meth:`report_error` → health, и она есть у любого процесса; плоскость
+        ошибок добавляет к ней запись, а не создаёт её. Счётчики в этом случае
+        приватные (см. ``process_hooks._resolve_counter_store``).
+        """
+        from ...logger_module.core.process_hooks import install_process_hooks
+
+        self._process_hooks = install_process_hooks(self)
+
+    def _uninstall_process_hooks(self) -> None:
+        """Снять процессные хуки. Идемпотентно, падать не имеет права.
+
+        Зовут двое: :class:`ProcessLifecycle` на штатном останове и
+        ``initialize()`` на своём провале — хуки не должны пережить процесс,
+        который не поднялся (иначе следующий ``install`` в том же
+        интерпретаторе увидел бы занятые слоты чужим объектом).
+        """
+        hooks = self._process_hooks
+        if hooks is None:
+            return
+        self._process_hooks = None
+        try:
+            hooks.uninstall()
+        except Exception as exc:  # noqa: BLE001 — отказ уборки не имеет права сорвать останов
+            self._log_error(f"снятие процессных хуков не удалось: {exc}")
+
+    def report_error(self, exc: BaseException, context: str | None = None, **fields: Any) -> None:
+        """Дорога инцидента процесса: health-счётчик + плоскость ошибок + строка журнала.
+
+        Тонкий делегат к процесс-общему :class:`HealthState` — сознательно, а не
+        «пока так»: тремя адресатами инцидента уже владеет health (ADR-PM-030,
+        C2), и второй распределитель рядом означал бы два ответа на вопрос
+        «куда едет отказ». Задача 1.3 обобщит эту дорогу на миксин, чтобы её
+        имели и менеджеры; здесь она нужна процессу, потому что именно процесс —
+        адресат процессных хуков (``services.report_error`` их протокола).
+
+        ``**fields`` уезжают в контекст записи плоскости ошибок (``thread``,
+        ``traceback``, ``hook`` у хука).
+        """
+        from ..health import get_or_create_health_state
+
+        get_or_create_health_state(self).report_error(exc, context=context, **fields)
 
     def _apply_boot_observability_layers(self) -> None:
         """Применить стек слоёв на старте — там, где ассемблер этого не сделал.

@@ -360,11 +360,36 @@ class TestA4UninstallStopsDelivery:
     вернули дефолтный/прежний обработчик, печатающий в stderr).
 
     Красный на этом HEAD: ``ModuleNotFoundError`` на локальном импорте.
+
+    **Правка исполнителя Task 1.1 (2026-08-29) — доказанное противоречие, не
+    подгонка под реализацию.** В исходной редакции якорь существования
+    (``"Traceback" in capfd.err``) недостижим ЛЮБОЙ реализацией задачи, и это
+    свойство pytest, а не хуков: pytest 9.0.3 занимает ``threading.excepthook``
+    на всю сессию (``_pytest/threadexception.py::pytest_configure``), а его хук
+    трассу НЕ печатает — он кладёт её в deque и позже выдаёт
+    ``PytestUnhandledThreadExceptionWarning``. Значит «прежний хук» внутри теста
+    — это pytest'овский сборщик, и stderr пуст. Воспроизведено отдельным зондом
+    БЕЗ участия process_hooks: поток с ``RuntimeError`` под ``capfd`` даёт
+    ``err == ''``. Одновременно A5 требует восстановления прежнего хука ПО
+    ИДЕНТИЧНОСТИ (``threading.excepthook is prev_threading``), то есть вернуть
+    вместо pytest'овского печатающий stdlib-дефолт реализация не вправе: два
+    критерия несовместимы.
+
+    Правка — одна строка, восстанавливающая ПРЕДПОСЫЛКУ критерия («прежний хук
+    печатает в stderr»), а не ослабляющая его: перед установкой в слот кладётся
+    stdlib-дефолт ``threading.__excepthook__``. Проверяемое свойство прежнее и
+    полное: снятые хуки не считают, не пишут в стор, а событие уезжает прежнему
+    хуку — и это видно по его СОБСТВЕННОМУ следу, а не по нашему. Обратно слот
+    возвращает автофикстура ``_restore_global_hooks`` этого файла.
     """
 
     @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
     def test_after_uninstall_counters_frozen_and_traceback_reaches_stderr(self, capfd, tmp_path) -> None:
         from multiprocess_framework.modules.logger_module.core.process_hooks import install_process_hooks
+
+        # См. докстринг класса: без этой строки «прежним хуком» оказывается
+        # молчащий сборщик pytest, и якорь существования недостижим в принципе.
+        threading.excepthook = threading.__excepthook__
 
         error_mgr = ErrorManager(manager_name="a4-error", config=_manager_config(tmp_path, "a4_error"))
         error_mgr.initialize()

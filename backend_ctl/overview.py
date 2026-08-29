@@ -233,6 +233,22 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             anomalies.append(
                 {"kind": "observability_loss", "process": proc, "detail": f"плоскость {plane!r}: {detail}"}
             )
+        # Ф1.1 (C3) — исключение, вышедшее из потока. СВОЙ kind, а не
+        # ``observability_loss``: там речь о записях, которых нет, здесь — о
+        # записи, которая ЕСТЬ и говорит про упавший поток. Слить их в одну
+        # подсказку значило бы предложить оператору чинить журнал вместо
+        # процесса. Читается из СЫРОЙ секции (``planes``), а не из ``nonzero``:
+        # ``nonzero`` — про классы потери, и добавить имя туда значило бы
+        # объявить отказ процесса потерей наблюдаемости.
+        error_plane = (obs.planes or {}).get("error") if obs.ok else None
+        if isinstance(error_plane, dict) and _is_positive(error_plane.get("thread_exceptions")):
+            anomalies.append(
+                {
+                    "kind": "thread_exceptions",
+                    "process": proc,
+                    "detail": f"thread_exceptions={error_plane['thread_exceptions']}",
+                }
+            )
         if not obs.ok:
             anomalies.append(
                 {

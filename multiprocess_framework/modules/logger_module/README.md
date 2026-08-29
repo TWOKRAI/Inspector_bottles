@@ -103,7 +103,8 @@ logger_module/
 │   ├── logger_manager.py     ← LoggerManager(ChannelRoutingManager, ILoggerManager)
 │   ├── log_types.py          ← LogRecord (dataclass)
 │   ├── log_config.py         ← реэкспорт LoggerManagerConfig, LogLevel, LogScope
-│   └── log_enums.py          ← LogLevel (enum), LogScope (строковые константы, Ф2.4)
+│   ├── log_enums.py          ← LogLevel (enum), LogScope (строковые константы, Ф2.4)
+│   └── process_hooks.py      ← три процессных хука: исключения потоков + warnings (Ф1.1 / C3)
 ├── configs/
 │   └── logger_manager_config.py  ← LoggerManagerConfig(ChannelRoutingConfig)
 │
@@ -399,6 +400,37 @@ logger.effective_channels("Plugins.vision.capture.basler")  # ("named_file",) | 
 
 Обе функции отвечают **про одну ось решения**, а не про судьбу записи: приёмник может
 быть снят оператором, а плоскость ошибок ходит своим путём.
+
+---
+
+## Процессные хуки: что ловится без единого вызова разъёма (Ф1.1 / C3)
+
+`core/process_hooks.py` ставит три слота интерпретатора — `threading.excepthook`,
+`sys.excepthook`, `warnings.showwarning` — и отдаёт пойманное плоскостям наблюдаемости.
+Повод (находка C3 ревью 2026-08-28, воспроизведена запуском): исключение в рабочем потоке
+давало 728 байт в stderr и **ноль** записей во всех трёх плоскостях.
+
+```python
+from multiprocess_framework.modules.logger_module.core.process_hooks import (
+    install_process_hooks, installed_hooks, HOOK_COUNTER_KEYS,
+)
+
+hooks = install_process_hooks(services)   # один объект на процесс; повторный вызов вернёт его же
+hooks.counters()                          # {'thread_exceptions': 0, 'warnings_captured': 0, ...}
+hooks.uninstall()                         # вернёт слоты — только если они всё ещё наши
+```
+
+`services` — утиный протокол (`name`, `report_error(exc, context, **fields)`,
+`_log_warning(message, **kwargs)`, `get_manager("error")`), поэтому модуль **не импортирует**
+`process_module`/`error_module`: хуку незачем знать про процесс. В боевой сборке протоколу
+удовлетворяет `ProcessModule`; ставит и снимает хуки фреймворк
+(`_install_process_hooks` в конце подъёма менеджеров, `ProcessLifecycle.shutdown` — между
+остановом потоков и гашением плоскостей).
+
+Счётчики `HOOK_COUNTER_KEYS` живут в `ErrorManager.stats` — том же словаре, что публикует
+`get_stats()`; своей копии значения нет. Полный разбор — что ловится, что нет и почему, —
+в [`docs/observability/CONNECTORS.md` §1.1](../../docs/observability/CONNECTORS.md);
+решение — **ADR-LOG-011** в [`DECISIONS.md`](DECISIONS.md).
 
 ---
 

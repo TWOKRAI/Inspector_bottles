@@ -20,7 +20,7 @@ python -m scripts.docs_verify.docs_check --list   # перечень прове�
 
 ## Что проверяется
 
-**14 проверок**, каждая названа идентификатором расхождения приёмки F1 или номером находки
+**15 проверок**, каждая названа идентификатором расхождения приёмки F1 или номером находки
 (число сторожится тестом `test_readme_states_the_true_number_of_checks` — первая редакция README
 обещала 15, и это заметил только внешний приёмщик, пересчитав руками):
 
@@ -35,6 +35,7 @@ python -m scripts.docs_verify.docs_check --list   # перечень прове�
 | H17-a…d | `docs/README.md`, `MODULE_CONTRACTS.md`, `MODULES_OVERVIEW.md`, `COMMUNICATION_MAP.md` | число модулей, вход в наблюдаемость, `collector` вместо `inspector`, отсутствие `InspectorManager` |
 | H6 | `command_manager.py`, `dispatcher.py` | докстринг-пример называет слот, который адресует `_record_metric` |
 | H19-a/b | `observability/NEW_MODULE_RECIPE.md` | шов `source_name=LOG_SOURCE`; образец шага 1 несёт `initialize`/`shutdown` |
+| C3 | `observability/CONNECTORS.md` | имена счётчиков раздела «Что ловится автоматически» = `HOOK_COUNTER_KEYS` |
 
 ## Чего он НЕ делает (названо, а не умолчано)
 

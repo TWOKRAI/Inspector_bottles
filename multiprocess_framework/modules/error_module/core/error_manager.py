@@ -31,6 +31,7 @@ from ...channel_routing_module import resolve_build_result
 from ...channel_routing_module.levels import is_error_level, severity_of
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, ScopeName
 from ...logger_module.core.logger_core import LoggerCore
+from ...logger_module.core.process_hooks import HOOK_COUNTER_KEYS
 from ..configs.error_manager_config import DEFAULT_SEVERITY_ROUTES, ErrorManagerConfig
 from ..interfaces import IErrorManager
 from .error_config_assembly import expand_error_manager_config
@@ -232,6 +233,24 @@ class ErrorManager(LoggerCore, IErrorManager):
             managers=managers or {},
             **kwargs,
         )
+
+        # Ф1.1 (C3): три счётчика процессных хуков объявлены ЗДЕСЬ и ВСЕГДА,
+        # нулями. Тем же приёмом, что счётчики потерь в ``LoggerCore.__init__``:
+        # ``update()``, а не присваивание, — присваивание стёрло бы то, что
+        # объявили база CRM и общий лог-слой.
+        #
+        # Объявление, а не «ключ появляется по факту первого события»: «ключа
+        # нет» и «событий не было» — разные факты, и потребитель
+        # (``PLANE_COUNTER_KEYS`` → ``introspect.observability`` →
+        # ``system_overview``) не должен их путать. Именно здесь, а не в
+        # ``process_hooks``, потому что плоскость ошибок обязана отвечать на
+        # вопрос «сколько исключений потоков было» и тогда, когда хуки НЕ
+        # ставили вовсе, — иначе ноль был бы неотличим от «спросить некого».
+        #
+        # Сами числа пишет ``install_process_hooks``: он берёт ЭТОТ словарь как
+        # хранилище (см. ``_resolve_counter_store``), поэтому копии значения
+        # нигде нет — ``hooks.counters()`` и ``get_stats()`` читают одно место.
+        self.stats.update({key: 0 for key in HOOK_COUNTER_KEYS})
 
         # R9: родитель положил в слепок для отката развёрнутый LoggerManagerConfig,
         # в котором нет include_stacktrace — это флаг ErrorManager, а не логгера.
@@ -499,4 +518,10 @@ class ErrorManager(LoggerCore, IErrorManager):
         stats = super().get_stats()
         stats["include_stacktrace"] = self._include_stacktrace
         stats["level_routes"] = dict(self._level_to_channel)
+        # Ф1.1 (C3): три счётчика процессных хуков. Родительский ``get_stats``
+        # собирает ИМЕНОВАННЫЙ список, а не весь ``self.stats``, поэтому
+        # объявления в конструкторе мало — без этих строк числа существовали бы,
+        # оставаясь невидимыми снаружи (тот же класс, что стрелял в Ф0.3).
+        for key in HOOK_COUNTER_KEYS:
+            stats[key] = self.stats[key]
         return stats

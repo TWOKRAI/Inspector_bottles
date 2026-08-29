@@ -34,6 +34,7 @@ DOCS_README = "multiprocess_framework/docs/README.md"
 CONTRACTS = "multiprocess_framework/docs/MODULE_CONTRACTS.md"
 CMD_MANAGER = "multiprocess_framework/modules/command_module/core/command_manager.py"
 SEVERITY_CFG = "multiprocess_framework/modules/error_module/configs/error_manager_config.py"
+PROCESS_HOOKS = "multiprocess_framework/modules/logger_module/core/process_hooks.py"
 
 Edit = Tuple[str, str, str]  # (файл, что заменить, на что — текст ДО правок 5.1)
 
@@ -205,6 +206,20 @@ INJECTIONS: List["pytest.ParameterSet"] = [
             )
         ],
         id="H19-b-образец-не-инстанцируется",
+    ),
+    pytest.param(
+        "C3",
+        [(CONNECTORS, "| `hook_delivery_failures` |", "| `hook_delivery_failure` |")],
+        id="C3-имя-счётчика-в-документе-разошлось-с-кодом",
+    ),
+    # Вторая инъекция того же C3 — со стороны КОДА, а не документа. Единственный
+    # слом «документ переврал имя» не сторожил бы противоположный дрейф: счётчик
+    # переименовали в константе, документ остался с прежним написанием (ровно то,
+    # что произошло с F1-2 при добавлении `scope`).
+    pytest.param(
+        "C3",
+        [(PROCESS_HOOKS, '"warnings_captured"', '"warnings_counted"')],
+        id="C3-счётчик-переименован-в-коде",
     ),
 ]
 

@@ -9,12 +9,32 @@
 
 | Критерий | Оценка | Комментарий |
 |---|---|---|
-| Код | 9 | 6 936 строк: `LoggerCore` — единственный писатель; иерархия имён, процессоры, floor, шесть типов приёмников. Батчинга нет (Ф7.4) |
-| Тесты | 9 | 18 213 строк (2.6 : 1 к коду) — цена доказанности после Ф0, где 12 зелёных тестов закрепляли неверную модель |
-| Документация | 10 | README, `DECISIONS.md` (ADR-LOG-001…010) + четыре справочника в [`docs/observability/`](../../docs/observability/CONNECTORS.md) |
+| Код | 9 | 7 461 строка: `LoggerCore` — единственный писатель; иерархия имён, процессоры, floor, шесть типов приёмников, процессные хуки. Батчинга нет (Ф7.4) |
+| Тесты | 9 | 19 144 строки (2.6 : 1 к коду) — цена доказанности после Ф0, где 12 зелёных тестов закрепляли неверную модель |
+| Документация | 10 | README, `DECISIONS.md` (ADR-LOG-001…011) + четыре справочника в [`docs/observability/`](../../docs/observability/CONNECTORS.md) |
 | Связанность | 9 | Наследует `ChannelRoutingManager`; зависит от `channel_routing_module` |
 | Дублирование | 10 | Нет: registry, sink-control, tap-механика, учёт потерь — из CRM |
 | Работоспособность | 9 | Синхронная запись, гейт по имени источника, floor; порядок останова закреплён (B3) |
+
+## Обновление 2026-08-29 (Ф1.1 плана `observability-closure` — процессные хуки, C3)
+
+- **`core/process_hooks.py`** (новый, 390 строк): `install_process_hooks(services)` /
+  `installed_hooks()` / `ProcessHooks`. Три слота интерпретатора — `threading.excepthook`,
+  `sys.excepthook`, `warnings.showwarning` — отдают пойманное плоскостям ошибок и логов.
+  Адресат — утиный протокол, поэтому модуль **не импортирует** `process_module`/`error_module`.
+- Повод — находка **C3** ревью 2026-08-28, воспроизведённая запуском: исключение в рабочем
+  потоке давало 728 байт в stderr и **ноль** записей в трёх плоскостях; в репозитории не было
+  ни одного вхождения этих трёх имён.
+- Три счётчика `HOOK_COUNTER_KEYS` (`thread_exceptions`, `warnings_captured`,
+  `hook_delivery_failures`) объявляет `ErrorManager` и публикует его `get_stats()`; наружу едут
+  через `PLANE_COUNTER_KEYS` → `introspect.observability` → `system_overview.anomalies`.
+- Проверка на живом процессе — команды `diag.thread_raise` / `diag.warn` (впрыск НАСТОЯЩЕГО
+  события в слот, а не имитация вызовом `report_error`).
+- Тесты: 17 приёмочных (независимый тестер, `process_module/tests/test_process_hooks_acceptance.py`
+  + `backend_ctl/tests/test_overview_thread_exceptions_acceptance.py`), 11 авторских hazard
+  (`tests/test_process_hooks.py`) и 3 на проводку (`process_module/tests/test_process_hooks_wiring.py`).
+- Решение и четыре развилки — **ADR-LOG-011**; что ловится и что нет —
+  [`docs/observability/CONNECTORS.md` §1.1](../../docs/observability/CONNECTORS.md).
 
 ## Обновление 2026-08-03 (Ф2.2 — иерархия имён)
 

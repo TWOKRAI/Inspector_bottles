@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...config_module.core.config import Config
+from ...logger_module.core.process_hooks import HOOK_COUNTER_KEYS
 from ..configs.observability_audit import ACTION_REBUILD
 from ..configs.observability_config import expand_observability
 from ..configs.observability_layers import (
@@ -628,7 +629,13 @@ PLANE_COUNTER_KEYS: tuple = (
     # оператор читает «<сборка сообщения упала: ...>» и не может спросить,
     # сколько таких было.
     "message_build_failures",
-)
+    # Ф1.1 (C3) — три счётчика процессных хуков приезжают ИМПОРТОМ константы, а
+    # не переписанными строками. Список выше сам объявлен «точкой забывания», и
+    # четвёртая копия трёх имён (реестр, объявление в ErrorManager, документ,
+    # здесь) разошлась бы молча — расхождение видно только тому, кто сверяет
+    # руками. Кортеж склеивается, а не распаковывается внутрь, чтобы имена
+    # оставались там, где они определены.
+) + HOOK_COUNTER_KEYS
 
 
 def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:

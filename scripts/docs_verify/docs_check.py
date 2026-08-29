@@ -155,6 +155,49 @@ def _model_fields(src: Sources, rel: str, cls: str) -> Set[str]:
     raise Unverifiable(f"{rel}: схема {cls} не найдена")
 
 
+def _tuple_constant(src: Sources, rel: str, name: str) -> List[str]:
+    """Значения кортежа-константы ``name`` из файла ``rel`` — по AST, без импорта.
+
+    Тем же приёмом, что разбор ``DEFAULT_SEVERITY_ROUTES``: сверщик не имеет
+    права импортировать фреймворк — оракул, падающий вместе с проверяемым,
+    ничего не доказывает.
+    """
+    tree = ast.parse(src.read(rel))
+    for node in ast.walk(tree):
+        named = (
+            isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+        ) or (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == name)
+        if named and node.value is not None:
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError as exc:  # значение не литерал — предпосылка не вычислилась
+                raise Unverifiable(f"{rel}: {name} не разбирается литералом: {exc}") from exc
+            return [str(item) for item in value]
+    raise Unverifiable(f"{rel}: константа {name} не найдена")
+
+
+def _section(text: str, title_fragment: str) -> str:
+    """Текст раздела от заголовка, содержащего ``title_fragment``, до следующего заголовка.
+
+    «Следующий» — того же или более высокого уровня: подразделы остаются внутри.
+    """
+    lines = text.splitlines()
+    start = None
+    level = 0
+    for index, line in enumerate(lines):
+        if line.startswith("#") and title_fragment in line:
+            start = index
+            level = len(line) - len(line.lstrip("#"))
+            break
+    if start is None:
+        raise Unverifiable(f"в документе нет заголовка со словами {title_fragment!r}")
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.startswith("#") and (len(line) - len(line.lstrip("#"))) <= level:
+            return "\n".join(lines[start:index])
+    return "\n".join(lines[start:])
+
+
 def _md_table_rows(text: str) -> List[List[str]]:
     """Строки markdown-таблиц файла: список ячеек без ведущих/хвостовых пустых."""
     rows: List[List[str]] = []
@@ -243,6 +286,11 @@ def _check_command_params(src: Sources) -> Optional[str]:
         "observability.tail.subscribe": "ObservabilityTailSubscribeParams",
         "observability.tail.unsubscribe": "ObservabilityTailUnsubscribeParams",
         "health.report": "HealthReportParams",
+        # Ф1.1 (C3): команды впрыска в процессные хуки. Судятся тем же
+        # правилом, что соседи, — иначе новая поверхность приехала бы без
+        # сверщика ровно в тот документ, ради которого он заведён.
+        "diag.thread_raise": "DiagThreadRaiseParams",
+        "diag.warn": "DiagWarnParams",
     }
     doc = src.read(f"{OBS}/CONTROL_PANEL.md")
     rows = {}
@@ -268,6 +316,42 @@ def _check_command_params(src: Sources) -> Optional[str]:
                 + (f"; не названы: {sorted(missing)}" if missing else "")
             )
     return "; ".join(bad) or None
+
+
+#: Реестр имён счётчиков процессных хуков — там, где он определён.
+_PROCESS_HOOKS = f"{MODULES}/logger_module/core/process_hooks.py"
+
+
+def _check_hook_counter_names(src: Sources) -> Optional[str]:
+    """Имена счётчиков в разделе «Что ловится автоматически» ↔ ``HOOK_COUNTER_KEYS``.
+
+    Ф1.1 (C3). Три имени живут в четырёх местах (константа, объявление в
+    ``ErrorManager``, реестр публикации, документ), и три из четырёх связаны
+    импортом — а документ связать импортом нельзя. Отсюда эта проверка: без неё
+    именно документ и разошёлся бы, причём молча, потому что счётчик,
+    переименованный в коде, продолжает существовать под старым именем на бумаге.
+
+    Сверяется МНОЖЕСТВО имён в первых ячейках таблиц раздела: и лишнее (счётчика
+    нет, а документ обещает), и недостающее (счётчик есть, документ молчит).
+    """
+    keys = set(_tuple_constant(src, _PROCESS_HOOKS, "HOOK_COUNTER_KEYS"))
+    if not keys:
+        raise Unverifiable("HOOK_COUNTER_KEYS пуст — предпосылка не вычислилась")
+    section = _section(src.read(f"{OBS}/CONNECTORS.md"), "Что ловится автоматически")
+    named = {
+        name
+        for cells in _md_table_rows(section)
+        if cells
+        for name in _backticked(cells[0])
+        if re.fullmatch(r"[a-z_]+", name)
+    }
+    if named == keys:
+        return None
+    return (
+        f"документ называет счётчики {sorted(named)}, HOOK_COUNTER_KEYS — {sorted(keys)}"
+        + (f"; лишние: {sorted(named - keys)}" if named - keys else "")
+        + (f"; не названы: {sorted(keys - named)}" if keys - named else "")
+    )
 
 
 def _check_error_floor_wording(src: Sources) -> Optional[str]:
@@ -626,6 +710,13 @@ CHECKS: Sequence[Check] = (
         "образец шага 1 несёт initialize/shutdown",
         "линза S2",
         _check_recipe_lifecycle_is_named,
+    ),
+    Check(
+        "C3",
+        "observability/CONNECTORS.md",
+        "имена счётчиков раздела «Что ловится автоматически» = HOOK_COUNTER_KEYS",
+        "C3 ревью 2026-08-28 (Task 1.1)",
+        _check_hook_counter_names,
     ),
 )
 

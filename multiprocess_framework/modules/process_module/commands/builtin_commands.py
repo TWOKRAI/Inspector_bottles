@@ -6,11 +6,27 @@
 
 from __future__ import annotations
 
+import builtins
 import os
+import threading
+import warnings
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
+
+
+#: Имя потока, который поднимает ``diag.thread_raise`` без ``thread_name``.
+#: Оно же приезжает в ``extra.context.thread`` записи плоскости ошибок — то есть
+#: это АДРЕС события в сторе, а не украшение.
+DIAG_THREAD_NAME = "diag-thread-raise"
+
+#: Предел ожидания потока в ``diag.thread_raise``. Единственный потолок задачи, и
+#: он не молчаливый: результат ожидания едет в ответе ключом ``joined``, поэтому
+#: «счётчик отстал, потому что не дождались» отличимо от «хук не сработал».
+#: Значение — с запасом на порядок: поднять поток, бросить и отработать хук стоит
+#: единиц миллисекунд, две секунды покрывают промах планировщика под нагрузкой.
+DIAG_JOIN_TIMEOUT_SEC = 2.0
 
 
 #: Кого команда sink-control имеет право трогать: плоскость → атрибут в services.
@@ -3188,12 +3204,20 @@ class BuiltinCommands:
     # ========================================================================
 
     def _register_health_commands(self) -> None:
-        """Зарегистрировать health.report / health.status.
+        """Зарегистрировать health.report / health.status / diag.thread_raise / diag.warn.
 
         ``health.report`` — диагностический впрыск health-события в процесс: даёт
         детерминированный способ проверить канал наблюдаемости (report_error →
         heartbeat → state-дерево → driver), не дожидаясь реального отказа железа.
         ``health.status`` — прочитать текущий снапшот здоровья процесса.
+
+        ``diag.*`` (Ф1.1 / C3) — тот же приём для процессных хуков: впрыснуть
+        НАСТОЯЩЕЕ исключение потока и НАСТОЯЩИЙ ``warnings.warn``, а не сымитировать
+        их вызовом ``report_error``. Имитация проверила бы дорогу от хука вниз и
+        промолчала бы ровно о том, ради чего механизм заведён: стоит ли хук в
+        слоте интерпретатора. Регистрируются здесь, вместе с ``health.*``, потому
+        что предмет один — наблюдаемость отказов, и два места регистрации одной
+        поверхности однажды разъедутся.
         """
         cm = self._services.command_manager
         if not cm:
@@ -3212,8 +3236,22 @@ class BuiltinCommands:
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system", "health"])
+        diag_specs = [
+            (
+                "diag.thread_raise",
+                self._cmd_diag_thread_raise,
+                "Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook",
+            ),
+            (
+                "diag.warn",
+                self._cmd_diag_warn,
+                "Диагностика: позвать warnings.warn — проверка warnings.showwarning",
+            ),
+        ]
+        for name, handler, desc in diag_specs:
+            cm.register_command(name, handler, metadata={"description": desc}, tags=["system", "diagnostics"])
         self._services._log_debug(
-            "Встроенные команды health.report/status зарегистрированы",
+            "Встроенные команды health.report/status и diag.thread_raise/warn зарегистрированы",
             module="lifecycle",
         )
 
@@ -3276,6 +3314,99 @@ class BuiltinCommands:
 
         state = get_or_create_health_state(self._services)
         return {"success": True, "process": self._services.name, "health": state.snapshot()}
+
+    def _cmd_diag_thread_raise(self, data=None, **kwargs) -> dict:
+        """Поднять поток, который бросит ``RuntimeError`` — проверка ``threading.excepthook``.
+
+        data: ``message`` (текст исключения), ``thread_name`` (имя потока, по
+        умолчанию :data:`DIAG_THREAD_NAME` — оно же приезжает в ``extra.context.thread``
+        записи плоскости ошибок, поэтому имя стоит задавать своё, когда проверок
+        несколько подряд).
+
+        Ждёт поток :data:`DIAG_JOIN_TIMEOUT_SEC` секунд и возвращает ``joined``:
+        предел ожидания — часть ОТВЕТА, а не молчаливый потолок. ``joined=false``
+        означает «счётчик в ответе может отставать», и без этого признака
+        отставание читалось бы как «хук не сработал».
+        """
+        from ...logger_module.core.process_hooks import installed_hooks
+
+        args = self._merge_args(data, kwargs)
+        hooks = installed_hooks()
+        if hooks is None:
+            # Не KeyError и не ноль: «хуков нет» и «событий не было» — разные
+            # факты, и ноль вместо отказа отправил бы читателя искать дефект
+            # в дороге доставки вместо отсутствующей установки.
+            return {
+                "success": False,
+                "process": self._services.name,
+                "reason": "процессные хуки не установлены — считать событие некому",
+            }
+
+        message = str(args.get("message") or "diagnostic thread exception")
+        thread_name = str(args.get("thread_name") or DIAG_THREAD_NAME)
+
+        def _raise_diagnostic_error() -> None:
+            raise RuntimeError(message)
+
+        thread = threading.Thread(target=_raise_diagnostic_error, name=thread_name, daemon=True)
+        thread.start()
+        thread.join(DIAG_JOIN_TIMEOUT_SEC)
+        joined = not thread.is_alive()
+        return {
+            "success": True,
+            "process": self._services.name,
+            "thread": thread_name,
+            "joined": joined,
+            "thread_exceptions": hooks.counters()["thread_exceptions"],
+        }
+
+    def _cmd_diag_warn(self, data=None, **kwargs) -> dict:
+        """Позвать ``warnings.warn`` — проверка ``warnings.showwarning``.
+
+        data: ``message`` (текст), ``category`` (имя класса-предупреждения из
+        ``builtins``, дефолт ``UserWarning``). Неизвестное имя — адресный отказ,
+        а не молчаливая подмена на ``UserWarning``: подмена дала бы «success» на
+        опечатке в имени категории.
+
+        Фильтры ``warnings`` команда НЕ трогает. Следствие названо, а не
+        умолчано: под штатными фильтрами повторный ``warn`` с тем же текстом из
+        той же строки кода машинерия ``warnings`` подавляет своим реестром, и
+        ``warnings_captured`` в ответе тогда не вырастет. Число в ответе именно
+        поэтому и возвращается — по нему видно, состоялось событие или нет.
+        """
+        from ...logger_module.core.process_hooks import installed_hooks
+
+        args = self._merge_args(data, kwargs)
+        hooks = installed_hooks()
+        if hooks is None:
+            return {
+                "success": False,
+                "process": self._services.name,
+                "reason": "процессные хуки не установлены — считать событие некому",
+            }
+
+        category_name = str(args.get("category") or "UserWarning")
+        category = getattr(builtins, category_name, None)
+        if not (isinstance(category, type) and issubclass(category, Warning)):
+            return {
+                "success": False,
+                "process": self._services.name,
+                "reason": f"неизвестная категория '{category_name}' (имя класса-предупреждения из builtins)",
+            }
+
+        message = str(args.get("message") or "diagnostic warning")
+        # ``stacklevel=1`` (эта строка), а не «свалить на вызывающего»: у
+        # синтетического впрыска источник — сама команда. С ``stacklevel=2``
+        # запись приезжала с адресом внутренностей диспетчера
+        # (``dispatch_module/core/dispatcher.py:413`` — воспроизведено прогоном),
+        # то есть указывала оператору на невиновного.
+        warnings.warn(message, category, stacklevel=1)
+        return {
+            "success": True,
+            "process": self._services.name,
+            "category": category_name,
+            "warnings_captured": hooks.counters()["warnings_captured"],
+        }
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов

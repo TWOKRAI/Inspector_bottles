@@ -340,6 +340,31 @@ class HealthReportParams(BaseModel):
     level: Optional[str] = None
 
 
+class DiagThreadRaiseParams(BaseModel):
+    """Параметры ``diag.thread_raise`` (впрыск исключения потока, Ф1.1 / C3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: Optional[str] = None
+    #: Имя потока. Объявлено, а не «додумывается из message»: имя приезжает в
+    #: ``extra.context.thread`` записи плоскости ошибок, то есть служит АДРЕСОМ
+    #: события, по которому его потом ищут среди соседних проверок.
+    thread_name: Optional[str] = None
+
+
+class DiagWarnParams(BaseModel):
+    """Параметры ``diag.warn`` (впрыск ``warnings.warn``, Ф1.1 / C3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: Optional[str] = None
+    #: Имя класса-предупреждения из ``builtins`` (``UserWarning`` по умолчанию).
+    #: Хендлер отвечает адресным отказом на неизвестное имя — но необъявленный
+    #: ключ до этой проверки не доехал бы (тот же довод, что у
+    #: ``HealthReportParams.level``).
+    category: Optional[str] = None
+
+
 #: Реестр контрактов built-in команд: имя команды → Pydantic-схема параметров.
 #: Наполняется в BuiltinCommands._register_message_guards.
 BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
@@ -388,6 +413,9 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     # health (Ф2 Task 2.1)
     "health.report": HealthReportParams,
     "health.status": NoParams,
+    # diag (Ф1.1 / C3) — впрыск НАСТОЯЩЕГО события в процессные хуки
+    "diag.thread_raise": DiagThreadRaiseParams,
+    "diag.warn": DiagWarnParams,
     # wire (runtime SHM-канал)
     "wire.configure": WireConfigureParams,
     "wire.deconfigure": WireDeconfigureParams,

@@ -114,8 +114,16 @@ class IHealthReporter(Protocol):
     Реализация — :class:`HealthReporter` поверх процесс-общего :class:`HealthState`.
     """
 
-    def report_error(self, exc: BaseException, context: str | None = ..., throttle: float = ...) -> None:
-        """Зарегистрировать проглоченную/обработанную ошибку (инкремент + last_error)."""
+    def report_error(
+        self, exc: BaseException, context: str | None = ..., throttle: float = ..., **fields: object
+    ) -> None:
+        """Зарегистрировать проглоченную/обработанную ошибку (инкремент + last_error).
+
+        ``**fields`` едут в контекст записи плоскости ошибок (Ф1.1 / C3): адрес
+        потока и трасса у инцидента процессного хука. Без них запись доезжала бы
+        обезличенной — «RuntimeError где-то в процессе», — а именно адрес и
+        трасса отвечают на первый вопрос разбирающего.
+        """
         ...
 
     def set_status(self, status: "HealthStatus | str", reason: str | None = ...) -> None:
@@ -225,12 +233,21 @@ class HealthState:
         exc: BaseException,
         context: str | None = None,
         throttle: float = DEFAULT_THROTTLE,
+        **fields: Any,
     ) -> None:
         """Учесть ошибку: инкремент счётчика + запись last_error + дросселированный лог.
 
         Счётчик растёт всегда (честность для breaker). last_error/dirty обновляются
         только вне лог-only. Лог — не чаще, чем раз в ``throttle`` сек на пару
         (тип исключения, context).
+
+        ``**fields`` (Ф1.1 / C3) уезжают в КОНТЕКСТ ЗАПИСИ плоскости ошибок
+        (``_safe_track`` → ``track_error`` → ``extra``), а не в health-снапшот:
+        health — агрегат процесса, и класть в него произвольные поля каждого
+        инцидента значило бы публиковать в state-дерево неограниченную форму.
+        Дроссель на них НЕ распространяется отдельным правилом: пара
+        (тип исключения, context) уже различает инциденты разных потоков, потому
+        что ``context`` у хука — ``thread:<имя>``.
         """
         etype = type(exc).__name__
         emsg = str(exc)[:_MAX_MESSAGE_LEN]
@@ -270,7 +287,7 @@ class HealthState:
             # проглоченное исключение в горячем цикле — ровно тот случай, где
             # «пишем каждое» превращает журнал инцидентов в поток. Счётчик
             # health при этом считает ВСЕ, поэтому число не теряется.
-            self._safe_track(exc, ctx)
+            self._safe_track(exc, ctx, fields)
 
         # Честный breaker (Task 2.2): инкремент подряд-счётчика ВНЕ self._lock —
         # breaker держит собственный lock, а переход в degraded ниже снова берёт
@@ -392,17 +409,27 @@ class HealthState:
             HealthField.BREAKER: self._breaker.state,
         }
 
-    def _safe_track(self, exc: BaseException, context: str) -> None:
+    def _safe_track(self, exc: BaseException, context: str, fields: dict[str, Any] | None = None) -> None:
         """Отдать инцидент плоскости ошибок; её отсутствие — законное состояние.
 
         Падать здесь запрещено: `report_error` зовут из веток «мы поймали
         исключение», и отказ учёта не имеет права стать вторым исключением
         поверх первого.
+
+        Ф1.1 (C3): ``fields`` — произвольные поля записи (``thread``,
+        ``traceback``, ``hook``). При ПУСТЫХ полях форма вызова прежняя,
+        байт-в-байт, включая ``None`` на пустом контексте: у ``track_error``
+        пустой словарь и ``None`` разбираются одинаково, но соседние тесты
+        сверяют именно вызов, и менять его без нужды значит красить их зря.
         """
         if self._track is None:
             return
+        if fields:
+            payload: dict[str, Any] | None = {"context": context, **fields}
+        else:
+            payload = {"context": context} if context else None
         try:
-            self._track(exc, {"context": context} if context else None)
+            self._track(exc, payload)
         except Exception:  # noqa: BLE001 — учёт инцидента не роняет обработчик инцидента
             pass
 
@@ -436,9 +463,11 @@ class HealthReporter:
         exc: BaseException,
         context: str | None = None,
         throttle: float = DEFAULT_THROTTLE,
+        **fields: Any,
     ) -> None:
+        """``**fields`` (Ф1.1 / C3) проходят насквозь в контекст записи плоскости ошибок."""
         ctx = context if context is not None else self._source
-        self._state.report_error(exc, context=ctx, throttle=throttle)
+        self._state.report_error(exc, context=ctx, throttle=throttle, **fields)
 
     def set_status(self, status: HealthStatus | str, reason: str | None = None) -> None:
         self._state.set_status(status, reason)
