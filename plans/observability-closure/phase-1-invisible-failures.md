@@ -16,11 +16,49 @@
 3. Снятие хуков при останове процесса (восстановить прежние), чтобы тесты не текли (фикстура).
 4. Тесты автора: реентрантность (исключение внутри хука), хук при остановленном менеджере, порядок «до/после LoggerManager».
 **Acceptance criteria:**
-- [ ] Юнит: исключение в `threading.Thread` → одна запись `kind=error` с `thread=<имя>` и трассой в сторе, `thread_exceptions == 1`, health-счётчик ошибок вырос; `warnings.warn` → одна запись `kind=log severity=warning` с категорией.
-- [ ] Живьём: `health.report`-аналог — команда диагностики `diag.thread_raise` (или зонд) → запись в `errors.log` + стор + `system_overview.anomalies`.
-- [ ] Пара инъекций: хук снят → 0 записей при 728 байтах в stderr (красный); хук стоит, менеджер мёртв → `hook_delivery_failures == 1`, не тишина.
-- [ ] `CONNECTORS.md`: раздел «что ловится автоматически» с этими тремя механизмами.
+- [x] (`4724f220`, `28cf8fd3`) Юнит: исключение в `threading.Thread` → одна запись `kind=error` с `thread=<имя>` и трассой в сторе, `thread_exceptions == 1`, health-счётчик ошибок вырос; `warnings.warn` → одна запись `kind=log severity=warning` с категорией.
+- [x] (`28cf8fd3`, стенд 2026-08-29) Живьём: `health.report`-аналог — команда диагностики `diag.thread_raise` (или зонд) → запись в `errors.log` + стор + `system_overview.anomalies`.
+- [x] (матрица I1/I3/I4 + A3/A4) Пара инъекций: хук снят → 0 записей при 728 байтах в stderr (красный); хук стоит, менеджер мёртв → `hook_delivery_failures == 1`, не тишина.
+- [x] (`28cf8fd3`, проверка C3 в docs_verify) `CONNECTORS.md`: раздел «что ловится автоматически» с этими тремя механизмами.
 **Out of scope:** fd-перехват нативного stderr (9.2), `faulthandler` в останове (§13 плана порта).
+
+**Статус: ЗАКРЫТА 2026-08-29.** Коммиты: `4724f220` (17 красных тестов тестера, worktree `D:/wtb04` на `0c7f3724`) →
+`28cf8fd3` (механизм + 14 авторских тестов + документы) → `3513dfef` (8 сторожей по ревью) → `3096cd06` (боевая
+проводка `diag.*`, ADR). Гейты на `3096cd06`: фреймворк **9034 passed / 8 skipped / 1 xfailed**, корневой
+**7243 passed / 64 skipped**, `docs_verify` 15 проверок / 0, `sentrux check .` 36 rules pass.
+
+- **Механизм:** `logger_module/core/process_hooks.py` — `install_process_hooks(services)`, одиночка на процесс, три
+  хука; счётчики `thread_exceptions / warnings_captured / hook_delivery_failures` в `ErrorManager.stats` →
+  `PLANE_COUNTER_KEYS` → `introspect.observability.counters.error`; `HealthState.report_error(**fields)` (адрес
+  потока и трасса едут в запись); `ProcessModule.report_error`; снятие в lifecycle между остановом воркеров и
+  гашением плоскостей; команды `diag.thread_raise` (readback `joined`, `join_timeout_sec`) / `diag.warn`; аномалия
+  `thread_exceptions` в `system_overview`, `hook_delivery_failures` ∈ `OBSERVABILITY_LOSS_KEYS`. ADR-LOG-011.
+- **Инъекции (предсказания до прогона):** серия 1 — 23 заплатки, 17 совпали, 6 разошлись в сторону «больше
+  красных»; I19a (реентрантность на пути исключений) — 0 красных, ветка недостижима по построению (потоковый
+  сторож + `finally`); I16 — страж `test_loss_keys_match_the_real_publisher` односторонний, снятый ключ держит
+  только A9b тестера. Серия 2 (после ревью) — 8/8 совпали. Заплатка «лишний kwarg в `register_command`» уронила
+  8 тестов, а не 1: фейковый менеджер повторяет сигнатуру строго — патча «краснеет только боевая проводка» нет.
+- **Живой стенд** (`webcam_sketch`, 7 процессов + ПМ, `logs_live/f1_task11`): `pult` `0/0/0 → 1/1/0`, контроль
+  `lines` `0/0/0`; `errors.log` 0 → 10 строк с трассой (`_raise_diagnostic_error`); стор — ровно одна `kind=error`
+  (`extra.context.thread`, `hook`, трасса) + `[health]`-строка `kind=log` + `py.warnings` `kind=log
+  category=UserWarning`; `health.status`: `errors 1`, `last_error.context = thread:live-hooked-worker`; аномалия
+  `thread_exceptions=1` — драйвером из свежего процесса (MCP-сервер держал `backend_ctl` до правок — как в 0.5).
+  Ревьюер добавил: троттл health 5 с — два инцидента одного потока за 3.86 с → счётчик 2, запись одна
+  (задокументировано в CONNECTORS/ADR); дедуп `warnings` тем же текстом → `warnings_captured` не растёт
+  (`success: true`, число в ответе и есть детектор); `gui` под хуками — нули.
+- **Ревью:** итерация 1 — CHANGES REQUESTED без блокеров: 6 заявленных свойств без сторожа (71 зелёных при
+  снятом свойстве) и литерал `DIAG_JOIN_TIMEOUT_SEC` без readback значения (§1.2); итерация 2 — **APPROVED**
+  (8/8 собственных заплаток ревьюера, утечек слотов нет); minor по тексту ADR закрыт в `3096cd06`. Правка
+  теста тестера A4 признана законной: pytest занимает `threading.excepthook` на сессию и в stderr не пишет
+  (0 байт против 648) — восстановлена предпосылка, не ослаблен критерий.
+- **Отклонения от буквы задачи, названные:** дорога инцидента — `services.report_error` → `HealthState`
+  (не прямой `_track_error`; Task 1.3 обобщит на миксин); свой `warnings.showwarning`, а не
+  `logging.captureWarnings` (не уводить в соседнюю систему записи); прежний `showwarning` не зовётся,
+  прежние `excepthook`'и — зовутся.
+- **Открыто:** одиночка хуков — на интерпретатор, не на объект процесса (`docs/claude/OPEN_QUESTIONS.md`;
+  в тестах и на стенде сценария нет); у повтора записи под троттлем нет своего счётчика (наследие C2).
+  Числа для соседей: `ProcessManager.counters.logger.unresolved_channel_records = 12` на чистом старте
+  (Task 1.2); один инцидент = две строки в сторе — `[health]` + `kind=error` (Task 1.3 / M8).
 
 ### Task 1.2 — Лаунчер и ранние записи не теряются (M14, m3)
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework

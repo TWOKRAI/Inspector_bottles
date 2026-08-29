@@ -77,6 +77,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — qt-mcp: «зонд жив» ≠ «отрисовано» · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало
 
 ## Активные проекты и долги
+- [observability-closure: Ф0 + Ф1.1 ЗАКРЫТЫ](project_observability_closure_progress.md) — хуки процесса (C3) в main-ветке closure; Ф1.3 ждёт Р-1, Р-8 до Ф5; стенд дал числа для 1.2 (unresolved=12 у ПМ) и 1.3 (две строки на инцидент)
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; правда в v1; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim
 - [observation-port: Ф0–Ф5 ЗАКРЫТЫ](project_observation_port_progress.md) — порт = единственный писатель чисел, StatsManager стал видом; ревью вернуло 3 блокера, все закрыты; гейт 8930
 - [constructor-master прогресс](project_constructor_master_progress.md) — Ф0–Ф3 + трек F + Ф5-ядро закрыты; NEXT C1-C8 + app_module 5.11-5.13 · [чистка границ C1-C8](project_arch_boundaries_plan.md) — движок миграций 4.5 идёт в recipe, НЕ generic
