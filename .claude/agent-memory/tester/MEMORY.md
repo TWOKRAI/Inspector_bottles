@@ -12,3 +12,4 @@
 - [Read tool can't skip forbidden docstrings](feedback_read_tool_cannot_skip_forbidden_docstrings.md) — use Bash+inspect.signature for "signature OK, docstring not"; disclose loudly if Read already leaked it
 - [reused ProcessHeartbeat required for retraction ticks](feedback_reused_heartbeat_required_for_retraction_ticks.md) — a fresh hb per tick loses per-instance bookkeeping → false RED on retraction propagation
 - [_do_shutdown on unbooted plugin is a silent no-op](feedback_do_shutdown_on_unbooted_plugin_is_a_silent_noop.md) — drive full configure->start->shutdown lifecycle before trusting shutdown-triggered assertions
+- [pytest.raises inverts RED polarity](feedback_pytest_raises_inverts_red_polarity.md) — wrapping a not-yet-built call in pytest.raises(X) PASSES today; assert the real success shape so X propagates unwrapped and fails the test
