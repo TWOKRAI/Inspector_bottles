@@ -50,22 +50,62 @@
 
 ## Task 0.3 — каталог метрик к моменту проверки
 
-База: `test_metric_catalog_order_gate.py` (4, тестерских) + авторские hazard-тесты — число записать после реализации.
+База: `test_metric_catalog_order_gate.py` (4, тестерских) + `test_metric_catalog_producer_hazards.py` (8, авторских) = **12 collected, 12 passed**.
+
+Реализация поставила **два** предохранителя: добор каталога в `gated_metrics()`
+(`ensure_framework_producers()`) и перестановку голоса после `_make_gate` на обеих дорогах.
+Главный вопрос матрицы — не «работает ли», а **маскируют ли они друг друга**: два механизма на одно
+свойство означают, что поломка любого из них по отдельности может остаться незамеченной.
 
 | # | Инъекция | Предсказание (до прогона) | Наблюдение | Вердикт |
 |---|---|---|---|---|
-| A | вернуть `_warn_unknown_metrics` **до** `_make_gate` на входе `_build_telemetry_gate` | — | — | — |
-| B | то же на втором входе `reconfigure_telemetry` | — | — | — |
-| C | убрать вызов `ensure_framework_producers()` из `gated_metrics()` | — | — | — |
-| D | расширить страж «пустой каталог → не судить» на «неполный каталог → не судить» (ложноположительная сторона: голос становится немым) | — | — | — |
+| A | вернуть `_warn_unknown_metrics` **до** `_make_gate` на входе `_build_telemetry_gate` | **0 красных** — предсказываю маскировку добором каталога. Если 0, это находка про конструкцию, а не про код | **1**: `TestOrderSafeguardAloneKeepsTheVoiceHonest::test_boot_stays_silent_on_a_real_metric_without_the_producer_import` | ⚠ предсказание неверно — и это хорошо, см. ниже |
+| B | то же на втором входе `reconfigure_telemetry` | **0 красных**, по той же причине | **1**: `TestOrderSafeguardAloneKeepsTheVoiceHonest::test_reconfigure_stays_silent_...` | ⚠ то же, парный сторож |
+| C | убрать вызов `ensure_framework_producers()` из `gated_metrics()` | **4 красных**, поимённо (включая оба `*_stays_silent_*`) | **3**: `test_catalog_complete_with_zero_producer_preimport`, `test_catalog_complete_when_only_partial_producer_preimported`, `TestImportRingAndCatalogCompleteness::test_catalog_is_full_when_the_policy_module_is_imported_first` | ⚠ состав разошёлся: пересечение 2 из 4 |
+| D | страж «пустой каталог → не судить» расширен до «не судить никогда» (голос немой) | **2 красных**: `test_boot_with_typo_metric_name_still_warns_exactly_once`, `test_runtime_reconfigure_with_a_typo_still_warns_exactly_once` | **2**, ровно эти | ✅ |
+| E | снять **оба** предохранителя разом (A+B+C) | **6 красных** — объединение A/B/C | **7** (объединение + `TestReconfigureEntryPoint::test_runtime_reconfigure_with_a_real_metric_name_does_not_warn`) | ⚠ недосчитал одного |
+
+**Главный вопрос матрицы снят, и ответ не тот, которого я ждал.** Я закладывался на классическую
+взаимную маскировку: два предохранителя на одно свойство → поломка любого по отдельности проходит
+незамеченной. Измерено — не маскируют. Разработчик увидел эту ловушку раньше меня и написал класс
+`TestOrderSafeguardAloneKeepsTheVoiceHonest`, который проверяет предохранитель **порядка в
+одиночку**, отключив добор каталога, — поэтому A и B краснеют поимённо, а не тонут в общей зелени.
+Симметрично `TestImportRingAndCatalogCompleteness` держит добор без опоры на порядок. Каждый
+предохранитель имеет своего сторожа; связка проверена инъекцией E.
+
+**Разбор C — почему `*_stays_silent_*` остались зелёными.** Я записал их в ожидаемые красные, считая,
+что они опираются на добор. Они опираются на противоположное: сценарий этих тестов — «производителей
+никто не импортировал, работает ТОЛЬКО порядок». Снятие добора их не трогает по построению. Ошибка в
+моей модели их назначения, не в тестах.
+
+**Итог по 0.3:** из 5 предсказаний точным было одно (D), три разошлись составом или числом, одно
+(E) — на единицу. Ни одно расхождение не вскрыло дефекта кода; все — дефекты моей модели тестов.
 
 ## Task 0.1 — утечка реестра объявлений
 
+База: `multiprocess_framework/modules/tests/` = **91 collected, 91 passed** (85 с).
+
+Независимость порядка (критерий 1) — измерено на реализации:
+
+```
+statistics_module → process_module:  2761 passed, 1 xfailed
+process_module → statistics_module:  2761 passed, 1 xfailed
+```
+
+Было на `b2dd7738`: `20 failed / 2729 passed` против `2749 passed`.
+(Перф-флейк `test_the_facade_adds_little_over_a_direct_call` исключён в обоих прогонах — предсуществующий,
+воспроизведён на чистой базе: 7.99 мкс соло при пороге 5.0.)
+
+Здесь три предохранителя на одно свойство, а не два: `TypeError` на голый вызов, autouse-фикстура
+снимка в двух conftest'ах, страж сессии. Матрица спрашивает, **какой из них держит что** — и не
+маскируют ли они друг друга.
+
 | # | Инъекция | Предсказание (до прогона) | Наблюдение | Вердикт |
 |---|---|---|---|---|
-| A | вернуть голый `forget_declarations()` в `test_observation_port_hazards.py:853` | — | — | — |
-| B | снять autouse-фикстуру снимка | — | — | — |
-| C | не импортировать производителей в сторже сессии (проверка на **вакуумную** красноту: сторож обязан отличать «утечка» от «производители не загрузились») | — | — | — |
+| A | снять фикстуру `_clean_declarations` в `process_module/plugins/tests/test_plugin_manifest.py` (вернуть утечку объявлением, найденную сторожем) | **1 красный** — teardown стража сессии, с именами `capture_fps`, `drops`, `frame_count` в «лишние». Прогон: `modules/tests` + `plugins/tests` | — | — |
+| B | снять autouse-фикстуру `declarations_snapshot` из обоих conftest'ов | **0–2**. Если 0 — находка: фикстуру прикрывает `TypeError`, и её собственная поломка невидима | — | — |
+| C | `warm_producers()` сделать заглушкой | **1–3** красных, включая тест на формулировку «несобранная сцена» | — | — |
+| D | снять `TypeError` **и** вернуть голый `forget_declarations()` в `test_observation_port_hazards.py:853` | **2 красных** (`test_bare_forget_declarations_raises_typeerror`, `..._names_the_replacement_fixture`); независимость порядка **останется зелёной**, потому что фикстура восстановит стёртое. Если так — это не дефект, а разделение ролей: `TypeError` защищает от написания голого вызова, фикстура — от его последствий | — | — |
 
 ## Task 0.4 — `full`, `introspect_observability`, честный `rules_matched_nothing`
 

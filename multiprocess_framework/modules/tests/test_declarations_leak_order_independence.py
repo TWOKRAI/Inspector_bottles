@@ -1,0 +1,114 @@
+# -*- coding: utf-8 -*-
+"""RED (Task 0.1, критерий 1) — гейт фреймворка зелен в ЛЮБОМ порядке сбора модулей.
+
+Независимый приёмочный тест, написанный ДО реализации (`plans/observability-closure/
+phase-0-trust-gate.md`, Task 0.1). Источник — Acceptance criteria задачи, не код: реализации
+ещё нет (worktree стоит на коммите ДО Task 0.1).
+
+**Что здесь проверяется.** `statistics_module/tests/test_observation_port_hazards.py`
+(тест `test_declare_through_the_slot_lands_in_the_shared_catalogue`) вызывает голый
+`forget_declarations()` — без `names` и без `kind`. Голый вызов чистит реестр
+объявлений ЦЕЛИКОМ, включая пять метрик фреймворка (`cycle_duration_ms`, `effective_hz`,
+`fps`, `latency_ms`, `shm`), объявленных при ИМПОРТЕ `process_module/heartbeat/
+telemetry.py` и `process_heartbeat.py`. Реестр процессный и наполняется импортом —
+повторно объявить стёртое после того, как модуль уже импортирован, некому (см.
+докстрока `forget_declarations` в `observability_declarations.py`).
+
+Значит, если `statistics_module/tests` собираются и выполняются РАНЬШЕ
+`process_module/tests` в одном процессе pytest, чистка происходит до того, как
+`process_module`-тесты успели воспользоваться каталогом, и они начинают падать
+пачкой (проверено вручную 2026-08-28 в этом дереве: обратный порядок даёт 21
+упавший тест про gated-каталог, прямой — 1 несвязанный таймингом тест). Порядок
+аргументов командной строки менять СВОЙСТВО прохождения тестов не должен.
+
+**Дедлайн.** Обе половины гоняются `subprocess.run(..., timeout=...)`, а не голым
+`os.system`/пайпом без предела — подвисший прогон хуже отсутствующего (правило
+проекта, см. CLAUDE.md `.claude/`).
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+# multiprocess_framework/modules/tests/<this file> -> parents[3] = корень репозитория
+# (worktree), tests -> modules -> multiprocess_framework -> repo root.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+_STATS_DIR = "multiprocess_framework/modules/statistics_module/tests"
+_PROCESS_DIR = "multiprocess_framework/modules/process_module/tests"
+
+#: Замер 2026-08-28: единственный тест, что красный НЕЗАВИСИМО от порядка сборки
+#: (флейк по времени `overhead < 5.0e-6`, тайминг-бенчмарк facade против прямого
+#: вызова). Он не имеет отношения к реестру объявлений — исключён из ОБОИХ
+#: прогонов ОДИНАКОВО, чтобы шум таймингов не маскировал и не имитировал
+#: свойство, которое тест на самом деле проверяет.
+_DESELECT_UNRELATED_TIMING_FLAKE = (
+    "multiprocess_framework/modules/process_module/tests/test_plugin_stats_road.py"
+    "::TestTheCostOfTheHotPath::test_the_facade_adds_little_over_a_direct_call"
+)
+
+_SUBPROCESS_TIMEOUT_SEC = 300.0
+
+_SUMMARY_RE = re.compile(r"(\d+) (passed|failed|error|errors)")
+
+
+def _run_order(first: str, second: str) -> tuple[dict[str, int], str]:
+    """Гоняет pytest в подпроцессе с заданным порядком директорий-аргументов.
+
+    Возвращает разобранную сводку (``{"passed": N, "failed": M, ...}``) и полный
+    вывод — для диагностики при расхождении.
+    """
+    env = dict(os.environ)
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        first,
+        second,
+        "-q",
+        "--deselect",
+        _DESELECT_UNRELATED_TIMING_FLAKE,
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(_REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT_SEC,
+    )
+    output = proc.stdout + "\n" + proc.stderr
+    tail = output.strip().splitlines()[-1] if output.strip() else ""
+    summary: dict[str, int] = {}
+    for count, word in _SUMMARY_RE.findall(tail):
+        summary[word] = summary.get(word, 0) + int(count)
+    return summary, output
+
+
+def test_statistics_then_process_module_order_matches_the_reverse_order() -> None:
+    """Acceptance §1: прямой и обратный порядок аргументов дают одинаковый результат.
+
+    Литерал для сравнения НЕ используем (пример из спеки — "ожидание ~2749 passed" —
+    это ориентир, не точное число): свойство, которое проверяется, — совпадение
+    двух прогонов ДРУГ С ДРУГОМ, а не с заранее вычисленным числом.
+    """
+    forward, forward_output = _run_order(_STATS_DIR, _PROCESS_DIR)
+    reverse, reverse_output = _run_order(_PROCESS_DIR, _STATS_DIR)
+
+    assert forward == reverse, (
+        "результат прогона зависит от порядка директорий в командной строке:\n"
+        f"  statistics_module -> process_module:  {forward}\n"
+        f"  process_module -> statistics_module:  {reverse}\n"
+        "Ожидаемая причина (Task 0.1, C1): голый forget_declarations() в "
+        "test_observation_port_hazards.py чистит реестр объявлений ЦЕЛИКОМ; когда "
+        "statistics_module/tests собираются и выполняются раньше process_module/tests, "
+        "уже импортированные производители метрик фреймворка не могут переобъявиться "
+        "после чистки, и process_module/tests краснеет пачкой тестов про gated-каталог.\n"
+        f"--- хвост вывода (прямой порядок) ---\n{forward_output[-2000:]}\n"
+        f"--- хвост вывода (обратный порядок) ---\n{reverse_output[-2000:]}"
+    )

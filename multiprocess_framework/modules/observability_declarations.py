@@ -66,7 +66,7 @@ name 'ChannelRoutingConfig' from partially initialized module`. Здесь ли�
 from __future__ import annotations
 
 import threading
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, Mapping, NamedTuple, Optional, Tuple
 
 __all__ = [
     "declare_log_source",
@@ -75,6 +75,9 @@ __all__ = [
     "declare_metric",
     "declared_metrics",
     "forget_declarations",
+    "snapshot",
+    "restore",
+    "RegistrySnapshot",
 ]
 
 #: Пространство имён лог-источников (``module`` записи).
@@ -304,19 +307,98 @@ def forget_declarations(kind: Optional[str] = None, *, names: Optional[Iterable[
 
     Сбрасывает и отметку «снимок взят» — по той же причине: иначе первый тест,
     прочитавший правила, включал бы поздние предупреждения всем соседям.
+
+    Raises:
+        TypeError: вызов БЕЗ ``names`` и БЕЗ ``kind``. Ф0.1 «trust gate»: такой
+            вызов чистил реестр целиком, и гейт фреймворка держался порядком
+            сборки — `statistics_module` перед `process_module` давал 20 красных,
+            обратный порядок ноль. Отказ, а не предупреждение: предупреждение
+            в тестовом прогоне никто не читает, а следствие видно за три модуля
+            от виновника. Замена — :func:`snapshot` / :func:`restore` либо
+            autouse-фикстура ``declarations_snapshot`` в conftest'ах обоих модулей.
     """
     global _RULES_CONSUMED
+    if kind is None and names is None:
+        raise TypeError(
+            "forget_declarations() без names и без kind чистит реестр объявлений "
+            "ЦЕЛИКОМ, а метрики после сплошной очистки не возвращаются никогда: их "
+            "производители уже импортированы (sys.modules), объявлять заново некому — "
+            "соседние тесты краснеют пачкой в зависимости от порядка сборки. "
+            "Вместо голого вызова: forget_declarations(names=[...]) — забыть СВОЙ мусор, "
+            "либо autouse-фикстура declarations_snapshot "
+            "(multiprocess_framework/modules/statistics_module/tests/conftest.py, "
+            "multiprocess_framework/modules/process_module/tests/conftest.py), которая "
+            "снимает snapshot() до теста и делает restore() после."
+        )
     with _LOCK:
+        # Сплошной очистки (``_DECLARED.clear()``) здесь больше нет: единственная
+        # форма, которая её звала, — голый вызов, а он теперь отказ. Возврат к
+        # чистому состоянию делается снимком (:func:`restore`), и это не то же
+        # самое: снимок ЗНАЕТ, что было, а сплошная очистка знает только, что
+        # стало пусто.
         if names is not None:
             wanted = set(names)
             for ключ in [k for k in _DECLARED if k[1] in wanted and (kind is None or k[0] == kind)]:
                 del _DECLARED[ключ]
-        elif kind is None:
-            _DECLARED.clear()
         else:
             for ключ in [k for k in _DECLARED if k[0] == kind]:
                 del _DECLARED[ключ]
         _RULES_CONSUMED = False
+
+
+class RegistrySnapshot(NamedTuple):
+    """Состояние реестра целиком — то, что :func:`restore` кладёт обратно.
+
+    Полей два, потому что состояний тоже два: словарь объявлений и отметка
+    «правила уже читались». Снимок без второго поля молча включал бы соседям
+    предупреждения о «правило объявлено после сборки конфига» — тест, прочитавший
+    правила, взводит ``_RULES_CONSUMED``, и без возврата отметка едет дальше по
+    сессии.
+    """
+
+    #: Копия ``_DECLARED`` на момент снятия — именно копия, не вид.
+    declared: Mapping[Tuple[str, str], Tuple[str, Optional[object]]]
+    #: Значение ``_RULES_CONSUMED`` на момент снятия.
+    rules_consumed: bool
+
+
+def snapshot() -> RegistrySnapshot:
+    """Снять состояние реестра. **Для тестов**, как и :func:`forget_declarations`.
+
+    **Копия, а не вид, и это существенно.** Вид менялся бы вместе с реестром, и
+    возврат по нему вернул бы ровно то состояние, от которого снимок защищал, —
+    то есть не сделал бы ничего, оставаясь при этом зелёным. Значения словаря
+    неизменяемы (кортеж «владелец, правило»), поэтому мелкой копии достаточно.
+
+    Прод-вызовов нет и быть не должно: реестр наполняется импортом, а импорт в
+    живом процессе не отменяют.
+    """
+    with _LOCK:
+        return RegistrySnapshot(declared=dict(_DECLARED), rules_consumed=_RULES_CONSUMED)
+
+
+def restore(state: RegistrySnapshot) -> None:
+    """Вернуть реестр К СОСТОЯНИЮ СНИМКА — тотально, а не «убрать лишнее».
+
+    **Тотальность выбрана намеренно, и у неё есть цена.** «Убрать то, что
+    появилось после» звучит мягче, но делает результат зависимым от истории
+    вызовов: при двух живых снимках (session-scope фикстура плюс function-scope)
+    возврат внешнего после внутреннего дал бы разное в зависимости от порядка.
+    Тотальный возврат кладёт ровно содержимое снимка, и результат читается по
+    одному аргументу.
+
+    **Обратная сторона, которую нельзя забыть.** Объявление, приехавшее в реестр
+    ИМПОРТОМ во время теста, возврат уносит навсегда: повторный ``import`` его не
+    вернёт (модуль уже в ``sys.modules``, тело не исполняется). Поэтому фикстуры и
+    сторож греют производителей ДО снятия снимка — иначе они сами становятся тем
+    самым дефектом, который стерегут. Свойство проверено, а не объяснено:
+    ``modules/tests/test_declarations_registry_hazards.py::TestRestoreCannotResurrectImports``.
+    """
+    global _RULES_CONSUMED
+    with _LOCK:
+        _DECLARED.clear()
+        _DECLARED.update(state.declared)
+        _RULES_CONSUMED = state.rules_consumed
 
 
 def _same_rule(left: Optional[object], right: Optional[object]) -> bool:

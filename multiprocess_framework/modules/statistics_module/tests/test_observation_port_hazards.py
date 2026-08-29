@@ -850,4 +850,4 @@ class TestWriterSegmentIsOneAcrossRoads:
             assert ctx.declare_metric(name) == name
             assert name in declared_metrics()
         finally:
-            forget_declarations()
+            forget_declarations(names=[name])

@@ -29,7 +29,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from multiprocess_framework.modules.observability_declarations import declare_metric
+from multiprocess_framework.modules.observability_declarations import (
+    KIND_METRIC,
+    declare_metric,
+    forget_declarations,
+)
 from multiprocess_framework.modules.process_module.heartbeat import ProcessHeartbeat
 from multiprocess_framework.modules.process_module.heartbeat.telemetry import gated_metrics
 
@@ -223,12 +227,18 @@ def test_a2c_gate_disables_a_metric_declared_after_the_gate_was_built() -> None:
 
     late_name = "tester_rt2_late_declared_metric_a2c"
     declare_metric(late_name, owner="tester:rt2_acceptance:late")
+    try:
+        allowed = gate.due_metrics()
+        assert late_name not in allowed
 
-    allowed = gate.due_metrics()
-    assert late_name not in allowed
-
-    enabled, _interval = gate.config.resolve(late_name)
-    assert enabled is False
+        enabled, _interval = gate.config.resolve(late_name)
+        assert enabled is False
+    finally:
+        # Реестр объявлений процессный: имя, оставленное здесь, доезжало до конца
+        # ВСЕГО корневого прогона и портило каталог метрик всем, кто его читает.
+        # Поймано стражем сессии (Ф0.1, multiprocess_framework/modules/tests/
+        # conftest.py) — до него утечка была невидима.
+        forget_declarations(KIND_METRIC, names=[late_name])
 
 
 # ===========================================================================

@@ -20,8 +20,12 @@ import logging
 
 import pytest
 
+from multiprocess_framework.modules.observability_declarations import restore, snapshot
 from multiprocess_framework.modules.process_module.commands.builtin_commands import (
     BuiltinCommands,
+)
+from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+    ensure_framework_producers,
 )
 from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import (
     PluginOrchestrator,
@@ -48,6 +52,30 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 @pytest.fixture(autouse=True)
 def _clean_registry():
     PluginRegistry.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clean_declarations():
+    """Второй процессный реестр этого файла — реестр ОБЪЯВЛЕНИЙ наблюдаемости.
+
+    ``PluginRegistry`` соседняя фикстура чистит с самого начала, а реестр
+    объявлений оставался: ``test_capture_boots_successfully_with_command_manager``
+    доводит настоящий ``CapturePlugin`` до ``configure()``, а тот объявляет
+    ``capture_fps``/``frame_count``/``drops`` (Plugins/sources/capture/plugin.py:103-105).
+    Имена доезжали до конца ВСЕГО прогона: гейт фреймворка 2026-08-29 закрывался
+    каталогом из восьми метрик вместо пяти — поймано стражем
+    ``modules/tests/conftest.py`` (Ф0.1), до него утечка была невидима.
+
+    Снимок/возврат, а не список имён: список пришлось бы править при каждой новой
+    метрике пилотного плагина, а забытая правка вернула бы ровно эту утечку.
+    Догрев производителей ДО снимка обязателен — иначе возврат унесёт и то, что
+    объявил ленивый импорт heartbeat внутри теста (см. ``restore`` в
+    ``observability_declarations``).
+    """
+    ensure_framework_producers()
+    state = snapshot()
+    yield
+    restore(state)
     yield
     PluginRegistry.clear()
 
