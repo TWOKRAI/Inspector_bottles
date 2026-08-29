@@ -225,9 +225,17 @@ def _introspect_observability(drv: BackendDriver, args: Dict[str, Any]) -> Any:
             "error": f"неизвестная section {section!r}: ожидаю одну из {list(OBSERVABILITY_SECTIONS)}",
         }
     # `send_command` отдаёт СЫРОЙ IPC-конверт (`type`/`sender`/`targets`/`queue_type`/
-    # `_fence`/`_receive_info`), а ответ команды лежит под `result`. Соседние
-    # инструменты этой разницы не видят, потому что ходят через методы драйвера,
-    # которые разворачивают конверт сами. Здесь разворачиваем явно, и это не
+    # `_fence`/`_receive_info`), а ответ команды лежит под `result`.
+    #
+    # ПОПРАВКА (ревью Ф0.5, находка 5). Прежняя редакция этого комментария утверждала,
+    # что соседние инструменты конверт разворачивают сами. Это НЕВЕРНО и измерено на
+    # живом стенде (process="points"): конверт отдают шесть из восьми —
+    # introspect_telemetry / handlers / queues / registers / plugins / router_stats;
+    # разворачивают только introspect_observability (после этой правки) и
+    # introspect_memory. Дефект соседей предсуществующий и вне периметра Ф0 — записан в
+    # план, — но уверенное «у соседей этого нет» пережило бы сам дефект, и потому снято.
+    #
+    # Здесь разворачиваем явно, и это не
     # косметика: без разворота фильтр `section` искал секции на верхнем уровне
     # КОНВЕРТА и не находил их НИКОГДА — `introspect_observability(seg,
     # section="observation")` на живом стенде отвечал `sections_present` со списком
@@ -239,6 +247,15 @@ def _introspect_observability(drv: BackendDriver, args: Dict[str, Any]) -> Any:
         leaf=True,
     )
     if section is None or not isinstance(result, dict):
+        return result
+    # Отказ команды сужать НЕЛЬЗЯ (ревью Ф0.5, находка 4). Прежде на неответившем
+    # процессе выдавалось:
+    #   introspect_observability(process="нет-такого", section="counters")
+    #   -> {"success": false, "error": "timeout", "sections_present": ["correlation_id"]}
+    # Докстрока обещает различать ДВА факта — «процесс секцию не отдал» и «фильтр съел»;
+    # здесь появлялся третий, и читатель, идущий по `sections_present`, решал бы, что
+    # плоскости наблюдаемости лежат, тогда как команда просто не ответила.
+    if result.get("success") is False:
         return result
     narrowed = {key: result[key] for key in _OBSERVABILITY_ENVELOPE if key in result}
     narrowed["section"] = section

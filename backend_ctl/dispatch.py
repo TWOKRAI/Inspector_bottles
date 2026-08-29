@@ -306,7 +306,11 @@ def _cap_heavy(name: str, result: Any, args: Dict[str, Any]) -> Any:
         return {
             "_truncated": True,
             "_bytes": size,
-            "_hint": hint + " (или сузь path/limit).",
+            # «path/limit» назывались безусловно, а есть они не у всех: у
+            # introspect_observability сужение зовётся `section` (ревью Ф0.5, находка 10).
+            # Подсказка, советующая несуществующий параметр, — тот же класс, что и
+            # подсказка про `full`, которую схема не принимала.
+            "_hint": hint + " (или сузь выборку параметрами инструмента: path/limit/section).",
             "keys": _cap_dict(result, RESPONSE_BYTE_CAP),
         }
     if isinstance(result, list):
