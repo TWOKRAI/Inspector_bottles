@@ -244,3 +244,68 @@ class TestDiagWarnStacklevel:
             )
         finally:
             hooks.uninstall()
+
+
+# ---------------------------------------------------------------------------
+# Боевая проводка: настоящий CommandManager, а не фейк с выдуманным dispatch()
+# ---------------------------------------------------------------------------
+
+
+class TestDiagCommandsRealWiring:
+    """Правило проекта «fake-harness test proves the harness»: у настоящего
+    ``CommandManager`` метода ``dispatch(command, data)`` нет вовсе — его придумал
+    фейковый харнесс соседних файлов, и переименование боевого входа оставило бы
+    все ``diag.*``-тесты зелёными при мёртвой команде. Здесь вход тот же, которым
+    команду доставляет IPC: ``handle_command({"command", "data"})`` живого
+    ``CommandManager`` на живом ``ProcessModule``. Найдено ревью Задачи 1.1
+    (итерация 2) как предсуществующий пробел приёмочного файла.
+    """
+
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+    def test_diag_commands_answer_through_the_real_command_manager(self) -> None:
+        import threading
+        import uuid
+
+        from multiprocess_framework.modules.command_module import CommandManager
+        from multiprocess_framework.modules.logger_module.core.process_hooks import install_process_hooks
+        from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
+        from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+
+        process = ProcessModule("diag_real_wiring_probe")
+        command_manager = CommandManager(manager_name="cmd_diag_real_wiring")
+        command_manager.initialize()
+        process.command_manager = command_manager
+        BuiltinCommands(process)._register_health_commands()
+        hooks = install_process_hooks(process)
+        box: dict = {}
+
+        def _send(command: str, data: dict) -> None:
+            try:
+                box[command] = command_manager.handle_command({"command": command, "data": data})
+            except BaseException as exc:  # noqa: BLE001 — прокинуть наружу, не проглотить
+                box[command] = exc
+
+        try:
+            token = uuid.uuid4().hex[:8]
+            for command, data in (
+                ("diag.thread_raise", {"message": f"real-wiring-{token}", "thread_name": f"real-{token}"}),
+                ("diag.warn", {"message": f"real-wiring-warn-{token}"}),
+            ):
+                worker = threading.Thread(target=_send, args=(command, data), name=f"send-{command}", daemon=True)
+                worker.start()
+                worker.join(timeout=5.0)
+                assert not worker.is_alive(), f"{command} завис на боевом handle_command"
+            raise_res = box["diag.thread_raise"]
+            warn_res = box["diag.warn"]
+            assert not isinstance(raise_res, BaseException), raise_res
+            assert not isinstance(warn_res, BaseException), warn_res
+            assert raise_res["success"] is True
+            assert raise_res["thread"] == f"real-{token}"
+            assert raise_res["joined"] is True
+            assert raise_res["thread_exceptions"] == 1
+            assert warn_res["success"] is True
+            assert warn_res["warnings_captured"] == 1
+            assert hooks.counters() == {"thread_exceptions": 1, "warnings_captured": 1, "hook_delivery_failures": 0}
+        finally:
+            hooks.uninstall()
+            command_manager.shutdown()

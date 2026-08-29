@@ -589,8 +589,14 @@ Spring, ни .NET такого не умеют.
 менеджеров), и у этого порядка есть сторож-тест: поставь хуки раньше, записи в плоскость
 пошли бы, а числа остались бы в приватном словаре. Сторож — `TestHooksInstallAfterErrorManagerBundle`
 в `multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py` (T2 ревью
-closure Ф0): краснеет, если `ProcessModule._install_process_hooks()` переставить в начало
-`_apply_managers_bundle` — до создания `ErrorManager`.
+Задачи 1.1, Ф1 closure): краснеет, если `ProcessModule._install_process_hooks()` переставить в начало
+`_apply_managers_bundle` — до `register_all`, которая регистрирует менеджеры в реестре
+`ObservableMixin`. Сам `ErrorManager` к этому моменту УЖЕ создан (`create_all()` создаёт и
+инициализирует его до входа в `_apply_managers_bundle`) — гейтит не создание, а регистрация:
+хранилище счётчиков резолвится через `services.get_manager("error")`, то есть через реестр.
+Первая редакция этой оговорки писала «до создания `ErrorManager`» — ревью Ф1 (итерация 2)
+опровергло её инъекцией: установка ПОСЛЕ `self.error_manager = bundle.error`, но ДО
+`register_all`, даёт тот же `assert 0 == 1`.
 
 **Отвергнуто.** (1) `logging.captureWarnings(True)` вместо своего `showwarning`: он уводит
 предупреждения в stdlib-логгер `py.warnings`, то есть в СОСЕДНЮЮ систему записи, мимо
