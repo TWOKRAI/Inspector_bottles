@@ -7,7 +7,7 @@
 Цель фазы: после неё зелёный гейт и ответы инструментов означают то, что говорят. Ни одна задача не
 меняет формат записей, конфиг или команды — только тесты, порядок вызовов и схемы MCP.
 
-### Task 0.1 — Утечка реестра объявлений (C1)
+### Task 0.1 — Утечка реестра объявлений (C1) — **[DONE]** `0ae55ac8`, `154ca59d`, `e9a5c898`
 **Level:** Middle (Sonnet) · **Assignee:** developer · **Layer:** framework, tests
 **Goal:** гейт фреймворка зелен в любом порядке сбора модулей, и голый сброс каталога больше невозможен.
 **Files:** `multiprocess_framework/modules/statistics_module/tests/test_observation_port_hazards.py:853`,
@@ -31,7 +31,7 @@
 - [ ] `OPEN_QUESTIONS.md`: запись «какая глобаль течёт» переведена в статус «закрыт» со ссылкой.
 **Out of scope:** реестр как объект процесса (Ф4.7).
 
-### Task 0.2 — `process_restart_verified` не лжёт (M4)
+### Task 0.2 — `process_restart_verified` не лжёт (M4) — **[DONE]** `5226045a`, `e9a5c898`
 **Level:** Middle (Sonnet) · **Assignee:** developer · **Layer:** tests (backend_ctl)
 **Goal:** вердикт рестарта не зависит от соотношения `timeout` и `wait`.
 **Files:** `backend_ctl/driver.py:519-640`, `backend_ctl/mcp_tools.py` (докстрока инструмента), `backend_ctl/tests/`.
@@ -45,7 +45,7 @@
 - [ ] Юнит на фейковом драйвере: запрос длительностью > `wait` не съедает окно опроса.
 **Out of scope:** graceful-stop 5 с (долг `project_graceful_stop_debt`).
 
-### Task 0.3 — Каталог метрик полон к моменту проверки (M1)
+### Task 0.3 — Каталог метрик полон к моменту проверки (M1) — **[DONE]** `5226045a`
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework
 **Goal:** ни одного WARNING «Неизвестные ключи … метрика игнорируется» при живой метрике; каталог не зависит от порядка импортов.
 **Files:** `process_module/heartbeat/process_heartbeat.py:376-410,540-600`, `process_module/configs/telemetry_publish_config.py:32-60,138-165`,
@@ -60,7 +60,7 @@
 - [ ] Инъекция: вернуть порядок «проверка до импорта» → тест двух порядков красный.
 **Out of scope:** реестр как объект процесса.
 
-### Task 0.4 — MCP: `full` у всех капнутых инструментов, `introspect_observability`, честный `rules_matched_nothing` (M2, M3, m6)
+### Task 0.4 — MCP: `full` у всех капнутых инструментов, `introspect_observability`, честный `rules_matched_nothing` (M2, M3, m6) — **[DONE, кроме критерия 5]** `5226045a`, `de8bc0a9`, `a69b3ef3`
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** tests (backend_ctl), framework (readback)
 **Goal:** агент читает через MCP всё, что читает драйвер; подсказка об усечении не обещает того, чего нет.
 **Files:** `backend_ctl/mcp_tools.py:36-60,400-460` (`_cap_heavy`, реестр схем), `backend_ctl/dispatch.py:267-312`,
@@ -79,8 +79,32 @@
 - [ ] Страж паритета инструментов ↔ документа красный при добавлении инструмента без строки в CONTROL_PANEL.
 **Out of scope:** `history_query` (Ф3.5), flare-бандл (Ф4.3).
 
-### Task 0.5 — Живой стенд Ф0 + ревью фазы
+### Task 0.5 — Живой стенд Ф0 + ревью фазы — **[PARTIAL]** см. [`review-phase-0.md`](./review-phase-0.md)
 **Level:** — · **Assignee:** владелец (стенд), reviewer (синхронно)
 **Acceptance criteria:**
 - [ ] Корневой гейт и `run_framework_tests.py` на принимаемом HEAD, числа записаны; матрица инъекций владельца по всем свойствам Ф0.
 - [ ] Агентская сессия только MCP-инструментами: `capabilities` → `introspect_observability` → `process_restart_verified` — без единого обхода драйвером.
+
+
+---
+
+## Итог фазы (2026-08-29)
+
+**Гейты на принимаемом HEAD:** корневой **7239 passed / 64 skipped**, фреймворка
+**8995 passed / 8 skipped / 1 xfailed**, `backend_ctl` **693 passed / 44 skipped**.
+Независимость порядка сбора — **2762 passed, 1 deselected, 1 xfailed в обоих порядках**
+(было `20 failed / 2729 passed` против `2749 passed`).
+
+**Матрица инъекций** — [`injections-phase-0.md`](./injections-phase-0.md): 14 предсказаний по
+четырём задачам, совпало 6. Четыре расхождения вскрыли реальные дыры в сторожах (все закрыты),
+остальные оказались дефектами модели, а не кода.
+
+**Ревью фазы** — [`review-phase-0.md`](./review-phase-0.md): вердикт первой итерации
+CHANGES REQUESTED, один блокер (вакуумный сторож критерия 1 + мёртвый `--deselect` + падение
+на кодировке). Из 12 находок 7 закрыто, 5 отложено с записью, одна вынесена в развилку Р-8.
+
+**Два чекбокса НЕ закрыты и закрывать их нельзя:**
+- критерий 5 задачи 0.4 (страж паритета инструментов ↔ `CONTROL_PANEL.md`) — сторож проверяет
+  один литерал и зелен при 34 неупомянутых инструментах из 51; решение владельца Р-8;
+- «агентская сессия только MCP-инструментами» из 0.5 — MCP-сервер держал код, загруженный до
+  правок дня, поэтому проверка шла хендлерами напрямую. Нужен перезапуск сессии с MCP.
