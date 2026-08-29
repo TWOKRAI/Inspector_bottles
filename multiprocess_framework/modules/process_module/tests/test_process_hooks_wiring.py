@@ -59,6 +59,11 @@ def _mock_shared_resources():
     return sr
 
 
+def _raise_order_probe_error() -> None:
+    """Именованная (НЕ lambda) цель потока — тот же приём, что в acceptance-файле."""
+    raise RuntimeError("order-probe")
+
+
 class TestFailedInitializeDoesNotLeakHooks:
     def test_hooks_are_removed_when_initialize_fails_after_managers(self, monkeypatch) -> None:
         """Провал подъёма ПОСЛЕ установки хуков не оставляет слоты занятыми.
@@ -161,3 +166,52 @@ class TestProcessReportErrorCarriesFields:
         finally:
             store.close()
             error_mgr.shutdown()
+
+
+class TestHooksInstallAfterErrorManagerBundle:
+    """T2 (находка ревью, ADR-LOG-011 в ``logger_module/DECISIONS.md``): хуки
+    ставятся ПОСЛЕ того, как бандл создал ``ErrorManager`` — тогда хранилище
+    счётчиков (``_resolve_counter_store``, выбирается ОДИН раз, при установке)
+    резолвится на ``error_mgr.stats``, а не на приватный словарь.
+
+    ADR называет цену перестановки словами, но сторожа на неё не было: ни один
+    существующий тест не поднимает ``ProcessModule`` с РЕАЛЬНОЙ секцией
+    ``managers.error`` и не сравнивает ``get_stats()`` с ``hooks.counters()``
+    после настоящего исключения в потоке. Конфиг ``error``-секции — свои поля
+    ``ErrorManagerConfig`` (``critical_file_path``/``error_file_path``/
+    ``warnings_file_path``), а не форма ``_manager_config()`` из приёмочного
+    файла: та собирается для ПРЯМОГО ``ErrorManager(config=dict)`` (путь
+    ``_normalize_error_config`` с dict, где ``log_directory`` доезжает как
+    есть), тогда как здесь конфиг идёт через ``ProcessManagers._create_error_manager``,
+    и там словарь сперва валидируется как ``ErrorManagerConfig`` — у неё нет
+    поля ``log_directory``, и оно молча потерялось бы. Абсолютные пути внутри
+    ``tmp_path`` эту потерю обходят.
+    """
+
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+    def test_hooks_use_the_error_manager_created_in_the_same_bundle(self, tmp_path) -> None:
+        error_section = {
+            "app_name": "hook_order_probe",
+            "error_file_path": str(tmp_path / "errors.log"),
+            "critical_file_path": str(tmp_path / "critical.log"),
+            "warnings_file_path": None,
+        }
+        process = ProcessModule(
+            "hook_order_probe",
+            shared_resources=_mock_shared_resources(),
+            config={"managers": {"error": error_section}},
+        )
+        assert process.initialize() is True
+        try:
+            thread = threading.Thread(target=_raise_order_probe_error, name="order-probe-worker", daemon=True)
+            thread.start()
+            thread.join(timeout=5.0)
+            assert not thread.is_alive(), "поток не завершился за 5 с — хук завис"
+
+            error_stats = process.get_manager("error").get_stats()
+            assert error_stats["thread_exceptions"] == 1, (
+                "число не попало в ErrorManager.stats — хранилище счётчиков резолвилось раньше, чем менеджер создан"
+            )
+            assert process._process_hooks.counters()["thread_exceptions"] == 1
+        finally:
+            process.shutdown()

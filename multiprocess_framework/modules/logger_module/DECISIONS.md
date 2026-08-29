@@ -587,7 +587,10 @@ Spring, ни .NET такого не умеют.
 `hooks.counters()` и `introspect.observability` отвечали бы разное на один вопрос.
 Хранилище выбирается ОДИН раз, при установке, — отсюда порядок в проводке (хуки после
 менеджеров), и у этого порядка есть сторож-тест: поставь хуки раньше, записи в плоскость
-пошли бы, а числа остались бы в приватном словаре.
+пошли бы, а числа остались бы в приватном словаре. Сторож — `TestHooksInstallAfterErrorManagerBundle`
+в `multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py` (T2 ревью
+closure Ф0): краснеет, если `ProcessModule._install_process_hooks()` переставить в начало
+`_apply_managers_bundle` — до создания `ErrorManager`.
 
 **Отвергнуто.** (1) `logging.captureWarnings(True)` вместо своего `showwarning`: он уводит
 предупреждения в stdlib-логгер `py.warnings`, то есть в СОСЕДНЮЮ систему записи, мимо

@@ -492,3 +492,101 @@ class TestMissingRoad:
             ]
         finally:
             hooks.uninstall()
+
+
+# ---------------------------------------------------------------------------
+# Проброс прежнему хуку (ревью Ф0, T1)
+# ---------------------------------------------------------------------------
+
+
+class TestPreviousHookReceivesTheEvent:
+    """T1 (находка ревью): §3.2 контракта обещает проброс ПРЕЖНЕМУ хуку ПОСЛЕ
+    доставки, а сторожа на это свойство не было — только на то, что доставка
+    состоялась, и отдельно (в приёмке) на сам факт вызова прежнего sys-хука.
+    Здесь обе половины (доставка И проброс) проверяются ОДНИМ тестом на
+    ОДНО событие — иначе можно было бы сломать любую из двух половин и не
+    заметить по другой.
+    """
+
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+    def test_threading_excepthook_delivers_and_forwards_to_the_previous_hook(self) -> None:
+        """Спай кладётся в слот ДО установки — тогда он и есть ``_prev_threading``,
+        и прежний pytest'овский сборщик (который в трассу не пишет и событие не
+        отдаёт) в тест не вмешивается вовсе.
+        """
+        services = _Services("prev-threading")
+        received: list = []
+
+        def _previous(args) -> None:
+            received.append(args)
+
+        threading.excepthook = _previous
+        hooks = install_process_hooks(services)
+        try:
+            thread = threading.Thread(
+                target=_raise_named_error, args=("prev-hook",), name="prev-hook-worker", daemon=True
+            )
+            thread.start()
+            _join_or_fail(thread)
+
+            assert len(services.reports) == 1, "доставка в services не состоялась"
+            assert len(received) == 1, "прежний threading.excepthook не был позван"
+            assert received[0].exc_value is services.reports[0][0], (
+                "прежнему хуку ушёл не тот же объект исключения, что уехал в доставку"
+            )
+        finally:
+            hooks.uninstall()
+
+    def test_sys_excepthook_delivers_and_forwards_to_the_previous_hook(self) -> None:
+        """``sys.excepthook`` зовут напрямую (не через реальный крах главного
+        потока) — тем же приёмом, что в ``TestTracebackWithoutExcInfo``, но
+        предмет здесь другой: не форма трассы, а сам факт проброса кортежа.
+        """
+        services = _Services("prev-sys")
+        received: list = []
+
+        def _previous(exc_type, exc_value, tb) -> None:
+            received.append((exc_type, exc_value, tb))
+
+        sys.excepthook = _previous
+        hooks = install_process_hooks(services)
+        try:
+            try:
+                _raise_named_error("prev-sys-hook")
+            except RuntimeError as exc:
+                exc_type, exc_value, tb = type(exc), exc, exc.__traceback__
+            sys.excepthook(exc_type, exc_value, tb)
+
+            assert len(services.reports) == 1, "доставка в services не состоялась"
+            assert received == [(exc_type, exc_value, tb)], "прежний sys.excepthook не получил тот же кортеж"
+        finally:
+            hooks.uninstall()
+
+
+# ---------------------------------------------------------------------------
+# counters() — копия (ревью Ф0, T6)
+# ---------------------------------------------------------------------------
+
+
+class TestCountersReturnsACopy:
+    """T6 (находка ревью): ``counters()`` документирован как копия, но сторожа
+    на это не было — только на форму (три ключа). С реальным ``ErrorManager``,
+    чтобы источником чисел был именно его ``stats``, а не приватный словарь.
+    """
+
+    def test_mutating_the_returned_dict_does_not_touch_the_source(self, tmp_path) -> None:
+        error_mgr = ErrorManager(manager_name="t6-error", config=_manager_config(tmp_path, "t6_error"))
+        error_mgr.initialize()
+        services = _Services("t6-copy", error_manager=error_mgr)
+        hooks = install_process_hooks(services)
+        try:
+            counters = hooks.counters()
+            assert set(counters) == set(HOOK_COUNTER_KEYS)
+
+            counters["thread_exceptions"] = 999
+
+            assert error_mgr.get_stats()["thread_exceptions"] != 999, "правка возвращённого dict уехала в источник"
+            assert hooks.counters()["thread_exceptions"] != 999, "второй вызов counters() увидел чужую правку"
+        finally:
+            hooks.uninstall()
+            error_mgr.shutdown()

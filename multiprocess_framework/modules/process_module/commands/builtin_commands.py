@@ -3357,6 +3357,11 @@ class BuiltinCommands:
             "process": self._services.name,
             "thread": thread_name,
             "joined": joined,
+            # Ревью Ф0: потолок ожидания — часть ОТВЕТА, читается эффективным
+            # значением константы, а не задокументирован отдельно молча. Без
+            # этого ключа «не дождались» и «дождались, но заняло 2 с» неотличимы
+            # от «дождались мгновенно» — ключ называет сам предел.
+            "join_timeout_sec": DIAG_JOIN_TIMEOUT_SEC,
             "thread_exceptions": hooks.counters()["thread_exceptions"],
         }
 
