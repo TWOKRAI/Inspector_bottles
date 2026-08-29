@@ -60,6 +60,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Один владелец ослепляет тест общего состояния](feedback_one_owner_blinds_the_shared_state_test.md) — после переезда «всё через порт» П1/П4 зелены и при приватной копии; держал контракт единственный читатель МИМО владельца
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — инъекция на КАЖДОЕ заявленное свойство, предсказание до прогона · [молчащий детектор](feedback_silent_detector_proves_nothing.md)
 - [Коммит ПЕРЕД инъекциями](feedback_inject_only_after_the_work_is_committed.md) — `git checkout` в харнессе съел незакоммиченную реализацию; красная база останавливает матрицу
+- [Скриптовая заплатка требует уникального якоря](feedback_scripted_patch_needs_a_unique_anchor.md) — `count == 1`, иначе режет соседнюю функцию молча; поймал только гейт фреймворка из трёх
 - [Инъекция смотрит ДРУГИМ объективом, чем тест](feedback_injection_must_use_a_different_lens_than_the_test.md) — совпали точки наблюдения (payload/дерево) → красный доказывает согласие двух копий одной модели
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без воспроизведения вход→выход = совет, не факт
 - [Транспорт арбитрирует то, чего не понимает](feedback_transport_arbitrates_what_it_cannot_understand.md) — два писателя в один лист; троттл вырезает молча (proceed=true без rejection_reason)

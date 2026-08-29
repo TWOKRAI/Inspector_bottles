@@ -25,6 +25,7 @@ from backend_ctl.capability_render import FORMATS, render_concise, render_help
 from backend_ctl.conditions import DEFAULT_AWAIT_TIMEOUT
 from backend_ctl.driver import BackendDriver
 from backend_ctl.events import ALL_PLANE, PLANES, page_with_reset_retry
+from backend_ctl.protocol import unwrap
 from backend_ctl.recorder import DEFAULT_MAX_EVENTS
 
 #: Handler инструмента: (driver, arguments) → JSON-сериализуемый результат.
@@ -223,7 +224,20 @@ def _introspect_observability(drv: BackendDriver, args: Dict[str, Any]) -> Any:
             "success": False,
             "error": f"неизвестная section {section!r}: ожидаю одну из {list(OBSERVABILITY_SECTIONS)}",
         }
-    result = drv.send_command(args["process"], "introspect.observability", **_kw_timeout(args))
+    # `send_command` отдаёт СЫРОЙ IPC-конверт (`type`/`sender`/`targets`/`queue_type`/
+    # `_fence`/`_receive_info`), а ответ команды лежит под `result`. Соседние
+    # инструменты этой разницы не видят, потому что ходят через методы драйвера,
+    # которые разворачивают конверт сами. Здесь разворачиваем явно, и это не
+    # косметика: без разворота фильтр `section` искал секции на верхнем уровне
+    # КОНВЕРТА и не находил их НИКОГДА — `introspect_observability(seg,
+    # section="observation")` на живом стенде отвечал `sections_present` со списком
+    # транспортных ключей. Фейковый драйвер в тестах отдаёт плоский dict, поэтому
+    # дефект был виден только живым прогоном (Ф0.5, 2026-08-29).
+    # Конверт вдобавок съедал байтовый потолок: 18165 Б против 12000.
+    result = unwrap(
+        drv.send_command(args["process"], "introspect.observability", **_kw_timeout(args)),
+        leaf=True,
+    )
     if section is None or not isinstance(result, dict):
         return result
     narrowed = {key: result[key] for key in _OBSERVABILITY_ENVELOPE if key in result}
