@@ -265,6 +265,73 @@ class ObservableMixin(IObservableMixin):
         self._log(level, text, **ctx)
         return True
 
+    def report_error(
+        self,
+        exc: BaseException,
+        context: Optional[str] = None,
+        throttle: Optional[float] = None,
+        **fields: Any,
+    ) -> None:
+        """Учесть отказ: **факт ВСЕГДА**, голос — по окну. Одна дверь на оба обязательства.
+
+        Зеркало :meth:`HealthState.report_error` для тех, у кого нет
+        ``ctx.health``: менеджеров фреймворка (роутер, диспетчер, командный
+        менеджер, топология) и сервисов. Оба держателя механизма говорят одним
+        языком — сайт зовёт ОДИН метод и не расставляет порядок сам.
+
+        **Почему метод, а не дисциплина вызывающего (Task 1.3b, вердикт).**
+        До него сайт собирал связку руками — ``should_voice`` → ``if voiced:
+        _log_error`` → ``_track_error``, — и вся корректность держалась на
+        ПОРЯДКЕ трёх вызовов. Порядок не удержался: в
+        ``RouterManager._report_send_error`` ``return`` при закрытом окне стоял
+        ВЫШЕ ``_track_error``, и замер дал **5 вхождений отказа → 5 в
+        счётчиках, 1 запись в плоскости ошибок, 4 потеряны целиком**. Написал
+        это тот, кто правило знал: инвариант, охраняемый порядком трёх вызовов
+        на 47 адресах, — генератор дефектов, а охраняемый телом одного метода —
+        структурное свойство.
+
+        Ключ окна — ``(класс отказа, context)``, та же формула, что у
+        ``HealthState``. Дробность решает САЙТ: нужен голос на устройство —
+        кладёт идентификатор в ``context`` (``f"create_worker@{dev_id}"``).
+        Фреймворк форму ключа фиксирует, а язык сборки ключей не заводит —
+        это был бы второй словарь политики. Отвергнут (Task 1.3b) вариант
+        «identity инстанса в ключе всегда»: хаб на 20 устройствах, отпавших
+        одной причиной, дал бы 20 строк — ровно шторм, против которого окно и
+        заведено. Различимость при этом не теряется: факт пер-вхождение и
+        несёт ``**fields``.
+
+        ``**fields`` уезжают в контекст записи плоскости ошибок И в поля
+        голоса: деталь, снятая вместе с соседним ``_log_error`` при миграции
+        Task 1.3b, обязана остаться структурной, а не раствориться в тексте.
+
+        Голос несёт маркер дедупа путей ``origin=error_manager`` ТОЛЬКО когда
+        факт действительно уехал в плоскость (см. ``_track_error`` → ``bool``).
+        Маркер — утверждение о ЧУЖОЙ строке стора; безусловный, он ложен там,
+        где плоскости нет, и тогда логгер-tap пропускает голос, а инцидент
+        исчезает целиком (находка Major 1 ревью Task 1.3a).
+        """
+        from ...channel_routing_module.observability.store_tap import ORIGIN_ERROR_MANAGER, ORIGIN_FIELD
+        from ...logger_module.core.windowed_voice import compose_voice_text
+        from ...logger_module.utils import safe_exception_message
+
+        etype = type(exc).__name__
+        ctx = str(context) if context else ""
+
+        # ФАКТ — первым и безусловно. Всё, что ниже, зовёт ЧУЖИЕ механизмы
+        # (держатель окон, логгер): упади любой из них — факт уже учтён.
+        recorded = self._track_error(exc, {"context": ctx, **fields} if (ctx or fields) else None)
+
+        voiced, suppressed = self.should_voice(f"{etype}|{ctx}", throttle)
+        if not voiced:
+            return
+        where = f" @ {ctx}" if ctx else ""
+        marker = {ORIGIN_FIELD: ORIGIN_ERROR_MANAGER} if recorded else {}
+        self._log_error(
+            compose_voice_text(f"{etype}{where}: {safe_exception_message(exc)}", suppressed),
+            **fields,
+            **marker,
+        )
+
     def _record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
         """Запись метрики через stats manager."""
         self._call_manager("stats", "record_metric", metric_name, value, tags or {})
@@ -296,8 +363,21 @@ class ObservableMixin(IObservableMixin):
         ctx.setdefault("module", self._observability_source())
         return ctx
 
-    def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
-        """Отслеживание ошибки через error manager (каноничный слот 'error')."""
+    def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> bool:
+        """Отслеживание ошибки через error manager (каноничный слот 'error').
+
+        Returns:
+            Ушёл ли факт ПРИЁМНИКУ. ``False`` — слота нет, он выключен или у
+            менеджера нет ни ``track_error``, ни ``record_error``. По этому и
+            только по этому признаку :meth:`report_error` решает, вешать ли на
+            голос маркер дедупа путей: маркер утверждает, что строка стора у
+            инцидента уже есть, и на процессе без ErrorManager это утверждение
+            ложно (Major 1 ревью Task 1.3a).
+
+            Потолок назван прямо: ``True`` — «приёмник протокола нашёлся», а не
+            «запись легла на диск». Отказ ВНУТРИ менеджера считается отдельно
+            (``manager_call_failures``), сюда он не доезжает.
+        """
         ctx = self._error_context(context)
         # Task 5.14: имя error-гнезда каноникализировано на 'error'. Legacy-fallback
         # на слот 'errors' убран — все точки регистрации переведены на 'error'.
@@ -312,10 +392,51 @@ class ObservableMixin(IObservableMixin):
         # тихим, это ничего не стоило; со счётчиком Т.1 здоровый путь давал
         # 9 ложных «потерь» за прогон гейта, и счётчик перестал бы значить
         # «запись потеряна». Предпочтение прежнее: track_error, если он есть.
+        error = self._as_incident(error, ctx)
         if self._manager_has_method("error", "track_error"):
             self._call_manager("error", "track_error", error, ctx)
-        else:
-            self._call_manager("error", "record_error", error, ctx)
+            return True
+        reachable = self._manager_has_method("error", "record_error")
+        # Вызов идёт ДАЖЕ при отсутствии метода — намеренно: ``_call_manager``
+        # на этой ветке считает потерю и предупреждает один раз на пару (Т.1),
+        # то есть дефект проводки остаётся видимым. Тихо пропустить вызов
+        # значило бы обменять счётчик потерь на ровный ноль.
+        self._call_manager("error", "record_error", error, ctx)
+        return reachable
+
+    def _as_incident(self, error: Any, ctx: Dict[str, Any]) -> BaseException:
+        """Гарантировать, что дальше поедет исключение, и НЕ бросить, если это не так.
+
+        Дорога наблюдаемости не имеет права бросать: её зовут из веток «мы
+        поймали исключение», и отказ учёта, ставший вторым исключением поверх
+        первого, ПОДМЕНЯЕТ исходную ошибку своей — худший из возможных исходов.
+
+        Найдено Task 1.3b запуском: четыре адреса
+        (``dispatcher.py:153,184``, ``command_manager.py:134,157``) звали
+        ``self._track_error("dispatcher.initialization.failed", error=e)`` —
+        ``error`` передан и позиционно, и по имени. Результат:
+        ``TypeError: _track_error() got multiple values for argument 'error'``
+        внутри ``except`` — то есть на месте настоящего отказа подъёма
+        подсистемы наружу уходила бы ошибка про сигнатуру. Не стреляло только
+        потому, что сами ветки ``except`` мертвы (тело ``try`` — присваивание и
+        лог), и НИ ОДИН тест через них не проходил.
+
+        Мусор не глотается: он становится ТИПИЗИРОВАННЫМ фактом
+        (``ObservabilityMisuse``) и считается в книге misuse, которая обязана
+        читаться наружу — иначе тихий счётчик заменил бы громкий отказ и стал
+        бы новым местом, где дефект живёт незамеченным (условие к вердикту
+        Q5, Task 1.3b).
+        """
+        if isinstance(error, BaseException):
+            return error
+        # Ленивый импорт: base_manager — нижний ярус и не тянет error_module
+        # на уровне модуля (тот наследует BaseManager — вышел бы цикл).
+        from ...error_module.failures import ObservabilityMisuse
+
+        misuse: Dict[str, int] = self.__dict__.setdefault("_track_error_misuse", {})
+        key = str(ctx.get("module") or self._observability_source())
+        misuse[key] = misuse.get(key, 0) + 1
+        return ObservabilityMisuse(f"_track_error получил не исключение, а {type(error).__name__}: {error!r:.200}")
 
     # =========================================================================
     # ПУБЛИЧНЫЙ API — УПРАВЛЕНИЕ МЕНЕДЖЕРАМИ
@@ -450,6 +571,21 @@ class ObservableMixin(IObservableMixin):
     def manager_call_failures(self) -> Dict[str, int]:
         """Счётчики проглоченных отказов _call_manager: 'manager.method' -> N (Ф2.3)."""
         return dict(self.__dict__.get("_manager_call_failures", {}))
+
+    @property
+    def track_error_misuse(self) -> Dict[str, int]:
+        """Кривые вызовы ``_track_error`` (не исключение на входе): источник -> N.
+
+        Ненулевое значение — дефект вызывающего кода, а не рантайма: дорога
+        наблюдаемости отработала, но сайт передал ей мусор (Task 1.3b,
+        :meth:`_as_incident`). Пусто, пока такого вызова не было ни одного.
+
+        **Долг, названный прямо:** книга читается только отсюда — в
+        ``introspect.observability`` она попадёт вместе с протоколом readback
+        (Ф4.3 плана ``observability-closure``). До тех пор «ноль на живом
+        стенде» проверяется тестом чистого подъёма, а не ручкой пульта.
+        """
+        return dict(self.__dict__.get("_track_error_misuse", {}))
 
     def _manager_has_method(self, manager_name: str, method_name: str) -> bool:
         """Есть ли в слоте ВКЛЮЧЁННЫЙ менеджер с вызываемым ``method_name``.

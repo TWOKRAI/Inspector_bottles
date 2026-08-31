@@ -36,6 +36,7 @@ from typing import Any, Callable, Protocol, runtime_checkable
 
 from ...channel_routing_module.observability.store_tap import ORIGIN_ERROR_MANAGER, ORIGIN_FIELD
 from ...logger_module.core.windowed_voice import WindowedVoices, compose_voice_text
+from ...logger_module.utils import safe_exception_message
 from .breaker import (
     DEFAULT_COOLDOWN_SEC,
     DEFAULT_FAIL_THRESHOLD,
@@ -72,24 +73,11 @@ def _env_first(*keys: str) -> str:
     return ""
 
 
-#: Обрезка длинных сообщений исключений (защита state-дерева от гигантских строк).
-_MAX_MESSAGE_LEN = 500
-
-
-def _safe_message(exc: BaseException) -> str:
-    """Текст исключения, НЕ веря его ``__str__``.
-
-    ``str(exc)`` — чужой код: у исключения с самодельным ``__str__`` он имеет
-    право бросить. Ревью Task 1.3a воспроизвело цену этого доверия: строка
-    стояла первой в :meth:`HealthState.report_error`, до лока и до
-    ``_safe_track``, и исключение с бросающим ``__str__`` уносило наружу
-    ``ValueError`` при ``errors=0`` и нуле записей плоскости — то есть отказ
-    ЧУЖОГО механизма стоил ВЕСЬ факт, ровно тот класс, который задача чинит.
-    """
-    try:
-        return str(exc)[:_MAX_MESSAGE_LEN]
-    except Exception:  # noqa: BLE001 — текст не имеет права стоить учёт факта
-        return f"<{type(exc).__name__}: __str__ недоступен>"
+#: Защита от чужого ``__str__``. Task 1.3b: хранилище ОДНО — второй держатель
+#: механизма (``ObservableMixin.report_error``) берёт ту же функцию оттуда же.
+#: Имя ``_safe_message`` оставлено псевдонимом: на него ссылаются докстринг
+#: :meth:`HealthState.report_error`, ADR-PM-045 и STATUS модуля.
+_safe_message = safe_exception_message
 
 
 class HealthSelfTestError(RuntimeError):

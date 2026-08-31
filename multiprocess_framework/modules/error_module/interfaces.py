@@ -28,6 +28,13 @@ error_module — специализация logger_module для обработ�
 from typing import Any, Dict, Optional, Union, Protocol, runtime_checkable
 
 from ..logger_module.utils import LogMessage
+from .failures import (
+    DeviceOpenFailed,
+    FrameworkFailure,
+    ObservabilityMisuse,
+    ResourceUnavailable,
+    SubsystemStartFailed,
+)
 
 
 @runtime_checkable
@@ -162,4 +169,9 @@ ErrorConfigLike = Union[Dict[str, Any], Any]
 # случайный top-level импорт не становился частью API.
 __all__ = [
     "IErrorManager",
+    "FrameworkFailure",
+    "ResourceUnavailable",
+    "SubsystemStartFailed",
+    "DeviceOpenFailed",
+    "ObservabilityMisuse",
 ]

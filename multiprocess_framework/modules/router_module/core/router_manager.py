@@ -392,20 +392,23 @@ class RouterManager(ChannelRoutingManager):
         # ФАКТ — всегда, окно его не касается (Ф1.4: два обязательства разделены).
         self._inc_stat("errors")
         self._inc_stat(f"errors_{reason}")
-        # ГОЛОС — не чаще окна на причину. Решение и число подавленных берутся
-        # под ОДНИМ локом внутри механизма (Ф6.х.7б переехал туда же).
-        voiced, suppressed = self.should_voice(f"{self._SEND_ERROR_VOICE_KEY}:{reason}")
-        if not voiced:
-            return
         with self._stats_lock:
-            # Ф6.х.7б: число в тексте снимается ПОСЛЕ решения о голосе — то есть
-            # «на момент записи», а не на момент входа в функцию.
+            # Число снимается СРАЗУ ЗА фактом — то есть «включая это вхождение».
+            # До Task 1.3b оно снималось после решения о голосе, потому что и
+            # запись плоскости стояла ТАМ ЖЕ; вместе с переносом факта наверх
+            # исчезла и причина откладывать замер.
             total = self._stats.get(f"errors_{reason}", 0)
-        tail = f"; подавлено с прошлой записи: {suppressed}" if suppressed else ""
-        self._log_error(f"send [{reason}] {detail} (errors_{reason}={total}{tail})")
-        self._track_error(
+        # ФАКТ + ГОЛОС — одной дверью (Task 1.3b). Прежде здесь стояла ручная
+        # связка, и `if not voiced: return` был ВЫШЕ `_track_error`: замер до
+        # правки — 5 вхождений отказа дали 5 в счётчиках, 1 запись в плоскости
+        # ошибок и 4 потерянных целиком, вместе с трассами. Порядок теперь живёт
+        # в теле `ObservableMixin.report_error`, а не в дисциплине этого сайта.
+        self.report_error(
             error if error is not None else RouterSendError(f"[{reason}] {detail}"),
-            {"reason": reason, "suppressed_since_last": suppressed},
+            context=f"{self._SEND_ERROR_VOICE_KEY}:{reason}",
+            detail=detail,
+            reason=reason,
+            errors_total=total,
         )
 
     def _count_door(self, door: str, msg_dict: Dict[str, Any]) -> None:
