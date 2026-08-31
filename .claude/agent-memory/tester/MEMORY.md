@@ -13,3 +13,4 @@
 - [reused ProcessHeartbeat required for retraction ticks](feedback_reused_heartbeat_required_for_retraction_ticks.md) — a fresh hb per tick loses per-instance bookkeeping → false RED on retraction propagation
 - [_do_shutdown on unbooted plugin is a silent no-op](feedback_do_shutdown_on_unbooted_plugin_is_a_silent_noop.md) — drive full configure->start->shutdown lifecycle before trusting shutdown-triggered assertions
 - [pytest.raises inverts RED polarity](feedback_pytest_raises_inverts_red_polarity.md) — wrapping a not-yet-built call in pytest.raises(X) PASSES today; assert the real success shape so X propagates unwrapped and fails the test
+- [store kind ignores which manager wrote it](feedback_store_kind_ignores_which_manager_wrote_it.md) — kind=error comes from severity alone; a buggy ctx.log_error path already produces it — pair with errors.log content / health.status instead
