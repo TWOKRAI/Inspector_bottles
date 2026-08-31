@@ -34,6 +34,9 @@
    константа, согласная с любым ответом.
 6. **Закрытие идемпотентно.** ``stop()`` зовут и повторно, и на не поднятом
    журнале.
+7. **Один разъём на точку.** Отказ уходит ТОЛЬКО в плоскость ошибок. Параллельная
+   строка в ``system.log`` не «дублирует для удобства», а лишает смысла вопрос
+   «сколько раз это случилось» — считать инциденты станет нечем.
 
 Все обращения к журналу идут через :func:`_within_deadline` — подъём менеджера
 открывает файлы и стартует поток подметальщика, и тест, который вместо падения
@@ -119,6 +122,11 @@ def log_root(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
 
 def _system_log(root: Any) -> str:
     path = root / "launcher" / "system.log"
+    return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+
+def _errors_log(root: Any) -> str:
+    path = root / "launcher" / "errors.log"
     return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
 
 
@@ -286,3 +294,43 @@ class TestShutdownIsIdempotent:
 
         assert launcher._logger_manager is None
         assert launcher._error_manager is None
+
+
+class TestOneConnectorPerPoint:
+    """Опасность 7: отказ, рассказанный дважды, ломает счёт «сколько раз».
+
+    :meth:`SystemLauncher._log_error` пишет ТОЛЬКО в плоскость ошибок — это
+    заявлено в его docstring как свойство конструкции, но до этого теста его не
+    сторожил никто. Замер 2026-08-31 (матрица инъекций, М5): заплатка, дописавшая
+    к отказу параллельную строку в ``system.log``, оставила ВСЕ 34 теста задачи
+    зелёными, а ручная проба показала маркер разом в двух файлах.
+
+    Дубль опасен не объёмом файла: по двум строкам об одном инциденте нельзя
+    ответить, сколько раз он случился, а именно повтор отличает разовый сбой от
+    насовсем сломанной уборки.
+
+    Ожидания — литералы, и вторая половина важнее первой: маркер обязан быть в
+    ``errors.log`` и обязан ОТСУТСТВОВАТЬ в ``system.log``.
+    """
+
+    def test_a_failure_is_told_once_and_only_to_the_error_plane(self, log_root: Any, launchers: Any) -> None:
+        launcher = launchers()
+        marker = "ОДИН_РАЗЪЁМ_НА_ТОЧКУ"
+
+        def _emit() -> None:
+            # Изнутри except: log_exception собирает трассу из активного исключения.
+            try:
+                raise RuntimeError(marker)
+            except RuntimeError as exc:
+                launcher._log_error("проверка одного разъёма", exc)
+
+        _within_deadline(_emit, "запись отказа")
+        _within_deadline(launcher._shutdown_observability, "закрытие журнала")
+
+        errors = _errors_log(log_root)
+        system = _system_log(log_root)
+        assert marker in errors, f"errors.log не содержит маркер отказа: {errors!r}"
+        assert marker not in system, (
+            "тот же инцидент попал ВТОРОЙ строкой в system.log — «сколько раз это случилось» "
+            f"перестаёт иметь ответ: {system!r}"
+        )
