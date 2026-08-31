@@ -4,9 +4,6 @@
 Dict at Boundary: add_process(name, proc_dict) — только dict.
 """
 
-import logging
-
-
 from ..launcher.system_launcher import SystemLauncher
 
 
@@ -19,16 +16,27 @@ class TestSystemLauncher:
         assert launcher._processes == []
         assert launcher._spawner is None
 
-    def test_log_fallback_without_spawner(self, caplog, monkeypatch) -> None:
-        """_log_info/_log_warning без spawner — логируется через stdlib logging."""
-        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+    def test_log_without_spawner_reaches_launcher_file(self, tmp_path, monkeypatch) -> None:
+        """_log_info/_log_warning без spawner попадают в ``{база}/launcher/system.log``.
 
-        monkeypatch.setattr(LoggerManager, "_instance", None)
+        Task 1.2 (M14) заменила прежний контракт этого теста. Прежде он утверждал
+        «уходит в stdlib logging» — то есть закреплял САМ ДЕФЕКТ: у главного
+        процесса корневой stdlib-логгер без хендлеров, и записи лаунчера не
+        доезжали ни до какого файла. Проверяем то, ради чего правка делалась:
+        файл существует и содержит обе строки.
+        """
+        monkeypatch.setenv("MULTIPROCESS_LOG_DIR", str(tmp_path))
+        monkeypatch.setenv("INSPECTOR_LOG_DIR", str(tmp_path))
         launcher = SystemLauncher()
-        with caplog.at_level(logging.INFO):
+        try:
             launcher._log_info("test info")
             launcher._log_warning("test warning")
-        assert "[SystemLauncher]" in caplog.text
+        finally:
+            launcher._shutdown_observability()
+
+        content = (tmp_path / "launcher" / "system.log").read_text(encoding="utf-8", errors="replace")
+        assert "[SystemLauncher] test info" in content
+        assert "[SystemLauncher] test warning" in content
 
     def test_add_process_name_and_dict(self) -> None:
         """add_process(name, proc_dict)."""

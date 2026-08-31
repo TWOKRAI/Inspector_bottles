@@ -46,25 +46,40 @@ def is_posix() -> bool:
     return platform.system() in ("Linux", "Darwin")
 
 
-def cleanup_stale_shm(name: str) -> None:
+def cleanup_stale_shm(name: str) -> bool:
     """
     Попытка удалить устаревший shm сегмент от предыдущих запусков.
 
     POSIX: открыть + close + unlink (освобождает сегмент).
     Windows: открыть + close (освобождает mapping, если последний handle).
+
+    Returns:
+        True — сегмент существовал и освобождён; False — его не было либо
+        освободить не удалось.
+
+    Task 1.2 (M14): раньше функция возвращала ``None`` и наружу об уборке не
+    сообщала НИЧЕГО. Из-за этого её вызывающий (``cleanup_known_shm_at_startup``
+    → ``SystemLauncher``) не мог сказать «очищено N сегментов» иначе как
+    выдумав число: «сделано» и «нечего было делать» выглядели одинаково.
+    Возвращаемое значение — не удобство, а единственный способ отличить два
+    исхода, у которых на диске разные последствия.
     """
     try:
         stale = shared_memory.SharedMemory(name=name, create=False)
+    except FileNotFoundError:
+        return False
+    except Exception:  # noqa: BLE001 — чужой сегмент/права: считаем «не убрали»
+        return False
+    try:
         stale.close()
         if is_posix():
             try:
                 stale.unlink()
             except FileNotFoundError:
                 pass
-    except FileNotFoundError:
-        pass
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 — сегмент найден, но освободить не вышло
+        return False
+    return True
 
 
 def _extract_memory_region_names(proc_dict: dict[str, Any]) -> list[str]:
@@ -88,7 +103,7 @@ def _extract_memory_region_names(proc_dict: dict[str, Any]) -> list[str]:
     return list(names_raw.keys()) if isinstance(names_raw, dict) else []
 
 
-def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
+def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> list[str]:
     """
     Очистить известные SharedMemory блоки перед стартом приложения.
 
@@ -99,8 +114,15 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
 
     Args:
         processes_config: {process_name: proc_dict}, proc_dict может содержать "memory".
+
+    Returns:
+        Имена РЕАЛЬНО освобождённых сегментов (порядок обхода). Пустой список
+        означает «висящих сегментов не было», а не «уборка не работала»: у этих
+        двух исходов один и тот же вид на диске, и различить их можно только
+        здесь — поэтому число уезжает наверх, а не остаётся в функции (Task 1.2).
     """
     seen: set = set()
+    cleaned: list[str] = []
     for proc_dict in (processes_config or {}).values():
         if not isinstance(proc_dict, dict):
             continue
@@ -114,7 +136,9 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
                 key = f"{name}_{i}"
                 if key not in seen:
                     seen.add(key)
-                    cleanup_stale_shm(key)
+                    if cleanup_stale_shm(key):
+                        cleaned.append(key)
+    return cleaned
 
 
 def extract_memory_region_names(processes_config: dict[str, Any] | None) -> list[str]:

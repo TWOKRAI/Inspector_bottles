@@ -141,6 +141,18 @@
 - **CONFIG_CONTRACT.md** — документирован контракт proc_dict (обязательные/опциональные поля, потребители)
 - **docs/examples/proc_dict_canonical_examples.py** — эталонные dict и демо нормализации (2026-03-30)
 
+## Наблюдаемость лаунчера (2026-08-31, Task 1.2, ADR-PMM-029)
+
+- `SystemLauncher` поднимает СВОЙ журнал в `{база логов}/launcher/` — `LoggerManager` +
+  `ErrorManager`, конфиги из общей `managers_from_log_dir` (та же сборка, что у процессов).
+  Подъём ленивый, на первой записи. До правки INFO лаунчера уходил в stdlib-фолбэк без
+  хендлеров, то есть в никуда (находка ревью M14).
+- Побочный эффект назван: после первой записи `get_std_logger`/`FallbackLogger` ГЛАВНОГО
+  процесса (в первую очередь `spawner`) тоже пишут в `launcher/system.log`.
+- Отказ уборки SHM больше не `except: pass`: `launcher/errors.log` с трассой + счётчик
+  `get_stats()["startup"]["shm_cleanup_failures"]`; успех называет число сегментов
+  (`shm_cleanup_segments`).
+
 ## Известные проблемы
 
 - Нет (все известные проблемы устранены)
@@ -154,3 +166,4 @@
 | 2026-03-11 | Этап 2: дочерние процессы создаются; flush=True в prints; graceful stop в spawner | 2 |
 | 2026-03-13 | Этапы 3-8: interfaces.py, error_module, graceful shutdown, CommandManager, тесты, документация | 8 |
 | 2026-03-30 | Добавлены docs/examples/proc_dict_canonical_examples.py; ссылка в CONFIG_CONTRACT.md и docs/README.md | 8 |
+| 2026-08-31 | Task 1.2: журнал лаунчера в `launcher/`, отказ уборки SHM громкий + счётчик (ADR-PMM-029) | — |

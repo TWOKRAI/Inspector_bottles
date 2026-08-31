@@ -95,6 +95,76 @@ def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
     return managers_payload_for_proc(managers_from_log_dir(resolve_base_log_dir(log_dir), model_cls=ManagersConfig))
 
 
+def compose_managers_payload(
+    resolved: Dict[str, Any],
+    *,
+    log_dir: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Разрешённые слои → конфиги менеджеров. **Одна сборка на два адресата.**
+
+    Адресаты:
+
+    * пересборка на boot / reload (:func:`apply_observability_layers`);
+    * **создание** менеджеров процесса
+      (``ProcessManagers._managers_config_for_creation``).
+
+    Почему шов, а не две ветки (Task 1.2, находка живого стенда). Создание
+    собирало конфиг само — голым ``expand_observability(layers.resolve())``, без
+    базы L0. А ``expand_observability`` эмитит **частичный** словарь каналов
+    (только те, что назвал слой): в конфиге прототипа это ``gui_file`` /
+    ``trace_file`` / ``busy_file``. Pydantic на ``LoggerManagerConfig`` заменяет
+    словарь целиком — значит рождавшийся менеджер имел ТРИ канала, а ``scopes``
+    у него оставались дефолтные и вели в ``system_file`` / ``messages_file``,
+    которых в его реестре не было вовсе.
+
+    Следствие измерено на стенде 2026-08-31: у ``ProcessManager`` **12 записей**
+    (``{'system_file': 6, 'messages_file': 6}``) уходили в несуществующие каналы —
+    ровно те, что эмитятся между ``logger.initialize()`` и пересборкой на boot
+    (`LoggerManager initialized`, `RouterManager initialized`, `StatsManager`,
+    порт наблюдений, `StatsAdapter.setup`). Пересборка секундой позже собирала
+    конфиг ПРАВИЛЬНО (``merge_managers(base, expanded)``) — и потери
+    прекращались. То есть дефекта «в логгере» не было: две дороги к одному
+    конфигу расходились, и расходились молча.
+
+    Поэтому сборка живёт здесь одна. Родиться и пересобраться теперь нельзя
+    по-разному: разойтись будет нечему.
+
+    Args:
+        resolved: результат ``ObservabilityLayers.resolve()`` **без** ключа
+            ``telemetry`` (её снимает вызывающий — у неё свои получатели, а
+            ``ObservabilityConfig`` не знает этого ключа).
+        log_dir: каталог логов; ``None`` → машинный контекст
+            (``MULTIPROCESS_LOG_DIR`` / ``INSPECTOR_LOG_DIR`` / ``logs``).
+
+    Returns:
+        ``{"logger": …, "error": …, "stats": …, "command": …}`` — слои, наложенные
+        на базу L0 машинного контекста.
+    """
+    from ...data_schema_module import deep_merge
+    from ..configs.managers_config import merge_managers
+
+    expanded = expand_observability(resolved)
+    base = base_managers_payload(log_dir)
+
+    explicit_level = resolved.get("log_level")
+    logger_cfg = merge_managers(base.get("logger", {}), expanded["logger"])
+    if explicit_level is not None:
+        # Ф8.1: уровень кладётся ОДНИМ правилом корня и мержится с остальными
+        # правилами, а не заменяет секцию. Прежде здесь стоял танец
+        # «вынуть scopes до merge → положить профиль → вернуть правки поверх»:
+        # он существовал ровно потому, что профиль переписывал набор целиком.
+        # Причина снята — танец снят вместе с ней.
+        #
+        # ``deep_merge``, а не ``update``: у корня может быть и правило приёмников
+        # (``loggers[""].channels``), и замена словаря целиком снесла бы его молча.
+        logger_cfg["loggers"] = deep_merge(logger_cfg.get("loggers") or {}, _root_level_rule(explicit_level))
+        logger_cfg["default_level"] = str(explicit_level).upper()
+    expanded["logger"] = logger_cfg
+    expanded["error"] = merge_managers(base.get("error", {}), expanded["error"])
+    expanded["stats"] = merge_managers(base.get("stats", {}), expanded["stats"])
+    return expanded
+
+
 def _root_level_rule(level: str) -> Dict[str, Dict[str, Any]]:
     """Корневое правило уровня — **вид на общую функцию**, а не вторая реализация.
 
@@ -823,9 +893,6 @@ def apply_observability_layers(
         Применённый конфиг ``{"logger": …, "error": …, "stats": …, "command": …}``.
         Фактическое состояние менеджеров — :func:`observability_effective`.
     """
-    from ...data_schema_module import deep_merge
-    from ..configs.managers_config import merge_managers
-
     # Task 5.8: пересборка идёт ПОД ЛОКОМ СТЕКА целиком. Писателей стало четыре
     # (два watcher'а, поток команд, такт heartbeat), а между «прочитал слои» и
     # «применил результат» два шага: без лока последней могла бы примениться
@@ -840,8 +907,6 @@ def apply_observability_layers(
                 stats=stats,
                 log_dir=log_dir,
                 log_info=log_info,
-                deep_merge=deep_merge,
-                merge_managers=merge_managers,
                 heartbeat=heartbeat,
                 telemetry_boot=telemetry_boot,
                 store_throttle=store_throttle,
@@ -884,8 +949,6 @@ def _rebuild_and_apply(
     stats: Any,
     log_dir: Optional[str],
     log_info: Optional[Callable[[str], None]],
-    deep_merge: Callable[..., Any],
-    merge_managers: Callable[..., Any],
     heartbeat: Any = None,
     telemetry_boot: Optional[Dict[str, Any]] = None,
     store_throttle: Any = None,
@@ -900,25 +963,7 @@ def _rebuild_and_apply(
     # получатели. Снимаем её до `expand_observability`, иначе `ObservabilityConfig`
     # отверг бы незнакомый ключ, и слой оказался бы невыразим.
     telemetry_layered = resolved.pop(TELEMETRY_KEY, None)
-    expanded = expand_observability(resolved)
-    base = base_managers_payload(log_dir)
-
-    explicit_level = resolved.get("log_level")
-    logger_cfg = merge_managers(base.get("logger", {}), expanded["logger"])
-    if explicit_level is not None:
-        # Ф8.1: уровень кладётся ОДНИМ правилом корня и мержится с остальными
-        # правилами, а не заменяет секцию. Прежде здесь стоял танец
-        # «вынуть scopes до merge → положить профиль → вернуть правки поверх»:
-        # он существовал ровно потому, что профиль переписывал набор целиком.
-        # Причина снята — танец снят вместе с ней.
-        #
-        # ``deep_merge``, а не ``update``: у корня может быть и правило приёмников
-        # (``loggers[""].channels``), и замена словаря целиком снесла бы его молча.
-        logger_cfg["loggers"] = deep_merge(logger_cfg.get("loggers") or {}, _root_level_rule(explicit_level))
-        logger_cfg["default_level"] = str(explicit_level).upper()
-    expanded["logger"] = logger_cfg
-    expanded["error"] = merge_managers(base.get("error", {}), expanded["error"])
-    expanded["stats"] = merge_managers(base.get("stats", {}), expanded["stats"])
+    expanded = compose_managers_payload(resolved, log_dir=log_dir)
 
     if logger is not None:
         logger.reconfigure(expanded["logger"])

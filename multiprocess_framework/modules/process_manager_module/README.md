@@ -108,7 +108,21 @@ launcher.stop() -> None         # graceful shutdown
 launcher.shutdown() -> None     # алиас для stop()
 launcher.wait() -> None         # ожидание завершения
 launcher.get_status() -> Dict   # spawner_running, process, registered_processes
-launcher.get_stats() -> Dict    # spawner, shared_resources
+launcher.get_stats() -> Dict    # spawner, startup, shared_resources
+```
+
+**Журнал лаунчера (Task 1.2, ADR-PMM-029).** Записи `SystemLauncher` (и всех
+`get_std_logger`/`FallbackLogger` ГЛАВНОГО процесса, включая `spawner`) идут в
+`{база логов}/launcher/system.log`, отказы — в `launcher/errors.log` с трассой. База берётся из
+`MULTIPROCESS_LOG_DIR` / `INSPECTOR_LOG_DIR`, иначе системный temp. Журнал поднимается ЛЕНИВО, на
+первой записи, и закрывается в `stop()`.
+
+Секция `get_stats()["startup"]` доступна ДО появления spawner'а — там живут счётчики стартовой
+части:
+
+```python
+{"shm_cleanup_failures": int,          # отказов уборки SHM (0 = отказов не было)
+ "shm_cleanup_segments": int | None}   # освобождено сегментов; None = уборка не выполнялась
 ```
 
 ### IProcessManagerProcess

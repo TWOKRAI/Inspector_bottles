@@ -118,18 +118,37 @@ class ProcessManagers:
         ВТОРУЮ ветку — спутник рецепта, записанный ``observability.persist``
         (его на момент создания менеджеров ещё не читали). Эта функция закрывает
         только «родиться правильным»; «дочитать спутник» по-прежнему её работа.
+
+        **Сборка — ТА ЖЕ, что у пересборки (Task 1.2).** Раньше здесь стоял голый
+        ``expand_observability(layers.resolve())``, то есть ВТОРАЯ дорога к тому же
+        конфигу — и она молча расходилась с первой. ``expand_observability`` эмитит
+        частичный словарь каналов (только названные слоем), Pydantic заменяет им
+        набор целиком, а ``scopes`` остаются дефолтные и ведут в ``system_file`` /
+        ``messages_file``, которых в реестре родившегося менеджера нет. Живой замер
+        2026-08-31: **12 записей** оркестратора (``system_file`` 6 + ``messages_file``
+        6) уходили в никуда между ``logger.initialize()`` и пересборкой на boot.
+        Теперь обе дороги зовут :func:`compose_managers_payload` — расходиться нечему.
         """
         declared = self.process.config_handler.get_managers_config()
         if declared:
             return declared
 
-        from ..configs.observability_config import expand_observability
-        from ..configs.observability_layers import layers_are_silent, process_observability_layers
+        from ..configs.observability_layers import (
+            TELEMETRY_KEY,
+            layers_are_silent,
+            process_observability_layers,
+        )
+        from .observability_reload import compose_managers_payload
 
         layers = process_observability_layers(self.process)
         if layers_are_silent(layers):
             return declared
-        return expand_observability(layers.resolve())
+        resolved = layers.resolve()
+        # Телеметрия снимается ДО раскладки: ``ObservabilityConfig`` этого ключа не
+        # знает и отверг бы его. То же самое делает пересборка (см. её тело) — здесь
+        # это не копия правила, а исполнение контракта `compose_managers_payload`.
+        resolved.pop(TELEMETRY_KEY, None)
+        return compose_managers_payload(resolved)
 
     def register_all(self, bundle: ManagersBundle, process) -> None:
         """Зарегистрировать менеджеры из bundle через ObservableMixin.

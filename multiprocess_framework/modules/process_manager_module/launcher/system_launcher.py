@@ -28,6 +28,11 @@ _logger = FallbackLogger(__name__)
 # префиксам, извлечённым из config-регионов — см. _cleanup_shm_at_startup).
 _DEFAULT_FRAME_SLOT_PREFIX = "output_frames"
 
+# Task 1.2 (M14): подкаталог журнала лаунчера внутри базы логов. Лаунчер — код ДО
+# существования хоть одного процесса, поэтому «каталог процесса» ему взять неоткуда;
+# имя фиксировано, чтобы записи искали по известному адресу, а не «где-то в base».
+_LAUNCHER_LOG_DIR_NAME = "launcher"
+
 
 class SystemLauncher:
     """
@@ -69,12 +74,114 @@ class SystemLauncher:
         # процесс (напр. GUI при закрытии) взводит его → каждый lifecycle-цикл
         # видит и гасится сам, ПАРАЛЛЕЛЬНО (не последовательно по команде PM).
         self._system_stop_event: _MpEvent = _MpEvent()
+        # Task 1.2 (M14): журнал лаунчера. Поднимается ЛЕНИВО, на первой записи —
+        # см. _ensure_observability. Конструктор их не создаёт намеренно: он
+        # зовётся и там, где ни одной записи не будет (сборка конфига в тестах),
+        # а подъём менеджеров открывает файлы и создаёт каталоги.
+        self._logger_manager: Optional[Any] = None
+        self._error_manager: Optional[Any] = None
+        # Отказы уборки SHM на старте. Счётчик, а не только запись в журнал:
+        # «терять можно, молчать нельзя» — по одной строке в errors.log нельзя
+        # ответить «сколько раз», а именно повтор отличает разовый сбой от
+        # сломанной уборки. Виден в get_stats()["startup"].
+        self._shm_cleanup_failures: int = 0
+        # Сколько сегментов реально освобождено последней уборкой (None — уборка
+        # ещё не выполнялась ни разу; ноль и «не выполнялась» — разные факты).
+        self._shm_cleanup_segments: Optional[int] = None
+
+    def _ensure_observability(self) -> None:
+        """Поднять журнал лаунчера: ``{база логов}/launcher/`` — system.log + errors.log.
+
+        **Тем же конфигом слоёв, что у процессов, а не своим механизмом**
+        (Task 1.2, M14). Пара конфигов берётся у :func:`managers_from_log_dir` —
+        той же функции, из которой собирается L0 каждого процесса
+        (``base_managers_payload`` → пересборка на boot). Второй сборки «как у
+        процессов, только для лаунчера» здесь нет намеренно: она разошлась бы с
+        первой на первой же правке — молча, потому что расхождение видно только
+        по тому, куда легли файлы.
+
+        **Почему у лаунчера ВООБЩЕ свой менеджер, а не запись через первый
+        процесс.** Всё, что лаунчер делает (реап PID-реестра, уборка SHM, спавн
+        оркестратора), происходит ДО существования хоть одного процесса — то
+        есть до того, как появится чужой LoggerManager. Отложить записи «до
+        первого процесса» нельзя: именно эти записи объясняют, почему процесса
+        может и не появиться.
+
+        **Побочный эффект назван вслух:** ``LoggerManager.__init__`` ставит
+        процессный синглтон, поэтому после этого вызова ``get_std_logger`` и
+        ``FallbackLogger`` ГЛАВНОГО процесса (в частности ``spawner``) тоже
+        начинают писать в ``launcher/system.log``. Это не побочный ущерб, а
+        вторая половина той же находки: до Task 1.2 их записи уходили в
+        stdlib-фолбэк без хендлеров, то есть в никуда.
+
+        Идемпотентно; отказ подъёма журнала не имеет права сорвать запуск
+        системы — он уходит в аварийный выход (stdlib напрямую).
+        """
+        if self._logger_manager is not None:
+            return
+        try:
+            from ...error_module import ErrorManager
+            from ...logger_module import LoggerManager
+            from ...logger_module.core.log_paths import default_log_base_directory
+            from ...process_module.configs.managers_config import managers_from_log_dir
+
+            launcher_dir = default_log_base_directory() / _LAUNCHER_LOG_DIR_NAME
+            managers = managers_from_log_dir(str(launcher_dir), app_name=_LAUNCHER_LOG_DIR_NAME)
+            logger = LoggerManager(manager_name="logger_launcher", config=managers.logger)
+            logger.initialize()
+            # B3: имя ставится В КОНФИГ — у ErrorManager имя конфига сильнее
+            # аргумента конструктора, и без этой строки плоскость ошибок
+            # лаунчера звалась бы безадресным «ErrorManager».
+            error_config = managers.error.model_copy(update={"manager_name": "error_launcher"})
+            error = ErrorManager(manager_name="error_launcher", config=error_config)
+            error.initialize()
+            self._logger_manager = logger
+            self._error_manager = error
+        except Exception as exc:  # noqa: BLE001 — журнал не имеет права сорвать запуск
+            from ..._fallback import emergency_log
+
+            emergency_log(__name__, "error", "[SystemLauncher] журнал лаунчера не поднялся: %s", exc)
+
+    def _shutdown_observability(self) -> None:
+        """Закрыть журнал лаунчера. Идемпотентно, падать не имеет права."""
+        for attr in ("_error_manager", "_logger_manager"):
+            manager = getattr(self, attr, None)
+            if manager is None:
+                continue
+            setattr(self, attr, None)
+            try:
+                manager.shutdown()
+            except Exception as exc:  # noqa: BLE001 — закрытие журнала best-effort
+                from ..._fallback import emergency_log
+
+                emergency_log(__name__, "warning", "[SystemLauncher] %s не закрылся: %s", attr, exc)
 
     def _log_info(self, message: str) -> None:
+        self._ensure_observability()
         _logger.info("[SystemLauncher] %s", message)
 
     def _log_warning(self, message: str) -> None:
+        self._ensure_observability()
         _logger.warning("[SystemLauncher] %s", message)
+
+    def _log_error(self, message: str, exc: BaseException) -> None:
+        """Отказ подсистемы лаунчера → плоскость ошибок (``launcher/errors.log``) с трассой.
+
+        Один разъём на точку: запись идёт ТОЛЬКО в плоскость ошибок, без
+        параллельного ``_logger.error`` — иначе один инцидент дал бы две строки
+        в двух файлах, и «сколько раз это случилось» перестало бы иметь ответ.
+
+        Зовётся ИЗНУТРИ ``except``-блока: ``log_exception`` собирает трассу через
+        ``traceback.format_exc()``, то есть из активного исключения.
+        """
+        self._ensure_observability()
+        error = self._error_manager
+        if error is None:
+            from ..._fallback import emergency_log
+
+            emergency_log(__name__, "error", "[SystemLauncher] %s: %r", message, exc)
+            return
+        error.log_exception(exc, f"[SystemLauncher] {message}", module="launcher", include_stacktrace=True)
 
     def add_process(
         self,
@@ -158,13 +265,32 @@ class SystemLauncher:
     def _cleanup_shm_at_startup(self, processes_config: dict) -> None:
         """Очистка SHM перед стартом: config-объявленные имена + (Ф7 G.3c, за флагом)
         осиротевшие рантайм-слоты по префиксу (``output_frames`` выделяется лениво и
-        в config-cleanup не попадает; после ``kill -9`` сегменты висят на POSIX)."""
+        в config-cleanup не попадает; после ``kill -9`` сегменты висят на POSIX).
+
+        **Отказ уборки — громкий (Task 1.2, M14).** Раньше оба блока стояли под
+        голым ``except: pass``: сегменты предыдущего запуска оставались висеть, и
+        единственным следом этого был падающий позже старт с ``FileExistsError``
+        в другом месте — то есть следствие без причины. Теперь отказ уходит в
+        плоскость ошибок с трассой и растит ``shm_cleanup_failures``, а успех
+        называет ЧИСЛО освобождённых сегментов (ноль тоже число: «висящих не
+        было» — законный и полезный ответ).
+
+        Уборка по-прежнему не имеет права сорвать запуск: исключение наружу не
+        уходит ни из одного блока.
+        """
         try:
             from ...shared_resources_module.memory.platform import cleanup_known_shm_at_startup
 
-            cleanup_known_shm_at_startup(processes_config)
-        except Exception:
-            pass
+            cleaned = cleanup_known_shm_at_startup(processes_config)
+            # isinstance, а не len() напрямую: функция подменяется заглушкой в
+            # соседних тестах лаунчера, и заглушка возвращает не список. «Не
+            # знаю сколько» честнее считать нулём, чем упасть на подсчёте.
+            count = len(cleaned) if isinstance(cleaned, (list, tuple, set)) else 0
+            self._shm_cleanup_segments = count
+            self._log_info(f"cleanup_stale_shm: очищено {count} SHM-сегментов")
+        except Exception as exc:  # noqa: BLE001 — уборка не имеет права сорвать запуск
+            self._shm_cleanup_failures += 1
+            self._log_error("уборка объявленных SHM-сегментов не удалась", exc)
         try:
             from ...config_module.feature_flags import is_enabled
 
@@ -184,9 +310,14 @@ class SystemLauncher:
                     prefixes = []
                 if _DEFAULT_FRAME_SLOT_PREFIX not in prefixes:
                     prefixes.append(_DEFAULT_FRAME_SLOT_PREFIX)
-                cleanup_orphaned_by_prefix(prefixes)
-        except Exception:
-            pass
+                orphaned = cleanup_orphaned_by_prefix(prefixes)
+                self._log_info(
+                    f"cleanup_orphaned_by_prefix: очищено {len(orphaned) if orphaned else 0} SHM-сегментов "
+                    f"по префиксам {prefixes}"
+                )
+        except Exception as exc:  # noqa: BLE001 — уборка не имеет права сорвать запуск
+            self._shm_cleanup_failures += 1
+            self._log_error("уборка осиротевших SHM-сегментов по префиксу не удалась", exc)
 
     def run(self) -> None:
         """Запуск: launch_orchestrator + wait. Ctrl+C → stop."""
@@ -295,6 +426,9 @@ class SystemLauncher:
             clear()
         except Exception:  # noqa: BLE001
             pass
+        # Журнал лаунчера закрывается ПОСЛЕДНИМ: строки выше («System stopped»,
+        # жалобы реестра) обязаны в него попасть.
+        self._shutdown_observability()
 
     def wait(self) -> None:
         """Ожидание завершения."""
@@ -328,15 +462,29 @@ class SystemLauncher:
                 self._log_warning(f"Failed to get process names: {e}")
         return status
 
+    def _startup_stats(self) -> Dict[str, Any]:
+        """Счётчики стартовой части лаунчера — ДО существования spawner'а (Task 1.2).
+
+        Отдельной секцией и БЕЗУСЛОВНО: уборка SHM происходит раньше, чем
+        появляется spawner, поэтому ранний выход ``if not self._spawner`` ниже
+        сделал бы её счётчики недостижимыми ровно в тот момент, когда их и
+        читают — сразу после отказа уборки.
+        """
+        return {
+            "shm_cleanup_failures": self._shm_cleanup_failures,
+            "shm_cleanup_segments": self._shm_cleanup_segments,
+        }
+
     def get_stats(self) -> Dict[str, Any]:
         """Статистика системы."""
         if not self._spawner:
-            return {"spawner": {"is_running": False}}
+            return {"spawner": {"is_running": False}, "startup": self._startup_stats()}
         return {
             "spawner": {
                 "is_running": self._spawner.is_running(),
                 "has_process": self._spawner.get_process() is not None,
             },
+            "startup": self._startup_stats(),
             "shared_resources": (
                 self._spawner.get_shared_resources().get_stats() if self._spawner.get_shared_resources() else {}
             ),

@@ -1,5 +1,19 @@
 # shared_resources_module — Статус рефакторинга
 
+## Изменения контракта
+
+- **2026-08-31 (Task 1.2 плана `observability-closure`):** две функции `memory/platform/shm.py`
+  сменили ВОЗВРАЩАЕМОЕ значение — раньше обе отдавали `None`, и «убрали N сегментов» было
+  неотличимо от «убирать было нечего»:
+  - `cleanup_stale_shm(name) -> bool` — сегмент существовал и освобождён;
+  - `cleanup_known_shm_at_startup(processes_config) -> list[str]` — имена реально освобождённых.
+
+  Вызывающий (`SystemLauncher._cleanup_shm_at_startup`) печатает это число в
+  `{база логов}/launcher/system.log` (`cleanup_stale_shm: очищено N SHM-сегментов`). Прежнее
+  поведение при отказе сохранено: исключения наружу не уходят. Не путать с одноимённой
+  `buffers/cleanup.py::cleanup_stale_shm(known_names: list) -> list[str]` — это ДРУГАЯ функция с
+  другой сигнатурой; её контракт не менялся.
+
 ## Текущий этап: 8 / 8 ✅
 
 ## Оценки (0-10)

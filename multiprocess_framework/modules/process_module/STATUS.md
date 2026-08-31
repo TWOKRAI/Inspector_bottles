@@ -4,6 +4,17 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-08-31 (Task 1.2 плана `observability-closure`, ADR-PM-044):** сборка конфига менеджеров
+  вынесена в ОДИН шов — `managers/observability_reload.py::compose_managers_payload`, и зовётся из
+  ОБЕИХ точек: рождения (`ProcessManagers._managers_config_for_creation`) и пересборки на
+  boot/reload. До правки рождение собирало голым `expand_observability(layers.resolve())` — без
+  базы L0, — и родившийся менеджер получал частичный набор каналов при дефолтных `scopes`,
+  ведущих в `system_file`/`messages_file`. Живой замер на стенде из девяти процессов:
+  `ProcessManager.counters.logger.unresolved_channel_records == 12` (`{'system_file': 6,
+  'messages_file': 6}`) — двенадцать записей старта не доезжали никуда; после правки **0**.
+  Сняты мёртвые параметры `deep_merge` / `merge_managers` у `_rebuild_and_apply`. Страж —
+  `tests/test_birth_config_channel_consistency.py` (3 теста).
+
 - **2026-08-26 (Ф5, доработка по синхронному ревью — `plans/observation-port/plan.md`, полное
   решение в `statistics_module/DECISIONS.md`, ADR-SM-014):** три правки со стороны этого модуля.
   **S1** — `_MockObservationPort` (`plugins/testing.py`) стал наследником `ObservationPort` над
