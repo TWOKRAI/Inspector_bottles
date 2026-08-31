@@ -32,7 +32,6 @@ from .schema import (
 from .state import (
     BREAKER_COOLDOWN_ENV,
     BREAKER_THRESHOLD_ENV,
-    DEFAULT_THROTTLE,
     LOG_ONLY_ENV,
     HealthReporter,
     HealthSelfTestError,
@@ -58,7 +57,6 @@ __all__ = [
     "HealthSelfTestError",
     "get_or_create_health_state",
     "publish_health",
-    "DEFAULT_THROTTLE",
     "LOG_ONLY_ENV",
     # breaker (Task 2.2)
     "CircuitBreaker",

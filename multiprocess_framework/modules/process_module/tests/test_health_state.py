@@ -21,6 +21,7 @@ from multiprocess_framework.modules.process_module.health import (
     health_path,
     publish_health,
 )
+from multiprocess_framework.modules.logger_module.core.windowed_voice import WindowedVoices
 from multiprocess_framework.modules.process_module.health.schema import LastErrorKey
 
 
@@ -75,20 +76,28 @@ def test_long_message_truncated() -> None:
 # --- throttle логирования ---------------------------------------------------
 
 
-def test_throttle_suppresses_repeated_logs_but_not_counter() -> None:
-    clock = _Clock()
-    logs: list[str] = []
-    hs = HealthState(log=logs.append, clock=clock)
+def test_throttle_suppresses_repeated_voices_but_not_counter() -> None:
+    """Окно глушит ГОЛОС, а не учёт (Task 1.3a).
 
-    # Первый лог проходит.
+    Времени здесь ДВА, и это не оплошность: ``clock`` HealthState — настенное
+    (метка ``last_error.ts``), а окно голоса живёт на МОНОТОННОМ времени общего
+    механизма. Двигать окно настенными часами нельзя — их можно перевести назад.
+    Поэтому окно получает свои часы через ``voices=WindowedVoices(clock=…)``.
+    """
+    clock = _Clock()
+    window_clock = _Clock()
+    logs: list[str] = []
+    hs = HealthState(log=logs.append, clock=clock, voices=WindowedVoices(clock=window_clock))
+
+    # Первый голос проходит.
     hs.report_error(ValueError("e"), context="s", throttle=5.0)
-    # Повтор той же (тип, context) в окне throttle → лог подавлен, счётчик растёт.
+    # Повтор той же (тип, context) в окне throttle → голос подавлен, счётчик растёт.
     hs.report_error(ValueError("e"), context="s", throttle=5.0)
     assert len(logs) == 1
     assert hs.error_count == 2
 
-    # За окном throttle — снова логируем.
-    clock.t += 6.0
+    # За окном throttle — снова говорим.
+    window_clock.t += 6.0
     hs.report_error(ValueError("e"), context="s", throttle=5.0)
     assert len(logs) == 2
     assert hs.error_count == 3

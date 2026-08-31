@@ -29,6 +29,7 @@ from typing import Optional, Any, List, Union, Dict
 
 from ...channel_routing_module import resolve_build_result
 from ...channel_routing_module.levels import is_error_level, severity_of
+from ...channel_routing_module.observability.store_tap import ORIGIN_ERROR_MANAGER, ORIGIN_FIELD
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, ScopeName
 from ...logger_module.core.logger_core import LoggerCore
 from ...logger_module.core.process_hooks import HOOK_COUNTER_KEYS
@@ -503,8 +504,15 @@ class ErrorManager(LoggerCore, IErrorManager):
           задан, и при этом **остаётся в контексте записи** — иначе фильтр по
           сайту работал бы только глазами, по тексту сообщения;
         * всё прочее — контекст записи как есть.
+
+        Task 1.3a: запись помечается ``origin=error_manager``. Штамп стоит ЗДЕСЬ,
+        на входной двери плоскости ошибок, а не у каждого вызывающего: маркер —
+        свойство ДОРОГИ («строка стора у этого инцидента уже есть»), и вызывающий
+        не имеет права его забыть. ``setdefault`` — чтобы явный ``origin`` сайта
+        не затирался.
         """
         ctx = dict(context or {})
+        ctx.setdefault(ORIGIN_FIELD, ORIGIN_ERROR_MANAGER)
         module = ctx.pop("module", "unknown")
         message = ctx.pop("message", None)
         if message is None:

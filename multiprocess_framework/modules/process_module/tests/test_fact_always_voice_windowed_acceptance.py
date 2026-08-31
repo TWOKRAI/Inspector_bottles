@@ -40,6 +40,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from ...logger_module.core.windowed_voice import WindowedVoices
 from ..health.breaker import CircuitBreaker
 from ..health.state import HealthState
 
@@ -69,8 +70,26 @@ def _no_throttle_clock() -> float:
     return time.time()
 
 
+class _FakeMonotonic:
+    """Управляемые МОНОТОННЫЕ часы окна голоса.
+
+    Правка исполнителя (Task 1.3a): инъекция часов в окно ОКАЗАЛАСЬ возможна —
+    ``WindowedVoices(clock=…)``. Прежняя редакция этого файла двигала окно
+    настоящим ``time.sleep(0.45)`` при окне 0.15 с, потому что тестер такой
+    двери не нашёл. Ассерты не тронуты, изменился только способ довести время
+    до конца окна.
+    """
+
+    def __init__(self) -> None:
+        self.t = 1_000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
 def _make_state(
     breaker_threshold: int = 100_000,
+    voices: Any = None,
 ) -> tuple[HealthState, list[tuple[BaseException, dict]], list[str]]:
     """HealthState с фейковыми log/track-колбэками + breaker, который НЕ мешает.
 
@@ -90,7 +109,7 @@ def _make_state(
         log_calls.append(msg)
 
     breaker = CircuitBreaker(fail_threshold=breaker_threshold, cooldown_sec=99_999.0, clock=_no_throttle_clock)
-    state = HealthState(log=log, track=track, breaker=breaker, clock=_no_throttle_clock)
+    state = HealthState(log=log, track=track, breaker=breaker, clock=_no_throttle_clock, voices=voices)
     return state, track_calls, log_calls
 
 
@@ -153,9 +172,10 @@ def test_n_repeats_within_window_give_n_error_plane_facts_from_different_threads
 
 def test_voice_after_window_expiry_names_the_suppressed_count() -> None:
     """1 голос → 3 молчаливых повтора (окно) → окно истекло → голос называет 3."""
-    state, track_calls, log_calls = _make_state()
+    window_clock = _FakeMonotonic()
+    state, track_calls, log_calls = _make_state(voices=WindowedVoices(clock=window_clock))
     key_ctx = "criterion2_suppressed_count"
-    window = 0.15  # достаточно узкое, но НЕ на сетке 15.6мс: sleep ниже её кратно перекрывает
+    window = 0.15  # величина окна теперь не связана с сеткой monotonic: часы инъектированы
 
     def fire() -> None:
         try:
@@ -170,7 +190,7 @@ def test_voice_after_window_expiry_names_the_suppressed_count() -> None:
 
     assert len(log_calls) == 1, f"до истечения окна — только первый голос, получено {log_calls}"
 
-    time.sleep(window * 3)  # с большим запасом относительно окна и относительно сетки monotonic
+    window_clock.t += window * 3  # окно заведомо истекло; настоящего sleep здесь больше нет
 
     fire()  # 5: окно истекло → голос №2, обязан назвать 3 подавленных с прошлой записи
 
@@ -207,7 +227,8 @@ def test_suppressed_count_must_be_read_from_voice_text_not_the_process_wide_coun
     counter_before = voice_counters().get("windowed_suppressed", 0)
 
     window = 0.15
-    state, _track_calls, log_calls = _make_state()
+    window_clock = _FakeMonotonic()
+    state, _track_calls, log_calls = _make_state(voices=WindowedVoices(clock=window_clock))
     key_ctx = "criterion3_our_key"
 
     def fire_ours() -> None:
@@ -216,7 +237,7 @@ def test_suppressed_count_must_be_read_from_voice_text_not_the_process_wide_coun
         except _Boom as exc:
             state.report_error(exc, context=key_ctx, throttle=window)
 
-    noise_state, _noise_track, _noise_log = _make_state()
+    noise_state, _noise_track, _noise_log = _make_state(voices=WindowedVoices(clock=window_clock))
 
     def fire_noise() -> None:
         try:
@@ -234,7 +255,7 @@ def test_suppressed_count_must_be_read_from_voice_text_not_the_process_wide_coun
     for _ in range(5):
         fire_noise()
 
-    time.sleep(window * 3)
+    window_clock.t += window * 3
     fire_ours()  # окно истекло → голос №2 нашего ключа, обязан назвать 3
 
     assert len(log_calls) == 2, f"ожидались 2 голоса нашего ключа (до/после окна), получено {log_calls}"

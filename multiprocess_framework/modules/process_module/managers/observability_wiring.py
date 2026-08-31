@@ -1481,11 +1481,22 @@ def wire_observability_store(
     """
     store = ObservabilityStore(db_path)
     taps: list[Tuple[Any, str]] = []
-    for mgr, tap_name in ((error_manager, STORE_ERROR_TAP), (logger_manager, STORE_LOGGER_TAP)):
+    for mgr, tap_name, owns_error_plane in (
+        (error_manager, STORE_ERROR_TAP, True),
+        (logger_manager, STORE_LOGGER_TAP, False),
+    ):
         if mgr is None or not hasattr(mgr, "add_tap"):
             continue
         # Вид записи (log/error) считает её важность — tap'у он не задаётся (Б-4).
-        mgr.add_tap(StoreTapChannel(store, name=tap_name, process=process), min_level=min_level, name=tap_name)
+        # ``owns_error_plane`` — другое: он говорит, ЧЕЙ этот tap. Записи с
+        # маркером ``origin=error_manager`` кладёт в стор только tap плоскости
+        # ошибок; логгер-tap их пропускает, иначе один инцидент даёт две строки
+        # (Task 1.3a, дедуп ПУТЕЙ).
+        mgr.add_tap(
+            StoreTapChannel(store, name=tap_name, process=process, owns_error_plane=owns_error_plane),
+            min_level=min_level,
+            name=tap_name,
+        )
         taps.append((mgr, tap_name))
     return store, taps
 

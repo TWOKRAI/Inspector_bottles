@@ -12,6 +12,8 @@ import threading
 import warnings
 from typing import TYPE_CHECKING, Any
 
+from ...channel_routing_module.observability.store_tap import ORIGIN_ERROR_MANAGER, ORIGIN_FIELD
+
 if TYPE_CHECKING:
     pass
 
@@ -3295,7 +3297,13 @@ class BuiltinCommands:
                     "process": self._services.name,
                     "reason": f"неизвестный level '{level}' (DEBUG|INFO|WARNING|ERROR|CRITICAL)",
                 }
-            log_fn(f"[health.report] {message}", module="diagnostics")
+            # Маркер дедупа ПУТЕЙ (Task 1.3a): инцидент уже записан плоскостью
+            # ошибок строкой выше (``state.report_error``), и эта строка — ВТОРАЯ
+            # дорога того же инцидента. В журнал она идёт как прежде (для того
+            # ``level`` и заведён — провести событие через штатный лог-канал и
+            # live-хвосты), но второй строкой в стор не ложится: замер до правки
+            # давал на одну команду ТРИ строки стора.
+            log_fn(f"[health.report] {message}", module="diagnostics", **{ORIGIN_FIELD: ORIGIN_ERROR_MANAGER})
             log_emitted = True
 
         status = args.get("status")

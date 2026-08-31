@@ -143,7 +143,7 @@ class ObservabilityVoicesConfig(SchemaBase):
     Окно ЖИВЁТ ЗДЕСЬ, а не литералом в коде, потому что до этой задачи оно было
     переписано вручную минимум семь раз (``_SEND_ERROR_LOG_INTERVAL_SEC``,
     ``_NEVER_DROP_LOSS_LOG_INTERVAL_SEC``, три окна реестра очередей,
-    ``HealthState.DEFAULT_THROTTLE``) — все со значением 5.0 и ни одно не
+    ``HealthState.DEFAULT_THROTTLE`` — снята Task 1.3a) — все со значением 5.0 и ни одно не
     настраиваемое. «Тише на линии, разговорчивее на стенде» было невыразимо.
     """
 

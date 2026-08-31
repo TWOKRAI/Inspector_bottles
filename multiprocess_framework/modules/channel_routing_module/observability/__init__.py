@@ -28,7 +28,7 @@ from .observability_hub import (
 )
 from .drain_adapter import ObservabilityDrainAdapter
 from .observability_store import ObservabilityStore, resolve_default_db_path
-from .store_tap import StoreTapChannel
+from .store_tap import ORIGIN_ERROR_MANAGER, ORIGIN_FIELD, StoreTapChannel
 from .record_display import hub_record_to_display, log_record_to_display
 from .record_forward_channel import FORWARD_COMMAND, RecordForwardChannel
 from .protocols import ErrorLike, LoggerLike, StatsLike
@@ -38,6 +38,8 @@ __all__ = [
     "ObservabilityDrainAdapter",
     "ObservabilityStore",
     "StoreTapChannel",
+    "ORIGIN_FIELD",
+    "ORIGIN_ERROR_MANAGER",
     "RecordForwardChannel",
     "FORWARD_COMMAND",
     "hub_record_to_display",

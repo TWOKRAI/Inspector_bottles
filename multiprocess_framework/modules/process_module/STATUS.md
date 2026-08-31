@@ -4,6 +4,24 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-08-31 (Task 1.3a плана `observability-closure`, ADR-PM-045):** `HealthState.report_error`
+  перестала быть писателем «по окну». `_safe_track` вышел из-под `if should_log:` — запись в
+  плоскость ошибок идёт на КАЖДОЕ вхождение, со своей трассой, своим потоком и своими полями;
+  окном управляется только ГОЛОС (`[health] …`), и следующий голос называет число подавленных.
+  Замер до правки: 5 повторов одного отказа из пяти потоков → **1** запись из пяти, четыре
+  потеряны вместе с трассами при счётчике `errors = 5`. После правки на том же харнесе из
+  настоящих `LoggerManager`/`ErrorManager`/`ObservabilityStore` — **5** строк `kind=error`,
+  каждая со своим `thread_tag`. Собственное окно снято: `DEFAULT_THROTTLE` и карта `_last_log_ts`
+  **удалены**, окно берётся у общего механизма `logger_module/core/windowed_voice.py`
+  (свой `WindowedVoices` на экземпляр). Дедуп ПУТЕЙ: плоскость ошибок штампует записи
+  `origin=error_manager`, store-tap не на плоскости ошибок их пропускает — один инцидент даёт
+  одну строку стора вместо двух (а `health.report(level=ERROR)` — вместо трёх).
+  Сторожа: `tests/test_health_fact_voice_hazards.py` (12), приёмка тестера
+  `tests/test_fact_always_voice_windowed_acceptance.py` (7),
+  `channel_routing_module/tests/test_store_tap_origin_dedup.py` (4).
+  **Внимание:** `HealthState.clock` больше НЕ двигает окно голоса — оси времени разные
+  (настенная у health, монотонная у окна); тестам окна нужен `voices=WindowedVoices(clock=…)`.
+
 - **2026-08-31 (Task 1.2 плана `observability-closure`, ADR-PM-044):** сборка конфига менеджеров
   вынесена в ОДИН шов — `managers/observability_reload.py::compose_managers_payload`, и зовётся из
   ОБЕИХ точек: рождения (`ProcessManagers._managers_config_for_creation`) и пересборки на

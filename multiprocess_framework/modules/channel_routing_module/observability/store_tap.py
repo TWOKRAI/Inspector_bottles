@@ -28,6 +28,16 @@ from ..interfaces import IChannel
 from .observability_store import ObservabilityStore
 from .record_display import KIND_LOG, kind_for_severity, severity_number_for
 
+#: Имя поля-маркера в ``extra`` записи: КАКАЯ плоскость уже владеет строкой стора.
+ORIGIN_FIELD = "origin"
+
+#: Значение маркера: инцидент уже учтён ПЛОСКОСТЬЮ ОШИБОК (Task 1.3a).
+#: Ставит его сама плоскость (``ErrorManager.track_error``) и тот, кто выпускает
+#: ГОЛОС о факте, который туда уже записан (``HealthState`` и диагностическая
+#: команда ``health.report``). Смысл ровно один: «строка стора у этого инцидента
+#: уже есть, второй раз не заводить».
+ORIGIN_ERROR_MANAGER = "error_manager"
+
 
 class StoreTapChannel(IChannel):
     """Tap-sink (IChannel): LogRecord-dict → ObservabilityStore.append_records."""
@@ -37,6 +47,7 @@ class StoreTapChannel(IChannel):
         store: ObservabilityStore,
         name: str = "observability_store_tap",
         process: str = "",
+        owns_error_plane: bool = False,
     ) -> None:
         """
         Args:
@@ -44,6 +55,13 @@ class StoreTapChannel(IChannel):
             name: имя tap'а (хэндл для remove_tap).
             process: имя процесса-источника (5.21 (c)) — стор проставит колонку
                 ``process``; пусто → падаем на ``module`` LogRecord.
+            owns_error_plane: этот tap висит НА ПЛОСКОСТИ ОШИБОК и потому пишет
+                записи с маркером :data:`ORIGIN_ERROR_MANAGER`. Все остальные
+                tap'ы такие записи ПРОПУСКАЮТ (Task 1.3a, дедуп ПУТЕЙ): один
+                инцидент едет двумя дорогами — фактом в плоскость ошибок и
+                голосом в журнал, — и до маркера обе дороги клали в стор по
+                строке. Дефолт ``False`` («я не плоскость ошибок») выбран
+                намеренно: забытый флаг даёт пропуск дубля, а не дубль.
 
         Параметра ``kind`` больше нет (Ф5.2, Б-4): вид записи считает её важность,
         а не конструктор канала. Прежний дефолт ``'error'`` и был дефектом — tap
@@ -53,6 +71,7 @@ class StoreTapChannel(IChannel):
         self._store = store
         self._name = name
         self._process = process
+        self._owns_error_plane = bool(owns_error_plane)
 
     @property
     def name(self) -> str:
@@ -63,7 +82,18 @@ class StoreTapChannel(IChannel):
         return "observability_store_tap"
 
     def write(self, record_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Нормализовать LogRecord-dict и добавить в стор. Ошибку глушим (tail не критичен)."""
+        """Нормализовать LogRecord-dict и добавить в стор. Ошибку глушим (tail не критичен).
+
+        Записи с маркером :data:`ORIGIN_ERROR_MANAGER` в ``extra`` пропускаются
+        всеми tap'ами, кроме того, что сам висит на плоскости ошибок
+        (``owns_error_plane=True``): у такого инцидента строка стора уже есть.
+        Пропуск — успех, а не отказ: возвращать ``status="error"`` значило бы
+        поднять ``tap_write_errors`` на штатном дедупе.
+        """
+        extra = record_dict.get("extra") or {}
+        origin = extra.get(ORIGIN_FIELD) if isinstance(extra, dict) else None
+        if origin == ORIGIN_ERROR_MANAGER and not self._owns_error_plane:
+            return {"status": "success", "channel": self._name, "deduplicated": True}
         severity = str(record_dict.get("level", "")).lower()
         rec = {
             # Ф5.2 (Б-4): вид считает важность записи, тем же правилом и тем же
@@ -77,6 +107,13 @@ class StoreTapChannel(IChannel):
             "message": record_dict.get("message", ""),
             "context": record_dict.get("extra", {}),
         }
+        if origin:
+            # Маркер поднимается на ВЕРХНИЙ уровень строки стора. Иначе он лежал
+            # бы на дне (``extra.context.origin``): нормализатор
+            # ``hub_record_to_display`` кладёт весь ``context`` записи одним
+            # значением внутрь ``extra``, и «кто владеет этой строкой» стало бы
+            # видно только тому, кто знает про два уровня вложенности.
+            rec[ORIGIN_FIELD] = origin
         try:
             self._store.append_records([rec])
         except Exception:  # nosec B110 — сбой стора не должен ронять логирование

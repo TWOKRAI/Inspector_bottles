@@ -9,11 +9,13 @@ heartbeat процесса (тот же self-publish канал, что и те�
 Ключевые свойства:
 - **rate-limit.** Публикация — по такту heartbeat (раз в ``heartbeat_interval``),
   так что «шторм» одинаковых ошибок не спамит state-дерево естественным образом.
-  Дополнительно логирование дросселируется окном ``throttle`` на пару
-  (тип, context), чтобы не залить и лог.
-- **counter честный.** ``errors`` инкрементится на КАЖДЫЙ ``report_error`` —
-  даже под throttle/лог-only — потому что breaker (Ф2 Task 2.2) читает счётчик и
-  ему нужна правда о числе проглоченных ошибок.
+  Отдельно окном ``throttle`` дросселируется ГОЛОС (строка журнала) на пару
+  (тип, context) — через общий механизм ``logger_module/core/windowed_voice.py``.
+- **факт не дросселируется НИКОГДА** (Task 1.3a). Счётчик ``errors`` и запись в
+  плоскость ошибок идут на КАЖДЫЙ ``report_error``: у каждого вхождения своя
+  трасса, свой поток и свои поля, и схлопывать их окном значит терять именно то,
+  ради чего инцидент записывают. Своё окно (``DEFAULT_THROTTLE``/``_last_log_ts``)
+  у HealthState снято — до Task 1.3a оно держало заодно и запись плоскости.
 - **откат в лог-only.** Переключатель ``MULTIPROCESS_HEALTH_LOG_ONLY`` (env) или
   явный ``log_only=True`` вырождает report_error/set_status в чистое логирование:
   state-дерево не трогается (dirty не поднимается) — путь отката, заложенный в
@@ -30,6 +32,8 @@ import threading
 import time
 from typing import Any, Callable, Protocol, runtime_checkable
 
+from ...channel_routing_module.observability.store_tap import ORIGIN_ERROR_MANAGER, ORIGIN_FIELD
+from ...logger_module.core.windowed_voice import WindowedVoices, compose_voice_text
 from .breaker import (
     DEFAULT_COOLDOWN_SEC,
     DEFAULT_FAIL_THRESHOLD,
@@ -43,10 +47,6 @@ from .schema import (
     LastErrorKey,
     health_path,
 )
-
-#: Окно дросселирования логов по умолчанию (сек): повтор той же ошибки в этом окне
-#: не пишется в лог второй раз. На счётчик ``errors`` не влияет.
-DEFAULT_THROTTLE = 5.0
 
 #: Переключатель отката: report_error/set_status только логируют, state не трогают.
 #: Пара «каноничное имя, легаси-алиас» (D4) — читаются оба, каноничное приоритетнее.
@@ -115,7 +115,7 @@ class IHealthReporter(Protocol):
     """
 
     def report_error(
-        self, exc: BaseException, context: str | None = ..., throttle: float = ..., **fields: object
+        self, exc: BaseException, context: str | None = ..., throttle: float | None = ..., **fields: object
     ) -> None:
         """Зарегистрировать проглоченную/обработанную ошибку (инкремент + last_error).
 
@@ -155,6 +155,7 @@ class HealthState:
         log_only: bool | None = None,
         clock: Callable[[], float] = time.time,
         breaker: CircuitBreaker | None = None,
+        voices: WindowedVoices | None = None,
     ) -> None:
         """
         Args:
@@ -168,6 +169,12 @@ class HealthState:
             breaker: честный circuit breaker подряд-ошибок (Task 2.2); None →
                 создать с дефолтами (env ``BREAKER_THRESHOLD_ENV``/``BREAKER_COOLDOWN_ENV``).
                 Разделяет ``clock`` с HealthState — тесты двигают одно время.
+            voices: держатель окон ГОЛОСА (Task 1.3a); None → свой собственный.
+                Свой, а не процессный ``process_voices()``: ключ вида
+                ``"RuntimeError|grab_frame"`` у двух HealthState разных процессов
+                в одном интерпретаторе (тесты, ProcessManager) — два разных
+                события, и общий держатель заглушил бы второе первым. Параметр
+                нужен, чтобы дать держателю свои часы (см. ``WindowedVoices``).
         """
         self._lock = threading.Lock()
         self._clock = clock
@@ -182,8 +189,9 @@ class HealthState:
         self._updated_at = 0.0
         # Начальный ok публикуем один раз (dirty=True со старта), дальше — по изменениям.
         self._dirty = True
-        # Дросселирование логов: (тип|context) → ts последней записи в лог.
-        self._last_log_ts: dict[str, float] = {}
+        # Окно ГОЛОСА (Task 1.3a) — общий механизм, а не своя карта. Факт
+        # (счётчик + запись в плоскость ошибок) окном не управляется вовсе.
+        self._voices: WindowedVoices = voices if voices is not None else WindowedVoices()
 
         # Честный breaker: кормится КАЖДЫМ report_error (Task 2.2). Делит clock с
         # HealthState, чтобы тесты двигали единое время.
@@ -232,36 +240,46 @@ class HealthState:
         self,
         exc: BaseException,
         context: str | None = None,
-        throttle: float = DEFAULT_THROTTLE,
+        throttle: float | None = None,
         **fields: Any,
     ) -> None:
-        """Учесть ошибку: инкремент счётчика + запись last_error + дросселированный лог.
+        """Учесть отказ: счётчик + last_error + запись в плоскость ошибок + голос по окну.
 
-        Счётчик растёт всегда (честность для breaker). last_error/dirty обновляются
-        только вне лог-only. Лог — не чаще, чем раз в ``throttle`` сек на пару
-        (тип исключения, context).
+        **Факт учитывается ВСЕГДА** (Task 1.3a): счётчик, ``last_error`` и запись
+        в плоскость ошибок (``_safe_track``) идут на КАЖДОЕ вхождение — со своей
+        трассой, своим потоком и своими полями. Окно управляет только ГОЛОСОМ,
+        строкой ``[health] …`` в журнале; следующий голос называет, сколько
+        вхождений было подавлено с прошлой записи.
+
+        До Task 1.3a ``_safe_track`` стоял ВНУТРИ ветки голоса, и повтор одного
+        отказа в окне 5 с не оставлял в плоскости ошибок ничего, кроме числа в
+        ``errors``: замер — 5 вхождений из пяти потоков, 1 выжившая запись,
+        четыре потеряны вместе с трассами. Комментарий «дроссель общий с логом
+        намеренно: у плоскости ошибок своего нет» снят вместе с обходом, который
+        он объяснял: своё окно у голоса появилось в Task 1.4
+        (``logger_module/core/windowed_voice.py``).
+
+        ``throttle`` — окно ГОЛОСА, сек; ``None`` → политика процесса
+        (``observability.voices.default_window_sec``). Ключ окна — пара
+        (тип исключения, ``context``).
+
+        **Порядок здесь — часть контракта, а не оформление.** ``_safe_track``
+        стоит ДО решения о голосе, потому что решение принимает чужой механизм
+        (держатель окон): упади он — факт уже записан. Обратный порядок терял бы
+        ровно то, ради чего задача и делалась.
 
         ``**fields`` (Ф1.1 / C3) уезжают в КОНТЕКСТ ЗАПИСИ плоскости ошибок
         (``_safe_track`` → ``track_error`` → ``extra``), а не в health-снапшот:
         health — агрегат процесса, и класть в него произвольные поля каждого
         инцидента значило бы публиковать в state-дерево неограниченную форму.
-        Дроссель на них НЕ распространяется отдельным правилом: пара
-        (тип исключения, context) уже различает инциденты разных потоков, потому
-        что ``context`` у хука — ``thread:<имя>``.
         """
         etype = type(exc).__name__
         emsg = str(exc)[:_MAX_MESSAGE_LEN]
         ctx = str(context) if context else ""
         now = self._clock()
-        key = f"{etype}|{ctx}"
 
-        should_log = False
         with self._lock:
             self._errors += 1
-            last = self._last_log_ts.get(key)
-            if last is None or (now - last) >= float(throttle):
-                self._last_log_ts[key] = now
-                should_log = True
             if not self._log_only:
                 self._last_error = {
                     LastErrorKey.TYPE: etype,
@@ -272,22 +290,23 @@ class HealthState:
                 self._updated_at = now
                 self._dirty = True
 
-        if should_log:
+        # C2: инцидент едет в ПЛОСКОСТЬ ОШИБОК. Прежде «report_error» было
+        # названием без обязательства: прогон `probe_c2_error_route` показал, что
+        # запись уходила в `system.log` через `services.log_warning`, а
+        # `errors.log`/`critical.log`/`warnings.log` не видели от плагинов НИЧЕГО.
+        # Task 1.3a: БЕЗУСЛОВНО — окно голоса к учёту факта отношения не имеет.
+        self._safe_track(exc, ctx, fields)
+
+        voiced, suppressed = self._voices.take(f"{etype}|{ctx}", throttle)
+        if voiced:
             where = f" @ {ctx}" if ctx else ""
-            self._safe_log(f"[health] {etype}{where}: {emsg}")
-            # C2: инцидент едет и в ПЛОСКОСТЬ ОШИБОК — под тем же дросселем, что
-            # строка журнала. Прежде «report_error» было названием без
-            # обязательства: прогон `probe_c2_error_route` показал, что запись
-            # уходила в `system.log` через `services.log_warning`, а
-            # `errors.log`/`critical.log`/`warnings.log` не видели от плагинов
-            # НИЧЕГО — единственной дорогой туда оставался `_track_error`,
-            # которого у `PluginContext` нет.
-            #
-            # Дроссель общий с логом намеренно: у плоскости ошибок своего нет, а
-            # проглоченное исключение в горячем цикле — ровно тот случай, где
-            # «пишем каждое» превращает журнал инцидентов в поток. Счётчик
-            # health при этом считает ВСЕ, поэтому число не теряется.
-            self._safe_track(exc, ctx, fields)
+            # Маркер дедупа ПУТЕЙ: факт этого инцидента уже в плоскости ошибок,
+            # и строка стора у него есть. Голос идёт в журнал, но второй строкой
+            # в стор не ложится (``StoreTapChannel``, Task 1.3a).
+            self._safe_log(
+                compose_voice_text(f"[health] {etype}{where}: {emsg}", suppressed),
+                **{ORIGIN_FIELD: ORIGIN_ERROR_MANAGER},
+            )
 
         # Честный breaker (Task 2.2): инкремент подряд-счётчика ВНЕ self._lock —
         # breaker держит собственный lock, а переход в degraded ниже снова берёт
@@ -433,17 +452,26 @@ class HealthState:
         except Exception:  # noqa: BLE001 — учёт инцидента не роняет обработчик инцидента
             pass
 
-    def _safe_log(self, msg: str) -> None:
-        try:
-            self._log(msg)
-        except TypeError:
-            # Логгеры процесса принимают module= kwarg — пробуем расширенную форму.
+    def _safe_log(self, msg: str, **extra: Any) -> None:
+        """Сказать вслух. ``extra`` — поля записи (напр. маркер ``origin``).
+
+        Приёмник — утиный колбэк: у процесса это ``log_warning(msg, **kwargs)``,
+        а в тестах бывает ``lambda msg: None``. Поэтому форма вызова подбирается
+        сверху вниз: с полями → без полей → с ``module=``. Расширенная форма
+        стояла здесь и раньше по той же причине (``TypeError`` от колбэка,
+        не принимающего kwargs), ``extra`` лишь добавила первую ступень.
+        """
+        attempts: list[dict[str, Any]] = [extra] if extra else []
+        attempts.append({})
+        attempts.append({"module": "health"})
+        for kwargs in attempts:
             try:
-                self._log(msg, module="health")  # type: ignore[call-arg]
+                self._log(msg, **kwargs)  # type: ignore[call-arg]
+                return
+            except TypeError:
+                continue
             except Exception:  # noqa: BLE001 — лог health не критичен
-                pass
-        except Exception:  # noqa: BLE001
-            pass
+                return
 
 
 class HealthReporter:
@@ -462,10 +490,14 @@ class HealthReporter:
         self,
         exc: BaseException,
         context: str | None = None,
-        throttle: float = DEFAULT_THROTTLE,
+        throttle: float | None = None,
         **fields: Any,
     ) -> None:
-        """``**fields`` (Ф1.1 / C3) проходят насквозь в контекст записи плоскости ошибок."""
+        """``**fields`` (Ф1.1 / C3) проходят насквозь в контекст записи плоскости ошибок.
+
+        ``throttle`` — окно ГОЛОСА (Task 1.3a); ``None`` → политика процесса.
+        Запись в плоскость ошибок им не управляется: факт идёт всегда.
+        """
         ctx = context if context is not None else self._source
         self._state.report_error(exc, context=ctx, throttle=throttle, **fields)
 
