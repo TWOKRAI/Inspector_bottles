@@ -87,9 +87,15 @@ class _FakeProc:
 
 
 class TestPriorityNoiseDedupByReasonZh5:
-    """Ж-5 (RS-3): «Failed to set priority» — WARNING один раз НА УРОВЕНЬ, дальше debug."""
+    """Ж-5 (RS-3) + Ф1.4: «Failed to set priority» — ОДИН голос НА УРОВЕНЬ, дальше debug.
 
-    def test_repeated_same_level_warn_once_then_debug(self) -> None:
+    Ф1.4 (m2) сменила уровень этого голоса WARNING → INFO: без прав администратора
+    и на macOS установка приоритета не проходит НИКОГДА, то есть это постоянное
+    состояние среды, а не отклонение, и система при этом работает штатно.
+    Дедуп (единственность голоса на уровень) не тронут — проверяется тем же счётом.
+    """
+
+    def test_repeated_same_level_voices_once_then_debug(self) -> None:
         logger = _RecordingLogger()
         priority = ProcessPriority(logger=logger, platform_adapter=_FailingPlatform())
 
@@ -97,19 +103,22 @@ class TestPriorityNoiseDedupByReasonZh5:
         for i in range(5):
             assert priority.set_priority(_FakeProc(f"p{i}"), "normal") is False
 
-        # WARNING ровно один; остальные ушли в debug (шум подавлен, факт сохранён)
-        assert len(logger.warnings) == 1
+        # Голос ровно один; остальные ушли в debug (шум подавлен, факт сохранён)
+        assert len(logger.infos) == 1
         assert len(logger.debugs) == 4
+        # Ф1.4: и он НЕ на уровне WARNING — иначе бут снова копит WARNING-константы.
+        assert logger.warnings == [], f"отказ приоритета не должен быть WARNING: {logger.warnings!r}"
 
-    def test_new_priority_level_surfaces_new_warning(self) -> None:
+    def test_new_priority_level_surfaces_new_voice(self) -> None:
         """Новая причина (другой priority_name) НЕ давится глобальным флагом."""
         logger = _RecordingLogger()
         priority = ProcessPriority(logger=logger, platform_adapter=_FailingPlatform())
 
-        priority.set_priority(_FakeProc("a"), "normal")  # WARNING #1 (normal)
+        priority.set_priority(_FakeProc("a"), "normal")  # голос #1 (normal)
         priority.set_priority(_FakeProc("b"), "normal")  # debug (повтор normal)
-        priority.set_priority(_FakeProc("c"), "realtime")  # WARNING #2 (новый уровень)
+        priority.set_priority(_FakeProc("c"), "realtime")  # голос #2 (новый уровень)
         priority.set_priority(_FakeProc("d"), "realtime")  # debug (повтор realtime)
 
-        assert len(logger.warnings) == 2  # по одному на каждый уровень
+        assert len(logger.infos) == 2  # по одному на каждый уровень
         assert len(logger.debugs) == 2
+        assert logger.warnings == []

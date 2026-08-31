@@ -523,6 +523,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             wire_event_selector,
             wire_observability_store,
             wire_process_observability,
+            wire_voices_policy,
         )
 
         # Ф8.5: плоскость документов — НЕЗАВИСИМО от наличия hub'а. Аудит смен
@@ -536,6 +537,14 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # `_apply_boot_observability_layers` (см. вызывающего): ручки к этому
         # моменту уже разрешены, и второго резолва не заводится.
         wire_event_selector(self)
+
+        # Ф1.4 (M17): окна голоса — политика процесса, не объект. Ставится
+        # РАНЬШЕ прочих сшивок по существу, а не по вкусу: держатели окон
+        # (роутер, реестр очередей) уже живы к этому моменту и берут окно на
+        # первом же голосе. Опоздай политика — первые голоса процесса ушли бы по
+        # встроенному дефолту, и настройка «тише на линии» не действовала бы ровно
+        # в самый шумный отрезок жизни процесса, на старте.
+        wire_voices_policy(self)
 
         # Ф5 (5.1): рекордер дампов — у каждого процесса и по тому же доводу.
         # ПОСЛЕ `wire_event_selector` только ради читаемости: обе сшивки читают

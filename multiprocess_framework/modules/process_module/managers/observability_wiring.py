@@ -867,6 +867,70 @@ def apply_event_selector(selector: Any, section: Any, svc: Any = None) -> Option
     return {"first_n": applied[0], "every_mth": applied[1]}
 
 
+#: Ф1.4 (M17) — политика окон голоса.
+VOICES_CONFIG_ADDRESS = "observability.voices"
+VOICES_SECTION_KEY = "voices"
+
+
+def _voices_knobs(section: Any, svc: Any = None) -> Optional[Dict[str, Any]]:
+    """Разобрать секцию ``voices``. ``None`` — секция молчит, политику не трогаем.
+
+    Молчание НЕ материализуется дефолтом: правило Г3 этого проекта — «слой,
+    который ничего не сказал, ничего и не решает». Иначе пересборка по правке
+    соседнего ключа сбрасывала бы окно, заданное раньше.
+    """
+    if section is None:
+        return None
+    from ..configs.observability_config import ObservabilityVoicesConfig
+
+    try:
+        cfg = (
+            section
+            if isinstance(section, ObservabilityVoicesConfig)
+            else ObservabilityVoicesConfig.model_validate(section)
+        )
+    except Exception as exc:  # noqa: BLE001 — негодная секция не роняет процесс
+        _process_warn(
+            svc,
+            f"[observability] {VOICES_CONFIG_ADDRESS} не принят ({exc!r}) — окна голоса остаются прежними",
+        )
+        return None
+    return {"window_sec": float(cfg.default_window_sec), "escalate_after": int(cfg.escalate_after_repeats)}
+
+
+def wire_voices_policy(svc: Any) -> Optional[Dict[str, Any]]:
+    """Ф1.4: применить политику окон голоса на СТАРТЕ процесса.
+
+    Механизм — процессный (:mod:`...logger_module.core.windowed_voice`), поэтому
+    сшивка не создаёт объект и не вешает атрибут на процесс, а задаёт политику,
+    которую читают все держатели окон этого интерпретатора. Тем и отличается от
+    :func:`wire_event_selector`: селектор — вещь, а это правило.
+    """
+    from ..configs.observability_layers import process_observability_layers
+
+    try:
+        layers = process_observability_layers(svc)
+        section = layers.resolve().get(VOICES_SECTION_KEY)
+    except Exception as exc:  # noqa: BLE001 — процесс без конфига живёт на дефолтном окне
+        _process_warn(svc, f"[observability] секция {VOICES_CONFIG_ADDRESS} не прочитана: {exc!r}")
+        return None
+    return apply_voices_policy(section, svc)
+
+
+def apply_voices_policy(section: Any, svc: Any = None) -> Optional[Dict[str, Any]]:
+    """Пересборка: применить окна голоса к ЖИВОМУ механизму. Возвращает применённое.
+
+    Третья точка дороги ручки (после схемы и фасада) — та, без которой
+    ``config.reload`` менял бы слой и не менял поведение.
+    """
+    knobs = _voices_knobs(section, svc)
+    if knobs is None:
+        return None
+    from ...logger_module.core.windowed_voice import set_voices_policy
+
+    return set_voices_policy(window_sec=knobs["window_sec"], escalate_after=knobs["escalate_after"])
+
+
 def event_plane_report(svc: Any) -> Dict[str, Any]:
     """Секция ``events`` для ``introspect.observability`` (Р4.1-8/Р4.1-10).
 

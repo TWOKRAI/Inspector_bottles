@@ -93,7 +93,12 @@ class TestQueueFullEventsWindowed:
             clock[0] += 0.01
             reg.send_to_queue("consumer", "system", {"cmd": f"cmd-{i}"})
 
-        stats = reg.get_stats()
+        # АДРЕС поправлен реализатором (Task 1.4), значения — нет: счётчики этого
+        # реестра лежат под секцией "queues" (``ManagerStatsMixin._merge_stats``),
+        # рядом с ``never_drop_loss_total``/``data_evicted``/``system_evict_blocked``.
+        # Тестер писал вслепую и предположил плоский readback — расхождение
+        # модели, названное в отчёте, а не ослабление критерия.
+        stats = reg.get_stats()["queues"]
         assert "queue_full_events" in stats, (
             "readback QueueRegistry.get_stats() не содержит ключ 'queue_full_events' — "
             "счётчик из критерия приёмки ещё не заведён"

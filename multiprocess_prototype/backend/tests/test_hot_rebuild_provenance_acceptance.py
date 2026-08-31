@@ -74,7 +74,14 @@ KEY_PRESENT_IN_APP = "log_level"
 # glob-паттерны с точками). В `system.yaml` секции `observation` нет, поэтому
 # все три законно остаются дефолтом схемы. Прирост ровно на размер новой
 # секции — это и есть проверка: расползись слой L1, число сошлось бы иначе.
-EXPECTED_FRAMEWORK_KEY_COUNT = 25
+# 2026-08-31, Ф1.4 задачи 1.4 плана observability-closure: 25 → 27. Схема
+# `ObservabilityConfig` обросла секцией окон голоса `voices`, и она добавила
+# РОВНО два framework-ключа: `voices.default_window_sec` и
+# `voices.escalate_after_repeats` (оба — скаляры, непрозрачных листов у секции
+# нет). В `system.yaml` секции `voices` нет, поэтому оба законно остаются
+# дефолтом схемы. Прирост ровно на размер новой секции — это и есть проверка:
+# расползись слой L1, число сошлось бы иначе.
+EXPECTED_FRAMEWORK_KEY_COUNT = 27
 
 
 class _FakeChildProcess:

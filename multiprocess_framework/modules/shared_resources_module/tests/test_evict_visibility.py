@@ -107,15 +107,31 @@ class TestEvictionReachesTheLogPlane:
         assert "ПОЛУЧАТЕЛЯ" in written, f"запись не отличает жертву от отправителя: {written!r}"
 
     def test_never_drop_block_is_written_too(self, logger_to_file) -> None:
-        """E — блокировка вытеснения из system-очереди идёт тем же живым путём."""
+        """E — блокировка вытеснения из system-очереди идёт тем же живым путём.
+
+        Ф1.4 (M17) сдвинула АДРЕС голоса, но не свойство. Прежде о блокировке
+        говорил сам ``remove_old_if_full``, и на боевом пути это давало ВТОРУЮ
+        строку об одном инциденте: сразу после блокировки ``send_to_queue``
+        делает ``put``, тот падает ``Full``, и о том же событии докладывал ещё и
+        отчёт о потере. Теперь голос один и звучит там, где известен ИСХОД —
+        поэтому и тест зовёт боевой вход, а не внутренний метод.
+
+        Проверяется ровно прежнее: запись доезжает до процессного LoggerManager
+        и называет ПОЛУЧАТЕЛЯ и тип очереди. Плюс новое следствие — блокировка
+        названа в тексте числом, то есть снятая запись ничего не унесла с собой.
+        """
         mgr, log_file = logger_to_file
         reg = _FullQueueRegistry(_full_queue())
 
-        reg.remove_old_if_full(reg._fixed_queue, "system", victim_process="pult")
+        assert reg.send_to_queue("pult", "system", {"cmd": "process.stop"}) is False
         mgr.flush()
 
         written = log_file.read_text(encoding="utf-8")
         assert "pult" in written and "system" in written, f"блокировка невидима: {written!r}"
+        assert "system_evict_blocked=1" in written, (
+            f"снятая запись унесла с собой число заблокированных вытеснений: {written!r}"
+        )
+        assert reg._stats["system_evict_blocked"] == 1, "учёт блокировки обязан пережить переезд голоса"
 
 
 class TestVictimAttribution:

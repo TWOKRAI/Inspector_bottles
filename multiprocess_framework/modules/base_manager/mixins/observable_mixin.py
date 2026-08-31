@@ -183,6 +183,80 @@ class ObservableMixin(IObservableMixin):
     def log_critical(self, message: str, **kwargs) -> None:
         self._log_critical(message, **kwargs)
 
+    # =========================================================================
+    # ОКНО ГОЛОСА НА КЛЮЧ (Ф1.4, M17)
+    # Механизм живёт в ``logger_module/core/windowed_voice.py``; здесь — РАЗЪЁМ
+    # для наследников BaseManager. Импорт ленивый: ``logger_module`` тянет
+    # ``base_manager`` (LoggerManager — тоже BaseManager), и импорт на уровне
+    # модуля замкнул бы цикл на пакетных ``__init__``.
+    # =========================================================================
+
+    def _voices(self) -> Any:
+        """Держатель окон ЭТОГО менеджера (ленивый, свой у каждого экземпляра).
+
+        Свой, а не процессный: ключ ``"send_error:no_route"`` у двух роутеров
+        в одном процессе — два разных события, и общий держатель заглушил бы
+        второй голос первым.
+        """
+        holder = self.__dict__.get("_windowed_voices")
+        if holder is None:
+            from ...logger_module.core.windowed_voice import WindowedVoices
+
+            holder = WindowedVoices()
+            self.__dict__["_windowed_voices"] = holder
+        return holder
+
+    def should_voice(self, key: str, interval: Optional[float] = None) -> "tuple[bool, int]":
+        """Решение о голосе по ключу — **без записи и без учёта**.
+
+        Разделение обязательств здесь и есть смысл механизма: **факт** (счётчик,
+        запись в плоскость ошибок) вызывающий учитывает ВСЕГДА, окно его не
+        касается; **голос** (строка в журнал) идёт не чаще ``interval``.
+
+            voiced, suppressed = self.should_voice(key)
+            self._inc_stat("errors")          # факт — всегда
+            if voiced:                        # голос — по окну
+                self._log_error(f"…(подавлено: {suppressed})")
+
+        Склейка их в один вызов уже стоила проекту дефекта: в
+        ``process_module/health/state.py`` запись в плоскость ошибок стоит ВНУТРИ
+        ветки «окно позволило», потому что своего окна у плоскости ошибок не было
+        и был взят дроссель журнала — повтор в окне не оставляет там ни трассы,
+        ни контекста, только число.
+
+        Returns:
+            ``(голосить?, подавлено с прошлой записи)``.
+        """
+        return self._voices().take(key, interval)
+
+    def log_windowed(
+        self,
+        key: str,
+        interval: Optional[float] = None,
+        level: str = "warning",
+        message: str = "",
+        **ctx: Any,
+    ) -> bool:
+        """Сказать вслух не чаще окна на ключ. Удобство для «нужен только голос».
+
+        Контекст едет СТРУКТУРНЫМИ полями (в отличие от свободной функции
+        :func:`~...logger_module.core.windowed_voice.log_windowed`, у которой
+        приёмник — stdlib-логгер без структурного места). Переменную часть клади
+        сюда, а не в ``message``: текст обязан быть постоянным, иначе ключ окна и
+        текст разъезжаются (находка m2 про ``trace_id``).
+
+        Returns:
+            ``True``, если голос прозвучал.
+        """
+        voiced, suppressed = self.should_voice(key, interval)
+        if not voiced:
+            return False
+        text = message if not suppressed else f"{message} (подавлено с прошлой записи: {suppressed})"
+        if suppressed:
+            ctx.setdefault("suppressed_since_last", suppressed)
+        self._log(level, text, **ctx)
+        return True
+
     def _record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
         """Запись метрики через stats manager."""
         self._call_manager("stats", "record_metric", metric_name, value, tags or {})
@@ -538,6 +612,12 @@ class ObservableMixin(IObservableMixin):
             # Внутренние компоненты (содержат ссылки на менеджеры)
             "_registry",
             "_proxy_created",
+            # Ф1.4: держатель окон голоса держит threading.Lock — непикл-совместим,
+            # а менеджеры этого миксина уезжают в дочерние процессы (spawn на
+            # Windows). Пересоздаётся лениво на первом обращении; окна при этом
+            # начинаются заново, что и правильно: в новом процессе это новые
+            # события, а не продолжение чужих.
+            "_windowed_voices",
         )
         for key in _EXCLUDE:
             state.pop(key, None)

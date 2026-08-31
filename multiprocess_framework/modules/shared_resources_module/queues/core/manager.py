@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from ....base_manager import BaseManager, ObservableMixin
 from ....logger_module import get_std_logger
+from ....logger_module.core.windowed_voice import log_windowed
 from ..interfaces import IQueueRegistry
 from ...mixins import ManagerStatsMixin
 from ...qos import qos_for
@@ -119,25 +120,24 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             # Оба пути НЕ пишут записи в лог (см. _is_observability_queue).
             "observability_evicted": 0,
             "observability_send_failed": 0,
+            # Ф1.4 (M17): сколько раз put не прошёл из-за полной очереди. Ключевое
+            # слово — АРИФМЕТИКА: троттлинг голоса не имеет права его трогать,
+            # иначе «≤1 запись на окно» и «сколько на самом деле» станут одним
+            # числом, и темп потери будет не восстановить.
+            "queue_full_events": 0,
         }
-        # Throttle для ERROR-лога переполнения system-очереди: логируем раз на окно,
-        # а не на каждый put (send_to_queue — hot-path). Счётчик инкрементируется всегда.
-        self._system_evict_log_window: float = 5.0
-        self._system_evict_last_log: float = 0.0
-        # Throttle громкого WARNING про drop_oldest из data-очереди (тот же приём).
-        self._data_evict_log_window: float = 5.0
-        self._data_evict_last_log: float = 0.0
-        # Ф6.х.3: throttle WARNING «Queue not found» — send_to_queue это hot-path,
-        # отсутствующая очередь в окне teardown стреляла бы покадрово. Счётчик
-        # ``queue_missing`` растёт всегда, запись — раз в окно.
-        self._queue_missing_log_window: float = 5.0
-        self._queue_missing_last_log: float = 0.0
-        # Учёт безвозвратных потерь never-drop груза (см. _report_never_drop_loss).
-        # Копится всегда, пишется в лог раз в окно; _since_log нужен, чтобы
-        # троттлированная запись честно называла ТЕМП потери, а не только факт.
+        # Ф1.4: ЧЕТЫРЁХ собственных окон здесь больше нет
+        # (`_system_evict_*`, `_data_evict_*`, `_queue_missing_*`,
+        # `_never_drop_loss_last_log`/`_since_log`). Все они были одной и той же
+        # четырежды переписанной механикой «метка времени + счётчик подавленных»
+        # с одинаковым 5.0 и без единой настройки. Общий механизм —
+        # `ObservableMixin.should_voice` → `logger_module.core.windowed_voice`,
+        # окно приходит из политики процесса
+        # (`observability.voices.default_window_sec`).
+        #
+        # Суммарный счётчик потерь остаётся ЗДЕСЬ: он факт, а не голос, и живёт
+        # за срок процесса, тогда как «подавлено с прошлой записи» — величина окна.
         self._never_drop_loss_total: int = 0
-        self._never_drop_loss_since_log: int = 0
-        self._never_drop_loss_last_log: float = 0.0
         # Ф4 Task 4.3 (plans/truth-holes-closure.md): «кто душит очередь X».
         # {"{process}_{queue_type}": {sender: {"put": n, "lost": n}}} — счётчик
         # ПОПЫТОК put ПО ОТПРАВИТЕЛЮ (put считается ДО самой отправки, поэтому это
@@ -266,15 +266,12 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             # Ф6.х.3: счётчик — всегда, запись — раз в окно (hot-path; в окне
             # teardown отсутствующая очередь стреляла бы покадрово).
             self._stats["queue_missing"] = self._stats.get("queue_missing", 0) + 1
-            now = time.monotonic()
-            if now - self._queue_missing_last_log >= self._queue_missing_log_window:
-                self._queue_missing_last_log = now
-                _loss_logger.warning(
-                    "Queue '%s' not found for '%s' (queue_missing=%d) — груз не доставлен",
-                    queue_type,
-                    process_name,
-                    self._stats["queue_missing"],
-                )
+            self._voice(
+                f"queue_missing:{process_name}:{queue_type}",
+                "warning",
+                f"Queue '{queue_type}' not found for '{process_name}' "
+                f"(queue_missing={self._stats['queue_missing']}) — груз не доставлен",
+            )
             return False
         self._count_sender(process_name, queue_type, message, "put")
         try:
@@ -294,11 +291,27 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             # который система сама пометила как нероняемый. Отдельная ветка нужна,
             # потому что только здесь известно ИМЯ получателя: remove_old_if_full
             # видит лишь сам объект очереди и назвать адресата не может.
+            if isinstance(e, Full):
+                # Ф1.4 (M17): АРИФМЕТИКА переполнения — до любых развилок и до
+                # любого троттлинга. Считается КАЖДАЯ неудачная попытка, независимо
+                # от типа очереди и от того, прозвучит ли голос: «≤1 запись на окно»
+                # имеет смысл только рядом с числом, которое окном не тронуто.
+                self._stats["queue_full_events"] += 1
             if isinstance(e, Full) and self._is_never_drop(queue_type):
                 self._report_never_drop_loss(process_name, queue_type, queue)
                 # Ф4 Task 4.3: потеря записывается ТОМУ ЖЕ отправителю — иначе видно
                 # «очередь теряет», но не видно, чей груз пропадает.
                 self._count_sender(process_name, queue_type, message, "lost")
+                # Ф1.4 (M17): выход ЗДЕСЬ, а не проваливание в общий
+                # «send_to_queue failed» ниже. Прежде один инцидент давал ТРИ
+                # строки — блокировку вытеснения, отчёт о потере и эту общую, —
+                # причём последняя не троттлилась вовсе: замер тестера на пяти
+                # попытках дал восемь записей. Отчёт о потере говорит строго
+                # больше общей строки (называет получателя, размер очереди и
+                # сумму потерь), поэтому терять нечего. Счётчик ``errors``
+                # растёт как прежде: он факт, а не голос.
+                self._stats["errors"] += 1
+                return False
             if isinstance(e, Full) and self._is_observability_queue(queue_type):
                 # Ф7.3, звено (а) петли самоусиления. Очередь наблюдаемости droppable,
                 # поэтому Full здесь — редкая гонка: между вытеснением и put её успел
@@ -321,7 +334,15 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 self._stats["observability_send_failed"] += 1
                 self._count_sender(process_name, queue_type, message, "lost")
                 return False
-            _loss_logger.error("send_to_queue('%s', '%s') failed: %r", process_name, queue_type, e)
+            # Ф1.4: последнее из ad-hoc-мест этого файла, у которого окна не было
+            # ВООБЩЕ. Ключ включает РОД исключения: шторм ``Full`` на одной
+            # очереди не имеет права заглушить редкий ``PicklingError`` на ней же
+            # — тот же довод, по которому окно роутера ключуется причиной.
+            self._voice(
+                f"send_failed:{process_name}:{queue_type}:{type(e).__name__}",
+                "error",
+                f"send_to_queue('{process_name}', '{queue_type}') failed: {e!r}",
+            )
             self._stats["errors"] += 1
             return False
 
@@ -468,19 +489,23 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             return None
         # process_data.QUEUE_SYSTEM == "system" — каноническое имя system-очереди.
         if self._is_never_drop(queue_type):
+            # Ф1.4 (M17), «один разъём на точку»: ЗДЕСЬ ОСТАЁТСЯ ТОЛЬКО СЧЁТЧИК.
+            #
+            # Голос отсюда убран сознательно, и это не потеря видимости, а её
+            # починка. Блокировка вытеснения и последующая потеря груза — ОДИН
+            # инцидент: единственный продовый вызывающий (``send_to_queue``)
+            # сразу после этого делает ``put``, тот падает ``Full``, и
+            # ``_report_never_drop_loss`` говорил о том же самом второй раз. Две
+            # строки на одно событие мешали считать: «сколько инцидентов» и
+            # «сколько строк» расходились вдвое, а окна у них были РАЗНЫЕ, так
+            # что и подавлялись они вразнобой.
+            #
+            # Голос переехал туда, где известен ИСХОД: если потребитель успел
+            # разобрать очередь между проверкой и ``put``, инцидента не было
+            # вовсе — теперь об этом и не говорится, а счётчик всё равно растёт.
+            # Всё, что знала снятая запись (``system_evict_blocked``), названо в
+            # тексте оставшегося голоса.
             self._stats["system_evict_blocked"] += 1
-            now = time.monotonic()
-            if now - self._system_evict_last_log >= self._system_evict_log_window:
-                self._system_evict_last_log = now
-                # Ф6.8: мимо ``self._log_error`` по той же причине, что и
-                # ``_report_never_drop_loss`` — штатная плоскость у этого
-                # менеджера не подключена ни в одном процессе.
-                _loss_logger.error(
-                    "system-очередь '%s' переполнена — вытеснение заблокировано "
-                    "(system_evict_blocked=%d); system-команда может быть потеряна при put",
-                    victim,
-                    self._stats["system_evict_blocked"],
-                )
             return None
         try:
             evicted = queue.get_nowait()
@@ -503,25 +528,31 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         # ограничена топологией: имён процессов единицы.
         key = f"data_evicted.{victim}"
         self._stats[key] = self._stats.get(key, 0) + 1
-        now = time.monotonic()
-        if now - self._data_evict_last_log >= self._data_evict_log_window:
-            self._data_evict_last_log = now
-            _loss_logger.warning(
-                "переполнена data-очередь ПОЛУЧАТЕЛЯ '%s' — вытеснен старый элемент "
-                "(drop_oldest; вытеснено в неё %d, всего этим процессом %d); "
-                "устойчивая перегрузка = теряем кадры, чинить пропускную способность",
-                victim,
-                self._stats[key],
-                self._stats["data_evicted"],
-            )
+        self._voice(
+            f"queue_evicted:{victim}",
+            "warning",
+            f"переполнена data-очередь ПОЛУЧАТЕЛЯ '{victim}' — вытеснен старый элемент "
+            f"(drop_oldest; вытеснено в неё {self._stats[key]}, "
+            f"всего этим процессом {self._stats['data_evicted']}); "
+            f"устойчивая перегрузка = теряем кадры, чинить пропускную способность",
+        )
         return evicted
 
-    #: Не чаще одной записи о потере за это окно (сек). Троттлинг по ВРЕМЕНИ, а не
-    #: «каждая N-я потеря»: на живом рецепте переполнение идёт непрерывно (~17
-    #: событий/с), и порог по счётчику всё равно давал бы несколько записей в
-    #: секунду. Окно даёт предсказуемый потолок независимо от темпа — иначе
-    #: получаем вторую беду того же рода, что раздула messages.log до 645 МБ.
-    _NEVER_DROP_LOSS_LOG_INTERVAL_SEC = 5.0
+    def _voice(self, key: str, level: str, message: str) -> bool:
+        """Голос реестра очередей — не чаще окна на ключ (Ф1.4).
+
+        Мимо ``self._log_*`` СОЗНАТЕЛЬНО и по старой причине: штатная плоскость
+        логов у ``QueueRegistry`` не подключена ни в одном процессе (см.
+        ``_loss_logger`` в шапке модуля), и запись через миксин просто исчезала
+        бы — ровно тот дефект, который Ф6.8 намерила как «246 вытеснений, ноль
+        строк». Механизм окна при этом общий с остальным деревом; своё у реестра
+        только состояние окон (``self._voices()``), и оно своё у каждого
+        экземпляра — два реестра в одном процессе не глушат друг друга.
+
+        Окно НЕ передаётся: ``None`` означает «политика процесса»
+        (``observability.voices.default_window_sec``).
+        """
+        return log_windowed(key, None, level, message, logger=_loss_logger, voices=self._voices())
 
     def _report_never_drop_loss(
         self,
@@ -529,36 +560,42 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         queue_type: Optional[str],
         queue: Queue,
     ) -> None:
-        """Троттлированный отчёт о безвозвратно потерянном never-drop грузе.
+        """Отчёт о безвозвратно потерянном never-drop грузе — один голос на окно.
 
         Почему мимо ``self._log_error``: штатная плоскость логов у QueueRegistry
         не подключена ни в одном процессе (см. ``_loss_logger``), и запись
         просто исчезала. Почему с именем получателя: без него запись не отвечает
         на главный вопрос разбора — КОМУ не доехало; счётчики этого не знают.
+
+        Ф1.4: это ЕДИНСТВЕННЫЙ голос всего инцидента «system-очередь полна».
+        Прежде их было два (второй — из ``remove_old_if_full``), и они говорили
+        об одном и том же событии в разные окна. Число заблокированных вытеснений
+        приехало сюда, в текст, чтобы снятая запись ничего не унесла с собой.
+
+        **Факт и голос разделены:** ``_never_drop_loss_total`` растёт ВСЕГДА,
+        окно его не касается; «подавлено с прошлой записи» считает механизм и
+        называет в тексте следующего голоса.
         """
-        self._never_drop_loss_total += 1
-        self._never_drop_loss_since_log += 1
-        now = time.monotonic()
-        if now - self._never_drop_loss_last_log < self._NEVER_DROP_LOSS_LOG_INTERVAL_SEC:
+        self._never_drop_loss_total += 1  # факт — всегда
+        voiced, suppressed = self._voices().take(f"queue_full:{process_name}:{queue_type}")
+        if not voiced:
             return
-        self._never_drop_loss_last_log = now
-        lost_in_window = self._never_drop_loss_since_log
-        self._never_drop_loss_since_log = 0
         try:
             size = queue.qsize()
         except (NotImplementedError, OSError, AttributeError):
             size = -1  # qsize недоступен (macOS) — не повод молчать о потере
+        tail = f" Подавлено с прошлой записи: {suppressed}." if suppressed else ""
         _loss_logger.error(
             "ПОТЕРЯ СООБЩЕНИЯ: очередь '%s' процесса-получателя '%s' переполнена "
-            "(размер %s), вытеснение запрещено QoS-профилем (never-drop) — "
-            "сообщение отброшено БЕЗВОЗВРАТНО и не будет доставлено. "
-            "Потерь с прошлой записи: %d, всего: %d (запись не чаще раза в %.0f с)",
+            "(размер %s), вытеснение запрещено QoS-профилем (never-drop, "
+            "system_evict_blocked=%d) — сообщение отброшено БЕЗВОЗВРАТНО и не будет "
+            "доставлено. всего: %d.%s",
             queue_type,
             process_name,
             size if size >= 0 else "недоступен",
-            lost_in_window,
+            self._stats["system_evict_blocked"],
             self._never_drop_loss_total,
-            self._NEVER_DROP_LOSS_LOG_INTERVAL_SEC,
+            tail,
         )
 
     #: Потолок числа РАЗЛИЧНЫХ отправителей, учитываемых по одной очереди (Ф4 Task 4.3).

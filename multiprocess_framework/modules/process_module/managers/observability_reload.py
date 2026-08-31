@@ -35,7 +35,12 @@ from ..configs.observability_layers import (
 )
 from ..configs.observation_policy import OBSERVATION_SECTION_KEY, normalized_observation_section
 from .observability_flight import FLIGHT_SECTION_KEY, apply_flight_recorder
-from .observability_wiring import EVENTS_SECTION_KEY, apply_event_selector
+from .observability_wiring import (
+    EVENTS_SECTION_KEY,
+    VOICES_SECTION_KEY,
+    apply_event_selector,
+    apply_voices_policy,
+)
 
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
@@ -676,6 +681,13 @@ PLANE_COUNTER_KEYS: tuple = (
     "records_sampled_out",
     "sampler_keys_tracked",
     "sampler_keys_saturated",
+    # Ф1.4 (M17) — окна голоса на ключ. Родственник дросселя выше, но не он:
+    # тот подавляет по ТЕКСТУ записи, этот — по явному ключу события, и число
+    # подавленных называется в тексте следующего голоса. Пара ключей по тому же
+    # правилу, что у дросселя: «сколько подавлено» и «сколько счётчиков потеряно
+    # вместе с выброшенным по потолку ключом» — второе делает первое честным.
+    "windowed_suppressed",
+    "windowed_keys_evicted",
     # Ф7.х — карта ключей дышит: подметённые протухшие. Пара к предыдущему ключу:
     # растёт expired — потолок работает как задумано; стоит expired при растущем
     # saturated — карта забита горячими ключами, дроссель по повторяемости против
@@ -1015,6 +1027,13 @@ def _rebuild_and_apply(
     flight_applied = apply_flight_recorder(flight_recorder, resolved.get(FLIGHT_SECTION_KEY))
     if flight_applied is not None:
         expanded[FLIGHT_SECTION_KEY] = flight_applied
+
+    # Ф1.4 (M17), та же третья точка у окон голоса. Отличие от соседей: живой
+    # объект перенастраивать не надо — механизм процессный, и применение это
+    # смена политики, которую все держатели окон читают на следующем голосе.
+    voices_applied = apply_voices_policy(resolved.get(VOICES_SECTION_KEY))
+    if voices_applied is not None:
+        expanded[VOICES_SECTION_KEY] = voices_applied
 
     # Ф4 плана «порт наблюдений» (4.1), та же третья точка у политики порта.
     # Секция `observation` остаётся в `resolved` по тому же доводу, что `events`

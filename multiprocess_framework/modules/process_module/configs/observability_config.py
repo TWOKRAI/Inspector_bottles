@@ -119,6 +119,38 @@ class ObservabilityEventsConfig(SchemaBase):
     ] = 0
 
 
+@register_schema("ObservabilityVoicesConfig")
+class ObservabilityVoicesConfig(SchemaBase):
+    """Под-секция окон голоса — повторяющееся состояние говорит раз в окно (Ф1.4, M17).
+
+    Политика, а не параметр менеджера: держателей окон в процессе много (роутер,
+    реестр очередей, менеджер процессов), и ни один из них не является плоскостью
+    наблюдаемости. Читает секцию живой механизм
+    (:mod:`...logger_module.core.windowed_voice`) через ``wire_voices_policy`` на
+    старте и ``apply_voices_policy`` на пересборке — тем же способом, каким
+    заведены ``documents`` / ``events`` / ``flight`` / ``observation``.
+
+    Окно ЖИВЁТ ЗДЕСЬ, а не литералом в коде, потому что до этой задачи оно было
+    переписано вручную минимум семь раз (``_SEND_ERROR_LOG_INTERVAL_SEC``,
+    ``_NEVER_DROP_LOSS_LOG_INTERVAL_SEC``, три окна реестра очередей,
+    ``HealthState.DEFAULT_THROTTLE``) — все со значением 5.0 и ни одно не
+    настраиваемое. «Тише на линии, разговорчивее на стенде» было невыразимо.
+    """
+
+    default_window_sec: Annotated[
+        float,
+        FieldMeta("Окно голоса по умолчанию, сек (0 — не голосить чаще, чем каждый раз)", min=0.0, max=3600.0),
+    ] = 5.0
+
+    #: Строго «больше порога»: 3 означает, что четвёртый подряд говорит громко.
+    #: Ось повторов ПОДРЯД, а не времени: единичный фолбэк готовности — норма
+    #: старта, серия подряд — симптом. Одним окном это не выражается.
+    escalate_after_repeats: Annotated[
+        int,
+        FieldMeta("Повторов подряд по ключу до эскалации INFO → WARNING", min=1, max=1000),
+    ] = 3
+
+
 @register_schema("ObservabilityFlightConfig")
 class ObservabilityFlightConfig(SchemaBase):
     """Под-секция flight recorder'а — дампа кольца записей по требованию (Ф5, 5.1).
@@ -499,6 +531,16 @@ class ObservabilityConfig(SchemaBase):
         ObservationPolicyConfig,
         FieldMeta("Политика порта наблюдений: glob-правила по пути дерева (Ф4)"),
     ] = Field(default_factory=ObservationPolicyConfig)
+    #: Ф1.4 (M17). В manager-конфиги НЕ раскладывается — по тому же доводу, что
+    #: ``documents``/``events``/``flight``/``observation``: это не параметр
+    #: менеджера, а политика окон голоса, которую читает живой механизм
+    #: ``windowed_voice`` (``wire_voices_policy`` на старте, ``apply_voices_policy``
+    #: на пересборке). Ключ живёт в ТОЙ ЖЕ секции ``observability`` — пятой двери
+    #: конфига задача не заводит (правило Б.1).
+    voices: Annotated[
+        ObservabilityVoicesConfig,
+        FieldMeta("Окна голоса: окно по умолчанию и порог эскалации повторов (Ф1.4)"),
+    ] = Field(default_factory=ObservabilityVoicesConfig)
 
     #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
     #: МОЛЧА (проверено), поэтому без этой сверки конфиг с ``enable_batching: true``
@@ -573,7 +615,10 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         ``ObservabilityLayers.effective_session_ttl``. По тому же доводу здесь нет
         ни ``documents`` (адрес второй плоскости, читает ``wire_document_sink``),
         ни ``events`` (политика отбора, читает ``WideEventSelector`` процесса),
-        ни ``flight`` (политика дампа, читает ``FlightRecorder`` процесса).
+        ни ``flight`` (политика дампа, читает ``FlightRecorder`` процесса),
+        ни ``voices`` (политика окон голоса, читает ``windowed_voice`` процесса —
+        Ф1.4). Держателей окон в процессе много и ни один из них не менеджер
+        наблюдаемости, поэтому «разложить в конфиг менеджера» здесь просто некуда.
     """
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 

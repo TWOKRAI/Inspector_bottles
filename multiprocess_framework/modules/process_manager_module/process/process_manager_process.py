@@ -3887,6 +3887,12 @@ class ProcessManagerProcess(ProcessModule):
                 if event is not None and event.is_set():
                     ready[name] = True
                     pending.discard(name)
+                    # Ф1.4: штатная готовность РВЁТ серию фолбэков. Без этого
+                    # порог эскалации однажды берётся накопленным за жизнь
+                    # процесса шумом и больше никогда не опускается — то есть
+                    # «подряд» молча превращается в «всего», и WARNING снова
+                    # звучит всегда, только с задержкой.
+                    self._voices().reset_repeat(self._LIVENESS_FALLBACK_KEY)
                     self._log_info(f"{reason}: '{name}' ready via event")
                     continue
                 proc = self._process_registry.get_process_by_name(name)
@@ -3898,8 +3904,45 @@ class ProcessManagerProcess(ProcessModule):
                 time.sleep(0.05)
         for name in pending:
             ready[name] = True  # пережил окно — считаем работающим
-            self._log_warning(f"{reason}: '{name}' ready via liveness-fallback (event не получен за {timeout_s}s)")
+            self._voice_liveness_fallback(name, reason, timeout_s)
         return ready
+
+    #: Ключ серии фолбэков готовности. Один на все процессы СОЗНАТЕЛЬНО: симптом,
+    #: ради которого заведена эскалация, — «ready-event перестал приходить вообще»,
+    #: а он общий. Ключ на имя процесса дал бы серию длины 1 у каждого, и порог не
+    #: сработал бы никогда при поголовном отказе — то есть ровно в худшем случае.
+    _LIVENESS_FALLBACK_KEY = "pm.ready.liveness_fallback"
+
+    def _voice_liveness_fallback(self, name: str, reason: str, timeout_s: float) -> None:
+        """Ф1.4 (m2): фолбэк готовности — INFO; WARNING только за серию подряд.
+
+        Единичный фолбэк — НОРМА старта, а не отклонение: ready-event может не
+        успеть при холодном импорте тяжёлого процесса, и процесс при этом жив
+        (`is_alive()` проверен выше — иначе сюда бы не дошли). Безусловный
+        WARNING на каждое имя делал старт постоянно «жёлтым» и обесценивал
+        уровень: в списке WARNING-констант бута (ревью m2) эта строка была самой
+        частой.
+
+        Отклонение — СЕРИЯ подряд: когда фолбэк перестаёт быть единичным, ready
+        не приходит системно, и это уже симптом. Порог — из конфига
+        (``observability.voices.escalate_after_repeats``), не литерал; строго
+        «больше порога», то есть при 3 громко говорит четвёртый подряд.
+
+        Серия рвётся о любой штатный ready (см. вызывающего): считается именно
+        «подряд», а не «всего за жизнь процесса», иначе порог однажды берётся
+        накопленным шумом и больше никогда не опускается.
+        """
+        from ...logger_module.core.windowed_voice import escalate_after_repeats
+
+        in_a_row = self._voices().note_repeat(self._LIVENESS_FALLBACK_KEY)
+        text = (
+            f"{reason}: '{name}' ready via liveness-fallback (event не получен за {timeout_s}s; "
+            f"подряд таких: {in_a_row})"
+        )
+        if in_a_row > escalate_after_repeats():
+            self._log_warning(text + " — ready-события не приходят системно, это уже не единичный случай")
+        else:
+            self._log_info(text)
 
     def _wait_boot_ready(self) -> None:
         """Ф3.2: boot-барьер — дождаться ready всех стартованных на boot детей.
