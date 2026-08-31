@@ -46,7 +46,17 @@ def resolve_base_log_dir(explicit: Optional[str] = None) -> str:
     """Каталог логов как МАШИННЫЙ контекст пересборки (Task 5.12).
 
     Тот же резолв, что на boot (``ProcessLaunchConfig._resolve_log_dir``): явный
-    аргумент → ``MULTIPROCESS_LOG_DIR`` → ``INSPECTOR_LOG_DIR`` → ``logs``.
+    аргумент → ``MULTIPROCESS_LOG_DIR`` → ``INSPECTOR_LOG_DIR`` →
+    :func:`~...logger_module.core.log_paths.default_log_base_directory`.
+
+    **Последним рубежом стоит общая функция, а не строка ``"logs"``** (ревью
+    Task 1.2, F4). Строка тут пережила задачу 3.3, которая сняла её у boot'а, и
+    расхождение было ровно то, от которого 3.3 и лечила: относительная ``"logs"``
+    резолвится от cwd запускающего, то есть при молчащем окружении пересборка
+    уводила логи в дерево репозитория, тогда как boot тех же менеджеров клал их в
+    системный temp. Один запуск — два дерева, и оба «правильные» с точки зрения
+    своей половины кода. Утверждение в docstring («тот же резолв, что на boot»)
+    при этом было ложным с момента 3.3 и молчало об этом.
 
     Живой конфиг логгера здесь СОЗНАТЕЛЬНО не читается. Он выглядит соблазнительно
     («там же уже лежит резолвнутый путь»), но тогда удаление ``log_directory`` из
@@ -55,7 +65,12 @@ def resolve_base_log_dir(explicit: Optional[str] = None) -> str:
     """
     if explicit:
         return str(explicit)
-    return os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR") or "logs"
+    env_dir = os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR")
+    if env_dir:
+        return env_dir
+    from ...logger_module.core.log_paths import default_log_base_directory
+
+    return str(default_log_base_directory())
 
 
 def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
@@ -131,10 +146,18 @@ def compose_managers_payload(
 
     Args:
         resolved: результат ``ObservabilityLayers.resolve()`` **без** ключа
-            ``telemetry`` (её снимает вызывающий — у неё свои получатели, а
-            ``ObservabilityConfig`` не знает этого ключа).
+            ``telemetry``: её снимает вызывающий, потому что у телеметрии свои
+            получатели. Слова «иначе конфиг её отверг бы» здесь стояли и были
+            неправдой (ревью Task 1.2, F5): ``ObservabilityConfig`` — обычная
+            pydantic-модель с политикой ``extra`` по умолчанию (``ignore``), и
+            незнакомый ключ она молча проглатывает. Замер 2026-08-31: с ключом
+            ``telemetry`` сборка проходит и отдаёт те же четыре секции, а снятие
+            ``pop`` на пути рождения не роняет ни одного теста из 3347. Ключ
+            снимается ради ОДНОЙ формы аргумента у обоих вызывающих, а не ради
+            защиты от отказа, которого нет.
         log_dir: каталог логов; ``None`` → машинный контекст
-            (``MULTIPROCESS_LOG_DIR`` / ``INSPECTOR_LOG_DIR`` / ``logs``).
+            (``MULTIPROCESS_LOG_DIR`` / ``INSPECTOR_LOG_DIR`` /
+            ``default_log_base_directory()``).
 
     Returns:
         ``{"logger": …, "error": …, "stats": …, "command": …}`` — слои, наложенные

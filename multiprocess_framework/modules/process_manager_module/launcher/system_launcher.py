@@ -33,6 +33,24 @@ _DEFAULT_FRAME_SLOT_PREFIX = "output_frames"
 # имя фиксировано, чтобы записи искали по известному адресу, а не «где-то в base».
 _LAUNCHER_LOG_DIR_NAME = "launcher"
 
+# Ревью Task 1.2 (F1): на платформе, где висящих сегментов не бывает, «очищено 0» —
+# это свойство платформы, а не показание об уборке. Голый ноль читается как «уборка
+# работала и ничего не нашла», и именно так его прочитал живой стенд. Литерал
+# критерия («cleanup_stale_shm: очищено N») при этом сохранён — приёмочный тест
+# независимого тестера ищет его регуляркой, и подмена строки увела бы его в красный
+# ровно на той платформе, где стоит стенд.
+_SHM_CLEANUP_NOT_APPLICABLE = (
+    " (уборка на этой платформе недоступна: ОС освобождает mapping при закрытии последнего handle, "
+    "висящих сегментов не бывает — ноль здесь структурный)"
+)
+
+
+def _shm_platform_note() -> str:
+    """Пояснение к числу освобождённых сегментов — только там, где число не показание."""
+    from ...shared_resources_module.memory.platform import is_posix
+
+    return "" if is_posix() else _SHM_CLEANUP_NOT_APPLICABLE
+
 
 class SystemLauncher:
     """
@@ -80,14 +98,39 @@ class SystemLauncher:
         # а подъём менеджеров открывает файлы и создаёт каталоги.
         self._logger_manager: Optional[Any] = None
         self._error_manager: Optional[Any] = None
+        # Подъём журнала уже ПРОБОВАЛИ — успешно или нет (ревью Task 1.2, F2).
+        # Флагом идемпотентности был сам ``_logger_manager``, а он ставится только
+        # на успехе: неписуемый каталог логов означал новую попытку на КАЖДОЙ
+        # записи (замер: 5 записей → 5 аварийных выходов; отдельная инъекция с
+        # падающим ErrorManager дала 3 живых LoggerManager'а на 3 записи, каждый
+        # со своими открытыми файлами и потоком подметальщика, и ни один не
+        # закрывался). Отказ подъёма — состояние, а не событие.
+        self._observability_attempted: bool = False
+        # Журнал закрыт ``stop()``. Второго подъёма не будет: ``stop()`` обязан
+        # быть терминальным, иначе следующая же запись воскрешает журнал (ревью
+        # Task 1.2, F3: три ``stop()`` давали три подъёма и три строки закрытия).
+        self._observability_closed: bool = False
         # Отказы уборки SHM на старте. Счётчик, а не только запись в журнал:
         # «терять можно, молчать нельзя» — по одной строке в errors.log нельзя
         # ответить «сколько раз», а именно повтор отличает разовый сбой от
         # сломанной уборки. Виден в get_stats()["startup"].
         self._shm_cleanup_failures: int = 0
-        # Сколько сегментов реально освобождено последней уборкой (None — уборка
-        # ещё не выполнялась ни разу; ноль и «не выполнялась» — разные факты).
+        # Сколько сегментов освобождено последней уборкой ПЕРВОГО блока
+        # (config-объявленные имена). Состояний ТРИ, а не два (ревью Task 1.2, F6),
+        # и читаются они парой с ``_shm_cleanup_failures``:
+        #   None + 0 отказов  — уборка не выполнялась ни разу;
+        #   None + ≥1 отказов — выполнялась и УПАЛА (число неизвестно);
+        #   int               — выполнилась, освободила столько имён.
+        # На Windows это число всегда 0 и это не показание об уборке, а свойство
+        # платформы (см. ``cleanup_stale_shm``). Префиксный блок (за флагом
+        # FW_SHM_PREFIX_CLEANUP) в это число НЕ входит — у него своя строка журнала.
         self._shm_cleanup_segments: Optional[int] = None
+        # Отказы стартовой работы с PID-реестром (реап осиротевших хвостов, чистка
+        # на штатной остановке). Тот же класс, что и у SHM: раньше стоял голый
+        # ``except: pass`` на пути лаунчера ДО существования хоть одного процесса
+        # (ревью Task 1.2, F8). Провалившийся реап означает выживших от прошлого
+        # запуска, а проявится это позже и в другом месте.
+        self._pid_registry_failures: int = 0
 
     def _ensure_observability(self) -> None:
         """Поднять журнал лаунчера: ``{база логов}/launcher/`` — system.log + errors.log.
@@ -99,6 +142,15 @@ class SystemLauncher:
         процессов, только для лаунчера» здесь нет намеренно: она разошлась бы с
         первой на первой же правке — молча, потому что расхождение видно только
         по тому, куда легли файлы.
+
+        **База каталога — тем же резолвером** (:func:`resolve_base_log_dir`), и
+        это вторая половина того же правила (ревью Task 1.2, F4). Общей была
+        только ``managers_from_log_dir``, а АРГУМЕНТ ей считали две разные
+        функции: лаунчер — ``default_log_base_directory()``, слой L0 процессов —
+        ``resolve_base_log_dir()``. При пустом окружении они давали РАЗНЫЕ
+        деревья (``…/Temp/multiprocess_framework/logs`` против относительного
+        ``logs``) — ровно тот класс, который ADR-PM-044 объявляет закрытым.
+        Страж — ``TestOneBaseForTheWholeRun``.
 
         **Почему у лаунчера ВООБЩЕ свой менеджер, а не запись через первый
         процесс.** Всё, что лаунчер делает (реап PID-реестра, уборка SHM, спавн
@@ -114,36 +166,71 @@ class SystemLauncher:
         вторая половина той же находки: до Task 1.2 их записи уходили в
         stdlib-фолбэк без хендлеров, то есть в никуда.
 
-        Идемпотентно; отказ подъёма журнала не имеет права сорвать запуск
-        системы — он уходит в аварийный выход (stdlib напрямую).
+        **Ровно одна попытка за жизнь лаунчера — и на успехе, и на отказе**
+        (ревью Task 1.2, F2). Флагом идемпотентности был сам ``_logger_manager``,
+        то есть результат УСПЕХА: пока подъём падал, каждая следующая запись
+        пробовала заново. На неписуемом каталоге это 5 аварийных выходов на 5
+        записей; на падающем ``ErrorManager`` — три живых ``LoggerManager``, каждый
+        с открытыми файлами и потоком подметальщика, каждый перебивает процессный
+        синглтон, и ни одного не закрывает ``_shutdown_observability``. Поэтому
+        флаг ставится ДО попытки, а ``_logger_manager`` — сразу после успешного
+        ``initialize()``, ещё до ``ErrorManager``: половина журнала, которая
+        поднялась, обязана иметь владельца, который её закроет.
+
+        Отказ подъёма журнала не имеет права сорвать запуск системы — он уходит в
+        аварийный выход (stdlib напрямую). После ``stop()`` подъёма не будет
+        вовсе: см. ``_observability_closed``.
         """
-        if self._logger_manager is not None:
+        if self._observability_attempted:
             return
+        self._observability_attempted = True
         try:
+            from pathlib import Path
+
             from ...error_module import ErrorManager
             from ...logger_module import LoggerManager
-            from ...logger_module.core.log_paths import default_log_base_directory
             from ...process_module.configs.managers_config import managers_from_log_dir
+            from ...process_module.managers.observability_reload import resolve_base_log_dir
 
-            launcher_dir = default_log_base_directory() / _LAUNCHER_LOG_DIR_NAME
+            launcher_dir = Path(resolve_base_log_dir()) / _LAUNCHER_LOG_DIR_NAME
             managers = managers_from_log_dir(str(launcher_dir), app_name=_LAUNCHER_LOG_DIR_NAME)
             logger = LoggerManager(manager_name="logger_launcher", config=managers.logger)
             logger.initialize()
+            # Владелец ставится СРАЗУ (F2): дальше может упасть ErrorManager, и без
+            # этой строки поднятый логгер осиротел бы — открытые файлы и поток
+            # подметальщика без того, кто их закроет.
+            self._logger_manager = logger
             # B3: имя ставится В КОНФИГ — у ErrorManager имя конфига сильнее
             # аргумента конструктора, и без этой строки плоскость ошибок
-            # лаунчера звалась бы безадресным «ErrorManager».
+            # лаунчера звалась бы безадресным «ErrorManager». Воспроизведено
+            # 2026-08-31: без ``model_copy`` ``ErrorManager(manager_name=
+            # "error_launcher", config=managers.error).manager_name ==
+            # "ErrorManager"`` (страж — ``TestErrorPlaneHasAnAddress``).
             error_config = managers.error.model_copy(update={"manager_name": "error_launcher"})
             error = ErrorManager(manager_name="error_launcher", config=error_config)
             error.initialize()
-            self._logger_manager = logger
             self._error_manager = error
         except Exception as exc:  # noqa: BLE001 — журнал не имеет права сорвать запуск
             from ..._fallback import emergency_log
 
-            emergency_log(__name__, "error", "[SystemLauncher] журнал лаунчера не поднялся: %s", exc)
+            emergency_log(
+                __name__,
+                "error",
+                "[SystemLauncher] журнал лаунчера не поднялся (второй попытки не будет): %s",
+                exc,
+            )
 
     def _shutdown_observability(self) -> None:
-        """Закрыть журнал лаунчера. Идемпотентно, падать не имеет права."""
+        """Закрыть журнал лаунчера. Идемпотентно, падать не имеет права.
+
+        **Закрытие терминально** (ревью Task 1.2, F3): после него журнал не
+        поднимется снова. Прежде ``_log_*`` звали ``_ensure_observability``,
+        та видела ``None`` и поднимала ВСЁ заново — три ``stop()`` давали три
+        подъёма и три строки закрытия, а «журнал закрыт» переставало что-либо
+        значить. Записи после закрытия уходят в аварийный выход и НЕ теряются
+        молча — окно названо в README модуля.
+        """
+        self._observability_closed = True
         for attr in ("_error_manager", "_logger_manager"):
             manager = getattr(self, attr, None)
             if manager is None:
@@ -156,11 +243,29 @@ class SystemLauncher:
 
                 emergency_log(__name__, "warning", "[SystemLauncher] %s не закрылся: %s", attr, exc)
 
+    def _after_close(self, level: str, message: str) -> bool:
+        """Запись пришла после ``stop()`` — увести её в аварийный выход.
+
+        Возвращает True, если запись уже обслужена здесь. Журнал закрыт и второй
+        раз не поднимется (F3), но «закрыт» не значит «можно потерять»: строка
+        уходит в stdlib напрямую с явной пометкой окна.
+        """
+        if not self._observability_closed:
+            return False
+        from ..._fallback import emergency_log
+
+        emergency_log(__name__, level, "[SystemLauncher] (журнал закрыт) %s", message)
+        return True
+
     def _log_info(self, message: str) -> None:
+        if self._after_close("info", message):
+            return
         self._ensure_observability()
         _logger.info("[SystemLauncher] %s", message)
 
     def _log_warning(self, message: str) -> None:
+        if self._after_close("warning", message):
+            return
         self._ensure_observability()
         _logger.warning("[SystemLauncher] %s", message)
 
@@ -174,6 +279,8 @@ class SystemLauncher:
         Зовётся ИЗНУТРИ ``except``-блока: ``log_exception`` собирает трассу через
         ``traceback.format_exc()``, то есть из активного исключения.
         """
+        if self._after_close("error", f"{message}: {exc!r}"):
+            return
         self._ensure_observability()
         error = self._error_manager
         if error is None:
@@ -247,6 +354,14 @@ class SystemLauncher:
         пары. Поднимаешь второй системный лончер в одном процессе — задай обе ручки
         (`MULTIPROCESS_PID_FILE` и `INSPECTOR_PID_FILE`) своим файлом; образец —
         `backend_ctl.harness.BackendHarness.start`.
+
+        **Отказ реапа — громкий** (ревью Task 1.2, F8). Здесь стоял голый
+        ``except: pass`` — тот же класс, что этот же коммит чинил строкой ниже, в
+        уборке SHM, и на том же пути «до существования хоть одного процесса».
+        Провалившийся реап означает выживших от прошлого запуска; проявится это
+        позже, в другом месте и уже без причины. Отказ уходит в плоскость ошибок
+        с трассой и растит ``pid_registry_failures`` (виден в
+        ``get_stats()["startup"]``).
         """
         try:
             import os as _os
@@ -259,8 +374,9 @@ class SystemLauncher:
             _os.environ["MULTIPROCESS_PID_FILE"] = resolved
             _os.environ["INSPECTOR_PID_FILE"] = resolved
             reap_and_reset(log=self._log_info)
-        except Exception:  # noqa: BLE001 — реестр не критичен для запуска
-            pass
+        except Exception as exc:  # noqa: BLE001 — реестр не критичен для запуска
+            self._pid_registry_failures += 1
+            self._log_error("реап PID-реестра не удался", exc)
 
     def _cleanup_shm_at_startup(self, processes_config: dict) -> None:
         """Очистка SHM перед стартом: config-объявленные имена + (Ф7 G.3c, за флагом)
@@ -275,6 +391,19 @@ class SystemLauncher:
         называет ЧИСЛО освобождённых сегментов (ноль тоже число: «висящих не
         было» — законный и полезный ответ).
 
+        **Ноль бывает двух разных сортов, и вслух это говорит строка журнала**
+        (ревью Task 1.2, F1). Там, где уборка возможна (POSIX), ноль означает
+        «висящих не нашлось». На Windows висящих не бывает вовсе — ОС
+        освобождает mapping при закрытии последнего handle, — и ноль там
+        структурный, то есть про уборку не говорит НИЧЕГО. Строка дополняется
+        пояснением (``_shm_platform_note``), иначе живой стенд читает свойство
+        платформы как показание.
+
+        **Число — про ПЕРВЫЙ блок** (config-объявленные имена). У второго,
+        префиксного, своя строка и своё число; в ``shm_cleanup_segments`` оно не
+        входит, потому что блоки отвечают на разные вопросы и складывать их
+        значило бы получить величину, которую нельзя истолковать (F6).
+
         Уборка по-прежнему не имеет права сорвать запуск: исключение наружу не
         уходит ни из одного блока.
         """
@@ -287,7 +416,7 @@ class SystemLauncher:
             # знаю сколько» честнее считать нулём, чем упасть на подсчёте.
             count = len(cleaned) if isinstance(cleaned, (list, tuple, set)) else 0
             self._shm_cleanup_segments = count
-            self._log_info(f"cleanup_stale_shm: очищено {count} SHM-сегментов")
+            self._log_info(f"cleanup_stale_shm: очищено {count} SHM-сегментов{_shm_platform_note()}")
         except Exception as exc:  # noqa: BLE001 — уборка не имеет права сорвать запуск
             self._shm_cleanup_failures += 1
             self._log_error("уборка объявленных SHM-сегментов не удалась", exc)
@@ -424,10 +553,17 @@ class SystemLauncher:
             from .pid_registry import clear
 
             clear()
-        except Exception:  # noqa: BLE001
-            pass
-        # Журнал лаунчера закрывается ПОСЛЕДНИМ: строки выше («System stopped»,
-        # жалобы реестра) обязаны в него попасть.
+        except Exception as exc:  # noqa: BLE001 — чистка реестра не критична для остановки
+            self._pid_registry_failures += 1
+            self._log_error("чистка PID-реестра при остановке не удалась", exc)
+        # Журнал лаунчера закрывается ПОСЛЕДНИМ: строки выше («Stopping system…»,
+        # «System stopped») обязаны в него попасть. Страж — TestJournalClosesLast;
+        # без него порядок держался лишь тем, что журнал воскресал (F3/F7).
+        #
+        # Названная граница: САМА ``clear()`` о своих отказах не рассказывает —
+        # она глушит их внутри (``pid_registry.py``, ``except: pass`` вокруг
+        # записи файла). Сюда долетают только отказы импорта и вызова, поэтому
+        # «жалоб реестра» в этом журнале нет и обещать их нельзя.
         self._shutdown_observability()
 
     def wait(self) -> None:
@@ -469,10 +605,14 @@ class SystemLauncher:
         появляется spawner, поэтому ранний выход ``if not self._spawner`` ниже
         сделал бы её счётчики недостижимыми ровно в тот момент, когда их и
         читают — сразу после отказа уборки.
+
+        ``shm_cleanup_segments`` читается ПАРОЙ с ``shm_cleanup_failures``: три
+        состояния, а не два (F6) — см. комментарий у поля в ``__init__``.
         """
         return {
             "shm_cleanup_failures": self._shm_cleanup_failures,
             "shm_cleanup_segments": self._shm_cleanup_segments,
+            "pid_registry_failures": self._pid_registry_failures,
         }
 
     def get_stats(self) -> Dict[str, Any]:

@@ -38,6 +38,21 @@
    строка в ``system.log`` не «дублирует для удобства», а лишает смысла вопрос
    «сколько раз это случилось» — считать инциденты станет нечем.
 
+Итерация 1 ревью добавила ещё пять — все пять про свойства, которые механизм
+ЗАЯВЛЯЛ (в docstring или комментарии), но не охранял ничем:
+
+8. **Отказ подъёма — тоже один раз** (F2). Идемпотентность держалась на
+   результате успеха, поэтому мёртвый журнал пробовали поднять на каждой записи.
+9. **``stop()`` терминален** (F3). После закрытия журнал не воскресает, а записи
+   уходят в аварийный выход, а не в никуда.
+10. **Журнал закрывается ПОСЛЕДНИМ** (F7). До починки 9 этот порядок соблюдался
+    «сам собой» — потому что журнал воскресал, а не потому что порядок верен.
+11. **Ноль освобождённых сегментов бывает двух сортов** (F1, F6). На платформе,
+    где висящих сегментов не бывает, ноль — свойство платформы; живой сегмент не
+    имеет права считаться освобождённым; «упала» не равно «нашла ноль».
+12. **Отказ реапа PID-реестра слышен** (F8) — тот же голый ``except: pass`` на
+    том же пути «до существования хоть одного процесса».
+
 Все обращения к журналу идут через :func:`_within_deadline` — подъём менеджера
 открывает файлы и стартует поток подметальщика, и тест, который вместо падения
 ПОВИСНЕТ, хуже отсутствующего.
@@ -53,6 +68,7 @@ from typing import Any, Callable, Dict, List
 
 import pytest
 
+from ...shared_resources_module.memory.platform import is_posix
 from ..launcher.system_launcher import SystemLauncher
 
 _DEADLINE_SEC = 30.0
@@ -179,6 +195,157 @@ class TestOrderingAndSingleRaise:
             assert content.count(f"запись {i}") == 1, f"'запись {i}' в файле не ровно один раз:\n{content}"
 
 
+class TestTheRaiseIsAlsoOnceOnFailure:
+    """Вторая половина опасности 2 (ревью Task 1.2, F2): отказ — тоже один раз.
+
+    Флагом идемпотентности был результат УСПЕХА (``_logger_manager``), поэтому
+    пока подъём падал, каждая запись пробовала снова. Замер до правки — 5 записей
+    дали 5 аварийных выходов; замер с падающим ``ErrorManager`` — 3 записи дали 3
+    живых ``LoggerManager``, каждый со своими файлами и потоком подметальщика.
+    """
+
+    def test_a_failed_raise_is_not_retried_on_every_record(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch, launchers: Any
+    ) -> None:
+        """Каталог занят файлом → 5 записей дают РОВНО один аварийный выход."""
+        blocked = tmp_path / "occupied"
+        blocked.write_text("это файл, а не каталог", encoding="utf-8")
+        monkeypatch.setenv("MULTIPROCESS_LOG_DIR", str(blocked))
+        monkeypatch.setenv("INSPECTOR_LOG_DIR", str(blocked))
+
+        calls: List[Any] = []
+        monkeypatch.setattr(
+            "multiprocess_framework.modules._fallback.emergency_log",
+            lambda *a, **kw: calls.append(a),
+        )
+
+        launcher = launchers()
+
+        def _emit() -> None:
+            for i in range(5):
+                launcher._log_info(f"запись {i}")
+
+        _within_deadline(_emit, "пять записей при мёртвом журнале")
+
+        raises = [c for c in calls if "не поднялся" in str(c)]
+        assert len(raises) == 1, f"подъём журнала пробовали {len(raises)} раз(а) вместо одного: {calls!r}"
+
+    def test_a_half_raised_journal_still_has_an_owner(
+        self, log_root: Any, monkeypatch: pytest.MonkeyPatch, launchers: Any
+    ) -> None:
+        """``ErrorManager`` падает → поднятый логгер обязан остаться на объекте.
+
+        Иначе он осиротеет: файлы открыты, поток подметальщика жив, а
+        ``_shutdown_observability`` его не увидит и не закроет.
+        """
+        import multiprocess_framework.modules.error_module as error_module
+
+        def _boom(*_a: Any, **_kw: Any) -> Any:
+            raise RuntimeError("ErrorManager не создался")
+
+        monkeypatch.setattr(error_module, "ErrorManager", _boom)
+
+        launcher = launchers()
+        _within_deadline(lambda: launcher._log_info("запись при падающем ErrorManager"), "запись")
+
+        assert launcher._logger_manager is not None, (
+            "логгер поднялся, но владельца не получил — закрывать его будет некому"
+        )
+        assert launcher._error_manager is None
+        closed: List[str] = []
+        monkeypatch.setattr(launcher._logger_manager, "shutdown", lambda: closed.append("logger"))
+        _within_deadline(launcher._shutdown_observability, "закрытие")
+        assert closed == ["logger"], "полуподнятый журнал не закрыли"
+
+
+class TestStopIsTerminal:
+    """F3: ``stop()`` терминален — следующая запись не воскрешает журнал.
+
+    До правки три ``stop()`` давали три подъёма и три строки закрытия, а запись
+    после закрытия снова открывала файлы. «Журнал закрыт» переставало что-либо
+    значить, и обещание README о безусловном маршруте держалось ровно этим.
+    """
+
+    def test_a_record_after_stop_does_not_raise_the_journal_again(
+        self, log_root: Any, monkeypatch: pytest.MonkeyPatch, launchers: Any
+    ) -> None:
+        launcher = launchers()
+        _within_deadline(lambda: launcher._log_info("до закрытия"), "первая запись")
+        _within_deadline(launcher.stop, "первый stop")
+        _within_deadline(launcher.stop, "второй stop")
+
+        calls: List[Any] = []
+        monkeypatch.setattr(
+            "multiprocess_framework.modules._fallback.emergency_log",
+            lambda *a, **kw: calls.append(a),
+        )
+        marker = "ПОСЛЕ_ЗАКРЫТИЯ"
+        _within_deadline(lambda: launcher._log_info(marker), "запись после закрытия")
+
+        content = _system_log(log_root)
+        assert content.count("LoggerManager initialized") == 1, (
+            f"журнал поднялся заново после stop() — «закрыт» ничего не значит:\n{content}"
+        )
+        assert marker not in content, "запись после закрытия попала в закрытый журнал"
+        assert any(marker in str(c) for c in calls), (
+            f"запись после закрытия пропала молча — аварийный выход её не получил: {calls!r}"
+        )
+
+
+class TestJournalClosesLast:
+    """F7: «журнал закрывается ПОСЛЕДНИМ» было комментарием, а не свойством.
+
+    Инъекция (перенос ``_shutdown_observability()`` в НАЧАЛО ``stop()``) не
+    роняла ничего: строки всё равно доезжали — потому что журнал воскресал
+    (F3), а не потому что порядок соблюдён. Сторож ставится ПОСЛЕ починки F3,
+    иначе он охранял бы воскрешение.
+    """
+
+    def test_the_stop_lines_are_in_the_file(self, log_root: Any, launchers: Any) -> None:
+        class _FakeSpawner:
+            def stop(self) -> None:
+                return None
+
+        launcher = launchers()
+        launcher._spawner = _FakeSpawner()
+        _within_deadline(launcher.stop, "остановка с журналом")
+
+        content = _system_log(log_root)
+        assert "Stopping system..." in content, f"строка начала остановки не доехала:\n{content}"
+        assert "System stopped" in content, (
+            f"«System stopped» не доехала — журнал закрылся раньше строк, которые обязан был принять:\n{content}"
+        )
+
+
+class TestPidRegistryFailureHasAVoice:
+    """F8: отказ реапа PID-реестра — та же плоскость ошибок и свой счётчик.
+
+    Голый ``except: pass`` стоял на пути «до существования хоть одного процесса»
+    строкой выше уборки SHM — того самого класса, который эта задача чинила.
+    Провалившийся реап означает выживших от прошлого запуска.
+    """
+
+    def test_a_failed_reap_is_counted_and_told(
+        self, log_root: Any, monkeypatch: pytest.MonkeyPatch, launchers: Any
+    ) -> None:
+        marker = f"РЕАП_НЕ_УДАЛСЯ_{uuid.uuid4().hex[:6]}"
+        monkeypatch.setattr(
+            "multiprocess_framework.modules.process_manager_module.launcher.pid_registry.reap_and_reset",
+            _failing_cleanup(marker),
+        )
+
+        launcher = launchers()
+        _within_deadline(launcher._prepare_pid_registry, "подготовка реестра")
+        _within_deadline(launcher._shutdown_observability, "закрытие журнала")
+
+        assert launcher.get_stats()["startup"]["pid_registry_failures"] == 1, (
+            "отказ реапа не посчитан — «выжившие от прошлого запуска» остались без единого следа"
+        )
+        errors = _errors_log(log_root)
+        assert marker in errors, f"отказ реапа не доехал до errors.log:\n{errors}"
+        assert "Traceback" in errors, f"отказ реапа приехал без трассы:\n{errors}"
+
+
 class TestCounterSurvivesADeadJournal:
     """Опасность 3: неписуемый каталог логов не отменяет ни старт, ни учёт."""
 
@@ -250,36 +417,158 @@ class TestFailureCounterIsAPair:
 
 
 class TestSegmentCountIsReal:
-    """Опасность 5: «очищено N» — измеренное число, а не украшение строки."""
+    """Опасность 5: «очищено N» — измеренное число, а не украшение строки.
 
-    def test_one_leaked_segment_is_reported_as_one(self, log_root: Any, launchers: Any) -> None:
-        """Реальный висящий сегмент → ровно 1 и в счётчике, и в строке журнала.
+    **Переписан по ревью (F1).** Первая редакция создавала сегмент, ДЕРЖАЛА его
+    открытым и ждала «очищено 1». На POSIX это правда (``unlink`` снимает имя у
+    живого сегмента), а на Windows единица приходила по обратной причине:
+    ``SharedMemory(create=False)`` там резолвится ровно потому, что сегмент ЖИВ и
+    его кто-то держит. Тест не проверял уборку — он пришпиливал перевёрнутый
+    смысл, и стенд (Windows) считал этой строкой НЕ убранное.
 
-        Пара к :meth:`TestFailureCounterIsAPair.test_successful_cleanup_leaves_the_counter_at_zero`
-        (там тот же вызов даёт ровно 0). Без пары строка «очищено N» согласна с
-        любым ответом, включая «уборка не работает вовсе».
+    Поэтому пара разделена по платформам, и обе половины буквальны.
+    """
+
+    def test_on_posix_cleanup_takes_the_name_away(self, log_root: Any, launchers: Any) -> None:
+        """POSIX: висящий сегмент → ровно 1, и ИМЕНИ после уборки больше нет.
+
+        Второй assert важнее первого: единица без проверки имени согласна и с
+        «функция посчитала, но ничего не сделала».
         """
+        if not is_posix():
+            pytest.skip("на не-POSIX уборка недоступна — половина пары ниже")
         region = f"hz{uuid.uuid4().hex[:8]}"
         leaked = shared_memory.SharedMemory(name=f"{region}_0", create=True, size=64)
         launcher = launchers()
         try:
+            leaked.close()
             _within_deadline(
                 lambda: launcher._cleanup_shm_at_startup({"p": {"memory": {"names": {region: (1, 1, 1)}, "coll": 1}}}),
                 "уборка висящего сегмента",
             )
             assert launcher.get_stats()["startup"]["shm_cleanup_segments"] == 1
             assert "cleanup_stale_shm: очищено 1 SHM-сегментов" in _system_log(log_root)
+            with pytest.raises(FileNotFoundError):
+                shared_memory.SharedMemory(name=f"{region}_0", create=False)
         finally:
             try:
-                leaked.close()
+                leaked.unlink()
+            except Exception:  # noqa: BLE001 — teardown теста не имеет права падать
+                pass
+
+    def test_a_living_segment_is_never_counted_as_freed(self, log_root: Any, launchers: Any) -> None:
+        """Не-POSIX: живой сегмент обязан дать 0 — и остаться живым.
+
+        Ровно то, что делал прежний тест наоборот. На Windows уборка не убирает
+        ничего, поэтому единственный честный ответ про ЖИВОЙ сегмент — ноль; а
+        строка журнала обязана сказать, что ноль здесь про платформу, иначе стенд
+        читает его как «уборка работала и ничего не нашла».
+        """
+        if is_posix():
+            pytest.skip("на POSIX уборка снимает имя — половина пары выше")
+        region = f"hz{uuid.uuid4().hex[:8]}"
+        alive = shared_memory.SharedMemory(name=f"{region}_0", create=True, size=64)
+        alive.buf[0] = 42
+        launcher = launchers()
+        try:
+            _within_deadline(
+                lambda: launcher._cleanup_shm_at_startup({"p": {"memory": {"names": {region: (1, 1, 1)}, "coll": 1}}}),
+                "уборка живого сегмента",
+            )
+            assert launcher.get_stats()["startup"]["shm_cleanup_segments"] == 0, (
+                "живой сегмент посчитан освобождённым — счётчик перечисляет ровно НЕ убранное"
+            )
+            still = shared_memory.SharedMemory(name=f"{region}_0", create=False)
+            try:
+                assert still.buf[0] == 42, "сегмент изменился — «уборка» на этой платформе что-то трогает"
+            finally:
+                still.close()
+            assert "уборка на этой платформе недоступна" in _system_log(log_root), (
+                "строка журнала выдаёт свойство платформы за показание об уборке"
+            )
+        finally:
+            try:
+                alive.close()
             except Exception:  # noqa: BLE001 — teardown теста не имеет права падать
                 pass
             try:
-                leaked.unlink()
-            except FileNotFoundError:
-                pass
+                alive.unlink()
             except Exception:  # noqa: BLE001
                 pass
+
+    def test_three_states_of_the_segment_counter(self, log_root: Any, launchers: Any, monkeypatch: Any) -> None:
+        """F6: «не выполнялась», «упала» и «освободила N» — три РАЗНЫХ показания.
+
+        Пара читается вместе с ``shm_cleanup_failures``; если отказ выставит
+        число (хоть ноль), «упала» станет неотличимо от «нашла ноль».
+        """
+        launcher = launchers()
+        fresh = launcher.get_stats()["startup"]
+        assert fresh["shm_cleanup_segments"] is None and fresh["shm_cleanup_failures"] == 0, (
+            "до первой уборки число обязано быть неизвестным"
+        )
+
+        monkeypatch.setattr(
+            "multiprocess_framework.modules.shared_resources_module.memory.platform.cleanup_known_shm_at_startup",
+            _failing_cleanup("отказ ради третьего состояния"),
+        )
+        _within_deadline(
+            lambda: launcher._cleanup_shm_at_startup({"p": {"memory": {"names": {"x": (1, 1, 1)}, "coll": 1}}}),
+            "упавшая уборка",
+        )
+        failed = launcher.get_stats()["startup"]
+        assert failed["shm_cleanup_failures"] == 1
+        assert failed["shm_cleanup_segments"] is None, (
+            "упавшая уборка выставила ЧИСЛО — «сломалась» стало неотличимо от «ничего не нашла»"
+        )
+
+
+class TestErrorPlaneHasAnAddress:
+    """F7: у плоскости ошибок лаунчера есть СВОЁ имя, и оно приходит из конфига.
+
+    Свойство было заявлено комментарием («без этой строки звалась бы безадресным
+    ErrorManager») и не охранялось ничем: инъекция, снявшая ``model_copy``,
+    оставила все тесты зелёными. Воспроизведение 2026-08-31 показывает, что само
+    утверждение ВЕРНО — имя конфига сильнее аргумента конструктора::
+
+        WITHOUT model_copy -> manager_name = ErrorManager
+        WITH model_copy    -> manager_name = error_launcher
+
+    Значит нужен не отзыв утверждения, а сторож. Объектив — живой менеджер, а не
+    текст в файле: под инъекцией текст ``errors.log`` не меняется вовсе, разница
+    видна только в имени менеджера.
+    """
+
+    def test_the_error_plane_is_named_after_the_launcher(self, log_root: Any, launchers: Any) -> None:
+        launcher = launchers()
+        _within_deadline(lambda: launcher._log_info("поднять журнал"), "подъём журнала")
+
+        error = launcher._error_manager
+        assert error is not None, "плоскость ошибок не поднялась"
+        assert error.manager_name == "error_launcher", (
+            f"плоскость ошибок лаунчера зовётся '{error.manager_name}' — безадресно: "
+            "по имени в записи нельзя понять, чья это плоскость"
+        )
+
+
+class TestOneBaseForTheWholeRun:
+    """F4: база каталога логов у лаунчера и у слоя L0 процессов — ОДНА функция.
+
+    Общей была только ``managers_from_log_dir``; аргумент ей считали две разные
+    функции с разными последними рубежами, и при молчащем окружении один запуск
+    писал в два дерева. Проверяется на ПУСТОМ окружении — единственном режиме,
+    где рубежи вообще различимы.
+    """
+
+    def test_bases_coincide_on_an_empty_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in ("MULTIPROCESS_LOG_DIR", "INSPECTOR_LOG_DIR"):
+            monkeypatch.delenv(key, raising=False)
+        from multiprocess_framework.modules.logger_module.core.log_paths import default_log_base_directory
+        from multiprocess_framework.modules.process_module.managers.observability_reload import resolve_base_log_dir
+
+        assert resolve_base_log_dir() == str(default_log_base_directory()), (
+            "слой L0 процессов и журнал лаунчера резолвят базу по-разному — один запуск, два дерева логов"
+        )
 
 
 class TestShutdownIsIdempotent:

@@ -15,6 +15,15 @@
   Сняты мёртвые параметры `deep_merge` / `merge_managers` у `_rebuild_and_apply`. Страж —
   `tests/test_birth_config_channel_consistency.py` (3 теста).
 
+  **Итерация 1 ревью (2026-08-31), две правки в этом модуле.** (1) `resolve_base_log_dir`
+  последним рубежом отдавала строку `"logs"` — пережиток, снятый задачей 3.3 у boot'а, но не
+  здесь; при молчащем окружении рождение и пересборка клали логи в РАЗНЫЕ деревья
+  (`…/Temp/multiprocess_framework/logs` против относительного `logs`), а docstring при этом
+  утверждал «тот же резолв, что на boot». Теперь рубеж общий — `default_log_base_directory()`.
+  (2) Снято ложное утверждение «`ObservabilityConfig` не знает ключ `telemetry` и отверг бы
+  его»: политика `extra` у модели дефолтная (`ignore`), незнакомый ключ проглатывается молча —
+  отсюда отдельный вопрос владельцу про `extra="forbid"` (`docs/claude/OPEN_QUESTIONS.md`).
+
 - **2026-08-26 (Ф5, доработка по синхронному ревью — `plans/observation-port/plan.md`, полное
   решение в `statistics_module/DECISIONS.md`, ADR-SM-014):** три правки со стороны этого модуля.
   **S1** — `_MockObservationPort` (`plugins/testing.py`) стал наследником `ObservationPort` над
