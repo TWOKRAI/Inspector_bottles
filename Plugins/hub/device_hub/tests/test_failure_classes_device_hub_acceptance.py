@@ -64,6 +64,30 @@ class _RaisingWorkerManager:
         return True
 
 
+class _MixedWorkerManager:
+    """Два РОДА отказа в одном контексте: один воркер бросает, другой возвращает False.
+
+    Нужен для целевой стороны критерия B: вырождение ключа окна видно только
+    тогда, когда в одном контексте встречаются отказ-исключение и
+    отказ-возврат-значения. ``FakeWorkerManager`` даёт лишь второй, а
+    ``_RaisingWorkerManager`` — лишь первый.
+    """
+
+    def __init__(self, *, raising_for: str) -> None:
+        self._raising_for = raising_for
+        self.workers: dict[str, object] = {}
+        self.calls: list[str] = []
+
+    def create_worker(self, name, fn, cfg=None, auto_start=False):  # noqa: ANN001 — тестовый дублёр
+        self.calls.append(name)
+        if name == self._raising_for:
+            raise RuntimeError("создание воркера отклонено пулом воркеров")
+        return False
+
+    def remove_worker(self, name):  # noqa: ANN001
+        return True
+
+
 def _make_plugin_with_real_health(tmp_path: Path) -> tuple[DeviceHubPlugin, MagicMock, list, list]:
     """Сконфигурированный DeviceHubPlugin с РЕАЛЬНЫМ HealthState/HealthReporter.
 
@@ -153,20 +177,39 @@ class TestCreateWorkerFalseFailureClass:
         found = any("alpha" in str(value) for payload in payloads_without_context for value in payload.values())
         assert found, f"имя воркера видно только в снятом ctx.log_error, структура инцидента его не несёт: {incidents}"
 
-    def test_two_devices_failing_with_create_worker_false_do_not_silence_each_other(self, tmp_path: Path) -> None:
-        """Критерий B: два РАЗНЫХ устройства в одном тике — два РАЗНЫХ голоса.
+    def test_two_devices_of_one_failure_class_give_two_facts_and_one_voice(self, tmp_path: Path) -> None:
+        """Критерий B, сторона «окно работает»: один класс — один голос, факты все.
 
-        Одна и та же причина (create_worker->False) для dev_alpha и dev_beta
-        не имеет права схлопнуться в общий ключ окна: второе устройство
-        обязано прозвучать, а не быть засчитано подавлением первого.
+        **Здесь заявленный контракт РАЗОШЁЛСЯ с моделью независимого тестера,
+        и расхождение решено в пользу окна (вердикт 2026-08-31).** Тестер
+        требовал голос НА УСТРОЙСТВО: dev_alpha и dev_beta, падающие одинаково,
+        должны были дать две строки. Отвергнуто: ключ с identity инстанса
+        отключает механизм ровно в том состоянии, ради которого он заведён —
+        хаб на 20 устройств, отваливающихся одной причиной, дал бы 20 строк,
+        то есть шторм, против которого Task 1.4 и делалась. Различимость
+        устройств при этом НЕ теряется: факт пер-девайсный и несёт имя воркера
+        структурным полем (тест выше), теряются только строки журнала.
+
+        «Два разных отказа» в критерии задачи — это два разных КЛАССА отказа,
+        и они проверяются соседом ``test_two_failure_classes_...`` ниже.
+        Гранулярность остаётся управляемой: сайт, которому нужен голос на
+        устройство, кладёт идентификатор в ``context`` сам — фреймворк
+        фиксирует форму ключа (класс, контекст), а не его дробность.
         """
-        plugin, _ctx, _incidents, voices = self._prime_two_colliding_devices(tmp_path)
+        plugin, _ctx, incidents, voices = self._prime_two_colliding_devices(tmp_path)
 
         plugin._ensure_device_workers()
 
-        assert len(voices) == 2, (
-            f"второй отказ ДРУГОГО устройства заглушён окном первого (или сайта в плоскости ошибок "
-            f"вовсе нет): голосов {len(voices)}, тексты: {voices}"
+        assert len(incidents) == 2, (
+            f"факт обязан учитываться на КАЖДЫЙ отказ (Task 1.3a), окно его не касается: {incidents}"
+        )
+        assert len(voices) == 1, (
+            f"один класс отказа в одном контексте обязан дать РОВНО ОДИН голос — "
+            f"иначе окно не работает и хаб на N устройствах даст N строк: {voices}"
+        )
+        assert "подавлено" in voices[0], (
+            f"голос обязан назвать число подавленных вхождений, иначе «одна строка» неотличима "
+            f"от «потеряли остальные»: {voices[0]!r}"
         )
 
 
@@ -212,15 +255,23 @@ class TestCreateWorkerRaisesFailureClass:
             f"report_error(exc, context=...) вызывается БЕЗ полей: {incidents}"
         )
 
-    def test_two_devices_raising_together_do_not_silence_each_other(self, tmp_path: Path) -> None:
-        """Критерий B: факт учитывается ВСЕГДА (контроль), голос — нет (RED).
+    def test_two_devices_raising_one_class_give_two_facts_and_one_voice(self, tmp_path: Path) -> None:
+        """Критерий B на ветке исключения: факты все, голос один.
 
-        ``len(incidents) == 2`` — это КОНТРОЛЬ: подтверждает, что «факт
-        всегда» (Task 1.3a) уже работает и не является причиной падения теста.
-        ``len(voices) == 2`` — это ЦЕЛЬ: оба устройства используют ОДИН
-        context ("device_hub.create_worker") и ОДИН тип исключения
-        (RuntimeError) -> один и тот же ключ окна голоса -> второй голос
-        заглушён первым.
+        **Этот тест ЗЕЛЁН уже сегодня — и это его назначение.** Он не приёмка
+        новой работы, а сторож регрессии: свойство «2 факта / 1 голос» на этой
+        ветке даёт Task 1.3a, и миграция 1.3b обязана его не сломать. Красным
+        он станет ровно тогда, когда переписывание сайта потеряет факт или
+        расщепит окно, — то есть в том единственном случае, ради которого он
+        здесь и стоит. Зелёный прогон этого файла целиком доказательством
+        задачи не является; доказывают четыре его красных соседа.
+
+        Контроль здесь ценен сам по себе: ``len(incidents) == 2`` подтверждает,
+        что «факт всегда» (Task 1.3a) на этом сайте уже работает — то есть
+        красное ниже, если оно появится, будет про голос, а не про факт.
+
+        Про то, почему голосов ОДИН, а не два (модель тестера отвергнута), —
+        см. докстринг ``test_two_devices_of_one_failure_class_...`` выше.
         """
         plugin, _ctx, incidents, voices = self._prime_two_raising_devices(tmp_path)
 
@@ -229,7 +280,43 @@ class TestCreateWorkerRaisesFailureClass:
         assert len(incidents) == 2, (
             f"факт обязан учитываться на КАЖДЫЙ отказ (Task 1.3a) независимо от окна голоса: {incidents}"
         )
+        assert len(voices) == 1, (
+            f"оба устройства делят класс отказа и контекст -> один ключ окна -> ровно один голос: {voices}"
+        )
+
+    def test_two_failure_classes_in_one_context_do_not_silence_each_other(self, tmp_path: Path) -> None:
+        """Критерий B, ЦЕЛЕВАЯ сторона: разные КЛАССЫ отказа — разные ключи.
+
+        Это и есть опасность, ради которой задача заводит типы отказов. В одном
+        контексте ``device_hub.create_worker`` живут ДВА разных отказа:
+
+        * ``create_worker`` вернул ``False`` (отказ возвратом значения);
+        * ``create_worker`` бросил исключение.
+
+        Если второй фабрикуется общим ``RuntimeError`` — а именно так и выйдет
+        у реализатора, которому не дали типов, — ключ ``RuntimeError|context``
+        совпадёт у обоих, и отказ одного рода **молча заглушит** отказ другого
+        рода на всё окно. Сегодня тест красный по более грубой причине: ветка
+        ``False`` не заводит инцидента вовсе, поэтому голос ровно один.
+        """
+        plugin, ctx, incidents, voices = _make_plugin_with_real_health(tmp_path)
+        ctx.worker_manager = _MixedWorkerManager(raising_for="dev_dev_delta")
+        plugin._ctx = ctx
+
+        for dev_id in ("dev_gamma", "dev_delta"):
+            _prime_driver(plugin, dev_id)
+
+        plugin._ensure_device_workers()
+
+        assert len(incidents) == 2, (
+            f"оба отказа обязаны быть фактами плоскости ошибок, независимо от того, "
+            f"пришёл отказ исключением или возвратом значения: {incidents}"
+        )
+        classes = {type(exc).__name__ for exc, _payload in incidents}
+        assert len(classes) == 2, (
+            f"два разных рода отказа приехали ОДНИМ классом {classes} — ключ окна "
+            f"(класс, контекст) вырожден, и один род заглушит другой"
+        )
         assert len(voices) == 2, (
-            f"оба устройства делят один context и один тип исключения -> один ключ окна -> "
-            f"второй голос заглушён первым: {voices}"
+            f"разные классы отказа в одном контексте обязаны прозвучать оба: голосов {len(voices)}: {voices}"
         )
