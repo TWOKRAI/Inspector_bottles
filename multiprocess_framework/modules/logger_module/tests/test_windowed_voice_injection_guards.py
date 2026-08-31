@@ -14,6 +14,10 @@
   ЧЛЕНСТВО ключа в белом списке публикации, а не то, что величина растёт.
   Классический «контрол существует и мёртв».
 
+Ниже в этом же файле — сторожа находок РЕВЬЮ той же задачи (major 3 и minor 6):
+насыщенная должниками карта съедала только что созданный ключ, а карта серий
+не имела потолка вовсе. Оба свойства механизм заявлял и не охранял ничем.
+
 Почему сторож лока смотрит на ЗАНЯТОСТЬ, а не на потерю счёта: потеря
 инкремента под GIL недетерминирована, и тест на неё был бы флейком в одну
 сторону и вакуумом в другую. Взаимное исключение — это и есть то, что лок
@@ -29,6 +33,7 @@ import time
 import pytest
 
 from multiprocess_framework.modules.logger_module.core.windowed_voice import (
+    MAX_TRACKED_KEYS,
     WindowedVoices,
     reset_voice_counters,
     voice_counters,
@@ -155,4 +160,114 @@ class TestSuppressionReachesTheReadbackNumber:
 
         assert voice_counters()["windowed_suppressed"] == 0, (
             "три разных ключа голосят каждый, подавлений нет — счётчик обязан остаться нулём"
+        )
+
+
+class TestASaturatedMapDoesNotEatTheKeyItJustCreated:
+    """Ревью Task 1.4: карта из одних должников выбрасывала СВЕЖИЙ ключ.
+
+    Воспроизведение (дословно из вердикта ревью):
+
+        после заполнения: tracked = 512, windowed_suppressed = 512
+        пять подряд take('hot', 100.0) -> [(True,0)] * 5
+        tracked = 512, 'hot' в карте: False, windowed_keys_evicted = 5
+
+    То есть механизм отключался ровно в том состоянии, ради которого заведён:
+    пять голосов из пяти при окне 100 с. Причина точечная — жертвы сортируются
+    «бездолжники первыми», а только что вставленный ключ бездолжник по
+    построению и потому единственный кандидат своей группы.
+
+    Сегодня латентно (у роутера и реестра очередей кардинальность ключей —
+    единицы), но Task 1.3a приносит сюда ключ ``f"{тип исключения}|{context}"``
+    с неограниченным алфавитом.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_counters(self):
+        reset_voice_counters()
+        yield
+        reset_voice_counters()
+
+    @staticmethod
+    def _saturate_with_debtors(voices: WindowedVoices) -> None:
+        """Заполнить карту до потолка ключами, у которых есть НЕНАЗВАННЫЙ счёт.
+
+        Второй ``take`` по каждому ключу и делает его должником: первый голосит,
+        второй подавляется и растит ``entry[1]``. Без должников тест был бы
+        вакуумен — свежий ключ конкурировал бы с такими же бездолжниками и
+        уцелел бы по возрасту даже у сломанной версии.
+        """
+        for i in range(MAX_TRACKED_KEYS):
+            key = f"debtor-{i}"
+            voices.take(key, 100.0)
+            voices.take(key, 100.0)
+
+    def test_a_fresh_key_voices_once_and_stays_in_the_map(self) -> None:
+        voices = WindowedVoices()
+        self._saturate_with_debtors(voices)
+        assert voices.tracked_keys() == MAX_TRACKED_KEYS, "карта обязана стоять на потолке до начала опыта"
+
+        decisions = [voices.take("hot", 100.0) for _ in range(5)]
+
+        # Литералы, а не выражения от механизма: первый голос, дальше молчание с
+        # растущим счётом подавленных. Сломанная версия давала [(True, 0)] * 5.
+        assert decisions == [(True, 0), (False, 1), (False, 2), (False, 3), (False, 4)], (
+            f"свежий ключ не пережил собственную вставку: {decisions}"
+        )
+
+    def test_the_fresh_key_survives_while_a_debtor_is_evicted_instead(self) -> None:
+        """Вторая половина: жертва всё-таки нашлась, и это НЕ свежий ключ.
+
+        Без неё предыдущий тест проходил бы и у версии, которая просто перестала
+        подметать: потолок карты — тоже обещание, и разменивать одно на другое
+        молча нельзя.
+        """
+        voices = WindowedVoices()
+        self._saturate_with_debtors(voices)
+
+        voices.take("hot", 100.0)
+
+        assert voices.tracked_keys() == MAX_TRACKED_KEYS, "потолок карты обязан остаться взятым"
+        assert voices.take("hot", 100.0) == (False, 1), "'hot' обязан остаться в карте, а не родиться заново"
+        assert voice_counters()["windowed_keys_evicted"] == 1, (
+            f"ровно один ключ обязан быть выброшен, а не ноль и не пять: {voice_counters()}"
+        )
+
+
+class TestTheRepeatsMapIsBoundedToo:
+    """Ревью Task 1.4, minor 6: потолка у карты СЕРИЙ не было вовсе.
+
+    Замер ревью: 50 000 ``note_repeat`` разными ключами → ``len(_repeats) ==
+    50000`` при ``tracked_keys() == 0``. Шапка модуля при этом утверждала, что
+    «карта ключей ограничена», — верно для ``_state`` и неверно для ``_repeats``,
+    которой ``note_repeat`` живёт единолично.
+    """
+
+    def test_a_flood_of_one_off_keys_does_not_grow_the_map_without_bound(self) -> None:
+        voices = WindowedVoices()
+
+        for i in range(MAX_TRACKED_KEYS * 4):
+            voices.note_repeat(f"one-off-{i}")
+
+        assert len(voices._repeats) <= MAX_TRACKED_KEYS, (  # noqa: SLF001 — предмет проверки
+            f"карта серий выросла до {len(voices._repeats)} при потолке {MAX_TRACKED_KEYS}"  # noqa: SLF001
+        )
+
+    def test_the_long_series_is_the_last_thing_to_be_dropped(self) -> None:
+        """Пара-контроль: потолок не имеет права стирать то, ради чего ось заведена.
+
+        Без этой половины «карта ограничена» проходило бы и у версии, которая
+        просто чистит карту целиком, — то есть у версии, где серия обнуляется
+        шумом соседей и порог не берётся никогда.
+        """
+        voices = WindowedVoices()
+        for _ in range(50):
+            length = voices.note_repeat("the-symptom")
+        assert length == 50, f"серия обязана считаться подряд: {length}"
+
+        for i in range(MAX_TRACKED_KEYS * 4):
+            voices.note_repeat(f"one-off-{i}")
+
+        assert voices.repeats("the-symptom") == 50, (
+            f"длинная серия потеряна под наплывом одноразовых ключей: {voices.repeats('the-symptom')}"
         )

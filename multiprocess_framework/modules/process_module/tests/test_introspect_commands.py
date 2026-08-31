@@ -630,14 +630,34 @@ class TestIntrospectObservability:
         assert effective["logger"]["log_directory"] == "/logs"
 
     def test_missing_managers_are_omitted_not_faked(self) -> None:
-        """Нет менеджера — нет секции. Пустой словарь вместо честного отсутствия врал бы."""
+        """Нет менеджера — нет его секции. Пустая секция вместо отсутствия врала бы.
+
+        Ф1.4: ``effective`` перестал быть пустым у процесса без менеджеров, и это
+        не ослабление контракта, а его граница. ``voices`` — не показание
+        менеджера, а ДЕЙСТВУЮЩАЯ политика процесса
+        (``logger_module.core.windowed_voice``): держателей окон много, ни один
+        из них не менеджер наблюдаемости, и «получателя не передали» здесь не
+        бывает — политика существует в любом процессе с первой секунды.
+        Опусти её по отсутствию менеджера — и вердикт ``config.reload`` про эту
+        секцию отвечал бы ``unverifiable`` при ``checked=0``, то есть «никто не
+        смотрел», читаемое как «проверено» (блокер ревью Task 1.4).
+
+        Поэтому проверка стала СТРОЖЕ, а не слабее: перечисляем поимённо, что
+        менеджерных секций нет ни одной, и что ``voices`` — ровно политика.
+        """
         _svc, cm = _make()
 
         result = cm.dispatch("introspect.observability")
 
         assert result["success"] is True
         assert result["counters"] == {}
-        assert result["effective"] == {}
+        assert set(result["effective"]) == {"voices"}, (
+            f"у процесса без менеджеров в readback не имеет права появиться ничего, "
+            f"кроме процессной политики окон: {sorted(result['effective'])}"
+        )
+        # Литералы встроенных дефолтов, а не значения из механизма: иначе тест
+        # согласился бы с любым ответом, включая выдуманный.
+        assert result["effective"]["voices"] == {"default_window_sec": 5.0, "escalate_after_repeats": 3}
 
     def test_command_does_not_mutate_managers(self) -> None:
         """Read-команда: менеджер только опрашивается, дважды подряд — тот же ответ."""

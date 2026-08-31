@@ -12,6 +12,15 @@
 > `process_module/managers/observability_reload.py`. Точки расширения и якоря —
 > ADR-CRM-006 в [`../channel_routing_module/DECISIONS.md`](../channel_routing_module/DECISIONS.md).
 
+> **Окно голоса (`core/windowed_voice.py`, ADR-LOG-012).** Механизм «повторяющееся состояние
+> говорит раз в окно на ключ». Живёт здесь, а не в `base_manager`, вынужденно: база не может
+> импортировать `logger_module` на уровне модуля (цикл), а `QueueRegistry` пишет мимо миксина
+> вовсе. Ключевое свойство — `WindowedVoices.take()` возвращает **решение** и ничего не пишет за
+> вызывающего: факт (счётчик, запись в плоскость ошибок) учитывается ВСЕГДА, окном давится только
+> голос. Политика процесса — `observability.voices.default_window_sec` /
+> `escalate_after_repeats`, не литерал. Счётчики `windowed_suppressed` /
+> `windowed_keys_evicted` — процессные, публикуются `LoggerCore.get_stats()`.
+
 ---
 
 ## Архитектура и наследование

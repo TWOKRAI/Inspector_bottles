@@ -2160,6 +2160,14 @@ class BuiltinCommands:
                     result["events_applied"] = expanded["events"]
                 if expanded.get("flight") is not None:
                     result["flight_applied"] = expanded["flight"]
+                # Ф1.4 (M17): ТОТ ЖЕ блокер Б2, что тремя строками ниже у
+                # `observation_applied`, — применённая политика окон голоса
+                # считалась пересборкой и выбрасывалась, за пределами тестов её
+                # не читал никто. Форма — дословно соседние `events_applied` /
+                # `flight_applied`: третьего способа спросить одно и то же у
+                # оператора заводиться не должно.
+                if expanded.get("voices") is not None:
+                    result["voices_applied"] = expanded["voices"]
                 # Блокер Б2 ревью Ф4: отчёт «нет молчаливых потолков» считался
                 # `apply_observation_policy` и выбрасывался — за пределами тестов
                 # его не читал никто, а единственный сторож смотрел во внутренний

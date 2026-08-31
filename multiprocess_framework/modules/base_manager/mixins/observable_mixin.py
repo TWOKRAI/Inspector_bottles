@@ -197,13 +197,21 @@ class ObservableMixin(IObservableMixin):
         Свой, а не процессный: ключ ``"send_error:no_route"`` у двух роутеров
         в одном процессе — два разных события, и общий держатель заглушил бы
         второй голос первым.
+
+        Установка — через ``setdefault``, а не «проверил и присвоил». Прежняя
+        пара операций была check-then-set: два потока, впервые голосящие
+        одновременно, получали РАЗНЫХ держателей, и один из них тут же
+        становился сиротой вместе со своим счётом подавлений. Естественным
+        прогоном это не воспроизводится (ревью Task 1.4: 0 из 200), а при
+        искусственно расширенном окне — воспроизводится; ``dict.setdefault``
+        закрывает окно целиком и стоит одной строки. Лишний экземпляр в гонке
+        создаётся и выбрасывается — он пуст, терять в нём нечего.
         """
         holder = self.__dict__.get("_windowed_voices")
         if holder is None:
             from ...logger_module.core.windowed_voice import WindowedVoices
 
-            holder = WindowedVoices()
-            self.__dict__["_windowed_voices"] = holder
+            holder = self.__dict__.setdefault("_windowed_voices", WindowedVoices())
         return holder
 
     def should_voice(self, key: str, interval: Optional[float] = None) -> "tuple[bool, int]":

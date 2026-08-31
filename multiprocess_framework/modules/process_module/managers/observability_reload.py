@@ -42,6 +42,26 @@ from .observability_wiring import (
     apply_voices_policy,
 )
 
+#: Под-секции ``observability``, у которых путь КОНФИГА совпадает с путём
+#: READBACK'а один в один, — те, что идут мимо ``expand_observability`` (у них
+#: нет менеджера, в поля которого их надо было бы переводить) и потому обязаны
+#: быть названы в ``observability_verified`` явно. Не названная здесь секция
+#: исчезает из вердикта ЦЕЛИКОМ: не попадает ни в ``mismatches``, ни даже в
+#: ``unverifiable``, — а «ключ не упомянут» читается оператором как «всё в
+#: порядке».
+#:
+#: Константа, а не литерал в цикле, потому что одну и ту же дыру ревью закрывало
+#: ТРИЖДЫ, каждый раз дописывая одну секцию: ``events`` (блокер Б2 ревью Ф4),
+#: ``flight`` (Ф5), и на четвёртой — ``voices`` (Task 1.4) — она открылась снова.
+#: Здесь её сторожит ``test_identity_sections_cover_every_unexpanded_subsection``:
+#: он краснеет на СЛЕДУЮЩЕЙ под-секции схемы, забытой в этом перечне, — то есть
+#: до ревью, а не после.
+#:
+#: ``observation`` в перечень НЕ входит намеренно: у её ключей своя нормализация
+#: обоих берегов (``normalized_observation_section``), и тождественное сравнение
+#: по строкам ей не годится — см. ветку ниже по файлу.
+IDENTITY_SECTION_KEYS = (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY, VOICES_SECTION_KEY)
+
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
     from ..configs.observability_layers import ObservabilityLayers
@@ -357,6 +377,27 @@ def observability_effective(
             section = policy_fn()
             if section is not None:
                 out[OBSERVATION_SECTION_KEY] = section
+    # Ф1.4 (M17): окна голоса — БЕЗУСЛОВНО и без параметра, в отличие от соседей
+    # выше. У этой секции нет живого объекта, который надо было бы прокинуть
+    # сюда вызывающему: механизм процессный, политика существует в любом
+    # процессе с первой секунды, и «получателя не передали» здесь не бывает.
+    #
+    # Читается ДЕЙСТВУЮЩАЯ политика механизма, а не разрешённые слои — по тому
+    # же доводу, что у `events`/`flight`/`observation`: пересчёт из того же
+    # источника показывал бы согласие всегда, в том числе когда правка до
+    # механизма не доехала. Без этой ветки КАЖДАЯ правка `observability.voices`
+    # отвечала бы `unverifiable` при `checked=0` — воспроизведено ревью Task 1.4
+    # на живом стенде, и это ровно тот же блокер Б2, что уже был у `events`.
+    #
+    # Имена ключей — из СХЕМЫ (`ObservabilityVoicesConfig`), а не внутренние
+    # имена политики: путь конфига обязан совпасть с путём readback'а один в
+    # один, иначе тождественное сравнение ниже не найдёт свой путь.
+    from ...logger_module.core.windowed_voice import default_window_sec, escalate_after_repeats
+
+    out[VOICES_SECTION_KEY] = {
+        "default_window_sec": float(default_window_sec()),
+        "escalate_after_repeats": int(escalate_after_repeats()),
+    }
     return out
 
 
@@ -427,7 +468,15 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     # доводом. Обе идут мимо `expand_observability` (у них нет менеджера, в поля
     # которого их надо переводить), поэтому обе обязаны быть названы здесь —
     # иначе вердикт про них молчит, а молчание читается как «не проверено».
-    for section_key in (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY):
+    # Ф1.4: перечень стал ИМЕНОВАННОЙ КОНСТАНТОЙ (`IDENTITY_SECTION_KEYS`), а
+    # список у цикла кончился. Довод — история этого места: ту же дыру ревью
+    # закрывало трижды подряд, каждый раз дописывая ОДНУ секцию (`events` в Ф4,
+    # `flight` в Ф5, `observation` отдельной веткой ниже), и на четвёртой
+    # (`voices`) она открылась снова. Дописывание вручную — не починка, а
+    # очередь на повтор; сторож перечня стоит в
+    # `test_identity_sections_cover_every_unexpanded_subsection` и краснеет на
+    # СЛЕДУЮЩЕЙ под-секции схемы, которую забудут назвать здесь.
+    for section_key in IDENTITY_SECTION_KEYS:
         if isinstance(survived.get(section_key), dict):
             for key, want in survived[section_key].items():
                 expected[f"{section_key}.{key}"] = want

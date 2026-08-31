@@ -922,13 +922,26 @@ def apply_voices_policy(section: Any, svc: Any = None) -> Optional[Dict[str, Any
 
     Третья точка дороги ручки (после схемы и фасада) — та, без которой
     ``config.reload`` менял бы слой и не менял поведение.
+
+    **Возвращает имена полей СХЕМЫ, а не внутренние имена политики** — ровно как
+    сосед :func:`apply_event_selector`. Ревью Task 1.4 воспроизвело, чем это
+    было: ``default_window_sec`` уезжал наружу как ``window_sec``, и подача
+    собственного readback'а обратно сбрасывала окно в дефолт молча
+    (``17.25`` → ``5.0``), потому что ``ObservabilityVoicesConfig`` с
+    ``extra=ignore`` незнакомое имя просто съедает. Вторая ось выживала лишь
+    потому, что её имя случайно совпало. Round-trip «применить свой же ответ»
+    обязан быть тождественным: этим ответом пользуются и оператор, и вердикт.
     """
     knobs = _voices_knobs(section, svc)
     if knobs is None:
         return None
     from ...logger_module.core.windowed_voice import set_voices_policy
 
-    return set_voices_policy(window_sec=knobs["window_sec"], escalate_after=knobs["escalate_after"])
+    applied = set_voices_policy(window_sec=knobs["window_sec"], escalate_after=knobs["escalate_after"])
+    return {
+        "default_window_sec": float(applied["window_sec"]),
+        "escalate_after_repeats": int(applied["escalate_after_repeats"]),
+    }
 
 
 def event_plane_report(svc: Any) -> Dict[str, Any]:
