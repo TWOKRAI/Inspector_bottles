@@ -440,6 +440,7 @@ class ErrorManager(LoggerCore, IErrorManager):
         message: str = "",
         module: str = "errors",
         include_stacktrace: Optional[bool] = None,
+        **context: Any,
     ) -> None:
         """Логировать исключение с traceback.
 
@@ -448,6 +449,8 @@ class ErrorManager(LoggerCore, IErrorManager):
             message:           Дополнительный контекст.
             module:            Модуль-источник.
             include_stacktrace: Переопределить глобальный флаг (None → из конфига).
+            **context:         Прочие поля контекста записи (Н-14) — едут туда же,
+                куда их кладёт обычный ``logger.error(msg, module=…, ключ=…)``.
         """
         full_message = f"{message}: {exc}" if message else str(exc)
         use_trace = include_stacktrace if include_stacktrace is not None else self._include_stacktrace
@@ -456,20 +459,40 @@ class ErrorManager(LoggerCore, IErrorManager):
             if tb and tb.strip() != "NoneType: None":
                 full_message += f"\n{tb}"
 
-        self.error(full_message, module=module)
+        self.error(full_message, module=module, **context)
 
     def track_error(
         self,
         error: BaseException,
         context: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Интеграция с ObservableMixin._track_error. Логирует через log_exception."""
-        ctx = context or {}
-        message = ctx.get("message", ctx.get("context", ""))
+        """Интеграция с ObservableMixin._track_error. Логирует через log_exception.
+
+        Н-14 (приёмка F1): прежняя редакция читала из контекста ДВА ключа
+        (``module`` и ``message``/``context``) и молча выбрасывала остальные —
+        инцидент приезжал к подписчику с ``context={}``, беднее лог-дороги той
+        же пары, у которой произвольные kwargs доезжают («обычная запись» на
+        репро несёт ``{recipe, roi}``). Проглоченным оказывался ровно тот
+        контекст, ради которого сайт его и передавал: где именно случилось.
+
+        Что происходит с ключами теперь:
+
+        * ``module`` — штамп источника, уходит полем записи (штамп ставит
+          :meth:`ObservableMixin._error_context`, здесь только читается);
+        * ``message`` — человекочитаемая приставка к тексту исключения;
+        * ``context`` — сайт-тег: становится приставкой, ЕСЛИ ``message`` не
+          задан, и при этом **остаётся в контексте записи** — иначе фильтр по
+          сайту работал бы только глазами, по тексту сообщения;
+        * всё прочее — контекст записи как есть.
+        """
+        ctx = dict(context or {})
+        module = ctx.pop("module", "unknown")
+        message = ctx.pop("message", None)
+        if message is None:
+            message = ctx.get("context", "")
         if isinstance(message, dict):
             message = str(message)
-        module = ctx.get("module", "unknown")
-        self.log_exception(error, message=message or "", module=module)
+        self.log_exception(error, message=message or "", module=module, **ctx)
 
     def get_stats(self) -> Dict[str, Any]:
         """Статистика ErrorManager — расширяет LoggerCore.get_stats()."""

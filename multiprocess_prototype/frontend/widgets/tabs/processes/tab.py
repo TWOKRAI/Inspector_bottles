@@ -40,7 +40,10 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
-    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
+    from multiprocess_framework.modules.frontend_module.state import (
+        TelemetryPoller,
+        TelemetryViewModel,
+    )
 
 
 def _layout_factory() -> DiffScrollTabLayout:
@@ -69,6 +72,7 @@ class ProcessesTab(BaseListNavTab):
         topology_bridge: "TopologyBridge | None" = None,
         bindings: "GuiStateBindings | None" = None,
         telemetry: "TelemetryViewModel | None" = None,
+        telemetry_poller: "TelemetryPoller | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         self._services = services
@@ -76,6 +80,10 @@ class ProcessesTab(BaseListNavTab):
         # Ф1 (gui-telemetry-read-model 1.3): локальный read-model телеметрии,
         # прокидывается в панели (VM-режим вместо bind на телеметрию).
         self._telemetry = telemetry
+        # Task 3.3: опрос уровней. Вкладка — не владелец, а ВЫКЛЮЧАТЕЛЬ: двигает
+        # set_active по видимости и set_targets по составу показанного. None →
+        # вкладка живёт на одном push, как до 3.3.
+        self._telemetry_poller = telemetry_poller
         self._presenter = ProcessesPresenter(
             services,
             command_sender=command_sender,
@@ -139,6 +147,7 @@ class ProcessesTab(BaseListNavTab):
             topology_bridge=runtime.topology_bridge,
             bindings=runtime.bindings,
             telemetry=runtime.telemetry,
+            telemetry_poller=runtime.telemetry_poller,
         )
 
     # ------------------------------------------------------------------ #
@@ -193,7 +202,49 @@ class ProcessesTab(BaseListNavTab):
         self._detail_card = getattr(single, "_card", None) if single else None
         self._detail_table = getattr(single, "_detail_table", None) if single else None
 
+        # Состав показанного изменился → изменился и состав опрашиваемого.
+        self._sync_poll_targets()
         self._update_buttons_state()
+
+    # ------------------------------------------------------------------ #
+    #  Опрос уровней по видимости (Task 3.3)                               #
+    # ------------------------------------------------------------------ #
+
+    def _sync_poll_targets(self) -> None:
+        """Опрашивать ровно то, что сейчас ПОКАЗАНО.
+
+        Вид «Все процессы» показывает карточку каждого процесса — цели все;
+        подвкладка процесса показывает один — цель одна. Опрашивать невидимое
+        значит платить IPC за числа, которых никто не читает.
+        """
+        poller = self._telemetry_poller
+        if poller is None:
+            return
+        if self._selected_process is None:
+            poller.set_targets(self._presenter.get_process_names())
+        else:
+            poller.set_targets([self._selected_process])
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt-хук
+        """Вкладка показана → опрос включается (и сразу делает первый запрос)."""
+        super().showEvent(event)
+        if self._telemetry_poller is not None:
+            self._sync_poll_targets()
+            self._telemetry_poller.set_active(True)
+
+    def hideEvent(self, event) -> None:  # noqa: N802 — Qt-хук
+        """Вкладка скрыта (переключение таба, закрытие окна) → опрос молчит.
+
+        ``set_active(False)``, а НЕ ``stop()``: скрытие — обратимое событие
+        (пользователь переключил таб и вернётся), а ``stop()`` терминален.
+        Вызвав его здесь, мы бы убили опрос на первом же уходе с вкладки, и
+        вернувшийся пользователь смотрел бы на замершие числа без единой ошибки
+        в логе. Терминальная остановка принадлежит владельцу поллера —
+        composition root гасит его на ``aboutToQuit`` (``app.py``).
+        """
+        super().hideEvent(event)
+        if self._telemetry_poller is not None:
+            self._telemetry_poller.set_active(False)
 
     # ------------------------------------------------------------------ #
     #  Actions / Buttons                                                   #

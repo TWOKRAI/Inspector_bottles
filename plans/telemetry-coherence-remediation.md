@@ -301,7 +301,9 @@ telemetry-publish-control); изменение дефолтных central-пра
 >   чисты по коду. Реальная находка — персист хранил лишь ПОСЛЕДНЮЮ дельту (при ≥2 merge respawn терял
 >   предыдущие) → исправлено аккумуляцией `deep_merge` `555e6caa`.
 >
-> **Follow-up тикеты (не блок):** (1) шаг 3 Task 3.2 — watcher fan-out publish с per-child override-мержем;
+> **Follow-up тикеты (не блок):** (1) шаг 3 Task 3.2 — watcher fan-out publish с per-child override-мержем
+> — **✅ ЗАКРЫТ 5.11.f (L1-конверт)**, см. строку W1 в таблице долгов; наследник W2 принят планом
+> [`telemetry-stage6`](telemetry-stage6.md) 3.4;
 > (2) known-gap смешанных merge→replace-цепочек в персисте (replace сбрасывает накопленное — приемлемо);
 > (3) minor pre-existing: серверная семантика `state.unsubscribe` для async/реактивированных covered-подписок
 > (sub_id локальный uuid4 vs серверный — потенциальный orphan, унаследован из штатного async-subscribe, не от 3.3).
@@ -428,7 +430,7 @@ README, STATUS, tests — правило проекта №2), `multiprocess_pro
 |---|---|
 | publisher-plane full-apply (`telemetry_set` пересобирает секцию целиком) | **Task 1.1** (mode=merge закрывает обе плоскости) |
 | две плоскости троттла с равными дефолтами каскадируют (residual #6) | **Task 1.3** |
-| file-watch fan-out publisher-gate детям | **Task 3.2** (шаг 3) |
+| file-watch fan-out publisher-gate детям | **Task 3.2** (шаг 3) → **✅ ЗАКРЫТ 5.11.f** (L1-конверт; подтверждено сверкой кодом при написании спеки [`telemetry-stage6`](telemetry-stage6.md) §1, 2026-08-12) |
 | runtime-дельта теряется при hot-swap (residual #7) | **Task 3.2** (шаги 1–2) |
 | Task 3.1 gui-read-model: дуальный VM/legacy-путь не вырезан | **Task 3.5** |
 
@@ -455,7 +457,7 @@ Windows test-debt (2 фейла app_module) — вне скоупа, отдел�
 | # | Sev | Что | Куда |
 |---|---|---|---|
 | W1 | MED | ~~Watcher не фанит publish-plane детям (шаг 3 Task 3.2)~~ — **✅ ЗАКРЫТ 5.11.f (L1-конверт)**: fan-out watcher'а → `config.reload` → ребёнок перечитывает свой файл и поднимает ОБЕ секции + восстанавливает per-process `telemetry_override` (`builtin_commands.py:1268-1287, :1567`). Проверено сквозным ревью Ф5 2026-08-01 ([отчёт](../docs/reviews/2026-08-01_f5-cross-review.md), C-5г). Оговорка: рассылка fire-and-forget — отказ ребёнка виден только числом `reached` в логе оркестратора | ✅ закрыт |
-| W2 | MED | Адресные per-process runtime-дельты не персистятся → respawn теряет точечную правку | вместе с W1 (per-child overlay) |
+| W2 | MED | Адресные per-process runtime-дельты не персистятся → respawn теряет точечную правку | ~~вместе с W1~~ → **принят задачей 3.4 плана [`telemetry-stage6`](telemetry-stage6.md)** (2026-08-12; там же — обязательное живое репро ДО правки и ADR о развороте объявленного решения) |
 | W3 | LOW/MED | cap-детекция матчит по суффиксу-листу → wildcard-лист операторского правила невидим (возможен тихий срез) | WARNING или абзац в ADR-PM-017 |
 | W4 | LOW | `_stale_age_threshold` = K×max(интервал) глобально — редкое правило 60с раздувает порог гигиены | per-rule порог (опц.) |
 | W5 | LOW→страт. | `GATED_METRICS` закрыт для приложений — своя метрика приложения = «опечатка»-WARNING; предел универсальности конструктора | стратегический тикет |

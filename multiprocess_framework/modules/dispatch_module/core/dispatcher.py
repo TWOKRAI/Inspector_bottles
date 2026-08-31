@@ -65,7 +65,11 @@ class Dispatcher(BaseManager, ObservableMixin):
         # С поддержкой логирования и статистики
         dispatcher = Dispatcher(
             "my_dispatcher",
-            managers={'logger': logger_manager, 'statistics': stats_manager}
+            # Канон — 'stats': self._record_metric адресует именно его. Имя
+            # 'statistics' принимает только proxy_creator (публичные прокси), и
+            # компонент по прежней редакции докстринга терял встроенные метрики
+            # молча — в manager_call_failures (Н-6-сосед приёмки F1).
+            managers={'logger': logger_manager, 'stats': stats_manager}
         )
     """
 
@@ -336,7 +340,12 @@ class Dispatcher(BaseManager, ObservableMixin):
         Returns:
             Результат работы обработчика или словарь с ошибкой
         """
-        start_time = time.time()
+        # 2.2 (Р2.2-10): часы длительности — perf_counter. Замеряемый интервал
+        # короче шага time.time()/monotonic на Windows (~15.6 мс), и такие
+        # разности ложатся на сетку часов: по бакетам они разложились бы
+        # двумя столбиками (0.0 и 0.0156) вместо распределения. Значение
+        # используется только как разность — эпоха perf_counter не важна.
+        start_time = time.perf_counter()
 
         try:
             key = message.get(key_field)
@@ -354,7 +363,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             if explicit_scenario and self._scenario_mgr.has_scenario(explicit_scenario):
                 self._log_debug(f"Executing scenario '{explicit_scenario}'", module=LOG_SOURCE)
                 result = self.dispatch_scenario(explicit_scenario, message, data_field)
-                duration = time.time() - start_time
+                duration = time.perf_counter() - start_time
                 self._record_timing(
                     "dispatcher.dispatch.scenario.duration",
                     duration,
@@ -366,7 +375,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             if self._scenario_mgr.has_scenario(key):
                 self._log_debug(f"Executing scenario '{key}'", module=LOG_SOURCE)
                 result = self.dispatch_scenario(key, message, data_field)
-                duration = time.time() - start_time
+                duration = time.perf_counter() - start_time
                 self._record_timing("dispatcher.dispatch.scenario.duration", duration, tags={"scenario": key})
                 return result
 
@@ -379,7 +388,7 @@ class Dispatcher(BaseManager, ObservableMixin):
                 if self._scenario_mgr.has_scenario(key):
                     self._log_debug(f"Executing scenario '{key}' via chain strategy", module=LOG_SOURCE)
                     result = self.dispatch_scenario(key, message, data_field)
-                    duration = time.time() - start_time
+                    duration = time.perf_counter() - start_time
                     self._record_timing("dispatcher.dispatch.scenario.duration", duration, tags={"scenario": key})
                     return result
                 error_msg = f"No scenario '{key}' found for chain strategy"
@@ -403,7 +412,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             handler_data = message if handler_info.expects_full_message else message.get(data_field, {})
             result = handler_info.handler(handler_data)
 
-            duration = time.time() - start_time
+            duration = time.perf_counter() - start_time
             self._log_debug(f"Dispatch completed for key '{key}' in {duration:.3f}s", module=LOG_SOURCE)
             self._record_timing("dispatcher.dispatch.duration", duration, tags={"key": key})
             self._record_metric("dispatcher.dispatch.success", tags={"key": key})
@@ -411,7 +420,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             return result
 
         except Exception as e:
-            duration = time.time() - start_time
+            duration = time.perf_counter() - start_time
             error_msg = f"Dispatch failed: {str(e)}"
             self._log_error(error_msg, module=LOG_SOURCE, exception=str(e))
             self._track_error(e, {"key": key if "key" in locals() else None, "message": str(message)})

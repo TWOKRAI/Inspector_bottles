@@ -4,7 +4,12 @@
 from .observability_tabs import ObservabilityTabs
 from .record_history_panel import RecordHistoryPanel
 from .record_history_presenter import RecordHistoryPresenter
-from .record_source import RecordSource, open_default_source
+from .record_source import (
+    RecordSource,
+    SearchableRecordSource,
+    open_default_source,
+    search_unavailability,
+)
 from .tail_activator import ObservabilityTailActivator
 
 __all__ = [
@@ -13,5 +18,7 @@ __all__ = [
     "RecordHistoryPanel",
     "RecordHistoryPresenter",
     "RecordSource",
+    "SearchableRecordSource",
     "open_default_source",
+    "search_unavailability",
 ]

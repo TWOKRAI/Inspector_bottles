@@ -27,10 +27,13 @@ from ..configs.observability_config import expand_observability
 from ..configs.observability_layers import (
     LAYER_APP,
     LAYER_RECIPE,
+    ORCHESTRATOR_PROCESS_NAME,
     TELEMETRY_KEY,
     TELEMETRY_LAYERED_SUBSECTION,
     layer_merge,
 )
+from .observability_flight import FLIGHT_SECTION_KEY, apply_flight_recorder
+from .observability_wiring import EVENTS_SECTION_KEY, apply_event_selector
 
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
@@ -116,6 +119,8 @@ def observability_effective(
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    event_selector: Any = None,
+    flight_recorder: Any = None,
 ) -> Dict[str, Any]:
     """Фактическое (readback) состояние менеджеров наблюдаемости — не эхо запроса.
 
@@ -173,6 +178,16 @@ def observability_effective(
         unknown_fn = getattr(logger, "unknown_scopes", None)
         if callable(unknown_fn):
             section["unknown_scopes"] = unknown_fn()
+        # Задача 4.4: действующие параметры дросселя. Без них включение ручки на
+        # живой системе давало вердикт ``unverifiable`` — «подано, подтвердить
+        # нечем» (воспроизведено зондом ``probe_4_4_sampler_live``): ни один путь
+        # ``logger.sampling_*`` в readback не приходил, а счётчик подавленных
+        # отвечает на другой вопрос. Спрашиваем менеджер, а он — сам процессор:
+        # запрошенное и действующее здесь расходятся законно (потолок обрезан
+        # ошибками), и показать обязаны действующее.
+        sampling_fn = getattr(logger, "sampling_readback", None)
+        if callable(sampling_fn):
+            section.update(sampling_fn())
         section.update(_sink_readback(logger))
         section.update(_idle_sinks(logger))
         out["logger"] = section
@@ -204,6 +219,28 @@ def observability_effective(
         section.update(_idle_sinks(stats))
         if section:
             out["stats"] = section
+    if event_selector is not None:
+        # Ф4 (4.1): отбор широких записей читается у ЖИВОГО селектора — той же
+        # дорогой, что темп статистики выше. Без этой ветки ручка применялась, но
+        # оставалась НЕПОДТВЕРЖДАЕМОЙ: `config_reload_verified` на всех восьми
+        # процессах живого стенда отвечал `unverifiable` при `checked=0`, потому
+        # что сравнивать запрошенное было не с чем (замер 2026-08-16). Ручка,
+        # которую нельзя подтвердить, неотличима от неприменённой — тот же урок
+        # 3.4, что и у предела строки снапшота.
+        knobs = getattr(event_selector, "knobs", None)
+        if isinstance(knobs, tuple) and len(knobs) == 2:
+            out["events"] = {"first_n": int(knobs[0]), "every_mth": int(knobs[1])}
+    if flight_recorder is not None:
+        # Ф5 (5.1): ручки дампа — той же дорогой и по тому же уроку, что
+        # `events` строкой выше. Ручка, которую нельзя подтвердить, неотличима
+        # от неприменённой: `config_reload_verified` отвечал бы `unverifiable`
+        # при `checked=0`, и правка «включить flight recorder» уходила бы к
+        # оператору без вердикта.
+        from .observability_flight import flight_effective  # локально: только этой ветке
+
+        section = flight_effective(flight_recorder)
+        if section is not None:
+            out[FLIGHT_SECTION_KEY] = section
     return out
 
 
@@ -243,22 +280,41 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     была бы вторым местом, где оно живёт.
     """
     from ..configs.observability_config import ObservabilityConfig, expand_observability
-    from ..configs.observability_layers import flatten_section
+    from ..configs.observability_layers import flatten_section, unknown_section_keys
 
     section = requested if isinstance(requested, dict) else {}
-    flat_request = flatten_section(section)
 
-    # Неизвестные ключи = не выжившие в round-trip через схему. Ключ, заданный
-    # значением по умолчанию, выживает — поэтому «совпал с дефолтом» и «опечатка»
-    # не путаются.
+    # Неизвестные ключи считает ОБЩИЙ сверщик (задача 5.4): та же функция стоит
+    # на границе записи в слой сессии, где отвечает отказом. Пока расчёт был
+    # написан ЗДЕСЬ, он и жил только здесь — то есть имя ключа судил вердикт
+    # ПОСЛЕ того, как ключ уже лёг в L3 со сроком (находки Н-C/Н-D приёмки F2).
+    # Две копии разошлись бы на первом же новом поле схемы, а «неизвестный ключ»
+    # значило бы разное на двух дорогах одной команды.
+    unknown = unknown_section_keys(section)
     try:
         survived = ObservabilityConfig.model_validate(section).model_dump(exclude_unset=True)
     except Exception:  # noqa: BLE001 — невалидную секцию судит применение, не вердикт
         survived = section
-    unknown = sorted(set(flat_request) - set(flatten_section(survived)))
 
     baseline = flatten_section(expand_observability({}))
     expected = flatten_section(expand_observability(survived))
+    # Ф4 (4.1): секция `events` — единственная, чей путь конфига СОВПАДАЕТ с
+    # путём readback'а один в один (`events.first_n` → `events.first_n`), потому
+    # что у неё нет менеджера, в поля которого её надо переводить. Она идёт мимо
+    # `expand_observability` (как `documents` и `session_ttl_sec`) — и потому
+    # мимо `expected`, а значит и мимо вердикта: живой стенд 2026-08-16 отвечал
+    # `unverifiable` при `checked=0` на всех восьми процессах, хотя ручка
+    # применялась. Тождественное соответствие — не «вторая таблица перевода»,
+    # которую запрещает докстринг выше: переводить здесь нечего, и разойтись
+    # этой строке не с чем.
+    # Ф5 (5.1): `flight` — вторая под-секция с тем же свойством и тем же
+    # доводом. Обе идут мимо `expand_observability` (у них нет менеджера, в поля
+    # которого их надо переводить), поэтому обе обязаны быть названы здесь —
+    # иначе вердикт про них молчит, а молчание читается как «не проверено».
+    for section_key in (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY):
+        if isinstance(survived.get(section_key), dict):
+            for key, want in survived[section_key].items():
+                expected[f"{section_key}.{key}"] = want
     flat_effective = flatten_section(effective if isinstance(effective, dict) else {})
 
     mismatches: list = []
@@ -407,6 +463,31 @@ PLANE_COUNTER_KEYS: tuple = (
     "errors_floor_write_failures",
     "error_floor",
     "metrics_count",
+    # 2.2 — потолок кардинальности. В ``LOSS_COUNTER_KEYS`` эти счётчики НЕ
+    # входят (решение Р2.2-8: те пять классов описывают стык «менеджер →
+    # канал» и общие для трёх плоскостей, а кардинальность — потеря на ВХОДЕ и
+    # существует только у статистики; в общем кортеже она объявила бы вечный
+    # ноль у логгера и у ошибок). Но «не в том реестре» не значит «невидима»:
+    # видимость обеспечивается ЗДЕСЬ, и именно это требовалось проверить
+    # поимённо. Имена опущенных серий едут рядом со счётчиками, потому что
+    # «порог-сумма прячет слепоту» — по одному числу нельзя понять, ЧТО
+    # перестало наблюдаться.
+    # Серии и эмиссии — РАЗНЫЕ величины и оба публикуются: «сколько серий не
+    # пущено» отвечает за арифметику снапшота, «сколько эмиссий отвергнуто» —
+    # за темп. Признак ``*_is_lower_bound`` едет РЯДОМ со своим числом: оценка,
+    # опубликованная без пометки, читается как точное число.
+    "series_dropped",
+    "observations_dropped",
+    "series_dropped_is_lower_bound",
+    "dropped_series",
+    # У окна публикуются ДВЕ величины из четырёх, и это решение, а не забывчивость:
+    # `series` и признак оценки снизу у стража окна живут до ближайшего
+    # `take_report()`, а `observations` и имена — за срок процесса. Одноимённая
+    # четвёрка с разными периодами читается неверно молча (пробовали — откатили,
+    # см. `StatsManager.get_stats`). «Сколько серий опущено за окно» едет в самой
+    # записи снапшота, где период однозначен.
+    "window_observations_dropped",
+    "window_dropped_series",
     "errors",
     # ``flush_failed`` здесь БЫЛ и удалён (F5, вердикт по Ф0.3): верхним уровнем
     # его не публикует ни один менеджер — единственный публикатор
@@ -604,6 +685,8 @@ def apply_observability_layers(
     telemetry_boot: Optional[Dict[str, Any]] = None,
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
+    event_selector: Any = None,
+    flight_recorder: Any = None,
     origin: str,
     record_rebuild: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
@@ -648,6 +731,18 @@ def apply_observability_layers(
     молчащий отказ здесь — задокументированный на этом проекте класс «следствие
     без причины».
 
+    Ф4 (4.1) — **пятая плоскость в том же стеке.** ``event_selector`` необязателен
+    ровно так же, как менеджеры: нет получателя — ручки отбора широких записей
+    пропускаются. Селектор создаётся сшивкой на старте и живёт весь процесс,
+    поэтому здесь он ПЕРЕНАСТРАИВАЕТСЯ, а не пересоздаётся: счёт по родам обязан
+    пережить правку конфига (тот же довод, что у ``RateSampler.configure``).
+
+    Ф5 (5.1) — **шестая плоскость, дословно на тех же правах.** ``flight_recorder``
+    необязателен, перенастраивается, а не пересоздаётся, и обязан быть передан
+    на ВСЕХ дорогах пересборки. Находка №1 задачи 4.1 была ровно про это: ручка
+    действовала через ``config.reload`` и НЕ действовала через правку файла, а
+    обе дороги отвечали «применено».
+
     ``record_rebuild=False`` — ровно ОДИН законный вызывающий: такт подметальщика
     (:mod:`.observability_ttl`). Он пишет за весь такт одну запись ``expire``,
     которая уже несёт исход пересборки (``ok`` / ``error`` / ``log_level``), и
@@ -683,6 +778,8 @@ def apply_observability_layers(
                 telemetry_boot=telemetry_boot,
                 store_throttle=store_throttle,
                 boot_rules=boot_rules,
+                event_selector=event_selector,
+                flight_recorder=flight_recorder,
             )
             # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
             # была вызвана. Иначе после неудачного возврата и последующего успешного
@@ -725,6 +822,8 @@ def _rebuild_and_apply(
     telemetry_boot: Optional[Dict[str, Any]] = None,
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
+    event_selector: Any = None,
+    flight_recorder: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Тело пересборки (вызывается под локом стека — см. вызывающего)."""
     resolved = layers.resolve()
@@ -763,6 +862,24 @@ def _rebuild_and_apply(
         stats.reconfigure(expanded["stats"])
         _remark_operator_disabled_sinks(stats, layers, ("stats", "channels"))
 
+    # Ф4 (4.1), третья точка дороги ручки: живой селектор перенастраивается ИЗ
+    # ТЕХ ЖЕ разрешённых слоёв, что прочитала сшивка на старте. Без этой ветки
+    # `config.reload` менял бы слой и не менял поведение — правка была бы видна в
+    # провенансе и не действовала бы, ровно тот класс, который лечит правило
+    # трёх точек. Секция `events` при этом остаётся в `resolved` (в отличие от
+    # `telemetry`, которую снимают выше): `ObservabilityConfig` её знает, а
+    # `expand_observability` не раскладывает — как `documents` и `session_ttl_sec`.
+    events_applied = apply_event_selector(event_selector, resolved.get(EVENTS_SECTION_KEY))
+    if events_applied is not None:
+        expanded[EVENTS_SECTION_KEY] = events_applied
+
+    # Ф5 (5.1), та же третья точка у соседней под-секции. Секция `flight`
+    # остаётся в `resolved` по той же причине, что `events`: `ObservabilityConfig`
+    # её знает, а `expand_observability` не раскладывает.
+    flight_applied = apply_flight_recorder(flight_recorder, resolved.get(FLIGHT_SECTION_KEY))
+    if flight_applied is not None:
+        expanded[FLIGHT_SECTION_KEY] = flight_applied
+
     telemetry_applied = _apply_telemetry_from_layers(
         telemetry_layered,
         layers=layers,
@@ -792,16 +909,29 @@ def telemetry_targets(svc: Any) -> Dict[str, Any]:
     аргументе — и возврат по сроку применялся бы не туда, куда правка.
 
     ``telemetry_boot`` читается ТЕМ ЖЕ способом, что и на старте
-    (``ProcessHeartbeat._build_telemetry_gate`` → ``get_config("telemetry")``):
+    (``ProcessHeartbeat._build_telemetry_gate`` → :func:`read_process_config`):
     L0 обязан совпадать с тем, из чего собран загрузочный гейт, иначе «вернуть
     как было» вернёт не то, что было.
 
+    **Ред. 2026-08-18.** Здесь стоял голый ``get_config(TELEMETRY_KEY, None)`` — тот
+    же плоский читатель, что и в загрузочном гейте, и обещание выше выполнялось
+    буквально: оба ОДИНАКОВО не видели вложенный адрес ``config.telemetry``, под
+    которым ключ приезжает дочернему процессу (весь ``proc_dict`` идёт конфигом).
+    Обе точки переведены на :func:`read_process_config` ОДНОВРЕМЕННО и намеренно:
+    почини одну — и обещание рвётся молча, а возврат по сроку отдаст не тот L0, из
+    которого собран гейт. Живое измерение дефекта — докстринг
+    ``ProcessHeartbeat._build_telemetry_gate``.
+
+    ``state_throttle_rules`` остаётся ПЛОСКИМ читателем сознательно: это ключ
+    оркестратора (``orchestrator_config``, ``backend/launch.py``), у детей его нет.
+
     Центрального троттла здесь нет намеренно — см. ``TELEMETRY_LAYERED_SUBSECTION``.
     """
+    from ..configs.observability_layers import read_process_config
     from .telemetry_reload import resolve_store_throttle
 
     get_config = getattr(svc, "get_config", None)
-    raw = get_config(TELEMETRY_KEY, None) if callable(get_config) else None
+    raw = read_process_config(svc, TELEMETRY_KEY) if callable(get_config) else None
     rules = get_config("state_throttle_rules", None) if callable(get_config) else None
     return {
         "heartbeat": getattr(svc, "_heartbeat", None),
@@ -813,6 +943,58 @@ def telemetry_targets(svc: Any) -> Dict[str, Any]:
         "store_throttle": resolve_store_throttle(svc),
         "boot_rules": dict(rules) if isinstance(rules, dict) else None,
     }
+
+
+#: Адрес исполнителя каждой под-секции ``telemetry`` — текстом, пригодным для
+#: ответа оператору. Task 3.1: «нет получателя» обязано называть, КУДА слать, а
+#: не только «здесь нельзя»: без адреса оператор узнаёт о промахе по отсутствию
+#: эффекта, то есть позже всего.
+#:
+#: Имя оркестратора берётся из :data:`ORCHESTRATOR_PROCESS_NAME`, а не пишется
+#: строкой второй раз: переименуй его — и зашитый литерал остался бы врать
+#: оператору, а тест приёмки (``assert "ProcessManager" in reason``) остался бы
+#: зелёным, потому что сверял бы литерал с литералом.
+TELEMETRY_SUBSECTION_ADDRESS: Dict[str, str] = {
+    "throttle": (
+        "центральный store-троттл живёт только на оркестраторе — "
+        f"адресуйте под-секцию процессу {ORCHESTRATOR_PROCESS_NAME}"
+    ),
+    "publish": (
+        "publisher-gate собирает ProcessHeartbeat, а у этого процесса heartbeat не поднят — применять publish некому"
+    ),
+}
+
+
+def telemetry_unaddressable(svc: Any, section: Any) -> list[str]:
+    """Под-секции ``telemetry``, у которых на ЭТОМ процессе нет исполнителя.
+
+    Task 3.1. Резолв получателей — ТОТ ЖЕ :func:`telemetry_targets`, которым
+    пользуется применение: разойдись они хоть в одном аргументе, и дверь
+    отказывала бы там, где применение справилось (или наоборот — пропускала
+    туда, где применить некому, ровно тот дефект, который задача закрывает).
+
+    Судится ПРИСУТСТВИЕ ключа, а не истинность значения: ``publish: null`` —
+    законная команда «снять гейт», и снимать его тоже некому, если heartbeat'а
+    нет. Тем же правилом Г3 («ключ есть → владею») здесь уже живут
+    :func:`_apply_telemetry_from_layers` и ``_cmd_telemetry_reconfigure``.
+
+    Возвращает имена под-секций в стабильном порядке (``throttle`` перед
+    ``publish``) — ответ команды не должен менять текст от порядка ключей во
+    входном словаре.
+    """
+    if not isinstance(section, dict):
+        return []
+    targets = telemetry_targets(svc)
+    receivers = {"throttle": targets.get("store_throttle"), "publish": targets.get("heartbeat")}
+    return [sub for sub in ("throttle", "publish") if sub in section and receivers[sub] is None]
+
+
+def format_telemetry_unaddressable(svc: Any, missing: list[str]) -> str:
+    """Собрать причину отказа/голоса по списку под-секций без исполнителя."""
+    where = getattr(svc, "name", "?")
+    return "; ".join(
+        f"telemetry.{sub} не применяется на процессе {where!r}: {TELEMETRY_SUBSECTION_ADDRESS[sub]}" for sub in missing
+    )
 
 
 def apply_telemetry_layers(
@@ -1004,15 +1186,27 @@ def _apply_throttle_from_layers(
     появится — это отдельное решение, а не побочный смысл пустого словаря.
     """
     delta = layered.get("throttle") if isinstance(layered, dict) else None
-    if isinstance(delta, dict):
-        layers.throttle_owned = True
-    if not layers.throttle_owned:
+    has_delta = isinstance(delta, dict)
+    if not (has_delta or layers.throttle_owned):
         # Слои дельты не держали ни разу — троттлом владеет файл и его watcher.
+        # Проверка стоит ПЕРВОЙ намеренно: процесс без получателя И без дельты
+        # обязан молчать, а не отчитываться `throttle: False` на каждый reload.
         return None
     if store_throttle is None:
         # Получателя нет (обычный процесс, а не оркестратор) — и это ОТВЕТ, а не
         # молчание: оператор, не увидевший поля, решил бы, что правило применено.
+        #
+        # Task 3.1: возврат стоит ДО присвоения `throttle_owned`, и это несущий
+        # порядок, а не стиль. Прежде владение захватывалось по одному факту
+        # «в слое лежит dict», то есть РАНЬШЕ, чем выяснялось, что применять
+        # некому: плоскость оказывалась во владении слоёв навсегда (флаг
+        # липкий), хотя ни одна дельта никогда не доезжала до исполнителя. Ответ
+        # при этом можно было сделать честным одним текстом — и слот всё равно
+        # остался бы занятым. Владеет тот, кто применил; неприменённая дельта не
+        # владеет ничем.
         return {"throttle": False}
+    if has_delta:
+        layers.throttle_owned = True
 
     effective = dict(boot_rules or {})
     for pattern, value in (delta or {}).items():
@@ -1073,6 +1267,8 @@ def make_observability_on_reload(
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    event_selector: Any = None,
+    flight_recorder: Any = None,
     section_key: str = "observability",
     log_info: Optional[Callable[[str], None]] = None,
     layers: Optional["ObservabilityLayers"] = None,
@@ -1113,6 +1309,19 @@ def make_observability_on_reload(
             logger=logger,
             error=error,
             stats=stats,
+            # Ф4 (4.1): селектор — такой же получатель пересборки, как менеджеры.
+            # Без него правка ФАЙЛА меняла бы слой и не меняла отбор широких
+            # записей, тогда как та же правка через `config.reload` действовала бы —
+            # то есть одна ручка вела бы себя по-разному на двух дорогах, и
+            # разошлись бы они молча. Найдено инъекцией по дорогам (2026-08-16),
+            # у соседней ручки `stats` этого дефекта нет по построению.
+            event_selector=event_selector,
+            # Ф5 (5.1): рекордер дампов — такой же получатель правки ФАЙЛА.
+            # Пропусти мы его здесь, и `observability.flight.enabled`,
+            # выставленный в system.yaml/спутнике, действовал бы только через
+            # `config.reload` — то есть ручка вела бы себя по-разному на двух
+            # дорогах, и разошлись бы они молча (находка 1 задачи 4.1).
+            flight_recorder=flight_recorder,
             log_info=log_info,
             origin=origin,
         )
@@ -1126,6 +1335,8 @@ def start_observability_watcher(
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    event_selector: Any = None,
+    flight_recorder: Any = None,
     section_key: str = "observability",
     debounce_seconds: float = 1.0,
     log_info: Optional[Callable[[str], None]] = None,
@@ -1182,6 +1393,8 @@ def start_observability_watcher(
         logger=logger,
         error=error,
         stats=stats,
+        event_selector=event_selector,
+        flight_recorder=flight_recorder,
         section_key=section_key,
         log_info=log_info,
         layers=layers,

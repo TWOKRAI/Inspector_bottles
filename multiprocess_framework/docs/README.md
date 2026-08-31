@@ -10,6 +10,12 @@
 2. [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md) — какой модуль за что отвечает.
 3. [`../modules/<X>/README.md`](../modules/) — детали модуля под задачу.
 4. [`DESIGN_RULES.md`](DESIGN_RULES.md) — что обязано / что запрещено.
+5. **Наблюдаемость** — [`OBSERVABILITY_MAP.md`](OBSERVABILITY_MAP.md) (карта плоскостей) и каталог
+   [`observability/`](observability/): чем писать ([`CONNECTORS.md`](observability/CONNECTORS.md)),
+   куда попадает ([`SINKS_MAP.md`](observability/SINKS_MAP.md)), чем управлять
+   ([`CONTROL_PANEL.md`](observability/CONTROL_PANEL.md)), как подключить свой модуль
+   ([`NEW_MODULE_RECIPE.md`](observability/NEW_MODULE_RECIPE.md)). Логи, ошибки, статистика и
+   документы — четыре плоскости одного разъёма; кто пишет мимо них, пишет в никуда.
 
 ---
 
@@ -19,8 +25,10 @@
 
 | Файл | Назначение |
 |------|------------|
-| [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md) | **Навигатор по 21 модулю** — точка входа |
+| [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md) | **Навигатор по 27 модулям** `modules/` — точка входа |
 | [`MODULE_CONTRACTS.md`](MODULE_CONTRACTS.md) | Контракт каждого модуля (API + инварианты) |
+| [`MODULE_TIERS.md`](MODULE_TIERS.md) | Ярусы core / optional / frozen (сверяется контракт-тестом) |
+| [`OBSERVABILITY_MAP.md`](OBSERVABILITY_MAP.md) + [`observability/`](observability/) | Наблюдаемость: плоскости, разъёмы, приёмники, пульт, рецепт подключения |
 | [`INTERACTION_FLOWS.md`](INTERACTION_FLOWS.md) | Цепочки вызовов (запуск, send, shutdown, FieldRouting…) |
 | [`DESIGN_RULES.md`](DESIGN_RULES.md) | Императивные правила |
 | [`GLOSSARY.md`](GLOSSARY.md) | Термины и сокращения |

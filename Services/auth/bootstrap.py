@@ -3,8 +3,22 @@
 Bootstrap CLI для первичной инициализации хранилища пользователей.
 
 Создаёт predefined роли (dev/admin/operator/viewer) и первого пользователя:
-- Если задан INSPECTOR_DEV_PASSWORD → dev-пользователь с ролью dev.
+- Если задан ``MULTIPROCESS_DEV_PASSWORD`` (легаси-алиас ``INSPECTOR_DEV_PASSWORD``)
+  → dev-пользователь с ролью dev.
 - Иначе → интерактивный prompt, создаётся admin-пользователь.
+
+Env-ручки читаются **парой, канон первым** (Р-5а, задача 5.2 плана
+``observability-roadmap``): ``Services`` — переиспользуемый слой, требовать от чужого
+приложения бренд ``INSPECTOR_*`` он не вправе. Легаси-имя остаётся рабочим.
+
+| Канон | Легаси |
+|---|---|
+| ``MULTIPROCESS_AUTH_USERS_PATH`` | ``INSPECTOR_AUTH_USERS_PATH`` |
+| ``MULTIPROCESS_DEV_PASSWORD`` | ``INSPECTOR_DEV_PASSWORD`` |
+
+Дефолтный каталог ``~/.inspector_bottles/`` **брендирован и оставлен как есть**:
+смена пути увела бы существующие установки от их файла пользователей. Это названное
+ограничение, а не недосмотр — задать свой путь можно каноничной ручкой.
 
 Exit codes:
     0 — успешная инициализация
@@ -56,10 +70,15 @@ def main() -> int:
     Returns:
         Exit code (0/1/2/3).
     """
-    # Определяем путь к users.yaml (читаем env при каждом вызове)
-    users_path = os.environ.get(
-        "INSPECTOR_AUTH_USERS_PATH",
-        str(Path.home() / ".inspector_bottles" / "auth" / "users.yaml"),
+    # Определяем путь к users.yaml (читаем env при каждом вызове).
+    # Канон первым, легаси вторым (Р-5а, задача 5.2 roadmap): `Services` — слой
+    # переиспользуемый, и читать ТОЛЬКО брендированное имя значит требовать бренд
+    # Inspector от чужого приложения. Пара, а не переименование: `INSPECTOR_*`
+    # остаётся рабочим — его выставляет прототип и старые скрипты.
+    users_path = (
+        os.environ.get("MULTIPROCESS_AUTH_USERS_PATH")
+        or os.environ.get("INSPECTOR_AUTH_USERS_PATH")
+        or str(Path.home() / ".inspector_bottles" / "auth" / "users.yaml")
     )
     storage = YamlUserStorage(users_path)
 
@@ -73,14 +92,16 @@ def main() -> int:
     hasher = BcryptHasher(rounds=12)
     policy = PasswordPolicy()
 
-    # Режим 1: INSPECTOR_DEV_PASSWORD задан → dev-пользователь
-    dev_password = os.environ.get("INSPECTOR_DEV_PASSWORD", "").strip()
+    # Режим 1: пароль задан env'ом → dev-пользователь. Канон первым (Р-5а).
+    dev_password = (
+        os.environ.get("MULTIPROCESS_DEV_PASSWORD") or os.environ.get("INSPECTOR_DEV_PASSWORD") or ""
+    ).strip()
     if dev_password:
         # Сначала валидируем пароль — до записи на диск
         try:
             policy.validate(dev_password)
         except WeakPassword as exc:
-            print(f"[ERROR] INSPECTOR_DEV_PASSWORD не соответствует политике паролей: {exc}")
+            print(f"[ERROR] MULTIPROCESS_DEV_PASSWORD не соответствует политике паролей: {exc}")
             return 2
 
         # Сохраняем роли и пользователя

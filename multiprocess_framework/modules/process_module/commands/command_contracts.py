@@ -27,6 +27,7 @@ built-in команд безопасна без allow-исключений.
 
 from __future__ import annotations
 
+import functools
 import typing
 from typing import Any, Dict, List, Optional, Type, Union
 
@@ -171,6 +172,51 @@ class LoggerSinkParams(BaseModel):
     ttl: Optional[float] = None
 
 
+class LoggerSinkTailParams(BaseModel):
+    """Параметры ``observability.sink.tail`` (и алиаса ``logger.sink.tail``).
+
+    Task 2.2: команда жила в поверхности наблюдаемости **без контракта вовсе** —
+    то есть её параметры не видел ни warn-мидлварь, ни карточка
+    ``introspect.capabilities``, ни оракул A1. Незадекларированная команда не
+    «свободна от правил», она невидима для них: судить нечем, и любой промах в
+    имени или типе параметра остаётся тихим.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sink: Optional[str] = None
+    name: Optional[str] = None  # алиас sink — как у LoggerSinkParams
+    manager: Optional[str] = None
+    #: Сколько последних записей вернуть из memory-приёмника.
+    limit: Optional[int] = None
+
+
+class TelemetryReconfigureParams(BaseModel):
+    """Параметры ``telemetry.reconfigure`` (PC 3.1).
+
+    Task 2.2: второй пробел того же рода, что у :class:`LoggerSinkTailParams`, и
+    более дорогой — эта команда правит publisher-gate и центральный троттл.
+
+    ``ttl`` объявлен здесь, хотя оракул A1 его у хендлера НЕ видит: хендлер
+    читает срок через общий ``_parse_ttl(args)``, а оракул судит только
+    литеральные ``args.get(...)`` в теле метода — ограничение метода, названное
+    в его докстринге. Пропусти мы ``ttl``, при ``extra="forbid"`` операторский
+    срок помечался бы лишним полем, а в strict-режиме команда исчезала бы молча.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: dict → пересобрать publisher-gate; ``None`` → выключить его (все метрики
+    #: каждый тик). Различаются они ПРИСУТСТВИЕМ ключа, а не значением.
+    publish: Optional[Dict[str, Any]] = None
+    #: Дельта центрального троттла ``{glob-паттерн: интервал_сек}``.
+    throttle: Optional[Dict[str, Any]] = None
+    #: ``replace`` (дефолт) | ``merge`` — как правка входит в слой.
+    telemetry_mode: Optional[str] = None
+    #: Срок жизни правки, сек (Task 5.10.f); читается через ``_parse_ttl``.
+    ttl: Optional[float] = None
+
+
 class ObservabilityIntrospectParams(BaseModel):
     """Параметры ``introspect.observability`` (Task 5.9).
 
@@ -224,16 +270,30 @@ class ObservabilityTailSubscribeParams(BaseModel):
     дефолт применяет процесс (см. ``subscribe_observability_tail``); повторять
     здесь константу ``"ERROR"`` нельзя — две позиции одного дефолта расходятся
     молча.
+
+    Задача 5.6: ``scope`` — та же история, что у ``level``, но про НАМЕРЕНИЕ.
+    ``"all"`` кладёт брокер, разворачивая оптовую подписку в адресные команды;
+    процесс по нему знает, что порог, заданный прицельно, понижать нельзя (блокер
+    Н2-1 переприёмки F2). Объявлено здесь потому, что ``extra="forbid"``: поле,
+    которого нет в схеме, дало бы `contract_violation` на каждой оптовой раздаче,
+    а под ``FW_CONTRACTS_STRICT=1`` — молча дропнутое сообщение. Отсутствие ключа
+    означает прицельную подписку, то есть прежнее поведение всех вызывающих.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     subscriber: Optional[str] = None
     level: Optional[str] = None
+    scope: Optional[str] = None
 
 
 class ObservabilityTailUnsubscribeParams(BaseModel):
     """Параметры ``observability.tail.unsubscribe`` (F1: per-subscriber отписка).
+
+    Задача 5.6 добавила ``scope`` — зеркало подписки: ``"all"`` кладёт брокер,
+    разворачивая ОПТОВОЕ снятие, и по нему процесс знает, что прицельную подписку
+    трогать нельзя (находка Н2-2: `unwatch()` глушил хвост, которого не создавал).
+    Объявлено здесь, потому что ``extra="forbid"``.
 
     Форвардер наблюдаемости — per-subscriber (несколько подписчиков сосуществуют на
     одном процессе: GUI + backend_ctl). ``subscriber`` снимает форвардер ТОЛЬКО этого
@@ -243,6 +303,7 @@ class ObservabilityTailUnsubscribeParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     subscriber: Optional[str] = None
+    scope: Optional[str] = None
 
 
 class ObservabilityTailBrokerParams(BaseModel):
@@ -311,6 +372,12 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     "observability.sink.disable": LoggerSinkParams,
     "logger.sink.enable": LoggerSinkParams,
     "logger.sink.disable": LoggerSinkParams,
+    # Task 2.2: три команды поверхности наблюдаемости жили без контракта вовсе —
+    # их не судили ни мидлварь, ни оракул A1, и в карточке процесса они значились
+    # командами без параметров. «Контракта нет» читалось как «нарушать нечего».
+    "observability.sink.tail": LoggerSinkTailParams,
+    "logger.sink.tail": LoggerSinkTailParams,
+    "telemetry.reconfigure": TelemetryReconfigureParams,
     "log.tail.subscribe": LogTailSubscribeParams,
     "log.tail.unsubscribe": LogTailUnsubscribeParams,
     "observability.tail.subscribe": ObservabilityTailSubscribeParams,
@@ -342,6 +409,101 @@ def _type_str(ann: Any) -> str:
     return getattr(ann, "__name__", None) or str(ann).replace("typing.", "")
 
 
+@functools.lru_cache(maxsize=256)
+def _adapter_for(schema: Type[BaseModel], field: str) -> Any:
+    """``TypeAdapter`` одного поля схемы — по полю, а не по модели целиком.
+
+    Модель целиком дала бы одну общую ошибку и потеряла бы соседей: оператор,
+    промахнувшийся дважды, чинил бы вход по одной строке за команду. Кэш —
+    потому что судить приходится на КАЖДОМ вызове команды наблюдаемости, а
+    сборка адаптера дороже самой проверки.
+    """
+    from pydantic import TypeAdapter
+
+    return TypeAdapter(schema.model_fields[field].annotation)
+
+
+def validated_params(command: str, params: Dict[str, Any]) -> tuple[Dict[str, Any], List[str]]:
+    """Проверить ТИПЫ объявленных параметров команды и вернуть приведённые значения.
+
+    Task 2.2 (находка Н-5, решение владельца Р-3а). Контракт объявляет тип, но
+    до этой задачи его читала только warn-мидлварь: она писала предупреждение и
+    ПРОПУСКАЛА сообщение к хендлеру. Хендлер получал мусор и падал на нём уже
+    своим способом — воспроизведено:
+
+    * ``introspect.observability {"resolve": true}`` → ``list(True)`` →
+      ``Dispatch failed: 'bool' object is not iterable``;
+    * ``config.reload {"observability_reset": true}`` → тот же ``TypeError``,
+      второе место того же класса;
+    * ``config.reload {"observability_session_clear": "net"}`` → ``bool("net")``
+      истинно → **весь слой L3 стёрт**, включая правку оператора со сроком 600 с.
+      Слово «нет» означало «да, снеси всё».
+
+    Судятся ТОЛЬКО типы объявленных полей, и только тех, что ПРИСУТСТВУЮТ во
+    входе. Три следствия, каждое намеренное:
+
+    * **отсутствующее поле не материализуется.** Вернуть ``model_dump()`` целиком
+      значило бы подставить ``None`` вместо «ключа нет», а половина команд
+      наблюдаемости различает эти случаи присутствием ключа
+      (``publish: null`` — «выключить гейт», отсутствие — «слои молчат»);
+    * **лишние ключи не судятся здесь.** Их считает warn-мидлварь
+      (``unexpected``) и вердикт ``config.reload``; второй предохранитель на то
+      же место сделал бы неизвестным, который из них держит;
+    * **приведение — часть договора, а не побочный эффект.** ``audit_limit="20"``
+      доедет до хендлера как ``20``, а ``observability_session_clear="no"`` — как
+      ``False``, то есть как и просил оператор.
+
+    Returns:
+        ``(параметры с приведёнными значениями, список проблем)``. Проблемы —
+        готовые строки с адресом поля, ожидаемым типом и полученным значением.
+    """
+    from pydantic import ValidationError
+
+    schema = BUILTIN_COMMAND_CONTRACTS.get(command)
+    if schema is None:
+        return params, []
+
+    coerced = dict(params)
+    problems: List[str] = []
+    for field, info in schema.model_fields.items():
+        if field not in params:
+            continue
+        value = params[field]
+        bad = isinstance(value, bool) and not _admits_bool(info.annotation)
+        if not bad:
+            try:
+                coerced[field] = _adapter_for(schema, field).validate_python(value)
+                continue
+            except ValidationError:
+                bad = True
+        if bad:
+            problems.append(
+                f"параметр {field}: ожидается {_type_str(info.annotation)}, получено {type(value).__name__} ({value!r})"
+            )
+    return (params if problems else coerced), problems
+
+
+def _admits_bool(ann: Any) -> bool:
+    """Объявлен ли ``bool`` среди допустимых типов поля.
+
+    Отдельная ветка нужна потому, что Pydantic в мягком режиме принимает ``True``
+    как число: ``bool`` — подкласс ``int``. Без неё эта проверка **ослабила бы**
+    существующую защиту, а не усилила: ``ttl=True`` до задачи 2.2 отвергался
+    (``validate_ttl``: «ttl=True — не число секунд»), а с приведением к ``1.0``
+    доехал бы до хендлера годным сроком в одну секунду — и приёмник был бы снят.
+    Поймано прогоном полной сьюты, а не рассуждением: тест
+    ``test_bad_ttl_is_refused_and_the_sink_is_untouched[True]`` покраснел.
+
+    Тот же довод, что у :func:`~..configs.observability_layers.validate_ttl` и у
+    правил троттла (2.1). Это третья ТОЧКА одного правила, а не третья его
+    редакция: там судят значение, дошедшее из файла или слоя, здесь — параметр
+    команды, и границ действительно три.
+    """
+    if typing.get_origin(ann) is typing.Union:
+        return any(_admits_bool(arg) for arg in typing.get_args(ann))
+    return ann is bool
+
+
 def params_schema_of(schema: Type[BaseModel]) -> list[dict[str, Any]]:
     """Детерминированная форма схемы для карточки: [{name, type, required}] по имени.
 
@@ -365,6 +527,10 @@ __all__ = [
     "WorkerCreateParams",
     "ConfigReloadParams",
     "LoggerSinkParams",
+    "LoggerSinkTailParams",
+    "TelemetryReconfigureParams",
+    "ObservabilityIntrospectParams",
+    "ObservabilityPersistParams",
     "LogTailSubscribeParams",
     "LogTailUnsubscribeParams",
     "ObservabilityTailSubscribeParams",

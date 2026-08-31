@@ -191,8 +191,8 @@ class ObservableMixin(IObservableMixin):
         """Запись времени выполнения через stats manager."""
         self._call_manager("stats", "record_timing", metric_name, duration, tags or {})
 
-    def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
-        """Отслеживание ошибки через error manager (каноничный слот 'error').
+    def _error_context(self, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Контекст инцидента со штампом источника — ЕДИНСТВЕННАЯ позиция штампа.
 
         Ф2.1: имя источника кладётся в КОНТЕКСТ, а не в kwargs — у слота
         ``error`` сигнатура другая (``track_error(error, context)``), и
@@ -200,13 +200,39 @@ class ObservableMixin(IObservableMixin):
         подставляя ``"unknown"`` при его отсутствии. Без этой строки плоскость
         ошибок осталась бы без штампа при заштампованной плоскости логов —
         то есть у самой важной из трёх. Найдено ревью Ф2.1.
+
+        Н-14 (приёмка F1): штамп стоял ТОЛЬКО в :meth:`_track_error`, а публичные
+        прокси ``track_error``/``record_error`` звали менеджер напрямую — и
+        инцидент от ``health.report`` уезжал ``module="unknown"`` при
+        заштампованной лог-дороге той же пары. Причём именно публичный путь и
+        выбирает ``HealthState`` (``_resolve_track`` предпочитает ``track_error``),
+        то есть штамп был мёртв ровно там, где он нужнее всего.
+        Вынесено сюда, чтобы позиция осталась одна: два ``setdefault`` в двух
+        файлах разошлись бы молча — этим дефект и был.
         """
         ctx = dict(context) if context else {}
         ctx.setdefault("module", self._observability_source())
+        return ctx
+
+    def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
+        """Отслеживание ошибки через error manager (каноничный слот 'error')."""
+        ctx = self._error_context(context)
         # Task 5.14: имя error-гнезда каноникализировано на 'error'. Legacy-fallback
         # на слот 'errors' убран — все точки регистрации переведены на 'error'.
-        result = self._call_manager("error", "track_error", error, ctx)
-        if result is None:
+        #
+        # Task Т.1: ветка выбирается ПО ПРОТОКОЛУ приёмника, а не по возвращённому
+        # значению. Прежняя лесенка «track_error вернул None → пробуем
+        # record_error» неотличима от успеха: ``ErrorManager.track_error``
+        # объявлен ``-> None`` и возвращает None ИМЕННО на штатной записи, так что
+        # вторая ступень срабатывала ВСЕГДА — и молча не находила метода
+        # (``ErrorManager`` его не имеет; ``record_error`` есть у duck-typed
+        # плоскостей вроде ``ObservabilityHub``). Пока отсутствующий метод был
+        # тихим, это ничего не стоило; со счётчиком Т.1 здоровый путь давал
+        # 9 ложных «потерь» за прогон гейта, и счётчик перестал бы значить
+        # «запись потеряна». Предпочтение прежнее: track_error, если он есть.
+        if self._manager_has_method("error", "track_error"):
+            self._call_manager("error", "track_error", error, ctx)
+        else:
             self._call_manager("error", "record_error", error, ctx)
 
     # =========================================================================
@@ -343,6 +369,35 @@ class ObservableMixin(IObservableMixin):
         """Счётчики проглоченных отказов _call_manager: 'manager.method' -> N (Ф2.3)."""
         return dict(self.__dict__.get("_manager_call_failures", {}))
 
+    def _manager_has_method(self, manager_name: str, method_name: str) -> bool:
+        """Есть ли в слоте ВКЛЮЧЁННЫЙ менеджер с вызываемым ``method_name``.
+
+        Нужно ровно там, где ветка выбирается по протоколу приёмника, а не по
+        результату вызова: ``None`` от менеджера — законный успех, и отличить
+        его от «метода нет» по возвращённому значению невозможно (см.
+        :meth:`_track_error`).
+
+        Вопрос, а не вызов: ничего не считает и ничего не пишет в лог.
+        """
+        registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
+        if registry is None or not registry.is_enabled(manager_name):
+            return False
+        manager = registry.get(manager_name)
+        # `is None`, а не truthiness — тот же довод, что в ``_call_manager``, и
+        # здесь он ЖЁСТЧЕ: эта функция ВЫБИРАЕТ ВЕТКУ в ``_track_error``.
+        # Менеджер с ложным ``__bool__``/``__len__`` (например error-менеджер,
+        # у которого ``__len__`` — «сколько ошибок накоплено»: пустой = ложь)
+        # читался как «слота нет», ветка падала на запасную ступень
+        # ``record_error``, которой у него может не быть, и запись терялась —
+        # а счётчик отказов приписывал потере ЛОЖНУЮ причину («в слот подан
+        # объект чужого протокола»), хотя протокол объект как раз реализует.
+        # Найдено ревью Ф1+Ф2: правка `0c06712d` убрала truthiness в
+        # ``_call_manager``, но эта функция появилась в том же коммите Т.1 и
+        # осталась со старым сравнением.
+        if manager is None:
+            return False
+        return callable(getattr(manager, method_name, None))
+
     def _call_manager(self, manager_name: str, method_name: str, *args, **kwargs) -> Any:
         """
         Универсальная точка вызова метода зарегистрированного менеджера.
@@ -351,45 +406,102 @@ class ObservableMixin(IObservableMixin):
         Исключение внутри менеджера не роняет вызывающего, но больше НЕ
         глотается молча (Ф2.3): счётчик manager_call_failures + WARNING.
 
+        Task Т.1: то же самое теперь верно и для второго способа потерять
+        запись — менеджер В СЛОТЕ ЕСТЬ, но нужного метода у него НЕТ. Раньше
+        управление просто проваливалось до ``return None``, и ни счётчик, ни
+        лог этого не видели. Это не допуск, а дефект проводки: в слот
+        ``logger`` подан объект с ``log_warning`` вместо ``warning``, и КАЖДАЯ
+        запись такого компонента исчезает (измерено: StateProxy дал 0 строк на
+        60 живых лог-файлах). Считается и предупреждается на тех же книгах,
+        что и исключение.
+
+        Три допуска остаются ТИХИМИ (их отсутствие — легальное состояние,
+        а не поломка): слота нет, менеджер None, слот выключен.
+
         Returns:
-            Результат вызова или None (если менеджер недоступен/выключен/упал)
+            Результат вызова или None (если менеджер недоступен/выключен/
+            упал/не имеет метода)
         """
         registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
         if registry is None or not registry.is_enabled(manager_name):
             return None
 
         manager = registry.get(manager_name)
-        if not manager:
+        # `is None`, а не truthiness — по тому же доводу, что ниже у метода, и
+        # найдено матрицей инъекций Т.1: заплата «считать отказом и manager
+        # is None» не покраснила НИ ОДНОГО теста, потому что до этой строки
+        # None не доходит вообще (``ManagerRegistry`` ставит
+        # ``_enabled[name] = manager is not None and enabled``, и такой слот
+        # отсекается гейтом выше). Значит единственный достижимый случай здесь —
+        # менеджер НАСТОЯЩИЙ, но с ложным ``__bool__``/``__len__``: его записи
+        # уходили в никуда и НЕ считались, потому что выглядели как «слот пуст».
+        if manager is None:
             return None
 
         try:
             method = getattr(manager, method_name, None)
-            if method and callable(method):
+            # `is not None`, а не truthiness: вызываемый объект с ложным
+            # __bool__ (Mock, функтор с __len__) иначе уехал бы в ветку
+            # «метода нет» и был бы посчитан отказом, которым не является.
+            if method is not None and callable(method):
                 return method(*args, **kwargs)
         except Exception as exc:
-            self._note_manager_call_failure(manager_name, method_name, exc)
+            self._note_manager_call_failure(manager_name, method_name, exc=exc)
+            return None
 
+        # Сюда попадаем ровно в одном случае: менеджер есть и включён, метода
+        # нет (или он не вызываем). exc=None отличает этот отказ от падения
+        # внутри менеджера — чинятся они по-разному.
+        self._note_manager_call_failure(manager_name, method_name, manager=manager)
         return None
 
-    def _note_manager_call_failure(self, manager_name: str, method_name: str, exc: Exception) -> None:
+    def _note_manager_call_failure(
+        self,
+        manager_name: str,
+        method_name: str,
+        exc: Optional[BaseException] = None,
+        manager: Any = None,
+    ) -> None:
         """Учёт отказа менеджера: счётчик всегда, WARNING — раз на пару (Ф2.3).
 
         Лог — через stdlib logging, НЕ через _log_* (отказать мог сам
         logger-менеджер — вызов через себя дал бы рекурсию). WARNING пишется
         один раз на пару manager.method, дальше растёт только счётчик
         (_call_manager стоит на hot-path каждого лога/метрики — спам недопустим).
+
+        Два рода отказа лежат в одном словаре, но текст WARNING у них разный
+        (Task Т.1): ``exc is not None`` — менеджер БРОСИЛ (чинят приёмник);
+        ``exc is None`` — у менеджера НЕТ такого метода (чинят проводку: в слот
+        подан объект не того протокола). Общий счётчик — сознательно: обе
+        ситуации означают «запись потеряна», и внешнему наблюдателю нужна
+        именно сумма потерь на паре.
         """
         failures: Dict[str, int] = self.__dict__.setdefault("_manager_call_failures", {})
         key = f"{manager_name}.{method_name}"
         first_failure = key not in failures
         failures[key] = failures.get(key, 0) + 1
-        if first_failure:
-            logging.getLogger(__name__).warning(
+        if not first_failure:
+            return
+
+        module_logger = logging.getLogger(__name__)
+        if exc is not None:
+            module_logger.warning(
                 "ObservableMixin: вызов %s провалился (%s: %s) — "
                 "дальнейшие отказы пары считаются в manager_call_failures",
                 key,
                 type(exc).__name__,
                 exc,
+            )
+        else:
+            module_logger.warning(
+                "ObservableMixin: вызов %s невозможен — у менеджера слота "
+                "'%s' (%s) нет вызываемого метода '%s'; запись потеряна. "
+                "Это дефект проводки: в слот подан объект чужого протокола — "
+                "дальнейшие потери пары считаются в manager_call_failures",
+                key,
+                manager_name,
+                type(manager).__name__,
+                method_name,
             )
 
     def _create_proxy_methods(self) -> None:

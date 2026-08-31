@@ -3,10 +3,16 @@
 
 Read-only телеметрия того, что камера реально применила (cap.get): FPS, разрешение,
 экспозиция, усиление, кодек. Привязка к реактивному дереву состояния по путям
-``processes.{proc}.state.cam.actual.*`` через GuiStateBindings. Показывается только
-для camera_service-ноды.
+``processes.{proc}.state.cam.actual.*`` через GuiStateBindings. Показывается для
+КАМЕРНОЙ ноды — ``camera_service`` либо ``capture`` (см. ``inspector_panel``).
 
-Инкапсулирует 6 подписок и их teardown — закрывает находку Н-4 (при разрушении панели
+Р3.5-15 (поправка владельца 2026-08-17) добавила седьмую строку — «FPS
+(измеренный)» по глобу ``processes.{proc}.state.plugins.*.capture_fps``, ВНЕ поддерева
+``cam.actual``. Место выбрано взамен слота на карточке процесса: карточка
+generic и не имеет права селить у себя прикладное понятие «кадры», а здесь уже
+известно, что перед нами камера.
+
+Инкапсулирует 7 подписок и их teardown — закрывает находку Н-4 (при разрушении панели
 с активной camera-нодой bind-хэндлы оставались жить в GuiStateBindings: утечка + запись
 в мёртвые QLabel через weakref). ``dispose()`` снимает подписки в destroyed-пути (чистый
 Python, без Qt-вызовов на уже удалённых дочерних виджетах).
@@ -19,8 +25,19 @@ from typing import Any
 from PySide6.QtWidgets import QFormLayout, QLabel, QWidget
 
 # Строки блока: ключ пути state store → подпись в форме.
+#
+# **Две строки про FPS, и подписи обязаны различаться однозначно** (Р3.5-15,
+# поправка владельца 2026-08-17). Это РАЗНЫЕ величины, и прежняя подпись «FPS:»
+# не говорила, какая именно:
+#   «FPS (по драйверу)» — ``cam.actual.fps``, то есть ``cap.get(CAP_PROP_FPS)``:
+#       что камера СООБЩАЕТ О СЕБЕ. Пишет ``camera_service`` (`_publish_actual`);
+#   «FPS (измеренный)»  — ``state.plugins.<писатель>.capture_fps``: сколько кадров
+#       в секунду реально прочитано. Считает и публикует ``CapturePlugin``.
+# «Настроенный» для первой не годится: настройка живёт в конфиге плагина, а
+# `cap.get` возвращает то, что драйвер применил, — это ответ камеры, не запрос.
 _ROWS = (
-    ("fps", "FPS:"),
+    ("fps", "FPS (по драйверу):"),
+    ("capture_fps", "FPS (измеренный):"),
     ("resolution", "Разрешение:"),
     ("exposure", "Экспозиция:"),
     ("gain", "Усиление:"),
@@ -34,7 +51,7 @@ class CamActualSection(QWidget):
     Использование:
         section = CamActualSection()
         section.set_bindings(bindings)          # GuiStateBindings | None (из set_services)
-        section.show_for("camera_0")            # bind 6 путей + показать
+        section.show_for("camera_0")            # bind 7 путей + показать
         section.hide_and_unbind()               # unbind + скрыть + сбросить метки
         section.dispose()                       # только unbind (destroyed-путь, без Qt)
     """
@@ -73,8 +90,16 @@ class CamActualSection(QWidget):
     def show_for(self, process_name: str) -> None:
         """Показать блок и привязать метки к state store.
 
-        Пути: processes.{proc}.state.cam.actual.{fps,width,height,exposure,gain,fourcc}.
+        Пути: processes.{proc}.state.cam.actual.{fps,width,height,exposure,gain,fourcc}
+        плюс глоб processes.{proc}.state.plugins.*.capture_fps (вне ``cam.actual`` —
+        это уровень процесса, а не actual-параметр камеры; писатель в путь не зашит).
         Разрешение собирается из width+height отдельным форматтером на оба пути.
+
+        Строка, которой в текущей раскладке некому писать, остаётся прочерком:
+        ``camera_service`` и ``capture`` в рецептах взаимоисключающи (проверено по
+        всем 14 рецептам 2026-08-17), поэтому у simulator-ноды прочерк у
+        «FPS (измеренный)», а у webcam-ноды — у actual-параметров. Прочерк здесь
+        честен: он означает «камера этого не сообщает», а не «сломалось».
         """
         self.hide_and_unbind()
         if self._bindings is None or not process_name:
@@ -87,9 +112,7 @@ class CamActualSection(QWidget):
             return lambda v: f"{float(v):.0f}{unit}" if isinstance(v, (int, float)) else str(v)
 
         self._handles.append(
-            self._bindings.bind(
-                f"{base}.fps", self._labels["fps"], "text", formatter=_num(self._labels["fps"], " fps")
-            )
+            self._bindings.bind(f"{base}.fps", self._labels["fps"], "text", formatter=_num(self._labels["fps"], " fps"))
         )
         self._handles.append(
             self._bindings.bind(
@@ -97,11 +120,40 @@ class CamActualSection(QWidget):
             )
         )
         self._handles.append(
-            self._bindings.bind(
-                f"{base}.gain", self._labels["gain"], "text", formatter=_num(self._labels["gain"])
-            )
+            self._bindings.bind(f"{base}.gain", self._labels["gain"], "text", formatter=_num(self._labels["gain"]))
         )
         self._handles.append(self._bindings.bind(f"{base}.fourcc", self._labels["fourcc"], "text"))
+
+        # Измеренная частота захвата — НЕ под ``base``: ``capture_fps`` живёт в
+        # ``processes.<proc>.state`` (с Ф1 — в поддереве писателя), потому что это
+        # уровень процесса под publisher-гейтом (ADR-PM-038), а не actual-параметр
+        # камеры. Прецедент
+        # особой обработки в этой же секции — ``resolution`` из width+height.
+        # Дескриптор идёт в ТОТ ЖЕ ``self._handles``: подписка мимо него — ровно
+        # утечка Н-4, ради закрытия которой секция и инкапсулировала подписки.
+        #
+        # Свой форматтер, а не соседний ``_num``: тот округляет до целого
+        # (``:.0f``), и измеренные 12.5 показались бы как «12 fps» — потерялся бы
+        # ровно тот знак, ради которого строку и заводят (сравнить с 25 по
+        # драйверу). Сборщик уровней округляет до 1 знака, столько и показываем.
+        def _measured(v: Any) -> str:
+            return f"{float(v):.1f} fps" if isinstance(v, (int, float)) else str(v)
+
+        # Адрес — ГЛОБ, а не точный путь: с Ф1 «порта наблюдений» плагинная
+        # метрика лежит в поддереве СВОЕГО писателя
+        # (`…state.plugins.<писатель>.capture_fps`). Имя писателя сюда не
+        # зашивается: `bind` принимает glob (`match_glob`), и `*` покрывает
+        # любого публикатора этого имени — включая того, которого в рецептах
+        # сегодня нет. Точный путь пришлось бы чинить при каждом переименовании
+        # плагина, и промах глоба немой: метка просто застыла бы на «—».
+        self._handles.append(
+            self._bindings.bind(
+                f"processes.{process_name}.state.plugins.*.capture_fps",
+                self._labels["capture_fps"],
+                "text",
+                formatter=_measured,
+            )
+        )
 
         # Разрешение: width и height приходят раздельно → обновляем общую метку.
         self._cam_res = {"width": 0, "height": 0}

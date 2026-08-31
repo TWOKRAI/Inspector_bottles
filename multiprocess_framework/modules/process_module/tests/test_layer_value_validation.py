@@ -19,10 +19,18 @@
 L3 (сессия — и целой секцией, и одним ключом через `session_set`), плюс
 persist-путь, который переносит L3 в L2.
 
-**Граница правила названа вслух.** Проверяются ЗНАЧЕНИЯ объявленных ключей.
-Незнакомый ключ (`log_levl`) схемой молча отбрасывается и ловится не здесь, а
-вердиктом `config.reload` (`unknown_keys` → `verdict=failed`) — второй
-предохранитель на то же место сделал бы неизвестным, который из них держит.
+**Задача 5.4 — сюда же переехали ИМЕНА, и только у ручки оператора.** До неё
+имя судил вердикт `config.reload` (`unknown_keys` → `verdict=failed`) уже ПОСЛЕ
+записи ключа в L3. Приёмка F2 (Н-C/Н-D) показала цену: незнакомый ключ отвечал
+`success=true`, оседал в слое со сроком и не действовал, а `verdict="failed"`
+лежал в ТОМ ЖЕ ответе и противоречил `success`::
+
+    config.reload {"observability": {"logger": {"default_level": "DEBUG"}}}
+    → success=true, session_keys=['logger.default_level'], effective — прежний
+
+Двери разведены: `session` (руки оператора) — отказ ДО записи; `app`/`recipe`
+(файл, спутник, конверт switch'а) — молчание стража и громкая строка вызывающего,
+иначе опечатка в спутнике валила бы switch рецепта.
 """
 
 from __future__ import annotations
@@ -73,9 +81,14 @@ class TestValidatorItself:
     def test_alias_and_lower_case_are_accepted(self) -> None:
         validate_layer_section({"log_level": "warn"}, layer=LAYER_APP)
 
-    def test_unknown_key_is_not_this_guard_business(self) -> None:
-        """Опечатка в ИМЕНИ ключа судится вердиктом (`unknown_keys`), не здесь."""
+    def test_unknown_key_in_a_file_layer_is_not_a_refusal(self) -> None:
+        """Задача 5.4: у ФАЙЛОВОГО слоя имя не отказ — иначе опечатка валит switch.
+
+        Голос файловой дороги — запись аудита и строка журнала (пара к этому
+        тесту живёт в ``test_layer_unknown_keys.py``), а не исключение здесь.
+        """
         validate_layer_section({"log_levl": "DEBUG"}, layer=LAYER_APP)
+        validate_layer_section({"logger": {"default_level": "DEBUG"}}, layer=LAYER_RECIPE)
 
 
 class TestEveryLayerRejectsTheSameWay:

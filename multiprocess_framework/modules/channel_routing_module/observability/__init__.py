@@ -22,6 +22,7 @@ from .observability_hub import (
     METRIC_COUNTER,
     METRIC_GAUGE,
     METRIC_TIMING,
+    STATS_AGGREGATE_KEY,
     ObservabilityHub,
 )
 from .drain_adapter import ObservabilityDrainAdapter
@@ -53,4 +54,5 @@ __all__ = [
     "METRIC_GAUGE",
     "METRIC_COUNTER",
     "METRIC_TIMING",
+    "STATS_AGGREGATE_KEY",
 ]

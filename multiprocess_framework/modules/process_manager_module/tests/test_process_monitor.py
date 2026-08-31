@@ -1000,7 +1000,7 @@ class TestHealthIntegrationRealStore:
         mock_pm._state_store_manager = ssm
         monitor = ProcessMonitor(mock_pm)
 
-        # Self-publish процесса (как делает ProcessHeartbeat._publish_metrics_to_tree).
+        # Self-publish процесса (как делает ProcessHeartbeat._publish_telemetry_to_tree).
         ssm.handle_state_set({"data": {"path": "processes.cam0.state.fps", "value": 25.0, "source": "cam0"}})
 
         monitor._publish_health({"cam0": {"status": "running"}})

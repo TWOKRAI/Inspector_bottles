@@ -179,7 +179,7 @@ class TestCommandSeamPassesLevel:
 
             # Сигнатура — КОПИЯ production-формы ProcessModule.subscribe_observability_tail
             # (level: Optional[str] = None). Разойдётся продовая — тест внизу это поймает.
-            def subscribe_observability_tail(self, subscriber: str, level=None) -> dict:
+            def subscribe_observability_tail(self, subscriber: str, level=None, *, wholesale: bool = False) -> dict:
                 captured["subscriber"] = subscriber
                 captured["level"] = level
                 return {"success": True}
@@ -214,7 +214,7 @@ class TestCommandSeamPassesLevel:
         class _Svc:
             name = "proc"
 
-            def subscribe_observability_tail(self, subscriber: str, level=None) -> dict:
+            def subscribe_observability_tail(self, subscriber: str, level=None, *, wholesale: bool = False) -> dict:
                 captured["level"] = level
                 return {"success": True}
 
@@ -225,6 +225,52 @@ class TestCommandSeamPassesLevel:
         bc._cmd_observability_tail_subscribe(args)
 
         assert captured["level"] is None, "хендлер подставил собственный дефолт — вторая позиция той же константы"
+
+    def test_scope_all_on_the_wire_reaches_the_process_as_wholesale(self) -> None:
+        """Задача 5.6: шов «провод → механизм». **Найдено инъекцией K4.**
+
+        Инъекция сняла чтение ``scope`` в хендлере — и НЕ покраснело ничего: сам
+        механизм объединения покрыт тестами, брокер-маркер покрыт тестами, а звено
+        между ними не сторожил никто. То есть блокер Н2-1 мог вернуться молча, и
+        именно так он однажды и появился.
+        """
+        from multiprocess_framework.modules.process_module.commands.builtin_commands import (
+            BuiltinCommands,
+        )
+
+        captured: Dict[str, Any] = {}
+
+        class _Svc:
+            name = "proc"
+
+            def subscribe_observability_tail(self, subscriber: str, level=None, *, wholesale: bool = False) -> dict:
+                captured["wholesale"] = wholesale
+                return {"success": True}
+
+            def unsubscribe_observability_tail(self, subscriber=None, *, wholesale: bool = False) -> dict:
+                captured["unsub_wholesale"] = wholesale
+                return {"success": True}
+
+        bc = BuiltinCommands.__new__(BuiltinCommands)
+        bc._services = _Svc()
+
+        bc._cmd_observability_tail_subscribe(
+            self._through_contract("observability.tail.subscribe", {"subscriber": "x", "scope": "all"})
+        )
+        assert captured["wholesale"] is True, "маркер оптовости не доехал до процесса"
+
+        # Пара: без маркера подписка ПРИЦЕЛЬНАЯ — иначе всё стало бы оптовым и
+        # защита прицельного порога не срабатывала бы никогда.
+        bc._cmd_observability_tail_subscribe(
+            self._through_contract("observability.tail.subscribe", {"subscriber": "x"})
+        )
+        assert captured["wholesale"] is False, "подписка без маркера объявлена оптовой"
+
+        # Тот же шов у снятия — вторая половина симметрии (Н2-2).
+        bc._cmd_observability_tail_unsubscribe(
+            self._through_contract("observability.tail.unsubscribe", {"subscriber": "x", "scope": "all"})
+        )
+        assert captured["unsub_wholesale"] is True, "маркер оптовости не доехал до снятия"
 
     def test_the_fake_signature_still_matches_production(self) -> None:
         """Дубль обязан сверяться с оригиналом, иначе он проверяет сам себя.
@@ -240,7 +286,7 @@ class TestCommandSeamPassesLevel:
         )
 
         sig = inspect.signature(ProcessModule.subscribe_observability_tail)
-        assert list(sig.parameters) == ["self", "subscriber", "level"]
+        assert list(sig.parameters) == ["self", "subscriber", "level", "wholesale"]
         assert sig.parameters["level"].default is None, (
             "production-дефолт уровня переехал — дубль в тестах выше устарел"
         )

@@ -73,8 +73,19 @@ def test_restart_rollback_keeps_diverged() -> None:
     assert session.diverged is True
 
 
-def test_restart_no_proxy_does_not_clear() -> None:
-    """Нет proxy (backend не запущен) → pre-flight, diverged не трогается."""
+def test_restart_no_proxy_does_not_clear(monkeypatch) -> None:
+    """Нет proxy (backend не запущен) → pre-flight, diverged не трогается.
+
+    Pre-flight показывает МОДАЛЬНОЕ окно «ProcessManager-proxy недоступен», и до
+    2026-08-10 тест на нём вставал: прогон ждал клика оператора, а выглядело это
+    как «тесты подвисли». Диалог подменён и ПРОВЕРЕН: оператор обязан узнать,
+    почему перезапуск не поехал, — молчаливый отказ здесь был бы хуже модалки.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    shown: list[str] = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")))
+
     session = TopologySession()
     session.mark_edited()
     presenter = _presenter(session, proxy=None)
@@ -82,6 +93,7 @@ def test_restart_no_proxy_does_not_clear() -> None:
     presenter.restart_topology(parent=None)
 
     assert session.diverged is True
+    assert shown and "proxy недоступен" in shown[0], "отказ pre-flight должен быть назван оператору"
 
 
 # ---------------------------------------------------------------------------

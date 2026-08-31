@@ -233,17 +233,34 @@ def test_every_testpath_points_at_something_that_exists() -> None:
     Судятся ОБА конфига: корневой `pyproject.toml` (дефолтный гейт) и
     `modules/pytest.ini` (fw-suite) — у них независимые списки, и разъехаться
     может любой.
+
+    **2026-08-11 (задача 3.3): проверка усилена с «путь существует» до «в пути есть
+    тесты».** Прежняя формулировка молчала три месяца о записи
+    `frontend_module/actions/handlers/tests`: каталог уехал в `actions_module`
+    carve-out'ом ADR-124 (2026-05-11, `git mv`), но на диске остался ПУСТОЙ каталог с
+    одним `__pycache__` — путь «существовал», а тестов в нём не было ни одного. Для
+    pytest это ровно тот же 0 items / exit 0, от которого страж и ставился: наличие
+    каталога никогда не было тем свойством, которое здесь важно. Ложь стала видна
+    только когда снос скелетов убрал каталог физически.
     """
     repo_root = _MODULES_ROOT.parents[1]
 
-    missing = [entry for entry in _root_testpaths() if not (repo_root / entry).exists()]
+    def _empty_of_tests(base: Path, entry: str) -> bool:
+        target = base / entry
+        if not target.exists():
+            return True
+        if target.is_file():
+            return not target.name.startswith("test_")
+        return not any(target.rglob("test_*.py"))
+
+    missing = [entry for entry in _root_testpaths() if _empty_of_tests(repo_root, entry)]
     assert not missing, (
-        f"в корневом testpaths пути, которых нет на диске: {missing}. "
+        f"в корневом testpaths пути без тестов внутри: {missing}. "
         "pytest на такой путь даёт 0 items и exit 0 — запись врёт о покрытии."
     )
 
-    missing_fw = [entry for entry in sorted(_testpaths_from_ini()) if not (_MODULES_ROOT / entry).exists()]
-    assert not missing_fw, f"в modules/pytest.ini пути, которых нет на диске: {missing_fw}."
+    missing_fw = [entry for entry in sorted(_testpaths_from_ini()) if _empty_of_tests(_MODULES_ROOT, entry)]
+    assert not missing_fw, f"в modules/pytest.ini пути без тестов внутри: {missing_fw}."
 
 
 def test_services_and_plugins_test_dirs_are_collected() -> None:
@@ -282,3 +299,147 @@ def test_services_and_plugins_test_dirs_are_collected() -> None:
         "Эти тесты не гоняются дефолтным гейтом — верните слой в testpaths "
         "(решение владельца 2026-08-09) или добавьте каталог явно."
     )
+
+
+def test_frontend_test_dirs_are_collected() -> None:
+    """Каждый каталог тестов фронта прототипа виден ДЕФОЛТНОМУ гейту.
+
+    ВОСЬМОЙ случай того же класса (2026-08-10). Шестой случай (Ф3.4) закрыли
+    ДВУМЯ ФАЙЛАМИ из `frontend/tests`, и запись в `pyproject.toml` объясняла это
+    ценой «каталог целиком >10 минут». Замер её не подтвердил: весь
+    `multiprocess_prototype/frontend` — 2371 тест за 103 с. Пока дерево было вне
+    гейта, коммит `8dad8e7b` (D8) уронил два теста `test_phase15_smoke.py`, и они
+    доехали красными до `main`.
+
+    Отдельный тест, а не строка в соседнем: слои `Services`/`Plugins` и фронт —
+    разные решения владельца с разными датами и разной ценой, и сообщение об
+    отказе должно называть своё. Покрытие — по префиксу, поэтому новый каталог
+    тестов фронта попадает в гейт даром.
+    """
+    repo_root = _MODULES_ROOT.parents[1]
+    entries = _root_testpaths()
+
+    def covered(rel: str) -> bool:
+        return any(rel == entry or rel.startswith(entry.rstrip("/") + "/") for entry in entries)
+
+    frontend_root = repo_root / "multiprocess_prototype" / "frontend"
+    if not frontend_root.is_dir():
+        pytest.skip("фронт прототипа отсутствует в этой сборке")
+
+    uncovered = [
+        path.relative_to(repo_root).as_posix()
+        for path in frontend_root.rglob("tests")
+        if path.is_dir() and "__pycache__" not in path.parts and not covered(path.relative_to(repo_root).as_posix())
+    ]
+
+    assert not uncovered, (
+        f"каталоги тестов фронта вне корневого testpaths (pyproject.toml): {sorted(uncovered)}. "
+        "Дефолтный гейт их не собирает — верните 'multiprocess_prototype/frontend' в testpaths "
+        "(решение владельца 2026-08-10) или добавьте каталог явно."
+    )
+
+
+# ==============================================================================
+# Задача 4.0: страж КЛАССА «тесты-невидимки», а не очередного его экземпляра
+# ==============================================================================
+
+# Инфраструктурные каталоги: там нет исходников проекта, и рекурсия по ним даёт
+# либо чужие копии дерева, либо мусор сборки. `.claude/worktrees` — рабочие копии
+# репозитория, заведённые агентами: без этой строки каждый worktree принёс бы
+# полный дубликат всех каталогов тестов.
+_INFRA_DIRS = frozenset(
+    {".git", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules", "worktrees"}
+)
+
+# Каталоги с файлами `test_*.py`, осознанно не входящие НИ В ОДИН прогонщик.
+# Имя → причина. Запись без причины запрещена: она ничем не отличается от
+# забытого каталога, а именно их этот страж и ловит.
+_RUNNERLESS_BY_DECISION: dict[str, str] = {
+    # `backend_ctl/tests` здесь БЫЛ и снят 2026-08-11 (Н-8): каталог целиком в
+    # `testpaths`. Исключение держалось на «идёт 8-10 минут», а замер разложил цену —
+    # 598 тестов за 24 с плюс 44 живых, которые и дают все десять минут. Живые
+    # пропускаются с причиной (conftest каталога), полный прогон — `make test-ctl`.
+    "scripts/test_ratio": (
+        "не тесты, а инструмент /core:quality:test-ratio: имя файла совпало с шаблоном "
+        "python_files=test_*.py. Тестов внутри нет; при попытке собрать его вместе с "
+        "плагинным шаблоном pytest падает на коллизии basename'ов (оба модуля зовутся "
+        "test_ratio). Переименование инструмента не делаем — на путь ссылается slash-команда"
+    ),
+    ".claude/plugins/lang-python/templates/scripts/test_ratio": "шаблон того же инструмента, та же причина",
+}
+
+
+def _dirs_with_test_files(repo_root: Path) -> set[str]:
+    """Каталоги репозитория, где физически лежит хотя бы один `test_*.py`."""
+    found: set[str] = set()
+    for path in repo_root.rglob("test_*.py"):
+        if _INFRA_DIRS & set(path.parts):
+            continue
+        found.add(path.parent.relative_to(repo_root).as_posix())
+    return found
+
+
+def test_no_test_dir_is_invisible_to_every_runner() -> None:
+    """Ни один каталог тестов не остаётся вне обоих прогонщиков без названной причины.
+
+    ДЕВЯТЬ случаев класса «тесты-невидимки» чинились поимённо — H.1, ревью 5.13, Ф6.х,
+    Ф3.4, Ф8.5, 2026-08-10 (фронт), задача 4.0. Каждый раз ставился страж на СВОЮ зону:
+    `modules/`, `Services`+`Plugins`, фронт прототипа. Класс от этого не закрывался —
+    следующий каталог заводили в зоне, которую ни один страж не сторожит, и он снова
+    был невидим. Замер 4.0: 114 файлов в 19 каталогах вне обоих прогонщиков, среди них
+    четыре красных теста, прожившие красными после ренейма D4 никем не замеченные.
+
+    Этот страж судит РЕПОЗИТОРИЙ целиком: каталог с `test_*.py` обязан быть покрыт
+    корневым `testpaths`, либо `modules/pytest.ini`, либо назван в
+    `_RUNNERLESS_BY_DECISION` с причиной. Третьего исхода нет — «невидимый» перестаёт
+    быть состоянием по умолчанию и становится решением, которое кто-то подписал.
+    """
+    repo_root = _MODULES_ROOT.parents[1]
+    root_entries = _root_testpaths()
+    fw_entries = _testpaths_from_ini()
+    modules_prefix = _MODULES_ROOT.relative_to(repo_root).as_posix()
+
+    def covered(rel: str) -> bool:
+        if any(rel == e or rel.startswith(e.rstrip("/") + "/") for e in root_entries):
+            return True
+        if not rel.startswith(modules_prefix + "/"):
+            return False
+        inner = rel[len(modules_prefix) + 1 :]
+        return any(inner == e or inner.startswith(e.rstrip("/") + "/") for e in fw_entries)
+
+    invisible = sorted(
+        rel for rel in _dirs_with_test_files(repo_root) if not covered(rel) and rel not in _RUNNERLESS_BY_DECISION
+    )
+    assert not invisible, (
+        f"каталоги с тестами вне ОБОИХ прогонщиков: {invisible}. "
+        "Эти тесты не гоняются нигде — добавьте путь в корневой testpaths "
+        "(pyproject.toml) или в modules/pytest.ini, либо впишите каталог в "
+        "_RUNNERLESS_BY_DECISION с причиной, за которую кто-то отвечает."
+    )
+
+
+def test_runnerless_decisions_stay_alive_and_needed() -> None:
+    """Исключения не гниют: каталог существует, тесты в нём есть, причина не пуста.
+
+    Обратная сторона того же класса. Мёртвая запись в списке исключений читается как
+    «здесь решение», хотя решать давно нечего, — и следующий каталог с тем же именем
+    проедет мимо стража молча. Плюс запись, которую тем временем внесли в testpaths,
+    обязана уйти отсюда: иначе исключение молча перекрывает реально покрытый путь.
+    """
+    repo_root = _MODULES_ROOT.parents[1]
+    root_entries = _root_testpaths()
+
+    dead = [rel for rel in _RUNNERLESS_BY_DECISION if not any((repo_root / rel).rglob("test_*.py"))]
+    assert not dead, f"в _RUNNERLESS_BY_DECISION каталоги без тестов (или отсутствующие): {dead}"
+
+    now_collected = [
+        rel
+        for rel in _RUNNERLESS_BY_DECISION
+        if any(rel == e or rel.startswith(e.rstrip("/") + "/") for e in root_entries)
+    ]
+    assert not now_collected, (
+        f"каталоги названы исключением и одновременно стоят в testpaths: {now_collected}. "
+        "Снимите запись из _RUNNERLESS_BY_DECISION — решение уже отменено."
+    )
+
+    assert all(reason.strip() for reason in _RUNNERLESS_BY_DECISION.values())

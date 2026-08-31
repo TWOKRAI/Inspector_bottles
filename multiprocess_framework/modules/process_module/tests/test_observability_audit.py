@@ -379,8 +379,17 @@ class TestFoundByTheReview:
 
         Оператор, применивший файл через `config.reload`, видел в журнале
         `command:telemetry.reconfigure` — команду, которую никто не вызывал.
+
+        Форма правила — ``{"enabled": True}``, а не ``True``. Прежняя редакция
+        писала краткое ``{"fps": True}``, и это было НЕВЕРНОЙ моделью: у
+        ``MetricRule`` короткой формы нет, получатель на ней падает, а
+        ``resolve()`` спросил бы у ``bool`` поле ``enabled``. Тест этого не
+        замечал, потому что в его харнессе heartbeat отсутствует — применять
+        секцию было некому, и мусор просто лежал в слое. Проверяет тест аудит,
+        а не форму секции, поэтому правка входа его предмета не трогает
+        (Task 2.1: с валидатором такой вход теперь честно отвергается).
         """
-        handlers["config.reload"]({"telemetry": {"publish": {"metrics": {"fps": True}}}, "ttl": 60})
+        handlers["config.reload"]({"telemetry": {"publish": {"metrics": {"fps": {"enabled": True}}}}, "ttl": 60})
 
         origins = {e["origin"] for e in process_observability_layers(svc).audit.entries()}
         assert origins == {"command:config.reload"}, origins
@@ -390,14 +399,16 @@ class TestFoundByTheReview:
 
         Пара: до фикса запись перечисляла только новые ключи, и снятый `latency`
         не встречался в аудите нигде.
+
+        Про форму ``{"enabled": True}`` — см. соседний тест выше.
         """
-        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"latency": True}}, "ttl": 600})
-        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"fps": True}}, "mode": "replace"})
+        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"latency": {"enabled": True}}}, "ttl": 600})
+        handlers["telemetry.reconfigure"]({"publish": {"metrics": {"fps": {"enabled": True}}}, "mode": "replace"})
 
         layers = process_observability_layers(svc)
-        assert layers.session_keys() == ("telemetry.publish.metrics.fps",)
+        assert layers.session_keys() == ("telemetry.publish.metrics.fps.enabled",)
         touches = [e for e in layers.audit.entries() if e["action"] == ACTION_TOUCH]
-        assert touches[-1]["removed"] == ["telemetry.publish.metrics.latency"]
+        assert touches[-1]["removed"] == ["telemetry.publish.metrics.latency.enabled"]
 
     def test_rebuild_record_cannot_claim_a_key_it_did_not_apply(self, svc) -> None:
         """Замечание 3: содержимое записи считалось ПОСЛЕ снятия лока.
@@ -416,6 +427,12 @@ class TestFoundByTheReview:
             писатель блокировался, `join` истекал по таймауту, и тест зеленел
             при любой реализации. Найдено слом-инъекцией: тест пережил свой слом
             и потому не существовал.
+
+            Задача 5.4 — ключ гонщика обязан быть НАСТОЯЩИМ (`retention_days`,
+            а не прежний выдуманный `smuggled.key`): ручка оператора теперь
+            отвергает имя вне контракта, и на выдуманном ключе поток гонщика
+            умирал бы исключением. Шов бы «сработал», правка бы не легла, и тест
+            зеленел бы, ничего не проверив.
             """
 
             def __init__(self, real, stack) -> None:
@@ -433,7 +450,7 @@ class TestFoundByTheReview:
                 if self._depth == 0 and self._armed:
                     self._armed = False
                     writer = threading.Thread(
-                        target=lambda: self._stack.session_set("smuggled.key", 1, ttl=0, origin="race"),
+                        target=lambda: self._stack.session_set("retention_days", 1, ttl=0, origin="race"),
                         daemon=True,
                     )
                     writer.start()
@@ -449,10 +466,10 @@ class TestFoundByTheReview:
         apply_observability_layers(layers, origin="test:race")
 
         assert seam.fired, "шов не сработал: чужой писатель не успел вклиниться в окно"
-        assert "smuggled.key" in layers.session_keys(), "правка гонщика вообще не легла"
+        assert "retention_days" in layers.session_keys(), "правка гонщика вообще не легла"
         rebuilt = [e for e in layers.audit.entries() if e["action"] == ACTION_REBUILD]
         assert rebuilt, layers.audit.entries()
-        assert "smuggled.key" not in rebuilt[-1]["keys"], "запись приписала себе чужую правку"
+        assert "retention_days" not in rebuilt[-1]["keys"], "запись приписала себе чужую правку"
 
     def test_sweeper_tick_writes_one_record_not_two(self, svc, handlers) -> None:
         """Замечание 4: две записи на такт выедали кольцо вдвое быстрее.
@@ -635,3 +652,58 @@ class TestReservedPersistIsRefusedLoudly:
     def test_absent_persist_still_applies_as_before(self, svc, handlers) -> None:
         result = handlers["config.reload"]({"observability": {"log_level": "DEBUG"}})
         assert result["success"] is True, result
+
+
+class TestRingOverflowHasAVoice:
+    """Н2-3 (переприёмка F2 раунд 2): вытеснение считалось, но молчало.
+
+    Живьём: 60 законных `config.reload` на `devices` → `audit.dropped` 0 → 22,
+    контроль `seg` = 0, и ни одного слова в логах. Мерило 1 требует счёт И голос:
+    «кто поставил ключ» уезжает из кольца первым, а спрашивают об этом в инциденте,
+    то есть позже всего.
+    """
+
+    @staticmethod
+    def _audit(maxlen: int = 3):
+        from collections import deque
+
+        from ..configs.observability_audit import ObservabilityAudit
+
+        lines: list = []
+        audit = ObservabilityAudit(
+            ring=deque(maxlen=maxlen),
+            log=lambda text, is_error: lines.append((text, is_error)),
+            clock=lambda: 1.0,
+        )
+        return audit, lines
+
+    def _fill(self, audit, count: int) -> None:
+        from ..configs.observability_audit import ACTION_SET
+
+        for i in range(count):
+            audit.record(ACTION_SET, origin="test", key=f"k{i}", value=i)
+
+    def test_overflow_is_announced_once_per_condition(self) -> None:
+        audit, lines = self._audit(maxlen=3)
+        self._fill(audit, 8)
+
+        spoken = [text for text, _err in lines if "кольцо заполнено" in text]
+        assert audit.dropped() == 5, audit.dropped()
+        # ОДИН раз, а не на каждую запись: иначе поток смен превратился бы в поток
+        # строк о потоке смен (тот же довод, что у схлопывания повторов).
+        assert len(spoken) == 1, spoken
+
+    def test_the_voice_is_marked_as_a_loss_not_a_change(self) -> None:
+        audit, lines = self._audit(maxlen=2)
+        self._fill(audit, 5)
+
+        flags = [is_error for text, is_error in lines if "кольцо заполнено" in text]
+        assert flags == [True], flags
+
+    def test_a_ring_that_never_fills_says_nothing(self) -> None:
+        """Пара: голос, звучащий всегда, — шум, а не сигнал."""
+        audit, lines = self._audit(maxlen=50)
+        self._fill(audit, 5)
+
+        assert audit.dropped() == 0
+        assert [text for text, _err in lines if "кольцо заполнено" in text] == []

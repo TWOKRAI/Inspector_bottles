@@ -195,13 +195,29 @@ def test_one_process_with_capture_plugin(topology_one_process, default_sys_confi
     assert len(entry["config"]["plugins"]) == 1
     assert entry["config"]["plugins"][0]["plugin_name"] == "capture"
 
-    # Проверяем начальное state
+    # Проверяем начальное state.
+    #
+    # Ред. 2026-08-18 (блокер 1 ревью, исполнение флипа РТ-2): здесь стояло
+    # `fps == 0.0` и `frame_count == 0`. Посев переведён на `None`, потому что
+    # при закрытом publisher-gate перетирать его стало НЕЧЕМУ, и ноль из
+    # «ещё не измерено» превращался в уверенное неверное показание: в дереве
+    # висел `fps: 0.0` при живых 15.4 опросом, а `system_overview` рапортовал
+    # семь аномалий `fps_zero_while_running`, показывая рядом живые Гц.
+    # `None` во всей системе означает «показания нет» — ноль обязан означать
+    # измеренный ноль. Как упадёт при откате: посей снова `0.0` — эти два
+    # ассерта покраснеют, и вместе с ними два снапшота сборки.
     state = entry["state"]
     assert state["status"] == "stopped"
     assert state["pid"] is None
-    assert state["fps"] == 0.0
-    assert state["frame_count"] == 0
+    assert state["fps"] is None, "посев fps обязан быть None («не измерено»), а не 0.0"
     assert state["error"] is None
+    # Ред. 2026-08-20 (Ф1 «порта наблюдений», Task 1.4): `frame_count` из посева
+    # УБРАН — имя публикует плагин, и его лист уехал в поддерево писателя
+    # (`state.plugins.<писатель>.frame_count`). Перетирать плоский адрес стало
+    # нечему, посеянный `None` остался бы вечным листом-призраком рядом с
+    # настоящим числом. Отдельный сторож с парой позитив/негатив —
+    # `test_observation_port_ghost_seed.py`.
+    assert "frame_count" not in state, "плоский посев frame_count вернулся — призрак навсегда"
 
 
 # ---------------------------------------------------------------------------

@@ -50,6 +50,50 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         communication: ProcessCommunication для межпроцессной коммуникации
     """
 
+    #: Сток плоскости документов (Ф8.7). Атрибут КЛАССА со значением ``None``, а не
+    #: «появляется при сшивке»: ``wire_document_sink`` ставит его только когда плоскость
+    #: настроена, и до задачи 4.2 процесс без плоскости атрибута не имел вовсе. Пока
+    #: ``IProcessServices`` о стоке не знал, это было незаметно; с объявлением в протоколе
+    #: отсутствие атрибута означало бы, что штатно сконфигурированный процесс перестаёт
+    #: удовлетворять протоколу — dev-проверка ``isinstance(process, IProcessServices)``
+    #: падала бы там, где всё правильно. ``None`` — законное «плоскость не поднята».
+    document_sink: Any = None
+
+    #: Ф4 (задача 4.1): живой хозяин отбора широких записей. Атрибут КЛАССА со
+    #: значением ``None`` — той же правкой, что объявление порта в
+    #: ``IProcessServices``, и по тому же доводу, что у ``document_sink`` выше:
+    #: объявление в протоколе без атрибута ломает ``isinstance(process,
+    #: IProcessServices)`` на штатной конфигурации, где сшивка не проходила
+    #: (одиночный запуск, тестовый стенд). ``None`` — законное «отбора нет»:
+    #: фронты пишутся, поток нет.
+    event_selector: Any = None
+
+    #: Ф5 (задача 5.1): живой хозяин дампов кольца записей. Атрибут КЛАССА со
+    #: значением ``None`` — ТОЙ ЖЕ правкой, что объявление порта
+    #: ``IProcessServices.flight_recorder`` (Р5.1-2), и по тому же доводу, что у
+    #: соседей выше: объявление в протоколе без атрибута ломает
+    #: ``isinstance(process, IProcessServices)`` на штатной конфигурации без
+    #: сшивки. ``None`` — законное «дампов нет», отвечающее тем же названным
+    #: отказом, что и настроенный рекордер с ``enabled=False``.
+    flight_recorder: Any = None
+
+    #: Task 3.5 (ADR-PM-038): хранилище текущих уровней, отданных плагинами
+    #: (``PluginLevels``). Атрибут КЛАССА со значением ``None`` — ТОЙ ЖЕ правкой,
+    #: что объявление порта ``IProcessServices.plugin_levels``, и по тому же
+    #: доводу, что у соседей выше. ``None`` — законное «уровней никто не отдавал»:
+    #: хранилище создаётся лениво, на первом ``ctx.publish_metric``, и подменяется
+    #: атрибутом ЭКЗЕМПЛЯРА, поэтому общий классовый ``None`` не может стать общим
+    #: состоянием двух процессов.
+    plugin_levels: Any = None
+
+    #: Задача 5.6: намерения подписчиков хвоста — атрибут КЛАССА со значением-пустотой
+    #: по тому же доводу, что у ``document_sink`` выше: объявление только в ``__init__``
+    #: оставляет без механизма тех, кто собирает процесс иначе (оркестратор, тестовые
+    #: стенды) — и подписка падала бы AttributeError вместо работы. Мутации на месте
+    #: нет ни одной: все записи — атомарный rebind ``{**старое, ...}``, поэтому общий
+    #: классовый словарь не может стать общим состоянием двух процессов.
+    _observability_tail_intents: dict = {}
+
     def __init__(
         self,
         name: str,
@@ -139,6 +183,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # подписчик молча угонял хвост у первого. Пусто до подписки командой
         # observability.tail.subscribe (форвардер «мёртв» без подписчика — как log_tail).
         self._observability_forwarders: dict = {}
+        # Задача 5.6: намерение подписчика — уровень и то, ЗАДАН ЛИ ОН ПРИЦЕЛЬНО.
+        # Без этого оптовая раздача молча понижала порог, заданный адресно
+        # (блокер Н2-1 переприёмки F2): {subscriber: {'level': str, 'targeted': bool}}.
+        self._observability_tail_intents: dict = {}
 
         # Plugin orchestrator — опциональная композиция
         # Активируется если config["plugins"] непуст (см. _init_custom_managers)
@@ -400,6 +448,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         from ..managers.observability_wiring import (
             resolve_history_policy,
             wire_document_sink,
+            wire_event_selector,
             wire_observability_store,
             wire_process_observability,
         )
@@ -409,6 +458,19 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # а hub — только у пилота: сшей мы документы внутри условия ниже, «когда
         # включили DEBUG» отвечалось бы ровно на одном процессе из восьми.
         wire_document_sink(self)
+
+        # Ф4 (4.1): отбор широких записей — тоже у каждого процесса и по тому же
+        # доводу. Селектор читает те же разрешённые слои, поэтому идёт ПОСЛЕ
+        # `_apply_boot_observability_layers` (см. вызывающего): ручки к этому
+        # моменту уже разрешены, и второго резолва не заводится.
+        wire_event_selector(self)
+
+        # Ф5 (5.1): рекордер дампов — у каждого процесса и по тому же доводу.
+        # ПОСЛЕ `wire_event_selector` только ради читаемости: обе сшивки читают
+        # одни и те же разрешённые слои и друг о друге не знают.
+        from ..managers.observability_flight import wire_flight_recorder
+
+        wire_flight_recorder(self)
 
         self._observability_hub, self._observability_drain = wire_process_observability(
             self.name,
@@ -1010,6 +1072,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 self._observability_drain,
                 self._observability_store,
                 [fwd for fwd, _taps in self._observability_forwarders.values()],
+                # 2.1: окно агрегации закрывается ЗДЕСЬ, а не в `shutdown()`
+                # менеджеров ниже — иначе последний снапшот смены родился бы
+                # уже после дренажа и после закрытия стора. См. докстринг.
+                stats_to_flush=self.stats_manager,
             )
         except Exception:  # noqa: BLE001 — потеря телеметрии не должна ронять stop()
             pass
@@ -1025,12 +1091,19 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         for _fwd, taps in self._observability_forwarders.values():
             unwire_observability_forward(taps)
         self._observability_forwarders = {}
+        self._observability_tail_intents = {}
         # Ф8.5: отцепить сток документов от аудита и закрыть БД. ПОСЛЕ дренажа: до
         # этой строки запись аудита ещё имеет право появиться (её может породить сам
         # teardown), и уехать ей есть куда.
         unwire_document_sink(self)
 
-    def subscribe_observability_tail(self, subscriber: str, level: Optional[str] = None) -> dict:
+    def subscribe_observability_tail(
+        self,
+        subscriber: str,
+        level: Optional[str] = None,
+        *,
+        wholesale: bool = False,
+    ) -> dict:
         """Ф5.20b: подписать адрес на live-хвост записей наблюдаемости (F1: per-subscriber).
 
         Ставит форвардер (drain log/stats) + error-tap'ы (write-through) на push
@@ -1086,6 +1159,23 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 "subscriber": subscriber,
                 "reason": f"неизвестный level '{level}' ({'|'.join(LEVEL_ORDER)})",
             }
+        # Задача 5.6 (блокер Н2-1 переприёмки F2 раунд 2): ПРИЦЕЛЬНАЯ подписка
+        # сильнее ОПТОВОЙ. Прежде побеждала последняя воля, и молча: живьём
+        # `subscribe(camera_0, INFO)` + `subscribe_all(WARNING)` давали 31 запись
+        # `{info}` → 0 info `{error: 6}`, при том что манифест продолжал обещать
+        # INFO. Процесс сам различить дороги не мог — брокер разворачивает оптовую
+        # команду в те же самые `observability.tail.subscribe`, поэтому намерение
+        # едет НА ПРОВОДЕ (`scope="all"`), а не выводится из догадки.
+        #
+        # Решение владельца 2026-08-12: объединение по мерилу 1 («подписчик с
+        # level=INFO получает INFO от каждого процесса»). Понижать уровень
+        # по-прежнему можно — но прицельной же командой, то есть тем же жестом,
+        # которым его задавали.
+        held = self._observability_tail_intents.get(subscriber)
+        kept_from: Optional[str] = None
+        if wholesale and held is not None and held.get("targeted") and held.get("level") != min_level:
+            kept_from, min_level = min_level, str(held["level"])
+        targeted = bool(held and held.get("targeted")) or not wholesale
         forwarder, taps = wire_observability_forward(
             self.router_manager,
             subscriber,
@@ -1097,6 +1187,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Атомарный rebind, не in-place set: heartbeat-drain итерирует .values() в
         # другом потоке — смена размера dict во время итерации дала бы RuntimeError.
         self._observability_forwarders = {**self._observability_forwarders, subscriber: (forwarder, taps)}
+        # Намерение живёт рядом с форвардером и тем же атомарным rebind'ом: без него
+        # «кто задал этот уровень» пришлось бы выводить из порядка команд, то есть
+        # из догадки. Снимается вместе с подпиской (см. unsubscribe).
+        self._observability_tail_intents = {
+            **self._observability_tail_intents,
+            subscriber: {"level": min_level, "targeted": targeted},
+        }
         # Ф6.х.5: ответ громкий, как у log.tail — tap'ы, менеджеры, порог.
         # Молча-пустой список tap'ов и был лицом дефекта З-1: подписка
         # «успешна», а слушать некому.
@@ -1108,7 +1205,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 "live-хвоста не будет (менеджеры без add_tap?)",
                 module="observability",
             )
-        return {
+        reply = {
             "success": True,
             "process": self.name,
             "subscriber": subscriber,
@@ -1116,8 +1213,23 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             "taps": tap_names,
             "managers": managers,
         }
+        if kept_from is not None:
+            # Молчание здесь и было половиной дефекта: оптовая раздача обязана
+            # сказать, что НЕ понизила прицельный порог, — иначе оператор считает
+            # действующим то, что запросил последним.
+            reply["kept_level"] = min_level
+            reply["ignored_level"] = kept_from
+            reply["reason"] = (
+                f"прицельная подписка сильнее оптовой: порог '{min_level}' сохранён, оптовый '{kept_from}' не применён"
+            )
+        return reply
 
-    def unsubscribe_observability_tail(self, subscriber: Optional[str] = None) -> dict:
+    def unsubscribe_observability_tail(
+        self,
+        subscriber: Optional[str] = None,
+        *,
+        wholesale: bool = False,
+    ) -> dict:
         """Ф5.20b: снять подписку на live-хвост (форвардер + error-tap'ы), F1: per-subscriber.
 
         ``subscriber`` задан → снять форвардер ТОЛЬКО этого подписчика (форвардеры
@@ -1131,13 +1243,39 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             for _fwd, taps in self._observability_forwarders.values():
                 unwire_observability_forward(taps)
             self._observability_forwarders = {}
+            self._observability_tail_intents = {}
             return {"success": had, "process": self.name}
 
+        # Задача 5.6, зеркало (находка Н2-2): ОПТОВОЕ снятие не сносит подписку,
+        # заданную ПРИЦЕЛЬНО. Воспроизведено живьём до правки: `unwatch()` глушил
+        # прицельный хвост, которого сам не создавал (28 записей → 28 после
+        # снятия профиля, который ни разу не включался). Симметрия с подпиской
+        # обязательна: закрой один конец — и «объединение» превратилось бы в
+        # «объединение до первого unwatch».
+        held = self._observability_tail_intents.get(subscriber)
+        if wholesale and held is not None and held.get("targeted"):
+            return {
+                "success": True,
+                "process": self.name,
+                "subscriber": subscriber,
+                "removed": False,
+                "kept_targeted": True,
+                "reason": (
+                    "прицельная подписка сильнее оптовой: оптовое снятие её не тронуло "
+                    f"(порог '{held.get('level')}' держится) — снимать адресной командой"
+                ),
+            }
         # Атомарный rebind вместо .pop() (см. subscribe): убрать гонку с heartbeat-drain.
         prev = self._observability_forwarders.get(subscriber)
         if prev is not None:
             self._observability_forwarders = {
                 k: v for k, v in self._observability_forwarders.items() if k != subscriber
+            }
+            # Намерение уходит вместе с подпиской: оставь его — и следующая ОПТОВАЯ
+            # подписка сохранила бы порог от снятой прицельной, то есть память о отменённом
+            # решении пережила бы само решение.
+            self._observability_tail_intents = {
+                k: v for k, v in self._observability_tail_intents.items() if k != subscriber
             }
             unwire_observability_forward(prev[1])
         return {"success": prev is not None, "process": self.name, "subscriber": subscriber}

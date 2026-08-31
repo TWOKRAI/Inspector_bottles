@@ -45,6 +45,8 @@ class DataReceiver:
         log_error: Callable[[str], None] | None = None,
         log_debug: Callable[[str], None] | None = None,
         node_name: str = "",
+        max_lag_items: int = 0,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._receive = receive_fn
         # Ф7 G.5.a — снятие двойной конверсии на data-plane. Флаг читается ОДИН раз
@@ -61,6 +63,15 @@ class DataReceiver:
         self._collector = item_collector
         self._chain_queue = chain_queue
         self._lag_threshold = lag_alert_threshold_sec
+        # Потолок отставания: сколько коллекций разрешено копить перед исполнителем.
+        # 0 = прежнее поведение (блокировать и ждать, Q6). >0 = «догоняющий буфер»:
+        # держим не более N свежих, самые старые выбрасываем. См. _bound_lag.
+        self._max_lag_items = max(0, int(max_lag_items))
+        self._clock = clock or time.monotonic
+        self._lag_dropped_total = 0
+        self._lag_dropped_since_log = 0
+        self._lag_log_window = 5.0
+        self._lag_last_log = 0.0
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
         # Kwargs-safe no-op по умолчанию (F6d, ревью 2026-07-13): реальный
@@ -99,6 +110,70 @@ class DataReceiver:
             metrics["perf_probes"] = self._perf.get_stats()
         return metrics
 
+    def _bound_lag(self, items: list[dict]) -> bool:
+        """Догоняющий буфер: держать не более ``max_lag_items`` свежих коллекций.
+
+        Зачем. Живой стенд 2026-08-12 (`webcam_sketch`): исполнитель `lines` тянет
+        3.3 к/с, источник даёт 21 к/с. Внутренняя очередь (64) и очередь транспорта
+        (50) наполнялись доверху, и картинка Line-art отставала от реальности
+        примерно на **34 секунды** — при том что кадры всё равно терялись: транспорт
+        вытеснил 1646 штук (``queue_data_evicted`` у `seg`). То есть гарантия «не
+        дропаем» уже не действовала, а платили за неё задержкой.
+
+        Что делает. Перед укладкой новой коллекции выбрасывает самые СТАРЫЕ, пока
+        в очереди не останется меньше потолка. Отставание сверху ограничено
+        ``max_lag_items / темп исполнителя``: 4 коллекции при 3.3 к/с — 1.2 с,
+        «несколько кадров, чтобы догнать пробку», а не секунды накопления.
+
+        Потеря — со счётом и голосом: счётчик ``lag_dropped_total`` растёт всегда,
+        WARNING печатается не чаще раза в 5 с и несёт число выброшенных за окно
+        (иначе строка на кадр сама стала бы нагрузкой — тот же приём, что у
+        ``drop_oldest`` транспорта).
+
+        Returns:
+            True — коллекция уложена (вызывающему делать нечего).
+            False — уложить не удалось (гонка с потребителем): пусть работает
+            прежняя дорога с блокировкой, а не тихая потеря.
+        """
+        dropped = 0
+        while self._chain_queue.qsize() >= self._max_lag_items:
+            try:
+                self._chain_queue.get_nowait()
+            except queue.Empty:  # потребитель успел вычерпать — места хватит
+                break
+            dropped += 1
+        try:
+            self._chain_queue.put_nowait(items)
+        except queue.Full:
+            # Гонка: место заняли между get и put. Не теряем молча — уходим на
+            # прежнюю дорогу (блокирующий put с алертом).
+            self._note_lag_drops(dropped)
+            return False
+        self._note_lag_drops(dropped)
+        return True
+
+    def _note_lag_drops(self, dropped: int) -> None:
+        """Учесть выброшенные коллекции; голос — не чаще раза в окно, с числом."""
+        if not dropped:
+            return
+        self._lag_dropped_total += dropped
+        self._lag_dropped_since_log += dropped
+        now = self._clock()
+        if now - self._lag_last_log < self._lag_log_window:
+            return
+        self._lag_last_log = now
+        count, self._lag_dropped_since_log = self._lag_dropped_since_log, 0
+        self._log_error(
+            f"DataReceiver: исполнитель не успевает — выброшено {count} устаревших коллекций "
+            f"за последние {self._lag_log_window:g} с (всего {self._lag_dropped_total}); "
+            f"потолок отставания {self._max_lag_items}"
+        )
+
+    @property
+    def lag_dropped_total(self) -> int:
+        """Сколько устаревших коллекций выброшено потолком отставания."""
+        return self._lag_dropped_total
+
     def on_items_ready(self, items: list[dict]) -> None:
         """Callback от ItemCollector — коллекция готова, кладём в chain_queue.
 
@@ -108,6 +183,8 @@ class DataReceiver:
         очереди: downstream consumer уже остановлен, ждать бессмысленно. Item
         дропается (единственный случай) чтобы воркер мог выйти gracefully.
         """
+        if self._max_lag_items and self._bound_lag(items):
+            return
         try:
             self._chain_queue.put(items, timeout=self._lag_threshold)
         except queue.Full:

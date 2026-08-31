@@ -266,7 +266,7 @@ class ProcessMonitor:
         # Сохраняем данные о воркерах процесса (для legacy full-status broadcast).
         # Телеметрию (per-worker + агрегат fps/latency) в дерево здесь НЕ публикуем:
         # каждый процесс делает это сам (self-publish — ProcessHeartbeat.
-        # _publish_metrics_to_tree). Heartbeat ProcessManager-у нужен только для
+        # _publish_telemetry_to_tree). Heartbeat ProcessManager-у нужен только для
         # liveness/timeout и переходов paused/running. См.
         # plans/telemetry-self-publish-redesign.md (Task 2).
         workers = msg.get("workers_status")
@@ -363,7 +363,9 @@ class ProcessMonitor:
         (рестарт процесса) приростом не считается — база просто опускается.
 
         Путь берётся ПЕРВЫЙ резолвящийся из ``rule.counter_paths`` (имя поля —
-        конвенция публикующей стороны: capture-плагин пишет ``drops``).
+        конвенция публикующей стороны: capture-плагин пишет ``drops``). Кандидат
+        может нести подстановочный сегмент ``*`` — его разрешает
+        :meth:`_read_state_counter` (сумма по писателям, см. её докстроку).
 
         Известная семантика: база продвигается на каждом замере, поэтому прирост,
         пришедшийся на окно ``cooldown``, НЕ аккумулируется — после окна алерт
@@ -381,7 +383,7 @@ class ProcessMonitor:
             for rule in rules:
                 current = None
                 for path in rule.paths_for(name):
-                    current = self._read_state_int(path)
+                    current = self._read_state_counter(path)
                     if current is not None:
                         break
                 if current is None:
@@ -395,8 +397,99 @@ class ProcessMonitor:
                 if growth >= rule.min_growth:
                     self._fire_alert(rule, name, f"счётчик вырос на {growth} (сейчас {current})")
 
-    def _read_state_int(self, path: str) -> int | None:
-        """Прочитать целочисленное значение из локального StateStore (или ``None``)."""
+    def _read_state_counter(self, path: str) -> int | None:
+        """Прочитать счётчик правила: точный путь ИЛИ путь с одним ``*``-сегментом.
+
+        Форма без ``*`` — прежнее поведение (:meth:`_read_state_int`), бит-в-бит.
+
+        Форма с ``*`` (``processes.cam.state.plugins.*.drops``) читает поддерево на
+        месте подстановки, берёт КАЖДОГО ребёнка и собирает одноимённые листья.
+        **Агрегация — СУММА по писателям, и это решение, а не деталь.** Правило
+        «дропы растут» обязано видеть рост у ЛЮБОГО писателя; «первый
+        резолвящийся» потерял бы рост второго целиком (писатель A стоит на 5,
+        писатель B растёт 0→50 — при выборе первого прирост равен нулю, алерта
+        нет). Сумма монотонна по каждому слагаемому: рост любого писателя growth
+        поднимает. Цена названа: величина в тексте алерта — суммарная по
+        процессу, а не по конкретному плагину; кто именно сыпет, видно в дереве.
+
+        Возвращается ``None``, если поддерева нет, оно пусто, или ни одного
+        ЦЕЛОГО листа с нужным именем в нём не нашлось. ``None``, а не ``0``:
+        ноль — это измеренное «дропов нет», и он заслонил бы плоских кандидатов
+        (``state.drops``), идущих следом в ``counter_paths``.
+
+        Нечисловой лист (``None``, строка, float, bool) в сумму не входит и её
+        не отменяет — сосед-писатель с корректным целым остаётся виден. Потолок
+        назван: писатель, публикующий ``drops`` дробным, для этого правила
+        невидим (контракт счётчика — целое, тот же фильтр, что у
+        :func:`counter_growth`).
+
+        Уход писателя (стоп плагина) уменьшает сумму — это СБРОС, и
+        :func:`counter_growth` отдаёт на нём ``0``: исчезновение источника не
+        должно выглядеть всплеском потерь.
+
+        **Симметричная цена, и она НЕ бесплатна: ПРИХОД писателя даёт ЛОЖНЫЙ
+        алерт.** Уход прощён `counter_growth`'ом, приход — нет: новый писатель с
+        ненулевым первым значением поднимает сумму скачком, и правило прочтёт это
+        как рост. Воспроизведено (ревью Task 1.4, находка 2): база снята при одном
+        писателе с ``drops=0``, приезжает второй с ``drops=500`` → алерт «счётчик
+        вырос на 500». С ``CapturePlugin`` сегодня недостижимо — он стартует с
+        нуля, — но ``RingBuffer.drops_count``
+        (``shared_resources_module/buffers/ring_buffer.py``) величина
+        КУМУЛЯТИВНАЯ, и такой писатель приедет с ненулевым первым значением.
+
+        Названный потолок, а не недосмотр: лечится базой ПЕР-ПИСАТЕЛЯ (помнить
+        предыдущее значение каждого листа и складывать приросты, а не значения),
+        и это отдельная задача — она меняет форму ``_counter_baseline``, то есть
+        контракт, общий с плоскими кандидатами. Пока цена такая: один ложный
+        warning на приход кумулятивного писателя, дальше правило работает верно.
+        Сторож — ``TestNewWriterArrival`` в ``test_counter_wildcard_hazards.py``:
+        он ПРИШПИЛИВАЕТ сегодняшнее поведение, чтобы починка была видна как смена
+        ожидания, а не как случайность.
+        """
+        if "*" not in path:
+            return self._read_state_int(path)
+        return self._read_state_int_sum(path)
+
+    def _read_state_int_sum(self, path: str) -> int | None:
+        """Сумма целых листьев по одному подстановочному сегменту (см. вызывающего)."""
+        segments = path.split(".")
+        if segments.count("*") != 1:
+            # Двух подстановок механизм не разрешает — молча вернуть None было бы
+            # тем самым «правило мертво и не жалуется». Пусть отказ будет громким
+            # в логе, а не в дереве: монитор не имеет права падать из-за правила.
+            self.process._log_warning(
+                f"alert-правило: путь '{path}' содержит не один подстановочный сегмент — не разрешён"
+            )
+            return None
+        idx = segments.index("*")
+        if idx == 0:
+            # Ведущая ``*`` не даёт префикса, поддерево читать неоткуда — отказ
+            # ТОТ ЖЕ громкий. Умирал молча (ревью Task 1.4, находка 5): механизм
+            # затевался ровно против «правило мертво и не жалуется», и оставить
+            # здесь тихий None значило бы завести ту же дыру внутри её лекарства.
+            self.process._log_warning(
+                f"alert-правило: путь '{path}' начинается с подстановки — префикса для чтения нет"
+            )
+            return None
+        prefix = ".".join(segments[:idx])
+        tail = segments[idx + 1 :]
+        subtree = self._read_state_raw(prefix)
+        if not isinstance(subtree, dict):
+            return None
+        total: int | None = None
+        for child in subtree.values():
+            leaf: Any = child
+            for seg in tail:
+                if not isinstance(leaf, dict):
+                    leaf = None
+                    break
+                leaf = leaf.get(seg)
+            if isinstance(leaf, int) and not isinstance(leaf, bool):
+                total = leaf if total is None else total + leaf
+        return total
+
+    def _read_state_raw(self, path: str) -> Any:
+        """Сырое значение узла локального StateStore (или ``None``): скаляр или поддерево."""
         if not path:
             return None
         ssm = getattr(self.process, "_state_store_manager", None)
@@ -406,10 +499,14 @@ class ProcessMonitor:
             resp = ssm.handle_state_get({"data": {"path": path}})
             if resp.get("status") != "ok":
                 return None
-            value = resp.get("value")
-            return value if isinstance(value, int) and not isinstance(value, bool) else None
+            return resp.get("value")
         except Exception:  # nosec B110 — чтение счётчика не критично для монитора
             return None
+
+    def _read_state_int(self, path: str) -> int | None:
+        """Прочитать целочисленное значение из локального StateStore (или ``None``)."""
+        value = self._read_state_raw(path)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
 
     def _clear_alerts_subtree(self, process_name: str) -> None:
         """Удалить ``system.alerts.<process>`` из StateStore (NEW-7).

@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from ..levels import ERROR_SEVERITY, UNKNOWN_SEVERITY, UNSPECIFIED, severity_of
-from .observability_hub import KIND_STATS
+from .observability_hub import KIND_STATS, STATS_AGGREGATE_KEY
 
 KIND_ERROR = "error"  # локальная константа (не тянем observability_store → без цикла store↔display)
 KIND_LOG = "log"
@@ -44,6 +44,17 @@ _ENVELOPE_KEYS = ("kind", "module", "process", "ts", "severity", "message", "obs
 #: Ключ отметки ПРИЁМА записи наблюдателем (Ф3.4). Рядом с ``ts`` и по тому же
 #: сокращению — одно написание на display-вид, а не ``ts`` + ``observed_timestamp``.
 OBSERVED_TS_KEY = "observed_ts"
+
+#: Значение колонки ``severity`` у записи-агрегата (задача 2.1). У сырой
+#: stats-записи там лежит ``metric_type`` (``counter``/``gauge``), у агрегата
+#: типа нет — в нём метрики РАЗНЫХ типов. Пустая строка сделала бы колонку
+#: неотличимой от «тип не проставлен»; слово называет класс записи.
+STATS_SNAPSHOT_SEVERITY = "snapshot"
+
+#: Ключи записи-агрегата, которые нормализатор читает по имени. Остальное
+#: содержимое едет в ``extra`` целиком — правилом конверта, как у лога.
+SNAPSHOT_METRICS_KEY = "metrics"
+SNAPSHOT_TOTAL_KEY = "total_count"
 
 
 def severity_number_for(kind: str, severity: str) -> int:
@@ -112,12 +123,71 @@ def stamp_observed(records: Any, now: float) -> Any:
     return records
 
 
+def snapshot_message(record: Dict[str, Any]) -> str:
+    """Текст записи-агрегата: имена метрик окна (задача 2.1).
+
+    **Имена в тексте — ради поиска, а не ради чтения.** Полнотекстовый индекс
+    стора (1.6) построен по ``message``/``module``/``process`` и НЕ смотрит в
+    JSON-мешок ``extra``. Положи мы имена только в ``extra`` — снапшот нашёлся
+    бы фильтром по виду записи и никогда по имени метрики, то есть ровно на тот
+    вопрос, ради которого он и едет в стор («что было с `frames.dropped`?»),
+    ответа бы не было.
+
+    Числа сюда НЕ дублируются: значения, типы и теги лежат в ``extra``
+    структурно (урок 3.2/3.4 — ``repr`` в строку читается глазами и не читается
+    ничем больше). Текст — поисковый ключ, а не второй источник правды.
+
+    Разность ``total_count − len(metrics)`` называется вслух: она станет
+    ненулевой, когда 2.2 введёт потолок кардинальности, и «сколько метрик было
+    в окне» не должно зависеть от того, сколько их доехало (тот же счёт, что у
+    предела строки снапшота в ``LogStatsChannel``).
+    """
+    metrics = [m for m in (record.get(SNAPSHOT_METRICS_KEY) or []) if isinstance(m, dict)]
+    total = record.get(SNAPSHOT_TOTAL_KEY, len(metrics))
+
+    # Имена — БЕЗ повторов. Единица окна — серия (имя × теги), и одно имя даёт
+    # столько серий, сколько у него сочетаний тегов. Живой замер стенда
+    # 2026-08-13: у процесса `devices` 384 серии на 4 разных имени, и текст
+    # записи весил 16 924 Б — 17 килобайт четырёх слов, повторённых сотнями.
+    # Поиску повтор не добавляет ничего (FTS5 индексирует термы), а в стор он
+    # едет каждым снапшотом.
+    names, seen = [], set()
+    for metric in metrics:
+        name = str(metric.get("name", ""))
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    # Тот же зачин, что у строки снапшота в ``performance.log``
+    # (``LogStatsChannel._format_snapshot``): оператор ищет одним словом в обоих
+    # приёмниках одной плоскости. Знак ``×`` тут стоял и снят — консоль Windows
+    # (cp1251/cp866) роняет на нём вывод, а зачин читают в том числе консолью.
+    head = f"metrics snapshot (count={total})"
+    if len(names) < len(metrics):
+        # Иначе «count=384» рядом со списком из четырёх слов читалось бы как
+        # «380 имён потерялись», а потерь тут нет — есть теги.
+        head += f", имён {len(names)}"
+    body = f": {', '.join(names)}" if names else ""
+
+    # Опущенное считается по СЕРИЯМ, а не по именам: свернувшиеся в одно имя
+    # серии никуда не делись, они в ``extra``. Разность станет ненулевой, когда
+    # 2.2 введёт потолок кардинальности и часть серий не доедет.
+    omitted = int(total) - len(metrics) if isinstance(total, int) else 0
+    tail = f" … опущено {omitted} из {total}" if omitted > 0 else ""
+    return f"{head}{body}{tail}"
+
+
 def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str, Any]:
     """Нормализовать hub-запись (drain log/stats) в display-вид.
 
     ЕДИНЫЙ нормализатор для live-хвоста И стора: ``extra`` здесь — dict (не
-    JSON-строка), стор сериализует его в JSON только на границе БД. Для stats
-    severity=metric_type, message=metric.
+    JSON-строка), стор сериализует его в JSON только на границе БД.
+
+    У ``stats`` веток ДВЕ, и назвать одну значило бы описать не ту, что едет:
+      * агрегат окна (``aggregate=true``) → ``severity="snapshot"``,
+        ``message`` — строка снапшота; так выглядят ВСЕ записи живого стенда
+        (замер 2026-08-14: 112 строк вкладки, снапшоты раз в 10 с);
+      * одиночная метрика → ``severity=metric_type``, ``message=metric``.
 
     Args:
         record: hub-запись (или tap-запись стора той же формы, с ключом ``context``).
@@ -128,10 +198,22 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
     ts = float(record.get("ts", 0.0) or 0.0)
     proc = process or record.get("process") or module
 
-    if kind == KIND_STATS:
+    if kind == KIND_STATS and record.get(STATS_AGGREGATE_KEY):
+        # Задача 2.1. Запись-АГРЕГАТ (снапшот окна) — не метрика, и «четыре
+        # ключа» ниже её уничтожают: ни ``metric``, ни ``value`` у неё нет, и
+        # в БД уехала бы строка `message="" extra={"value": null}` при зелёном
+        # «kind=stats > 0». Дефект найден ревью №2 спеки ЧТЕНИЕМ КОДА — живой
+        # прогон его бы не заметил: строка-то есть.
+        severity = STATS_SNAPSHOT_SEVERITY
+        message = snapshot_message(record)
+        # То же правило конверта, что у лога: всё, что не конверт, — в extra.
+        # Перечислять ключи агрегата поимённо значило бы завести второе место,
+        # где описан его состав, и потерять поле 2.2 молча.
+        extra: Dict[str, Any] = {k: v for k, v in record.items() if k not in _ENVELOPE_KEYS}
+    elif kind == KIND_STATS:
         severity = str(record.get("metric_type", "")).lower()
         message = record.get("metric", "")
-        extra: Dict[str, Any] = {"value": record.get("value"), "tags": record.get("tags", {})}
+        extra = {"value": record.get("value"), "tags": record.get("tags", {})}
     else:
         severity = str(record.get("severity", "")).lower()
         message = record.get("message", "")

@@ -14,6 +14,14 @@
 
 **2026-04-03:** В **`sql_module.__init__`** реэкспорт **`SchemaBaseMapper`** (публичный контур вместе с **`ExportFormat`** / **`TableExporter`**, **ADR-115**).
 
+**2026-08-11 (задача 3.1, ADR-SQL-012):** у `SQLiteSyncAdapter` появилось **обслуживание
+файла** — `migrate_to_incremental_auto_vacuum(schema_version)` и `incremental_vacuum()`.
+Способности необязательные (потребитель проверяет через `getattr`), PostgreSQL/MySQL не
+затронуты. Первый потребитель — плоскость документов. **Ловушка, стоящая замера:** штатные
+`execute`/`query` для `PRAGMA incremental_vacuum` не годятся — прагма исполняется шагами, и
+`execute` отдаёт РОВНО ОДНУ страницу из двух тысяч, а `query` падает `ResourceClosedError`;
+до конца её догоняет только сырой курсор DBAPI с `fetchall()`.
+
 ## Чеклист рефакторинга
 
 - [x] Этап 1: interfaces.py, sql_manager_config.py, db_commands.py

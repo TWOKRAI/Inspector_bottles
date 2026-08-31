@@ -81,7 +81,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `worker_status(process)` → `WorkerStatus` | типизированно: `process`/`status`/`workers` (+ `.raw`) |
 | `introspect_capabilities(process)` | карточка процесса: команды+descriptions, регистры (поля), handlers |
 | `capabilities()` → `Capabilities` | «контактная книжка»: свод по ВСЕМ процессам (fan-out) — топология, каналы, карточки |
-| `system_overview(timeout=)` | **B.3**: «один вызов = вся картина» — компактная сводка процессов + anomalies-подсказки; ноль новых IPC-команд |
+| `system_overview(timeout=)` | **B.3**: «один вызов = вся картина» — компактная сводка процессов + anomalies-подсказки; ноль новых IPC-команд. Т.2: `queue_data_loss` (вытеснение data-очереди получателя) и `control_plane_loss` (сорванная гарантия never-drop — строго хуже) — были в `RouterStats`, но не всплывали в `anomalies` |
 | `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
 | `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
 | `set_register(..., confirm_within=N)` | **D.5** commit-confirmed: запись авто-откатится через `N` сек без `register_confirm(commit_id)` (аналог Juniper `commit confirmed`) |
@@ -92,7 +92,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `subscribe(callback)` / `unsubscribe(callback)` | колбэк на каждое push-событие (зовётся в reader-потоке) |
 | `events_page(plane=None, cursor=None, limit=None)` | **B.1**: курсорная страница событий плоскости — недеструктивно, несколько читателей не мешают друг другу; ответ несёт `next_cursor`/`dropped`/`bookmark` |
 | `events_stats()` | счётчики hub'а: per-plane seq/размер/вытеснено (вход для overview B.3) |
-| `await_condition(kind, spec, timeout=)` | **B.2**: дождаться условия одним вызовом вместо поллинга — `state_path`/`event_matches`/`metric_threshold`; таймаут → диагноз (что ждали/что видели), не пустота |
+| `await_condition(kind, spec, timeout=)` | **B.2**: дождаться условия одним вызовом вместо поллинга — `state_path`/`event_matches`/`metric_threshold`; таймаут → диагноз (что ждали/что видели), не пустота. Т.2: удаление ПРЕДКА наблюдаемого пути (сегментно, не текстовый префикс) тоже ложится в `last_seen` таймаута как диагноз `{deleted: True, ancestor: ...}` — не совпадение условия |
 | `record_start(name, max_events=)` / `record_stop()` | **D.4 flight recorder**: запись потока событий в файл (`BACKEND_CTL_RECORD_DIR`) → offline-реплей; лимит → авто-стоп (footer valid) |
 | `record_load(name, position=, ring_maxlen=)` / `record_unload()` | загрузить запись в offline-реплей (сессия → replay) / вернуть live; `position="end"` (финал) \| `"start"` (тайм-трэвел) |
 | `record_status()` / `record_dump(name)` | статус записи/реплея; one-shot дамп arrival-кольца (`reason=dump`) |
@@ -128,6 +128,23 @@ Reply-путь матчит ответы по `request_id`. Push-сообщен�
 `reset_required: True` + `bookmark`: начать заново с `cursor=None` (полный re-list —
 Phase D). Кавеат: `dropped` разных плоскостей несравним — telemetry получает k
 item'ов на одну state.changed с k дельтами и вытесняется быстрее.
+
+**Голос вытеснения (Task 2.4).** Вытеснение больше не молчит: кольцо, начавшее
+терять события, говорит об этом WARNING'ом в логгер `backend_ctl.events` —
+**один раз на эпизод**, а не на каждую потерянную запись. Эпизод кончается
+затишьем дольше `EVICTION_VOICE_QUIET_SEC` (30.0 с, публичная константа модуля);
+следующее вытеснение после затишья звучит снова. Эпизоды считаются независимо для
+каждого кольца, включая arrival (`all`). Часы инъецируются: `EventHub(..., clock=…)`,
+дефолт `time.monotonic` — тестам не нужно патчить глобальное время.
+
+Число в голосе — вытеснено на МОМЕНТ ГОЛОСА, то есть в начале эпизода оно мало́
+(живой замер 2026-08-14: голос про `telemetry` с числом 1, а за те же 30 с кольцо
+потеряло 587). Голос отвечает на вопрос «потеря НАЧАЛАСЬ, где», нарастающий итог —
+в `events_stats()`. Именно `events_stats()`, а не `system_overview → events_evicted`:
+последний строится только из `planes` и кольцо `all` не показывает.
+
+Голос звучит ВНЕ лока хаба и ПЕРЕД колбэками подписчиков: тревога про отстающих
+читателей не должна стоять в очереди за этими же читателями.
 
 ```python
 with BackendDriver(port=8765) as drv:
@@ -240,7 +257,9 @@ python -m backend_ctl.mcp_server_sdk --http [--http-bind 127.0.0.1:8901] [--read
 
 **Инвариант:** HTTP-режим ТРЕБУЕТ бэкенд с `session_isolation=ON` (иначе broadcast течёт
 между сессиями). Сервер fail-fast проверяет флаг через `introspect.router_stats` и громко
-отказывает, если бэкенд поднят broadcast'ом. Подними бэкенд с `BACKEND_CTL_SESSION_ISOLATION=1`.
+отказывает, если бэкенд поднят broadcast'ом. **С задачи 5.5 это ДЕФОЛТ** — ручка
+нужна только чтобы изоляцию **выключить** (`BACKEND_CTL_SESSION_ISOLATION=0` либо
+`backend_ctl.session_isolation: false`), и тогда HTTP-режим откажет сам.
 **Safety-режим — per-server:** нужны одновременно read-only и full — два инстанса на разных
 портах (не per-session). `.mcp.json` с HTTP-транспортом:
 

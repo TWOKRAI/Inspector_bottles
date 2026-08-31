@@ -188,12 +188,13 @@ class WorkerPoolPlugin(ProcessModulePlugin):
             instance: ProcessModulePlugin = plugin_cls()
 
             # Создать sub-контекст для worker plugin
-            sub_ctx = SubPluginContext(
+            # from_parent — ВСЕ дороги родителя одним списком (задача 4.2, Н-6):
+            # перечисление вручную давало два log-метода из пяти, и предупреждение
+            # вложенного плагина уходило в no-op вместо родительского логгера.
+            sub_ctx = SubPluginContext.from_parent(
+                self._ctx,  # включая health: ошибки sub-плагина кормят health процесса
                 process_name="worker",
                 config=self._reg.worker_plugin_config,
-                log_info=self._ctx.log_info,
-                log_error=self._ctx.log_error,
-                health=self._ctx.health,  # ошибки sub-плагина кормят health процесса
             )
             instance.configure(sub_ctx)
             return instance

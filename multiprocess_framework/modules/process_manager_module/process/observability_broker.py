@@ -54,7 +54,7 @@ class ObservabilitySubscriptionBroker:
         *,
         broadcast: Callable[[str, dict], int],
         send_to: Callable[[str, str, dict], bool],
-        subscribe_self: Optional[Callable[[str], dict]] = None,
+        subscribe_self: Optional[Callable[[str, Optional[str]], dict]] = None,
         unsubscribe_self: Optional[Callable[[str], dict]] = None,
         log_info: Optional[Callable[[str], None]] = None,
         log_error: Optional[Callable[[str], None]] = None,
@@ -66,8 +66,11 @@ class ObservabilitySubscriptionBroker:
             subscribe_self: подписать хвост САМОГО оркестратора (он такой же
                 источник записей; исключи его — и «всё» у брокера разошлось бы
                 со «всем» у оператора). Нет hub'а → процесс ответит честным
-                отказом, отдельной ветки для этого не нужно.
-            unsubscribe_self: симметричное снятие своего хвоста.
+                отказом, отдельной ветки для этого не нужно. Сигнатура —
+                ``(subscriber, level)``, как у ``subscribe_observability_tail``
+                процесса: порог свой хвост принимает наравне с чужими (Н-1).
+            unsubscribe_self: симметричное снятие своего хвоста. Порогом не
+                параметризуется — его нет в сигнатуре снятия у процесса.
             log_info / log_error: журнал охвата и сбоев раздачи.
         """
         self._broadcast = broadcast
@@ -247,6 +250,7 @@ class ObservabilitySubscriptionBroker:
         где никакого запроса уже нет. Один источник уровня на оба пути.
         """
         payload: Dict[str, Any] = {"subscriber": subscriber}
+        wanted: Optional[str] = None
         if command == SUBSCRIBE_COMMAND:
             with self._lock:
                 held = self._subscribers.get(subscriber)
@@ -255,6 +259,17 @@ class ObservabilitySubscriptionBroker:
             # означал бы «подписчик попросил дефолт», что неотличимо от «не просил».
             if wanted:
                 payload["level"] = wanted
+            # Задача 5.6 (блокер Н2-1): брокер держит ТОЛЬКО оптовые намерения — его
+            # зовёт `observability.tail.subscribe_all` и его же переподписка свежей
+            # инкарнации. Поэтому маркер ставится безусловно, включая адресный
+            # replay: replay воспроизводит оптовое намерение, а не прицельное, и без
+            # маркера он бы молча понижал порог, заданный оператором адресно.
+            payload["scope"] = "all"
+        else:
+            # Снятие помечается по той же причине: брокер снимает ОПТОВОЕ намерение,
+            # и без маркера `unsubscribe_all` сносил бы прицельную подписку соседа
+            # по себе (находка Н2-2 — `unwatch()` глушил хвост, которого не создавал).
+            payload["scope"] = "all"
         out: Dict[str, Any] = {"reached": 0}
         try:
             if target is not None:
@@ -267,7 +282,7 @@ class ObservabilitySubscriptionBroker:
             if self._log_error:
                 self._log_error(f"[observability] брокер: раздача '{command}' для '{subscriber}' не удалась: {exc}")
         if target is None:
-            own = self._own_tail(subscriber, command)
+            own = self._own_tail(subscriber, command, level=wanted)
             if own is not None:
                 out["orchestrator"] = own
         with self._lock:
@@ -280,16 +295,55 @@ class ObservabilitySubscriptionBroker:
                 entry["last_target"] = target
         return out
 
-    def _own_tail(self, subscriber: str, command: str) -> Optional[dict]:
-        """Свой (оркестраторов) хвост — тем же вызовом, что и у любого процесса."""
-        fn = self._subscribe_self if command == SUBSCRIBE_COMMAND else self._unsubscribe_self
+    def _own_tail(self, subscriber: str, command: str, *, level: Optional[str] = None) -> Optional[dict]:
+        """Свой (оркестраторов) хвост — тем же вызовом И ТЕМ ЖЕ ПОРОГОМ, что у любого процесса.
+
+        Н-1 (приёмка F1): порог сюда не доезжал. Вызов был
+        ``subscribe_self(subscriber)`` одним аргументом, процесс подставлял свой
+        дефолт ``ERROR`` — и подписка «хочу всё с INFO» давала оркестратору
+        ERROR-only хвост. Живой замер: ``watch_like_gui(INFO)`` → 163 события от
+        семи детей и **0 от ProcessManager** при 22 его строках в сторе за то же
+        окно. A1 положила уровень в конверт детям (:meth:`_fan_out`), а «свой
+        хвост» ставился прямым вызовом мимо намерения — дефект ровно того класса,
+        который A1 и закрывала, но на одном пути из восьми.
+
+        Уровень приходит параметром, а не читается тут заново: его уже прочитал
+        :meth:`_fan_out` из намерения, и второе чтение под своим локом означало бы
+        две позиции одного факта — при смене порога между чтениями конверт детям и
+        свой хвост разошлись бы молча.
+
+        ``level=None`` («уровень не назван») передаётся как есть: константу дефолта
+        знает только процесс, повтор её здесь был бы второй позицией той же
+        константы. Снятие порогом не параметризуется — у
+        ``unsubscribe_observability_tail`` его нет в сигнатуре, поэтому ветки
+        различаются не только колбэком, но и арностью.
+
+        **Отказ здесь глушится намеренно** (свой хвост не важнее чужих), и это же
+        глушение прячет расхождение сигнатур: колбэк без ``level`` даст ``TypeError``,
+        который станет мягким ``success=False``. Поэтому арность сверяется тестом
+        (``test_the_subscribe_self_double_matches_production``), а не верой в тип-хинт.
+        """
+        if command == SUBSCRIBE_COMMAND:
+            fn = self._subscribe_self
+            args: tuple = (subscriber, level)
+            # Задача 5.6: свой хвост оркестратора — такая же ОПТОВАЯ раздача,
+            # как и конверт детям: его ставит брокер из того же оптового намерения.
+            # Без маркера восемь дорог вели бы себя одинаково, а девятая (своя) — как
+            # прицельная, и порог ПМ зависел бы от того, какой путь стрелял последним.
+            kwargs: dict = {"wholesale": True}
+        else:
+            fn = self._unsubscribe_self
+            args = (subscriber,)
+            kwargs = {}
         if not callable(fn):
             return None
         try:
-            return dict(fn(subscriber) or {})
+            return dict(fn(*args, **kwargs) or {})
         except Exception as exc:  # noqa: BLE001 — свой хвост не важнее чужих
             if self._log_error:
-                self._log_error(f"[observability] брокер: свой хвост для '{subscriber}' не поставлен: {exc}")
+                self._log_error(
+                    f"[observability] брокер: свой хвост для '{subscriber}' (level={level!r}) не поставлен: {exc}"
+                )
             return {"success": False, "reason": str(exc)}
 
     # ------------------------------------------------------------------

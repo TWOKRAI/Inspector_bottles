@@ -1,6 +1,6 @@
 ---
 name: project-line-sim-vision
-description: line_sim — симулятор линии; видение согласовано 2026-08-13, буквы первыми, план ещё не создан
+description: line_sim — симулятор линии; видение и план согласованы 2026-08-13, буквы первыми, plans/line-sim/ Ф0–Ф6, ветка feat/line-sim
 metadata:
   type: project
 ---

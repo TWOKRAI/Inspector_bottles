@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import threading
 from typing import Any
 
 from multiprocess_framework.modules.logger_module import get_std_logger
@@ -73,11 +74,43 @@ PYMODBUS_LOGGER_NAMES = ("pymodbus", "pymodbus_internal")
 
 
 class _PymodbusChannelBridge(logging.Handler):
-    """Единственная точка передачи записей pymodbus в get_std_logger()."""
+    """Единственная точка передачи записей pymodbus в get_std_logger().
+
+    **Повтор одного и того же сообщения понижается до DEBUG.** Недоступное
+    устройство даёт от библиотеки один и тот же текст на каждой попытке
+    («Connection to (host, port) failed: timed out», «Repeating....»), и на живом
+    стенде 2026-08-12 это давало по три строки ERROR/WARNING на попытку при
+    четырёх попытках подряд. Первое вхождение остаётся на своём уровне — событие
+    видно; повторы уходят в DEBUG и **считаются**, а число печатается, когда
+    сообщение меняется. Потеря громкости со счётом и голосом, а не молчание.
+
+    Состояние — на экземпляре handler'а, а он один на логгер (см.
+    :func:`install_pymodbus_bridge`), поэтому счёт ведётся по паре
+    ``(имя логгера, текст)``: разные устройства дают разный текст и друг друга
+    не глушат.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._last_key: tuple[str, str] | None = None
+        self._repeats = 0
+        self._lock = threading.Lock()
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            get_std_logger(record.name).log(record.levelname, record.getMessage())
+            message = record.getMessage()
+            key = (record.name, message)
+            with self._lock:
+                if key == self._last_key:
+                    self._repeats += 1
+                    level, text = "DEBUG", f"{message} (повтор #{self._repeats})"
+                else:
+                    summary = ""
+                    if self._repeats:
+                        summary = f" [предыдущее сообщение повторилось ещё {self._repeats} раз]"
+                    self._last_key, self._repeats = key, 0
+                    level, text = record.levelname, f"{message}{summary}"
+            get_std_logger(record.name).log(level, text)
         except Exception:  # noqa: BLE001 — обработчик логов не роняет вызывающего
             self.handleError(record)
 
@@ -129,6 +162,9 @@ class ModbusSdkClient:
     def __init__(self, config: ModbusConfig) -> None:
         self._cfg = config
         self._client: Any | None = None
+        #: Длина текущей серии неудачных connect подряд. 0 = серии нет.
+        #: Первая неудача громкая, повторы — DEBUG; успех закрывает серию числом.
+        self._connect_fail_streak = 0
 
     # ------------------------------------------------------------------ #
     # Управление соединением
@@ -156,20 +192,43 @@ class ModbusSdkClient:
             retries=cfg.retries,
         )
 
+    def _note_connect_failed(self, detail: str) -> None:
+        """Сообщить о неудачном connect: первая в серии — громко, повторы — тихо.
+
+        Недоступное устройство переподключается по расписанию драйвера, и каждая
+        попытка писала WARNING с одинаковым текстом. Событие «устройство не
+        отвечает» одно, поэтому громкая строка одна; повторы уходят в DEBUG со
+        счётчиком, а итог серии печатает либо успех (:meth:`connect`), либо
+        «сдались» драйвера (``BaseDeviceDriver._note_reconnect_failed``).
+        """
+        self._connect_fail_streak += 1
+        text = f"[MODBUS] connect FAILED {self._cfg.describe()} (unit={self._cfg.unit_id}){detail}"
+        if self._connect_fail_streak == 1:
+            logger.warning(text)
+        else:
+            logger.debug(f"{text} — попытка #{self._connect_fail_streak} подряд")
+
     def connect(self) -> bool:
         """Установить соединение. Бросает ModbusConnectionError при неудаче."""
         if self._client is None:
             self._client = self._build_client()
-        logger.info(f"[MODBUS] connect → {self._cfg.describe()} (unit={self._cfg.unit_id})")
+        # Строка «пробуем» нужна ровно один раз на серию: при недоступном
+        # устройстве она удваивала объём, не добавляя ни одного нового факта.
+        if self._connect_fail_streak == 0:
+            logger.info(f"[MODBUS] connect → {self._cfg.describe()} (unit={self._cfg.unit_id})")
+        else:
+            logger.debug(f"[MODBUS] connect → {self._cfg.describe()} (повтор #{self._connect_fail_streak + 1})")
         try:
             ok = bool(self._client.connect())
         except ModbusException as exc:  # pragma: no cover - сетевые сбои
-            logger.warning(f"[MODBUS] connect FAILED {self._cfg.describe()}: {exc}")
+            self._note_connect_failed(f": {exc}")
             raise ModbusConnectionError(str(exc)) from exc
         if not ok:
-            logger.warning(f"[MODBUS] connect FAILED {self._cfg.describe()} (unit={self._cfg.unit_id})")
+            self._note_connect_failed("")
             raise ModbusConnectionError(f"Не удалось подключиться к {self._cfg.describe()}")
-        logger.info(f"[MODBUS] connected {self._cfg.describe()} (unit={self._cfg.unit_id})")
+        recovered = f" (после {self._connect_fail_streak} неудачных попыток)" if self._connect_fail_streak else ""
+        self._connect_fail_streak = 0
+        logger.info(f"[MODBUS] connected {self._cfg.describe()} (unit={self._cfg.unit_id}){recovered}")
         if self._cfg.transport is TransportType.TCP and self._cfg.tcp_nodelay:
             self._enable_nodelay()
         return True

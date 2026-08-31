@@ -123,10 +123,21 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
                 "плагин работает как no-op (история не пишется)"
             )
         else:
-            self._sub_id = ctx.state_proxy.subscribe("processes.**", self._on_deltas, exclude_self=True)
+            # sync=False — ОБЯЗАТЕЛЬНО, а не оптимизация (2026-08-23). start()
+            # плагина исполняется шагом 6 ProcessModule.initialize(), а приёмный
+            # поток процесса (message_processor) создаётся шагом 7 — то есть
+            # ПОЗЖЕ. Синхронная подписка ждала бы ответ, разобрать который в этот
+            # момент физически некому: замер на живом стенде дал ровно 10.03 с
+            # простоя старта = два таймаута по 5 с, и обе подписки всё равно
+            # оставались неподтверждёнными. Fire-and-forget отправляет ту же
+            # команду тем же каналом, серверная подписка создаётся так же;
+            # разница только в том, что серверный sub_id не возвращается —
+            # он здесь и не нужен: снимает подписки shutdown() прокси через
+            # state.unsubscribe_all по имени процесса.
+            self._sub_id = ctx.state_proxy.subscribe("processes.**", self._on_deltas, exclude_self=True, sync=False)
             # system.** — сводное здоровье (avg_fps/active/broken_wires) для строки
             # process_name='system'. Тот же callback кладёт листья в общий кэш.
-            self._sub_id_system = ctx.state_proxy.subscribe("system.**", self._on_deltas, exclude_self=True)
+            self._sub_id_system = ctx.state_proxy.subscribe("system.**", self._on_deltas, exclude_self=True, sync=False)
             ctx.log_info(
                 f"TelemetrySinkPlugin: подписка 'processes.**'/'system.**' sub_id={self._sub_id}/{self._sub_id_system}"
             )
@@ -159,11 +170,77 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         """
         with self._cache_lock:
             for d in deltas:
-                # Удаление узла (new_value is MISSING) → убираем из кэша.
                 if d.is_delete:
-                    self._cache.pop(d.path, None)
+                    self._cache_evict(d.path)
                 else:
-                    self._cache[d.path] = d.new_value
+                    self._cache_put(d.path, d.new_value)
+
+    def _cache_put(self, path: str, value: object) -> None:
+        """Положить значение в накопитель, РАЗВЕРНУВ словарь в листья.
+
+        Накопитель обязан держать ЛИСТЬЯ, и это не вкусовщина — иначе ломаются
+        сразу три вещи (все три воспроизведены на живом стенде 2026-08-23):
+
+        1. **Протухание.** Дельта СОЗДАНИЯ поддерева приходит со словарём
+           целиком (``state.plugins`` → ``{'capture': {'capture_fps': 14.5}}``),
+           а дальше обновления идут полистовыми дельтами. Словарь после этого
+           не обновляется никогда: в строке БД рядом жили ``14.5`` в словаре и
+           ``14.3`` в листе.
+        2. **Призрак после ухода писателя.** :meth:`_cache_evict` чистит по
+           границе-точке, поэтому удаление ``…plugins.capture`` снимает лист
+           ``…plugins.capture.capture_fps``, но НЕ трогает ПРЕДКА
+           ``…plugins`` — и числа ушедшего писателя остаются в строках БД
+           навсегда, ровно тот дефект, который Ф2 и убирает.
+        3. **Дубль в строке.** Одно и то же число едет в БД дважды, под двумя
+           разными ключами.
+
+        Согласованность: применение снимка ресинка словари уже пропускает
+        (``StateProxy._apply_resync_snapshot``: ``not isinstance(value, dict)``),
+        то есть «в кэше только листья» — существующий инвариант, который
+        приёмная сторона дельт нарушала.
+        """
+        if isinstance(value, dict):
+            if not value:
+                # Пустой словарь листьев не даёт вовсе — узел есть, значений нет.
+                # Молча пропустить правильнее, чем положить {} как значение.
+                return
+            for key, nested in value.items():
+                self._cache_put(f"{path}.{key}", nested)
+            return
+        self._cache[path] = value
+
+    def _cache_evict(self, path: str) -> None:
+        """Убрать ``path`` и его ПОДДЕРЕВО из кэша по MISSING-дельте.
+
+        Почему поддерево, а не только точное совпадение: кэш хранит ЛИСТЬЯ
+        (``self._cache["...plugins.capture.fps"] = value`` — по одной записи на
+        MERGE-лист), а снятие писателя целиком идёт ОДНОЙ дельтой на КОРЕНЬ
+        поддерева — ``TreeStore.delete`` снимает ровно один узел по пути и
+        возвращает одну ``Delta`` с ``new_value=MISSING`` на этом пути (не по
+        дельте на лист, `core/tree_store.py`). Путь дельты тогда —
+        ``processes.<P>.state.plugins.<writer>``, а ключи кэша —
+        ``processes.<P>.state.plugins.<writer>.fps`` и т.п.: точного совпадения
+        никогда не будет, и точечный ``pop(path)`` — молчаливый no-op, из-за
+        которого сток бессрочно пишет последние числа ушедшего писателя
+        (воспроизведено C5-тестом, `test_f2_acceptance_writer_subtree_cleanup.py`).
+
+        Точечное удаление (MISSING-дельта самого листа — тоже валидный путь,
+        например прямое снятие одного значения) остаётся нужным и покрыто тем
+        же вызовом: ``pop(path)`` снимает точное совпадение, цикл ниже — детей.
+
+        Граница — точка-разделитель, тот же приём, что
+        ``TelemetryReadModel._purge_subtree`` (``telemetry_read_model.py``) и
+        ``StateProxy._update_cache`` (Task 2.1, `proxy/state_proxy.py`): чистим
+        ``path`` и ключи с префиксом ``path + "."``, а НЕ ``path`` как голую
+        подстроку — иначе уход ``...plugins.capture`` задел бы и
+        ``...plugins.capture2.fps`` (общий текстовый префикс "capture", разный
+        сегмент пути).
+        """
+        self._cache.pop(path, None)
+        dotted_prefix = path + "."
+        stale = [p for p in self._cache if p.startswith(dotted_prefix)]
+        for p in stale:
+            del self._cache[p]
 
     # --- Семпл ---
 

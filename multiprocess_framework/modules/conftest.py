@@ -8,6 +8,7 @@ Pytest: логи по умолчанию не пишутся в дерево и�
 from __future__ import annotations
 
 import os
+import threading
 
 import pytest
 
@@ -57,6 +58,52 @@ def _reset_logger_manager_singleton() -> None:
     _shutdown_leftover()
     yield
     _shutdown_leftover()
+
+
+#: Долгоживущие стенды ПО РЕШЕНИЮ: префикс nodeid → причина. Пусто не случайно:
+#: сегодня ни один тест не имеет права держать flusher дольше себя. Запись без
+#: причины не считается (образец дисциплины — _RUNNERLESS_BY_DECISION в 4.0).
+_FLUSHER_LONG_LIVED_ALLOWED: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_state_flushers(request: pytest.FixtureRequest):
+    """Третье текущее процессное состояние: daemon-flusher'ы StateStoreManager.
+
+    ``initialize()`` запускает поток ``StateCoalesceFlusher`` (тик 0.12 с), и
+    гасит его только ``shutdown()``. Тест, забывший пару, оставляет поток
+    ЖИВЫМ до конца прогона: поток держит диспетчер сильной ссылкой (bound
+    method в target), поэтому стенд не собирается GC и не финализируется —
+    он бессмертен. Замерено пробой 2026-08-12 на корневом гейте: 18 утёкших
+    потоков из 4 файлов state_store_module/tests — ~150 пробуждений в секунду
+    фонового шума всему остатку прогона; все 18 фигурируют в каждом
+    faulthandler-дампе access violation (там они соседи детонации, не причина —
+    причина закрыта отдельно, MPLBACKEND в корневом conftest).
+
+    Сравнение по МНОЖЕСТВУ потоков до/после, не по числу: чужая утечка,
+    пережившая свой тест, не должна красить соседей — краснеет только тест,
+    ДОБАВИВШИЙ живой поток. Утёкший поток гасится best-effort до fail, чтобы
+    один забытый shutdown() не шумел остатку прогона.
+    """
+    marker = "StateCoalesceFlusher"
+    before = {t.ident for t in threading.enumerate() if t.name == marker and t.is_alive()}
+    yield
+    leaked = [t for t in threading.enumerate() if t.name == marker and t.is_alive() and t.ident not in before]
+    if not leaked:
+        return
+    for prefix, _reason in _FLUSHER_LONG_LIVED_ALLOWED.items():
+        if request.node.nodeid.startswith(prefix):
+            return
+    for t in leaked:
+        owner = getattr(getattr(t, "_target", None), "__self__", None)
+        if owner is not None and hasattr(owner, "stop_flusher"):
+            owner.stop_flusher(timeout=1.0)
+    pytest.fail(
+        f"Тест оставил {len(leaked)} живой(ых) поток(ов) {marker}: "
+        "StateStoreManager.initialize() обязан закрываться shutdown() в teardown "
+        "(try/finally или фикстура с yield). Долгоживущий стенд по решению — "
+        "запись в _FLUSHER_LONG_LIVED_ALLOWED с причиной."
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

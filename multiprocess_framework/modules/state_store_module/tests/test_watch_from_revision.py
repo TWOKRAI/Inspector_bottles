@@ -78,19 +78,22 @@ class _RelayRouter:
         return None
 
 
-def _wire_manager_and_proxy() -> tuple[StateStoreManager, StateProxy, _RelayRouter]:
+@pytest.fixture
+def wired() -> "tuple[StateStoreManager, StateProxy, _RelayRouter]":
+    """Связка manager+proxy; shutdown() гарантирован teardown'ом (страж — modules/conftest)."""
     router = _RelayRouter()
     mgr = StateStoreManager(router=router, initial_state={})
     mgr.initialize()  # регистрирует все state.* handlers (включая state.changed НЕ трогает)
 
     proxy = StateProxy("gui", router=router, server_target="ProcessManager")
     router.register_message_handler("state.changed", proxy.on_state_changed)
-    return mgr, proxy, router
+    yield mgr, proxy, router
+    mgr.shutdown()
 
 
-def test_dropped_delta_triggers_resync_and_cache_converges():
+def test_dropped_delta_triggers_resync_and_cache_converges(wired):
     """Пропущенная дельта → StateProxy детектит разрыв revision → resync → кэш сходится."""
-    mgr, proxy, router = _wire_manager_and_proxy()
+    mgr, proxy, router = wired
 
     proxy.subscribe("cameras.0.**", lambda _deltas: None, exclude_self=False)
 
@@ -120,9 +123,9 @@ def test_dropped_delta_triggers_resync_and_cache_converges():
     assert len(router.resync_requests()) == 1
 
 
-def test_no_loss_no_resync_needed():
+def test_no_loss_no_resync_needed(wired):
     """Контроль: без потери сообщений revision растёт последовательно, resync не требуется."""
-    mgr, proxy, router = _wire_manager_and_proxy()
+    mgr, proxy, router = wired
     proxy.subscribe("cameras.0.**", lambda _deltas: None, exclude_self=False)
 
     mgr.handle_state_set({"data": {"path": "cameras.0.fps", "value": 10, "source": "camera_0"}})
@@ -135,9 +138,9 @@ def test_no_loss_no_resync_needed():
     assert router.resync_requests() == []
 
 
-def test_dropped_delta_on_unrelated_sibling_path_also_converges():
+def test_dropped_delta_on_unrelated_sibling_path_also_converges(wired):
     """Разрыв обнаруживается и по мутациям СОСЕДНЕГО пути под тем же pattern."""
-    mgr, proxy, router = _wire_manager_and_proxy()
+    mgr, proxy, router = wired
     proxy.subscribe("cameras.0.**", lambda _deltas: None, exclude_self=False)
 
     mgr.handle_state_set({"data": {"path": "cameras.0.fps", "value": 10, "source": "camera_0"}})
@@ -155,7 +158,7 @@ def test_dropped_delta_on_unrelated_sibling_path_also_converges():
     assert proxy._last_revision == mgr.store.revision == 3
 
 
-def test_multi_leaf_merge_does_not_trigger_false_resync():
+def test_multi_leaf_merge_does_not_trigger_false_resync(wired):
     """HIGH-1 (ревью 2026-07-11): merge на 2+ листа инкрементирует revision по
     разу на лист (TreeStore._merge_recursive) — ОДИН пакет state.changed несёт
     ДИАПАЗОН revision. Раньше клиент сравнивал только max(revision) конверта
@@ -165,7 +168,7 @@ def test_multi_leaf_merge_does_not_trigger_false_resync():
     диапазон пакета стыкуется с last+1 → это НЕ разрыв, resync не нужен,
     дельты доставлены штатно одним пакетом в callback.
     """
-    mgr, proxy, router = _wire_manager_and_proxy()
+    mgr, proxy, router = wired
     received: list = []
     proxy.subscribe("cameras.0.**", lambda deltas: received.append(deltas), exclude_self=False)
 
@@ -187,7 +190,7 @@ def test_multi_leaf_merge_does_not_trigger_false_resync():
     assert len(received[0]) == 2
 
 
-def test_unrelated_mutation_outside_pattern_does_not_swallow_relevant_delivery():
+def test_unrelated_mutation_outside_pattern_does_not_swallow_relevant_delivery(wired):
     """HIGH-2 (ревью 2026-07-11): мутация ВНЕ паттерна подписчика двигает
     revision дерева невидимо для него — следующий релевантный пакет получает
     envelope, не равный last+1 ("разрыв" по глобальному счётчику, хотя
@@ -196,7 +199,7 @@ def test_unrelated_mutation_outside_pattern_does_not_swallow_relevant_delivery()
     дельта ВСЕГДА доставляется в callback (инвариант (б)), даже если попутно
     (best-effort) запускается лишний resync.
     """
-    mgr, proxy, router = _wire_manager_and_proxy()
+    mgr, proxy, router = wired
     received: list = []
     proxy.subscribe("cameras.0.**", lambda deltas: received.append(deltas), exclude_self=False)
 

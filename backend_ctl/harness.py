@@ -52,6 +52,13 @@ if TYPE_CHECKING:
 #: Имя процесса презентации в топологии (объявляет РЕЦЕПТ, см. докстринг модуля).
 GUI_PROCESS_NAME = "gui"
 
+#: ПАРА ручек PID-реестра в порядке приоритета — как их читает
+#: ``pid_registry.pid_file_path`` (каноничная + легаси-алиас после де-брендинга D4).
+#: Список литералом, а не импортом из фреймворка: harness обязан пережить отсутствие
+#: прототипа в окружении, а разойтись список может только вместе с падением
+#: ``test_pid_file_env_pair_matches_the_framework`` — он сверяет его с источником.
+_PID_FILE_ENV_KEYS = ("MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE")
+
 
 # ---------------------------------------------------------------------------
 # Сборка headless-launcher'а
@@ -62,6 +69,7 @@ def build_headless_launcher(
     *,
     recipe: Optional[Path | str] = None,
     with_base: bool = False,
+    log_dir: Optional[Path | str] = None,
 ) -> "SystemLauncher":
     """Собрать ``SystemLauncher`` из топологии прототипа без презентационного overlay.
 
@@ -74,6 +82,20 @@ def build_headless_launcher(
             (тот же, что у ``smoke_proof`` — синтетический, без реального железа).
         with_base: подмешать фундамент (``base.yaml``) — always-on инфра
             (``devices``), как в проде.
+        log_dir: корень дерева логов вместо ``system.log_dir`` из yaml. ``None`` →
+            yaml как есть (``logs/prototype_2`` относительно cwd).
+
+            **Почему конфигом, а не env** (задача 3.3). Через env было бы короче, но
+            ``launch._ENV_LOG_DIR_OVERRIDE`` снимается ОДИН раз при импорте модуля —
+            и первый же harness, поднятый с env, заморозил бы снимок на своём каталоге
+            до конца процесса. Характеризация сборки в том же pytest-процессе читает
+            ``resolve_log_dir_root`` и держит ``"logs/prototype_2"`` в золотом
+            снапшоте: золотой файл начал бы зависеть от того, какой тест шёл первым.
+            Такой дефект в этом самом месте уже был (см. докстринг
+            ``_ENV_LOG_DIR_OVERRIDE``), поэтому дорога выбрана детерминированная.
+
+            Env по-прежнему СИЛЬНЕЕ (``resolve_log_dir_root``: env → yaml → дефолт),
+            так что живые зонды со своим ``logs_live/`` этот параметр не задевает.
 
     Использует только ПУБЛИЧНЫЕ помощники прототипа — прод-код не меняется.
     """
@@ -91,8 +113,14 @@ def build_headless_launcher(
         base_path = HERE / "backend" / "topology" / "base.yaml"
         blueprint = merge_topologies(load_topology_dict(base_path), blueprint)
 
+    sys_config = load_system_config(CONFIG_PATH)
+    if log_dir is not None:
+        # Присваивание полю, а не model_copy(update=...): copy не валидирует, и опечатка
+        # в имени поля прошла бы молча, оставив каталог прежним.
+        sys_config.system.log_dir = str(log_dir)
+
     builder = SystemBuilder(
-        sys_config=load_system_config(CONFIG_PATH),
+        sys_config=sys_config,
         blueprint=blueprint,
         topology_path=bp_path,
         system_path=CONFIG_PATH,
@@ -271,9 +299,14 @@ class BackendHarness:
         teardown_timeout: float = 15.0,
         log: Optional[Callable[[str], None]] = None,
         launcher_factory: Optional[Callable[[], "SystemLauncher"]] = None,
+        log_dir: Optional[Path | str] = None,
     ) -> None:
         self._recipe = recipe
         self._with_base = with_base
+        #: Корень дерева логов поднятой системы. ``None`` → как в yaml. Дефолт НЕ меняли
+        #: намеренно: 28 из 34 живых зондов не задают каталог сами, и подмена дефолта на
+        #: временный увела бы их логи туда, где оператор их не ищет (задача 3.3).
+        self._log_dir = log_dir
         # Резолв через единый источник: явный порт > env BACKEND_CTL_PORT > DEFAULT_PORT.
         # Harness затем сам фиксирует BACKEND_CTL_PORT для дочернего процесса (start()).
         self._port = resolve_endpoint(port=port)[1]
@@ -306,27 +339,41 @@ class BackendHarness:
         """Поднять headless-систему, дождаться готовности, подключить driver."""
         # env-restore (Task 0.4): снимок прежних значений ДО мутации → stop() вернёт.
         # Снимок ВНЕ try, чтобы восстановление всегда имело базу (ревью MAJOR #4).
-        self._saved_env = {k: os.environ.get(k) for k in ("BACKEND_CTL", "BACKEND_CTL_PORT", "INSPECTOR_PID_FILE")}
+        self._saved_env = {k: os.environ.get(k) for k in ("BACKEND_CTL", "BACKEND_CTL_PORT", *_PID_FILE_ENV_KEYS)}
         try:
             # Гейт сокета: env — escape-hatch (yaml тоже enabled). Порт driver'а должен
             # совпасть с endpoint'ом — фиксируем BACKEND_CTL_PORT (его читает endpoint).
             os.environ["BACKEND_CTL"] = "1"
             os.environ["BACKEND_CTL_PORT"] = str(self._port)
-            # PID-реестр (INSPECTOR_PID_FILE) — свой файл на инстанс harness. Общий
-            # дефолт рассчитан на «одна система на машину»: reap_and_reset при старте
-            # ВТОРОГО бэкенда (test_harness при живой session-фикстуре) убил бы процессы
-            # первого как «хвосты прошлого запуска». Осиротевшие хвосты harness добивает
-            # сам (watchdog + kill дерева в stop()) — глобальный reap ему не нужен.
+            # PID-реестр — свой файл на инстанс harness. Общий дефолт рассчитан на
+            # «одна система на машину»: reap_and_reset при старте ВТОРОГО бэкенда
+            # (test_harness при живой session-фикстуре) убил бы процессы первого как
+            # «хвосты прошлого запуска». Осиротевшие хвосты harness добивает сам
+            # (watchdog + kill дерева в stop()) — глобальный реап ему не нужен.
+            #
+            # Ставятся ОБЕ ручки пары, и это не перестраховка (Н-8, 2026-08-11).
+            # `pid_file_path()` читает пару по приоритету: `MULTIPROCESS_PID_FILE`
+            # СИЛЬНЕЕ `INSPECTOR_PID_FILE`, а `SystemLauncher._prepare_pid_registry`
+            # после резолва пишет ОБЕ (детям через spawn). Пока harness ставил одну
+            # вторую, картина была такая: первый стенд оставлял в окружении
+            # `MULTIPROCESS_PID_FILE` = свой реестр (эту ручку никто не снимал), второй
+            # стенд читал именно её и реапил ЧУЖОЙ живой реестр — то есть убивал
+            # десять процессов первого стенда в момент своего старта. Воспроизведено
+            # вне pytest: PM сессионного стенда исчезает, драйвер получает WinError
+            # 10054, и все последующие тесты на сессионной фикстуре падают
+            # (11 красных в полном каталоге `backend_ctl/tests`).
             import tempfile
 
-            os.environ["INSPECTOR_PID_FILE"] = str(
-                Path(tempfile.gettempdir()) / f"inspector_pids_harness_{os.getpid()}_{self._port}.jsonl"
-            )
+            pid_file = str(Path(tempfile.gettempdir()) / f"inspector_pids_harness_{os.getpid()}_{self._port}.jsonl")
+            for key in _PID_FILE_ENV_KEYS:
+                os.environ[key] = pid_file
 
             if self._launcher_factory is not None:
                 self._launcher = self._launcher_factory()
             else:
-                self._launcher = build_headless_launcher(recipe=self._recipe, with_base=self._with_base)
+                self._launcher = build_headless_launcher(
+                    recipe=self._recipe, with_base=self._with_base, log_dir=self._log_dir
+                )
             self._launcher.start()
             # pid оркестратора + снимок его поддерева СРАЗУ после старта, ДО wait_until_ready
             # (Task 5.1, находка ultra-ревью): раньше снимок снимался только ПОСЛЕ успешной

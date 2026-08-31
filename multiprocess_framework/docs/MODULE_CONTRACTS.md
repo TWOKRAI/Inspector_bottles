@@ -563,7 +563,7 @@
 - `ProcessSchemaAdapter` — `SchemaBase` → `proc_dict` (Dict at Boundary).
 - `bundle_contract.py` — `build_bundle/validate_bundle` для pickle-safe передачи.
 - `run_process_function` — top-level runner для дочернего процесса (pickle-safe).
-- `topology/blueprint.py` — schema-модель топологии всей системы (не одного процесса): `SystemBlueprint` (`processes: list[ProcessConfig]`, `wires: list[Wire]`), `ProcessConfig` (typed-поля `inspector`/`chain_targets`/`source_target_fps`/`io_peek` — приоритет над одноимёнными в `extras`; `extras`/`metadata` — domain-opaque мешки), `Wire`, `Port`. Переехало из `process_module/generic/blueprint.py` (C6 (c), ADR-PMM-016) — системный артефакт живёт у оркестратора, не у модуля одного процесса; back-compat шим на старом пути удалён (grouping Фаза 2, 2026-07-19) — импорт только из `topology/`.
+- `topology/blueprint.py` — schema-модель топологии всей системы (не одного процесса): `SystemBlueprint` (`processes: list[ProcessConfig]`, `wires: list[Wire]`), `ProcessConfig` (typed-поля `collector`/`chain_targets`/`source_target_fps`/`io_peek` — приоритет над одноимёнными в `extras`; ключ `inspector` — **легаси-алиас на чтении** (`_accept_legacy_collector_key`), `model_dump` пишет всегда каноничное `collector`; `extras`/`metadata` — domain-opaque мешки), `Wire`, `Port`. Переехало из `process_module/generic/blueprint.py` (C6 (c), ADR-PMM-016) — системный артефакт живёт у оркестратора, не у модуля одного процесса; back-compat шим на старом пути удалён (grouping Фаза 2, 2026-07-19) — импорт только из `topology/`.
 - `SystemBlueprint.infer_missing_collectors()` — структурный вывод `{mode: join, inputs, primary}` для процессов без явного `collector`: ≥2 процесса-источника REQUIRED-порта → join (опциональные порты не считаются); явный `collector`/`extras["collector"]` — escape-hatch, отключает вывод. Заменяет снятый костыль `_hoist_inspector_from_metadata` (Ф4.7, ADR-PMM-017).
 - `TopologyManager` (`process/topology_manager.py`) — runtime-применение топологии (switch/hot-apply); отдельный от `blueprint.py` (runtime-логика применения vs schema-модель).
 
@@ -574,7 +574,7 @@
 4. **Heartbeat monitoring** (ADR-PMM-004): `process.is_alive()` для обнаружения crashed.
 5. **Signal handler** только устанавливает `stop_event`, **не вызывает `sys.exit()`** (ADR-PMM-006).
 6. **Топология — артефакт оркестратора** (ADR-PMM-016): `SystemBlueprint`/`ProcessConfig`/`Wire` живут в `topology/`, не в `process_module`.
-7. **join — структурный факт графа wires** (ADR-PMM-017): не зависит от того, куда в рецепте попал `inspector` (прямой ключ vs `metadata`); тег входа = имя source-порта совпадает с `data_type` только по конвенции (не проверяемый инвариант схемы) — см. известные edge-случаи в `modules/process_manager_module/DECISIONS.md`.
+7. **join — структурный факт графа wires** (ADR-PMM-017): не зависит от того, куда в рецепте попал `collector` (прямой ключ vs `metadata`, включая легаси-написание `inspector`); тег входа = имя source-порта совпадает с `data_type` только по конвенции (не проверяемый инвариант схемы) — см. известные edge-случаи в `modules/process_manager_module/DECISIONS.md`.
 
 **Зависимости:** `process_module`, `command_module`.
 **Тестов:** ~80+

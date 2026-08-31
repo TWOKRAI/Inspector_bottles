@@ -2,7 +2,20 @@
 
 > Авто-сгенерировано многоагентным аудитом (workflow comms-architecture-audit) 2026-05-31.
 > Покрытие: 23 подсистем, 166 механизмов, gap-fill раундов: 2.
-> Сырые структурированные карты + аудит RouterManager — в COMMUNICATION_MAP_raw.json (рядом).
+>
+> **⚠️ Это СНИМОК на 2026-05-31, а не живая карта.** С тех пор плоскость наблюдаемости
+> перестроена целиком (ADR-LOG-008 снял `BatchBuffer`, Ф2.1 ввела штамп источника, Ф6 перевела
+> 107 файлов на единственного писателя), поэтому цепочки логов/ошибок/статистики здесь описывают
+> **снятый** механизм. Действующее устройство — [`OBSERVABILITY_MAP.md`](OBSERVABILITY_MAP.md) и
+> каталог [`observability/`](observability/); свежий срез каналов на любой момент — `/channel-map`
+> ([`scripts/channel_map`](../../scripts/channel_map)). Data-plane и state-дельты снимка
+> проверялись приёмкой F1 и остаются верными.
+>
+> Сырые структурированные карты + аудит RouterManager лежали в `COMMUNICATION_MAP_raw.json` —
+> файл **не входит в репозиторий** (`.gitignore:123`, локальный артефакт того же прогона) и
+> устарел вместе со снимком: девять его цепочек ведут через `BatchBuffer`, включая путь к
+> удалённому `channel_routing_module/buffers/batch_buffer.py`. Ссылаться на него нельзя —
+> на свежем клоне его нет.
 
 ---
 
@@ -35,7 +48,7 @@
 |---|---|---|---|---|
 | **Производство кадров (живой data-plane):** `SourceProducer.run_loop → plugin.produce() → FrameShmMiddleware(generic).strip_and_write [frame→SHM] → send_fn=send_message → queue_registry.send_to_queue('{target}_data')` | process_module/generic, shared_resources MemoryManager | да | framework | **alive** |
 | **SHM-payload (numpy):** `strip_and_write → MemoryManager.write_images → SharedMemory.buf` … `restore_frame → MemoryManager.read_images ИЛИ SharedMemory(name=shm_actual_name)` | shared_resources_module/memory, buffers | да | framework | **alive** (через очередь идут только координаты) |
-| Приём+fan-in: `DataReceiver.run_loop → receive_message(channel_types=['data']) → restore_frame → InspectorManager.on_item [буфер по (camera_id,seq_id)] → chain_queue.put` | process_module/generic | да | framework | **alive** |
+| Приём+fan-in: `DataReceiver.run_loop → receive_message(channel_types=['data']) → restore_frame → ItemCollector.on_item [буфер по (camera_id,seq_id)] → _on_ready → DataReceiver.on_items_ready → chain_queue.put` | process_module/generic (`collector_registry`), Plugins/_shared/fanin | да | framework | **alive** (`InspectorManager` не существует: протокол `ItemCollector`, дефолт `PassThroughCollector`, join-реализации приходят DI из `Plugins`) |
 | Внутрипроцесс: `chain_queue (queue.Queue) → PipelineExecutor.run_loop → _execute_chain → _send_results` | process_module/generic | нет | framework | **alive** |
 | GUI-приём: `GuiProcess._data_receiver_loop → router.receive(['data']) → FrameShmMiddleware(router).on_receive → DataReceiverBridge.dispatch → ImagePanelWidget` | frontend/process, router_module/middleware | да | mixed | **alive** |
 | RingBufferWriter/Reader (round-robin + seq_id) | shared_resources_module/buffers | да | framework | **partial** (реализован, но live-pipeline использует FrameShmMiddleware, дубль логики кольца) |

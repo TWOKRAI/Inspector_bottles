@@ -19,6 +19,8 @@ from typing import Literal
 
 from PySide6.QtWidgets import QMessageBox, QWidget
 
+from multiprocess_prototype.frontend import unattended
+
 UnsavedChoice = Literal["save", "discard", "cancel"]
 
 
@@ -41,6 +43,15 @@ def confirm_unsaved_changes(
         "save" — сохранить и продолжить; "discard" — продолжить без сохранения;
         "cancel" — отменить действие.
     """
+    # Прогон без присмотра: спрашивать некого, а ждать клика — вставать намертво на
+    # shutdown (ровно это мешало поднимать живой стенд с настоящим GUI). Ответ ЯВНЫЙ,
+    # а не «отказ по умолчанию»: reject у этого вопроса означает «Отмена», то есть окно
+    # не закроется и приложение не выйдет — зависание сменило бы место, а не исчезло.
+    # "discard", а не "save": автоматический прогон не имеет права писать рецепты.
+    if unattended.is_unattended():
+        unattended.auto_answer(f"несохранённые правки графа: {text}", "discard")
+        return "discard"
+
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
     box.setWindowTitle("Несохранённые правки графа")

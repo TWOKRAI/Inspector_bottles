@@ -13,6 +13,7 @@ from __future__ import annotations
 import queue
 
 from ..core.process_module import ProcessModule
+from ..plugins.base import PluginState
 from .data_receiver import DataReceiver
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .collector_registry import build_collector
@@ -74,16 +75,48 @@ class GenericProcess(ProcessModule):
         chain_targets = app_cfg.get("chain_targets", [])
         queue_size = app_cfg.get("queue_size", 64)
         lag_threshold = app_cfg.get("lag_alert_threshold_sec", 2.0)
+        # Потолок отставания исполнителя (0 = прежнее «копим и блокируем», Q6).
+        # Ставится узлам живого тракта, где ценна СВЕЖЕСТЬ: кадр, обработанный
+        # через 30 секунд, бесполезен, а очередь всё равно теряет — см.
+        # DataReceiver._bound_lag. Дефолт 0 — поведение не меняется молча.
+        max_lag_items = app_cfg.get("chain_max_lag_items", 0)
         source_fps = app_cfg.get("source_target_fps", 25.0)
         max_fails = app_cfg.get("error_max_consecutive_fails", 5)
         auto_reset = app_cfg.get("error_auto_reset_sec", 60.0)
         critical = app_cfg.get("error_critical_plugins", [])
 
-        # Плагины через orchestrator
+        # Плагины через orchestrator. Список — реестр для shutdown (инвариант H-2),
+        # а НЕ «живые»: в нём остаётся и плагин, не дошедший до RUNNING (бросил
+        # configure() ИЛИ start() — RUNNING ставится ПОСЛЕ вызова start,
+        # plugins/base.py::_do_start).
         all_plugins = self._orchestrator.plugins
 
-        # Разделить плагины на source и processing
-        source_plugins = [p for p in all_plugins if p.is_source]
+        # Разделить плагины на source и processing.
+        #
+        # Фильтр «поднят» стоит ТОЛЬКО на источниках, и это граница, а не экономия
+        # (ревью Ф0 Task 0.2, блокер): источнику неподнятость означает «нечем
+        # производить» — рабочий поток ему не создаётся вовсе (воспроизведено: при
+        # упавшем configure() проводка создавала воркер source_producer_<имя>, и
+        # SourceProducer звал produce() у плагина в IDLE, 7 вызовов за 0.2 с).
+        # А processing-плагину его позиция в списке — ШТАТНАЯ ДОРОГА
+        # ПРЕДОХРАНИТЕЛЯ: PipelineExecutor._build_active_steps ставит SuspectTagStep
+        # НА ПОЗИЦИЮ критического bypassed-плагина, а PluginOperationStep тегирует
+        # items `inspection_status="not_inspected"`. Убери его из списка — и
+        # пропадут и позиция, и тег: батч уедет молча, как будто инспекция была.
+        # Поэтому processing идёт списком оркестратора, как и до правки.
+        source_plugins = []
+        for plugin in all_plugins:
+            if not plugin.is_source:
+                continue
+            if plugin.state != PluginState.RUNNING:
+                # Громко и поимённо: молчаливое выпадение источника выглядит как
+                # «камера просто не отдаёт кадры».
+                self._log_error(
+                    f"GenericProcess[{self.name}]: источник '{plugin.name}' не поднят "
+                    f"(состояние {plugin.state.value}) — рабочий поток ему НЕ создаётся"
+                )
+                continue
+            source_plugins.append(plugin)
         processing_plugins = [p for p in all_plugins if not p.is_source]
 
         # Если нет ни source, ни processing — pipeline не нужен
@@ -172,6 +205,7 @@ class GenericProcess(ProcessModule):
                 log_error=self._log_error,
                 log_debug=self._log_debug,
                 node_name=self.name,
+                max_lag_items=max_lag_items,
             )
             # Подключить callback
             collector._on_ready = self._data_receiver.on_items_ready

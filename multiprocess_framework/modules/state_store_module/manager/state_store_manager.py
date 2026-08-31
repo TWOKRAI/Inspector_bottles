@@ -566,6 +566,46 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         count = self._subs.unsubscribe_all(subscriber)
         return {"status": "ok", "count": count}
 
+    def forget_session(self, session_id: str) -> list[str]:
+        """Снять подписки адресов закрытой сессии (Т-2, находка Н3-1).
+
+        Внешний подписчик адресуется как ``"<sender>.<session>"``, а session
+        уникален на соединение — значит закрытие сокета есть сигнал о смерти
+        ИМЕННО этого адреса. Симметрично ``ObservabilitySubscriptionBroker.
+        forget_session``: там снимаются намерения хвоста, здесь — подписки на
+        дерево состояния.
+
+        Почему одной уборки хвоста не хватало. `on_session_closed` был заведён
+        под плоскость наблюдаемости и только её и чистил; подписка `state.**`
+        того же мёртвого адреса оставалась в реестре, и оркестратор продолжал
+        пушить ей `state.changed`. Под изоляцией сессий (ADR-PMM-026) такой
+        пуш — не тихая протечка соседу, а отказ доставки: замер жёсткого ревью
+        2026-08-12 — `errors_delivery_failed` 0 → 1486 за 30 с (~39/с) при НУЛЕ
+        живых клиентов, и так до рестарта оркестратора.
+
+        Штатное завершение (`unwatch`/`state.unsubscribe_all`) этот путь не
+        закрывало: клиент, умерший аварийно (креш, kill, RST), команды снятия
+        не шлёт, а его адрес после реконнекта не знает уже никто — новая сессия
+        берёт новый session_id.
+
+        Args:
+            session_id: идентификатор закрытого соединения.
+
+        Returns:
+            Снятые адреса (для лога и тестов).
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return []
+        suffix = f".{sid}"
+        doomed = [name for name in self._subs.subscribers() if name.endswith(suffix)]
+        removed = 0
+        for name in doomed:
+            removed += self._subs.unsubscribe_all(name)
+        if doomed:
+            self._log_info(f"Сессия '{sid}' закрыта: сняты подписки {doomed} ({removed} шт.)")
+        return doomed
+
     # -------------------------------------------------------------------
     # Регистрация в CommandManager и RouterManager
     # -------------------------------------------------------------------

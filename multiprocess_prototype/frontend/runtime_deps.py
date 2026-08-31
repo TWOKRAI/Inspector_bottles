@@ -131,3 +131,9 @@ class RuntimeDeps(FrameworkRuntime):
     # снимка для GuiStateBindings (единый read-model). None → живой телеметрии
     # нет (метрики «—»). Runtime-объект (Qt-сигналы, живёт с приложением).
     telemetry: Any = None
+    # Task 3.3: TelemetryPoller — опрос уровней, пока вкладка ВИДИМА (скрытая
+    # молчит). Пишет в тот же read-model, что и push, теми же путями — виджеты
+    # не различают источник. Вкладка только двигает set_active/set_targets;
+    # владение и частота — здесь, в runtime-слое (ADR-136). None → опроса нет,
+    # вкладка работает на одном push (полный откат к поведению до 3.3).
+    telemetry_poller: Any = None

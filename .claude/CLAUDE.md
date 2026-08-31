@@ -37,11 +37,21 @@ Rules:
 - **Author writes hazard tests for the mechanism.** Most of the value arrives while writing
   the docstring — "what can break in *this* mechanism, given how it is built" — not from the
   run. Author's tests are additional, never a replacement.
-- **Independent `tester` — selectively, not always.** Call it when the contract is
-  observable from outside: config fields, counters, public API, command surface. Skip it for
-  internal mechanism work: not seeing the code, it invents a model and pins it as the
-  contract. When called, it goes **before** the author writes tests and gets the acceptance
-  criteria only, never the diff.
+- **Independent `tester` — ALWAYS, on every task. No "selectively".** (Owner's decision,
+  2026-08-13, replacing the earlier carve-out for "internal mechanism work". The carve-out
+  was doing exactly what the rule below warned about: decaying into "never". Measured on
+  Task 2.1 of `telemetry-stage6`, where the skip had already been declared and the tester
+  was then run anyway: it found two stale README claims the author had missed, and
+  injecting against *its* suite exposed a wrong causal explanation the author had written
+  into the ADR, the plan and three docstrings.)
+  - It runs **before** the author writes tests where the order allows, gets the acceptance
+    criteria only, and is explicitly forbidden the diff, the implementation files, and the
+    author's tests — name the forbidden paths in the prompt, a generic "don't peek" leaks.
+  - Its green run is **not** the result. Break-inject against *its* file too: a suite that
+    stays green under the break is the thing you were trying to prevent, and the tester
+    cannot check this itself — it never saw what to break.
+  - Its wrong model is a finding, not noise: when it pins a contract the code does not
+    have, decide which one is right and write down why.
 - **A review verdict without a reproduction is advisory only.** Findings must carry
   input → observed output. Reviewers work **synchronously** — no background offload,
   no long waits; on a hang, skip that check and say so, but always issue the verdict.
@@ -55,9 +65,9 @@ Rules:
   evaporates the moment someone swaps an equivalent call. Found by the phase review:
   a test spying on `Path.rglob` stayed green when the walk was rewritten with `os.walk`
   while the guarantee it protected was gone.
-- **Skipping the independent tester must be declared out loud** ("tester skipped: internal
-  mechanism, <reason>") in the plan or the commit. Unstated, "selectively" decays into
-  "never".
+- **There is no legitimate skip of the independent tester** since 2026-08-13. If one is
+  ever forced (agent unavailable, task is pure docs), say so in the plan AND the commit with
+  the reason — and treat the task as unverified until it is run.
 - **A fake-harness test proves the harness.** Where a command surface is tested against
   fakes, add one test that wires the real objects — otherwise renaming a production
   attribute leaves every test green.
@@ -75,6 +85,45 @@ task 0.7 alone exposed **three defective tests of the author's own** — a vacuo
 with the guard fully removed), a flaky one, and one that hung the suite instead of failing.
 The reviewer role delivered only once it was run synchronously against a narrow scope — and
 then it returned two blockers with reproductions.
+
+## Task launch convention (owner's decision, 2026-08-13 — do NOT ask before each task)
+
+The owner does not want a "how should I run this one?" round per task. This is the standing
+answer; follow it and only speak up when deviating.
+
+| Stage | Who | Notes |
+|---|---|---|
+| 1. Independent acceptance tests | `tester`, **once per mechanism, before the implementation** | synchronous, from acceptance criteria only. Runs in a **git worktree at the pre-implementation commit** — blindness is enforced by the tree, not by prose (see below). Its tests are expected RED; they are the spec handed to stage 2. |
+| 2. Implementation | `developer` (Middle) / `teamlead` (Senior+) | per the threshold rule in the global CLAUDE.md. I keep the spec, the acceptance and the measurements. |
+| 3. Break-injection | me, never delegated | against **both** test sets — the author's and the tester's. Predictions written before the run. |
+| 4. Live stand | me | numbers, not adjectives; `backend_ctl` over reading source. |
+| 5. Review | `reviewer`, **after every task** | synchronous (`run_in_background: false`), findings must carry input → observed output. |
+| 6. Live defect that is not obvious | `investigator` | instead of digging in the main context. |
+
+**Stage 1 refined 2026-08-20 (owner's decision), and it is NOT a carve-out.** The tester still runs on
+every mechanism — what is banned is running it TWICE on the same one. Measured on Ф1 of
+`observation-port`: Task 1.2 and Task 1.3 both commissioned an independent tester over the same
+subtree mechanism. The first (before/with the implementation) found real defects; the second cost
+**479k tokens and 16 minutes to find zero** — it re-accepted what a tester and a reviewer had already
+accepted. A second acceptance pass over an already-tested mechanism is now **my injection matrix plus
+`reviewer`**, never a second tester. The tester's own value comes from arriving BEFORE the code:
+on Task 1.4 the same role, run first, returned 6 red tests that became the implementer's spec.
+
+**Blindness is enforced by the worktree, not by the prompt (same decision).** Both testers that day
+confessed leaks — one ran a wide `grep` across the tests directory and pulled in forbidden files, the
+other imported the forbidden `alert_rules` through `python -c` and printed the rule table. Both
+disclosed honestly, both swear they did not use it, and **neither claim is checkable**. Naming
+forbidden paths in prose stays (it is still the instruction), but the tester now works in a
+`git worktree` at the commit before the implementation lands: there is nothing to leak, and its tests
+are red by construction. Carry the file back into the main tree afterwards.
+
+Solo (no subagent for stage 2) stays legitimate only for genuinely trivial work — 1–3 files,
+under ~80 lines, no new mechanism — and **must be said out loud** in the task write-up. It is
+not the default. Stages 1, 3 and 5 have no solo variant.
+
+The owner's multi-select on 2026-08-13 picked the full roster *and* "tester only, rest solo";
+the two are incompatible, and this table is how it was resolved — full roster as the default,
+solo as the named exception. Say so if the owner meant the opposite.
 
 ## Subagents are background by default (Claude Code 2.1.212+, STRICT)
 

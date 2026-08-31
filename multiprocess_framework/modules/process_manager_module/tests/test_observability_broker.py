@@ -49,6 +49,33 @@ class _Transport:
         return {row[2] for row in self.sent}
 
 
+class _OwnTailDouble:
+    """Дубль «своего хвоста» оркестратора: пишет РОВНО то, чем его позвали.
+
+    Подписка объявлена копией production-формы
+    ``ProcessModule.subscribe_observability_tail(subscriber, level=None)``;
+    снятие принимает ``*args/**kwargs`` НАМЕРЕННО — так лишний аргумент виден
+    счётом, а не проглатывается дефолтом (сигнатура с ``level=None`` у снятия
+    сделала бы инъекцию «шлём порог и туда» структурно невидимой).
+    Сверка с оригиналом — ``test_the_subscribe_self_double_matches_production``.
+    """
+
+    def __init__(self, answer: dict | None = None) -> None:
+        self.subscribes: list[tuple] = []
+        self.unsubscribes: list[tuple] = []
+        self._answer = answer or {"success": True, "process": "ProcessManager"}
+
+    def subscribe(self, subscriber: str, level=None, *, wholesale: bool = False) -> dict:
+        # Задача 5.6: дубль принимает третий аргумент и ЗАПОМИНАЕТ его:
+        # без запоминания он бы терпел любое значение, включая неверное.
+        self.subscribes.append((subscriber, level, wholesale))
+        return dict(self._answer)
+
+    def unsubscribe(self, *args, **kwargs) -> dict:
+        self.unsubscribes.append((args, kwargs))
+        return {"success": True}
+
+
 def _broker(transport: _Transport, **kw) -> ObservabilitySubscriptionBroker:
     return ObservabilitySubscriptionBroker(
         broadcast=transport.broadcast,
@@ -70,13 +97,18 @@ class TestBrokerMechanics:
         assert len(t.sent) == 1
         kind, target, command, data = t.sent[0]
         assert (kind, target, command) == ("broadcast", None, SUBSCRIBE_COMMAND)
-        assert data == {"subscriber": "gui"}
+        assert data == {"subscriber": "gui", "scope": "all"}
 
     def test_subscribe_all_also_wires_orchestrator_own_tail(self):
         """«Хочу всё» включает оркестратор — он такой же источник записей."""
         t = _Transport()
         own: list[str] = []
-        b = _broker(t, subscribe_self=lambda s: own.append(s) or {"success": True, "process": "ProcessManager"})
+        b = _broker(
+            t,
+            subscribe_self=lambda s, level=None, wholesale=False: (
+                own.append(s) or {"success": True, "process": "ProcessManager"}
+            ),
+        )
 
         res = b.subscribe_all("gui")
 
@@ -86,7 +118,13 @@ class TestBrokerMechanics:
     def test_orchestrator_without_hub_answers_honestly_and_does_not_break_fan_out(self):
         """Процесс без hub'а отказывает — раздача детям от этого не страдает."""
         t = _Transport(reached=4)
-        b = _broker(t, subscribe_self=lambda s: {"success": False, "reason": "observability hub не активен"})
+        b = _broker(
+            t,
+            subscribe_self=lambda s, level=None, wholesale=False: {
+                "success": False,
+                "reason": "observability hub не активен",
+            },
+        )
 
         res = b.subscribe_all("gui")
 
@@ -302,7 +340,7 @@ class TestBrokerWiredIntoPM:
 
         assert res["success"] is True and res["reached"] == 2
         assert [m["command"] for m in sent] == [SUBSCRIBE_COMMAND]
-        assert sent[0]["data"] == {"subscriber": "gui"}
+        assert sent[0]["data"] == {"subscriber": "gui", "scope": "all"}
         assert sent[0]["queue_type"] == "system"
 
     def test_command_unsubscribe_all_requires_an_address(self):
@@ -326,7 +364,7 @@ class TestBrokerWiredIntoPM:
         assert len(sent) == 1
         assert sent[0]["kind"] == "addressed" and sent[0]["target"] == "camera_1"
         assert sent[0]["command"] == SUBSCRIBE_COMMAND
-        assert sent[0]["data"] == {"subscriber": "gui"}
+        assert sent[0]["data"] == {"subscriber": "gui", "scope": "all"}
 
     def test_no_intent_no_traffic_on_process_start(self):
         pm, sent = self._pm_with_comm()
@@ -346,7 +384,7 @@ class TestBrokerWiredIntoPM:
 
         resubs = [m for m in sent if m["command"] == SUBSCRIBE_COMMAND]
         assert len(resubs) == 1
-        assert resubs[0]["target"] == "camera_0" and resubs[0]["data"] == {"subscriber": "gui"}
+        assert resubs[0]["target"] == "camera_0" and resubs[0]["data"] == {"subscriber": "gui", "scope": "all"}
 
     def test_start_process_path_also_resubscribes(self):
         pm, sent = self._pm_with_comm({"camera_0": {"class": "x.Y"}})
@@ -593,6 +631,125 @@ def test_broker_commands_are_the_per_process_ones(command):
     assert command in ("observability.tail.subscribe", "observability.tail.unsubscribe")
 
 
+class TestOrchestratorTailDeliversAtTheAskedLevel:
+    """Н-1 сквозь настоящие объекты: INFO-запись САМОГО оркестратора доезжает до подписчика.
+
+    Тесты выше судят конверт («чем позвали свой хвост»). Этого мало: конверт —
+    имя параметра, а гарантия — доставленная запись. Здесь харнес такой же, как
+    у Ф6.х.5 (``process_module/tests/test_observability_tail_delivery.py``):
+    настоящий ``LoggerManager``, настоящая проводка
+    ``subscribe_observability_tail`` → ``wire_observability_forward`` →
+    ``RecordForwardChannel``; фейковый только router — это граница процесса.
+    Вход — реальная команда PM, то есть цепочка целиком: команда → брокер →
+    свой хвост → tap → пуш.
+
+    Ровно это и мерила приёмка F1 живьём: ``watch_like_gui(INFO)`` → 163 события
+    от семи детей и **0 от ProcessManager**.
+    """
+
+    @staticmethod
+    def _pm_with_real_logger(tmp_path):
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
+        pm, sent = TestBrokerWiredIntoPM._pm_with_comm()
+
+        class _CapturingRouter:
+            def __init__(self) -> None:
+                self.pushed: list[dict] = []
+
+            def send_async(self, message: dict, priority: str = "normal") -> None:
+                self.pushed.append(message)
+
+        router = _CapturingRouter()
+        logger = LoggerManager(
+            manager_name="PMTailProbe",
+            config={
+                "app_name": "pm_tail",
+                "log_directory": str(tmp_path),
+                "enable_batching": False,
+                "modules": {},
+                "channels": {"a": {"type": "file", "enabled": True, "file_path": str(tmp_path / "a.log")}},
+                "scopes": {
+                    "SYSTEM": {"channels": ["a"]},
+                    "BUSINESS": {"channels": ["a"]},
+                    "DEBUG": {"channels": ["a"]},
+                },
+            },
+        )
+        logger.initialize()
+        pm.router_manager = router
+        pm.logger_manager = logger
+        pm.error_manager = None
+        pm._observability_forwarders = {}
+        # Хаб нужен только как признак «подписка возможна»: batch-половина
+        # структурно пуста (см. шапку wire_observability_forward), проверяется
+        # tap-путь — тот самый, которым едут записи оркестратора.
+        pm._observability_hub = object()
+        return pm, router, logger, sent
+
+    @staticmethod
+    def _tail_pushes(router) -> list:
+        return [m for m in router.pushed if m.get("command") == "observability.record"]
+
+    def test_info_record_of_the_orchestrator_reaches_the_subscriber(self, tmp_path):
+        """Заявленное свойство 1.1: подписка «хочу всё с INFO» открывает и хвост ПМ."""
+        pm, router, logger, _sent = self._pm_with_real_logger(tmp_path)
+        try:
+            res = pm._cmd_observability_tail_subscribe_all({"subscriber": "gui", "level": "INFO"})
+            assert res["orchestrator"]["success"] is True, res["orchestrator"]
+            assert res["orchestrator"]["min_level"] == "INFO", (
+                f"свой хвост заведён не на запрошенном пороге: {res['orchestrator']}"
+            )
+
+            logger.info("оркестратор жив и говорит на INFO", module="observability")
+
+            pushes = self._tail_pushes(router)
+            assert pushes, "INFO-запись оркестратора не доехала до подписчика — Н-1 жив"
+            assert pushes[0]["targets"] == ["gui"]
+        finally:
+            pm.unsubscribe_observability_tail(None)
+            logger.shutdown()
+
+    def test_without_a_level_the_orchestrator_tail_stays_error_only(self, tmp_path):
+        """Пара к предыдущему: дефолт НЕ сдвинут — INFO отсечён, ERROR проходит.
+
+        Без этой половины «INFO доехал» доказывал бы и порог «пропускать всё»:
+        зелёным был бы и брокер, подставляющий DEBUG всем подряд.
+        """
+        pm, router, logger, _sent = self._pm_with_real_logger(tmp_path)
+        try:
+            res = pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
+            assert res["orchestrator"]["min_level"] == "ERROR", f"дефолт своего хвоста сдвинулся: {res['orchestrator']}"
+
+            logger.info("рутина", module="unit")
+            assert self._tail_pushes(router) == [], "дефолтный порог перестал отсекать INFO"
+
+            logger.error("настоящая беда", module="unit")
+            assert self._tail_pushes(router), "ERROR обязан проходить и на дефолтном пороге"
+        finally:
+            pm.unsubscribe_observability_tail(None)
+            logger.shutdown()
+
+    def test_fresh_fan_out_replay_keeps_the_orchestrator_tail_open(self, tmp_path):
+        """Второй путь раздачи на настоящих объектах: веер не гасит свой хвост.
+
+        Веерное доигрывание переставляет форвардер заново (подписка идемпотентна
+        снятием прежних tap'ов). Потеряй оно порог — ПМ замолчал бы не сразу, а
+        на первом же доигрывании, то есть тем незаметнее, чем реже рестарты.
+        """
+        pm, router, logger, _sent = self._pm_with_real_logger(tmp_path)
+        try:
+            pm._cmd_observability_tail_subscribe_all({"subscriber": "gui", "level": "INFO"})
+            pm._replay_observability_subscriptions("instance.started")
+
+            logger.info("после доигрывания", module="observability")
+
+            assert self._tail_pushes(router), "после веерного доигрывания хвост ПМ вернулся к ERROR"
+        finally:
+            pm.unsubscribe_observability_tail(None)
+            logger.shutdown()
+
+
 class TestForgetSessionOnSocketClose:
     """5.11-R1: подписчик умирает вместе со своим соединением — и брокер узнаёт об этом.
 
@@ -614,7 +771,7 @@ class TestForgetSessionOnSocketClose:
         pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.bbb222"})
         pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
 
-        pm._forget_observability_session("aaa111")
+        pm._forget_closed_session("aaa111")
 
         names = pm._observability_broker_obj().subscriber_names()
         assert "backend_ctl.aaa111" not in names, "намерение мёртвой сессии пережило закрытие сокета"
@@ -629,14 +786,14 @@ class TestForgetSessionOnSocketClose:
         for i in range(5):
             sid = f"sess{i}"
             pm._cmd_observability_tail_subscribe_all({"subscriber": f"backend_ctl.{sid}"})
-            pm._forget_observability_session(sid)
+            pm._forget_closed_session(sid)
         assert pm._observability_broker_obj().subscriber_names() == []
 
     def test_dead_subscriber_is_not_replayed_to_fresh_incarnations(self):
         """Главное следствие: шов инкарнации не воскрешает снятую подписку."""
         pm, sent = self._pm_with_comm()
         pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.dead01"})
-        pm._forget_observability_session("dead01")
+        pm._forget_closed_session("dead01")
         sent.clear()
 
         pm._mark_instance_started("camera_1")
@@ -646,7 +803,7 @@ class TestForgetSessionOnSocketClose:
     def test_unknown_session_is_a_quiet_noop(self):
         pm, _sent = self._pm_with_comm()
         pm._cmd_observability_tail_subscribe_all({"subscriber": "gui"})
-        pm._forget_observability_session("никогда-не-существовала")
+        pm._forget_closed_session("никогда-не-существовала")
         assert pm._observability_broker_obj().subscriber_names() == ["gui"]
 
     def test_signal_never_breaks_the_channel(self):
@@ -654,7 +811,106 @@ class TestForgetSessionOnSocketClose:
         pm, _sent = self._pm_with_comm()
         broker = pm._observability_broker_obj()
         broker.forget_session = lambda _sid: (_ for _ in ()).throw(RuntimeError("boom"))
-        pm._forget_observability_session("aaa")  # не должно бросить
+        pm._forget_closed_session("aaa")  # не должно бросить
+
+
+class TestClosedSessionIsForgottenOnEveryPlane:
+    """Т-2 (Н3-1): сигнал закрытия убирает подписчика ИЗ ВСЕХ плоскостей, не из одной.
+
+    Тесты выше судят плоскость наблюдаемости и были зелёными весь срок жизни дефекта:
+    колбэк назывался ``_forget_observability_session`` и честно делал ровно то, что
+    обещал именем. Призрака давала соседняя плоскость — подписка ``state.**`` того же
+    мёртвого адреса: замер жёсткого ревью 2026-08-12 — ``errors_delivery_failed``
+    0 → 1486 за 30 с (~39/с) при нуле живых клиентов, до рестарта оркестратора.
+
+    Здесь стоит настоящий ``StateStoreManager``, а не дубль: механика уборки
+    проверена в его собственных тестах, а этот класс сторожит ПРОВОДКУ — что PM
+    зовёт обе уборки и что падение одной не отменяет соседнюю.
+    """
+
+    @staticmethod
+    def _pm_with_both_planes():
+        from ...state_store_module.manager.state_store_manager import StateStoreManager
+
+        pm, sent = TestBrokerWiredIntoPM._pm_with_comm()
+        ssm = StateStoreManager()
+        pm._state_store_manager = ssm
+        return pm, ssm, sent
+
+    @staticmethod
+    def _subscribe_state(ssm, subscriber: str) -> None:
+        ssm.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": subscriber}})
+
+    def test_both_planes_lose_the_dead_address(self):
+        pm, ssm, _sent = self._pm_with_both_planes()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.aaa111"})
+        self._subscribe_state(ssm, "backend_ctl.aaa111")
+        self._subscribe_state(ssm, "gui")
+
+        pm._forget_closed_session("aaa111")
+
+        assert pm._observability_broker_obj().subscriber_names() == []
+        assert ssm.subscription_manager.subscribers() == ["gui"], "state-подписка мёртвого адреса выжила"
+
+    def test_a_failing_observability_cleanup_does_not_cancel_the_state_one(self):
+        """Плоскости независимы: общий ``try`` вернул бы призрака при первой же ошибке."""
+        pm, ssm, _sent = self._pm_with_both_planes()
+        broker = pm._observability_broker_obj()
+        broker.forget_session = lambda _sid: (_ for _ in ()).throw(RuntimeError("boom"))
+        self._subscribe_state(ssm, "backend_ctl.aaa111")
+
+        pm._forget_closed_session("aaa111")
+
+        assert ssm.subscription_manager.subscribers() == [], "падение соседней плоскости отменило уборку state"
+
+    def test_a_failing_state_cleanup_does_not_cancel_the_observability_one(self):
+        """Обратный порядок: одного из двух направлений мало (дефект на одном пути из двух)."""
+        pm, ssm, _sent = self._pm_with_both_planes()
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.aaa111"})
+        ssm.forget_session = lambda _sid: (_ for _ in ()).throw(RuntimeError("boom"))
+
+        pm._forget_closed_session("aaa111")
+
+        assert pm._observability_broker_obj().subscriber_names() == []
+
+    def test_a_pm_without_a_state_store_is_a_quiet_noop(self):
+        """Оркестратор без стора состояния — законная конфигурация, а не отказ."""
+        pm, _sent = TestBrokerWiredIntoPM._pm_with_comm()
+        pm._state_store_manager = None
+        pm._cmd_observability_tail_subscribe_all({"subscriber": "backend_ctl.aaa111"})
+
+        pm._forget_closed_session("aaa111")
+
+        assert pm._observability_broker_obj().subscriber_names() == []
+
+    def test_the_endpoint_is_wired_to_the_two_plane_cleanup(self):
+        """Проводка, а не метод: без неё весь класс выше судил бы код, который не зовут.
+
+        ``setup_backend_ctl_channel`` поднимается внутри ``initialize()`` PM (сокет,
+        поток, гейт env) — воспроизводить это ради одного аргумента дороже, чем оно
+        стоит. Поэтому имя колбэка читается из ИСХОДНИКА места вызова и сверяется с
+        живым атрибутом класса: переименуй метод, забыв call-site, — и `getattr`
+        не найдёт ничего.
+        """
+        import ast
+        from pathlib import Path
+
+        from ..process import process_manager_process as pmp
+
+        tree = ast.parse(Path(pmp.__file__).read_text(encoding="utf-8"))
+        wired = {
+            kw.value.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            for kw in node.keywords
+            if kw.arg == "on_session_closed" and isinstance(kw.value, ast.Attribute)
+        }
+        assert wired, "в process_manager_process.py нет ни одной передачи on_session_closed"
+        for name in wired:
+            assert callable(getattr(pmp.ProcessManagerProcess, name, None)), (
+                f"канал получает on_session_closed={name}, а такого метода у PM нет"
+            )
+        assert wired == {"_forget_closed_session"}, f"уборка сессии ушла в другой колбэк: {wired}"
 
 
 class TestLevelIsPartOfTheIntent:
@@ -677,7 +933,7 @@ class TestLevelIsPartOfTheIntent:
 
         assert res["level"] == "INFO"
         _kind, _target, _command, data = t.sent[0]
-        assert data == {"subscriber": "gui", "level": "INFO"}, (
+        assert data == {"subscriber": "gui", "level": "INFO", "scope": "all"}, (
             "порог не доехал до процесса — подписка молча вернётся к дефолту ERROR"
         )
 
@@ -698,8 +954,12 @@ class TestLevelIsPartOfTheIntent:
         assert t.sent, "переподписка свежей инкарнации не состоялась вовсе"
         _kind, target, command, data = t.sent[0]
         assert (target, command) == ("camera_1", SUBSCRIBE_COMMAND)
-        assert data == {"subscriber": "gui", "level": "DEBUG"}, (
-            "свежая инкарнация подписана БЕЗ порога — после рестарта хвост молча вернулся к дефолту"
+        # Задача 5.6: replay воспроизводит ОПТОВОЕ намерение брокера, а значит
+        # несёт маркер тоже: без него переподписка свежей инкарнации молча
+        # понижала бы порог, заданный оператором прицельно — тот же блокер Н2-1,
+        # только срабатывающий при рестарте, то есть ещё незаметнее.
+        assert data == {"subscriber": "gui", "level": "DEBUG", "scope": "all"}, (
+            "свежая инкарнация подписана БЕЗ порога либо без маркера оптовости"
         )
 
     def test_level_is_visible_in_the_readback(self):
@@ -749,7 +1009,122 @@ class TestLevelIsPartOfTheIntent:
 
         _kind, _target, command, data = t.sent[0]
         assert command == UNSUBSCRIBE_COMMAND
-        assert data == {"subscriber": "gui"}
+        # Задача 5.6: снятие несёт маркер ОПТОВОСТИ (иначе `unsubscribe_all` снёс бы
+        # прицельную подписку — находка Н2-2), но уровня по-прежнему не несёт: его
+        # у снятия нет ни в сигнатуре процесса, ни в смысле.
+        assert data == {"subscriber": "gui", "scope": "all"}
+        assert "level" not in data
+
+    def test_own_tail_gets_the_same_level_as_the_children(self):
+        """Н-1: свой хвост оркестратора — такой же потребитель порога, как дети.
+
+        До правки ``_own_tail`` звал ``subscribe_self(subscriber)`` одним
+        аргументом, процесс подставлял свой дефолт ``ERROR`` — и подписка
+        «хочу всё с INFO» давала ProcessManager'у ERROR-only хвост. Живой замер
+        приёмки F1: 163 события от семи детей и **0 от ProcessManager** при 22
+        его строках в сторе за то же окно.
+        """
+        t = _Transport()
+        own = _OwnTailDouble()
+        b = _broker(t, subscribe_self=own.subscribe, unsubscribe_self=own.unsubscribe)
+
+        b.subscribe_all("gui", level="INFO")
+
+        assert own.subscribes == [("gui", "INFO", True)], (
+            f"свой хвост подписан не тем порогом, что дети: {own.subscribes}"
+        )
+        # Пара: конверт детям и свой хвост несут ОДИН И ТОТ ЖЕ порог — расхождение
+        # этих двух и было дефектом (A1 положила уровень только в конверт).
+        _kind, _target, _command, data = t.sent[0]
+        assert data["level"] == own.subscribes[0][1]
+
+    def test_replay_fan_out_re_subscribes_own_tail_with_the_intent_level(self):
+        """Второй путь раздачи (шов инкарнации веером) — тот же порог.
+
+        Раздачу делают ДВА пути; почини один — и свой хвост молча возвращался бы
+        к дефолту на каждом веерном доигрывании.
+        """
+        t = _Transport()
+        own = _OwnTailDouble()
+        b = _broker(t, subscribe_self=own.subscribe, unsubscribe_self=own.unsubscribe)
+        b.subscribe_all("gui", level="DEBUG")
+        own.subscribes.clear()
+
+        b.replay()  # без target → веер + свой хвост
+
+        assert own.subscribes == [("gui", "DEBUG", True)], (
+            f"веерное доигрывание вернуло свой хвост к дефолту: {own.subscribes}"
+        )
+
+    def test_absent_level_reaches_own_tail_as_none_not_as_error(self):
+        """Константа дефолта живёт в ОДНОЙ позиции — у процесса.
+
+        Подставь брокер здесь свой ``"ERROR"`` — и смена дефолта у процесса
+        доехала бы одним путём из двух, а совпадение констант замаскировало бы
+        расхождение до первого изменения (та же форма, что
+        ``test_absent_level_puts_no_key_at_all`` для конверта детям).
+        """
+        t = _Transport()
+        own = _OwnTailDouble()
+        b = _broker(t, subscribe_self=own.subscribe, unsubscribe_self=own.unsubscribe)
+
+        b.subscribe_all("gui")
+
+        assert own.subscribes == [("gui", None, True)], (
+            f"брокер подставил своему хвосту собственный дефолт: {own.subscribes}"
+        )
+
+    def test_changed_level_reaches_own_tail_too(self):
+        """Смена порога — законная операция и для своего хвоста."""
+        t = _Transport()
+        own = _OwnTailDouble()
+        b = _broker(t, subscribe_self=own.subscribe, unsubscribe_self=own.unsubscribe)
+        b.subscribe_all("gui", level="ERROR")
+        b.subscribe_all("gui", level="INFO")
+
+        assert own.subscribes[-1] == ("gui", "INFO", True), f"свой хвост остался на прежнем пороге: {own.subscribes}"
+
+    def test_own_tail_unsubscribe_is_called_with_one_argument(self):
+        """Снятие порогом не параметризуется — у процесса его нет в сигнатуре.
+
+        Общая схема «свой хвост» не повод слать лишний аргумент: production-форма
+        ``unsubscribe_observability_tail(subscriber=None)`` приняла бы второй
+        позиционный как ... ничто — она его не объявляет, и вызов упал бы
+        TypeError'ом, который ``_own_tail`` глушит в мягкий ``success=False``.
+        Поэтому арность проверяется счётом, а не сигнатурой дубля с дефолтом.
+        """
+        t = _Transport()
+        own = _OwnTailDouble()
+        b = _broker(t, subscribe_self=own.subscribe, unsubscribe_self=own.unsubscribe)
+        b.subscribe_all("gui", level="INFO")
+
+        b.unsubscribe_all("gui")
+
+        assert own.unsubscribes == [(("gui",), {})], (
+            f"снятие своего хвоста позвано не одним аргументом: {own.unsubscribes}"
+        )
+
+    def test_the_subscribe_self_double_matches_production(self):
+        """Дубль обязан сверяться с оригиналом, иначе он проверяет сам себя.
+
+        ``_own_tail`` глушит исключения (свой хвост не важнее чужих) — значит
+        расхождение арности стало бы мягким ``success=False``, а не падением.
+        Прецедент этого класса записан в правилах проекта: приватная копия
+        фикстуры разошлась с conftest молча, и девять красных жили как «не наш» долг.
+        """
+        import inspect
+
+        from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+
+        sub = inspect.signature(ProcessModule.subscribe_observability_tail)
+        assert list(sub.parameters) == ["self", "subscriber", "level", "wholesale"]
+        assert sub.parameters["level"].default is None, (
+            "production-дефолт уровня переехал — дубль _OwnTailDouble устарел"
+        )
+        unsub = inspect.signature(ProcessModule.unsubscribe_observability_tail)
+        assert list(unsub.parameters) == ["self", "subscriber", "wholesale"], (
+            "сигнатура снятия разошлась с дублём — брокер обязан нести ровно то, что процесс принимает"
+        )
 
     def test_pm_command_seam_hands_the_level_to_the_broker(self):
         """Живой PM (реальные объекты, не фейк-гарнесс): звено 3 цепочки A1.
@@ -775,6 +1150,6 @@ class TestLevelIsPartOfTheIntent:
         res = pm._cmd_observability_tail_subscribe_all({"subscriber": "gui", "level": "INFO"})
 
         assert res["success"] is True
-        assert sent[0]["data"] == {"subscriber": "gui", "level": "INFO"}, (
+        assert sent[0]["data"] == {"subscriber": "gui", "level": "INFO", "scope": "all"}, (
             "порог не пережил шов команды ПМ — ровно корень Б-1"
         )

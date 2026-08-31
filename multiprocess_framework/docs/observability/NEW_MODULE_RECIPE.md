@@ -17,11 +17,28 @@
 ```python
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 
+from .interfaces import LOG_SOURCE          # объявляется на шаге 2
+
 class MyManager(BaseManager, ObservableMixin):
     def __init__(self, name, managers=None, **kw):
         BaseManager.__init__(self, name)
-        ObservableMixin.__init__(self, managers=managers or {}, **kw)
+        ObservableMixin.__init__(self, managers=managers or {},
+                                 source_name=LOG_SOURCE, **kw)   # ← шов, см. шаг 2
+
+    def initialize(self) -> bool:            # ОБЯЗАТЕЛЕН — abstractmethod
+        self.is_initialized = True
+        return True
+
+    def shutdown(self) -> bool:              # ОБЯЗАТЕЛЕН — abstractmethod
+        self.is_initialized = False
+        return True
 ```
+
+**`initialize`/`shutdown` — не «по вкусу», а условие существования класса.** Оба объявлены
+`@abstractmethod` в `IBaseManager`
+([`base_manager/core/base_manager.py:57-67`](../../modules/base_manager/core/base_manager.py#L57)),
+поэтому без них наследник не инстанцируется вовсе: `TypeError: Can't instantiate abstract class`.
+Слепой автор модуля (линза S2 приёмки F1) споткнулся здесь первым же прогоном.
 
 Слоты называются **канонично**: `logger`, `error`, `stats` (`error`, не `errors` — Task 5.14).
 Внутри процесса их кладёт `process_managers.register_all`
@@ -93,8 +110,17 @@ self._record_timing("decode_sec", elapsed)
 гейта, и никаким порогом внутри не снимается; лямбда зовётся только после гейта и ровно один раз.
 Точке с постоянным текстом лямбда не нужна — собирать там нечего, и замыкание было бы чистой ценой.
 
-Имя источника штампуется автоматически (`_observability_source()`); явный `module=` на call-site
-перебивает штамп.
+**Шов, который легко пропустить: объявление имени (шаг 2) и штамп записи (шаг 3) — разные
+механизмы, и связывает их ровно один аргумент.** `declare_log_source` наполняет реестр
+объявлений; `module` в записи ставит `_observability_source()`
+([`observable_mixin.py:112-125`](../../modules/base_manager/mixins/observable_mixin.py#L112)) по
+порядку **явный `source_name` из `__init__` → `manager_name` → `"main"`**. Не передал
+`source_name=LOG_SOURCE` (шаг 1) — записи поедут под именем менеджера (`my_manager`), правило
+конфига по точечному префиксу на них не подействует, а проверка доставки шага «Доказательство»
+прочитается как провал при исправной доставке. Ровно это произошло со слепым автором модуля
+(линза S2 приёмки F1): слово `source_name` в прежней редакции рецепта не встречалось ни разу.
+
+Явный `module=` на call-site перебивает штамп.
 
 ## Шаг 4 (по необходимости). Свой тип приёмника
 
@@ -136,6 +162,12 @@ METRIC_FPS = declare_metric("fps", owner=__name__)
 
 ### 1. Заведи кольцо и направь в него свой источник
 
+**Куда это класть.** Секция `observability:` живёт в конфиге **приложения**, не фреймворка: у
+прототипа это [`multiprocess_prototype/backend/config/system.yaml`](../../../multiprocess_prototype/backend/config/system.yaml)
+(слой L1). Своё приложение — свой файл; фреймворк прикладных имён не содержит вовсе (см. раздел
+«Правок во фреймворке — 0»). Правка на живой системе, без файла — `config.reload` со слоем L3
+([`CONTROL_PANEL.md §1`](CONTROL_PANEL.md)).
+
 ```yaml
 observability:
   channels:
@@ -145,6 +177,28 @@ observability:
       level: DEBUG
       channels_extra: [my_ring]
 ```
+
+Ключ в `loggers` — то самое имя из `declare_log_source`, и оно попадает в запись только если
+передано `source_name=LOG_SOURCE` (шаг 1). Имя менеджера сюда писать бессмысленно: правило по
+префиксу работает на точечном имени.
+
+**Ярлык на набор источников** — `logger_groups`, форма `{имя_группы: [полный_точечный_префикс, …]}`
+(модель `logging.group.*` Spring Boot). Ярлык раскрывается по каждому члену при сборке дерева,
+поэтому правило пишется один раз на группу, а не построчно на компонент:
+
+```yaml
+observability:
+  logger_groups:
+    служебное:
+      - multiprocess_framework.modules.command_module
+      - multiprocess_framework.modules.dispatch_module
+  loggers:
+    служебное:
+      channels: [busy_file]        # правка одна на всю группу
+```
+
+Имя группы, не заведённое в `logger_groups`, видно в `effective.logger.unknown_scopes` (см. шаг 3
+ниже) — молча оно не теряется.
 
 `channels_extra` **добавляет** приёмник к унаследованным и накапливается по всей ветке имени;
 `channels` — **замещает** список, и там побеждает самый длинный совпавший префикс. Обе оси
@@ -226,7 +280,10 @@ config_reload_verified(process="<твой процесс>",
 * **не заводить второй писатель на файл**: сток `DocumentStore` публикуется на процессе именно
   затем, чтобы аудит смен и прикладные вердикты шли в ОДИН экземпляр;
 * **не звать `emergency_log`** из прикладного кода: он существует для случая «штатный маршрут
-  сломан» и считается по AST страж-тестом;
+  сломан». Это **соглашение**: AST-страж
+  [`test_std_logger_guard.py`](../../modules/logger_module/tests/test_std_logger_guard.py) считает
+  другое — писателей `logging.getLogger` и `loguru` вне whitelist'а; вызовы `emergency_log` не
+  считает никто (расхождение №5 приёмки F1);
 * **не писать документ на каждый кадр**: `ctx.write_document` идёт синхронно в SQLite (медиана
   3.6 мс, p95 82 мс, max 928 мс под конкуренцией шести процессов) — это бюджет редкого события;
 * **не полагаться на `MagicMock` в тестах разъёма**: он порождает любой атрибут, поэтому

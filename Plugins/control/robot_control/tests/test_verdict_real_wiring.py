@@ -124,3 +124,59 @@ class TestVerdictOnRealWiring:
             assert plugin.cmd_get_stats({})["total_rejected"] == 1
         finally:
             proc._flush_observability()
+
+
+class TestUnitTiesTogetherOnRealWiring:
+    """Ф4 (4.1): документ и широкая запись одной единицы сходятся по ``trace_id``.
+
+    Сосед (``test_verdict_documents.py``) судит это на дубле контекста — и судить
+    там может только то, что ПЕРЕДАЛ плагин. Сам ``trace_id`` в запись кладёт
+    фасад ``PluginContext.write_event``, читая его из ``unit``, поэтому дубль
+    остаётся зелёным и при полностью снятой сборке следа. Здесь настоящие оба
+    конца: реальный контекст процесса, реальный сток документов, реальный
+    селектор, поднятый сшивкой; подделан только приёмник записей — иначе строку
+    негде увидеть.
+
+    Инъекция, ради которой тест поставлен: снять ``trace_id`` из
+    ``_write_verdict`` — до него это не краснело НИ В ОДНОМ из 146 тестов задачи.
+    """
+
+    class _Collector:
+        """Приёмник плоскости логов в объёме, который зовёт ``ObservableMixin``."""
+
+        def __init__(self) -> None:
+            self.records: list[dict] = []
+
+        def info(self, message: str, module: str = "main", **extra: Any) -> None:
+            self.records.append({"message": message, "module": module, **extra})
+
+        def __getattr__(self, name: str):  # debug/warning/error/critical — молча
+            return lambda *a, **kw: None
+
+    def test_the_document_and_the_wide_record_carry_the_same_trace(self, process: ProcessModule) -> None:
+        collector = self._Collector()
+        process.register_manager("logger", collector)
+
+        ctx = PluginContext(services=process, config={"min_defect_area": 500}, plugin_name="robot_control")
+        plugin = RobotControlPlugin()
+        plugin.configure(ctx)
+        plugin.process(
+            [
+                {
+                    "frame": np.zeros((32, 32, 3), dtype=np.uint8),
+                    "detections": [{"bbox": [1, 1, 5, 5], "center": [3, 3], "area": 1600}],
+                    "trace_id": "77665544332211aa",
+                }
+            ]
+        )
+
+        rows = process.document_sink.query(kind=KIND_VERDICT)
+        assert len(rows) == 1
+        assert rows[0]["trace_id"] == "77665544332211aa"
+
+        events = [rec for rec in collector.records if rec.get("event") == "inspection"]
+        assert len(events) == 1, "фронт вердикта — ровно одна широкая запись (дефолт 0/0 душит поток)"
+        assert events[0]["trace_id"] == rows[0]["trace_id"]
+        # След обязан быть и в ТЕКСТЕ: полнотекстовый индекс стора не смотрит в extra.
+        assert events[0]["message"].endswith("trace=77665544332211aa")
+        assert events[0]["roi"] == [[1, 1, 5, 5]]

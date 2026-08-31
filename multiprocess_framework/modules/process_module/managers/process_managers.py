@@ -39,7 +39,7 @@ class ProcessManagers:
         Returns:
             ManagersBundle — контейнер созданных менеджеров.
         """
-        managers_config = self.process.config_handler.get_managers_config()
+        managers_config = self._managers_config_for_creation()
 
         worker = self._create_worker_manager()
         logger = self._create_logger_manager(managers_config)
@@ -64,6 +64,61 @@ class ProcessManagers:
             config_manager=self.process.config_manager,
             console_enabled=console_enabled,
         )
+
+    def _managers_config_for_creation(self) -> Dict[str, Any]:
+        """Секция менеджеров для СОЗДАНИЯ — из слоёв, если ассемблер её не собрал.
+
+        Task 2.3 (находка Н-7). Секция приезжает готовой только тем процессам,
+        которых собирал ассемблер; **оркестратор спавнится другим кодом, и ключа
+        ``managers`` в его bundle нет вовсе** (``spawner.launch_orchestrator``).
+        Из-за этого его менеджеры РОЖДАЛИСЬ на дефолтах L0, и первым, что делал
+        ``StatsManager`` оркестратора на каждом старте, было предупреждение о
+        собственном конфиге::
+
+            [stats_ProcessManager] stats.aggregation_interval=5.0 ниже пола
+            stats.flush_interval=10.0 — действует 10.0 с.
+
+        При том что ``system.yaml`` задавал ``aggregation_interval: 10.0``. Дети
+        того же стенда молчали — им конфиг доезжал. Предупреждение было ПРАВДОЙ
+        про менеджер и ЛОЖЬЮ про систему: значения доносила пересборка на boot
+        (``_apply_boot_observability_layers``) секундой позже.
+
+        **Почему это не «просто шум».** Воспроизведено на расходящейся паре
+        (``aggregation_interval: 10.0`` + ``flush_interval: 2.0``): при создании
+        менеджер получал ``agg=5.0, flush=10.0``, и его readback показывал
+        ``agg=10.0`` — совпадение, потому что действующий темп это
+        ``max(flush, agg)``, а ``max(5,10) == max(10,10)``. Разошёлся СОСЕД:
+        ``flush_interval`` — действующий ПОЛ темпа — был 10.0 против заданных
+        2.0, то есть впятеро. Совпадение констант прятало, доезжает ли конфиг
+        вообще; различает их только пара, где ветки расходятся.
+
+        Признак **структурный** — «секция пуста», а не «имя равно
+        ProcessManager»: тот же довод, по которому он выбран в
+        :meth:`~..core.process_module.ProcessModule._apply_boot_observability_layers`.
+        Починка по имени закрыла бы одного адресата и оставила бы дефект ждать
+        следующего процесса, поднятого без готовой секции.
+
+        **Молчащие слои ничего не дают** (:func:`layers_are_silent`): пустая
+        секция при молчащих слоях остаётся пустой. ``expand_observability({})``
+        — это не пустота, а полный набор дефолтов L0, и подстановка его здесь
+        затёрла бы конфиг, собранный встройщиком программно.
+
+        Что осталось за пересборкой на boot и почему её не сняли: она обслуживает
+        ВТОРУЮ ветку — спутник рецепта, записанный ``observability.persist``
+        (его на момент создания менеджеров ещё не читали). Эта функция закрывает
+        только «родиться правильным»; «дочитать спутник» по-прежнему её работа.
+        """
+        declared = self.process.config_handler.get_managers_config()
+        if declared:
+            return declared
+
+        from ..configs.observability_config import expand_observability
+        from ..configs.observability_layers import layers_are_silent, process_observability_layers
+
+        layers = process_observability_layers(self.process)
+        if layers_are_silent(layers):
+            return declared
+        return expand_observability(layers.resolve())
 
     def register_all(self, bundle: ManagersBundle, process) -> None:
         """Зарегистрировать менеджеры из bundle через ObservableMixin.

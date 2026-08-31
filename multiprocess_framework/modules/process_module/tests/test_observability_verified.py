@@ -206,11 +206,15 @@ class TestVerdictRidesInConfigReloadResponse:
             assert "channel_written_records" in counters["logger"], counters["logger"].keys()
             assert "observed_at" in counters["logger"]
 
-            # Пара: опечатка через ту же команду — вердикт провальный, при том что
-            # само применение не упало (`success` остаётся истинным).
+            # Пара: опечатка через ту же команду. **Задача 5.4 сменила ответ на
+            # ЭТОЙ двери**: прежде было `success=true` + `verdict="failed"` в одном
+            # ответе (находка Н-C приёмки F2 — оператор читает `success`, а правда
+            # этажом ниже). Теперь inline-ручка отказывает ДО записи в слой.
+            # Вердикт с `unknown_keys` остаётся ответом ФАЙЛОВОЙ дороги, где отказа
+            # нет; его пара — в test_layer_value_validation.py.
             bad = reload_cmd({"observability": {"log_levl": "DEBUG"}})
-            assert bad.get("success") is True, "применение не должно падать из-за опечатки"
-            assert bad["verified"]["verdict"] == "failed", bad["verified"]
-            assert bad["verified"]["unknown_keys"] == ["log_levl"]
+            assert bad.get("success") is False, f"опечатка в имени принята: {bad}"
+            assert "log_levl" in str(bad.get("reason", "")), bad
+            assert "verified" not in bad, "отказ не имеет права нести вердикт применения"
         finally:
             logger.shutdown()

@@ -18,7 +18,11 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
 
+from multiprocess_framework.modules.logger_module import get_std_logger
+
 __all__ = ["RequestRunner"]
+
+_logger = get_std_logger(__name__)
 
 ResultCallback = Callable[[dict[str, Any]], None]
 
@@ -42,7 +46,22 @@ class _RequestTask(QRunnable):
             result = {"success": False, "error": str(exc)}
         if not isinstance(result, dict):
             result = {"success": True, "result": result}
-        self._on_done(result)
+        try:
+            self._on_done(result)
+        except Exception as exc:  # noqa: BLE001 — доставка тоже может отказать, см. ниже
+            # Доставка идёт Qt-сигналом, и она НЕ безотказна: на разрушенном
+            # источнике сигнала (RequestRunner удалён при выходе приложения)
+            # emit поднимает `RuntimeError: Signal source has been deleted` —
+            # уже ПОСЛЕ того, как запрос отработал. Раньше это исключение
+            # улетало в поток пула необработанным.
+            #
+            # Что здесь чинится, а что нет — без переобещаний: поток пула
+            # больше не падает и отказ доставки перестал быть невидимым. Но
+            # доставить результат по разрушенному сигналу всё равно нечем —
+            # инициатор ответа не получит. Поэтому инициатор обязан иметь
+            # СВОЙ дедлайн на незавершённый запрос (у TelemetryPoller это
+            # выселение по TTL, ADR-139), а не полагаться на приход callback'а.
+            _logger.debug("RequestRunner: результат не доставлен (%s: %s)", type(exc).__name__, exc)
 
 
 class RequestRunner(QObject):

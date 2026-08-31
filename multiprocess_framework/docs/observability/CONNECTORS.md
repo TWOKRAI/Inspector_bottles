@@ -17,10 +17,27 @@
 | Кто получает | наследник `BaseManager` / любой класс, подмешавший миксин | плагин (`ProcessModulePlugin`), через `ctx` в каждом хуке |
 | Адрес | [`modules/base_manager/mixins/observable_mixin.py`](../../modules/base_manager/mixins/observable_mixin.py) | [`modules/process_module/plugins/base.py`](../../modules/process_module/plugins/base.py) |
 | Логи | `_log_debug/_log_info/_log_warning/_log_error/_log_critical` (+ публичные алиасы без подчёркивания) | `ctx.log_debug/log_info/log_warning/log_error/log_critical` |
-| Ошибки | `_track_error(exc, context)` → слот `error` | `ctx.health.report_error(exc, context=…, throttle=…)` |
-| Метрики | `_record_metric(name, value, tags)`, `_record_timing(name, sec, tags)` → слот `stats` | **разъёма нет** (см. §3, строка C1) |
+| Ошибки | `_track_error(error, context)` → слот `error` | `ctx.health.report_error(exc, context=…, throttle=…)` |
+| Метрики | `_record_metric(metric_name, value, tags)`, `_record_timing(metric_name, duration, tags)` → слот `stats` | `ctx.record_metric(name, value=1, tags=None)`, `ctx.gauge(name, value, tags=None)`, `ctx.record_timing(name, duration, tags=None)`, `ctx.histogram(name, value, tags=None)` → `stats_manager` процесса (ADR-PM-033) |
 | Документы | — | `ctx.write_document(kind, summary, **fields)` |
-| Штамп источника | `_observability_source()`: явный `source_name` → `manager_name` → `"main"` | имя плагина, ставит `PluginContext._stamped` через `functools.partial(log_fn, module=…)` |
+| Широкая запись о единице | — | `ctx.write_event(kind, summary, *, unit=None, decisive=False, **fields)` → плоскость логов, `BUSINESS`/`INFO` (ADR-PM-036) |
+| Дамп кольца записей | — | `ctx.flight_dump(reason, **fields)` → файл `<логи>/<процесс>/flight/<ts>_<reason>.jsonl` из memory-приёмника логгера (ADR-PM-037). Не плоскость: ЧТЕНИЕ уже написанного. Дефолт — выключено |
+| Штамп источника | `_observability_source()`: явный `source_name` → `manager_name` → `"main"` | логи — имя плагина через `PluginContext._stamped` (`functools.partial(log_fn, module=…)`); метрики — тег `plugin` с тем же именем |
+
+**Первый аргумент метрики зовётся по-разному на двух разъёмах, и это НЕ опечатка.** У миксина —
+`metric_name` ([`observable_mixin.py:186`](../../modules/base_manager/mixins/observable_mixin.py#L186)),
+у `PluginContext` и у самого `StatsManager` — `name`. Разъём плагина повторяет менеджер, в который
+пишет, дословно; миксин же — предсуществующее третье написание, и звать `ctx.record_metric(metric_name=…)`
+по его образцу — `TypeError`. Ровно тот класс расхождения, что уже стоил приёмке F1 её №1.
+
+**Единица `record_timing` — СЕКУНДЫ** на обоих разъёмах (`StatsManager.record_timing` документирован
+так, боевые вызовы передают `0.5`/`1.0`). Миллисекунды здесь не падают тестом: агрегат соберётся, но
+окажется в тысячу раз не там.
+
+Имена аргументов в таблице — **дословно из кода**
+([`interfaces.py:206-214`](../../modules/base_manager/interfaces.py#L206)), а не пересказ: вызов
+именованными аргументами по прежней редакции документа (`_track_error(exc=…)`,
+`_record_metric(name=…)`) давал `TypeError` — расхождение №1 приёмки F1.
 
 **Оба разъёма ведут в одни и те же три менеджера процесса.** Их регистрирует
 [`process_managers.register_all`](../../modules/process_module/managers/process_managers.py) под
@@ -110,7 +127,7 @@ display-виде записи — `record_display.stamp_observed`
 | 6 | Ветка readback'а stats **не исполнялась ни разу** (сторожилась `getattr(stats, "config")`, которого у `StatsManager` нет) — темп, приёмники и молчащие стоки третьей плоскости наружу не выходили | **2026-08-09**, B1 | `StatsManager.observability_readback()`: темп из живого окна агрегации |
 | 7 | `channels_active` / `sinks_disabled_by_operator` / `idle_sinks` отдавал только логгер — на error/stats оператор не отличал «я выключил» от «не поднялось» | Task 5.10 | `_sink_readback` / `_idle_sinks` зовутся для всех трёх плоскостей |
 | 8 | Реентрантный tap давал лавину до предела рекурсии (498 записей), а `RecursionError` съедал `except Exception` | **2026-08-10**, D1 | поточный счётчик глубины + именованный `tap_reentrant_suppressed` |
-| 9 | **stats-разъёма у плагина нет** — `IProcessServices` не объявляет stats-методов, 0 использований на ~30 плагинов | **НЕ ЗАКРЫТА** | развилка Р-2 решена владельцем как **(в)**: C1 уехала первой фазой в план телеметрии. Ветку `KIND_STATS` в drain трогать нельзя — на ней стоит это решение |
+| 9 | **stats-разъёма у плагина нет** — `IProcessServices` не объявляет stats-методов, 0 использований на ~30 плагинов | **разъём ЗАКРЫТ 2026-08-12** (ADR-PM-033, план `telemetry-stage6` задача 1.1); **доставка — нет**, задача 2.1 | Порт `stats_manager` в протоколе, четвёрка на `PluginContext`/`SubPluginContext`, узкий контракт `IPluginStatsManager`. Ненастроенная плоскость слышима: `stats.without_plane` в `introspect.observability` + однократный WARNING. Ветку `KIND_STATS` в drain оживляет задача 2.1 — решение Р-2 исполняется там, не здесь |
 
 Строка 9 — единственная открытая. Пока она открыта, бизнес-числа плагин отдаёт телеметрией
 (self-publish в дерево состояния), а не `StatsManager`.
@@ -149,6 +166,29 @@ display-виде записи — `record_display.stamp_observed`
   туда, глушит пол ошибок, и об этом предупреждает `LoggerCore._warn_on_silenced_error_scopes`;
 * вытеснение из кольца `MemoryChannel` (`evicted`) — контракт кольца: ёмкость N заказал оператор.
 
+### 4.1. Два окна, в которых потеря штатна — и видна счётчиком
+
+Оба найдены живым прогоном приёмки F1 (2026-08-10, стенд `webcam_sketch`, 8 процессов; отчёт —
+[`docs/reviews/2026-08-10_observability-acceptance-review.md`](../../../docs/reviews/2026-08-10_observability-acceptance-review.md),
+находки Н-11 и Н-12). Решение владельца **Р-6(б)**: окна называются числами, механизма под них не
+заводится — буфер на своп-окно стоит дороже, чем стоят одна-две записи, у которых уже есть и голос,
+и счётчик.
+
+| Окно | Типичная потеря | Чем видно |
+|---|---|---|
+| **Пересборка каналов на `config.reload`** | **~1 запись** на процесс, попавшая в окно между сносом старого реестра каналов и постановкой нового | голос `канал '<имя>' не резолвится — учтено N` + `unresolved_channel_records {'<имя>': N}`. Живой замер: `system_file: 1` на процессе `seg` в момент `config.reload` |
+| **Останов ПМ после гашения логгера** | **2 записи** (`system_file`, `messages_file`), порождённые самим teardown уже после строки `logger_… shutting down` | тот же счётчик и тот же голос; в консоли видны ПОСЛЕ финальной строки логгера |
+
+Что это НЕ значит:
+
+* это не «потери при reload вообще» — записи вне окна пересборки едут как обычно; окно измеряется
+  единицами записей, а не долей потока;
+* это не тихая потеря. Обе попадают в `unresolved_channel_records`, то есть отличимы от
+  «источник молчит». Ноль в этом счётчике после reload означал бы, что окна не было;
+* число «2» у teardown — это то, что порождает teardown САМОГО ПМ. У процесса, который в момент
+  останова ещё пишет прикладные записи, их будет больше, и считать их надо тем же счётчиком, а не
+  этой строкой.
+
 ---
 
 ## 5. «Всё через менеджеры» и named-исключения
@@ -159,7 +199,7 @@ display-виде записи — `record_display.stamp_observed`
 | Выход | Адрес | Почему без него нельзя |
 |---|---|---|
 | `emergency_log` | [`modules/_fallback.py`](../../modules/_fallback.py) | отказ писателя нельзя рассказать через самого писателя. Один выход на всю плоскость: `CRM._fallback_log`, четыре точки `log_channel`, немой `ChannelRegistry` (D1), миграция стора (D3), жалоба на снятые ключи конфига — все они именованные вызовы **этой** функции |
-| `ErrorFloor` | [`logger_module/core/error_floor.py`](../../modules/logger_module/core/error_floor.py) | синхронный конфиго-независимый пол error/critical (в stdlib он не ходит вовсе — пишет JSON Lines сам). Прикладной код его позвать не может: это внутренний приёмник последней инстанции. Подробности в [`SINKS_MAP.md §4`](SINKS_MAP.md) |
+| `ErrorFloor` | [`logger_module/core/error_floor.py`](../../modules/logger_module/core/error_floor.py) | синхронный конфиго-независимый пол error/critical (в stdlib он не ходит вовсе — пишет JSON Lines сам). Прикладной код звать его **не должен**: это внутренний приёмник последней инстанции. Но это **соглашение, а не запрет** — класс публичен и импортируем, стража нет (приёмка F1 воспроизвела вызов из прикладного кода: `write returned: True`, файл записан). Подробности в [`SINKS_MAP.md §4`](SINKS_MAP.md) |
 
 **Голый `logging.getLogger` разрешён семи файлам, и каждому — под собственную причину.** Список
 живёт не в договорённости, а в страже
@@ -225,6 +265,12 @@ console → command → router → error → stats → статус + итого
   ERROR/CRITICAL, INFO/WARNING уборки терялись всегда;
 * **stats до логгера** — его канал `log_stats` пишет ЧЕРЕЗ логгер, и обратный порядок отправил бы
   финальный снапшот метрик в закрытый приёмник;
+* **последнее окно закрывается ДО финального дренажа hub'а** (задача 2.1) — у канала `hub_stats`
+  приёмник не логгер, а буфер hub'а, и порядок останова для него обратный: дренаж идёт РАНЬШЕ
+  `shutdown()` менеджеров, где рождается последний снапшот. Поэтому `_flush_observability`
+  передаёт дренажу `stats_to_flush=stats_manager` и закрывает окно сам; без этого последнее окно
+  смены ложилось бы в hub, из которого уже никто не читает (стор к тому моменту закрыт), — молча,
+  на каждом процессе, каждый останов;
 * **error и stats гасятся вообще** — до B3 `shutdown()` у них не звался никем, и финальный flush
   двух плоскостей был на совести ОС. `shutdown()` оба наследуют от CRM: `flush()` → `buffer.stop()`
   → `_close_all_channels()`;
@@ -253,6 +299,14 @@ console → command → router → error → stats → статус + итого
   `self._log_debug(lambda: f"…")` вместо f-строки. f-строка собирается на call-site, то есть до
   гейта, и никаким порогом внутри не снимается. Точке с постоянным текстом лямбда не нужна —
   собирать там нечего.
+* **Нативные C++ писатели идут в stderr мимо плоскости логов.** `glog` внутри OpenCV/mediapipe/
+  onnxruntime пишет своим C++-логгером прямо в файловый дескриптор процесса: строки вида
+  `INFO: Created TensorFlow Lite XNNPACK delegate…` и `W0000 …` видны в консоли, но не имеют ни
+  `module`, ни severity нашей плоскости, не попадают ни в один приёмник и не считаются ни одним
+  счётчиком потерь (Н-15 приёмки F1, [ПРОВЕРЕНО консолью]). Python-мостом (`logging.Handler`,
+  как у `pymodbus`) это **не закрывается в принципе** — запись не проходит через stdlib-логгер.
+  Закрытие требует перехвата на уровне fd при спавне ребёнка; названо задачей 9.2 плана
+  [`observability-roadmap`](../../../plans/observability-roadmap.md), сейчас — принятая граница.
 * **Mojibake русских строк в консоли Windows** (cp866) — принято как есть; числа при этом верны.
 * **`events_page` на бутстрапе отдаёт ~114 КБ** — принято как есть.
 

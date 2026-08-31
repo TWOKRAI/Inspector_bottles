@@ -33,6 +33,7 @@ from pydantic import Field, field_validator, model_validator
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...observability_declarations import declared_rules
 from ...logger_module.configs.logger_manager_config import MIN_BURST_RESET_SEC
+from ...statistics_module import DEFAULT_LOG_LINE_MAX_BYTES, DEFAULT_MAX_SERIES
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 
 #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
@@ -78,6 +79,89 @@ class ObservabilityDocumentsConfig(SchemaBase):
     ] = Field(default_factory=dict)
 
 
+@register_schema("ObservabilityEventsConfig")
+class ObservabilityEventsConfig(SchemaBase):
+    """Под-секция отбора широких записей о единице работы (Ф4, задача 4.1).
+
+    Wide event — одна запись со всем контекстом единицы (вердикт, счётчики, ROI,
+    спаны). Фронты решения (``decisive=True``) идут мимо отбора ВСЕГДА; здесь
+    настраивается только ПОТОК — записи о каждой рядовой единице.
+
+    **Дефолт 0/0 = поток не пишется вовсе.** Выключенность выражена параметрами,
+    а не отдельным флагом: два способа сказать «выключено» рано или поздно
+    разъезжаются (правило «флаги не костыли», тот же довод у ``sampling_first_n``).
+
+    **Ловушка имён.** Рядом, в этой же секции, живут ``sampling_first_n`` /
+    ``sampling_every_mth`` логгера — те же слова, но ДРУГОЙ ключ отбора (пара
+    «уровень + текст» записи, а не род единицы) и другой смысл нуля: у дросселя
+    логгера ``every_mth`` имеет ``min=1`` и ноль там невыразим, здесь же ноль —
+    штатное «после первых N не проходит ничего». Слить их в один механизм нельзя:
+    у wide event текст свой у каждой единицы, и дроссель по тексту не дросселирует
+    ничего по построению.
+    """
+
+    first_n: Annotated[
+        int,
+        FieldMeta(
+            "Сколько потоковых записей КАЖДОГО рода пропускать всегда (0 — поток не пишется)",
+            min=0,
+            max=100_000,
+        ),
+    ] = 0
+    every_mth: Annotated[
+        int,
+        FieldMeta(
+            "После первых N проходит каждая M-я запись рода (0 — дальше не проходит ничего)",
+            min=0,
+            max=1_000_000,
+        ),
+    ] = 0
+
+
+@register_schema("ObservabilityFlightConfig")
+class ObservabilityFlightConfig(SchemaBase):
+    """Под-секция flight recorder'а — дампа кольца записей по требованию (Ф5, 5.1).
+
+    Кольцо ЗАПИСЕЙ, а не пикселей: дамп отвечает на «что происходило вокруг
+    момента брака» строками плоскости логов этого процесса, включая широкие
+    записи Ф4. Изображения кадров сюда не едут и не поедут — у них свои
+    механизмы (copy_out, датасет).
+
+    **Выключенность выражена ОДНИМ ключом с ОДНИМ адресом** (Р5.1-5). Соблазн
+    был выразить её вторым способом — «нет memory-канала в конфиге процесса», —
+    и он отвергнут: два независимых способа быть выключенным дают ровно тот
+    класс, где оператор гасит один, а действует другой. Здесь нет канала —
+    механизм отвечает ДРУГИМ названным отказом (см. ``sink``), а не тем же
+    самым.
+
+    **Ловушка соседней двери, названная явно** (Р5.1-7). Само кольцо объявляется
+    не здесь, а в ``observability.channels.<имя>`` — и там обязателен
+    ``type: memory``. Без него общий цикл секции каналов строит ФАЙЛОВЫЙ
+    приёмник под тем же именем (дефолт ``LoggerChannelSchema.type == "file"``),
+    и снаружи разница не видна: канал есть, ``sink`` на него указывает, а
+    ``tail()`` у файла отсутствует — дамп отвечает «приёмник записей не хранит».
+    Маршрут в кольцо (``observability.scopes``) обязателен по той же причине:
+    объявленный и не смаршрутизированный канал поднят и вечно пуст.
+    """
+
+    enabled: Annotated[
+        bool,
+        FieldMeta("Писать ли дампы кольца по вызову ctx.flight_dump (единственный выключатель)"),
+    ] = False
+    sink: Annotated[
+        str,
+        FieldMeta("Имя memory-приёмника ЛОГГЕРА, чьё кольцо уходит в дамп (пусто — читать нечего)"),
+    ] = ""
+    keep: Annotated[
+        int,
+        FieldMeta("Сколько последних дампов держать в каталоге flight/ (0 — без предела)", min=0, max=10_000),
+    ] = 5
+    limit: Annotated[
+        int,
+        FieldMeta("Сколько последних записей кольца брать в дамп (0 — всё, что лежит)", min=0, max=1_000_000),
+    ] = 0
+
+
 def canonical_level_or_raise(value: Any, *, field: str) -> Any:
     """Каноничное имя уровня либо громкий отказ с адресом ключа (B2).
 
@@ -97,6 +181,34 @@ def canonical_level_or_raise(value: Any, *, field: str) -> Any:
             f"неизвестный уровень '{value}' в {field} (известны: {', '.join(LEVEL_ORDER)}; синонимы: WARN, FATAL)"
         )
     return canonical
+
+
+def canonical_scope_keys(value: Any) -> Any:
+    """Ф2.4: канон имени группы — заглавными, и приводится ЗДЕСЬ ТОЖЕ.
+
+    Копия правила у ``LoggerManagerConfig`` его не покрывает: слои
+    наблюдаемости мержатся между собой (``deep_merge``) ДО того, как результат
+    доедет до конфига менеджера, и ключ ``system:`` из ``system.yaml`` лёг бы
+    рядом с ``SYSTEM`` из дефолта, а не поверх него. До менеджера доехали бы
+    ОБА, и настройка «сделать SYSTEM тише» тихо не сработала бы.
+
+    Это второе место, а не вторая реализация: правило одно («канон заглавными»),
+    а точки его применения — две, потому что и границ конфига две. Разъехаться
+    им нечем — приведение регистра целиком в одну строку.
+
+    **Задача 5.4 — третий вызывающий, и ради него правило стало функцией.**
+    :func:`~.observability_layers.unknown_section_keys` сверяет ключи запроса с
+    теми, что выжили в round-trip через схему, а схема к этому моменту УЖЕ
+    переименовала ``scopes.system`` в ``scopes.SYSTEM``: сравнение сырых путей
+    объявляло законное строчное имя незнакомым (проверено до правки —
+    ``unknown_keys == ['scopes.system.channels']`` при работающей настройке).
+    Пока это жило только в вердикте, ценой был ложный ``failed``; с отказом на
+    границе ценой стал бы отказ законной правке. Поэтому сверяющий приводит
+    запрос ТЕМ ЖЕ правилом, а не своей копией регистра.
+    """
+    if not isinstance(value, dict):
+        return value
+    return {(k.upper() if isinstance(k, str) else k): v for k, v in value.items()}
 
 
 @register_schema("ObservabilityErrorsConfig")
@@ -146,6 +258,27 @@ class ObservabilityStatsConfig(SchemaBase):
         FieldMeta("ПОЛ интервала записи snapshot'ов, сек — темп ниже него недостижим", min=1.0, max=300.0),
     ] = 10.0
     log_level: Annotated[str, FieldMeta("Уровень логирования метрик")] = "INFO"
+
+    # 3.4: предел объёма ОДНОЙ строки снапшота. Живёт здесь, а не только в
+    # `StatsManagerConfig`, потому что этот фасад — единственная дорога конфига
+    # приложения к плоскости: ключ, которого тут нет, схема отбрасывает молча.
+    # Проверено живым прогоном ДО правки: `config.reload` на восьми процессах вернул
+    # `failed` (ключ не выжил round-trip), а прямой тест менеджера при этом был зелёным.
+    log_line_max_bytes: Annotated[
+        int,
+        FieldMeta("Предел объёма строки снапшота, байт (0 — без предела)", min=0, max=1_048_576),
+    ] = DEFAULT_LOG_LINE_MAX_BYTES
+
+    # 2.2: потолок уникальных серий (имя × теги) — на окно агрегации И на живой
+    # слой сразу. Живёт здесь по той же причине, что `log_line_max_bytes`: этот
+    # фасад — единственная дорога конфига приложения к плоскости, и ключ,
+    # которого тут нет, схема отбрасывает МОЛЧА. Дорога трёх точек §3.2:
+    # схема → фасад/`expand_observability` → readback живого стража
+    # (`StatsManager.observability_readback`).
+    max_series: Annotated[
+        int,
+        FieldMeta("Потолок уникальных серий метрик (имя × теги); 0 — без предела", min=0, max=1_000_000),
+    ] = DEFAULT_MAX_SERIES
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -332,6 +465,27 @@ class ObservabilityConfig(SchemaBase):
         ObservabilityDocumentsConfig,
         FieldMeta("Плоскость документов: фабрика стока и её словарь (Ф8.5)"),
     ] = Field(default_factory=ObservabilityDocumentsConfig)
+    #: Ф4 (задача 4.1). В manager-конфиги НЕ раскладывается — ровно как
+    #: ``documents`` и ``session_ttl_sec``: это не параметр менеджера, а политика
+    #: отбора, которую читает живой ``WideEventSelector`` процесса
+    #: (``wire_event_selector`` на старте, ``apply_event_selector`` на пересборке).
+    #: Ключ живёт в ТОЙ ЖЕ секции ``observability``, а не в ``telemetry.*``:
+    #: пятой двери конфига этап не заводит (правило Б.1), а под-секции
+    #: ``observability`` закрытого списка не имеют.
+    events: Annotated[
+        ObservabilityEventsConfig,
+        FieldMeta("Отбор широких записей о единице работы: first_n / every_mth (Ф4)"),
+    ] = Field(default_factory=ObservabilityEventsConfig)
+    #: Ф5 (задача 5.1). В manager-конфиги НЕ раскладывается — по тому же доводу,
+    #: что ``documents``/``events``/``session_ttl_sec``: это не параметр менеджера,
+    #: а политика дампа, которую читает живой ``FlightRecorder`` процесса
+    #: (``wire_flight_recorder`` на старте, ``apply_flight_recorder`` на пересборке).
+    #: Ключ живёт в ТОЙ ЖЕ секции ``observability`` — пятой двери конфига этап не
+    #: заводит (правило Б.1), ``telemetry.*`` не трогается.
+    flight: Annotated[
+        ObservabilityFlightConfig,
+        FieldMeta("Дамп кольца записей по вызову: enabled / sink / keep / limit (Ф5)"),
+    ] = Field(default_factory=ObservabilityFlightConfig)
 
     #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
     #: МОЛЧА (проверено), поэтому без этой сверки конфиг с ``enable_batching: true``
@@ -366,22 +520,8 @@ class ObservabilityConfig(SchemaBase):
     @field_validator("scopes", mode="before")
     @classmethod
     def _normalize_scope_keys(cls, value: Any) -> Any:
-        """Ф2.4: канон имени группы — заглавными, и приводится ЗДЕСЬ ТОЖЕ.
-
-        Копия правила у ``LoggerManagerConfig`` его не покрывает: слои
-        наблюдаемости мержатся между собой (``deep_merge``) ДО того, как
-        результат доедет до конфига менеджера, и ключ ``system:`` из
-        ``system.yaml`` лёг бы рядом с ``SYSTEM`` из дефолта, а не поверх него.
-        До менеджера доехали бы ОБА, и настройка «сделать SYSTEM тише» тихо не
-        сработала бы.
-
-        Это второе место, а не вторая реализация: правило одно («канон
-        заглавными»), а точки его применения — две, потому что и границ конфига
-        две. Разъехаться им нечем — приведение регистра целиком в одну строку.
-        """
-        if not isinstance(value, dict):
-            return value
-        return {(k.upper() if isinstance(k, str) else k): v for k, v in value.items()}
+        """Ф2.4: канон имени группы — заглавными. Тело — :func:`canonical_scope_keys`."""
+        return canonical_scope_keys(value)
 
 
 def _toggled_logger_channels(console: bool, file: bool) -> Dict[str, Dict[str, Any]]:
@@ -417,7 +557,10 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
 
         Ключ ``session_ttl_sec`` (Task 5.8) сюда НЕ раскладывается сознательно: это
         политика слоя L3, а не параметр менеджера — её читает
-        ``ObservabilityLayers.effective_session_ttl``.
+        ``ObservabilityLayers.effective_session_ttl``. По тому же доводу здесь нет
+        ни ``documents`` (адрес второй плоскости, читает ``wire_document_sink``),
+        ни ``events`` (политика отбора, читает ``WideEventSelector`` процесса),
+        ни ``flight`` (политика дампа, читает ``FlightRecorder`` процесса).
     """
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 
@@ -510,6 +653,14 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         # max(flush_interval, aggregation_interval) съедал любую настройку темпа.
         "flush_interval": cfg.stats.flush_interval,
         "log_level": cfg.stats.log_level,
+        # 3.4: без прокида ключ существовал бы в фасаде и не доезжал до менеджера —
+        # ровно та половинчатость, которой уже был `flush_interval` (Ф6.х.8).
+        "log_line_max_bytes": cfg.stats.log_line_max_bytes,
+        # 2.2: третья точка той же дороги. Без этой строки ручка стояла бы в
+        # схеме, показывалась бы оператору и не значила бы ничего — менеджер
+        # брал бы дефолт (тот же дефект, что дважды ловили `flush_interval` и
+        # `log_line_max_bytes`).
+        "max_series": cfg.stats.max_series,
     }
 
     # Task 5.10.b: адресные переопределения каналов двух младших плоскостей —

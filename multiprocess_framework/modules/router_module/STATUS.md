@@ -64,7 +64,7 @@ register_route("order", "queue_channel")
 ## Известные проблемы
 
 - **configs/:** `RouterManagerConfig` (SchemaBase) — метаданные; рантайм не переведён
-- `correlation_id` для request-response — этап 5 (чеклист)
+- `correlation_id` для request-response — есть (`request`/`request_async`/`reply_to_request`, ADR-RTR-011)
 - `ErrorManager` не подключён — ошибки через `_log_error` попадают в `LoggerManager`
 - `StatsManager` не реализован
 - Config-driven channels (объявление `worker_in` через конфиг процесса) — этап 8
@@ -80,3 +80,4 @@ register_route("order", "queue_channel")
 | 2026-04-09 | План 10: dead code, Lock для _stats, тесты адаптеров, DECISIONS + ARCH §6.9 | 5 |
 | 2026-07-13 | Ф7 G.2: kind-каналы `{process}_{kind}` за флагом `use_kind_channels` (дефолт OFF, приоритет ctor > env > конфиг > False); всё-или-fallback при частичном fan-out (F4), специфичный `register_route` выигрывает у kind (F5). Не в проде до G.7 | 5 |
 | 2026-07-14 | Ф7 G.3 (ADR-RTR-009): FrameShmMiddleware — одно ядро записи `_write_frame_into_slot` (round-robin, снят сломанный find_free_index в on_send); кэш SHM-handles читателя за флагом `FW_SHM_HANDLE_CACHE`; громкий pickle-fallback `frame_pickle_fallbacks` (→ `get_stats().router`); cross-process seqlock через `shm_seqlock` в сообщении + `read_single_frame`. Дефолты OFF, не в проде до G.7 | 5 |
+| 2026-08-23 | ADR-RTR-011: контракт `request()` стал исполняемым — вызов с приёмного потока бросает `RouterReentrantRequestError` (было: тихие 5 с до таймаута), отсутствие приёмного цикла даёт быстрый отказ `reason="no_receive_pump"` через 0.5 с. Добавлен `request_async(on_response=…)` — неблокирующий запрос с колбэком на приёмном потоке, «ровно один раз» через снятие слота под локом, подметание просроченных на приёмном такте | 5 |

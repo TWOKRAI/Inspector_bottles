@@ -6,7 +6,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
@@ -16,6 +16,7 @@ from multiprocess_framework.modules.frontend_module.core.app_identity import (
     set_app_identity,
 )
 from multiprocess_framework.modules.process_module.generic import frame_trace
+from . import unattended
 from .auth_context import AuthContext
 from .bridge.command_sender import CommandSender
 from .windows.main_window import MainWindow
@@ -60,6 +61,14 @@ def _resolve_dev_login_settings() -> tuple[bool, str, str]:
 def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # Режим без присмотра (env INSPECTOR_GUI_UNATTENDED=1): живой стенд с настоящими
+    # окнами, где кликать некому. Ставится ПЕРВЫМ делом и до всех стартовых диалогов —
+    # StartupBlockingDialog при отсутствии хранилища пользователей и LoginDialog при
+    # неудавшемся автологине висят ниже по этой же функции, и сторож, поставленный
+    # после них, опоздал бы ровно на тот случай, ради которого он есть. Off по умолчанию.
+    unattended.set_logger(process._log_warning)
+    unattended.install_modal_watchdog(app)
 
     # Диагностика зависаний GUI (env INSPECTOR_STALL_DUMP=1): faulthandler в отдельном
     # C-потоке пишет стеки ВСЕХ потоков каждые 5 сек — ловит место фриза даже когда
@@ -108,15 +117,29 @@ def run_gui(process: "GuiProcess") -> None:
             lambda: getattr(process, "_ui_command_sender", None),
         )
 
-    # qt-mcp probe — активируется только при QT_MCP_PROBE=1.
-    # Слушает localhost:9142, видимо MCP-сервером qt-mcp для UI-интроспекции.
-    # Прод-поведение не меняется без env-флага.
+    # qt-mcp probe — активируется только при QT_MCP_PROBE=1 (значение сверяется
+    # ДОСЛОВНО, и то же самое делает хук `qt_mcp_probe.pth` в venv).
+    #
+    # Задача Т-4 (находка HR-6): жёсткое ревью 2026-08-12 выставило
+    # `QT_MCP_PROBE=1:9142` — «флаг и порт одной ручкой». Такое значение не равно
+    # `"1"`, обе проверки промолчали, порт не поднялся, и рендер GUI-вкладки
+    # наблюдаемости остался непроверенным ни одним из трёх раундов приёмки.
+    # Порт — НЕ часть этого флага: проба слушает `qt_mcp.probe.DEFAULT_PORT` (9142).
+    #
+    # `install()` возвращает None, если QApplication ещё нет или порт занят. Прежняя
+    # редакция писала «installed» безусловно — то есть отчитывалась о механизме,
+    # которого могло не быть; ровно этот класс лечит весь трек.
     if os.environ.get("QT_MCP_PROBE") == "1":
         try:
-            from qt_mcp.probe import install
+            from qt_mcp.probe import DEFAULT_PORT, install
 
-            install()
-            process._log_info("qt-mcp probe installed on localhost:9142", module="startup")
+            if install() is not None:
+                process._log_info(f"qt-mcp probe installed on localhost:{DEFAULT_PORT}", module="startup")
+            else:
+                process._log_warning(
+                    f"qt-mcp probe requested but not installed (нет QApplication либо порт {DEFAULT_PORT} занят)",
+                    module="startup",
+                )
         except ImportError:
             process._log_warning("qt-mcp probe requested but qt_mcp not installed", module="startup")
 
@@ -229,8 +252,12 @@ def run_gui(process: "GuiProcess") -> None:
         from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
 
         _topology_dict = unwrap_recipe(_yaml.safe_load(_manifest.pipeline.read_text(encoding="utf-8")) or {})
-        if _manifest.base:
-            _base_dict = unwrap_recipe(_yaml.safe_load(_manifest.base.read_text(encoding="utf-8")) or {})
+        # Фундамент — СПИСОК фрагментов, склеиваемых по порядку (тот же цикл, что в
+        # backend/launch.py::from_manifest). Зеркалить обязательно: разойдись эти
+        # два места — GUI показывал бы граф, отличный от запущенного, и «Перезапустить»
+        # применял бы не то, что видно на экране.
+        for _fragment in _manifest.base:
+            _base_dict = unwrap_recipe(_yaml.safe_load(_fragment.read_text(encoding="utf-8")) or {})
             _topology_dict = merge_topologies(_base_dict, _topology_dict)
     except Exception as e:
         process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")
@@ -308,6 +335,53 @@ def run_gui(process: "GuiProcess") -> None:
     # VM регистрируется вторым потребителем ПОСЛЕ bindings (порядок §11.15:
     # сначала bindings _state_cb, затем listener).
     process._bridge.add_state_listener(telemetry_view_model.on_state_delta)
+
+    # 3b.1 Task 3.3: опрос уровней по видимости — ВТОРАЯ дорога в тот же read-model.
+    #     Push остаётся дефолтом и здесь не трогается: publisher-gate живёт своей
+    #     жизнью, GUI им не управляет (отклонённая альтернатива — см. ADR-FE-004).
+    #     Владелец — runtime-слой рядом с VM (ADR-136: один владелец «снимок→виджет»);
+    #     вкладка только двигает set_active/set_targets по видимости.
+    #
+    #     Частота названа: 1 опрос/с. Уровни собираются в момент ответа (снимок
+    #     `get_all_workers_status()`, не последний опубликованный тик) и меняются с
+    #     частотой цикла воркера — живьём 21.2 Гц (ADR-PM-035), так что 1 Гц опроса
+    #     заметно ниже частоты изменений. Таймаут запроса — 3с: короче дефолтных 30с,
+    #     чтобы зависший процесс не держал слот опроса полминуты.
+    from PySide6.QtCore import QThreadPool
+
+    from multiprocess_framework.modules.frontend_module.state import TelemetryPoller
+
+    from .bridge.request_runner import RequestRunner
+
+    # СВОЙ пул, а не QThreadPool.globalInstance(): опрос ходит к N процессам с
+    # таймаутом 3с, и на общем пуле (maxThreadCount = число ядер) неотвечающие
+    # цели занимали бы слоты, через которые идут ОБЫЧНЫЕ действия GUI — кнопка
+    # ждала бы таймаут опроса. Измерено ревью: 2 зависшие цели на общем пуле из
+    # 2 потоков → обычный запрос обслужен за 3.02 с. Два потока: опрос
+    # пакетный (один запрос на процесс), больше параллелизма ему не нужно.
+    _telemetry_pool = QThreadPool()
+    _telemetry_pool.setMaxThreadCount(2)
+    # Создаётся в GUI main thread → _delivered (AutoConnection) доставит результат
+    # обратно сюда же. Живёт по ссылке из bound-метода submit, который держит поллер.
+    _telemetry_request_runner = RequestRunner(pool=_telemetry_pool)
+    telemetry_poller = TelemetryPoller(
+        poll_fn=lambda name: command_sender.request_command(name, "introspect.telemetry", timeout=3.0),
+        submit=_telemetry_request_runner.submit,
+        view_model=telemetry_view_model,
+        interval_sec=1.0,
+        targets=(),  # состав целей задаёт видимая вкладка (set_targets)
+        # Себя не опрашиваем: круг gui → PM → gui по IPC ради чисел, которые
+        # процесс знает локально.
+        exclude=(process.name,),
+        # Потолок ниже числа процессов топологии: цели обходятся по кругу, так
+        # что хвост списка не голодает, а пул из двух потоков не забивается.
+        max_in_flight=2,
+        # Держать СТРОГО больше таймаута запроса выше (3.0 с) — оба числа
+        # стоят рядом намеренно. Выселение освобождает слот поллера, но не
+        # снимает задачу с пула: TTL ниже таймаута заставил бы поллер слать
+        # второй запрос поверх ещё живого первого, пробивая max_in_flight.
+        flight_ttl_sec=4.0,
+    )
 
     # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge
     from .bridge.command_catalog import CommandCatalog
@@ -774,6 +848,7 @@ def run_gui(process: "GuiProcess") -> None:
         data_bridge=process._bridge,
         topology_session=topology_session,  # RS-4: dirty-контур редактора топологии
         telemetry=telemetry_view_model,  # Ф1: локальный read-model телеметрии
+        telemetry_poller=telemetry_poller,  # Task 3.3: опрос уровней по видимости вкладки
     )
 
     tab_factory = TabFactory(
@@ -811,7 +886,7 @@ def run_gui(process: "GuiProcess") -> None:
     )
 
     # 7. Запустить таймеры (fps, safety)
-    _setup_timers(app, process, window)
+    _setup_timers(app, process, window, telemetry_poller)
 
     # 8. Сохранить ссылку на окно в process
     process._window = window
@@ -961,8 +1036,17 @@ def _setup_timers(
     app: QApplication,
     process: "GuiProcess",
     window: MainWindow,
+    telemetry_poller: Any,
 ) -> None:
-    """FPS таймер + safety таймер."""
+    """FPS таймер + safety таймер (+ терминальная остановка опроса телеметрии).
+
+    ``telemetry_poller`` — параметр ОБЯЗАТЕЛЬНЫЙ намеренно, без дефолта ``None``.
+    Ревью №2: с дефолтом потеря аргумента при рефакторинге не дала бы ни ошибки,
+    ни строки в логе — просто опрос перестал бы останавливаться при выходе, а
+    проявилось бы это далёким `RuntimeError: Signal source has been deleted`.
+    Теперь потеря аргумента — немедленный `TypeError` в composition root.
+    Тестом это не покрыто (нужен старт приложения) — страховкой служит сигнатура.
+    """
     # FPS таймер: раз в секунду
     fps_timer = QTimer()
     fps_timer.setInterval(1000)
@@ -1029,6 +1113,14 @@ def _setup_timers(
     app.aboutToQuit.connect(
         lambda: setattr(process, "_stop_requested", True) if not getattr(process, "_restart_ui", False) else None
     )
+
+    # Опрос телеметрии гасим терминально: иначе взведённый таймер успевает
+    # отправить ещё один запрос в пул, пока Qt разрушает объекты, и доставка
+    # результата приходит в уже разрушенный источник сигнала (`RuntimeError:
+    # Signal source has been deleted`). Здесь stop() уместен и безопасен — в
+    # отличие от вкладки, приложение больше не откроется.
+    if telemetry_poller is not None:
+        app.aboutToQuit.connect(telemetry_poller.stop)
 
     # Сохранить ссылки на таймеры чтобы GC не убил их
     window._fps_timer = fps_timer

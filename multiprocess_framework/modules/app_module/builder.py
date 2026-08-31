@@ -101,8 +101,11 @@ def default_blueprint_loader(manifest: "AppManifest") -> dict[str, Any]:
     pipeline = _load_yaml_or_json(manifest.pipeline)
     blueprint = (nested_blueprint_data(pipeline) or {}) if has_top_level_blueprint(pipeline) else pipeline
 
-    if manifest.base is not None:
-        base = _load_yaml_or_json(manifest.base)
+    # Фундамент — КОРТЕЖ фрагментов, склеиваемых по порядку тем же merge, что и
+    # pipeline поверх фундамента: отдельного механизма для инфраструктуры нет.
+    # Порядок значим и читается сверху вниз в манифесте.
+    for base_path in manifest.base:
+        base = _load_yaml_or_json(base_path)
         base_bp = (nested_blueprint_data(base) or {}) if has_top_level_blueprint(base) else base
         blueprint = _merge_topologies(base_bp, blueprint)
 
@@ -113,7 +116,7 @@ def assemble_proc_dicts(
     blueprint: dict[str, Any],
     *,
     observability_section: dict[str, Any] | None = None,
-    log_dir: str = "logs",
+    log_dir: str | None = None,
     app_config_path: str = "",
     recipe_path: str = "",
 ) -> dict[str, dict[str, Any]]:
@@ -131,6 +134,20 @@ def assemble_proc_dicts(
     generic-двойник прикладного ассемблера, и без слоёв здесь секция рецепта
     молча не применялась бы ровно на тех приложениях, у которых своего
     ассемблера нет.
+
+    ``log_dir`` **не имеет материализованного дефолта** (задача 3.3). Раньше здесь
+    стояло ``= "logs"``, и эта строка попадала в конфиг КАЖДОГО процесса — то есть
+    ровно тот дефект, о котором предупреждает абзац выше про ``expand_observability``:
+    материализованный дефолт становится неперебиваемым. Следствие было измеримым:
+    ``_resolve_log_dir`` смотрит на ``MULTIPROCESS_LOG_DIR``/``INSPECTOR_LOG_DIR``
+    только когда каталог НЕ задан, поэтому воля вызывающего проигрывала нашему
+    дефолту — ``examples/minimal_app`` писал в ``<репозиторий>/logs/`` даже когда
+    тест явно выставлял env (111 354 байта за прогон). Задать каталог иначе было
+    нечем: ни ``build_app``, ни ``app.yaml``, ни ``AppSpec`` такого поля не имеют.
+
+    ``None`` → поле остаётся пустым, и каталог выбирает тот, кто ниже: env, а при его
+    молчании — системный temp (``log_paths.default_log_base_directory``). Явное
+    значение работает как прежде.
 
     Raises:
         BlueprintError: ``SystemBlueprint.check`` вернул ошибки.
@@ -162,7 +179,7 @@ def assemble_proc_dicts(
 
     configs = topology.build_configs()
     for cfg in configs:
-        if not cfg.log_dir:
+        if not cfg.log_dir and log_dir:
             cfg.log_dir = log_dir
 
     result: dict[str, dict[str, Any]] = {}

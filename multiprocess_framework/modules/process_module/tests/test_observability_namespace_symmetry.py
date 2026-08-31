@@ -325,10 +325,17 @@ class TestCanonicalNameAndAlias:
         Проверяется тождество объектов, а не совпадение ответов: две ветки,
         дающие сегодня одинаковый ответ, разъезжаются на первой же правке одной
         из них — и разъезд был бы молчаливым.
+
+        Task 2.2: сравнивается то, что ПОД обёрткой проверки типов. Сами обёртки
+        у канона и алиаса разные намеренно — каждая знает своё имя, чтобы отказ
+        называл ту команду, которую позвали. Тождество самих обёрток означало бы
+        обратное: одно имя в ответе на оба написания.
         """
         _, handlers, _ = error_wired
         for suffix in ("enable", "disable", "tail"):
-            assert handlers[f"observability.sink.{suffix}"] == handlers[f"logger.sink.{suffix}"]
+            canonical = handlers[f"observability.sink.{suffix}"]
+            alias = handlers[f"logger.sink.{suffix}"]
+            assert getattr(canonical, "__wrapped__", canonical) == getattr(alias, "__wrapped__", alias)
 
     def test_alias_addresses_the_error_plane_too(self, error_wired) -> None:
         """Старое написание не потеряло охвата, ради которого имя менялось."""

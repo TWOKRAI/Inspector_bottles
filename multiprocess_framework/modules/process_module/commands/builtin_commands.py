@@ -101,6 +101,38 @@ def _parse_ttl(args: dict) -> tuple[float | None, str | None]:
         return None, str(exc)
 
 
+#: Команды, чьи параметры судятся ПО ТИПАМ до входа в хендлер (Task 2.2, Р-3а).
+#:
+#: Список **явный**, а не «все команды с контрактом», и это решение владельца
+#: (Р-3: (а) провалидированные args только для команд наблюдаемости — против
+#: (б) глобального STRICT). Поверхность наблюдаемости — та, куда оператор ходит
+#: руками во время инцидента, и цена мусора здесь измерена: `TypeError` вместо
+#: отказа на двух командах и стёртый слой L3 на третьей. Остальные команды
+#: остаются под прежней warn-мидлварью; расширять охват — отдельное решение с
+#: отдельным замером, а не побочный эффект этой задачи.
+#:
+#: Имена перечислены поимённо, чтобы охват был ВИДЕН и проверяем: тест
+#: `test_command_param_types.py` судит каждое имя отсюда живым вызовом, а не
+#: чтением списка.
+OBSERVABILITY_TYPED_COMMANDS = frozenset(
+    {
+        "introspect.observability",
+        "config.reload",
+        "telemetry.reconfigure",
+        "observability.sink.enable",
+        "observability.sink.disable",
+        "observability.sink.tail",
+        "logger.sink.enable",
+        "logger.sink.disable",
+        "logger.sink.tail",
+        "log.tail.subscribe",
+        "log.tail.unsubscribe",
+        "observability.persist",
+        "observability.tail.subscribe",
+        "observability.tail.unsubscribe",
+    }
+)
+
 #: Что разрешено уехать через IPC как есть. Всё остальное — в ``repr``.
 _BOUNDARY_SCALARS = (str, int, float, bool, type(None))
 
@@ -269,6 +301,52 @@ class BuiltinCommands:
             args.update(data)
         args.update(kwargs)
         return args
+
+    def _typed(self, name: str, handler):
+        """Обернуть хендлер проверкой типов параметров (Task 2.2, Р-3а).
+
+        Обёртка стоит на РЕГИСТРАЦИИ, а не внутри четырнадцати хендлеров, и это
+        главное в решении: место одно, забыть его нельзя, а следующая команда
+        наблюдаемости попадает под гарантию добавлением имени в
+        :data:`OBSERVABILITY_TYPED_COMMANDS`, а не правкой тела.
+
+        Проверка идёт ДО хендлера, поэтому отказ приходит на нетронутом
+        состоянии — то же правило, что у ``ttl`` (5.8) и у содержимого
+        телеметрии (2.1). Хендлер получает **приведённые** значения: он читает
+        их своим обычным ``_merge_args(data, kwargs)``, ничего не зная о проверке.
+
+        Не в области действия — прямой вызов метода мимо ``CommandManager``
+        (``bc._cmd_introspect_observability(...)``): так зовут только три теста,
+        и они судят внутренность хендлера, а не командную поверхность. Назвать
+        это ограничение важнее, чем закрыть: закрытие потребовало бы проверки
+        внутри каждого метода, то есть ровно того размазывания, от которого
+        обёртка и уводит.
+        """
+        if name not in OBSERVABILITY_TYPED_COMMANDS:
+            return handler
+
+        from .command_contracts import validated_params
+
+        def _typed_handler(data=None, **kwargs) -> dict:
+            params = self._merge_args(data, kwargs)
+            coerced, problems = validated_params(name, params)
+            if problems:
+                return {
+                    "success": False,
+                    "process": self._services.name,
+                    "command": name,
+                    "reason": "; ".join(problems),
+                }
+            return handler(coerced)
+
+        _typed_handler.__name__ = getattr(handler, "__name__", "_typed_handler")
+        _typed_handler.__doc__ = getattr(handler, "__doc__", None)
+        # Канон и алиас получают РАЗНЫЕ обёртки (каждая знает своё имя — отказ
+        # называет ту команду, которую позвали), поэтому тождество объектов
+        # больше не годится как признак «одна команда, два имени». Признаком
+        # становится `__wrapped__`: под обёртками обязан лежать один метод.
+        _typed_handler.__wrapped__ = handler
+        return _typed_handler
 
     def _resolve_worker_target(self, worker_class: str | None, worker_cfg: dict):
         """Создать инстанс воркера и вернуть его target callable (instance.run).
@@ -536,7 +614,7 @@ class BuiltinCommands:
             ),
         ]
         for name, handler, desc in specs:
-            cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
+            cm.register_command(name, self._typed(name, handler), metadata={"description": desc}, tags=["system"])
         self._services._log_debug(
             "Встроенные команды introspect.* зарегистрированы",
             module="lifecycle",
@@ -822,7 +900,16 @@ class BuiltinCommands:
             observability_effective,
             observability_provenance,
         )
-        from ..managers.observability_wiring import document_plane_report
+        from ..managers.observability_flight import (
+            FLIGHT_RECORDER_ATTR,
+            flight_plane_report,
+        )
+        from ..managers.observability_wiring import (
+            EVENT_SELECTOR_ATTR,
+            document_plane_report,
+            event_plane_report,
+            stats_plane_report,
+        )
 
         from ..managers.observability_ttl import ttl_report
 
@@ -862,7 +949,19 @@ class BuiltinCommands:
         return {
             "success": True,
             "process": svc.name,
-            "effective": observability_effective(logger=logger, error=error, stats=stats),
+            "effective": observability_effective(
+                logger=logger,
+                error=error,
+                stats=stats,
+                # Ф4 (4.1): отбор широких записей — часть действующего состояния
+                # плоскости, а не отдельная витрина. Тот же селектор ниже отдаёт
+                # счётчики через `event_plane_report`; здесь — действующие ручки,
+                # без которых `config.reload` не может их подтвердить.
+                event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+                # Ф5 (5.1): ручки дампа — тоже часть действующего состояния
+                # плоскости, и без них `config.reload` не может их подтвердить.
+                flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
+            ),
             **({"resolve": resolved} if resolved else {}),
             # `flush` (Task 5.7) — просьба о КОГЕРЕНТНОМ снимке: дожать буферы,
             # чтобы «записано» включало всё уже эмитированное. По умолчанию
@@ -887,6 +986,23 @@ class BuiltinCommands:
             # его снаружи было нечем — при том что докстринг ЭТОЙ ЖЕ команды
             # формулирует «без readback'а ручка неотличима от сломанной».
             **document_plane_report(svc),
+            # Этап 6, 1.1: то же самое для плоскости stats. Метрика возврата не
+            # имеет (сигнатура дословна StatsManager), поэтому «писать некуда»
+            # наблюдаемо ТОЛЬКО отсюда — без этой строки счётчик
+            # `without_plane` рос бы в процессе и не читался ничем.
+            **stats_plane_report(svc),
+            # Ф4 (4.1): третья точка дороги ручек `observability.events` — и
+            # единственное место, где видно, СКОЛЬКО широких записей прорежено.
+            # Читается ЖИВОЙ селектор, а не конфиг: пересчёт из того же
+            # источника показывал бы согласие всегда, в том числе когда правка
+            # до селектора не доехала.
+            **event_plane_report(svc),
+            # Ф5 (5.1): единственное место, где видно, сколько дампов сделано,
+            # сколько записей в них легло, сколько файлов вытеснено ретеншеном
+            # и по какому из ТРЁХ разных диагнозов отказано. Читается живой
+            # рекордер, а не конфиг: пересчёт из того же источника показывал бы
+            # согласие всегда, в том числе когда правка до него не доехала.
+            **flight_plane_report(svc),
             "audit": layers.audit.view(audit_limit),
             **extra,
             "layers": {
@@ -1106,11 +1222,46 @@ class BuiltinCommands:
         - ``gated_metrics`` — каталог известных метрик (справочник против опечаток);
         - ``throttle_rules`` — правила ЦЕНТРАЛЬНОГО store-троттла, если процесс их
           держит (только оркестратор; у остальных ``None``). Вторая плоскость
-          (IPC-страховка, ADR-PM-017) тоже перестаёт быть невидимой.
+          (IPC-страховка, ADR-PM-017) тоже перестаёт быть невидимой;
+        - ``levels`` (Task 3.2, ADR-PM-035) — **пакетный снимок текущих уровней**:
+          один запрос → все метрики и все воркеры сразу (форма пути как у тика:
+          ``workers.*`` + ``state.*``, включая ``state.shm.*``). Это то, что собирает
+          телеметрийный тик, а НЕ весь ``processes.<name>.state`` дерева: ключи, которые
+          пишут ДРУГИЕ публикаторы (``uptime``/``status``/``pid`` от ПМ, прикладные
+          фронты от плагинов), сюда не попадают — ADR-PM-035 и граница ADR-PM-038.
+          Уровень, ОБЪЯВЛЕННЫЙ плагином (``ctx.declare_metric``), сюда попадает: с
+          Task 3.5 его собирает тот же тик. Секции выше отвечают
+          «что публикуется», ``levels`` — «сколько СЕЙЧАС», и отвечает **независимо от
+          publisher-гейта**: гейт про push, а не про то, что процесс знает о себе.
+          Закрытая публикация → ноль трафика в дерево, но снимок по-прежнему есть.
+          ``None`` = сенсоров нет (нет ``ProcessHeartbeat`` / воркеров / показаний), а
+          не «команда не сработала». Новой команды опроса не заводится — развилка РТ-3
+          решена расширением этой (ADR-PM-035);
+        - ``snapshot_ts`` — **wall-clock** (эпоха, ``time.time()``) момента сборки
+          ЭТОГО ОТВЕТА. Эпоха, а не ``time.monotonic()``: monotonic одного процесса
+          несравним с часами потребителя на другой стороне IPC. Тот же выбор и по той
+          же причине, что у ``timestamp`` heartbeat-сообщения. Цена: перевод системных
+          часов назад делает поле убывающим.
+
+          **Чего это поле НЕ даёт — возраста ЧИСЕЛ.** Оно измеряет возраст ответа, а не
+          свежесть уровней: у остановленного воркера два опроса с разницей 4.00 с несут
+          разные ``snapshot_ts`` и идентичные ``fps``/``latency_ms`` (``status`` при этом
+          ``running``). А если завис процесс целиком, ответа не будет вовсе — то есть в
+          самом тяжёлом случае поле не доезжает. Не строить на нём индикатор «живо»:
+          признак движения — per-worker ``cycles`` внутри ``levels`` (счётчик
+          завершённых циклов: стоит → числа протухли). Судить по ПАРЕ. Отдельно:
+          у процесса без heartbeat'а ответ несёт ``levels=None`` и при этом свежий
+          ``snapshot_ts`` — штамп есть всегда, показаний может не быть.
 
         Best-effort по образцу ``introspect.memory``: недоступная подсистема → ``None``
         в своей секции, а не ошибка всей команды.
+
+        **Только чтение, и это проверяется:** опрос не публикует (ноль merge/set в
+        дерево) и не двигает расписание гейта (``_next_due`` не продвигается — снимок
+        не зовёт ``due_metrics()``).
         """
+        import time
+
         from ..configs.telemetry_publish_config import gated_metrics
 
         svc = self._services
@@ -1125,17 +1276,55 @@ class BuiltinCommands:
             "unknown_metrics": [],
             "gated_metrics": list(gated_metrics()),
             "throttle_rules": None,
+            # Ключ присутствует ВСЕГДА, включая вырожденные случаи: «поля нет» и
+            # «показаний нет» — разные ответы, и потребитель (как и приёмочный тест)
+            # обязан их различать. Значение подставляется ниже.
+            "levels": None,
+            # Штамп берётся ДО снятия — снимок сделан в этот момент или сразу после,
+            # никогда раньше.
+            "snapshot_ts": time.time(),
         }
 
         if heartbeat is None:
             result["note"] = "у процесса нет ProcessHeartbeat — publisher-gate не применяется"
         else:
+            # Снимок уровней снимается ПЕРВЫМ и в своём try: он не зависит от gate, и
+            # отказ readback'а гейта (ниже, ветка success=False) не должен уносить с
+            # собой единственные живые числа ответа.
+            result["snapshot_ts"] = time.time()
+            try:
+                result["levels"] = heartbeat.current_levels_snapshot()
+            except Exception as exc:  # noqa: BLE001 — best-effort секция, не отказ команды
+                result["levels"] = None
+                result["levels_error"] = f"current_levels_snapshot: {exc}"
+
             try:
                 publish = heartbeat.current_telemetry_publish()
             except Exception as exc:  # noqa: BLE001 — readback не должен ронять команду
-                return {"success": False, "process": svc.name, "reason": f"current_telemetry_publish: {exc}"}
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "reason": f"current_telemetry_publish: {exc}",
+                    # Уровни уже сняты и от гейта не зависят — отдаём их даже с отказом
+                    # readback'а: иначе сломанный гейт уносил бы с собой единственные
+                    # живые числа ответа.
+                    "levels": result["levels"],
+                    "snapshot_ts": result["snapshot_ts"],
+                }
             if publish is None:
-                result["note"] = "gate выключен — все метрики публикуются каждый тик (нет секции telemetry.publish)"
+                # Формулировка — ФАКТ, а не вывод (ред. 2026-08-18). Здесь стояло
+                # «нет секции telemetry.publish»: на живом стенде секция БЫЛА в боевом
+                # system.yaml, но лежала по адресу config.telemetry, которого сломанный
+                # читатель не видел. Ответ уверенно назвал причину — и увёл диагностику
+                # в конфиг, где всё было в порядке. Команда видит отсутствие ГЕЙТА и
+                # только о нём вправе говорить; почему его нет — скажет лог сборки.
+                result["note"] = (
+                    "gate не собран — все метрики публикуются каждый тик; "
+                    "почему именно (секция не задана / не найдена по адресу / не разобралась / "
+                    "снята рантайм-командой) — в логе процесса, строка '[telemetry] publisher-gate'. "
+                    "Строки нет вовсе → heartbeat не стартовал (heartbeat_interval <= 0), "
+                    "искать 'Heartbeat отключён'"
+                )
             else:
                 result["gate_active"] = True
                 result["publish"] = publish
@@ -1258,7 +1447,7 @@ class BuiltinCommands:
             ),
         ]
         for name, handler, desc in specs:
-            cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
+            cm.register_command(name, self._typed(name, handler), metadata={"description": desc}, tags=["system"])
         self._services._log_debug(
             "Встроенные команды config.reload / telemetry.reconfigure / logger.sink.* / log.tail.* зарегистрированы",
             module="lifecycle",
@@ -1431,7 +1620,89 @@ class BuiltinCommands:
                     telemetry_section = dict(telemetry_section)
                     telemetry_section["publish"] = deep_merge(telemetry_section.get("publish") or {}, override)
 
+        # Task 2.1 (находка Н-4): содержимое телеметрии судится ЗДЕСЬ — после того,
+        # как секция окончательно собрана (inline либо прочитана из файла вместе с
+        # per-process overlay), и ДО первой записи в слой. Место выбрано не по вкусу:
+        # ветка observability ниже кладёт СВОЮ секцию в L3 раньше, чем доходит до
+        # телеметрии, — проверь мы телеметрию там, отказ приходил бы уже поверх
+        # изменённого состояния. Ровно тот же довод, по которому здесь же, выше,
+        # стоят проверки `telemetry_mode` и `ttl`.
+        if telemetry_section is not None:
+            from ..configs.observability_layers import LAYER_APP as _LAYER_APP
+            from ..configs.observability_layers import validate_telemetry_section
+
+            try:
+                validate_telemetry_section(
+                    telemetry_section,
+                    layer="session" if source == "inline" else _LAYER_APP,
+                )
+            except ValueError as exc:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "source": source,
+                    "reason": str(exc),
+                }
+
+        # Task 3.1: под-секция, у которой на ЭТОМ процессе нет исполнителя. Ответ
+        # РАЗНЫЙ по месту — та же политика, что у неизвестных ссылок (Task 5.5 /
+        # ADR-PM-031) и по той же причине:
+        #   * inline — ручка оператора, адрес написан руками → отказ ДО любой
+        #     записи в слой. Прежде такая правка отвечала `success=true` при
+        #     `applied.throttle=false`, занимала слот L3 с дефолтным сроком и не
+        #     действовала никогда;
+        #   * файл → голос в ответе, а не отказ: секция `telemetry.throttle`
+        #     совершенно законна в общем `system.yaml` (её адресат — оркестратор),
+        #     а читают этот файл ВСЕ, и отказ здесь валил бы reload у каждого
+        #     ребёнка из-за строчки, адресованной не ему.
+        #     РЕЦЕПТ и switch сюда НЕ входят — они въезжают в слой мимо этой
+        #     двери и голоса не получают (ADR-PM-034, «Известный долг»). Первая
+        #     редакция комментария перечисляла их здесь, и это было неправдой.
+        # Место — здесь, рядом с `validate_telemetry_section`, и по тому же
+        # доводу: секция уже окончательно собрана (inline либо файл + overlay), а
+        # ветка observability ниже кладёт СВОЮ секцию в L3 раньше телеметрии.
+        # Проверь мы её там — отказ приходил бы поверх изменённого состояния, и
+        # существовал бы лишь на одной из ДВУХ дорог этой двери (вторая —
+        # `config.reload` c секцией observability, вливающая телеметрию в слой
+        # вызовом `_merge_telemetry_layer` мимо `_apply_telemetry_section`).
+        # Номер строки здесь не пишется намеренно: прежний указатель «:1820»
+        # протух молча, пока комментарий вокруг него переписывали.
+        telemetry_no_receiver: list[str] = []
+        if isinstance(telemetry_section, dict):
+            from ..managers.observability_reload import (
+                format_telemetry_unaddressable,
+                telemetry_unaddressable,
+            )
+
+            telemetry_no_receiver = telemetry_unaddressable(svc, telemetry_section)
+            if telemetry_no_receiver and source == "inline":
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "source": source,
+                    "reason": format_telemetry_unaddressable(svc, telemetry_no_receiver),
+                    "telemetry_no_receiver": telemetry_no_receiver,
+                }
+
         result: dict = {"success": True, "process": svc.name, "source": source}
+        if telemetry_no_receiver:
+            # Файловая половина правила: применить остальное и сказать ВСЛУХ.
+            # Поле в ответе — образец `unknown_refs` рядом.
+            #
+            # Голос живёт ТОЛЬКО здесь, у ответа. Первая редакция комментария
+            # обещала, что долговечный след кладёт аудит слоёв и покрывает дороги
+            # без ответа (watcher) — ревью воспроизвело обратное: запись
+            # `rebuild` на `observability_reload.py:747` не несёт `applied`, и
+            # факта «получателя не было» в аудите нет ни на одной из тех дорог.
+            # Долг назван в ADR-PM-034 («Известный долг»); обещание снято, чтобы
+            # искать след не шли туда, где его нет.
+            result["telemetry_no_receiver"] = telemetry_no_receiver
+            _log_no_recv = getattr(svc, "_log_error", None)
+            if callable(_log_no_recv):
+                _log_no_recv(
+                    format_telemetry_unaddressable(svc, telemetry_no_receiver),
+                    module="lifecycle",
+                )
         # Секцию телеметрии в слой вливает РОВНО ОДНА из двух веток ниже. Флаг, а
         # не «нет ли поля в ответе»: пустой результат применения — законный
         # (получателей нет), и по его отсутствию вторая ветка влила бы ту же
@@ -1447,6 +1718,8 @@ class BuiltinCommands:
                 observability_effective,
                 telemetry_targets,
             )
+            from ..managers.observability_flight import FLIGHT_RECORDER_ATTR
+            from ..managers.observability_wiring import EVENT_SELECTOR_ATTR
 
             layers = process_observability_layers(svc)
             _logger = getattr(svc, "logger_manager", None)
@@ -1480,7 +1753,11 @@ class BuiltinCommands:
             # `replace_layer`/`session_set` держат ту же проверку у себя, но по
             # этой дороге секция въезжает в L3 напрямую (`layer_merge`), и без
             # проверки здесь мусор попал бы в сессию мимо обоих.
-            from ..configs.observability_layers import validate_layer_section
+            from ..configs.observability_layers import (
+                format_unknown_keys,
+                unknown_section_keys,
+                validate_layer_section,
+            )
 
             try:
                 validate_layer_section(obs_section, layer="session" if source == "inline" else LAYER_APP)
@@ -1505,6 +1782,20 @@ class BuiltinCommands:
                 _unknown_refs = report_unknown_refs(svc, obs_section, source=source)
                 if _unknown_refs:
                     result["unknown_refs"] = _unknown_refs
+                # Задача 5.4, файловая половина правила. Отказа здесь нет (см.
+                # `validate_layer_section`), поэтому голос: ответ инициатору + та
+                # же громкая строка, что у ссылок без приёмника рядом. Долговечный
+                # след кладёт `replace_layer` в аудит — он покрывает и дороги без
+                # ответа (watcher `system.yaml`, watcher спутника).
+                _stray_keys = unknown_section_keys(obs_section)
+                if _stray_keys:
+                    result["unknown_keys"] = _stray_keys
+                    _log_stray = getattr(svc, "_log_error", None)
+                    if callable(_log_stray):
+                        _log_stray(
+                            format_unknown_keys(_stray_keys, layer=LAYER_APP, source=source),
+                            module="lifecycle",
+                        )
 
             # Блокер ревью 5.8: правка слоя и её применение — ОДИН критический
             # блок. Прежняя редакция считала `deep_merge(layers.session, ...)` и
@@ -1711,12 +2002,26 @@ class BuiltinCommands:
                         stats=_stats,
                         log_info=getattr(svc, "_log_info", None),
                         **telemetry_targets(svc),
+                        # Ф4 (4.1): живой селектор широких записей — получатель
+                        # ручек `observability.events`. Без него правка легла бы
+                        # в слой и не подействовала: селектор создаётся один раз
+                        # на старте, и пересборка обязана донести до него ручки.
+                        event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+                        # Ф5 (5.1): живой рекордер дампов — получатель ручек
+                        # `observability.flight`. Без него правка легла бы в слой
+                        # и не подействовала: рекордер создаётся один раз на
+                        # старте, и пересборка обязана донести до него ручки.
+                        flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
                         origin=_ORIGIN_SWITCH if obs_clear else _ORIGIN_RELOAD,
                     )
                 except Exception as exc:  # noqa: BLE001
                     return {"success": False, "reason": f"reconfigure failed: {exc}"}
                 if expanded.get("telemetry") is not None:
                     result["telemetry_applied"] = expanded["telemetry"]
+                if expanded.get("events") is not None:
+                    result["events_applied"] = expanded["events"]
+                if expanded.get("flight") is not None:
+                    result["flight_applied"] = expanded["flight"]
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.
@@ -1729,7 +2034,13 @@ class BuiltinCommands:
                 result["reset_not_held"] = unknown
             # Readback: фактическое состояние менеджеров ПОСЛЕ применения — инициатор
             # видит эффект (пороги скоупов, каталог, активные каналы), а не эхо входа.
-            result["effective"] = observability_effective(logger=_logger, error=_error, stats=_stats)
+            result["effective"] = observability_effective(
+                logger=_logger,
+                error=_error,
+                stats=_stats,
+                event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+                flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
+            )
             # Task 5.7: судить, а не только показывать. Readback лежал в ответе, но
             # `success` означал «применение не упало» — запрошенный ключ, перебитый
             # вышестоящим слоем, и ОПЕЧАТКА в имени давали тот же успех.
@@ -1797,6 +2108,48 @@ class BuiltinCommands:
             result["telemetry_ttl_sec"] = ttl_sec
             result["telemetry_applied"] = applied
 
+        # Задача 5.7 (вторая половина блокера Н2-4): у телеметрийной правки не было
+        # НИ вердикта, ни голоса об опечатке в имени метрики — оба существовали, но
+        # только на соседней двери (`telemetry.reconfigure`). Дефект, живущий на
+        # одной дороге из двух, воскресает на второй: приёмка спросила `config.reload`
+        # и получила `verified=None` и пустоту про метрики.
+        if isinstance(telemetry_section, dict):
+            heartbeat = getattr(svc, "_heartbeat", None)
+            unknown_metrics = getattr(heartbeat, "current_unknown_metrics", None)
+            if callable(unknown_metrics):
+                # Имя метрики — НЕ опечатка по построению ПРИ default_enabled=True
+                # (конфиг сужает набор, а не объявляет белый список) — поэтому здесь
+                # голос, а не отказ. При default_enabled=False (ADR-PM-039) секция
+                # САМА становится белым списком, и цена той же опечатки меняет
+                # класс (находка ревью Д3, 2026-08-18): было fail-open (метрика с
+                # опечаткой просто не находит правила и публикуется дефолтом,
+                # остальные явные правила работают как задумано), стало fail-closed
+                # (единственная запись, что должна была включить метрику, ни на что
+                # не сослалась — метрика молчит НАВСЕГДА). Поведение не меняется
+                # (голос остаётся голосом, не отказом) — при default_enabled=False
+                # этот голос единственный след метрики, которая должна была
+                # появиться и не появилась. Поле только при непустом наборе — как у
+                # соседней двери.
+                names = unknown_metrics() or []
+                if names:
+                    result["unknown_metrics"] = list(names)
+            if "verified" not in result:
+                # Честный третий исход вместо тишины: readback плоскости телеметрии
+                # `observability_effective` не отдаёт, значит подтверждать нечем — и
+                # это ОТВЕТ. Форма та же, что у соседней секции (`unverifiable`
+                # несёт запрошенные пути), чтобы потребитель читал одним способом.
+                from ..configs.observability_layers import TELEMETRY_KEY as _TELEMETRY_KEY
+                from ..configs.observability_layers import flatten_section
+
+                requested = sorted(flatten_section({_TELEMETRY_KEY: telemetry_section}).keys())
+                result["verified"] = {
+                    "verdict": "unverifiable",
+                    "checked": 0,
+                    "mismatches": [],
+                    "unknown_keys": [],
+                    "unverifiable": requested,
+                }
+
         return result
 
     def _merge_telemetry_layer(
@@ -1819,6 +2172,16 @@ class BuiltinCommands:
         ``replace`` заменяет ТОЛЬКО названные под-секции. Заменять всё поддерево
         было бы враньём соседней плоскости: оператор, поправивший ``publish``,
         не просил снять свою же дельту троттла.
+
+        **Содержимое сюда приезжает УЖЕ проверенным (Task 2.1).** Своей проверки
+        у метода нет намеренно: он пишет ``layers.session`` прямым присваиванием,
+        и на дороге ``config.reload`` его зовут ПОСЛЕ того, как секция
+        ``observability`` легла в тот же слой, — отказ отсюда приходил бы поверх
+        изменённого состояния. Поэтому :func:`validate_telemetry_section` стоит у
+        обеих дверей (``config.reload`` и ``telemetry.reconfigure``), до первой
+        записи. Ветка ``source != "inline"`` получает вторую проверку от
+        ``replace_layer`` — это не запасной предохранитель, а следствие того, что
+        ``replace_layer`` обязан судить ЛЮБОЕ тело, чьё бы оно ни было.
         """
         from ...data_schema_module import deep_merge
         from ..configs.observability_layers import LAYER_APP, TELEMETRY_KEY, flatten_section, layer_merge
@@ -1940,6 +2303,40 @@ class BuiltinCommands:
         ttl, ttl_error = _parse_ttl(args)
         if ttl_error is not None:
             return {"success": False, "process": svc.name, "reason": ttl_error}
+        # Task 2.1 (находка Н-4): содержимое — тоже ДО правки. Вторая дверь в ту же
+        # плоскость: `config.reload` судит свою секцию у себя, эта команда — свою
+        # здесь. Общее у них правило (`validate_telemetry_section`), а не место:
+        # разделяет их то, что до задачи 2.1 отказ приходил ОТ ПОЛУЧАТЕЛЯ, то есть
+        # уже поверх записанного слоя.
+        from ..configs.observability_layers import LAYER_SESSION, validate_telemetry_section
+
+        try:
+            validate_telemetry_section(section, layer=LAYER_SESSION)
+        except ValueError as exc:
+            return {"success": False, "process": svc.name, "reason": str(exc)}
+        # Task 3.1: адресат под-секции — тоже ДО правки, по той же причине, что и
+        # содержимое выше. Эта дверь ВСЕГДА inline (ручка оператора), поэтому
+        # половина правила здесь одна — отказ; голос существует только на файловой
+        # дороге соседней двери (`config.reload`, см. там же).
+        #
+        # Отказ ЦЕЛИКОМ, даже когда вторая под-секция применима: `publish` уехал
+        # бы получателю, а `throttle` — нет, и одна команда оставила бы
+        # полу-применённое состояние, про которое ответ говорит «отказ». Ровно от
+        # этого inline-половина ADR-PM-031 и защищает: «состояние не изменилось»
+        # обязано быть правдой целиком, иначе откатывать нечего и непонятно что.
+        from ..managers.observability_reload import (
+            format_telemetry_unaddressable,
+            telemetry_unaddressable,
+        )
+
+        no_receiver = telemetry_unaddressable(svc, section)
+        if no_receiver:
+            return {
+                "success": False,
+                "process": svc.name,
+                "reason": format_telemetry_unaddressable(svc, no_receiver),
+                "telemetry_no_receiver": no_receiver,
+            }
         try:
             applied, ttl_sec = self._apply_telemetry_section(
                 section, source="inline", mode=mode, ttl=ttl, origin=_ORIGIN_TELEMETRY
@@ -2402,6 +2799,10 @@ class BuiltinCommands:
         ложится на получателя: к получателю результат всегда применяется
         собранным из слоёв (дельта поверх живого не умеет выразить удаление, а
         удаление здесь — основная операция).
+
+        Содержимое секции здесь НЕ судится: у метода два вызывающих, и оба —
+        обработчики команд, которые судят его до любой записи (Task 2.1, см.
+        :func:`~..configs.observability_layers.validate_telemetry_section`).
         """
         from ..configs.observability_layers import process_observability_layers
         from ..managers.observability_reload import apply_telemetry_layers, telemetry_targets
@@ -2608,7 +3009,14 @@ class BuiltinCommands:
             return {"success": False, "reason": "процесс не поддерживает observability-tail"}
         raw_level = args.get("level")
         level = str(raw_level).upper() if raw_level else None
-        return svc.subscribe_observability_tail(subscriber, level=level)
+        # Задача 5.6: намерение «оптовая раздача» едет НА ПРОВОДЕ. Процесс не может
+        # вывести его из содержимого команды — брокер разворачивает `subscribe_all`
+        # в те же самые `observability.tail.subscribe`, и до 5.6 оптовая раздача
+        # молча понижала прицельный порог (блокер Н2-1). Отсутствие ключа = прицельная
+        # подписка: так ведут себя все существующие вызывающие, и их поведение не
+        # меняется молчанием.
+        wholesale = str(args.get("scope") or "").strip().lower() == "all"
+        return svc.subscribe_observability_tail(subscriber, level=level, wholesale=wholesale)
 
     def _cmd_observability_tail_unsubscribe(self, data=None, **kwargs) -> dict:
         """Снять подписку на live-хвост наблюдаемости (форвардер + error-tap'ы), F1: per-subscriber.
@@ -2621,7 +3029,9 @@ class BuiltinCommands:
         if not hasattr(svc, "unsubscribe_observability_tail"):
             return {"success": False, "reason": "процесс не поддерживает observability-tail"}
         subscriber = str(args.get("subscriber") or "").strip() or None
-        return svc.unsubscribe_observability_tail(subscriber)
+        # Задача 5.6 (Н2-2): маркер оптовости — тот же, что у подписки.
+        wholesale = str(args.get("scope") or "").strip().lower() == "all"
+        return svc.unsubscribe_observability_tail(subscriber, wholesale=wholesale)
 
     @staticmethod
     def _log_tap_name(subscriber: str) -> str:

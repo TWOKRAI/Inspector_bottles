@@ -310,10 +310,17 @@ class ProcessConfig(SchemaBase):
         # и НЕ долетали до GenericProcess — «заявлено, но не проведено».
         frame_ring_depth = _pick("frame_ring_depth", 0)
         copy_out_targets = _pick("copy_out_targets", [])
+        # Потолок отставания исполнителя (2026-08-12). Тот же путь, что у ключей выше:
+        # живёт в extras, до GenericProcess доезжает только будучи названным ЗДЕСЬ.
+        # Проверено отказом: положенный в `metadata` ключ не доехал вовсе — `metadata`
+        # читается только ради легаси-коллектора, а _pick смотрит в extras.
+        chain_max_lag_items = _pick("chain_max_lag_items", 0)
         if frame_ring_depth:
             base_kwargs["frame_ring_depth"] = int(frame_ring_depth)
         if copy_out_targets:
             base_kwargs["copy_out_targets"] = list(copy_out_targets)
+        if chain_max_lag_items:
+            base_kwargs["chain_max_lag_items"] = int(chain_max_lag_items)
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(
@@ -656,10 +663,25 @@ class SystemBlueprint(SchemaBase):
         процесса) НЕ считается ребром графа процессов и не может создать
         ложный self-loop цикл.
 
+        **Адресуемость входит в этот гейт с задачи 4.3 (Н-13).** Страж
+        ``_unaddressable_chain_targets`` (план D8) стоял только на boot-валидации
+        ``check()``, а GUI-сохранение шло через ``check_structure()`` — то есть
+        рецепт с адресом в никуда записывался на диск молча, и цена приходила
+        позже и в другом месте: 1418 отказов доставки за 30 с на стенде, без
+        строки о причине в самой топологии. Страж, поставленный на одну из двух
+        дорог, не закрывает класс — правку GUI сохраняет именно эта дорога.
+
+        Обе добавленные проверки не зависят от ``PluginRegistry`` (сверяют имена
+        процессов), поэтому гейт остаётся годным в разреженном окружении — то
+        свойство, ради которого ``check_structure`` и отделён от ``check``.
+
         Returns:
-            Список ошибок. Пустой = граф структурно корректен (без циклов/дублей).
+            Список ошибок. Пустой = граф структурно корректен (без циклов/дублей,
+            все адреса ведут в объявленные процессы).
         """
         errors: list[str] = list(self._duplicate_process_names())
+        errors.extend(self._unknown_observability_processes())
+        errors.extend(self._unaddressable_chain_targets())
 
         edges: list[tuple[str, str]] = []
         for wire in self.wires:

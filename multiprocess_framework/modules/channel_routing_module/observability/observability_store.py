@@ -54,6 +54,69 @@ _EMERGENCY_NAME = __name__
 #: процесса-владельца без отдельной таблицы метаданных.
 _AUTO_VACUUM_SCHEMA_VERSION = 1
 
+#: Версия схемы после заведения полнотекстового индекса (задача 1.6). Тот же
+#: гейт ``user_version``, следующее число — и потому :meth:`_init_fts` зовётся
+#: ПОСЛЕ :meth:`_migrate_auto_vacuum`: поставь версию 2 раньше, и миграция
+#: auto_vacuum увидела бы ``2 >= 1`` и пропустила себя молча на унаследованном
+#: файле. Порядок здесь — не стиль, а условие.
+_FTS_SCHEMA_VERSION = 2
+
+#: Имя теневой таблицы полнотекстового индекса.
+_FTS_TABLE = "records_fts"
+
+
+class ObservabilitySearchError(RuntimeError):
+    """Поиск не выполнен — с названной причиной (задача 1.6).
+
+    Исключение, а не пустой список: «ничего не нашлось» и «искать нечем/запрос
+    непонят» обязаны различаться. Пустой результат на сломанный запрос — ровно
+    класс «тихая потеря», из-за которого оператор уходит уверенным, что записей
+    нет, тогда как их не искали.
+    """
+
+
+#: Признаки НАМЕРЕННОГО синтаксиса FTS5 в запросе. Двоеточия здесь НЕТ
+#: намеренно: колоночный фильтр ``module:seg`` у панели и так есть отдельными
+#: полями, а вот «12:30» оператор вставляет из сообщения постоянно.
+_FTS_SYNTAX_CHARS = ('"', "*", "(", ")")
+_FTS_OPERATORS = frozenset({"AND", "OR", "NOT", "NEAR"})
+
+
+def fts_query(text: str) -> str:
+    """Превратить то, что НАБРАЛ человек, в выражение, понятное FTS5 (задача 1.6).
+
+    **Найдено живым прогоном, а не тестами.** Самый частый жест оператора —
+    скопировать кусок прямо из сообщения и вставить в поиск. Почти любой такой
+    кусок голый FTS5 отвергает: ``кадр,`` → «syntax error near ","», ``12:30``
+    → «no such column: 12», ``camera-0`` → «no such column: 0», ``ROI=1/2`` →
+    «syntax error near "="». Отказ был назван (тихой потери нет), но оператору
+    от «syntax error near ","» толку ноль — разбор начинается со слова, а слово
+    он в поле вставляет, а не изобретает.
+
+    Правило простое и предсказуемое: **обычный текст ищется как есть**, каждое
+    слово — точная фраза; power-синтаксис остаётся доступен, но включается
+    ЯВНО — кавычками, звёздочкой, скобками или оператором заглавными
+    (``a OR b``). Угадывать «а вдруг он имел в виду OR» не пытаемся: молчаливая
+    смена смысла запроса хуже отказа.
+
+    Пустых слов не бывает: кусок без единого буквенно-цифрового символа
+    (``,``, ``---``) — это НАЗВАННЫЙ отказ, а не «не нашлось».
+
+    Raises:
+        ObservabilitySearchError: в запросе нет ни одного слова.
+    """
+    if any(ch in text for ch in _FTS_SYNTAX_CHARS):
+        return text
+    tokens = text.split()
+    if any(tok in _FTS_OPERATORS for tok in tokens):
+        return text
+    # Кавычки внутри слова сюда не доходят (они — признак намерения выше),
+    # поэтому экранировать нечего: каждое слово оборачивается целиком.
+    words = [tok for tok in tokens if any(ch.isalnum() for ch in tok)]
+    if not words:
+        raise ObservabilitySearchError(f"в запросе «{text}» нет ни одного слова — искать нечего")
+    return " ".join(f'"{word}"' for word in words)
+
 
 def resolve_default_db_path() -> str:
     """Путь к файлу стора по умолчанию: <log_dir>/observability.db.
@@ -128,6 +191,9 @@ class ObservabilityStore:
         self._dropped = 0
         if self._db_path not in (":memory:", "") and os.path.dirname(self._db_path):
             os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        # Полнотекстовый индекс (1.6): доступен не в каждой сборке SQLite, и
+        # «искать нечем» обязано иметь имя, а не выглядеть как «ничего не нашлось».
+        self._fts_reason: Optional[str] = None
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
@@ -174,6 +240,8 @@ class ObservabilityStore:
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_records_severity_number ON records(severity_number, id)")
             self._conn.commit()
             self._migrate_auto_vacuum()
+            # ПОСЛЕ миграции auto_vacuum — см. комментарий у _FTS_SCHEMA_VERSION.
+            self._init_fts()
 
     def _migrate_auto_vacuum(self) -> None:
         """Разовая миграция унаследованных БД на реально работающий ``auto_vacuum`` (D3).
@@ -223,6 +291,92 @@ class ObservabilityStore:
         # PRAGMA не принимает `?`-плейсхолдеры — константа модуля, не пользовательский ввод.
         self._conn.execute(f"PRAGMA user_version = {_AUTO_VACUUM_SCHEMA_VERSION}")
         self._conn.commit()
+
+    def _init_fts(self) -> None:
+        """Завести полнотекстовый индекс по тексту записи (задача 1.6, С-2).
+
+        **Зачем.** Данные в ``observability.db`` были, а ходить по ним человеку
+        нечем: страница по kind/severity — это лента, а разбор начинается со
+        слова («что было про `hikvision`?»). Внешней инфраструктуры (Loki, ELK)
+        для этого не заводится — таблица уже здесь.
+
+        **Форма — external content** (``content='records'``): FTS5 хранит только
+        индекс и берёт текст из самой таблицы, а не её копию. Иначе каждая
+        запись жила бы в файле дважды, и предел стора (Ф5.2) пришлось бы делить
+        надвое.
+
+        **Индекс не имеет права пережить свои строки.** Ретеншен (:meth:`purge`)
+        и :meth:`clear` удаляют из ``records``; без синхронизации индекс рос бы
+        вечно — тот же инцидент 645 МБ, только теневой таблицей. Синхронизация —
+        триггерами, а не вызовами из Python: писателей у таблицы несколько
+        (drain-петля и store-tap), и «не забыть позвать» в каждом из них — это
+        договорённость, а триггер — свойство схемы.
+
+        **UPDATE-триггера нет намеренно:** таблица append-only, строки не
+        правятся (проверяется тестом ``test_the_store_never_updates_a_row``).
+        Появится правка — тест покраснеет раньше, чем индекс разойдётся с текстом.
+
+        **Отсутствие FTS5 в сборке SQLite — законное состояние**: причина
+        запоминается и называется в :meth:`search`, поиск отключается, всё
+        остальное работает как прежде.
+
+        **Цена, замеренная не на глаз** (200 000 строк, короткие сообщения):
+        backfill унаследованного файла — **0.50 с однократно** при открытии
+        (второе открытие — 0 мс, гейт держит); файл 20.14 → 30.27 МиБ,
+        то есть **+50 % к размеру**. Это не «накладные расходы», а половина
+        предела стора: при потолке 200 000 строк планировать надо от файла с
+        индексом. Пропорция зависит от длины сообщений — здесь они короткие,
+        и доля индекса тем меньше, чем длиннее текст.
+        """
+        try:
+            self._conn.execute(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS {_FTS_TABLE} USING fts5("  # nosec B608 — константа модуля
+                "message, module, process, "
+                "content='records', content_rowid='id')"
+            )
+            self._conn.execute(
+                f"CREATE TRIGGER IF NOT EXISTS records_fts_ai AFTER INSERT ON records BEGIN "  # nosec B608
+                f"INSERT INTO {_FTS_TABLE}(rowid, message, module, process) "
+                "VALUES (new.id, new.message, new.module, new.process); END"
+            )
+            self._conn.execute(
+                f"CREATE TRIGGER IF NOT EXISTS records_fts_ad AFTER DELETE ON records BEGIN "  # nosec B608
+                f"INSERT INTO {_FTS_TABLE}({_FTS_TABLE}, rowid, message, module, process) "
+                "VALUES ('delete', old.id, old.message, old.module, old.process); END"
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            self._fts_reason = f"полнотекстовый индекс недоступен в этой сборке SQLite: {exc}"
+            emergency_log(
+                _EMERGENCY_NAME,
+                "WARNING",
+                "ObservabilityStore: %s — поиск по тексту выключен, чтение истории работает",
+                self._fts_reason,
+            )
+            return
+
+        # Разовый backfill унаследованного файла: триггеры ловят только НОВЫЕ
+        # строки, а в уже существующей БД их могут быть сотни тысяч. Гейт — тот
+        # же `user_version`, что у миграции auto_vacuum: «однократно за жизнь
+        # файла», а не «на каждом открытии».
+        version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        if version >= _FTS_SCHEMA_VERSION:
+            return
+        rows = int(self._conn.execute("SELECT COUNT(*) FROM records").fetchone()[0])
+        started = time.monotonic()
+        self._conn.execute(f"INSERT INTO {_FTS_TABLE}({_FTS_TABLE}) VALUES('rebuild')")  # nosec B608
+        # PRAGMA не принимает `?`-плейсхолдеры — константа модуля, не пользовательский ввод.
+        self._conn.execute(f"PRAGMA user_version = {_FTS_SCHEMA_VERSION}")
+        self._conn.commit()
+        if rows:
+            emergency_log(
+                _EMERGENCY_NAME,
+                "WARNING",
+                "ObservabilityStore: построен полнотекстовый индекс по %d строкам за %.3f с (%s)",
+                rows,
+                time.monotonic() - started,
+                self._db_path,
+            )
 
     def _migrate_add_severity_number(self) -> None:
         """Аддитивная миграция Ф3.6: ``severity_number``.
@@ -324,6 +478,59 @@ class ObservabilityStore:
     # Чтение (пагинация — целая история для GUI)
     # ------------------------------------------------------------------
 
+    def _filter_clauses(
+        self,
+        *,
+        kind: Optional[str] = None,
+        module: Optional[str] = None,
+        process: Optional[str] = None,
+        severity_in: Optional[List[str]] = None,
+        min_severity: Optional[int] = None,
+        since: Optional[float] = None,
+        until: Optional[float] = None,
+    ) -> tuple[List[str], List[Any]]:
+        """Собрать WHERE-условия и параметры — ОДИН набор фильтров на оба чтения.
+
+        Общий, а не по копии в :meth:`list_records` и :meth:`search`: две копии
+        одного набора расходятся молча, и «фильтр по процессу сузил ленту, но не
+        сузил поиск» читалось бы как дефект поиска. Все значения уходят через
+        ``?``-плейсхолдеры; в SQL склеиваются только литеральные куски отсюда.
+
+        Имена колонок КВАЛИФИЦИРОВАНЫ псевдонимом ``r``, и оба чтения обязаны
+        объявлять ``records r``. Причина найдена прогоном, а не чтением: теневая
+        таблица FTS5 несёт колонки с теми же именами (``message``/``module``/
+        ``process``), и в соединении неквалифицированное имя даёт
+        ``ambiguous column name`` — то есть отказ на КАЖДЫЙ поиск с фильтром.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if kind is not None:
+            clauses.append("r.kind = ?")
+            params.append(kind)
+        if module is not None:
+            clauses.append("r.module = ?")
+            params.append(module)
+        if process is not None:
+            clauses.append("r.process = ?")
+            params.append(process)
+        if severity_in:
+            placeholders = ",".join("?" for _ in severity_in)
+            clauses.append(f"r.severity IN ({placeholders})")
+            params.extend(s.lower() for s in severity_in)
+        if min_severity is not None:
+            # Ф3.6: ПОРОГ, а не членство. Раньше «покажи всё от WARNING и выше»
+            # выражалось только перечислением уровней вручную, и новый уровень
+            # в такой список никто бы не добавил.
+            clauses.append("r.severity_number >= ?")
+            params.append(int(min_severity))
+        if since is not None:
+            clauses.append("r.ts >= ?")
+            params.append(float(since))
+        if until is not None:
+            clauses.append("r.ts <= ?")
+            params.append(float(until))
+        return clauses, params
+
     def list_records(
         self,
         kind: Optional[str] = None,
@@ -333,6 +540,10 @@ class ObservabilityStore:
         offset: int = 0,
         limit: int = 100,
         newest_first: bool = True,
+        *,
+        process: Optional[str] = None,
+        since: Optional[float] = None,
+        until: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """Вернуть страницу записей (по убыванию id по умолчанию — свежие первыми).
 
@@ -345,29 +556,21 @@ class ObservabilityStore:
                 регистре), поэтому 'ERROR' и 'error' эквивалентны (5.20 review #7).
             offset/limit: пагинация.
             newest_first: True → ORDER BY id DESC.
+            process: фильтр по процессу-источнику (1.6; общий набор с :meth:`search`).
+            since/until: окно по ``ts`` (wall-часы писателя), включительно.
 
         Returns:
             Список dict-строк: {id,kind,module,ts,severity,message,extra(dict)}.
         """
-        clauses: List[str] = []
-        params: List[Any] = []
-        if kind is not None:
-            clauses.append("kind = ?")
-            params.append(kind)
-        if module is not None:
-            clauses.append("module = ?")
-            params.append(module)
-        if severity_in:
-            placeholders = ",".join("?" for _ in severity_in)
-            clauses.append(f"severity IN ({placeholders})")
-            params.extend(s.lower() for s in severity_in)
-        if min_severity is not None:
-            # Ф3.6: ПОРОГ, а не членство. Раньше «покажи всё от WARNING и выше»
-            # выражалось только перечислением уровней вручную, и новый уровень
-            # в такой список никто бы не добавил.
-            clauses.append("severity_number >= ?")
-            params.append(int(min_severity))
-
+        clauses, params = self._filter_clauses(
+            kind=kind,
+            module=module,
+            process=process,
+            severity_in=severity_in,
+            min_severity=min_severity,
+            since=since,
+            until=until,
+        )
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         order = "DESC" if newest_first else "ASC"
         # Подстановки в SQL ниже НЕ пользовательские: `where` собран из
@@ -377,14 +580,109 @@ class ObservabilityStore:
         # файле и до Ф3.6 — хук сканирует только изменённые файлы, поэтому
         # всплыло при первой же правке стора.
         sql = (
-            "SELECT id, kind, process, module, ts, severity, severity_number, message, extra FROM records"
-            f"{where} ORDER BY id {order} LIMIT ? OFFSET ?"  # nosec B608
+            "SELECT r.id, r.kind, r.process, r.module, r.ts, r.severity, r.severity_number, r.message, r.extra "
+            "FROM records r"
+            f"{where} ORDER BY r.id {order} LIMIT ? OFFSET ?"  # nosec B608
         )
         params.extend([int(limit), int(offset)])
 
         with self._lock:
             cur = self._conn.execute(sql, params)
             rows = cur.fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def search(
+        self,
+        query: str,
+        *,
+        kind: Optional[str] = None,
+        module: Optional[str] = None,
+        process: Optional[str] = None,
+        severity_in: Optional[List[str]] = None,
+        min_severity: Optional[int] = None,
+        since: Optional[float] = None,
+        until: Optional[float] = None,
+        offset: int = 0,
+        limit: int = 100,
+        newest_first: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Найти записи по СЛОВУ в тексте (+ те же фильтры, что у ленты) — задача 1.6.
+
+        Ищется по ``message``, ``module`` и ``process``: разбор начинается либо со
+        слова из сообщения, либо с имени источника, и заставлять оператора
+        выбирать заранее, что он помнит, — лишний вопрос.
+
+        ``query`` — то, что набрал человек: обычный текст ищется как есть
+        (каждое слово — точная фраза), power-синтаксис включается явно —
+        ``"фраза"``, ``hik*``, ``a OR b``, скобки. Разбор строки — в
+        :func:`fts_query`, там же причина: голый FTS5 отвергал почти всё, что
+        оператор вставляет из сообщения. Строка уходит параметром, не склейкой;
+        непонятый синтаксис остаётся НАЗВАННЫМ отказом.
+
+        Порядок — свежие первыми (``id DESC``), тот же, что у ленты, а не по
+        релевантности bm25: панель показывает историю, и «почему эта строка выше
+        той» не должно зависеть от того, искал оператор или листал.
+
+        **Цена этого выбора замерена, а не оценена** (200 000 строк, Windows;
+        разрешение таймера здесь 15.6 мс, поэтому числа лежат на его сетке —
+        меньше одного тика значит «ниже разрешающей способности», а не «ноль»):
+
+        =============================  ==========  ===========
+        случай                         FTS5        LIKE-скан
+        =============================  ==========  ===========
+        редкое слово (1 из 200 000)    < 15.6 мс   16 мс
+        отсутствующее слово            < 15.6 мс   31 мс
+        частое слово (~1/10 строк)     31 мс       < 15.6 мс
+        =============================  ==========  ===========
+
+        Последняя строка — честная цена «свежие первыми»: чтобы отсортировать по
+        ``id``, надо собрать ВСЕ совпадения (тут ~20 000), тогда как ``LIKE`` с
+        ``LIMIT 100`` останавливается на первой сотне. Выигрыш индекса — там, где
+        оператор и ищет: редкое слово и «а было ли вообще», где скан платит
+        полным проходом. Менять порядок на bm25 ради частых слов не стали:
+        предсказуемость ленты дороже, чем 31 мс на запрос, который и так вернёт
+        не то (частое слово — плохой фильтр).
+
+        Raises:
+            ObservabilitySearchError: поиск невозможен (нет FTS5 в сборке SQLite)
+                или запрос непонят. Пустой список означает ровно «не нашлось» —
+                и ничего больше.
+        """
+        text = str(query or "").strip()
+        if self._fts_reason is not None:
+            raise ObservabilitySearchError(self._fts_reason)
+        if not text:
+            raise ObservabilitySearchError("пустой запрос: искать нечего (это не «не нашлось»)")
+        text = fts_query(text)
+
+        clauses, params = self._filter_clauses(
+            kind=kind,
+            module=module,
+            process=process,
+            severity_in=severity_in,
+            min_severity=min_severity,
+            since=since,
+            until=until,
+        )
+        # Соединение по rowid: external-content FTS5 держит только индекс, текст
+        # берётся из самой `records`, поэтому строка ответа — та же, что у ленты.
+        where = " AND ".join([f"{_FTS_TABLE} MATCH ?", *clauses])
+        order = "DESC" if newest_first else "ASC"
+        sql = (
+            "SELECT r.id, r.kind, r.process, r.module, r.ts, r.severity, r.severity_number, r.message, r.extra "
+            f"FROM {_FTS_TABLE} JOIN records r ON r.id = {_FTS_TABLE}.rowid "  # nosec B608
+            f"WHERE {where} ORDER BY r.id {order} LIMIT ? OFFSET ?"  # nosec B608
+        )
+        args: List[Any] = [text, *params, int(limit), int(offset)]
+
+        with self._lock:
+            try:
+                rows = self._conn.execute(sql, args).fetchall()
+            except sqlite3.OperationalError as exc:
+                # Сюда приходит и синтаксическая ошибка запроса FTS5, и отсутствие
+                # теневой таблицы. Молчать нельзя: пустой ответ на сломанный
+                # запрос читается как «записей нет».
+                raise ObservabilitySearchError(f"запрос не понят: {exc}") from exc
         return [self._row_to_dict(r) for r in rows]
 
     def count(self, kind: Optional[str] = None) -> int:
@@ -531,3 +829,59 @@ class ObservabilityStore:
     def dropped(self) -> int:
         """Число строк, потерянных при записи (database locked / busy_timeout)."""
         return self._dropped
+
+    @property
+    def search_available(self) -> bool:
+        """Есть ли полнотекстовый поиск (задача 1.6). ``False`` — причина в :attr:`search_unavailable_reason`."""
+        return self._fts_reason is None
+
+    @property
+    def search_unavailable_reason(self) -> Optional[str]:
+        """Почему поиска нет, если его нет. ``None`` — поиск доступен.
+
+        Отдельным свойством, а не только исключением из :meth:`search`: панели
+        нужно решить, показывать ли строку поиска, ДО первого запроса — иначе
+        оператор набирает слово в поле, которое ничего не умеет.
+        """
+        return self._fts_reason
+
+    def index_rowids(self, term: str) -> List[int]:
+        """Что ИНДЕКС думает про слово — напрямую, без соединения с таблицей.
+
+        Единственный способ увидеть остаток индекса, и найден он инъекцией, а не
+        рассуждением. Два очевидных способа спросить оказались слепыми:
+
+        * ``SELECT COUNT(*) FROM records_fts`` у external-content таблицы читает
+          **саму** ``records``, а не индекс — то есть всегда равен :meth:`count`
+          и не может разойтись с ним ПО ПОСТРОЕНИЮ (первая редакция этого метода
+          именно так и «сверяла» индекс с таблицей — вакуумно);
+        * ``integrity-check`` расхождения тоже не показывает: замер — удаление
+          строки без delete-триггера проверку проходит.
+
+        А прямой ``MATCH`` показывает: при работающем триггере слово удалённой
+        строки не находится, без него — находится и указывает на мёртвый rowid.
+        Наружу такой остаток не протекает (соединение с ``records`` его
+        отфильтрует), но он вечен: место занято, а строк нет.
+
+        **Замер, снимающий соблазн «оптимизировать»:** удаление 19 000 строк из
+        20 000 даёт ``records_fts_data`` 205 → **259** с триггером и 205 → 205
+        без него. То есть удаление в FTS5 — это ЗАПИСЬ надгробия, а не вычитание,
+        и файл сразу после уборки временно БОЛЬШЕ. Место возвращает слияние
+        сегментов; «индекс сжимается вместе со строками» было бы удобным, но
+        неверным утверждением.
+
+        Args:
+            term: слово запроса FTS5 (без фильтров — это про индекс, не про ленту).
+
+        Returns:
+            rowid'ы, которые индекс относит к этому слову (могут указывать на
+            уже удалённые строки — в том и смысл проверки).
+        """
+        if self._fts_reason is not None:
+            return []
+        with self._lock:
+            cur = self._conn.execute(
+                f"SELECT rowid FROM {_FTS_TABLE} WHERE {_FTS_TABLE} MATCH ?",  # nosec B608 — константа модуля
+                (str(term),),
+            )
+            return [int(r[0]) for r in cur.fetchall()]

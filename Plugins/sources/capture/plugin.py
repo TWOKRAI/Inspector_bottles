@@ -89,6 +89,20 @@ class CapturePlugin(ProcessModulePlugin):
         self._fps_timer = time.monotonic()
         self._actual_fps = 0.0
         self._drops = 0
+        # Задача 2.1: сколько потерь уже отдано в плоскость stats. ``_drops``
+        # накопительный, а counter принимает ПРИРОСТ — отдай мы сумму, окно
+        # сложило бы её с предыдущими и «потерь за смену» вышло бы
+        # квадратичным. Позиция одна, вычитается здесь же.
+        self._drops_reported = 0
+
+        # Имена уровней объявляются РЯДОМ с полями, которые их считают: сборщик
+        # тика берёт лист, только если объявленный владелец имени совпадает с
+        # публикатором (Р3.5-11). ``fps`` в этом списке нет и не будет — это имя
+        # фреймворка, под которым едет ДРУГАЯ величина (частота цикла воркера);
+        # измеренная частота захвата едет своим именем, см. :meth:`_publish_levels`.
+        ctx.declare_metric("capture_fps")
+        ctx.declare_metric("frame_count")
+        ctx.declare_metric("drops")
 
     # --- Команды (авторегистрация через commands dict) ---
 
@@ -145,6 +159,14 @@ class CapturePlugin(ProcessModulePlugin):
         Возвращает [{"frame": ndarray, "camera_id": int, ...}] или [].
         SHM write и IPC send выполняет SourceProducer.
         """
+        # Такт метрик — ПЕРВЫМ делом, до всех ранних `return`. Раньше он стоял в
+        # ветке успешного кадра, и плоскость слепла ровно в отказном режиме:
+        # при `ret=False` управление уходило по `return []` выше, и на 485
+        # потерянных кадров за 1.4 с не эмитилось НИ ОДНОЙ метрики — ни
+        # `capture.drops`, ни `capture.fps=0`. «Камера умерла» было неотличимо
+        # от «процесс простаивает» (находка ревью 2.1, воспроизведена).
+        self._tick_stats()
+
         # Заморозка: переотправляем последний кадр (новый seq_id), не читая камеру.
         if self._frozen and self._last_frame is not None:
             self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
@@ -178,17 +200,54 @@ class CapturePlugin(ProcessModulePlugin):
         # Инкремент счётчика с rollover
         self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
 
-        # Обновление FPS-метрики раз в секунду
         self._fps_counter += 1
-        now = time.monotonic()
-        elapsed = now - self._fps_timer
-        if elapsed >= 1.0:
-            self._actual_fps = self._fps_counter / elapsed
-            self._fps_counter = 0
-            self._fps_timer = now
-            self._publish_state()
 
         return [self._build_item(frame)]
+
+    def _tick_stats(self) -> None:
+        """Раз в секунду: пересчитать fps, опубликовать состояние, отдать метрики.
+
+        Зовётся в НАЧАЛЕ ``produce``, до любых ранних выходов, — потому что
+        отвечать эта ветка должна и на «кадров нет»: молчание плоскости в
+        отказном режиме и есть тот сигнал, который нужен оператору больше всего.
+        """
+        now = time.monotonic()
+        elapsed = now - self._fps_timer
+        if elapsed < 1.0:
+            return
+        self._actual_fps = self._fps_counter / elapsed
+        self._emit_stats(self._fps_counter)
+        self._fps_counter = 0
+        self._fps_timer = now
+        self._publish_state()
+        self._publish_levels()
+
+    def _emit_stats(self, frames_in_window: int) -> None:
+        """Отдать бизнес-метрики захвата тем же жестом, что лог (задача 2.1).
+
+        **Первый боевой эмитент плоскости stats.** До него у плоскости не было
+        ни одного: разъём (1.1) существовал, дорога в стор (2.1) существовала, а
+        писать в неё было некому — ``kind=stats`` в сторе стоял на нуле.
+
+        **Раз в секунду, не на кадр.** Точка вызова — существующая ветка
+        пересчёта fps, а не горячий путь ``produce``: при 30 к/с эмиссия на кадр
+        стоила бы 30 вызовов в секунду там, где вся ценность в агрегате за окно
+        (окно ``StatsManager`` всё равно свернёт их в одно число). Своего
+        таймера задача не заводит — ветка уже есть и уже срабатывает по времени.
+
+        Счётчик потерь отдаётся ПРИРОСТОМ: counter суммируется за окно, и сумма
+        накопительного значения дала бы квадратичный рост «потерь за смену».
+        """
+        ctx = self._ctx
+        if ctx is None:
+            return
+        tags = {"camera": str(self._camera_id)}
+        ctx.record_metric("capture.frames", frames_in_window, tags)
+        ctx.gauge("capture.fps", self._actual_fps, tags)
+        drops_delta = self._drops - self._drops_reported
+        if drops_delta:
+            ctx.record_metric("capture.drops", drops_delta, tags)
+            self._drops_reported = self._drops
 
     def _build_item(self, frame) -> dict:
         """Собрать item-словарь кадра (общий для живого захвата и заморозки)."""
@@ -224,6 +283,7 @@ class CapturePlugin(ProcessModulePlugin):
             ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват запущен")
             # Публикуем начальное состояние после старта захвата
             self._publish_state()
+            self._publish_levels()
         else:
             ctx.log_error(f"CapturePlugin[{self._camera_id}]: не удалось открыть камеру {self._device_id}")
 
@@ -232,12 +292,32 @@ class CapturePlugin(ProcessModulePlugin):
         self._is_capturing = False
         self._release_camera()
         ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват остановлен")
-        # Сбрасываем FPS и публикуем финальное состояние
+        # Сбрасываем FPS и публикуем финальное состояние. Уровень отдаём здесь же,
+        # не дожидаясь следующего такта метрик: такта больше не будет (``produce``
+        # не зовут у остановленного захвата), и ``capture_fps`` замер бы на
+        # последнем живом значении — «камера остановлена, а частота идёт».
         self._actual_fps = 0.0
         self._publish_state()
+        self._publish_levels()
 
     def _publish_state(self) -> None:
-        """Опубликовать метрики в StateStore."""
+        """Опубликовать ФРОНТЫ захвата в StateStore (Task 3.5).
+
+        Здесь остались только те ключи, которые меняются СОБЫТИЕМ, а не текут по
+        тику: ``status`` (запущен/остановлен), ``paused`` и ``frozen``. Их и
+        публикуем прямой записью в дерево — уровнем, обновляемым по тику, они не
+        являются, и превращать их в уровень значило бы получить «уровень»,
+        который между сменами состояния не обновляется.
+
+        **Уровни ушли на дорогу фреймворка** (``ctx.publish_metric``, см.
+        :meth:`_publish_levels`): ``capture_fps``, ``frame_count``, ``drops``. Прямая
+        запись уровней отсюда была ВТОРОЙ дорогой в тот же путь дерева — мимо
+        publisher-гейта, мимо сборщика телеметрийного тика и мимо опроса. Живьём
+        это выглядело так: гейт ``camera_0`` закрыт на ``fps`` (readback
+        ``enabled=false``), чисто-тиковые ``latency_ms`` и ``shm`` дают ноль
+        дельт за 41.1 с, а ``state.fps`` за то же окно получает 35 — потому что
+        писал их сюда этот метод.
+        """
         if self._state_proxy is None:
             return
         path = f"processes.{self._ctx.process_name}.state"
@@ -245,13 +325,40 @@ class CapturePlugin(ProcessModulePlugin):
             path,
             {
                 "status": "running" if self._is_capturing else "stopped",
-                "fps": round(self._actual_fps, 1),
-                "frame_count": self._frame_count,
-                "drops": self._drops,
                 "paused": self._paused,
                 "frozen": self._frozen,
             },
         )
+
+    def _publish_levels(self) -> None:
+        """Отдать УРОВНИ захвата сборщику телеметрийного тика (ADR-PM-038).
+
+        Дорога одна на все три числа: фреймворк собирает их на своём тике, гейтит
+        наравне с ``fps``/``latency_ms`` и отдаёт опросом
+        (``introspect.telemetry`` → ``levels``).
+
+        **Измеренная частота захвата едет под именем ``capture_fps``, а не
+        ``fps``** (Р3.5-13). Это ДВЕ РАЗНЫЕ ФИЗИЧЕСКИЕ ВЕЛИЧИНЫ, и коллизия была
+        в модели данных, а не в доставке: ``fps`` фреймворка — ``max(effective_hz)``
+        по running-воркерам, то есть частота ЦИКЛА воркера; здесь — сколько кадров
+        в секунду реально прочитано с камеры. Прежняя редакция публиковала обе под
+        одним именем и разрешала спор порядком двух merge — а продовое правило
+        троттла ``processes.**.state.fps: 0.05`` вырезало вторую запись ВСЕГДА
+        (воспроизведено 2026-08-16), и оператор при остановленном захвате видел
+        21.4 вместо 0.0.
+
+        Следствие, названное в ADR: в исторической колонке ``fps`` у ``camera_0``
+        есть ступенька — до 2026-08-16 там измеренная частота захвата (~12.5),
+        после неё частота цикла воркера (~21.4). Миграции нет намеренно: смена
+        смысла — дефект только когда она неназвана. ``capture_fps`` персистится
+        сам, JSON-колонкой ``extra`` стока телеметрии.
+        """
+        ctx = self._ctx
+        if ctx is None:
+            return
+        ctx.publish_metric("capture_fps", round(self._actual_fps, 1))
+        ctx.publish_metric("frame_count", self._frame_count)
+        ctx.publish_metric("drops", self._drops)
 
     def _release_camera(self) -> None:
         """Освободить камеру."""

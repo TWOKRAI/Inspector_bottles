@@ -15,9 +15,9 @@
 from __future__ import annotations
 
 import threading
-import time
 
 import pytest
+from multiprocess_framework.modules.state_store_module.core import subscription_manager
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
 from multiprocess_framework.modules.state_store_module.core.subscription_manager import (
     Subscription,
@@ -366,8 +366,39 @@ class TestConcurrency:
 class TestPerformance:
     """Тесты производительности матчинга."""
 
-    def test_100_subscriptions_1000_matches_under_50ms(self) -> None:
-        """100 подписок × 1000 match() < 50мс."""
+    def test_100_subscriptions_1000_matches_operation_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """100 подписок × 1000 match() — сторож в операциях, не в стенных часах.
+
+        S-17 (задача, 2026-08-18): предыдущая версия мерила elapsed_ms < 100 —
+        порог по стенным часам. Он падал в полном гейте (113.2мс / 158.5мс)
+        и держал 10/10 в изоляции за 0.10с: не скорость match() регрессировала,
+        регрессировала занятость машины на 8550-тестовом прогоне. П-16
+        (задача 4.3) уже убирала один источник шума (чужую кучу сборщика) —
+        порог остался стенно-часовым и остался гонкой с планировщиком ОС.
+        Воспроизведено ещё раз (репро-скрипт с управляемой CPU-нагрузкой):
+        то же измерение даёт ~44-50мс в изоляции и 85-630мс под нагрузкой —
+        порог 100мс пересекается в зависимости от занятости машины, а не от
+        кода.
+
+        Починка не поднятием порога (это осталось бы гонкой), а сменой меры:
+        число вызовов ``_split_pattern`` за 1000 match() — целое число, не
+        зависящее от загрузки машины.
+
+        Почему _split_pattern, а не _match_pattern: _match_pattern рекурсивна
+        (у «**» две ветки на сегмент) — обёртка-счётчик на её имени в модуле
+        перехватила бы и рекурсивные самовызовы (проверено: 353 захвата на
+        один match() вместо ожидаемых «одна подписка — один вызов», итог
+        353000 вместо 100000 — тоже детерминировано, но магическое число
+        никто не может перепроверить в уме). _split_pattern не рекурсивна и
+        вызывается из цикла match() РОВНО один раз на рассмотренную подписку
+        (строка ``pattern_segs = _split_pattern(sub.pattern)``) — счётчик её
+        вызовов проверяем арифметикой на бумаге: 100 подписок без
+        exclude_sources (фильтр источника не отсеивает ни одной ДО вызова)
+        × 1000 match() = 100000, без разброса. Лишний полный проход по
+        подпискам на каждый match() (пример регрессии из задачи) удвоил бы
+        счётчик — сторож её ловит независимо от того, насколько занята
+        машина в момент прогона.
+        """
         mgr = SubscriptionManager()
 
         # Создаём 100 подписок с разнообразными паттернами
@@ -384,22 +415,29 @@ class TestPerformance:
 
         delta = _make_delta("cameras.5.config.fps")
 
-        # Прогрев. Без него тест мерил не скорость match(), а холодный старт:
-        # первый прогон компилирует regex-паттерны подписок и наполняет кэши,
-        # и на холодную давал 132-145мс против 100 порога, а сразу следом —
-        # уверенно проходил. Тест-флейк по этой причине не ловит регресс, он
-        # ловит загрузку машины. Меряем установившийся режим.
-        for _ in range(100):
-            mgr.match(delta)
+        call_count = 0
+        original_split_pattern = subscription_manager._split_pattern
 
-        # 1000 вызовов match()
-        start = time.perf_counter()
+        def counting_split_pattern(pattern: str) -> tuple[str, ...]:
+            nonlocal call_count
+            call_count += 1
+            return original_split_pattern(pattern)
+
+        # match() обращается к _split_pattern по имени в глобальном
+        # пространстве своего модуля — подмена атрибута модуля перехватывает
+        # вызов без правки production-кода. Ставим ПОСЛЕ subscribe(): у
+        # subscribe() свой вызов _split_pattern (прогрев кэша) — он не должен
+        # попасть в счётчик матчей.
+        monkeypatch.setattr(subscription_manager, "_split_pattern", counting_split_pattern)
+
         for _ in range(1000):
             mgr.match(delta)
-        elapsed_ms = (time.perf_counter() - start) * 1000
 
-        # Должно уложиться в 100мс (Windows даёт больше latency чем Linux/Mac)
-        assert elapsed_ms < 100, f"Слишком медленно: {elapsed_ms:.1f}мс (лимит 100мс)"
+        assert call_count == 100_000, (
+            f"Неожиданное число обращений к подпискам: {call_count} (ожидалось "
+            f"100000 = 100 подписок × 1000 match()) — алгоритмическая "
+            f"регрессия (лишний проход по подпискам на матч и т.п.)"
+        )
 
 
 # ===========================================================================

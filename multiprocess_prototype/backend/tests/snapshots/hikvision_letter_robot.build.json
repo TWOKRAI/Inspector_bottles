@@ -42,8 +42,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -99,8 +98,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -136,8 +134,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -150,8 +147,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -204,8 +200,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -235,8 +230,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -261,8 +255,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -298,8 +291,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -370,8 +362,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -457,8 +448,7 @@
           },
           "state": {
             "error": null,
-            "fps": 0.0,
-            "frame_count": 0,
+            "fps": null,
             "pid": null,
             "status": "stopped"
           }
@@ -552,6 +542,17 @@
         }
       },
       "console": true,
+      "documents": {
+        "config": {
+          "db_path": "data/documents.db",
+          "purge_interval_sec": 3600,
+          "retention_sec": {
+            "audit": 31536000,
+            "verdict": 315360000
+          }
+        },
+        "factory": "Services.documents.wiring:make_document_sink"
+      },
       "errors": {
         "enabled": true,
         "include_stacktrace": true,
@@ -594,12 +595,17 @@
     },
     "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
     "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
+    "presentation_overlay": null,
     "replace_debounce_s": 1.0,
     "state_throttle_rules": {
+      "processes.**.state.capture_fps": 0.05,
       "processes.**.state.drops": 0.05,
       "processes.**.state.fps": 0.05,
       "processes.**.state.frame_count": 0.05,
       "processes.**.state.latency_ms": 0.05,
+      "processes.**.state.plugins.*.capture_fps": 0.05,
+      "processes.**.state.plugins.*.drops": 0.05,
+      "processes.**.state.plugins.*.frame_count": 0.05,
       "processes.**.state.uptime": 0.05,
       "processes.**.workers.*.cycle_duration_ms": 0.05,
       "processes.**.workers.*.effective_hz": 0.05
@@ -648,19 +654,24 @@
             "type": "file"
           }
         },
-        "commands": {
-          "log_success": false
-        },
-        "compress_rotated": false,
         "console": true,
+        "documents": {
+          "config": {
+            "db_path": "data/documents.db",
+            "purge_interval_sec": 3600,
+            "retention_sec": {
+              "audit": 31536000,
+              "verdict": 315360000
+            }
+          },
+          "factory": "Services.documents.wiring:make_document_sink"
+        },
         "errors": {
-          "channels": {},
           "enabled": true,
           "include_stacktrace": true,
           "level": "WARNING"
         },
         "file": true,
-        "log_directory": null,
         "log_level": "INFO",
         "logger_groups": {
           "служебное": [
@@ -689,17 +700,9 @@
         "retention_days": 7,
         "retention_sweep_interval_sec": 3600.0,
         "retention_total_mb": 200,
-        "sampling_burst_reset_sec": 5.0,
-        "sampling_every_mth": 100,
-        "sampling_first_n": 0,
-        "sampling_max_level": "DEBUG",
-        "scopes": {},
-        "session_ttl_sec": 300.0,
         "stats": {
           "aggregation_interval": 10.0,
-          "channels": {},
           "enabled": true,
-          "flush_interval": 10.0,
           "log_level": "INFO"
         }
       },
@@ -716,8 +719,20 @@
         "stop_timeout": 5.0
       },
       "telemetry": {
-        "publish": null,
-        "throttle": {}
+        "publish": {
+          "default_enabled": false,
+          "default_interval_sec": 1.0,
+          "metrics": {
+            "fps": {
+              "enabled": true,
+              "interval_sec": 1.0
+            },
+            "latency_ms": {
+              "enabled": true,
+              "interval_sec": 1.0
+            }
+          }
+        }
       }
     }
   },
@@ -725,15 +740,16 @@
     "camera_0": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "vision"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -755,6 +771,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -822,7 +849,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -1035,7 +1079,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -1073,13 +1119,14 @@
     "devices": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1101,6 +1148,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1188,7 +1246,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -1401,7 +1476,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -1426,14 +1503,10 @@
     "draw": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui"
         ],
-        "copy_out_targets": [],
-        "error_auto_reset_sec": 60.0,
-        "error_critical_plugins": [],
-        "error_max_consecutive_fails": 5,
-        "frame_ring_depth": 0,
         "collector": {
           "inputs": [
             "frame",
@@ -1443,6 +1516,11 @@
           "primary": "frame",
           "timeout_sec": 0.25
         },
+        "copy_out_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1464,6 +1542,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1529,7 +1618,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -1742,7 +1848,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -1767,13 +1875,14 @@
     "gui": {
       "class": "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1795,6 +1904,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -1839,7 +1959,24 @@
         "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -2052,7 +2189,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -2077,13 +2216,14 @@
     "layout": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2105,6 +2245,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -2190,7 +2341,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -2403,7 +2571,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -2428,16 +2598,17 @@
     "line": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "recog",
           "draw"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2459,6 +2630,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -2517,7 +2699,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -2730,7 +2929,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -2755,15 +2956,16 @@
     "maskview": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2785,6 +2987,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -2839,7 +3052,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -3052,7 +3282,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -3077,16 +3309,17 @@
     "phone": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui",
           "layout"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3108,6 +3341,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -3179,7 +3423,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -3392,7 +3653,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -3425,15 +3688,11 @@
     "recog": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "gui",
           "layout"
         ],
-        "copy_out_targets": [],
-        "error_auto_reset_sec": 60.0,
-        "error_critical_plugins": [],
-        "error_max_consecutive_fails": 5,
-        "frame_ring_depth": 0,
         "collector": {
           "inputs": [
             "frame",
@@ -3443,6 +3702,11 @@
           "primary": "frame",
           "timeout_sec": 0.25
         },
+        "copy_out_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3464,6 +3728,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -3567,7 +3842,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -3780,7 +4072,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },
@@ -3805,18 +4099,19 @@
     "vision": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
+        "chain_max_lag_items": 0,
         "chain_targets": [
           "line",
           "recog",
           "draw",
           "maskview"
         ],
+        "collector": {},
         "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
-        "collector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3838,6 +4133,17 @@
             }
           },
           "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
           "errors": {
             "enabled": true,
             "include_stacktrace": true,
@@ -3951,7 +4257,24 @@
           }
         ],
         "queue_size": 64,
-        "source_target_fps": 25.0
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
       },
       "managers": {
         "command": {
@@ -4164,7 +4487,9 @@
           "enable_logging": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
+          "log_line_max_bytes": 2048,
           "manager_name": "StatsManager",
+          "max_series": 1000,
           "retention_seconds": 3600.0
         }
       },

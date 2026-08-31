@@ -7,6 +7,7 @@
 1. MULTIPROCESS_LOG_DIR или INSPECTOR_LOG_DIR
 2. иначе tempfile / «multiprocess_framework» / «logs»
 """
+
 from __future__ import annotations
 
 import os
@@ -26,6 +27,28 @@ def default_log_base_directory() -> Path:
     root = Path(tempfile.gettempdir()) / "multiprocess_framework" / "logs"
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
+
+
+def process_log_directory(log_directory: Optional[str], process_name: str) -> Path:
+    """Каталог ЭТОГО процесса внутри базы логов: ``{база}/{имя процесса}``.
+
+    Вынесено из :meth:`LoggerCore._resolved_file_path` задачей 5.1 (Ф5), где
+    появился второй клиент — каталог дампов flight recorder'а
+    (``{база}/{процесс}/flight/``). Второй клиент обязан класть файлы РЯДОМ с
+    журналом того же процесса, а не куда-нибудь ещё, и единственный способ этого
+    добиться — считать базу ОДНОЙ функцией, а не двумя одинаковыми тройками
+    строк. Скопируй мы вычисление — оно разошлось бы на первой же правке
+    приоритета каталогов, и разошлось бы молча: файлы легли бы не туда, где их
+    ищут, а никакой ошибки при этом не случилось бы.
+
+    ``log_directory=None`` (никто не привязал каталог) уводит в системный temp
+    через :func:`default_log_base_directory` — то же обещание, что и у файлов
+    журнала. Материализованного дефолта ``"logs"`` здесь нет намеренно: он
+    отменял это обещание, и цена была измерена (задача 3.3 — 154 457 Б за один
+    прогон тестов в дерево репозитория, каталог дорос до 467 МиБ).
+    """
+    base = Path(log_directory) if log_directory else default_log_base_directory()
+    return base / str(process_name)
 
 
 def log_files_base(log_directory: Optional[str]) -> Path:

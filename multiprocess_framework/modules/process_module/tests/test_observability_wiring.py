@@ -40,6 +40,18 @@ class RecordingSink:
         return _rec
 
 
+#: Методы, которыми в stats-сток ПИШУТ метрику. Всё остальное, что дубль ловит
+#: своим ``__getattr__`` (2.1 добавила единичный ``attach_observability_hub`` в
+#: момент сборки), к вопросу «доехала ли метрика до менеджера» отношения не
+#: имеет — и не должно красить тесты буферизации.
+_METRIC_WRITES = ("record_metric", "record_timing", "gauge", "histogram", "increment")
+
+
+def _metric_calls(sink):
+    """Только вызовы записи метрики — то, что стерегут тесты буфера."""
+    return [c for c in sink.calls if c[0] in _METRIC_WRITES]
+
+
 def _wire():
     worker = WorkerManager("workers")
     logger, stats, error = RecordingSink(), RecordingSink(), RecordingSink()
@@ -153,10 +165,13 @@ def test_worker_stat_buffered_then_drained():
     """stats-слот остаётся буферизуемым — снятие лог-буфера его не касается."""
     worker, _, stats, _, hub, adapter = _wire()
     worker._record_metric("hits", 5)
-    assert stats.calls == []
+    assert _metric_calls(stats) == []
     drain_process_observability(hub, adapter)
-    # hub.record_metric помечает запись METRIC_GAUGE → адаптер → stats.gauge;
-    # тест буфера/дренажа проверяет приход метрики по имени, не тип-роутинг.
+    # hub.record_metric (S-4: METRIC_COUNTER) → адаптер → stats.record_metric;
+    # тест буфера/дренажа проверяет приход метрики по имени, не тип-роутинг —
+    # тип-роутинг доказан отдельно, на уровне приёмника (стат-sink'а), в
+    # test_drain_adapter.py::test_hub_record_metric_reaches_sink_as_counter
+    # и его паре ...as_gauge.
     assert any(c[1] and c[1][0] == "hits" for c in stats.calls)
 
 
@@ -212,8 +227,67 @@ def test_only_stats_is_buffered():
     # Лог и ошибка — у своих менеджеров немедленно.
     assert any(c[0] == "info" for c in logger.calls)
     assert error.calls
-    # Метрика — ещё в буфере, менеджер не тронут.
-    assert stats.calls == []
+    # Метрика — ещё в буфере, менеджер её не получил.
+    assert _metric_calls(stats) == []
 
     drain_process_observability(hub, adapter)
     assert any(c[1] and c[1][0] == "m" for c in stats.calls)
+
+
+# ---------------------------------------------------------------------------
+# Обратная дорога: снапшот окна StatsManager'а → stats-слот hub'а (задача 2.1)
+# ---------------------------------------------------------------------------
+
+
+def test_wire_attaches_the_hub_to_a_real_stats_manager(tmp_path):
+    """Проводка поднимает канал `hub_stats` на НАСТОЯЩЕМ StatsManager'е.
+
+    Дубль ``RecordingSink`` проглотит любой вызов и подтвердит только сам факт
+    обращения — то есть договорённость с дублем. Свойство, которое здесь
+    проверяется, другое: после проводки метрика, записанная в менеджер,
+    доезжает до stats-слота hub'а. Проверить это можно лишь на менеджере с
+    живым окном агрегации.
+    """
+    from ...statistics_module.channels.hub_stats_channel import STATS_HUB_CHANNEL
+    from ...statistics_module.core.stats_manager import StatsManager
+
+    worker = WorkerManager("workers")
+    stats = StatsManager(
+        "StatsManager",
+        config={
+            "enable_logging": False,
+            "aggregation_interval": 3600.0,
+            "channels": {"file_stats": {"type": "file", "file_path": str(tmp_path / "s.json")}},
+        },
+    )
+    stats.initialize()
+    try:
+        hub, _ = wire_process_observability("camera_0", worker, None, stats, None)
+
+        assert STATS_HUB_CHANNEL in stats._channel_registry.names()
+
+        stats.record_metric("plugin.frames_total", 1)
+        stats._buffer.flush_all()
+        records = hub.drain_all()["stats"]
+        assert len(records) == 1
+        assert [m["name"] for m in records[0]["metrics"]] == ["plugin.frames_total"]
+    finally:
+        stats.shutdown()
+
+
+def test_wire_survives_a_stats_sink_without_the_attach_method():
+    """Чужой дубль в слоте stats не роняет проводку.
+
+    ``stats`` здесь duck-typed: процесс вправе подсунуть любой объект с
+    методами записи метрик. Требование «умей принимать hub» распространялось бы
+    на всех, а нужно оно ровно ``StatsManager``.
+    """
+
+    class BareStats:
+        def record_metric(self, *a, **kw):
+            pass
+
+    worker = WorkerManager("workers")
+    hub, adapter = wire_process_observability("proc", worker, None, BareStats(), None)
+
+    assert hub is not None and adapter is not None

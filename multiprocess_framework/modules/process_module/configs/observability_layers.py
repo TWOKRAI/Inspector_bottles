@@ -137,8 +137,18 @@ TELEMETRY_KEY = "telemetry"
 #: по построению.
 TELEMETRY_LAYERED_SUBSECTION = "publish"
 
+#: Имя второй под-секции. Литерал ``"throttle"`` был написан в этом файле
+#: ОДИН раз (внутри :data:`TELEMETRY_THROTTLE_PATH`), а сверяться с ним
+#: понадобилось валидатору Task 2.1 — вытащено в имя, чтобы у одной под-секции
+#: не завелось двух написаний.
+TELEMETRY_THROTTLE_SUBSECTION = "throttle"
+
+#: Под-секции телеметрии, которые существуют. Список ЗАКРЫТ — довод в
+#: :func:`validate_telemetry_section`.
+TELEMETRY_SUBSECTIONS = (TELEMETRY_LAYERED_SUBSECTION, TELEMETRY_THROTTLE_SUBSECTION)
+
 #: Путь дельты центрального троттла в слое сессии (Task 5.10.g).
-TELEMETRY_THROTTLE_PATH = f"{TELEMETRY_KEY}.throttle"
+TELEMETRY_THROTTLE_PATH = f"{TELEMETRY_KEY}.{TELEMETRY_THROTTLE_SUBSECTION}"
 
 #: Пути, ниже которых бухгалтерия слоёв НЕ спускается: значение целиком — лист.
 #:
@@ -804,12 +814,22 @@ class ObservabilityLayers:
         Возвращает ключи НОВОЙ секции — то, что слой теперь заявляет. Разницу
         со старой аудит не считает: сравнение двух сырых секций дало бы третье
         написание того же факта, а «что действует» отвечает провенанс.
+
+        Задача 5.4 — **незнакомые ключи файла попадают в аудит ЗДЕСЬ**, а не у
+        вызывающих. Отказать файлу нельзя (опечатка в спутнике не имеет права
+        валить switch рецепта), но и промолчать нельзя: ключ, которого нет в
+        контракте, живёт в файле вечно и не делает ничего. Место выбрано по
+        числу дорог: тело в L1/L2 кладут пять (watcher ``system.yaml``, watcher
+        спутника, файловая ветка ``config.reload``, конверт switch'а, перечитка
+        спутника), и запись у каждой из них была бы пятью написаниями одного
+        факта — с гарантией, что одна отстанет.
         """
         body = dict(section) if isinstance(section, dict) else {}
         # B2: проверка ДО того, как тронут слой. Отвергнутая секция не имеет
         # права оставить слой ни в новом состоянии, ни в полупустом — тот же
         # порядок «сперва проверить, потом разрушать», что у CRM.reconfigure (R9).
         validate_layer_section(body, layer=layer)
+        stray = unknown_section_keys(body)
         with self._lock:
             if layer == LAYER_RECIPE:
                 self.recipe = body
@@ -820,7 +840,18 @@ class ObservabilityLayers:
                 if source is not None:
                     self.app_source = source
             keys = tuple(sorted(flatten_section(body).keys()))
-        self.audit.record(ACTION_LAYER, origin=origin, key=layer, keys=keys, source=source or "")
+        self.audit.record(
+            ACTION_LAYER,
+            origin=origin,
+            key=layer,
+            keys=keys,
+            source=source or "",
+            # `or None` — штатный способ сказать «поля нет»: `record` пропускает
+            # None-экстры (см. её тело). Пустой список читался бы как «проверено
+            # и чисто» ровно так же, как отсутствие поля, но выедал бы кольцо
+            # аудита на всех здоровых дорогах.
+            unknown_keys=stray or None,
+        )
         return keys
 
     def session_forget_expiry(self, keys: Iterable[str]) -> Tuple[str, ...]:
@@ -1119,6 +1150,88 @@ def _reject_path_inside_opaque(path: str) -> None:
             )
 
 
+def unknown_section_keys(section: Any) -> list[str]:
+    """Пути секции, которых НЕТ в контракте наблюдаемости (задача 5.4).
+
+    Механизм — round-trip через ТУ ЖЕ схему, из которой считается раскладка:
+    ключ, не выживший в ``model_validate → model_dump(exclude_unset=True)``,
+    схеме неизвестен (``extra`` у Pydantic — ``ignore``, лишнее отбрасывается
+    молча). Второй таблицы «известных имён» здесь нет намеренно: она разошлась
+    бы с первой на первом же новом поле, и тогда «неизвестный ключ» значило бы
+    разное на двух дорогах одной команды.
+
+    Ключ, заданный значением ПО УМОЛЧАНИЮ, выживает (``model_fields_set``),
+    поэтому «совпал с дефолтом» и «опечатка» не путаются.
+
+    Две границы механизма — обе найдены разведкой ДО правки, обе стали бы
+    ложными ОТКАЗАМИ, если бы сверка пошла по сырым путям:
+
+    * **``telemetry``** снимается до сверки. Схема наблюдаемости про эту
+      плоскость не знает вовсе (её ключи разбирает
+      :func:`validate_telemetry_section`, а раскладка снимает ключ в
+      ``_rebuild_and_apply``), и round-trip объявлял незнакомым КАЖДЫЙ путь
+      законной телеметрийной правки (``telemetry.publish.tick_sec``);
+    * **регистр имени скоупа** приводится :func:`~.observability_config.canonical_scope_keys`
+      — тем же правилом, которым его приводит схема. Иначе законное
+      ``scopes.system`` не совпадало бы с выжившим ``scopes.SYSTEM``.
+
+    Значение, отвергнутое схемой, даёт ПУСТОЙ ответ: судить имена там нечем, и
+    об этом входе говорит :func:`validate_layer_section` — своим отказом, с
+    адресом ключа. Иначе один и тот же мусор получил бы два разных объяснения.
+
+    Returns:
+        Отсортированные ПУТИ (``logger.default_level``, ``errors.lvl``), а не
+        голые имена: оператор правит текст, и «где именно» ему нужнее.
+    """
+    if not isinstance(section, dict) or not section:
+        return []
+    from .observability_config import ObservabilityConfig, canonical_scope_keys
+
+    body = {key: value for key, value in section.items() if key != TELEMETRY_KEY}
+    if not body:
+        return []
+    if "scopes" in body:
+        body = {**body, "scopes": canonical_scope_keys(body["scopes"])}
+    try:
+        survived = ObservabilityConfig.model_validate(body).model_dump(exclude_unset=True)
+    except Exception:  # noqa: BLE001 — негодное ЗНАЧЕНИЕ судит validate_layer_section
+        return []
+    return sorted(set(flatten_section(body)) - set(flatten_section(survived)))
+
+
+def format_unknown_keys(keys: Iterable[str], *, layer: str, source: Optional[str] = None) -> str:
+    """Одна формулировка отказа и громкой строки — задача 5.4.
+
+    Текст называет ПОСЛЕДСТВИЕ («ключ есть, эффекта нет»), а не только факт: из-за
+    него опечатку и не замечают. Подсказка о похожих именах считается по полям
+    схемы через ``difflib``, а не по своему списку: список разошёлся бы со схемой.
+    Ровно этот класс и дал находку — оператор подал ``logger.default_level``
+    (машинную форму, которой на этой границе нет) и получил «успех».
+    """
+    from difflib import get_close_matches
+
+    from .observability_config import ObservabilityConfig
+
+    paths = sorted(str(key) for key in keys)
+    known = list(ObservabilityConfig.model_fields)
+    hints: list[str] = []
+    for path in paths:
+        segments = path.split(".")
+        # Ищем похожее и по КОРНЮ пути, и по его листу. Одного корня мало ровно на
+        # том входе, который дал находку: у `logger.default_level` корень похож на
+        # `loggers`/`logger_groups`, а нужное имя — `log_level`, и оно похоже на
+        # ЛИСТ (`default_level`). Подсказка, не называющая человеческую форму
+        # машинной, оставила бы оператора там же, где он стоял.
+        for probe in {segments[0], segments[-1]}:
+            hints.extend(get_close_matches(probe, known, n=2, cutoff=0.6))
+    where = f" ({source})" if source else ""
+    tail = f"; возможно, имелось в виду: {', '.join(sorted(set(hints)))}" if hints else ""
+    return (
+        f"слой {layer} отвергнут{where} — ключей нет в контракте наблюдаемости "
+        f"(ключ есть, эффекта нет): {', '.join(paths)}{tail}"
+    )
+
+
 def validate_layer_section(section: Any, *, layer: str) -> None:
     """Проверить секцию наблюдаемости ДО записи в слой (B2, major-8).
 
@@ -1134,20 +1247,59 @@ def validate_layer_section(section: Any, *, layer: str) -> None:
     (:meth:`session_set`). Persist наследует гарантию через ``replace_layer``.
     Проверка в одном из четырёх мест воскресала бы на трёх соседних.
 
-    **Что проверяется — ЗНАЧЕНИЯ объявленных ключей.** Незнакомый ключ схемой
-    отбрасывается молча, и ловит его не этот страж, а вердикт ``config.reload``
-    (``unknown_keys`` → ``verdict=failed``). Второй предохранитель на то же
-    место сделал бы неизвестным, который из них держит.
+    **Пятое место — телеметрия, и до задачи 2.1 его здесь не было.** Ревью
+    приёмки (Н-4) назвало докстринг враньём, и по делу: ``_merge_telemetry_layer``
+    пишет ``layers.session`` ПРЯМЫМ присваиванием, а ключ ``telemetry`` эта
+    функция не знала вовсе — секция ``ObservabilityConfig`` принимает лишние
+    ключи молча, поэтому мусор в ``publish``/``throttle`` проезжал границу без
+    единого возражения. Теперь ключ разбирает :func:`validate_telemetry_section`
+    — то же правило, а не вторая его реализация; мест применения по-прежнему
+    столько, сколько дверей в слой.
+
+    **ИМЕНА ключей — с задачи 5.4, и только у слоя сессии.** Прежняя редакция
+    отдавала имена вердикту ``config.reload`` (``unknown_keys`` →
+    ``verdict=failed``) с доводом «второй предохранитель на то же место сделал
+    бы неизвестным, который из них держит». Приёмка F2 (находки Н-C/Н-D)
+    показала цену: незнакомый ключ — включая машинную форму
+    ``logger.default_level``, которой на этой границе нет, — отвечал
+    ``success=true``, оседал в L3 со сроком и не действовал, а честный
+    ``verdict="failed"`` лежал в ТОМ ЖЕ ответе и противоречил ``success``.
+    Оператор читает ``success``. Мерило 2 плана требует буквально: «мусор любого
+    рода (значение, тип, **ключ**) — адресный отказ».
+
+    Разведены не по важности, а **по двери**, и это не второй предохранитель на
+    то же место:
+
+    * ``session`` (ручка оператора: ``config.reload`` inline, ``session_set``) →
+      **отказ ДО записи**. Имя написано руками сейчас, и узнать об опечатке
+      через час по отсутствию логов дороже;
+    * ``framework``/``app``/``recipe`` (файл, спутник, конверт switch'а) →
+      молчание здесь и громкая строка у вызывающего. Отказ означал бы, что
+      опечатка в спутнике валит switch рецепта или старт процесса. Та же
+      политика и по той же причине, что у ссылок без приёмника
+      (:mod:`.observability_refs`), — одна на два соседних класса опечаток.
+
+    Вердикт при этом НЕ становится мёртвым слоем: ``unknown_keys`` по-прежнему
+    единственный ответ на файловой дороге, где отказа нет.
 
     Raises:
-        ValueError: значение не годится; текст несёт адрес ключа и список
-            допустимых значений.
+        ValueError: значение не годится (текст несёт адрес ключа и список
+            допустимых значений) ЛИБО — у слоя сессии — ключа нет в контракте
+            (текст несёт путь и похожие известные имена).
     """
     if not isinstance(section, dict) or not section:
         return
     from pydantic import ValidationError
 
     from .observability_config import ObservabilityConfig
+
+    if TELEMETRY_KEY in section:
+        # Ключ снимается ДО схемы наблюдаемости: она про него не знает и,
+        # принимая лишнее молча, вернула бы «годится» на любое содержимое.
+        validate_telemetry_section(section[TELEMETRY_KEY], layer=layer)
+        section = {k: v for k, v in section.items() if k != TELEMETRY_KEY}
+        if not section:
+            return
 
     try:
         ObservabilityConfig.model_validate(section)
@@ -1157,6 +1309,200 @@ def validate_layer_section(section: Any, *, layer: str) -> None:
             address = ".".join(str(part) for part in err.get("loc", ())) or "<секция>"
             problems.append(f"{address}: {err.get('msg', '')}")
         raise ValueError(f"слой {layer} отвергнут — " + "; ".join(problems)) from exc
+
+    # Задача 5.4: имена — после значений и только у ручки оператора (см. докстринг).
+    # Порядок именно такой: негодное ЗНАЧЕНИЕ известного ключа обязано получить
+    # свой текст со списком допустимых, а не общий «ключа нет в контракте».
+    if layer == LAYER_SESSION:
+        unknown = unknown_section_keys(section)
+        if unknown:
+            raise ValueError(format_unknown_keys(unknown, layer=layer))
+
+
+def validate_telemetry_section(section: Any, *, layer: str) -> None:
+    """Проверить секцию ``telemetry`` ДО записи в слой (Task 2.1, находка Н-4).
+
+    Плоскость телеметрии живёт в тех же слоях, что и логи, но её содержимое до
+    этой задачи не судил никто. Воспроизведено на харнессе ``test_telemetry_*``:
+
+    * ``telemetry.reconfigure {"publish": {"default_interval_sec": "быстро"}}``
+      → ``success=false`` (мусор ловит Pydantic уже У ПОЛУЧАТЕЛЯ), но в слое L3
+      к этому моменту ЛЕЖИТ ``telemetry.publish.default_interval_sec: "быстро"``.
+      Дальше отравленный слой ломает **соседа**: следующий, совершенно законный
+      ``config.reload {"observability": {"log_level": "DEBUG"}}`` того же процесса
+      отвечает ``reconfigure failed: … TelemetryPublishConfig``. Оператор, который
+      телеметрию не трогал, не может сменить уровень логов ближайшие 300 секунд —
+      до истечения срока правки, которой ему официально отказали;
+    * ``telemetry.reconfigure {"throttle": {"processes.**.state.fps": "часто"}}``
+      → ``success=true``, правило доехало до живого ``ThrottleMiddleware``, и на
+      ВТОРОЙ записи по этому пути стор падает с ``TypeError: unsupported operand
+      type(s) for /: 'float' and 'str'``. Следствие Н-4 числилось гипотезой —
+      теперь оно с репро;
+    * опечатка в имени под-секции (``pubish``) вела себя ПО-РАЗНОМУ на двух
+      дверях: без секции ``observability`` рядом — тихий no-op, вместе с ней —
+      ключ ``telemetry.pubish.tick_sec`` ложился в L3 под срок и попадал в
+      ``session_keys``. Один и тот же ввод, два ответа, оба неверные.
+
+    Список под-секций ЗАКРЫТ (:data:`TELEMETRY_SUBSECTIONS`). Незнакомое имя —
+    это опечатка оператора, а не расширение протокола: своей секции у неё нет,
+    применить её некому, и единственное, что она может, — занять место в слое и
+    съесть срок. Цена решения названа честно: рецепт с под-секцией из БУДУЩЕЙ
+    версии фреймворка будет отвергнут этой, а не принят наполовину.
+
+    Args:
+        section: значение ключа ``telemetry`` (``None`` — «слой про телеметрию
+            молчит», законно).
+        layer: имя слоя для текста отказа — тем же словом, что у соседа.
+
+    Raises:
+        ValueError: содержимое не годится; текст несёт адрес КАЖДОГО негодного
+            ключа (все проблемы разом, а не первая попавшаяся).
+    """
+    if section is None:
+        return
+    if not isinstance(section, dict):
+        raise ValueError(
+            f"слой {layer} отвергнут — {TELEMETRY_KEY}: ожидается словарь под-секций "
+            f"({'/'.join(TELEMETRY_SUBSECTIONS)}), получено {type(section).__name__}"
+        )
+
+    problems: list[str] = []
+    unknown = [str(key) for key in section if key not in TELEMETRY_SUBSECTIONS]
+    for key in sorted(unknown):
+        problems.append(
+            f"{TELEMETRY_KEY}.{key}: неизвестная под-секция телеметрии (известны: {', '.join(TELEMETRY_SUBSECTIONS)})"
+        )
+
+    if TELEMETRY_LAYERED_SUBSECTION in section:
+        problems.extend(_telemetry_publish_problems(section[TELEMETRY_LAYERED_SUBSECTION]))
+    if TELEMETRY_THROTTLE_SUBSECTION in section:
+        problems.extend(_telemetry_throttle_problems(section[TELEMETRY_THROTTLE_SUBSECTION]))
+
+    if problems:
+        raise ValueError(f"слой {layer} отвергнут — " + "; ".join(problems))
+
+
+def _telemetry_publish_problems(publish: Any) -> list[str]:
+    """Негодные ключи ``telemetry.publish`` — судит СВОЯ схема плоскости.
+
+    ``None`` — законная команда «выключить гейт» (все метрики каждый тик), и
+    отвергать её было бы отказом в существующей операции. Всё остальное едет в
+    :class:`~.telemetry_publish_config.TelemetryPublishConfig` — ту же схему, из
+    которой получатель собирает гейт. Второй копии правил здесь нет: разъедься
+    они, слой принимал бы то, чего получатель не умеет, — ровно сегодняшний
+    дефект, только с другой стороны.
+    """
+    if publish is None:
+        return []
+    from pydantic import ValidationError
+
+    from .telemetry_publish_config import MetricRule, TelemetryPublishConfig
+
+    base = f"{TELEMETRY_KEY}.{TELEMETRY_LAYERED_SUBSECTION}"
+    try:
+        TelemetryPublishConfig.model_validate(publish)
+    except ValidationError as exc:
+        problems = []
+        for err in exc.errors():
+            tail = ".".join(str(part) for part in err.get("loc", ()))
+            problems.append(f"{base}.{tail}: {err.get('msg', '')}" if tail else f"{base}: {err.get('msg', '')}")
+        return problems
+
+    # Задача 5.7 (блокер Н2-4 переприёмки раунда 2). Значения проверены выше, а
+    # ИМЕНА — нет: схема принимает лишние ключи молча, и `publish: {нет_такой_ручки:
+    # …}` отвечал `success=true`, ложился в L3 со сроком 254 с, не имел readback'а и
+    # ПОПУТНО включал гейт публикации. Задача 5.4 закрыла тот же класс у соседних
+    # плоскостей и передала ключ `telemetry` сюда — а здесь судились только имена
+    # ПОД-СЕКЦИЙ. Классический «фасад — белый список»: поле в схеме менеджера не
+    # делает ручку управляемой, и делегирование соседу не делает её проверенной.
+    #
+    # Метрики НЕ трогаем: имя под `metrics` — это имя метрики, и незнакомое имя там
+    # законно (конфиг сужает, а не объявляет белый список). Их судит существующий
+    # `unknown_metrics` — голосом, а не отказом.
+    if isinstance(publish, dict):
+        known = set(TelemetryPublishConfig.model_fields)
+        problems = [
+            f"{base}.{key}: неизвестное поле секции публикации (известны: {', '.join(sorted(known))}); "
+            f"правила метрик живут под 'metrics'"
+            for key in sorted(str(k) for k in publish)
+            if str(key) not in known
+        ]
+        rules = publish.get("metrics")
+        if isinstance(rules, dict):
+            rule_fields = set(MetricRule.model_fields)
+            for name, rule in sorted(rules.items()):
+                if not isinstance(rule, dict):
+                    continue
+                problems.extend(
+                    f"{base}.metrics.{name}.{key}: неизвестное поле правила метрики "
+                    f"(известны: {', '.join(sorted(rule_fields))})"
+                    for key in sorted(str(k) for k in rule)
+                    if str(key) not in rule_fields
+                )
+        if problems:
+            return problems
+    return []
+
+
+def _telemetry_throttle_problems(throttle: Any) -> list[str]:
+    """Негодные правила ``telemetry.throttle`` — схемы у плоскости нет, правила здесь.
+
+    Дельта троттла — ПЛОСКИЙ словарь ``{glob-паттерн: интервал}``, и Pydantic-модели
+    у неё нет по построению (ключи — произвольные имена путей). Поэтому три правила
+    написаны здесь, и каждое стоит на своём репро:
+
+    * **интервал — конечное неотрицательное число.** Строка доезжает до живого
+      ``ThrottleMiddleware`` и роняет стор делением на неё (см. репро выше);
+    * **``bool`` интервалом не считается.** ``True`` — подкласс ``int``, то есть
+      «раз в секунду» под видом «включить»; тот же довод, по которому его
+      отвергает :func:`validate_ttl`;
+    * **``__clear__`` — только ``true``.** Применение сверяет маркер строго
+      (``is True``), и ``__clear__: "yes"`` не очистит набор, а заведёт ПРАВИЛО с
+      таким именем и строковым интервалом — то есть тихо сделает не то, о чём
+      просили, да ещё и на горячем пути.
+
+    ``None`` у паттерна остаётся законным: это родной маркер
+    ``THROTTLE_REMOVE`` («снять правило») в режиме ``merge``, а в ``replace`` —
+    просто путь без правила.
+
+    Адрес в тексте — ``telemetry.throttle[паттерн]``, а НЕ через точку: точки
+    внутри паттерна часть имени, и точечная форма назвала бы оператору путь,
+    который слои запрещают (:func:`_reject_path_inside_opaque`).
+    """
+    from ..managers.telemetry_reload import THROTTLE_CLEAR_MARKER
+
+    if throttle is None:
+        return []
+    if not isinstance(throttle, dict):
+        return [
+            f"{TELEMETRY_THROTTLE_PATH}: ожидается словарь {{паттерн: интервал_сек}}, "
+            f"получено {type(throttle).__name__}"
+        ]
+
+    problems: list[str] = []
+    for pattern, interval in throttle.items():
+        address = f"{TELEMETRY_THROTTLE_PATH}[{pattern!r}]"
+        if not isinstance(pattern, str):
+            problems.append(f"{address}: паттерн правила обязан быть строкой")
+            continue
+        if pattern == THROTTLE_CLEAR_MARKER:
+            if interval is not True:
+                problems.append(
+                    f"{address}: маркер полной очистки принимает только true "
+                    f"(получено {interval!r}); иначе это правило с таким именем, а не очистка"
+                )
+            continue
+        if interval is None:  # THROTTLE_REMOVE — снять правило
+            continue
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)):
+            problems.append(f"{address}: интервал должен быть числом секунд, получено {interval!r}")
+            continue
+        if interval != interval or interval in (float("inf"), float("-inf")):
+            problems.append(f"{address}: интервал должен быть конечным числом секунд, получено {interval!r}")
+            continue
+        if interval < 0:
+            problems.append(f"{address}: интервал не может быть отрицательным (0 — полная блокировка)")
+    return problems
 
 
 def _channel_toggle(channel_type: str) -> str:

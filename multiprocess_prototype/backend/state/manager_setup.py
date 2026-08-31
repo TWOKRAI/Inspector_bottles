@@ -50,6 +50,28 @@ def _default_throttle_rules() -> dict[str, float]:
         "processes.**.state.fps": interval,
         "processes.**.state.latency_ms": interval,
         "processes.**.state.uptime": interval,
+        # Плагинные метрики — в ПОДДЕРЕВЕ ПИСАТЕЛЯ (Ф1 «порта наблюдений»):
+        # `processes.<P>.state.plugins.<писатель>.<имя>`. Сегмент `*` — ОДИН
+        # уровень (имя писателя), `**` перед ним — имя процесса любой глубины.
+        # Имя плагина здесь не появляется: предохранитель ставится на ФОРМУ
+        # адреса, иначе новый писатель приезжает незащищённым.
+        #
+        # Измеренная частота захвата — свой лист, свой предохранитель (Р3.5-13).
+        # Не авторитет частоты: ею управляет publisher-gate, здесь только страховка
+        # от runaway-публикатора (ADR-PM-017).
+        "processes.**.state.plugins.*.capture_fps": interval,
+        "processes.**.state.plugins.*.frame_count": interval,
+        "processes.**.state.plugins.*.drops": interval,
+        # Плоские адреса тех же трёх имён ОСТАВЛЕНЫ: `publish_metric` — не
+        # единственная дорога в `state`, прямая запись через `state_proxy.merge`
+        # (предмет Ф5) кладёт лист плоско, и предохранитель обязан его накрыть.
+        # Названный потолок: если интервалы двух форм когда-нибудь разойдутся,
+        # `detect_throttle_caps` (`process_module/managers/telemetry_reload.py`)
+        # рапортует СТРОЖАЙШИЙ из них по последнему сегменту — то есть возможно
+        # значение с адреса, который в этом дереве не пишет никто. Пока обе формы
+        # держат один `interval`, рапорт честен; разводить их врозь нельзя не
+        # починив там матчинг.
+        "processes.**.state.capture_fps": interval,
         "processes.**.state.frame_count": interval,
         "processes.**.state.drops": interval,
         # Per-worker метрики — тот же мягкий предохранитель.

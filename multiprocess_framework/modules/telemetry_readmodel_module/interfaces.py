@@ -17,14 +17,34 @@ class ITelemetryReadModel(Protocol):
 
     Наполняется потоком дельт через :meth:`ingest`; читается локально —
     ``get``/``snapshot``/``history`` не делают IPC и не создают подписок.
+
+    Инвариантов два: кольцо истории пишет только поток (ADR-139) и порядок
+    записи судится номером, а не временем (:attr:`write_seq`, S-1 нога B).
     """
+
+    @property
+    def write_seq(self) -> int:
+        """Число ПРИНЯТЫХ записей push-дороги; ответ опроса его не двигает."""
+        ...
 
     def prime(self, cache: dict[str, Any]) -> None:
         """Залить первичный снимок ``{path: value}`` (без истории для нечисловых)."""
         ...
 
-    def ingest(self, path: str, value: Any, *, deleted: bool = False) -> None:
-        """Внести одну разобранную дельту: обновить снимок и историю; deleted → удалить путь."""
+    def ingest(self, path: str, value: Any, *, deleted: bool = False, record_history: bool = True) -> None:
+        """Внести одну разобранную дельту: обновить снимок и историю; deleted → удалить путь.
+
+        ``record_history=False`` — обновить только снимок (источник УРОВНЯ, а не
+        точки потока: опрос, ADR-139; кольцо истории имеет фиксированный maxlen).
+        """
+        ...
+
+    def ingest_poll_snapshot(self, values: dict[str, Any], *, requested_at_seq: int) -> list[str]:
+        """Влить ответ опроса, отбросив пути с ``push_seq[path] > requested_at_seq``.
+
+        Возвращает применённые пути; историю не пишет. ``requested_at_seq``
+        обязателен без умолчания — умолчание позволяло бы обойти сторожа молча.
+        """
         ...
 
     def get(self, path: str, default: Any = None) -> Any:

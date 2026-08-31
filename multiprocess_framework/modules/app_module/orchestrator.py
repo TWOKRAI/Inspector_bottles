@@ -168,6 +168,15 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             logger=self.logger_manager,
             error=self.error_manager,
             stats=self.stats_manager,
+            # Ф4 (4.1): отбор широких записей — такой же получатель правки файла,
+            # как менеджеры. Оба watcher'а получают ОДИН селектор процесса, а не
+            # каждый свой: селектор один на процесс, и второй экземпляр вёл бы
+            # свой счёт по родам.
+            event_selector=getattr(self, "event_selector", None),
+            # Ф5 (5.1): рекордер дампов — по тому же правилу и в ОБА watcher'а.
+            # Экземпляр один на процесс: второй вёл бы свой счёт дампов и свой
+            # ретеншен в том же каталоге.
+            flight_recorder=getattr(self, "flight_recorder", None),
             log_info=self._log_info,
             log_error=self._log_error,
             on_reload_extra=self._compose_fan_out(telemetry_on_reload, {}, "system-конфиг"),
@@ -216,6 +225,8 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             logger=self.logger_manager,
             error=self.error_manager,
             stats=self.stats_manager,
+            event_selector=getattr(self, "event_selector", None),
+            flight_recorder=getattr(self, "flight_recorder", None),
             log_info=self._log_info,
             log_error=self._log_error,
             on_reload_extra=self._compose_fan_out(None, {"observability_recipe_reload": True}, "спутник рецепта"),
@@ -369,10 +380,17 @@ class GenericProcessManagerApp(ProcessManagerProcess):
         # ниже), kind-router в receive() диспатчит их туда по type=="command",
         # reply делает транспорт. RAW-копии в event_dispatcher были бы dead-path.
         # router всё равно нужен DeltaDispatcher'у (push дельт).
+        # logger=self.logger_manager, а НЕ logger=self (Task Т.1). StateStoreManager
+        # кладёт объект в слот 'logger' своего ObservableMixin и зовёт каноничные
+        # warning()/error()/…; у оркестратора их нет — только log_warning()/….
+        # Порядок: _setup_state_store() вызывается из initialize() ПОСЛЕ
+        # super().initialize(), где отработал _init_managers (шаг 3) —
+        # logger_manager уже присвоен. Пиновка порядка — в
+        # tests/test_state_store_logger_wiring.py.
         self._state_store_manager = StateStoreManager(
             router=self.router_manager,
             initial_state=initial_state,
-            logger=self,
+            logger=self.logger_manager,
             auto_register_ipc=False,
         )
 

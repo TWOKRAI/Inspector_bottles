@@ -739,13 +739,35 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         )
 
     def _resolved_file_path(self, file_path: Optional[str], fallback: str) -> str:
-        # Каждый процесс пишет в свою подпапку: logs/{process_name}/
+        """Путь файла лога: каждый процесс пишет в свою подпапку ``{база}/{process_name}/``.
+
+        **Базой молчащего конфига служит** :func:`default_log_base_directory`, а НЕ строка
+        ``"logs"``. Здесь стоял материализованный дефолт (``_Path("logs")``), и он отменял
+        защиту, стоящую за ним: ``log_paths`` обещает «без явной привязки файлы не попадают
+        в дерево пакета» и для ``log_directory=None`` уводит в системный temp — но получал
+        уже непустой ОТНОСИТЕЛЬНЫЙ путь и честно резолвил его от ``cwd``. То есть обещание
+        было снято слоем выше, в одну строку, и молча.
+
+        Цена этого измерена (задача 3.3): прогон тестов из корня репозитория дописывал в
+        ``<репозиторий>/logs/`` — 154 457 байт за один прогон осиротевших каталогов, в
+        подпапки по именам процессов (``ProcessManager``, ``console_sink``, ``ticker``).
+        Каталог дорос до 467 МиБ.
+
+        Поведение при ЗАДАННОМ ``log_directory`` не менялось — прототип задаёт его всегда
+        (``system.log_dir``), поэтому прод эту правку не чувствует. Меняется ровно случай
+        «никто не привязал каталог»: раньше писало рядом с cwd, теперь — в temp, как и
+        обещано в :mod:`log_paths`.
+        """
         log_dir = self.config.log_directory
         if self.process is not None and hasattr(self.process, "name"):
-            from pathlib import Path as _Path
+            # Задача 5.1 (Ф5): вычисление переехало в :func:`process_log_directory`,
+            # потому что у него появился ВТОРОЙ клиент — каталог дампов flight
+            # recorder'а. Две одинаковые тройки строк разошлись бы на первой же
+            # правке приоритета каталогов, и дампы легли бы не рядом с журналом
+            # процесса, а куда-нибудь ещё — молча.
+            from .log_paths import process_log_directory
 
-            base = _Path(log_dir) if log_dir else _Path("logs")
-            log_dir = str(base / self.process.name)
+            log_dir = str(process_log_directory(log_dir, self.process.name))
         return resolve_log_file_path(
             file_path,
             fallback=fallback,
@@ -1679,6 +1701,18 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             burst_reset_sec=getattr(log_config, "sampling_burst_reset_sec", 5.0),
             max_level=getattr(log_config, "sampling_max_level", "DEBUG"),
         )
+
+    def sampling_readback(self) -> Dict[str, Any]:
+        """ДЕЙСТВУЮЩИЕ параметры дросселя — для readback пульта (задача 4.4).
+
+        Спрашивает САМ ПРОЦЕССОР, а не свой конфиг: цепочка держит объект, и
+        ``self.config`` пережил бы правку, которая до сэмплера не доехала, —
+        расхождение, о котором readback обязан говорить, стало бы невидимым.
+        Потолок при этом приезжает обрезанным по ошибкам (см.
+        :meth:`RateSampler.readback`), поэтому ``sampling_max_level: CRITICAL``
+        из конфига честно показывается как действующий ``WARNING``.
+        """
+        return self._sampler.readback()
 
     def _run_processors(
         self,

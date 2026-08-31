@@ -92,7 +92,9 @@ def sweep_session_ttl(svc: Any) -> Optional[Dict[str, Any]]:
     if not expired and not layers.rebuild_pending:
         return None
 
+    from .observability_flight import FLIGHT_RECORDER_ATTR
     from .observability_reload import apply_observability_layers, telemetry_targets
+    from .observability_wiring import EVENT_SELECTOR_ATTR
 
     entry: Dict[str, Any] = {
         # Своей отметки времени тут нет намеренно (A-A6-1): аудит ставит `ts` сам,
@@ -117,6 +119,15 @@ def sweep_session_ttl(svc: Any) -> Optional[Dict[str, Any]]:
             # получателей — возврат объявлялся бы, а гейт оставался на истёкшей
             # правке: следствие без причины, худший из возможных исходов.
             **telemetry_targets(svc),
+            # Ф4 (4.1): истечь может и ключ `observability.events`. Не передай мы
+            # селектор — возврат объявлялся бы, а отбор оставался бы на истёкшей
+            # правке: то же «следствие без причины», что уже ловили на телеметрии.
+            event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
+            # Ф5 (5.1): истечь может и ключ `observability.flight`. Не передай мы
+            # рекордер — возврат объявлялся бы, а дампы продолжали писаться по
+            # истёкшей правке: то же «следствие без причины», что уже ловили на
+            # телеметрии и на отборе широких записей.
+            flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
             origin=AUDIT_ORIGIN,
             # Запись за такт кладёт `note_revert` ниже: она несёт и снятые ключи,
             # и исход пересборки. Generic-запись была бы вторым описанием того же

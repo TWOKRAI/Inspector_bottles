@@ -86,6 +86,79 @@ class MockCommandManager:
 # ---------------------------------------------------------------------------
 
 
+class MockDocumentSink:
+    """Дубль стока плоскости документов (Ф8.7), умеющий ОТКАЗЫВАТЬ.
+
+    Дубль, который всегда успешен, глушит гейт: путь вердикта «записан» и путь
+    «сток отказал» выглядели бы для теста одинаково, а различает их именно
+    ``write_document`` — возвратом ``False`` и счётчиком потери. Поэтому у дубля
+    есть ``refuse``, а отказы он считает так же, как настоящий стор (``dropped``).
+
+    Args:
+        refuse: отказывать в записи (``append`` вернёт ``False``).
+        raises: вместо отказа поднимать исключение — третий исход настоящего
+            стора (сбой хранилища), который ``write_document`` обязан пережить,
+            не роняя линию.
+    """
+
+    def __init__(self, *, refuse: bool = False, raises: BaseException | None = None) -> None:
+        self.refuse = refuse
+        self.raises = raises
+        #: Принятые документы — по ним тест судит СОДЕРЖИМОЕ конверта, а не факт вызова.
+        self.documents: list[dict[str, Any]] = []
+        #: Отказы. Имя как у настоящего стора: ``document_plane_report`` читает его.
+        self.dropped = 0
+
+    def append(self, document: dict[str, Any]) -> bool:
+        if self.raises is not None:
+            raise self.raises
+        if self.refuse:
+            self.dropped += 1
+            return False
+        self.documents.append(dict(document))
+        return True
+
+
+class MockStatsManager:
+    """Дубль ``StatsManager`` для плоскости stats (этап 6, 1.1), умеющий ОТКАЗЫВАТЬ.
+
+    Тот же довод, что у :class:`MockDocumentSink` строкой выше: дубль,
+    который всегда успешен, глушит гейт. У метрики нет возврата, поэтому
+    отличить «записано» от «сбой учёта» можно только по тому, что фасад
+    сказал в журнал — а сказать ему не о чем, если дубль не умеет падать.
+
+    Записи хранятся списком в порядке вызова: тест судит СОДЕРЖИМОЕ (род,
+    имя, значение, теги — в т.ч. автоштамп ``plugin``), а не факт вызова.
+
+    Args:
+        raises: поднимать это исключение на каждой записи — исход, который
+            фасад обязан пережить, не роняя линию.
+    """
+
+    def __init__(self, *, raises: BaseException | None = None) -> None:
+        self.raises = raises
+        #: ``[(род, имя, значение, теги), …]`` — род берётся из имени метода,
+        #: как и у настоящего менеджера: строкового параметра рода нет нигде.
+        self.records: list[tuple[str, str, Any, dict | None]] = []
+
+    def _put(self, kind: str, name: str, value: Any, tags: dict | None) -> None:
+        if self.raises is not None:
+            raise self.raises
+        self.records.append((kind, name, value, dict(tags) if tags is not None else None))
+
+    def record_metric(self, name: str, value: Any = 1, tags: dict | None = None) -> None:
+        self._put("counter", name, value, tags)
+
+    def gauge(self, name: str, value: float, tags: dict | None = None) -> None:
+        self._put("gauge", name, value, tags)
+
+    def record_timing(self, name: str, duration: float, tags: dict | None = None) -> None:
+        self._put("timing", name, duration, tags)
+
+    def histogram(self, name: str, value: float, tags: dict | None = None) -> None:
+        self._put("histogram", name, value, tags)
+
+
 class MockProcessServices:
     """Лёгкий mock IProcessServices для изолированного тестирования плагинов.
 
@@ -98,6 +171,33 @@ class MockProcessServices:
         router_manager: Можно передать кастомный mock RouterManager.
         memory_manager: Можно передать кастомный mock MemoryManager.
         state_proxy: Можно передать кастомный StateProxy.
+        document_sink: Сток плоскости документов (Ф8.7). ``None`` по умолчанию —
+            «плоскость не настроена», ровно как у процесса без секции
+            ``observability.documents``; ``write_document`` тогда вернёт ``False``
+            и посчитает документ в ``without_sink``. Чтобы судить путь вердикта,
+            передай :class:`MockDocumentSink` — он умеет и принять, и отказать.
+        stats_manager: Менеджер плоскости stats (этап 6, 1.1). ``None`` по
+            умолчанию — «плоскости нет», ровно как у процесса без
+            ``StatsManager``: четвёрка тогда считает метрику в
+            ``stats.without_plane`` и говорит один раз. Чтобы судить путь
+            метрики, передай :class:`MockStatsManager`.
+        event_selector: Селектор широких записей (Ф4, 4.1). ``None`` по
+            умолчанию — «сшивки не было»: ``write_event`` тогда пишет фронты
+            (``decisive=True``) и не пишет поток, ровно как настроенный селектор
+            с дефолтом ``first_n=0, every_mth=0``. Чтобы судить лесенку отбора,
+            передай настоящий ``WideEventSelector`` — фальшивка-всегда-успех
+            заглушила бы ровно то свойство, которое проверяют.
+        flight_recorder: Рекордер дампов кольца (Ф5, 5.1). ``None`` по умолчанию
+            — «сшивки не было»: ``flight_dump`` тогда отвечает тем же названным
+            отказом, что и выключённый рекордер (Р5.1-5 — у «выключено» одно
+            состояние). Чтобы судить дорогу дампа, передай настоящий
+            ``FlightRecorder``: он читает кольцо через ``logger_manager``, и
+            фальшивка-всегда-успех заглушила бы именно ту дорогу.
+        plugin_levels: Хранилище уровней дерева состояния (Task 3.5). ``None`` по
+            умолчанию — и это не «плоскости нет», а нормальный старт: хранилище
+            создаётся лениво на первом ``ctx.publish_metric``. Передавай готовый
+            ``PluginLevels`` только чтобы заглянуть в него из теста, не поднимая
+            ``ProcessHeartbeat``.
     """
 
     def __init__(
@@ -107,8 +207,38 @@ class MockProcessServices:
         router_manager: Any = None,
         memory_manager: Any = None,
         state_proxy: Any = None,
+        document_sink: Any = None,
+        stats_manager: Any = None,
+        event_selector: Any = None,
+        flight_recorder: Any = None,
+        plugin_levels: Any = None,
+        logger_manager: Any = None,
     ) -> None:
         self.name: str = name
+        # Ф8.7 / задача 4.2 (Н-9): атрибут ЕСТЬ всегда, значение может быть None.
+        # До 4.2 дубль стока не имел вовсе — дорога документов не судилась ни одним
+        # тестом плагина: пройти её было нечем, а отказать тем более.
+        self.document_sink: Any = document_sink
+        # Этап 6, 1.1: тот же довод, что у стока строкой выше — атрибут ЕСТЬ
+        # всегда, значение может быть None. Без атрибута дубль перестал бы
+        # удовлетворять IProcessServices, который порт объявил.
+        self.stats_manager: Any = stats_manager
+        # Ф4 (4.1): третий порт с тем же доводом — атрибут ЕСТЬ всегда, значение
+        # может быть None. Без атрибута дубль перестал бы удовлетворять протоколу.
+        self.event_selector: Any = event_selector
+        # Ф5 (5.1): четвёртый порт с тем же доводом — атрибут ЕСТЬ всегда,
+        # значение может быть None. Без атрибута дубль перестал бы удовлетворять
+        # IProcessServices, который порт объявил.
+        self.flight_recorder: Any = flight_recorder
+        # Task 3.5: пятый порт с тем же доводом — атрибут ЕСТЬ всегда, значение
+        # может быть None. ``None`` здесь ещё и штатный старт: хранилище уровней
+        # создаётся лениво на первом ``ctx.publish_metric``, и дубль обязан этот
+        # путь пройти, а не получить готовое хранилище задаром.
+        self.plugin_levels: Any = plugin_levels
+        # Task Т.1: шестой порт с тем же доводом — атрибут ЕСТЬ всегда, значение
+        # может быть None. Без атрибута дубль перестал бы удовлетворять
+        # IProcessServices, который порт объявил.
+        self.logger_manager: Any = logger_manager
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()

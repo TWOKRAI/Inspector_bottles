@@ -27,7 +27,7 @@ from .manager import PluginDiscoveryResult, PluginManager
 from .metrics import PluginMetrics
 from .port import Port, are_ports_compatible, validate_chain
 from .registry import PluginRegistry, register_plugin
-from .test_bench import PluginTestBench
+from .plugin_test_bench import PluginTestBench
 
 __all__ = [
     "ProcessModulePlugin",

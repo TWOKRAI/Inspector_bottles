@@ -26,19 +26,25 @@ class GenericProcessApp(GenericProcess):
             StateProxy,
         )
 
+        # logger=self.logger_manager, а НЕ logger=self (Task Т.1). StateProxy —
+        # носитель ObservableMixin: он кладёт этот объект в слот 'logger' и зовёт
+        # каноничный протокол warning()/error()/…, а сам процесс экспонирует
+        # только log_warning()/log_error(). При logger=self КАЖДАЯ запись
+        # StateProxy исчезала (измерено: 0 строк на 60 живых лог-файлах).
+        # Порядок безопасен: _init_custom_managers — шаг 6 initialize(), а
+        # logger_manager присваивается на шаге 3 (_init_managers) — см. тест
+        # test_state_proxy_logger_wiring.py.
         self._state_proxy = StateProxy(
             process_name=self.name,
             router=self.router_manager,
             server_target="ProcessManager",
-            logger=self,
+            logger=self.logger_manager,
         )
         self._state_proxy.initialize()
 
         # Регистрация handler для входящих state.changed от StateStoreManager
         if self.router_manager:
-            self.router_manager.register_message_handler(
-                "state.changed", self._state_proxy.on_state_changed
-            )
+            self.router_manager.register_message_handler("state.changed", self._state_proxy.on_state_changed)
 
         # super() прокинет self._state_proxy в PluginContext (Task 8.2)
         super()._init_custom_managers()

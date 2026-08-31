@@ -100,6 +100,11 @@ def _make_pm_app(router, initial_state, throttle_rules):
     pm.config_handler = None
     pm.router_manager = router
     pm.command_manager = MagicMock()
+    # Task Т.1: у настоящего объекта logger_manager ставит ProcessModule.__init__
+    # (None) и переприсваивает _init_managers; __new__ обходит оба шага.
+    # _setup_state_store отдаёт его в слот logger StateStoreManager вместо self —
+    # процесс каноничного debug/info/warning/… не несёт.
+    pm.logger_manager = None
     pm._state_store_manager = None
 
     return pm
@@ -374,10 +379,22 @@ class TestManagerSetup:
     _SAFETY = 0.05
     _DEFAULT_RULES = {
         "processes.**.state.fps": _SAFETY,
+        # Р3.5-13: измеренная частота захвата разведена с частотой цикла воркера
+        # и получила СВОЙ лист — значит и свой мягкий предохранитель.
+        "processes.**.state.capture_fps": _SAFETY,
         "processes.**.state.latency_ms": _SAFETY,
         "processes.**.state.uptime": _SAFETY,
         "processes.**.state.frame_count": _SAFETY,
         "processes.**.state.drops": _SAFETY,
+        # Ф1 «порта наблюдений» (Task 1.4): те же три плагинных имени приехали
+        # ВТОРОЙ формой адреса — в поддереве писателя. Плоская форма оставлена
+        # для прямой записи мимо `publish_metric` (дорога Ф5), новая накрывает
+        # разъём. Сторож совпадения по СВОЙСТВУ (правило матчит живой путь) —
+        # `test_throttle_rules_cover_plugin_paths.py`; здесь характеризация
+        # словаря, и она про состав, а не про матч.
+        "processes.**.state.plugins.*.capture_fps": _SAFETY,
+        "processes.**.state.plugins.*.frame_count": _SAFETY,
+        "processes.**.state.plugins.*.drops": _SAFETY,
         "processes.**.workers.*.effective_hz": _SAFETY,
         "processes.**.workers.*.cycle_duration_ms": _SAFETY,
     }

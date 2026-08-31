@@ -150,7 +150,11 @@
   в Наблюдаемости). 2. Первичное наполнение из `snapshot()`. 3. Обнаружение runtime-воркеров — из тех же батчей.
 **Acceptance:**
 - [x] Открытие вкладки: 0 `state.subscribe`, 0 блокирующих IPC (инвариант-тест) — `test_telemetry_vm_panels.py::TestNoServerSubscriptionsInVmMode` (`test_all_panel_vm_makes_no_bind_calls`, `test_single_panel_vm_makes_no_bind_calls`, `test_tab_open_and_select_makes_no_bind_calls` — мок-bindings, 0 bind/bind_fanout/ensure_subscription из панелей в VM-режиме)
-- [ ] Live-обновления карточек/воркеров работают (qt-smoke по правилу — прогонит Director) · pytest-покрытие: `TestLiveUpdateViaVm` (карточки/health/trace-fanout/воркеры через батч + первичное наполнение из snapshot late-binding), `TestFallbackWithoutVm` (telemetry=None → прежний bind-путь)
+- [x] Live-обновления карточек/воркеров работают (qt-smoke по правилу — прогонит Director) · pytest-покрытие: `TestLiveUpdateViaVm` (карточки/health/trace-fanout/воркеры через батч + первичное наполнение из snapshot late-binding), `TestFallbackWithoutVm` (telemetry=None → прежний bind-путь)
+      · **Снято на живом стенде 2026-08-14** (qt-mcp, боевой вход, `telemetry-stage6` Task 2.3):
+      «Время цикла» карточки `camera_0` меняется 47.0 → 46.0 → 47.0 мс, шапка — FPS 21.0 → 22.0.
+      Различитель выбран намеренно: «Циклов/с 21.2» и «Воркеров: 1» стоят неподвижно у живой
+      и у замёрзшей вкладки одинаково, поэтому доказательством служить не могут.
 **Out of scope:** остальные вкладки (devices/calibration) — мигрируют по мере надобности этим же паттерном.
 
 ### Фаза 2 — История и графики (pull из telemetry_sink)

@@ -15,9 +15,10 @@ DataReceiverBridge.dispatch(data_type="observability_record").
     IChannel: LogRecord-dict → display), min_level задаёт подписчик (Ф6.х.5;
     дефолт ERROR — прежний захардкоженный порог был половиной дефекта З-1).
 
-Ф6.х.5, честно про batch-путь: в проде hub наполняет только stats-слот, и его
-единственный владелец (WorkerManager) метрик не эмитит — push_batch сегодня не
-вызывается, stats-плоскость хвоста структурно пуста. Охват hub'а — решение Ф8.3.
+Batch-путь ЖИВ с задачи 2.1: у stats-слота hub'а появился второй владелец —
+канал `hub_stats` StatsManager'а, кладущий туда снапшот окна агрегации. До того
+слот принадлежал только WorkerManager'у, который метрик не шлёт, и push_batch не
+вызывался ни разу. См. ADR-CRM-015.
 
 Канал duck-typed: НЕ импортирует logger_module/router (только IChannel + router с
 ``send_async``); Dict at Boundary — наружу едет чистый pickle-safe dict.

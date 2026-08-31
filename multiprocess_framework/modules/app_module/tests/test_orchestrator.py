@@ -40,6 +40,11 @@ def _make_orchestrator(config: dict) -> GenericProcessManagerApp:
     orch.config_handler = None
     orch.router_manager = InMemoryRouter()
     orch.command_manager = MagicMock()
+    # Task Т.1: у настоящего объекта logger_manager ставит ProcessModule.__init__
+    # (None) и переприсваивает _init_managers; __new__ обходит оба шага.
+    # _setup_state_store отдаёт его в слот logger StateStoreManager вместо self —
+    # процесс каноничного debug/info/warning/… не несёт.
+    orch.logger_manager = None
     orch._state_store_manager = None
     return orch
 
@@ -63,25 +68,34 @@ class TestSetupStateStoreGating:
         """Непустой initial_state (build-time state_bootstrap) → StateStore создан."""
         orch = _make_orchestrator({"initial_state": {"system": {"x": 1}}})
         orch._setup_state_store()
-        assert orch._state_store_manager is not None
-        assert orch._state_store_manager.is_initialized
-        assert orch._state_store_manager.store.get("system.x") == 1
+        try:
+            assert orch._state_store_manager is not None
+            assert orch._state_store_manager.is_initialized
+            assert orch._state_store_manager.store.get("system.x") == 1
+        finally:
+            orch._state_store_manager.shutdown()
 
     def test_only_throttle_creates_store(self) -> None:
         """Только throttle_rules (без initial_state) → StateStore + middleware."""
         orch = _make_orchestrator({"initial_state": {}, "state_throttle_rules": {"system.*": {"interval_ms": 100}}})
         orch._setup_state_store()
-        assert orch._state_store_manager is not None
-        pipeline = orch._state_store_manager.pipeline
-        assert len(pipeline._middlewares) > 0
-        assert pipeline._middlewares[0].name == "throttle"
+        try:
+            assert orch._state_store_manager is not None
+            pipeline = orch._state_store_manager.pipeline
+            assert len(pipeline._middlewares) > 0
+            assert pipeline._middlewares[0].name == "throttle"
+        finally:
+            orch._state_store_manager.shutdown()
 
     def test_commands_registered_when_store_created(self) -> None:
         """При созданном store команды state.* регистрируются в CommandManager."""
         orch = _make_orchestrator({"initial_state": {"system": {"x": 1}}})
         orch._setup_state_store()
-        names = [c.args[0] for c in orch.command_manager.register_command.call_args_list]
-        assert "state.set" in names
+        try:
+            names = [c.args[0] for c in orch.command_manager.register_command.call_args_list]
+            assert "state.set" in names
+        finally:
+            orch._state_store_manager.shutdown()
 
 
 class TestConfigureRuntimeSeam:
@@ -257,12 +271,18 @@ class TestShutdownStopsStatePlane:
         orch = _make_orchestrator({"initial_state": {"system": {"x": 1}}})
         orch._setup_state_store()
         assert orch._state_store_manager is not None
-        orch._state_store_manager.shutdown = MagicMock(return_value=True)
+        mgr = orch._state_store_manager
+        mgr.shutdown = MagicMock(return_value=True)
         monkeypatch.setattr(type(orch).__mro__[1], "shutdown", lambda self: True, raising=False)
 
-        orch.shutdown()
+        try:
+            orch.shutdown()
 
-        orch._state_store_manager.shutdown.assert_called_once()
+            mgr.shutdown.assert_called_once()
+        finally:
+            # Спай доказал ВЫЗОВ, но настоящий flusher им не остановлен —
+            # гасим реализацией класса мимо инстансной подмены.
+            type(mgr).shutdown(mgr)
 
     def test_shutdown_without_state_plane_is_noop(self, monkeypatch) -> None:
         """Процесс без state-plane (minimal_app) — shutdown не падает."""
@@ -274,10 +294,14 @@ class TestShutdownStopsStatePlane:
         """Сбой остановки state-plane не срывает остановку ядра (best-effort)."""
         orch = _make_orchestrator({"initial_state": {"system": {"x": 1}}})
         orch._setup_state_store()
-        orch._state_store_manager.shutdown = MagicMock(side_effect=RuntimeError("бум"))
+        mgr = orch._state_store_manager
+        mgr.shutdown = MagicMock(side_effect=RuntimeError("бум"))
         monkeypatch.setattr(type(orch).__mro__[1], "shutdown", lambda self: True, raising=False)
 
-        assert orch.shutdown() is True
+        try:
+            assert orch.shutdown() is True
+        finally:
+            type(mgr).shutdown(mgr)
 
 
 class TestRetargetRecipeWatcherAddress:

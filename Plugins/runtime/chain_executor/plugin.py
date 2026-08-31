@@ -111,12 +111,10 @@ class ChainExecutorPlugin(ProcessModulePlugin):
         # Корректно завершить каждый sub-plugin
         for step in self._steps:
             try:
-                sub_ctx = SubPluginContext(
-                    config=step["config"],
-                    log_info=self._ctx.log_info,
-                    log_error=self._ctx.log_error,
-                    health=self._ctx.health,
-                )
+                # from_parent — ВСЕ дороги родителя одним списком (задача 4.2, Н-6):
+                # перечисление вручную пробрасывало два log-метода из пяти, и
+                # предупреждение вложенного плагина уходило в no-op.
+                sub_ctx = SubPluginContext.from_parent(self._ctx, config=step["config"])
                 step["plugin"].shutdown(sub_ctx)
             except Exception:  # no-health: defensive teardown — sub-plugin мог не реализовать shutdown
                 pass
@@ -153,12 +151,10 @@ class ChainExecutorPlugin(ProcessModulePlugin):
 
             # Создать экземпляр и сконфигурировать с sub-контекстом
             plugin_instance = plugin_cls()
-            sub_ctx = SubPluginContext(
+            sub_ctx = SubPluginContext.from_parent(
+                self._ctx,  # включая health: ошибки sub-плагина кормят health процесса
                 process_name=step_name,
                 config=sub_config,
-                log_info=self._ctx.log_info,
-                log_error=self._ctx.log_error,
-                health=self._ctx.health,  # ошибки sub-плагина кормят health процесса
             )
             plugin_instance.configure(sub_ctx)
 

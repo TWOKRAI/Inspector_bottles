@@ -264,3 +264,30 @@ class TestSamplingKnobsReachTheLogger:
         """У плоскости ошибок дросселя нет — заявленная там ручка ничего бы не делала."""
         out = expand_observability({"sampling_first_n": 5})
         assert not [key for key in out.get("error", {}) if key.startswith("sampling")]
+
+
+def test_snapshot_line_limit_survives_the_facade() -> None:
+    """Предел строки снапшота доезжает до StatsManagerConfig через фасад (3.4).
+
+    Фасад — единственная дорога конфига приложения к плоскости, и ключа, которого в
+    нём нет, схема не пропускает молча: `config_reload_verified` вернёт `failed`
+    («ключ не выжил round-trip»), а не «применено». Так и было на живом стенде — отказ
+    на всех восьми процессах при зелёном прямом тесте менеджера.
+
+    Значение взято ВНЕ дефолта (2048): на дефолтном числе тест проверял бы дефолт.
+    """
+    out = expand_observability({"stats": {"log_line_max_bytes": 777}})
+    assert out["stats"]["log_line_max_bytes"] == 777
+    cfg = StatsManagerConfig.model_validate(out["stats"])
+    assert cfg.log_line_max_bytes == 777
+
+
+def test_snapshot_line_limit_zero_survives_too() -> None:
+    """`0` (предел снят) — тоже значение, а не «не задано».
+
+    Отдельный случай: ноль ложно-подобен, и любая проверка вида `if value:` по дороге
+    превратила бы явное «без предела» обратно в дефолт.
+    """
+    out = expand_observability({"stats": {"log_line_max_bytes": 0}})
+    assert out["stats"]["log_line_max_bytes"] == 0
+    assert StatsManagerConfig.model_validate(out["stats"]).log_line_max_bytes == 0

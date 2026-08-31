@@ -165,6 +165,70 @@ class TestBootLayersAppliedWhenAssemblerDidNot:
             logger.shutdown()
 
 
+class TestRebuildReachesTheStatsPlaneToo:
+    """Task 2.3: пересборка судится с РЕАЛЬНЫМ ``StatsManager``, а не с ``None``.
+
+    До этой задачи весь файл подавал ``stats=None`` (``_Proc.stats_manager``), то
+    есть доказывал пересборку на ОДНОЙ плоскости из трёх. Находка Н-7 жила ровно
+    в непроверенной: у оркестратора stats-менеджер рождался на дефолтах схемы.
+    Задача 2.3 научила его рождаться настроенным, но пересборка обязана доносить
+    правку и до него — иначе спутник рецепта (её вторая ветка) менял бы логи и
+    молча не менял темп метрик.
+
+    Числа — расходящаяся пара: ``flush_interval`` 2.0 против дефолтных 10.0.
+    Проверять ``aggregation_interval`` бессмысленно — действующий темп есть
+    ``max(flush, agg)``, и ``max(5,10) == max(10,10)``: он совпал бы при
+    полностью несработавшей пересборке.
+    """
+
+    def test_stats_plane_gets_the_layer_values(self, tmp_path) -> None:
+        from multiprocess_framework.modules.statistics_module import StatsManager, StatsManagerConfig
+
+        logger = _logger(tmp_path)
+        stats = StatsManager(manager_name="stats_boot", config=StatsManagerConfig(), managers={"logger": logger})
+        stats.initialize()
+        proc = _Proc(
+            "ProcessManager",
+            logger,
+            {APP_CONFIG_KEY: {"log_level": "WARNING", "stats": {"aggregation_interval": 10.0, "flush_interval": 2.0}}},
+            _ConfigHandler({}),
+        )
+        proc.stats_manager = stats
+        try:
+            assert stats.observability_readback()["flush_interval"] == 10.0, "предусловие: до пересборки — дефолт L0"
+            proc._apply_boot_observability_layers()
+            assert stats.observability_readback()["flush_interval"] == 2.0, "пересборка не дошла до плоскости метрик"
+            assert proc.errors == []
+        finally:
+            stats.shutdown()
+            logger.shutdown()
+
+    def test_ready_section_leaves_the_stats_plane_alone(self, tmp_path) -> None:
+        """Вторая половина пары: у процесса с готовой секцией пересборки нет.
+
+        Без неё тест выше был бы зелёным и у реализации «пересобирать ВСЕГДА»,
+        которая ломает ранний выход и стирает конфиг, пришедший от ассемблера.
+        """
+        from multiprocess_framework.modules.statistics_module import StatsManager, StatsManagerConfig
+
+        logger = _logger(tmp_path)
+        stats = StatsManager(manager_name="stats_boot", config=StatsManagerConfig(), managers={"logger": logger})
+        stats.initialize()
+        proc = _Proc(
+            "camera_0",
+            logger,
+            {APP_CONFIG_KEY: {"stats": {"flush_interval": 2.0}}},
+            _ConfigHandler({"stats": {"flush_interval": 30.0}}),
+        )
+        proc.stats_manager = stats
+        try:
+            proc._apply_boot_observability_layers()
+            assert stats.observability_readback()["flush_interval"] == 10.0, "менеджеры пришли готовыми — не трогать"
+        finally:
+            stats.shutdown()
+            logger.shutdown()
+
+
 class TestLayersAreSilentRule:
     """Правило «слои молчат → накладывать нечего» — одно на три адресата."""
 

@@ -256,6 +256,44 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             )
         if _is_positive(rs.errors):
             anomalies.append({"kind": "router_errors", "process": proc, "detail": f"errors={rs.errors}"})
+        # Т.2: асимметрия ревью — потери хвоста наблюдаемости (obs_transport ниже)
+        # были видны, а две потери на очередях ПОЛУЧАТЕЛЯ — нет, хотя обе уже
+        # разбирались ``RouterStats.from_response`` (protocol.py:203, :216).
+        # ``queue_data_evicted`` — вытеснение из data-очереди (drop_oldest, приём
+        # кадров): компромисс задержки против буферизации, тот же счётчик, что
+        # ``_bound_lag`` в data_receiver.py:120 называет по имени в живом инциденте
+        # 2026-08-12 (1646 вытесненных кадров у `seg`). Ожидаемый класс потерь —
+        # DATA-плоскость, поэтому kind отдельный от ``observability_loss``.
+        if _is_positive(rs.queue_data_evicted):
+            anomalies.append(
+                {
+                    "kind": "queue_data_loss",
+                    "process": proc,
+                    "detail": f"queue_data_evicted={rs.queue_data_evicted}",
+                }
+            )
+        # ``queue_never_drop_loss_total`` — очередь CONTROL-плоскости с гарантией
+        # «не дропаем» (never-drop QoS-класс); ненулевое значение значит, что
+        # гарантия НЕ УДЕРЖАЛАСЬ — строго хуже вытеснения data-очереди выше, где
+        # потеря входит в контракт. Эмитент — RouterManager.get_shm_stats()
+        # (router_manager.py:1819, ``queue_registry.never_drop_loss_total``, Ф4
+        # Task 4.3; сам счётчик растит ``_report_never_drop_loss``,
+        # shared_resources_module/queues/core/manager.py:538). Счётчик отдавала и
+        # ``introspect.router_stats``, и ``RouterStats`` его разбирал — но сводка,
+        # с которой начинается любая сессия, о нём не говорила ни слова, то есть
+        # увидеть потерю можно было только зная, что о ней надо спросить.
+        # kind отдельный и от ``router_dropped``/``router_errors`` (те —
+        # middleware/обработка сообщений, не очередь получателя) и от
+        # ``queue_data_loss`` выше — иначе оператор не отличил бы допустимую
+        # потерю data-плоскости от сорванной гарантии control-плоскости.
+        if _is_positive(rs.queue_never_drop_loss_total):
+            anomalies.append(
+                {
+                    "kind": "control_plane_loss",
+                    "process": proc,
+                    "detail": f"queue_never_drop_loss_total={rs.queue_never_drop_loss_total}",
+                }
+            )
         # Ф7.х: транспортные потери хвоста наблюдаемости. По замыслу Ф7.3 они
         # молчат в логах и НЕ растят общий errors (иначе петля Б-6) — значит
         # аномалия отсюда и есть единственное место, где оператор их увидит

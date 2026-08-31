@@ -236,6 +236,13 @@ def test_every_manager_counter_is_published_or_declared_unpublished(make_manager
             # Список имён метрик статистики: содержимое плоскости, а не её
             # здоровье; едет наружу telemetry-ручками.
             "metric_names",
+            # 2.2: потолок серий — РУЧКА, а не счётчик. Наружу он едет своей
+            # дорогой (``observability_readback`` → ``effective.stats.
+            # max_series``), и второе написание того же числа в реестре
+            # счётчиков означало бы две позиции у одной величины. Сами отказы
+            # (``series_dropped`` и соседи) публикуются — они в
+            # PLANE_COUNTER_KEYS.
+            "max_series",
         }
         # Проверяются ОБА словаря: ``self.stats`` (счётчики) и то, что менеджер
         # добавляет прямо в ``get_stats()`` мимо него.

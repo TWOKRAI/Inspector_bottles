@@ -4,7 +4,13 @@
 - **Ф0 ✅** реконсиляция планов/доков (T0.1–T0.5) — `5307a2c2`, 2026-07-18
 - **Ф1 ✅** гигиена `frontend_module` (T1.1–T1.5, фасад-флип Gen-1→Gen-2) — 5 коммитов, 2026-07-18
 - **Ф2 ✅** граница фронт/бэк, headless-default + точка входа фронта (T2.1/T2.2/T2.3/T2.4/T2.6) — `d6faaa80`, 2026-07-19. T2.5 опционален, пропущен. **Live headless-гейт T2.1 сознательно ОТЛОЖЕН** (параллельно шла live-система Phase B — совместный подъём даёт PID/SHM-коллизию).
-- **Ф3+ (Блок В) — НЕ начаты.** Блокер: [framework-layer-grouping](../framework-layer-grouping/plan.md) Фаза 3 (codemod) — freeze-окно, кодовые фазы не параллелятся с ним.
+- **Ф3+ (Блок В) — НЕ начаты.** Блокер: **окно codemod Ф3 плана [framework-architecture-rework](../framework-architecture-rework/plan.md)** — freeze-окно, кодовые фазы не параллелятся с ним. (Прежний блокер `framework-layer-grouping` Фаза 3 — **замещён** этим планом 2026-08-17; это то же самое окно.)
+
+**Сверка под rework 2026-08-18 (docs-only, чисел не пересчитывали — они устареют после merge телеметрии):**
+- **Разделение владения разрезом `frontend`.** Фреймворковая сторона — у rework: Р-4 (расщепить `frontend_module`: Qt-free ядро → `framework`, Qt-часть → свой пакет), Task 2б.2 (поимённый список разреза 298 файлов — это T0.5 этого плана, переснятый на месяц позже; **владелец списка — rework, этот план его потребляет**), ступень 3.4 окна (само расщепление), 5.1 (пакет `frontend` в workspace). Прототипная сторона остаётся здесь: Ф3 промоушен из `multiprocess_prototype/frontend/`, Ф4 `GuiBootstrap`, Ф5 `minimal_gui`, Ф6 enforcement.
+- **Мэппинг «куда во фреймворк» в Ф3 (колонка «Куда (fw)») написан под слои layer-grouping** (`frontend/bridge/`, `frontend/state/`, `frontend/core/`…) — перед стартом Блока В **переписать под раскладку доменов rework ред. 3** и под результат 2б.2 (что из `bridge/`/`state/` уходит в Qt-free ядро, что остаётся в GUI-пакете). Линтер границ — `tach` (rework Р-10), не `.importlinter`.
+- **Бэкенд-сторона подвижна и здесь не ведётся:** `app_module`-задачи — в constructor-master (5.11–5.13), composition root бэкенда ещё раз тронет ADR-RCP-006 (папка на приложение, оверлеи параметров — `recipe_io`/launch). Отдельного «backend-carve» плана нет и не нужен: его роль растворена между `app_module` и rework.
+- **Числа устарели** (44.7k LOC, ×29 deep-импортов, 13 шимов — июль): за месяц добавились `frontend_module/state/telemetry_view_model`, тапы в `frontend_module/debug/`. Пересчёт — первым шагом T3.0, не раньше merge телеметрии.
 
 ✅ **Долг Ф2 ЗАКРЫТ 2026-07-20** (`8f814b00`, ветка `fix/build-snapshots-headless`; suite 602 passed). `d6faaa80` вынес `gui` из `backend/topology/base.yaml` в `frontend/presentation.yaml`, но не перегенерил характеризационные снапшоты → `test_build_matches_snapshot[phone_sketch]`/`[hikvision_letter_robot]` были красными в `main` неделю. Приёмка Ф2 это пропустила (гоняли 68 топологических тестов, не полный suite).
 
@@ -44,16 +50,16 @@ Diff вычитан поштучно — **дрейф оказался из ДВ
 
 ## Решения (зафиксировать в Ф0, подтвердить владельцем)
 
-- **Р1. `telemetry_readmodel_module` в layer-grouping → слой `state/`** (`state/telemetry_readmodel`). Онтология: проекция дерева StateStore (read-model рядом с write-моделью state_store); «телеметрия» — профиль использования. `observability/` отвергнут (та группа — производящая сторона: logger/error/stats эмитят), `foundation/` отвергнут (не примитив, потребители наверху). Альтернатива `observability/` допустима — решает владелец при патче grouping-плана.
+- **Р1. `telemetry_readmodel_module` в layer-grouping → слой `state/`** *(2026-08-18: rework ред. 3 решил иначе — домен `observability/`, «на вопрос „где телеметрия?“»; альтернатива, допущенная здесь же, и выбрана; владелец решения — rework Р-1)* (`state/telemetry_readmodel`). Онтология: проекция дерева StateStore (read-model рядом с write-моделью state_store); «телеметрия» — профиль использования. `observability/` отвергнут (та группа — производящая сторона: logger/error/stats эмитят), `foundation/` отвергнут (не примитив, потребители наверху). Альтернатива `observability/` допустима — решает владелец при патче grouping-плана.
 - **Р2. `proto-frontend-carve.md` — поглотить**: шапка `SUPERSEDED → plans/frontend-constructor/plan.md Ф2`, файл остаётся справочной спецификацией (freeze, не kill). Предусловие carve-плана (хвост В1: C3/4.7) уже выполнено 2026-07-12.
-- **Р3. Секвенирование с layer-grouping**: Ф0–Ф2 — **до** codemod (Ф0 патчит их mapping; Ф1 — только внутри frontend_module; Ф2 — только прототип+yaml), Ф3+ — **после** (промоушены кладутся сразу в финальные пути `application/frontend/*`, enforcement пишется поверх их `.importlinter`). Если grouping откладывается — весь план допустимо исполнить до него (промоушены в `modules/frontend_module/*`, codemod перепишет бесплатно). Жёсткий инвариант: **кодовые фазы никогда не параллельны Фазе 3-codemod** (freeze-окно).
+- **Р3. Секвенирование с layer-grouping** *(2026-08-18: читать как «с rework Ф3» — layer-grouping замещён; пути `application/frontend/*` и `.importlinter` — устаревшие имена, актуальные — раскладка доменов rework и `tach`, см. сверку в шапке)*: Ф0–Ф2 — **до** codemod (Ф0 патчит их mapping; Ф1 — только внутри frontend_module; Ф2 — только прототип+yaml), Ф3+ — **после** (промоушены кладутся сразу в финальные пути `application/frontend/*`, enforcement пишется поверх их `.importlinter`). Если grouping откладывается — весь план допустимо исполнить до него (промоушены в `modules/frontend_module/*`, codemod перепишет бесплатно). Жёсткий инвариант: **кодовые фазы никогда не параллельны Фазе 3-codemod** (freeze-окно).
 - **Р4. Gen-1 — freeze, не kill** (правило владельца): убрать из фасада, пометить докстринг-маркерами `LEGACY Gen-1 (frozen)`, тесты остаются под pytest-маркером `legacy_gen1`. Не удалять.
 - **Р5. Принцип промоушена — «всё универсальное → фреймворк»**: критерий = 0 упоминаний домена (bottle/inspection/устройства/пути прототипа). Прототип оставляет: ConnectionMap, `build_rm_from_topology`, `TABS: list[TabSpec]`, ThemeVariables (значения темы), device-секции, whitelist телеметрии, wildcard-подписки (как декларации).
 - **Р6. Пограничный набор (~1.8k LOC) решается СПИСКОМ в Ф0 (T0.5), а не суждением инвентаря** (правка независимого ревью — иначе директива «всё универсальное» выполнится частично): `windows/main_window.py` (766 LOC) → **промоутится генерик-шелл `GuiHostWindow`** (меню/доки/статусбар/tab-host/apply-theme; прикладная компоновка остаётся в прототипе, T4.6); `dialogs/` helper `confirm_unsaved_changes` (стандарт платформы) → промоут; `prefs/` (QSettings) → промоут; `styles/` (загрузчик тем vs значения) / `permissions.py`+`auth_context.py` (глю vs матрица) / `startup_checks.py` — классифицировать в T0.5 поимённо.
 
 ```
 Ф0 (доки) → Ф1 (гигиена fw) → Ф2 (граница фронт/бэк, ex-NEW-D2)
-   ║  [freeze-окно: layer-grouping Ф0–Ф5; ветка backend_ctl влита до codemod]
+   ║  [freeze-окно: rework Ф3 (бывш. layer-grouping); ветка backend_ctl влита до codemod]
 Ф3 (промоушен всего универсального) → Ф4 (GuiBootstrap) → Ф5 (examples/minimal_gui)
    → Ф6 (enforcement+доки) → [опц. волны] Ф7 (device-kit) → Ф8 (MVP-унификация)
 ```
@@ -148,7 +154,7 @@ Diff вычитан поштучно — **дрейф оказался из ДВ
 
 Порядок по зависимостям:
 
-| # | Что | Куда (fw) |
+| # | Что | Куда (fw) — **имена под layer-grouping, переписать под домены rework + итог 2б.2 перед стартом** |
 |---|-----|-----------|
 | T3.1 | `DataReceiverBridge` (`bridge_impl.py`) + `IDeltaSource` Protocol — **дефолтно в КОНЦЕ фазы** (В4/G.2 «единый конверт» по роадмапу идёт ПОСЛЕ В3 и почти наверняка не влит) | `frontend/bridge/data_receiver.py` |
 | T3.2 | `RequestRunner` — тоже в конце фазы (та же причина) | `frontend/bridge/` (закрывает FE-004) |

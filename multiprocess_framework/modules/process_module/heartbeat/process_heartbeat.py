@@ -10,10 +10,10 @@ from ...observability_declarations import declare_metric
 if TYPE_CHECKING:
     pass
 
-# Ф8.1: `shm` объявляется здесь, потому что считает её `_publish_router_shm_stats_to_tree`
+# Ф8.1: `shm` объявляется здесь, потому что её счёт заказывает `_publish_telemetry_to_tree`
 # в этом файле. Остальные четыре — у `telemetry.py`, где собираются они. Каталог
-# перестал быть кортежем-литералом в configs/, и владение метрикой теперь совпадает
-# с местом её вычисления, а не держится совпадением имени.
+# перестал быть кортежем-литералом в configs/, и объявление метрики теперь стоит
+# там же, где она вычисляется, а не двумя слоями ниже.
 #
 # Импорт на уровне модуля, а не ленивый, как соседи: ленивый объявил бы метрику
 # только после первого вызова публикатора, то есть каталог отвечал бы на вопрос
@@ -153,11 +153,24 @@ class ProcessHeartbeat:
                 # тике мы работаем с одним и тем же gate целиком (старым/новым/None), а не
                 # с частично подменённым состоянием. None → гейт неактивен → все метрики.
                 gate = self._telemetry_gate
-                allowed_metrics = gate.due_metrics() if gate is not None else None
-                # Self-publish метрик процесса напрямую в дерево StateStore.
-                self._publish_metrics_to_tree(workers, allowed_metrics)
-                # Ф7 G.3 H8: SHM-счётчики router'а (pickle-fallback / torn / границы) в дерево.
-                self._publish_router_shm_stats_to_tree(allowed_metrics)
+                # ``extra`` — имена листьев, реально лежащие в хранилище уровней
+                # (Ф1, шаг 5). Гейт матчит по ИМЕНИ ЛИСТА и обязан быть тотален:
+                # необъявленное имя решается дефолтным правилом конфига, ровно как
+                # ``TelemetryPublishConfig.resolve``. Обходи гейт только каталог
+                # объявлений — необъявленное имя не попало бы в ``allowed`` никогда,
+                # и «едет легально» оказалось бы тихим отказом.
+                #
+                # Имена берутся отдельным дешёвым чтением (без значений), а сами
+                # значения читает сборщик ниже. Между двумя чтениями писатель может
+                # завести НОВОЕ имя — оно поедет следующим тиком, потому что на этом
+                # решения по нему гейт не выдавал. Это та же семантика «разрешение
+                # выдаётся, а не подтверждается данными», что уже описана у
+                # ``TelemetryGate``, и та же задержка, что у публикации сразу после
+                # тика: один тик, то есть секунды.
+                allowed_metrics = gate.due_metrics(extra=self._level_names()) if gate is not None else None
+                # Self-publish телеметрии процесса напрямую в дерево StateStore:
+                # воркеры + агрегат + shm + уровни плагинов ОДНИМ merge (Р3.5-12).
+                self._publish_telemetry_to_tree(workers, allowed_metrics)
 
                 # --- Heartbeat-сообщение + хозяйственные self-publish'ы (частота liveness) ---
                 if self._heartbeat_due(now, tick):
@@ -425,18 +438,48 @@ class ProcessHeartbeat:
 
         Обратная совместимость: нет секции ``telemetry`` / нет под-секции ``publish``
         → ``None`` (гейт неактивен, все метрики публикуются каждый тик — поведение как
-        раньше). Плумбинг значений из ``system.yaml``/blueprint — отдельная задача
-        (PC 1.3); здесь читаем уже доставленный ``get_config("telemetry")``.
+        раньше). Это ТРЕТЬЕ состояние, отличное и от «всё выключено»
+        (``default_enabled: false``), и от «всё включено»: в :meth:`_loop`
+        ``allowed_metrics=None`` значит «разрешено всё», а ``set()`` — «ничего».
+
+        **Адрес ключа — два, и оба законны (исправлено 2026-08-18).** Оркестратор
+        получает конфиг ПЛОСКИМ (спавнер мержит ``orchestrator_config`` в корень), а
+        дочерний процесс — ВЕСЬ ``proc_dict``, поэтому его ключи лежат под ``config.``.
+        Голый ``get_config("telemetry")`` работал только у оркестратора и у ДЕТЕЙ
+        ВОЗВРАЩАЛ ``None`` молча. Измерено живым стендом 2026-08-18
+        (``logs_live/rt2_config_flip``): при действующей секции
+        ``telemetry.publish.default_enabled: false`` в боевом ``system.yaml`` семь из
+        семи детей рапортовали ``gate_active: false``, а тот же процесс после
+        ``config.reload`` того же файла — ``gate_active: true``; reload читает YAML сам
+        (``builtin_commands.py``) и потому мимо сломанного звена проезжал. Читаем через
+        :func:`read_process_config` — он пробует плоский адрес, затем ``config.<ключ>``,
+        то есть обе формы. Тот же класс дефекта до этого кусал ``observability.persist``
+        (5.12) и ``telemetry_override`` (находка C задачи 2.2).
+
+        **L0 обязан читаться ТЕМ ЖЕ способом.** ``telemetry_targets`` в
+        ``managers/observability_reload.py`` достаёт ``telemetry_boot`` для возврата
+        рантайм-правок по сроку и обещает докстрингом совпадение с загрузочным гейтом.
+        Чинить адрес здесь и забыть там — значит порвать это обещание молча: истечение
+        срока вернуло бы не то, из чего гейт собран.
         """
+        from ..configs.observability_layers import read_process_config
+
         try:
-            telemetry = self._services.get_config("telemetry", None)
+            telemetry = read_process_config(self._services, "telemetry")
         except Exception:  # noqa: BLE001 — отсутствие/битость конфига не должна ронять heartbeat
             telemetry = None
-        if not isinstance(telemetry, dict):
+        if not isinstance(telemetry, dict) or telemetry.get("publish") is None:
+            # Голос на ОТКАЗЕ — обязателен и симметричен голосу на успехе (ниже).
+            # До 2026-08-18 обе ветки молчали, и неработающий флип выглядел как
+            # штатный дефолт: на стенде это стоило полного расследования.
+            # Формулировка — ФАКТ («не найдена по адресам»), а не вывод («секции нет»):
+            # секция в конфиге БЫЛА, просто по другому адресу, и вывод увёл диагностику.
+            self._log_heartbeat(
+                "[telemetry] publisher-gate ВЫКЛЮЧЕН: секция publish не найдена ни по "
+                "'telemetry', ни по 'config.telemetry' — все метрики публикуются каждый тик"
+            )
             return None
-        publish = telemetry.get("publish")
-        if publish is None:
-            return None
+        publish = telemetry["publish"]
         from ..configs.telemetry_publish_config import TelemetryPublishConfig
         from .telemetry import TelemetryGate
 
@@ -450,9 +493,26 @@ class ProcessHeartbeat:
         self._warn_capped_metrics(config)
         # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
         self._warn_unknown_metrics(config)
+        # Голос на УСПЕХЕ — вторая половина пары. Лог только на отказе не отличает
+        # «гейт выключен» от «код не исполнялся вовсе».
+        self._log_heartbeat(
+            f"[telemetry] publisher-gate активен: default_enabled={config.default_enabled}, "
+            f"явных правил {len(config.metrics)}, интервал по умолчанию "
+            f"{config.default_interval_sec} с"
+        )
         # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
         # fake-clock тестов каденции; в проде обоим — time.monotonic).
         return TelemetryGate(config, clock=self._clock)
+
+    def _log_heartbeat(self, message: str) -> None:
+        """Сказать вслух, не уронив такт: у дублёров ``services`` логгера может не быть."""
+        log = getattr(self._services, "log_info", None)
+        if not callable(log):
+            return
+        try:
+            log(message, module="heartbeat")
+        except Exception:  # noqa: BLE001 — голос не смеет ронять сборку гейта
+            pass
 
     def current_unknown_metrics(self) -> list[str]:
         """Отсортированный список неизвестных ключей ``metrics`` текущего живого gate (Task 2.3).
@@ -531,8 +591,17 @@ class ProcessHeartbeat:
             base = self.current_telemetry_publish() or {}
             publish_section = deep_merge(base, publish_section)
 
+        # Голос на ОБОИХ исходах — тот же парный контракт, что у загрузочного
+        # ``_build_telemetry_gate`` (блокер 2 ревью 2026-08-18). Раньше рантайм-снятие
+        # гейта молчало, и ответ ``introspect.telemetry`` посылал оператора к строке
+        # лога, которой при этом пути не существовало: «gate не собран … почему —
+        # в логе» при пустом логе читается как «диагностика соврала».
         if publish_section is None:
             self._telemetry_gate = None
+            self._log_heartbeat(
+                "[telemetry] publisher-gate СНЯТ рантайм-командой: секция передана как null — "
+                "все метрики снова публикуются каждый тик"
+            )
             return
         from ..configs.telemetry_publish_config import TelemetryPublishConfig
         from .telemetry import TelemetryGate
@@ -545,157 +614,390 @@ class ProcessHeartbeat:
         # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
         # Gate использует clock heartbeat'а (fake-clock тесты; в проде time.monotonic).
         self._telemetry_gate = TelemetryGate(config, clock=self._clock)
+        self._log_heartbeat(
+            f"[telemetry] publisher-gate пересобран рантайм-командой (mode={mode}): "
+            f"default_enabled={config.default_enabled}, явных правил {len(config.metrics)}, "
+            f"интервал по умолчанию {config.default_interval_sec} с"
+        )
 
-    def _publish_metrics_to_tree(self, workers: dict, allowed_metrics: Any = None) -> None:
-        """Опубликовать телеметрию процесса и каждого воркера в дерево StateStore.
+    def _level_names(self) -> set[str]:
+        """Имена листьев, лежащих в хранилище уровней, — кандидаты гейта на тике.
+
+        Отдельно от :meth:`_collect_plugin_levels`, потому что гейт решает ДО
+        сборки: чтобы ответить «поедет ли имя», он должен сначала узнать, какие
+        имена вообще есть (каталог объявлений знает только объявленные — см.
+        ``TelemetryGate.due_metrics``). Значения сюда не копируются.
+
+        Хранилища нет (процесс без плагинов, иммутабельный дубль сервисов) →
+        пустое множество: гейт тогда работает ровно по каталогу, как раньше.
+        """
+        from .telemetry import PLUGIN_LEVELS_ATTR
+
+        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
+        names: Any = getattr(store, "names", None)
+        if not callable(names):
+            return set()
+        try:
+            return set(names())
+        except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Имена уровней плагинов недоступны: {exc}", module="heartbeat")
+            return set()
+
+    def _collect_plugin_levels(self, allowed_metrics: Any = None) -> dict:
+        """Поддерево ``plugins.<писатель>.<имя>`` для секции ``state``.
+
+        Общий шов push и poll: одно место, а не две копии в тике и опросе —
+        разойдись они, «опрос отдаёт то же, что push» стало бы ложью, которую
+        видно только на стенде (ADR-PM-035). Различие ровно одно и оно
+        параметром: опрос зовёт с ``allowed_metrics=None``.
+
+        Голоса здесь больше нет вовсе. Он сообщал об отсеве по владению —
+        механизме, который Ф1 удалила: писатель стал сегментом пути, отсеивать
+        по владению нечего, и «публикация в чужое имя» перестала существовать
+        как событие.
+
+        Args:
+            allowed_metrics: разрешённые на этом тике имена листьев (``None`` →
+                все).
+
+        Returns:
+            ``{"plugins": {писатель: {имя: значение}}}`` — пусто, если хранилища
+            нет, оно пусто или всё придержал гейт.
+        """
+        from .telemetry import PLUGIN_LEVELS_ATTR, build_plugin_levels
+
+        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
+        publications: Any = getattr(store, "publications", None)
+        if not callable(publications):
+            return {}  # ни один плагин процесса уровней не отдавал
+        try:
+            return build_plugin_levels(publications(), allowed_metrics)
+        except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Уровни плагинов недоступны: {exc}", module="heartbeat")
+            return {}
+
+    def _delete_departed_subtrees(self, proxy: Any) -> None:
+        """Утвердить удаление поддеревьев писателей, ушедших с процесса (Ф2).
+
+        Снятие адресуется ПИСАТЕЛЕМ, а не именем листа: уходит плагин — уходит
+        весь его узел ``processes.<процесс>.state.plugins.<писатель>``. Имя листа
+        в этой дороге не участвует нигде, поэтому «отложил снятие имени, которое
+        к моменту тика принадлежит другому» перестало быть выразимым (класс A1
+        старого мира). ``None`` как «показания нет» тоже исчез: нет писателя —
+        нет поддерева, а не лист с надгробием.
+
+        **Запас тратится только на успехе.** Успех здесь — «вызов вернулся без
+        исключения», и большего дорога не даёт: ``StateProxy.delete``
+        fire-and-forget, ответа обработчика нет (см.
+        :data:`~.telemetry.DEPARTED_DELETE_BUDGET`). Исключение (прокси без этой
+        дороги, отказ транспорта, поднятый наружу) означает, что сообщение из
+        процесса не вышло вовсе, — списывать за него страховку не за что, и
+        писатель остаётся в ведомости до следующего тика.
+
+        Названная цена этого выбора: прокси, у которого ``delete`` падает
+        КАЖДЫЙ раз, держит писателя в ведомости бессрочно и стоит одной пойманной
+        попытки за тик. Ограничитель — число писателей (ведомость по ключу
+        писателя), а не время; воспроизведено в авторских hazard'ах
+        (``test_writer_retraction_hazards.py``, класс про исключение).
+
+        Зовётся ПЕРВЫМ шагом тика — до сборки уровней и до раннего выхода «нечего
+        слать». Оба порядка существенны и оба сторожатся тестами:
+
+        * до раннего выхода — потому что у процесса, чей последний писатель
+          только что ушёл, публиковать больше нечего вовсе, и снятие, стоящее
+          после ``if not data: return``, не случилось бы НИКОГДА (ровно тот
+          случай, который механизм и обслуживает);
+        * до сборки — потому что публикация возвращённого писателя, пришедшая
+          между снимком ведомости и вызовом ``delete``, иначе стёрла бы уже
+          живой узел до следующего тика. При этом порядке тот же тик собирает
+          значения ПОСЛЕ удаления и возвращает лист в дереве тем же merge.
+
+        Окно всё же остаётся, и оно названо, а не заговорено: публикация,
+        пришедшая ПОСЛЕ сборки уровней этого тика, приедет в дерево следующим
+        тиком — обычная задержка в один тик, та же, что у любой публикации сразу
+        после сборки. Про порядок ДВУХ сообщений на проводе (``state.delete``
+        уходит раньше ``state.merge``) сказано только то, что проверено чтением:
+        оба уходят одним ``_send`` → ``router.send_async(priority="normal")`` в
+        одну очередь того же адресата; замера порядка на живом стенде у этой
+        задачи нет.
+
+        Args:
+            proxy: StateProxy процесса — тот же, которым тик шлёт merge.
+        """
+        # Путь строится ТОЙ ЖЕ константой, что и поддерево в сборщике: снятие,
+        # адресующее другой ключ, чем публикация, чистило бы не то место — и
+        # разъезд был бы виден только на стенде.
+        from .telemetry import PLUGIN_LEVELS_ATTR, PLUGINS_SUBTREE_KEY
+
+        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
+        departed: Any = getattr(store, "departed_writers", None)
+        if not callable(departed):
+            return  # процесс без порта уровней — снимать нечего
+        try:
+            writers = tuple(departed())
+        except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Ведомость ушедших писателей недоступна: {exc}", module="heartbeat")
+            return
+
+        for writer in writers:
+            path = f"processes.{self._services.name}.state.{PLUGINS_SUBTREE_KEY}.{writer}"
+            try:
+                proxy.delete(path)
+            except Exception as exc:  # noqa: BLE001 — запас НЕ тратится, повторим на следующем тике
+                _log = getattr(self._services, "log_debug", self._services.log_info)
+                _log(f"Снятие поддерева писателя {writer!r} не ушло: {exc}", module="heartbeat")
+                continue
+            store.note_delete_delivered(writer)
+
+    def _publish_telemetry_to_tree(self, workers: dict, allowed_metrics: Any = None) -> None:
+        """Вся телеметрия процесса за тик — ОДНИМ ``proxy.merge`` (Р3.5-12).
 
         Здоровый путь телеметрии: процесс САМ репортит свои метрики через
-        собственный StateProxy (``state.set`` → ProcessManager → StateStoreManager
-        → GUI) — тот же проверенный канал, что и статус процесса. Минует
-        центральную heartbeat-агрегацию в ProcessMonitor (хрупкий лишний участок).
+        собственный StateProxy (→ ProcessManager → StateStoreManager → GUI) — тот
+        же проверенный канал, что и статус процесса. Минует центральную
+        heartbeat-агрегацию в ProcessMonitor (хрупкий лишний участок).
         См. ``plans/telemetry-self-publish-redesign.md``.
 
-        Per-worker (строки таблицы воркеров в детальном виде процесса):
-          - ``processes.{name}.workers.{w}.status``            — живой статус;
-          - ``processes.{name}.workers.{w}.effective_hz``      — частота воркера;
-          - ``processes.{name}.workers.{w}.cycle_duration_ms`` — время цикла (latency).
+        Собирается под одним путём ``processes.{name}``:
 
-        Агрегат уровня процесса (карточка):
-          - ``processes.{name}.state.fps``        = max(``effective_hz``) по
-            running-воркерам с hz > 0 (ведущий loop-воркер задаёт темп);
-          - ``processes.{name}.state.latency_ms`` = max(``cycle_duration_ms``) —
-            время самого медленного воркера (узкое горло процесса).
-        Нет ни одного hz > 0 → агрегат не публикуем (карточка остаётся «—»).
+        * ``workers.{w}.{status, effective_hz, cycle_duration_ms}`` — строки
+          таблицы воркеров;
+        * ``state.fps`` = max(``effective_hz``) по running-воркерам с hz > 0,
+          ``state.latency_ms`` = max(``cycle_duration_ms``) среди них — агрегат
+          карточки; нет ни одного hz > 0 → агрегата нет;
+        * ``state.shm.*`` — счётчики кадрового транспорта router'а (Ф7 G.3 H8 /
+          G.4.a): pickle_fallbacks, torn_reads, boundary_crossings,
+          queue_data_evicted и прочие сигналы потери кадра для вкладки Pipeline;
+        * ``state.plugins.<писатель>.<имя>`` — уровни, отданные плагинами
+          процесса, каждый в поддереве СВОЕГО писателя (Ф1 «порт наблюдений»:
+          владение = путь). Одинаковое имя у двух плагинов — два разных листа.
 
-        Процессы без StateProxy (чисто системные) тихо пропускаются.
+        **Почему один merge, а не три.** До Р3.5-12 тик слал три отдельных merge,
+        и продовое правило троттла ``processes.**.state.fps: 0.05`` пропускало
+        одну запись на путь за окно. Воспроизведено 2026-08-16: два merge с
+        разницей 0.5 мс на Windows-сетке 15.6 мс читают ОДИН таймстамп, второй
+        возвращает ``proceed=True`` с уже вырезанным листом и без
+        ``rejection_reason`` — потерю не видел даже отправитель. Один merge
+        возвращает систему к собственному принципу E6/Task 5.7 («один merge
+        вместо 3W+2 set») и снимает с транспорта роль, которой у него нет.
 
-        PC 1.2: ``status`` воркеров публикуется всегда (вне гейта); частота/цикл/агрегат
-        фильтруются ``allowed_metrics`` (выключенная/зажатая метрика не считается и не
-        уходит в merge).
+        **Порядок наложения внутри payload больше не страхует — потому что
+        страховать нечего.** Уровни плагинов кладутся ПЕРВЫМИ, агрегат
+        фреймворка — поверх, и это осталось лишь стабильным порядком сборки.
+        Столкновение имён исчезло структурно (Ф1): плагинный ``fps`` лежит под
+        ``state.plugins.<писатель>.fps``, а агрегат — под ``state.fps``; ключа,
+        за который они могли бы спорить, у них нет.
+
+        Прежняя редакция называла порядок второй линией защиты при протечке
+        отбора по владению и честно мерила её: инъекция «отбор по каталогу
+        вместо владения» показала, что порядок спасал **1 случай из 5** (только
+        ``fps``/``latency_ms`` и только при наличии агрегата на том же тике).
+        Единственной настоящей защитой была проверка владельца в сборщике; вместе
+        с ней ушёл и повод для второй линии.
+
+        **Что осталось политикой ПУБЛИКАТОРА** (а не сборщиков, которые чисты):
+        гейт метрик, «нет прокси — молчим», «все счётчики ``shm`` нулевые — не
+        грузим дерево» и «нечего слать — не шлём пустой merge».
 
         Args:
             workers: снимок ``get_all_workers_status()`` (тайминг цикла на верхнем
-                уровне каждого статуса).
-            allowed_metrics: разрешённые на этом тике суффиксы метрик (``None`` → все,
-                обратная совместимость).
+                уровне каждого статуса). Пустой — НЕ причина пропустить тик: до
+                Р3.5-12 ранний выход по ``not workers`` жил в отдельном методе и
+                глотал только воркерные листья, а ``shm`` и уровни ехали своими
+                merge. В объединённой сборке тот же выход проглотил бы и их.
+            allowed_metrics: разрешённые на этом тике суффиксы метрик (``None`` →
+                все, обратная совместимость).
         """
         proxy = getattr(self._services, "_state_proxy", None)
-        if proxy is None or not workers:
-            return
+        if proxy is None:
+            return  # чисто системный процесс без StateProxy
 
-        # E6/Task 5.7: собрать все листья (per-worker + агрегат) в один вложенный
-        # payload и отправить ОДНИМ proxy.merge вместо 3W+2 proxy.set — глубокий
-        # merge сохраняет сиблинги (health.* и пр.), число сообщений ↓ ~в W раз.
-        from .telemetry import build_worker_telemetry
+        from .telemetry import build_router_shm_telemetry, build_worker_telemetry
 
-        result = build_worker_telemetry(workers, self._services.name, allowed_metrics)
-        if result is None:
-            return
-        path, data = result
+        # (0) Снятие поддеревьев ушедших писателей — ДО сборки и ДО раннего
+        # выхода «нечего слать»: у процесса, чей последний писатель только что
+        # ушёл, публиковать нечего вовсе, и снятие в конце метода не случилось бы
+        # никогда. Порядок «сначала снять, потом собрать» ещё и лечит гонку с
+        # возвращённым писателем в пределах ОДНОГО тика — см.
+        # :meth:`_delete_departed_subtrees`.
+        self._delete_departed_subtrees(proxy)
+
+        data: dict = {}
+        state: dict = {}
+
+        # (1) Уровни плагинов — первыми (см. «порядок наложения» выше).
+        #
+        # Поддерево ``plugins.<писатель>.<имя>``: ОДИН ключ ``plugins`` в секции
+        # ``state``, а не россыпь плоских имён. Столкнуться с агрегатом
+        # фреймворка оно больше не может по построению — ``fps`` плагина лежит
+        # под ``plugins.<он>.fps``, а не рядом с ``state.fps``.
+        state.update(self._collect_plugin_levels(allowed_metrics))
+
+        # (2) Воркеры + агрегат фреймворка — поверх.
+        if workers:
+            result = build_worker_telemetry(workers, self._services.name, allowed_metrics)
+            if result is not None:
+                _path, worker_data = result
+                workers_payload = worker_data.get("workers")
+                if workers_payload:
+                    data["workers"] = workers_payload
+                state.update(worker_data.get("state") or {})
+
+        # (3) Счётчики кадрового транспорта. Гейт спрашивается ДО чтения router'а:
+        # полный get_stats() у router'ов без узкого аксессора стоит десятки мс
+        # (ADR-PM-035), и платить их за выключенную метрику незачем.
+        if allowed_metrics is None or "shm" in allowed_metrics:
+            router = getattr(self._services, "router_manager", None)
+            if router is not None:
+                try:
+                    shm = build_router_shm_telemetry(router)
+                except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
+                    _log = getattr(self._services, "log_debug", self._services.log_info)
+                    _log(f"SHM-счётчики недоступны: {exc}", module="heartbeat")
+                    shm = None
+                # Все счётчики нулевые → нет кадрового пути / всё чисто — не
+                # публикуем. Проверка по значениям, а не поимённым сравнением с
+                # нулём: добавленный в сборщик счётчик попадает под тот же guard
+                # сам, без правки здесь.
+                if shm and any(shm.values()):
+                    state["shm"] = shm
+
+        # (4) Снятие здесь не стоит — оно ушло шагом (0) наверх, и это не
+        # перестановка ради красоты.
+        #
+        # Прежний шаг клал ``None``-надгробие на плоский путь ИМЕНИ, чей писатель
+        # ушёл, с запасом переутверждений и фильтром «только СВОИ имена» по
+        # каталогу владения. Каталог владения удалён вместе с арбитражем (Ф1), а
+        # во вложенной форме страж надгробия («имени нет в payload») ВСЕГДА
+        # истинен для плагинных имён: имя ушедшего писателя лежит теперь под
+        # ``plugins.<он>.<имя>``, в плоской секции его нет и не было — надгробие
+        # легло бы на ``state.<имя>``, то есть на чужой (или несуществующий) лист
+        # при живом писателе. Это ровно класс A1, который механизм чинил.
+        #
+        # Ф2 заменила его удалением ПОДДЕРЕВА писателя дорогой ``state.delete``:
+        # адрес снятия — писатель, а не имя; ``None`` как «показания нет» не
+        # существует вовсе (нет писателя — нет узла). Место вызова — начало
+        # метода, потому что снятие обязано случиться и тогда, когда публиковать
+        # уже нечего (ровно случай «ушёл последний писатель»), а этот хвост
+        # метода из-под ``if not data: return`` недостижим.
+        if state:
+            data["state"] = state
+        if not data:
+            return  # показаний нет вовсе — пустой merge не шлём
         try:
-            proxy.merge(path, data)
-        except Exception as exc:
-            _log = getattr(self._services, "log_debug", self._services.log_info)
-            _log(f"Не удалось self-publish метрик процесса: {exc}", module="heartbeat")
-
-    def _publish_router_shm_stats_to_tree(self, allowed_metrics: Any = None) -> None:
-        """Ф7 G.3 H8 / G.4.a: счётчики кадрового транспорта router'а → дерево StateStore
-        (тот же self-publish канал, что телеметрия/health). Публикует
-        ``processes.{name}.state.shm.{...}``: pickle_fallbacks (громкий slow-path),
-        torn_reads (гонка seqlock), boundary_crossings (границ/кадр), а также
-        queue_data_evicted (Ф7 G.4.a — дроп из полных data-очередей, drop_oldest) —
-        все сигналы потери кадра в одном месте для вкладки Pipeline. Публикует только
-        при НЕнулевых счётчиках (иначе no-op — не засоряем дерево у процессов без
-        кадрового пути).
-
-        PC 1.2: группа ``shm`` проходит publisher-gate. ``allowed_metrics`` не None и
-        без ``"shm"`` → выходим сразу (не считаем ``get_stats()`` — экономим источник).
-        ``None`` → shm разрешён (обратная совместимость).
-        """
-        if allowed_metrics is not None and "shm" not in allowed_metrics:
-            return  # shm выключен/зажат частотой — не считаем и не публикуем
-        proxy = getattr(self._services, "_state_proxy", None)
-        router = getattr(self._services, "router_manager", None)
-        if proxy is None or router is None:
-            return
-        try:
-            stats = router.get_stats()
-            rs = stats.get("router", stats) if isinstance(stats, dict) else {}
-            pickle_fallbacks = int(rs.get("frame_pickle_fallbacks", 0) or 0)
-            torn = int(rs.get("frame_torn_reads", 0) or 0)
-            crossings = int(rs.get("frame_boundary_crossings", 0) or 0)
-            queue_evicted = int(rs.get("queue_data_evicted", 0) or 0)
-            # Ф7 G.4.a: system-backpressure тоже виден (блокировки вытеснения из полной
-            # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
-            # surface был, но публикации не было — асимметрия с data_evicted).
-            sys_blocked = int(rs.get("queue_system_evict_blocked", 0) or 0)
-            # Ф7.3: потери ХВОСТА наблюдаемости. Публикация здесь обязательна, а не
-            # «для симметрии»: пути потери хвоста молчат в логах сознательно (запись
-            # о потерянной записи усиливала бы шторм), поэтому дерево — единственное
-            # место, где оператор эту потерю увидит.
-            obs_evicted = int(rs.get("queue_observability_evicted", 0) or 0)
-            obs_send_failed = int(rs.get("queue_observability_send_failed", 0) or 0)
-            # Ф7.х M-2: ТРЕТЬЯ форма потери хвоста — билет не доехал ни одним из
-            # путей доставки роутера (targets, relay через хаб, канал). Счётчик
-            # завела Ф7.3 и не вывела наружу НИ ОДНИМ путём: ни в heartbeat, ни в
-            # аномалиях — то есть класс «проглоченный сбой» воспроизвёлся внутри
-            # починки того же класса. Проверено живьём: в ``state.shm`` были
-            # только evicted и send_failed.
-            obs_delivery_failed = int(rs.get("observability_delivery_failed", 0) or 0)
-            # Ф7 G.5.c: дроп по post-use re-check zero-copy view (слот перезаписан под
-            # живым view — consumer отстал > глубины кольца). Ещё один сигнал потери
-            # кадра в том же месте для вкладки Pipeline.
-            stale_drops = int(rs.get("frame_stale_drops", 0) or 0)
-            # Ф7 G.5.d (В3): исчерпание free-list → drop-на-источнике (back-pressure,
-            # читатели отстали). Тот же сигнальный набор потери кадра.
-            loan_exhausted = int(rs.get("frame_loan_exhausted", 0) or 0)
-            # Ф7 G.5 ревью-фикс 15: здоровье loan-цикла (released/reclaimed) — не потери,
-            # но обязательный сигнал: если exhausted растёт, а released стоит на нуле —
-            # release-контур не замкнут (ревью поймало именно это через отсутствие сигнала).
-            slots_released = int(rs.get("frame_slots_released", 0) or 0)
-            slots_reclaimed = int(rs.get("frame_slots_reclaimed", 0) or 0)
-            # Ф7 G.7 (0.5): размер reader-кэша SHM-handle. НЕ потеря, а health-сигнал:
-            # под zero-copy эвикция отключена → рост на инкарнацию = утечка handle
-            # (резидуал G.5). Без handle-кэша (флаг off) = 0 → guard ниже сохраняет
-            # прежний no-op (off = бит-в-бит).
-            cache_size = int(rs.get("frame_handle_cache_size", 0) or 0)
-            if (
-                pickle_fallbacks == 0
-                and torn == 0
-                and crossings == 0
-                and queue_evicted == 0
-                and sys_blocked == 0
-                and obs_evicted == 0
-                and obs_send_failed == 0
-                and obs_delivery_failed == 0
-                and stale_drops == 0
-                and loan_exhausted == 0
-                and slots_released == 0
-                and slots_reclaimed == 0
-                and cache_size == 0
-            ):
-                return  # нет кадрового пути / всё чисто — не публикуем
-            proxy.merge(
-                f"processes.{self._services.name}.state.shm",
-                {
-                    "pickle_fallbacks": pickle_fallbacks,
-                    "torn_reads": torn,
-                    "boundary_crossings": crossings,
-                    "queue_data_evicted": queue_evicted,
-                    "queue_system_evict_blocked": sys_blocked,
-                    "queue_observability_evicted": obs_evicted,
-                    "queue_observability_send_failed": obs_send_failed,
-                    "observability_delivery_failed": obs_delivery_failed,
-                    "stale_drops": stale_drops,
-                    "loan_exhausted": loan_exhausted,
-                    "slots_released": slots_released,
-                    "slots_reclaimed": slots_reclaimed,
-                    "cache_size": cache_size,
-                },
-            )
+            proxy.merge(f"processes.{self._services.name}", data)
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
-            _log(f"Не удалось self-publish SHM-счётчиков: {exc}", module="heartbeat")
+            _log(f"Не удалось self-publish телеметрии процесса: {exc}", module="heartbeat")
+
+    def current_levels_snapshot(self) -> dict | None:
+        """Пакетный снимок текущих УРОВНЕЙ процесса — один вызов, все метрики (Task 3.2).
+
+        Отвечает на «сколько сейчас» БЕЗ включённой публикации: publisher-гейт
+        (ADR-PM-018) управляет push'ем в дерево, а не тем, что процесс знает о себе.
+        Поэтому сборщик зовётся с ``allowed_metrics=None`` — гейт закрыт наглухо, а
+        снимок всё равно полон. Обратное («опрос показывает только разрешённое к
+        публикации») сделало бы поле бесполезным ровно в том случае, ради которого оно
+        заводилось: закрытое окно, ноль push-трафика, оператор всё ещё хочет числа.
+
+        **Тот же сборщик, что у тика** (:func:`build_worker_telemetry` +
+        :func:`build_router_shm_telemetry` + :meth:`_collect_plugin_levels`), и та же
+        форма пути: возвращаемый dict ложится в дерево как ``processes.<name>``
+        (``workers.*`` + ``state.*``, включая ``state.shm.*``). Второго способа
+        посчитать те же величины не заводится: разойдись они, «опрос отдаёт то же,
+        что push» стало бы ложью, которую видно только на стенде с router'ом (в
+        юнит-тестах router обычно ``None``).
+
+        **Граница названа: снимок — это то, что собирает ТЕЛЕМЕТРИЙНЫЙ ТИК, а не всё,
+        что кто-либо когда-либо писал под ``processes.<name>.state``.** Проверено на
+        живом стенде 2026-08-14: рядом с ``fps``/``latency_ms``/``shm`` в дереве лежали
+        ключи, которые писали ДРУГИЕ публикаторы (``uptime``/``status``/``pid`` от ПМ,
+        прикладные счётчики от плагинов), и этот сборщик их не считал.
+
+        Task 3.5 сдвинула границу, но не стёрла её. Уровень, который плагин ОТДАЁТ
+        (``ctx.publish_metric``), собирается здесь же и приезжает опросом — под
+        ``state.plugins.<писатель>.<имя>``, в той же вложенной форме, что уходит
+        push'ем. Объявления для этого больше не требуется: каталог остался именами
+        для гейта и авто-строк GUI, а не правом на имя (Ф1). За границей осталось
+        два РАЗНЫХ класса, и путать их нельзя (ADR-PM-038):
+
+        * ``uptime``/``status``/``pid`` принадлежат **ProcessManager'у** — он публикует
+          их О ЧУЖОМ процессе из своего ``first_seen``, и опрос процесса их отдать не
+          может по построению. Это граница, а не долг;
+        * прикладные ключи, которые плагин публикует **фронтом** (при смене состояния,
+          а не по тику), уровнем не являются: собранный тиком «уровень», который между
+          сменами не обновляется, был бы хуже прямой записи. Такие ключи остаются на
+          прежней дороге сознательно.
+
+        Прикладных имён здесь не перечисляется намеренно (§3.6 «универсальность»):
+        поимённый реестр немигрированных писателей с причинами живёт в ``README.md``
+        модуля, а не в коде фреймворка.
+
+        Следствие общего сборщика, принятое осознанно: **округление до 1 знака**
+        (``round(x, 1)``) действует и на опросе. Снимок — вид уровней для глаз, а не
+        измерительный прибор; расхождение push/poll в последнем знаке было бы дороже
+        потерянной точности.
+
+        **Только чтение.** ``get_all_workers_status()`` и узкий ``router.get_shm_stats()``
+        ничего не мутируют, ``_next_due`` гейта НЕ продвигается (``due_metrics()``
+        здесь не зовётся), в дерево не пишется ни одного merge/set. Читать дёшево:
+        узкий аксессор не строит маршруты/хендлеры/каналы — цена измерена в ADR-PM-035.
+
+        **Чем определяется свежесть — и чем НЕ определяется.** ``snapshot_ts`` в ответе
+        команды говорит только «когда собран ЭТОТ ОТВЕТ» — это возраст ответа, НЕ
+        возраст чисел. Воспроизведено: воркер остановлен полностью, два опроса с
+        разницей 4.00 с несут разные ``snapshot_ts`` и **идентичные**
+        ``fps=21.0 / latency_ms=47.7``, а ``status`` при этом ``running``. Признак
+        движения даёт per-worker ``cycles`` (``include_cycles=True`` ниже): счётчик
+        завершённых циклов стоит — числа протухли, растёт — живые. Судить по паре
+        (``snapshot_ts``, ``cycles``), а не по штампу.
+
+        Returns:
+            Поддерево уровней (непустой dict) — ЛИБО ``None``, если показаний нет
+            вовсе (нет ``worker_manager`` / ноль воркеров / нет router'а). ``None``
+            означает «сенсоров нет», а не «команда не сработала».
+
+        Raises:
+            Ничего не поднимает по своей воле: сбой снятия статуса воркеров глотает
+            ``_collect_workers``, сбой ``router.get_stats()`` — секция ``shm``
+            пропускается (best-effort по образцу ``introspect.memory``).
+        """
+        from .telemetry import build_router_shm_telemetry, build_worker_telemetry
+
+        # allowed_metrics=None — намеренно: см. докстринг (гейт про push, не про знание).
+        # include_cycles=True — признак движения, нужный только опрашивающему.
+        result = build_worker_telemetry(self._collect_workers(), self._services.name, None, include_cycles=True)
+        data: dict = dict(result[1]) if result is not None else {}
+
+        # Уровни плагинов — тем же швом и в ту же секцию ``state``, в той же
+        # вложенной форме ``plugins.<писатель>.<имя>``, что уходит push'ем.
+        # Разойдись формы — «опрос отдаёт то же, что push» стало бы ложью,
+        # которую видно только на стенде (ADR-PM-035, инвариант «один сборщик»).
+        plugin_levels = self._collect_plugin_levels(None)
+        if plugin_levels:
+            state = dict(plugin_levels)
+            state.update(data.get("state") or {})
+            data["state"] = state
+
+        router = getattr(self._services, "router_manager", None)
+        if router is not None:
+            try:
+                shm = build_router_shm_telemetry(router)
+            except Exception as exc:  # noqa: BLE001 — best-effort: без секции, не отказ
+                _log = getattr(self._services, "log_debug", self._services.log_info)
+                _log(f"Снимок уровней: SHM-счётчики недоступны: {exc}", module="heartbeat")
+                shm = None
+            if shm:
+                # Нули включительно: для ОПРОСА «все нули» — показание «всё чисто», а не
+                # отсутствие данных (у публикатора наоборот — там нули не грузят дерево).
+                state = dict(data.get("state") or {})
+                state["shm"] = shm
+                data["state"] = state
+
+        return data or None
 
     def _publish_health_to_tree(self) -> None:
         """Опубликовать здоровье процесса (Ф2 Task 2.1) в дерево StateStore.

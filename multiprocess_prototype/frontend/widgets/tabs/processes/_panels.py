@@ -112,7 +112,10 @@ _DEFAULT_GRAPH_RANGE = "10m"
 # каталог метрик фреймворка. Ключи — те же метрики; отсутствующий ключ → сам ключ /
 # общий дефолт. Значения — app-specific presentation (framework даёт лишь список).
 _TELEMETRY_METRIC_LABELS: dict[str, str] = {
-    "fps": "FPS (кадров/с)",
+    # «Циклов/с», не «кадров/с»: метрика фреймворка ``fps`` — max(effective_hz)
+    # по running-воркерам, то есть частота цикла. Кадры камеры едут отдельным
+    # именем ``capture_fps`` (Р3.5-13).
+    "fps": "Циклов/с",
     "latency_ms": "Задержка, мс",
     "effective_hz": "Частота цикла, Гц",
     "cycle_duration_ms": "Длит. цикла, мс",
@@ -558,7 +561,10 @@ class AllProcessesPanel(QWidget):
         просто не показывает живую телеметрию — метрики остаются «—».
         """
         # Плейсхолдеры метрик карточек (QLabel'ы «Циклов/с»/«Время цикла», к
-        # которым дальше цепляются VM-setter'ы).
+        # которым дальше цепляются VM-setter'ы). У ``EntityCard`` метки создаёт САМ
+        # ``set_metrics`` — забудь здесь ключ, и привязка ниже молча не найдёт
+        # виджета (``_metric_labels.get`` вернёт None), то есть путь тихо не
+        # подключится.
         for card in self._cards.values():
             card.set_metrics({"Циклов/с": "—", "Время цикла": "—"})
 
@@ -572,7 +578,11 @@ class AllProcessesPanel(QWidget):
         первично наполнить из snapshot (late-binding)."""
         setters: dict[str, Callable[[Any], None]] = {}
 
-        # Карточки: статус + Циклов/с + Время цикла.
+        # Карточки: статус + Циклов/с + Время цикла. `state.capture_fps` сюда НЕ
+        # привязывается (решение владельца 2026-08-17): карточка generic и
+        # показывает только то, чем владеет фреймворк. Измеренная частота захвата
+        # живёт в секции «Камера (actual)» инспектора — там известно, что перед
+        # нами камера.
         for name, card in self._cards.items():
             setters[f"processes.{name}.state.status"] = _make_vm_setter(card._indicator, "set_state")
             hz_label = card._metric_labels.get("Циклов/с")
@@ -829,8 +839,11 @@ class SingleProcessPanel(QWidget):
         # Мини-графики fps/latency — тот же generic TelemetryChart, что дашборд (единая
         # система графиков), одиночная серия без легенды, но интерактивный: зум колесом
         # по времени (Ф2.3). Отдельные графики (разные юниты — своя авто-шкала у каждого).
-        layout.addWidget(QLabel("FPS"))
-        self._fps_chart = TelemetryChart([SeriesSpec("fps", "FPS", color="#2563eb")], legend=False)
+        # Метка «Циклов/с», а не «FPS»: график читает ``state.fps`` — агрегат
+        # ``max(effective_hz)`` по воркерам, то есть частоту ЦИКЛА. Иначе Р3.5-13
+        # снял бы ложь метки с карточки и перенёс её на график.
+        layout.addWidget(QLabel("Циклов/с"))
+        self._fps_chart = TelemetryChart([SeriesSpec("fps", "Циклов/с", color="#2563eb")], legend=False)
         self._fps_chart.setMaximumHeight(150)
         layout.addWidget(self._fps_chart)
 

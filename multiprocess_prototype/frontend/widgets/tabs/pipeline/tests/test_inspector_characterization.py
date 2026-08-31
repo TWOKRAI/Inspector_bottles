@@ -47,10 +47,14 @@ class _CountingBindings:
         self.bind_count = 0
         self.unbind_count = 0
         self.live: int = 0
+        # Пути подписок: счётчик отвечает «сколько», а адрес — «куда». Для
+        # capture_fps важно именно второе (он биндится вне общего префикса).
+        self.paths: set = set()
 
     def bind(self, path: str, widget: Any, prop: str = "value", *, formatter: Any = None) -> tuple:
         self.bind_count += 1
         self.live += 1
+        self.paths.add(path)
         return ("handle", path, self.bind_count)
 
     def unbind(self, handle: Any) -> None:
@@ -183,6 +187,49 @@ class TestCameraActualBindBalance:
         assert binds.live == 0
         assert panel._cam_section._handles == []
         assert panel._cam_section.isHidden()
+
+    def test_capture_node_also_gets_the_camera_section(self, qtbot):
+        """Секция показывается и для ноды `capture`, а не только `camera_service`.
+
+        Гейт был `== "camera_service"`. Р3.5-15 посадила в секцию строку
+        «FPS (измеренный)» по `state.plugins.<писатель>.capture_fps` (адрес
+        обновлён Ф1 «порта наблюдений», Task 1.4: ассерт ниже проверяет ГЛОБ, и
+        докстринг обязан говорить то же самое), а пишет её `CapturePlugin` с
+        plugin_name `capture`. Проверено по всем 14 рецептам: `camera_service` и
+        `capture` НИКОГДА не живут в одном процессе (симулятор против реальной
+        вебкамеры). Останься гейт прежним — новая строка была бы мертва везде:
+        у `camera_service` листа нет, а `capture`-нода секцию не показывала бы.
+
+        Судится ЭФФЕКТОМ на боевом пути (`show_plugin_node` → секция видима и
+        подписки живы), а не содержимым константы `_CAMERA_PLUGINS`: константу
+        можно расширить, не подключив её к ветке.
+        """
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        binds = _CountingBindings()
+        panel.set_services(make_pipeline_services(topology=_TOPO_WORKERS), bindings=binds)
+
+        panel.show_plugin_node(
+            "camera_0.capture",
+            category="source",
+            plugin_name="capture",
+            process_name="camera_0",
+        )
+
+        assert not panel._cam_section.isHidden(), "камерная секция скрыта для ноды capture"
+        assert "processes.camera_0.state.plugins.*.capture_fps" in binds.paths, sorted(binds.paths)
+
+    def test_non_camera_node_still_gets_no_camera_section(self, qtbot):
+        """Обратная половина пары: расширение гейта не открыло его всем подряд."""
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        binds = _CountingBindings()
+        panel.set_services(make_pipeline_services(topology=_TOPO_WORKERS), bindings=binds)
+
+        _show_processing(panel)
+
+        assert panel._cam_section.isHidden()
+        assert binds.live == 0
 
     def test_clear_balances(self, qtbot):
         panel = NodeInspectorPanel()

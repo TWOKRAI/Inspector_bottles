@@ -541,17 +541,39 @@ class TestObservabilitySilence:
             observability_counters,
         )
 
+        from multiprocess_framework.modules.statistics_module import StatsManager
+
+        # Ключи, которых у плоскости ЛОГОВ нет и не может быть — реестр
+        # исключений С ПРИЧИНАМИ, а не маска. Задача 2.2: потолок серий
+        # существует только у статистики (кардинальность — потеря на ВХОДЕ,
+        # а не на стыке «менеджер → канал»), и требовать его от логгера
+        # значило бы требовать вечный ноль. Каждое исключение обязано быть
+        # опубликовано СВОЕЙ плоскостью — иначе «не у логгера» превратилось бы
+        # в «нигде», и подсказка молчала бы всегда.
+        STATS_ONLY = {
+            "series_dropped": "различные серии, не пущенные в живой слой (ADR-SM-011)",
+            "window_observations_dropped": "эмиссии, отвергнутые окном агрегации (ADR-SM-011)",
+        }
+
         tmp = Path(tempfile.mkdtemp())
         logger = LoggerManager(config=LoggerManagerConfig(app_name="silence_probe", log_directory=str(tmp)))
+        stats = StatsManager(manager_name="SilenceProbeStats", config={"enable_logging": False})
         try:
-            plane = observability_counters(logger=logger)["logger"]
+            planes = observability_counters(logger=logger, stats=stats)
+            plane = planes["logger"]
+            stats_plane = planes["stats"]
         finally:
+            stats.shutdown()
             logger.shutdown()
 
         # Не «хотя бы один», а поимённо: плоскость логов обязана публиковать все
-        # ключи перечня.
+        # ключи перечня, кроме объявленных чужими.
         for key in OBSERVABILITY_LOSS_KEYS:
+            if key in STATS_ONLY:
+                continue
             assert key in plane, f"логгер перестал публиковать {key!r} — детектор 2.V2 ослеп на этот класс"
+        for key, reason in STATS_ONLY.items():
+            assert key in stats_plane, f"статистика перестала публиковать {key!r} ({reason}) — подсказка ослепла"
         # Ф7.х.2: буфера ЗАПИСИ у логгера больше нет — ``BatchBuffer`` снят
         # (Ф7.4), нормализация в ``_plane_counters`` его секцию не производит.
         # Отсутствие и есть контракт: вернувшийся ключ значил бы, что буфер

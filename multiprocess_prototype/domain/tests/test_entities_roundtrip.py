@@ -310,13 +310,20 @@ class TestInspectorEscapeHatchRoundtrip:
         )
         assert proc.extras["inspector"] == {"mode": "fanin"}
 
-    def test_inspector_extras_authoritative_in_blueprint(self) -> None:
-        """Домен-сериализованный extras.inspector авторитетен для framework-blueprint.
+    def test_legacy_inspector_extras_reaches_generic_collector(self) -> None:
+        """Домен-сериализованный extras.inspector доезжает до GenericProcessConfig.collector.
 
         Плоский inspector, пройдя через домен-entity, оседает в extras — и framework
-        ProcessConfig читает его как escape-hatch (`as_generic_config._pick` /
-        `infer_missing_collectors`). Конструируем ProcessConfig из релевантных полей
-        (в реальном пути process_class-нормализацию делает адаптер/unwrap).
+        читает его как escape-hatch (`as_generic_config._pick` + легаси-ключ).
+        Конструируем ProcessConfig из релевантных полей (в реальном пути
+        process_class-нормализацию делает адаптер/unwrap).
+
+        **Проверяется НАБЛЮДАЕМОЕ — значение в собранном конфиге, а не имя атрибута.**
+        Прежняя редакция читала `pc.inspector`, и ренейм D4 (`2942c949`, «фреймворк
+        перестаёт быть инспектором») уронил её с `AttributeError`. Красной она прожила
+        незамеченной: каталог `domain/tests` не собирал ни один прогонщик (задача 4.0).
+        Само поведение при этом не ломалось ни на минуту — легаси-ключ читается и
+        типизированным алиасом, и из extras.
         """
         from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             ProcessConfig,
@@ -326,8 +333,8 @@ class TestInspectorEscapeHatchRoundtrip:
         assert proc_dict["extras"]["inspector"] == {"mode": "fanin"}
 
         pc = ProcessConfig(process_name=proc_dict["process_name"], extras=proc_dict["extras"])
-        # extras.inspector виден framework как escape-hatch (typed inspector пуст)
-        assert (pc.inspector or pc.extras.get("inspector")) == {"mode": "fanin"}
+        assert pc.collector == {}, "typed-поле пусто: рецепт задал только легаси-форму в extras"
+        assert pc.as_generic_config().collector == {"mode": "fanin"}
 
 
 class TestRestartPolicyRoundtrip:
@@ -365,38 +372,149 @@ class TestRestartPolicyRoundtrip:
 
 
 class TestExtrasShorthandDriftGuard:
-    """F4: _EXTRAS_SHORTHAND_KEYS — рукописное зеркало `_pick`-набора ProcessConfig.
+    """F4: _EXTRAS_SHORTHAND_KEYS — зеркало `_pick`-набора ProcessConfig.
 
     Cross-layer contract-тест (импорт framework разрешён слоями): новый `_pick`-ключ во
     framework, забытый в домене, тихо ушёл бы в metadata при зелёных тестах — здесь ловим.
+
+    **Задача 4.0 (2026-08-11): набор `_pick` теперь ЧИТАЕТСЯ ИЗ ИСХОДНИКА framework.**
+    Прежняя редакция сверяла два рукописных набора — `_PINNED_PICK_SET` здесь против
+    `_EXTRAS_SHORTHAND_KEYS` в домене — и потому физически не могла исполнить то, что
+    обещал её собственный докстринг: framework в сверке не участвовал вовсе. Механизм
+    был назван, но не построен. Доказательство не рассуждением: ключи `frame_ring_depth`
+    и `copy_out_targets` вошли в `_pick` в Ф7 G.4.b и не покраснели нигде — ни здесь, ни
+    в домене. Плюс ренейм D4 (`inspector` → `collector`, `2942c949`) оставил в пине
+    мёртвое имя, и три теста класса стали красными; красноту никто не увидел, потому что
+    каталог `domain/tests` не собирал ни один прогонщик (это и чинит задача 4.0).
     """
 
-    # Pinned зеркало ключей ProcessConfig.as_generic_config._pick (blueprint.py:200-203).
-    # При добавлении нового _pick-ключа во framework — обнови и этот набор, и домен.
-    _PINNED_PICK_SET = frozenset({"chain_targets", "source_target_fps", "inspector", "io_peek"})
+    # `_pick`-ключи, которые домен осознанно НЕ принимает в ПЛОСКОЙ форме рецепта.
+    # Ключ-значение: имя → причина. Пустой список причин запрещён: запись без причины
+    # ничем не отличается от забытого ключа, а именно их этот класс и ловит.
+    _FLAT_FORM_NOT_ACCEPTED: dict[str, str] = {
+        "frame_ring_depth": (
+            "SHM-ключ процесса-владельца (Ф7 G.4.b): рецепты пишут только явную форму "
+            "`extras: {frame_ring_depth: N}`, которую домен переносит как есть. Плоской "
+            "формы нет ни в одном yaml репозитория (замер 2026-08-11)"
+        ),
+        "copy_out_targets": "то же происхождение и та же форма записи, что у frame_ring_depth",
+        "chain_max_lag_items": (
+            "потолок отставания исполнителя (2026-08-12, `9bacd304`): тот же класс, что "
+            "у SHM-ключей выше — extras-only, typed-полем ProcessConfig не заводится "
+            "(рычаг C6 №1). Обе записи в `webcam_sketch.yaml` (lines, points) — явная "
+            "форма `extras: {chain_max_lag_items: N}`; плоской формы нет ни в одном yaml "
+            "репозитория (замер 2026-08-12). Плоский ключ свернулся бы в metadata и стал "
+            "бы нем — это проверено отказом при вводе ручки"
+        ),
+    }
 
-    def test_extras_shorthand_mirrors_pick_set(self) -> None:
-        """_EXTRAS_SHORTHAND_KEYS + chain_targets (typed-поле домена) == _pick-набор."""
+    @staticmethod
+    def _framework_pick_keys() -> frozenset[str]:
+        """Ключи вызовов `_pick(...)` в blueprint.py — из исходника, не из головы.
+
+        Первый аргумент бывает и литералом, и константой модуля (`COLLECTOR_CONFIG_KEY`),
+        поэтому имена резолвятся через сам модуль.
+        """
+        import ast
+
+        from multiprocess_framework.modules.process_manager_module.topology import blueprint
+
+        tree = ast.parse(Path(blueprint.__file__).read_text(encoding="utf-8"))
+        keys: set[str] = set()
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_pick"):
+                continue
+            if not node.args:
+                continue
+            arg = node.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                keys.add(arg.value)
+            elif isinstance(arg, ast.Name):
+                resolved = getattr(blueprint, arg.id, None)
+                if isinstance(resolved, str):
+                    keys.add(resolved)
+        return frozenset(keys)
+
+    def test_pick_keys_are_readable_from_framework_source(self) -> None:
+        """Разбор исходника работает — иначе все проверки ниже стали бы вакуумом.
+
+        Сломанный парсер вернул бы пустое множество, и включения `⊆` прошли бы молча.
+        Поэтому исторически известное ядро набора проверяется отдельно и поимённо.
+        """
+        from multiprocess_framework.modules.process_module.generic.collector_registry import (
+            COLLECTOR_CONFIG_KEY,
+        )
+
+        keys = self._framework_pick_keys()
+        assert {"chain_targets", "source_target_fps", COLLECTOR_CONFIG_KEY, "io_peek"} <= keys
+
+    def test_every_pick_key_reaches_framework_from_domain(self) -> None:
+        """Каждый ключ, который framework читает, домен доносит — или он назван причиной.
+
+        Три законных исхода для `_pick`-ключа: домен кладёт его в extras (shorthand),
+        домен несёт его typed-полем, либо плоская форма осознанно не принимается и
+        записана в `_FLAT_FORM_NOT_ACCEPTED` с причиной. Новый ключ во framework не
+        попадает ни в один — тест краснеет и называет его.
+        """
         from multiprocess_prototype.domain.entities.process import _EXTRAS_SHORTHAND_KEYS
 
-        assert _EXTRAS_SHORTHAND_KEYS | {"chain_targets"} == self._PINNED_PICK_SET
+        delivered = _EXTRAS_SHORTHAND_KEYS | set(Process.model_fields)
+        undelivered = self._framework_pick_keys() - delivered - set(self._FLAT_FORM_NOT_ACCEPTED)
+        assert not undelivered, (
+            f"framework читает из extras ключи, которых домен не доносит: {sorted(undelivered)}. "
+            "Плоская форма такого ключа свернётся в metadata и станет для бэкенда немой. "
+            "Добавьте ключ в _EXTRAS_SHORTHAND_KEYS (или typed-полем в Process), "
+            "либо впишите в _FLAT_FORM_NOT_ACCEPTED с причиной."
+        )
+
+    def test_flat_form_exceptions_are_alive_and_honest(self) -> None:
+        """Исключения не гниют: каждое — живой `_pick`-ключ, которого нет в shorthand."""
+        from multiprocess_prototype.domain.entities.process import _EXTRAS_SHORTHAND_KEYS
+
+        exceptions = set(self._FLAT_FORM_NOT_ACCEPTED)
+        assert exceptions <= self._framework_pick_keys(), (
+            f"в _FLAT_FORM_NOT_ACCEPTED записи, которых framework больше не читает: "
+            f"{sorted(exceptions - self._framework_pick_keys())}"
+        )
+        assert not (exceptions & _EXTRAS_SHORTHAND_KEYS), (
+            "ключ назван непринимаемым в плоской форме и одновременно лежит в shorthand: "
+            f"{sorted(exceptions & _EXTRAS_SHORTHAND_KEYS)}"
+        )
+        assert all(reason.strip() for reason in self._FLAT_FORM_NOT_ACCEPTED.values())
 
     def test_shorthand_keys_are_real_process_config_fields(self) -> None:
-        """Каждый shorthand-ключ — реальное поле ProcessConfig (ловит опечатку/ренейм)."""
+        """Каждый shorthand-ключ — поле ProcessConfig; исключение одно — легаси-алиас.
+
+        Легаси-имя не является полем и не обязано им быть: framework читает его из extras
+        (`extras.get(LEGACY_COLLECTOR_CONFIG_KEY)`), а домен обязан не свернуть его в
+        metadata, иначе рецепт, написанный до D4, потеряет authoritative-режим коллектора.
+        Имя берётся у framework — рукописная копия разошлась бы ровно так же, как пин.
+        """
         from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             ProcessConfig,
+        )
+        from multiprocess_framework.modules.process_module.generic.collector_registry import (
+            COLLECTOR_CONFIG_KEY,
+            LEGACY_COLLECTOR_CONFIG_KEY,
         )
         from multiprocess_prototype.domain.entities.process import _EXTRAS_SHORTHAND_KEYS
 
-        assert _EXTRAS_SHORTHAND_KEYS <= set(ProcessConfig.model_fields)
+        assert COLLECTOR_CONFIG_KEY in _EXTRAS_SHORTHAND_KEYS
+        assert LEGACY_COLLECTOR_CONFIG_KEY in _EXTRAS_SHORTHAND_KEYS
+        assert _EXTRAS_SHORTHAND_KEYS - {LEGACY_COLLECTOR_CONFIG_KEY} <= set(ProcessConfig.model_fields)
 
-    def test_pinned_pick_set_matches_process_config_fields(self) -> None:
-        """Pinned _pick-набор целиком — поля ProcessConfig (детект дрейфа имён во framework)."""
+    def test_extras_only_pick_keys_are_named(self) -> None:
+        """`_pick`-ключи вне полей ProcessConfig — поимённо, иначе они безымянный долг."""
         from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             ProcessConfig,
         )
 
-        assert self._PINNED_PICK_SET <= set(ProcessConfig.model_fields)
+        extras_only = self._framework_pick_keys() - set(ProcessConfig.model_fields)
+        assert extras_only == {"frame_ring_depth", "copy_out_targets", "chain_max_lag_items"}, (
+            f"состав extras-only ключей framework изменился: {sorted(extras_only)}. "
+            "Такой ключ живёт только в extras (typed-поля не плодим, рычаг C6 №1) — "
+            "проверьте, что домен доносит его форму, и обновите этот список."
+        )
 
 
 # ==============================================================================

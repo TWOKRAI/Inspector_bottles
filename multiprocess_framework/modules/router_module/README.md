@@ -154,8 +154,13 @@ router.shutdown()
 |---|---|
 | `send(msg)` | Синхронная отправка. Блокирует поток. Возвращает `{"status": ...}`. |
 | `send_async(msg, priority)` | Non-blocking. Кладёт в PriorityQueue AsyncSender'а. |
+| `request(msg, timeout=5.0)` | Request-response: отправить и ЖДАТЬ ответ по `correlation_id`. **Нельзя звать с приёмного потока** — контракт проверяется, нарушение бросает `RouterReentrantRequestError` (ADR-RTR-011). |
+| `request_async(msg, on_response, timeout=5.0)` | То же без ожидания: ответ приходит колбэком, который исполняет ПРИЁМНЫЙ поток внутри `receive()`. Колбэк вызывается ровно один раз (ответ / таймаут / провал отправки). Единственный законный способ спросить что-то из обработчика сообщения. |
+| `reply_to_request(msg, result, success)` | Ответить на билет, если он несёт `correlation_id` (иначе no-op). |
 
 **Приоритеты `send_async`:** `"urgent"` → `"high"` → `"normal"` → `"low"`
+
+**Кто такой «приёмный поток»:** тот, что сейчас внутри `receive()` этого роутера — в процессе это `message_processor` (`process_module/threads/system_threads.py`), и он же разбирает ответы. Блокирующий `request()` из него ждал бы сам себя: ответ разобрать некому. Второй случай без ответа — приёмного цикла ещё нет вовсе (вызов из `start()` плагина, до шага 7 `ProcessModule.initialize()`): тогда `request()` не ждёт полный таймаут, а через 0.5 с возвращает `{"error": "timeout", "reason": "no_receive_pump"}`, отправив при этом сообщение (деградация до fire-and-forget).
 
 **Разрешение канала** (по порядку):
 1. `msg["channel"]` задан → прямой O(1) lookup в `_channel_registry`

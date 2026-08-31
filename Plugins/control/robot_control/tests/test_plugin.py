@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from Plugins.control.robot_control.plugin import RobotControlPlugin
 
@@ -34,12 +33,14 @@ class TestConfigure:
     def test_configure(self):
         """Парсинг параметров из ctx.config."""
         plugin = RobotControlPlugin()
-        ctx = _make_mock_ctx({
-            "enabled": False,
-            "min_defect_area": 300,
-            "reject_delay_ms": 50,
-            "max_detections_for_reject": 3,
-        })
+        ctx = _make_mock_ctx(
+            {
+                "enabled": False,
+                "min_defect_area": 300,
+                "reject_delay_ms": 50,
+                "max_detections_for_reject": 3,
+            }
+        )
 
         plugin.configure(ctx)
 
@@ -171,10 +172,14 @@ class TestProcess:
     def test_max_detections_for_reject(self):
         """max_detections_for_reject ограничивает кол-во дефектов для анализа."""
         plugin = RobotControlPlugin()
-        plugin.configure(_make_mock_ctx({
-            "min_defect_area": 100,
-            "max_detections_for_reject": 2,
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "min_defect_area": 100,
+                    "max_detections_for_reject": 2,
+                }
+            )
+        )
 
         detections = [
             _make_detection(area=500),

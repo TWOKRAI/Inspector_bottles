@@ -3,12 +3,14 @@
 EngineFactory — создание SQLAlchemy Engine с учётом fork-safety.
 
 В multiprocess QueuePool не fork-safe — deadlocks при SSL/PostgreSQL.
-Используем NullPool при INSPECTOR_MULTIPROCESS=1 или config.fork_safe=True.
+Используем NullPool при ``MULTIPROCESS_SQL_FORK_SAFE=1`` (легаси-алиас
+``INSPECTOR_MULTIPROCESS=1``) или ``config.fork_safe=True``.
 
 Выбор конкретного адаптера по dialect живёт в adapter_factory.py —
 разделение нужно, чтобы sync_adapter мог зависеть только от builder'а Engine,
 не подтягивая конкретные подклассы (sqlite/postgresql/mysql).
 """
+
 from __future__ import annotations
 
 import os
@@ -21,6 +23,24 @@ from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 from Services.sql.configs import SQLManagerConfig
 
 
+def fork_safe_env_flag() -> bool:
+    """Флаг fork-safe из env: канон первым, легаси вторым, дефолт — выключено.
+
+    Пара ``MULTIPROCESS_SQL_FORK_SAFE`` / ``INSPECTOR_MULTIPROCESS`` (Р-5а, задача
+    5.2 roadmap): ``Services`` переиспользуем, и читать только брендированное имя
+    значит требовать бренд Inspector от чужого приложения. Каноничное имя — не
+    механическая замена префикса: ``MULTIPROCESS_MULTIPROCESS`` было бы именем ни о
+    чём, поэтому ручка названа по свойству, которое включает.
+
+    **Единственная позиция чтения на обе дороги.** ``adapters/async_adapter.py``
+    зовёт эту же функцию: две позиции одного решения разошлись бы молча, и async-
+    адаптер брал бы другой пул, чем sync. Имена — литералами прямо здесь, а не через
+    константу-кортеж: аудит env-пар (``Services/tests/test_env_brand.py``) читает
+    имена по месту вызова, и косвенность сделала бы его слепым.
+    """
+    return (os.environ.get("MULTIPROCESS_SQL_FORK_SAFE") or os.environ.get("INSPECTOR_MULTIPROCESS") or "0") == "1"
+
+
 def _should_use_null_pool(config: Union[SQLManagerConfig, Dict[str, Any]]) -> bool:
     """Определить, нужен ли NullPool (fork-safe)."""
     if isinstance(config, dict):
@@ -29,7 +49,7 @@ def _should_use_null_pool(config: Union[SQLManagerConfig, Dict[str, Any]]) -> bo
     else:
         if config.fork_safe:
             return True
-    return os.environ.get("INSPECTOR_MULTIPROCESS", "0") == "1"
+    return fork_safe_env_flag()
 
 
 def _config_to_dict(config: Union[SQLManagerConfig, Dict[str, Any]]) -> Dict[str, Any]:

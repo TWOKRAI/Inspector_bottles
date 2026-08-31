@@ -79,7 +79,9 @@ class TestEmissionRouting:
         hub.record_timing("m3", 0.42)
         hub.gauge("m4", 7)
         by = {r["metric"]: r for r in hub.drain_stats()}
-        assert by["m1"]["metric_type"] == METRIC_GAUGE
+        # S-4: record_metric — ПРИРОСТ (counter), как у соседа StatsManager.record_metric,
+        # а не gauge. До S-4 здесь стоял METRIC_GAUGE — он дублировал m4/gauge ниже.
+        assert by["m1"]["metric_type"] == METRIC_COUNTER
         assert by["m2"]["metric_type"] == METRIC_COUNTER
         assert by["m3"]["metric_type"] == METRIC_TIMING and by["m3"]["value"] == 0.42
         assert by["m4"]["metric_type"] == METRIC_GAUGE and by["m4"]["value"] == 7

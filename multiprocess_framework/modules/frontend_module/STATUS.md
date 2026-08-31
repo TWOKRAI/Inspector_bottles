@@ -78,7 +78,7 @@ e128b930). **Gen-2** («generic-механизмы», `tabs`/`state`/`components
 - Механизм вкладок (NEW-D1): `TabSpec`, `TabRegistry`, `LazyTab`,
   `AccessContextSource`, `PlaceholderFactory`
 - Read-model телеметрии (FE-005): `TelemetryViewModel`, `TelemetryHistorySource`,
-  `DEFAULT_TRACKED_SUFFIXES`
+  `DEFAULT_TRACKED_SUFFIXES`, `TelemetryPoller` (ADR-139, опрос по видимости)
 - Идентичность приложения (NEW-2): `AppIdentity`, `get_app_identity`, `set_app_identity`
 - Фасады подпакетов: `components`, `widgets` (включая `widgets.tabs`)
 
@@ -184,6 +184,33 @@ layout_composer}`, `schemas.{widget_descriptor,window_config}`, `configs`,
 - `FrontendRegistersBridge` — connection_map, send_callback, subscribe (LEGACY Gen-1)
 - `TabRegistry`/`TabSpec` — generic-механизм вкладок (Gen-2, живое, в фасаде)
 - `TelemetryViewModel`/`TelemetryHistorySource` — read-model телеметрии (Gen-2, живое, в фасаде)
+- `TelemetryPoller` — опрос уровней, пока вкладка видима; вливает `levels` в тот же
+  read-model теми же путями, что и push (ADR-139, Gen-2, живое, в фасаде). Push
+  остаётся дефолтом: publisher-гейт поллером не управляется. Опрос НЕ приносит
+  восемь push-ключей (`status`/`pid`/`frame_count`/`error`/`uptime`/`drops`/
+  `paused`/`frozen`) — их пишут другие публикаторы, и влив их не трогает (K-8);
+  `cycles` есть только у воркеров с `CycleMetricsRecorder` (K-9). Влив идёт
+  ОТДЕЛЬНЫМ входом `TelemetryViewModel.ingest_poll_snapshot` (снимок да, кольцо
+  истории нет) — иначе опрос сокращал бы окно спарклайна вытеснением точек push'а.
+  Требует СВОЕГО `QThreadPool` (не `globalInstance`) и имеет дедлайн на
+  незавершённый запрос: доставка результата исполнителем не гарантирована.
+- **S-1 (2026-08-17): у двух входов появился сторож порядка.** Ответ опроса,
+  отправленный ДО push'а и пришедший ПОСЛЕ него, воскрешал снятое значение
+  (оборот запроса 7.5–10 с; `t2 push -> None`, `t3 poll -> 12.5`) — push и опрос
+  расходились необратимо и в противоположные стороны. Судится номером, а не
+  временем (Windows-сетка `monotonic` 15.6 мс): `TelemetryViewModel.write_seq`
+  (делегат ядра) снимается поллером в момент ОТПРАВКИ, лежит в записи о полёте
+  рядом со штампом и возвращается во влив как `requested_at_seq` (keyword-only,
+  без умолчания). Правило (`push_seq[path] > requested_at_seq` → отбросить) живёт
+  в ядре read-model, судится КАЖДЫЙ путь отдельно. Расхождение видно числом —
+  `TelemetryViewModel.poll_values_dropped_stale` (считает ПУТИ, не ответы).
+  **Своего места на экране у него, как и у счётчиков поллера
+  (`polls_started`/`polls_completed`/`polls_failed`/`polls_expired`), сегодня нет:
+  все они публичные свойства, читаемые только тестами.** Отдельная дорога показа
+  этим счётчиком не заводилась намеренно — это строка для GUI-фазы, а не решение,
+  которое стоит принимать здесь.
+  Границы: `stop()` терминален; потеря фокуса окна опрос НЕ гасит (гасят
+  скрытие/сворачивание/закрытие)
 - `AppIdentity`/`get_app_identity`/`set_app_identity` — идентичность приложения (Gen-2, живое, в фасаде)
 - Controls: SliderControl, CheckboxControl, SpinBoxControl, NumericControl, CompoundControl (Gen-2, живое)
 - Widgets: BaseWidget[TModel], HeaderWidget, TabWidget, ImagePanelWidget (Gen-2, живое); LoadingWindow (LEGACY Gen-1)

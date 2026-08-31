@@ -71,12 +71,18 @@ class GuiProcess(ProcessModule):
             GuiStateProxy,
         )
 
+        # logger=self.logger_manager, а НЕ logger=self (Task Т.1): GuiStateProxy —
+        # носитель ObservableMixin, слот 'logger' вызывается каноничным
+        # протоколом warning()/error()/…, которого у GuiProcess нет (только
+        # log_warning()/…). При logger=self весь лог прокси уходил в никуда.
+        # Порядок: _init_application_threads — шаг 6 initialize(), logger_manager
+        # готов с шага 3.
         self._gui_state_proxy = GuiStateProxy(
             process_name=self.name,
             router=self.router_manager,
             delta_sink=self._on_state_deltas_to_bridge,
             server_target="ProcessManager",
-            logger=self,
+            logger=self.logger_manager,
         )
         self._gui_state_proxy.initialize()
         if self.router_manager:
@@ -97,26 +103,49 @@ class GuiProcess(ProcessModule):
             self.router_manager.register_message_handler("process.command.response", self._on_command_response)
             # Серверная подписка на телеметрию (callback пуст — доставку в виджеты
             # делает emitter через bridge; подписка нужна, чтобы DeltaDispatcher слал
-            # дельты на 'gui'). Не блокирует старт: subscribe — fire-and-forget.
+            # дельты на 'gui'). sync=False ОБЯЗАТЕЛЕН (Task Т.3,
+            # plans/observation-port/plan.md): на этом шаге (шаг 6 initialize())
+            # приёмный поток data_receiver ещё не создан — он заводится НИЖЕ, —
+            # поэтому sync=True (дефолт) блокировал главный поток НА КАЖДОЙ из
+            # четырёх подписок: отвечать было буквально некому. Цена — НЕ полный
+            # request-таймаут: `RouterManager.request` видит незапущенный приёмный
+            # цикл и обрывает ожидание грейсом `_NO_PUMP_GRACE_SEC = 0.5 с`
+            # (router_manager.py:974, 1062), то есть 4 × 0.5 = 2.0 с. Правка Н2
+            # ревью Ф1+Ф2: прежняя редакция этого комментария называла 5.0 с на
+            # подписку — грейс существовал уже на базе, и живой замер это
+            # подтвердил: A/B двумя стендами (frontend/run.py, offscreen) дал
+            # 2.044 с до правки против 0.001 с после, при четырёх WARNING роутера
+            # «приёмный цикл ещё не запускался» до и нуле после. Цифра 20.03 с из
+            # ревью снята ДО починки грейса и на текущем main не воспроизводится.
+            # Терялось при этом НЕ сообщение: `RouterManager.request` при
+            # отсутствии приёмного цикла сообщение ОТПРАВЛЯЕТ и сам называет это
+            # fire-and-forget-деградацией (router_manager.py:1021-1025) — не
+            # приезжало только ПОДТВЕРЖДЕНИЕ, а платой был простой главного потока. При sync=False подписка
+            # действительно fire-and-forget: комментарий ниже стал верным вместе
+            # с кодом, а не отдельно от него. Плата — все четыре паттерна
+            # остаются НЕподтверждёнными (не попадают в _confirmed_patterns), и
+            # coverage-check (_find_covering_pattern) для GUI-процесса вырождается
+            # в «ничего не покрывает» — см. докстринг класса StateProxy и
+            # _find_covering_pattern; это не чинится здесь (см. Out of scope Т.3).
             try:
-                self._gui_state_proxy.subscribe("processes.**", lambda _deltas: None, exclude_self=True)
+                self._gui_state_proxy.subscribe("processes.**", lambda _deltas: None, exclude_self=True, sync=False)
                 # system.** — сводное здоровье (system.health.active/avg_fps/broken_wires)
                 # для health-панели вкладки «Процессы». Без неё дельты system.* не
                 # доходят до GUI и панель показывает дефолты («Активно: 0», «—»).
-                self._gui_state_proxy.subscribe("system.**", lambda _deltas: None, exclude_self=True)
+                self._gui_state_proxy.subscribe("system.**", lambda _deltas: None, exclude_self=True, sync=False)
                 # devices.** — реестр устройств, conn-статусы, телеметрия.
                 # Без этой подписки DeviceHubPlugin публикует devices.registry.*
                 # / devices.state.* в DeltaDispatcher, но дельты не доходят до GUI:
                 # DeltaDispatcher шлёт дельты только подписчикам; GUI не в списке →
                 # комбо остаётся пустым и push-обновления conn мертвы.
                 # При подписке сработает _replay_initial_state — комбо заполнится сразу.
-                self._gui_state_proxy.subscribe("devices.**", lambda _deltas: None, exclude_self=True)
+                self._gui_state_proxy.subscribe("devices.**", lambda _deltas: None, exclude_self=True, sync=False)
                 # calibration.** — прогресс визарда калибровки камера↔робот.
                 # CameraRobotCalibrationPlugin публикует calibration.state.<camera_id>.progress;
                 # без этой подписки DeltaDispatcher не шлёт дельты в GUI (GUI не в списке
                 # подписчиков) → подвкладка «Калибровка» (Services → Робот) «висит»: «найдено
                 # N/5», собранные точки, reproj и активация «Сохранить» не обновляются.
-                self._gui_state_proxy.subscribe("calibration.**", lambda _deltas: None, exclude_self=True)
+                self._gui_state_proxy.subscribe("calibration.**", lambda _deltas: None, exclude_self=True, sync=False)
             except Exception as exc:
                 self._log_warning(
                     f"GuiProcess '{self.name}': подписка на processes.**/system.**/devices.**/"

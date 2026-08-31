@@ -52,11 +52,17 @@ reader-потоке (колбэк не роняет reader) — контракт
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 import uuid
 from collections import deque
 from itertools import islice
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
+
+# Логгер hub'а: голос вытеснения (Task 2.4) звучит сюда — конвенция та же,
+# что у соседей (driver.py:80, transport.py:31): logging.getLogger(__name__).
+_log = logging.getLogger(__name__)
 
 # Колбэк подписчика на события (получает распарсенный push-dict).
 EventCallback = Callable[[Dict[str, Any]], None]
@@ -87,6 +93,13 @@ _KIND_TO_PLANE: Dict[Any, str] = {"log": "logs", "error": "errors", "stats": "st
 # страхует контекст агента от заливки (response_format-лимиты целиком — Phase E).
 _DEFAULT_PAGE_LIMIT = 100
 _MAX_PAGE_LIMIT = 500
+
+#: Порог затишья (сек) между вытеснениями ОДНОГО кольца, разделяющий эпизоды
+#: вытеснения друг от друга (Task 2.4, вход Н3-2). Голос — WARNING в лог
+#: ``backend_ctl.events`` — звучит один раз на эпизод: на первом вытеснении
+#: после затишья дольше этого порога, а не на каждой вытесненной записи.
+#: Эпизоды считаются независимо для каждого кольца (arrival и per-plane).
+EVICTION_VOICE_QUIET_SEC: float = 30.0
 
 
 def iter_state_deltas(msg: Any) -> List[Dict[str, Any]]:
@@ -208,12 +221,26 @@ class EventHub:
     ``_events_cv``); на нём же будятся ожидающие при :meth:`wake` (close() driver'а).
     """
 
-    def __init__(self, maxlen: int = 1000, *, alive: Optional[Callable[[], bool]] = None) -> None:
+    def __init__(
+        self,
+        maxlen: int = 1000,
+        *,
+        alive: Optional[Callable[[], bool]] = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._cv = threading.Condition()
         # Предикат «соединение ещё живо» — сохранён как часть контракта hub'а
         # (будущие блокирующие читатели поверх ``_cv``); legacy-``drain`` (единственный
         # потребитель) удалён в F.1.
         self._alive: Callable[[], bool] = alive if alive is not None else (lambda: False)
+        # Часы голоса вытеснения (Task 2.4) — инъецируются, чтобы тесты не патчили
+        # глобальный time.monotonic; дефолт совпадает с монотонными часами, которыми
+        # уже меряют интервалы в проекте (см. Р2.2-10 плана telemetry-stage6).
+        self._clock: Callable[[], float] = clock
+        # plane/ALL_PLANE → время (в единицах self._clock) последнего вытеснения
+        # этого кольца. Пусто, пока вытеснений не было. Читается только внутри
+        # emit() под self._cv.
+        self._last_eviction_ts: Dict[str, float] = {}
         # Токен поколения в курсорах: новый hub (реконнект) ⇒ старый курсор даёт
         # явный reset_required, а не тихое чтение с совпавшего по числу места.
         # §8: тот же токен ротируется на границе рестарта наблюдаемого процесса.
@@ -239,13 +266,50 @@ class EventHub:
 
         Вызывается из reader-потока. Исключение любого колбэка не роняет
         reader (глотается, инкрементит ``event_errors``) и не мешает остальным.
+
+        Task 2.4 (вход Н3-2): вытеснение кольца (arrival ИЛИ любой плоскости)
+        обязано прозвучать голосом — WARNING в лог ``backend_ctl.events`` — один
+        раз на ЭПИЗОД (серия вытеснений без затишья дольше
+        :data:`EVICTION_VOICE_QUIET_SEC`), а не на каждой вытесненной записи.
+        Признак вытеснения — кольцо было ПОЛНЫМ до append (модульный докстринг,
+        механика (б)): ``len(ring) == ring.maxlen`` перед вызовом ``append``.
+        Решение «нужен ли голос» дешёвое (сравнение времени) и принимается под
+        локом; сам вызов ``_log.warning`` — уже ВНЕ лока, тем же правилом, что
+        и колбэки подписчиков ниже: логирование зовёт чужой код (хендлеры),
+        и держать его под локом hub'а значило бы рисковать тем же классом
+        проблем, ради которого колбэки уже вынесены наружу.
         """
+        now = self._clock()
         with self._cv:
             self._gseq += 1
+            arrival_was_full = len(self._arrival) == self._arrival.maxlen
             self._arrival.append((self._gseq, msg))
+            evictions: List[Tuple[str, int]] = []
+            if arrival_was_full:
+                evictions.append((ALL_PLANE, self._gseq - len(self._arrival)))
+
             for plane, view in _classify(msg):
                 self._pseq[plane] += 1
-                self._rings[plane].append((self._pseq[plane], view))
+                ring = self._rings[plane]
+                ring_was_full = len(ring) == ring.maxlen
+                ring.append((self._pseq[plane], view))
+                if ring_was_full:
+                    evictions.append((plane, self._pseq[plane] - len(ring)))
+
+            # Эпизоды считаются НЕЗАВИСИМО для каждого кольца (arrival и каждая
+            # плоскость свою временную метку). Внутри одного emit() один и тот
+            # же ключ может вытесниться несколько раз (state.changed с k
+            # дельтами вытесняет "telemetry" k раз) — первое вытеснение решает,
+            # нужен ли голос, отметка времени сразу обновляется на "now", и
+            # следующее в этом же вызове видит нулевой зазор → тот же эпизод,
+            # повторного голоса не даёт.
+            voices: List[Tuple[str, int]] = []
+            for key, evicted in evictions:
+                last = self._last_eviction_ts.get(key)
+                if last is None or (now - last) > EVICTION_VOICE_QUIET_SEC:
+                    voices.append((key, evicted))
+                self._last_eviction_ts[key] = now
+
             if _is_restart_boundary(msg):
                 # §8: наблюдаемый процесс пересёк рестарт (supervisor.event) → ротируем
                 # generation-токен. Курсоры «до рестарта» на следующем page() дадут
@@ -261,6 +325,37 @@ class EventHub:
                 self._gen_boundary = {ALL_PLANE: self._gseq, **{p: self._pseq[p] for p in PLANES}}
             subscribers = list(self._subscribers)  # снимок под локом
             self._cv.notify_all()
+        # Голос вытеснения — вне лока (Task 2.4), см. докстринг метода выше, и
+        # ПЕРЕД колбэками подписчиков. Порядок содержательный: тревога звучит
+        # ровно про то, что читатели отстают, и стоять в очереди ЗА этими же
+        # читателями ей нельзя — медленный подписчик задерживал бы сообщение о
+        # собственном отставании (находка ревью 2026-08-14, пункт 5).
+        #
+        # ОДНО push-сообщение может открыть эпизод сразу у НЕСКОЛЬКИХ колец
+        # (arrival + плоскость, в которую классифицируется простое сообщение,
+        # эвиктятся синхронно — оба впервые на одном и том же append) — тогда
+        # это ОДИН вызов логгера с обоими именами, а не два отдельных. Отсюда
+        # следствие, которое надо знать: число ЗАПИСЕЙ WARNING не равно числу
+        # колец, поэтому алерт, считающий строки, недосчитает. Единица контракта
+        # — «кольцо/эпизод», и проверять её надо по имени кольца в тексте.
+        if voices:
+            # Число — вытеснено НА МОМЕНТ ГОЛОСА, а голос звучит на ПЕРВОМ
+            # вытеснении эпизода, поэтому оно почти всегда маленькое (живой
+            # замер 2026-08-14: голос про 'telemetry' с числом 1, а за те же
+            # 30 с кольцо потеряло 587). Голое «=1» читалось бы как «потеряно
+            # одно событие» — счётчик, значащий не то, что написано.
+            #
+            # Адрес полной величины назван ТОЧНО: ``events_stats()`` покрывает и
+            # плоскости, и arrival-кольцо, а ``system_overview → events_evicted``
+            # строится только из ``planes`` и кольцо ``all`` не показывает — то
+            # есть для 'all' был бы ложный адрес (находка ревью, пункт 1).
+            # Величина названа нарастающим итогом, а не итогом эпизода: счётчик
+            # кумулятивен за всю жизнь hub'а и эпизоды не разделяет.
+            text = ", ".join(f"'{key}' (вытеснено {evicted} и растёт)" for key, evicted in voices)
+            _log.warning(
+                "кольца событий начали вытеснять: %s — читатели отстают; нарастающий итог по кольцу — в events_stats()",
+                text,
+            )
         # Колбэки — вне лока: могут быть медленными и/или звать driver повторно.
         for cb in subscribers:
             try:
@@ -541,6 +636,7 @@ __all__ = [
     "MISSING_MARKER",
     "PLANES",
     "ALL_PLANE",
+    "EVICTION_VOICE_QUIET_SEC",
     "extract_observability_records",
     "iter_state_deltas",
 ]

@@ -80,6 +80,26 @@ def _error(text: str) -> Dict[str, Any]:
     return {"success": False, "error": text}
 
 
+def _is_ancestor_path(candidate: str, watched: str) -> bool:
+    """True, если ``candidate`` — предок ``watched`` по СЕГМЕНТАМ пути (Т.2).
+
+    Удаление узла состояния удаляет всё поддерево: дельта по ``processes.gui``
+    делает бессмысленным ожидание ``processes.gui.state.plugins.capture.capture_fps``,
+    даже когда её ``path`` не совпадает с наблюдаемым буквально. Сравнение —
+    ТОЛЬКО по границе сегмента (``candidate + "."``), не текстовый префикс:
+    ``processes.gu`` — префикс строки ``processes.gui.x``, но НЕ предок по
+    сегментам (последний сегмент оборван на середине имени, ``gu`` ≠ ``gui``);
+    наивный ``str.startswith(candidate)`` без добавленной точки ловится сюда
+    ложным срабатыванием.
+
+    Стоимость: одна конкатенация строк + ``str.startswith`` на дельту, для
+    которой уже подтверждено ``new_value == MISSING_MARKER`` (см. вызовы) —
+    предикат живёт в reader-потоке, но до этой проверки доходят только
+    дельты-удаления, не каждая дельта подряд.
+    """
+    return watched.startswith(candidate + ".")
+
+
 def _match_targets(view: Dict[str, Any]) -> List[str]:
     """Строки, по которым матчится glob event_matches: command + path'ы события."""
     targets: List[str] = []
@@ -110,15 +130,36 @@ class _Waiter:
         self.matched: Optional[Dict[str, Any]] = None
         self.events_seen = 0
         self.last_seen: Optional[Dict[str, Any]] = None
+        # Т.2: отказы предиката — считаемый факт, а не тишина (см. ``offer``).
+        self.predicate_failures = 0
+        self.first_predicate_error: Optional[str] = None
+        # Н4 (ревью Ф1+Ф2): удаление ПРЕДКА живёт отдельно от ``last_seen``.
+        # Раньше оно писалось тем же ``note`` и затирало последнее наблюдённое
+        # ЗНАЧЕНИЕ, если стояло в пакете позже него: ответ по таймауту терял
+        # «видел 25 по нужному пути» и показывал только «поддерево удалено».
+        # Это два разных факта, и оба нужны для разбора — храним оба.
+        self.subtree_deleted: Optional[Dict[str, Any]] = None
         # Доп. диагностика, собранная на этапе setup_condition (сейчас — unknown_metric
         # у metric_threshold); пусто для остальных kind — их ответ не меняется ни на байт.
         self.diagnostics: Dict[str, Any] = {}
 
     def offer(self, msg: Dict[str, Any]) -> None:
-        """Колбэк событийного канала (reader-поток): лёгкая проверка + set()."""
+        """Колбэк событийного канала (reader-поток): лёгкая проверка + set().
+
+        Отказ предиката НЕ роняет reader — но и не исчезает (Т.2). Раньше
+        ``except: return`` глотал сообщение целиком вместе с возможным
+        совпадением в его хвосте, и ответ по таймауту выглядел как «релевантных
+        наблюдений не было»: тот же класс дефекта, который эта задача и чинит —
+        система наблюдаемости, неспособная рассказать о собственном отказе.
+        Считаем отказы и называем первый; ответ по таймауту их печатает.
+        """
         try:
             found = self._predicate(msg)
-        except Exception:  # noqa: BLE001 — предикат не должен ронять reader
+        except Exception as exc:  # noqa: BLE001 — предикат не должен ронять reader
+            with self._lock:
+                self.predicate_failures += 1
+                if self.first_predicate_error is None:
+                    self.first_predicate_error = f"{type(exc).__name__}: {exc}"
             return
         with self._lock:
             self.events_seen += 1
@@ -139,6 +180,25 @@ class _Waiter:
         """Запомнить последнее релевантное наблюдение для таймаут-диагноза."""
         with self._lock:
             self.last_seen = observation
+
+    def note_subtree_deletion(self, observation: Dict[str, Any]) -> None:
+        """Запомнить удаление ПРЕДКА — не затирая наблюдённое значение (Н4).
+
+        Первое удаление и побеждает: последующие ничего не добавляют к
+        диагнозу («поддерево уже снесли»), а перезапись прятала бы самый
+        ранний — то есть объясняющий — момент.
+        """
+        with self._lock:
+            if self.subtree_deleted is None:
+                self.subtree_deleted = observation
+            # В ``last_seen`` удаление попадает ТОЛЬКО если там пусто. Так
+            # выполняются оба требования разом: приёмка Т.2 хочет видеть
+            # диагноз вместо пустоты, а Н4 запрещает затирать им наблюдённое
+            # ЗНАЧЕНИЕ. Обратный порядок (сначала снос, потом значение) не
+            # ломается: ``note`` перезапишет ``last_seen`` значением, а снос
+            # останется в своём ключе.
+            if self.last_seen is None:
+                self.last_seen = observation
 
     def wait(self, timeout: float) -> bool:
         return self._hit.wait(timeout)
@@ -180,6 +240,9 @@ def await_condition(
     elapsed = round(time.monotonic() - started, 3)
     with waiter._lock:
         matched, events_seen, last_seen = waiter.matched, waiter.events_seen, waiter.last_seen
+        predicate_failures = waiter.predicate_failures
+        first_predicate_error = waiter.first_predicate_error
+        subtree_deleted = waiter.subtree_deleted
     if matched is not None:
         return {"success": True, "kind": kind, "matched": matched, "elapsed_sec": elapsed}
 
@@ -192,6 +255,17 @@ def await_condition(
         "events_seen": events_seen,
         "last_seen": last_seen,
     }
+    # Н4: удаление предка — отдельный ключ, а не замена last_seen. Пустой
+    # last_seen рядом с ним читается «значения не видели, зато видели снос»;
+    # непустой — «видели и значение, и снос», и порядок больше не решает,
+    # какой из двух фактов доживёт до ответа.
+    if subtree_deleted is not None:
+        out["subtree_deleted"] = subtree_deleted
+    # Т.2: отказавший предикат объясняет пустой last_seen — без этой строки
+    # «наблюдений не было» и «наблюдения были, но их разбор упал» неотличимы.
+    if predicate_failures:
+        out["predicate_failures"] = predicate_failures
+        out["first_predicate_error"] = first_predicate_error
     # unknown_metric/candidates (только metric_threshold с неопознанным путём) — собраны
     # на setup, ДО ожидания; для известных путей и прочих kind словарь пуст — update({})
     # не меняет ответ ни на байт (BCTL-ADR-007).
@@ -245,17 +319,29 @@ def _setup_state_path(drv: Any, spec: Dict[str, Any]):
 
     def predicate(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for delta in iter_state_deltas(msg):
-            if delta.get("path") != path:
+            delta_path = delta.get("path")
+            if delta_path == path:
+                new_value = delta.get("new_value")
+                if new_value == MISSING_MARKER:
+                    # Удаление узла — не значение, но наблюдение релевантное: диагноз
+                    # «видел удаление» информативнее пустого last_seen.
+                    waiter.note({"path": path, "deleted": True, "source": "delta"})
+                    continue
+                waiter.note({"path": path, "value": new_value, "source": "delta"})
+                if new_value == value:
+                    return {"path": path, "value": new_value, "source": "delta"}
                 continue
-            new_value = delta.get("new_value")
-            if new_value == MISSING_MARKER:
-                # Удаление узла — не значение, но наблюдение релевантное: диагноз
-                # «видел удаление» информативнее пустого last_seen.
-                waiter.note({"path": path, "deleted": True, "source": "delta"})
-                continue
-            waiter.note({"path": path, "value": new_value, "source": "delta"})
-            if new_value == value:
-                return {"path": path, "value": new_value, "source": "delta"}
+            # Т.2: дельта по ЧУЖОМУ пути — релевантна, только если это удаление
+            # ПРЕДКА наблюдаемого пути (всё поддерево ушло вместе с ним). Матчем
+            # это НЕ считается (условие не выполнено — «удалили», а не «совпало»),
+            # но last_seen обязан назвать удалённого предка, иначе таймаут отдаёт
+            # пустой диагноз, хотя релевантное наблюдение БЫЛО.
+            if (
+                isinstance(delta_path, str)
+                and delta.get("new_value") == MISSING_MARKER
+                and _is_ancestor_path(delta_path, path)
+            ):
+                waiter.note_subtree_deletion({"path": path, "deleted": True, "ancestor": delta_path, "source": "delta"})
         return None
 
     def initial_check() -> Optional[Dict[str, Any]]:
@@ -291,15 +377,24 @@ def _setup_metric_threshold(drv: Any, spec: Dict[str, Any]):
 
     def predicate(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for delta in iter_state_deltas(msg):
-            if delta.get("path") != path:
+            delta_path = delta.get("path")
+            if delta_path == path:
+                new_value = delta.get("new_value")
+                if new_value == MISSING_MARKER:
+                    waiter.note({"path": path, "deleted": True, "source": "delta"})
+                    continue
+                found = check(new_value, "delta")
+                if found is not None:
+                    return found
                 continue
-            new_value = delta.get("new_value")
-            if new_value == MISSING_MARKER:
-                waiter.note({"path": path, "deleted": True, "source": "delta"})
-                continue
-            found = check(new_value, "delta")
-            if found is not None:
-                return found
+            # Т.2: то же требование, что у ``_setup_state_path`` — удаление ПРЕДКА
+            # наблюдаемого пути. Диагноз, не пересечение порога (см. helper выше).
+            if (
+                isinstance(delta_path, str)
+                and delta.get("new_value") == MISSING_MARKER
+                and _is_ancestor_path(delta_path, path)
+            ):
+                waiter.note_subtree_deletion({"path": path, "deleted": True, "ancestor": delta_path, "source": "delta"})
         return None
 
     def initial_check() -> Optional[Dict[str, Any]]:

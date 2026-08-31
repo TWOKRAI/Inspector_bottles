@@ -17,7 +17,10 @@ from typing import Any
 
 import multiprocess_prototype.backend.assembly as assembly_pkg
 from multiprocess_prototype.backend.config.schemas import SystemConfig
+from multiprocess_prototype.backend.launch import sys_config_for_orchestrator
 from multiprocess_prototype.backend.orchestrator_hooks import configure_topology_engine
+
+from ._orchestrator_stub_contract import assert_stub_speaks_the_real_class_surface
 
 
 class _CaptureAssembler:
@@ -119,7 +122,7 @@ def test_hot_swap_forwards_global_telemetry(monkeypatch) -> None:
             "telemetry": {"publish": {"default_interval_sec": 2.0, "metrics": {"fps": {"enabled": False}}}},
         }
     )
-    orch = _StubOrchestrator(sys_config.model_dump())
+    orch = _StubOrchestrator(sys_config_for_orchestrator(sys_config))
 
     configure_topology_engine(orch)
     _build(orch)
@@ -133,7 +136,7 @@ def test_hot_swap_no_telemetry_passes_none(monkeypatch) -> None:
     """Нет глобальной telemetry.publish → telemetry_dict=None (backward-compat)."""
     _patch_engine(monkeypatch)
     sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
-    orch = _StubOrchestrator(sys_config.model_dump())
+    orch = _StubOrchestrator(sys_config_for_orchestrator(sys_config))
 
     configure_topology_engine(orch)
     _build(orch)
@@ -145,7 +148,7 @@ def test_hot_swap_configures_topology_manager(monkeypatch) -> None:
     """Sanity: хук всё ещё конфигурирует TopologyManager (diff/commands из планировщика)."""
     _patch_engine(monkeypatch)
     sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
-    orch = _StubOrchestrator(sys_config.model_dump())
+    orch = _StubOrchestrator(sys_config_for_orchestrator(sys_config))
 
     configure_topology_engine(orch)
 
@@ -161,7 +164,7 @@ def test_hot_swap_forwards_layer_addresses(monkeypatch) -> None:
     _patch_engine(monkeypatch)
     sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
     orch = _StubOrchestrator(
-        sys_config.model_dump(),
+        sys_config_for_orchestrator(sys_config),
         extra_config={
             "observability_recipe_path": "recipes/demo.yaml",
             "observability_config_path": "backend/config/system.yaml",
@@ -180,7 +183,9 @@ def test_hot_swap_resolves_recipe_path_per_build(monkeypatch) -> None:
     а рецепт меняется каждым switch — зашитый в конструктор путь остался бы от первого."""
     _patch_engine(monkeypatch)
     sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
-    orch = _StubOrchestrator(sys_config.model_dump(), extra_config={"observability_recipe_path": "recipes/a.yaml"})
+    orch = _StubOrchestrator(
+        sys_config_for_orchestrator(sys_config), extra_config={"observability_recipe_path": "recipes/a.yaml"}
+    )
 
     configure_topology_engine(orch)
     _build(orch)
@@ -223,7 +228,9 @@ class TestCompanionStaysOutOfTheRebuiltBase:
         _patch_engine(monkeypatch)
         recipe = self._recipe(tmp_path, companion_section)
         sys_config = SystemConfig.model_validate({"discovery": {"auto_discover": False}})
-        orch = _StubOrchestrator(sys_config.model_dump(), extra_config={"observability_recipe_path": str(recipe)})
+        orch = _StubOrchestrator(
+            sys_config_for_orchestrator(sys_config), extra_config={"observability_recipe_path": str(recipe)}
+        )
         configure_topology_engine(orch)
         orch._full_replace_planner.kwargs["proc_dicts_fn"](
             {"processes": [], "wires": [], "observability": dict(self._SECTION)}
@@ -247,3 +254,24 @@ class TestCompanionStaysOutOfTheRebuiltBase:
         recipe = self._build_with(monkeypatch, tmp_path, {"processes": {"seg": {"log_level": "DEBUG"}}})
 
         assert _CaptureAssembler.last["recipe_path"] == str(recipe)
+
+
+# ---------------------------------------------------------------------------
+# S-29 — дублёр оркестратора обязан совпадать по именам с настоящим классом
+# ---------------------------------------------------------------------------
+
+
+def test_the_stub_orchestrator_speaks_the_real_class_surface() -> None:
+    """`_StubOrchestrator` этого файла обязан совпадать по именам с НАСТОЯЩИМ
+    `GenericProcessManagerApp` — иначе переименование в проде остаётся
+    незамеченным.
+
+    Этот файл проверяет hot-swap телеметрии, адреса слоёв и то, что спутник
+    рецепта не домерживается в базу (`TestCompanionStaysOutOfTheRebuiltBase`) —
+    но каждый тест гоняет `configure_topology_engine` против `_StubOrchestrator`,
+    объявленного выше, и ни разу не заглядывает в оркестратор по имени.
+    Измерено (S-29, 2026-08-18): переименование `live_process_config` в
+    `process_manager_process.py` не покрасило ни одного теста этого файла.
+    Общая проверка — `_orchestrator_stub_contract.py` (S-26).
+    """
+    assert_stub_speaks_the_real_class_surface(_StubOrchestrator)

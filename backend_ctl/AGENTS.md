@@ -37,8 +37,37 @@
 | Режим | Как | Что видно |
 |-------|-----|-----------|
 | **Бэкенд отдельно** (headless, без Qt) | `BackendHarness` в тестах или `BACKEND_CTL=1` + strip_gui | introspect/state/логи/регистры — весь этот файл |
-| **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 python run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
+| **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 INSPECTOR_GUI_UNATTENDED=1 python multiprocess_prototype/frontend/run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
 | **Совместно** (корреляция UI ↔ бэкенд) | `drv.watch_like_gui()` (весь приёмный профиль GUI: state + логи/observability + авто-переподписка) **+** `drv.ui_tap("gui")` (жесты+команды GUI); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; выключение — `drv.unwatch()` + `drv.ui_untap("gui")` | единый событийный поток с ts/seq: «клик (ui.event kind=button, seq=41) → команда GUI→бэкенд (kind=command, seq=42) → log.record → state.changed» — разрыв между уровнями локализует баг |
+
+**qt-mcp: значение флага сверяется ДОСЛОВНО.** Работает только `QT_MCP_PROBE=1`; порт — не
+часть этой ручки (проба слушает 9142). Задача Т-4: жёсткое ревью 2026-08-12 выставило
+`QT_MCP_PROBE=1:9142`, оба читателя (`qt_mcp_probe.pth` в venv и `frontend/app.py`) сравнили
+значение с `"1"`, не совпало, порт не поднялся — и **молча**, потому что `.pth` глушит любое
+исключение. Рабочая строка целиком:
+
+```
+BACKEND_CTL=1 INSPECTOR_GUI_UNATTENDED=1 QT_MCP_PROBE=1 .venv/Scripts/python.exe multiprocess_prototype/frontend/run.py
+```
+
+Проверка, что дорога жива: в `<log_dir>/gui/system.log` есть `qt-mcp probe installed on
+localhost:9142`, а `mcp__qt-mcp__qt_list_windows` отвечает. Отсутствие строки — теперь WARNING
+с причиной, а не тишина.
+
+**GUI-стенд поднимается ТОЛЬКО боевой точкой входа** (решение владельца 2026-08-11).
+`BackendHarness` — headless-стенд для тестов, и GUI через него не поднимается: попытка
+(презентационный overlay, в т.ч. с боевым `build_launcher` через `launcher_factory`)
+кончается зависанием процесса `gui` в `_init_application_threads` — до `run_gui` он не
+доходит, поэтому молчат команды и переполняется очередь данных. Двух дорог подъёма не
+заводим: та, что виснет, молча ломает сравнимость чисел между стендами.
+
+`INSPECTOR_GUI_UNATTENDED=1` обязателен для автоматических прогонов с окнами
+([`frontend/unattended.py`](../multiprocess_prototype/frontend/unattended.py)): вопрос
+«сохранить несохранённые правки графа?» получает явный ответ «не сохранять» ДО показа
+окна, любая другая модалка закрывается сторожем с записью в лог. Без него прогон встаёт
+на первой же модалке — из-за этого живые замеры и шли headless, где нагрузка беднее
+боевой в разы. Приёмка стенда — [`probe_gui_stand_live`](probes/probe_gui_stand_live.py)
+(подключается к уже поднятому, ничего не поднимает сам).
 
 **Киллер-фича:** `introspect_handlers(process)` за секунду ловит баг «нет приёмника»
 (команда есть в `CommandManager`, но не в router `message_dispatcher`, или у плагина нет
@@ -134,8 +163,8 @@ PY
 **Мультиклиент (D.2, streamable-HTTP):** `python -m backend_ctl.mcp_server_sdk --http`
 [`--http-bind 127.0.0.1:8901`] — несколько агентов на одной живой системе одновременно
 (каждая MCP-сессия = свой driver/сокет/`session`, изоляция поверх D.1a; завершение сессии
-снимает её подписки). **Требует бэкенд с `session_isolation=ON`** (`BACKEND_CTL_SESSION_ISOLATION=1`)
-— иначе fail-fast отказ. Safety-режим per-server (нужны разные — два инстанса на разных портах).
+снимает её подписки). **Требует бэкенд с `session_isolation=ON` — с задачи 5.5 это дефолт**
+(выключается явно: `BACKEND_CTL_SESSION_ISOLATION=0`) — иначе fail-fast отказ. Safety-режим per-server (нужны разные — два инстанса на разных портах).
 Дефолт остаётся stdio. Детали — [`DECISIONS.md`](DECISIONS.md) BCTL-ADR-005, [`README.md`](README.md).
 
 **Flight recorder (D.4, offline-реплей):** `record_start(name)` пишет снимок + ленту

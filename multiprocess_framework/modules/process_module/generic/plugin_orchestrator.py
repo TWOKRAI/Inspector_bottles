@@ -16,7 +16,7 @@ import importlib
 from typing import Any
 
 from . import frame_trace
-from ..plugins.base import PluginContext, ProcessModulePlugin
+from ..plugins.base import PluginContext, PluginState, ProcessModulePlugin
 from ..plugins.interfaces import IProcessServices
 from ..plugins.manifest import PLUGIN_API_VERSION, api_version_major_mismatch, check_requires
 
@@ -180,7 +180,19 @@ class PluginOrchestrator:
                 self._services.log_error(f"PluginOrchestrator[{self._services.name}]: configure '{plugin.name}': {e}")
 
         # Фаза 2: READY -> RUNNING (start)
+        #
+        # H-2 (дополнение Ф0 Task 0.2, правка 4): плагин, чей configure() бросил,
+        # ОСТАЁТСЯ в self._plugins/self._contexts — ровно ради shutdown, как
+        # сказано выше; отсюда он никуда не убирается. Но стартовать ему нечем:
+        # он в IDLE, ресурсы не разложены. Раньше _do_start звался всем подряд,
+        # и защита срабатывала на этаж ниже (plugins/base.py:_do_start требует
+        # READY) — ценой лживой строки в журнале «start() в состоянии idle,
+        # ожидается READY» на каждый упавший плагин, то есть отказ configure()
+        # выглядел вторым, независимым отказом старта. Решение «этот плагин не
+        # поднимается» принимается ЗДЕСЬ, где известна причина.
         for plugin, ctx in zip(self._plugins, self._contexts):
+            if plugin.state != PluginState.READY:
+                continue
             try:
                 plugin._do_start(ctx)
                 self._services.log_info(
@@ -330,7 +342,13 @@ class PluginOrchestrator:
         try:
             from multiprocess_framework.modules.registers_module import RegistersManager
 
-            rm = RegistersManager(registers=schemas, logger=self._services)
+            # logger=реальный LoggerManager, а НЕ self._services (Task Т.1):
+            # RegistersManager — носитель ObservableMixin и зовёт слот каноничным
+            # протоколом warning()/error()/…, которого у процесса-сервисов нет
+            # (только log_warning()/…). Раньше весь его лог исчезал молча.
+            # Момент безопасен: _init_custom_managers — шаг 6 initialize(),
+            # менеджеры процесса созданы на шаге 3.
+            rm = RegistersManager(registers=schemas, logger=self._services.logger_manager)
             self._registers_manager = rm
             return rm
         except Exception as e:

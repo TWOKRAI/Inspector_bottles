@@ -656,7 +656,15 @@ class TestObservability:
         assert "topology.commands" in metric_names
 
     def test_record_timing_on_apply(self) -> None:
-        """apply → _record_timing("topology.apply_ms", ...) доходит до fake stats."""
+        """apply → _record_timing("topology.apply", СЕКУНДЫ) доходит до fake stats.
+
+        Тест судит и ЕДИНИЦУ, а не только имя (задача 2.2, Р2.2-10). Прежняя
+        версия проверяла присутствие имени ``topology.apply_ms`` — и была
+        зелёной ровно тогда, когда метрика уезжала в миллисекундах в API,
+        документированный в секундах, то есть завышенной в 1000 раз. Пустой
+        apply на любой машине укладывается заметно меньше чем в секунду;
+        значение ≥ 1.0 означало бы, что кто-то снова умножил на 1000.
+        """
         fake_stats = FakeStats()
         tm = _make_tm(
             diff_fn=lambda c, d: {"has_changes": True},
@@ -664,8 +672,9 @@ class TestObservability:
             stats=fake_stats,
         )
         tm.apply({"x": 1})
-        timing_names = [t[0] for t in fake_stats.timings]
-        assert "topology.apply_ms" in timing_names
+        timings = {t[0]: t[1] for t in fake_stats.timings}
+        assert "topology.apply" in timings
+        assert 0.0 <= timings["topology.apply"] < 1.0
 
     def test_track_error_on_exception(self) -> None:
         """Exception в apply → _track_error доходит до fake error manager."""

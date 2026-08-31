@@ -147,6 +147,15 @@ class ObservabilityAudit:
     ring: Deque[Dict[str, Any]] = field(default_factory=lambda: deque(maxlen=AUDIT_HISTORY))
     seq: int = 0
     log: Optional[Callable[[str, bool], None]] = None
+    #: Н2-3: голос о вытеснении сказан. ОДИН НА УСЛОВИЕ (не на запись и не на
+    #: процесс-в-целом-навсегда по смыслу, а до конца жизни объекта — кольцо, раз
+    #: заполнившись, теряет с каждой новой сменой, и повторять это нечего). Счёт
+    #: остаётся за :meth:`dropped`; второй счётчик разошёлся бы с кольцом.
+    _overflow_announced: bool = False
+    #: Отказ журнала на этой строке — именной, а не проглоченный (класс
+    #: «проглоченный сбой»): «голоса не было» и «голос не смог записаться» лечатся
+    #: разным.
+    _overflow_log_failed: Optional[str] = None
     #: Приёмник ДОКУМЕНТА: ``(dict) -> Any``. ``None`` — плоскость документов не
     #: подключена, поведение прежнее (кольцо + строка журнала).
     #:
@@ -250,7 +259,23 @@ class ObservabilityAudit:
             self.seq += 1
             entry["seq"] = self.seq
             entry["ts"] = self.clock()
+            # Задача Н2-3 (переприёмка F2 раунд 2): вытеснение из кольца считалось,
+            # но НЕ озвучивалось. Живьём: 60 законных `config.reload` на `devices` →
+            # `audit.dropped` 0 → 22, контроль `seg` = 0, и ни одного слова в логах.
+            # Мерило 1 требует счёт И голос: «кто поставил ключ» уезжает из кольца
+            # первым, и узнаётся это в инциденте — то есть позже всего.
+            #
+            # Голос ОДИН НА УСЛОВИЕ, а не на запись: озвучь каждое вытеснение — и
+            # поток смен превратится в поток строк о потоке смен (тот же довод, по
+            # которому подряд идущие записи схлопываются абзацем выше).
+            overflowing = self.ring.maxlen is not None and len(self.ring) >= self.ring.maxlen
+            first_overflow = overflowing and not self._overflow_announced
+            if first_overflow:
+                self._overflow_announced = True
             self.ring.append(entry)
+
+        if first_overflow:
+            self._announce_overflow()
 
         # Повтор в журнал не пишется: он и есть тот самый поток строк, ради
         # которого схлопывание заведено. Первое вхождение объявлено громко, а
@@ -259,6 +284,28 @@ class ObservabilityAudit:
         self._announce(entry)
         self._emit_document(entry)
         return entry
+
+    def _announce_overflow(self) -> None:
+        """Сказать вслух, что кольцо аудита начало терять старые записи (Н2-3).
+
+        Строка идёт тем же путём, что и записи (``self.log``), и помечена как
+        ошибочная: это ПОТЕРЯ, а не смена. Считать её нечем отдельно —
+        :meth:`dropped` уже считает, и второй счётчик разошёлся бы с кольцом.
+
+        Вне лока: строка делает файловое I/O, а держать на нём лок кольца,
+        которого ждут писатели смен, незачем (тот же довод, что у ``_announce``).
+        """
+        if self.log is None:
+            return
+        try:
+            self.log(
+                f"[observability-audit] кольцо заполнено ({self.ring.maxlen} записей) — "
+                f"старые смены вытесняются; счёт вытесненных спрашивать у "
+                f"introspect.observability (audit.dropped)",
+                True,
+            )
+        except Exception as exc:  # noqa: BLE001 — журнал не имеет права ронять смену
+            self._overflow_log_failed = repr(exc)
 
     def _emit_document(self, entry: Dict[str, Any]) -> None:
         """Отдать запись в плоскость документов — долговечный запрашиваемый след.
@@ -386,6 +433,13 @@ def format_entry(entry: Dict[str, Any]) -> str:
         parts.append(f"keys=[{listed}]")
     if "value" in entry:
         parts.append(f"value={entry['value']!r}")
+    # Задача 5.4: ключи вне контракта — в СТРОКЕ, а не только в кольце. Поле
+    # кладёт `replace_layer` на всех пяти файловых дорогах (файлу не отказывают —
+    # опечатка в спутнике не имеет права валить switch рецепта), и без вывода
+    # здесь единственным следом остался бы readback, куда за ним никто не пойдёт:
+    # спрашивают обычно «почему настройка не действует», а не «что в кольце».
+    if entry.get("unknown_keys"):
+        parts.append(f"ВНЕ КОНТРАКТА (ключ есть, эффекта нет): [{', '.join(entry['unknown_keys'])}]")
     if entry.get("ttl_sec") is not None:
         parts.append(f"ttl={entry['ttl_sec']}с")
     if not entry.get("ok", True):

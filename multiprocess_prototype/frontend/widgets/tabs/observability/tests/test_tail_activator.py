@@ -13,6 +13,9 @@
 from __future__ import annotations
 
 from multiprocess_prototype.frontend.widgets.tabs.observability import ObservabilityTailActivator
+from multiprocess_prototype.frontend.widgets.tabs.observability.tail_activator import (
+    DEFAULT_TAIL_LEVEL,
+)
 
 SUBSCRIBE_ALL = "observability.tail.subscribe_all"
 
@@ -37,7 +40,7 @@ def test_announces_intent_once_to_the_broker():
 
     act.on_state_delta(_delta("processes.cam.state.fps", 30))
 
-    assert send.calls == [("ProcessManager", SUBSCRIBE_ALL, {"subscriber": "gui"})]
+    assert send.calls == [("ProcessManager", SUBSCRIBE_ALL, {"subscriber": "gui", "level": DEFAULT_TAIL_LEVEL})]
 
 
 def test_further_deltas_do_not_produce_more_commands():
@@ -65,7 +68,8 @@ def test_gui_does_not_name_a_single_process():
 
     target, _command, args = send.calls[0]
     assert target == "ProcessManager"
-    assert args == {"subscriber": "gui"}
+    assert set(args) == {"subscriber", "level"}, f"в конверте появилось лишнее знание о системе: {args}"
+    assert args["subscriber"] == "gui"
 
 
 def test_waits_for_the_first_process_delta():
@@ -136,5 +140,191 @@ def test_a_retry_after_a_hiccup_succeeds_and_stops():
     act.on_state_delta(_delta("processes.cam.state.fps", 2))
     act.on_state_delta(_delta("processes.cam.state.fps", 3))
 
-    assert calls == [("ProcessManager", SUBSCRIBE_ALL, {"subscriber": "gui"})]
+    assert calls == [("ProcessManager", SUBSCRIBE_ALL, {"subscriber": "gui", "level": DEFAULT_TAIL_LEVEL})]
     assert act.announced is True and act.attempts == 2
+
+
+class TestGuiNamesTheLevel:
+    """Н-2: панель наблюдаемости была ERROR-only ПО ПОСТРОЕНИЮ.
+
+    Конверт GUI не нёс ключа ``level``, сервер подставлял свой дефолт ``ERROR`` —
+    и на здоровом стенде панель пуста, а пустота неотличима от «всё хорошо».
+    Починка хвоста оркестратора (1.1) этот путь не лечила: дефект жил у
+    потребителя, ровно как «дефект на одном пути из трёх».
+
+    Проверяется не только конверт (это имя ключа), но и то, что ключ переживает
+    ГРАНИЦУ — реальную схему команды с ``extra='forbid'``. Прецедент записан в
+    ``test_observability_tail_delivery``: тест с самодельным дублем был зелёным
+    именно потому, что жил НИЖЕ границы, где контракт ключ запрещал.
+    """
+
+    @staticmethod
+    def _envelope(level=..., gui_name: str = "gui") -> dict:
+        send = RecordingSend()
+        kwargs = {} if level is ... else {"level": level}
+        act = ObservabilityTailActivator(send, gui_name, **kwargs)
+        act.on_state_delta(_delta("processes.cam.state.fps", 30))
+        return send.calls[0][2]
+
+    def test_default_envelope_names_warning(self):
+        """Р-1а: порог назван явно и совпадает с ``watch_like_gui`` драйвера."""
+        assert self._envelope()["level"] == "WARNING", "GUI снова не называет порог — панель вернулась к ERROR-only"
+
+    def test_the_level_survives_the_command_contract(self):
+        """Граница: схема команды объявляет ``level``, значит ключ доедет до хендлера.
+
+        ``extra='forbid'`` делает эту проверку двусторонней: не объяви контракт
+        поле — и тест упадёт на валидации, а не «просто не увидит» потери.
+        """
+        from multiprocess_framework.modules.process_module.commands.command_contracts import (
+            BUILTIN_COMMAND_CONTRACTS,
+        )
+
+        schema = BUILTIN_COMMAND_CONTRACTS[SUBSCRIBE_ALL]
+        cleaned = schema(**self._envelope()).model_dump(exclude_none=True)
+
+        assert cleaned == {"subscriber": "gui", "level": "WARNING"}, (
+            f"порог не пережил границу контракта команды: {cleaned}"
+        )
+
+    def test_a_custom_level_reaches_the_envelope(self):
+        """Ручка есть уже сегодня (Р-1: «ручка в UI — потом»), и она работает."""
+        assert self._envelope(level="DEBUG")["level"] == "DEBUG"
+
+    def test_explicit_none_means_process_default_not_a_second_error_constant(self):
+        """``None`` — «не называть»: константу дефолта знает только процесс.
+
+        Проверяется НЕ значение ``None`` в конверте (это тавтология), а его
+        смысл на настоящем брокере: намерение с ``level=None`` разворачивается
+        в подписку БЕЗ ключа, то есть решение о пороге остаётся у процесса.
+        Подставь GUI здесь свой ``"ERROR"`` — и совпадение констант замаскировало
+        бы вторую позицию дефолта до первого её изменения.
+
+        ``scope="all"`` в конверте ставит САМ брокер (5.6 / ADR-PM-032): GUI-подписка
+        оптовая, и без маркера её снятие сносило бы прицельный хвост соседа. Ключ
+        закреплён здесь намеренно — исчезнет маркер, вернётся находка Н2-2.
+        """
+        from multiprocess_framework.modules.process_manager_module.process.observability_broker import (
+            ObservabilitySubscriptionBroker,
+        )
+
+        fanned: list[dict] = []
+        broker = ObservabilitySubscriptionBroker(
+            broadcast=lambda _command, data: (fanned.append(dict(data)), 1)[1],
+            send_to=lambda *_a: True,
+        )
+
+        broker.subscribe_all(**self._envelope(level=None))
+
+        assert fanned == [{"subscriber": "gui", "scope": "all"}], (
+            f"«не назван» превратился в конкретный порог по дороге: {fanned}"
+        )
+
+    def test_the_named_level_is_the_one_the_broker_fans_out(self):
+        """Имя ключа GUI = имя ключа, которое читает брокер.
+
+        Дубль на своём же словаре этого не доказывает: переименуй поле в брокере —
+        и конверт-тесты остались бы зелёными, а хвост молчал бы снова. Здесь
+        конверт GUI подаётся в НАСТОЯЩИЙ брокер фреймворка.
+        """
+        from multiprocess_framework.modules.process_manager_module.process.observability_broker import (
+            ObservabilitySubscriptionBroker,
+        )
+
+        fanned: list[dict] = []
+        broker = ObservabilitySubscriptionBroker(
+            broadcast=lambda _command, data: (fanned.append(dict(data)), 1)[1],
+            send_to=lambda *_a: True,
+        )
+
+        broker.subscribe_all(**self._envelope())
+
+        assert fanned == [{"subscriber": "gui", "level": "WARNING", "scope": "all"}], (
+            f"порог GUI не доехал до конверта процессам: {fanned}"
+        )
+
+
+class TestPanelStopsBeingErrorOnly:
+    """Сквозная пара на настоящих объектах: WARNING-запись доезжает, а раньше — нет.
+
+    Конверт и контракт выше судят ключ. Гарантия же — доставленная запись, и
+    только она отличает «панель жива» от «панель пуста по построению». Харнес —
+    тот же, что у Ф6.х.5: настоящие ``ProcessModule`` и ``LoggerManager``,
+    фейковый только router (граница процесса).
+    """
+
+    @staticmethod
+    def _process(tmp_path):
+        from unittest.mock import Mock
+
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+
+        class _CapturingRouter:
+            def __init__(self) -> None:
+                self.pushed: list[dict] = []
+
+            def send_async(self, message: dict, priority: str = "normal") -> None:
+                self.pushed.append(message)
+
+        logger = LoggerManager(
+            manager_name="GuiTailProbe",
+            config={
+                "app_name": "gui_tail",
+                "log_directory": str(tmp_path),
+                "enable_batching": False,
+                "modules": {},
+                "channels": {"a": {"type": "file", "enabled": True, "file_path": str(tmp_path / "a.log")}},
+                "scopes": {
+                    "SYSTEM": {"channels": ["a"]},
+                    "BUSINESS": {"channels": ["a"]},
+                    "DEBUG": {"channels": ["a"]},
+                },
+            },
+        )
+        logger.initialize()
+        process = ProcessModule("camera_0")
+        router = _CapturingRouter()
+        process.router_manager = router
+        process.logger_manager = logger
+        process.error_manager = None
+        process._observability_hub = Mock()
+        return process, router, logger
+
+    @staticmethod
+    def _pushes(router) -> list:
+        return [m for m in router.pushed if m.get("command") == "observability.record"]
+
+    def test_warning_record_reaches_the_panel_with_the_gui_envelope(self, tmp_path):
+        process, router, logger = self._process(tmp_path)
+        envelope = TestGuiNamesTheLevel._envelope()
+        try:
+            res = process.subscribe_observability_tail(envelope["subscriber"], envelope["level"])
+            assert res["success"] is True, res
+
+            logger.warning("камера перегрелась", module="capture")
+
+            assert self._pushes(router), "WARNING не доехал до панели — Н-2 жив"
+            assert self._pushes(router)[0]["targets"] == ["gui"]
+        finally:
+            process.unsubscribe_observability_tail(None)
+            logger.shutdown()
+
+    def test_the_old_envelope_without_a_level_leaves_the_panel_error_only(self, tmp_path):
+        """Вторая половина пары — воспроизведение дефекта до правки.
+
+        Без неё «WARNING доехал» доказывал бы и порог «пропускать всё».
+        """
+        process, router, logger = self._process(tmp_path)
+        try:
+            res = process.subscribe_observability_tail("gui")  # конверт до задачи 1.2
+            assert res["min_level"] == "ERROR"
+
+            logger.warning("камера перегрелась", module="capture")
+            assert self._pushes(router) == [], "дефолтный порог перестал отсекать WARNING"
+
+            logger.error("камера отвалилась", module="capture")
+            assert self._pushes(router), "ERROR обязан проходить и на дефолтном пороге"
+        finally:
+            process.unsubscribe_observability_tail(None)
+            logger.shutdown()

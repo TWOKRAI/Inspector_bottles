@@ -18,7 +18,7 @@
 | `interfaces.py` | ✓ готово | IAuthManager / IUserStorage / IPasswordHasher (Protocol) |
 | Sub-package reorg | ✓ готово | crypto/ + storage/ + security/; фасад __init__.py; Auth-005 |
 | `manager.py` | ✓ готово | AuthManager(BaseManager, ObservableMixin) — Группа B |
-| `bootstrap.py` | ✓ готово | CLI bootstrap + env var INSPECTOR_DEV_PASSWORD — Группа B |
+| `bootstrap.py` | ✓ готово | CLI bootstrap + env-пара MULTIPROCESS_DEV_PASSWORD / INSPECTOR_DEV_PASSWORD — Группа B |
 | Тесты (Группа A) | ✓ 62/62 | hasher / policies / lockout / storage |
 | Тесты (Группа B) | ✓ 48/48 | auth_manager (41) / bootstrap (7) |
 | Тесты (всего) | ✓ 110/110 | все зелёные |
