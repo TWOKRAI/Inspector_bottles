@@ -39,7 +39,7 @@
 - [Оффскрин для агентских прогонов](feedback_no_qt_popups_offscreen.md) — QT_QPA_PLATFORM=offscreen, иначе Qt-окно вешает агента
 - [Резюм агента родит призрака](feedback_agent_resume_ghost.md) — SendMessage может дать ДВА инстанса, проверять mtime зоны
 - worktree: [стейл-база](feedback_worktree_stale_base.md) — проверять базу до старта · [при одном файле](feedback_worktree_for_parallel_samefile.md) — от committed HEAD · [walk обязан исключать .claude/worktrees](feedback_walk_skips_worktrees.md)
-- [Parallel agents commit race](feedback_parallel_agents_commit_race.md) — макс 2 без worktree · [pre-commit stash collision 2+](feedback_precommit_stash_collision_2plus_agents.md) — recovery `git show :path > path` · [откат pre-commit ест незастейдженное](feedback_precommit_rollback_drops_unstaged_edits.md) — потеря выглядит как чистый статус
+- [Чужая сессия в том же дереве](feedback_a_peer_session_shares_the_tree.md) — `git add -A` затянул чужие 98 строк; сверять ListAgents, стейджить явные пути · [Parallel agents commit race](feedback_parallel_agents_commit_race.md) — макс 2 без worktree · [pre-commit stash collision 2+](feedback_precommit_stash_collision_2plus_agents.md) — recovery `git show :path > path` · [откат pre-commit ест незастейдженное](feedback_precommit_rollback_drops_unstaged_edits.md) — потеря выглядит как чистый статус
 - [Грабли merge в main](feedback_git_main_merge_hook_traps.md) — `git merge -F -` не читает stdin; protect-branch блокирует commit на main · [stash pop чужого стеша](feedback_git_stash_pop_wrong_stash.md) — маркеры конфликта в дереве
 - [Commit msg format](feedback_commit_msg_format.md) — хук терпит перенос; ruff → re-stage · [commit забирает весь индекс](feedback_commit_takes_the_whole_index.md) · [agent commit quality](feedback_agent_commit_quality.md) — транслит amend
 - [ruff сносит свежий импорт](feedback_ruff_strips_unused_import.md) — импорт и его использование ОДНИМ Edit
@@ -77,7 +77,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — qt-mcp: «зонд жив» ≠ «отрисовано» · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало
 
 ## Активные проекты и долги
-- [observability-closure: Ф0 + Ф1.1 ЗАКРЫТЫ](project_observability_closure_progress.md) — хуки процесса (C3) в main-ветке closure; Ф1.3 ждёт Р-1, Р-8 до Ф5; стенд дал числа для 1.2 (unresolved=12 у ПМ) и 1.3 (две строки на инцидент)
+- [observability-closure: Ф0 + Ф1.1 + Ф1.2 ЗАКРЫТЫ](project_observability_closure_progress.md) — Р-1 решена как (а), Task 1.3 разблокирована; в 1.2 причина из плана оказалась неверной при верном симптоме; гейт 9058; Р-8 до Ф5
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; правда в v1; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim
 - [observation-port: Ф0–Ф5 ЗАКРЫТЫ](project_observation_port_progress.md) — порт = единственный писатель чисел, StatsManager стал видом; ревью вернуло 3 блокера, все закрыты; гейт 8930
 - [constructor-master прогресс](project_constructor_master_progress.md) — Ф0–Ф3 + трек F + Ф5-ядро закрыты; NEXT C1-C8 + app_module 5.11-5.13 · [чистка границ C1-C8](project_arch_boundaries_plan.md) — движок миграций 4.5 идёт в recipe, НЕ generic
@@ -125,4 +125,4 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Посылка плана устаревает](feedback_a_plans_premise_expires.md) — блокер воспроизводить, не сверять номера
 - [Plan-Driven Dev](project_plan_driven_dev.md) — slug, Refs-trailer · [checkboxes [x]+hash](feedback_plan_checkboxes.md) · [dual-save](feedback_plan_dual_save.md)
 - [Один активный план](feedback_one_active_plan_per_tool.md) — иначе воскрешение отменённых задач
-- [Спека может врать](feedback_plan_spec_can_lie.md) — имя поля сверять с кодом · [позиционный вызов прячет имена](feedback_positional_call_hides_parameter_name_drift.md) — падало на duration=
+- [Причина из плана — гипотеза](feedback_the_plans_stated_cause_is_a_hypothesis.md) — симптом верен до числа, причина нет; зонд мимо подозреваемой плоскости, иначе построишь механизм вокруг несуществующего дефекта · [Спека может врать](feedback_plan_spec_can_lie.md) — имя поля сверять с кодом · [позиционный вызов прячет имена](feedback_positional_call_hides_parameter_name_drift.md) — падало на duration=

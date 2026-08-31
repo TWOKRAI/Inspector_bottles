@@ -1,6 +1,6 @@
 ---
 name: project-observability-closure-progress
-description: "observability-closure — Ф0 закрыта (2026-08-29 утро), Ф1.1 (C3, хуки процесса) закрыта 2026-08-29 вечером; Ф1.2/1.4 без развилок, Ф1.3 ждёт Р-1, Р-8 — до Ф5; ветка feat/observability-closure, merge в main — по закрытии Ф2"
+description: "observability-closure — Ф0, Ф1.1 и Ф1.2 закрыты (последняя 2026-08-31); Р-1 решена владельцем как (а), Task 1.3 разблокирована; Р-8 — до Ф5; ветка feat/observability-closure, merge в main — по закрытии Ф2"
 metadata:
   node_type: memory
   type: project
@@ -36,11 +36,29 @@ metadata:
 - MCP-сервер backend-ctl держит `backend_ctl`, загруженный при старте сессии: новые аномалии
   `system_overview` видны только драйвером из свежего процесса (то же, что в Ф0.5).
 
+- **Ф1.2 (M14/m3)** — 2026-08-31, коммиты `d4deba58` (5 красных тестера) → `3badcf83` (реализация)
+  → `e1867a60` (мой сторож «один разъём на точку») → `0a075682` (10 находок ревью) → `8cecc306`
+  (остатки Р1/Р5). **Причина оказалась НЕ той, что записал план:** не «запись раньше регистрации
+  канала», а ДВЕ дороги к одному конфигу — рождение собирало голым `expand_observability`, а он
+  эмитит ЧАСТИЧНЫЙ набор каналов; Pydantic заменяет набор целиком, `scopes` остаются дефолтом схемы
+  и ведут в `system_file`/`messages_file`, которых в реестре нет. Ровно 6 записей × 2 приёмника = 12.
+  Лечится швом `compose_managers_payload` (одна сборка на рождение и на пересборку), не буфером.
+  Стенд: 12 → **0**, аномалий 0 при 8 процессах, `launcher/system.log` 10 строк (6 из них — чужие:
+  spawner, PluginRegistry, Hikvision SDK, devices_sync — до задачи уходили в stdlib без хендлеров).
+  Гейт 9058. Ревью: итерация 1 — 10 находок, итерация 2 — APPROVED.
+
 ## Открыто для владельца
 
-- **Р-1** (плоскость ошибок, M8) — без него Task 1.3 не начать; рекомендация плана — (а).
+- **Р-1 РЕШЕНА** 2026-08-30 как **(а)** — отдельная плоскость ошибок. Task 1.3 разблокирована.
 - **Р-8** (паритет инструментов ↔ документов) — до Ф5; рекомендация — повесить на `backend_ctl/README.md`.
-- Следующие без развилок: **Task 1.2** (лаунчер и ранние записи, M14/m3), **Task 1.4** (голоса окном).
+- Долги Task 1.2, не блокеры: Р2 (маршрут после закрытия не охраняется у `_log_warning`/`_log_error`),
+  Р3 (отказ `clear()` в `stop()` без сторожа), Р4 (`is_posix()` — белый список, глушит уборку на
+  FreeBSD/AIX). POSIX-половина уборки на Windows не гоняется — доказательством был бы прогон на Linux.
+- Счётчик `unresolved_channel_records` НЕ различает «канала ещё нет» / «канала уже нет» / «оператор
+  снял» — три факта приходят одним числом (`OPEN_QUESTIONS.md`, F9). Значит критерий «нет
+  `observability_loss`» — утверждение о моменте, а не о свойстве: на остановке он перестаёт
+  выполняться у каждого процесса.
 
 Связано: [[project_observation_port_progress]], [[feedback_pytest_owns_threading_excepthook_for_the_session]],
-[[feedback_a_list_walking_guard_cannot_see_a_removed_item]].
+[[feedback_a_list_walking_guard_cannot_see_a_removed_item]], [[feedback_a_peer_session_shares_the_tree]],
+[[feedback_the_plans_stated_cause_is_a_hypothesis]].
