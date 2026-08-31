@@ -22,11 +22,15 @@
   политика процесса из `observability.voices`, процессные счётчики `windowed_suppressed` /
   `windowed_keys_evicted` (публикует `LoggerCore.get_stats()`). Разъём —
   `ObservableMixin.should_voice` / `log_windowed`. Решение — **ADR-LOG-012**.
-- Схлопнуты пять ручных копий окна `5.0` (`router_module`, четыре окна `QueueRegistry`);
-  шестая — `HealthState.DEFAULT_THROTTLE` — снята **Task 1.3a** (2026-08-31, ADR-PM-045): там
-  окно журнала держало заодно и запись в плоскость ошибок; теперь окно у голоса, запись
-  безусловна. Тогда же у `WindowedVoices` появился параметр `clock` (дефолт `None` →
-  `time.monotonic` в момент вызова, чтобы не ломать `monkeypatch`).
+- Схлопнуты ручные копии окна `5.0` (`router_module`, окна `QueueRegistry`); последняя —
+  `HealthState.DEFAULT_THROTTLE` — снята **Task 1.3a** (2026-08-31, ADR-PM-045): там окно
+  журнала держало заодно и запись в плоскость ошибок; теперь окно у голоса, запись безусловна.
+  Тогда же у `WindowedVoices` появился параметр `clock` (дефолт `None` → `time.monotonic` в
+  момент вызова, чтобы не ломать `monkeypatch`).
+  **Поимённый реестр копий — `REPLACED_MANUAL_WINDOWS` в `core/windowed_voice.py`, и число
+  живёт только его длиной** (ревью Task 1.3a): три соседних докстринга независимо говорили
+  «семь», «шесть» и «пять» об одном и том же наборе — слово и перечень расходились молча.
+  Сторож — `tests/test_windowed_voice_injection_guards.py::TestTheManualWindowCountLivesInExactlyOnePlace`.
 - **Ревью Task 1.4 закрыто пятью правками с воспроизведением у каждой:** публикация счётчика в
   readback не охранялась ничем (заплатка → 0 красных из 350); дорога
   «конфиг → живой механизм» не проверялась вовсе, а вердикт `config_reload_verified` отвечал

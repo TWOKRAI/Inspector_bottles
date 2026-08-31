@@ -518,6 +518,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         пилота (worker_module). log/stats буферизуются в hub и дренируются по
         heartbeat; error-слот остаётся реальным error_manager (write-through)."""
         from ..managers.observability_wiring import (
+            error_plane_store_warning,
             resolve_history_policy,
             wire_document_sink,
             wire_event_selector,
@@ -573,15 +574,16 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 self.error_manager, self.logger_manager, process=self.name, min_level=policy["level"]
             )
             # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
-            # Ни одного tap → вкладка «Ошибки» молча пуста — предупреждаем
-            # (терять можно, молчать нельзя; 5.20 review #6).
-            if not self._observability_store_taps:
-                self._log_warning(
-                    f"Process '{self.name}': ObservabilityStore без error-tap "
-                    "(ни logger_manager, ни error_manager не поддержали add_tap) "
-                    "— ошибки в стор попадать НЕ будут",
-                    module="observability",
-                )
+            # Дырка в плоскости ошибок → вкладка «Ошибки» молча беднеет —
+            # предупреждаем (терять можно, молчать нельзя; 5.20 review #6).
+            # Само решение и оба текста живут у проводки, которая их и порождает
+            # (`error_plane_store_warning`): ревью Task 1.3a показало, что
+            # прежнее условие «список tap'ов пуст» пропускало молча раскладку
+            # «есть logger-tap, нет error-tap» — ту самую, на которой инцидент
+            # терялся целиком.
+            store_warning = error_plane_store_warning(self.name, self._observability_store_taps)
+            if store_warning:
+                self._log_warning(store_warning, module="observability")
 
     def _init_communication(self):
         """Инициализация коммуникации процесса."""

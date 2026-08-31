@@ -15,6 +15,7 @@ from multiprocess_framework.modules.process_module.managers.observability_wiring
     STORE_ERROR_TAP,
     STORE_LOGGER_TAP,
     drain_process_observability,
+    error_plane_store_warning,
     unwire_observability_store,
     wire_observability_store,
 )
@@ -164,3 +165,86 @@ class TestDrainToStore:
         hub = ObservabilityHub("worker_module")
         hub.info("x")
         drain_process_observability(hub, None, None)  # без стора — не падает
+
+
+class TestExactlyOneTapOwnsTheErrorPlane:
+    """Владелец маркированных строк — ровно один, и он есть, пока встал хоть один tap.
+
+    Сторож находки Major 1 ревью Task 1.3a на уровне ПРОВОДКИ (сквозной сторож
+    числом строк — ``process_module/tests/test_health_incident_reaches_the_store.py``).
+    Прежняя редакция раздавала ``owns_error_plane`` константой по роли, и на
+    раскладке «есть logger-tap, нет error-tap» маркированную запись не принимал
+    НИКТО: замер ревью — контроль 1 строка стора, опыт 0.
+    """
+
+    @staticmethod
+    def _marked_record(message="инцидент"):
+        return {
+            "timestamp": 1.0,
+            "level": "ERROR",
+            "scope": "system",
+            "message": message,
+            "module": "worker_module",
+            "extra": {"origin": "error_manager"},
+        }
+
+    def test_the_logger_tap_takes_over_when_the_error_plane_has_no_tap(self, tmp_path):
+        """ОПЫТ: ErrorManager'а нет — маркированную запись обязан принять логгер-tap."""
+        log = FakeLoggerCore()
+        store, taps = wire_observability_store(None, log, db_path=str(tmp_path / "obs.db"), process="camera_0")
+        try:
+            assert {name for _, name in taps} == {STORE_LOGGER_TAP}
+            for channel, _ in log._taps.values():
+                channel.write(self._marked_record())
+            rows = store.list_records(process="camera_0")
+            assert len(rows) == 1, f"маркированную запись не принял никто: {rows}"
+        finally:
+            unwire_observability_store(store, taps)
+
+    def test_the_logger_tap_still_skips_when_the_error_plane_has_its_own_tap(self, tmp_path):
+        """КОНТРОЛЬ: оба менеджера на месте — логгер-tap по-прежнему пропускает маркер.
+
+        Без него «опыт принял» доказывалось бы и починкой, снявшей дедуп путей
+        целиком: тогда инцидент давал бы две строки вместо одной.
+        """
+        err, log = FakeLoggerCore(), FakeLoggerCore()
+        store, taps = wire_observability_store(err, log, db_path=str(tmp_path / "obs.db"), process="camera_0")
+        try:
+            assert {name for _, name in taps} == {STORE_ERROR_TAP, STORE_LOGGER_TAP}
+            for channel, _ in log._taps.values():
+                channel.write(self._marked_record())
+            assert store.list_records(process="camera_0") == [], "логгер-tap перестал пропускать маркер — будет дубль"
+            for channel, _ in err._taps.values():
+                channel.write(self._marked_record())
+            assert len(store.list_records(process="camera_0")) == 1
+        finally:
+            unwire_observability_store(store, taps)
+
+
+class TestTheErrorPlaneGapIsAnnounced:
+    """Асимметрия tap'ов обязана быть СКАЗАНА, а не пройти молча.
+
+    Ревью Task 1.3a: прежнее предупреждение срабатывало только на НУЛЕ tap'ов,
+    а раскладка «есть logger-tap, нет error-tap» — та самая, на которой инцидент
+    терялся, — проходила его без единого слова.
+    """
+
+    def test_a_healthy_pair_says_nothing(self):
+        healthy = [(object(), STORE_ERROR_TAP), (object(), STORE_LOGGER_TAP)]
+        assert error_plane_store_warning("camera_0", healthy) is None
+
+    def test_no_taps_at_all_is_announced_as_a_loss(self):
+        msg = error_plane_store_warning("camera_0", [])
+        assert msg is not None and "camera_0" in msg
+        assert "попадать НЕ будут" in msg, msg
+
+    def test_a_logger_only_layout_is_announced_as_a_takeover(self):
+        """Именно эта ветка и была находкой: список НЕ пуст, а плоскости ошибок нет."""
+        msg = error_plane_store_warning("camera_0", [(object(), STORE_LOGGER_TAP)])
+        assert msg is not None, "раскладка «есть logger-tap, нет error-tap» прошла молча"
+        assert "ПЛОСКОСТИ ОШИБОК" in msg, msg
+        assert "camera_0" in msg, msg
+
+    def test_none_taps_reads_as_no_taps(self):
+        """``None`` вместо списка — та же потеря, а не тихий успех."""
+        assert error_plane_store_warning("camera_0", None) is not None

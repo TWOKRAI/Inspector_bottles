@@ -54,9 +54,11 @@ class TestTheErrorPlaneTapKeepsWhatOthersSkip:
         try:
             result = tap.write(_log_record_dict(message="инцидент", origin="error_manager"))
             assert store.list_records(process="camera_0") == []
-            # Пропуск — успех, а не отказ: ``status="error"`` поднял бы
-            # ``tap_write_errors`` на штатном дедупе, и счётчик потерь начал бы
-            # считать здоровую работу.
+            # Пропуск — успех, а не отказ, и это утверждение о СМЫСЛЕ возврата,
+            # а не о счётчике: раздача tap'ам судит только факт исключения и
+            # возврат ``write()`` не читает (ревью Task 1.3a; прежний довод
+            # «``status="error"`` поднял бы ``tap_write_errors``» опровергнут
+            # запуском — ``accepted=1, tap_write_errors=0``).
             assert result["status"] == "success", result
         finally:
             store.close()

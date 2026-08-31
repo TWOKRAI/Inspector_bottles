@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -68,6 +69,20 @@ def _raise_boom(msg: str) -> _Boom:
         raise _Boom(msg)
     except _Boom as exc:
         return exc
+
+
+@contextmanager
+def _swallowing():
+    """Погасить бросок ``report_error``, чтобы судить ФАКТЫ, а не форму отказа.
+
+    Сторож, держащийся на ``pytest.raises``, обесточивается любым ``try/except``
+    в реализации — ревью Task 1.3a поймало именно это. Здесь бросок гасится
+    намеренно: проброс проверяет отдельный тест, а этот смотрит, что учтено.
+    """
+    try:
+        yield
+    except AssertionError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -211,26 +226,79 @@ class _ThrowingVoices(WindowedVoices):
 
 
 class TestFactIsRecordedBeforeTheVoiceDecision:
-    def test_a_throwing_window_holder_does_not_lose_the_fact(self) -> None:
-        """Решение о голосе принимает чужой код; факт обязан быть записан ДО него.
+    def test_a_throwing_window_holder_still_leaves_the_whole_fact(self) -> None:
+        """ВЕСЬ факт — счётчик, плоскость и breaker — переживает отказ держателя окон.
 
-        Обратный порядок (``take()`` первым, как в иллюстрации ТЗ) терял бы ровно
-        то, ради чего задача и делалась: при отказе держателя окон вхождение не
-        попало бы ни в счётчик, ни в плоскость ошибок.
+        Сторож находки Major 2 ревью Task 1.3a. Проверяется ПОЛНОТА вызова, а не
+        форма отказа, и это разница с ценой: прежний сторож закреплял
+        ``pytest.raises``, то есть любой ``try/except`` вокруг ``take()``
+        обесточил бы его целиком, а поломка «блок breaker перенесён ниже решения
+        о голосе» не красила из 142 сторожей НИ ОДНОГО.
+
+        Что ловилось этой дырой (замер ревью, 5 вхождений одного отказа):
+
+            КОНТРОЛЬ (обычный держатель):  errors=5 плоскость=5 status=degraded breaker=open
+            ОПЫТ     (держатель бросает):  errors=5 плоскость=5 status=ok       breaker=closed
+
+        Факт записан весь, breaker не накормлен ни разу — статус не деградировал
+        бы НИКОГДА, хотя ``PluginContext.health`` и ADR-PM-045 оба перечисляют
+        подряд-счётчик breaker среди того, что делает ``report_error``.
+
+        Порог ``2`` взят, чтобы продвижение читалось С ОБЕИХ сторон: после
+        первого вхождения ``closed`` (не «щёлкнуло само»), после второго
+        ``open`` (не «стоит на месте»). Порог ``1`` был бы слеп к счётчику,
+        который прибавляет по два.
         """
         tracked: list[str] = []
+        voices: list[str] = []
         state = HealthState(
+            log=voices.append,
             track=lambda exc, payload: tracked.append(str((payload or {}).get("context"))),
-            breaker=_quiet_breaker(),
+            breaker=CircuitBreaker(fail_threshold=2, cooldown_sec=1_000_000.0),
             voices=_ThrowingVoices(),
         )
 
-        with pytest.raises(AssertionError):
-            state.report_error(_raise_boom("boom"), context="order", throttle=_WINDOW_NEVER)
+        # Бросок наружу — решённый контракт (перехват стоит у вызывающего,
+        # ``process_hooks``), но сторож на нём НЕ держится: гасим и судим факты.
+        for _ in range(1):
+            with _swallowing():
+                state.report_error(_raise_boom("boom"), context="order", throttle=_WINDOW_NEVER)
 
         assert tracked == ["order"], f"факт потерян отказом ЧУЖОГО механизма: {tracked}"
         assert state.snapshot()["errors"] == 1
-        assert state.snapshot()["last_error"]["context"] == "order"
+        assert state.snapshot()["breaker"] == "closed", "breaker щёлкнул раньше своего порога"
+
+        with _swallowing():
+            state.report_error(_raise_boom("boom"), context="order", throttle=_WINDOW_NEVER)
+
+        snap = state.snapshot()
+        assert len(tracked) == 2, tracked
+        assert snap["errors"] == 2
+        assert snap["breaker"] == "open", (
+            f"breaker не накормлен: подряд-счётчик стоит НИЖЕ решения о голосе и теряется его броском — {snap}"
+        )
+        assert snap["status"] == "degraded", snap
+        # (в) голоса инцидента нет — держатель бросил ДО него. Строка статуса от
+        # открывшегося breaker'а при этом есть, и она же доказывает, что ветка
+        # breaker'а реально исполнилась, а не была угадана по снапшоту.
+        status_lines = [v for v in voices if v.startswith("[health] status")]
+        incident_voices = [v for v in voices if not v.startswith("[health] status")]
+        assert incident_voices == [], f"голос прозвучал вопреки отказу держателя: {incident_voices}"
+        assert status_lines, f"ветка breaker'а не сказала ни слова: {voices}"
+
+    def test_the_throw_from_the_holder_is_not_swallowed(self) -> None:
+        """Пара к тесту выше: бросок ДОХОДИТ до вызывающего — это решённый контракт.
+
+        Глушить его здесь незачем и вредно: перехват уже стоит у вызывающего
+        (``logger_module/core/process_hooks.py`` ловит ``BaseException``, поднимает
+        ``hook_delivery_failures`` и пишет ``emergency_log``), то есть вторым
+        исключением поверх первого бросок не становится — он становится
+        ПОСЧИТАННОЙ потерей доставки. Проглоти его ``report_error`` сам — потеря
+        стала бы невидимой, и счётчик доставки перестал бы значить что-либо.
+        """
+        state = HealthState(breaker=_quiet_breaker(), voices=_ThrowingVoices())
+        with pytest.raises(AssertionError):
+            state.report_error(_raise_boom("boom"), context="order", throttle=_WINDOW_NEVER)
 
 
 # ---------------------------------------------------------------------------
@@ -293,13 +361,17 @@ class TestTheVoiceCarriesTheDedupMarker:
 
         Без маркера один инцидент кладёт в стор ДВЕ строки — факт и голос,
         — и «сколько у нас инцидентов» перестаёт быть вопросом с ответом.
+
+        Плоскость ошибок здесь настоящая (``track=…``) — по ревью Task 1.3a это
+        стало условием маркера, а не декорацией теста: без дороги маркер был бы
+        утверждением о строке, которой нет (пара тестов ниже).
         """
         seen: list[dict] = []
 
         def log(msg: str, **kwargs: Any) -> None:
             seen.append(dict(kwargs))
 
-        state = HealthState(log=log, breaker=_quiet_breaker())
+        state = HealthState(log=log, track=lambda exc, payload: None, breaker=_quiet_breaker())
         state.report_error(_raise_boom("boom"), context="marker", throttle=_WINDOW_NEVER)
 
         assert seen and seen[0].get("origin") == "error_manager", seen
@@ -319,6 +391,87 @@ class TestTheVoiceCarriesTheDedupMarker:
         state.degraded("причина")
 
         assert seen and "origin" not in seen[0], seen
+
+    def test_no_marker_when_there_is_no_road_to_the_error_plane(self) -> None:
+        """Дороги нет (``track=None``) — маркер был бы утверждением о НЕсуществующей строке.
+
+        Маркер говорит логгер-tap'у «эту запись пропусти, у инцидента уже есть
+        своя строка». Сказать это, не отдав факт никуда, значит вычесть инцидент
+        из стора целиком — ровно находка Major 1 ревью Task 1.3a, замеренная
+        строками стора (контроль 1, опыт 0).
+        """
+        seen: list[dict] = []
+        state = HealthState(
+            log=lambda msg, **kwargs: seen.append(dict(kwargs)),
+            track=None,
+            breaker=_quiet_breaker(),
+        )
+        state.report_error(_raise_boom("boom"), context="noplane", throttle=_WINDOW_NEVER)
+
+        assert seen, "голос обязан прозвучать даже без плоскости ошибок"
+        assert "origin" not in seen[0], f"маркер поставлен без второй дороги: {seen[0]}"
+
+    def test_no_marker_when_the_error_plane_refused(self) -> None:
+        """Приёмник бросил — второй дороги фактически не было, маркер лжив так же.
+
+        Пара к тесту выше по ДРУГОЙ причине отсутствия факта: там дороги нет
+        вовсе, здесь она есть и отказала. Обе обязаны читаться одинаково.
+        """
+        seen: list[dict] = []
+
+        def track(exc: BaseException, payload: dict | None) -> None:
+            raise OSError("плоскость ошибок недоступна")
+
+        state = HealthState(
+            log=lambda msg, **kwargs: seen.append(dict(kwargs)),
+            track=track,
+            breaker=_quiet_breaker(),
+        )
+        state.report_error(_raise_boom("boom"), context="refused", throttle=_WINDOW_NEVER)
+
+        assert seen, "отказ плоскости не имеет права проглотить голос"
+        assert "origin" not in seen[0], f"маркер поставлен, хотя плоскость отказала: {seen[0]}"
+
+
+# ---------------------------------------------------------------------------
+# Текст исключения — чужой код, и он имеет право бросить
+# ---------------------------------------------------------------------------
+
+
+class TestAThrowingStrDoesNotCostTheFact:
+    def test_an_exception_whose_str_raises_is_still_counted(self) -> None:
+        """``str(exc)`` стоит первым в ``report_error`` — и был единственной дырой в «ВСЕГДА».
+
+        Ревью Task 1.3a: исключение с самодельным бросающим ``__str__`` уносило
+        наружу ``ValueError`` при ``errors=0`` и нуле записей плоскости. То есть
+        отказ ЧУЖОГО кода (``__str__`` исключения) стоил ВЕСЬ факт — ровно тот
+        класс, который задача 1.3a и разбирает.
+        """
+
+        class _EvilStr(RuntimeError):
+            def __str__(self) -> str:
+                raise ValueError("__str__ бросил")
+
+        tracked: list[Any] = []
+        state = HealthState(
+            track=lambda exc, payload: tracked.append(payload),
+            breaker=_quiet_breaker(),
+        )
+        state.report_error(_EvilStr(), context="evil", throttle=_WINDOW_NEVER)
+
+        snap = state.snapshot()
+        assert snap["errors"] == 1, f"факт потерян отказом __str__: {snap}"
+        assert len(tracked) == 1, tracked
+        assert "__str__" in snap["last_error"]["message"], (
+            f"заглушка обязана НАЗЫВАТЬ причину, а не выглядеть пустым сообщением: {snap['last_error']}"
+        )
+
+    def test_a_normal_exception_still_carries_its_own_text(self) -> None:
+        """Контроль: защита не имеет права подменить текст здорового исключения заглушкой."""
+        state = HealthState(breaker=_quiet_breaker())
+        state.report_error(_raise_boom("камера отвалилась"), context="ok", throttle=_WINDOW_NEVER)
+
+        assert state.snapshot()["last_error"]["message"] == "камера отвалилась", state.snapshot()
 
 
 # ---------------------------------------------------------------------------

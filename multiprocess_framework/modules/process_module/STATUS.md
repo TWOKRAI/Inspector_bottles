@@ -16,11 +16,34 @@
   (свой `WindowedVoices` на экземпляр). Дедуп ПУТЕЙ: плоскость ошибок штампует записи
   `origin=error_manager`, store-tap не на плоскости ошибок их пропускает — один инцидент даёт
   одну строку стора вместо двух (а `health.report(level=ERROR)` — вместо трёх).
-  Сторожа: `tests/test_health_fact_voice_hazards.py` (12), приёмка тестера
+  Сторожа: `tests/test_health_fact_voice_hazards.py` (17), приёмка тестера
   `tests/test_fact_always_voice_windowed_acceptance.py` (7),
-  `channel_routing_module/tests/test_store_tap_origin_dedup.py` (4).
+  `channel_routing_module/tests/test_store_tap_origin_dedup.py` (4),
+  `tests/test_health_incident_reaches_the_store.py` (3, сквозной счёт СТРОК стора).
   **Внимание:** `HealthState.clock` больше НЕ двигает окно голоса — оси времени разные
   (настенная у health, монотонная у окна); тестам окна нужен `voices=WindowedVoices(clock=…)`.
+
+- **2026-08-31 (ревью Task 1.3a — две регрессии и три уточнения, ADR-PM-045):**
+  1. **Процесс без `ErrorManager` терял инцидент ЦЕЛИКОМ** (регрессия правки выше). Маркер
+     `origin=error_manager` — утверждение о ЧУЖОЙ строке стора, а ставился безусловно; на
+     раскладке «есть logger-tap, нет error-tap» логгер-tap пропускал голос при несуществующей
+     второй дороге. Замер: контроль (есть EM) 1 строка, опыт (нет EM) **0**; до Task 1.3a на
+     той же раскладке инцидент был виден. Чинится ДВУМЯ правками: `_safe_track` возвращает
+     признак «факт уехал» и голос несёт маркер только по нему; `wire_observability_store`
+     вычисляет владельца маркированных строк по тому, кто реально встал (нет error-tap →
+     владение берёт логгер-tap). Раскладку находки закрывает вторая: `_safe_track` там всё
+     равно `True`, потому что приватный `ObservableMixin._track_error` глотает молча.
+     Предупреждение расширено с «ноль tap'ов» до «у плоскости ошибок нет своего tap'а»
+     (`error_plane_store_warning`).
+  2. **Бросок из `take()` обрывал `report_error` до breaker.** Подряд-счётчик стоял НИЖЕ
+     решения о голосе: `errors=5, плоскость=5` при `breaker=closed, status=ok` — статус не
+     деградировал бы никогда. Блок перенесён выше голоса; бросок наружу оставлен (у
+     вызывающего перехват и `hook_delivery_failures`). Сторож переписан на ПОЛНОТУ вызова,
+     а не на `pytest.raises`.
+  3. `str(exc)` обёрнут (`_safe_message`): исключение с бросающим `__str__` уносило наружу
+     `ValueError` при `errors=0`.
+  Матрица инъекций: база 111 собрано / 0 красных, 9 заплаток, у каждой ровно предсказанная
+  краснота (3+1+2+1+1+1+1+1+1).
 
 - **2026-08-31 (Task 1.2 плана `observability-closure`, ADR-PM-044):** сборка конфига менеджеров
   вынесена в ОДИН шов — `managers/observability_reload.py::compose_managers_payload`, и зовётся из

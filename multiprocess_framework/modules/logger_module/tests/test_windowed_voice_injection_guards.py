@@ -271,3 +271,76 @@ class TestTheRepeatsMapIsBoundedToo:
         assert voices.repeats("the-symptom") == 50, (
             f"длинная серия потеряна под наплывом одноразовых ключей: {voices.repeats('the-symptom')}"
         )
+
+
+class TestTheManualWindowCountLivesInExactlyOnePlace:
+    """Число снятых ручных копий окна — только длина реестра, и нигде словом.
+
+    Сторож minor 5 ревью Task 1.3a, и правка ТРЕТЬЯ на одном месте: соседние
+    докстринги независимо говорили «семь», «шесть» и «пять», перечисляя при этом
+    один и тот же набор — ``observability_config.py`` утверждал «переписано
+    вручную минимум семь раз» при шести перечисленных, пока
+    ``windowed_voice.py`` в двух шагах говорил «ШЕСТЬ». Слово и перечень — два
+    хранилища одного факта, расходятся молча, и ловится это только чтением обоих
+    подряд. Реестр оставляет одно хранилище, а этот тест сторожит, что второе не
+    заведут снова.
+    """
+
+    #: Файлы, где число уже разъезжалось. Литерал, а не обход дерева: обход
+    #: молча расширил бы правило на чужие докстринги и превратил бы сторож в
+    #: источник ложных красных.
+    _WATCHED = (
+        "multiprocess_framework/modules/logger_module/core/windowed_voice.py",
+        "multiprocess_framework/modules/process_module/configs/observability_config.py",
+        "multiprocess_framework/modules/process_module/health/state.py",
+    )
+
+    #: Числительные словом. «Один/одна» не в списке: оно живёт в этих файлах
+    #: законно («ни одна не настраиваемая»).
+    _NUMERALS = ("два", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять")
+
+    @staticmethod
+    def _repo_root():
+        from pathlib import Path
+
+        import multiprocess_framework
+
+        return Path(multiprocess_framework.__file__).resolve().parent.parent
+
+    def test_the_registry_names_every_replaced_copy(self) -> None:
+        """Состав реестра — литералом. Он и есть единственное хранилище числа."""
+        from multiprocess_framework.modules.logger_module.core.windowed_voice import (
+            REPLACED_MANUAL_WINDOWS,
+        )
+
+        assert [name for name, _ in REPLACED_MANUAL_WINDOWS] == [
+            "_SEND_ERROR_LOG_INTERVAL_SEC",
+            "_NEVER_DROP_LOSS_LOG_INTERVAL_SEC",
+            "_system_evict_log_window",
+            "_data_evict_log_window",
+            "_queue_missing_log_window",
+            "HealthState.DEFAULT_THROTTLE",
+        ]
+        assert len({name for name, _ in REPLACED_MANUAL_WINDOWS}) == len(REPLACED_MANUAL_WINDOWS), "дубль в реестре"
+
+    def test_no_watched_file_spells_the_count_next_to_the_manual_copies(self) -> None:
+        """Ни одна строка про РУЧНЫЕ копии не имеет права называть их число словом.
+
+        Правило узкое сознательно: запрет действует только на строках со стемом
+        ``ручн`` (``вручную``, ``ручных``, ``ручные``) — именно так были
+        сформулированы все три разъехавшиеся редакции. Общий запрет числительных
+        сломал бы соседние законные фразы вроде «5 вхождений из пяти потоков».
+        """
+        root = self._repo_root()
+        offenders = []
+        for rel in self._WATCHED:
+            path = root / rel
+            assert path.exists(), f"сторож смотрит на несуществующий файл: {rel}"
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                low = line.lower()
+                if "ручн" not in low:
+                    continue
+                said = [word for word in self._NUMERALS if word in low]
+                if said:
+                    offenders.append(f"{rel}:{lineno} назвал {said}: {line.strip()}")
+        assert offenders == [], "число ручных копий снова записано словом:\n" + "\n".join(offenders)

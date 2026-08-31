@@ -1476,12 +1476,23 @@ def wire_observability_store(
             таблицы защищает ретеншен (:func:`sweep_observability_history`), а не
             высокий порог.
 
+    **Владение плоскостью ошибок — у того, кто встал, а не у роли.** Записи с
+    маркером ``origin=error_manager`` принимает РОВНО ОДИН tap: обычно error-tap,
+    а если ErrorManager'а нет (или он не поддержал ``add_tap``) — логгер-tap
+    берёт владение на себя. Иначе маркированную строку не принимает никто, и
+    инцидент процесса без ErrorManager исчезает из стора целиком (ревью Task 1.3a
+    воспроизвело: контроль 1 строка, опыт 0).
+
     Returns:
-        (store, taps) — taps: список (manager, tap_name) для unwire.
+        (store, taps) — taps: список (manager, tap_name) для unwire. Отсутствие
+        :data:`STORE_ERROR_TAP` в списке означает «у плоскости ошибок своего
+        tap'а нет» — по нему вызывающий и предупреждает (см.
+        ``ProcessModule._wire_observability_hub``).
     """
     store = ObservabilityStore(db_path)
     taps: list[Tuple[Any, str]] = []
-    for mgr, tap_name, owns_error_plane in (
+    error_plane_owned = False
+    for mgr, tap_name, owns_by_role in (
         (error_manager, STORE_ERROR_TAP, True),
         (logger_manager, STORE_LOGGER_TAP, False),
     ):
@@ -1490,15 +1501,62 @@ def wire_observability_store(
         # Вид записи (log/error) считает её важность — tap'у он не задаётся (Б-4).
         # ``owns_error_plane`` — другое: он говорит, ЧЕЙ этот tap. Записи с
         # маркером ``origin=error_manager`` кладёт в стор только tap плоскости
-        # ошибок; логгер-tap их пропускает, иначе один инцидент даёт две строки
+        # ошибок; остальные их пропускают, иначе один инцидент даёт две строки
         # (Task 1.3a, дедуп ПУТЕЙ).
+        #
+        # Ревью Task 1.3a: владелец вычисляется по тому, кто РЕАЛЬНО встал, а не
+        # по таблице ролей. Прежняя редакция раздавала флаг константой, и на
+        # раскладке «есть logger-tap, нет error-tap» (процесс без ErrorManager:
+        # секции ``error`` в конфиге нет → ``_create_error_manager`` вернул None)
+        # маркированную строку не принимал НИКТО — замер: контроль 1 строка,
+        # опыт 0, инцидент исчезал целиком. Инвариант теперь структурный:
+        # владелец маркированных строк — ровно один, и он есть, пока встал хотя
+        # бы один tap.
+        owns_error_plane = owns_by_role or not error_plane_owned
         mgr.add_tap(
             StoreTapChannel(store, name=tap_name, process=process, owns_error_plane=owns_error_plane),
             min_level=min_level,
             name=tap_name,
         )
+        error_plane_owned = error_plane_owned or owns_error_plane
         taps.append((mgr, tap_name))
     return store, taps
+
+
+def error_plane_store_warning(process_name: str, taps: Optional[list]) -> Optional[str]:
+    """Чего не хватает истории ошибок после :func:`wire_observability_store`.
+
+    Живёт ЗДЕСЬ, а не веткой у вызывающего, ровно потому, что решение читает
+    результат этой проводки и ничего больше: у вызывающего остаются три строки
+    без собственного условия, а сам вопрос «кто владеет плоскостью ошибок»
+    проверяем литералом.
+
+    Возвращает готовый текст предупреждения или ``None``, если у плоскости
+    ошибок есть свой tap. Два разных повода молчать нельзя путать:
+
+    * tap'ов НЕТ вовсе — вкладка «Ошибки» будет пуста, это потеря;
+    * своего tap'а у плоскости ошибок нет, владение взял логгер-tap — инциденты
+      в сторе будут, но приедут дорогой ГОЛОСА. Прежняя редакция условия
+      (у вызывающего, «список tap'ов пуст») эту раскладку пропускала молча — и
+      ревью Task 1.3a показало, что до починки проводки инцидент на ней
+      исчезал целиком.
+    """
+    names = [name for _, name in (taps or [])]
+    if not names:
+        return (
+            f"Process '{process_name}': ObservabilityStore без error-tap "
+            "(ни logger_manager, ни error_manager не поддержали add_tap) "
+            "— ошибки в стор попадать НЕ будут"
+        )
+    if STORE_ERROR_TAP not in names:
+        return (
+            f"Process '{process_name}': у ПЛОСКОСТИ ОШИБОК нет своего store-tap "
+            "(ErrorManager не создан или не поддержал add_tap) — владение "
+            "маркированными записями взял на себя логгер-tap. Инциденты в сторе "
+            "будут, но приедут дорогой ГОЛОСА, а не дорогой факта: без трассы и "
+            "без полей track_error"
+        )
+    return None
 
 
 def unwire_observability_store(
