@@ -623,3 +623,39 @@ class TestOneConnectorPerPoint:
             "тот же инцидент попал ВТОРОЙ строкой в system.log — «сколько раз это случилось» "
             f"перестаёт иметь ответ: {system!r}"
         )
+
+
+class TestPrefixCleanupTellsThePlatform:
+    """Р5: у ПРЕФИКСНОГО блока гейт строже, а строка журнала об этом молчала.
+
+    Ревью Task 1.2 закрыло этот класс в первом блоке уборки и оставило его
+    открытым в блоке-близнеце. ``cleanup_orphaned_by_prefix`` сканирует
+    ``/dev/shm`` и работает ТОЛЬКО на Linux: на Windows enumeration недоступен,
+    на macOS каталога просто нет. То есть на двух платформах проекта из трёх
+    строка «очищено 0 по префиксам …» была свойством платформы, выданным за
+    показание об уборке — ровно то, за что правился первый блок.
+
+    Ожидания литералами и обе половины нужны: без первой тест согласится с
+    исчезновением строки вовсе, без второй — с молчанием о платформе.
+    """
+
+    def test_the_prefix_line_says_the_scan_is_unavailable(
+        self, log_root: Any, launchers: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from multiprocess_framework.modules.shared_resources_module.buffers.cleanup import _is_linux
+
+        if _is_linux():
+            pytest.skip("на Linux скан реален — ноль там показание, а не свойство платформы")
+        monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", "1")
+        launcher = launchers()
+
+        _within_deadline(lambda: launcher._cleanup_shm_at_startup({}), "уборка с префиксным блоком")
+
+        content = _system_log(log_root)
+        assert "cleanup_orphaned_by_prefix: очищено 0 SHM-сегментов" in content, (
+            f"строки префиксной уборки нет в журнале вовсе: {content!r}"
+        )
+        assert "скан по префиксу доступен только на Linux" in content, (
+            "строка выдаёт недоступность скана за результат уборки — читатель стенда "
+            f"не отличит «чистить было нечего» от «сканировать здесь нечем»: {content!r}"
+        )

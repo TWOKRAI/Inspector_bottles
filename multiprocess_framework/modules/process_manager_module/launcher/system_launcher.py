@@ -52,6 +52,23 @@ def _shm_platform_note() -> str:
     return "" if is_posix() else _SHM_CLEANUP_NOT_APPLICABLE
 
 
+# Ревью Task 1.2, Р5: у ПРЕФИКСНОГО блока гейт СТРОЖЕ — не POSIX, а Linux. macOS
+# проходит is_posix(), но /dev/shm там не материализуется, сканировать нечего; на
+# Windows enumeration недоступен вовсе. Без этой оговорки строка «очищено 0 по
+# префиксам …» читается как показание ровно на двух из трёх платформ проекта.
+_PREFIX_CLEANUP_NOT_APPLICABLE = (
+    " (скан по префиксу доступен только на Linux: он ищет файлы в /dev/shm, "
+    "которых на этой платформе нет — ноль здесь структурный)"
+)
+
+
+def _prefix_platform_note() -> str:
+    """Пояснение к числу префиксной уборки — там, где скан недоступен."""
+    from ...shared_resources_module.buffers.cleanup import _is_linux
+
+    return "" if _is_linux() else _PREFIX_CLEANUP_NOT_APPLICABLE
+
+
 class SystemLauncher:
     """
     Фасад запуска системы процессов.
@@ -247,8 +264,15 @@ class SystemLauncher:
         """Запись пришла после ``stop()`` — увести её в аварийный выход.
 
         Возвращает True, если запись уже обслужена здесь. Журнал закрыт и второй
-        раз не поднимется (F3), но «закрыт» не значит «можно потерять»: строка
-        уходит в stdlib напрямую с явной пометкой окна.
+        раз не поднимется (F3); строка уходит в stdlib напрямую с явной пометкой окна.
+
+        **Не «не теряется», а «теряется не всё» — замер ревью (Р1).** ``emergency_log``
+        зовёт голый ``logging.getLogger(...)``: после закрытия у ветки нет хендлеров,
+        эффективный уровень корня — WARNING, поэтому WARNING и ERROR доезжают до
+        stderr, а INFO отбрасывается ещё до ``lastResort``. Во встройке с настроенным
+        stdlib выживет и INFO. Сторож этого маршрута подменяет сам ``emergency_log``,
+        то есть охраняет ФАКТ ВЫЗОВА, а не выживание записи — цена названа здесь,
+        потому что тест её назвать не может.
         """
         if not self._observability_closed:
             return False
@@ -442,7 +466,7 @@ class SystemLauncher:
                 orphaned = cleanup_orphaned_by_prefix(prefixes)
                 self._log_info(
                     f"cleanup_orphaned_by_prefix: очищено {len(orphaned) if orphaned else 0} SHM-сегментов "
-                    f"по префиксам {prefixes}"
+                    f"по префиксам {prefixes}{_prefix_platform_note()}"
                 )
         except Exception as exc:  # noqa: BLE001 — уборка не имеет права сорвать запуск
             self._shm_cleanup_failures += 1
