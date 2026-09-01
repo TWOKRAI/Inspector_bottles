@@ -392,11 +392,22 @@ def observability_effective(
     # Имена ключей — из СХЕМЫ (`ObservabilityVoicesConfig`), а не внутренние
     # имена политики: путь конфига обязан совпасть с путём readback'а один в
     # один, иначе тождественное сравнение ниже не найдёт свой путь.
-    from ...logger_module.core.windowed_voice import default_window_sec, escalate_after_repeats
+    #
+    # Task 2.7 (добор ревью Ф1): бывшие литералы MAX_TRACKED_KEYS/_STALE_WINDOWS
+    # читаются той же безусловной дорогой, что и окно/эскалация выше — они
+    # такая же ДЕЙСТВУЮЩАЯ политика механизма, а не параметр менеджера.
+    from ...logger_module.core.windowed_voice import (
+        default_window_sec,
+        escalate_after_repeats,
+        max_tracked_keys,
+        stale_windows,
+    )
 
     out[VOICES_SECTION_KEY] = {
         "default_window_sec": float(default_window_sec()),
         "escalate_after_repeats": int(escalate_after_repeats()),
+        "max_tracked_keys": int(max_tracked_keys()),
+        "stale_windows": int(stale_windows()),
     }
     return out
 

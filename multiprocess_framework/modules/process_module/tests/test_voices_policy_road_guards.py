@@ -165,9 +165,15 @@ class TestRebuildReachesTheLiveMechanism:
         """
         applied = apply_voices_policy({"default_window_sec": WINDOW, "escalate_after_repeats": ESCALATE})
 
-        assert applied == {"default_window_sec": WINDOW, "escalate_after_repeats": ESCALATE}, (
-            f"имена ключей ответа обязаны быть именами полей СХЕМЫ: {applied}"
-        )
+        # Task 2.7: секция не назвала max_tracked_keys/stale_windows — обе оси
+        # получают СХЕМНЫЕ дефолты (512/10), та же дорога, что уже была у
+        # window_sec/escalate_after до этой задачи.
+        assert applied == {
+            "default_window_sec": WINDOW,
+            "escalate_after_repeats": ESCALATE,
+            "max_tracked_keys": 512,
+            "stale_windows": 10,
+        }, f"имена ключей ответа обязаны быть именами полей СХЕМЫ: {applied}"
         assert set(applied) <= set(ObservabilityConfig().voices.model_dump()), (
             f"в ответе есть ключ, которого нет в схеме секции: {sorted(applied)}"
         )
@@ -197,9 +203,13 @@ class TestTheVerdictSeesTheSection:
 
         effective = observability_effective()
 
+        # Task 2.7: readback безусловный (как и раньше) и теперь несёт ещё два
+        # поля секции — на схемных дефолтах, потому что запрос их не называл.
         assert effective[VOICES_SECTION_KEY] == {
             "default_window_sec": WINDOW,
             "escalate_after_repeats": ESCALATE,
+            "max_tracked_keys": 512,
+            "stale_windows": 10,
         }, effective.get(VOICES_SECTION_KEY)
 
     def test_an_applied_knob_is_confirmed_not_unverifiable(self) -> None:
@@ -256,9 +266,12 @@ class TestTheCommandAnswerCarriesVoicesApplied:
 
         assert res["success"] is True, res
         assert "voices_applied" in res, sorted(res)
+        # Task 2.7: те же два новых поля секции, на схемных дефолтах.
         assert res["voices_applied"] == {
             "default_window_sec": WINDOW,
             "escalate_after_repeats": ESCALATE,
+            "max_tracked_keys": 512,
+            "stale_windows": 10,
         }, res["voices_applied"]
 
     def test_the_same_answer_confirms_the_knob(self, tmp_path: Path) -> None:

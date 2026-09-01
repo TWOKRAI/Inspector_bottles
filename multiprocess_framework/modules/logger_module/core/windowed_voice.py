@@ -39,19 +39,29 @@
 ## Ключи и память
 
 Состояние живёт по ключу, ключи разных источников независимы. **Обе** карты
-держателя ограничены :data:`MAX_TRACKED_KEYS`: ключ с именем процесса, рода
-исключения или причины — величина неограниченного алфавита, и карта без потолка
-стала бы утечкой на ключах, которых больше никогда не будет.
+держателя ограничены действующим потолком (:data:`MAX_TRACKED_KEYS` — L0-дефолт
+512, ``observability.voices.max_tracked_keys`` — ручка, Task 2.7): ключ с именем
+процесса, рода исключения или причины — величина неограниченного алфавита, и
+карта без потолка стала бы утечкой на ключах, которых больше никогда не будет.
+До Task 2.7 потолок и такт протухания были литералами без ручки и без readback
+(ревью Ф1, нарушение правила 2 §1 плана) — механизм-сосед (дроссель-сэмплер,
+:mod:`.sampling`) уже публиковал и текущее число ключей, и счётчик насыщения, а
+здесь у ``WindowedVoices.tracked_keys()`` не было ни одного боевого вызывающего.
 
-* карта ОКОН (``_state``) подметается сначала по протухшим (давно не голосившие
-  И без накопленных подавлений), потом, если и это не помогло, по старшинству
-  среди бездолжников; выброс НЕ молчит — он растит ``windowed_keys_evicted``;
+* карта ОКОН (``_state``) подметается сначала по протухшим — старше
+  :data:`_STALE_WINDOWS` своих окон (L0-дефолт 10, ``observability.voices.stale_windows``,
+  Task 2.7) и без накопленных подавлений, — потом, если и это не помогло, по
+  старшинству среди бездолжников; выброс НЕ молчит — он растит
+  ``windowed_keys_evicted`` (этот счётчик и есть насыщение — сампловый
+  аналог ``sampler_keys_saturated``: растёт ровно тогда, когда протухшего
+  для освобождения места не нашлось, и пришлось жертвовать живым ключом);
 * карта СЕРИЙ (``_repeats``) растёт отдельно: :meth:`WindowedVoices.note_repeat`
   карты окон не касается, и до ревью Task 1.4 потолка у неё не было вовсе
   (замер ревью: 50 000 разных ключей → 50 000 записей при ``tracked_keys() == 0``).
   Жертвы здесь — САМЫЕ КОРОТКИЕ серии: серия длины 1 не отличима от «серии не
   было», а длинная — ровно тот симптом, ради которого ось заведена, и терять её
-  первой значило бы слепнуть в худшем случае.
+  первой значило бы слепнуть в худшем случае. Потолок — тот же самый
+  действующий :data:`MAX_TRACKED_KEYS`, а не вторая копия числа.
 
 **Только что созданный ключ жертвой не становится** — ни в одной из карт. Иначе
 насыщенная должниками карта выбрасывала бы его сразу после вставки, и механизм
@@ -73,6 +83,14 @@
 не по соглашению о порядке. Прежняя редакция объявляла здесь именно порядок
 («сначала лок держателя, потом лок счётчиков») — утверждение вакуумное: ревью
 Task 1.4 не нашло в коде ни одной точки, где выполнялась бы его посылка.
+
+**Третий лок (Task 2.7) подчиняется тому же правилу.** ``_policy_lock`` читает
+действующий потолок/такт (:func:`max_tracked_keys`, :func:`stale_windows`) — оба
+вызова стоят ДО ``with self._lock:``, как и уже существовавшее чтение
+``default_window_sec()``. ``_sweep_locked``/``_sweep_repeats_locked`` получают
+готовые числа параметрами и НЕ зовут политику сами — иначе ``_policy_lock``
+захватывался бы изнутри ``self._lock``, и третий лок нарушил бы то же
+инвариант, который у первых двух проверяется тестом.
 """
 
 from __future__ import annotations
@@ -109,16 +127,23 @@ DEFAULT_WINDOW_SEC: float = 5.0
 #: Строго «больше порога»: N=3 означает, что четвёртый подряд говорит громко.
 DEFAULT_ESCALATE_AFTER_REPEATS: int = 3
 
-#: Потолок карты ключей на один держатель окон.
+#: Потолок карты ключей на один держатель окон. L0-дефолт политики
+#: (``observability.voices.max_tracked_keys``, Task 2.7) — действующее значение
+#: читает :func:`max_tracked_keys`, а не этот символ напрямую (он остаётся
+#: именем встроенного дефолта, как :data:`DEFAULT_WINDOW_SEC` у окна).
 MAX_TRACKED_KEYS: int = 512
 
-#: Во сколько окон молчания ключ считается протухшим и подметается.
+#: Во сколько окон молчания ключ считается протухшим и подметается. L0-дефолт
+#: политики (``observability.voices.stale_windows``, Task 2.7) — действующее
+#: значение читает :func:`stale_windows`.
 _STALE_WINDOWS: int = 10
 
 _policy_lock = threading.Lock()
 _policy: Dict[str, Any] = {
     "window_sec": DEFAULT_WINDOW_SEC,
     "escalate_after_repeats": DEFAULT_ESCALATE_AFTER_REPEATS,
+    "max_tracked_keys": MAX_TRACKED_KEYS,
+    "stale_windows": _STALE_WINDOWS,
 }
 
 _totals_lock = threading.Lock()
@@ -142,10 +167,32 @@ def escalate_after_repeats() -> int:
         return int(_policy["escalate_after_repeats"])
 
 
+def max_tracked_keys() -> int:
+    """Действующий потолок карты ключей процесса (``observability.voices.max_tracked_keys``).
+
+    Читается ДЕРЖАТЕЛЕМ на каждый вызов :meth:`WindowedVoices.take` /
+    :meth:`WindowedVoices.note_repeat`, а не один раз в конструкторе — держатели
+    создаются до применения политики (роутер, реестр очередей поднимаются раньше
+    ``wire_voices_policy``), и захват значения в ``__init__`` заморозил бы
+    встроенный дефолт (Task 2.7, тот же урок, что уже есть у ``clock`` в
+    :meth:`WindowedVoices.__init__`).
+    """
+    with _policy_lock:
+        return int(_policy["max_tracked_keys"])
+
+
+def stale_windows() -> int:
+    """Действующий такт протухания процесса (``observability.voices.stale_windows``)."""
+    with _policy_lock:
+        return int(_policy["stale_windows"])
+
+
 def set_voices_policy(
     *,
     window_sec: Optional[float] = None,
     escalate_after: Optional[int] = None,
+    max_tracked_keys: Optional[int] = None,
+    stale_windows: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Задать политику голосов процесса. Возвращает применённый снимок.
 
@@ -166,6 +213,10 @@ def set_voices_policy(
             _policy["window_sec"] = float(window_sec)
         if escalate_after is not None:
             _policy["escalate_after_repeats"] = int(escalate_after)
+        if max_tracked_keys is not None:
+            _policy["max_tracked_keys"] = int(max_tracked_keys)
+        if stale_windows is not None:
+            _policy["stale_windows"] = int(stale_windows)
         return dict(_policy)
 
 
@@ -174,6 +225,8 @@ def reset_voices_policy() -> None:
     with _policy_lock:
         _policy["window_sec"] = DEFAULT_WINDOW_SEC
         _policy["escalate_after_repeats"] = DEFAULT_ESCALATE_AFTER_REPEATS
+        _policy["max_tracked_keys"] = MAX_TRACKED_KEYS
+        _policy["stale_windows"] = _STALE_WINDOWS
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +307,13 @@ class WindowedVoices:
             вызывающему бывает нужно решить, не пора ли сказать иначе).
         """
         window = default_window_sec() if interval is None else float(interval)
+        # Потолок и такт протухания — тоже действующая политика процесса
+        # (Task 2.7), и читаются здесь же, ДО входа в ``with self._lock``: тот
+        # же довод, что уже у ``window`` — ``_policy_lock`` не имеет права
+        # захватываться изнутри ``self._lock`` (см. «Дисциплина лока» в шапке
+        # модуля), поэтому оба числа приходят в ``_sweep_locked`` параметрами.
+        ceiling = max_tracked_keys()
+        stale_factor = stale_windows()
         now = time.monotonic() if self._clock is None else self._clock()
         evicted = 0
         with self._lock:
@@ -266,13 +326,13 @@ class WindowedVoices:
                 suppressed = int(entry[1]) if entry is not None else 0
                 self._state[key] = [now, 0, window]
                 voiced = True
-                if len(self._state) > MAX_TRACKED_KEYS:
+                if len(self._state) > ceiling:
                     # ``protect`` — ключ, ради которого сюда и зашли. Без него
                     # насыщенная должниками карта выбрасывала бы его немедленно
                     # (он бездолжник по построению, а бездолжники идут первыми),
                     # и следующий вызов снова видел бы НОВЫЙ ключ: голос звучал
                     # бы каждый раз. Воспроизведено ревью Task 1.4.
-                    evicted = self._sweep_locked(now, protect=key)
+                    evicted = self._sweep_locked(now, ceiling, stale_factor, protect=key)
         # Инкременты процессных счётчиков — ВНЕ лока держателя, и это ЕДИНСТВЕННОЕ
         # место, где встречаются оба лока модуля. Порядка захвата у них нет, потому
         # что одновременно они не удерживаются нигде: ``_bump`` исполняется уже
@@ -283,18 +343,23 @@ class WindowedVoices:
         _bump("windowed_keys_evicted", evicted)
         return voiced, suppressed
 
-    def _sweep_locked(self, now: float, protect: Optional[str] = None) -> int:
+    def _sweep_locked(self, now: float, ceiling: int, stale_factor: int, protect: Optional[str] = None) -> int:
         """Подмести карту окон. Вызывается под ``self._lock``. Возвращает выброшенные.
 
         Args:
             now: момент вызова (monotonic).
+            ceiling: действующий потолок карты (:func:`max_tracked_keys` на
+                момент вызова :meth:`take` — снят ДО лока, не пересчитывается
+                здесь: см. «Дисциплина лока»).
+            stale_factor: действующий такт протухания (:func:`stale_windows`,
+                снят той же дорогой).
             protect: ключ, которому НЕЛЬЗЯ стать жертвой — тот, ради которого
                 подметание и запущено.
         """
-        for key in [k for k, e in self._state.items() if e[1] == 0 and (now - e[0]) > _STALE_WINDOWS * e[2]]:
+        for key in [k for k, e in self._state.items() if e[1] == 0 and (now - e[0]) > stale_factor * e[2]]:
             del self._state[key]
             self._repeats.pop(key, None)
-        if len(self._state) <= MAX_TRACKED_KEYS:
+        if len(self._state) <= ceiling:
             # Протухшие не считаются выброшенными: у них не было ни одного
             # неназванного подавления, терять было нечего.
             return 0
@@ -318,7 +383,7 @@ class WindowedVoices:
             key=lambda kv: (kv[1][1] > 0, kv[1][0]),
         )
         evicted = 0
-        for key, _entry in ordered[: len(self._state) - MAX_TRACKED_KEYS]:
+        for key, _entry in ordered[: len(self._state) - ceiling]:
             del self._state[key]
             self._repeats.pop(key, None)
             evicted += 1
@@ -343,13 +408,16 @@ class WindowedVoices:
         карты окон не касается вовсе, поэтому её собственный потолок — не
         дублирование, а единственный (см. шапку модуля).
         """
+        # Потолок читается ДО лока — та же дисциплина, что у ``take()``
+        # (Task 2.7): ``_policy_lock`` не захватывается изнутри ``self._lock``.
+        ceiling = max_tracked_keys()
         with self._lock:
             self._repeats[key] = self._repeats.get(key, 0) + 1
-            if len(self._repeats) > MAX_TRACKED_KEYS:
-                self._sweep_repeats_locked(protect=key)
+            if len(self._repeats) > ceiling:
+                self._sweep_repeats_locked(ceiling, protect=key)
             return self._repeats[key]
 
-    def _sweep_repeats_locked(self, protect: str) -> None:
+    def _sweep_repeats_locked(self, ceiling: int, protect: str) -> None:
         """Подмести карту серий. Под ``self._lock``. Жертвы — самые короткие серии.
 
         Длина серии здесь работает ценой записи: единица не отличима от «серии не
@@ -364,7 +432,7 @@ class WindowedVoices:
         единицы ключей (один вызывающий на всё дерево), — рано.
         """
         victims = sorted((k for k in self._repeats if k != protect), key=lambda k: self._repeats[k])
-        for key in victims[: len(self._repeats) - MAX_TRACKED_KEYS]:
+        for key in victims[: len(self._repeats) - ceiling]:
             del self._repeats[key]
 
     def reset_repeat(self, key: str) -> None:

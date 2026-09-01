@@ -895,7 +895,14 @@ def _voices_knobs(section: Any, svc: Any = None) -> Optional[Dict[str, Any]]:
             f"[observability] {VOICES_CONFIG_ADDRESS} не принят ({exc!r}) — окна голоса остаются прежними",
         )
         return None
-    return {"window_sec": float(cfg.default_window_sec), "escalate_after": int(cfg.escalate_after_repeats)}
+    return {
+        "window_sec": float(cfg.default_window_sec),
+        "escalate_after": int(cfg.escalate_after_repeats),
+        # Task 2.7: бывшие литералы MAX_TRACKED_KEYS/_STALE_WINDOWS — теперь
+        # такая же ручка, идущая той же дорогой (схема → сшивка → механизм).
+        "max_tracked_keys": int(cfg.max_tracked_keys),
+        "stale_windows": int(cfg.stale_windows),
+    }
 
 
 def wire_voices_policy(svc: Any) -> Optional[Dict[str, Any]]:
@@ -937,10 +944,17 @@ def apply_voices_policy(section: Any, svc: Any = None) -> Optional[Dict[str, Any
         return None
     from ...logger_module.core.windowed_voice import set_voices_policy
 
-    applied = set_voices_policy(window_sec=knobs["window_sec"], escalate_after=knobs["escalate_after"])
+    applied = set_voices_policy(
+        window_sec=knobs["window_sec"],
+        escalate_after=knobs["escalate_after"],
+        max_tracked_keys=knobs["max_tracked_keys"],
+        stale_windows=knobs["stale_windows"],
+    )
     return {
         "default_window_sec": float(applied["window_sec"]),
         "escalate_after_repeats": int(applied["escalate_after_repeats"]),
+        "max_tracked_keys": int(applied["max_tracked_keys"]),
+        "stale_windows": int(applied["stale_windows"]),
     }
 
 

@@ -317,8 +317,9 @@ class RouterManager(ChannelRoutingManager):
         # механизма и переехала в него целиком (`ObservableMixin.should_voice` →
         # `logger_module.core.windowed_voice`). Ключ окна — по-прежнему причина,
         # окно — из политики процесса (`observability.voices.default_window_sec`),
-        # а не из константы: восемь ручных копий одного и того же 5.0 по дереву
-        # и были той причиной, по которой «тише на линии» нельзя было настроить.
+        # а не из константы: шесть ручных копий одного и того же 5.0 по дереву
+        # (поимённый список — `windowed_voice.REPLACED_MANUAL_WINDOWS`) и были
+        # той причиной, по которой «тише на линии» нельзя было настроить.
 
     def _inc_stat(self, key: str, value: int = 1) -> None:
         # get(key, 0): счётчики с разбивкой по kind (``sent_via_channel.data`` и т.п.)

@@ -657,7 +657,17 @@ class TestIntrospectObservability:
         )
         # Литералы встроенных дефолтов, а не значения из механизма: иначе тест
         # согласился бы с любым ответом, включая выдуманный.
-        assert result["effective"]["voices"] == {"default_window_sec": 5.0, "escalate_after_repeats": 3}
+        # Ф2 Task 2.7: к паре окна добавились ёмкость и такт подметания — бывшие
+        # литералы ``MAX_TRACKED_KEYS``/``_STALE_WINDOWS`` из ``windowed_voice``.
+        # Литерал здесь полный и обновляется РУКАМИ: новый ключ, приехавший в
+        # readback незамеченным, обязан ронять этот тест, иначе он согласится с
+        # любым составом ответа.
+        assert result["effective"]["voices"] == {
+            "default_window_sec": 5.0,
+            "escalate_after_repeats": 3,
+            "max_tracked_keys": 512,
+            "stale_windows": 10,
+        }
 
     def test_command_does_not_mutate_managers(self) -> None:
         """Read-команда: менеджер только опрашивается, дважды подряд — тот же ответ."""
