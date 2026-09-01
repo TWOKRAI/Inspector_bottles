@@ -58,6 +58,11 @@
 ### Task 3.5 — `history_query`: история для агентов и операторов (T6/CTL-F6)
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** tests (backend_ctl)
 **Goal:** агент получает историю логов/ошибок/чисел из стора одним инструментом, без чтения файла и без драйвера.
+**Приоритет поднят ревью Ф1 (2026-09-01):** это самый большой недостающий кусок агентского DX —
+две агентские сессии стенда Ф1.5 видели только «сейчас», «как дошло» приходилось читать sqlite
+руками. Исполнять ПЕРВОЙ задачей фазы, какой позволит зависимость: половина инструмента
+(`kind=log/error`) не ждёт колонки `metric` из 3.1 — можно дать раньше, ряд по метрике добрать
+после 3.1.
 **Files:** `backend_ctl/driver.py` (метод `history_query`), `backend_ctl/mcp_tools.py`, `channel_routing_module/observability/observability_store.py:481-533`
 (`_filter_clauses` + `metric`), `CONTROL_PANEL.md`, `backend_ctl/AGENTS.md`.
 **Steps:** путь к БД — из `introspect.observability.history.db_path` (readback, не догадка); read-only соединение; фильтры `kind/metric/process/module/severity/min_severity/since/until/text(FTS)/limit`; кап + `full`; для `kind=stats` — ряд `[ts, value]` по `metric`.
