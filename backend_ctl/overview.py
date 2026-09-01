@@ -411,6 +411,26 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
         elif drv._telemetry_matches_metric(path, "supervisor.event") and rec.get("value") == "recovered":
             anomalies.append({"kind": "recent_recovery", "process": rec.get("process"), "detail": f"{path}=recovered"})
 
+    # Ф2 Task 2.8: находка стенда Ф1.5 — холодная агентская сессия видела
+    # ``telemetry.fps == {}`` МОЛЧА. Причина законная (наполняет ``watch_like_gui``/
+    # ``state_subscribe``, см. докстринг ``telemetry_snapshot``), но сама сводка о
+    # предусловии молчала, и обещание «один вызов = вся картина» держало для
+    # людей-операторов и ломалось ровно для агентов, которые не знают, что
+    # подписаться нужно СНАЧАЛА. Сигнал «подписки нет» берём из уже полученного
+    # ``snapshot["ingest_active"]`` — второй round-trip не нужен, overview и так
+    # делает ровно один ``telemetry_snapshot()`` (комментарий выше). Активная
+    # подписка при пустом снимке — законное «дельт ещё не было» (в т.ч. если
+    # паттерн подписки не покрывает ``processes.**`` — та же оговорка, что в
+    # докстринге ``telemetry_snapshot`` про ``ingest_active``), и здесь НАМЕРЕННО
+    # молчим: ложный hint хуже тишины (прямое требование задачи 2.8).
+    if snapshot.get("count", 0) == 0 and not snapshot.get("ingest_active"):
+        anomalies.append(
+            {
+                "kind": "telemetry_readmodel_empty",
+                "detail": "state-подписки нет — watch_like_gui наполнит",
+            }
+        )
+
     events_stats = drv.events_stats()
     events_evicted = {plane: st["evicted"] for plane, st in events_stats.get("planes", {}).items() if st.get("evicted")}
 

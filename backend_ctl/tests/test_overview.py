@@ -96,7 +96,11 @@ class TestOverviewShape:
         assert card["workers"] == {"w1": "running"}  # компактно: имя → статус-строка
         assert card["router"]["middleware_dropped"] == 0
         assert "raw" not in json.dumps(card)  # сырые ответы в сводку не протекают
-        assert res["anomaly_count"] == 0
+        # Ф2 Task 2.8: сцена холодная (без watch_like_gui/state_subscribe) — система
+        # здорова, но read-model телеметрии пуст и без подписки, поэтому сводка
+        # обязана назвать это отдельным hint'ом, а не молчать нулём аномалий.
+        assert res["anomaly_count"] == 1
+        assert res["anomalies"][0]["kind"] == "telemetry_readmodel_empty"
 
     def test_zero_new_ipc_commands(self, monkeypatch) -> None:
         """Fan-out только существующими ручками — новых IPC-команд ноль."""

@@ -105,7 +105,7 @@ PY
 
 | Метод | Назначение |
 |-------|-----------|
-| `system_overview(timeout=)` | **B.3, первая команда сессии**: компактная сводка всех процессов (статус/воркеры/router/очереди/память) + telemetry fps + счётчики driver'а + `anomalies`-подсказки (router_dropped, queue_depth, fps_zero_while_running, recent_recovery, late_replies, events_evicted, …) |
+| `system_overview(timeout=)` | **B.3, первая команда сессии**: компактная сводка всех процессов (статус/воркеры/router/очереди/память) + telemetry fps + счётчики driver'а + `anomalies`-подсказки (router_dropped, queue_depth, fps_zero_while_running, recent_recovery, late_replies, events_evicted, telemetry_readmodel_empty, …). Ф2 Task 2.8: `telemetry_readmodel_empty` — холодная сессия (`telemetry.fps` пуст И нет активной `state.subscribe`) не молчит про предусловие; после `watch_like_gui`/`state_subscribe` подсказка пропадает (пустой снимок под активной подпиской — законное «дельт ещё не было») |
 | `introspect_handlers(process)` | ключи router `message_dispatcher` + команды `CommandManager` |
 | `introspect_registers(process)` | имена регистров + поля (**пусто = нет worker-side приёмника**) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |

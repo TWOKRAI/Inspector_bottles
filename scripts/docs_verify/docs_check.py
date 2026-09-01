@@ -55,6 +55,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS = "multiprocess_framework/docs"
 OBS = f"{DOCS}/observability"
 MODULES = "multiprocess_framework/modules"
+BACKEND_CTL = "backend_ctl"
 
 
 class Unverifiable(Exception):
@@ -612,6 +613,28 @@ def _check_recipe_lifecycle_is_named(src: Sources) -> Optional[str]:
     return None
 
 
+def _check_overview_telemetry_readmodel_empty_kind(src: Sources) -> Optional[str]:
+    """Task 2.8: kind ``telemetry_readmodel_empty`` в шпаргалке AGENTS.md ↔ реальный литерал overview.py.
+
+    Ф2 Task 2.8 завела новую аномалию ``system_overview``: холодная сессия (read-model
+    пуст И подписки нет) перестаёт молчать про предусловие. Имя kind'а — inline-строка
+    в ``anomalies.append``, константы под ней нет (единственное место, где он назван
+    в коде, — сам вызов), поэтому проверка сверяет строку документа с текстом файла
+    через ``ast``-парсер было бы избыточно — здесь регулярка по литералу, тем же
+    приёмом, что у остальных «проверка фразы» в этом модуле.
+    """
+    agents = src.read(f"{BACKEND_CTL}/AGENTS.md")
+    row = next((line for line in agents.splitlines() if "system_overview(timeout=)" in line), None)
+    if row is None:
+        raise Unverifiable(f"{BACKEND_CTL}/AGENTS.md: строки со `system_overview(timeout=)` нет — предпосылка ушла")
+    if "telemetry_readmodel_empty" not in row:
+        return "AGENTS.md: строка system_overview не называет kind telemetry_readmodel_empty"
+    overview = src.read(f"{BACKEND_CTL}/overview.py")
+    if not re.search(r'"kind":\s*"telemetry_readmodel_empty"', overview):
+        return "AGENTS.md называет kind telemetry_readmodel_empty, в overview.py такого литерала нет"
+    return None
+
+
 CHECKS: Sequence[Check] = (
     Check(
         "F1-1",
@@ -717,6 +740,13 @@ CHECKS: Sequence[Check] = (
         "имена счётчиков раздела «Что ловится автоматически» = HOOK_COUNTER_KEYS",
         "C3 ревью 2026-08-28 (Task 1.1)",
         _check_hook_counter_names,
+    ),
+    Check(
+        "T2.8",
+        "backend_ctl/AGENTS.md",
+        "kind telemetry_readmodel_empty (шпаргалка system_overview) — реальный литерал overview.py",
+        "Task 2.8 плана observability-closure (Ф2)",
+        _check_overview_telemetry_readmodel_empty_kind,
     ),
 )
 

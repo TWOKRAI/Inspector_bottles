@@ -35,6 +35,8 @@ CONTRACTS = "multiprocess_framework/docs/MODULE_CONTRACTS.md"
 CMD_MANAGER = "multiprocess_framework/modules/command_module/core/command_manager.py"
 SEVERITY_CFG = "multiprocess_framework/modules/error_module/configs/error_manager_config.py"
 PROCESS_HOOKS = "multiprocess_framework/modules/logger_module/core/process_hooks.py"
+BACKEND_CTL_AGENTS = "backend_ctl/AGENTS.md"
+BACKEND_CTL_OVERVIEW = "backend_ctl/overview.py"
 
 Edit = Tuple[str, str, str]  # (файл, что заменить, на что — текст ДО правок 5.1)
 
@@ -220,6 +222,21 @@ INJECTIONS: List["pytest.ParameterSet"] = [
         "C3",
         [(PROCESS_HOOKS, '"warnings_captured"', '"warnings_counted"')],
         id="C3-счётчик-переименован-в-коде",
+    ),
+    pytest.param(
+        "T2.8",
+        # Обе живые упоминания в строке лежат в одной физической строке таблицы
+        # (перечень + пояснение рядом) — заменяем все вхождения разом, иначе одно
+        # оставшееся упоминание тихо спасло бы проверку от красноты.
+        [(BACKEND_CTL_AGENTS, "telemetry_readmodel_empty", "REMOVED_KIND")],
+        id="T2.8-документ-забыл-kind",
+    ),
+    pytest.param(
+        "T2.8",
+        # Противоположное направление дрифта — код переименовал литерал, документ
+        # остался со старым написанием (тот же класс слома, что у F1-2/C3 выше).
+        [(BACKEND_CTL_OVERVIEW, '"kind": "telemetry_readmodel_empty"', '"kind": "telemetry_readmodel_missing"')],
+        id="T2.8-код-переименовал-kind",
     ),
 ]
 
