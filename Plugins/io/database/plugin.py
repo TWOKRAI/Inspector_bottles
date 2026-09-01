@@ -170,18 +170,16 @@ class DatabasePlugin(ProcessModulePlugin):
         # created_at проставляется в коде (SQL-default unixepoch не переносится в DDL).
         created = time.time()
         saved = 0
-        first_error_logged = False
         for record in batch:
             try:
                 repo.insert_many([DetectionSchema(created_at=created, **record)])
                 saved += 1
             except Exception as e:
                 self._total_errors += 1
+                # Голос по одному разу на пакет давал ручной first_error_logged —
+                # теперь ту же роль играет окно голоса report_error (ключ
+                # (тип, context)), факт при этом учитывается на КАЖДУЮ строку.
                 self._ctx.health.report_error(e, context="database.insert")
-                if not first_error_logged:
-                    # Логируем только первую ошибку пакета — не засорять лог при сбое БД.
-                    self._ctx.log_error(f"Detection insert failed: {e}")
-                    first_error_logged = True
         self._total_written += saved
         return saved
 

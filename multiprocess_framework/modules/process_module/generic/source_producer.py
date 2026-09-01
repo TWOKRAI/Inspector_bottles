@@ -134,18 +134,31 @@ class SourceProducer:
                 # OFF (см. perf_probes.py), при off — ноль вызовов perf_counter.
                 with self._perf.measure("capture"):
                     items = self._runner.call_produce(self._plugin)
-            except NotImplementedError:
-                self._log_error(f"SourceProducer: {self._plugin.name} не реализует produce()")
+            except NotImplementedError as e:
+                # Task 1.3b: раньше отказ шёл ТОЛЬКО в _log_error — источник
+                # останавливается НАВСЕГДА (stop_event.set() ниже), а плоскость
+                # ошибок об этом не узнавала вовсе. Один коннектор: если health
+                # подключён — факт и голос идут туда (тот же держатель окон, что
+                # у обычных produce()-фейлов ниже); без health (юниты/legacy) —
+                # запасной прямой лог, чтобы отказ не стал немым целиком.
+                if self._health is not None:
+                    self._health.report_error(e, context=self._health_context)
+                else:
+                    self._log_error(f"SourceProducer: {self._plugin.name} не реализует produce()")
                 stop_event.set()
                 return
             except Exception as e:
-                self._log_error(f"SourceProducer: {self._plugin.name}.produce() error: {e}")
                 items = []
                 produce_failed = True
                 # Honest produce-breaker (Task 2.2): кормим тот же счётчик, что и
                 # плагины — N подряд produce()-фейлов откроют breaker → health degraded.
+                # Task 1.3b: _log_error безусловный дублировал этот же инцидент —
+                # один коннектор: health.report_error, когда он есть; иначе лог,
+                # чтобы отказ остался видимым без health (юниты/legacy).
                 if self._health is not None:
                     self._health.report_error(e, context=self._health_context)
+                else:
+                    self._log_error(f"SourceProducer: {self._plugin.name}.produce() error: {e}")
 
             # record_success сбрасывает подряд-счётчик breaker → закрывает деградацию.
             # Зовём ТОЛЬКО если итерация честно успешна: produce() не бросил И плагин

@@ -155,7 +155,6 @@ class SegmentationPlugin(ProcessModulePlugin):
             confidence = result.confidence_masks[0].numpy_view().squeeze()
         except Exception as exc:  # pragma: no cover - защита горячего пути
             self._ctx.health.report_error(exc, context="segmentation.process")
-            self._ctx.log_error(f"SegmentationPlugin: сегментация упала: {exc}")
             self._degraded = True
             return item
 

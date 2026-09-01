@@ -404,6 +404,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         имели и менеджеры; здесь она нужна процессу, потому что именно процесс —
         адресат процессных хуков (``services.report_error`` их протокола).
 
+        **Обобщение состоялось (Task 1.3b), и этот метод ПЕРЕКРЫВАЕТ его.**
+        У :meth:`ObservableMixin.report_error` то же имя и та же форма вызова,
+        но у`ProcessModule` дорога богаче: health-счётчик, ``last_error`` и
+        breaker, которых у голого миксина нет. MRO отдаёт приоритет классу, и
+        это ровно то, что нужно, — но два одноимённых метода с разной полнотой
+        обязаны знать друг о друге, иначе разъедутся молча. Сторож на MRO —
+        ``base_manager/tests/test_report_error_mechanism_hazards.py::
+        TestProcessModuleKeepsItsRicherRoad``.
+
         ``**fields`` уезжают в контекст записи плоскости ошибок (``thread``,
         ``traceback``, ``hook`` у хука).
         """

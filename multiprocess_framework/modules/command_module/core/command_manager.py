@@ -130,8 +130,11 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._record_metric("command_manager.initialization.success", tags={"name": self.manager_name})
             return True
         except Exception as e:
-            self._log_error(f"Failed to initialize CommandManager: {e}")
-            self._track_error("command_manager.initialization.failed", error=e)
+            # Task 1.3b: было `_log_error` + `_track_error("...", error=e)` — второй
+            # вызов передавал `error` и позиционно, и по имени (TypeError внутри
+            # except). Один коннектор — `report_error` — не ловит и не может
+            # поймать это же несоответствие сигнатуры.
+            self.report_error(e, context="command_manager.initialize", name=self.manager_name)
             return False
 
     def shutdown(self) -> bool:
@@ -153,8 +156,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._record_metric("command_manager.shutdown.success", tags={"name": self.manager_name})
             return True
         except Exception as e:
-            self._log_error(f"Error during CommandManager shutdown: {e}")
-            self._track_error("command_manager.shutdown.failed", error=e)
+            self.report_error(e, context="command_manager.shutdown", name=self.manager_name)
             return False
 
     # ========================================================================

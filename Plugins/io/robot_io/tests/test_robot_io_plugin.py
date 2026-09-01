@@ -265,7 +265,15 @@ def test_forwarder_exception_drops_job() -> None:
 
 
 def test_once_per_transition_logging() -> None:
-    """Лог ошибки hub пишется только при смене состояния (once-per-transition)."""
+    """Task 1.3b: факт hub-отказа учитывается на КАЖДОЕ вхождение, восстановление — once-per-transition.
+
+    До Task 1.3b здесь стоял соседний ``ctx.log_error``, гейтившийся тем же
+    ``_last_was_error``, что и лог восстановления — тест проверял, что он
+    молчит на повторе. Соседний коннектор снят (Task 1.3a: факт не троттлится
+    НИКОГДА), поэтому ``ctx.health.report_error`` теперь зовётся на КАЖДЫЙ
+    hub-отказ; once-per-transition остаётся только у соседнего лога
+    восстановления ("hub восстановлен"), который эта задача не трогает.
+    """
     # Три подряд ошибки → лог только первый раз
     client = FakeDeviceHubClient(
         [
@@ -293,10 +301,10 @@ def test_once_per_transition_logging() -> None:
     assert plugin._reg.jobs_dropped == 2
     assert plugin._reg.jobs_forwarded == 1
 
-    # Проверяем лог-вызовы: ошибка 1 раз + восстановление 1 раз
-    error_calls = [c for c in ctx.log_error.call_args_list if "hub" in str(c)]
+    # Факт (report_error) — на КАЖДЫЙ hub-отказ; восстановление — once-per-transition.
+    error_calls = ctx.health.report_error.call_args_list
     info_calls = [c for c in ctx.log_info.call_args_list if "восстановлен" in str(c)]
-    assert len(error_calls) == 1, f"Ожидалась 1 ошибка hub, получено {len(error_calls)}"
+    assert len(error_calls) == 2, f"Ожидались 2 факта hub-отказа, получено {len(error_calls)}"
     assert len(info_calls) == 1, f"Ожидалось 1 восстановление, получено {len(info_calls)}"
 
 

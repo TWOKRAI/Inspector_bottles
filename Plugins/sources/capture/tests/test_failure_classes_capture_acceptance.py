@@ -93,9 +93,12 @@ class TestCameraOpenFailureStructure:
 
         # Контроль: сегодняшний текст ДЕЙСТВИТЕЛЬНО называет оба идентификатора —
         # иначе тест ничего не грунтует.
+        # Контроль перевёрнут вместе с задачей (правка автора, 2026-08-31):
+        # тестер требовал, чтобы текст ВСЁ ЕЩЁ называл идентификаторы, а 1.3b
+        # эту строку снимает. Проверяется теперь само правило «один разъём».
         logged_texts = [str(c) for c in ctx.log_error.call_args_list]
-        assert any("71" in text and "42" in text for text in logged_texts), (
-            f"контрольная проверка провалилась: сегодняшний ctx.log_error не назвал camera_id/device_id: {logged_texts}"
+        assert logged_texts == [], (
+            f"отказ открытия камеры по-прежнему объявлен в плоскость логов отдельной строкой: {logged_texts}"
         )
 
         assert incidents, (

@@ -104,7 +104,6 @@ class PixelToRobotPlugin(ProcessModulePlugin):
         except Exception as exc:  # noqa: BLE001 — кривой файл не должен валить процесс
             self._reg.last_error = f"load: {exc}"
             self._ctx.health.report_error(exc, context="pixel_to_robot.load_calibration")
-            self._ctx.log_error(f"PixelToRobotPlugin: ошибка чтения калибровки: {exc}")
             return
         if not payload or "px_to_mm" not in payload:
             self._reg.last_error = f"нет калибровки '{self._reg.camera_id}' в {self._reg.calibration_dir}"

@@ -11,6 +11,7 @@ import time
 
 import cv2
 
+from multiprocess_framework.modules.error_module.interfaces import DeviceOpenFailed
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     Port,
@@ -285,7 +286,12 @@ class CapturePlugin(ProcessModulePlugin):
             self._publish_state()
             self._publish_levels()
         else:
-            ctx.log_error(f"CapturePlugin[{self._camera_id}]: не удалось открыть камеру {self._device_id}")
+            ctx.health.report_error(
+                DeviceOpenFailed(f"не удалось открыть камеру {self._device_id}"),
+                context="capture.start",
+                camera_id=self._camera_id,
+                device_id=self._device_id,
+            )
 
     def _stop_capture(self, ctx: PluginContext) -> None:
         """Остановить захват и сбросить FPS-метрику."""

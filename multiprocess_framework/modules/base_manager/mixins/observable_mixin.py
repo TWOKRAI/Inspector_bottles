@@ -43,6 +43,13 @@ from .proxies.proxy_creator import ProxyCreator
 from ..interfaces import IObservableMixin
 
 
+#: Имена, занятые ПОДПИСЬЮ приёмника журнала (``_log_error(message, **kwargs)``).
+#: Поле инцидента с таким именем роняло бы вызов TypeError'ом, поэтому
+#: :meth:`ObservableMixin.report_error` разводит их префиксом ``field_``.
+#: Список ровно такой длины, какова сигнатура: расширять только вместе с ней.
+_VOICE_RESERVED_NAMES = frozenset({"message"})
+
+
 class ObservableMixin(IObservableMixin):
     """
     Mixin для подключения любого менеджера к logger, stats, error и кастомным сервисам.
@@ -279,6 +286,11 @@ class ObservableMixin(IObservableMixin):
         менеджер, топология) и сервисов. Оба держателя механизма говорят одним
         языком — сайт зовёт ОДИН метод и не расставляет порядок сам.
 
+        **Перекрывается сознательно у ``ProcessModule``** (тот же метод, дорога
+        богаче: health-счётчик, ``last_error``, breaker). MRO отдаёт приоритет
+        классу, и это верно: у процесса есть health, у голого менеджера — нет.
+        Сторож на MRO — ``TestProcessModuleKeepsItsRicherRoad``.
+
         **Почему метод, а не дисциплина вызывающего (Task 1.3b, вердикт).**
         До него сайт собирал связку руками — ``should_voice`` → ``if voiced:
         _log_error`` → ``_track_error``, — и вся корректность держалась на
@@ -319,18 +331,50 @@ class ObservableMixin(IObservableMixin):
 
         # ФАКТ — первым и безусловно. Всё, что ниже, зовёт ЧУЖИЕ механизмы
         # (держатель окон, логгер): упади любой из них — факт уже учтён.
-        recorded = self._track_error(exc, {"context": ctx, **fields} if (ctx or fields) else None)
+        #
+        # ``context`` кладётся ПОСЛЕ полей — СТРАХОВКА, а не закрытие дыры.
+        # Проверено запуском: подмены здесь быть не может, потому что
+        # ``context`` — именованный параметр этого метода, и одноимённое поле
+        # сайта до ``fields`` просто не долетает (Python роняет вызов ещё на
+        # сайте). Первая редакция комментария объявляла тихую подмену реальной
+        # опасностью — неправда, снято. Порядок оставлен: он ничего не стоит и
+        # переживёт день, когда ``context`` перестанет быть параметром.
+        recorded = self._track_error(exc, {**fields, "context": ctx} if (ctx or fields) else None)
 
-        voiced, suppressed = self.should_voice(f"{etype}|{ctx}", throttle)
-        if not voiced:
-            return
-        where = f" @ {ctx}" if ctx else ""
-        marker = {ORIGIN_FIELD: ORIGIN_ERROR_MANAGER} if recorded else {}
-        self._log_error(
-            compose_voice_text(f"{etype}{where}: {safe_exception_message(exc)}", suppressed),
-            **fields,
-            **marker,
-        )
+        # ГОЛОС — целиком под защитой. Зеркалить здесь HealthState нельзя: там
+        # бросок держателя окон уходит вызывающему сознательно (процессные хуки
+        # его ловят и считают потерей доставки). У ЭТОЙ двери вызывающий — по
+        # построению миграции Task 1.3b тело ``except``, и бросок отсюда
+        # ПОДМЕНИЛ БЫ исходную ошибку своей. Факт выше уже учтён, а голос
+        # дешевле любого искажения разбора.
+        try:
+            voiced, suppressed = self.should_voice(f"{etype}|{ctx}", throttle)
+            if not voiced:
+                return
+            where = f" @ {ctx}" if ctx else ""
+            # Имя поля, совпавшее с ПАРАМЕТРОМ приёмника, роняет вызов
+            # `TypeError: got multiple values for argument`. Это не гипотеза:
+            # тем же способом при миграции Task 1.3b нашлась пара `origin`
+            # (маркер) и пара `message` (сайт `dispatcher.dispatch` клал под
+            # этим именем текст сообщения). Первую нашёл я чтением, вторую —
+            # исполнитель миграции, и оба раза дефект убивал бы ГОЛОС ЦЕЛИКОМ.
+            # Механизм разводит имена сам: переименовать поле на каждом сайте
+            # значит расставить по дереву 47 ловушек ожидания.
+            voice_fields: Dict[str, Any] = {
+                (f"field_{k}" if k in _VOICE_RESERVED_NAMES else k): v for k, v in fields.items()
+            }
+            if recorded:
+                # Маркер кладётся ПОВЕРХ полей, а не рядом: ``**fields, **marker``
+                # роняет вызов TypeError'ом на сайте, который сам передал поле
+                # ``origin``. Здесь маркер обязан выигрывать — он не деталь
+                # инцидента, а утверждение о строке стора.
+                voice_fields[ORIGIN_FIELD] = ORIGIN_ERROR_MANAGER
+            self._log_error(
+                compose_voice_text(f"{etype}{where}: {safe_exception_message(exc)}", suppressed),
+                **voice_fields,
+            )
+        except Exception as voice_exc:  # noqa: BLE001 — голос не стоит подмены исходной ошибки
+            self._note_manager_call_failure("logger", "report_error.voice", exc=voice_exc)
 
     def _record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
         """Запись метрики через stats manager."""

@@ -203,7 +203,6 @@ class ModbusSinkPlugin(ProcessModulePlugin):
         except (ModbusDriverError, ValueError, TypeError) as exc:
             self._reg.last_error = str(exc)
             self._ctx.health.report_error(exc, context="modbus_sink.write", throttle=30.0)
-            self._ctx.log_error(f"ModbusSinkPlugin: write failed: {exc}")
             return
         self._reg.writes_ok += 1
         self._reg.last_written = str(regs)

@@ -39,6 +39,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from multiprocess_framework.modules.error_module.interfaces import SubsystemStartFailed
 from multiprocess_framework.modules.process_module.health import HealthReporter, HealthState
 from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 
@@ -160,11 +161,15 @@ class TestCreateWorkerFalseFailureClass:
 
         plugin._ensure_device_workers()
 
-        # Контроль: сегодняшний текст ДЕЙСТВИТЕЛЬНО называет имя воркера —
-        # иначе тест ничего не грунтует.
+        # Контроль ПЕРЕВЁРНУТ вместе с задачей (правка автора, 2026-08-31).
+        # Тестер писал его до миграции: «сегодняшний ctx.log_error называет имя
+        # воркера — иначе тест ничего не грунтует». После 1.3b второй строки об
+        # одном инциденте НЕТ ВООБЩЕ, и прежний контроль требовал бы ровно того,
+        # что задача снимает. Заменён на проверку самого правила «один разъём на
+        # точку»: деталь обязана быть в полях, а дубля в плоскости логов — не быть.
         logged_texts = [str(c) for c in ctx.log_error.call_args_list]
-        assert any("dev_dev_alpha" in text for text in logged_texts), (
-            f"контрольная проверка провалилась: сегодняшний ctx.log_error не назвал имя воркера: {logged_texts}"
+        assert logged_texts == [], (
+            f"инцидент по-прежнему объявлен ДВАЖДЫ — соседний ctx.log_error не снят: {logged_texts}"
         )
 
         assert incidents, (
@@ -207,9 +212,22 @@ class TestCreateWorkerFalseFailureClass:
             f"один класс отказа в одном контексте обязан дать РОВНО ОДИН голос — "
             f"иначе окно не работает и хаб на N устройствах даст N строк: {voices}"
         )
-        assert "подавлено" in voices[0], (
-            f"голос обязан назвать число подавленных вхождений, иначе «одна строка» неотличима "
-            f"от «потеряли остальные»: {voices[0]!r}"
+        # ЗДЕСЬ БЫЛА МОЯ ОШИБКА (автор, 2026-08-31): первая редакция требовала
+        # «подавлено» в ЭТОМ голосе. Недостижимо механически, воспроизведено
+        # исполнителем миграции и перепроверено мной:
+        #     take(k) -> (True, 0);  take(k) -> (False, 1);  take(k, 0.0) -> (True, 1)
+        # Первый голос окна всегда несёт suppressed=0, число всплывает лишь на
+        # СЛЕДУЮЩЕМ прозвучавшем. Двух вызовов не хватает по построению — я
+        # написал утверждение, которое не мог выполнить никакой реализацией.
+        # Проверяю то же свойство честно: третьим вхождением с нулевым окном.
+        plugin._ctx.health.report_error(
+            SubsystemStartFailed("третье вхождение"),
+            context="device_hub.create_worker",
+            throttle=0.0,
+        )
+        assert len(voices) == 2 and "подавлено" in voices[1], (
+            f"следующий прозвучавший голос обязан назвать число подавленных — иначе «одна строка» "
+            f"неотличима от «остальные потеряли»: {voices}"
         )
 
 
@@ -240,9 +258,10 @@ class TestCreateWorkerRaisesFailureClass:
 
         plugin._ensure_device_workers()
 
+        # Контроль перевёрнут — см. довод в тесте выше.
         logged_texts = [str(c) for c in ctx.log_error.call_args_list]
-        assert any("dev_dev_gamma" in text for text in logged_texts), (
-            f"контрольная проверка провалилась: сегодняшний ctx.log_error не назвал имя воркера: {logged_texts}"
+        assert logged_texts == [], (
+            f"инцидент по-прежнему объявлен ДВАЖДЫ — соседний ctx.log_error не снят: {logged_texts}"
         )
 
         assert incidents, "create_worker() бросил — report_error() уже стоит на сайте, инцидент обязан долететь"

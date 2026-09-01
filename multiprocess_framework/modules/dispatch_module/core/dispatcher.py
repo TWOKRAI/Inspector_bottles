@@ -149,8 +149,11 @@ class Dispatcher(BaseManager, ObservableMixin):
             self._record_metric("dispatcher.initialization.success", tags={"name": self.manager_name})
             return True
         except Exception as e:
-            self._log_error(f"Failed to initialize Dispatcher: {e}")
-            self._track_error("dispatcher.initialization.failed", error=e)
+            # Task 1.3b: прежняя пара `_log_error` + `_track_error("...", error=e)`
+            # роняла сигнатуру `_track_error(error, context=None)` — `error` уезжал
+            # и позиционно, и по имени. `report_error` — один коннектор, этого
+            # класса ошибки в вызывающем коде больше нет.
+            self.report_error(e, context="dispatcher.initialize", name=self.manager_name)
             return False
 
     def shutdown(self) -> bool:
@@ -180,8 +183,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             self._record_metric("dispatcher.shutdown.success", tags={"name": self.manager_name})
             return True
         except Exception as e:
-            self._log_error(f"Error during Dispatcher shutdown: {e}")
-            self._track_error("dispatcher.shutdown.failed", error=e)
+            self.report_error(e, context="dispatcher.shutdown", name=self.manager_name)
             return False
 
     # ========================================================================
@@ -272,8 +274,7 @@ class Dispatcher(BaseManager, ObservableMixin):
 
             return result
         except Exception as e:
-            self._log_error(f"Error registering handler '{key}': {str(e)}", module=LOG_SOURCE)
-            self._track_error(e, {"key": key, "strategy": target_strategy.value})
+            self.report_error(e, context="dispatcher.register_handler", key=key, strategy=target_strategy.value)
             self._record_metric("dispatcher.handler.registration.errors", tags={"key": key})
             return False
 
@@ -422,8 +423,17 @@ class Dispatcher(BaseManager, ObservableMixin):
         except Exception as e:
             duration = time.perf_counter() - start_time
             error_msg = f"Dispatch failed: {str(e)}"
-            self._log_error(error_msg, module=LOG_SOURCE, exception=str(e))
-            self._track_error(e, {"key": key if "key" in locals() else None, "message": str(message)})
+            # Поле называлось "message" в снятом _track_error — переименовано в
+            # "request", т.к. "message" уже занято позиционным параметром
+            # ObservableMixin._log_error(self, message, **kwargs): совпадение
+            # имени поля дало бы тот же класс TypeError, что чинит Task 1.3b
+            # в initialize/shutdown этого же файла.
+            self.report_error(
+                e,
+                context="dispatcher.dispatch",
+                key=key if "key" in locals() else None,
+                request=str(message),
+            )
             self._record_timing("dispatcher.dispatch.error_duration", duration)
             self._record_metric("dispatcher.dispatch.errors", tags={"error": "exception"})
             return {"status": "error", "reason": error_msg}

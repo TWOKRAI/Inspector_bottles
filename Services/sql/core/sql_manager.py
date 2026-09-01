@@ -71,8 +71,7 @@ class SQLManager(BaseManager, ObservableMixin):
             self._log_info("SQLManager initialized", module="sql_module")
             return True
         except Exception as e:
-            self._track_error(e, {"context": "initialize", "module": "sql_module"})
-            self._log_error(f"SQLManager init failed: {e}", module="sql_module")
+            self.report_error(e, context="sql_manager.initialize", module="sql_module")
             raise
 
     def shutdown(self) -> bool:
@@ -316,8 +315,7 @@ class SQLManager(BaseManager, ObservableMixin):
                 return self._handle_insert(insert_cmd)
             return {"status": "error", "reason": f"unknown command: {command}"}
         except Exception as e:
-            self._track_error(e, {"context": "execute_command", "module": "sql_module"})
-            self._log_error(f"execute_command failed: {e}", module="sql_module")
+            self.report_error(e, context="sql_manager.execute_command", module="sql_module")
             return {"status": "error", "reason": str(e)}
 
     def _handle_query(self, cmd: Any) -> Dict[str, Any]:

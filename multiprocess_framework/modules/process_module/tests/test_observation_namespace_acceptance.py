@@ -534,46 +534,16 @@ class TestH3PublicationOrderDoesNotMatter:
 
 
 class TestH4CaptureCompatibility:
-    def test_capture_plugin_file_is_byte_for_byte_unchanged_vs_main(self) -> None:
-        """git diff против main для Plugins/sources/capture/plugin.py — пусто.
-
-        ОДНОРАЗОВАЯ проверка, привязанная к ФАЗЕ (ветка feat/observation-port
-        сравнивается с main, из которой она выведена), а НЕ постоянный
-        инвариант проекта. Два способа протухнуть, оба названы координатором:
-
-          1. Локального рефа ``main`` может не быть (свежий клон, CI с shallow
-             fetch) — тогда ``git diff --quiet main`` падает НЕ из-за различий
-             в файле, а из-за отсутствия рефа, и наивная проверка кода возврата
-             читала бы это как «файл изменён» — ложь. Поэтому реф проверяется
-             ОТДЕЛЬНО, и при его отсутствии тест `pytest.skip`'ит с явной
-             причиной, а не молча падает и не молча зеленеет.
-          2. После merge этой фазы в main сравнение станет тавтологией
-             (diff ветки САМОЙ С СОБОЙ), и первая же ЗАКОННАЯ правка
-             capture-плагина покрасит тест без всякой вины со стороны Н4 —
-             в этот момент тест нужно УДАЛИТЬ или заменить проверкой другого
-             рода (например «плагин не тронут ИМЕННО этим PR/коммитом»), а не
-             чинить его бесконечно как будто неизменность файла навсегда.
-        """
-        repo_root = _repo_root()
-
-        ref_check = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", "main"],
-            cwd=repo_root,
-            capture_output=True,
-        )
-        if ref_check.returncode != 0:
-            pytest.skip(
-                "локальной ветки/рефа 'main' нет (свежий клон или shallow fetch) — "
-                "сравнение с main невозможно, а не пройдено"
-            )
-
-        result = subprocess.run(
-            ["git", "diff", "--quiet", "main", "--", "Plugins/sources/capture/plugin.py"],
-            cwd=repo_root,
-        )
-        assert result.returncode == 0, (
-            "Plugins/sources/capture/plugin.py отличается от main — capture-совместимость нарушена (Н4)"
-        )
+    # УДАЛЁН 2026-09-01 (Task 1.3b) — ``test_capture_plugin_file_is_byte_for_byte_unchanged_vs_main``.
+    # Сторож был ОДНОРАЗОВЫЙ и фазовый: «Plugins/sources/capture/plugin.py не
+    # отличается от main» доказывало совместимость фазы observation-port. Его
+    # собственный докстринг назвал условие снятия заранее: после merge фазы
+    # сравнение вырождается в diff ветки с самой собой, и ПЕРВАЯ ЗАКОННАЯ правка
+    # capture красит тест без всякой вины. Такая правка пришла: 1.3b снимает на
+    # строке 288 второй разъём и заводит отказ открытия камеры в плоскость
+    # ошибок (DeviceOpenFailed). Тест удалён, а не подкручен — чинить его
+    # значило бы делать вид, что неизменность файла инвариант навсегда.
+    # Совместимость capture продолжает держать соседний тест по МЕТРИКАМ.
 
     def test_capture_metrics_visible_under_the_plugin_subtree(self) -> None:
         """capture_fps/frame_count/drops видны под state.plugins.<имя плагина>.<метрика>.

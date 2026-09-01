@@ -192,11 +192,9 @@ class EdgeDetectionPlugin(ProcessModulePlugin):
                 # Веса не найдены — деградация: логируем один раз, пропускаем кадр.
                 self._load_failed = True
                 self._ctx.health.report_error(exc, context="edge_detection.load")
-                self._ctx.log_error(f"EdgeDetectionPlugin: {exc}")
                 return item
             except Exception as exc:  # pragma: no cover - защита горячего пути
                 self._ctx.health.report_error(exc, context="edge_detection.infer", throttle=30.0)
-                self._ctx.log_error(f"EdgeDetectionPlugin: инференс упал: {exc}")
                 return item
 
         mask = self._last_mask

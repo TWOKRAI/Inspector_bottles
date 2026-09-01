@@ -19,6 +19,7 @@ import queue
 import time
 from typing import Any
 
+from multiprocess_framework.modules.error_module.interfaces import ResourceUnavailable
 from multiprocess_framework.modules.process_module.plugins import (
     ExecutionMode,
     PluginContext,
@@ -166,7 +167,6 @@ class RobotDrawPlugin(ProcessModulePlugin):
             except queue.Full as exc:
                 self._reg.jobs_dropped += 1
                 self._ctx.health.report_error(exc, context="robot_draw.enqueue")
-                self._ctx.log_error("RobotDrawPlugin: очередь заданий полна, задание отброшено")
             # Одноразово: разоружаемся после первой валидной пачки.
             self._armed = False
             break
@@ -182,7 +182,6 @@ class RobotDrawPlugin(ProcessModulePlugin):
             path = self._dump_points(points)
         except Exception as exc:  # noqa: BLE001 — превью не должно валить pipeline
             self._ctx.health.report_error(exc, context="robot_draw.preview")
-            self._ctx.log_error(f"RobotDrawPlugin: не удалось записать предпросмотр точек: {exc}")
             return
         n = len(points)
         xs = [p["x_mm"] for p in points]
@@ -276,9 +275,7 @@ class RobotDrawPlugin(ProcessModulePlugin):
                 self._reg.hub_errors += 1
                 self._reg.last_error = str(exc)
                 self._ctx.health.report_error(exc, context="robot_draw.forward", throttle=30.0)
-                if not self._last_was_error:
-                    self._ctx.log_error(f"RobotDrawPlugin: hub ошибка: {exc}")
-                    self._last_was_error = True
+                self._last_was_error = True
                 continue
 
             if result.get("status") == "ok":
@@ -292,6 +289,13 @@ class RobotDrawPlugin(ProcessModulePlugin):
                 self._reg.jobs_dropped += 1
                 self._reg.hub_errors += 1
                 self._reg.last_error = result.get("message", "неизвестная ошибка hub")
-                if not self._last_was_error:
-                    self._ctx.log_error(f"RobotDrawPlugin: hub отказ: {self._reg.last_error}")
-                    self._last_was_error = True
+                # Отказ ВОЗВРАТОМ статуса (не исключением): hub ответил, но не "ok".
+                # Своё имя класса и свой context — чтобы не схлопнуться в один ключ
+                # окна с веткой транспортного исключения выше.
+                self._ctx.health.report_error(
+                    ResourceUnavailable(f"hub отказ: {self._reg.last_error}"),
+                    context="robot_draw.forward.refused",
+                    device_id=self._reg.device_id,
+                    message=self._reg.last_error,
+                )
+                self._last_was_error = True

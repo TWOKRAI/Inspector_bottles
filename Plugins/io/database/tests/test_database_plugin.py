@@ -240,11 +240,19 @@ class TestFlush:
         assert plugin._total_written == 2
         assert plugin._total_errors == 1
         assert count_rows(plugin) == 2
-        # Лог ошибки — один раз (логируем только первую ошибку пакета).
-        plugin._ctx.log_error.assert_called_once()
+        # Task 1.3b: соседний ctx.log_error снят — единственный разъём инцидента
+        # теперь ctx.health.report_error (один факт на одну ошибочную строку).
+        plugin._ctx.health.report_error.assert_called_once()
 
-    def test_first_error_only_logged_once(self):
-        """При множественных сбоях логируется только первая ошибка пакета."""
+    def test_every_row_failure_reaches_the_error_plane(self):
+        """Task 1.3a/1.3b: факт учитывается на КАЖДУЮ ошибочную строку, не только первую.
+
+        До Task 1.3b здесь стоял ручной ``first_error_logged`` — гейт логировал
+        только первую ошибку пакета. Он снят вместе с соседним ``ctx.log_error``:
+        троттлинг голоса теперь берёт на себя окно ``HealthState``/``WindowedVoices``
+        внутри ``report_error``, а факт (что здесь и проверяется) не троттлится
+        никогда.
+        """
         plugin = make_plugin()
         plugin._buffer = [
             {"timestamp": 1.0, "frame_id": 1, "camera_id": 0, "event_type": "bad", "data": "{}"},
@@ -259,7 +267,7 @@ class TestFlush:
         assert flushed == 0
         assert plugin._total_written == 0
         assert plugin._total_errors == 2
-        plugin._ctx.log_error.assert_called_once()
+        assert plugin._ctx.health.report_error.call_count == 2
 
 
 # ---------------------------------------------------------------------------

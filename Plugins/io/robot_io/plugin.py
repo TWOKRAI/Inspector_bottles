@@ -18,6 +18,7 @@ import time
 from collections import deque
 from typing import Any
 
+from multiprocess_framework.modules.error_module.interfaces import ResourceUnavailable
 from multiprocess_framework.modules.process_module.plugins import (
     ExecutionMode,
     PluginContext,
@@ -237,10 +238,7 @@ class RobotIoPlugin(ProcessModulePlugin):
                 self._reg.hub_errors += 1
                 self._reg.last_error = str(exc)
                 self._ctx.health.report_error(exc, context="robot_io.forward", throttle=30.0)
-                # once-per-transition: логируем только при смене состояния
-                if not self._last_was_error:
-                    self._ctx.log_error(f"RobotIoPlugin: hub ошибка: {exc}")
-                    self._last_was_error = True
+                self._last_was_error = True
                 continue
 
             if result.get("status") == "ok":
@@ -254,7 +252,13 @@ class RobotIoPlugin(ProcessModulePlugin):
                 self._reg.hub_errors += 1
                 error_msg = result.get("message", "неизвестная ошибка hub")
                 self._reg.last_error = error_msg
-                # once-per-transition
-                if not self._last_was_error:
-                    self._ctx.log_error(f"RobotIoPlugin: hub отказ: {error_msg}")
-                    self._last_was_error = True
+                # Отказ ВОЗВРАТОМ статуса (не исключением): hub ответил, но не "ok".
+                # Своё имя класса и свой context — не схлопнуться в один ключ окна
+                # с веткой транспортного исключения выше.
+                self._ctx.health.report_error(
+                    ResourceUnavailable(f"hub отказ: {error_msg}"),
+                    context="robot_io.forward.refused",
+                    device_id=self._reg.device_id,
+                    message=error_msg,
+                )
+                self._last_was_error = True

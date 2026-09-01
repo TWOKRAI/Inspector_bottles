@@ -293,11 +293,15 @@ def run_gui(process: "GuiProcess") -> None:
         for w in _report.warnings:
             process._log_warning(w, module="startup")
     if _report.errors:
-        for e in _report.errors:
-            process._log_error(e, module="startup")
-        process._track_error(
+        # Task 1.3b: было N раздельных _log_error (по одному на ошибку) плюс
+        # один агрегатный _track_error — тот же инцидент (провал startup-валидации)
+        # двумя коннекторами вперемешку с текстом-в-лог. Один report_error:
+        # список ошибок едет структурным полем, а не N строк журнала.
+        process.report_error(
             RuntimeError(f"Startup: {len(_report.errors)} ошибок валидации"),
-            context={"errors": _report.errors},
+            context="app.startup_checks",
+            module="startup",
+            errors=_report.errors,
         )
         process._record_metric("startup.errors", len(_report.errors))
 
@@ -569,7 +573,7 @@ def run_gui(process: "GuiProcess") -> None:
     try:
         _auth_manager.initialize()
     except Exception as exc:  # включая StorageCorrupted
-        process._log_error(f"auth.init.failed: {exc}", module="startup")
+        process.report_error(exc, context="app.auth_init", module="startup")
         from multiprocess_prototype.frontend.widgets.dialogs import StartupBlockingDialog
 
         _dlg = StartupBlockingDialog(f"Ошибка инициализации Auth:\n\n{exc}")
@@ -603,7 +607,7 @@ def run_gui(process: "GuiProcess") -> None:
             _auth_state.set_user(_result, AccessContext.from_dict(_result))
             process._log_info(f"auth.auto_login: {_dev_username}", module="startup")
         except Exception as exc:
-            process._log_error(f"auth.auto_login.failed: {exc}", module="startup")
+            process.report_error(exc, context="app.auth_auto_login", module="startup", username=_dev_username)
     elif _dev_password and not _dev_auto_login_enabled:
         process._log_info(
             "auth.auto_login.disabled: DEV_PASSWORD set, DEV_AUTO_LOGIN=False",
@@ -650,10 +654,7 @@ def run_gui(process: "GuiProcess") -> None:
     try:
         app_services = build_app_services(_services_deps)
     except Exception as exc:
-        process._log_error(
-            f"AppServices factory failed: {exc}",
-            module="startup",
-        )
+        process.report_error(exc, context="app.build_app_services", module="startup")
         import traceback
 
         traceback.print_exc()

@@ -96,7 +96,8 @@ ErrorManager  (хук _route() для level-based routing; log() общий)
 
 ```
 error_module/
-├── interfaces.py         ← Публичный контракт (IErrorManager)
+├── interfaces.py         ← Публичный контракт (IErrorManager + классы отказа)
+├── failures.py           ← Классы отказа для сайтов, где исключения НЕТ (Task 1.3b)
 ├── __init__.py           ← Публичный API
 │
 ├── core/
@@ -112,6 +113,44 @@ error_module/
     ├── test_error_level_routing.py
     └── test_error_integration.py
 ```
+
+---
+
+## Классы отказа (`failures.py`)
+
+Ключ окна голоса — пара `(класс отказа, context)` (см. `ObservableMixin.report_error`
+и `HealthState.report_error`). Отсюда правило: отказ, пришедший **возвратом значения**
+(`isOpened() -> False`, `create_worker(...) -> False`), нельзя фабриковать общим
+`RuntimeError` — ключ выродится, и два разных отказа в одном контексте начнут глушить
+друг друга.
+
+| Класс | Когда |
+|---|---|
+| `ResourceUnavailable` | внешнее не отвечает: файл, БД, сокет, порт |
+| `SubsystemStartFailed` | отказ внутри периметра: `create`/`initialize`/регистрация вернули отказ |
+| `DeviceOpenFailed` | устройство не открылось: камера, привод, драйвер шины |
+| `ObservabilityMisuse` | саму дорогу наблюдаемости позвали неправильно (заводит `_as_incident`) |
+
+**Граница узкая и она не пожелание.** Классы — только для мест, где объект исключения
+приходится фабриковать. Сервис или плагин со своим доменом отказов пользуется СВОЕЙ
+иерархией (`Services/device_hub/errors.py`, `Services/modbus/sdk/errors.py`,
+`Services/hikvision_camera/sdk/errors.py`): они уже дают различимые имена типов, и
+перевод их на общефреймворковую таксономию был бы вторым словарём поверх работающего
+первого.
+
+```python
+from multiprocess_framework.modules.error_module.interfaces import DeviceOpenFailed
+
+if not cap.isOpened():
+    ctx.health.report_error(
+        DeviceOpenFailed(f"камера {device_id} не открылась"),
+        context="capture.start",
+        camera_id=camera_id,
+        device_id=device_id,
+    )
+```
+
+Деталь уезжает в `**fields` **структурно**, а не в текст: по тексту фильтр по полю не ищет.
 
 ---
 

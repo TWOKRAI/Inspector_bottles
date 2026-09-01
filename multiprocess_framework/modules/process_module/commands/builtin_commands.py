@@ -3776,15 +3776,14 @@ class BuiltinCommands:
                 self_meta["routing_refresh_applied"] = int(self_meta.get("routing_refresh_applied", 0) or 0) + 1
             return {"success": True, "epoch": epoch, "reset": sorted(reset), "reset_count": len(reset)}
         except Exception as exc:  # noqa: BLE001 — не ронять message-loop
-            log_error = getattr(svc, "_log_error", None)
-            if callable(log_error):
-                log_error(f"routing.refresh handler упал: {exc}", module="lifecycle")
-            err_mgr = getattr(svc, "error_manager", None)
-            if err_mgr is not None and hasattr(err_mgr, "track_error"):
-                try:
-                    err_mgr.track_error(exc, {"phase": "routing.refresh"})
-                except Exception:  # noqa: BLE001
-                    pass
+            # Task 1.3b: defensive-сайт — svc не гарантированно ObservableMixin,
+            # поэтому report_error резолвится тем же getattr-паттерном, что и
+            # раньше _log_error/error_manager (два коннектора порознь). Один
+            # guarded вызов: report_error уже сам безопасен при отсутствующем
+            # error-слоте, отдельный try/except вокруг track_error больше не нужен.
+            report_error = getattr(svc, "report_error", None)
+            if callable(report_error):
+                report_error(exc, context="routing.refresh", module="lifecycle")
             return {"success": False, "reason": str(exc)}
 
     def _cmd_routing_probe(self, data=None, **kwargs) -> dict:
