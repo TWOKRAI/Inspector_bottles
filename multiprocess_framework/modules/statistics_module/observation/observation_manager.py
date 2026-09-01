@@ -202,7 +202,7 @@ class ObservationPort:
     здесь означал бы, что отказ хранилища не увидит никто.
     """
 
-    __slots__ = ("_levels",)
+    __slots__ = ("_levels", "_numbers_gate")
 
     def __init__(self, levels: Any) -> None:
         """
@@ -210,6 +210,58 @@ class ObservationPort:
             levels: хранилище :class:`PluginLevels`, которое обслуживает порт.
         """
         self._levels = levels
+        # Ф2 (задача 2.1): гейт плоскости чисел. ``None`` — политики не
+        # приносили, порт пропускает все числа (дословно поведение до Ф2).
+        self._numbers_gate: Any = None
+
+    # ------------------------------------------------------------------
+    # Политика чисел (Ф2, задача 2.1)
+    # ------------------------------------------------------------------
+
+    def attach_numbers_policy(self, policy: Any) -> bool:
+        """Подключить/сменить политику плоскости ЧИСЕЛ — ВТОРОЙ ПОТРЕБИТЕЛЬ, не второй механизм.
+
+        Политику собирает и приносит ``ProcessHeartbeat`` — ТОТ ЖЕ объект
+        :class:`~...process_module.configs.observation_policy.ObservationPolicy`,
+        которым решается плоскость уровней, и та же дорога
+        (``apply_observation_policy`` → ``config.reload``). Второй сборки,
+        второй секции конфига и второго счёта попаданий здесь нет: разойдись они
+        хоть в одном правиле — и «одна политика на все плоскости», ради которой
+        существует Ф2, стало бы двумя политиками с похожими именами.
+
+        Имя метода — по образцу соседей ЭТОГО же класса
+        (``StatsManager.attach_observation_port`` / ``attach_observability_hub``):
+        глагол ``attach`` у трёх разных подключений значит одно и то же, и
+        четвёртое имя для того же жеста читателю пришлось бы запоминать
+        отдельно. Повторный вызов — ШТАТНЫЙ (каждый ``config.reload``): счётчики
+        гейта переживают смену, расписание чистится (см.
+        :class:`~.numbers_gate.NumbersGate`).
+
+        Args:
+            policy: политика (duck-typed по ``resolve(path)``) либо ``None`` —
+                снять гейт, вернуть порт к «пропускать всё».
+
+        Returns:
+            ``True`` — политика установлена. ``False`` не возвращается: у
+            подключения нет режима отказа, а возврат существует ради формы,
+            общей с соседними ``attach_*``.
+        """
+        from .numbers_gate import NumbersGate
+
+        gate = self._numbers_gate
+        if gate is None:
+            from ...process_module.configs.observation_policy import PROCESS_UNKNOWN
+
+            name = getattr(getattr(self, "process", None), "name", None)
+            self._numbers_gate = NumbersGate(policy, str(name or PROCESS_UNKNOWN))
+        else:
+            gate.set_policy(policy)
+        return True
+
+    @property
+    def numbers_gate(self) -> Any:
+        """Гейт плоскости чисел (``None`` — политики не приносили). Читают readback и тесты."""
+        return self._numbers_gate
 
     # ------------------------------------------------------------------
     # Хранилище
@@ -388,11 +440,29 @@ class ObservationPort:
         self._route_number(RECORD_KIND_HISTOGRAM, name, value, tags)
 
     def _route_number(self, metric_kind: str, name: str, value: Any, tags: Optional[Dict[str, str]]) -> None:
-        """Один шов на все четыре рода — не четыре копии одной и той же сборки dict."""
+        """Один шов на все четыре рода — не четыре копии одной и той же сборки dict.
+
+        **Гейт политики стоит ЗДЕСЬ и до сборки словаря** (Ф2, задача 2.1, шаг 1).
+        Место выбрано, а не досталось: ``_route_number`` — единственный шов, через
+        который проходят все четыре рода чисел и все три входные дороги
+        (``StatsManager.record_metric``, слот-дорога ``ObservableMixin``, дорога
+        плагина ``PluginContext._stats_call``). Поставь проверку в фасад
+        ``StatsManager`` — числа плагина, идущие в порт мимо менеджера, обошли бы
+        её молча; поставь ПОСЛЕ сборки записи — выключенная метрика продолжала бы
+        стоить словарь на вызов, и обещание «не дороже гейта» осталось бы
+        словами (эту половину сторожит бенч шага 5).
+
+        ``self._numbers_gate is None`` — политики не приносили: дословно
+        поведение до Ф2, ни одной лишней операции на пути.
+        """
+        metric_name = str(name)
+        gate = self._numbers_gate
+        if gate is not None and not gate.allow(metric_name):
+            return
         self._deliver_number(
             {
                 "metric_kind": metric_kind,
-                "name": str(name),
+                "name": metric_name,
                 "value": value,
                 "tags": dict(tags or {}),
             }

@@ -20,7 +20,7 @@ python -m scripts.docs_verify.docs_check --list   # перечень прове�
 
 ## Что проверяется
 
-**16 проверок**, каждая названа идентификатором расхождения приёмки F1, номером находки или
+**17 проверок**, каждая названа идентификатором расхождения приёмки F1, номером находки или
 номером задачи плана (число сторожится тестом `test_readme_states_the_true_number_of_checks` —
 первая редакция README обещала 15 проверок при факте 14, и это заметил только внешний приёмщик,
 пересчитав руками):
@@ -38,6 +38,7 @@ python -m scripts.docs_verify.docs_check --list   # перечень прове�
 | H19-a/b | `observability/NEW_MODULE_RECIPE.md` | шов `source_name=LOG_SOURCE`; образец шага 1 несёт `initialize`/`shutdown` |
 | C3 | `observability/CONNECTORS.md` | имена счётчиков раздела «Что ловится автоматически» = `HOOK_COUNTER_KEYS` |
 | T2.8 | `backend_ctl/AGENTS.md` | kind `telemetry_readmodel_empty` в шпаргалке `system_overview` — реальный литерал `overview.py` |
+| F2-1 | `observability/CONTROL_PANEL.md` | плоскость ЧИСЕЛ: форма пути правила, дефолтный интервал, дефолт `log_snapshots`, имена счётчиков политики, оговорка про теги (Р-2а) |
 
 ## Чего он НЕ делает (названо, а не умолчано)
 

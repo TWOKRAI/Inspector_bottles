@@ -308,9 +308,38 @@ class ObservabilityErrorsConfig(SchemaBase):
 
 @register_schema("ObservabilityStatsConfig")
 class ObservabilityStatsConfig(SchemaBase):
-    """Под-секция статистики (фасад над StatsManagerConfig)."""
+    """Под-секция статистики (фасад над StatsManagerConfig).
 
-    enabled: Annotated[bool, FieldMeta("Логировать метрики через LoggerManager")] = True
+    **Ф2, задача 2.1: ``enabled`` сменил смысл** (развилка Р-3, вариант «а»,
+    решение владельца). Было — «логировать метрики через LoggerManager», то есть
+    ручка ОДНОГО канала. Стало — ПЛОСКОСТЬ: ``false`` означает, что числа не
+    собираются вовсе (окно пусто, каналы молчат, счётчик
+    ``numbers_policy_dropped`` растёт). Прежний смысл переехал в новый ключ
+    :attr:`log_snapshots` с дефолтом ``True``, поэтому конфиг со старым
+    ``enabled: true`` ведёт себя дословно как раньше.
+
+    Это ЕДИНСТВЕННАЯ смена поведения существующего ключа во всей фазе, и
+    митигация к ней прилагается вся, а не наполовину: ADR-PM-046, паритетный
+    тест на боевом конфиге прототипа и громкий голос при чтении старого
+    ``enabled: false`` (:meth:`_complain_about_repurposed_enabled`).
+    """
+
+    enabled: Annotated[
+        bool,
+        FieldMeta(
+            "Плоскость чисел включена (false — метрики не собираются вовсе)",
+            info="Ф2/Р-3а: до этой задачи ключ означал «логировать снапшоты» — этот смысл "
+            "переехал в stats.log_snapshots (дефолт true)",
+        ),
+    ] = True
+    log_snapshots: Annotated[
+        bool,
+        FieldMeta(
+            "Писать снапшоты метрик в журнал через LoggerManager",
+            info="Прежний смысл stats.enabled. Независим от плоскости: числа можно собирать "
+            "и не логировать (log_snapshots=false), но не наоборот",
+        ),
+    ] = True
     aggregation_interval: Annotated[
         float,
         FieldMeta("Интервал агрегации, сек (действует max с flush_interval)", min=0.1, max=60.0),
@@ -351,6 +380,49 @@ class ObservabilityStatsConfig(SchemaBase):
         int,
         FieldMeta("Потолок уникальных серий метрик (имя × теги); 0 — без предела", min=0, max=1_000_000),
     ] = DEFAULT_MAX_SERIES
+
+    @model_validator(mode="before")
+    @classmethod
+    def _complain_about_repurposed_enabled(cls, data: Any) -> Any:
+        """Назвать смену смысла ``stats.enabled`` вслух — при чтении старого ``false``.
+
+        Митигация (3) развилки Р-3, условие владельца. Конфиг, написанный ДО Ф2,
+        просил «не логировать снапшоты», а получит «не собирать числа вовсе» —
+        разница видна только тому, кто про неё знает, и молчать здесь значило бы
+        поменять поведение боевого стенда без единого слова.
+
+        **Голос жестом ``REMOVED_BATCHING_KEYS``**, а не отказом: конфиг с
+        унаследованной ручкой не должен вставать колом на стенде. Пишется через
+        ``emergency_log`` — он работает до подъёма логгера, а конфиг читают
+        именно тогда.
+
+        **Только при ``false``, и это не половинчатость.** При ``enabled: true``
+        старое и новое поведение совпадают дословно (плоскость включена, канал
+        снапшотов включён дефолтом ``log_snapshots=True``) — предупреждать не о
+        чем, а голос на каждом конфиге проекта превратился бы в фон, который
+        перестают читать.
+
+        **«Один раз» здесь означает «один раз на ЧТЕНИЕ конфига», а не «один раз
+        за жизнь процесса», и это выбрано сознательно.** Процессный флаг «уже
+        предупреждали» сделал бы голос зависимым от порядка: первый прочитавший
+        конфиг тест или процесс съедал бы предупреждение, а следующий
+        ``config.reload`` с тем же ключом молчал бы — то есть громкость правила
+        зависела бы от того, кто прочитал раньше. Чтений конфига единицы (boot и
+        каждый reload), фона это не создаёт.
+        """
+        if isinstance(data, dict) and data.get("enabled") is False:
+            from ..._fallback import emergency_log
+
+            emergency_log(
+                "observability_config",
+                "WARNING",
+                "stats.enabled: false — с Ф2 этот ключ означает ПЛОСКОСТЬ ЧИСЕЛ: метрики не "
+                "будут собираться вовсе (окно пустое, все каналы статистики молчат). Прежний "
+                "смысл «не писать снапшоты в журнал» переехал в stats.log_snapshots — если вы "
+                "хотели именно его, замените на 'enabled: true, log_snapshots: false' "
+                "(ADR-PM-046)",
+            )
+        return data
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -744,7 +816,19 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     }
 
     stats: Dict[str, Any] = {
-        "enable_logging": cfg.stats.enabled,
+        # Ф2 (2.1, Р-3а): судьбу ЛОГ-КАНАЛА решает `log_snapshots`, а не
+        # `enabled`. Прежде здесь стоял `cfg.stats.enabled`, и это была ЕДИНСТВЕННАЯ
+        # работа ключа; теперь `enabled` — плоскость, и он едет отдельной строкой
+        # ниже. Две ручки, две строки: слитые в одну, они означали бы, что числа
+        # нельзя собирать не логируя, — а это ровно тот сценарий, ради которого
+        # ключи и разведены.
+        "enable_logging": cfg.stats.log_snapshots,
+        # Плоскость чисел. Четвёртая точка дороги ключа (схема → фасад →
+        # `StatsManagerConfig` → менеджер): пропусти её здесь — и `enabled`
+        # стоял бы в схеме, показывался бы оператору и не значил бы ничего.
+        # Тот же дефект трижды ловили `flush_interval`, `log_line_max_bytes` и
+        # `max_series`.
+        "enabled": cfg.stats.enabled,
         "aggregation_interval": cfg.stats.aggregation_interval,
         # Ф6.х.8: без прокида этой ручки менеджер всегда брал дефолт 10.0, и
         # max(flush_interval, aggregation_interval) съедал любую настройку темпа.

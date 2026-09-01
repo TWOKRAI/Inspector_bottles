@@ -26,6 +26,7 @@ import time
 from typing import Any, Callable, Iterable, Mapping, Optional
 
 from ...observability_declarations import declare_metric
+from ...statistics_module.observation.numbers_gate import PathSchedule
 from ..configs.observation_policy import PROCESS_UNKNOWN
 from ..configs.telemetry_publish_config import gated_metrics
 
@@ -830,7 +831,23 @@ class TelemetryGate:
         self._clock = clock
         self._policy = policy
         self._process = str(process or PROCESS_UNKNOWN)
-        self._next_due: dict[str, float] = {}
+        # Ф2 (задача 2.1): расписание — ОБЩИЙ класс с гейтом чисел, а не копия
+        # трёх строк. Требование плана дословно: `interval_sec` у чисел обязан
+        # считаться ТЕМ ЖЕ расписанием, что у уровней. Вторая машина расписания
+        # рядом с первой — ровно тот дефект, который фаза разбирает.
+        self._schedule = PathSchedule(clock)
+
+    @property
+    def _next_due(self) -> dict[str, float]:
+        """Таблица сроков — ЖИВАЯ, как до выноса расписания в :class:`PathSchedule`.
+
+        Свойство, а не поле: три набора тестов (``test_telemetry_levels_poll_hazards``,
+        ``test_telemetry_reconfigure``, ``test_writer_subtree_hazards``) читают
+        ``gate._next_due`` как словарь и сравнивают снимки до/после. Вынос
+        состояния без такого делегата тихо оставил бы их зелёными на пустом
+        словаре — то есть сторож изоляции расписания перестал бы сторожить.
+        """
+        return self._schedule.table
 
     @property
     def config(self) -> Any:
@@ -940,14 +957,17 @@ class TelemetryGate:
         return decision.enabled, decision.interval_sec
 
     def _grant(self, path: str, metric: str, now: float) -> bool:
-        """Выдать разрешение по пути и продвинуть его расписание."""
+        """Выдать разрешение по пути и продвинуть его расписание.
+
+        Само расписание — :class:`PathSchedule`, ОБЩИЙ класс с гейтом плоскости
+        чисел (Ф2, 2.1). Тело метода стало короче ровно на те три строки,
+        которые уехали в общий класс; контракт «срок двигается в момент ВЫДАЧИ»
+        не изменился и живёт теперь в одном месте на две плоскости.
+        """
         enabled, interval = self.decide(path, metric)
         if not enabled:
             return False
-        if now < self._next_due.get(path, 0.0):
-            return False
-        self._next_due[path] = now + interval
-        return True
+        return self._schedule.due(path, interval, now)
 
     @property
     def policy(self) -> Any:

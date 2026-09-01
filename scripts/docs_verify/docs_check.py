@@ -635,7 +635,120 @@ def _check_overview_telemetry_readmodel_empty_kind(src: Sources) -> Optional[str
     return None
 
 
+def _module_constant(src: Sources, rel: str, name: str) -> object:
+    """Значение модульной константы ``name`` по AST файла ``rel`` (без импорта)."""
+    tree = ast.parse(src.read(rel))
+    for node in ast.walk(tree):
+        targets = (
+            node.targets if isinstance(node, ast.Assign) else ([node.target] if isinstance(node, ast.AnnAssign) else [])
+        )
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets) and node.value is not None:
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError as exc:  # pragma: no cover — константа перестала быть литералом
+                raise Unverifiable(f"{rel}: {name} не литерал ({exc})") from exc
+    raise Unverifiable(f"{rel}: константа {name} не найдена")
+
+
+def _schema_field_default(src: Sources, rel: str, cls: str, field: str) -> object:
+    """Дефолт поля Pydantic-схемы ``cls.field`` по AST — без импорта фреймворка."""
+    tree = ast.parse(src.read(rel))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.ClassDef) and node.name == cls):
+            continue
+        for stmt in node.body:
+            if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == field:
+                if stmt.value is None:
+                    raise Unverifiable(f"{rel}: {cls}.{field} без дефолта")
+                try:
+                    return ast.literal_eval(stmt.value)
+                except ValueError as exc:
+                    raise Unverifiable(f"{rel}: дефолт {cls}.{field} не литерал ({exc})") from exc
+        raise Unverifiable(f"{rel}: поле {field} не найдено у {cls}")
+    raise Unverifiable(f"{rel}: класс {cls} не найден")
+
+
+def _string_members(src: Sources, rel: str, name: str) -> Set[str]:
+    """Строковые элементы кортежа ``name`` — ЧЛЕНСТВО, а не точное значение.
+
+    ``literal_eval`` здесь не годится: перечень собран конкатенацией
+    (``PLANE_COUNTER_KEYS = (...) + DELIVERY_COUNTER_KEYS``), и узел выражения
+    не литерал. Обходим поддерево и берём все строковые константы — для вопроса
+    «опубликован ли ЭТОТ ключ» этого достаточно, а точный порядок ни один
+    документ не обещает.
+    """
+    tree = ast.parse(src.read(rel))
+    for node in ast.walk(tree):
+        targets = (
+            node.targets if isinstance(node, ast.Assign) else ([node.target] if isinstance(node, ast.AnnAssign) else [])
+        )
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets) and node.value is not None:
+            return {n.value for n in ast.walk(node.value) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    raise Unverifiable(f"{rel}: перечень {name} не найден")
+
+
+def _check_numbers_policy_claims(src: Sources) -> Optional[str]:
+    """CONTROL_PANEL.md о плоскости ЧИСЕЛ ↔ константы и схема (Ф2, задача 2.1).
+
+    Сторожатся ровно те утверждения документа, которые несут ИМЯ, ЧИСЛО или
+    ДЕФОЛТ, — то есть те, что расходятся с кодом молча:
+
+    * форма пути правила (``processes.<процесс>.stats.<имя метрики>``) ↔
+      ``STATS_SUBTREE_PATTERN``;
+    * дефолтный интервал чисел ``0.0`` ↔ ``STATS_SUBTREE_INTERVAL_SEC``;
+    * дефолт ``stats.log_snapshots`` ↔ поле схемы ``ObservabilityStatsConfig``.
+
+    Формулировка «теги правилом не адресуются» структурно не выразима, и
+    сторожится ФРАЗОЙ — но с предпосылкой, вычисленной из кода: пока в паттерне
+    поддерева нет сегмента про теги, документ обязан говорить об этом вслух.
+    """
+    policy_rel = f"{MODULES}/process_module/configs/observation_policy.py"
+    pattern = _module_constant(src, policy_rel, "STATS_SUBTREE_PATTERN")
+    interval = _module_constant(src, policy_rel, "STATS_SUBTREE_INTERVAL_SEC")
+    log_default = _schema_field_default(
+        src, f"{MODULES}/process_module/configs/observability_config.py", "ObservabilityStatsConfig", "log_snapshots"
+    )
+    # Пробелы и жирный markdown схлопываются ДО сверки: перенос строки в
+    # документе — вопрос вёрстки, и проверка, краснеющая от него, научила бы
+    # обходить себя переносом, а не сверять факт.
+    doc = re.sub(r"\s+", " ", src.read(f"{OBS}/CONTROL_PANEL.md").replace("*", ""))
+    bad: List[str] = []
+
+    # Путь в документе записан человеческой формой с угловыми скобками, а в коде
+    # — glob'ом. Сверяется ЯДРО (`processes` … `stats` …), общее у обеих форм:
+    # сменись корень плоскости в коде — документ обязан покраснеть.
+    if not str(pattern).startswith("processes.") or ".stats." not in str(pattern):
+        raise Unverifiable(f"STATS_SUBTREE_PATTERN сменил форму ({pattern!r}) — проверку нужно переписать")
+    if "`processes.<процесс>.stats.<имя метрики>`" not in doc:
+        bad.append(f"CONTROL_PANEL.md не называет форму пути чисел, а код её держит: {pattern!r}")
+    if f"`{pattern}`" not in doc and "`processes.<процесс>.stats.<имя метрики>`" not in doc:
+        bad.append(f"CONTROL_PANEL.md не сходится с STATS_SUBTREE_PATTERN={pattern!r}")
+    if f"интервал `{interval}`" not in doc:
+        bad.append(f"CONTROL_PANEL.md: дефолтный интервал чисел в коде {interval!r}, в документе его нет")
+    if bool(log_default) is not True:
+        bad.append(f"дефолт log_snapshots в схеме стал {log_default!r} — документ обещает true")
+    elif "log_snapshots` с дефолтом `true`" not in doc:
+        bad.append("CONTROL_PANEL.md не называет дефолт log_snapshots (`true`), а от него зависит миграция")
+    if "Теги в путь НЕ входят и правилом не адресуются" not in doc:
+        bad.append("CONTROL_PANEL.md молчит про Р-2(а): теги правилом не адресуются")
+
+    counters = _string_members(src, f"{MODULES}/process_module/managers/observability_reload.py", "PLANE_COUNTER_KEYS")
+    for key in ("numbers_policy_dropped", "numbers_policy_throttled"):
+        if key not in counters:
+            bad.append(f"{key} обещан документами, но не публикуется через PLANE_COUNTER_KEYS")
+        if f"`{key}`" not in doc:
+            bad.append(f"CONTROL_PANEL.md не называет счётчик {key}")
+    return "; ".join(bad) if bad else None
+
+
 CHECKS: Sequence[Check] = (
+    Check(
+        "F2-1",
+        "observability/CONTROL_PANEL.md",
+        "плоскость ЧИСЕЛ: форма пути, дефолтный интервал, дефолт log_snapshots, имена счётчиков",
+        "Ф2 задача 2.1 (Р-2а/Р-3а)",
+        _check_numbers_policy_claims,
+    ),
     Check(
         "F1-1",
         "observability/CONNECTORS.md",

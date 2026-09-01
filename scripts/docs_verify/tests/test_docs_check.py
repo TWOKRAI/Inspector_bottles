@@ -37,6 +37,7 @@ SEVERITY_CFG = "multiprocess_framework/modules/error_module/configs/error_manage
 PROCESS_HOOKS = "multiprocess_framework/modules/logger_module/core/process_hooks.py"
 BACKEND_CTL_AGENTS = "backend_ctl/AGENTS.md"
 BACKEND_CTL_OVERVIEW = "backend_ctl/overview.py"
+OBSERVATION_POLICY = "multiprocess_framework/modules/process_module/configs/observation_policy.py"
 
 Edit = Tuple[str, str, str]  # (файл, что заменить, на что — текст ДО правок 5.1)
 
@@ -237,6 +238,25 @@ INJECTIONS: List["pytest.ParameterSet"] = [
         # остался со старым написанием (тот же класс слома, что у F1-2/C3 выше).
         [(BACKEND_CTL_OVERVIEW, '"kind": "telemetry_readmodel_empty"', '"kind": "telemetry_readmodel_missing"')],
         id="T2.8-код-переименовал-kind",
+    ),
+    # F2-1 (Ф2, задача 2.1). Две инъекции на ПРОТИВОПОЛОЖНЫЕ направления дрифта —
+    # то же правило, что у F1-2 и T2.8: одна проверка «документ обещает лишнее»
+    # не сторожит случай «код изменился, документ промолчал».
+    pytest.param(
+        "F2-1",
+        [
+            (
+                CONTROL_PANEL,
+                "**Теги в путь НЕ входят и правилом не адресуются**",
+                "Теги в путь входят и адресуются правилом",
+            )
+        ],
+        id="F2-1-документ-обещает-адресацию-по-тегам",
+    ),
+    pytest.param(
+        "F2-1",
+        [(OBSERVATION_POLICY, "STATS_SUBTREE_INTERVAL_SEC = 0.0", "STATS_SUBTREE_INTERVAL_SEC = 1.0")],
+        id="F2-1-код-сменил-дефолтный-интервал-чисел",
     ),
 ]
 

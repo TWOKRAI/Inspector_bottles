@@ -63,9 +63,20 @@ class StatsManagerConfig(ChannelRoutingConfig):
         FieldMeta("ПОЛ интервала записи в каналы, сек — темп ниже него недостижим", min=1.0, max=300.0),
     ] = 10.0
 
+    # Ф2 (задача 2.1, Р-3а): ПЛОСКОСТЬ чисел. `False` — метрики не собираются
+    # вовсе. Поле обязано быть ЗДЕСЬ, а не только в фасаде `ObservabilityStatsConfig`:
+    # `ProcessManagers._create_stats_manager` копирует ключи фасада в этот объект
+    # через `hasattr` — ключ, которого тут нет, отбрасывается МОЛЧА, и ручка
+    # выглядела бы работающей, ничего не делая (тот же дефект уже ловили
+    # `flush_interval` и `log_line_max_bytes`).
+    enabled: Annotated[
+        bool,
+        FieldMeta("Плоскость чисел включена (false — метрики не собираются)"),
+    ] = True
+
     enable_logging: Annotated[
         bool,
-        FieldMeta("Логировать метрики через LoggerManager"),
+        FieldMeta("Писать снапшоты метрик в журнал (прежний смысл stats.enabled)"),
     ] = True
 
     log_level: Annotated[

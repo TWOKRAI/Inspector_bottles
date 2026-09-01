@@ -384,14 +384,30 @@ def stats_plane_report(svc: Any) -> Dict[str, Any]:
     операция в памяти), поэтому третьего числа, симметричного ``dropped``
     документов, здесь нет — пустая графа «не измерено» врала бы о наличии
     механизма отказа.
+
+    **Ф2 (задача 2.1): ``policy`` — третье число той же плоскости.** Числа
+    теперь режутся правилами по пути, и без этой секции «метрики нет в окне»
+    было бы неотличимо от «метрику никто не писал»: правила, попадания и
+    ``dropped_by_rule`` отвечают на «кто её срезал и сколько раз». Читается
+    ЖИВОЙ гейт порта через плоскость (:meth:`StatsManager.numbers_policy_view`),
+    а не конфиг. Ключ опускается, когда политики нет вовсе, — «правил не
+    приносили» и «правила есть, попаданий ноль» это разные ответы, и пустой
+    словарь склеил бы их.
     """
     stats = getattr(svc, "stats_manager", None)
-    return {
-        "stats": {
-            "declared": callable(getattr(stats, "record_metric", None)),
-            "without_plane": int(getattr(svc, _STATS_WITHOUT_PLANE_ATTR, 0) or 0),
-        }
+    section: Dict[str, Any] = {
+        "declared": callable(getattr(stats, "record_metric", None)),
+        "without_plane": int(getattr(svc, _STATS_WITHOUT_PLANE_ATTR, 0) or 0),
     }
+    policy_fn = getattr(stats, "numbers_policy_view", None)
+    if callable(policy_fn):
+        try:
+            policy_view = policy_fn()
+        except Exception as exc:  # noqa: BLE001 — readback не смеет ронять команду диагностики
+            policy_view = {"error": repr(exc)}
+        if policy_view is not None:
+            section["policy"] = policy_view
+    return {"stats": section}
 
 
 # ---------------------------------------------------------------------------

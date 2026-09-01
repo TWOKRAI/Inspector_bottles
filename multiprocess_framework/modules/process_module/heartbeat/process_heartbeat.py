@@ -539,7 +539,7 @@ class ProcessHeartbeat:
         # него. Порядок важен: секция `observability.observation` — L0..L3 слоями,
         # а легаси `telemetry.publish` — именованный источник ТОЙ ЖЕ сборки; гейт
         # получает обе одним объектом.
-        self._observation_policy = self._resolve_observation_policy()
+        self._install_observation_policy(self._resolve_observation_policy())
         try:
             telemetry = read_process_config(self._services, "telemetry")
         except Exception:  # noqa: BLE001 — отсутствие/битость конфига не должна ронять heartbeat
@@ -607,7 +607,7 @@ class ProcessHeartbeat:
         policy = self._observation_policy
         if policy is None:
             policy = ObservationPolicy(None, config)
-            self._observation_policy = policy
+            self._install_observation_policy(policy)
         else:
             # Легаси-секция могла смениться этой же командой — политика обязана
             # держать АКТУАЛЬНУЮ: она читает из неё умолчание и белый список.
@@ -620,13 +620,48 @@ class ProcessHeartbeat:
                 evaluated_ticks=policy.evaluated_ticks,
                 rule_first_tick=policy.rule_first_tick(),
             )
-            self._observation_policy = policy
+            self._install_observation_policy(policy)
         return TelemetryGate(
             config,
             clock=self._clock,
             policy=policy,
             process=str(getattr(self._services, "name", "") or ""),
         )
+
+    def _install_observation_policy(self, policy: Any) -> None:
+        """Поставить политику на место — ОБА её потребителя, одним швом (Ф2, задача 2.1).
+
+        Потребителя два: гейт УРОВНЕЙ (через поле ``_observation_policy``, из
+        которого его собирает :meth:`_make_gate`) и гейт ЧИСЕЛ (порт наблюдений,
+        :meth:`ObservationManager.attach_numbers_policy`). Механизм при этом ОДИН
+        — один объект политики, одна секция конфига, один счёт попаданий; вторая
+        сборка означала бы две политики с похожими именами, расходящиеся тем
+        тише, чем реже на них смотрят.
+
+        **Шов, а не четыре ветки.** Политика встаёт на место из ЧЕТЫРЁХ мест
+        (загрузочный резолв, две ветки ``_make_gate``, ``apply_observation_policy``),
+        и до этой правки каждое присваивало поле напрямую. Допиши доставку в
+        порт в три из четырёх — и четвёртая дорога тихо оставляла бы числа без
+        политики; ровно этот класс («провод есть, маршрута нет») уже стоил
+        проекту живого разбора.
+
+        Отказ доставки НЕ роняет такт: порт может быть не зарегистрирован
+        (процесс, поднятый не через ``ProcessManagers.register_all``), а ступень 2
+        резолвера отдаёт вид без менеджера, у которого этого метода нет вовсе.
+        Уровни в обоих случаях продолжают работать — и молчание здесь честное:
+        числа такого процесса никуда и не доставляются (см.
+        ``bare_port_number_losses``).
+        """
+        self._observation_policy = policy
+        try:
+            from ...statistics_module.observation.observation_manager import observation_port
+
+            port = observation_port(self._services)
+            attach = getattr(port, "attach_numbers_policy", None)
+            if callable(attach):
+                attach(policy)
+        except Exception as exc:  # noqa: BLE001 — доставка политики чисел не смеет ронять такт
+            self._log_heartbeat(f"[observation] политика чисел не доставлена в порт: {exc!r}")
 
     def _resolve_observation_policy(self) -> Any:
         """Политика порта из секции ``observability.observation`` разрешённых слоёв.
@@ -708,7 +743,7 @@ class ProcessHeartbeat:
             evaluated_ticks=live.evaluated_ticks if live is not None else 0,
             rule_first_tick=live.rule_first_tick() if live is not None else None,
         )
-        self._observation_policy = policy
+        self._install_observation_policy(policy)
         if gate is not None:
             # Сборка завершена — только теперь подменяем ссылку (см. докстринг).
             self._telemetry_gate = TelemetryGate(

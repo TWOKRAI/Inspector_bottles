@@ -130,6 +130,21 @@ def _float_or(value: Any, default: float) -> float:
         return default
 
 
+def _plane_enabled(cfg: Mapping[str, Any]) -> bool:
+    """Включена ли ПЛОСКОСТЬ чисел (``stats.enabled``, Р-3а) — одна позиция чтения.
+
+    Ключа нет → ``True``, и это не «мягкая проверка», а совместимость: менеджеры,
+    построенные вне фасада ``expand_observability`` (тесты соседних модулей,
+    прямой ``StatsManager(config={...})``), про плоскость ничего не говорят, и
+    молчание обязано значить «как было».
+
+    Функция, а не строка по месту, ровно по доводу :func:`resolve_max_series`:
+    ключ читают конструктор и пересборка конфига, и разъехавшись, они дали бы
+    менеджер, чья плоскость выключена в одном чтении и включена в другом.
+    """
+    return bool(cfg.get("enabled", True))
+
+
 def _schema_default(field_name: str) -> float:
     """Дефолт темпа — ИЗ СХЕМЫ, а не вторая копия числа в коде.
 
@@ -246,6 +261,17 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         #: ``histogram``). Ноль в боевой сборке — проверяемый факт (см.
         #: `observation_bypasses`), не предположение.
         self._observation_bypass_counts: Dict[str, int] = {}
+        # Ф2 (задача 2.1, Р-3а): `stats.enabled` — ПЛОСКОСТЬ, а не лог-канал.
+        # `False` означает «числа не собираются»: окно пусто, каналы молчат,
+        # счётчик растёт. Прежний смысл ключа («писать снапшоты в лог») переехал
+        # в `stats.log_snapshots`, и это ЕДИНСТВЕННАЯ смена поведения
+        # существующего ключа во всей фазе — миграция названа в ADR-PM-046 и
+        # громким голосом схемы (`ObservabilityStatsConfig`).
+        self._plane_enabled: bool = _plane_enabled(cfg)
+        #: Числа, не собранные ВЫКЛЮЧЕННОЙ ПЛОСКОСТЬЮ, по имени метрики. Пара к
+        #: тишине: «выключено» без растущего счётчика неотличимо от «никто не
+        #: писал» (критерий 3 приёмки Task 2.1).
+        self._plane_dropped_counts: Dict[str, int] = {}
 
     # =========================================================================
     # ЖИЗНЕННЫЙ ЦИКЛ
@@ -291,6 +317,12 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         cfg = normalize_config(config, default={})
         self._config_dict = cfg
         self._default_tags = cfg.get("default_tags") or {}
+        # Ф2 (2.1): плоскость включается и выключается ЖИВЬЁМ, тем же
+        # `config.reload`, что и остальные ручки секции. Не обнови это здесь —
+        # ключ выглядел бы применённым (он в конфиге и в readback'е) и не
+        # действовал бы до рестарта: ровно тот класс, которым уже болели темп
+        # (major-3), предел строки (3.4) и потолок серий.
+        self._plane_enabled = _plane_enabled(cfg)
         self._setup_channels()
         # Потолок серий обновляется ОТДЕЛЬНО от подмены окна и БЕЗУСЛОВНО.
         # ``_swap_aggregation_window`` выходит рано, когда темп не изменился, —
@@ -379,6 +411,13 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         ``observability_effective(stats=mgr)`` → ``{}``.
         """
         out: Dict[str, Any] = {}
+        # Ф2 (2.1, Р-3а): состояние ПЛОСКОСТИ. Ключ назван от ОТКАЗА
+        # (`plane_disabled`), а не от нормы: оператор смотрит readback, когда
+        # чисел нет, и ответ обязан прочитаться с первого взгляда — «плоскость
+        # выключена», а не «enabled: false» посреди десятка других `enabled`.
+        # Читается ЖИВОЕ поле менеджера, а не конфиг: правка, не доехавшая до
+        # пересборки, обязана быть видна расхождением, а не эхом запроса.
+        out["plane_disabled"] = not self._plane_enabled
         tempo = getattr(self._buffer, "flush_interval", None)
         if tempo is not None:
             out["aggregation_interval"] = tempo
@@ -950,7 +989,28 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         ``rec is None`` — серия не пущена в живой справочник потолком 2.2.
         Эмиссия при этом происходит ВСЕГДА: стражи двух позиций независимы, и
         отказ справочника не имеет права остановить доставку (Р2.2-7).
+
+        **Гейт ПЛОСКОСТИ (``stats.enabled``, Р-3а) стоит здесь, в ШВЕ, а не в
+        четырёх ветках фасада.** Сюда сходятся ОБЕ дороги сбора: прямая (порт не
+        подключён) и tap-колбэк порта (:meth:`_on_port_record`) — а значит и
+        числа плагинов, которые пишут в порт мимо этого менеджера. Поставь
+        проверку в ``record_metric`` и трёх его братьев — получилось бы четыре
+        копии одного правила и дырка ровно на плагинной дороге; поставь её
+        только на приёме порта — портless-менеджер (тесты соседних модулей,
+        standalone) плоскость бы не выключал.
+
+        Цена, названная вслух: при подключённом порте выключенная плоскость
+        всё равно оплачивает дорогу «фасад → порт → раздача tap'ам» и гасится
+        уже здесь. Дешевле было бы отвечать в фасаде, но это вернуло бы четыре
+        ветки; выключенная плоскость — редкая конфигурация, а бенч шага 5 меряет
+        ПРАВИЛО политики (гейт порта), которое стоит ровно один resolve.
+        ``ponytail: гейт плоскости в шве сбора; ранний выход в фасаде — если
+        замер покажет, что дорога до порта на выключенной плоскости чего-то
+        стоит.``
         """
+        if not self._plane_enabled:
+            self._plane_dropped_counts[name] = self._plane_dropped_counts.get(name, 0) + 1
+            return
         if metric_type is MetricType.COUNTER:
             value = float(value)
         rec = self._ensure_record(name, metric_type, merged_tags)
@@ -1137,4 +1197,62 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         # (`LOSS_COUNTER_KEYS`): счётчик по МЕТОДУ и общий для ТРЁХ соседних
         # плоскостей смысла не имеет — «числа» есть только у stats/observation.
         stats["observation_bypasses"] = self.observation_bypasses
+        # Ф2 (2.1): ЕДИНСТВЕННЫЙ адрес чтения «сколько чисел не собрано
+        # политикой». Владельцев решения двое — выключенная плоскость судит
+        # здесь, правило по пути судит в гейте порта (до сборки записи), — но
+        # СПРАШИВАЮТ об этом в одном месте: два счётчика с одним именем в двух
+        # объектах читатель складывал бы сам и ошибался бы молча.
+        stats["numbers_policy_dropped"] = self.numbers_policy_dropped
+        stats["numbers_policy_throttled"] = self.numbers_policy_throttled
         return stats
+
+    @property
+    def numbers_policy_dropped(self) -> Dict[str, int]:
+        """``{имя метрики: сколько раз не собрано политикой}`` — плоскость И правило.
+
+        Складываются два источника, и оба — про одно и то же событие «число не
+        доехало до окна по решению политики»:
+
+        * выключенная ПЛОСКОСТЬ (``stats.enabled: false``, Р-3а) — судит этот
+          менеджер, в шве :meth:`_apply_metric`;
+        * ПРАВИЛО по пути (``processes.<P>.stats.<имя>``) — судит гейт порта
+          (``ObservationManager.numbers_gate``) ДО сборки записи.
+
+        Порт спрашивается через уже подключённую ссылку, а не резолвится заново:
+        менеджер и порт живут в одном процессе и связаны
+        :meth:`attach_observation_port`. Порта нет → в сумме только плоскость.
+        """
+        merged = dict(self._plane_dropped_counts)
+        gate = getattr(self._observation_port, "numbers_gate", None)
+        if gate is not None:
+            for name, count in gate.dropped_by_metric().items():
+                merged[name] = merged.get(name, 0) + int(count)
+        return merged
+
+    def numbers_policy_view(self) -> Optional[Dict[str, Any]]:
+        """Действующая политика ЧИСЕЛ — секция ``introspect.observability.stats.policy``.
+
+        Спрашивается ЖИВОЙ гейт порта, а не конфиг: пересчёт из той же секции
+        показывал бы согласие всегда, в том числе когда правка до порта не
+        доехала (тот же довод, что у ``current_observation_policy`` для уровней).
+
+        ``None`` — политики порту не приносили ЛИБО порт не подключён. Два факта
+        под одним ответом, и это огрубление названо: различает их соседний
+        ``observation_bypasses`` (порт не подключён → он растёт), а заводить
+        третье состояние ради readback'а значило бы описывать проводку, а не
+        политику.
+        """
+        gate = getattr(self._observation_port, "numbers_gate", None)
+        return None if gate is None else gate.view()
+
+    @property
+    def numbers_policy_throttled(self) -> Dict[str, int]:
+        """``{имя метрики: сколько раз придержано ``interval_sec``}`` — только гейт порта.
+
+        Отдельно от :attr:`numbers_policy_dropped`, потому что это ДРУГОЙ факт:
+        «запрещено» лечится правилом, «придержано» — частотой, и слитые в одну
+        цифру они не дают оператору понять, что именно он видит. У плоскости
+        второй половины нет: выключенная плоскость не троттлит, она запрещает.
+        """
+        gate = getattr(self._observation_port, "numbers_gate", None)
+        return {} if gate is None else gate.throttled_by_metric()
