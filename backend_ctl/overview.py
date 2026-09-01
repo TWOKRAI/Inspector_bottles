@@ -99,7 +99,12 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
     anomalies: List[Dict[str, Any]] = []
     processes: Dict[str, Dict[str, Any]] = {}
 
-    procs = drv._discover_processes(timeout=timeout)
+    # Ф1 Task 1.5: поддерево целиком, а не только имена — в нём уже лежит ветка
+    # ``health`` каждого процесса (самопубликация heartbeat, контракт
+    # ``process_module/health/schema.py``). Ноль новых IPC-команд и ноль новых
+    # round-trip: тот же самый вызов, из которого раньше брали одни ключи.
+    topology = drv._state_topology(timeout=timeout)
+    procs = sorted(topology)
     if not procs:
         anomalies.append(
             {"kind": "empty_topology", "detail": "state-топология пуста — бэкенд не прогрет или нет соединения"}
@@ -192,6 +197,37 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
         }
         if missing_by_source:
             processes[proc]["missing"] = missing_by_source
+
+        # Ф1 Task 1.5 (M8-хвост): отказ, доехавший до плоскости ошибок, обязан быть
+        # назван сводкой. Источник — ветка ``processes.<p>.health`` из УЖЕ полученного
+        # state-поддерева (самопубликация heartbeat; схема — health/schema.py), новых
+        # ручек и round-trip'ов нет. Ветки может не быть (старый бэкенд, health ещё не
+        # публиковался) — тогда карточка и аномалии байт-в-байт прежние: отсутствие
+        # показания не выдаётся за «здоров». ``errors`` флагается ПОЖИЗНЕННО, как
+        # observability_loss выше: инцидент плоскости ошибок не перестаёт быть фактом
+        # от того, что случился давно; свежесть видна по ``ts`` в detail.
+        health = topology.get(proc, {}).get("health") if isinstance(topology.get(proc), dict) else None
+        if isinstance(health, dict):
+            processes[proc]["health"] = {"status": health.get("status"), "errors": health.get("errors")}
+            status = health.get("status")
+            last = health.get("last_error") if isinstance(health.get("last_error"), dict) else {}
+            if isinstance(status, str) and status not in ("", "ok"):
+                reason = health.get("degraded_reason") or last.get("message") or "причина не названа"
+                anomalies.append({"kind": f"health_{status}", "process": proc, "detail": str(reason)})
+            if _is_positive(health.get("errors")):
+                last_text = (
+                    f"последняя: {last.get('type')}: {last.get('message')} "
+                    f"(context={last.get('context')}, ts={last.get('ts')})"
+                    if last
+                    else "last_error пуст"
+                )
+                anomalies.append(
+                    {
+                        "kind": "health_errors",
+                        "process": proc,
+                        "detail": f"errors={health['errors']}, {last_text}",
+                    }
+                )
 
         if failed_handles:
             anomalies.append(

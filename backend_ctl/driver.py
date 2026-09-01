@@ -1844,12 +1844,22 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """Синтетическое ui.event тем же путём доставки — проверка цепочки без клика."""
         return _leaf_result(self.send_command(process, "ui.tap.ping", {"note": note}, timeout=timeout))
 
-    def _discover_processes(self, *, timeout: Optional[float] = None) -> List[str]:
-        """Список процессов из state-топологии (общий источник для ``watch_like_gui`` и ``system_overview``)."""
+    def _state_topology(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Поддерево ``processes`` из state-топологии ЦЕЛИКОМ (не только имена).
+
+        Ф1 Task 1.5: ``system_overview`` читает отсюда и имена процессов, и ветку
+        ``health`` (``processes.<p>.health.*`` — контракт ``health/schema.py``),
+        которую heartbeat самопубликует. Тот же самый вызов, что раньше делал
+        ``_discover_processes``, — данные уже приезжали и выбрасывались.
+        """
         st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
         tree = unwrap(st, leaf=True)
         node = tree.get("subtree") or tree.get("value") or {}
-        return sorted(node) if isinstance(node, dict) else []
+        return node if isinstance(node, dict) else {}
+
+    def _discover_processes(self, *, timeout: Optional[float] = None) -> List[str]:
+        """Список процессов из state-топологии (общий источник для ``watch_like_gui`` и ``system_overview``)."""
+        return sorted(self._state_topology(timeout=timeout))
 
     def _expand_processes(
         self,
