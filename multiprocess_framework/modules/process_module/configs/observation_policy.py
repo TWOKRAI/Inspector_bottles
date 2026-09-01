@@ -264,6 +264,10 @@ def resolution_key(tier: int, pattern: str) -> Tuple[int, int, int, str]:
 #: зовётся на каждое число и на каждый лист тика; пересчитывать разбор двух
 #: константных паттернов на каждом вызове — работа на горячем пути ради нуля.
 _STATS_SUBTREE_SEGMENTS = split_pattern(STATS_SUBTREE_PATTERN)
+#: То же для поддерева уровней (Ф2, задача 2.4) — до этой правки
+#: :data:`PORT_SUBTREE_PATTERN` разбирался внутри :meth:`ObservationPolicy.resolve`
+#: заново на КАЖДЫЙ путь, не имея своей константы рядом с соседом выше.
+_PORT_SUBTREE_SEGMENTS = split_pattern(PORT_SUBTREE_PATTERN)
 
 
 class ObservationPolicy:
@@ -356,6 +360,35 @@ class ObservationPolicy:
         self._first_tick: Dict[str, int] = {
             pattern: int(carried_first.get(pattern, self._evaluated_ticks)) for pattern in self._rules
         }
+        # Задача 2.4: паттерны правил оператора разбираются ОДИН раз на сборку
+        # политики, а не на каждый резолв. ``self._rules`` неизменен после
+        # конструктора (докстринг класса), поэтому разбор, сделанный здесь,
+        # действителен на всю жизнь объекта — второй раз его делать не для чего.
+        self._rule_segments: Dict[str, Tuple[str, ...]] = {pattern: split_pattern(pattern) for pattern in self._rules}
+        # Кэш решений по ПОЛНОМУ пути дерева (задача 2.4) — «выключенный лист не
+        # стоит ничего, кроме поиска в кэше». Ключ — путь, значение — пара
+        # (готовое решение, паттерны правил ОПЕРАТОРА, которые за него голосовали
+        # при первом резолве). Вторая половина пары нужна ИМЕННО для того, чтобы
+        # кэш-хит продолжал считаться :meth:`rule_hits` — см. докстринг
+        # :meth:`resolve`, где счёт разведён с самим кэшированием.
+        #
+        # Живёт НА ЭКЗЕМПЛЯРЕ, не в модульной глобали. Это и есть инвалидация:
+        # политика неизменяема (докстринг класса), а её ЗАМЕНА на новую
+        # (``_install_observation_policy`` при ``config.reload`` — см.
+        # ``process_heartbeat.py``) всегда собирает НОВЫЙ объект
+        # ``ObservationPolicy`` с пустым кэшем; старый объект вместе со своим
+        # кэшем уходит в сборщик мусора. Кэш, вынесенный в модульную переменную
+        # или в class-level словарь, пережил бы замену объекта и продолжал бы
+        # отвечать по СТАРЫМ правилам — «новое правило действует после reload»
+        # стало бы ложным; ровно это доказывает инъекция задачи 2.4
+        # (``TestCacheDoesNotSurviveAPolicyReplacement``).
+        #
+        # Потокобезопасность: запись — обычный ``dict[str] = ...`` без лока.
+        # Под GIL присваивание атомарно, поэтому гонка на НОВОМ пути — это в
+        # худшем случае повторное (но идентичное — резолв детерминирован)
+        # вычисление у второго потока, не порча значения. Тот же довод, каким
+        # в этом файле уже живёт ``PathSchedule.due`` по соседству.
+        self._cache: Dict[str, Tuple[PolicyDecision, Tuple[str, ...]]] = {}
 
     # ------------------------------------------------------------------ чтение
 
@@ -408,6 +441,19 @@ class ObservationPolicy:
         докстринге класса. Правила оператора при этом обходятся ТЕМ ЖЕ циклом
         выше: язык правил один на обе плоскости, разные у них только умолчания.
 
+        **Задача 2.4 — O(1) после первого вызова.** Само решение — чистая
+        функция от ``path`` и неизменяемой политики (:meth:`_decide`), поэтому
+        оно считается РОВНО ОДИН РАЗ на путь и кладётся в :attr:`_cache`; второй
+        и следующие резолвы того же пути отвечают словарным поиском. Счёт
+        попаданий правил (:attr:`_hits`) — сознательно ОТДЕЛЬНЫЙ шаг: он не
+        часть кэшируемого значения, а побочный эффект КАЖДОГО вызова с
+        ``count=True``, кэш-хит включительно. Иначе второй и далее резолвы
+        уже включённой метрики перестали бы засчитываться в ``rule_hits``, и
+        :meth:`rules_matched_nothing` начала бы обвинять здоровое, часто
+        читаемое правило в «ни разу не совпало» — тот самый класс дефекта
+        (счётчик, который лжёт о том, что считает), ради которого в этом файле
+        уже разведены ``count=True``/``count=False`` (находка З3 ревью Ф4).
+
         Args:
             path: полный путь листа в дереве состояния.
             count: считать ли попадания правил (``rules_matched_nothing``).
@@ -419,9 +465,35 @@ class ObservationPolicy:
                 ``introspect.observability`` без единого такта процесса между
                 ними убирали работающее правило из списка «не совпало ни с чем».
         """
-        segments = tuple(str(path).split("."))
+        key = str(path)
+        cached = self._cache.get(key)
+        if cached is None:
+            decision, matched = self._decide(key)
+            self._cache[key] = (decision, matched)
+        else:
+            decision, matched = cached
+        if count:
+            for pattern in matched:
+                self._hits[pattern] = self._hits.get(pattern, 0) + 1
+        return decision
+
+    def _decide(self, path: str) -> Tuple[PolicyDecision, Tuple[str, ...]]:
+        """Тело резолва БЕЗ побочных эффектов — вызывается :meth:`resolve` РОВНО
+        ОДИН РАЗ на путь (задача 2.4), результат кэшируется вызывающим.
+
+        Returns:
+            Пара ``(решение, паттерны правил ОПЕРАТОРА, которые совпали с этим
+            путём)``. Второй элемент — не только победитель: правило может
+            совпасть и проиграть по ступени явности (см. :func:`resolution_key`),
+            и оно всё равно обязано попасть в ``rule_hits`` — так было устроено
+            до кэша (счёт вёлся внутри цикла ниже), и вынос в отдельный кортеж
+            сохраняет это буквально, лишь перенося момент инкремента в
+            :meth:`resolve`.
+        """
+        segments = tuple(path.split("."))
         best_key: Optional[Tuple[int, int, int, str]] = None
         best: Optional[PolicyDecision] = None
+        matched: list[str] = []
 
         def _offer(pattern: str, enabled: bool, interval: float, source: str, tier: int) -> None:
             nonlocal best_key, best
@@ -435,9 +507,8 @@ class ObservationPolicy:
         default_interval = self._legacy.default_interval_sec if self._legacy is not None else 0.0
 
         for pattern, rule in self._rules.items():
-            if match_pattern(split_pattern(pattern), segments):
-                if count:
-                    self._hits[pattern] = self._hits.get(pattern, 0) + 1
+            if match_pattern(self._rule_segments[pattern], segments):
+                matched.append(pattern)
                 interval = rule.interval_sec if rule.interval_sec is not None else default_interval
                 _offer(pattern, rule.enabled, interval, SOURCE_RULE, TIER_RULE)
 
@@ -459,12 +530,12 @@ class ObservationPolicy:
             # этой плоскости, поэтому кандидат здесь есть всегда — либо этот
             # дефолт, либо одноимённое правило оператора из цикла выше.
             assert best is not None  # noqa: S101 — инвариант тотальности, а не проверка ввода
-            return best
+            return best, tuple(matched)
 
         if (
             cfg.subtree_enabled
             and PORT_SUBTREE_PATTERN not in self._rules
-            and match_pattern(split_pattern(PORT_SUBTREE_PATTERN), segments)
+            and match_pattern(_PORT_SUBTREE_SEGMENTS, segments)
         ):
             _offer(
                 PORT_SUBTREE_PATTERN,
@@ -494,7 +565,7 @@ class ObservationPolicy:
 
         # `best` не может остаться None: последняя ветка всегда предлагает `**`.
         assert best is not None  # noqa: S101 — инвариант тотальности, а не проверка ввода
-        return best
+        return best, tuple(matched)
 
     # ------------------------------------------------------------- диагностика
 
