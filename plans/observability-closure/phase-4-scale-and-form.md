@@ -67,7 +67,18 @@
 **Files:** `process_module/heartbeat/telemetry.py:58-61,160-170`, `process_manager_module/monitor/process_monitor.py:560-600`, `telemetry_readmodel_module/telemetry_read_model.py:45-75`,
 `logger_module/core/logger_core.py:2064-2156` (`frame_trace` → `register_sink_factory`), `statistics_module/core/metric_record.py:30-60` (сетка бакетов из конфига),
 `process_manager_module/core/alert_rules.py` + `monitor/process_monitor.py:158` (секция `observability.alerts.rules`, `DEFAULT_RULES` = L0),
-`backend_ctl/registers.py:100-140` + `process_manager_module` (commit-confirmed на стороне ПМ под TTL-подметальщиком, Р-6а), рецепты и GUI, где встречаются `fps`/`latency_ms`.
+`backend_ctl/registers.py:100-140` + `process_manager_module` (commit-confirmed на стороне ПМ под TTL-подметальщиком, Р-6а), рецепты и GUI, где встречаются `fps`/`latency_ms`,
+`backend_ctl/overview.py` (секция `telemetry.fps`, аномалия `fps_zero_while_running`), подписи GUI (`StatusLabel «FPS»`).
+
+**Р-4 решена владельцем 2026-09-01 — принцип, которому следует задача:** единственный
+универсальный дефолт ядра — **время цикла исполнения** (`cycle_ms` / `rate_hz`): оно есть у
+любого исполняемого узла, и у воркеров уже живёт в нейтральной форме
+(`effective_hz`/`target_interval_ms` — их задача НЕ трогает). `fps` — доменное имя камеры и
+дисплеев изображений; оно законно в прикладных модулях, GUI и у камеры (например `fps_limit`
+дисплея, `capture_fps` плагина камеры — остаются), но как имя АГРЕГАТА ФРЕЙМВОРКА
+(`processes.<p>.state.fps`, `latency_ms`) уходит в алиас с датой снятия. Критерий «grep fps → 0
+вне алиас-таблицы» относится к `multiprocess_framework/` — доменные `fps` прототипа и плагинов
+под него не подпадают.
 **Acceptance criteria:**
 - [ ] `rate_hz`/`cycle_ms` публикуются; `fps`/`latency_ms` — алиасы с провенансом `alias` и датой снятия в ADR; read-model и дашборд живут (qt-smoke); алерт `drops_growing` живьём срабатывает на новом пути (пара).
 - [ ] `frame_trace` — сток по фабрике: `LoggerCore` не содержит слова `frame` (страж); `grep -rn "fps\b" multiprocess_framework/modules` вне алиас-таблицы → 0.
