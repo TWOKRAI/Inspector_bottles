@@ -89,6 +89,24 @@ ctx.health.report_error(exc)     → плоскость ошибок   → error
 то есть дороги в плоскость ошибок у плагина не было ни одной. Дорогу сторожит тест на МАРШРУТ
 (`test_error_route.py`), а не на имя метода.
 
+### 1.0a. Какая дорога для какого класса события
+
+Классы инвентаря Task 1.3 (миграция 1.3b прошла по ним): выбор дороги — по КЛАССУ события, не
+по вкусу автора сайта.
+
+| Класс | Что это | Дорога | Пример |
+|---|---|---|---|
+| **A** | отказ подсистемы/устройства — инцидент | `report_error(exc, context=…)` | плагин не смог открыть камеру, драйвер Modbus не ответил |
+| **B** | прикладная ситуация, не отказ — система исправна, действовать нечем | `log_error("строка")` | «нет точек для сохранения» на команде «сохранить» (`DrawingIoPlugin._do_save`) |
+| **C** | диагностика/трассировка | `log_debug`/`log_info` | «вызван produce(), items=3» |
+| **W** | предупреждение о состоянии, не инцидент | `log_warning` | «recipe_manager: рецепт из манифеста не найден» |
+
+Классы A и B — не «оба на всякий случай» на одном сайте: **один разъём на точку**, машинно
+сторожится AST-стражем
+[`modules/tests/test_one_connector_per_point.py`](../../modules/tests/test_one_connector_per_point.py)
+(Task 1.3c, Р-9/Р-10 — единица правила ВЕТКА, whitelist отсутствует). Граница правила — тело
+определения самого разъёма (`ObservableMixin.report_error`), не whitelist по файлу.
+
 ### 1.1. Что ловится автоматически — третья дорога, которую не подключают
 
 Два разъёма выше требуют, чтобы автор кода их **позвал**. Событие, о котором никто не позаботился
@@ -400,6 +418,7 @@ console → command → router → error → stats → статус + итого
 | ADR-EM-007, ADR-EM-008 | единая точка эмиссии `_route()`, severity-лестница данными | [`error_module/DECISIONS.md`](../../modules/error_module/DECISIONS.md) |
 | ADR-SM-006, ADR-SM-007 | `AggregationWindow` как `IBufferStrategy`, граница statistics ↔ hub | [`statistics_module/DECISIONS.md`](../../modules/statistics_module/DECISIONS.md) |
 | ADR-PM-028, ADR-PM-029, ADR-PM-030 | плоскость документов, вердикт как второй клиент, `log_error` vs `report_error` | [`process_module/DECISIONS.md`](../../modules/process_module/DECISIONS.md) |
+| ADR-PM-030 (дополнение, Task 1.3c) | страховка «оба коннектора на сайте» снята — дорога плагина уже починена в C2; один разъём на точку, единица правила ветка (Р-10), whitelist отсутствует (Р-9) | там же |
 | ADR-PM-016, ADR-PM-017, ADR-PM-018 | телеметрийный тик, центральный троттл, управляемая публикация | там же |
 | ADR-136, ADR-137 | GUI read-model без блокирующего IPC; фреймворк нейтрален к продукту | [`multiprocess_framework/DECISIONS.md`](../../DECISIONS.md) |
 | ADR-PMM-025 | адрес обязан быть объявлен; headless — воплощение процесса | [`process_manager_module/DECISIONS.md`](../../modules/process_manager_module/DECISIONS.md) |
