@@ -533,7 +533,8 @@ TOOLS: List[ToolSpec] = [
         "«Один вызов = вся картина» (B.3): компактная сводка по всем процессам топологии "
         "(статус/воркеры/router-счётчики/очереди/память) + telemetry fps + счётчики driver'а "
         "+ секция anomalies (подсказки: router_dropped, queue_depth, fps_zero_while_running, "
-        "recent_recovery, late_replies, events_evicted, …). Первая команда сессии после "
+        "recent_recovery, late_replies, events_evicted, health_errors/health_<status> — отказ, "
+        "доехавший до плоскости ошибок процесса, назван с last_error, …). Первая команда сессии после "
         "capabilities: вердикты, не археология. Только существующие introspect-ручки (read-only). "
         "Крупный ответ усекается до карты формы — full=true для полного объёма (E.3).",
         _obj({"timeout": _TIMEOUT, "full": _FULL}),
