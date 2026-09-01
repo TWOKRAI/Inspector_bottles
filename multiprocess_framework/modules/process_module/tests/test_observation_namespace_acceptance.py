@@ -81,11 +81,8 @@
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
 from typing import Any
 
-import pytest
 
 from multiprocess_framework.modules.observability_declarations import forget_declarations
 from multiprocess_framework.modules.process_module.commands.builtin_commands import (
@@ -315,26 +312,6 @@ def _assert_plugin_leaf_via_poll(levels: Any, writer: str, name: str, expected: 
         f"лист {writer}.{name} найден НЕ по адресу через сегмент 'plugins' "
         f"(state.plugins.<writer>.<name> из Н1) — фактический путь: {paths[0]}"
     )
-
-
-def _repo_root() -> Path:
-    """Корень репозитория через ``git rev-parse``.
-
-    Вычисляется ЛЕНИВО, внутри теста, а не на этапе импорта модуля (координатор
-    указал: `git rev-parse` на этапе сбора тестов запускался бы у ВСЕХ, кто
-    вообще собирает этот каталог, — включая прогоны, которым Н4 не нужен). Не
-    падает, а `pytest.skip`'ит с явной причиной, если git недоступен вовсе —
-    тот же принцип, что у проверки самого рефа ``main`` ниже.
-    """
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=Path(__file__).resolve().parent,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        pytest.skip(f"git rev-parse --show-toplevel не сработал: {result.stderr.strip()!r}")
-    return Path(result.stdout.strip())
 
 
 # --------------------------------------------------------------------------- #

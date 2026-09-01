@@ -43,11 +43,23 @@ from .proxies.proxy_creator import ProxyCreator
 from ..interfaces import IObservableMixin
 
 
-#: Имена, занятые ПОДПИСЬЮ приёмника журнала (``_log_error(message, **kwargs)``).
-#: Поле инцидента с таким именем роняло бы вызов TypeError'ом, поэтому
-#: :meth:`ObservableMixin.report_error` разводит их префиксом ``field_``.
-#: Список ровно такой длины, какова сигнатура: расширять только вместе с ней.
-_VOICE_RESERVED_NAMES = frozenset({"message"})
+#: Имена, занятые ПРОТОКОЛОМ дорог наблюдаемости — не деталями инцидента.
+#: Поле сайта с таким именем не доезжает как поле, и по-разному на каждой двери:
+#:
+#: * ``message`` — позиционный параметр ``_log_error(message, **kwargs)`` (голос
+#:   упал бы TypeError'ом) И протокольный ключ ``ErrorManager.track_error``,
+#:   который его ``pop``-ает в приставку к тексту (в записи поля бы не осталось);
+#: * ``manager_name`` / ``method_name`` — параметры второго хопа
+#:   ``_call_manager(manager_name, method_name, *args, **kwargs)``: голос терялся
+#:   бы целиком, оставляя факт и счётчик ``manager_call_failures``.
+#:
+#: Набор выведен из ВСЕЙ цепочки, а не из одной подписи — первая редакция
+#: смотрела один хоп из двух и называла себя полной. Сверяется запуском:
+#: ``TestFieldNamesCannotCollideWithTheReceiversSignature``.
+#:
+#: ``module`` сюда НЕ входит сознательно: это законный сквозной штамп источника,
+#: его передают 14 сайтов одного только ``dispatch_module``.
+_RESERVED_FIELD_NAMES = frozenset({"message", "manager_name", "method_name"})
 
 
 class ObservableMixin(IObservableMixin):
@@ -339,7 +351,19 @@ class ObservableMixin(IObservableMixin):
         # сайте). Первая редакция комментария объявляла тихую подмену реальной
         # опасностью — неправда, снято. Порядок оставлен: он ничего не стоит и
         # переживёт день, когда ``context`` перестанет быть параметром.
-        recorded = self._track_error(exc, {**fields, "context": ctx} if (ctx or fields) else None)
+        # Разводка имён — ОДИН раз, на входе, до обеих дорог. Первая редакция
+        # разводила только голос, и это само было дефектом: одно и то же поле
+        # приезжало в журнал как ``field_x``, а в плоскость ошибок как ``x``,
+        # то есть фильтр по полю зависел от того, куда смотришь. Хуже: на дороге
+        # факта имя ``message`` не роняет вызов, а ТИХО СЪЕДАЕТСЯ протоколом
+        # ``track_error`` (уходит в приставку к тексту), и поля не остаётся
+        # вовсе — найдено ревью Task 1.3b запуском против настоящего
+        # ``ErrorManager``, тогда как мой сторож проверял это против фейка.
+        safe_fields: Dict[str, Any] = {
+            (f"field_{k}" if k in _RESERVED_FIELD_NAMES else k): v for k, v in fields.items()
+        }
+
+        recorded = self._track_error(exc, {**safe_fields, "context": ctx} if (ctx or safe_fields) else None)
 
         # ГОЛОС — целиком под защитой. Зеркалить здесь HealthState нельзя: там
         # бросок держателя окон уходит вызывающему сознательно (процессные хуки
@@ -352,17 +376,7 @@ class ObservableMixin(IObservableMixin):
             if not voiced:
                 return
             where = f" @ {ctx}" if ctx else ""
-            # Имя поля, совпавшее с ПАРАМЕТРОМ приёмника, роняет вызов
-            # `TypeError: got multiple values for argument`. Это не гипотеза:
-            # тем же способом при миграции Task 1.3b нашлась пара `origin`
-            # (маркер) и пара `message` (сайт `dispatcher.dispatch` клал под
-            # этим именем текст сообщения). Первую нашёл я чтением, вторую —
-            # исполнитель миграции, и оба раза дефект убивал бы ГОЛОС ЦЕЛИКОМ.
-            # Механизм разводит имена сам: переименовать поле на каждом сайте
-            # значит расставить по дереву 47 ловушек ожидания.
-            voice_fields: Dict[str, Any] = {
-                (f"field_{k}" if k in _VOICE_RESERVED_NAMES else k): v for k, v in fields.items()
-            }
+            voice_fields: Dict[str, Any] = dict(safe_fields)
             if recorded:
                 # Маркер кладётся ПОВЕРХ полей, а не рядом: ``**fields, **marker``
                 # роняет вызов TypeError'ом на сайте, который сам передал поле

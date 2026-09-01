@@ -296,6 +296,6 @@ class RobotDrawPlugin(ProcessModulePlugin):
                     ResourceUnavailable(f"hub отказ: {self._reg.last_error}"),
                     context="robot_draw.forward.refused",
                     device_id=self._reg.device_id,
-                    message=self._reg.last_error,
+                    hub_message=self._reg.last_error,
                 )
                 self._last_was_error = True

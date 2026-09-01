@@ -321,22 +321,27 @@ class TestProcessModuleKeepsItsRicherRoad:
 
 
 class TestFieldNamesCannotCollideWithTheReceiversSignature:
-    """Имя поля инцидента, совпавшее с ПАРАМЕТРОМ приёмника, убивало бы голос.
+    """Имя поля, занятое ПРОТОКОЛОМ дорог, не имеет права съесть деталь инцидента.
 
-    Класс найден дважды и обоими способами, которыми его вообще можно найти:
-    ``origin`` — чтением механизма автором, ``message`` — исполнителем миграции
-    Task 1.3b, который принёс с реального сайта ``dispatcher.dispatch`` поле с
-    таким именем. Оба раза дефект стоил бы ГОЛОС ЦЕЛИКОМ (`TypeError: got
-    multiple values for argument`), причём на сайте, который ничего плохого не
-    делает: имя ``message`` для текста сообщения — очевидный выбор.
+    Класс найден трижды, тремя разными способами, и это его главная
+    характеристика — он не виден с одной точки наблюдения:
 
-    Поэтому имена разводит МЕХАНИЗМ. Альтернатива — переименовывать поле на
-    каждом сайте — это 47 ловушек ожидания, срабатывающих в момент отказа, то
-    есть ровно тогда, когда голос нужен.
+    * ``origin`` — чтением механизма автором;
+    * ``message`` на дороге ГОЛОСА — исполнителем миграции Task 1.3b, который
+      принёс поле с этим именем с реального сайта ``dispatcher.dispatch``;
+    * ``message`` на дороге ФАКТА и пара ``manager_name``/``method_name`` —
+      ревью, ЗАПУСКОМ против настоящего ``ErrorManager``, тогда как сторож
+      автора (этот файл) проверял свойство против фейка и был зелен.
+
+    Две двери резервируют имена ПО-РАЗНОМУ, и в этом ловушка. Голос роняет
+    вызов громко (``TypeError``), а факт съедает имя ``message`` ТИХО: протокол
+    ``track_error`` ``pop``-ает его в приставку к тексту, и поля не остаётся.
+    Поэтому разводка стоит на ВХОДЕ, одна на обе дороги: иначе одно и то же
+    поле приезжает в журнал под одним именем, а в стор под другим.
     """
 
     def test_a_field_named_like_the_log_parameter_does_not_kill_the_voice(self) -> None:
-        """Поле ``message`` не роняет вызов и доезжает переименованным."""
+        """Поле ``message`` не роняет голос и доезжает переименованным."""
         probe = _Probe()
         plane, voices = _wire(probe)
 
@@ -348,38 +353,104 @@ class TestFieldNamesCannotCollideWithTheReceiversSignature:
         )
 
         assert len(voices) == 1, f"голос не прозвучал — коллизия имени уронила вызов: {voices}"
-        text, kwargs = voices[0]
+        _text, kwargs = voices[0]
         assert kwargs["field_message"] == "сырое тело сообщения", f"деталь сайта потеряна при разводке имён: {kwargs}"
         assert kwargs["key"] == "cmd.run", f"соседнее поле пострадало от разводки: {kwargs}"
-        assert text, "текст голоса пуст"
 
-        # ФАКТ переименования не знает: разводка нужна только приёмнику журнала,
-        # а в плоскости ошибок поле обязано лежать под своим настоящим именем.
+    def test_the_same_field_arrives_under_the_same_name_on_both_planes(self) -> None:
+        """Имя поля не зависит от того, куда смотришь — журнал или стор.
+
+        Первая редакция механизма разводила ТОЛЬКО голос, и это само было
+        дефектом: фильтр по полю работал бы в журнале и не работал бы в сторе.
+        """
+        probe = _Probe()
+        plane, voices = _wire(probe)
+
+        probe.report_error(DeviceOpenFailed("нет связи"), context="hub.forward", message="хаб отказал")
+
         _exc, ctx = plane.rows[0]
-        assert ctx["message"] == "сырое тело сообщения", (
-            f"разводка имён протекла в плоскость ошибок, где коллизии нет: {ctx}"
+        _text, kwargs = voices[0]
+        assert "field_message" in ctx and "field_message" in kwargs, (
+            f"поле приехало под РАЗНЫМИ именами: стор {sorted(ctx)}, журнал {sorted(kwargs)}"
+        )
+        assert "message" not in ctx, f"занятое имя осталось в записи и будет съедено протоколом: {ctx}"
+
+    def test_against_the_real_error_manager_not_a_fake(self) -> None:
+        """Пара к фейку: то же свойство против НАСТОЯЩЕГО ``ErrorManager``.
+
+        Сторож выше проверяет ``_ErrorPlane`` — дублёра, который кладёт словарь
+        дословно. Против настоящей двери утверждение «поле лежит под своим
+        именем» было ЛОЖНЫМ: ``track_error`` ``pop``-ает ``message`` в приставку
+        к тексту. Ревью нашло это запуском, и без этого теста следующий сайт
+        положил бы имя снова.
+        """
+        from multiprocess_framework.modules.error_module.core.error_manager import ErrorManager
+
+        em = ErrorManager(config={"app_name": "hazard_probe"})
+        captured: List[Dict[str, Any]] = []
+        em.log_exception = lambda error, message="", module="unknown", **kw: captured.append(  # type: ignore[method-assign]
+            {"message": message, "module": module, **kw}
         )
 
-    def test_the_reserved_set_is_exactly_the_receivers_signature(self) -> None:
-        """Список зарезервированных имён сверяется с ПОДПИСЬЮ, а не с памятью автора.
+        probe = _Probe()
+        probe.register_manager("error", em, enabled=True)
+        probe._log_error = lambda msg, **kw: None  # type: ignore[method-assign]
 
-        Литерал ``frozenset({"message"})`` живёт ровно до того дня, когда у
-        ``_log_error`` появится второй именованный параметр. Тест держит их
-        связанными: иначе новая коллизия вернётся тем же способом, каким
-        пришла эта, — падением голоса в момент отказа.
+        probe.report_error(
+            DeviceOpenFailed("устройство не отвечает"),
+            context="robot_io.forward.refused",
+            message="хаб отказал",
+            device_id="dev_alpha",
+        )
+
+        assert len(captured) == 1, f"инцидент не доехал до настоящей двери: {captured}"
+        row = captured[0]
+        assert row["field_message"] == "хаб отказал", (
+            f"деталь съедена протоколом настоящей двери — то, что фейк показать не мог: {row}"
+        )
+        assert row["message"] == "robot_io.forward.refused", (
+            f"приставкой к тексту обязан остаться САЙТ-ТЕГ, а не поле сайта: {row}"
+        )
+        assert row["device_id"] == "dev_alpha", f"соседнее поле потеряно: {row}"
+
+    def test_the_reserved_set_is_exactly_the_chain_not_one_hop(self) -> None:
+        """Набор сверяется со ВСЕЙ цепочкой вызова, а не с памятью автора.
+
+        Первая редакция теста смотрела подпись ``_log_error`` и называла себя
+        «exactly the receiver's signature», пропуская второй хоп
+        ``_call_manager(manager_name, method_name, ...)``: поля с такими именами
+        теряли ГОЛОС целиком, а сторож оставался зелёным. Считаем объединение.
         """
         import inspect
 
         from multiprocess_framework.modules.base_manager.mixins.observable_mixin import (
-            _VOICE_RESERVED_NAMES,
+            _RESERVED_FIELD_NAMES,
         )
 
-        params = inspect.signature(ObservableMixin._log_error).parameters
-        named = {name for name, p in params.items() if name != "self" and p.kind is not inspect.Parameter.VAR_KEYWORD}
-        assert named == set(_VOICE_RESERVED_NAMES), (
-            f"подпись приёмника разошлась со списком зарезервированных имён: "
-            f"подпись {sorted(named)}, список {sorted(_VOICE_RESERVED_NAMES)}"
+        def _named(fn) -> set:
+            return {
+                name
+                for name, prm in inspect.signature(fn).parameters.items()
+                if name != "self" and prm.kind not in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+            }
+
+        chain = _named(ObservableMixin._log_error) | _named(ObservableMixin._call_manager)
+        assert chain == set(_RESERVED_FIELD_NAMES), (
+            f"цепочка разошлась с набором зарезервированных имён: "
+            f"цепочка {sorted(chain)}, набор {sorted(_RESERVED_FIELD_NAMES)}"
         )
+
+    def test_a_second_hop_name_does_not_silently_swallow_the_voice(self) -> None:
+        """``manager_name`` как поле — голос жив, а не потерян в счётчике."""
+        probe = _Probe()
+        _plane, voices = _wire(probe)
+
+        probe.report_error(DeviceOpenFailed("сбой"), context="op", manager_name="чужое имя")
+
+        assert len(voices) == 1, (
+            f"голос потерян на втором хопе цепочки: {voices}, отказы={getattr(probe, 'manager_call_failures', {})}"
+        )
+        assert voices[0][1]["field_manager_name"] == "чужое имя", f"деталь потеряна: {voices[0][1]}"
 
 
 class TestTheWindowContextCannotBeShadowedByASite:

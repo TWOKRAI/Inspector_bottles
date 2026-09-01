@@ -274,7 +274,13 @@ class Dispatcher(BaseManager, ObservableMixin):
 
             return result
         except Exception as e:
-            self.report_error(e, context="dispatcher.register_handler", key=key, strategy=target_strategy.value)
+            self.report_error(
+                e,
+                context="dispatcher.register_handler",
+                module=LOG_SOURCE,
+                key=key,
+                strategy=target_strategy.value,
+            )
             self._record_metric("dispatcher.handler.registration.errors", tags={"key": key})
             return False
 
@@ -431,6 +437,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             self.report_error(
                 e,
                 context="dispatcher.dispatch",
+                module=LOG_SOURCE,
                 key=key if "key" in locals() else None,
                 request=str(message),
             )

@@ -296,9 +296,19 @@ def run_gui(process: "GuiProcess") -> None:
         # Task 1.3b: было N раздельных _log_error (по одному на ошибку) плюс
         # один агрегатный _track_error — тот же инцидент (провал startup-валидации)
         # двумя коннекторами вперемешку с текстом-в-лог. Один report_error:
-        # список ошибок едет структурным полем, а не N строк журнала.
+        # список ошибок едет структурным полем.
+        #
+        # ПРИЧИНЫ ОСТАЮТСЯ В ТЕКСТЕ, и это правка по находке ревью Task 1.3b.
+        # Первая редакция несла только ЧИСЛО («Startup: 3 ошибок валидации»), и
+        # тот, кто читал причины провала старта из errors.log, больше не нашёл
+        # бы их нигде: они жили только структурным полем записи стора. Поле —
+        # для фильтра, текст — для человека, который смотрит журнал упавшего
+        # старта; терять второе ради первого задача не просила.
+        _reasons = "; ".join(str(e) for e in _report.errors[:5])
+        if len(_report.errors) > 5:
+            _reasons += f"; … ещё {len(_report.errors) - 5}"
         process.report_error(
-            RuntimeError(f"Startup: {len(_report.errors)} ошибок валидации"),
+            RuntimeError(f"Startup: {len(_report.errors)} ошибок валидации: {_reasons}"),
             context="app.startup_checks",
             module="startup",
             errors=_report.errors,

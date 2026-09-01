@@ -259,6 +259,6 @@ class RobotIoPlugin(ProcessModulePlugin):
                     ResourceUnavailable(f"hub отказ: {error_msg}"),
                     context="robot_io.forward.refused",
                     device_id=self._reg.device_id,
-                    message=error_msg,
+                    hub_message=error_msg,
                 )
                 self._last_was_error = True
