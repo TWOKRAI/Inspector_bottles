@@ -12,6 +12,8 @@
 
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
+- [Верный ФОРМЕ дублёр неверен ПРОТОКОЛУ](feedback_a_faithful_fake_still_lacks_the_protocol.md) — настоящая дверь pop-ает служебные ключи; чем проще дублёр, тем надёжнее прячет; одно имя, две двери, два симптома
+- [Прототипируй страж до фиксации формулировки](feedback_prototype_the_guard_before_fixing_its_wording.md) — «в одной функции» было методом инвентаря и пережило основание: красно по построению, выход только whitelist
 - [Ревью ловит стык своих кусков](feedback_review_finds_the_seam_between_own_pieces.md) · [ревью спеки — независимым](feedback_spec_review_needs_independent_agent.md) — автор находит карту, не форму
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) · [вердикт по одному маркеру врёт](feedback_single_marker_verdict_lies.md) — пара маркеров + признак жизни
 - [Subagent live = синхронно](feedback_subagent_live_test_monitor_hang.md)
