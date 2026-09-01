@@ -6,22 +6,52 @@
 **ветке исполнения**. Whitelist отсутствует (Р-9) — правило либо соблюдено, либо
 красное.
 
-Единица правила — ВЕТКА, не функция. Развилку дают ТОЛЬКО:
-    * `if.body` vs `if.orelse`;
-    * каждый `except`-обработчик одного `try` (свой, и все они отдельны от тела `try`).
-Развилку НЕ дают: тело `try`, тело `with`, тело цикла, `else`/`finally` у `try`,
-`else` у цикла — поток идёт СКВОЗЬ них, это продолжение той же ветки. Ранний
-`return`/`raise`/`continue`/`break` делит ветку на сегменты «до» и «после».
-Вложенные `def`/`class`/`lambda` — своя единица, в текущую ветку их вызовы не
-считаются (обходчик анализирует их отдельно, само по себе).
+## Модель — перечисление ПУТЕЙ, не изолированных сегментов (правка J9)
 
-**Почему тело `try` обязано быть проходным, а не веткой — это была ошибка автора
-Р-10 в первой редакции прототипа.** Если считать тело `try:` отдельной веткой, то
-сайт вида `_track_error(...)` перед `try: ... _log_error(...)` проскакивает мимо
-правила, и страж даёт ложный зелёный. Проверено этим же обходчиком на
-`ObservableMixin.report_error`: с этой ошибкой дерево даёт 0 нарушений, без неё — 1
-(см. `test_boundary_is_structural_not_a_whitelist_entry` ниже — без границы этот же
-адрес обязан попасть в список).
+**Первая редакция обходчика (тот же день, до инъекции) резала веточную развилку от
+ЕЁ ЖЕ РОДИТЕЛЯ и была неверна.** `if`-тело обрабатывалось как отдельный сегмент,
+заведённый ПУСТЫМ — вызов до `if` и вызов внутри `if.body` никогда не оказывались в
+одном сегменте, даже когда `if` не имеет `else` и оба вызова реально исполняются
+подряд на одном и том же прогоне при истинном условии. Матрица инъекций координатора
+(заплатка J9, `router_manager.py::_report_send_error`: `if reason:
+self._log_error(...)` перед уже стоящим `self.report_error(...)`) поймала это —
+страж молчал, хотя при истинном `reason` голос звучит дважды. Тот же прогон
+опроверг и мой собственный прогноз про guard-clause (J7a): пара, разведённая `if x:
+_log_error(); return`, действительно обязана оставаться зелёной, но старая модель
+была зелёной там ПО ТОЙ ЖЕ ошибочной причине (пустой сегмент), а не потому что
+`return` — легитимная развилка. Обе кривизны (ложный зелёный на J9, случайно верный
+зелёный на guard-clause) чинит одна замена модели.
+
+Правильная модель — **перечисление путей исполнения**, а не одна метка «ветка» на
+подсегмент:
+
+* `A; if c: B else: D; E` даёт ДВА пути: `A+B+E` и `A+D+E`. Пара «лог+факт» в ОДНОМ
+  пути = нарушение. `if` без `else` — то же самое с `D` пустым (путь проходит `if`
+  насквозь, не подбирая ничего).
+* `if`/`try`-`except` **форкают** список открытых путей: тело `if` и `else`
+  (или сквозной проход при отсутствии `else`) — по копии от каждого пути, вошедшего в
+  `if`; каждый `except` — по копии от путей, живых на ВХОДЕ в `try` (не после его
+  тела — исключение может прилететь с первой же строки).
+* Тело `try`, тело `with`, тело цикла, `else`/`finally` у `try`, `else` у цикла —
+  ПРОХОДНЫЕ: продолжают открытые пути, а не форкают их.
+* `return`/`raise`/`continue`/`break` **закрывают** путь: он больше не растёт и
+  проверяется на нарушение немедленно. Это и делает ранний выход настоящей
+  развилкой: `if x: log(); return` + `report()` ниже даёт путь-1 (лог, закрыт на
+  `return`, факта в нём нет) и путь-2 (после `if`, только факт) — оба чисты.
+  Без `return` тот же код даёт ОДИН путь после `if`, где оба вызова встречаются —
+  и это уже нарушение (см. `test_if_without_else_leaks_from_parent_j9_regression` и
+  `test_early_return_closes_the_path_guard_clause` ниже — заявленное свойство
+  проверено ОБОИМИ прогонами, не только тем, что «зелено»).
+* Вложенные `def`/`class`/`lambda` — своя единица, в текущий путь их вызовы не идут
+  (без изменений от первой редакции).
+* **Потолок открытых путей** (`_MAX_OPEN_PATHS`) — при форке, дающем больше путей,
+  чем потолок, все пути группы схлопываются в ОДИН консервативным объединением
+  вызовов (сумма log/track, без потери фактов). Без потолка N независимых `if`
+  подряд даёт `2**N` путей — экспоненциальный взрыв на глубоко вложенном/длинном
+  файле повесил бы страж навсегда. Слияние может дать ЛИШНЕЕ нарушение (пути,
+  которые сами по себе не нарушали, но объединены), но никогда не спрячет
+  настоящее — объединение calls не теряет ни одного вызова. См.
+  `test_path_explosion_is_capped_and_terminates`.
 
 **Граница правила (не whitelist).** Тело определения самого разъёма —
 `ObservableMixin.report_error` (`base_manager/mixins/observable_mixin.py`) — не
@@ -39,44 +69,46 @@
 написанный тестером ВСЛЕПУЮ (до реализации, из acceptance criteria плана). Он пинил
 ДВЕ вещи:
 
-1. **Единица правила — «одна функция».** Отменено Р-10 в пользу «одна ветка» — сама
-   формулировка правила изменилась, а не его исполнение;
+1. **Единица правила — «одна функция».** Отменено Р-10 в пользу «одна ветка/путь» —
+   сама формулировка правила изменилась, а не его исполнение;
 2. **Известное нарушение — `router_module/core/router_manager.py::_report_send_error`.**
-   Эта пара уже НЕ существует: Task 1.3b перенесла сайт на единственный вызов
-   `self.report_error(...)` (см. `router_manager.py:406-409` — коммент на месте прямо
-   объясняет перенос). Тестер писал против HEAD ДО миграции 1.3b, и старый контроль
-   умер вместе с мигрированной парой — не потому что сломался, а потому что предмет,
-   который он проверял, физически перестал существовать.
+   Эта пара уже НЕ существует на боевом коде: Task 1.3b перенесла сайт на единственный
+   вызов `self.report_error(...)` (см. `router_manager.py:406-409` — коммент на месте
+   прямо объясняет перенос). Тестер писал против HEAD ДО миграции 1.3b, и старый
+   контроль умер вместе с мигрированной парой. Та же функция позже сослужила службу
+   ещё раз — координатор воспроизвёл на ней находку J9 ВРЕМЕННОЙ заплаткой (внесена
+   и сразу откачена, в дереве её нет).
 
-Файл удалён (не оставлен рядом) — две копии одного обходчика были бы хуже одной:
-зелёный доказывал бы согласие двух копий одной модели, а не здоровье кода (правило
-проекта «одна ветка исполнения» применительно к самим тестам). Обе содержательные
-идеи тестера перенесены сюда: «обходчик обязан хоть что-то находить на реальном
-исходнике» → `test_synthetic_pair_in_one_body_is_a_violation` (контроль по адресу);
-«известное нарушение находится обходчиком» → сам обходчик доказан на живом дереве
-через `ObservableMixin.report_error` (см. границу выше — до C2/1.3b дорога плагина в
-плоскость ошибок была ПОЧИНЕНА, и парность в самом разъёме — не костыль, а место, где
-обе дороги ЖИВУТ по построению).
+Файл удалён (не оставлен рядом) — две копии одного обходчика были бы хуже одной.
+Обе содержательные идеи тестера перенесены сюда: «обходчик обязан хоть что-то
+находить на реальном исходнике» → `test_synthetic_pair_in_one_body_is_a_violation`
+(контроль по адресу); «известное нарушение находится обходчиком» → сам обходчик
+доказан на живом дереве через `ObservableMixin.report_error` (граница выше).
 
 ## Числа (сверены с числами владельца до задачи, метод — AST, не глазом)
 
 Обход `multiprocess_framework`, `Services`, `Plugins`, `multiprocess_prototype`, без
-`tests/`, `test_*`, `__pycache__`, на HEAD `659930a5`:
+`tests/`, `test_*`, `__pycache__`, на HEAD `659930a5`/`83b12f30`:
 
 * «в функции» (оба коннектора где-то в поддереве функции, включая вложенные
   `def`) → **4**: `ObservableMixin.report_error`,
   `SourceProducer.run_loop`, `DrawingIoPlugin._do_save`, `frontend/app.py::run_gui`
   (у `run_gui` — только через вложенный `_ActivatorLog.error`, который сам по себе
-  отдельная единица; на уровне веток `run_gui` ЧИСТ — см. ниже);
-* «в ветке» (Р-10) → **1**: только `ObservableMixin.report_error` (тело `try` —
-  проходное, факт и голос делят один сегмент);
-* «в ветке» + граница → **0**.
+  отдельная единица; на уровне путей `run_gui` ЧИСТ — см. ниже);
+* «путевая модель» без границы → нарушения находит ТОЛЬКО на путях, реально
+  проходящих через `ObservableMixin.report_error` (в нём после правки J9 путевая
+  модель находит нарушение на КАЖДОМ из двух путей, форкнутых вложенным `if
+  recorded:` до вызова `_log_error` — было 1 при старой сегментной модели, теперь 2,
+  оба по тому же самому реальному дефекту рецепта, не по двум разным);
+* «путевая модель» + граница → **0** — дерево зелёное (см.
+  `test_guard_is_green_on_the_tree`).
 """
 
 from __future__ import annotations
 
 import ast
 import textwrap
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, Optional
@@ -87,18 +119,25 @@ _SCAN_ROOTS = ("multiprocess_framework", "Services", "Plugins", "multiprocess_pr
 _LOG_NAMES = frozenset({"_log_error", "log_error"})
 _TRACK_NAMES = frozenset({"_track_error", "track_error", "report_error"})
 
+#: Потолок одновременно открытых путей на один юнит. Без него N независимых `if`
+#: подряд удваивают список путей на каждом — `2**N` при N~30 вешает страж навсегда
+#: на реальном файле. При превышении — консервативное слияние (см. `_cap_paths`).
+_MAX_OPEN_PATHS = 512
+
 #: Граница правила (не whitelist, Р-9/Р-10) — тело определения самого разъёма.
 _BOUNDARY_FILE = "multiprocess_framework/modules/base_manager/mixins/observable_mixin.py"
 _BOUNDARY_QUALNAME = "ObservableMixin.report_error"
 
 #: Живые (не синтетические) негативные пары — легитимные развилки, которые страж
-#: обязан НЕ находить. Взяты с дерева после Task 1.3b.
+#: обязан НЕ находить. Взяты с дерева после Task 1.3b, перепроверены под путевой
+#: моделью (не только под первой, сегментной).
 _LIVE_NEGATIVE_CASES = (
     # if/else-запасной путь: health.report_error, когда health подключён,
-    # иначе _log_error — две ветки одного if, каждая с ОДНИМ коннектором.
+    # иначе _log_error — каждый путь через этот if несёт РОВНО один коннектор.
     ("multiprocess_framework/modules/process_module/generic/source_producer.py", "run_loop"),
-    # разведённые ранним `return` разные классы событий: пустой список точек
-    # (класс B, log_error + return) отдельно от отказа сохранения (except + return).
+    # разведённые ранним `return` разные классы событий: путь через пустой список
+    # точек закрывается на `return` сразу после log_error (факта в нём нет), путь
+    # через отказ сохранения закрывается на `return` сразу после report_error.
     ("Plugins/io/drawing_io/plugin.py", "_do_save"),
 )
 
@@ -129,11 +168,23 @@ class CallSite:
 
 
 @dataclass
-class Segment:
-    """Накопитель вызовов ОДНОГО сегмента одной ветки — до следующего разделителя."""
+class Path:
+    """Один путь исполнения от начала юнита до текущей точки.
+
+    ``trail`` — метки форков, пройденных этим путём (для адреса в сообщении).
+    Пустой ``trail`` — путь ни разу не форкался (``root``).
+    """
 
     log: list = field(default_factory=list)
     track: list = field(default_factory=list)
+    trail: list = field(default_factory=list)
+
+    def copy(self) -> "Path":
+        p = Path()
+        p.log = list(self.log)
+        p.track = list(self.track)
+        p.trail = list(self.trail)
+        return p
 
     def add(self, name: str, line: int) -> None:
         if name in _LOG_NAMES:
@@ -143,6 +194,9 @@ class Segment:
 
     def is_violation(self) -> bool:
         return bool(self.log) and bool(self.track)
+
+    def label(self) -> str:
+        return ">".join(self.trail) if self.trail else "root"
 
 
 @dataclass
@@ -161,12 +215,11 @@ class Violation:
         )
 
 
-class _BranchWalker:
-    """Обходчик ОДНОГО юнита (функции/метода/лямбды) — своё дерево веток.
+class _PathWalker:
+    """Обходчик ОДНОГО юнита (функции/метода/лямбды) — перечисляет пути исполнения.
 
-    Вложенные `def`/`class`/`lambda` в текущую ветку не идут — они складываются в
-    ``nested_units`` и разбираются отдельно, как самостоятельные юниты (см. модульную
-    докстринг-семантику Р-10 выше).
+    Вложенные `def`/`class`/`lambda` в текущий путь не идут — они складываются в
+    ``nested_units`` и разбираются отдельно, как самостоятельные юниты.
     """
 
     def __init__(self, file_rel: str, qualname: str) -> None:
@@ -176,84 +229,113 @@ class _BranchWalker:
         self.nested_units: list[tuple[str, ast.AST]] = []
 
     # ------------------------------------------------------------------ #
-    # Публичный вход — разобрать список стейтментов как ОДНУ ветку.
+    # Публичный вход — разобрать тело юнита целиком.
     # ------------------------------------------------------------------ #
-    def walk_branch(self, stmts: list, label: str) -> None:
-        seg = Segment()
-        self._walk_stmts(stmts, seg, label)
-        self._close(seg, label)
+    def run(self, body: list) -> None:
+        closed: list[Path] = []
+        open_paths = self._walk_stmts(body, [Path()], closed)
+        # Юнит кончился — то, что ещё открыто, закрывается неявным концом функции.
+        closed.extend(open_paths)
+        for p in closed:
+            self._check(p)
 
-    def _close(self, seg: Segment, label: str) -> None:
-        if seg.is_violation():
-            self.violations.append(Violation(self.file, self.qualname, label, seg.log[0], seg.track[0]))
-        seg.log = []
-        seg.track = []
+    def _check(self, p: "Path") -> None:
+        if p.is_violation():
+            self.violations.append(Violation(self.file, self.qualname, p.label(), p.log[0], p.track[0]))
 
-    def _walk_stmts(self, stmts: list, seg: Segment, label: str) -> None:
+    # ------------------------------------------------------------------ #
+    # Перечисление путей.
+    # ------------------------------------------------------------------ #
+    def _walk_stmts(self, stmts: list, paths: list, closed: list) -> list:
         for stmt in stmts:
-            self._walk_stmt(stmt, seg, label)
+            paths = self._walk_stmt(stmt, paths, closed)
+        return paths
 
-    def _walk_stmt(self, stmt: ast.stmt, seg: Segment, label: str) -> None:
-        # Вложенные def/class — своя единица (Р-10): в текущую ветку не идут.
+    def _walk_stmt(self, stmt: ast.stmt, paths: list, closed: list) -> list:
+        # Вложенные def/class — своя единица (без изменений): в текущий путь не идут.
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             self.nested_units.append((f"{self.qualname}.<locals>.{stmt.name}", stmt))
-            return
+            return paths
 
         if isinstance(stmt, ast.If):
-            # test исполняется безусловно на пути к обеим веткам — часть текущего сегмента.
-            self._collect_expr(stmt.test, seg)
-            self.walk_branch(stmt.body, f"{label}>if@{stmt.lineno}.body")
+            # test исполняется на пути к ОБЕИМ веткам — не форкает, идёт во все пути.
+            for p in paths:
+                self._collect_expr(stmt.test, p)
+            body_paths = [p.copy() for p in paths]
+            for p in body_paths:
+                p.trail.append(f"if@{stmt.lineno}.body")
+            body_paths = self._walk_stmts(stmt.body, body_paths, closed)
             if stmt.orelse:
-                self.walk_branch(stmt.orelse, f"{label}>if@{stmt.lineno}.else")
-            return
+                else_paths = [p.copy() for p in paths]
+                for p in else_paths:
+                    p.trail.append(f"if@{stmt.lineno}.else")
+                else_paths = self._walk_stmts(stmt.orelse, else_paths, closed)
+            else:
+                # Нет else — путь проходит `if` НАСКВОЗЬ (J9): копия родителя без
+                # добавленного тела `if`, а не пустой изолированный сегмент.
+                else_paths = [p.copy() for p in paths]
+            return self._cap(body_paths + else_paths)
 
         if isinstance(stmt, ast.Try):
-            # Тело try — ПРОХОДНОЕ (не ветка): продолжает ТЕКУЩИЙ сегмент.
-            self._walk_stmts(stmt.body, seg, label)
-            # Каждый except — своя ветка, отдельная от тела try и от соседних except.
+            entry_paths = [p.copy() for p in paths]  # пути, живые НА ВХОДЕ в try
+            body_paths = self._walk_stmts(stmt.body, [p.copy() for p in paths], closed)
+            handler_paths: list = []
             for idx, handler in enumerate(stmt.handlers):
-                self.walk_branch(handler.body, f"{label}>try@{stmt.lineno}.{_handler_label(idx, handler)}")
-            # else/finally у try — тоже проходные, продолжают текущий сегмент.
+                # Каждый except форкается от ВХОДА в try, не от конца тела —
+                # исключение может прилететь с первой же строки тела.
+                h_paths = [p.copy() for p in entry_paths]
+                label = f"try@{stmt.lineno}.{_handler_label(idx, handler)}"
+                for p in h_paths:
+                    p.trail.append(label)
+                h_paths = self._walk_stmts(handler.body, h_paths, closed)
+                handler_paths.extend(h_paths)
             if stmt.orelse:
-                self._walk_stmts(stmt.orelse, seg, label)
+                body_paths = self._walk_stmts(stmt.orelse, body_paths, closed)
+            merged = self._cap(body_paths + handler_paths)
             if stmt.finalbody:
-                self._walk_stmts(stmt.finalbody, seg, label)
-            return
+                # finally — проходной для ВСЕХ путей (успех и каждый except).
+                merged = self._walk_stmts(stmt.finalbody, merged, closed)
+            return merged
 
         if isinstance(stmt, (ast.With, ast.AsyncWith)):
             for item in stmt.items:
-                self._collect_expr(item.context_expr, seg)
-            self._walk_stmts(stmt.body, seg, label)  # тело with — проходное
-            return
+                for p in paths:
+                    self._collect_expr(item.context_expr, p)
+            return self._walk_stmts(stmt.body, paths, closed)  # проходной
 
         if isinstance(stmt, (ast.For, ast.AsyncFor)):
-            self._collect_expr(stmt.iter, seg)
-            self._walk_stmts(stmt.body, seg, label)  # тело цикла — проходное
+            for p in paths:
+                self._collect_expr(stmt.iter, p)
+            paths = self._walk_stmts(stmt.body, paths, closed)  # проходной
             if stmt.orelse:
-                self._walk_stmts(stmt.orelse, seg, label)  # else цикла — тоже проходной
-            return
+                paths = self._walk_stmts(stmt.orelse, paths, closed)
+            return paths
 
         if isinstance(stmt, ast.While):
-            self._collect_expr(stmt.test, seg)
-            self._walk_stmts(stmt.body, seg, label)
+            for p in paths:
+                self._collect_expr(stmt.test, p)
+            paths = self._walk_stmts(stmt.body, paths, closed)
             if stmt.orelse:
-                self._walk_stmts(stmt.orelse, seg, label)
-            return
+                paths = self._walk_stmts(stmt.orelse, paths, closed)
+            return paths
 
         if isinstance(stmt, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
             value = getattr(stmt, "value", None)
             if value is None:
                 value = getattr(stmt, "exc", None)
             if value is not None:
-                self._collect_expr(value, seg)
-            # Ранний выход делит ветку на сегменты «до» и «после» (Р-10).
-            self._close(seg, label)
-            return
+                for p in paths:
+                    self._collect_expr(value, p)
+            # Ранний выход ЗАКРЫВАЕТ путь — он не растёт дальше (J9-фикс).
+            closed.extend(paths)
+            return []
 
         # Простой стейтмент (Expr, Assign, AugAssign, AnnAssign, Global, Import, ...).
-        self._collect_expr(stmt, seg)
+        for p in paths:
+            self._collect_expr(stmt, p)
+        return paths
 
-    def _collect_expr(self, node, seg: Segment) -> None:
+    def _collect_expr(self, node, p: "Path") -> None:
         if node is None:
             return
         if isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -263,9 +345,25 @@ class _BranchWalker:
         if isinstance(node, ast.Call):
             name = _call_name(node.func)
             if name:
-                seg.add(name, node.lineno)
+                p.add(name, node.lineno)
         for child in ast.iter_child_nodes(node):
-            self._collect_expr(child, seg)
+            self._collect_expr(child, p)
+
+    def _cap(self, paths: list) -> list:
+        """Потолок открытых путей — консервативное слияние при превышении.
+
+        Схлопывает ВСЕ пути группы в один union'ом log/track (без потери вызовов —
+        может дать лишнее нарушение, никогда не спрячет настоящее). Иначе `2**N`
+        независимых `if` подряд не даёт стражу завершиться на реальном файле.
+        """
+        if len(paths) <= _MAX_OPEN_PATHS:
+            return paths
+        merged = Path()
+        merged.trail = ["capped(>{}paths)".format(_MAX_OPEN_PATHS)]
+        for p in paths:
+            merged.log.extend(p.log)
+            merged.track.extend(p.track)
+        return [merged]
 
 
 def _is_boundary(rel: str, qualname: str) -> bool:
@@ -295,13 +393,13 @@ def _analyze_module(tree: ast.Module, rel: str, *, apply_boundary: bool = True) 
             continue
         if apply_boundary and _is_boundary(rel, qualname):
             continue
-        walker = _BranchWalker(rel, qualname)
+        walker = _PathWalker(rel, qualname)
         if isinstance(node, ast.Lambda):
-            seg = Segment()
-            walker._collect_expr(node.body, seg)
-            walker._close(seg, "root")
+            p = Path()
+            walker._collect_expr(node.body, p)
+            walker._check(p)
         else:
-            walker.walk_branch(node.body, "root")
+            walker.run(node.body)
         violations.extend(walker.violations)
         queue.extend(walker.nested_units)
 
@@ -351,7 +449,7 @@ class TestOneConnectorPerPointGuard:
 
         Прежняя формулировка «в одной функции» была бы красна по построению на
         4 функциях (см. докстринг файла) — зелёным дерево становится ТОЛЬКО когда
-        единица правила — ветка, а не функция.
+        единица правила — путь, а не функция и не изолированный сегмент.
         """
         violations, unparsed = scan_tree(_REPO_ROOT)
         # «Не разобрал» ≠ «данных нет» (правило проекта) — молчащий парсер даёт
@@ -368,9 +466,7 @@ class TestOneConnectorPerPointGuard:
         """Контроль по адресу: обходчик обязан хоть что-то находить.
 
         Без этого теста зелёный прогон выше был бы немотой, а не здоровьем (правило
-        проекта «ноль наблюдений выглядит как результат наблюдения»). Синтетика — не
-        подмена живой проверки, а доказательство, что сам обходчик рабочий, ДО того
-        как мы доверяем его нулю на реальном дереве.
+        проекта «ноль наблюдений выглядит как результат наблюдения»).
         """
         source = textwrap.dedent(
             """
@@ -390,6 +486,77 @@ class TestOneConnectorPerPointGuard:
         assert v.branch == "root"
         assert v.log_site.line == 3
         assert v.track_site.line == 4
+
+    def test_if_without_else_leaks_from_parent_j9_regression(self) -> None:
+        """Регресс-сторож J9: `if` без `else` обязан наследовать вызовы РОДИТЕЛЯ.
+
+        Найдено инъекцией координатора на живом коде (`router_manager.py::
+        _report_send_error`, заплатка `if reason: self._log_error(...)` перед уже
+        стоящим `self.report_error(...)`): первая редакция обходчика заводила ПУСТОЙ
+        сегмент для тела `if` — вызов до `if` и вызов внутри никогда не встречались
+        в одном сегменте, и страж молчал, хотя при истинном условии звучат ОБА.
+        Путевая модель обязана видеть путь «через `if`» как ПРОДОЛЖЕНИЕ пути до
+        `if`, а не изолированную ветку с нуля.
+        """
+        source = textwrap.dedent(
+            """
+            class Foo:
+                def bar(self, exc, ctx, reason):
+                    self.report_error(exc, context=ctx)
+                    if reason:
+                        self._log_error(f"[{reason}] detail")
+            """
+        ).strip("\n")
+        tree = ast.parse(source, filename="<synthetic-j9-if-leak>")
+        violations = _analyze_module(tree, "synthetic_j9_if_leak.py")
+
+        assert len(violations) == 1, violations
+        v = violations[0]
+        assert v.func == "Foo.bar"
+        assert v.track_site.line == 3
+        assert v.log_site.line == 5
+
+    def test_early_return_closes_the_path_guard_clause(self) -> None:
+        """Guard-clause: ранний `return` — легитимная развилка, немота — нет.
+
+        Пара обязана быть в ОДНОМ тесте (координатор): иначе зелёный на варианте
+        с `return` неотличим от того, что обходчик просто ничего не находит — его
+        держит именно закрытие пути на `return`, что доказывает КРАСНЫЙ вариант без
+        `return` рядом, на том же теле.
+        """
+        with_return = textwrap.dedent(
+            """
+            class Foo:
+                def bar(self, exc, ctx, x):
+                    if x:
+                        self._log_error("x")
+                        return
+                    self._track_error(exc, ctx)
+            """
+        ).strip("\n")
+        violations_with_return = _analyze_module(
+            ast.parse(with_return, filename="<synthetic-guard-clause-return>"),
+            "synthetic_guard_clause_return.py",
+        )
+        assert violations_with_return == [], violations_with_return
+
+        without_return = textwrap.dedent(
+            """
+            class Foo:
+                def bar(self, exc, ctx, x):
+                    if x:
+                        self._log_error("x")
+                    self._track_error(exc, ctx)
+            """
+        ).strip("\n")
+        violations_without_return = _analyze_module(
+            ast.parse(without_return, filename="<synthetic-guard-clause-no-return>"),
+            "synthetic_guard_clause_no_return.py",
+        )
+        assert len(violations_without_return) == 1, violations_without_return
+        v = violations_without_return[0]
+        assert v.log_site.line == 4
+        assert v.track_site.line == 5
 
     def test_live_negative_pairs_are_not_flagged(self) -> None:
         """Легитимные развилки с живого дерева НЕ краснеют — по имени и файлу.
@@ -413,13 +580,12 @@ class TestOneConnectorPerPointGuard:
         сканом всех четырёх слоёв (framework/Services/Plugins/prototype, без
         tests/) подтверждено: функций, где оба коннектора вообще встречаются
         вместе, ровно 4 (см. числа в докстринге файла — совпадают с числами
-        владельца). Ни в одной из них, и нигде больше в этом дереве на
-        HEAD `659930a5`, `_log_error` не стоит в одном `except`, а
-        `report_error`/`_track_error` — в ДРУГОМ `except` ТОГО ЖЕ `try`: сама эта
-        форма сейчас в коде не встречается ни разу. Инструкция задачи просила все
-        три случая «с живого дерева», но для этого конкретного паттерна живого
-        случая нет — искал скриптом (AST по всем `ast.Try` с 2+ обработчиками),
-        не глазом. Если он появится позже — это готовая точка, куда его перенести.
+        владельца). Ни в одной из них, и нигде больше в этом дереве, `_log_error`
+        не стоит в одном `except`, а `report_error`/`_track_error` — в ДРУГОМ
+        `except` ТОГО ЖЕ `try`: сама эта форма сейчас в коде не встречается ни
+        разу. Инструкция задачи просила все три случая «с живого дерева», но для
+        этого конкретного паттерна живого случая нет — искал скриптом (AST по всем
+        `ast.Try` с 2+ обработчиками), не глазом.
         """
         source = textwrap.dedent(
             """
@@ -460,3 +626,26 @@ class TestOneConnectorPerPointGuard:
         assert not any(v.func == _BOUNDARY_QUALNAME for v in with_boundary), (
             f"с границей {_BOUNDARY_QUALNAME} обязан выпасть из нарушений"
         )
+
+    def test_path_explosion_is_capped_and_terminates(self) -> None:
+        """Потолок путей не даёт стражу зависнуть на длинной цепочке `if`.
+
+        14 НЕЗАВИСИМЫХ (не вложенных) `if` подряд без потолка дают `2**14` = 16384
+        путей — далеко за `_MAX_OPEN_PATHS` (512). Синтетика в памяти, файл на диск
+        не кладём. Проверяется и завершение (не висит), и отсутствие ложного
+        падения обходчика на самом факте превышения потолка.
+        """
+        depth = 14
+        lines = ["class Foo:", "    def bar(self, c):"]
+        for _ in range(depth):
+            lines.append("        if c:")
+            lines.append("            pass")
+        source = "\n".join(lines) + "\n"
+        tree = ast.parse(source, filename="<synthetic-path-explosion>")
+
+        started = time.perf_counter()
+        violations = _analyze_module(tree, "synthetic_path_explosion.py")
+        elapsed = time.perf_counter() - started
+
+        assert violations == [], violations
+        assert elapsed < 5.0, f"обходчик завис/затянул анализ на цепочке if: {elapsed:.2f} с"
