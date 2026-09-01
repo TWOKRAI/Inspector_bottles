@@ -62,6 +62,14 @@ from .test_observation_policy_review_f4 import _wired
 WINDOW = 17.25
 ESCALATE = 9
 
+#: Н-2 (добор ревью Ф2, ``review-phase-1.md``): те же значения, что в
+#: ``test_f2_task27_voices_reload_response_gap.py`` (``CAP``/``STALE``) — СПЕЦИАЛЬНО
+#: не равны схемным дефолтам (512/10). Заплата, приколотившая ответ константой
+#: 512/10, раньше проходила незамеченной именно потому, что запрос эти поля не
+#: называл и ответ падал на дефолт — правда и ложь совпадали.
+CAP = 2048
+STALE = 7
+
 
 @pytest.fixture(autouse=True)
 def _isolated_policy() -> Iterator[None]:
@@ -258,20 +266,33 @@ class TestTheCommandAnswerCarriesVoicesApplied:
     """
 
     def test_voices_applied_is_a_key_of_the_answer(self, tmp_path: Path) -> None:
+        """Н-2 (добор ревью Ф2): запрос НАЗЫВАЕТ ``max_tracked_keys``/``stale_windows``
+        значениями, отличными от схемных дефолтов (512/10) — иначе заплата,
+        приколотившая ответ той же константой, что и дефолт, проходит незамеченной
+        (0 красных из 2526 у ревьюера).
+        """
         _, handlers = _wired(tmp_path)
 
         res = handlers["config.reload"](
-            {"observability": {"voices": {"default_window_sec": WINDOW, "escalate_after_repeats": ESCALATE}}}
+            {
+                "observability": {
+                    "voices": {
+                        "default_window_sec": WINDOW,
+                        "escalate_after_repeats": ESCALATE,
+                        "max_tracked_keys": CAP,
+                        "stale_windows": STALE,
+                    }
+                }
+            }
         )
 
         assert res["success"] is True, res
         assert "voices_applied" in res, sorted(res)
-        # Task 2.7: те же два новых поля секции, на схемных дефолтах.
         assert res["voices_applied"] == {
             "default_window_sec": WINDOW,
             "escalate_after_repeats": ESCALATE,
-            "max_tracked_keys": 512,
-            "stale_windows": 10,
+            "max_tracked_keys": CAP,
+            "stale_windows": STALE,
         }, res["voices_applied"]
 
     def test_the_same_answer_confirms_the_knob(self, tmp_path: Path) -> None:

@@ -17,9 +17,12 @@
 > импортировать `logger_module` на уровне модуля (цикл), а `QueueRegistry` пишет мимо миксина
 > вовсе. Ключевое свойство — `WindowedVoices.take()` возвращает **решение** и ничего не пишет за
 > вызывающего: факт (счётчик, запись в плоскость ошибок) учитывается ВСЕГДА, окном давится только
-> голос. Политика процесса — `observability.voices.default_window_sec` /
-> `escalate_after_repeats`, не литерал. Счётчики `windowed_suppressed` /
-> `windowed_keys_evicted` — процессные, публикуются `LoggerCore.get_stats()`.
+> голос. Политика процесса, не литерал — четыре поля `observability.voices`
+> (Task 2.7): `default_window_sec` / `escalate_after_repeats` (окно и порог
+> эскалации) и `max_tracked_keys` / `stale_windows` (потолок карты ключей и
+> такт протухания — до Task 2.7 были литералами без ручки и без readback).
+> Счётчики `windowed_suppressed` / `windowed_keys_evicted` — процессные,
+> публикуются `LoggerCore.get_stats()`.
 
 ---
 

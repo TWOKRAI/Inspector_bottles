@@ -427,7 +427,17 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
         anomalies.append(
             {
                 "kind": "telemetry_readmodel_empty",
-                "detail": "state-подписки нет — watch_like_gui наполнит",
+                # Н-6 (добор ревью Ф2): «наполнит» без оговорки — обещание, а у
+                # пустоты есть ТРЕТЬЯ штатная причина, которую ingest_active не
+                # различает (закрытый publisher-gate в источнике, см. докстринг
+                # ``driver.telemetry_snapshot``) — после неё watch_like_gui не
+                # поможет, а второй подсказки уже не будет (условие anomaly
+                # больше не выполняется под активной подпиской). Вторая дорога
+                # названа здесь заранее, а не после повторной немоты.
+                "detail": (
+                    "state-подписки нет — watch_like_gui наполнит; если после "
+                    "него снимок всё ещё пуст — introspect.telemetry, поле gate_active"
+                ),
             }
         )
 

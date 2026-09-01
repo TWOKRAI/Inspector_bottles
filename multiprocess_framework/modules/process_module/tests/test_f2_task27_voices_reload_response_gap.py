@@ -29,6 +29,19 @@ test_the_answer_uses_schema_field_names``), подаёт секцию, кото�
 Сторож ниже закрывает разницу: секция называет значения, ОТЛИЧНЫЕ от L0-дефолтов,
 и ответ обязан повторить именно их. Литералы здесь намеренно не 512/10 — иначе
 тест вернулся бы в ту же слепую точку.
+
+**Уточнение границы (ревью Ф2, Н-2).** Тесты ниже зовут ``apply_voices_policy()``
+НАПРЯМУЮ — это внутренний шов между механизмом (``windowed_voice``) и слоем
+пересборки (``observability_reload``), а НЕ ответ команды ``config.reload``
+оператору: между ``apply_voices_policy`` и ``result["voices_applied"]``
+(``builtin_commands.py:2172``) лежит ещё код (`apply_observability_layers`,
+запись в ``expanded[VOICES_SECTION_KEY]``), который этот файл не проходит.
+Операторскую границу — ЦЕЛИКОМ, через ``handlers["config.reload"]`` — теперь
+сторожит ``test_voices_policy_road_guards.py::
+TestTheCommandAnswerCarriesVoicesApplied::test_voices_applied_is_a_key_of_the_answer``
+теми же литералами (``CAP``/``STALE`` здесь = 2048/7 там, чтобы числа не
+размножались). Этот файл остаётся — он держит внутренний шов, который
+операторский тест не задевает напрямую.
 """
 
 from __future__ import annotations

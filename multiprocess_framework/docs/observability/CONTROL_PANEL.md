@@ -486,6 +486,32 @@ observability:
 Последний жест — именно **удаление**: присвоение прежнего значения порвало бы связь с нижним слоем
 навсегда, и при смене дефолта сессия продолжала бы держать старое число.
 
+### Окна голоса — троттлинг диагностики на ключ (`observability.voices`, ADR-LOG-012)
+
+```bash
+# тише на линии backpressure, разговорчивее на стенде: своё окно и потолок ключей
+config.reload {"observability": {"voices": {"default_window_sec": 30, "max_tracked_keys": 2048}}}
+#   voices_applied            → что применено к ЖИВОМУ механизму
+#   introspect.observability  → windowed_suppressed / windowed_keys_evicted
+```
+
+Политика ПРОЦЕССНАЯ, не привязана к живому объекту: `apply_voices_policy` пишет прямо в
+`logger_module/core/windowed_voice.py`, и readback читает механизм безусловно (см.
+[`logger_module/README.md`](../../modules/logger_module/README.md)).
+
+| Ключ | Дефолт | Смысл |
+|---|---|---|
+| `default_window_sec` | `5.0` | окно голоса на ключ, сек (`0` — не голосить чаще, чем каждый раз) |
+| `escalate_after_repeats` | `3` | повторов ПОДРЯД по ключу до эскалации INFO → WARNING (ось повторов, не времени) |
+| `max_tracked_keys` | `512` | потолок карты ключей держателя (обе карты — окна и серии — один потолок) |
+| `stale_windows` | `10` | окон молчания до того, как бездолжный ключ считается протухшим |
+
+`max_tracked_keys` / `stale_windows` — добор ревью Ф1 (Task 2.7): до него это были литералы в
+`windowed_voice.py` без ручки и без readback. Счётчики `windowed_suppressed` /
+`windowed_keys_evicted` — процессные, публикует плоскость логов (`introspect.observability`).
+Факт (счётчик, запись в плоскость ошибок) учитывается ВСЕГДА, окно давит только голос — не
+путать со счётчиком, который сам не растёт без голоса.
+
 ---
 
 ## Решения
@@ -495,6 +521,7 @@ observability:
 | ADR-CRM-006 | Observability Control Plane — точки расширения | [`channel_routing_module/DECISIONS.md`](../../modules/channel_routing_module/DECISIONS.md) |
 | ADR-CRM-010 | `reconfigure` — validate-then-swap, откат к последнему принятому конфигу | там же |
 | ADR-LOG-010 | у порога одна ось | [`logger_module/DECISIONS.md`](../../modules/logger_module/DECISIONS.md) |
+| ADR-LOG-012 | окно голоса на ключ — факт всегда, строка не чаще окна | там же |
 | ADR-PM-016, ADR-PM-017, ADR-PM-018 | телеметрийный тик, центральный троттл, управляемая публикация | [`process_module/DECISIONS.md`](../../modules/process_module/DECISIONS.md) |
 | ADR-PM-030 | `log_error` — строка, `health.report_error` — инцидент | там же |
 | ADR-PM-036 | широкая запись о единице работы и живой хозяин её отбора | там же |

@@ -38,6 +38,7 @@ PROCESS_HOOKS = "multiprocess_framework/modules/logger_module/core/process_hooks
 BACKEND_CTL_AGENTS = "backend_ctl/AGENTS.md"
 BACKEND_CTL_OVERVIEW = "backend_ctl/overview.py"
 OBSERVATION_POLICY = "multiprocess_framework/modules/process_module/configs/observation_policy.py"
+OBSERVABILITY_CONFIG = "multiprocess_framework/modules/process_module/configs/observability_config.py"
 
 Edit = Tuple[str, str, str]  # (файл, что заменить, на что — текст ДО правок 5.1)
 
@@ -257,6 +258,48 @@ INJECTIONS: List["pytest.ParameterSet"] = [
         "F2-1",
         [(OBSERVATION_POLICY, "STATS_SUBTREE_INTERVAL_SEC = 0.0", "STATS_SUBTREE_INTERVAL_SEC = 1.0")],
         id="F2-1-код-сменил-дефолтный-интервал-чисел",
+    ),
+    # H3H4-schema (замыкатель класса Н-4, добор ревью Ф2, 2026-09-01). Тот же
+    # парный приём, что у F1-2/C3/T2.8/F2-1 выше: одна инъекция «документ забыл
+    # поле» не сторожит противоположный дрейф «схема завела поле, документ
+    # молчит» — а именно ЭТОТ дрейф и был точкой находки Н-4 (max_tracked_keys/
+    # stale_windows добавлены в схему Task 2.7, документ не узнал ни об одном).
+    pytest.param(
+        "H3H4-schema",
+        [
+            (
+                CONTROL_PANEL,
+                "| `stale_windows` | `10` | окон молчания до того, как бездолжный ключ считается протухшим |\n",
+                "",
+            )
+        ],
+        id="H3H4-schema-документ-забыл-поле-таблицы",
+    ),
+    pytest.param(
+        "H3H4-schema",
+        # Схема завела поле, документ не узнал: доказывает, что список полей
+        # ДЕЙСТВИТЕЛЬНО читается из схемы (_model_fields), а не переписан
+        # константой в самой проверке — иначе эта инъекция не покраснела бы.
+        [
+            (
+                OBSERVABILITY_CONFIG,
+                "    stale_windows: Annotated[\n"
+                "        int,\n"
+                '        FieldMeta("Сколько окон молчания до того, как бездолжный ключ '
+                'считается протухшим", min=1, max=10_000),\n'
+                "    ] = 10\n",
+                "    stale_windows: Annotated[\n"
+                "        int,\n"
+                '        FieldMeta("Сколько окон молчания до того, как бездолжный ключ '
+                'считается протухшим", min=1, max=10_000),\n'
+                "    ] = 10\n"
+                "    new_field_for_h3h4_injection: Annotated[\n"
+                "        int,\n"
+                '        FieldMeta("поле для инъекции сторожа H3H4-schema", min=1, max=10),\n'
+                "    ] = 1\n",
+            )
+        ],
+        id="H3H4-schema-код-завёл-поле-документ-молчит",
     ),
 ]
 

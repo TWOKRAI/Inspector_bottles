@@ -170,6 +170,10 @@
 **Files:** `backend_ctl/overview.py`, `backend_ctl/tests/test_overview*.py`.
 **Steps:** если `telemetry_snapshot` пуст И подписка не активна → hint
 `{"kind": "telemetry_readmodel_empty", "detail": "state-подписки нет — watch_like_gui наполнит"}`;
+**исполнено с добором Н-6 ревью:** `detail` называет и ВТОРУЮ дорогу («если после него снимок
+всё ещё пуст — `introspect.telemetry`, поле `gate_active`»), потому что у пустоты есть третья
+штатная причина — закрытый publisher-gate, — которую `ingest_active` не различает, и второй
+подсказки уже не будет: под активной подпиской условие аномалии не выполняется;
 при активной подписке и пустом снимке — НЕ выдавать (законное «дельт ещё не было»).
 **Acceptance criteria:**
 - [x] Холодный `system_overview` → hint есть; после `watch_like_gui` + первая дельта → hint нет.

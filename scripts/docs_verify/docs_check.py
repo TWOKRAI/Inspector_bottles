@@ -181,19 +181,42 @@ def _section(text: str, title_fragment: str) -> str:
     """Текст раздела от заголовка, содержащего ``title_fragment``, до следующего заголовка.
 
     «Следующий» — того же или более высокого уровня: подразделы остаются внутри.
+
+    Строки внутри ```-блоков кода заголовками не считаются, даже если начинаются
+    с ``#`` (шапка bash-комментария в примере команды) — без этого секция
+    обрывалась на первом же таком комментарии. Найдено добором Н-4 (ревью Ф2,
+    2026-09-01): секция «Flight recorder» в CONTROL_PANEL.md резалась до 87
+    символов строкой ``# что происходило в процессе...`` внутри ```bash``` —
+    первого же примера команды под заголовком.
     """
     lines = text.splitlines()
+
+    def _is_fence(line: str) -> bool:
+        return line.lstrip().startswith("```")
+
     start = None
     level = 0
+    in_fence = False
     for index, line in enumerate(lines):
+        if _is_fence(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         if line.startswith("#") and title_fragment in line:
             start = index
             level = len(line) - len(line.lstrip("#"))
             break
     if start is None:
         raise Unverifiable(f"в документе нет заголовка со словами {title_fragment!r}")
+    in_fence = False
     for index in range(start + 1, len(lines)):
         line = lines[index]
+        if _is_fence(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         if line.startswith("#") and (len(line) - len(line.lstrip("#"))) <= level:
             return "\n".join(lines[start:index])
     return "\n".join(lines[start:])
@@ -316,6 +339,63 @@ def _check_command_params(src: Sources) -> Optional[str]:
                 + (f"; лишние: {sorted(extra)}" if extra else "")
                 + (f"; не названы: {sorted(missing)}" if missing else "")
             )
+    return "; ".join(bad) or None
+
+
+#: Секции ``observability.*``, для которых CONTROL_PANEL.md обязан назвать
+#: КАЖДОЕ поле Pydantic-схемы (замыкатель класса Н-4, добор ревью Ф2,
+#: 2026-09-01). Ключ — фрагмент заголовка секции в документе, значение — имя
+#: схемы в ``observability_config.py``.
+#:
+#: Список полей ВЫЧИСЛЯЕТСЯ из схемы через ``_model_fields`` (AST, без
+#: импорта фреймворка) — новое поле схемы (как ``max_tracked_keys``/
+#: ``stale_windows`` у Task 2.7) попадёт под проверку САМО, без правки этого
+#: файла. Честная граница (~80%, не 100%, названо явно): СПИСОК СЕКЦИЙ (какая
+#: секция в каком заголовке документа рассказана) остаётся объявленным
+#: руками — вывести его из кода значило бы знать заранее, в каком месте
+#: прозы документа человек решит рассказать о новой секции, а это решение не
+#: в коде. Числительные словом («шесть копий», «две ручки» — Н-3, Н-4) эта
+#: проверка тоже не видит: для них своя дисциплина «число не пишется
+#: словом», другой класс сторожей (см. ``test_f2_task27_manual_window_
+#: registry_matches_claims.py`` в дереве тестов).
+_OBSERVABILITY_SECTION_SCHEMAS: Dict[str, str] = {
+    "Окна голоса": "ObservabilityVoicesConfig",
+    "Flight recorder": "ObservabilityFlightConfig",
+}
+
+
+def _check_observability_section_fields(src: Sources) -> Optional[str]:
+    """CONTROL_PANEL.md называет КАЖДОЕ поле схемы для секций ``observability.*``.
+
+    Находка Н-4 (добор ревью Ф2, 2026-09-01): секции ``observability.voices``
+    не было в документе вовсе — четыре ручки существовали в схеме
+    (``ObservabilityVoicesConfig``, Task 2.7) и ни одна не была названа
+    оператору. Эта проверка — не заплатка под одно расхождение, а вычисляемая
+    проверка КЛАССА: добавь новое поле в схему секции из
+    ``_OBSERVABILITY_SECTION_SCHEMAS`` — проверка покраснеет сама, без правки
+    этого файла (см. ``_model_fields``).
+    """
+    config_file = f"{MODULES}/process_module/configs/observability_config.py"
+    doc = src.read(f"{OBS}/CONTROL_PANEL.md")
+
+    bad: List[str] = []
+    for heading_fragment, schema in _OBSERVABILITY_SECTION_SCHEMAS.items():
+        fields = _model_fields(src, config_file, schema)
+        try:
+            section_text = _section(doc, heading_fragment)
+        except Unverifiable:
+            bad.append(
+                f"{schema}: в CONTROL_PANEL.md нет заголовка со словами {heading_fragment!r} — "
+                "секция не документирована вовсе"
+            )
+            continue
+        named: Set[str] = set()
+        for cells in _md_table_rows(section_text):
+            if cells:
+                named.update(_backticked(cells[0]))
+        missing = fields - named
+        if missing:
+            bad.append(f"{schema}: секция {heading_fragment!r} не называет поля схемы в таблице: {sorted(missing)}")
     return "; ".join(bad) or None
 
 
@@ -860,6 +940,13 @@ CHECKS: Sequence[Check] = (
         "kind telemetry_readmodel_empty (шпаргалка system_overview) — реальный литерал overview.py",
         "Task 2.8 плана observability-closure (Ф2)",
         _check_overview_telemetry_readmodel_empty_kind,
+    ),
+    Check(
+        "H3H4-schema",
+        "observability/CONTROL_PANEL.md",
+        "секции observability.* называют КАЖДОЕ поле своей Pydantic-схемы (схемо-управляемо)",
+        "Н-4, добор ревью Ф2 (замыкатель класса, 2026-09-01)",
+        _check_observability_section_fields,
     ),
 )
 
