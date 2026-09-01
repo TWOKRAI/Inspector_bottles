@@ -55,6 +55,8 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Сторож «хотя бы раз» слеп к точечной поломке](feedback_a_guard_that_counts_at_least_once_is_blind.md) — за сломанный метод лок брал СОСЕД; литералы по дорогам · [разность прячет то, что по обе стороны](feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md) — бюджет «цены прохода через порт» порт не мерил · [«не разобрал» ≠ «данных нет»](feedback_unparsed_is_not_absent.md) — молчащий парсер дал зелёный validate и 7 невидимых ADR
 - [Ноль наблюдений = результат наблюдения](feedback_zero_observations_looks_like_a_result.md) — сторож обязан требовать passed>0/mtime/собранность, а не только failed==0; сработало 3 раза за день
 - [Ноль в инъекции = сторожа не собрались](feedback_injection_zero_may_mean_the_guards_were_not_collected.md) — база матрицы БЕЗ -k, collected записать числом до заплат; имена от лица (test_writer_*) теряются предметным фильтром
+- [Утверждение об ОТСУТСТВИИ требует парной проверки достижимости](feedback_an_absence_assertion_needs_a_reachability_check.md) — тест-негатив сверял голые имена с qualname'ами и был зелен вхолостую: предмет красный, тест зелёный
+- [Проходной блок — не развилка](feedback_a_pass_through_block_is_not_a_fork.md) — тело try/with/цикла продолжает ветку; ошибка модели даёт ТИХИЙ ложный зелёный, обратная (match/except*) — ложный красный без выхода
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
 - [Тестер один раз на механизм и ДО кода](feedback_tester_once_per_mechanism_before_the_code.md) — второй заход по тому же механизму нашёл ноль за 479k; красный набор до кода = ТЗ · [слепоту даёт worktree, не проза](feedback_tester_blindness_needs_a_worktree.md) — оба тестера признались в утечке, проверить нельзя
 - [Один владелец ослепляет тест общего состояния](feedback_one_owner_blinds_the_shared_state_test.md) — после переезда «всё через порт» П1/П4 зелены и при приватной копии; держал контракт единственный читатель МИМО владельца
@@ -77,7 +79,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — qt-mcp: «зонд жив» ≠ «отрисовано» · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало
 
 ## Активные проекты и долги
-- [observability-closure: Ф1 — 6 из 8](project_observability_closure_progress.md) — 1.1/1.2/1.4/1.3a/1.3b закрыты; Р-10: единица стража — ВЕТКА, не функция; гейты 9185 фреймворк / 7258 корневой; NEXT 1.3c → 1.5
+- [observability-closure: Ф1 — 7 из 8](project_observability_closure_progress.md) — Task 1.3 ЗАКРЫТА целиком (1.3a/1.3b/1.3c); единица правила стража — ПУТЬ исполнения, не ветка; гейты 9204 фреймворк / 7277 корневой; NEXT 1.5 стенд фазы
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; правда в v1; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim
 - [observation-port: Ф0–Ф5 ЗАКРЫТЫ](project_observation_port_progress.md) — порт = единственный писатель чисел, StatsManager стал видом; ревью вернуло 3 блокера, все закрыты; гейт 8930
 - [constructor-master прогресс](project_constructor_master_progress.md) — Ф0–Ф3 + трек F + Ф5-ядро закрыты; NEXT C1-C8 + app_module 5.11-5.13 · [чистка границ C1-C8](project_arch_boundaries_plan.md) — движок миграций 4.5 идёт в recipe, НЕ generic
