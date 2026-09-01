@@ -423,11 +423,11 @@ class Dispatcher(BaseManager, ObservableMixin):
         except Exception as e:
             duration = time.perf_counter() - start_time
             error_msg = f"Dispatch failed: {str(e)}"
-            # Поле называлось "message" в снятом _track_error — переименовано в
-            # "request", т.к. "message" уже занято позиционным параметром
-            # ObservableMixin._log_error(self, message, **kwargs): совпадение
-            # имени поля дало бы тот же класс TypeError, что чинит Task 1.3b
-            # в initialize/shutdown этого же файла.
+            # Поле называлось "message" в снятом _track_error — здесь оно
+            # "request" ради ЯСНОСТИ, а не ради безопасности: коллизию с
+            # позиционным параметром ``_log_error(self, message, **kwargs)``
+            # механизм закрывает сам (_VOICE_RESERVED_NAMES разводит такое имя
+            # префиксом field_). Именно этот сайт её и обнаружил.
             self.report_error(
                 e,
                 context="dispatcher.dispatch",
