@@ -40,6 +40,7 @@
 - [Константа из физики, а не из замера](feedback_constant_from_domain_physics_not_measured.md) — 99.28 % наблюдений ниже первой границы; инъекции такое не ловят
 
 ## Вакуумные тесты и ассерты
+- [coverage держит settrace, не setprofile](feedback_coverage_holds_settrace_not_setprofile.md) — под `--cov` `gettrace()` занят CTracer, `getprofile()` пуст: счётчик на setprofile не конфликтует, а `assert gettrace() is None` даёт ложный красный; базу брать СНИМКОМ
 - [Readback, собранный руками, оставляет своего производителя без сторожа](feedback_a_handmade_readback_leaves_its_producer_unguarded.md) — 0 красных из 145 при снятой строке readback: все тесты подавали `effective` литералом. Инъекция в производителя — отдельно от инъекции в сверщик
 - [Применяющая команда не измеряет то, что переустанавливает](feedback_an_applying_command_cannot_measure_what_it_reapplies.md) — второй `config.reload` подтверждал собственную запись (3.5 != 9.25); живость такта читать ЧИТАЮЩЕЙ дверью, и её надо зарегистрировать в стенде явно
 - [Страж-обходчик не видит удалённого элемента](feedback_a_list_walking_guard_cannot_see_a_removed_item.md) — ключ снят из OBSERVABILITY_LOSS_KEYS, обходчик зелен; держит только литерал «ключ в реестре»; в матрице всегда заплатка «элемент удалён»
