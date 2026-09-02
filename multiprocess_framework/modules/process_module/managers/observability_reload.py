@@ -18,19 +18,21 @@ Observability hot-reload: ConfigFileWatcher → reconfigure(Logger/Error/Stats).
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...config_module.core.config import Config
 from ...logger_module.core.process_hooks import HOOK_COUNTER_KEYS
 from ..configs.observability_audit import ACTION_REBUILD
-from ..configs.observability_config import expand_observability
+from ..configs.observability_config import ObservabilityConfig, expand_observability
 from ..configs.observability_layers import (
     LAYER_APP,
     LAYER_RECIPE,
     ORCHESTRATOR_PROCESS_NAME,
     TELEMETRY_KEY,
     TELEMETRY_LAYERED_SUBSECTION,
+    flatten_section,
     layer_merge,
 )
 from ..configs.observation_policy import OBSERVATION_SECTION_KEY, normalized_observation_section
@@ -514,6 +516,173 @@ def observability_effective(
     return out
 
 
+#: Часовой «значение отсутствует» для сравнения двух раскладок. ``None`` тут не
+#: годится: ``None`` — законное ЗНАЧЕНИЕ листа раскладки, и «пути нет» слилось бы
+#: с «путь есть и в нём null».
+_ABSENT = object()
+
+#: Пробное значение для строк. Канонический уровень, а не ``"<строка>__probe"``:
+#: ровно пять строковых полей схемы (``log_level``, ``errors.level``,
+#: ``stats.log_level``, ``sampling_max_level``, ``history.level``) провалидированы
+#: ``canonical_level_or_raise``, и произвольная строка уронила бы зонд именно на
+#: них — то есть на самых нагруженных ручках. Для НЕ-уровневых строк (пути к
+#: файлам, имена стоков, dotted-путь фабрики) канонический уровень — такая же
+#: годная «другая строка», как любая иная.
+_PROBE_STR = "DEBUG"
+_PROBE_STR_ALT = "ERROR"
+
+
+@lru_cache(maxsize=8)
+def _schema_leaf_paths(model_cls: type) -> frozenset:
+    """Листовые пути схемы: спуск ТОЛЬКО в под-``SchemaBase``.
+
+    ``Dict[str, Any]``-поле (``channels``, ``scopes``, ``loggers``,
+    ``observation.rules``) — ЛИСТ, хотя его значение и словарь: за его формой
+    стоит не под-схема, а свободная карта, и «управляет ли им экспандер» — вопрос
+    про поле целиком, а не про каждое имя внутри. Та же рекурсия по
+    ``issubclass(annotation, SchemaBase)``, что у стражей задач 2.2/2.9 — правило
+    здесь атрибут схемы, а не решение автора, поэтому копии разойтись неоткуда.
+    """
+    from ...data_schema_module import SchemaBase
+
+    out = set()
+    for name, field in model_cls.model_fields.items():
+        ann = field.annotation
+        if isinstance(ann, type) and issubclass(ann, SchemaBase):
+            out.update((name, *rest) for rest in _schema_leaf_paths(ann))
+        else:
+            out.add((name,))
+    return frozenset(out)
+
+
+def _requested_leaves(section: Any, leaf_paths: frozenset, prefix: tuple = ()) -> list:
+    """Листья ЗАПРОСА как ``(кортеж-путь, значение)`` — с резом по границе СХЕМЫ.
+
+    Кортеж, а не строка ``"a.b.c"``: имена внутри свободных карт содержат точки
+    (``loggers``: ``some.prefix``), и восстановить вложенную форму из плоской
+    строки однозначно нельзя. Зонду ниже нужна именно вложенная форма.
+
+    Ключ, которого в схеме нет вовсе (секция не прошла валидацию, и ``survived``
+    остался сырым), листом всё равно становится — его назовёт отдельный сверщик
+    ``unknown_section_keys``, а молча потерять его здесь нельзя.
+    """
+    out: list = []
+    if not isinstance(section, dict):
+        return out
+    for key, value in section.items():
+        path = prefix + (str(key),)
+        if path in leaf_paths or not isinstance(value, dict) or not value:
+            out.append((path, value))
+        else:
+            out.extend(_requested_leaves(value, leaf_paths, path))
+    return out
+
+
+def _other_value(value: Any) -> Any:
+    """Заведомо ДРУГОЕ значение того же рода — второй полюс зонда.
+
+    Про пустоту отдельно, потому что оба случая неочевидны:
+
+    * ``None`` — это «ключ есть, значения нет» (``log_directory``,
+      ``documents.factory``). Другим полюсом берём строку: почти все
+      ``Optional``-листья схемы строковые, а валидации на пути зонда нет вовсе
+      (см. :func:`_with_leaf`), поэтому промах по типу максимум даст неотличимые
+      раскладки — то есть безопасный исход «лист назван», а не тихий пропуск;
+    * пустой словарь ``{}`` — это «слой владеет пустотой» (правило Г3), законное
+      значение ``channels``/``scopes``. Другим полюсом берём непустую карту:
+      экспандер смотрит такие поля через ``if cfg.channels:``, и разница
+      «пусто/непусто» — ровно та ось, которой лист и управляет.
+    """
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value + 1
+    if isinstance(value, str):
+        return _PROBE_STR_ALT if value == _PROBE_STR else _PROBE_STR
+    if value is None:
+        return _PROBE_STR
+    if isinstance(value, (list, tuple)):
+        return [] if value else [_PROBE_STR]
+    if isinstance(value, dict):
+        return {k: _other_value(v) for k, v in value.items()} if value else {_PROBE_STR: {}}
+    return _PROBE_STR
+
+
+def _with_leaf(cfg: Any, path: tuple, value: Any) -> Any:
+    """Копия конфига с ОДНИМ подменённым листом — БЕЗ повторной валидации.
+
+    ``model_copy(update=...)``, а не сборка словаря и ``model_validate``, и это
+    не микро-оптимизация. У схемы есть валидаторы с ПОБОЧНЫМ ДЕЙСТВИЕМ: у
+    ``stats`` стоит ``mode="before"``, который на ``enabled: false`` пишет
+    оператору предупреждение «метрики не будут собираться вовсе» (ADR-PM-046).
+    Зонд подставляет второй полюс сам — и через словарь он вписывал бы это
+    предупреждение оператору, попросившему ровно ОБРАТНОЕ (``enabled: true``).
+    Ложный голос о выключенной плоскости дороже отсутствующего: его читают.
+    Воспроизведено: ``expand_observability({"stats": {"enabled": False}})`` даёт
+    запись ``WARNING observability_config``, тот же вход через ``model_copy`` —
+    ноль записей.
+
+    Второе следствие того же выбора: мутант не может быть отвергнут схемой, то
+    есть ветка «зонд ослеп из-за собственного пробного значения» закрыта не
+    обработкой исключения, а построением. ``expand_observability`` при этом
+    остаётся защищённым ``try`` у вызывающего — он читает поля сам и на
+    бессмысленном значении может упасть.
+    """
+    if not path:
+        return value
+    head = path[0]
+    if len(path) == 1:
+        return cfg.model_copy(update={head: value})
+    node = getattr(cfg, head, None)
+    if not hasattr(node, "model_copy"):
+        raise TypeError(f"{head}: не под-схема, спускаться некуда")
+    return cfg.model_copy(update={head: _with_leaf(node, path[1:], value)})
+
+
+def _controlled_layout_paths(path: tuple, value: Any, layout: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Пути раскладки, которыми управляет ОДИН лист запроса, со значениями из ``layout``.
+
+    Возвращает:
+
+    * ``None`` — раскладка от значения этого листа не зависит ВООБЩЕ (два полюса
+      дали побайтно одно и то же). Экспандер лист не смотрит: его получатель —
+      живой механизм процесса, а не конфиг менеджера. Вызывающий кладёт такой
+      лист в ``expected`` под СХЕМНЫМ именем;
+    * словарь — лист потреблён, и это его отпечаток: пути, которыми полюса
+      расходятся, пересечённые с ПОЛНОЙ раскладкой запроса. Значение берётся из
+      полной раскладки, а не из изолированной: ключи взаимодействуют
+      (``loggers`` объявленных модулей мержится с ``loggers`` запроса), и
+      изолированный полюс тут соврал бы значением;
+    * ПУСТОЙ словарь — лист потреблён, но при ЭТОМ значении экспандер молчит и
+      отдаёт решение дефолту ниже (``console: true`` не эмитит ``channels``
+      вовсе — их подставит ``LoggerManagerConfig``). Проверять нечего: значения,
+      которое надо сравнить с readback'ом, в раскладке просто нет.
+
+    Пустой словарь в самой раскладке (``error: {}`` при ``errors.enabled:
+    false``) в отпечаток НЕ берётся: это не поле, а погашенная СЕКЦИЯ раскладки,
+    и readback такого пути не отдаёт никогда. Без этого реза вердикт называл бы
+    оператору внутреннее имя ``error``, которого нет ни в его конфиге, ни в
+    ответе (находка Д3 ревью).
+    """
+    base = ObservabilityConfig()
+    try:
+        here = flatten_section(expand_observability(_with_leaf(base, path, value)))
+        there = flatten_section(expand_observability(_with_leaf(base, path, _other_value(value))))
+    except Exception:  # noqa: BLE001 — зонд ослеп: назвать лист, а не проглотить
+        return None
+    if here == there:
+        return None
+    owned: Dict[str, Any] = {}
+    for probe_path in set(here) | set(there):
+        if here.get(probe_path, _ABSENT) == there.get(probe_path, _ABSENT):
+            continue
+        got = layout.get(probe_path, _ABSENT)
+        if got is _ABSENT or (isinstance(got, dict) and not got):
+            continue
+        owned[probe_path] = got
+    return owned
+
+
 def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[str, Any]:
     """Сравнить ЗАПРОШЕННОЕ с ДЕЙСТВУЮЩИМ и назвать расхождения поимённо (Task 5.7).
 
@@ -549,49 +718,60 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     ``log_level`` действует как ``logger.default_level``, и своя копия этого знания
     была бы вторым местом, где оно живёт.
 
-    **Задача 2.9 (M1, добор ревью Ф2): «потреблён ли лист» решает ЗОНД, а не
-    ручной список особых случаев.** До этой правки лист, не попавший ни в
-    ``expand_observability(survived)``, ни в ``IDENTITY_SECTION_KEYS``, ни в
-    одну из именованных строк (``observation``, ``session_ttl_sec``), исчезал
-    из вердикта ЦЕЛИКОМ — не в ``mismatches``, не даже в ``unverifiable``.
-    Ревью воспроизвело это на ``heartbeat_interval_sec`` (M1) и на
-    ``stats.enabled``, названном readback'ом под чужим именем (M2): запрос,
-    подавший такой лист, отвечал побайтно тем же, что и пустой запрос.
+    **«Потреблён ли лист» решает ЗОНД, а не ручной список особых случаев**
+    (задача 2.9, M1/M2). До неё лист, не попавший ни в
+    ``expand_observability(survived)``, ни в ``IDENTITY_SECTION_KEYS``, исчезал
+    из вердикта ЦЕЛИКОМ: запрос, подавший ``heartbeat_interval_sec`` или
+    ``stats.enabled``, отвечал побайтно тем же, что и ПУСТОЙ запрос.
 
-    Починка одна на класс, а не на ключ. Для каждого ЛИСТА ВЕРХНЕГО УРОВНЯ
-    ``survived`` (``log_level``, ``stats``, ``documents``, ``heartbeat_interval_sec``…)
-    зонд собирает ИЗОЛИРОВАННЫЙ словарь ``{ключ: значение_survived}`` и спрашивает
-    у САМОГО ``expand_observability`` (единственной точки раскладки — тот же
-    довод, что и абзацем выше про ``unknown_keys``): изменилась ли раскладка
-    относительно раскладки ПУСТОГО запроса. Не изменилась → секция мимо
-    экспандера целиком → КАЖДЫЙ её лист (после ``flatten_section``) входит в
-    ``expected`` дословно под своим схемным путём. Изменилась → секция
-    потреблена, её путь уже назван в ``expected`` выше (под именем поля
-    менеджера, посчитанным из ПОЛНОГО ``survived``) — дописывать её схемным
-    именем нельзя: тождественное сравнение получило бы ДВА разных пути на один
-    лист, и один из них остался бы вечно проверяемым по значению, которое ему
-    не принадлежит.
+    **Зонд спрашивает про РАЗНИЦУ ДВУХ значений, а не про одно** (добор ревью
+    2.9). Первая редакция сравнивала раскладку ``{ключ: значение}`` с раскладкой
+    пустого запроса — и путала «ключ не просили» с «значение запроса совпало со
+    схемным дефолтом». Совпадение с дефолтом законно (оператор, написавший
+    ``console: true`` поверх выключенной консоли, сказал ровно то, что хотел), а
+    цена ошибки была двойной: 24 листа схемы получали в ``unverifiable`` СЫРОЕ
+    схемное имя, которого readback не отдаёт никогда, и ещё 7 не получали
+    ничего. Ложное имя хуже отсутствующего: отличить его от честного
+    ``documents.factory`` оператору нечем.
 
-    Изоляция — по ВЕРХНЕУРОВНЕВОМУ ключу, а не по полностью расплющенному
-    пути. Причина: узнать, «потребляет ли экспандер лист», не требует
-    восстанавливать вложенную форму из плоской строки (а восстановить её
-    однозначно и нельзя — имя источника ``loggers`` само содержит точки), а
-    словарь ``{top_key: survived[top_key]}`` уже лежит в нужной форме без
-    реконструкции. Внутри одной ветки схемы («потребляется ли весь
-    ``stats``?») экспандер решает однородно по каждому листу секции — ни один
-    сегодняшний верхнеуровневый ключ ``ObservabilityConfig`` не расщепляется
-    экспандером на «эта половина консюмится, а эта нет».
+    Разница двух значений от значения не зависит — на этом и стоит починка. Для
+    каждого ЛИСТА СХЕМЫ, приехавшего в ``survived``, зонд строит два полюса
+    (``значение`` и :func:`_other_value`), раскладывает ОБА и берёт пути, в
+    которых они расходятся: это ровно те пути раскладки, которыми лист
+    управляет. Полюса собираются ``model_copy`` поверх чистого
+    ``ObservabilityConfig()`` — без повторной валидации, см. :func:`_with_leaf`.
+    Значение для ``expected`` берётся из ПОЛНОЙ раскладки ``expand(survived)``.
 
-    ``observation`` — секция того же непотреблённого рода, но её собственная
-    нормализация (``normalized_observation_section``, glob-пути с точками
-    внутри имени) обязана применяться ПОСЛЕ генерического правила: без этого
-    порядка генерическое правило клало бы СЫРОЙ ``rules``-словарь (без
-    достроенных дефолтов ``MetricRule``), и он бы никогда не совпал с тем, что
-    отдаёт readback. Здесь и только здесь более специфичная запись обязана
-    победить более общую.
+    Три исхода зонда и что вердикт с ними делает — в докстринге
+    :func:`_controlled_layout_paths`. Здесь важны следствия:
+
+    * отдельного пропуска «запрос этот путь не менял» больше НЕТ и он не нужен:
+      в ``expected`` попадают ТОЛЬКО пути, которыми запрос управляет, а не вся
+      раскладка. Пропуск сравнивал со схемными дефолтами и глушил ровно те
+      правки, где оператор просит значение, равное дефолту (``stats.enabled:
+      true`` подтверждался только на выключение);
+    * лист, чей отпечаток раскладка при этом значении не материализовала
+      (``console: true`` — экспандер молчит и отдаёт решение дефолту ниже),
+      проверяемого пути не даёт. Если ВЕСЬ запрос состоит из таких листьев,
+      последний рубеж ниже называет их схемными именами: ответ на непустой
+      запрос не имеет права совпасть с ответом на ``{}``. Известный предел: в
+      запросе ВМЕСТЕ с проверяемыми ключами такой лист остаётся неназванным —
+      подтверждать его нечем, а называть непроверяемым, когда readback его
+      плоскость отдаёт, значило бы вернуть то самое ложное имя;
+    * раскладка не обязана быть инъективной: если два значения листа дают
+      побайтно одну раскладку (клампинг, насыщение), отпечаток пуст и лист
+      уходит в ``unverifiable`` под схемным именем. Шумно, но честно —
+      сегодняшних примеров в схеме нет, а появится такой лист — вердикт скажет
+      «не проверил», а не «сошлось».
+
+    ``observation`` — секция непотреблённого рода, но её собственная нормализация
+    (``normalized_observation_section``, glob-пути с точками внутри имени)
+    обязана применяться ПОСЛЕ зонда: без этого порядка в ``expected`` лёг бы
+    СЫРОЙ ``rules``-словарь (без достроенных дефолтов ``MetricRule``), и он бы
+    никогда не совпал с тем, что отдаёт readback. Здесь и только здесь более
+    специфичная запись обязана победить более общую.
     """
-    from ..configs.observability_config import ObservabilityConfig, expand_observability
-    from ..configs.observability_layers import flatten_section, unknown_section_keys
+    from ..configs.observability_layers import unknown_section_keys
 
     section = requested if isinstance(requested, dict) else {}
 
@@ -607,23 +787,35 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     except Exception:  # noqa: BLE001 — невалидную секцию судит применение, не вердикт
         survived = section
 
-    baseline = flatten_section(expand_observability({}))
-    expected = flatten_section(expand_observability(survived))
-    # Генерический шаг (Task 2.9, M1) — см. докстринг выше. Верхнеуровневый
-    # лист, чья ИЗОЛИРОВАННАЯ раскладка не отличима от раскладки пустого
-    # запроса, экспандером не потреблён: каждый его собственный лист входит в
-    # `expected` дословно под схемным путём. Потреблённый лист уже лежит в
-    # `expected` (посчитан строкой выше из ПОЛНОГО `survived`) — трогать его
-    # здесь нельзя, отсюда проверка на равенство, а не безусловная запись.
-    for top_key, top_value in survived.items():
-        isolated = flatten_section(expand_observability({top_key: top_value}))
-        if isolated == baseline:
-            expected.update(flatten_section({top_key: top_value}))
+    # Раскладка ПОЛНОГО запроса — источник ЗНАЧЕНИЙ (какие пути кому
+    # принадлежат, решает зонд по каждому листу отдельно).
+    layout = flatten_section(expand_observability(survived))
+    leaves = _requested_leaves(survived, _schema_leaf_paths(ObservabilityConfig))
+    expected: Dict[str, Any] = {}
+    for leaf_path, leaf_value in leaves:
+        owned = _controlled_layout_paths(leaf_path, leaf_value, layout)
+        if not owned:
+            # ``None`` — раскладка от листа не зависит вовсе (зонд молчит на обоих
+            # полюсах): лист идёт мимо экспандера, его схемный путь и есть путь
+            # readback'а. Пустой словарь — лист УПРАВЛЯЕТ путями раскладки, но при
+            # ЭТОМ значении раскладка их не материализовала (`console: true` —
+            # схемный дефолт, экспандер молчит; `errors.enabled: false` гасит
+            # секцию целиком). Сверять нечего ни там, ни там — и оба случая
+            # обязаны быть НАЗВАНЫ схемным именем.
+            #
+            # Одной веткой, а не «последним рубежом при пустом `expected`»:
+            # рубеж делал названность зависимой от СОСЕДЕЙ по запросу — один и тот
+            # же `console: true` назывался в одиночку и молчал рядом с проверяемым
+            # ключом. Свойство «либо сверен, либо назван, но никогда нигде»
+            # принадлежит ЛИСТУ, а не запросу целиком.
+            expected[".".join(leaf_path)] = leaf_value
+        else:
+            expected.update(owned)
     # `observation` — секция того же непотреблённого рода, но с СОБСТВЕННОЙ
-    # нормализацией путей (glob-паттерны содержат точки, и голое расплющивание
-    # выше кладёт СЫРОЙ словарь `rules` без достроенных дефолтов `MetricRule`).
-    # Обязана идти ПОСЛЕ генерического шага: её ключи заменяют только что
-    # положенные сырые, а не соседствуют с ними (см. докстринг функции).
+    # нормализацией путей (glob-паттерны содержат точки, и голая запись выше
+    # кладёт СЫРОЙ словарь `rules` без достроенных дефолтов `MetricRule`).
+    # Обязана идти ПОСЛЕ зонда: её ключи заменяют только что положенные сырые,
+    # а не соседствуют с ними (см. докстринг функции).
     if isinstance(survived.get(OBSERVATION_SECTION_KEY), dict):
         expected.update(normalized_observation_section(survived[OBSERVATION_SECTION_KEY]))
     flat_effective = flatten_section(effective if isinstance(effective, dict) else {})
@@ -632,8 +824,6 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     unverifiable: list = []
     checked = 0
     for path, want in expected.items():
-        if baseline.get(path) == want:
-            continue  # запрос этот путь не менял
         if path not in flat_effective:
             unverifiable.append(path)
             continue
@@ -641,7 +831,6 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
         got = flat_effective[path]
         if got != want:
             mismatches.append({"key": path, "expected": want, "actual": got})
-
     if mismatches or unknown:
         verdict = "failed"
     elif checked:

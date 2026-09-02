@@ -123,9 +123,12 @@ _OVERRIDES: Dict[Tuple[str, ...], Any] = {
     ("loggers",): {"some.prefix": {"level": "DEBUG"}},
     ("logger_groups",): {"noisy": ["some.prefix"]},
     ("errors", "channels"): {"errors_file": {"enabled": False}},
-    # `_real_wired` не поднимает StatsManager (см. докстринг класса теста) —
-    # каталог известных stats-каналов пуст независимо от имени, поэтому `type`
-    # обязателен здесь тем же доводом, что у `channels` выше.
+    # `type` обязателен тем же доводом, что у `channels` выше: имя, которого нет
+    # в каталоге ЖИВОГО менеджера, отвергается как «ссылка в пустоту» до
+    # применения. Каталог stats-каналов у `_real_wired` пуст не потому, что
+    # менеджера нет (с `ca958b32` он настоящий — прежняя редакция этого
+    # комментария утверждала обратное и устарела), а потому, что своих каналов
+    # он в этом харнессе не объявляет.
     ("stats", "channels"): {"file_stats": {"enabled": False, "type": "file"}},
     ("documents", "config"): {"db_path": "probe.db"},
     ("observation", "rules"): {"processes.*.state.plugins.*.fps": {"enabled": False}},
@@ -183,6 +186,25 @@ def _nest(path: Tuple[str, ...], value: Any) -> Dict[str, Any]:
 _LEAF_PATHS = _schema_leaf_paths(ObservabilityConfig)
 
 #: Листья, у которых ``_real_wired`` даёт ЖИВОГО получателя readback'а СЕГОДНЯ
+#:
+#: **Пин ДВУСТОРОННИЙ (добор ревью 2.9).** Прежняя редакция сверяла только
+#: половину «лист ИЗ списка обязан быть confirmed», и список тихо состарился за
+#: один день: ``ca958b32`` расширил ``_real_wired`` живым ``StatsManager``, число
+#: подтверждаемых листьев выросло 25 → 36, а страж не сказал ни слова. Цена
+#: молчания измерена ревью: инъекция «снять ``out["enabled"]`` в
+#: ``stats_manager.py``» и инъекция «снять ветку readback ``heartbeat_interval_sec``»
+#: давали по НУЛЮ красных в этом файле — регрессия ровно того класса, ради
+#: которого сильная половина и написана, проходила мимо. Теперь лист ВНЕ списка,
+#: вернувший ``confirmed``, красит страж так же, как лист из списка, переставший
+#: его возвращать: список обязан стареть громко.
+#:
+#: Читается «у листа есть живой получатель readback'а в ЭТОМ харнессе», а не
+#: «ручка работает»: остальные 16 законно остаются ``unverifiable`` — нет живого
+#: heartbeat'а/хаба/стока документов/подходящего канала (``documents.*``,
+#: ``events.*``, ``flight.*``, ``history.enabled``/``db_path``,
+#: ``errors.enabled``/``channels``, ``stats.channels``), либо экспандер при этом
+#: значении молчит и сверять нечего (``console``/``file``/``channels`` — их
+#: вердикт частично сверяет, но с непустым ``unverifiable``).
 #: (измерено прогоном, не предположено): logger-плоскость (скаляры и
 #: dict-секции — их читает настоящий `LoggerManager`), errors.level/
 #: include_stacktrace (настоящий `ErrorManager`), commands.log_success
@@ -213,6 +235,8 @@ _EXPECTED_CONFIRMED_UNDER_REAL_WIRING: frozenset = frozenset(
         ("loggers",),
         ("logger_groups",),
         ("session_ttl_sec",),
+        # Ф2 2.9: живой такт порта — ветка readback `heartbeat_interval_sec`.
+        ("heartbeat_interval_sec",),
         ("retention_days",),
         ("retention_total_mb",),
         ("compress_rotated",),
@@ -223,7 +247,24 @@ _EXPECTED_CONFIRMED_UNDER_REAL_WIRING: frozenset = frozenset(
         ("sampling_max_level",),
         ("errors", "level"),
         ("errors", "include_stacktrace"),
+        # Ф2 2.9 (`ca958b32`): `_real_wired` поднимает НАСТОЯЩИЙ `StatsManager`,
+        # и вся плоскость чисел получила живого читателя readback'а. Пока эти
+        # семь листьев отсутствовали в списке, инъекция «снять `out["enabled"]`
+        # в `stats_manager.py`» давала ноль красных.
+        ("stats", "enabled"),
+        ("stats", "log_snapshots"),
+        ("stats", "aggregation_interval"),
+        ("stats", "flush_interval"),
+        ("stats", "log_level"),
+        ("stats", "log_line_max_bytes"),
+        ("stats", "max_series"),
         ("commands", "log_success"),
+        # Политика порта нормализуется на ОБОИХ берегах
+        # (`normalized_observation_section` против `current_observation_policy`),
+        # живого heartbeat'а для этого не нужно.
+        ("observation", "subtree_enabled"),
+        ("observation", "subtree_interval_sec"),
+        ("observation", "rules"),
         ("voices", "default_window_sec"),
         ("voices", "escalate_after_repeats"),
         ("voices", "max_tracked_keys"),
@@ -270,8 +311,19 @@ class TestSchemaCoverageGuardAgainstRealWiring:
             f"{leaf_name}: подан {request!r}, а вердикт не проверил ЭТОТ путь и не назвал его "
             f"непроверяемым — лист пропал из вердикта молча (состояние «нигде»): {verified}"
         )
+        confirmed = verified["checked"] >= 1 and verified["unverifiable"] == []
         if path in _EXPECTED_CONFIRMED_UNDER_REAL_WIRING:
-            assert verified["checked"] >= 1 and verified["unverifiable"] == [], (
+            assert confirmed, (
                 f"{leaf_name}: у этого листа ЕСТЬ живой получатель readback'а в _real_wired, "
                 f"а вердикт не 'confirmed' — похоже, ветка readback пропала: {verified}"
+            )
+        else:
+            # Вторая половина пина. Без неё список тихо стареет при КАЖДОЙ правке
+            # харнесса: `_real_wired` подрастает, лист начинает подтверждаться, а
+            # страж молчит — и инъекция «снять эту же ветку readback» перестаёт
+            # быть красной, ничего никому не сказав (замер ревью: ноль красных на
+            # двух инъекциях подряд).
+            assert not confirmed, (
+                f"{leaf_name}: лист ВНЕ _EXPECTED_CONFIRMED_UNDER_REAL_WIRING вернул 'confirmed' — "
+                f"харнесс подрос, список устарел, впишите лист в него: {verified}"
             )

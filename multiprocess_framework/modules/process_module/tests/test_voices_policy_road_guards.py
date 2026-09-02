@@ -346,9 +346,12 @@ class TestIdentitySectionsCoverEveryUnexpandedSubsection:
 
         assert subsections == set(IDENTITY_SECTION_KEYS) | self.EXPANDED | self.EXEMPT, (
             "у схемы появилась под-секция, не отнесённая ни к одной корзине. "
-            "Не назвав её в IDENTITY_SECTION_KEYS, вы получите вердикт "
-            "'unverifiable' при checked=0 — то есть «никто не смотрел», "
-            f"читаемое как «проверено». Секции схемы: {sorted(subsections)}"
+            "Молчания вердикта это САМО ПО СЕБЕ уже не вызывает — с задачи 2.9 "
+            "'потреблена ли секция экспандером' решает зонд, и новая секция "
+            "будет названа без правки этого перечня. Красное здесь означает "
+            "другое и не менее важное: никто не ЗАПИСАЛ, почему секция обходит "
+            "экспандер (или почему не обходит), то есть решение принято молча. "
+            f"Секции схемы: {sorted(subsections)}"
         )
 
     def test_identity_sections_really_bypass_the_expander(self) -> None:
