@@ -69,6 +69,14 @@ from ...channel_routing_module.observability import (
     hub_record_to_display,
 )
 
+# Ф2 (задача 2.2): единственный источник дефолтов истории — схема; см.
+# DEFAULT_HISTORY_* ниже и resolve_history_store_settings. Импорт верхнего
+# уровня безопасен: `observability_config.py` не импортирует `managers/*`
+# ни прямо, ни транзитивно (её импорты — data_schema_module,
+# observability_declarations, logger_module.configs, statistics_module,
+# channel_routing_module.levels, .observation_policy).
+from ..configs.observability_config import ObservabilityConfig
+
 # Имена store-tap'ов (хэндлы для remove_tap на teardown). Вешаем на ОБА
 # менеджера: error_manager (track_error/write-through) и logger_manager
 # (logger.error/ctx.log_error) — приложение логирует ошибки и туда, и туда.
@@ -1336,7 +1344,12 @@ HISTORY_CONFIG_ADDRESS = "observability.history"
 #: ровно та находка (Б-8), ради которой задача и заведена. Безопасным INFO делает
 #: не скромность, а предел: :data:`DEFAULT_HISTORY_MAX_ROWS` ограничивает таблицу
 #: сверху независимо от темпа записи.
-DEFAULT_HISTORY_LEVEL = "INFO"
+#:
+#: Ф2 (задача 2.2): дефолт живёт в СХЕМЕ (``ObservabilityHistoryConfig.level``) —
+#: константа здесь читает его атрибутом, а не дублирует число вторым литералом.
+#: Второй литерал разошёлся бы со схемой на первом же новом релизе (тот же
+#: довод, что у ``_default_session_ttl`` в ``observability_layers.py``).
+DEFAULT_HISTORY_LEVEL = ObservabilityConfig().history.level
 
 #: Потолок истории по числу строк.
 #:
@@ -1351,16 +1364,16 @@ DEFAULT_HISTORY_LEVEL = "INFO"
 #: прогона — 5040 строк/час, то есть предел по числу строк наступает примерно
 #: через 40 часов и связывает раньше недельного возраста (7 сут × 5040 ≈ 847 000
 #: строк). Оператору, которому 110 МБ много, ручка — ``max_rows`` в секции.
-DEFAULT_HISTORY_MAX_ROWS = 200_000
+DEFAULT_HISTORY_MAX_ROWS = ObservabilityConfig().history.max_rows
 
 #: Возраст, старше которого запись уходит: неделя. Столько живёт вопрос «что было
 #: в прошлый вторник» на этом стенде; больше хранит файловый журнал, у него своя
 #: ротация и свой объём.
-DEFAULT_HISTORY_MAX_AGE_SEC = 7 * 24 * 3600.0
+DEFAULT_HISTORY_MAX_AGE_SEC = ObservabilityConfig().history.max_age_sec
 
 #: Период уборки истории. Реже документов (там срок в сутках, здесь строки копятся
 #: минутами), но не на каждый такт: уборка — хозяйство, а не горячий путь.
-DEFAULT_HISTORY_PURGE_INTERVAL_SEC = 300.0
+DEFAULT_HISTORY_PURGE_INTERVAL_SEC = ObservabilityConfig().history.purge_interval_sec
 
 _HISTORY_POLICY_ATTR = "_observability_history_policy"
 _HISTORY_PURGE_DEADLINE_ATTR = "_observability_history_purge_at"
@@ -1429,6 +1442,52 @@ def resolve_history_policy(svc: Any) -> Dict[str, Any]:
         "max_age_sec": _number("max_age_sec", DEFAULT_HISTORY_MAX_AGE_SEC, integer=False),
         "purge_interval_sec": _number("purge_interval_sec", DEFAULT_HISTORY_PURGE_INTERVAL_SEC, integer=False),
     }
+
+
+def resolve_history_store_settings(svc: Any) -> Dict[str, Any]:
+    """``enabled``/``db_path`` секции истории — судьба СТОРА целиком (Ф2, задача 2.2).
+
+    Отдельная функция от :func:`resolve_history_policy`: та возвращает четыре
+    поля политики уборки (спрашивает их такт heartbeat через
+    :func:`sweep_observability_history`), эти два поля решают, поднимать ли
+    стор вовсе и куда положить файл — читаются РОВНО ОДИН РАЗ, при подъёме
+    (``ProcessModule._wire_observability_hub``), а не на каждом такте.
+    Разделены, чтобы не расширять зрелый контракт ``resolve_history_policy``
+    (``test_observability_history_policy.py::test_section_values_win`` сверяет
+    точным равенством словарь из четырёх ключей) полями, которых такт уборки
+    не спрашивает.
+
+    Читает СХЕМУ атрибутом (``cfg.history.enabled`` / ``cfg.history.db_path``) —
+    критерий 4 задачи 2.2 (страж «каждое поле схемы имеет читателя»): у
+    ``resolve_history_policy`` эти два поля читателя не имели вовсе, ``history``
+    не входит в список секций со своим механизмом (не гейт документов/событий/
+    дампа/наблюдения/голоса — стор не менеджер и своей проводки без этой
+    функции не имел).
+
+    Мусор в секции (например, невалидный ``level`` рядом) не имеет права
+    уронить подъём стора: он падает на дефолты СХЕМЫ целиком, с громким
+    предупреждением, — тем же принципом нетерпимости к тихому мусору, что и у
+    :func:`resolve_history_policy`, но без по-полевого разбора: два независимых
+    парсера одной секции разошлись бы в диагнозах на одном и том же мусоре.
+    """
+    section: Any = {}
+    try:
+        from ..configs.observability_layers import process_observability_layers
+
+        section = process_observability_layers(svc).resolve().get("history") or {}
+    except Exception as exc:  # noqa: BLE001 — процесс без конфига живёт на дефолтах
+        _process_warn(svc, f"[observability] секция {HISTORY_CONFIG_ADDRESS} не прочитана: {exc!r}")
+        section = {}
+    try:
+        cfg = ObservabilityConfig.model_validate({"history": section} if isinstance(section, dict) else {})
+    except Exception as exc:  # noqa: BLE001 — негодная секция не роняет подъём стора
+        _process_warn(
+            svc,
+            f"[observability] {HISTORY_CONFIG_ADDRESS} невалидна для стора ({exc!r}) — "
+            "взяты дефолты схемы (enabled=True, db_path по умолчанию)",
+        )
+        cfg = ObservabilityConfig()
+    return {"enabled": cfg.history.enabled, "db_path": cfg.history.db_path}
 
 
 def sweep_observability_history(svc: Any, now: Optional[float] = None) -> Optional[Dict[str, int]]:

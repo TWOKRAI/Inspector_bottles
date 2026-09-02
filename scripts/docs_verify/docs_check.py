@@ -361,6 +361,7 @@ def _check_command_params(src: Sources) -> Optional[str]:
 _OBSERVABILITY_SECTION_SCHEMAS: Dict[str, str] = {
     "Окна голоса": "ObservabilityVoicesConfig",
     "Flight recorder": "ObservabilityFlightConfig",
+    "История": "ObservabilityHistoryConfig",
 }
 
 

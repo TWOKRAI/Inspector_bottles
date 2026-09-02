@@ -234,6 +234,55 @@ class ObservabilityFlightConfig(SchemaBase):
     ] = 0
 
 
+@register_schema("ObservabilityHistoryConfig")
+class ObservabilityHistoryConfig(SchemaBase):
+    """Под-секция истории (SQLite-стор) — порог записи и пределы ретеншена (Ф5.2, Ф2 задача 2.2).
+
+    До задачи 2.2 эти четыре значения читались МИМО схемы — прямо строковым
+    ``.get()`` из разрешённых слоёв (``resolve_history_policy``), поэтому
+    ``history.level`` отвергался операторской дверью (``config.reload`` inline)
+    как незнакомый ключ: сверка имён (``unknown_section_keys``, задача 5.4)
+    судит round-trip через ``ObservabilityConfig``, а секции ``history`` в ней
+    не было вовсе. Дефолты здесь — те же числа, что раньше жили литералами в
+    ``managers/observability_wiring.py`` (``DEFAULT_HISTORY_*``); та модуль
+    теперь читает их у ЭТОЙ схемы (см. докстринг констант), а не дублирует.
+
+    ``enabled``/``db_path`` — вторая пара, которой раньше не было НИГДЕ: стор
+    поднимался ВСЕГДА, когда есть hub, и путь к БД был только машинным дефолтом
+    (``resolve_default_db_path()``). Читает их проводка (``ProcessModule.
+    _wire_observability_hub``) АТРИБУТОМ схемы (``cfg.history.enabled`` /
+    ``cfg.history.db_path``) — ровно та же дорога, что у остальных четырёх
+    полей.
+    """
+
+    enabled: Annotated[
+        bool,
+        FieldMeta("Вести историю (стор создаётся только когда True и у процесса есть hub)"),
+    ] = True
+    level: Annotated[str, FieldMeta("Минимальный уровень записи в историю")] = "INFO"
+    max_rows: Annotated[
+        int,
+        FieldMeta("Потолок таблицы по числу строк (0 — предела нет)", min=0, max=100_000_000),
+    ] = 200_000
+    max_age_sec: Annotated[
+        float,
+        FieldMeta("Возраст, старше которого запись уходит, сек (0 — предела нет)", min=0.0, max=31_536_000.0),
+    ] = 7 * 24 * 3600.0
+    purge_interval_sec: Annotated[
+        float,
+        FieldMeta("Период фонового свипа истории, сек", min=0.0, max=86400.0),
+    ] = 300.0
+    db_path: Annotated[
+        str,
+        FieldMeta("Путь к SQLite-файлу стора (пусто — resolve_default_db_path())"),
+    ] = ""
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def _normalize_level(cls, value):
+        return canonical_level_or_raise(value, field="history.level")
+
+
 def canonical_level_or_raise(value: Any, *, field: str) -> Any:
     """Каноничное имя уровня либо громкий отказ с адресом ключа (B2).
 
@@ -673,6 +722,17 @@ class ObservabilityConfig(SchemaBase):
         ObservabilityVoicesConfig,
         FieldMeta("Окна голоса: окно по умолчанию и порог эскалации повторов (Ф1.4)"),
     ] = Field(default_factory=ObservabilityVoicesConfig)
+    #: Ф5.2 / Ф2 (задача 2.2). В manager-конфиги НЕ раскладывается — по тому же
+    #: доводу, что ``documents``/``events``/``flight``/``observation``/``voices``:
+    #: это не параметр менеджера, а политика ПЕРСИСТЕНТНОГО стора (SQLite),
+    #: которую читает проводка процесса (``ProcessModule._wire_observability_hub``
+    #: — enabled/db_path АТРИБУТОМ; такт уборки — ``resolve_history_policy``,
+    #: level/max_rows/max_age_sec/purge_interval_sec). Ключ живёт в ТОЙ ЖЕ секции
+    #: ``observability`` — пятой двери конфига задача не заводит (правило Б.1).
+    history: Annotated[
+        ObservabilityHistoryConfig,
+        FieldMeta("Персистентная история (SQLite-стор): порог записи, пределы ретеншена, путь к БД (Ф5.2)"),
+    ] = Field(default_factory=ObservabilityHistoryConfig)
 
     #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
     #: МОЛЧА (проверено), поэтому без этой сверки конфиг с ``enable_batching: true``
@@ -749,8 +809,11 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         ни ``events`` (политика отбора, читает ``WideEventSelector`` процесса),
         ни ``flight`` (политика дампа, читает ``FlightRecorder`` процесса),
         ни ``voices`` (политика окон голоса, читает ``windowed_voice`` процесса —
-        Ф1.4). Держателей окон в процессе много и ни один из них не менеджер
-        наблюдаемости, поэтому «разложить в конфиг менеджера» здесь просто некуда.
+        Ф1.4), ни ``history`` (политика персистентного стора — читает
+        ``ProcessModule._wire_observability_hub`` атрибутом схемы, такт уборки —
+        ``resolve_history_policy``, Ф5.2/Ф2 2.2). Держателей окон в процессе
+        много и ни один из них не менеджер наблюдаемости, поэтому «разложить в
+        конфиг менеджера» здесь просто некуда.
     """
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 
@@ -831,10 +894,23 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     if merged:
         logger["loggers"] = merged
 
-    error: Dict[str, Any] = {
-        "default_level": cfg.errors.level,
-        "include_stacktrace": cfg.errors.include_stacktrace,
-    }
+    # Ф2 (задача 2.2, критерий 2): `errors.enabled` был в схеме (дефолт True) и
+    # НЕ ЧИТАЛСЯ здесь вовсе — `ErrorManager` создавался всегда, независимо от
+    # ключа (`_create_error_manager` смотрит только на непустоту словаря).
+    # Гейт стоит РОВНО тут, у ЕДИНСТВЕННОЙ точки раскладки: `False` даёт ПУСТОЙ
+    # словарь, и `_create_error_manager` (managers/process_managers.py) видит
+    # пустой `managers_config.get("error", {})` — тем же путём, что и процесс
+    # БЕЗ секции `error` вовсе (см. докстринг `ProcessModule._install_process_hooks`:
+    # дорога инцидента `report_error` → health есть у ЛЮБОГО процесса и без
+    # ErrorManager, плоскость ошибок добавляет к ней запись, а не создаёт её).
+    error: Dict[str, Any] = (
+        {
+            "default_level": cfg.errors.level,
+            "include_stacktrace": cfg.errors.include_stacktrace,
+        }
+        if cfg.errors.enabled
+        else {}
+    )
 
     stats: Dict[str, Any] = {
         # Ф2 (2.1, Р-3а): судьбу ЛОГ-КАНАЛА решает `log_snapshots`, а не
@@ -870,7 +946,11 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     # собирается сознательно: severity-каналы ошибок строит
     # ``expand_error_manager_config``, а служебные каналы статистики — её
     # собственные сборщики; наша запись обязана лечь поверх, а не вместо.
-    if cfg.errors.channels:
+    # Ф2 (2.2): гейт выше может оставить `error` пустым (`errors.enabled=False`) —
+    # дописывать в него каналы значило бы сделать словарь непустым и оживить
+    # `ErrorManager`, которого гейт как раз погасил. `error`, а не `cfg.errors.enabled`
+    # ещё раз: одна проверка, а не вторая копия того же условия.
+    if cfg.errors.channels and error:
         error["channels"] = {str(k): dict(v) for k, v in cfg.errors.channels.items()}
     if cfg.stats.channels:
         stats["channels"] = {str(k): dict(v) for k, v in cfg.stats.channels.items()}

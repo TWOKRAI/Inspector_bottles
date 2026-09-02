@@ -60,7 +60,15 @@ from .observability_wiring import (
 #: ``observation`` в перечень НЕ входит намеренно: у её ключей своя нормализация
 #: обоих берегов (``normalized_observation_section``), и тождественное сравнение
 #: по строкам ей не годится — см. ветку ниже по файлу.
-IDENTITY_SECTION_KEYS = (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY, VOICES_SECTION_KEY)
+#: Ф2 (задача 2.2): ``history`` — четвёртая под-секция того же рода. Она идёт мимо
+#: ``expand_observability`` (у стора нет менеджера, в поля которого её надо было бы
+#: переводить — см. докстринг схемы), а её путь конфига совпадает с путём
+#: readback'а один в один (``history.level`` → ``history.level``), поэтому
+#: тождественное соответствие ей подходит буквально. Без неё вердикт по
+#: ``observability.history`` отвечал бы ``unverifiable`` при ``checked=0`` — тот
+#: же блокер Б2, что уже был у ``events``/``flight``/``voices``; сторож —
+#: ``test_voices_policy_road_guards.py::TestIdentitySectionsCoverEveryUnexpandedSubsection``.
+IDENTITY_SECTION_KEYS = (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY, VOICES_SECTION_KEY, "history")
 
 #: Ф2 (задача 2.3, M9). СКАЛЯР схемы (``float``), не под-секция — тем же родом,
 #: что ``session_ttl_sec`` (``observability_layers.SESSION_TTL_KEY``): у него нет
@@ -249,6 +257,9 @@ def observability_effective(
     event_selector: Any = None,
     flight_recorder: Any = None,
     heartbeat: Any = None,
+    command: Any = None,
+    session_ttl_sec: Optional[float] = None,
+    history: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Фактическое (readback) состояние менеджеров наблюдаемости — не эхо запроса.
 
@@ -263,7 +274,30 @@ def observability_effective(
         section: Dict[str, Any] = {
             "default_level": getattr(lc, "default_level", None),
             "log_directory": getattr(lc, "log_directory", None),
+            # Ф2 (задача 2.2, критерий 3): ретеншен/компрессия эмитятся
+            # `expand_observability` (`logger.retention_*`/`compress_rotated`), но
+            # readback их не отдавал вовсе — `config_reload_verified` отвечал
+            # `unverifiable` на КАЖДУЮ правку этих четырёх ключей. Читаются у
+            # ЖИВОГО конфига (`self.config` мутируется на `reconfigure`, ретеншен
+            # сам читает `self.config` в момент свипа — расхождения между «что
+            # сказали» и «что действует» здесь нет).
+            "retention_days": getattr(lc, "retention_days", None),
+            "retention_total_mb": getattr(lc, "retention_total_mb", None),
+            "compress_rotated": getattr(lc, "compress_rotated", None),
+            "retention_sweep_interval_sec": getattr(lc, "retention_sweep_interval_sec", None),
         }
+        # Ф2 (2.2, критерий 3): адресные переопределения канала (Task 5.12,
+        # `observability.channels.<имя>.enabled`) эмитятся экспандером, но
+        # readback отдавал только ИМЕНА активных каналов (`channels_active`
+        # ниже), не их `enabled` — правка `channels.messages_file.enabled`
+        # была неподтверждаема. Путь конфига (`channels.<имя>.enabled`) и путь
+        # readback'а обязаны совпадать — иначе тождественное сравнение вердикта
+        # не найдёт свой путь.
+        channels_cfg = getattr(lc, "channels", None)
+        if isinstance(channels_cfg, dict):
+            section["channels"] = {
+                str(name): {"enabled": bool(getattr(ch, "enabled", True))} for name, ch in channels_cfg.items()
+            }
         scopes = getattr(lc, "scopes", None)
         if isinstance(scopes, dict):
             # Ф8.1: у скоупа осталась одна ось — приёмники. Прежний readback отдавал
@@ -284,9 +318,14 @@ def observability_effective(
         # Ф2.5: ярлыки как их ОБЪЯВИЛИ, рядом с раскрытой таблицей выше.
         # Расхождение между ними и есть «ярлык написан, а не действует»: член,
         # у которого нашлось собственное правило, в раскрытии не появится.
+        # Ф2 (2.2, критерий 3): имя readback'а — ИМЯ СХЕМЫ (`logger_groups`), а не
+        # внутреннее `groups`. Оператор правит секцию ключом `logger_groups`
+        # (`ObservabilityConfig.logger_groups`), и старое имя ответа не совпадало
+        # с путём запроса — тождественное сравнение вердикта не находило свой
+        # путь, и `logger_groups.*` был `unverifiable` на любой правке.
         groups_fn = getattr(logger, "logger_groups", None)
         if callable(groups_fn):
-            section["groups"] = groups_fn()
+            section["logger_groups"] = groups_fn()
         # Ф2.7: каталог объявленных источников — что МОЖЕТ писать, в отличие от
         # `sources` (что уже писало). Источник, у которого всё гасится порогом, в
         # журнале не появится вовсе, а разбирают обычно именно его.
@@ -322,9 +361,40 @@ def observability_effective(
     if error is not None and getattr(error, "config", None) is not None:
         out["error"] = {
             "default_level": getattr(error.config, "default_level", None),
+            # Ф2 (2.2, критерий 3): пара к `default_level` (тот уже подтверждался).
+            # `include_stacktrace` живёт НЕ на `error.config` (он превращается в
+            # `LoggerManagerConfig` внутри `ErrorManager` и теряет это поле) — а в
+            # приватном `_include_stacktrace` самого менеджера
+            # (`error_manager.py::_normalize_error_config`), тем же приёмом, что
+            # `_sinks_disabled_by_operator` соседней строкой ниже.
+            "include_stacktrace": getattr(error, "_include_stacktrace", None),
             **_sink_readback(error),
             **_idle_sinks(error),
         }
+    # Ф2 (2.2, критерий 3): `observability_effective` не принимала получателя для
+    # `command` вовсе — `commands.log_success` не мог попасть в readback ни при
+    # каком запросе, и `config_reload_verified` отвечал `unverifiable` всегда.
+    # Читаем ПРИВАТНЫЙ `_log_success_enabled`: у `CommandManager` нет отдельного
+    # публичного геттера (только `set_log_success_enabled`), тем же приёмом, что
+    # `include_stacktrace` строкой выше.
+    if command is not None:
+        log_success = getattr(command, "_log_success_enabled", None)
+        if log_success is not None:
+            out["command"] = {"log_success": bool(log_success)}
+    # Ф2 (2.2, критерий 3): `session_ttl_sec` (Task 5.8) не раскладывается
+    # `expand_observability` (получатель — бухгалтерия слоя L3, не менеджер), и
+    # без этой ветки правка исчезала из вердикта ЦЕЛИКОМ — не `mismatch`, не
+    # даже `unverifiable`. Читается ВЫЗЫВАЮЩИМ у `ObservabilityLayers.
+    # effective_session_ttl()` и передаётся сюда готовым числом: эта функция не
+    # держит ссылку на `layers`.
+    if session_ttl_sec is not None:
+        out["session_ttl_sec"] = float(session_ttl_sec)
+    # Ф2 (2.2, критерий 1): `history` — четвёртая под-секция «своего механизма»
+    # (см. IDENTITY_SECTION_KEYS). Политика приходит готовым словарём
+    # (`resolve_history_policy(svc)`) — той же дорогой, что и `session_ttl_sec`
+    # выше: эта функция читает менеджеров и живые объекты, а не сам процесс.
+    if history is not None:
+        out["history"] = dict(history)
     if stats is not None:
         # B1. Прежде ветка сторожилась `getattr(stats, "config", None) is not None`
         # и НЕ ИСПОЛНЯЛАСЬ НИ РАЗУ: `self.config` ставит `LoggerCore` (общий
@@ -510,6 +580,16 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     # где всё применилось.
     if isinstance(survived.get(OBSERVATION_SECTION_KEY), dict):
         expected.update(normalized_observation_section(survived[OBSERVATION_SECTION_KEY]))
+    # Ф2 (задача 2.2, критерий 3): `session_ttl_sec` — СКАЛЯР схемы (не
+    # под-секция, поэтому мимо `IDENTITY_SECTION_KEYS` выше), и `expand_observability`
+    # его не раскладывает (см. её докстринг). Без этой строки правка исчезала бы
+    # из вердикта целиком: путь никогда не появлялся бы ни в `expected`, ни,
+    # следовательно, ни в `mismatches`, ни в `unverifiable` — «ключ не упомянут»
+    # читалось бы оператором как «всё в порядке». `model_fields_set` через
+    # `exclude_unset=True` уже отличил «задано явно» от «совпало с дефолтом»
+    # (та же гарантия, что у остальных путей survived).
+    if "session_ttl_sec" in survived:
+        expected["session_ttl_sec"] = survived["session_ttl_sec"]
     flat_effective = flatten_section(effective if isinstance(effective, dict) else {})
 
     mismatches: list = []
@@ -937,6 +1017,7 @@ def apply_observability_layers(
     boot_rules: Optional[Dict[str, Any]] = None,
     event_selector: Any = None,
     flight_recorder: Any = None,
+    command: Any = None,
     origin: str,
     record_rebuild: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
@@ -967,6 +1048,13 @@ def apply_observability_layers(
     ``test_observability_reload_merge.py``.
 
     None-менеджеры пропускаются (например error/stats отключены).
+
+    Task 2.2 (критерий 3): ``command`` — седьмая плоскость на тех же правах,
+    что ``event_selector``/``flight_recorder``: ручка ``observability.commands.
+    log_success`` раскладывалась ``expand_observability`` и НИКОГДА не
+    доставлялась до живого ``CommandManager`` — правка лежала в слое, была
+    видна в провенансе и не действовала. ``None`` — не отказ (процесс без
+    ``CommandManager`` пропускает ветку).
 
     Task 5.10.f — **четвёртая плоскость в том же стеке.** ``heartbeat`` /
     ``heartbeat`` / ``telemetry_boot`` необязательны ровно так же, как
@@ -1025,6 +1113,7 @@ def apply_observability_layers(
                 boot_rules=boot_rules,
                 event_selector=event_selector,
                 flight_recorder=flight_recorder,
+                command=command,
             )
             # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
             # была вызвана. Иначе после неудачного возврата и последующего успешного
@@ -1067,6 +1156,7 @@ def _rebuild_and_apply(
     boot_rules: Optional[Dict[str, Any]] = None,
     event_selector: Any = None,
     flight_recorder: Any = None,
+    command: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Тело пересборки (вызывается под локом стека — см. вызывающего)."""
     resolved = layers.resolve()
@@ -1086,6 +1176,18 @@ def _rebuild_and_apply(
     if stats is not None:
         stats.reconfigure(expanded["stats"])
         _remark_operator_disabled_sinks(stats, layers, ("stats", "channels"))
+
+    # Ф2 (задача 2.2, критерий 3): третья точка дороги `observability.commands.
+    # log_success`. `expanded["command"]` УЖЕ считается `compose_managers_payload`
+    # выше, но раньше его не забирал никто — правка легла бы в слой, была бы
+    # видна в провенансе (`_schema_keys()` генерик её видит) и НЕ действовала.
+    # Получатель — ЖИВОЙ `CommandManager` (`set_log_success_enabled`), а не
+    # пересоздание: гейт у ИСТОЧНИКА (командный hot-path не должен терять счёт
+    # ради правки конфига).
+    if command is not None:
+        set_log_success_fn = getattr(command, "set_log_success_enabled", None)
+        if callable(set_log_success_fn):
+            set_log_success_fn(bool(expanded["command"].get("log_success", False)))
 
     # Ф4 (4.1), третья точка дороги ручки: живой селектор перенастраивается ИЗ
     # ТЕХ ЖЕ разрешённых слоёв, что прочитала сшивка на старте. Без этой ветки

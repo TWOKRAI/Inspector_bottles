@@ -3544,3 +3544,104 @@ readback отвечает `plane_disabled: true`). Прежний смысл п�
   трёх прогонах показала двукратный разброс абсолютных чисел, устойчиво только ОТНОШЕНИЕ.
   Лечится это задачей 2.4 той же фазы (мемоизация `(path) → PolicyDecision`), и до неё правка
   на живой стенд идти не должна.
+
+### ADR-PM-047 — схема без мёртвых и без-схемных ключей: `history` — под-секция, `errors.enabled` гасит менеджер (2026-09-02, Task 2.2)
+
+**Статус:** принято
+**Дата:** 2026-09-02
+**Refs:** plans/observability-closure/phase-2-one-policy.md (Ф2, задача 2.2), plan.md §3,
+`configs/observability_config.py::ObservabilityHistoryConfig`/`expand_observability`,
+`managers/observability_wiring.py::resolve_history_store_settings`,
+`managers/observability_reload.py::IDENTITY_SECTION_KEYS`/`observability_effective`/`observability_verified`,
+`core/process_module.py::_wire_observability_hub`
+
+**Контекст.** Инвентарь независимого тестера (AST + грепом) на 46 листовых полях
+`ObservabilityConfig` нашёл: (1) `history` — механизм живой (`resolve_history_policy`), но секции
+НЕТ в схеме, читается строковым путём мимо round-trip, и `history.level` отвергался операторской
+дверью (`config.reload` inline) как незнакомый ключ (сверка задачи 5.4); (2) `errors.enabled`
+существует в схеме с 2026-xx (дефолт `True`) и НЕ ЧИТАЕТСЯ НИГДЕ — `ErrorManager` создаётся
+всегда, ключ не делает ничего; (3) readback называет поле логгера `groups`, схема — `logger_groups`
+— тождественное сравнение вердикта не находит свой путь; (4) `session_ttl_sec`, `retention_*`,
+`compress_rotated`, `channels.*.enabled`, `errors.include_stacktrace`, `commands.log_success`
+эмитятся (или должны эмитироваться) фасадом, но readback их не отдаёт — `config_reload_verified`
+отвечает `unverifiable` на каждой правке, не отличая «не проверено» от «проверено».
+
+**Решение 1 — `history`.** Заведена `ObservabilityHistoryConfig` (enabled/level/max_rows/
+max_age_sec/purge_interval_sec/db_path), поле `history` добавлено в `ObservabilityConfig` и в
+`IDENTITY_SECTION_KEYS` (идёт мимо `expand_observability`, как `events`/`flight`/`voices` — у стора
+нет менеджера, в поля которого секцию надо переводить). `DEFAULT_HISTORY_*` в
+`observability_wiring.py` теперь ЧИТАЮТ схему атрибутом (`ObservabilityConfig().history.<field>`),
+а не дублируют числа вторым литералом. `enabled`/`db_path` — новая пара полей, которой раньше не
+было НИГДЕ (стор поднимался всегда, путь к БД был только машинным дефолтом); читает их
+`resolve_history_store_settings` в `_wire_observability_hub`, гейтуя подъём стора и передавая
+`db_path` в `wire_observability_store`.
+
+**Решение 2 — `errors.enabled` (развилка задачи, вариант «а»).** Ключ ЧИТАЕТСЯ:
+`expand_observability` гейтует раскладку плоскости ошибок — `False` даёт ПУСТОЙ `error`-словарь, и
+`_create_error_manager` (`managers_config.get("error", {})` непуст) не создаёт менеджер той же
+дорогой, что и процесс без секции `error` вовсе. Довод: плоскость ошибок реальна, и «выключить её»
+— осмысленное операторское желание; вариант «б» (снять ключ из схемы с жалобой, как
+`REMOVED_BATCHING_KEYS`) отвергнут — он отбирает у оператора ручку, которая по имени обещает
+существовать, ради упрощения, которое не требовалось ни одним живым сценарием.
+
+**Остаток, названный честно.** Читается ТОЛЬКО судьба `ErrorManager`; readback `error.enabled:
+false` и явный маркер «инцидент идёт в логгер» — НЕ реализованы (задача этого не требует ни одним
+пунктом приёмки: тест держит дизъюнкцию «гейт ИЛИ жалоба», и гейта достаточно). Дорога инцидента
+БЕЗ `ErrorManager` уже существует независимо от этой задачи (`ProcessModule._install_process_hooks`
++ `HealthState.report_error` → `_safe_log` пишет голосом в журнал через health), но БЕЗ маркера
+«плоскость ошибок операторски выключена» — отличить «нет ErrorManager, потому что оператор так
+решил» от «нет ErrorManager, потому что секции не было в конфиге вовсе» по одному этому логу
+нельзя. Если понадобится различать — отдельная задача, а не молчаливое расширение этой.
+
+**Решение 3 — readback.** `observability_effective`: `groups` → `logger_groups` (имя схемы);
+добавлены `retention_days`/`retention_total_mb`/`compress_rotated`/`retention_sweep_interval_sec`
+(из живого `logger.config`), `channels.<имя>.enabled` (из живого `logger.config.channels`),
+`error.include_stacktrace` (приватный `error._include_stacktrace` — у `error.config` его нет: он
+становится `LoggerManagerConfig` внутри `ErrorManager` и теряет это поле). Добавлены три НОВЫХ
+параметра функции: `command` (readback `commands.log_success` из приватного
+`command._log_success_enabled`), `session_ttl_sec` (число, готовое вызывающим —
+`layers.effective_session_ttl()`), `history` (словарь, готовый вызывающим —
+`resolve_history_policy(svc)`). `observability_verified` получил identity-путь для скаляра
+`session_ttl_sec` (та же корзина логики, что у `heartbeat_interval_sec`, но без своего резолвера —
+значение приходит от вызывающего).
+
+**Живая находка попутно.** `observability.commands.log_success` эмитился фасадом с самого начала
+(`expand_observability`), но НИКОГДА не доставлялся до живого `CommandManager` на пересборке —
+третьей точки дороги не было вовсе (`_rebuild_and_apply` не принимала `command`). Правка легла бы в
+слой, была бы видна в провенансе и не действовала — тот же класс дефекта, что уже трижды ловили у
+`events`/`flight`/`voices` (ADR-PM-036/037, Task 1.4). Закрыто той же третьей точкой: `command`
+параметром в `apply_observability_layers`/`_rebuild_and_apply`, вызывающий —
+`CommandManager.set_log_success_enabled`.
+
+**Открытый хвост (не в этой задаче).** `stats.enabled` (Task 2.1) не покрыт верификатором —
+`config_reload_verified` отвечает `unverifiable`, `checked: 0` при живом эффекте (найдено стендом
+2026-09-01). Требует живого `StatsManager` в харнессе readback'а (территория Task 2.1/стенда, не
+схемы) — см. `plans/observability-closure/stand-phase-2.md` и раздел «что осталось незакрытым» в
+коммите этой задачи.
+
+**Остаток по `history` — назван, а не закрыт.** Приёмка задачи (пункт 1) требует ЖИВОГО эффекта:
+«`config_reload_verified(history.level=WARNING)` → `confirmed`; стор перестаёт принимать INFO
+(пара до/после по счётчику строк)». Взято только первое: `history.level`/`max_rows`/`max_age_sec`/
+`purge_interval_sec` теперь корректно ЧИТАЮТСЯ readback'ом и пересчитывается кэш
+`svc._observability_history_policy` на КАЖДОМ `config.reload` (такт уборки увидит новые
+`max_rows`/`max_age_sec`/`purge_interval_sec` на следующем срабатывании). НЕ взято: порог записи
+живого SQLite-тапа (`StoreTapChannel`, зарегистрирован `wire_observability_store(..., min_level=…)`
+на подъёме) НЕ переустанавливается на `config.reload` — `_tap_sinks[name] = (channel,
+threshold_severity(min_level))` выставляется РОВНО ОДИН РАЗ. Значит `history.level=WARNING` сейчас
+даёт `confirmed` readback (честный — политика правда изменилась), но живой стор ПРОДОЛЖИТ принимать
+INFO до следующего рестарта процесса — readback и поведение РАСХОДЯТСЯ ровно на этом одном поле,
+хотя оба пишутся с формальной честностью каждый про своё. Дешёвый путь закрытия — `remove_tap` +
+`add_tap` тем же именем/каналом с новым `min_level` в момент, когда `resolve_history_policy(svc)`
+возвращает изменившийся `level`; не сделано в этой задаче намеренно — правка тап-реестра без
+break-инъекции на неё же (что если два `config.reload` подряд гонятся за одним тапом?) не
+соответствует правилу проекта «тест не доказан без красного», а бюджет задачи это уже исчерпал.
+`enabled`/`db_path` — та же плоскость (подъём/снятие стора целиком) — тоже читаются только на
+`_wire_observability_hub`, это по докстрингу `resolve_history_store_settings` и не заявлено иначе.
+
+**Отвергнутые альтернативы.**
+* **`errors.enabled` снимается из схемы (вариант «б»)** — см. «Решение 2» выше.
+* **Полная readback-симметрия `history`/`command`/`session_ttl_sec` и в `introspect.observability`**
+  — не сделана: `_cmd_introspect_observability` уже несёт `history` отдельной секцией
+  (`_history_report()`), и дублировать её внутри `effective` без запроса приёмки — расширение
+  задачи, не её требование. `commands.log_success`/`session_ttl_sec` в `introspect.observability`
+  тоже не добавлены по той же причине.

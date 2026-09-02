@@ -529,6 +529,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         from ..managers.observability_wiring import (
             error_plane_store_warning,
             resolve_history_policy,
+            resolve_history_store_settings,
             wire_document_sink,
             wire_event_selector,
             wire_observability_store,
@@ -579,20 +580,36 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             # безлимитную таблицу — ровно то состояние, которое задача чинит.
             policy = resolve_history_policy(self)
             self._observability_history_policy = policy
-            self._observability_store, self._observability_store_taps = wire_observability_store(
-                self.error_manager, self.logger_manager, process=self.name, min_level=policy["level"]
-            )
-            # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
-            # Дырка в плоскости ошибок → вкладка «Ошибки» молча беднеет —
-            # предупреждаем (терять можно, молчать нельзя; 5.20 review #6).
-            # Само решение и оба текста живут у проводки, которая их и порождает
-            # (`error_plane_store_warning`): ревью Task 1.3a показало, что
-            # прежнее условие «список tap'ов пуст» пропускало молча раскладку
-            # «есть logger-tap, нет error-tap» — ту самую, на которой инцидент
-            # терялся целиком.
-            store_warning = error_plane_store_warning(self.name, self._observability_store_taps)
-            if store_warning:
-                self._log_warning(store_warning, module="observability")
+            # Ф2 (задача 2.2): `history.enabled`/`history.db_path` — вторая пара
+            # полей секции, судьба СТОРА целиком. До этой задачи стор поднимался
+            # ВСЕГДА, когда есть hub, и путь к БД был только машинным дефолтом —
+            # ключи существовали в схеме и не значили ничего (класс дефекта,
+            # который вся задача 2.2 и закрывает).
+            store_settings = resolve_history_store_settings(self)
+            if store_settings["enabled"]:
+                self._observability_store, self._observability_store_taps = wire_observability_store(
+                    self.error_manager,
+                    self.logger_manager,
+                    db_path=store_settings["db_path"] or None,
+                    process=self.name,
+                    min_level=policy["level"],
+                )
+                # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
+                # Дырка в плоскости ошибок → вкладка «Ошибки» молча беднеет —
+                # предупреждаем (терять можно, молчать нельзя; 5.20 review #6).
+                # Само решение и оба текста живут у проводки, которая их и порождает
+                # (`error_plane_store_warning`): ревью Task 1.3a показало, что
+                # прежнее условие «список tap'ов пуст» пропускало молча раскладку
+                # «есть logger-tap, нет error-tap» — ту самую, на которой инцидент
+                # терялся целиком.
+                store_warning = error_plane_store_warning(self.name, self._observability_store_taps)
+                if store_warning:
+                    self._log_warning(store_warning, module="observability")
+            else:
+                # `enabled=False` — операторское решение «истории не держим»,
+                # а не отказ: молчим, как и у соседних гейтов (`flight.enabled`,
+                # `documents.factory` пустой).
+                self._observability_store, self._observability_store_taps = None, []
 
     def _init_communication(self):
         """Инициализация коммуникации процесса."""

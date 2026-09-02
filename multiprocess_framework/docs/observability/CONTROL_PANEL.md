@@ -220,11 +220,18 @@ Task 5.12 ручка переживает reload — то есть инциде�
 ### 5.3. Что показывает readback
 
 `observability_effective` читает **живые менеджеры после применения**, а не конфиг: пороги правил,
-каталог логов, `channels_active` (реестр каналов — он отражает и рантайм-снятие приёмника, чего
-конфиг не видит), `sinks_disabled_by_operator`, `idle_sinks`, `declared_sources` (что МОЖЕТ писать)
-рядом с `sources` (что уже писало), `unknown_scopes`, `groups`. У плоскости статистики темп
-берётся из **живого окна агрегации** (`StatsManager.observability_readback`) — пересчёт из конфига
-дал бы то же число и при полностью несработавшей пересборке, то есть снова эхо.
+каталог логов, ретеншен/компрессия (`retention_days`/`retention_total_mb`/`compress_rotated`/
+`retention_sweep_interval_sec`), адресные переопределения каналов (`channels.<имя>.enabled`),
+`channels_active` (реестр каналов — он отражает и рантайм-снятие приёмника, чего конфиг не видит),
+`sinks_disabled_by_operator`, `idle_sinks`, `declared_sources` (что МОЖЕТ писать) рядом с `sources`
+(что уже писало), `unknown_scopes`, `logger_groups` (Ф2, задача 2.2: имя схемы, не внутреннее
+`groups` — старое имя ответа не совпадало с путём запроса `observability.logger_groups`, и
+`config_reload_verified` не находил свой путь). Плоскость ошибок отдаёт и `include_stacktrace`
+(пара к `default_level`, тот подтверждался и раньше). `commands.log_success` и `session_ttl_sec` —
+тем же дублирующим отсутствие-получателя доводом, что `events`/`flight`/`voices`/`history` (§7):
+без них правка законно применялась и исчезала из вердикта целиком (Ф2, задача 2.2). У плоскости
+статистики темп берётся из **живого окна агрегации** (`StatsManager.observability_readback`) —
+пересчёт из конфига дал бы то же число и при полностью несработавшей пересборке, то есть снова эхо.
 
 ### 5.4. Политика плоскости ЧИСЕЛ (Ф2, задача 2.1)
 
@@ -317,7 +324,8 @@ introspect.observability -> stats.policy -> rules / hits / dropped_by_rule
 |---|---|---|
 | `config.reload {"persist": true}` | **адресный отказ** с подсказкой на `observability.persist` | флаг зарезервирован и не реализован. Молча принятый флаг был ловушкой: оператор уходил уверенным, что записал правку навсегда, а она лежала в L3 со сроком. Ключ объявлен в схеме именно ради достижимости этого отказа — иначе при `extra="forbid"` мидлварь дропнула бы его до проверки |
 | `observability.documents` (фабрика стока и её конфиг) | принимается слоями, но **сток не пересшивается** | `wire_document_sink` зовётся один раз, из `_wire_observability_hub` на `initialize()` ([`process_module.py:411`](../../modules/process_module/core/process_module.py#L411)); в `apply_observability_layers` упоминаний `documents` нет. Действует со следующего старта процесса |
-| `observability.history` (`level`, `max_rows`, `max_age_sec`, `purge_interval_sec`) | то же | `resolve_history_policy` зовётся один раз рядом, [`process_module.py:427`](../../modules/process_module/core/process_module.py#L427) |
+| `observability.history.enabled` / `.db_path` | то же — судьба стора целиком | `resolve_history_store_settings` зовётся один раз, из `_wire_observability_hub` ([`process_module.py:588`](../../modules/process_module/core/process_module.py#L588)) |
+| `observability.history.level` | **readback подтверждает немедленно, живой порог записи — нет** | кэш `svc._observability_history_policy` обновляется каждым `config.reload` (см. §7 «История»), но `StoreTapChannel.min_level` уже поднятого стора не переустанавливается — действует со следующего рестарта. `max_rows`/`max_age_sec`/`purge_interval_sec` из ТОГО ЖЕ кэша при этом уже применяются на следующем такте свипа — гранулярность внутри одной секции разная, см. ADR-PM-047 |
 | опечатка в **имени** ключа (`log_levl`), включая машинную форму (`logger.default_level`) | у ручки оператора — **адресный отказ до записи**; у файла/рецепта — принимается и называется вслух | задача 5.4 (находки Н-C/Н-D приёмки F2). Прежде имя судил только вердикт, и ответ противоречил себе: `success=true` при `verified.verdict="failed"` в том же payload, ключ оседал в L3 со сроком и не действовал. Двери разведены не по важности, а по цене отказа: опечатка в спутнике не имеет права валить switch рецепта. Голос файловой дороги — запись аудита (`unknown_keys`) и строка журнала «ВНЕ КОНТРАКТА (ключ есть, эффекта нет)» |
 | правило-дефолт источника, объявленное **после** сборки конфига (ленивый импорт, плагин) | в уже собранные конфиги не попало | говорится вслух через `emergency_log`; начнёт действовать со следующей сборки (reload либо новый процесс) |
 | срок (`ttl`) в процессе без heartbeat | ставится, но не исполняется | `ttl_enforced: false` в ответе — молчаливое «срок принят» там, где возврата не будет, запрещено |
@@ -541,6 +549,40 @@ config.reload {"observability": {"voices": {"default_window_sec": 30, "max_track
 `windowed_keys_evicted` — процессные, публикует плоскость логов (`introspect.observability`).
 Факт (счётчик, запись в плоскость ошибок) учитывается ВСЕГДА, окно давит только голос — не
 путать со счётчиком, который сам не растёт без голоса.
+
+### История — персистентный стор (`observability.history`, ADR-PM-047, Ф5.2 / Ф2 задача 2.2)
+
+```bash
+# тише порог, безопаснее ретеншен
+config.reload {"observability": {"history": {"level": "WARNING", "max_rows": 50000}}}
+#   config_reload_verified → verified.verdict (readback подтверждает СЕКЦИЮ КОНФИГА)
+```
+
+До задачи 2.2 секции `history` не было в схеме вовсе — `history.level` отвергался операторской
+дверью как незнакомый ключ (сверка задачи 5.4). Теперь секция — под-схема
+`ObservabilityHistoryConfig`, идёт мимо `expand_observability` (у стора нет менеджера, в поля
+которого её надо переводить — тем же родом, что `events`/`flight`/`voices`).
+
+| Ключ | Дефолт | Смысл |
+|---|---|---|
+| `enabled` | `true` | вести историю (стор создаётся только когда True и у процесса есть hub) |
+| `level` | `INFO` | минимальный уровень записи в историю (порог ERROR держал бы вкладку «Логи» пустой ПО ПОСТРОЕНИЮ — находка Б-8) |
+| `max_rows` | `200000` | потолок таблицы по числу строк (0 — предела нет) |
+| `max_age_sec` | `604800.0` | возраст, старше которого запись уходит, сек — неделя (0 — предела нет) |
+| `purge_interval_sec` | `300.0` | период фонового свипа истории, сек |
+| `db_path` | `""` | путь к SQLite-файлу стора (пусто — `resolve_default_db_path()`) |
+
+**Три скорости применения, и это не забывчивость.** `enabled`/`db_path` решают судьбу стора
+целиком (поднимать ли вовсе, куда класть файл) и читаются РОВНО ОДИН РАЗ при подъёме
+(`ProcessModule._wire_observability_hub` → `resolve_history_store_settings`) — действуют со
+следующего рестарта процесса. `max_rows`/`max_age_sec`/`purge_interval_sec` живут в кэше
+`svc._observability_history_policy`, который `config.reload` обновляет на КАЖДОЙ пересборке —
+такт уборки (`sweep_observability_history`) увидит новые пределы на следующем срабатывании.
+`level` — **readback подтверждает правку немедленно** (та же дорога, что и три предыдущих поля),
+но живой ПОРОГ ЗАПИСИ уже поднятого SQLite-тапа (`StoreTapChannel`, зарегистрирован
+`wire_observability_store(..., min_level=…)`) НЕ переустанавливается на лету — стор продолжит
+принимать записи по СТАРОМУ порогу до следующего рестарта. Названный, не закрытый остаток —
+см. ADR-PM-047.
 
 ---
 

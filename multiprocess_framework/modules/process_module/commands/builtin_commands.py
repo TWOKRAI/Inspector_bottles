@@ -1870,12 +1870,15 @@ class BuiltinCommands:
                 telemetry_targets,
             )
             from ..managers.observability_flight import FLIGHT_RECORDER_ATTR
-            from ..managers.observability_wiring import EVENT_SELECTOR_ATTR
+            from ..managers.observability_wiring import EVENT_SELECTOR_ATTR, resolve_history_policy
 
             layers = process_observability_layers(svc)
             _logger = getattr(svc, "logger_manager", None)
             _error = getattr(svc, "error_manager", None)
             _stats = getattr(svc, "stats_manager", None)
+            # Ф2 (задача 2.2, критерий 3): третья точка дороги `commands.log_success` —
+            # без неё правка легла бы в слой и не действовала бы (см. `_rebuild_and_apply`).
+            _command = getattr(svc, "command_manager", None)
             # Ф5, ревью-блокер S2 — тот же геттер, что и в introspect.observability.
             _observation = _safe_get_manager(svc, "observation")
 
@@ -2165,6 +2168,10 @@ class BuiltinCommands:
                         # и не подействовала: рекордер создаётся один раз на
                         # старте, и пересборка обязана донести до него ручки.
                         flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
+                        # Ф2 (2.2): живой CommandManager — получатель ручки
+                        # `observability.commands.log_success` (см. докстринг
+                        # `_rebuild_and_apply`).
+                        command=_command,
                         origin=_ORIGIN_SWITCH if obs_clear else _ORIGIN_RELOAD,
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -2196,6 +2203,19 @@ class BuiltinCommands:
                 # выключен), и это не то же самое, что «применять было некому».
                 if expanded.get("heartbeat_interval_sec") is not None:
                     result["heartbeat_interval_applied"] = expanded["heartbeat_interval_sec"]
+                # Ф2 (задача 2.2): `history.level`/`max_rows`/`max_age_sec`/
+                # `purge_interval_sec` жили в `svc._observability_history_policy`,
+                # выставленном РОВНО ОДИН РАЗ на подъёме (`_wire_observability_hub`) —
+                # такт уборки (`sweep_observability_history`) читает именно этот
+                # кэш, а не слои заново. Без обновления здесь readback показывал
+                # бы применённое значение (см. `history=` в `observability_effective`
+                # ниже), а такт уборки продолжал бы жить прежним — расхождение
+                # ровно того класса, который вся фаза и лечит. `db_path`/`enabled`
+                # сюда НЕ входят: они читаются РОВНО на подъёме стора и решают,
+                # поднимать ли его вовсе — «стор появился/исчез на лету» эта
+                # задача не берёт (см. ADR-PM-047, остаток).
+                if getattr(svc, "_observability_store", None) is not None:
+                    svc._observability_history_policy = resolve_history_policy(svc)
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.
@@ -2217,6 +2237,12 @@ class BuiltinCommands:
                 # Фв4 (4.1): без этой строки вердикт по секции порта был бы
                 # `unverifiable` при `checked=0` — «никто не смотрел» вместо проверки.
                 heartbeat=getattr(svc, "_heartbeat", None),
+                # Ф2 (задача 2.2, критерий 3): без этих трёх без исключения правка
+                # `commands.log_success`/`session_ttl_sec`/`history.*` отвечала бы
+                # `unverifiable` — путь запроса некому было сравнить с readback'ом.
+                command=_command,
+                session_ttl_sec=layers.effective_session_ttl(),
+                history=resolve_history_policy(svc),
             )
             # Task 5.7: судить, а не только показывать. Readback лежал в ответе, но
             # `success` означал «применение не упало» — запрошенный ключ, перебитый
