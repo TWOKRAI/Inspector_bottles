@@ -24,7 +24,6 @@
 from __future__ import annotations
 
 import inspect
-import sys
 
 import pytest
 
@@ -44,7 +43,7 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
     MockStatsManager,
 )
 from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
-from multiprocess_framework.modules.tests._road_cost import count_calls, timed_pair
+from multiprocess_framework.modules.tests._road_cost import count_calls, report as _report, timed_pair
 
 #: Порт, который читает фасад. Имя одно и то же в протоколе, в процессе и в дубле —
 #: рукописные копии одного имени расходятся молча, поэтому копия здесь одна.
@@ -377,20 +376,6 @@ class TestTheSubContextCarriesTheStatsRoad:
 # ==============================================================================
 # Цена горячего пути — числом, а не словом «незначительно»
 # ==============================================================================
-
-
-def _report(capsys: "pytest.CaptureFixture", line: str) -> None:
-    """Печать замера мимо capture, безопасная для консоли в cp1251.
-
-    Форма взята у ``logger_module/tests/test_gate_cost_bench.py`` дословно и по
-    той же причине: русский текст в дефолтной консоли Windows роняет тест
-    ``UnicodeEncodeError``, и «зелёный прогон» оказывается верным только под
-    utf-8. Кодировка снимается ВНУТРИ ``disabled()`` — снаружи у capture-объекта
-    она всегда ``UTF-8``, и защита была бы тождеством.
-    """
-    with capsys.disabled():
-        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
-        print(line.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
 
 class TestTheCostOfTheHotPath:

@@ -34,7 +34,6 @@
 
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
 
 import pytest
@@ -46,25 +45,12 @@ from multiprocess_framework.modules.process_module.configs.observation_policy im
 from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import MetricRule
 from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
 from multiprocess_framework.modules.statistics_module.observation.observation_manager import ObservationManager
-from multiprocess_framework.modules.tests._road_cost import count_calls, timed_pair
+from multiprocess_framework.modules.tests._road_cost import count_calls, report as _report, timed_pair
 
 #: Процесс стенда — сегмент пути правила (Р-2а: ``processes.<p>.stats.<имя>``).
 _PROCESS = "task210_cost_probe"
 _DISABLED_METRIC = "task210_disabled_metric"
 _ENABLED_METRIC = "task210_enabled_metric"
-
-
-def _report(capsys: "pytest.CaptureFixture", line: str) -> None:
-    """Печать замера мимо capture, безопасная для консоли в cp1251.
-
-    Дословный дубль соседа (``test_plugin_stats_road.py::_report``,
-    ``logger_module/tests/test_gate_cost_bench.py``) — по добору перенос в
-    общий помощник получили только ``timed_pair``/``count_calls``, печать
-    осталась локальной каждому бенчу.
-    """
-    with capsys.disabled():
-        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
-        print(line.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
 
 def _wired_stand() -> tuple[StatsManager, ObservationManager, ObservationPolicy]:
@@ -123,9 +109,13 @@ class TestTheDisabledMetricCostsNoMoreThanTheGate:
             through_disabled, through_enabled = timed_pair(disabled_call, enabled_call, repeats=20_000)
             ratio = through_disabled / through_enabled
 
-            # (б) — та же интерливинг-техника ``timed_pair``, применённая к
-            # ОДНОЙ и той же стороне: устраняет окно загрузки машины между
-            # двумя половинами замера тем же приёмом, что и у пары (а)/(в).
+            # (б) — НЕ чередование: обе стороны здесь один и тот же вызов,
+            # сравнивать нечего, и работу делает минимум из пяти окон, а не
+            # порядок блоков. Прежняя редакция комментария объявляла это
+            # «устранением окна загрузки машины» — неверно, и вдвойне: (б)
+            # снимается ОТДЕЛЬНЫМ вызовом ``timed_pair``, то есть в другом окне
+            # загрузки, чем (а)/(в). С ними (б) сопоставимо только по порядку
+            # величины; нужна точная сопоставимость — парить одним вызовом.
             per_call_resolve, _per_call_resolve_again = timed_pair(resolve_call, resolve_call, repeats=20_000)
 
             _report(capsys, "\nЦена выключенной метрики (Task 2.1, шаг 5 / Task 2.10):")
@@ -150,17 +140,21 @@ class TestTheDisabledMetricCostsNoMoreThanTheGate:
             # останавливается на ``gate.allow`` и никогда не доходит до
             # ``_deliver_number``/``_emit_to_taps`` — структурно короче, не
             # только по времени.
-            disabled_py, _disabled_c = count_calls(disabled_call)
-            enabled_py, _enabled_c = count_calls(enabled_call)
-            _report(capsys, f"  python-вызовов (выключенная / включённая): {disabled_py} / {enabled_py}")
+            #
+            # ПАРАМИ (py, C), а не одним py-числом: ``d.copy()`` и ``with lock:``
+            # дают py+0 и C+1, то есть только-py сторож слеп ровно к тем
+            # регрессиям, ради которых заведён (замер соседа, добор Р-12).
+            # C-число здесь устойчиво: на этой дороге нет ни одного ``import``,
+            # из-за которого гулял литерал фасада, — сверено в голом процессе,
+            # под PySide6 и под coverage.
+            disabled = count_calls(disabled_call)
+            enabled = count_calls(enabled_call)
+            _report(capsys, f"  вызовов py/C (выключенная / включённая): {disabled} / {enabled}")
 
-            assert disabled_py == 6, (
-                f"дорога выключенной метрики завела новую работу: {disabled_py} python-вызовов вместо 6"
+            assert disabled == (6, 5), (
+                f"дорога выключенной метрики завела новую работу: {disabled} вместо (6, 5) (py, C)"
             )
-            assert enabled_py == 28, f"дорога включённой метрики изменилась: {enabled_py} python-вызовов вместо 28"
-            assert disabled_py < enabled_py, (
-                f"выключенная метрика обязана делать МЕНЬШЕ вызовов, чем включённая: {disabled_py} !< {enabled_py}"
-            )
+            assert enabled == (28, 30), f"дорога включённой метрики изменилась: {enabled} вместо (28, 30) (py, C)"
         finally:
             mgr.shutdown()
             port.shutdown()

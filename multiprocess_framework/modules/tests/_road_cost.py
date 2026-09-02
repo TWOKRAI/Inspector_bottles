@@ -32,7 +32,26 @@ import sys
 import time
 from typing import Any, Callable, Tuple
 
-__all__ = ["count_calls", "timed_pair"]
+__all__ = ["count_calls", "report", "timed_pair"]
+
+
+def report(capsys: Any, line: str) -> None:
+    """Печать замера МИМО capture — и безопасная для консоли в cp1251.
+
+    Бенч обязан печатать свои числа даже при зелёном прогоне: замер, который
+    никто не видит, нельзя ни сверить с прошлым, ни принести в отчёт. Кодировка
+    правится с запасом, потому что консоль на этой машине не UTF-8, а падение
+    на печати выглядело бы как падение теста.
+
+    Жила тремя дословными копиями (``test_plugin_stats_road.py``,
+    ``test_f2_numbers_disabled_cost_bench.py``, ``logger_module/tests/
+    test_gate_cost_bench.py``); первые две переведены сюда добором Р-12, третья
+    осталась копией — она в чужом модуле и её перевод назван follow-up'ом,
+    а не сделан заодно.
+    """
+    with capsys.disabled():
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
 
 def timed_pair(new_fn: Callable[[], Any], old_fn: Callable[[], Any], repeats: int) -> Tuple[float, float]:
