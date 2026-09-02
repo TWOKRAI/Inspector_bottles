@@ -79,7 +79,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — qt-mcp: «зонд жив» ≠ «отрисовано» · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало
 
 ## Активные проекты и долги
-- [observability-closure: Ф0+Ф1 ЗАКРЫТЫ](project_observability_closure_progress.md) — 2026-09-01: 1.5 = пара стендов + health в overview.anomalies (ноль новых IPC); ревью фазы: 18 подтверждённых major → review-phase-1.md; гейты 9206/7277; NEXT Ф2 + добор пар счётчиков
+- [observability-closure: Ф0+Ф1 закрыты, Ф2 = 9/12](project_observability_closure_progress.md) — 2026-09-02: Task 2.9 сняла ЕДИНСТВЕННЫЙ блокер merge Ф2 (вердикт различал молчанием; зонд по разнице двух значений); гейт 9565 (+230); остаток — 9 листьев на своём дефолте называются, а не сверяются (→4.9); merge в main ждёт владельца; NEXT 2.10, 2.11 (Р-11), 2.12 (Р-12)
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; правда в v1; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim
 - [observation-port: Ф0–Ф5 ЗАКРЫТЫ](project_observation_port_progress.md) — порт = единственный писатель чисел, StatsManager стал видом; ревью вернуло 3 блокера, все закрыты; гейт 8930
 - [constructor-master прогресс](project_constructor_master_progress.md) — Ф0–Ф3 + трек F + Ф5-ядро закрыты; NEXT C1-C8 + app_module 5.11-5.13 · [чистка границ C1-C8](project_arch_boundaries_plan.md) — движок миграций 4.5 идёт в recipe, НЕ generic

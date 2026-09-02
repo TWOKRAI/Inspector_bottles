@@ -40,6 +40,8 @@
 - [Константа из физики, а не из замера](feedback_constant_from_domain_physics_not_measured.md) — 99.28 % наблюдений ниже первой границы; инъекции такое не ловят
 
 ## Вакуумные тесты и ассерты
+- [Readback, собранный руками, оставляет своего производителя без сторожа](feedback_a_handmade_readback_leaves_its_producer_unguarded.md) — 0 красных из 145 при снятой строке readback: все тесты подавали `effective` литералом. Инъекция в производителя — отдельно от инъекции в сверщик
+- [Применяющая команда не измеряет то, что переустанавливает](feedback_an_applying_command_cannot_measure_what_it_reapplies.md) — второй `config.reload` подтверждал собственную запись (3.5 != 9.25); живость такта читать ЧИТАЮЩЕЙ дверью, и её надо зарегистрировать в стенде явно
 - [Страж-обходчик не видит удалённого элемента](feedback_a_list_walking_guard_cannot_see_a_removed_item.md) — ключ снят из OBSERVABILITY_LOSS_KEYS, обходчик зелен; держит только литерал «ключ в реестре»; в матрице всегда заплатка «элемент удалён»
 
 - [Молчащий детектор](feedback_silent_detector_proves_nothing.md) — сперва покажи красным · [тест, поднимающий ошибку сам](feedback_test_raising_the_error_itself_guards_the_branch.md) — сторожит except
@@ -93,6 +95,7 @@
 - [PRAGMA молчит об отказе](feedback_sqlite_pragma_fails_silently.md) — порядок до WAL
 
 ## Конфиг и схемы
+- [Классифицировать лист по РАЗНИЦЕ двух значений](feedback_classify_a_leaf_by_the_difference_of_two_values.md) — один полюс путает «не потребляется» с «равно дефолту» (24 ложных имени); отпечаток ПЕРЕСЕЧЕНИЕМ полюсов, объединение обвиняет нетронутых соседей
 
 - [Dict at Boundary GUI](feedback_dict_at_boundary_gui.md) — виджеты только dict, не live SchemaBase
 - [model_copy не валидирует](feedback_model_copy_does_not_validate.md) — dict вместо схемы молча · [материализованный дефолт](feedback_materialized_default_hides_absence.md) — сверять с model_fields[].default
