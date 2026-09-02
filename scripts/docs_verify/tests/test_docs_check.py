@@ -259,6 +259,20 @@ INJECTIONS: List["pytest.ParameterSet"] = [
         [(OBSERVATION_POLICY, "STATS_SUBTREE_INTERVAL_SEC = 0.0", "STATS_SUBTREE_INTERVAL_SEC = 1.0")],
         id="F2-1-код-сменил-дефолтный-интервал-чисел",
     ),
+    # Task 2.9 (M2, добор ревью Ф2): CONTROL_PANEL.md перестал называть readback-ключ
+    # `enabled` рядом с `plane_disabled` — код факт держит (регэксп по stats_manager.py
+    # не тронут), молчит именно документ.
+    pytest.param(
+        "F2-1",
+        [
+            (
+                CONTROL_PANEL,
+                "| `enabled` | `introspect.observability` → `effective.stats` |",
+                "| `enabled_renamed_for_test` | `introspect.observability` → `effective.stats` |",
+            )
+        ],
+        id="F2-1-документ-перестал-называть-readback-enabled",
+    ),
     # F2-3 (Ф2, задача 2.3, M9). Тот же парный приём, что у F2-1 выше: документ
     # обещает лишнее (дефолт разошёлся) И код сменился молча (документ не узнал).
     pytest.param(

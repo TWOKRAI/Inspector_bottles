@@ -276,7 +276,8 @@ introspect.observability -> stats.policy -> rules / hits / dropped_by_rule
 
 | Читается | Где | Что означает |
 |---|---|---|
-| `plane_disabled` | `introspect.observability` → `effective.stats` | плоскость выключена ключом `stats.enabled` |
+| `enabled` | `introspect.observability` → `effective.stats` | ИМЯ СХЕМЫ, прямая полярность: `false` = плоскость выключена. Задача 2.9 (M2, добор ревью Ф2) — без него `config_reload_verified` на `stats.enabled` отвечал `unverifiable` при `checked=0` даже когда плоскость реально выключилась: тождественное сравнение вердикта искало путь запроса (`stats.enabled`) в readback буквально и находило только `plane_disabled` под другим именем |
+| `plane_disabled` | `introspect.observability` → `effective.stats` | то же самое состояние, ключ от ОТКАЗА — оператору, который смотрит readback именно когда чисел нет, ответ должен прочитаться с первого взгляда |
 | `policy.rules` / `policy.hits` / `policy.dropped_by_rule` | `introspect.observability` → `stats` | действующие правила чисел, попадания и сколько срезано каждым |
 | `numbers_policy_dropped` | `introspect.observability` → `counters.stats` | числа, не собранные ЗАПРЕТОМ (правило либо выключенная плоскость), по имени метрики |
 | `numbers_policy_throttled` | там же | числа, ПРИДЕРЖАННЫЕ `interval_sec`, по имени метрики. Отдельный ключ: «запрещено» лечится правилом, «придержано» — частотой |

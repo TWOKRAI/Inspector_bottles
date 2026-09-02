@@ -782,6 +782,12 @@ def _check_numbers_policy_claims(src: Sources) -> Optional[str]:
     Формулировка «теги правилом не адресуются» структурно не выразима, и
     сторожится ФРАЗОЙ — но с предпосылкой, вычисленной из кода: пока в паттерне
     поддерева нет сегмента про теги, документ обязан говорить об этом вслух.
+
+    Task 2.9 (M2, добор ревью Ф2): ``StatsManager.observability_readback`` отдаёт
+    ключ ``enabled`` (имя схемы, прямая полярность) — предпосылка вычисляется
+    структурным поиском по ИСХОДНИКУ ``stats_manager.py`` (``out["enabled"] = ...``),
+    а не константой, иначе проверка продолжила бы обещать факт, который код уже не
+    держит. Документ обязан называть этот ключ рядом с `plane_disabled`.
     """
     policy_rel = f"{MODULES}/process_module/configs/observation_policy.py"
     pattern = _module_constant(src, policy_rel, "STATS_SUBTREE_PATTERN")
@@ -819,6 +825,25 @@ def _check_numbers_policy_claims(src: Sources) -> Optional[str]:
             bad.append(f"{key} обещан документами, но не публикуется через PLANE_COUNTER_KEYS")
         if f"`{key}`" not in doc:
             bad.append(f"CONTROL_PANEL.md не называет счётчик {key}")
+
+    # Task 2.9 (M2): предпосылка — структурный факт исходника, не константа: ключ
+    # `enabled` отдаётся `StatsManager.observability_readback` литеральным
+    # присваиванием `out["enabled"] = ...`.
+    stats_manager_src = src.read(f"{MODULES}/statistics_module/core/stats_manager.py")
+    if not re.search(r'out\[["\']enabled["\']\]\s*=', stats_manager_src):
+        raise Unverifiable(
+            "StatsManager.observability_readback не отдаёт ключ 'enabled' структурно — предпосылка Task 2.9 (M2) "
+            "не вычислилась"
+        )
+    # Сверка СКОУПЛЕНА разделом «Политика плоскости ЧИСЕЛ»: и `enabled`, и
+    # `plane_disabled` — обычные слова, живущие в документе и вне этого раздела
+    # (`flight.enabled`, `history.enabled`), и глобальный substring-поиск не
+    # заметил бы, что именно ЭТОТ раздел перестал называть ключ.
+    numbers_section = re.sub(
+        r"\s+", " ", _section(src.read(f"{OBS}/CONTROL_PANEL.md"), "Политика плоскости ЧИСЕЛ").replace("*", "")
+    )
+    if "`enabled`" not in numbers_section or "plane_disabled" not in numbers_section:
+        bad.append("CONTROL_PANEL.md не называет readback-ключ 'enabled' (имя схемы) рядом с 'plane_disabled'")
     return "; ".join(bad) if bad else None
 
 
