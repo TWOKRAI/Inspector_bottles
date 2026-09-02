@@ -223,13 +223,33 @@
 4. Страж по образцу `unread_schema_fields`: обходит листья `ObservabilityConfig`, подаёт каждый со значением, отличным от дефолта, в `observability_verified` против readback реальной проводки (`_real_wired`, как в `test_f2_task22_schema_wiring.py`) и требует, чтобы путь оказался либо в `checked`, либо в `unverifiable`, но никогда «нигде». Исключения только явным списком с причиной.
 5. `CONTROL_PANEL.md`: строка про readback `stats.enabled`; `docs_verify`: проверка имени.
 **Acceptance criteria:**
-- [ ] Офлайн, точной функцией: `{"heartbeat_interval_sec": 1}` при readback `1.0` → `confirmed`, `checked: 1`; при readback `5.0` → `failed` с `mismatches: [{key: heartbeat_interval_sec, expected: 1.0, actual: 5.0}]`.
-- [ ] Офлайн: `{"stats": {"enabled": false}}` → `confirmed`, `checked: 1`; при `_plane_enabled=True` → `failed`.
-- [ ] Инвариант шага 2 сторожится тестом: непустой запрос с ключом, которого нет в readback, даёт `unverifiable == [<путь>]`, не `[]`.
-- [ ] Страж шага 4 зелен на дереве; инъекция «убрать ветку readback у `commands.log_success`» → страж красный **по имени** `command.log_success`.
-- [ ] Инъекция «вернуть readback `plane_disabled` без `enabled`» → красный тест `stats.enabled`; инъекция «убрать генерическую строку шага 1» → красный инвариант шага 2 и страж шага 4.
-- [ ] Живьём (`backend_ctl`, `camera_0`): `config_reload_verified` на `{"heartbeat_interval_sec": 1}` и на `{"stats": {"enabled": false}}` → `confirmed`, `checked: 1`, `unverifiable: []`. Пара: `heartbeat_interval_applied` и `plane_disabled` в readback совпадают с вердиктом.
-- [ ] `TestFullSectionRoundTripHasNoUnverifiablePaths` расширен на `stats.*` и `heartbeat_interval_sec` → `unverifiable: []`.
+- [x] Офлайн, точной функцией: `{"heartbeat_interval_sec": 1}` при readback `1.0` → `confirmed`, `checked: 1`; при readback `5.0` → `failed` с `mismatches: [{key: heartbeat_interval_sec, expected: 1.0, actual: 5.0}]`. — `47b8eb4f`, сторожится инъекциями H5′ (3 красных) и H8 (42)
+- [x] Офлайн: `{"stats": {"enabled": false}}` → `confirmed`, `checked: 1`; при `_plane_enabled=True` → `failed`. — `47b8eb4f`, инъекция H2′ (6 красных, включая страж покрытия поимённо)
+- [x] Инвариант шага 2 сторожится тестом: непустой запрос с ключом, которого нет в readback, даёт `unverifiable == [<путь>]`, не `[]`. — `34e19966`, инъекция H9 (44 красных)
+- [x] Страж шага 4 зелен на дереве; инъекция «убрать ветку readback у `commands.log_success`» → страж красный **по имени** `command.log_success`. — инъекция H3 (3 красных; сверх предсказания красны два предсуществующих теста Ф2.2)
+- [x] Инъекция «вернуть readback `plane_disabled` без `enabled`» → красный тест `stats.enabled`; инъекция «убрать генерическую строку шага 1» → красный инвариант шага 2 и страж шага 4. — H2 (4→6 красных) и H1 (52 красных)
+- [x] Живьём (`backend_ctl`, `camera_0`): `config_reload_verified` на `{"heartbeat_interval_sec": 1}` и на `{"stats": {"enabled": false}}` → `confirmed`, `checked: 1`, `unverifiable: []`. Пара: `heartbeat_interval_applied` и `plane_disabled` в readback совпадают с вердиктом. — снято на `014d951d`: одним запросом обе ручки → `confirmed`, `checked: 2`, `unverifiable: []`; пары `heartbeat_interval_applied: 1.0` ↔ `effective.heartbeat_interval_sec: 1.0` и `effective.stats.enabled: false` ↔ `plane_disabled: true`
+- [x] `TestFullSectionRoundTripHasNoUnverifiablePaths` расширен на `stats.*` и `heartbeat_interval_sec` → `unverifiable: []`. — `ca958b32`: `_real_wired` поднимает настоящие `ProcessHeartbeat` и `StatsManager`, `checked == 15` литералом; инъекция H5 краснит его
+
+**Сверх ТЗ, найдено инъекциями и ревью (см. `injections-phase-2.md`, набор H):**
+- H5 дала **0 красных при 145 собранных**: readback-половина дороги (`observability_effective`) не
+  сторожилась ничем — все тесты строили `effective` руками. Закрыто `ca958b32`.
+- Ревью, итерация 1: зонд первой редакции смешивал «экспандер не потребляет секцию» с «значение
+  совпало со схемным дефолтом» — 24 ложных имени и молчание на обратной полярности `stats.enabled`.
+  Закрыто `34e19966` (классификация по разнице ДВУХ значений).
+- Ревью, итерация 2: отпечаток по объединению полюсов давал **ложный `failed`** — запрос про
+  `errors.enabled` обвинял двух соседей, которых оператор не писал. Закрыто `014d951d` (рез по
+  пересечению); побочно снят предсуществующий шум `console: false` (56 имён → 1).
+- H11 разошлась в опасную сторону и указала на дыру: живой сценарий А-1 не сторожился. Закрыто `392ac2a8`.
+
+**Остаток, принят осознанно (записан в `docs/claude/OPEN_QUESTIONS.md`):** девять листьев
+(`log_directory`, `console`, `file`, `channels`, `scopes`, `loggers`, `logger_groups`,
+`errors.channels`, `stats.channels`), поданные СО СВОИМ схемным дефолтом, называются в
+`unverifiable` схемным именем: при этом значении экспандер не эмитит ни одного пути, и выбор стоит
+между «назвать» и «промолчать». Молчание — тот самый отказ, ради которого делалась задача.
+`console`/`file` при этом потеряли единственную сверку (`logger.channels.<имя>.enabled`) — она
+приезжала в комплекте с 56 ложными именами. Настоящую дорогу этим ключам даст реестр описателей
+ручек (Task 4.9).
 **Out of scope:** реестр описателей ручек (Task 4.9), переименование других ключей readback, кольцо пакетов (Task 4.10).
 
 ### Task 2.10 — Бенч «выключенная метрика не дороже гейта» в дерево (M3, В-4)
