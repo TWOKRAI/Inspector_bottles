@@ -749,11 +749,36 @@ def capped_metrics(config: Any, effective_tick: float, policy: Any = None) -> li
     Returns:
         Список ``(имя-или-паттерн, interval_sec)`` включённых правил с
         ``interval_sec < effective_tick`` (пустой — ни одно тиком не ограничено).
+
+    **Только ЯВНО настроенные имена** (Ф2, задача 2.3, M9 — сужение, найденное
+    стадией 2). До этой правки цикл ниже резолвил ВЕСЬ каталог :func:`gated_metrics`,
+    включая имена БЕЗ записи в ``config.metrics`` — они наследуют
+    ``default_interval_sec`` (дефолт схемы ``1.0``) и раньше молчали об этом только
+    потому, что путь ``tick_sec is None`` (единственный, где ``effective_tick`` мог
+    оказаться СРЕДИ этого дефолта — боевой ``system.yaml`` его не задаёт) был
+    no-op'ом (finding D, Task 1.2) вплоть до шага 2 этой задачи. Как только шаг 2
+    убрал этот no-op, каждый боевой boot (``tick_sec: null``, ``heartbeat_interval``
+    по умолчанию 5.0) стал давать WARNING про ``latency_ms``/``effective_hz``/
+    ``cycle_duration_ms``/``shm`` — метрики, которые оператор НЕ настраивал вовсе:
+    воспроизведено прогоном ``test_metric_catalog_order_gate.py::
+    test_boot_with_real_metric_name_gives_no_false_unknown_warning`` (ожидание
+    ``warnings == []`` при boot без явной секции ``metrics`` для этих имён) и ещё
+    9 существовавших тестов ДО этой правки — все они красные по ОДНОЙ причине.
+    Голос «недостижимая частота» осмыслен для заявки, которую сделал оператор
+    (объясняет несовпадение его ожидания с явью); для имени, о котором он не сказал
+    ничего, дефолт схемы — не заявка, и голос об этом дефолте — шум про решение,
+    которого никто не принимал. Правило по ПУТИ (``cap_candidates`` ниже) эта
+    сверка не затрагивает — там нет каталога-по-умолчанию, каждый кандидат уже
+    оператора (правило) либо назначенный предохранитель поддерева.
     """
     out: list[tuple[str, float]] = []
     for metric in gated_metrics():
+        if metric not in config.metrics:
+            continue  # см. докстринг выше: дефолт схемы — не заявка оператора
         # config — валидированный TelemetryPublishConfig; resolve() тотальна для суффиксов
-        # каталога (возвращает (enabled, interval) даже для отсутствующих правил).
+        # каталога (возвращает (enabled, interval) даже для отсутствующих правил) —
+        # здесь используется только ради наследования interval_sec=None → default_interval_sec
+        # для метрики, которую оператор УЖЕ назвал явно.
         enabled, interval = config.resolve(metric)
         if enabled and interval < effective_tick:
             out.append((metric, interval))

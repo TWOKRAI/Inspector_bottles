@@ -62,6 +62,13 @@ from .observability_wiring import (
 #: по строкам ей не годится — см. ветку ниже по файлу.
 IDENTITY_SECTION_KEYS = (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY, VOICES_SECTION_KEY)
 
+#: Ф2 (задача 2.3, M9). СКАЛЯР схемы (``float``), не под-секция — тем же родом,
+#: что ``session_ttl_sec`` (``observability_layers.SESSION_TTL_KEY``): у него нет
+#: своего ``SchemaBase``-класса, поэтому страж ``test_identity_sections_...``
+#: (он перебирает ТОЛЬКО поля с аннотацией-подклассом ``SchemaBase``) его не
+#: видит и не обязан — ``IDENTITY_SECTION_KEYS`` выше про НЕГО, не про это имя.
+HEARTBEAT_INTERVAL_KEY = "heartbeat_interval_sec"
+
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
     from ..configs.observability_layers import ObservabilityLayers
@@ -1117,6 +1124,17 @@ def _rebuild_and_apply(
     if observation_applied is not None:
         expanded[OBSERVATION_SECTION_KEY] = observation_applied
 
+    # Ф2 (задача 2.3, M9), седьмая плоскость на тех же правах. Скаляр, а не
+    # под-секция (как `observation`/`voices`/`events`/`flight` выше), поэтому в
+    # `resolved` лежит ПРЯМО под своим именем (как `log_level` в
+    # `compose_managers_payload`), а не под ключом-конвертом. Получатель — ЖИВОЙ
+    # `ProcessHeartbeat`: без этой ветки правка легла бы в слой, была бы видна в
+    # провенансе (`_schema_keys()` генерик её уже видит) и НЕ действовала бы —
+    # ровно тот класс, ради которого «третья точка дороги» здесь и заведена.
+    heartbeat_interval_applied = apply_heartbeat_interval(heartbeat, resolved.get(HEARTBEAT_INTERVAL_KEY))
+    if heartbeat_interval_applied is not None:
+        expanded[HEARTBEAT_INTERVAL_KEY] = heartbeat_interval_applied
+
     telemetry_applied = _apply_telemetry_from_layers(
         telemetry_layered,
         layers=layers,
@@ -1207,6 +1225,27 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
             default_interval_sec=inherited,
         )
     return applied
+
+
+def apply_heartbeat_interval(heartbeat: Any, value: Any) -> Optional[float]:
+    """Донести ``observability.heartbeat_interval_sec`` до ЖИВОГО такта (Ф2, 2.3, M9).
+
+    Тонкая обёртка — тем же приёмом, что :func:`apply_observation_policy` для
+    соседней плоскости: тело мутации живёт НА ``ProcessHeartbeat``
+    (:meth:`~..heartbeat.process_heartbeat.ProcessHeartbeat.apply_heartbeat_interval`),
+    здесь — только достать получателя и не уронить пересборку, если его нет.
+
+    ``heartbeat is None`` (такт не поднят — паритет с соседями выше) → ``None``,
+    и это НЕ отказ: пересборка идёт и на процессах без heartbeat'а.
+
+    Returns:
+        Применённое значение (для readback в ответе ``config.reload``) либо
+        ``None``, если применять было некому.
+    """
+    apply = getattr(heartbeat, "apply_heartbeat_interval", None)
+    if not callable(apply):
+        return None
+    return apply(value)
 
 
 def telemetry_targets(svc: Any) -> Dict[str, Any]:

@@ -373,18 +373,50 @@ class ProcessHeartbeat:
         (``min(heartbeat_interval, tick_sec)``), настроенная частота недостижима — метрика
         публикуется на каждом тике, но не чаще. Раньше это был тихий no-op (finding D) —
         теперь явный WARNING (не отвергаем секцию: метрика продолжает публиковаться).
-        No-op, если ``tick_sec`` не задан (``None``) — легаси-процессы не шумят.
 
         Ф4 (задача 4.1): в тот же голос вошли glob-правила порта — их частота
         упирается в тот же потолок, а через ``config`` они не проходят вовсе.
+
+        Ф2 (задача 2.3, M9, шаг 2). **Больше не no-op при ``tick_sec is None``.**
+        Такт существует и без явного ``tick_sec`` — он тогда просто равен
+        ``heartbeat_interval`` (см. :meth:`_telemetry_tick`, та же формула), и метрика
+        может упираться в НЕГО ровно так же, как в явный ``tick_sec``. Раньше эта ветка
+        возвращалась немедленно (см. историю метода) — голос молчал ВСЕГДА, независимо
+        от того, зажата ли метрика фактическим тактом. Эффективный тик считается ИЗ
+        ``config`` (параметра), а не из :meth:`_telemetry_tick` — на пути
+        :meth:`_build_telemetry_gate` этот метод зовётся ДО того, как ``config``
+        становится живым гейтом (``self._telemetry_gate`` в этот момент ещё старый),
+        поэтому вопрос о такте обязан решаться по тому же ``config``, который проверяется.
+
+        **Находка стадии 2, СУЖЕНИЕ шага 2 — не в тексте задачи, требует подтверждения
+        владельца (см. отчёт реализатора).** В ветке ``tick_sec is None`` политика порта
+        (``self._observation_policy``) в голос НЕ идёт — только явные записи
+        ``config.metrics`` (то же сужение уже стоит в :func:`~.telemetry.capped_metrics`
+        для каталога по имени, см. её докстринг). Причина числом: дефолт поддерева
+        порта (:data:`~..configs.observation_policy.DEFAULT_SUBTREE_INTERVAL_SEC` = 1.0)
+        меньше дефолта такта (``heartbeat_interval_sec`` = 5.0) БЕЗУСЛОВНО — эти два
+        дефолта разных задач (4.1 и 2.3) никогда не сверялись друг с другом. Без этого
+        сужения ЛЮБОЙ boot с ``tick_sec`` не заданным (боевой конфиг прототипа —
+        именно такой) кричал бы про предохранитель поддерева, которого оператор не
+        трогал, на КАЖДОЙ пересборке гейта НАВСЕГДА — воспроизведено 10 красными в
+        существовавшем ДО этой задачи наборе (``test_metric_catalog_order_gate.py``,
+        ``test_metric_catalog_producer_hazards.py``, ``test_telemetry_gate.py``,
+        ``test_telemetry_tick.py::test_no_warning_when_tick_sec_none``,
+        ``test_writer_subtree_acceptance.py``) — все они ждут тишины на boot без
+        явной конфигурации, и все называли ``processes.*.state.plugins.**``
+        источником шума. Явный ``tick_sec`` (ветка ``if`` выше) политику по-прежнему
+        видит — это Ф4-поведение, которое задача 2.3 не трогает и не обязана трогать.
         """
         tick_sec = getattr(config, "tick_sec", None)
-        if not isinstance(tick_sec, (int, float)) or tick_sec <= 0:
-            return
-        effective_tick = min(self._interval, float(tick_sec))
+        if isinstance(tick_sec, (int, float)) and tick_sec > 0:
+            effective_tick = min(self._interval, float(tick_sec))
+            policy = self._observation_policy
+        else:
+            effective_tick = self._interval
+            policy = None
         from .telemetry import capped_metrics
 
-        capped = capped_metrics(config, effective_tick, self._observation_policy)
+        capped = capped_metrics(config, effective_tick, policy)
         if not capped:
             return
         _warn = getattr(self._services, "log_warning", None) or getattr(self._services, "log_info", None)
@@ -765,6 +797,39 @@ class ProcessHeartbeat:
         )
         return applied
 
+    def apply_heartbeat_interval(self, value: Any) -> float:
+        """Применить ``observability.heartbeat_interval_sec`` к ЖИВОМУ такту (Ф2, 2.3, шаг 1).
+
+        Третья точка дороги ручки — та же роль, что у :meth:`apply_observation_policy`
+        для секции порта: без неё ``config.reload`` менял бы слой и не менял поведение.
+
+        ``value is None`` — секция слоями не задана (ключ ушёл из L3 по TTL, либо его
+        не было ни в одном слое) — применяется СХЕМНЫЙ дефолт (5.0), а не «оставить как
+        было»: `_rebuild_and_apply` — это пересборка ИЗ ИСТОЧНИКОВ (см. докстринг
+        ``observability_reload.apply_observability_layers``), и снятие ключа обязано
+        вернуть такт к L0 так же, как это уже устроено у соседних плоскостей
+        (``observation``/``voices``/``events``/``flight``).
+
+        Негодное значение (не число, отрицательное) — тот же откат к дефолту, без
+        исключения: readback инициатора и так увидит применённое число, а падать
+        heartbeat'у на кривом ``config.reload`` незачем (тот же довод, что у
+        :meth:`start`, где парсинг ``heartbeat_interval`` укрыт тем же ``try``).
+
+        Никакого рестарта: только атомарное присваивание ``self._interval`` — воркер,
+        если он уже запущен, подхватит новое значение на СЛЕДУЮЩЕЙ итерации `_loop`
+        (та же семантика, что у смены ``tick_sec`` через `reconfigure_telemetry`).
+
+        Returns:
+            Применённое значение (для readback в ответе ``config.reload``).
+        """
+        try:
+            interval = float(value) if value is not None else 5.0
+        except (TypeError, ValueError):
+            interval = 5.0
+        self._interval = interval
+        self._log_heartbeat(f"[heartbeat] такт применён рантайм-командой: {interval} с")
+        return interval
+
     def current_observation_policy(self) -> Optional[Dict[str, Any]]:
         """Действующая политика порта — readback для ``introspect``/вердикта.
 
@@ -786,6 +851,21 @@ class ProcessHeartbeat:
         # Счёт, а не «ноль/не ноль»: правило, совпадающее раз в час, и правило,
         # совпадающее каждый такт, — разные факты (открытый вопрос З3 ревью Ф4).
         view["rule_hits"] = policy.rule_hits()
+        # Ф2 (задача 2.3, M9, шаг 3): та же «честная каденция», что у
+        # `current_resolved_metrics` ниже, но для правил ПОРТА. `cap_candidates`
+        # (`configs/observation_policy.py`) уже собирает ПОЛНЫЙ охват правил порта,
+        # включая дефолт поддерева, — тем же сборщиком, что и голос
+        # `_warn_capped_metrics` (находка З1 ревью Ф4: два отчёта о потолках,
+        # разошедшихся в охвате). Здесь тот же сборщик даёт readback, а не голос.
+        from ..configs.observation_policy import cap_candidates
+
+        tick = self._telemetry_tick()
+        effective: Dict[str, Dict[str, Any]] = {}
+        for pattern, rule in cap_candidates(view).items():
+            raw = rule.get("interval_sec")
+            interval = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0.0
+            effective[pattern] = {"interval_sec": interval, "effective_interval_sec": max(interval, tick)}
+        view["effective"] = effective
         return view
 
     def current_resolved_metrics(self) -> Optional[Dict[str, Any]]:
@@ -830,6 +910,10 @@ class ProcessHeartbeat:
 
         process = str(getattr(self._services, "name", "") or "")
         by_writer = self._level_names_by_writer()
+        # Ф2 (задача 2.3, M9, шаг 3): ДОСТИЖИМЫЙ интервал — тот же `_telemetry_tick`,
+        # что решает реальный такт воркера, а не пересчёт его составляющих. Один раз
+        # на весь снимок: тик не меняется между метриками ОДНОГО ответа.
+        tick = self._telemetry_tick()
         out: Dict[str, Any] = {}
         for metric in gated_metrics():
             path = state_metric_path(process, metric)
@@ -837,6 +921,11 @@ class ProcessHeartbeat:
             entry: Dict[str, Any] = {
                 "enabled": bool(enabled),
                 "interval_sec": float(interval),
+                # M9: заявленный `interval_sec` мог и раньше не совпадать с
+                # действующей частотой (тик режет её сверху) — расхождение «сконфигу-
+                # рировано 1с, действует 5с» было слышно только в логе WARNING на
+                # пересборке, а не в этом readback'е.
+                "effective_interval_sec": max(float(interval), tick),
                 "path": path,
             }
             # Второй адрес того же ИМЕНИ. Живой стенд 2026-08-26: `capture_fps`
@@ -855,6 +944,9 @@ class ProcessHeartbeat:
                     port_paths[port_path] = {
                         "enabled": bool(p_enabled),
                         "interval_sec": float(p_interval),
+                        # M9: тот же тик решает достижимую частоту у ВСЕХ путей
+                        # этого имени — плагинного и фреймворкового (один механизм).
+                        "effective_interval_sec": max(float(p_interval), tick),
                     }
                 entry["port_paths"] = port_paths
                 # Прямая подсказка оператору: вердикт выше — не про то место,
@@ -884,6 +976,19 @@ class ProcessHeartbeat:
         if gate is None:
             return []
         return sorted(gate.config.unknown_metrics())
+
+    def current_telemetry_tick(self) -> float:
+        """Достижимый тик воркера — readback-обёртка над :meth:`_telemetry_tick` (Ф2, 2.3, M9).
+
+        Сама формула (``min(heartbeat_interval, tick_sec)``, фолбэк на
+        ``heartbeat_interval``) — уже существующий приватный метод; здесь только имя
+        из публичной readback-поверхности (тот же ряд, что `current_observation_policy`
+        / `current_resolved_metrics` / `current_telemetry_publish` ниже), потому что
+        значение это идёт наружу — в ответ команды `introspect.telemetry`
+        (``tick_effective_sec``), а звать приватный метод другого модуля через границу
+        readback'а — не эта дорога.
+        """
+        return self._telemetry_tick()
 
     def current_telemetry_publish(self) -> dict | None:
         """Текущая эффективная секция ``telemetry.publish`` живого gate (Task 1.1).

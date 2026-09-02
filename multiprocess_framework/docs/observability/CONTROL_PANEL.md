@@ -277,6 +277,36 @@ introspect.observability -> stats.policy -> rules / hits / dropped_by_rule
 Пара «тишина + счётчик» здесь обязательна: выключенная плоскость без растущего
 `numbers_policy_dropped` неотличима от «никто не писал».
 
+### 5.5. Честный такт: эффективная каденция (Ф2, задача 2.3, M9)
+
+`heartbeat_interval_sec` — ключ слоёв секции `observability` (L0 **`5.0`**), тем же
+рядом, что `session_ttl_sec`: применяется `config.reload` **без рестарта** процесса
+(`observability.heartbeat_interval_sec` → живой `ProcessHeartbeat._interval`, третья
+точка дороги — `apply_heartbeat_interval` в `observability_reload.py`). Старый ключ
+процесса `heartbeat_interval` (боевой `ProcessHeartbeat.start()`) этой задачей не
+снят — читается по-прежнему на boot, ручка слоёв правит только рантайм ПОВЕРХ него.
+
+Расхождение «сконфигурировано 1 с, действует 5 с» (метрика просит частоту быстрее
+достижимого такта) теперь слышно и в readback'е, не только в логе:
+
+| Читается | Где | Что означает |
+|---|---|---|
+| `tick_effective_sec` | `introspect.telemetry` (верхний уровень) | действующий тик воркера, `max(heartbeat_interval_sec, ...)` не при чём — формула `min(heartbeat_interval, tick_sec)`, фолбэк на `heartbeat_interval` |
+| `resolved.<метрика>.effective_interval_sec` | `introspect.telemetry` | `max(interval_sec, tick_effective_sec)` — ДОСТИЖИМАЯ частота публикации ЭТОЙ метрики (не только заявленная `interval_sec`) |
+| `effective.observation.effective.<паттерн>` | `introspect.observability` | то же самое, для правил ПОРТА (`observability.observation.rules` + дефолт поддерева): `{interval_sec, effective_interval_sec}` |
+
+Голос `_warn_capped_metrics` (WARNING «частота метрик ограничена телеметрийным
+тиком») звучит теперь и когда `tick_sec` не задан вовсе (такт = `heartbeat_interval`
+в одиночку) — раньше это был тихий no-op независимо от факта зажатости. **Сужение
+(находка стадии 2, не в тексте задачи):** в этой ветке голос называет только ЯВНО
+настроенные имена (`telemetry.publish.metrics.<имя>`) — НЕ дефолт поддерева порта
+(`observability.observation`, назначенный предохранитель `1.0` с). Довод числом: он
+меньше дефолта `heartbeat_interval_sec` (`5.0`) БЕЗУСЛОВНО, для любого процесса, вне
+зависимости от того, что настраивал оператор, — без сужения каждый boot с боевым
+конфигом прототипа (`tick_sec` не задан) кричал бы про предохранитель, которого
+никто не трогал, на каждой пересборке гейта. Readback (таблица выше) при этом
+показывает достижимую частоту предохранителя честно — сужен только ГОЛОС, не число.
+
 ---
 
 ## 6. Что на лету НЕ действует

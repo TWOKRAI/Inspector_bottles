@@ -1389,6 +1389,11 @@ class BuiltinCommands:
             # «показаний нет» — разные ответы, и потребитель (как и приёмочный тест)
             # обязан их различать. Значение подставляется ниже.
             "levels": None,
+            # M9 (Ф2, задача 2.3): достижимый тик воркера — тот же
+            # `ProcessHeartbeat._telemetry_tick()`, что решает реальную частоту, просто
+            # не выставленный наружу раньше. Ключ присутствует ВСЕГДА, тем же приёмом,
+            # что `levels` строкой выше: у процесса без heartbeat'а спрашивать нечего.
+            "tick_effective_sec": None,
             # Штамп берётся ДО снятия — снимок сделан в этот момент или сразу после,
             # никогда раньше.
             "snapshot_ts": time.time(),
@@ -1401,6 +1406,14 @@ class BuiltinCommands:
             # отказ readback'а гейта (ниже, ветка success=False) не должен уносить с
             # собой единственные живые числа ответа.
             result["snapshot_ts"] = time.time()
+            # M9: тик — тоже НЕ зависит от gate (`_telemetry_tick()` уже сегодня
+            # фолбэчит на `self._interval`, когда gate не собран) — тот же довод, что
+            # у `levels` выше: сломанный readback гейта не должен уносить с собой
+            # число, которое gate вообще не спрашивает.
+            try:
+                result["tick_effective_sec"] = heartbeat.current_telemetry_tick()
+            except Exception:  # noqa: BLE001 — best-effort секция, не отказ команды
+                result["tick_effective_sec"] = None
             try:
                 result["levels"] = heartbeat.current_levels_snapshot()
             except Exception as exc:  # noqa: BLE001 — best-effort секция, не отказ команды
@@ -2178,6 +2191,11 @@ class BuiltinCommands:
                 # завелось третьего способа спросить одно и то же.
                 if expanded.get("observation") is not None:
                     result["observation_applied"] = expanded["observation"]
+                # Ф2 (задача 2.3, M9): та же форма, теперь для скаляра. `is not None`,
+                # а не «истинно»: `0.0` — легальное применённое значение (гейт heartbeat
+                # выключен), и это не то же самое, что «применять было некому».
+                if expanded.get("heartbeat_interval_sec") is not None:
+                    result["heartbeat_interval_applied"] = expanded["heartbeat_interval_sec"]
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.

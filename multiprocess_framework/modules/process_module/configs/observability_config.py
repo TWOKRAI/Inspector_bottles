@@ -528,6 +528,27 @@ class ObservabilityConfig(SchemaBase):
         FieldMeta("Срок жизни рантайм-правки наблюдаемости, сек (0 — бессрочно)", min=0.0, max=86400.0),
     ] = 300.0
 
+    # Ф2 (задача 2.3, M9, «Честный такт»). БЫЛ голым `get_config("heartbeat_interval",
+    # 5.0)` в `ProcessHeartbeat.start()` — процессный ключ вне слоёв, без провенанса и
+    # без применения без рестарта. Полем схемы (как `session_ttl_sec` выше) он получает
+    # оба: генерик `_schema_keys()` (`observability_layers.provenance`) видит его без
+    # отдельной проводки, а `config.reload` принимает его на границе (белый список —
+    # это и есть поля этой схемы, см. `validate_layer_section`/`unknown_section_keys`).
+    # В manager-конфиги НЕ раскладывается (`expand_observability` его не берёт, тем же
+    # доводом, что и `session_ttl_sec`) — получатель не менеджер, а ЖИВОЙ
+    # `ProcessHeartbeat._interval`; третья точка дороги — `apply_heartbeat_interval` в
+    # `managers/observability_reload.py`, доставляющая значение без рестарта процесса.
+    # Старый ключ `heartbeat_interval` (боевой `start()`) этой задачей НЕ снимается и
+    # не меняется — она вводит только рантайм-правку ПОВЕРХ загрузочного значения.
+    heartbeat_interval_sec: Annotated[
+        float,
+        FieldMeta(
+            "Такт heartbeat/телеметрии процесса, сек — эффективный тик = min(это, tick_sec)",
+            min=0.0,
+            max=86400.0,
+        ),
+    ] = 5.0
+
     # Ф0.7. Ротация ограничивает каждый файл, но не их число — за 82 дня
     # накопилось 730 файлов / 291 МБ без единого удаления. Обе политики
     # выключены по умолчанию: включать чистку молча нельзя.

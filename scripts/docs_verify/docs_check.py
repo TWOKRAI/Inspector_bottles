@@ -821,7 +821,65 @@ def _check_numbers_policy_claims(src: Sources) -> Optional[str]:
     return "; ".join(bad) if bad else None
 
 
+def _check_heartbeat_tick_claims(src: Sources) -> Optional[str]:
+    """CONTROL_PANEL.md о честном такте ↔ схема и код (Ф2, задача 2.3, M9).
+
+    Три утверждения с ЧИСЛОМ или ИМЕНЕМ, расходящиеся с кодом молча:
+
+    * L0-дефолт ``heartbeat_interval_sec`` (``5.0``) ↔ поле схемы
+      ``ObservabilityConfig``;
+    * имена двух новых readback-полей (``tick_effective_sec``,
+      ``effective_interval_sec``) — оба введены этой задачей, документ обязан
+      называть их дословно, иначе оператор не найдёт ключ по документу;
+    * СУЖЕНИЕ голоса (находка стадии 2, не было в тексте задачи): предохранитель
+      поддерева порта (``DEFAULT_SUBTREE_INTERVAL_SEC``, ``1.0``) в голос
+      ``_warn_capped_metrics`` при ``tick_sec is None`` не входит — документ обязан
+      называть его число, иначе будущая правка дефолта (в любую сторону) сделает
+      формулировку «безусловно меньше» неверной молча.
+    """
+    config_file = f"{MODULES}/process_module/configs/observability_config.py"
+    default = _schema_field_default(src, config_file, "ObservabilityConfig", "heartbeat_interval_sec")
+    if not isinstance(default, (int, float)) or isinstance(default, bool):
+        raise Unverifiable(f"heartbeat_interval_sec: дефолт {default!r} не число — предпосылка не вычислилась")
+
+    policy_rel = f"{MODULES}/process_module/configs/observation_policy.py"
+    subtree_default = _module_constant(src, policy_rel, "DEFAULT_SUBTREE_INTERVAL_SEC")
+    if not isinstance(subtree_default, (int, float)) or isinstance(subtree_default, bool):
+        raise Unverifiable(f"DEFAULT_SUBTREE_INTERVAL_SEC: {subtree_default!r} не число — предпосылка не вычислилась")
+    if not float(subtree_default) < float(default):
+        raise Unverifiable(
+            f"DEFAULT_SUBTREE_INTERVAL_SEC={subtree_default!r} больше не меньше heartbeat_interval_sec={default!r} — "
+            "сужение голоса перестало быть обязательным, формулировку и код нужно пересмотреть вместе"
+        )
+
+    # Пробелы и жирный markdown схлопываются ДО сверки — тем же приёмом, что F2-1:
+    # перенос строки в документе — вопрос вёрстки, а не расхождение с кодом.
+    doc = re.sub(r"\s+", " ", src.read(f"{OBS}/CONTROL_PANEL.md").replace("*", ""))
+    bad: List[str] = []
+
+    if f"(L0 `{default}`)" not in doc:
+        bad.append(f"CONTROL_PANEL.md не называет L0-дефолт heartbeat_interval_sec ({default!r})")
+    # Имя ищется БЕЗ обрамляющих бэктиков: в документе оно законно живёт внутри
+    # более длинного пути (`resolved.<метрика>.effective_interval_sec`), и требовать
+    # изолированного упоминания значило бы сторожить ВЁРСТКУ, а не утверждение.
+    # Предмет проверки — «документ называет это поле», а не «называет его отдельно».
+    for name in ("tick_effective_sec", "effective_interval_sec"):
+        if name not in doc:
+            bad.append(f"CONTROL_PANEL.md не называет readback-поле {name}")
+    if f"предохранитель `{subtree_default}` с" not in doc:
+        bad.append(f"CONTROL_PANEL.md не называет предохранитель поддерева числом ({subtree_default!r})")
+    return "; ".join(bad) if bad else None
+
+
 CHECKS: Sequence[Check] = (
+    Check(
+        "F2-3",
+        "observability/CONTROL_PANEL.md",
+        "честный такт: L0-дефолт heartbeat_interval_sec, readback tick_effective_sec/effective_interval_sec,"
+        "сужение голоса у предохранителя поддерева",
+        "Ф2 задача 2.3 (M9)",
+        _check_heartbeat_tick_claims,
+    ),
     Check(
         "F2-1",
         "observability/CONTROL_PANEL.md",
