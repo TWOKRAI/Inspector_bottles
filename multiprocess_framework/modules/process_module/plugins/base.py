@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
+from ...statistics_module.observation.observation_manager import observation_port
 from ..managers.observability_flight import FLIGHT_RECORDER_ATTR, NO_RECORDER_KNOBS, note_flight_disabled
 from ..managers.observability_wiring import (
     CARRIER_FAILURE_KEY,
@@ -692,9 +693,27 @@ class PluginContext:
         менеджеры. Требуй эта дорога зарегистрированного слота, и первые
         публикации каждого плагина исчезали бы молча.
 
-        Импорт ЛЕНИВЫЙ — тем же жестом и по той же причине, что у соседей ниже:
-        ``plugins.base`` импортируется РАНЬШЕ heartbeat'а, и тянуть его наверх
-        значило бы менять порядок загрузки ради трёх строк.
+        **Импорт ПОДНЯТ на уровень модуля 2026-09-02 (Р-12, добор Task 2.10).**
+        Прежняя редакция держала его в теле метода с доводом «``plugins.base``
+        импортируется РАНЬШЕ heartbeat'а, и тянуть его наверх значило бы менять
+        порядок загрузки». Довод верен про **heartbeat** и не относится к
+        ``observation_manager``: тот тянет ``process_module`` обратно только
+        лениво (``_telemetry()``), цикла нет, а сосед ``plugins/testing.py``
+        импортирует этот же модуль наверху с тем же обоснованием.
+
+        Довод в пользу поднятия — замер, а не вкус. Импорт стоял на дороге
+        КАЖДОГО вызова фасада (``_stats_call`` → сюда), и под импорт-хуком
+        ``shibokensupport`` одно выражение ``import`` стоит **четыре**
+        профилируемых Python-вызова даже когда модуль уже в ``sys.modules``.
+        Из-за этого счётный сторож (``test_plugin_stats_road.py``) давал разные
+        числа в разных прогонах: 9 под узким pytest и 5 под полным — состояние
+        ``builtins.__import__`` меняет соседний тест (гонка импортов из
+        нескольких потоков переводит ``__feature_import__`` в
+        ``__lazy_import__``). После поднятия число одно во всех четырёх
+        состояниях хука. Резолв порта при этом остаётся ПОКАЖДЫМ: кэшировать
+        результат ``observation_port(...)`` нельзя — плагин публикует уровни из
+        ``configure()``, до регистрации слота, и закэшированный фолбэк молча
+        увёл бы все последующие метрики мимо менеджера.
 
         Args:
             create: завести хранилище значений, если его ещё нет. ``True``
@@ -705,8 +724,6 @@ class PluginContext:
                 безусловно, и ``create=False`` соблюдался ровно там, где слот не
                 зарегистрирован.
         """
-        from ...statistics_module.observation.observation_manager import observation_port
-
         return observation_port(self.services, create=create)
 
     def declare_metric(self, name: str) -> str:

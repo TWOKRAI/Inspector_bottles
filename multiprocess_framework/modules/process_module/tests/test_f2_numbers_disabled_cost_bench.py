@@ -1,0 +1,166 @@
+# -*- coding: utf-8 -*-
+"""Task 2.10 (M3, В-4) + добор Р-12: бенч «выключенная метрика не дороже гейта» — в дереве.
+
+**Зачем этот файл.** Главный перф-критерий Task 2.1 (шаг 5: «выключенная метрика
+≤ 0.5 мкс, цель — цена гейта») до этой задачи жил только в тексте плана
+(``phase-2-one-policy.md``) — воспроизвести его одной командой было нечем, и
+ревью назвало это находкой М3/В-4. Здесь тот же замер приезжает В ДЕРЕВО, форма
+взята дословно у соседа
+``process_module/tests/test_plugin_stats_road.py::TestTheCostOfTheHotPath`` —
+БОЕВОЙ стенд (настоящие ``StatsManager`` + ``ObservationManager`` + гейт с
+политикой), а не дубль, по тому же доводу: фейковый харнесс доказывает харнесс,
+а не цену.
+
+**Три числа, один гейтуется.** Шаг 2 задачи:
+
+* (а) ``record_metric`` метрики, запрещённой правилом, через БОЕВОЙ порт;
+* (б) голый ``policy.resolve(path)`` на прогретом кэше (задача 2.4) — справочно;
+* (в) ``record_metric`` РАЗРЕШЁННОЙ метрики той же дорогой.
+
+Гейтуется ОТНОШЕНИЕ (а)/(в), а не абсолют: разность двух шумных величин на
+общей машине шумит сильнее каждой из них по отдельности (тот же довод Н-7,
+которым Task 2.1 уже переписала свой гейт с дельты на отношение — см.
+``test_plugin_stats_road.py``). (б) репортируется, но не гейтуется — это
+диагностика «сколько стоит сам поиск в кэше», а не «во сколько раз дороже».
+
+**Счётный сторож рядом** (Р-12, добор к Task 2.10, шаг 7) — тем же доводом, что
+у соседа: тайминг-гейт любой ширины слеп к мелкой регрессии на шумной машине,
+число python-вызовов от машины не зависит. Здесь свойство — КАЧЕСТВЕННОЕ
+(«меньше», а не заданная кратность): выключенная метрика останавливается на
+``gate.allow`` ДО ``_deliver_number``/``_emit_to_taps``, поэтому её дорога
+короче структурно, а не только по времени — и это стерегётся литералами ОБОИХ
+чисел (не разностью), как того требует добор.
+"""
+
+from __future__ import annotations
+
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from multiprocess_framework.modules.process_module.configs.observation_policy import (
+    ObservationPolicy,
+    ObservationPolicyConfig,
+)
+from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import MetricRule
+from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
+from multiprocess_framework.modules.statistics_module.observation.observation_manager import ObservationManager
+from multiprocess_framework.modules.tests._road_cost import count_calls, timed_pair
+
+#: Процесс стенда — сегмент пути правила (Р-2а: ``processes.<p>.stats.<имя>``).
+_PROCESS = "task210_cost_probe"
+_DISABLED_METRIC = "task210_disabled_metric"
+_ENABLED_METRIC = "task210_enabled_metric"
+
+
+def _report(capsys: "pytest.CaptureFixture", line: str) -> None:
+    """Печать замера мимо capture, безопасная для консоли в cp1251.
+
+    Дословный дубль соседа (``test_plugin_stats_road.py::_report``,
+    ``logger_module/tests/test_gate_cost_bench.py``) — по добору перенос в
+    общий помощник получили только ``timed_pair``/``count_calls``, печать
+    осталась локальной каждому бенчу.
+    """
+    with capsys.disabled():
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+
+
+def _wired_stand() -> tuple[StatsManager, ObservationManager, ObservationPolicy]:
+    """Настоящие порт + менеджер + политика, связанные как ``ProcessManagers.create_all``.
+
+    Правило запрещает РОВНО ``_DISABLED_METRIC``; ``_ENABLED_METRIC`` в
+    ``rules`` не упомянут и падает на дефолт поддерева плоскости чисел
+    (:data:`~...configs.observation_policy.STATS_SUBTREE_PATTERN`,
+    ``enabled=True, interval_sec=0.0`` — тот же дефолт, каким живёт любая
+    метрика плагина без единой правки конфига).
+    """
+    policy = ObservationPolicy(
+        ObservationPolicyConfig(rules={f"processes.{_PROCESS}.stats.{_DISABLED_METRIC}": MetricRule(enabled=False)}),
+        legacy=None,
+    )
+    port = ObservationManager(manager_name=f"port_{_PROCESS}", process=SimpleNamespace(name=_PROCESS))
+    assert port.initialize(), "стенд сломан ДО замера: порт не поднялся"
+    port.attach_numbers_policy(policy)
+
+    mgr = StatsManager(
+        manager_name=f"stats_{_PROCESS}",
+        config={
+            "enable_logging": False,
+            "aggregation_interval": 300.0,
+            "flush_interval": 300.0,
+            "channels": {"file_stats": {"enabled": False}},
+        },
+    )
+    assert mgr.initialize(), "стенд сломан ДО замера: StatsManager не поднялся"
+    assert mgr.attach_observation_port(port) is True, "стенд сломан ДО замера: attach_observation_port вернул False"
+    return mgr, port, policy
+
+
+class TestTheDisabledMetricCostsNoMoreThanTheGate:
+    """Task 2.1, шаг 5 — воспроизводимый бенч дерева, а не число из плана."""
+
+    def test_disabled_vs_enabled_ratio_and_call_count(self, capsys: "pytest.CaptureFixture") -> None:
+        """(а)/(в) отношением, (б) справочно, плюс счётный сторож «меньше вызовов»."""
+        mgr, port, policy = _wired_stand()
+        tags = {"probe": "task210"}
+        try:
+            disabled_call = lambda: mgr.record_metric(_DISABLED_METRIC, 1, tags)  # noqa: E731
+            enabled_call = lambda: mgr.record_metric(_ENABLED_METRIC, 1, tags)  # noqa: E731
+            disabled_path = f"processes.{_PROCESS}.stats.{_DISABLED_METRIC}"
+            resolve_call = lambda: policy.resolve(disabled_path)  # noqa: E731
+
+            # Прогрев ДО замера — задача 2.4 кэширует решение политики НА ПУТЬ,
+            # и первый вызов каждой стороны платит нерепрезентативный холодный
+            # резолв (плюс, для включённой метрики, разовое создание агрегата в
+            # StatsManager). Разница (а) против (в) обязана отражать цену
+            # ГЕЙТА на прогретом кэше, а не цену первого касания.
+            disabled_call()
+            enabled_call()
+            resolve_call()
+
+            through_disabled, through_enabled = timed_pair(disabled_call, enabled_call, repeats=20_000)
+            ratio = through_disabled / through_enabled
+
+            # (б) — та же интерливинг-техника ``timed_pair``, применённая к
+            # ОДНОЙ и той же стороне: устраняет окно загрузки машины между
+            # двумя половинами замера тем же приёмом, что и у пары (а)/(в).
+            per_call_resolve, _per_call_resolve_again = timed_pair(resolve_call, resolve_call, repeats=20_000)
+
+            _report(capsys, "\nЦена выключенной метрики (Task 2.1, шаг 5 / Task 2.10):")
+            _report(capsys, f"  (а) выключенная через боевой порт: {through_disabled * 1e6:.3f} мкс")
+            _report(capsys, f"  (в) включённая тем же путём:        {through_enabled * 1e6:.3f} мкс")
+            _report(capsys, f"  (б) голый policy.resolve на кэше:   {per_call_resolve * 1e6:.3f} мкс  (справочно)")
+            _report(capsys, f"  отношение (а)/(в):                  {ratio:.3f}x  (гейтуется, потолок 0.3)")
+
+            # Потолок 0.3 — рекомендация ревью (добор Р-12, шаг 2), измеренные
+            # ~0.15; абсолют (а) и (б) репортируются, не гейтуются — та же
+            # причина, что у соседа: абсолют шумной величины на общей машине
+            # краснеет без регрессии (Н-7).
+            assert ratio < 0.3, (
+                f"выключенная метрика подорожала относительно включённой: {ratio:.3f}x "
+                f"(выключенная {through_disabled * 1e6:.3f} мкс, включённая {through_enabled * 1e6:.3f} мкс)"
+            )
+
+            # Счётный сторож (добор Р-12, шаг 7): выключенная метрика ОБЯЗАНА
+            # делать строго меньше python-вызовов, чем включённая, — литералом
+            # ОБОИХ чисел, не разностью. Гейт стоит ДО сборки записи
+            # (``ObservationPort._route_number``), поэтому выключенная дорога
+            # останавливается на ``gate.allow`` и никогда не доходит до
+            # ``_deliver_number``/``_emit_to_taps`` — структурно короче, не
+            # только по времени.
+            disabled_py, _disabled_c = count_calls(disabled_call)
+            enabled_py, _enabled_c = count_calls(enabled_call)
+            _report(capsys, f"  python-вызовов (выключенная / включённая): {disabled_py} / {enabled_py}")
+
+            assert disabled_py == 6, (
+                f"дорога выключенной метрики завела новую работу: {disabled_py} python-вызовов вместо 6"
+            )
+            assert enabled_py == 28, f"дорога включённой метрики изменилась: {enabled_py} python-вызовов вместо 28"
+            assert disabled_py < enabled_py, (
+                f"выключенная метрика обязана делать МЕНЬШЕ вызовов, чем включённая: {disabled_py} !< {enabled_py}"
+            )
+        finally:
+            mgr.shutdown()
+            port.shutdown()
