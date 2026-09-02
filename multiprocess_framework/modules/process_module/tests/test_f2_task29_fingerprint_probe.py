@@ -119,7 +119,13 @@ _NAMED_AT_ITS_OWN_DEFAULT: Dict[Tuple[str, ...], List[str]] = {
     # У `enabled` СВОЕГО пути в раскладке нет: ключ решает, существует ли секция
     # `error` целиком. Поэтому он назван обоими путями, которые материализует, —
     # это и есть то, чем он управляет.
-    ("errors", "enabled"): ["error.default_level", "error.include_stacktrace"],
+    # Переключатель, ГАСЯЩИЙ секцию раскладки целиком, называет СЕБЯ, а не её
+    # содержимое. Прежде здесь стояли `error.default_level` и
+    # `error.include_stacktrace` — пути, которых оператор не писал; на живом
+    # стенде это давало ложный `failed`, требующий схемный дефолт от настройки,
+    # выставленной самим оператором секундой раньше (находка А-1 ревью,
+    # итерация 2). Рез отпечатка по пересечению полюсов оставил здесь одно имя.
+    ("errors", "enabled"): ["errors.enabled"],
     ("errors", "level"): ["error.default_level"],
     ("errors", "include_stacktrace"): ["error.include_stacktrace"],
     ("errors", "channels"): ["errors.channels"],
@@ -289,20 +295,33 @@ class TestNoFalseNameWhenTheRequestRepeatsTheDefault:
         assert with_neighbour["checked"] == 2, with_neighbour
         assert with_neighbour["verdict"] == "confirmed", with_neighbour
 
-    def test_a_non_default_toggle_is_named_by_its_layout_path(self) -> None:
-        """Обратная сторона той же монеты: выключенная консоль — ПОТРЕБЛЁННЫЙ ключ.
+    def test_a_toggle_that_materialises_a_whole_table_is_named_by_its_own_name(self) -> None:
+        """``console: false`` МАТЕРИАЛИЗУЕТ стол каналов — и потому не сверяется.
 
-        Здесь экспандер говорит, и вердикт обязан назвать путь раскладки, а не
-        схемное имя. Без этой половины тест выше проходил бы и у зонда, который
-        просто выкидывает ``console`` в любом случае.
+        Прежняя редакция теста требовала обратного: сверки
+        ``logger.channels.console.enabled`` и запрета имени ``console``. Одна
+        сверка там действительно была — в комплекте с **56 именами** остального
+        стола в ``unverifiable`` (на базе ``f84817cf`` — 47: шум предсуществующий,
+        зонд добавил девять) и с риском ложного ``failed``, воспроизведённым
+        ревью живьём на соседнем ключе ``errors.enabled``.
+
+        Причина у обоих одна: отпечаток брался по ОБЪЕДИНЕНИЮ путей двух полюсов,
+        то есть включал пути, различающиеся лишь НАЛИЧИЕМ. Переключатель, гасящий
+        или зажигающий целую секцию раскладки, забирал в отпечаток всю её, а
+        значения соседям доставались из схемных дефолтов — вердикт требовал
+        дефолт от настройки, которую оператор выставил сам.
+
+        После реза по ПЕРЕСЕЧЕНИЮ вердикт говорит про ``console`` то же, что про
+        остальные восемь листьев такого рода: «не проверил», под именем, которое
+        написал оператор. Это слабее сверки и честнее её: проверку, которую нельзя
+        отличить от вранья, отличить от вранья нельзя. Настоящую дорогу этим
+        ключам даст реестр описателей ручек (Task 4.9).
         """
         verdict = observability_verified({"console": False}, self.READBACK)
 
-        assert verdict["checked"] == 1, verdict
-        assert verdict["mismatches"] == [
-            {"key": "logger.channels.console.enabled", "expected": False, "actual": True}
-        ], verdict
-        assert "console" not in verdict["unverifiable"], verdict
+        assert verdict["unverifiable"] == ["console"], verdict
+        assert verdict["mismatches"] == [], verdict
+        assert verdict["checked"] == 0, verdict
 
 
 class TestAnExtinguishedSectionIsNamedBySchemaNotByLayout:
