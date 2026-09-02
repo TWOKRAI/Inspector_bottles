@@ -75,6 +75,8 @@ from multiprocess_framework.modules.process_module.configs.observability_config 
     expand_observability,
 )
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+from multiprocess_framework.modules.process_module.heartbeat.process_heartbeat import ProcessHeartbeat
+from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
 
 from .test_observation_policy_review_f4 import _wired
 
@@ -123,11 +125,39 @@ def _real_wired(tag: str) -> Iterator[Tuple[ProcessModule, LoggerManager, ErrorM
     command_manager.initialize()
     process.command_manager = command_manager
 
-    BuiltinCommands(process)._register_observability_commands()
+    # Task 2.9: НАСТОЯЩИЙ `ProcessHeartbeat` и НАСТОЯЩИЙ `StatsManager` в том же
+    # харнессе — иначе критерий 5 (полная секция → `unverifiable == []`) нечем
+    # расширить на `stats.*` и `heartbeat_interval_sec`: обе ручки применяются
+    # ЖИВЫМ объектом, и без него ответ был бы `unverifiable` по причине
+    # харнесса, а не по свойству. Такт НЕ запускается (`start` не зовётся):
+    # `apply_heartbeat_interval` — атомарное присваивание `_interval`, воркер
+    # для этой дороги не нужен, а запущенный поток сделал бы тест флейком.
+    heartbeat = ProcessHeartbeat(services=process)
+    process._heartbeat = heartbeat
+
+    stats = StatsManager(
+        manager_name=f"stats_{tag}",
+        config=expand_observability({})["stats"],
+        process=process,
+        managers={"logger": logger},
+    )
+    stats.initialize()
+    process.stats_manager = stats
+    process.register_manager("stats", stats, enabled=True)
+
+    builtins_ = BuiltinCommands(process)
+    builtins_._register_observability_commands()
+    # Task 2.9: ЧИТАЮЩАЯ дверь оператора регистрируется ДРУГИМ методом. Без неё
+    # харнесс умеет только применять (`config.reload`) и не умеет смотреть
+    # (`introspect.observability`) — а свойство «readback идёт за живым
+    # объектом» проверяется только читающей дверью: применяющая переустановит
+    # значение из слоёв ПЕРЕД чтением и покажет согласие всегда.
+    builtins_._register_introspect_commands()
 
     try:
         yield process, logger, error, command_manager
     finally:
+        stats.shutdown()
         command_manager.shutdown()
         error.shutdown()
         logger.shutdown()
@@ -593,6 +623,17 @@ class TestFullSectionRoundTripHasNoUnverifiablePaths:
         "channels": {"messages_file": {"enabled": False}},
         "commands": {"log_success": True},
         "errors": {"include_stacktrace": False},
+        # Task 2.9 (критерий приёмки): секция расширена на `stats.*` и
+        # `heartbeat_interval_sec` — обе ручки применялись и НЕ подтверждались
+        # (M1/M2 ревью Ф2). Значения — литералы, отличные от схемных дефолтов:
+        # совпадение с дефолтом даёт `confirmed` и у полностью слепого вердикта.
+        "heartbeat_interval_sec": 3.5,
+        "stats": {
+            "enabled": False,
+            "aggregation_interval": 20.0,
+            "flush_interval": 5.0,
+            "max_series": 77,
+        },
     }
 
     def test_unverifiable_is_empty(self) -> None:
@@ -606,4 +647,48 @@ class TestFullSectionRoundTripHasNoUnverifiablePaths:
             assert verified["unverifiable"] == [], (
                 f"полная секция даёт неполный readback: {verified['unverifiable']} — критерий 5 задачи 2.2 не взят"
             )
+            # Task 2.9: ЛИТЕРАЛ, а не `len(SECTION)`. Пустой `unverifiable` сам по
+            # себе достижим и слепым вердиктом — ровно это и был дефект M1: путь,
+            # который никто не положил в `expected`, не попадает и в
+            # `unverifiable`. Число сверенных путей — второй, независимый берег:
+            # снятие любой ветки readback роняет его, даже когда список пуст.
+            assert verified["checked"] == 15, (
+                f"сверено {verified['checked']} путей вместо 15 — ветка readback потеряна молча: {verified}"
+            )
             assert verified["verdict"] == "confirmed", verified
+
+    def test_the_heartbeat_readback_follows_the_live_tact_not_the_request(self) -> None:
+        """Task 2.9: readback такта — про ЖИВОЙ объект, а не эхо запроса.
+
+        Инъекция H5 (снять ветку readback `heartbeat_interval_sec`) на момент
+        реализации дала НОЛЬ красных при 144 собранных: все тесты строили
+        `effective` руками, и readback-половина дороги не сторожилась ничем.
+        Заплата была достижима (якорь единственный) и действенна — прямой вызов
+        `observability_effective(heartbeat=...)` менял исход с `True` на `False`.
+        Здесь она обязана краснеть.
+
+        Вторая половина теста — почему «живой» сказано буквально: `_interval`
+        меняется МИМО `config.reload`, и readback обязан показать новое число.
+        Пересчёт из конфига показал бы 3.5 и здесь — то есть согласие всегда.
+        """
+        with _real_wired("live_tact") as (process, _logger, _error, cm):
+            res = _reload(cm, {"heartbeat_interval_sec": 3.5})
+
+            assert res["verified"]["verdict"] == "confirmed", res["verified"]
+            assert res["verified"]["checked"] == 1, res["verified"]
+            assert res["effective"]["heartbeat_interval_sec"] == 3.5, res["effective"]
+
+            # Читает `introspect.observability`, а НЕ второй `config.reload`.
+            # Первая редакция этого теста звала `_reload(cm, {})` и падала на
+            # `3.5 != 9.25` — не потому, что readback врал, а потому, что
+            # пересборка из слоёв ЗАКОННО положила 3.5 обратно на живой такт
+            # ПЕРЕД чтением. Моя модель была неверной: команда применения не
+            # годится как измеритель того, что она сама и переустанавливает.
+            process._heartbeat._interval = 9.25
+
+            seen = cm.handle_command({"command": "introspect.observability", "data": {}})
+            effective = seen.get("effective", seen)
+            assert effective["heartbeat_interval_sec"] == 9.25, (
+                f"readback не пошёл за живым тактом: {effective.get('heartbeat_interval_sec')} — "
+                "это пересчёт из конфига, а не действующее значение"
+            )
