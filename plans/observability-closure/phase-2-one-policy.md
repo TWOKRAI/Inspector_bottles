@@ -201,3 +201,78 @@
       (ложноположительный) и тишина при пустом read-model без подписки (ложноотрицательный) — оба
       красные. D3 добором: пустота меряется всем read-model, а не fps-срезом.
 **Out of scope:** сама история (Task 3.5).
+
+---
+
+## Добор ревью Ф2 (2026-09-02) — задачи 2.9–2.12
+
+> Заведены по [`review-phase-2.md`](./review-phase-2.md). Порядок: **2.9 — до merge в `main`**
+> (единственный блокер merge по вердикту ревью). 2.10–2.12 — после решений владельца Р-11/Р-12
+> (`plan.md` §4), до или после merge по его выбору. Приёмка каждой — по правилам §3 `plan.md`:
+> тестер до кода в worktree, инъекции с предсказанием, ревью синхронно с парами вход→выход.
+
+### Task 2.9 — Верификатор без слепых ключей: генерическое `expected`, readback под именем схемы (M1, M2, В-3)
+**Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework
+**Goal:** любой лист схемы `observability`, поданный в `config.reload`, либо сверяется с readback, либо назван в `unverifiable` поимённо; пустой `unverifiable` при непустом запросе невозможен; `stats.enabled` подтверждается.
+**Files:** `process_module/managers/observability_reload.py` (`observability_verified` :492-626, `observability_effective` :252-490),
+`statistics_module/core/stats_manager.py` (`observability_readback` :393-425), `process_module/tests/test_f2_task22_schema_wiring.py` (образец стража `unread_schema_fields`), новый `process_module/tests/test_f2_task29_verifier_covers_every_leaf.py`, `CONTROL_PANEL.md`.
+**Steps:**
+1. `expected` в `observability_verified` собирать генерически: каждый лист `flatten(survived)`, не потреблённый `expand_observability` (его выход известен: `flatten(expand_observability(survived))`), ложится в `expected` под своим схемным путём. Ручная строка для `session_ttl_sec` и цикл по `IDENTITY_SECTION_KEYS` становятся частным случаем генерического правила; снять их, оставив `normalized_observation_section` (у неё своя нормализация паттернов).
+2. Инвариант вердикта: если `survived` непуст и `checked == 0`, список `unverifiable` непуст (в него попадает каждый путь запроса, не найденный в readback). Воспроизведение до правки: `observability_verified({"heartbeat_interval_sec": 1}, eff)` побайтно равен `observability_verified({}, eff)`.
+3. `observability_effective`: `heartbeat_interval_sec` читается у живого `ProcessHeartbeat._interval` (получатель тот же `heartbeat`, что уже передаётся ради `observation`). Readback `stats`: отдавать `enabled` (имя схемы, прямая полярность); `plane_disabled` оставить рядом как удобство оператора.
+4. Страж по образцу `unread_schema_fields`: обходит листья `ObservabilityConfig`, подаёт каждый со значением, отличным от дефолта, в `observability_verified` против readback реальной проводки (`_real_wired`, как в `test_f2_task22_schema_wiring.py`) и требует, чтобы путь оказался либо в `checked`, либо в `unverifiable`, но никогда «нигде». Исключения только явным списком с причиной.
+5. `CONTROL_PANEL.md`: строка про readback `stats.enabled`; `docs_verify`: проверка имени.
+**Acceptance criteria:**
+- [ ] Офлайн, точной функцией: `{"heartbeat_interval_sec": 1}` при readback `1.0` → `confirmed`, `checked: 1`; при readback `5.0` → `failed` с `mismatches: [{key: heartbeat_interval_sec, expected: 1.0, actual: 5.0}]`.
+- [ ] Офлайн: `{"stats": {"enabled": false}}` → `confirmed`, `checked: 1`; при `_plane_enabled=True` → `failed`.
+- [ ] Инвариант шага 2 сторожится тестом: непустой запрос с ключом, которого нет в readback, даёт `unverifiable == [<путь>]`, не `[]`.
+- [ ] Страж шага 4 зелен на дереве; инъекция «убрать ветку readback у `commands.log_success`» → страж красный **по имени** `command.log_success`.
+- [ ] Инъекция «вернуть readback `plane_disabled` без `enabled`» → красный тест `stats.enabled`; инъекция «убрать генерическую строку шага 1» → красный инвариант шага 2 и страж шага 4.
+- [ ] Живьём (`backend_ctl`, `camera_0`): `config_reload_verified` на `{"heartbeat_interval_sec": 1}` и на `{"stats": {"enabled": false}}` → `confirmed`, `checked: 1`, `unverifiable: []`. Пара: `heartbeat_interval_applied` и `plane_disabled` в readback совпадают с вердиктом.
+- [ ] `TestFullSectionRoundTripHasNoUnverifiablePaths` расширен на `stats.*` и `heartbeat_interval_sec` → `unverifiable: []`.
+**Out of scope:** реестр описателей ручек (Task 4.9), переименование других ключей readback, кольцо пакетов (Task 4.10).
+
+### Task 2.10 — Бенч «выключенная метрика не дороже гейта» в дерево (M3, В-4)
+**Level:** Middle (Sonnet) · **Assignee:** developer · **Layer:** tests
+**Goal:** главный перф-критерий Task 2.1 воспроизводим одной командой из дерева, а не живёт только в планах.
+**Files:** новый `statistics_module/tests/test_f2_numbers_disabled_cost_bench.py` (образец формы: `process_module/tests/test_plugin_stats_road.py::TestTheCostOfTheHotPath`, `_timed_pair`/`_report`).
+**Steps:**
+1. Три замера в одном тесте: (а) `record_metric` выключенной правилом метрики через боевой порт (`ObservationManager` + `NumbersGate` + `ObservationPolicy`); (б) голый `policy.resolve(path)` на прогретом кэше; (в) включённая метрика по той же дороге.
+2. Гейтуется **отношение** (а)/(в) с потолком, названным владельцем (ревью предлагает 0.3 при измеренных ~0.15); абсолютные мкс и (б) репортируются, не гейтуются. Довод тот же, что у В-2: абсолют шумной величины на общей машине краснеет без регрессии.
+3. В коммите три соло-прогона числом (правило §3 «замер под нагрузкой не засчитывается»).
+**Acceptance criteria:**
+- [ ] Тест зелен трижды соло; три числа записаны в критерий Task 2.1 шаг 5 вместо ссылки на несуществующий бенч.
+- [ ] Инъекция E1 (гейт после сборки записи) → бенч красный по отношению (второй сторож рядом с `test_f2_gate_precedes_assembly.py`, другим объективом: ценой, а не чтением `tags`).
+- [ ] Инъекция «снять кэш `resolve`» (memoize → прямой `_decide`) → бенч красный.
+**Out of scope:** оптимизация цепочки `record_metric → port → gate` (отвергнуто владельцем 2026-09-01).
+
+### Task 2.11 — Дефолт поддерева, который действует; голос без развилки (В-1, m4) — после Р-11
+**Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework
+**Goal:** L0-дефолт частоты поддерева порта достижим при дефолтном такте; `_warn_capped_metrics` видит политику в обеих ветках `tick_sec`, не крича на буте без явной конфигурации.
+**Files:** `process_module/configs/observation_policy.py:91` (`DEFAULT_SUBTREE_INTERVAL_SEC`), `process_module/heartbeat/process_heartbeat.py:369-431` (`_warn_capped_metrics`), `process_module/heartbeat/telemetry.py` (`capped_metrics`, `TelemetryGate.decide`/`_grant`), тесты, пиннящие 1.0: `test_f2_task23_honest_tick.py`, `test_observation_policy_hazards.py`, `test_observation_policy_task25_legacy_adapter.py`; `CONTROL_PANEL.md`, ADR-дополнение к ADR-PM-041.
+**Steps:**
+1. По решению Р-11 (рекомендация ревью: `0.0`, «не чаще такта, без дополнительного троттла») сменить L0, обновить провенанс и три теста. Проверить, что `TelemetryGate` при `interval == 0` не заводит запись расписания на каждый путь (у `NumbersGate.allow` такой short-circuit есть, у уровней сверить `_grant`).
+2. Снять сужение в `_warn_capped_metrics`: политика передаётся в `capped_metrics` в обеих ветках. Контроль F5 матрицы обязан теперь дать **0 красных**: это и есть доказательство, что голос молчит на буте не из-за сужения, а потому что кричать не о чем.
+3. `effective` в readback (`current_observation_policy`) показывает `effective_interval_sec == tick` для дефолта; сверить тестом.
+**Acceptance criteria:**
+- [ ] F5 (снятие сужения) на новом дереве: 0 красных из тех же 9 тестов «boot молчит».
+- [ ] Явное правило оператора `interval_sec: 1.0` при такте 5.0 даёт голос в ОБЕИХ ветках `tick_sec` (пара тестов: `tick_sec=None` и `tick_sec=2.0`); инъекция «вернуть сужение» → красный в ветке `None`.
+- [ ] Живьём: `introspect.telemetry` на буте без конфигурации — ни одного WARNING про предохранитель; `observation.effective[поддерево].effective_interval_sec == 5.0`.
+**Out of scope:** изменение `heartbeat_interval_sec` (отвергнуто ревью: ×5 IPC ради дефолта).
+
+### Task 2.12 — Документный и мелкий добор (M5, m1, m2, m3, В-2) — после Р-12
+**Level:** Middle (Sonnet) · **Assignee:** developer · **Layer:** mixed
+**Goal:** план совпадает с деревом; три minor ревью закрыты; потолок бенча отношения — решение владельца.
+**Files:** этот файл (чекбоксы 2.1 «юнит» и «М5», 2.2 ×3, 2.6 ×2), `process_module/configs/observability_config.py:462-472` (голос ADR-PM-046), `process_module/tests/test_f2_task22_schema_wiring.py:225` (`errors.enabled`), `process_module/DECISIONS.md` (ADR-PM-041, п. «срок снятия»), `process_module/tests/test_plugin_stats_road.py:494+` (потолок).
+**Steps:**
+1. Чекбоксы: 2.1 «юнит `capture.frames`» и «М5» → `[x]` со ссылкой на E3/E7 матрицы; 2.2 три критерия по стенду `stand-phase-2-final.md` и `52c0f585`/`d35eae19` (живой `history.level` → `[x]`, полная секция → `[~]` до Task 2.9, инъекция стража → `[x]`); 2.6 критерии 1 и 3 → `[x]` по `stand-phase-2-final.md`, критерий 2 остаётся `[ ]` с пометкой «нагрузочный харнесс: Ф3/Ф4».
+2. m1: голос ADR-PM-046 один раз на `config.reload`, не на каждый `model_validate` (замер ревью: 3 голоса на один `observability_verified`). Через окно голосов `windowed_voice` с ключом `stats.enabled.repurposed`, тем же механизмом, что Task 1.4, не процессным флагом (довод докстринга валидатора про порядок остаётся в силе: окно, а не «уже предупреждали»).
+3. m2: тест `errors.enabled` закрепляет ВЫБРАННЫЙ вариант (гейт: пустой словарь `error`); вторая ветка `or removal_variant` снимается.
+4. m3: в ADR-PM-041 условие «фаза после Ф5» дополнить датой не позже, чем `plan.md` получит фазу Ф6, либо календарной датой решением владельца.
+5. В-2/Р-12: потолок `test_the_facade_adds_little_over_a_direct_call` — значение из Р-12 (рекомендация ревью 3.0 при измеренных 1.73–1.76); в комментарии три числа ревью и три числа исполнителя.
+**Acceptance criteria:**
+- [ ] `/dev:plan-status` показывает Ф2 без расхождений с деревом; критерий 2 Task 2.6 — единственный открытый.
+- [ ] m1: тест «три `config.reload` подряд с `stats.enabled: false` → один голос за окно»; инъекция «снять окно» → красный.
+- [ ] m2: инъекция «сменить реализацию на removal-вариант» → тест красный (раньше оставался зелёным).
+- [ ] Бенч отношения зелен трижды соло с новым потолком.
+**Out of scope:** нагрузочный харнесс переполнения очереди (критерий 2 Task 2.6): отдельная задача Ф3/Ф4.

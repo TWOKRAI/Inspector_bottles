@@ -95,5 +95,56 @@
 - [ ] Module-level API работает без изменений у вызывающих (0 правок в Plugins/Services); реестр процесса создаётся `ProcessModule`, тесты получают свежий через фикстуру; голого сброса нет как API.
 - [ ] Гейт зелен в трёх случайных порядках модулей (`-p random-order` или скрипт перестановки).
 
+### Task 4.9 — Универсальный механизм ручек: `KnobManager` уровня фреймворка, observability — первый потребитель (ревью Ф2 §6, §2.2а; направление владельца 2026-09-02)
+> Заведена 2026-09-02 по [`review-phase-2.md`](./review-phase-2.md). **Направление владельца
+> (2026-09-02): ручка — универсальный механизм со своим менеджером/инспектором, потому что ручки
+> живут по всей наблюдаемости и за её пределами.** Поэтому цель задачи не «реестр внутри
+> observability», а менеджер фреймворка, у которого observability — первый, но не единственный
+> потребитель. Предпосылка Task 4.3 (Protocol readback менеджеров). Порядок: 4.3 → 4.9.
+> **Порог:** если инвентарь шага 1 покажет ≥3 потребителя, задача выделяется в собственный план
+> (`/dev:plan`, slug `knobs-universal-manager`) по правилу «10+ файлов, архитектура → Manager →
+> TeamLead → Reviewer»; здесь остаётся ссылка.
+
+**Level:** Senior (Opus) · **Assignee:** teamlead (после Manager-декомпозиции) · **Layer:** framework
+**Goal:** добавить ручку в любом месте системы — значит написать **одно объявление** (`KnobSpec`: путь, схема значения, применитель на живом объекте, геттер readback, справочная строка), после чего слои L0→L3 с TTL и аудитом, провенанс, вердикт `confirmed/failed/unverifiable`, `introspect` и справочник получаются **даром**, из менеджера, а не из пяти ручных ветвлений на каждую ручку.
+
+**Что уже есть и переиспользуется, а не пишется заново** (инвентарь ревью Ф2):
+- `ObservabilityLayers` (`process_module/configs/observability_layers.py`) — четыре слоя, TTL-подметальщик, `session_keys`, аудит `reverts`, провенанс `_schema_keys()`. Это и есть универсальный слоёный стор ручек, названный по первому потребителю. Переезжает в менеджер как ядро.
+- `observability_verified` — трёхзначный вердикт, round-trip неизвестных ключей. Переезжает как метод менеджера; `expected` строится из реестра.
+- `backend_ctl.set_register_verified` / `register_snapshot` / `register_rollback_log` — та же форма «применил → сверил → откатил» у регистров, написанная второй раз (`backend_ctl/registers.py`, commit-confirmed, Р-6). Второй потребитель-кандидат.
+- `telemetry.reconfigure`/`_apply_telemetry_from_layers` — третья копия дороги ручки со своими слоями (`TELEMETRY_KEY`). Третий кандидат, после снятия легаси (Task 2.5, ADR-PM-041).
+- `FW_*`-флаги (реестр `ctor > env > default`), пресеты камеры (`camera settings`), параметры рецептов — за пределами наблюдаемости; в инвентарь входят, в первую волну миграции — нет.
+
+**Files:** новый модуль фреймворка (имя и ярус — решение teamlead в ADR; кандидаты: `knob_module` как core-модуль на `BaseManager`, по правилу владельца «всё через BaseManager, три менеджера — одна база»), `process_module/configs/observability_layers.py` (→ ядро менеджера), `process_module/managers/observability_reload.py` (`_rebuild_and_apply`, `observability_effective`, `observability_verified` → потребители менеджера), `process_module/commands/builtin_commands.py` (`config.reload`/`introspect.observability` → тонкие алиасы над `knob.set`/`knob.readback`/`knob.verify`), `backend_ctl` (инструменты `config_reload_verified`, `set_register_verified` — общий драйверный путь), `scripts/docs_verify/docs_check.py`, `CONTROL_PANEL.md`, `CONNECTORS.md`, `NEW_MODULE_RECIPE.md` (раздел «как объявить ручку»), `MODULE_TIERS.md` + контракт-тест ярусов.
+**Steps:**
+1. **Инвентарь числом** (Manager): все дороги «ключ → применение → readback → вердикт» в дереве: observability (20 веток с пометкой `unverifiable` в `observability_reload.py`), регистры, `telemetry.*`, `FW_*`, камера, рецепты. Для каждой: сколько ручных точек стоит одна ручка сегодня (у `heartbeat_interval_sec` — 7, ревью Ф2 §2.2а). Таблица в `workspace`-заметке задачи; она же решает порог выделения в план.
+2. **Контракт** (`module-contract`, full): `KnobSpec` (`path`, `schema`, `apply(live, value)`, `readback(live)`, `doc`, `scope`: процесс/ПМ/глобально), `KnobManager` (`declare(spec)`, `set(path, value, layer, ttl)`, `readback()`, `verify(requested) -> verdict`, `provenance()`, `audit()`), `introspect.knobs` — одна команда на все namespace'ы. Под-секции с собственным механизмом (`observation`, `voices`, `events`, `flight`, `history`) — `KnobSpec` на секцию с нормализацией (как сегодня `normalized_observation_section`).
+3. **Первый потребитель — observability**: описатели для всех ручек `observability.*`; `_rebuild_and_apply`, `observability_effective`, `observability_verified` становятся обходом реестра; `IDENTITY_SECTION_KEYS`, `_TOP_LEVEL_DICT_KEY_READERS`, ручные строки (`session_ttl_sec`) исчезают. Старые команды и инструменты работают как алиасы — 0 правок у вызывающих (`backend_ctl`-тесты зелены без изменений, кроме форм ответа, названных в ADR).
+4. **Второй потребитель доказывает универсальность**: регистры (`set_register_verified` через тот же менеджер, commit-confirmed = слой с TTL — Р-6а) либо `telemetry.*` — по инвентарю выбирается тот, у кого дорога короче. Без второго потребителя задача не считается закрытой: «универсальный механизм с одним потребителем» — это переименование.
+5. **Стражи**: лист схемы без описателя — красный поимённо; описатель без листа — красный поимённо (пара); `docs_verify` сверяет справочники с реестром; AST-счёт ручных ветвлений применения/readback вне менеджера.
+**Acceptance criteria:**
+- [ ] Эксперимент «новая ручка»: тестовая ручка добавляется ОДНИМ объявлением + строкой схемы; `config_reload_verified` даёт `confirmed`, `introspect.knobs` показывает провенанс и TTL, справочник проходит `docs_verify` — при `git diff --stat`, в котором нет ни `observability_reload.py`, ни `builtin_commands.py`. Пара: та же ручка без описателя → страж красный по имени.
+- [ ] Два потребителя на одном менеджере живьём: `config_reload_verified(camera_0, …)` и `set_register_verified(…)` дают вердикт одной формы, откат по TTL пишется в один аудит; инъекция «снять TTL-подметальщик» → красны сторожа ОБОИХ потребителей.
+- [ ] Число ручных ветвлений применения/readback вне менеджера ≤ 3 (AST-счёт до/после в коммите; «до» — по инвентарю шага 1).
+- [ ] Гейты фреймворка, `sentrux check .`, `docs_verify` зелены; `MODULE_TIERS.md` и карта ответственности содержат новый модуль; полная секция `observability` через `config_reload_verified` → `unverifiable: []` на всех восьми процессах.
+- [ ] Цена: `config.reload` не медленнее, чем до задачи (три соло-замера пары «до/после», отношение ≤ 1.2).
+**Out of scope:** миграция `FW_*`-флагов, пресетов камеры и параметров рецептов (инвентаризируются, переезжают отдельными задачами после доказанного второго потребителя); новые ручки; GUI-редактор ручек (после того, как `introspect.knobs` даст один источник для вкладки Settings).
+
+### Task 4.10 — Словарь политики в один модуль ниже обеих плоскостей; кольцо `process_module ↔ statistics_module` снято (ревью Ф2, M4)
+> Заведена 2026-09-02 по [`review-phase-2.md`](./review-phase-2.md) §2.2(г). sentrux кольца не видит (одна половина ленивая), поэтому нужен собственный страж.
+
+**Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
+**Goal:** `ObservationPolicy`, `PathSchedule`, помощники путей (`stats_metric_path`, `state_metric_path`, `plugin_metric_path`) и `PolicyDecision` живут в одном модуле, от которого зависят и `process_module`, и `statistics_module`; обратных импортов (в том числе ленивых) между этими двумя пакетами нет.
+**Files:** `process_module/configs/observation_policy.py`, `statistics_module/observation/numbers_gate.py`, `statistics_module/observation/observation_manager.py:135,:253` (ленивые импорты), `process_module/heartbeat/telemetry.py:29`, место назначения — по решению teamlead с доводом в ADR (кандидаты: `channel_routing_module` как общая база трёх менеджеров; `state_store_module`, где уже живёт `match_pattern`; новый модуль только если оба не подходят — тогда `MODULE_TIERS.md` и контракт-тест ярусов).
+**Steps:**
+1. Замер до: список всех импортов `process_module → statistics_module` и обратных, включая ленивые внутри функций (AST по `Import`/`ImportFrom` в любой глубине тела), числом в коммите.
+2. Перенос словаря; `TelemetryPublishConfig` (легаси-вход политики) остаётся в `process_module` — политика принимает его duck-typed, как сегодня `NumbersGate` принимает политику.
+3. AST-страж «нет импортов между `process_module` и `statistics_module` ни на уровне модуля, ни внутри функций» в одну сторону, которую назовёт ADR; инъекция «вернуть ленивый импорт» → красный по адресу файл:строка.
+**Acceptance criteria:**
+- [ ] Обратных импортов (по AST, включая ленивые) между двумя пакетами — 0; страж красен на инъекции.
+- [ ] `sentrux check .` и полный гейт фреймворка зелены; E2/E5 матрицы Ф2 (второй потребитель отвалился; расписание — один класс) остаются красными под своими заплатами.
+- [ ] Порядок импорта пакетов не значим: гейт зелен в трёх случайных порядках модулей (тот же приём, что у Task 4.7).
+**Out of scope:** перенос самого `ObservationManager`/`NumbersGate` (они остаются плоскостью чисел).
+
 ### Task 4.8 — Живой стенд Ф4 (20 процессов) + ревью фазы
 - [ ] Числа масштаба в отчёте: дельт/с, CPU ПМ, `hub.dropped`, `evicted` — все нули с контролем «нагрузка есть» (дельты > 0).

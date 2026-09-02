@@ -128,3 +128,5 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Plan-Driven Dev](project_plan_driven_dev.md) — slug, Refs-trailer · [checkboxes [x]+hash](feedback_plan_checkboxes.md) · [dual-save](feedback_plan_dual_save.md)
 - [Один активный план](feedback_one_active_plan_per_tool.md) — иначе воскрешение отменённых задач
 - [Причина из плана — гипотеза](feedback_the_plans_stated_cause_is_a_hypothesis.md) — симптом верен до числа, причина нет; зонд мимо подозреваемой плоскости, иначе построишь механизм вокруг несуществующего дефекта · [Спека может врать](feedback_plan_spec_can_lie.md) — имя поля сверять с кодом · [позиционный вызов прячет имена](feedback_positional_call_hides_parameter_name_drift.md) — падало на duration=
+- [Универсальный механизм ручек — KnobManager](project_knobs_universal_manager.md) — 2026-09-02: ручка = одно объявление; observability первый потребитель, регистры/telemetry второй; Task 4.9, при ≥3 потребителях свой план
+- [Сначала наблюдаемость, потом ponytail-audit](project_sequencing_observability_then_audit.md) — 2026-09-02: аудит не посреди фазы; узкий проход после merge Ф2, полный после Ф5
