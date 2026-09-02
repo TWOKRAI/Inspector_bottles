@@ -1579,6 +1579,26 @@ def wire_observability_store(
         ``ProcessModule._wire_observability_hub``).
     """
     store = ObservabilityStore(db_path)
+    taps = _attach_store_taps(store, error_manager, logger_manager, process, min_level)
+    return store, taps
+
+
+def _attach_store_taps(
+    store: ObservabilityStore,
+    error_manager: Optional[Any],
+    logger_manager: Optional[Any],
+    process: str,
+    min_level: str,
+) -> list[Tuple[Any, str]]:
+    """Повесить store-tap'ы (error+logger) на СУЩЕСТВУЮЩИЙ стор с заданным порогом.
+
+    Общее тело для :func:`wire_observability_store` (подъём — стор создаётся здесь
+    же) и :func:`reapply_observability_store_level` (Ф2, задача 2.2, добор
+    ADR-PM-047 — `config.reload`, стор ПЕРЕЖИВАЕТ правку, переустанавливается
+    только порог tap'ов). Тело одно: развести его на два места означало бы, что
+    порог создания и порог пересборки могут разойтись на следующей правке рядом —
+    тот же довод, что у `compose_managers_payload` («сборка живёт здесь одна»).
+    """
     taps: list[Tuple[Any, str]] = []
     error_plane_owned = False
     for mgr, tap_name, owns_by_role in (
@@ -1602,6 +1622,14 @@ def wire_observability_store(
         # владелец маркированных строк — ровно один, и он есть, пока встал хотя
         # бы один tap.
         owns_error_plane = owns_by_role or not error_plane_owned
+        # `add_tap` идемпотентен ПО ИМЕНИ (`ChannelRoutingManager._tap_sinks[tap_name]
+        # = (channel, threshold)` — ОДНО присваивание словаря по уже
+        # СУЩЕСТВУЮЩЕМУ ключу при переустановке, без изменения размера словаря).
+        # Поэтому переустановка порога на `reapply_observability_store_level` не
+        # требует предварительного `remove_tap`: окна «tap снят, новый ещё не
+        # встал», в котором запись потерялась бы молча, здесь нет СТРУКТУРНО —
+        # см. докстринг `reapply_observability_store_level` про гонку двух
+        # `config.reload`.
         mgr.add_tap(
             StoreTapChannel(store, name=tap_name, process=process, owns_error_plane=owns_error_plane),
             min_level=min_level,
@@ -1609,7 +1637,93 @@ def wire_observability_store(
         )
         error_plane_owned = error_plane_owned or owns_error_plane
         taps.append((mgr, tap_name))
-    return store, taps
+    return taps
+
+
+def reapply_observability_store_level(
+    store: Optional[ObservabilityStore],
+    error_manager: Optional[Any],
+    logger_manager: Optional[Any],
+    process: str,
+    min_level: str,
+) -> list[Tuple[Any, str]]:
+    """Переустановить ПОРОГ store-tap'ов на `config.reload`, стор не трогая.
+
+    Ф2 (задача 2.2), добор ADR-PM-047 («остаток по history, назван, а не
+    закрыт»). До этой функции `history.level` менял ТОЛЬКО кэш
+    `svc._observability_history_policy` (читает такт уборки) — `min_level`
+    уже поднятого SQLite-тапа (`StoreTapChannel`, поставлен
+    `wire_observability_store` на подъёме) выставлялся РОВНО ОДИН РАЗ и
+    `config.reload` его не видел. Следствие: `config_reload_verified` отвечал
+    `confirmed` (readback честно показывал новый уровень политики), а живой
+    стор ПРОДОЛЖАЛ принимать записи по СТАРОМУ порогу до рестарта — ложный
+    `confirmed`, худший класс вердикта (молчащий `unverifiable` хотя бы не
+    врёт).
+
+    **Стор не пересоздаётся.** Новый `ObservabilityStore(db_path)` открыл бы
+    ВТОРОЕ соединение к тому же SQLite-файлу и потерял бы накопленную историю
+    из вида старого соединения — вместо этого сюда передаётся ЖИВОЙ
+    `svc._observability_store`, и меняется только порог tap'ов поверх него,
+    ровно как переустройство `resolve_history_policy`'ем не создаёт заново
+    очередь уборки.
+
+    **Гонка двух `config.reload` подряд (опасность, названная ADR-PM-047 и НЕ
+    проверенная задачей 2.2).** `_attach_store_taps` НЕ зовёт `remove_tap` —
+    он создаёт НОВЫЙ `StoreTapChannel` и кладёт его в
+    `ChannelRoutingManager._tap_sinks[tap_name]` ОДНИМ присваиванием словаря по
+    уже существующему ключу (без структурного изменения размера — не вставка,
+    а замена значения). Раздельного `remove_tap` перед `add_tap` здесь
+    намеренно НЕТ: он внёс бы РЕАЛЬНОЕ окно между `pop` и следующим `[...] =`,
+    в котором эмиссия, попавшая ровно в этот момент, увидела бы у себя НОЛЬ
+    tap'ов и запись потерялась бы молча — структурная замена по существующему
+    ключу такого окна не имеет вовсе (доказано наблюдением: `reapply` не вызывает
+    `remove_tap` НИ РАЗУ, см. `test_observability_store_wiring.py::
+    TestReapplyStoreLevel::test_reapply_never_calls_remove_tap_no_absence_window`
+    — детерминированное доказательство, не полагающееся на удачу таймингов).
+    Конкурент, оказавшийся МЕЖДУ двумя присваиваниями двух гонящихся `reapply`,
+    увидит ОДНО из двух валидных состояний (старый канал+порог либо новый) —
+    последняя запись выигрывает гонку, тем же приёмом, которым в этом проекте
+    уже принят атомарный rebind у `_observability_forwarders` (см. докстринг
+    `ProcessModule.subscribe_observability_tail`).
+
+    **Честно про то, что НЕ доказано.** Потоковый стресс-тест
+    (`TestReapplyStoreLevelRace`) не уронил ни одного исключения ни на этой
+    реализации, ни на инъекции, воспроизводящей НАИВНЫЙ `remove_tap`+`add_tap`
+    (проверено вручную: 2000×8 переустановок против 6 эмиттеров, уменьшенный
+    `sys.setswitchinterval(0.00001)` — 0 ошибок на ОБЕИХ версиях). Похоже, что
+    `list(dict.values())` в CPython не отдаёт GIL посередине своего C-вызова, и
+    поэтому гонка по КРАШУ не воспроизводится потоковым стрессом ни у одной из
+    двух версий — это наблюдение об интерпретаторе, а не гарантия языка, и
+    полагаться на него как на доказательство было бы неверно. Довод против
+    `remove_tap` в этой функции держится на СТРУКТУРНОМ доказательстве (тест
+    выше, без потоков) — «есть окно потери записи» доказано устройством кода
+    (наивная версия ЗОВЁТ `remove_tap`, эта — нет), «не крашится» доказано
+    отдельно и слабее (потоковый стресс, отрицательный результат которого не
+    отличает эту реализацию от отвергнутой альтернативы).
+
+    Тело — тот же цикл `_attach_store_taps`, что и у подъёма (см. её докстринг):
+    два места, применяющие один и тот же порог, разошлись бы на первой же
+    будущей правке цикла.
+
+    Args:
+        store: живой стор процесса (`svc._observability_store`). ``None`` —
+            стор не поднят (`history.enabled=False` или hub'а нет) — no-op,
+            пустой список (то же самое решение, что у `wire_observability_store`
+            без менеджеров).
+        error_manager/logger_manager: те же живые менеджеры, что на подъёме.
+        process: имя процесса-источника — тем же значением, что и на подъёме
+            (иначе новые записи сменили бы колонку ``process`` посреди истории).
+        min_level: НОВЫЙ порог (`resolve_history_policy(svc)["level"]`).
+
+    Returns:
+        Список `(manager, tap_name)` — та же форма, что у `wire_observability_store`,
+        для замены `svc._observability_store_taps` (менеджеры и имена tap'ов не
+        меняются между вызовами, но вызывающий обязан держать актуальный список,
+        а не выводить его из факта самого вызова).
+    """
+    if store is None:
+        return []
+    return _attach_store_taps(store, error_manager, logger_manager, process, min_level)
 
 
 def error_plane_store_warning(process_name: str, taps: Optional[list]) -> Optional[str]:

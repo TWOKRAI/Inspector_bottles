@@ -52,11 +52,7 @@ class ProcessAdapter(BaseAdapter):
             if hasattr(self.manager, "shared_resources") and self.manager.shared_resources:
                 sr = self.manager.shared_resources
                 psr = getattr(sr, "process_state_registry", None)
-                state = (
-                    psr.get_state(self.manager.name)
-                    if psr is not None and hasattr(psr, "get_state")
-                    else None
-                )
+                state = psr.get_state(self.manager.name) if psr is not None and hasattr(psr, "get_state") else None
                 if state and "status" in state:
                     return state["status"]
             if self.manager._stop_requested:

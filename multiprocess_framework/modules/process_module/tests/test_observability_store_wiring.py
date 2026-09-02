@@ -16,6 +16,7 @@ from multiprocess_framework.modules.process_module.managers.observability_wiring
     STORE_LOGGER_TAP,
     drain_process_observability,
     error_plane_store_warning,
+    reapply_observability_store_level,
     unwire_observability_store,
     wire_observability_store,
 )
@@ -248,3 +249,208 @@ class TestTheErrorPlaneGapIsAnnounced:
     def test_none_taps_reads_as_no_taps(self):
         """``None`` вместо списка — та же потеря, а не тихий успех."""
         assert error_plane_store_warning("camera_0", None) is not None
+
+
+class TestReapplyStoreLevel:
+    """Ф2 (задача 2.2), добор ADR-PM-047: переустановка ПОРОГА уже поднятого
+    store-tap'а на ``config.reload`` — стор не пересоздаётся, канал переустанавливается.
+
+    До этой функции `history.level` менял ТОЛЬКО кэш `svc._observability_history_
+    policy` (см. `resolve_history_policy`) — `min_level` уже поднятого
+    `StoreTapChannel` выставлялся РОВНО ОДИН РАЗ на `wire_observability_store` и
+    `config.reload` его не видел: `config_reload_verified` отвечал `confirmed`
+    (readback честно показывал новый уровень политики), а живой стор продолжал
+    принимать записи по СТАРОМУ порогу. Пара до/после по счётчику строк — ровно
+    та проверка, которой не хватало приёмке.
+    """
+
+    def test_raising_the_level_makes_info_stop_landing_pair_before_after(self, tmp_path):
+        log = FakeLoggerCore()
+        store, taps = wire_observability_store(
+            None, log, db_path=str(tmp_path / "obs.db"), process="seg", min_level="INFO"
+        )
+        try:
+            log.emit("до правки: рутина", level="INFO")
+            before = store.list_records(process="seg", severity_in=["info"])
+            assert len(before) == 1, f"порог INFO обязан пропускать INFO ДО переустановки: {before}"
+
+            taps = reapply_observability_store_level(store, None, log, "seg", "WARNING")
+
+            log.emit("после правки: рутина", level="INFO")
+            after_info = store.list_records(process="seg", severity_in=["info"])
+            assert len(after_info) == 1, (
+                f"порог поднят до WARNING — вторая INFO-запись не имела права лечь в стор: {after_info}"
+            )
+
+            log.emit("после правки: тревога", level="WARNING")
+            after_warning = store.list_records(process="seg", severity_in=["warning"])
+            assert len(after_warning) == 1, f"WARNING обязан лечь в стор при пороге WARNING: {after_warning}"
+        finally:
+            unwire_observability_store(store, taps)
+
+    def test_lowering_the_level_makes_info_land_again_pair_before_after(self, tmp_path):
+        """Контроль в обратную сторону: понижение порога — то же переустройство,
+        а не односторонний хак, который умеет только поднимать порог."""
+        log = FakeLoggerCore()
+        store, taps = wire_observability_store(
+            None, log, db_path=str(tmp_path / "obs.db"), process="seg", min_level="WARNING"
+        )
+        try:
+            log.emit("до правки: рутина", level="INFO")
+            before = store.list_records(process="seg", severity_in=["info"])
+            assert before == [], f"порог WARNING обязан ГЛУШИТЬ INFO ДО переустановки: {before}"
+
+            taps = reapply_observability_store_level(store, None, log, "seg", "INFO")
+
+            log.emit("после правки: рутина", level="INFO")
+            after = store.list_records(process="seg", severity_in=["info"])
+            assert len(after) == 1, f"порог понижен до INFO — запись обязана лечь: {after}"
+        finally:
+            unwire_observability_store(store, taps)
+
+    def test_store_is_none_is_a_noop(self):
+        """``store=None`` (стор не поднят, `history.enabled=False`) — no-op со
+        списком ``[]``, симметрично `wire_observability_store` без менеджеров."""
+        assert reapply_observability_store_level(None, None, None, "seg", "WARNING") == []
+
+    def test_reapply_never_calls_remove_tap_no_absence_window(self, tmp_path):
+        """Структурное доказательство отсутствия окна «tap отсутствует».
+
+        Потоковая гонка (см. `TestReapplyStoreLevelRace`) не доказывает это
+        свойство надёжно: ручная проверка (2000x8 переустановок против 6
+        эмиттеров, `sys.setswitchinterval(0.00001)`) НЕ уронила ни одного
+        исключения даже на инъекции, воспроизводящей наивный `remove_tap`+
+        `add_tap` — похоже, `list(dict.values())` в CPython не отдаёт GIL
+        посередине своего C-вызова, и поэтому потоковый стресс не отличает
+        безопасную реализацию от отвергнутой альтернативы. Здесь то же
+        свойство доказывается СТРУКТУРНО и детерминированно: `remove_tap`
+        не вызывается вовсе, значит окна «pop случился, add ещё не случился»
+        нет ПО УСТРОЙСТВУ кода, а не по везению таймингов теста.
+        """
+
+        class _SpyLoggerCore(FakeLoggerCore):
+            def __init__(self) -> None:
+                super().__init__()
+                self.remove_calls: list = []
+
+            def remove_tap(self, name):
+                self.remove_calls.append(name)
+                return super().remove_tap(name)
+
+        log = _SpyLoggerCore()
+        store, taps = wire_observability_store(None, log, db_path=str(tmp_path / "obs.db"), process="seg")
+        try:
+            reapply_observability_store_level(store, None, log, "seg", "WARNING")
+            assert log.remove_calls == [], (
+                f"reapply вызвал remove_tap{log.remove_calls} — значит между ним и следующим "
+                "add_tap есть окно, в котором запись, пришедшая ровно в этот момент, "
+                "потерялась бы молча (ноль tap'ов у эмиссии)"
+            )
+        finally:
+            unwire_observability_store(store, taps)
+
+    def test_reused_channel_names_stay_the_same_across_reapply(self, tmp_path):
+        """Реестр имён tap'ов не разрастается: переустановка — замена ПО ИМЕНИ,
+        не добавление второго tap'а рядом (иначе запись задваивалась бы)."""
+        err, log = FakeLoggerCore(), FakeLoggerCore()
+        store, taps = wire_observability_store(
+            err, log, db_path=str(tmp_path / "obs.db"), process="seg", min_level="INFO"
+        )
+        try:
+            new_taps = reapply_observability_store_level(store, err, log, "seg", "WARNING")
+            assert {name for _, name in new_taps} == {STORE_ERROR_TAP, STORE_LOGGER_TAP}
+            assert len(err._taps) == 1 and len(log._taps) == 1, (
+                f"переустановка обязана ЗАМЕНИТЬ запись по имени, а не добавить вторую: "
+                f"err={err._taps.keys()} log={log._taps.keys()}"
+            )
+        finally:
+            unwire_observability_store(store, taps)
+
+
+def _race_logger_config(tmp_path, name: str) -> dict:
+    return {
+        "app_name": name,
+        "log_directory": str(tmp_path),
+        "enable_batching": False,
+        "modules": {},
+        "channels": {"a": {"type": "file", "enabled": True, "file_path": str(tmp_path / f"{name}.log")}},
+        "scopes": {"SYSTEM": {"channels": ["a"]}, "BUSINESS": {"channels": ["a"]}, "DEBUG": {"channels": ["a"]}},
+    }
+
+
+class TestReapplyStoreLevelRace:
+    """Опасность, названная ADR-PM-047 и НЕ проверенная задачей 2.2: «что если
+    два ``config.reload`` подряд гонятся за одним и тем же tap'ом».
+
+    Харнес — РЕАЛЬНЫЙ ``LoggerManager`` (не ``FakeLoggerCore``): гонка живёт в
+    `ChannelRoutingManager._tap_sinks` настоящего менеджера и его реальном пути
+    записи (`_emit_to_taps`, `list(self._tap_sinks.values())` — снимок ПЕРЕД
+    итерацией), а фальшивка своего снимка не делает и могла бы скрыть проблему
+    по совпадению, а не по факту её отсутствия.
+
+    Предсказание ДО прогона: поток-эмиттер и потоки-переустановщики не должны
+    уронить друг друга исключением (`RuntimeError` на изменение словаря во время
+    итерации — ровно тот класс гонки, которого автор 2.2 испугался), а реестр
+    ``_tap_sinks`` после шторма обязан содержать ОБА tap'а с порогом, равным
+    ОДНОМУ из двух гонящихся значений (last-write-wins), а не мусором и не
+    отсутствующим ключом.
+    """
+
+    def test_concurrent_reapply_and_concurrent_emit_never_crash_and_leave_a_valid_threshold(self, tmp_path):
+        import threading
+
+        from multiprocess_framework.modules.channel_routing_module.levels import threshold_severity
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
+        logger = LoggerManager(manager_name="RaceLogger", config=_race_logger_config(tmp_path, "race"))
+        logger.initialize()
+        store, taps = wire_observability_store(
+            None, logger, db_path=str(tmp_path / "race.db"), process="seg", min_level="INFO"
+        )
+        errors: list[BaseException] = []
+        stop = threading.Event()
+
+        def hammer_reapply(level: str) -> None:
+            try:
+                for _ in range(200):
+                    reapply_observability_store_level(store, None, logger, "seg", level)
+            except BaseException as exc:  # noqa: BLE001 — стресс-поток обязан донести исключение наверх
+                errors.append(exc)
+
+        def hammer_emit() -> None:
+            try:
+                i = 0
+                while not stop.is_set():
+                    logger.info(f"race-{i}")
+                    i += 1
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        emitters = [threading.Thread(target=hammer_emit) for _ in range(3)]
+        reapplyers = [
+            threading.Thread(target=hammer_reapply, args=(lvl,)) for lvl in ("WARNING", "INFO", "WARNING", "INFO")
+        ]
+        try:
+            for t in emitters + reapplyers:
+                t.start()
+            for t in reapplyers:
+                t.join(timeout=30)
+                assert not t.is_alive(), "переустановщик не завершился за 30с — подозрение на deadlock"
+            stop.set()
+            for t in emitters:
+                t.join(timeout=5)
+                assert not t.is_alive(), "эмиттер не завершился за 5с после stop — подозрение на deadlock"
+
+            assert errors == [], f"гонку уронило исключением в потоке: {errors!r}"
+
+            sinks = logger._tap_sinks  # noqa: SLF001 — тест сознательно инспектирует внутренний реестр
+            assert STORE_LOGGER_TAP in sinks, "tap логгера пропал под гонкой переустановки"
+            _, threshold = sinks[STORE_LOGGER_TAP]
+            assert threshold in (threshold_severity("INFO"), threshold_severity("WARNING")), (
+                f"порог после гонки обязан быть ОДНИМ ИЗ ДВУХ валидных значений "
+                f"(last-write-wins), а не мусором: {threshold}"
+            )
+        finally:
+            stop.set()
+            unwire_observability_store(store, taps)
+            logger.shutdown()

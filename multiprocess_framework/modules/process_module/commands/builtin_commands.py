@@ -1870,7 +1870,11 @@ class BuiltinCommands:
                 telemetry_targets,
             )
             from ..managers.observability_flight import FLIGHT_RECORDER_ATTR
-            from ..managers.observability_wiring import EVENT_SELECTOR_ATTR, resolve_history_policy
+            from ..managers.observability_wiring import (
+                EVENT_SELECTOR_ATTR,
+                reapply_observability_store_level,
+                resolve_history_policy,
+            )
 
             layers = process_observability_layers(svc)
             _logger = getattr(svc, "logger_manager", None)
@@ -2214,8 +2218,32 @@ class BuiltinCommands:
                 # сюда НЕ входят: они читаются РОВНО на подъёме стора и решают,
                 # поднимать ли его вовсе — «стор появился/исчез на лету» эта
                 # задача не берёт (см. ADR-PM-047, остаток).
-                if getattr(svc, "_observability_store", None) is not None:
-                    svc._observability_history_policy = resolve_history_policy(svc)
+                store = getattr(svc, "_observability_store", None)
+                if store is not None:
+                    new_history_policy = resolve_history_policy(svc)
+                    old_history_policy = getattr(svc, "_observability_history_policy", None) or {}
+                    # Добор ADR-PM-047: до этой правки ЗДЕСЬ обновлялся ТОЛЬКО
+                    # кэш, который читает такт уборки (max_rows/max_age_sec/
+                    # purge_interval_sec) — `level` подтверждался readback'ом
+                    # (см. `history=` ниже) НЕ действуя: живой SQLite-тап
+                    # (`StoreTapChannel`, `min_level` задан РОВНО ОДИН РАЗ на
+                    # `wire_observability_store` в `_wire_observability_hub`)
+                    # продолжал принимать записи по СТАРОМУ порогу — ложный
+                    # `confirmed`, худший класс вердикта. Порог переустанавливаем
+                    # ТОЛЬКО когда он реально сменился — `reapply_observability_
+                    # store_level` создаёт новые `StoreTapChannel` на каждый
+                    # вызов, и звать её на каждый `config.reload` (в том числе
+                    # тот, что не тронул `history` вовсе) было бы лишней работой
+                    # без наблюдаемого эффекта.
+                    if new_history_policy.get("level") != old_history_policy.get("level"):
+                        svc._observability_store_taps = reapply_observability_store_level(
+                            store,
+                            _error,
+                            _logger,
+                            getattr(svc, "name", ""),
+                            new_history_policy["level"],
+                        )
+                    svc._observability_history_policy = new_history_policy
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.

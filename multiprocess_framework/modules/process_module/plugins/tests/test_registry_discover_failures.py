@@ -79,15 +79,13 @@ class TestDiscoverFailedImports:
 
         failed = PluginRegistry.failed_imports()
         assert len(failed) == 1
-        (module_path, error_text), = failed.items()
+        ((module_path, error_text),) = failed.items()
         assert module_path == "reg_disc_pkg.broken.plugin"
         assert "SyntaxError" in error_text
         # Хороший плагин при этом загрузился
         assert "reg_disc_good" in PluginRegistry
 
-    def test_broken_plugin_logged_as_warning(
-        self, mixed_plugin_dir: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_broken_plugin_logged_as_warning(self, mixed_plugin_dir: Path, caplog: pytest.LogCaptureFixture) -> None:
         """Уровень лога — WARNING (раньше debug: невидим при стандартной настройке)."""
         with caplog.at_level(logging.WARNING, logger="multiprocess_framework.modules.process_module.plugins.registry"):
             PluginRegistry.discover(str(mixed_plugin_dir))

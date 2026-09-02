@@ -89,7 +89,4 @@ EXAMPLE_CUSTOM_PROCESS_DATA_STYLE: Dict[str, Any] = {
 
 
 if __name__ == "__main__":
-    print(
-        "Эталонные dict выше — справочник. "
-        "Запуск: pytest process_module/tests/test_process_config.py -q"
-    )
+    print("Эталонные dict выше — справочник. Запуск: pytest process_module/tests/test_process_config.py -q")

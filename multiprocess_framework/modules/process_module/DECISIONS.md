@@ -3619,24 +3619,72 @@ false` и явный маркер «инцидент идёт в логгер» 
 схемы) — см. `plans/observability-closure/stand-phase-2.md` и раздел «что осталось незакрытым» в
 коммите этой задачи.
 
-**Остаток по `history` — назван, а не закрыт.** Приёмка задачи (пункт 1) требует ЖИВОГО эффекта:
-«`config_reload_verified(history.level=WARNING)` → `confirmed`; стор перестаёт принимать INFO
-(пара до/после по счётчику строк)». Взято только первое: `history.level`/`max_rows`/`max_age_sec`/
-`purge_interval_sec` теперь корректно ЧИТАЮТСЯ readback'ом и пересчитывается кэш
-`svc._observability_history_policy` на КАЖДОМ `config.reload` (такт уборки увидит новые
-`max_rows`/`max_age_sec`/`purge_interval_sec` на следующем срабатывании). НЕ взято: порог записи
-живого SQLite-тапа (`StoreTapChannel`, зарегистрирован `wire_observability_store(..., min_level=…)`
-на подъёме) НЕ переустанавливается на `config.reload` — `_tap_sinks[name] = (channel,
-threshold_severity(min_level))` выставляется РОВНО ОДИН РАЗ. Значит `history.level=WARNING` сейчас
-даёт `confirmed` readback (честный — политика правда изменилась), но живой стор ПРОДОЛЖИТ принимать
-INFO до следующего рестарта процесса — readback и поведение РАСХОДЯТСЯ ровно на этом одном поле,
-хотя оба пишутся с формальной честностью каждый про своё. Дешёвый путь закрытия — `remove_tap` +
-`add_tap` тем же именем/каналом с новым `min_level` в момент, когда `resolve_history_policy(svc)`
-возвращает изменившийся `level`; не сделано в этой задаче намеренно — правка тап-реестра без
-break-инъекции на неё же (что если два `config.reload` подряд гонятся за одним тапом?) не
-соответствует правилу проекта «тест не доказан без красного», а бюджет задачи это уже исчерпал.
-`enabled`/`db_path` — та же плоскость (подъём/снятие стора целиком) — тоже читаются только на
-`_wire_observability_hub`, это по докстрингу `resolve_history_store_settings` и не заявлено иначе.
+**Остаток по `history` — был назван, а не закрыт; закрыт добором 2026-09-02.** Приёмка задачи
+(пункт 1) требует ЖИВОГО эффекта: «`config_reload_verified(history.level=WARNING)` → `confirmed`;
+стор перестаёт принимать INFO (пара до/после по счётчику строк)». Задача 2.2 взяла только первую
+половину — `history.level`/`max_rows`/`max_age_sec`/`purge_interval_sec` читались readback'ом и
+пересчитывался кэш `svc._observability_history_policy`, но живой порог `StoreTapChannel`
+(`wire_observability_store(..., min_level=…)`) выставлялся РОВНО ОДИН РАЗ на подъёме, и
+`history.level=WARNING` давал `confirmed` readback (честный) при сторе, продолжающем принимать INFO
+до рестарта — ложный `confirmed`, а не `unverifiable`.
+
+Закрыто добором: `reapply_observability_store_level(store, error_manager, logger_manager, process,
+min_level)` (`observability_wiring.py`) и его общее тело с подъёмом — `_attach_store_taps` (тот же
+цикл `mgr.add_tap(StoreTapChannel(...), min_level=…, name=tap_name)`, что раньше жил только внутри
+`wire_observability_store`). `_cmd_config_reload` зовёт её ПОСЛЕ пересборки слоёв, когда и только
+когда `resolve_history_policy(svc)["level"]` реально сменился (сравнение со старым кэшем) — вызов на
+каждый `config.reload`, не тронувший `history`, был бы работой без наблюдаемого эффекта.
+
+**Форма, а не `remove_tap`+`add_tap`.** `add_tap` идемпотентен ПО ИМЕНИ
+(`ChannelRoutingManager._tap_sinks[tap_name] = (channel, threshold)` — присваивание словаря по
+существующему ключу, без изменения размера) — переустановка порога зовёт `add_tap` СНОВА с новым
+`StoreTapChannel` и ТЕМ ЖЕ `tap_name`, без предварительного `remove_tap`. Опасность, которую задача
+2.2 назвала и не проверила («что если два `config.reload` гонятся за одним тапом»), закрыта в двух
+частях, разного веса:
+* **окно «tap отсутствует»** (запись, попавшая между `pop` и следующим `[...] =`, увидела бы ноль
+  tap'ов и потерялась бы молча) — закрыто СТРУКТУРНО: `remove_tap` в пути переустановки не зовётся
+  вовсе, что доказано детерминированным тестом-шпионом
+  (`test_observability_store_wiring.py::TestReapplyStoreLevel::
+  test_reapply_never_calls_remove_tap_no_absence_window`), а не гонкой по удаче таймингов;
+* **краш итерации** (`RuntimeError` на изменение словаря во время чужой итерации) — потоковый
+  стресс (`TestReapplyStoreLevelRace`, реальный `LoggerManager`, несколько эмиттеров ×
+  переустановщиков) не уронил исключения НИ РАЗУ — но, честно, ручная проверка тем же стрессом
+  (`sys.setswitchinterval(0.00001)`, 2000×8 итераций) НЕ уронила исключение и на инъекции,
+  воспроизводящей отвергнутый `remove_tap`+`add_tap` — судя по всему, `list(dict.values())` в
+  CPython не отдаёт GIL посреди своего C-вызова, и это наблюдение об интерпретаторе, а не гарантия.
+  Довод против `remove_tap` держится на первом пункте (окно потери записи, доказано структурно), а
+  не на этом отрицательном результате потокового стресса.
+
+**Гонка двух `config.reload` — потенциальные ИСТОЧНИКИ есть, но применение УЖЕ сериализовано
+`layers.lock`.** Отправители правда разные потоки: IPC-путь (backend_ctl, ProcessManager-хаб, любой
+отправитель через `RouterManager`) идёт через единственный потребитель `router_manager.receive()` —
+воркер `message_processor` (`process_module/threads/system_threads.py::_message_processing_loop`); а
+`ConsoleAdapter.setup()` (интерактив, `console.interactive=True`, «God Mode» уровня 3, **дефолт
+`False`** — `console_module/configs/console_config.py`) вешает `cmd_mgr.handle_command` НАПРЯМУЮ на
+callback входного потока `ConsoleInput-{name}` (`console_manager.py::enable_input`), МИМО роутера.
+Но `_cmd_config_reload` держит `with layers.lock:` (`ObservabilityLayers._lock`, `threading.RLock`,
+`observability_layers.py:405`) на ВСЁ время пересборки — как `apply_observability_layers`, так и
+добавленный этой правкой `reapply_observability_store_level` живут ВНУТРИ этого `with` (строки
+1968–2250 `builtin_commands.py` на момент правки). Докстринг `ObservabilityLayers.lock` называет
+причину прямо: «держится и на время пересборки» — «пересборка читает слои и применяет результат
+двумя шагами, и две пересборки внахлёст могут закончиться тем, что последней применится СТАРШАЯ по
+времени чтения». Значит два `config.reload` на ОДНОМ процессе — с консоли и по IPC одновременно —
+СЕРИАЛИЗОВАНЫ уже существующим (не этой задачей заведённым) механизмом. Проверено не только чтением:
+`test_f2_task22_history_store_level_reapply.py::TestConcurrentConfigReloadsAreSerializedByLayersLock`
+гоняет ДВА РЕАЛЬНЫХ потока с `threading.Barrier` (синхронный старт) на РАЗНЫЕ уровни (`WARNING`
+против `ERROR`) через настоящий `handle_command` — 0 исключений на 5 прогонах подряд, финальный
+порог ОБОИХ менеджеров (`error`/`logger`) согласован и равен ОДНОМУ из двух запрошенных уровней, не
+смеси. Выбор формы (`add_tap`-only, без `remove_tap`) при этом НЕ полагается на `layers.lock`: он
+защищает от гонки МЕЖДУ двумя ВЫЗОВАМИ команды, а не от чтения `_tap_sinks` ГОРЯЧИМ ПУТЁМ эмиссии
+(`_emit_to_taps`), которое не берёт лок вовсе и остаётся защищённым структурно (см. докстринг
+`reapply_observability_store_level`).
+
+Живой пары до/после по счётчику строк через РЕАЛЬНЫЙ вход `config.reload` (не вызов механизма
+напрямую) —
+`test_f2_task22_history_store_level_reapply.py::TestHistoryLevelReappliesLiveOnConfigReload`.
+`enabled`/`db_path` по-прежнему читаются только на `_wire_observability_hub` — задача 2.2 (и этот
+добор) их не берёт, см. докстринг `resolve_history_store_settings`; «стор появился/исчез на лету» —
+отдельная задача.
 
 **Отвергнутые альтернативы.**
 * **`errors.enabled` снимается из схемы (вариант «б»)** — см. «Решение 2» выше.

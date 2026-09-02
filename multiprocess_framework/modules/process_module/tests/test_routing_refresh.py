@@ -106,10 +106,12 @@ def test_both_commands_registered_with_own_reply():
 
 
 def test_reset_peer_on_incarnation_change():
-    psr = _make_psr({
-        "devices": {"self": True},
-        "preprocessor": {"incarnation": 0, "queues": ["system", "data"]},
-    })
+    psr = _make_psr(
+        {
+            "devices": {"self": True},
+            "preprocessor": {"incarnation": 0, "queues": ["system", "data"]},
+        }
+    )
     _svc, cm = _make(psr)
     res = cm.dispatch("routing.refresh", _refresh({"preprocessor": {"incarnation": 1}}, epoch=1))
     assert res["success"] is True
@@ -120,10 +122,12 @@ def test_reset_peer_on_incarnation_change():
 
 
 def test_no_reset_when_incarnation_matches():
-    psr = _make_psr({
-        "devices": {"self": True},
-        "preprocessor": {"incarnation": 2, "queues": ["system"]},
-    })
+    psr = _make_psr(
+        {
+            "devices": {"self": True},
+            "preprocessor": {"incarnation": 2, "queues": ["system"]},
+        }
+    )
     _svc, cm = _make(psr)
     res = cm.dispatch("routing.refresh", _refresh({"preprocessor": {"incarnation": 2}}, epoch=1))
     assert res["reset"] == []
@@ -168,11 +172,13 @@ def test_applied_updates_last_seen_and_counter():
 
 
 def test_reset_name_absent_from_snapshot():
-    psr = _make_psr({
-        "devices": {"self": True},
-        "gone": {"incarnation": 0, "queues": ["system", "data"]},
-        "alive": {"incarnation": 0, "queues": ["system"]},
-    })
+    psr = _make_psr(
+        {
+            "devices": {"self": True},
+            "gone": {"incarnation": 0, "queues": ["system", "data"]},
+            "alive": {"incarnation": 0, "queues": ["system"]},
+        }
+    )
     _svc, cm = _make(psr)
     # gone отсутствует в снимке → сброшен; alive присутствует и совпадает → нет.
     res = cm.dispatch("routing.refresh", _refresh({"alive": {"incarnation": 0}}, epoch=1))
@@ -182,10 +188,12 @@ def test_reset_name_absent_from_snapshot():
 
 
 def test_self_and_hub_never_touched():
-    psr = _make_psr({
-        "devices": {"self": True, "queues": ["system"]},
-        "ProcessManager": {"incarnation": 0, "queues": ["system"]},
-    })
+    psr = _make_psr(
+        {
+            "devices": {"self": True, "queues": ["system"]},
+            "ProcessManager": {"incarnation": 0, "queues": ["system"]},
+        }
+    )
     _svc, cm = _make(psr)
     # Снимок пуст (ни self, ни hub нет) + hub с иной incarnation — оба должны уцелеть.
     res = cm.dispatch("routing.refresh", _refresh({}, epoch=1, hub="ProcessManager"))

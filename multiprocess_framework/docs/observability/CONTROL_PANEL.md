@@ -325,7 +325,6 @@ introspect.observability -> stats.policy -> rules / hits / dropped_by_rule
 | `config.reload {"persist": true}` | **адресный отказ** с подсказкой на `observability.persist` | флаг зарезервирован и не реализован. Молча принятый флаг был ловушкой: оператор уходил уверенным, что записал правку навсегда, а она лежала в L3 со сроком. Ключ объявлен в схеме именно ради достижимости этого отказа — иначе при `extra="forbid"` мидлварь дропнула бы его до проверки |
 | `observability.documents` (фабрика стока и её конфиг) | принимается слоями, но **сток не пересшивается** | `wire_document_sink` зовётся один раз, из `_wire_observability_hub` на `initialize()` ([`process_module.py:411`](../../modules/process_module/core/process_module.py#L411)); в `apply_observability_layers` упоминаний `documents` нет. Действует со следующего старта процесса |
 | `observability.history.enabled` / `.db_path` | то же — судьба стора целиком | `resolve_history_store_settings` зовётся один раз, из `_wire_observability_hub` ([`process_module.py:588`](../../modules/process_module/core/process_module.py#L588)) |
-| `observability.history.level` | **readback подтверждает немедленно, живой порог записи — нет** | кэш `svc._observability_history_policy` обновляется каждым `config.reload` (см. §7 «История»), но `StoreTapChannel.min_level` уже поднятого стора не переустанавливается — действует со следующего рестарта. `max_rows`/`max_age_sec`/`purge_interval_sec` из ТОГО ЖЕ кэша при этом уже применяются на следующем такте свипа — гранулярность внутри одной секции разная, см. ADR-PM-047 |
 | опечатка в **имени** ключа (`log_levl`), включая машинную форму (`logger.default_level`) | у ручки оператора — **адресный отказ до записи**; у файла/рецепта — принимается и называется вслух | задача 5.4 (находки Н-C/Н-D приёмки F2). Прежде имя судил только вердикт, и ответ противоречил себе: `success=true` при `verified.verdict="failed"` в том же payload, ключ оседал в L3 со сроком и не действовал. Двери разведены не по важности, а по цене отказа: опечатка в спутнике не имеет права валить switch рецепта. Голос файловой дороги — запись аудита (`unknown_keys`) и строка журнала «ВНЕ КОНТРАКТА (ключ есть, эффекта нет)» |
 | правило-дефолт источника, объявленное **после** сборки конфига (ленивый импорт, плагин) | в уже собранные конфиги не попало | говорится вслух через `emergency_log`; начнёт действовать со следующей сборки (reload либо новый процесс) |
 | срок (`ttl`) в процессе без heartbeat | ставится, но не исполняется | `ttl_enforced: false` в ответе — молчаливое «срок принят» там, где возврата не будет, запрещено |
@@ -572,17 +571,26 @@ config.reload {"observability": {"history": {"level": "WARNING", "max_rows": 500
 | `purge_interval_sec` | `300.0` | период фонового свипа истории, сек |
 | `db_path` | `""` | путь к SQLite-файлу стора (пусто — `resolve_default_db_path()`) |
 
-**Три скорости применения, и это не забывчивость.** `enabled`/`db_path` решают судьбу стора
+**Две скорости применения, и это не забывчивость.** `enabled`/`db_path` решают судьбу стора
 целиком (поднимать ли вовсе, куда класть файл) и читаются РОВНО ОДИН РАЗ при подъёме
 (`ProcessModule._wire_observability_hub` → `resolve_history_store_settings`) — действуют со
-следующего рестарта процесса. `max_rows`/`max_age_sec`/`purge_interval_sec` живут в кэше
+следующего рестарта процесса; «стор появился/исчез на лету» этой парой задач не берётся.
+`max_rows`/`max_age_sec`/`purge_interval_sec`/`level` живут в кэше
 `svc._observability_history_policy`, который `config.reload` обновляет на КАЖДОЙ пересборке —
-такт уборки (`sweep_observability_history`) увидит новые пределы на следующем срабатывании.
-`level` — **readback подтверждает правку немедленно** (та же дорога, что и три предыдущих поля),
-но живой ПОРОГ ЗАПИСИ уже поднятого SQLite-тапа (`StoreTapChannel`, зарегистрирован
-`wire_observability_store(..., min_level=…)`) НЕ переустанавливается на лету — стор продолжит
-принимать записи по СТАРОМУ порогу до следующего рестарта. Названный, не закрытый остаток —
-см. ADR-PM-047.
+такт уборки (`sweep_observability_history`) увидит новые `max_rows`/`max_age_sec`/
+`purge_interval_sec` на следующем срабатывании, и всё это **действует на лету**.
+
+`level` — **действует немедленно и на СХЕМЕ, и на ЖИВОМ ПОРОГЕ ЗАПИСИ** (закрыт добором ADR-PM-047,
+2026-09-02). До добора readback подтверждал правку, а живой SQLite-тап (`StoreTapChannel`,
+зарегистрирован `wire_observability_store(..., min_level=…)`) держал СТАРЫЙ порог до рестарта —
+`config_reload_verified` отвечал `confirmed`, пока стор продолжал принимать записи по прежнему
+уровню (ложный `confirmed`). Теперь `_cmd_config_reload` при каждой смене `level` зовёт
+`reapply_observability_store_level` — она переустанавливает `StoreTapChannel` на ОБОИХ менеджерах
+(`error_manager`/`logger_manager`) новым порогом, стор не пересоздавая (то же соединение к БД, та
+же история). Живая пара до/после по счётчику строк — `config.reload
+{"observability": {"history": {"level": "WARNING"}}}` → следующая INFO-запись НЕ попадает в стор,
+WARNING — попадает; тест-доказательство —
+`test_f2_task22_history_store_level_reapply.py::TestHistoryLevelReappliesLiveOnConfigReload`.
 
 ---
 
