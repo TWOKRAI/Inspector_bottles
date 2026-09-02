@@ -59,9 +59,9 @@ criteria). Тестеру ЗАПРЕЩЕНЫ: дифф Ф4, ``telemetry_publish_
 from __future__ import annotations
 
 from multiprocess_framework.modules.process_module.configs.observation_policy import (
+    SOURCE_LEGACY,
     SOURCE_RULE,
     SOURCE_SUBTREE_DEFAULT,
-    SOURCE_WHITELIST,
     ObservationPolicy,
     ObservationPolicyConfig,
 )
@@ -303,7 +303,7 @@ class TestProvenanceNamesThreeSources:
         assert by_rule.interval_sec == 0.5, by_rule
         assert by_subtree.source == SOURCE_SUBTREE_DEFAULT, by_subtree
         assert by_subtree.interval_sec == 1.0, by_subtree
-        assert by_whitelist.source == SOURCE_WHITELIST, by_whitelist
+        assert by_whitelist.source == SOURCE_LEGACY, by_whitelist
         assert by_whitelist.interval_sec == 3.0, by_whitelist
 
         sources = {by_rule.source, by_subtree.source, by_whitelist.source}
@@ -316,5 +316,5 @@ class TestProvenanceNamesThreeSources:
         # поддерева порта молчит — переворот варианта «в» не течёт на плоскость
         # фреймворка. Без этой половины тест был бы зелен при развороте дерева.
         outside = policy.resolve(f"processes.{PROC}.state.effective_hz")
-        assert outside.source == SOURCE_WHITELIST, outside
+        assert outside.source == SOURCE_LEGACY, outside
         assert outside.enabled is False, outside

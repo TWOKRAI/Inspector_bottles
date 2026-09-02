@@ -29,9 +29,9 @@ from multiprocess_framework.modules.process_module.configs.observability_layers 
 )
 from multiprocess_framework.modules.process_module.configs.observation_policy import (
     PORT_SUBTREE_PATTERN,
+    SOURCE_LEGACY,
     SOURCE_RULE,
     SOURCE_SUBTREE_DEFAULT,
-    SOURCE_WHITELIST,
     TIER_LEGACY_ENTRY,
     TIER_RULE,
     TIER_SUBTREE_DEFAULT,
@@ -113,7 +113,7 @@ class TestExplicitOperatorEntryBeatsADefault:
         assert decision.enabled is False, (
             f"оператор ЗАПРЕТИЛ fps, а лист порта едет: {decision} — умолчание перебило заявление"
         )
-        assert decision.source == SOURCE_WHITELIST, decision
+        assert decision.source == SOURCE_LEGACY, decision
         assert decision.pattern == "**.fps", decision
 
     def test_a_brand_new_metric_still_travels_on_the_subtree_default(self) -> None:
@@ -582,7 +582,7 @@ class TestAWhitelistEntryOutranksTheSubtreeFrequencyToo:
         policy = _policy({"subtree_interval_sec": 0.2}, publish=self.PROD)
 
         listed = policy.resolve(f"processes.{PROC}.state.plugins.capture.fps")
-        assert (listed.interval_sec, listed.source) == (1.0, SOURCE_WHITELIST), listed
+        assert (listed.interval_sec, listed.source) == (1.0, SOURCE_LEGACY), listed
 
         # Якорь существования той же ручки: имя ВНЕ белого списка ускоряется.
         free = policy.resolve(f"processes.{PROC}.state.plugins.capture.drops")

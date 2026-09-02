@@ -22,10 +22,14 @@
 * :data:`SOURCE_SUBTREE_DEFAULT` — дефолтное правило поддерева порта
   (:data:`PORT_SUBTREE_PATTERN`) с ЯВНОЙ частотой значением
   (``observation.subtree_interval_sec``), а не подразумеваемой;
-* :data:`SOURCE_WHITELIST` — легаси-секция ``telemetry.publish``: её белый список
+* :data:`SOURCE_LEGACY` — легаси-секция ``telemetry.publish``: её белый список
   ``metrics.<имя>`` и её же умолчание ``default_enabled``. Она читается ТОЙ ЖЕ
   сборкой как ИМЕНОВАННЫЙ источник, а не второй дверью, и провенанс называет её
-  вслух (:data:`LEGACY_SOURCE_NAME`);
+  вслух (:data:`LEGACY_SOURCE_NAME`). **Ф2, задача 2.5 (m11):** легаси-секция —
+  ВХОД, переводимый в правила при сборке политики (:func:`_translate_legacy_rules`),
+  а не отдельная резолв-ветка с собственным литералом провенанса
+  (бывший ``SOURCE_WHITELIST`` снят — он не называл адрес источника и не
+  различал именованную запись от зонтика умолчания);
 * :data:`SOURCE_UNGATED` — легаси-секции нет вовсе. Паритет с сегодняшним
   ``ProcessHeartbeat._build_telemetry_gate`` → ``None``: вне поддерева порта
   гейта нет, метрика едет каждый тик.
@@ -101,11 +105,21 @@ STATS_SUBTREE_INTERVAL_SEC = 0.0
 #: Литералы источника решения — они же значения поля ``source`` в провенансе.
 SOURCE_RULE = "rule"
 SOURCE_SUBTREE_DEFAULT = "subtree_default"
-SOURCE_WHITELIST = "whitelist"
 SOURCE_UNGATED = "ungated"
 
 #: Имя легаси-источника в провенансе — адрес, по которому оператор его грепнет.
 LEGACY_SOURCE_NAME = "telemetry.publish"
+
+#: Провенанс легаси-адаптера (Ф2, задача 2.5, m11) — заменяет бывший
+#: ``SOURCE_WHITELIST`` (буквально ``"whitelist"``) для ОБЕИХ ступеней легаси
+#: (:data:`TIER_LEGACY_ENTRY` — именованная запись ``metrics.<имя>``, и
+#: :data:`TIER_UMBRELLA` — зонтик ``default_enabled``): развилка АК4 задания
+#: решена в пользу прочтения (i) — умолчание перестаёт быть ОТДЕЛЬНО НАЗВАННОЙ
+#: веткой и говорит ТЕМ ЖЕ голосом, что именованная запись, не расширяя при
+#: этом свой адресный охват (см. отчёт исполнителя и докстринг
+#: :func:`_translate_legacy_rules`). Значение — адрес, по которому оператор
+#: реально найдёт секцию, а не техническое имя алгоритма.
+SOURCE_LEGACY = f"legacy:{LEGACY_SOURCE_NAME}"
 
 #: **Ступени ЯВНОСТИ — старший разряд ключа разрешения** (:func:`resolution_key`).
 #: Числа сравниваются, а не перечисляются по месту: порядок обязан быть один на
@@ -209,7 +223,7 @@ class PolicyDecision:
         enabled: публиковать ли лист вообще.
         interval_sec: минимальный интервал публикации, сек.
         source: КТО решил — один из :data:`SOURCE_RULE` /
-            :data:`SOURCE_SUBTREE_DEFAULT` / :data:`SOURCE_WHITELIST` /
+            :data:`SOURCE_SUBTREE_DEFAULT` / :data:`SOURCE_LEGACY` /
             :data:`SOURCE_UNGATED`. Без этого поля оператор не отличает
             «разрешено дефолтом» от «разрешено руками», а в секции с ДВУМЯ
             разными умолчаниями (цена варианта «в») это единственный способ
@@ -269,6 +283,68 @@ _STATS_SUBTREE_SEGMENTS = split_pattern(STATS_SUBTREE_PATTERN)
 #: заново на КАЖДЫЙ путь, не имея своей константы рядом с соседом выше.
 _PORT_SUBTREE_SEGMENTS = split_pattern(PORT_SUBTREE_PATTERN)
 
+#: Префикс паттернов, зарезервированных под трансляцию легаси-секции (Ф2,
+#: задача 2.5). Ни один задокументированный операторский путь в этом проекте
+#: не начинается с ``**`` (форма ``observation.rules`` — полный путь вида
+#: ``processes.*.state.plugins.*.fps``, см. :class:`ObservationPolicyConfig`);
+#: значит граница безопасна для ОТДЕЛЕНИЯ легаси-паттернов от правил
+#: оператора БЕЗ отдельного поля-маркера в
+#: :class:`~.telemetry_publish_config.MetricRule` — она разошлась бы на
+#: первом же новом поле схемы (см. докстринг класса про общую схему правила).
+_LEGACY_RESERVED_PREFIX = "**"
+
+
+def _is_legacy_reserved_pattern(pattern: str) -> bool:
+    """Паттерн принадлежит зарезервированному легаси-пространству (``**`` / ``**.<имя>``).
+
+    **Зачем граница обязана быть БЕЗУСЛОВНОЙ, а не только для новых
+    трансляций.** ``ObservationPolicy`` пересобирается на КАЖДУЮ правку легаси
+    (``_make_gate`` в ``heartbeat/process_heartbeat.py`` — единая точка сборки
+    на все три дороги: старт, ``telemetry.reconfigure``, ``config.reload``, и
+    трогать её не входит в объём задачи 2.5). Новая сборка получает
+    ``.config`` ПРЕДЫДУЩЕЙ политики как операторский аргумент (``policy.config``
+    кормится обратно как ``config=``) — если бы правила ступени
+    :data:`TIER_RULE` читали :attr:`ObservationPolicy.config` без фильтра,
+    зонтик легаси-умолчания (паттерн ``**``), однажды показанный в
+    ``.config.rules`` (:func:`_translate_legacy_rules`, АК3 задания), долетел
+    бы туда СНОВА при следующей пересборке и резолвился бы на ступени
+    :data:`TIER_RULE` — на ДВЕ ступени выше назначенного :data:`TIER_UMBRELLA`
+    и на ступень выше :data:`TIER_SUBTREE_DEFAULT`. Это и есть капкан,
+    названный в задании: зонтик молча гасит метрики, живущие дефолтом
+    поддерева порта (``capture_fps``/``frame_count``/``drops`` паритетного
+    теста АК1) — только не при первой сборке, а при ВТОРОЙ. Воспроизведено
+    руками на ``test_telemetry_reconfigure.py::test_live_enable_to_disable``
+    (два последовательных ``reconfigure_telemetry`` без резолва слоёв между
+    ними) — без этого фильтра второй вызов терял смену ``fps`` на ``False``.
+    """
+    return pattern == _LEGACY_RESERVED_PREFIX or pattern.startswith(f"{_LEGACY_RESERVED_PREFIX}.")
+
+
+def _translate_legacy_rules(legacy: TelemetryPublishConfig) -> Dict[str, MetricRule]:
+    """Легаси-секция ``telemetry.publish`` → правила в форме ``observation.rules``.
+
+    ЧИСТАЯ функция от ``legacy`` — не читает и не помнит НИЧЕГО из предыдущей
+    сборки политики, поэтому :meth:`ObservationPolicy.__init__` может звать её
+    на каждой bootstrap-сборке без риска унести устаревший перевод вперёд.
+    Форма ключа дословно совпадает с тем, что уже показывал ``decision.pattern``
+    ДО задачи 2.5 (суффиксная ``**.<имя>``, зонтик ``**``) — это не новая
+    нотация, а промотка display-формы (см. :meth:`ObservationPolicy._decide`)
+    в буквальный ключ словаря ``rules``.
+
+    Returns:
+        ``{"**.<имя>": правило, ...}`` по каждой записи ``legacy.metrics`` плюс
+        ``{"**": правило умолчания}`` под ключ зонтика. Значения — ТЕ ЖЕ
+        ``enabled``/``interval_sec``, что вернул бы легаси-резолв (см.
+        :meth:`ObservationPolicy._decide`) — читателю ``.config.rules`` не
+        показывают другое число под тем же именем.
+    """
+    translated: Dict[str, MetricRule] = {
+        f"{_LEGACY_RESERVED_PREFIX}.{name}": MetricRule(enabled=rule.enabled, interval_sec=rule.interval_sec)
+        for name, rule in legacy.metrics.items()
+    }
+    translated[_LEGACY_RESERVED_PREFIX] = MetricRule(enabled=legacy.default_enabled, interval_sec=None)
+    return translated
+
 
 class ObservationPolicy:
     """Разрешение «поедет ли ЭТОТ путь и как часто» — одним glob-множеством.
@@ -321,6 +397,30 @@ class ObservationPolicy:
         Args:
             config: секция ``observability.observation`` (``None`` → дефолты L0,
                 то есть дефолтное правило поддерева включено).
+
+                **``None`` — bootstrap-состояние, а не «пустая секция» (Ф2, задача
+                2.5).** Оператор писал бы ``{}`` — реальный, резолвленный
+                объект; голый ``None`` означает «секция ни разу не резолвилась
+                вовсе» и встречается РОВНО в одном месте продакшн-кода —
+                ``ProcessHeartbeat._make_gate`` при самой первой сборке, когда
+                политика ещё не существует. ТОЛЬКО в этом состоянии легаси
+                (если он есть) переводится ПРЯМО в :attr:`config` (см.
+                :func:`_translate_legacy_rules`) — это структурная половина
+                АК3 задания («``.config.rules`` растёт от ``telemetry.reconfigure``»).
+                За пределами bootstrap :attr:`config` остаётся ДОСЛОВНО тем,
+                что передал вызывающий. Причина границы —
+                ``ProcessHeartbeat.apply_observation_policy`` сравнивает
+                ``live.config.model_dump()`` со свежим
+                ``ObservationPolicyConfig.from_dict(section)``, чтобы ПРОПУСТИТЬ
+                пересборку гейта, когда операторская секция не менялась;
+                подмешай сюда легаси БЕЗУСЛОВНО — и это сравнение расходилось
+                бы на КАЖДОМ ``config.reload`` любого процесса с активным
+                ``telemetry.publish`` (то есть почти всегда — см.
+                ``system.yaml``), сбрасывая расписание порта без реальной
+                причины. ``apply_observation_policy`` и ``_resolve_observation_policy``
+                НИКОГДА не передают буквальный ``None`` (у обоих всегда есть
+                резолвленный ``ObservationPolicyConfig``), поэтому граница их
+                не задевает — подробности в отчёте исполнителя задачи 2.5.
             legacy: секция ``telemetry.publish`` как ИМЕНОВАННЫЙ источник
                 (``None`` → гейта вне поддерева порта нет вовсе).
             hits: счёт попаданий ПРЕДЫДУЩЕЙ политики (``{паттерн: сколько раз}``).
@@ -349,9 +449,25 @@ class ObservationPolicy:
                 возраст начинается с ТЕКУЩЕГО тика; переживший пересборку свой
                 возраст сохраняет.
         """
-        self._config = config if config is not None else ObservationPolicyConfig()
         self._legacy = legacy
-        self._rules: Dict[str, MetricRule] = dict(self._config.rules)
+        # Ф2, задача 2.5 — bootstrap-перевод легаси в САМ `.config.rules`
+        # (АК3, структурная половина). Условие узкое НАМЕРЕННО — см. докстринг
+        # параметра `config` выше про капкан `apply_observation_policy`.
+        if config is None and legacy is not None:
+            self._config = ObservationPolicyConfig(rules=_translate_legacy_rules(legacy))
+        else:
+            self._config = config if config is not None else ObservationPolicyConfig()
+        # TIER_RULE обязан видеть ТОЛЬКО правила ОПЕРАТОРА. Фильтр —
+        # БЕЗУСЛОВНЫЙ (действует и в bootstrap-ветке выше, и во всех
+        # остальных): `.config` (в т.ч. bootstrap-перевод) кормится ОБРАТНО в
+        # конструктор как `config=` при каждой пересборке гейта
+        # (`ProcessHeartbeat._make_gate`), и без фильтра зонтичный `**`
+        # долетел бы туда ПОВТОРНО и резолвился бы на ступени `TIER_RULE` —
+        # см. докстринг :func:`_is_legacy_reserved_pattern` про
+        # воспроизведение капкана на втором вызове.
+        self._rules: Dict[str, MetricRule] = {
+            pattern: rule for pattern, rule in self._config.rules.items() if not _is_legacy_reserved_pattern(pattern)
+        }
         # Ключи фиксированы здесь и больше не меняются — см. докстринг класса.
         carried = hits or {}
         self._hits: Dict[str, int] = {pattern: int(carried.get(pattern, 0)) for pattern in self._rules}
@@ -394,7 +510,20 @@ class ObservationPolicy:
 
     @property
     def config(self) -> ObservationPolicyConfig:
-        """Секция, из которой политика собрана (источник readback'а)."""
+        """Секция, из которой политика собрана (источник readback'а).
+
+        Обычно — ДОСЛОВНО то, что передал вызывающий конструктору. Единственное
+        исключение — bootstrap (конструктор получил буквальный ``config=None``
+        при живом ``legacy``, Ф2, задача 2.5): тогда сюда попадает легаси,
+        переведённый в правила (:func:`_translate_legacy_rules`), — это и есть
+        то, что читает АК3 задания 2.5 (``.config.rules`` растёт от
+        ``telemetry.reconfigure``). Подробности границы — докстринг параметра
+        ``config`` у :meth:`__init__`. Ступень резолва (:data:`TIER_RULE` и
+        ниже) от этого исключения не страдает: :attr:`_rules` фильтрует
+        зарезервированные легаси-паттерны БЕЗУСЛОВНО, эта же секция читает их
+        как есть — читатель ``.rules`` получает полную картину, резолвер не
+        путает источники.
+        """
         return self._config
 
     @property
@@ -556,12 +685,18 @@ class ObservationPolicy:
                 interval = rule.interval_sec if rule.interval_sec is not None else default_interval
                 # Суффиксное правило `имя` ≡ `**.имя` — старые правила валидны буквально.
                 # Ступень ЯВНАЯ: оператор написал это имя руками (блокер Б1).
-                _offer(f"**.{leaf}", rule.enabled, interval, SOURCE_WHITELIST, TIER_LEGACY_ENTRY)
+                # Ф2, задача 2.5: провенанс — SOURCE_LEGACY (адрес секции), не
+                # техническое имя "whitelist".
+                _offer(f"**.{leaf}", rule.enabled, interval, SOURCE_LEGACY, TIER_LEGACY_ENTRY)
             else:
                 # `default_enabled` — зонтик над ВСЕМИ именами, а не заявление про
                 # это. Поэтому дефолт поддерева порта его перекрывает, и критерий
-                # М1 («новая метрика — ноль правок конфига») цел.
-                _offer("**", self._legacy.default_enabled, default_interval, SOURCE_WHITELIST, TIER_UMBRELLA)
+                # М1 («новая метрика — ноль правок конфига») цел. Ф2, задача 2.5
+                # (АК4, развилка решена в пользу прочтения (i)): зонтик говорит
+                # ТЕМ ЖЕ SOURCE_LEGACY, что и именованная запись выше, — не
+                # отдельно названной веткой, — но ступень (TIER_UMBRELLA) и
+                # адресный охват не меняются ни на йоту.
+                _offer("**", self._legacy.default_enabled, default_interval, SOURCE_LEGACY, TIER_UMBRELLA)
 
         # `best` не может остаться None: последняя ветка всегда предлагает `**`.
         assert best is not None  # noqa: S101 — инвариант тотальности, а не проверка ввода
@@ -737,10 +872,10 @@ __all__ = [
     "PROCESS_UNKNOWN",
     "STATS_SUBTREE_INTERVAL_SEC",
     "STATS_SUBTREE_PATTERN",
+    "SOURCE_LEGACY",
     "SOURCE_RULE",
     "SOURCE_SUBTREE_DEFAULT",
     "SOURCE_UNGATED",
-    "SOURCE_WHITELIST",
     "TIER_LEGACY_ENTRY",
     "TIER_RULE",
     "TIER_SUBTREE_DEFAULT",

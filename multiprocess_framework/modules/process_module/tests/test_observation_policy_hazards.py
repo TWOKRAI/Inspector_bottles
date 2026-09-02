@@ -32,9 +32,9 @@ from multiprocess_framework.modules.process_module.configs.observability_layers 
 from multiprocess_framework.modules.process_module.configs.observation_policy import (
     OBSERVATION_RULES_PATH,
     PORT_SUBTREE_PATTERN,
+    SOURCE_LEGACY,
     SOURCE_RULE,
     SOURCE_SUBTREE_DEFAULT,
-    SOURCE_WHITELIST,
     ObservationPolicy,
     ObservationPolicyConfig,
     pattern_specificity,
@@ -357,7 +357,7 @@ class TestRuleBeatsLegacySourceOutsideStaysLegacy:
         assert port.interval_sec == 0.5 and port.source == SOURCE_RULE, port
         # Та же метрика во фреймворковой плоскости — по-прежнему легаси-правило.
         framework = policy.resolve(f"processes.{PROC}.state.fps")
-        assert framework.interval_sec == 30.0 and framework.source == SOURCE_WHITELIST, framework
+        assert framework.interval_sec == 30.0 and framework.source == SOURCE_LEGACY, framework
 
     def test_legacy_whitelist_still_denies_outside_the_port_subtree(self) -> None:
         policy = _policy(None, publish={"default_enabled": False, "metrics": {"fps": {}}})
