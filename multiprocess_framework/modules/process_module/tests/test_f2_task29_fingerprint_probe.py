@@ -324,6 +324,35 @@ class TestNoFalseNameWhenTheRequestRepeatsTheDefault:
         assert verdict["checked"] == 0, verdict
 
 
+class TestASectionSwitchDoesNotAccuseItsNeighbours:
+    """Находка А-1 ревью (итерация 2), воспроизведённая на ЖИВОМ стенде.
+
+    Сценарий оператора в два шага: сперва он выставил уровень и стектрейс, затем
+    спросил про ОДИН ключ — ``errors.enabled``. Вердикт отвечал ``failed`` и
+    называл ``error.default_level`` и ``error.include_stacktrace`` — ключи,
+    которых оператор в этом запросе не писал, — требуя от них СХЕМНЫЙ ДЕФОЛТ
+    поверх значений, выставленных им же секундой раньше. Ложная тревога дороже
+    отсутствующей: на неё полагаются.
+
+    Отличие от соседнего класса ниже: там ``effective`` пуст и сравнивать не с
+    чем, поэтому ложная тревога не проявлялась. Здесь readback ОТДАЁТ эти пути —
+    и ровно эта половина не была рассмотрена ни одним тестом, пока её не нашёл
+    живой прогон.
+    """
+
+    READBACK = {"error": {"default_level": "ERROR", "include_stacktrace": False}}
+
+    def test_asking_about_the_switch_does_not_fail_on_untouched_neighbours(self) -> None:
+        verdict = observability_verified({"errors": {"enabled": True}}, self.READBACK)
+
+        assert verdict["mismatches"] == [], (
+            f"вердикт обвинил соседей, которых запрос не трогал: {verdict['mismatches']}"
+        )
+        assert verdict["verdict"] != "failed", verdict
+        assert verdict["unverifiable"] == ["errors.enabled"], verdict
+        assert verdict["checked"] == 0, verdict
+
+
 class TestAnExtinguishedSectionIsNamedBySchemaNotByLayout:
     """Д3 ревью: ``errors.enabled: false`` гасит секцию раскладки целиком.
 
