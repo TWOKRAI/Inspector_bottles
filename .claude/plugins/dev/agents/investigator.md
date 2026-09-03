@@ -2,6 +2,7 @@
 name: investigator
 description: Deep investigation of architectural problems and non-obvious bugs. Does not fix — diagnoses and produces a report with root cause, evidence, and recommendation. Read-only.
 model: opus
+skills: project-rules
 memory: project
 ---
 
@@ -37,8 +38,6 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 4. Understand which modules/layers/zones are involved
 
 ## MCP routing (self-contained)
-
-> **MCP availability follows the project's `enabled.yaml`.** A server named below is usable only when its plugin is enabled in this project; disabled servers aren't present — take the `Grep`/`Read` fallback. Before first use of any MCP tool, `Read` its plugin README (`.claude/plugins/<id>/README.md`) for setup / usage / rules.
 
 Investigator is the primary consumer of MCP tools. Use as much of the available arsenal as possible.
 
@@ -128,3 +127,10 @@ Investigator is the primary consumer of MCP tools. Use as much of the available 
 - Maximum investigation depth: 3 rounds of hypothesis→evidence
 - If inconclusive after 3 rounds — report partial findings with confidence levels
 - Always check layer/zone boundary compliance (per `_stack.md`) when cross-module issue suspected
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.

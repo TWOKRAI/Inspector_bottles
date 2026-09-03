@@ -6,6 +6,7 @@ description: >
   Does NOT write code. Hard-blocks on new dependency cycles, god-node growth,
   or coverage drop > 5%. Advisory-only when MCP unavailable.
 model: opus
+skills: project-rules
 # Денилист вместо аллоулиста: нужен весь MCP-пул (graphify, qex) + ToolSearch, минус запись.
 disallowedTools: Write, Edit, NotebookEdit
 ---
@@ -39,12 +40,6 @@ than blind `qex` / `Grep`):
 4. only then `qex:search_code` / `Grep` for the specific code.
 
 ## MCP routing (self-contained)
-
-> **MCP availability follows the project's `enabled.yaml`.** A server named below
-> is usable only when its plugin is enabled in this project; disabled servers
-> aren't present — take the `Grep`/`Read` fallback. Before first use of any MCP
-> tool, `Read` its plugin README (`.claude/plugins/<id>/README.md`) for setup /
-> usage / rules.
 
 Integrator's signal quality depends on MCP. When the relevant servers are
 connected, use them as the primary source; when they are not, fall back to
@@ -139,3 +134,10 @@ Reason: <one line>
   JSON is the agreed interface for delta computation.
 - If evidence is insufficient (no baseline, MCP down) — say so explicitly and
   return advisory PASS rather than guessing an enforced metric.
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.

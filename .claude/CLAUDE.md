@@ -168,6 +168,72 @@ claimed property, the three test-authorship roles, `README.md` + `STATUS.md` + `
 module, `Why:`/`Layer:` trailers. ponytail governs **what gets built**, never what gets
 proven or documented.
 
+## Standing rules — one skill, not twelve copies (since 2026-09-02)
+
+The standing rules (qex freshness, honesty over plausibility) plus MCP availability, commit
+trailers, subagent scope, language discipline and the escalation ladder live in ONE file:
+`.claude/plugins/dev/skills/project-rules/SKILL.md`, materialized to `.claude/skills/project-rules/`.
+Every agent in `.claude/agents/dev/` lists `project-rules` in its `skills:` frontmatter (preloads the
+text into its context) and ends with a four-line pointer for the case preload does not happen.
+Change a rule in the skill, never in an agent.
+
+History: before 2026-09-02 the block was pasted verbatim into all 12 agents (~60 lines each, ~650
+lines of duplication), and the plugin sources in `.claude/plugins/dev/agents/` had silently fallen
+60 lines behind the materialized copies — a `claude-kit sync` would have erased the rules from every
+agent. Sources and materialized copies are identical again; keep them so (edit the source, copy to
+the mirror, or run the materializer).
+
+1. **qex freshness** — `get_indexing_status` first; announce the index age before a verdict; pass
+   the age as a number into subagent prompts; counts come from grep.
+2. **Honesty is the rewarded outcome** — every final report carries a non-empty "what I left open
+   and what I know is unreliable in my own work"; questions that outlive the task go to
+   [`docs/claude/OPEN_QUESTIONS.md`](../docs/claude/OPEN_QUESTIONS.md).
+
+Language of agent files: English end to end. Commands, guides and reports: Russian.
+
+## Team mode — agents that live in the session (`/dev:team`, since 2026-09-02)
+
+Agent Teams is enabled: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in the `env` of `.claude/settings.json`
+(source: `.claude/plugins/core/settings.partial.json`). The lead — this session, Opus at `high` by
+project settings — is the PM: intake → Task X.Y → the minimal roster as teammates → tasks with
+dependencies → monitor → break-injection → review → merge. There is no PM agent: the lead has the
+conversation history, an agent would not. Protocol: `.claude/commands/dev/team.md`. Owner's guide
+(Russian): [`docs/claude/AGENT_TEAMS_GUIDE.md`](../docs/claude/AGENT_TEAMS_GUIDE.md). Brief template
+with per-model prompting notes: `.claude/plugins/dev/templates/team-brief.md`.
+
+Roles → models: `cto` = Fable (verdicts only: phase acceptance, merge gate, arbitration, answers to
+escalations from Opus roles — once per phase, never per task); `teamlead` / `reviewer` /
+`investigator` / `manager` = Opus; `developer` / `tester` / `debugger` = Sonnet; `junior` /
+`docs-writer` = Haiku. `junior` never commits. No role exists without a task: spawn the minimal roster.
+
+**Escalation ladder (owner's decision 2026-09-02, `project-rules` §7).** A question goes one level up,
+never sideways, never into a guess: `junior`/`docs-writer` → `developer`/`tech-writer` →
+`teamlead` → `cto` → the owner (through the lead, recorded in `OPEN_QUESTIONS.md`). `debugger` may
+route through `investigator` for the diagnosis. In a team the asker messages the higher role by name;
+outside a team it ends its report with `ESCALATION -> <role>` (question / tried / blocked on / files)
+and the lead spawns that role. The lead relays; it does not answer in place of the higher role.
+
+What does NOT change in team mode: tester once per mechanism BEFORE the code, in a worktree at the
+pre-implementation commit; break-injection by the lead, never delegated; reviewer synchronous after
+every task; Fable only at phase acceptance / merge gate / arbitration / escalation.
+
+Hooks as gates (fail-open after two blocks on the same task or agent; `TEAM_GATES=off` disables):
+`TaskCompleted` runs ruff on changed `.py` and pytest on changed test files — titles containing
+`[RED]`, `[docs]` or `[skip-gate]` skip it; `TeammateIdle` blocks idling with uncommitted work inside
+a linked worktree and only warns in the shared tree; `SubagentStart` / `SubagentStop` append to
+`data/team-journal.jsonl`. Scripts: `.claude/plugins/dev/hooks/`.
+
+Git in team mode: one worktree per writer (`.claude/worktrees/team-<task>`), at most three writers
+at once, readers in the shared tree; only the lead merges; stage explicit paths; `git show --stat`
+after every commit; `docs/sessions/*.md` merges by union (`.gitattributes`). No per-worktree venv:
+the main `.venv` with `PYTHONPATH=$PWD` from the worktree root — the package is not an editable
+install, and `uv sync` would fetch CPU torch instead of the CUDA wheel.
+
+Engine limits (2.1.222): teammates do not survive `/resume`; one team per session; teammates cannot
+spawn teams or background subagents; split panes are unavailable in Windows Terminal / VS Code —
+in-process only (↑/↓ + Enter opens a teammate, Esc back, x stops, Ctrl+T task list). Each teammate
+is a full session: ~25k tokens of context before its first tool call.
+
 ## Language policy (STRICT)
 
 **All user-facing output MUST be in Russian. No exceptions.**

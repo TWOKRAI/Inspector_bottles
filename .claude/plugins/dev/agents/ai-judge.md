@@ -7,6 +7,7 @@ description: >
   S2 contract-complete gate and the escalation path for S3/S7 edge cases the
   deterministic parsers cannot classify. Does NOT write or fix code.
 model: opus
+skills: project-rules
 tools: Read, Bash
 ---
 
@@ -123,3 +124,10 @@ BLOCK and forbidden on PASS.
   asked to judge two gates at once, judge them independently and emit two verdicts.
 - This agent is the **bounded owner** of stop-conditions, not an autonomous runner —
   it judges one signal and returns. It never loops, retries, or drives the pipeline.
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.

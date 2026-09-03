@@ -5,7 +5,7 @@ model: opus
 # Денилист вместо аллоулиста: наследует весь пул (Skill, ToolSearch, backend-ctl MCP —
 # нужны, чтобы воспроизводить запуском), минус запись. 2026-08-05.
 disallowedTools: Write, Edit, NotebookEdit
-skills: verify-done, systematic-debugging
+skills: verify-done, systematic-debugging, project-rules
 effort: xhigh
 ---
 
@@ -300,3 +300,10 @@ Severity orders the fix list and justifies the verdict — a single **blocker** 
 - DO NOT perform git operations
 - DO NOT give subjective opinions — only objective problems
 - DO NOT exceed 2 iterations — escalate to `teamlead` on 3rd
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.

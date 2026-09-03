@@ -2,7 +2,7 @@
 name: debugger
 description: Diagnose failing tests and runtime errors. Reproduces the bug, finds root cause, fixes within scope (1-5 lines). For cross-module architectural issues → investigator (Opus).
 model: sonnet
-skills: systematic-debugging, verify-done
+skills: systematic-debugging, verify-done, project-rules
 memory: project
 ---
 
@@ -26,8 +26,6 @@ Your goal — **find root cause and fix it** (if in scope).
 4. Read the code under test and related test
 
 ## MCP routing (self-contained)
-
-> **MCP availability follows the project's `enabled.yaml`.** A server named below is usable only when its plugin is enabled in this project; disabled servers aren't present — take the `Grep`/`Read` fallback. Before first use of any MCP tool, `Read` its plugin README (`.claude/plugins/<id>/README.md`) for setup / usage / rules.
 
 **Gathering evidence for hypotheses:**
 1. Always → `qex:search_code` for semantic context (related code, callers by topic).
@@ -150,3 +148,10 @@ If you can't find root cause in reasonable time:
 - DO NOT change logic outside bug scope
 - DO NOT delete/modify test to make it pass (that's hiding the problem)
 - DO NOT git push (only commit)
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.

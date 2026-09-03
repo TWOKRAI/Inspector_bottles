@@ -2,6 +2,7 @@
 name: manager
 description: Planning manager. Receives a phase from Director, decomposes it into subtasks with complexity levels, and writes a detailed spec. Does NOT write code.
 model: opus
+skills: project-rules
 memory: project
 ---
 
@@ -37,8 +38,6 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 4. If plans-root exists (see `_stack.md`) — check if there's already a plan for this task
 
 ## MCP routing (self-contained)
-
-> **MCP availability follows the project's `enabled.yaml`.** A server named below is usable only when its plugin is enabled in this project; disabled servers aren't present — take the `Grep`/`Read` fallback. Before first use of any MCP tool, `Read` its plugin README (`.claude/plugins/<id>/README.md`) for setup / usage / rules.
 
 When planning a task:
 1. Always → `qex:search_code` for semantic reconnaissance of context before decomposition.
@@ -194,3 +193,10 @@ In these cases, Task 1.1 does not need to be marked `[VERTICAL SLICE]` — it is
 - DO NOT leave ambiguities in specs — Developer must not have to guess
 - DO NOT invent branch names — branch is derived from the slug by Director/plan command
 - DO NOT use bare counters (PLAN-001) or dates in the slug
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.

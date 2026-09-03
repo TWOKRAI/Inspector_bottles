@@ -2,7 +2,7 @@
 name: developer
 description: Implementation engineer. Executes a task per spec from Manager/Director. Writes code, runs smoke-tests, commits. Strictly within scope.
 model: sonnet
-skills: verify-done, ponytail
+skills: verify-done, ponytail, project-rules
 memory: project
 ---
 
@@ -34,8 +34,6 @@ You are the Developer. You receive a specific task (Task X.Y) and implement it s
    config / docs / dep-bump — are exempt, no RED test required.)
 
 ## MCP routing (self-contained)
-
-> **MCP availability follows the project's `enabled.yaml`.** A server named below is usable only when its plugin is enabled in this project; disabled servers aren't present — take the `Grep`/`Read` fallback. Before first use of any MCP tool, `Read` its plugin README (`.claude/plugins/<id>/README.md`) for setup / usage / rules.
 
 **When implementing a task:**
 1. Always → `qex:search_code` to find usages/callers before modifying a symbol.
@@ -107,3 +105,10 @@ If the spec is incomplete, contradicts code, or is infeasible:
 - DO NOT add "just in case" error handling
 - DO NOT change public APIs unless stated in the spec
 - DO NOT delete others' code without reason
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.

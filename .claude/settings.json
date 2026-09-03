@@ -287,12 +287,57 @@
           }
         ]
       }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/dev/hooks/team-task-completed-gate.sh",
+            "timeout": 150
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/dev/hooks/team-teammate-idle-gate.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/dev/hooks/team-journal.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/dev/hooks/team-journal.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   },
   "env": {
     "MCP_TIMEOUT": "7200000",
     "MCP_TOOL_TIMEOUT": "7200000",
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1"
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
   "statusLine": {
     "type": "command",
@@ -304,5 +349,7 @@
     "context7@claude-plugins-official": true,
     "github@claude-plugins-official": true,
     "sentry@claude-plugins-official": true
-  }
+  },
+  "model": "opus",
+  "effortLevel": "high"
 }
