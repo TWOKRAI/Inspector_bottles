@@ -19,7 +19,7 @@
 | `README.md` | Индекс: таблицы агентов, скиллов, команд, хуков |
 | `settings.json` | Разрешения Bash, хуки Pre/Post, язык, status line |
 | `mcp.json` | MCP **qex** (Qdrant + Ollama), путь к `qex-mcp-v2`, переменные окружения |
-| `agents/*.md` | Субагенты (узкие роли: архитектор, IPC, тесты, PyQt, security) |
+| `agents/dev/*.md` | 14 dev-агентов (cto, teamlead, developer, tester, reviewer, junior, …) — зеркало `plugins/dev/agents/`; роли в [DEV_COMPANY.md](DEV_COMPANY.md), командный режим в [AGENT_TEAMS_GUIDE.md](AGENT_TEAMS_GUIDE.md) |
 | `skills/*/SKILL.md` | Скиллы — процедуры по явному вызову (`/skill-name`) |
 | `commands/*.md` | Slash-команды — готовые промпты и команды shell |
 | `hooks/*.sh` | Скрипты до/после инструментов (безопасность bash, ruff) |

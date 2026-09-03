@@ -42,7 +42,8 @@ DIRTY="$(git -C "$CWD" status --porcelain 2>/dev/null | grep -v 'docs/sessions/'
 # A linked worktree carries a `.git` *file* (gitdir pointer); the main tree has a `.git` directory.
 TOP="$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null)"
 if [ ! -f "$TOP/.git" ]; then
-  printf '{"systemMessage":"team-gate: %s (%s) went idle with uncommitted changes in the shared tree. Lead: stage explicit paths, never git add -A."}\n' "$AGENT_TYPE" "$AGENT_ID"
+  # json.dumps, not printf: a quote inside agent_id must not break the JSON the harness parses.
+  HOOK_AGENT_TYPE="$AGENT_TYPE" HOOK_AGENT_ID="$AGENT_ID" "$PY" -c "import json, os; print(json.dumps({'systemMessage': 'team-gate: %s (%s) went idle with uncommitted changes in the shared tree. Lead: stage explicit paths, never git add -A.' % (os.environ['HOOK_AGENT_TYPE'], os.environ['HOOK_AGENT_ID'])}))"
   exit 0
 fi
 

@@ -41,15 +41,22 @@ PYEOF
 TASK_ID="${FIELDS[0]:--}"; TASK_TITLE="${FIELDS[1]:--}"; CWD="${FIELDS[2]:--}"
 TASK_ID="${TASK_ID%$'\r'}"; TASK_TITLE="${TASK_TITLE%$'\r'}"; CWD="${CWD%$'\r'}"
 
-case "$TASK_TITLE" in *"[RED]"*|*"[docs]"*|*"[skip-gate]"*) exit 0 ;; esac
+# Only a *prefix* disarms the gate: "[RED] ..." is the tester's set, "fix the [RED] path" is not.
+case "$TASK_TITLE" in "[RED]"*|"[docs]"*|"[skip-gate]"*) exit 0 ;; esac
 
 [ -d "$CWD" ] || CWD="$(pwd)"
 ROOT="$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$ROOT" || exit 0
 
-STRIKE_DIR="$ROOT/data/team-gates"
+# Strike counters live in the MAIN repository root (same as the idle gate), so a task judged
+# from a worktree and later from the main tree shares one counter.
+COMMON="$(git -C "$CWD" rev-parse --git-common-dir 2>/dev/null)"
+case "$COMMON" in /*|[A-Za-z]:*) ;; *) COMMON="$CWD/$COMMON" ;; esac
+STRIKE_DIR="$(dirname "$COMMON")/data/team-gates"
 mkdir -p "$STRIKE_DIR" 2>/dev/null
-SAFE_ID="$(printf '%s' "$TASK_ID" | tr -c 'A-Za-z0-9_.-' '_')"
+# No task_id in the payload -> key the counter by the title, so two tasks never share a file.
+[ "$TASK_ID" = "-" ] && TASK_ID="title-$TASK_TITLE"
+SAFE_ID="$(printf '%s' "$TASK_ID" | tr -c 'A-Za-z0-9_.-' '_' | cut -c1-80)"
 STRIKE_FILE="$STRIKE_DIR/task-${SAFE_ID}.strikes"
 STRIKES="$(cat "$STRIKE_FILE" 2>/dev/null || echo 0)"
 case "$STRIKES" in ''|*[!0-9]*) STRIKES=0 ;; esac
@@ -67,6 +74,7 @@ block() {
   exit 2
 }
 
+# The worktrees filter is belt-and-braces: .gitignore already hides .claude/worktrees/ from --exclude-standard.
 CHANGED="$( { git diff --name-only HEAD -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } 2>/dev/null | grep -v '^\.claude/worktrees/' | sort -u)"
 FILES=()
 while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && FILES+=("$f"); done <<< "$CHANGED"

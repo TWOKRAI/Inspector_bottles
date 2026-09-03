@@ -155,11 +155,11 @@ Co-Authored-By: ...
 
 ## Slash-команды
 
-46 команд в 7 категориях. Список (упорядочено по namespace):
+76 файлов команд в 14 namespace (`find .claude/commands -name '*.md' | wc -l`, 2026-09-02). Ключевые по семи основным категориям:
 
 | Категория | Ключевые команды |
 |-----------|------------------|
-| **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/adr`, `/plan-status` |
+| **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/team` (живая команда агентов, [руководство](docs/claude/AGENT_TEAMS_GUIDE.md)), `/adr`, `/plan-status` |
 | **quality/** | `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/arch-review`, `/doctor`, `/lint-agents`, `/lint-settings` |
 | **analysis/** | `/channel-map`, `/message-contracts`, `/todo-inventory`, `/graph-slice` |
 | **memory/** | `/memory:init`, `/memory:search`, `/memory:status` |

@@ -5,6 +5,10 @@ description: Standing rules shared by every dev agent in this repository — qex
 
 # Project rules (apply on top of your role)
 
+Sections 1 (qex), 3 (MCP) and 4 (commits) apply only to roles that have the tools they name;
+a role restricted to Read/Write/Edit/Glob/Grep (for example `docs-writer`) skips them and
+follows sections 2, 5, 6 and 7 in full.
+
 These rules used to be pasted verbatim into all twelve agent files; they now live here only.
 Source of truth: `.claude/plugins/dev/skills/project-rules/SKILL.md`, materialized to
 `.claude/skills/project-rules/`. Edit the plugin source, then re-materialize — there are no

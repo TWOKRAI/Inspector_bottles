@@ -135,3 +135,10 @@ you could not run; name it.
 - No verdict per task: that is the reviewer's cadence, and your cost is not justified there.
 - No soft language in place of a decision: the first line is ACCEPT, ACCEPT WITH CONDITIONS,
   or BLOCK.
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.
