@@ -83,6 +83,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 
 ## Активные проекты и долги
 - [observability-closure: Ф0+Ф1 закрыты, Ф2 = 9/12](project_observability_closure_progress.md) — 2026-09-02: Task 2.9 сняла ЕДИНСТВЕННЫЙ блокер merge Ф2 (вердикт различал молчанием; зонд по разнице двух значений); гейт 9565 (+230); остаток — 9 листьев на своём дефолте называются, а не сверяются (→4.9); merge в main ждёт владельца; NEXT 2.10, 2.11 (Р-11), 2.12 (Р-12)
+- [Голос конфига принадлежит стадии «применяю»](project_config_voice_belongs_to_the_apply_stage.md) — config.reload разбирает секцию ШЕСТЬ раз тремя стадиями; окно маскирует, «подавлено: N» считает разборы; дом — Task 4.11
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; правда в v1; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim
 - [observation-port: Ф0–Ф5 ЗАКРЫТЫ](project_observation_port_progress.md) — порт = единственный писатель чисел, StatsManager стал видом; ревью вернуло 3 блокера, все закрыты; гейт 8930
 - [constructor-master прогресс](project_constructor_master_progress.md) — Ф0–Ф3 + трек F + Ф5-ядро закрыты; NEXT C1-C8 + app_module 5.11-5.13 · [чистка границ C1-C8](project_arch_boundaries_plan.md) — движок миграций 4.5 идёт в recipe, НЕ generic

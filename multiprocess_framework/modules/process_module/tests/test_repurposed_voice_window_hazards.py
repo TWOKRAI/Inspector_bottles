@@ -360,3 +360,66 @@ class TestTheWindowComesFromProcessPolicyNotALiteral:
             "политики; ручка observability.voices.default_window_sec на этот голос не "
             "действует (инъекция J3 матрицы 2.12 давала 0 красных именно поэтому)"
         )
+
+
+# =========================================================================== #
+# 7 — ЗОЛОТОЙ ПУТЬ: голос доезжает до ФАЙЛА журнала, а не только до caplog     #
+# =========================================================================== #
+class TestTheVoiceReachesTheLogFileNotOnlyCaplog:
+    """Опасность 7 — **найдена вердиктом CTO, и она про сам этот файл тоже.**
+
+    Все остальные тесты задачи 2.12 (11 приёмочных + 12 опасностей) смотрят
+    через ``caplog``, то есть через stdlib-root. Это ФЕЙКОВЫЙ харнесс для
+    данного вопроса: они честны о ЧИСЛЕ голосов и слепы к их АДРЕСУ, и остались
+    бы зелёными при голосе, которого нет ни в одном файле ``logs/``. Ровно так и
+    было до правки адреса: замер CTO на настоящем ``LoggerManager`` дал
+    ``emergency_log`` → **0 строк в файле**, обе записи в stderr через
+    ``logging.lastResort`` (у stdlib-root в процессах фреймворка нет ни одного
+    хендлера), а вид (``FallbackLogger``) → **2 строки в файле**, включая
+    сделанную ДО подъёма менеджера (слита из раннего буфера ``std_facade._EARLY``).
+
+    Правило проекта, которое здесь исполняется дословно: «где командная
+    поверхность тестируется на фейках, добавь ОДИН тест на настоящих объектах —
+    иначе переименование боевого атрибута оставит все тесты зелёными».
+    """
+
+    def test_the_voice_lands_in_the_log_file_of_a_real_logger_manager(self, tmp_path) -> None:
+        from multiprocess_framework.modules.logger_module.configs.logger_manager_config import (
+            LoggerManagerConfig,
+        )
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+
+        log_dir = tmp_path / "golden"
+        log_dir.mkdir()
+        process = ProcessModule("t212_golden")
+        logger = LoggerManager(
+            manager_name="logger_t212_golden",
+            config=LoggerManagerConfig(app_name="t212_golden", log_directory=str(log_dir)),
+            process=process,
+        )
+        logger.initialize()
+        process.logger_manager = logger
+        process.register_manager("logger", logger, enabled=True)
+        try:
+            reset_process_voices()
+            ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+            logger.flush() if hasattr(logger, "flush") else None
+            deadline = time.monotonic() + 5.0
+            found: list = []
+            while time.monotonic() < deadline and not found:
+                for path in sorted(log_dir.rglob("*.log")):
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                    if "ADR-PM-046" in text:
+                        found.append(path.name)
+                if not found:
+                    threading.Event().wait(0.05)
+        finally:
+            logger.shutdown()
+
+        assert found, (
+            "голос ADR-PM-046 не попал НИ В ОДИН файл журнала настоящего LoggerManager — "
+            f"файлы: {[p.name for p in sorted(log_dir.rglob('*.log'))]}. Это тот самый дефект, "
+            "который caplog не видит: правило звучит ровно один раз на действие и уходит в "
+            "stderr через logging.lastResort, а оператор со стендом читает logs/"
+        )
