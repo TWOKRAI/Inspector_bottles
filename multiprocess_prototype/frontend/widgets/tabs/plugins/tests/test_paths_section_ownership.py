@@ -1,165 +1,137 @@
-"""Тесты владения singleton-секцией «Пути» (`__paths__`) в `build_plugin_sections`.
+# -*- coding: utf-8 -*-
+"""Владение секцией «Пути»: модуль состояния не копит, вкладка секцию держит.
 
-RED-фаза (Task fix/plugins-paths-section-cache, worktree paths-cache): на коммите,
-где писались эти тесты, `build_plugin_sections()` ЕЩЁ НЕ принимает параметр
-`paths_cache` — весь файл обязан падать с `TypeError: unexpected keyword argument
-'paths_cache'`. Это ожидаемый и единственно верный результат прогона.
+История файла, чтобы следующий читатель не пошёл по тому же кругу.
 
-Контракт (см. промпт задачи, домыслы явно помечены "ДОГАДКА"):
-- `build_plugin_sections(services, *, ..., paths_cache: dict | None = None)`
-- `paths_cache` — держатель singleton-секций, ПРИНАДЛЕЖАЩИЙ вызывающему (вкладке).
-  Один и тот же dict в двух вызовах → одна и та же секция «Пути» (П1).
-  Разные dict-держатели → разные секции, даже при равных по значению `services` (П2).
-- `paths_cache=None` → держатель локален вызову, секция не переживает сам вызов
-  и не оседает в модульном (глобальном) состоянии `_sections` (П3).
-- Секция «Пути» живёт не дольше своего держателя: когда dict-держатель, переданный
-  вызывающим, уничтожен, секция становится недостижимой вместе с ним (П4).
-  ДОГАДКА: реализация не должна прятать секцию за отдельной структурой, живущей
-  дольше переданного `paths_cache` (например, WeakKeyDictionary с ключом `id(cache)` —
-  тогда переиспользование id после сборки мусора склеило бы чужие секции).
+Первую редакцию писал независимый тестер по критериям, которые я ему выдал, и
+критерии были построены на НЕВЕРНОЙ посылке: будто ``refresh_catalog()``
+пересоздаёт секции, а значит секцию надо специально сохранять в держателе,
+иначе теряется подписка на ``catalog_updated``. Ревью опровергло это замером:
+секция «Пути» объявлена НЕленивой, ``BaseTreeNavTab.__init__`` подключает её
+один раз, а ``refresh_catalog()`` пересобирает только спеки — счётчик вызовов
+фабрики показал 1 после ``__init__`` и 1 после двух ``refresh_catalog()``.
+Контрольная инъекция (кэш убран полностью) не изменила поведение GUI.
 
-Секция «Пути» — обычный python-объект (не QWidget), её `.widget()` ленив и здесь
-не вызывается: Qt-виджет тестам не нужен, offscreen-платформа не требуется по сути
-контракта (но команда прогона задаёт QT_QPA_PLATFORM=offscreen на случай, если модуль
-`_sections` всё же тянет Qt-импорты на уровне модуля).
-
-Покрывает:
-- test_same_holder_returns_same_paths_section        — П1
-- test_different_holders_return_different_sections   — П2, включая равные-по-значению services
-- test_no_holder_leaves_no_module_level_state         — П3, weakref + gc
-- test_holder_lifetime_bounds_section_lifetime        — П4, weakref + gc
+Поэтому три теста той редакции — про держатель, отданный вызывающим, — сняты
+вместе с самим держателем: они охраняли контракт, который решено не вводить.
+Уцелел тест на отсутствие модульного состояния (настоящий дефект: словарь по
+``id(services)`` не чистился никогда), а к нему добавлены два теста на живой
+вкладке — они проверяют то, что раньше только утверждалось прозой.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import gc
 import weakref
 
+import pytest
+from PySide6.QtWidgets import QApplication
+
+from multiprocess_prototype.domain.protocols.plugin_catalog import PluginSpec
+from multiprocess_prototype.domain.tests._fakes import FakePluginCatalog
+from multiprocess_prototype.domain.tests.conftest import make_test_app_services
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.tabs.plugins._sections import (
     build_plugin_sections,
 )
-
-from ._helpers import make_plugins_services
+from multiprocess_prototype.frontend.widgets.tabs.plugins.tab import PluginsTab
 
 _PATHS_KEY = "__paths__"
 
 
-def _paths_spec(specs):
-    """Найти SectionSpec секции «Пути» в списке, отданном build_plugin_sections."""
-    for spec in specs:
-        if spec.key == _PATHS_KEY:
-            return spec
-    raise AssertionError(f"секция с key={_PATHS_KEY!r} не найдена среди {[s.key for s in specs]}")
+@pytest.fixture
+def app() -> QApplication:
+    return QApplication.instance() or QApplication([])
 
 
-def _paths_section_weakref(services, paths_cache):
-    """Построить секцию «Пути» через build_plugin_sections и вернуть weakref на неё.
+def _services():
+    specs = {
+        "color_mask": PluginSpec(name="color_mask", category="processing", description="d", has_registers=False),
+    }
+    return make_test_app_services(plugins=FakePluginCatalog(specs=specs))
 
-    Не возвращает и не удерживает ничего, кроме weakref: specs/spec/section — явно
-    удалены из локального стека этой функции до return, иначе тест П3/П4 был бы
-    зелёным по неверной причине (живая ссылка через фрейм, а не через кэш).
+
+def _paths_widget(tab: PluginsTab):
+    """Виджет, который вкладка показывает на странице «Пути» — то, что видит оператор."""
+    return tab._content_stack.widget(tab.presenter._page_index[_PATHS_KEY])
+
+
+def _make_section_and_forget(services) -> weakref.ref:
+    """Собрать спеки, создать секцию «Пути» и уронить ВСЕ свои сильные ссылки.
+
+    Отдельная функция, чтобы фрейм теста не удерживал ни спеки, ни секцию:
+    локальные переменные умирают вместе с фреймом, и остаётся ровно то, что
+    держит сам продукт.
     """
-    specs = build_plugin_sections(services, paths_cache=paths_cache)
-    spec = _paths_spec(specs)
+    specs = build_plugin_sections(services)
+    spec = next(s for s in specs if s.key == _PATHS_KEY)
     section = spec.factory(None)
     ref = weakref.ref(section)
-    del section
-    del spec
-    del specs
+    del section, spec, specs
     return ref
 
 
-def test_same_holder_returns_same_paths_section():
-    """П1: один и тот же dict-держатель → одна и та же секция «Пути» между вызовами.
+def test_build_leaves_no_module_level_state() -> None:
+    """Модуль сборки секций не удерживает созданную секцию.
 
-    Если сломать: вкладка после refresh_catalog() (второй вызов build_plugin_sections
-    с тем же paths_cache) получит НОВЫЙ объект секции «Пути» — подписка секции на
-    catalog_updated из первого объекта останется висеть на выброшенном экземпляре,
-    а новый экземпляр сигналов не получит. Секция «Пути» в GUI перестанет обновляться.
+    Свойство от независимого тестера — единственное из его набора, которое
+    пережило ревью, и именно оно ловит настоящий дефект: словарь
+    ``_PATHS_SECTION_CACHE`` по ``id(services)`` не удалял записи никогда.
+
+    Если покраснеет — в модуле снова завёлся кэш: секции будут накапливаться на
+    каждую пересозданную вкладку, а ``id`` умершего объекта, доставшийся новому,
+    отдаст новой вкладке чужую секцию, подписанную на объекты прошлой.
     """
-    services = make_plugins_services()
-    cache: dict = {}
+    services = _services()
 
-    specs_first = build_plugin_sections(services, paths_cache=cache)
-    specs_second = build_plugin_sections(services, paths_cache=cache)
-
-    section_first = _paths_spec(specs_first).factory(None)
-    section_second = _paths_spec(specs_second).factory(None)
-
-    assert section_first is section_second
-
-
-def test_different_holders_return_different_sections():
-    """П2: разные dict-держатели → разные секции, даже при РАВНЫХ по значению services.
-
-    AppServices — frozen dataclass: два независимо собранных экземпляра с одинаковой
-    начинкой равны (`==`) и хешируются одинаково. Если реализация ошибочно кладёт
-    секцию в глобальный кэш по ключу `services` (а не по держателю, который ей дал
-    вызывающий), то два разных держателя с равными services получат ОДНУ и ту же
-    секцию — то есть утечку состояния между двумя независимыми вкладками/вызовами.
-
-    Строим "два отдельных, но равных" AppServices через dataclasses.replace() без
-    изменений: это два РАЗНЫХ экземпляра контейнера (проверено `is not` ниже), поля
-    которых — те же самые объекты (значит равны по построению) — это честнее, чем
-    вызывать make_plugins_services() дважды: там под капотом создаются НЕЗАВИСИМЫЕ
-    Fake-объекты без __eq__ (identity-equality), и два вызова дали бы services_a !=
-    services_b — сам сценарий "равные, но разные" не собрался бы.
-    """
-    services_a = make_plugins_services()
-    services_b = dataclasses.replace(services_a)
-    assert services_a is not services_b
-    assert services_a == services_b
-    assert hash(services_a) == hash(services_b)
-
-    cache_a: dict = {}
-    cache_b: dict = {}
-
-    specs_a = build_plugin_sections(services_a, paths_cache=cache_a)
-    specs_b = build_plugin_sections(services_b, paths_cache=cache_b)
-
-    section_a = _paths_spec(specs_a).factory(None)
-    section_b = _paths_spec(specs_b).factory(None)
-
-    assert section_a is not section_b
-
-
-def test_no_holder_leaves_no_module_level_state():
-    """П3: paths_cache=None → секция не оседает в модульном состоянии `_sections`.
-
-    Если сломать: модуль `_sections` держит singleton-секцию «Пути» сам (модульная
-    глобальная переменная вместо переданного вызывающим держателя) — тогда секция
-    переживёт оба вызова этого теста даже без единого dict-держателя, weakref после
-    gc.collect() останется живым, и разные вкладки/тесты процесса начнут незаметно
-    делить одну и ту же секцию «Пути» без какого-либо paths_cache в подписи вызова.
-    """
-    services = make_plugins_services()
-
-    ref_first = _paths_section_weakref(services, None)
-    ref_second = _paths_section_weakref(services, None)
-
+    ref_first = _make_section_and_forget(services)
+    ref_second = _make_section_and_forget(services)
     gc.collect()
 
     assert ref_first() is None
     assert ref_second() is None
 
 
-def test_holder_lifetime_bounds_section_lifetime():
-    """П4: секция «Пути» не переживает уничтожение своего dict-держателя.
+def test_paths_section_survives_refresh_catalog(app: QApplication) -> None:
+    """На ЖИВОЙ вкладке страница «Пути» переживает rescan плагинов.
 
-    Если сломать: реализация регистрирует секцию во внутренней структуре, живущей
-    дольше переданного paths_cache (например, по `id(cache)` в отдельном модульном
-    реестре) — тогда после удаления единственной внешней ссылки на cache и gc.collect()
-    секция всё равно останется достижимой (утечка), а при переиспользовании Python'ом
-    того же id() для нового dict-держателя новый держатель рискует получить чужую,
-    устаревшую секцию «Пути».
+    Раньше это свойство только утверждалось прозой («иначе теряется подписка
+    catalog_updated»), а держалось оно совсем не тем механизмом, которому
+    приписывалось: секция неленивая и подключается один раз, поэтому
+    ``refresh_catalog()`` её не трогает.
+
+    Если покраснеет — оператор после пересканирования каталога получит новый
+    экземпляр ``PathsSubtabWidget`` на месте старого: введённые пути и подписка
+    на ``catalog_updated`` уедут вместе с прежним виджетом.
     """
-    services = make_plugins_services()
-    cache: dict = {}
+    tab = PluginsTab.create(_services(), RuntimeDeps(registers_manager=None))
+    before = _paths_widget(tab)
 
-    ref = _paths_section_weakref(services, cache)
+    tab.refresh_catalog()
+    app.processEvents()
+    tab.refresh_catalog()
+    app.processEvents()
 
-    del cache
+    assert _paths_widget(tab) is before
+
+
+def test_section_does_not_outlive_its_tab(app: QApplication) -> None:
+    """Секция «Пути» умирает вместе со своей вкладкой — течи нет.
+
+    Парный контроль к предыдущему тесту: там секция обязана ЖИТЬ, пока жива
+    вкладка, здесь — обязана УМЕРЕТЬ, когда вкладки не стало. Без второй
+    половины «переживает rescan» выполнил бы и вечный модульный кэш.
+
+    Если покраснеет — каждая пересозданная вкладка оставляет за собой секцию с
+    её виджетом и подписками: течь памяти плюс живые обработчики, слушающие
+    сигналы от имени закрытой вкладки.
+    """
+    tab = PluginsTab.create(_services(), RuntimeDeps(registers_manager=None))
+    ref = weakref.ref(_paths_widget(tab))
+
+    del tab
+    gc.collect()
+    app.processEvents()
     gc.collect()
 
     assert ref() is None
