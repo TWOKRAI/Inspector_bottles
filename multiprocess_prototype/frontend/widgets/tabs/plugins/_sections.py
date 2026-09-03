@@ -315,29 +315,37 @@ def _make_plugin_factory(
 # ---------------------------------------------------------------------------
 
 
-# Модульный кэш singleton-секций «Пути» по id(services).
-# Замыкание в _make_paths_factory не работает между вызовами
-# build_plugin_sections() — каждый refresh_catalog() создавал бы новую секцию
-# с новым PathsSubtabWidget, что ломало бы подписку catalog_updated.
-_PATHS_SECTION_CACHE: "dict[int, _PathsSection]" = {}
-
-
 def _make_paths_factory(
     services: AppServices,
     plugin_manager: Any = None,
+    cache: "dict[str, _PathsSection] | None" = None,
 ) -> "Callable[[object], _PathsSection]":
     """Фабрика singleton-секции «Пути».
 
-    Кэш по id(services) переживает повторные вызовы build_plugin_sections(),
-    что гарантирует сохранение подписки catalog_updated после refresh_catalog().
+    Секция обязана пережить повторный вызов :func:`build_plugin_sections`
+    (вкладка пересобирает секции на каждом ``refresh_catalog()``): новый
+    экземпляр означал бы новый ``PathsSubtabWidget`` и потерянную подписку
+    ``catalog_updated``. Замыкание этого не даёт — оно живёт один вызов.
+
+    Держатель ``cache`` принадлежит ВЫЗЫВАЮЩЕМУ (вкладке), а не модулю.
+    Прежде здесь стоял модульный словарь по ``id(services)``, и это был
+    дефект на два фронта: запись не удалялась никогда (течь на каждую
+    пересозданную вкладку), а ``id`` переиспользуется после сборки мусора —
+    новый ``AppServices`` мог получить адрес умершего и вместе с ним чужую
+    секцию, подписанную на объекты прошлой вкладки. Владение по времени
+    жизни вкладки снимает оба разом; хранить кэш атрибутом самого
+    ``AppServices`` нельзя — он ``frozen=True, slots=True``.
+
+    ``cache=None`` — держатель на один вызов: секция никем не переживает
+    сборку, и модуль состояния не копит.
     """
-    cache_key = id(services)
+    holder: "dict[str, _PathsSection]" = {} if cache is None else cache
 
     def factory(_ctx_arg: object) -> _PathsSection:
-        section = _PATHS_SECTION_CACHE.get(cache_key)
+        section = holder.get(_PATHS_KEY)
         if section is None:
             section = _PathsSection(services, plugin_manager)
-            _PATHS_SECTION_CACHE[cache_key] = section
+            holder[_PATHS_KEY] = section
         return section
 
     return factory
@@ -349,6 +357,7 @@ def build_plugin_sections(
     plugin_manager: Any = None,
     registers_manager: Any = None,
     open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
+    paths_cache: "dict[str, _PathsSection] | None" = None,
 ) -> "list[SectionSpec]":
     """Сформировать декларацию секций PluginsTab.
 
@@ -369,6 +378,10 @@ def build_plugin_sections(
         open_sandbox_cb: callback для открытия sandbox в content-панели.
             Сигнатура: ``(plugin_name: str, sandbox_widget: QWidget) -> None``.
             По умолчанию None — кнопка «Тест» disabled (обратная совместимость).
+        paths_cache: держатель singleton-секции «Пути», принадлежащий вызывающему.
+            Один и тот же словарь, отданный в несколько вызовов, сохраняет секцию
+            (и её подписку ``catalog_updated``) через ``refresh_catalog()``.
+            None — держатель на один вызов, наружу ничего не живёт.
     """
     presenter = PluginsPresenter(services)
     plugins = presenter.list_plugins()  # [(name, display, category), ...]
@@ -380,7 +393,7 @@ def build_plugin_sections(
         SectionSpec(
             key=_PATHS_KEY,
             title="Пути",
-            factory=_make_paths_factory(services, plugin_manager),
+            factory=_make_paths_factory(services, plugin_manager, paths_cache),
         )
     )
 

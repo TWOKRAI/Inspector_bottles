@@ -103,6 +103,13 @@ class PluginsTab(BaseTreeNavTab):
         # Текущий режим отображения (Cards/Table).
         self._view_mode: ViewMode = ViewMode.CARDS
 
+        # Держатель singleton-секции «Пути». Живёт ровно столько, сколько вкладка:
+        # секция обязана пережить refresh_catalog() (иначе теряется её подписка
+        # catalog_updated), но НЕ обязана пережить саму вкладку. Раньше держателем
+        # был модульный словарь в _sections.py по id(services) — он не чистился
+        # никогда и мог отдать новой вкладке секцию умершей (id переиспользуется).
+        self._paths_cache: dict = {}
+
         # G.4.3: ActionBus bridge удалён (был мёртвый — action_bus=None в production).
         # Plugins = превью/песочница, без topology-привязки.
         super().__init__(
@@ -112,6 +119,7 @@ class PluginsTab(BaseTreeNavTab):
                 plugin_manager=plugin_manager,
                 registers_manager=registers_manager,
                 open_sandbox_cb=self.open_sandbox,
+                paths_cache=self._paths_cache,
             ),
             ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
@@ -204,7 +212,10 @@ class PluginsTab(BaseTreeNavTab):
         # Пересобрать список секций с актуальным каталогом плагинов
         # Передаём open_sandbox как callback — секции получат кнопку «Тест».
         self._sections_specs = build_plugin_sections(
-            self._services, plugin_manager=self._plugin_manager, open_sandbox_cb=self.open_sandbox
+            self._services,
+            plugin_manager=self._plugin_manager,
+            open_sandbox_cb=self.open_sandbox,
+            paths_cache=self._paths_cache,
         )
 
         # Очистить дерево и перестроить заново
