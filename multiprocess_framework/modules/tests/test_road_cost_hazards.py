@@ -36,6 +36,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, List, Tuple
 
@@ -87,11 +88,12 @@ class TestTheMeasurementTakesTheMinimumOfItsWindows:
     def test_each_side_reports_the_minimum_of_its_own_five_windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """При ``repeats=1`` ответ обязан быть ровно ``(5.0, 2.0)``.
 
-        **Хрупкость названа вслух:** тест подменяет ``perf_counter`` НА МОДУЛЕ
-        ``time``, потому что помощник зовёт его как ``time.perf_counter()``.
-        Рефакторинг на ``from time import perf_counter`` сделает этот тест
-        ЛОЖНО КРАСНЫМ, а не тихо зелёным — направление отказа безопасное, но
-        чинить придётся здесь же.
+        **Две хрупкости названы вслух.** Первая: подмена идёт НА МОДУЛЕ ``time``,
+        потому что помощник зовёт часы как ``time.perf_counter()``; рефакторинг
+        на ``from time import perf_counter`` сделает тест ЛОЖНО КРАСНЫМ, а не
+        тихо зелёным — направление безопасное, но чинить придётся здесь.
+        Вторая (находка ревью): подмена процессная, и без привязки к потоку
+        соседний демон съедал бы тики из общего списка — см. ``scripted``.
         """
         ticks: List[float] = []
         moment = 0.0
@@ -101,9 +103,22 @@ class TestTheMeasurementTakesTheMinimumOfItsWindows:
             ticks.append(moment)
 
         real_perf_counter = time.perf_counter
+        mine = threading.get_ident()
 
         def scripted() -> Any:
-            return ticks.pop(0) if ticks else real_perf_counter()
+            """Подставные часы — ТОЛЬКО своему потоку.
+
+            Подмена процессная (``time.perf_counter`` — один объект на весь
+            интерпретатор), а ``ticks`` — общий расходуемый список. Соседний
+            поток, зовущий часы в фоне, съел бы тики, и литерал получил бы
+            ЧУЖИЕ числа: воспроизведено ревью — ``(2.0e-07, 3.0e-07)`` вместо
+            ``(5.0, 2.0)``. Отказ ложно-красный, а не тихо-зелёный, но в общем
+            гейте живут чужие демоны-потоки, а мигающий красный учит не
+            смотреть на красное.
+            """
+            if threading.get_ident() != mine or not ticks:
+                return real_perf_counter()
+            return ticks.pop(0)
 
         monkeypatch.setattr(_road_cost.time, "perf_counter", scripted)
         result = timed_pair(lambda: None, lambda: None, repeats=1)

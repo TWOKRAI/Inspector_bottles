@@ -30,9 +30,10 @@ from __future__ import annotations
 import gc
 import sys
 import time
+import tracemalloc
 from typing import Any, Callable, Tuple
 
-__all__ = ["count_calls", "report", "timed_pair"]
+__all__ = ["count_calls", "peak_alloc", "report", "timed_pair"]
 
 
 def report(capsys: Any, line: str) -> None:
@@ -43,11 +44,23 @@ def report(capsys: Any, line: str) -> None:
     правится с запасом, потому что консоль на этой машине не UTF-8, а падение
     на печати выглядело бы как падение теста.
 
-    Жила тремя дословными копиями (``test_plugin_stats_road.py``,
-    ``test_f2_numbers_disabled_cost_bench.py``, ``logger_module/tests/
-    test_gate_cost_bench.py``); первые две переведены сюда добором Р-12, третья
-    осталась копией — она в чужом модуле и её перевод назван follow-up'ом,
-    а не сделан заодно.
+    **Инвентарь снят грепом, а не памятью** (первая редакция этого абзаца назвала
+    три копии по памяти; их было четыре — поймано ревью, и это ровно тот класс,
+    который задача чинила). На 2026-09-02 в дереве:
+
+    * ``report``-подобных тел бенча — четыре: здесь, ``test_plugin_stats_road.py``
+      и ``test_f2_numbers_disabled_cost_bench.py`` (обе переведены сюда добором
+      Р-12), плюс ДВЕ оставшиеся копии — ``logger_module/tests/test_gate_cost_bench.py:101``
+      и ``base_manager/tests/test_source_stamping.py:408``;
+    * ``timed_pair``-подобных — три: здесь, ``test_gate_cost_bench.py:141`` и
+      ``test_source_stamping.py:420``.
+
+    **Обе оставшиеся копии ``timed_pair`` УЖЕ разошлись с этим телом:** у них
+    ``range(3)`` вместо пяти окон и **нет** ``gc.disable()`` — то есть они мерят
+    по трём окнам и вместе со сборкой мусора. Разошлись молча, как и положено
+    дублю. Их перевод назван follow-up'ом в «Out of scope» добора и НЕ сделан
+    заодно: это чужие зелёные тесты, а правка чужого зелёного требует своей
+    инъекции.
     """
     with capsys.disabled():
         encoding = getattr(sys.stdout, "encoding", None) or "ascii"
@@ -93,6 +106,54 @@ def timed_pair(new_fn: Callable[[], Any], old_fn: Callable[[], Any], repeats: in
     finally:
         gc.enable()
     return best_new / repeats, best_old / repeats
+
+
+def peak_alloc(fn: Callable[[], Any], warm: int = 50, repeats: int = 200) -> int:
+    """Пик выделенной памяти за ``repeats`` вызовов ``fn()``, в байтах.
+
+    **Третий объектив, и он нужен потому, что первые два слепы.** ``tracemalloc``
+    видит то, чего не видит ни :func:`count_calls`, ни :func:`timed_pair`:
+    КОНСТРУИРОВАНИЕ объектов. Замер (CPython 3.12): ``dict(d)`` и ``{**d}`` дают
+    у счётчика вызовов ровно ``(1, 1)`` — столько же, сколько ``lambda: None``,
+    потому что конструктор типа не порождает события ``c_call``; а по пику
+    памяти те же формы дают 248 и 184 байта против 112 у пустой.
+
+    Из-за этой слепоты приёмочный критерий Task 2.10 («сборка записи перенесена
+    ПЕРЕД гейтом → бенч красный») не выполнялся: заплата проходила мимо обеих
+    половин пары и укладывалась в тайминг-потолок (дельта отношения 0.048).
+    Найдено ревью, а не автором.
+
+    **Прогрев обязателен.** Первый замер ``tracemalloc`` включает разовые
+    аллокации самого инструмента (наблюдалось 158 против устойчивых 342 и 2402
+    против устойчивых 738). ``gc`` выключен на окно замера по той же причине,
+    что и у :func:`timed_pair`.
+
+    Args:
+        fn: измеряемый вызов без аргументов.
+        warm: сколько раз позвать ДО замера — чтобы не мерить разовое.
+        repeats: сколько раз позвать под наблюдением.
+
+    Returns:
+        Пик ``tracemalloc`` минус базовая линия, в байтах. Величина
+        детерминирована для данной версии CPython и данных, но НЕ переносится
+        между версиями — сверять замером, а не переписыванием.
+    """
+    for _ in range(warm):
+        fn()
+    gc.disable()
+    tracemalloc.start()
+    try:
+        baseline = tracemalloc.get_traced_memory()[0]
+        top = 0
+        for _ in range(repeats):
+            fn()
+            peak = tracemalloc.get_traced_memory()[1]
+            if peak > top:
+                top = peak
+        return top - baseline
+    finally:
+        tracemalloc.stop()
+        gc.enable()
 
 
 def count_calls(fn: Callable[[], Any]) -> Tuple[int, int]:

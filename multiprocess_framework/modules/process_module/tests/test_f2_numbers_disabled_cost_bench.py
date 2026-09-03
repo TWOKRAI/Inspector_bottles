@@ -45,7 +45,7 @@ from multiprocess_framework.modules.process_module.configs.observation_policy im
 from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import MetricRule
 from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
 from multiprocess_framework.modules.statistics_module.observation.observation_manager import ObservationManager
-from multiprocess_framework.modules.tests._road_cost import count_calls, report as _report, timed_pair
+from multiprocess_framework.modules.tests._road_cost import count_calls, peak_alloc, report as _report, timed_pair
 
 #: Процесс стенда — сегмент пути правила (Р-2а: ``processes.<p>.stats.<имя>``).
 _PROCESS = "task210_cost_probe"
@@ -155,6 +155,44 @@ class TestTheDisabledMetricCostsNoMoreThanTheGate:
                 f"дорога выключенной метрики завела новую работу: {disabled} вместо (6, 5) (py, C)"
             )
             assert enabled == (28, 30), f"дорога включённой метрики изменилась: {enabled} вместо (28, 30) (py, C)"
+
+            # ТРЕТИЙ объектив — и без него приёмочный критерий этой задачи
+            # («инъекция E1: сборка записи ПЕРЕД гейтом → бенч красный») НЕ
+            # ВЫПОЛНЯЛСЯ. Найдено ревью, а не автором: заплата E1 проходила
+            # мимо ОБЕИХ половин счётной пары (конструктор типа не даёт события
+            # ``c_call``: ``dict(d)`` и ``{**d}`` неотличимы от ``lambda: None``)
+            # и укладывалась в тайминг-потолок — дельта отношения всего 0.048.
+            #
+            # Гейтуется ОТНОШЕНИЕ пиков, а не байты: абсолют зависит от версии
+            # CPython, от размера тегов И ОТ ПОКРЫТИЯ, отношение — от того,
+            # СОБИРАЕТСЯ ли запись на запрещённой дороге.
+            #
+            # Замер обоих режимов (числа побайтно повторяются от прогона к
+            # прогону, это НЕ шумная величина):
+            #
+            #   без покрытия:   дерево 363/990 = 0.367   E1 731/990  = 0.738
+            #   под --cov:      дерево 1739/4174 = 0.417 E1 2099/4166 = 0.504
+            #
+            # Потолок 0.46 стоит между парами в ОБОИХ режимах. **Теснота названа
+            # вслух:** под покрытием окно всего 0.417…0.504, потому что coverage
+            # раздувает обе стороны (990 → 4166 байт) и тем сжимает разницу. Это
+            # терпимо ровно потому, что величина детерминирована побайтно, а не
+            # шумит; при смене версии CPython или coverage оба числа обязаны
+            # быть ПЕРЕСНЯТЫ, а не подогнаны. `make test` идёт с покрытием —
+            # значит проверять надо оба режима, одного мало.
+            disabled_bytes = peak_alloc(disabled_call)
+            enabled_bytes = peak_alloc(enabled_call)
+            alloc_ratio = disabled_bytes / enabled_bytes
+            _report(
+                capsys,
+                f"  пик памяти (выкл/вкл): {disabled_bytes} / {enabled_bytes} байт, "
+                f"отношение {alloc_ratio:.3f}x  (гейтуется, потолок 0.46)",
+            )
+            assert alloc_ratio < 0.46, (
+                f"выключенная метрика начала СОБИРАТЬ запись: пик {disabled_bytes} байт против "
+                f"{enabled_bytes} у включённой, отношение {alloc_ratio:.3f} — гейт перестал стоять "
+                "ПЕРЕД сборкой записи"
+            )
         finally:
             mgr.shutdown()
             port.shutdown()
