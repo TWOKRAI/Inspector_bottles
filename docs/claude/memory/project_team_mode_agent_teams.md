@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 2bef5f02-841d-4f66-86fc-b9d72ba30dce
-  modified: 2026-09-02T17:53:08.703Z
+  modified: 2026-09-03T06:01:15.602Z
 ---
 
 Решение владельца 2026-09-02: разработка в режиме **живой команды** — агенты создаются один раз,
@@ -20,6 +20,11 @@ metadata:
 - Хуки `plugins/dev/hooks/`: `TaskCompleted` (ruff + pytest на изменённых тестах; `[RED]`/`[docs]`/`[skip-gate]` пропуск), `TeammateIdle` (блок только в linked worktree), `SubagentStart/Stop` → `data/team-journal.jsonl`. Fail-open после двух блоков; `TEAM_GATES=off`.
 - `.gitattributes`: `docs/sessions/*.md merge=union`.
 - Руководство владельца: `docs/claude/AGENT_TEAMS_GUIDE.md` (что изменилось, как пользоваться, стоимость, ограничения движка, насколько лучше и почему).
+
+**Ревью сделано** (reviewer, Opus, синхронно, 2026-09-02/03): 18 находок, блокеров нет, вердикт CHANGES → правки
+внесены вторым коммитом `c595b252` (гейт только по префиксу `[RED]`, указатели у cto/junior, английский в
+агентах, инвентари, потолки doctor); смоук хуков 16/16. Коммиты ветки: `14ab981b`, `c595b252`; merge в feat:
+`f652607f`, `579f216b`. Ревьюер инъекцией подтвердил, что снятие `\r` в гейтах несущее (без него exit 0 вместо 2).
 
 **Не проверено:** живая команда в сессии не запускалась (переменная подхватывается при старте);
 preload `skills:` для in-process участников — по докам неясно, есть указатель-fallback; хуки
