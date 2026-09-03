@@ -460,7 +460,20 @@ def test_c7_reading_old_stats_enabled_false_warns_loudly_about_meaning_change(ca
     обязан быть замечен и назван вслух — тем же жестом, что уже применяется в
     этом же файле к ``REMOVED_BATCHING_KEYS`` (``_fallback.emergency_log`` →
     ``logging.getLogger(...).warning(...)``, перехватывается ``caplog``).
+
+    **Сброс окна голоса — не косметика, а условие осмысленности теста (Task 2.12,
+    m1).** С задачи 2.12 это предупреждение дросселируется окном по ключу
+    ``stats.enabled.repurposed`` (окно процесса, L0-дефолт 5.0 с), и держатель —
+    процессный синглтон. Соседи по ЭТОМУ ЖЕ файлу (``test_c3_*``, ``test_c4b_*``)
+    сами прогоняют конфиг со ``stats.enabled: false`` и съедают окно раньше:
+    измерено — без сброса файл даёт ``1 failed, 8 passed`` даже в изоляции, и
+    красным оказывается именно этот тест. Тест про голос обязан владеть окном
+    голоса ровно так же, как тест про время обязан владеть часами; без сброса он
+    проверял бы порядок сбора pytest, а не свойство.
     """
+    from multiprocess_framework.modules.logger_module.core.windowed_voice import reset_process_voices
+
+    reset_process_voices()
     with caplog.at_level("WARNING"):
         ObservabilityConfig.model_validate({"stats": {"enabled": False}})
 

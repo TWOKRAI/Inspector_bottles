@@ -60,7 +60,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterator, Tuple
 
-import pytest
 
 from multiprocess_framework.modules.command_module import CommandManager
 from multiprocess_framework.modules.data_schema_module import SchemaBase
@@ -236,53 +235,60 @@ class TestHistoryIsASchemaSubsection:
 # =========================================================================== #
 # 2 — ``errors.enabled`` не имеет права быть тихим no-op
 # =========================================================================== #
-class TestErrorsEnabledIsNotASilentNoop:
-    """Критерий 2: свойство держится ДИЗЪЮНКТИВНО — задача разрешает реализатору
-    выбрать один из двух путей (гасить ``ErrorManager`` ИЛИ снять ключ из схемы
-    с громким предупреждением, как ``REMOVED_BATCHING_KEYS``). Тест не привязан
-    ни к одному из них — он проверяет, что хотя бы ОДИН эффект случился.
+class TestErrorsEnabledGatesTheManagerWithAnEmptyErrorDict:
+    """Критерий 2: ``errors.enabled=False`` обязан гасить создание ``ErrorManager``,
+    и НЕ имеет права быть тихим no-op.
 
-    Сегодня — НИ ОДИН: ``errors.enabled`` существует в схеме
-    (``ObservabilityErrorsConfig.enabled``, дефолт ``True``), но
-    ``expand_observability`` строит ``error``-словарь БЕЗ обращения к
-    ``cfg.errors.enabled`` (подтверждено чтением ``configs/observability_config.py``
-    строки 834-837 и грепом ``errors\\.enabled`` по всему фреймворку — ноль
-    совпадений вне схемы и докстрингов). ``ErrorManager`` создаётся, если
-    ``managers_config.get("error", {})`` непусто (``managers/process_managers.py``,
-    ``_create_error_manager``) — а он непуст ВСЕГДА, независимо от ``enabled``.
+    **Дизъюнкция здесь БЫЛА, и это не забыто, а история, зафиксированная задачей
+    2.12.** На момент задачи 2.2 акцептанс сознательно оставлял реализатору выбор
+    между ДВУМЯ путями: (а) гасить ``ErrorManager`` (пустой/явно-выключенный
+    ``error``-словарь) ИЛИ (б) снять ключ из схемы с громкой жалобой через
+    ``emergency_log`` — тем же жестом, что ``REMOVED_BATCHING_KEYS``. Прежняя
+    редакция этого теста держала ИМЕННО дизъюнкцию (``gating_variant or
+    removal_variant``), потому что реализация ещё не была написана.
+
+    **Выбор сделан — вариант (а), гейт.** Задача 2.12 (координатор, живой замер
+    на текущем дереве) сняла:
+
+    ::
+
+        expand_observability(ObservabilityConfig.model_validate(
+            {"errors": {"enabled": False}}
+        ))["error"]                                            ->  {}
+        expand_observability({})["error"]                       ->  словарь с
+                                                                     ключами
+                                                                     ['default_level',
+                                                                      'include_stacktrace']
+
+    Тест, согласный с ДВУМЯ разными ответами, не стережёт ни одного: подмена
+    реализации на removal-вариант (снятие ключа из схемы) сегодня оставила бы
+    старую версию теста зелёной ровно так же, как и правильную — то есть она не
+    ловит регрессию. Здесь тест сужен до литерала выбранного варианта: ветка
+    ``removal_variant`` (сбор ``heard`` через ``monkeypatch`` на
+    ``fallback_mod.emergency_log``) снята вместе с переменной — она больше ни на
+    что не работает, а держать мёртвый код разбора несуществующей ветки значило
+    бы оставить читателю ложный след «реализация может пойти сюда».
+
+    Правка законна в этом файле (он принадлежит независимому тестеру) именно
+    потому, что она прямо предписана задачей 2.12 — сужение уже принятого
+    (2.2), а не переписывание чужого контракта по своей инициативе.
+
+    Сегодня ``errors.enabled`` существует в схеме (``ObservabilityErrorsConfig.
+    enabled``, дефолт ``True``) и читается ЕДИНСТВЕННОЙ точкой раскладки —
+    ``expand_observability`` (``configs/observability_config.py``, гейт `if
+    cfg.errors.enabled ... else {}`): `False` даёт ПУСТОЙ словарь, и
+    `_create_error_manager` (``managers/process_managers.py``) видит пустой
+    `managers_config.get("error", {})` — тем же путём, что и процесс БЕЗ секции
+    `error` вовсе.
     """
 
-    def test_setting_it_false_either_gates_the_manager_or_gets_a_loud_removal_complaint(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        heard: list = []
-        import multiprocess_framework.modules._fallback as fallback_mod
-
-        def _record(name: str, level: str, message: str, *args: Any) -> None:
-            heard.append(str(message) % args if args else str(message))
-
-        monkeypatch.setattr(fallback_mod, "emergency_log", _record)
-
+    def test_setting_it_false_gives_an_empty_error_dict_that_gates_the_manager(self) -> None:
         cfg = ObservabilityConfig.model_validate({"errors": {"enabled": False}})
         expanded = expand_observability(cfg)
-        error_dict = expanded["error"]
 
-        # Вариант (а) — гейт создания ErrorManager: словарь пуст (тогда
-        # `_create_error_manager` не создаст менеджер, см. `managers_config.get`
-        # проверку на непустоту) ИЛИ несёт явный маркер `enabled: False`,
-        # который умеет читать `_create_error_manager`.
-        gating_variant = (not error_dict) or (error_dict.get("enabled") is False)
-
-        # Вариант (б) — ключ снят из схемы: старый конфиг с `errors.enabled: false`
-        # обязан дать ГРОМКУЮ жалобу через `emergency_log` (тот же жест, что
-        # `REMOVED_BATCHING_KEYS` / `_complain_about_repurposed_enabled`), а не
-        # молча проигнорироваться `extra=ignore`.
-        removal_variant = any("enabled" in msg for msg in heard)
-
-        assert gating_variant or removal_variant, (
-            f"errors.enabled=False не даёт НИКАКОГО наблюдаемого эффекта: "
-            f"error-словарь={error_dict!r}, аварийные предупреждения={heard!r} — "
-            "ключ принимается и ничего не делает (критерий 2 задачи 2.2, m4/M7)"
+        assert expanded["error"] == {}, (
+            f"errors.enabled=False обязан давать ПУСТОЙ error-словарь (гейт создания "
+            f"ErrorManager, вариант (а) — выбор задачи 2.12), получено: {expanded['error']!r}"
         )
 
     def test_setting_it_true_stays_the_default_shape_as_a_control(self) -> None:

@@ -386,7 +386,29 @@ class TestTheProbeDoesNotSpeakForTheOperator:
     ``model_validate`` — и оператор, попросивший ``enabled: true``, получил бы в
     журнале голос о ВЫКЛЮЧЕННОЙ плоскости. Ложный голос дороже отсутствующего:
     его читают. Отсюда ``model_copy`` в ``_with_leaf``.
+
+    **Сброс окна голоса обязателен для ОБЕИХ половин пары, и по разным причинам
+    (Task 2.12, m1).** С задачи 2.12 предупреждение дросселируется окном по
+    ключу ``stats.enabled.repurposed``, держатель — процессный синглтон:
+
+    * у половины «оператор правда гасит» без сброса голос съедает сосед,
+      прогнавший ту же секцию раньше в том же процессе — измерено, тест краснел
+      в полном прогоне ``process_module/tests/`` (``test_f2_task22_schema_wiring.py``
+      идёт алфавитно раньше и реалит секцию со ``stats.enabled: false``);
+    * у половины «зонд молчит» сброс нужен ЗЕРКАЛЬНО: без него утверждение
+      «записей нет» зелено и тогда, когда голос просто подавлен чужим окном, то
+      есть тест проходил бы, не проверив ничего. Это тот же класс, что «ноль
+      наблюдений выглядит как результат наблюдения».
     """
+
+    @pytest.fixture(autouse=True)
+    def _own_the_voice_window(self):
+        """Окно голоса принадлежит этой паре тестов, а не порядку сбора pytest."""
+        from multiprocess_framework.modules.logger_module.core.windowed_voice import reset_process_voices
+
+        reset_process_voices()
+        yield
+        reset_process_voices()
 
     def test_asking_to_enable_the_plane_logs_no_warning_about_disabling_it(self, caplog: Any) -> None:
         import logging
