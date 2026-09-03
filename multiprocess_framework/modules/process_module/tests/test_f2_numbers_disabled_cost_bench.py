@@ -45,12 +45,25 @@ from multiprocess_framework.modules.process_module.configs.observation_policy im
 from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import MetricRule
 from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
 from multiprocess_framework.modules.statistics_module.observation.observation_manager import ObservationManager
-from multiprocess_framework.modules.tests._road_cost import count_calls, peak_alloc, report as _report, timed_pair
+from multiprocess_framework.modules.tests._road_cost import (
+    count_calls,
+    count_instructions,
+    peak_alloc,
+    report as _report,
+    timed_pair,
+)
 
 #: Процесс стенда — сегмент пути правила (Р-2а: ``processes.<p>.stats.<имя>``).
 _PROCESS = "task210_cost_probe"
 _DISABLED_METRIC = "task210_disabled_metric"
 _ENABLED_METRIC = "task210_enabled_metric"
+
+#: Инструкций байткода на дорогах — сняты В ЭТОМ ЖЕ харнессе (число зависит от
+#: того, как устроена лямбда: замыкание стоит на одну инструкцию дороже
+#: модульной функции, ``COPY_FREE_VARS``). Предсказание инъекции E1: выключенная
+#: 139 → 150.
+DISABLED_INSTRUCTIONS = 139
+ENABLED_INSTRUCTIONS = 607
 
 
 def _wired_stand() -> tuple[StatsManager, ObservationManager, ObservationPolicy]:
@@ -160,38 +173,51 @@ class TestTheDisabledMetricCostsNoMoreThanTheGate:
             # («инъекция E1: сборка записи ПЕРЕД гейтом → бенч красный») НЕ
             # ВЫПОЛНЯЛСЯ. Найдено ревью, а не автором: заплата E1 проходила
             # мимо ОБЕИХ половин счётной пары (конструктор типа не даёт события
-            # ``c_call``: ``dict(d)`` и ``{**d}`` неотличимы от ``lambda: None``)
-            # и укладывалась в тайминг-потолок — дельта отношения всего 0.048.
+            # ``c_call``: ``dict(d)``, ``{**d}`` и словарный литерал неотличимы
+            # от ``lambda: None``) и укладывалась в тайминг-потолок — дельта
+            # отношения всего 0.048.
             #
-            # Гейтуется ОТНОШЕНИЕ пиков, а не байты: абсолют зависит от версии
-            # CPython, от размера тегов И ОТ ПОКРЫТИЯ, отношение — от того,
-            # СОБИРАЕТСЯ ли запись на запрещённой дороге.
+            # Объектив — СЧЁТ ИНСТРУКЦИЙ, литералом обоих чисел, как у пары
+            # вызовов. Почему литерал, а не отношение (первая редакция гейтовала
+            # отношение пиков ``tracemalloc``, потолок 0.46):
             #
-            # Замер обоих режимов (числа побайтно повторяются от прогона к
-            # прогону, это НЕ шумная величина):
+            #   * отношение ПРОБИВАЕМО СО СТОРОНЫ ЗНАМЕНАТЕЛЯ. Замер: E1 плюс
+            #     ~600 байт транзиентной работы на ВКЛЮЧЁННОЙ дороге даёт
+            #     731/1526 = 0.479 — E1 проходит зелёным, ничего не сломав в
+            #     себе. У литерала выключенной дороги знаменателя нет вовсе;
+            #   * пик аллокаций зависит от ЯДРА трассировщика, а не только от
+            #     версии: на одной дороге CTracer даёт 0.417, ``COVERAGE_CORE=
+            #     sysmon`` — 0.367, ``pytrace`` — 0.440. Порог на такой величине
+            #     — Н-7 в другом пальто. Счёт инструкций одинаков во всех
+            #     четырёх состояниях, включая оба ядра coverage.
             #
-            #   без покрытия:   дерево 363/990 = 0.367   E1 731/990  = 0.738
-            #   под --cov:      дерево 1739/4174 = 0.417 E1 2099/4166 = 0.504
-            #
-            # Потолок 0.46 стоит между парами в ОБОИХ режимах. **Теснота названа
-            # вслух:** под покрытием окно всего 0.417…0.504, потому что coverage
-            # раздувает обе стороны (990 → 4166 байт) и тем сжимает разницу. Это
-            # терпимо ровно потому, что величина детерминирована побайтно, а не
-            # шумит; при смене версии CPython или coverage оба числа обязаны
-            # быть ПЕРЕСНЯТЫ, а не подогнаны. `make test` идёт с покрытием —
-            # значит проверять надо оба режима, одного мало.
+            # Довод Н-7 («отношение, а не абсолют») здесь НЕ применяется: он про
+            # ШУМНЫЕ величины, а счёт инструкций — событие байткода. Первая
+            # редакция перенесла форму по аналогии с соседним гейтом, и это была
+            # ошибка того же рода, что три ложных утверждения в старом
+            # комментарии соседа.
+            disabled_instr = count_instructions(disabled_call)
+            enabled_instr = count_instructions(enabled_call)
+            _report(capsys, f"  инструкций (выключенная / включённая): {disabled_instr} / {enabled_instr}")
+
+            assert disabled_instr == DISABLED_INSTRUCTIONS, (
+                f"дорога выключенной метрики исполняет {disabled_instr} инструкций вместо "
+                f"{DISABLED_INSTRUCTIONS}: если число ВЫРОСЛО — на запрещённой дороге появилась "
+                "работа, и первый подозреваемый — сборка записи ПЕРЕД гейтом"
+            )
+            assert enabled_instr == ENABLED_INSTRUCTIONS, (
+                f"дорога включённой метрики исполняет {enabled_instr} инструкций вместо {ENABLED_INSTRUCTIONS}"
+            )
+
+            # Пик аллокаций — СПРАВОЧНО, без гейта: величина зависит от ядра
+            # трассировщика (см. выше), гейтовать её значило бы завести порог,
+            # который молча краснеет от смены ``COVERAGE_CORE``.
             disabled_bytes = peak_alloc(disabled_call)
             enabled_bytes = peak_alloc(enabled_call)
-            alloc_ratio = disabled_bytes / enabled_bytes
             _report(
                 capsys,
                 f"  пик памяти (выкл/вкл): {disabled_bytes} / {enabled_bytes} байт, "
-                f"отношение {alloc_ratio:.3f}x  (гейтуется, потолок 0.46)",
-            )
-            assert alloc_ratio < 0.46, (
-                f"выключенная метрика начала СОБИРАТЬ запись: пик {disabled_bytes} байт против "
-                f"{enabled_bytes} у включённой, отношение {alloc_ratio:.3f} — гейт перестал стоять "
-                "ПЕРЕД сборкой записи"
+                f"отношение {disabled_bytes / enabled_bytes:.3f}x  (справочно, НЕ гейтуется)",
             )
         finally:
             mgr.shutdown()

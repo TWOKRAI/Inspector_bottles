@@ -29,11 +29,12 @@ from __future__ import annotations
 
 import gc
 import sys
+import threading
 import time
 import tracemalloc
 from typing import Any, Callable, Tuple
 
-__all__ = ["count_calls", "peak_alloc", "report", "timed_pair"]
+__all__ = ["count_calls", "count_instructions", "peak_alloc", "report", "timed_pair"]
 
 
 def report(capsys: Any, line: str) -> None:
@@ -106,6 +107,75 @@ def timed_pair(new_fn: Callable[[], Any], old_fn: Callable[[], Any], repeats: in
     finally:
         gc.enable()
     return best_new / repeats, best_old / repeats
+
+
+def count_instructions(fn: Callable[[], Any]) -> int:
+    """Сколько инструкций байткода исполняет ``fn()`` — в СВОЁМ потоке, на любой глубине.
+
+    **Третий объектив дорог, и он строже двух первых.** :func:`count_calls`
+    слеп к КОНСТРУИРОВАНИЮ: ``dict(d)``, ``{**d}``, ``list(d)`` и словарный
+    литерал дают у него ровно ``(1, 1)`` — столько же, сколько ``lambda: None``,
+    потому что конструктор типа не порождает события ``c_call``. Из-за этой
+    слепоты приёмочный критерий Task 2.10 («сборка записи ПЕРЕД гейтом → бенч
+    красный») не выполнялся ни счётным сторожем, ни таймингом.
+
+    Счёт ИНСТРУКЦИЙ (``sys.monitoring``, CPython ≥ 3.12) видит все эти формы,
+    оставаясь событием байткода — то есть не зависит ни от машины, ни от
+    нагрузки. Замер на стенде бенча: выключенная дорога 139 инструкций, под
+    заплатой E1 — 150; включённая 607 и 609.
+
+    **Почему именно инструкции, а не пик аллокаций.** Пик ``tracemalloc``
+    (:func:`peak_alloc`) тоже видит сборку, но его число зависит от ЯДРА
+    трассировщика: на одной и той же дороге CTracer даёт отношение 0.417,
+    ``COVERAGE_CORE=sysmon`` — 0.367, ``pytrace`` — 0.440. Порог на такой
+    величине — Н-7 в другом пальто. Счёт инструкций одинаков во всех четырёх
+    состояниях, включая оба ядра coverage.
+
+    Args:
+        fn: измеряемый вызов без аргументов. **Прогрев — снаружи**, как у
+            :func:`peak_alloc`: холодный вызов заводит агрегаты и даёт другое
+            число.
+
+    Returns:
+        Число событий ``INSTRUCTION``, увиденных в потоке вызывающего.
+
+    Note:
+        Число зависит от того, как устроен сам ``fn``: лямбда с замыканием
+        стоит на одну инструкцию дороже модульной функции (``COPY_FREE_VARS``).
+        Литерал снимать в ТОМ ЖЕ харнессе, где он будет проверяться.
+
+        События процессные, поэтому счёт фильтруется по ``threading.get_ident``:
+        без фильтра соседний поток (в стенде живёт таймер окна агрегации) добавил
+        бы свои инструкции. Идентификатор инструмента берётся свободный —
+        ``coverage`` в режиме ``sysmon`` занимает свой, и сосуществование
+        проверено.
+    """
+    monitoring = sys.monitoring
+    tool_id = next((i for i in range(6) if monitoring.get_tool(i) is None), None)
+    if tool_id is None:  # pragma: no cover — все слоты заняты, сказать вслух, а не соврать нулём
+        raise RuntimeError("sys.monitoring: свободного tool id нет — счёт инструкций невозможен")
+
+    mine = threading.get_ident()
+    counted = 0
+
+    def _on_instruction(code: Any, offset: int) -> Any:
+        nonlocal counted
+        if threading.get_ident() == mine:
+            counted += 1
+        return None
+
+    monitoring.use_tool_id(tool_id, "road_cost")
+    try:
+        monitoring.register_callback(tool_id, monitoring.events.INSTRUCTION, _on_instruction)
+        monitoring.set_events(tool_id, monitoring.events.INSTRUCTION)
+        try:
+            fn()
+        finally:
+            monitoring.set_events(tool_id, 0)
+            monitoring.register_callback(tool_id, monitoring.events.INSTRUCTION, None)
+    finally:
+        monitoring.free_tool_id(tool_id)
+    return counted
 
 
 def peak_alloc(fn: Callable[[], Any], warm: int = 50, repeats: int = 200) -> int:
