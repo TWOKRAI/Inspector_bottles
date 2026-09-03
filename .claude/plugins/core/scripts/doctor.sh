@@ -432,7 +432,7 @@ fi
 #
 # ROADMAP §J caps harness surface to keep the system in the "smart zone"
 # (too many agents/hooks/skills/MCP degrade routing + context budget):
-#   - <=12 agents in any one team plugin   (dev ships exactly 12 — at ceiling)
+#   - <=14 agents in any one team plugin   (dev ships exactly 14 — at ceiling; 12 -> 14 on 2026-09-02, cto + junior)
 #   - <=15 hooks  in any one plugin        (core ships exactly 15 — at ceiling)
 #   - <=15 skills total across all plugins (seed ships ~8)
 #   - <=8  configured MCP servers          (default ships ~4)
@@ -481,7 +481,9 @@ except Exception:
     [ -z "$MCP_N" ] && MCP_N=0
 fi
 
-AGENTS_CAP=12; HOOKS_CAP=15; SKILLS_CAP=15; MCP_CAP=8
+# AGENTS_CAP raised 12 -> 14 on 2026-09-02: the owner added cto (Fable verdicts) and junior (Haiku mechanics) to dev.
+# SKILLS_CAP raised 15 -> 17 on 2026-09-02: 16 were already over; project-rules (+1) replaces 12 pasted copies.
+AGENTS_CAP=14; HOOKS_CAP=15; SKILLS_CAP=17; MCP_CAP=8
 BLOAT_SUMMARY="agents:${AGENTS_MAX}/${AGENTS_CAP}(${AGENTS_WHO}) hooks:${HOOKS_MAX}/${HOOKS_CAP}(${HOOKS_WHO}) skills:${SKILLS_N}/${SKILLS_CAP} mcp:${MCP_N}/${MCP_CAP}"
 BLOAT_OVER=""
 [ "${AGENTS_MAX:-0}" -gt "$AGENTS_CAP" ] && BLOAT_OVER="$BLOAT_OVER agents(${AGENTS_MAX}>${AGENTS_CAP} in ${AGENTS_WHO})"

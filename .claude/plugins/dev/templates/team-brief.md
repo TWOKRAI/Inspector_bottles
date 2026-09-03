@@ -38,8 +38,12 @@ qex index date: <YYYY-MM-DD> (<N> days old). Counts come from Grep, not from qex
 - If the task is ambiguous, implement the reading its wording and the surrounding code most
   directly support, state that assumption in your report, and do not build for the others.
 - A pre-existing bug or an improvement you notice: a follow-up line in your report, not a fix.
-- Ask a peer by name when its output is your input (the RED test path, an interface); ask
-  the lead only for decisions. Do not wait idle for an answer you can work around.
+- Ask a peer by name when its output is your input (the RED test path, an interface).
+- Cannot finish (a decision you may not make, spec contradicts the code, two failed
+  iterations)? Escalate ONE level up, never sideways: junior/docs-writer -> developer/tech-writer
+  -> teamlead -> cto -> owner. Send `ESCALATION -> <role>` with question / tried / blocked on /
+  files to that role by name, or to the lead if the role is not on the team. Do not wait idle
+  for an answer you can work around.
 </working_rules>
 
 <report>

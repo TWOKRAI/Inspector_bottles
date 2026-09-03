@@ -201,10 +201,10 @@ conversation history, an agent would not. Protocol: `.claude/commands/dev/team.m
 (Russian): [`docs/claude/AGENT_TEAMS_GUIDE.md`](../docs/claude/AGENT_TEAMS_GUIDE.md). Brief template
 with per-model prompting notes: `.claude/plugins/dev/templates/team-brief.md`.
 
-Roles → models: `cto` = Fable (verdicts only: phase acceptance, merge gate, arbitration, answers to
-escalations from Opus roles — once per phase, never per task); `teamlead` / `reviewer` /
-`investigator` / `manager` = Opus; `developer` / `tester` / `debugger` = Sonnet; `junior` /
-`docs-writer` = Haiku. `junior` never commits. No role exists without a task: spawn the minimal roster.
+Roles → models (all 14): `cto` = Fable (verdicts only: phase acceptance, merge gate, arbitration,
+answers to escalations from Opus roles — once per phase, never per task); `teamlead` / `reviewer` /
+`investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` /
+`tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` = Haiku. `junior` never commits. No role exists without a task: spawn the minimal roster.
 
 **Escalation ladder (owner's decision 2026-09-02, `project-rules` §7).** A question goes one level up,
 never sideways, never into a guess: `junior`/`docs-writer` → `developer`/`tech-writer` →
@@ -218,8 +218,8 @@ pre-implementation commit; break-injection by the lead, never delegated; reviewe
 every task; Fable only at phase acceptance / merge gate / arbitration / escalation.
 
 Hooks as gates (fail-open after two blocks on the same task or agent; `TEAM_GATES=off` disables):
-`TaskCompleted` runs ruff on changed `.py` and pytest on changed test files — titles containing
-`[RED]`, `[docs]` or `[skip-gate]` skip it; `TeammateIdle` blocks idling with uncommitted work inside
+`TaskCompleted` runs ruff on changed `.py` and pytest on changed test files — titles *starting*
+with `[RED]`, `[docs]` or `[skip-gate]` skip it (a prefix only, so a task about the RED path is still judged); `TeammateIdle` blocks idling with uncommitted work inside
 a linked worktree and only warns in the shared tree; `SubagentStart` / `SubagentStop` append to
 `data/team-journal.jsonl`. Scripts: `.claude/plugins/dev/hooks/`.
 
@@ -253,9 +253,9 @@ is a full session: ~25k tokens of context before its first tool call.
 
 ## Commands — quick reference
 
-Full list in the corresponding mode file. Key commands (46 total in 7 namespaces):
+Full list in the corresponding mode file. Key commands (76 command files in 14 namespaces, counted 2026-09-02):
 
-- **Dev:** `/dev:plan`, `/dev:implement`, `/dev:test`, `/dev:review`, `/dev:debug`, `/dev:ship`, `/dev:pipeline`, `/dev:adr`, `/dev:plan-status`
+- **Dev:** `/dev:plan`, `/dev:implement`, `/dev:test`, `/dev:review`, `/dev:debug`, `/dev:ship`, `/dev:pipeline`, `/dev:team`, `/dev:adr`, `/dev:plan-status`
   (bare `/plan` and `/review` are Claude Code built-ins — plan mode and PR review; the
   global agent-launching copies moved to `/ko:plan` and `/ko:review` on 2026-08-05)
 - **Spec:** `/spec`, `/spec-sync`

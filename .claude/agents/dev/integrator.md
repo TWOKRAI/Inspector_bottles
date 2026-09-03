@@ -7,7 +7,7 @@ description: >
   or coverage drop > 5%. Advisory-only when MCP unavailable.
 model: opus
 skills: project-rules
-# Денилист вместо аллоулиста: нужен весь MCP-пул (graphify, qex) + ToolSearch, минус запись.
+# Denylist instead of allowlist: needs the whole MCP pool (graphify, qex) + ToolSearch, minus writes.
 disallowedTools: Write, Edit, NotebookEdit
 ---
 

@@ -86,3 +86,10 @@ Question (only for needs-decision): <one sentence>
 - Do not "improve" tests: no added assertions, no removed ones, no skips.
 - Do not commit, push, or create branches.
 - Do not spend more than one attempt on a failing verification: report it with the output.
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.
