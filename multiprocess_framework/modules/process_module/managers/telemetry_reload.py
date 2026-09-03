@@ -316,6 +316,7 @@ def detect_throttle_caps(
     *,
     observation_rules: Optional[Dict[str, Any]] = None,
     default_interval_sec: Optional[float] = None,
+    effective_tick: Optional[float] = None,
 ) -> Dict[str, Dict[str, float]]:
     """Найти метрики publish-дельты, чью частоту central-троттл молча срезал бы.
 
@@ -364,16 +365,53 @@ def detect_throttle_caps(
     порта — сам ПУТЬ на языке того же матчера, что и central-правила. Довод
     целиком — ADR-PM-042.
 
+    **Ноль (Ф2, задача 2.11, Р-11, 2026-09-03) — НЕ то же самое, что у соседа
+    ``capped_metrics``.** С тех пор как дефолт поддерева порта
+    (``DEFAULT_SUBTREE_INTERVAL_SEC``) стал ``0.0``, кандидат с
+    ``interval_sec <= 0`` доходит и сюда — в частности, дефолт поддерева
+    попадает в ``observation_rules`` (:func:`~..configs.observation_policy.cap_candidates`)
+    буквально нулём на КАЖДОЙ пересборке политики боевого процесса, даже когда
+    оператор ничего не настраивал. Судить его напрямую (``0 > throttle_interval``
+    арифметически истинно почти всегда) значило бы вернуть ровно тот шум,
+    ради снятия которого Р-11 и делалась — только не в голосе
+    ``_warn_capped_metrics``, а в поле ``capped_by_throttle`` ответа
+    ``config.reload``. Измерено на боевых правилах троттла прототипа
+    (``manager_setup.py::_default_throttle_rules``, предохранитель 0.05 с):
+    без исправления заявленный интервал поддерева 0.0 при каждом
+    ``config.reload`` давал непустой ``capped_by_throttle`` про предохранитель,
+    которого никто не трогал.
+
+    Вопрос здесь, однако, ДРУГОЙ, чем у ``capped_metrics``, и решается он не
+    игнорированием, а ЗАМЕЩЕНИЕМ. У соседа вопрос — «зажал ли тик ЗАЯВКУ»; при
+    нуле заявки нет, и вопрос снимается целиком. Здесь вопрос — «срежет ли
+    троттл то, что публикатор РЕАЛЬНО попросит у хранилища»; при
+    ``interval_sec <= 0`` публикатор попросит НЕ «никогда», а ТАКТ (тот же
+    расчёт, что даёт ``effective_interval_sec`` в readback'е) — и троттл может
+    срезать именно эту, реальную частоту (такт 0.01 с при троттле 0.05 с —
+    настоящий, не мнимый срез). Игнорирование здесь спрятало бы реальный
+    срез; замещение тактом — единственный честный ответ.
+
     Args:
         publish_section: publish-под-секция команды (dict с опциональным ``metrics``).
         store_throttle: живой центральный ``ThrottleMiddleware`` оркестратора (или ``None``).
         observation_rules: правила порта по пути ``{glob: {enabled, interval_sec}}``
             — ожидается :func:`~..configs.observation_policy.cap_candidates`
             (правила оператора ПЛЮС дефолт поддерева) либо ``None``.
+        effective_tick: эффективный телеметрийный тик воркера, сек
+            (``ProcessHeartbeat.current_telemetry_tick()``). Замещает
+            ``interval_sec <= 0`` при сверке с троттлом (см. выше).
+            ``None`` (такт неизвестен вызывающему — читатель не дал/не смог
+            достать) → такой кандидат ПРОПУСКАЕТСЯ вовсе, тем же приёмом, что
+            уже стоит рядом для ``interval_sec is None`` — «наследование
+            default — не флагуем, неоднозначно»: судить неизвестное молчанием
+            здесь честнее, чем кричать волком на предположение.
 
     Returns:
         ``{метрика-или-паттерн: {"publisher_interval_sec": p, "throttle_interval_sec": t}}``
         — только там, где троттл строже (``t > p`` или ``t == 0`` полная блокировка).
+        ``p`` — РЕАЛЬНЫЙ ask публикатора (после замещения тактом при нуле), не
+        сырое заявленное значение конфига: печатать ``0.0`` рядом с «троттл
+        строже» было бы противоречием по смыслу для читателя отчёта.
         Пусто → поднятие частоты дойдёт до дерева без среза (страховка мягче публикатора).
     """
     if store_throttle is None:
@@ -410,16 +448,32 @@ def detect_throttle_caps(
                 return float(raw)
         return 0.0
 
+    def _publisher_ask(pub_interval: float) -> Optional[float]:
+        """Частота, которую публикатор РЕАЛЬНО запросит у хранилища (Р-11).
+
+        ``pub_interval > 0`` — заявка есть, она и есть ask. ``pub_interval <= 0``
+        — заявки нет, реальный ask — ТАКТ (``effective_tick``); такт неизвестен
+        (``None``) — не с чем сравнивать, читается вызывающим как «пропустить».
+        """
+        if pub_interval > 0.0:
+            return float(pub_interval)
+        if effective_tick is None:
+            return None
+        return float(effective_tick)
+
     def _judge(key: str, metric: str, pub_interval: Any) -> None:
         if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
+            return
+        asked = _publisher_ask(float(pub_interval))
+        if asked is None:
             return
         throttle_interval = _central_rule_for_metric(metric, rules)
         if throttle_interval is None:
             return
         # Троттл строже: больший min-интервал (реже пропускает) ИЛИ 0 (полная блокировка).
-        if throttle_interval == 0 or throttle_interval > pub_interval:
+        if throttle_interval == 0 or throttle_interval > asked:
             caps[key] = {
-                "publisher_interval_sec": float(pub_interval),
+                "publisher_interval_sec": asked,
                 "throttle_interval_sec": float(throttle_interval),
             }
 
@@ -447,12 +501,15 @@ def detect_throttle_caps(
             pub_interval = rule.get("interval_sec")
             if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
                 pub_interval = default_interval
+            asked = _publisher_ask(float(pub_interval))
+            if asked is None:
+                continue
             throttle_interval = _central_rule_for_path_pattern(str(pattern), rules)
             if throttle_interval is None:
                 continue
-            if throttle_interval == 0 or throttle_interval > pub_interval:
+            if throttle_interval == 0 or throttle_interval > asked:
                 caps[str(pattern)] = {
-                    "publisher_interval_sec": float(pub_interval),
+                    "publisher_interval_sec": asked,
                     "throttle_interval_sec": float(throttle_interval),
                 }
 

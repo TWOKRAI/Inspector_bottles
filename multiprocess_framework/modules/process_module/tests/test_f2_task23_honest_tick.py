@@ -246,12 +246,15 @@ class TestObservationEffectiveShowsThePortsAchievableCadence:
 
         Сценарий: такт = 5.0 (heartbeat_interval, ``tick_sec`` снят), правил
         оператора НЕТ ни одного → решает дефолт поддерева
-        (``DEFAULT_SUBTREE_INTERVAL_SEC`` = 1.0, ``PORT_SUBTREE_PATTERN``) —
-        быстрее такта, поэтому достижимое 5.0, не 1.0. Прямая параллель со
-        сценарием ``test_the_tick_wins_when_the_configured_interval_is_tighter``
-        выше, тем же гейтом (``cap_candidates`` уже считает этот случай
-        «зажатым» для ЦЕЛЕЙ ГОЛОСА — см. ``capped_metrics``; этот тест
-        проверяет то же самое число, но в READBACK, а не в логе).
+        (``DEFAULT_SUBTREE_INTERVAL_SEC`` = 0.0 — Р-11, Ф2 задача 2.11,
+        2026-09-03; было 1.0 до этого решения, ``PORT_SUBTREE_PATTERN``) —
+        поддерево не заявляет частоты вовсе, поэтому достижимое равно самому
+        такту (5.0). Прямая параллель со сценарием
+        ``test_the_tick_wins_when_the_configured_interval_is_tighter``
+        выше, тем же гейтом (``cap_candidates`` до Р-11 считал этот случай
+        «зажатым» для ЦЕЛЕЙ ГОЛОСА — см. ``capped_metrics``; после Р-11 ноль
+        не «зажат», он не заявлен, но формула ``effective_interval_sec =
+        max(interval_sec, tick)`` в READBACK не изменилась и даёт то же число).
         """
         svc, handlers = _wired_with_introspect(tmp_path)
         svc._heartbeat.reconfigure_telemetry({"metrics": {"fps": {"enabled": True, "interval_sec": 1.0}}})
@@ -263,8 +266,8 @@ class TestObservationEffectiveShowsThePortsAchievableCadence:
         effective = observation["effective"]
         assert PORT_SUBTREE_PATTERN in effective, sorted(effective) if isinstance(effective, dict) else effective
         subtree = effective[PORT_SUBTREE_PATTERN]
-        assert subtree["interval_sec"] == DEFAULT_SUBTREE_INTERVAL_SEC, subtree  # заявленное (дефолт), 1.0
-        assert subtree["effective_interval_sec"] == BOOT_HEARTBEAT_INTERVAL, subtree  # max(1.0, 5.0) = 5.0
+        assert subtree["interval_sec"] == DEFAULT_SUBTREE_INTERVAL_SEC, subtree  # заявленное (дефолт), 0.0
+        assert subtree["effective_interval_sec"] == BOOT_HEARTBEAT_INTERVAL, subtree  # max(0.0, 5.0) = 5.0
 
 
 # =========================================================================== #

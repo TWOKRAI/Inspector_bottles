@@ -302,7 +302,9 @@ class TestProvenanceNamesThreeSources:
         assert by_rule.source == SOURCE_RULE, by_rule
         assert by_rule.interval_sec == 0.5, by_rule
         assert by_subtree.source == SOURCE_SUBTREE_DEFAULT, by_subtree
-        assert by_subtree.interval_sec == 1.0, by_subtree
+        # Р-11 (Ф2, задача 2.11, 2026-09-03): дефолт поддерева сменился с 1.0
+        # на 0.0 — «не чаще такта, без дополнительного троттла».
+        assert by_subtree.interval_sec == 0.0, by_subtree
         assert by_whitelist.source == SOURCE_LEGACY, by_whitelist
         assert by_whitelist.interval_sec == 3.0, by_whitelist
 

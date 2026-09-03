@@ -770,6 +770,16 @@ def capped_metrics(config: Any, effective_tick: float, policy: Any = None) -> li
     которого никто не принимал. Правило по ПУТИ (``cap_candidates`` ниже) эта
     сверка не затрагивает — там нет каталога-по-умолчанию, каждый кандидат уже
     оператора (правило) либо назначенный предохранитель поддерева.
+
+    **Нулевой интервал не «зажат» (Ф2, задача 2.11, Р-11).** Правило,
+    заявляющее ``interval_sec=0``, не просит частоты вовсе — «не чаще такта,
+    без дополнительного троттла» (дефолт поддерева порта теперь такой же,
+    :data:`~..configs.observation_policy.DEFAULT_SUBTREE_INTERVAL_SEC`).
+    Сравнивать отсутствие заявки с тактом было бы категориальной ошибкой:
+    ``0 < effective_tick`` арифметически истинно почти всегда, но «зажато»
+    описывает ЗАЯВКУ, которую тик срезал, а не её отсутствие. Обе половины
+    ниже (каталог имён и ``cap_candidates``) поэтому проверяют ``0 <
+    interval < effective_tick``, а не голое ``interval < effective_tick``.
     """
     out: list[tuple[str, float]] = []
     for metric in gated_metrics():
@@ -780,7 +790,9 @@ def capped_metrics(config: Any, effective_tick: float, policy: Any = None) -> li
         # здесь используется только ради наследования interval_sec=None → default_interval_sec
         # для метрики, которую оператор УЖЕ назвал явно.
         enabled, interval = config.resolve(metric)
-        if enabled and interval < effective_tick:
+        # Р-11 (Ф2, задача 2.11): ноль — «частоты не прошу», не «зажато» (см.
+        # докстринг выше про категориальную разницу между заявкой и её отсутствием).
+        if enabled and 0.0 < interval < effective_tick:
             out.append((metric, interval))
     if policy is None:
         return out
@@ -798,7 +810,8 @@ def capped_metrics(config: Any, effective_tick: float, policy: Any = None) -> li
             continue
         raw = rule.get("interval_sec")
         interval = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else default_interval
-        if interval < effective_tick:
+        # Р-11: та же граница, что у каталога имён выше — ноль не «зажат».
+        if 0.0 < interval < effective_tick:
             out.append((str(pattern), float(interval)))
     return out
 
@@ -988,10 +1001,24 @@ class TelemetryGate:
         чисел (Ф2, 2.1). Тело метода стало короче ровно на те три строки,
         которые уехали в общий класс; контракт «срок двигается в момент ВЫДАЧИ»
         не изменился и живёт теперь в одном месте на две плоскости.
+
+        **Нулевой интервал минует расписание вовсе** (Ф2, задача 2.11, Р-11).
+        ``interval <= 0`` значит «частота не заявлена» (дефолт поддерева порта
+        теперь именно такой —
+        :data:`~..configs.observation_policy.DEFAULT_SUBTREE_INTERVAL_SEC`), а
+        не «публиковать чаще, чем возможно»: без короткого замыкания
+        :meth:`PathSchedule.due` всё равно завёл бы запись ``_next_due[path] =
+        now`` на каждый такой путь — расписание росло бы без единого
+        троттлинга. Тот же приём уже стоит у соседней плоскости чисел
+        (``NumbersGate.allow``: ``if interval > 0.0 and not
+        self._schedule.due(...)``) — здесь он выражен тем же условием, только
+        в форме раннего возврата.
         """
         enabled, interval = self.decide(path, metric)
         if not enabled:
             return False
+        if interval <= 0.0:
+            return True
         return self._schedule.due(path, interval, now)
 
     @property

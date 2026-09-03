@@ -1567,11 +1567,26 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
             raw = live_publish.get("default_interval_sec")
             if isinstance(raw, (int, float)) and not isinstance(raw, bool):
                 inherited = float(raw)
+        # Ф2 (задача 2.11, Р-11): дефолт поддерева (`cap_candidates(applied)`)
+        # заявляет `interval_sec=0.0` на каждой пересборке — `detect_throttle_caps`
+        # обязан судить его по РЕАЛЬНОМУ ask (тику), а не по голому нулю (см. её
+        # докстринг). Тот же осторожный приём, что уже стоит выше для
+        # `current_telemetry_publish`: readback не смеет ронять применение политики.
+        effective_tick = None
+        current_tick = getattr(heartbeat, "current_telemetry_tick", None)
+        if callable(current_tick):
+            try:
+                raw_tick = current_tick()
+            except Exception:  # noqa: BLE001 — readback не смеет ронять применение политики
+                raw_tick = None
+            if isinstance(raw_tick, (int, float)) and not isinstance(raw_tick, bool):
+                effective_tick = float(raw_tick)
         applied["capped_by_throttle"] = detect_throttle_caps(
             None,
             store_throttle,
             observation_rules=cap_candidates(applied),
             default_interval_sec=inherited,
+            effective_tick=effective_tick,
         )
     return applied
 

@@ -127,7 +127,8 @@ class TestExplicitOperatorEntryBeatsADefault:
             f"новая метрика плагина не поехала при НУЛЕВЫХ правках конфига: {decision} — критерий М1 сломан"
         )
         assert decision.source == SOURCE_SUBTREE_DEFAULT, decision
-        assert decision.interval_sec == 1.0, decision
+        # Р-11 (Ф2, задача 2.11, 2026-09-03): дефолт поддерева сменился с 1.0 на 0.0.
+        assert decision.interval_sec == 0.0, decision
 
     def test_the_legacy_umbrella_does_not_leak_onto_the_framework_plane(self) -> None:
         """Пара-контроль плоскостей: тот же конфиг, другой путь — другой ответ.
@@ -199,9 +200,15 @@ class TestCapReportReachesTheCommandAnswer:
         applied = res["observation_applied"]
         assert applied["throttle_checked"] is True, applied
         # Оба кандидата: правило оператора И дефолт поддерева. Второй попал сюда
-        # находкой З1 — этот синтетический троттл (2.0 с) строже и его дефолтной
-        # секунды. В бою предохранитель мягкий (0.05 с, `manager_setup.py`), и
-        # дефолт поддерева в отчёт не попадает — ложной тревоги нет.
+        # находкой З1 — этот синтетический троттл (2.0 с) строже и его дефолтного
+        # значения. Дефолт поддерева заявляет 0.0 с (Р-11, Ф2 задача 2.11,
+        # 2026-09-03; было 1.0 с до этого решения) — «частоты не заявлено»,
+        # поэтому `detect_throttle_caps` (добор к 2.11, тот же коммит) судит его
+        # по РЕАЛЬНОМУ ask — эффективному тику живого heartbeat'а
+        # (`current_telemetry_tick()`), а не по голому нулю. Такт здесь —
+        # `min(heartbeat_interval=5.0, tick_sec=1.0)` = 1.0 (`BOOT_PUBLISH`,
+        # `test_telemetry_layers.py`) — меньше троттла (2.0), значит троттл
+        # СТРОЖЕ, и предохранитель по-прежнему в отчёте, теперь числом 1.0.
         assert applied["capped_by_throttle"] == {
             "processes.*.state.plugins.*.fps": {"publisher_interval_sec": 0.02, "throttle_interval_sec": 2.0},
             PORT_SUBTREE_PATTERN: {"publisher_interval_sec": 1.0, "throttle_interval_sec": 2.0},
@@ -425,7 +432,8 @@ class TestResolvedNamesThePathsWhereTheMetricActuallyLives:
         assert real in port_paths, f"вердикт по реальному пути отсутствует: {entry}"
         # Дефолт поддерева порта разрешает лист — ровно то, что видно в дереве.
         assert port_paths[real]["enabled"] is True, port_paths
-        assert port_paths[real]["interval_sec"] == 1.0, port_paths
+        # Р-11 (Ф2, задача 2.11, 2026-09-03): дефолт поддерева сменился с 1.0 на 0.0.
+        assert port_paths[real]["interval_sec"] == 0.0, port_paths
         # И вердикты РАЗНЫЕ — иначе находка не воспроизведена: именно расхождение
         # «плоскость молчит / путь работает» вводило оператора в заблуждение.
         assert entry["enabled"] is False, entry
@@ -484,24 +492,47 @@ class TestInheritedIntervalIsJudgedToo:
         )
         assert caps == {}, caps
 
-    def test_with_nothing_to_inherit_the_fallback_agrees_with_the_neighbours(self) -> None:
-        """Нечего наследовать → ``0.0``, как у соседа и у самого решения.
+    def test_with_nothing_to_inherit_and_no_tick_known_the_candidate_is_skipped(self) -> None:
+        """Нечего наследовать → кандидат ПРОПУЩЕН, если такт неизвестен.
 
-        **Этот тест был написан наоборот и закреплял дефект.** Первая редакция
-        пришпиливала схемный литерал ``1.0`` как «правильный ответ» — то есть
-        объявляла контрактом то самое число, которым сверщик подменял живое
-        значение. Нашёл второй проход ревью; переписан на согласие с ДВУМЯ
-        соседями, решающими ту же задачу на том же входе:
-        ``capped_metrics`` (``getattr(config, "default_interval_sec", 0.0)``) и
-        ``ObservationPolicy.resolve`` (``... if self._legacy is not None else 0.0``).
-        «Частоты нет» значит «каждый тик», и любой троттл тогда строже.
+        **Согласие, которое этот тест прежде закреплял, СНЯТО Р-11** (Ф2,
+        задача 2.11, 2026-09-03) — это не регрессия, а прямое следствие
+        решения владельца. До Р-11 «частоты нет» читалось как «нулевой
+        интервал», и сверщик судил ноль буквально — тем самым соглашаясь с
+        ``capped_metrics``/``ObservationPolicy.resolve``, которые тоже
+        откатывались к ``0.0``. После Р-11 ноль в языке политики порта
+        значит «частота не заявлена, публикатор попросит ТАКТ» — а такт
+        ``detect_throttle_caps`` не знает сам, его обязан передать
+        вызывающий (``effective_tick``, см. докстринг функции). Без него
+        кандидат не судится вовсе — то же решение, что уже стоит рядом для
+        ``interval_sec is None`` («наследование default — не флагуем,
+        неоднозначно»); подставлять литерал ``0.0`` вместо неизвестного
+        такта значило бы вернуть тот самый шум, ради снятия которого Р-11
+        делалась.
         """
         caps = detect_throttle_caps(
             None,
             _Throttle(),
             observation_rules={"processes.*.state.plugins.*.fps": {"enabled": True}},
         )
-        assert caps["processes.*.state.plugins.*.fps"]["publisher_interval_sec"] == 0.0, caps
+        assert caps == {}, caps
+
+    def test_with_a_known_tick_the_candidate_is_judged_by_the_tick_not_by_zero(self) -> None:
+        """Тот же вход, но вызывающий передал такт (как боевой
+        ``apply_observation_policy`` через
+        ``ProcessHeartbeat.current_telemetry_tick()``) — кандидат судится по
+        РЕАЛЬНОМУ ask, а не по нулю. Такт ``1.0`` меньше central-правила
+        ``2.0`` (``_Throttle``) — троттл СТРОЖЕ, срез реален, отчёт обязан
+        появиться."""
+        caps = detect_throttle_caps(
+            None,
+            _Throttle(),
+            observation_rules={"processes.*.state.plugins.*.fps": {"enabled": True}},
+            effective_tick=1.0,
+        )
+        assert caps == {
+            "processes.*.state.plugins.*.fps": {"publisher_interval_sec": 1.0, "throttle_interval_sec": 2.0}
+        }, caps
 
     def test_the_live_default_reaches_the_report_through_the_command(self, tmp_path) -> None:
         """Кейс B ревьюера — через ОТВЕТ КОМАНДЫ, а не прямым вызовом.

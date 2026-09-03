@@ -114,14 +114,17 @@ WRITER = "capture"
 #: полученные РУЧНЫМ разбором ``ObservationPolicy._decide()`` (см. докстринг
 #: файла) на ``REAL_LEGACY_PUBLISH`` и дефолтной ``ObservationPolicyConfig()``
 #: (в боевом ``system.yaml`` секции ``observability.observation`` нет —
-#: действуют дефолты L0: ``subtree_enabled=True``, ``subtree_interval_sec=1.0``,
+#: действуют дефолты L0: ``subtree_enabled=True``, ``subtree_interval_sec=0.0``
+#: (Р-11, Ф2 задача 2.11, 2026-09-03 — было ``1.0`` до этого решения),
 #: ``rules={}``). Независимо подтверждено вторым источником: тот же боевой
 #: конфиг ЦЕЛИКОМ (под именем ``PROD``) уже живёт в
-#: ``test_observation_policy_review_f4.py::TestAWhitelistEntryOutranksTheSubtreeFrequencyToo``,
-#: и её ``test_the_subtree_frequency_does_not_reach_a_whitelisted_name`` при
-#: дефолтном (не суженном) ``subtree_interval_sec`` даёт ТЕ ЖЕ значения для
-#: ``fps`` (whitelist, 1.0) и ``drops`` (subtree_default, 1.0), что и таблица
-#: ниже.
+#: ``test_observation_policy_review_f4.py::TestAWhitelistEntryOutranksTheSubtreeFrequencyToo``
+#: (её ``test_the_subtree_frequency_does_not_reach_a_whitelisted_name`` задаёт
+#: ``subtree_interval_sec`` ЯВНО, не дефолтом, — 0.2 — но подтверждает тот же
+#: МЕХАНИЗМ: ``fps`` остаётся легаси-белым-списком (``1.0``, не трогается
+#: значением поддерева) вне зависимости от него, а ``drops`` всегда следует за
+#: ``subtree_default`` — при дефолте L0 это ``0.0``, что и стоит в таблице
+#: ниже).
 PATHS_AND_EXPECTED: dict[str, tuple[str, bool, float]] = {
     # Плоскость фреймворка (``processes.<p>.state.<имя>``) — решает ИМЕННО
     # легаси-секция: путь не попадает под ``PORT_SUBTREE_PATTERN``
@@ -139,9 +142,12 @@ PATHS_AND_EXPECTED: dict[str, tuple[str, bool, float]] = {
     # "КРИТИЧНО" — здесь она для плоскости УРОВНЕЙ (не чисел): наивная
     # трансляция, которая подняла бы зонтик default_enabled на ступень не
     # ниже TIER_SUBTREE_DEFAULT, погасила бы эти три пути молча.
-    "capture_fps": (f"processes.{PROC}.state.plugins.{WRITER}.capture_fps", True, 1.0),
-    "frame_count": (f"processes.{PROC}.state.plugins.{WRITER}.frame_count", True, 1.0),
-    "drops": (f"processes.{PROC}.state.plugins.{WRITER}.drops", True, 1.0),
+    # Р-11 (Ф2, задача 2.11, 2026-09-03): дефолт поддерева сменился с 1.0 на
+    # 0.0 — «не чаще такта, без дополнительного троттла». Три пути ниже
+    # решаются ИМЕННО этим дефолтом (subtree_default), не легаси-зонтиком.
+    "capture_fps": (f"processes.{PROC}.state.plugins.{WRITER}.capture_fps", True, 0.0),
+    "frame_count": (f"processes.{PROC}.state.plugins.{WRITER}.frame_count", True, 0.0),
+    "drops": (f"processes.{PROC}.state.plugins.{WRITER}.drops", True, 0.0),
 }
 
 

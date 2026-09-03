@@ -848,20 +848,28 @@ def _check_numbers_policy_claims(src: Sources) -> Optional[str]:
 
 
 def _check_heartbeat_tick_claims(src: Sources) -> Optional[str]:
-    """CONTROL_PANEL.md о честном такте ↔ схема и код (Ф2, задача 2.3, M9).
+    """CONTROL_PANEL.md о честном такте ↔ схема и код (Ф2, задача 2.3/2.11, M9).
 
     Три утверждения с ЧИСЛОМ или ИМЕНЕМ, расходящиеся с кодом молча:
 
     * L0-дефолт ``heartbeat_interval_sec`` (``5.0``) ↔ поле схемы
       ``ObservabilityConfig``;
     * имена двух новых readback-полей (``tick_effective_sec``,
-      ``effective_interval_sec``) — оба введены этой задачей, документ обязан
+      ``effective_interval_sec``) — оба введены задачей 2.3, документ обязан
       называть их дословно, иначе оператор не найдёт ключ по документу;
-    * СУЖЕНИЕ голоса (находка стадии 2, не было в тексте задачи): предохранитель
-      поддерева порта (``DEFAULT_SUBTREE_INTERVAL_SEC``, ``1.0``) в голос
-      ``_warn_capped_metrics`` при ``tick_sec is None`` не входит — документ обязан
-      называть его число, иначе будущая правка дефолта (в любую сторону) сделает
-      формулировку «безусловно меньше» неверной молча.
+    * дефолт поддерева порта (``DEFAULT_SUBTREE_INTERVAL_SEC``) — Ф2, задача
+      2.11 (Р-11): «не чаще такта, без дополнительного троттла». Документ
+      обязан называть ЭТО число, а не число сужения, которого больше нет.
+      **Страж переписан, а не расширен** (найдено при подготовке задачи
+      2.11): прежняя форма сравнивала ``subtree_default < heartbeat_default``
+      (``0.0 < 5.0``) — условие осталось истинным и после отмены сужения,
+      то есть страж продолжил бы молчаливо проходить, охраняя утверждение
+      («предохранитель недостижим БЕЗУСЛОВНО»), которого в коде больше нет.
+      Он сторожил СЛЕДСТВИЕ старого столкновения чисел, а не его ПРИЧИНУ, и
+      не заметил бы, что причина снята. Проверяется теперь ПРЯМО: Р-11
+      требует ровно ``0.0`` (поддерево не заявляет частоты вовсе) — любое
+      другое значение обязано остановить сверку, а не проползти мимо
+      арифметики, которая на новом числе тоже сходится.
     """
     config_file = f"{MODULES}/process_module/configs/observability_config.py"
     default = _schema_field_default(src, config_file, "ObservabilityConfig", "heartbeat_interval_sec")
@@ -872,10 +880,11 @@ def _check_heartbeat_tick_claims(src: Sources) -> Optional[str]:
     subtree_default = _module_constant(src, policy_rel, "DEFAULT_SUBTREE_INTERVAL_SEC")
     if not isinstance(subtree_default, (int, float)) or isinstance(subtree_default, bool):
         raise Unverifiable(f"DEFAULT_SUBTREE_INTERVAL_SEC: {subtree_default!r} не число — предпосылка не вычислилась")
-    if not float(subtree_default) < float(default):
+    if float(subtree_default) != 0.0:
         raise Unverifiable(
-            f"DEFAULT_SUBTREE_INTERVAL_SEC={subtree_default!r} больше не меньше heartbeat_interval_sec={default!r} — "
-            "сужение голоса перестало быть обязательным, формулировку и код нужно пересмотреть вместе"
+            f"DEFAULT_SUBTREE_INTERVAL_SEC={subtree_default!r} — решение Р-11 (2026-09-03) требует 0.0 "
+            "(«поддерево не заявляет частоты вовсе»); формулировку CONTROL_PANEL.md и код нужно "
+            "пересмотреть вместе"
         )
 
     # Пробелы и жирный markdown схлопываются ДО сверки — тем же приёмом, что F2-1:
@@ -892,8 +901,8 @@ def _check_heartbeat_tick_claims(src: Sources) -> Optional[str]:
     for name in ("tick_effective_sec", "effective_interval_sec"):
         if name not in doc:
             bad.append(f"CONTROL_PANEL.md не называет readback-поле {name}")
-    if f"предохранитель `{subtree_default}` с" not in doc:
-        bad.append(f"CONTROL_PANEL.md не называет предохранитель поддерева числом ({subtree_default!r})")
+    if f"поддерева `{subtree_default}` с" not in doc:
+        bad.append(f"CONTROL_PANEL.md не называет дефолт поддерева числом ({subtree_default!r})")
     return "; ".join(bad) if bad else None
 
 
@@ -902,8 +911,8 @@ CHECKS: Sequence[Check] = (
         "F2-3",
         "observability/CONTROL_PANEL.md",
         "честный такт: L0-дефолт heartbeat_interval_sec, readback tick_effective_sec/effective_interval_sec,"
-        "сужение голоса у предохранителя поддерева",
-        "Ф2 задача 2.3 (M9)",
+        "дефолт поддерева = 0.0 (сужение голоса снято, Р-11)",
+        "Ф2 задача 2.3 (M9) / 2.11 (Р-11)",
         _check_heartbeat_tick_claims,
     ),
     Check(
