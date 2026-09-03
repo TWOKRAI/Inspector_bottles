@@ -491,10 +491,10 @@ class ObservabilityStatsConfig(SchemaBase):
           ``:1333`` → ``unknown_section_keys:1212`` (``model_validate``);
         * стадия «применить» — ``builtin_commands.py:2158`` →
           ``observability_reload.py:1350/1415`` → ``compose_managers_payload:219``
-          → ``expand_observability:861``;
+          → ``expand_observability:901``;
         * стадия «сверить» — ``builtin_commands.py:2285`` →
           ``observability_verified:806`` → ``unknown_section_keys:1212``, затем
-          ``:808`` (``model_validate``) и ``:814`` → ``expand_observability:861``.
+          ``:808`` (``model_validate``) и ``:814`` → ``expand_observability:901``.
 
         Трёхстадийность («сперва проверить, потом применить, потом сверить») —
         сознательное решение (B2, Task 5.7), и шесть разборов словаря размером с
@@ -504,7 +504,7 @@ class ObservabilityStatsConfig(SchemaBase):
 
         **Корень — отдельная задача, и он назван проверяемо:** голос обязан
         переехать на стадию «применяю» (``compose_managers_payload``, единственную
-        со смыслом применения; обе дороги — boot через ``process_managers.py:130``
+        со смыслом применения; обе дороги — boot через ``process_managers.py:160``
         и reload через ``observability_reload.py:219`` — уже зовут её). Окно
         останется вторым рубежом для цикла ассемблера по процессам. До переезда
         число в «подавлено: N» считает РАЗБОРЫ, а не действия оператора: три
