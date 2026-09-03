@@ -1,0 +1,2 @@
+- [Road lenses — what each sees](project_road_lenses_what_each_sees.md) — count_calls blind to constructors; tracemalloc peak depends on coverage core; INSTRUCTION count sees all, coverage-independent
+- [emergency_log is stderr-only](project_emergency_log_is_stderr_only.md) — validator voices via emergency_log never reach logs/; FallbackLogger buffers+drains; reload parses ×6 by design
