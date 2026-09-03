@@ -34,6 +34,8 @@
 - [Живой критерий требует боевого триггера](feedback_acceptance_criterion_needs_a_live_trigger.md) — «на стенде видно X» проверять грепом по вызывающим ДО записи в план; нет вызывающего вне teardown — критерий недостижим
 - [База инъекций = число собранных](feedback_injection_base_needs_a_collected_count.md) — 0 collected читается как зелено; дочерний логгер не глушит
 - [Покрывать ВСЕ точки правила](feedback_injection_must_cover_all_check_sites.md) · [слишком грубая не доказывает](feedback_injection_too_coarse_proves_nothing_specific.md) · [негодная ≠ вакуум](feedback_broken_injection_is_not_a_vacuous_test.md) — ERROR vs FAILED
+- [Покрытие на ПРОВЕРКУ ≠ покрытие на утверждение](feedback_coverage_per_check_is_not_coverage_per_claim.md) — у F2-3 было три утверждения и инъекция у одного; ослабь половину — не покраснел бы никто
+- [Вырожденное значение — «неизвестно», а не ноль](feedback_a_degenerate_value_is_not_zero_it_is_unknown.md) — heartbeat 0 законен («выключен»), поэтому страж ставится у ПОТРЕБИТЕЛЯ такта, не у источника
 - [Откат — восстановлением](feedback_injection_rollback_by_restore_not_replace.md) — обратная замена задевает соседа; эталон протухает от правок ревью · [дубль обязан блокировать](feedback_double_must_block_like_the_original.md)
 - [Тест, переживший свой слом](feedback_test_survived_its_own_break.md) — шов сквозь RLock · [ноль красных = лишний слой](feedback_zero_reds_can_mean_a_useless_layer.md)
 - [У нуля красных ТРИ чтения](feedback_a_zero_under_injection_has_three_readings.md) — плохая реплика / промах ВЫБОРКИ тестов / незастережённая ветка; спутал (б) с (в) — завёл ложную находку против верного утверждения. Плюс: у одного выхода бывает несколько стражей, тест покрывает лишь тот, до которого доходит

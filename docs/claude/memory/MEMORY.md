@@ -82,7 +82,7 @@ Qt-виджеты или гонять qt-mcp. Ядро, которое обяз�
 - [Живость зонда ≠ рендер](feedback_probe_liveness_is_not_render.md) — qt-mcp: «зонд жив» ≠ «отрисовано» · [флаг сравнивается дословно](feedback_qt_mcp_flag_value_is_compared_verbatim.md) — «1:9142» промолчало
 
 ## Активные проекты и долги
-- [observability-closure: Ф0+Ф1 закрыты, Ф2 = 11/12](project_observability_closure_progress.md) — 2026-09-03: Task 2.12 закрыта, механизм дал 8 строк, дорогими вышли шесть разборов на reload, вакуумные зелёные у соседей и адрес голоса мимо файлов; гейт 9603; корень вынесен в Task 4.11; NEXT 2.11
+- [observability-closure: Ф0+Ф1+Ф2 ЗАКРЫТЫ 12/12](project_observability_closure_progress.md) — 2026-09-03: Task 2.11 закрыта, одной константы не хватило (ноль доехал до ВТОРОГО сверщика потолков), ревью нашло вырожденный такт; гейты 9639 / 7322, sentrux 7022; за владельцем — merge в main и telemetry.broadcast
 - [Голос конфига принадлежит стадии «применяю»](project_config_voice_belongs_to_the_apply_stage.md) — config.reload разбирает секцию ШЕСТЬ раз тремя стадиями; окно маскирует, «подавлено: N» считает разборы; дом — Task 4.11
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; правда в v1; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim
 - [observation-port: Ф0–Ф5 ЗАКРЫТЫ](project_observation_port_progress.md) — порт = единственный писатель чисел, StatsManager стал видом; ревью вернуло 3 блокера, все закрыты; гейт 8930
