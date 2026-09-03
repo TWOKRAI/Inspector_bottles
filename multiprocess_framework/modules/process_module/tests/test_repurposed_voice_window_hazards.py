@@ -28,6 +28,8 @@ from multiprocess_framework.modules.logger_module.core.windowed_voice import (
     process_voices,
     reset_process_voices,
     reset_voice_counters,
+    reset_voices_policy,
+    set_voices_policy,
 )
 from multiprocess_framework.modules.process_module.configs.observability_config import (
     ObservabilityConfig,
@@ -303,4 +305,58 @@ class TestEmissionOutsideLockAllowsReentry:
         assert reentered.is_set(), "обработчик ни разу не реентерировал — тест ничего не проверил"
         assert len(_voices(caplog)) == 1, (
             f"реентерентный вызов внутри окна дал больше одного голоса: {_voices(caplog)!r}"
+        )
+
+
+# =========================================================================== #
+# 6 — окно приходит из ПОЛИТИКИ процесса, а не из литерала в этой функции      #
+# =========================================================================== #
+class TestTheWindowComesFromProcessPolicyNotALiteral:
+    """Опасность 6 — **найдена не рассуждением, а инъекцией J3 матрицы задачи**.
+
+    Заплата «заменить ``take(key, None)`` на ``take(key, 5.0)``» — то есть
+    прибить окно литералом вместо политики процесса — дала **0 красных из 163**.
+    Поведение при дефолтной политике совпадает дословно (L0-дефолт как раз 5.0),
+    поэтому ни приёмка, ни остальные опасности разницы не видят: ручка
+    ``observability.voices.default_window_sec`` была бы применена и
+    неподтверждаема — ровно класс «ручка применена ≠ подтверждена».
+
+    Здесь ручка проверяется ДВИЖЕНИЕМ: политика процесса ставится в ``0.0``
+    («без окна»), и голос обязан прозвучать на КАЖДОМ чтении. Литерал в функции
+    этого движения не заметит и продолжит глушить — тест краснеет.
+
+    Литерал ``0.0``, а не «какое-нибудь другое число», выбран потому, что он даёт
+    наблюдаемый эффект БЕЗ подмены часов: сравнение ``(now - last) < 0.0`` ложно
+    всегда, каким бы ни было реальное время между вызовами.
+    """
+
+    def test_moving_the_process_policy_changes_how_often_the_voice_speaks(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+
+        # Контроль-половина: при ДЕЙСТВУЮЩЕЙ политике три чтения дают один голос.
+        for _ in range(3):
+            ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        assert len(_voices(caplog)) == 1, (
+            f"контроль не воспроизвёлся: при дефолтной политике три чтения дали "
+            f"{len(_voices(caplog))} голосов вместо одного"
+        )
+        caplog.clear()
+        reset_process_voices()
+
+        # Движение ручки: окно 0.0 — «без окна».
+        set_voices_policy(window_sec=0.0)
+        try:
+            for _ in range(3):
+                ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+            voices = _voices(caplog)
+        finally:
+            reset_voices_policy()
+
+        assert len(voices) == 3, (
+            f"политика процесса сдвинута в window_sec=0.0, а голос всё равно прозвучал "
+            f"{len(voices)} раз вместо 3 — окно взято ЛИТЕРАЛОМ в валидаторе, а не из "
+            "политики; ручка observability.voices.default_window_sec на этот голос не "
+            "действует (инъекция J3 матрицы 2.12 давала 0 красных именно поэтому)"
         )
