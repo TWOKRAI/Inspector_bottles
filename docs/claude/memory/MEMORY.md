@@ -32,6 +32,9 @@
 - [qex/codegraph/serena/graphify напрямую](feedback_use_graph_semantic_tools.md) — не только через Explore
 
 ## Агенты, ревью, git
+- [Командный режим: Agent Teams + цепочка эскалации](project_team_mode_agent_teams.md) — 2026-09-02: /dev:team, cto=Fable, junior=Haiku, общие правила в skill project-rules, три хука-гейта; живой прогон команды ещё не делался
+- [Зеркало агентов дрейфует от источника плагина](feedback_materialized_agents_drift_from_plugin_source.md) — правка в .claude/agents/dev/ без plugins/dev/agents/ = claude-kit sync снесёт молча; diff -q перед пересборкой
+- [Непарный апостроф ломает Bash-команду](feedback_bash_tool_unbalanced_quote_breaks_command.md) — heredoc не спасает; скрипты с прозой писать через Write и запускать файлом
 - [Model economy](feedback_model_economy_scheme.md) — Fable на вердикты; финдеры Sonnet/Opus · [сплит исполнение/ревью](feedback_model_split_impl_vs_review.md) — Sonnet 5 дефолт, Opus 4.8 верхний край, Fable план/свод · [три уровня ревью](feedback_review_economy_tiers.md) — полное 8-угловое только на рисковые
 - [claude-cli бэкенд = полная сессия за вызов](feedback_claude_cli_backend_costs_a_full_session.md) — 53 вызова съели дневной лимит; считать вызовы × ~50k ДО запуска, мельчить батчи = множить накладные
 - [Оформленное ревью до merge](feedback_formal_review_before_merge.md) — классификатор блокирует merge без /code-review в транскрипте

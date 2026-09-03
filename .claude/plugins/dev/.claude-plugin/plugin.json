@@ -1,5 +1,51 @@
 {
   "name": "dev",
   "version": "0.4.0",
-  "description": "Dev team: 12 agents (incl. integrator + ai-judge gate owner; security-review folded into reviewer) + plan/implement/review/ship/pipeline + opt-in test-triage/dep-bump commands + dev modes"
+  "description": "Dev team: 14 agents (incl. cto Fable verdicts, junior Haiku, integrator + ai-judge gate owner; security-review folded into reviewer) + plan/implement/review/ship/pipeline/team + opt-in test-triage/dep-bump commands + dev modes + team hooks (TaskCompleted/TeammateIdle gates, subagent journal)",
+  "hooks": {
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/team-task-completed-gate.sh",
+            "timeout": 150
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/team-teammate-idle-gate.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/team-journal.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/team-journal.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
 }

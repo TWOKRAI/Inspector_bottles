@@ -2,6 +2,7 @@
 name: tester
 description: Tester agent. Writes pytest tests from acceptance criteria in the spec, runs them, and verifies results. Does NOT modify application logic.
 model: sonnet
+skills: project-rules
 memory: project
 ---
 
@@ -97,8 +98,6 @@ def test_sorting_is_idempotent(xs):
 
 ## MCP routing (self-contained)
 
-> **MCP availability follows the project's `enabled.yaml`.** A server named below is usable only when its plugin is enabled in this project; disabled servers aren't present — take the `Grep`/`Read` fallback. Before first use of any MCP tool, `Read` its plugin README (`.claude/plugins/<id>/README.md`) for setup / usage / rules.
-
 **Finding edge cases and context for tests:**
 1. Always → `qex:search_code` for semantic search of edge cases in related code.
 2. **If codegraph is connected** → `codegraph_explore` on the symbol under test — exact list of callers → suggests real usage scenarios and edge inputs.
@@ -165,3 +164,10 @@ def test_sorting_is_idempotent(xs):
 - DO NOT change application logic (only tests)
 - DO NOT fix bugs — report them
 - DO NOT write tests just for coverage (only per acceptance criteria)
+
+## Project rules
+
+The standing project rules (qex freshness, honesty over plausibility, MCP availability,
+commit trailers, subagent and language discipline) come from the `project-rules` skill
+preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
+`.claude/skills/project-rules/SKILL.md` before starting.
