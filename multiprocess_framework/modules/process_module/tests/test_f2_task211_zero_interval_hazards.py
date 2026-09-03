@@ -448,3 +448,79 @@ class TestThrottleCapsJudgeZeroByTheEffectiveTickNotByZero:
         )
 
         assert caps == {}, caps
+
+
+class TestADegenerateTickIsNotATick:
+    """Находка №2 ревью Task 2.11 (2026-09-03): «такта нет» — это не только ``None``.
+
+    Чего не хватало соседнему классу выше: он покрывал ``None``, ``0.01`` и ``5.0`` —
+    то есть отсутствие такта и два годных значения. Вырожденный такт (``0.0`` и
+    отрицательный) в нём отсутствовал, а он ДОСТИЖИМ, и это проверено, а не
+    предположено:
+
+    * ``ObservabilityConfig.heartbeat_interval_sec`` объявлен с ``min=0.0`` — ноль
+      схемно легален и означает «heartbeat отключён»;
+    * ``ProcessHeartbeat.apply_heartbeat_interval`` отбивает только НЕЧИСЛО
+      (``try/except`` вокруг ``float()``), поэтому отрицательное значение слоя
+      проходит насквозь: прогон ревьюера дал ``_interval = -3.0`` и
+      ``current_telemetry_tick() = -3.0``;
+    * ``apply_observation_policy`` берёт этот readback и отдаёт в сверщик как есть.
+
+    Замер ревьюера ДО починки, дословно: при ``effective_tick=0.0`` замещение
+    возвращало ``{'processes.*.state.plugins.**': {'publisher_interval_sec': 0.0,
+    'throttle_interval_sec': 0.05}}`` — тот самый отчёт, ради снятия которого добор
+    и делался, вернувшийся через чёрный ход.
+
+    Что сломается, если это перестанет быть правдой: оператор выключает heartbeat
+    (``heartbeat_interval_sec: 0``) — законное действие — и получает при каждой
+    пересборке политики тревогу про предохранитель, которого не трогал, с числом
+    ``publisher_interval_sec: 0.0``, не означающим никакой частоты.
+    """
+
+    THROTTLE = {"processes.**.state.plugins.**": 0.05}
+    ZERO_RULE = {PORT_SUBTREE_PATTERN: {"enabled": True, "interval_sec": 0.0}}
+
+    def test_a_zero_tick_is_read_as_no_tick_at_all(self) -> None:
+        """``effective_tick=0.0`` (heartbeat отключён) — судить нечем, отчёт пуст."""
+        caps = detect_throttle_caps(
+            None,
+            _FakeCentralThrottle(self.THROTTLE),
+            observation_rules=self.ZERO_RULE,
+            effective_tick=0.0,
+        )
+
+        assert caps == {}, caps
+
+    def test_a_negative_tick_is_read_as_no_tick_at_all(self) -> None:
+        """Отрицательный такт — тоже «нет такта», а не «частота быстрее любой».
+
+        Отдельным тестом от нуля, а не параметром: у них РАЗНЫЕ причины
+        достижимости (ноль — законное выключение, отрицательное — дыра в
+        ``apply_heartbeat_interval``), и слитые в один случай они перестали бы
+        различаться при починке одной из причин.
+        """
+        caps = detect_throttle_caps(
+            None,
+            _FakeCentralThrottle(self.THROTTLE),
+            observation_rules=self.ZERO_RULE,
+            effective_tick=-3.0,
+        )
+
+        assert caps == {}, caps
+
+    def test_control_a_nonzero_interval_is_still_judged_under_a_degenerate_tick(self) -> None:
+        """Контроль: вырожденный такт глушит только кандидата БЕЗ заявки.
+
+        Правило, у которого частота заявлена (0.02 с), от такта не зависит вовсе —
+        его ask это он сам, — и обязано судиться по-прежнему. Без этой половины
+        первые два теста были бы неотличимы от починки «при кривом такте функция
+        замолкает целиком», а это спрятало бы настоящие срезы.
+        """
+        caps = detect_throttle_caps(
+            None,
+            _FakeCentralThrottle(self.THROTTLE),
+            observation_rules={PORT_SUBTREE_PATTERN: {"enabled": True, "interval_sec": 0.02}},
+            effective_tick=0.0,
+        )
+
+        assert caps == {PORT_SUBTREE_PATTERN: {"publisher_interval_sec": 0.02, "throttle_interval_sec": 0.05}}, caps

@@ -247,6 +247,57 @@ class TestCappedByThrottle:
         res = pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 0.1}}}})
         assert "capped_by_throttle" not in res["publish"]
 
+    def test_an_explicit_zero_interval_is_no_longer_flagged_here(self) -> None:
+        """Ф2, Task 2.11 (Р-11, 2026-09-03): явный операторский ``interval_sec: 0``
+        в ВЕЕРНОЙ рассылке больше не флагуется — и это ПОКА не решённый вопрос,
+        а не утверждённое поведение.
+
+        **Что изменилось, числом.** Один и тот же вход на двух деревьях
+        (замер ревью Task 2.11):
+
+        * до `58d759ca` → ``{'fps': {'publisher_interval_sec': 0.0,
+          'throttle_interval_sec': 0.05}}`` — сравнение было голым
+          ``throttle_interval > pub_interval``, то есть ``0.05 > 0.0``;
+        * после → ``{}``.
+
+        **Почему так вышло.** Task 2.11 научила :func:`detect_throttle_caps`
+        читать ``interval_sec <= 0`` как «частоты не прошу — публикуй на такте»
+        и судить такого кандидата ПО ТАКТУ. У веерной рассылки единого такта
+        адресатов нет по построению (у каждого ребёнка свой), поэтому
+        ``effective_tick`` сюда не передаётся вовсе, и кандидат пропускается.
+
+        **Почему тест пришпиливает ТИШИНУ, хотя вопрос открыт.** Прежний громкий
+        ответ был НЕОБОСНОВАН: ProcessManager тактов детей не знает и утверждать
+        «троттл строже твоего нуля» не может — он подставлял ``0.0`` в сравнение
+        как настоящую заявку. Новое молчание верно по существу. Но замена
+        громкого отказа на молчаливый в этом проекте числится отдельным классом
+        дефекта, поэтому владельцу вынесены три варианта (оставить · назвать
+        непосуженных кандидатов отдельным списком в ответе, идиома
+        ``unverifiable`` уже есть · отдельная задача Ф4) — см.
+        `plans/observability-closure/phase-2-one-policy.md`, Task 2.11, и
+        `docs/claude/OPEN_QUESTIONS.md`.
+
+        **Этот тест — не одобрение варианта, а якорь.** До него ни старое, ни
+        новое поведение на этой поверхности не стерёг никто (грепом: ни одного
+        ``interval_sec: 0`` в этом файле), и вердикт владельца — в любую сторону
+        — приехал бы молча. Меняется решение — краснеет этот тест, и вместе с ним
+        обновляется докстринг.
+        """
+        throttle = ThrottleMiddleware({"processes.**.state.fps": 0.05})
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+
+        res = pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 0}}}})
+
+        assert res["success"] is True
+        assert "capped_by_throttle" not in res["publish"], res["publish"]
+        # Контроль в том же теле: ненулевая заявка ниже того же правила по-прежнему
+        # флагуется. Без него первая половина была бы неотличима от «сверщик здесь
+        # вообще перестал работать».
+        res_nonzero = pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 0.01}}}})
+        assert res_nonzero["publish"]["capped_by_throttle"] == {
+            "fps": {"publisher_interval_sec": 0.01, "throttle_interval_sec": 0.05}
+        }, res_nonzero["publish"]
+
     def test_no_flag_without_central_throttle(self) -> None:
         """Нет StateStoreManager у PM → нет central-правил → нечего срезать, флага нет."""
         pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)  # throttle=None
