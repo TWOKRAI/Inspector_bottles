@@ -64,6 +64,44 @@ _SUBPROCESS_TIMEOUT_SEC = 300.0
 
 _SUMMARY_RE = re.compile(r"(\d+) (passed|failed|error|errors)")
 
+#: Строка-сводка pytest узнаётся по ФОРМЕ, а не по положению в выводе: счётчик исходов
+#: плюс хвост «in <секунды>s». Второе условие обязательно — без него в сводку попал бы
+#: любой абзац, где случайно стоит «N passed».
+_SUMMARY_LINE_RE = re.compile(r"\d+ (?:passed|failed|error|errors|skipped|xfailed|xpassed|deselected)\b.*\bin \d")
+
+
+def _parse_summary(output: str) -> dict[str, int]:
+    """Разобрать сводку исходов из вывода подпрогона.
+
+    Ищет ПОСЛЕДНЮЮ строку формы сводки, а не последнюю строку вывода. Разница не
+    косметическая — она измерена.
+
+    **Что было и чем это стоило (2026-09-03, задача 2.11).** Прежняя редакция брала
+    ``output.strip().splitlines()[-1]``. Корневой гейт дал красный этого теста с
+    сообщением «прямой порядок не собрал ни одного пройденного теста ({})» — при том
+    что подпрогон честно отработал ``3235 passed, 1 deselected, 1 xfailed``. Причина в
+    ОДНОЙ посторонней строке, напечатанной ПОСЛЕ сводки: логгер процесса
+    ``hook_leak_probe`` (:mod:`process_module.tests.test_process_hooks_wiring`, строка
+    с ``ProcessModule("hook_leak_probe", …)``) при гашении интерпретатора жалуется, что
+    канал ``performance_file`` не разрешился. Регулярка по такой строке даёт ``{}``, и
+    абсолютный пол теста («ноль наблюдений — тоже результат») срабатывал на СОБСТВЕННОМ
+    разборе, а не на предмете. Проверено повтором: на том же коммите второй прогон
+    зелёный, на пред-задачном коммите зелёный — то есть тест был флейкозависим от
+    порядка гашения чужих потоков, а красный сообщал не о том, о чём написан.
+
+    **Почему именно ПОСЛЕДНЯЯ подходящая, а не первая.** Внутри подпрогона живут тесты,
+    которые сами запускают pytest (``test_metric_catalog_order_gate.py``), поэтому в
+    середине вывода законно встречается ЧУЖАЯ сводка. Своя всегда последняя — а
+    посторонние строки после неё сводкой по форме не являются и в разбор не попадают.
+    """
+    lines = [ln for ln in output.splitlines() if _SUMMARY_LINE_RE.search(ln)]
+    if not lines:
+        return {}
+    summary: dict[str, int] = {}
+    for count, word in _SUMMARY_RE.findall(lines[-1]):
+        summary[word] = summary.get(word, 0) + int(count)
+    return summary
+
 
 def _run_order(first: str, second: str) -> tuple[dict[str, int], str]:
     """Гоняет pytest в подпроцессе с заданным порядком директорий-аргументов.
@@ -102,11 +140,7 @@ def _run_order(first: str, second: str) -> tuple[dict[str, int], str]:
         timeout=_SUBPROCESS_TIMEOUT_SEC,
     )
     output = proc.stdout + "\n" + proc.stderr
-    tail = output.strip().splitlines()[-1] if output.strip() else ""
-    summary: dict[str, int] = {}
-    for count, word in _SUMMARY_RE.findall(tail):
-        summary[word] = summary.get(word, 0) + int(count)
-    return summary, output
+    return _parse_summary(output), output
 
 
 def test_statistics_then_process_module_order_matches_the_reverse_order() -> None:
@@ -148,3 +182,51 @@ def test_statistics_then_process_module_order_matches_the_reverse_order() -> Non
         f"--- хвост вывода (прямой порядок) ---\n{forward_output[-2000:]}\n"
         f"--- хвост вывода (обратный порядок) ---\n{reverse_output[-2000:]}"
     )
+
+
+class TestTheSummaryIsFoundByShapeNotByPosition:
+    """Разбор сводки не ломается посторонней строкой после неё — и не выдумывает сводку.
+
+    Четыре быстрых теста без подпроцесса на функцию :func:`_parse_summary`. Заведены
+    2026-09-03 (задача 2.11) после того, как ОДНА строка логгера, напечатанная при
+    гашении интерпретатора, дала этому файлу красный с сообщением «не собрал ни одного
+    пройденного теста» при 3235 честно пройденных. Подробный разбор — в докстринге
+    :func:`_parse_summary`.
+
+    Четвёртый тест — КОНТРОЛЬ, и он обязателен: без него починка «искать сводку по
+    форме» была бы неотличима от починки «всегда что-нибудь находить», а абсолютный пол
+    теста (``passed > 0``) существует именно для случая, когда прогон не состоялся.
+    """
+
+    #: Дословная строка, из-за которой красный и случился, — не пересказ.
+    STRAY = (
+        "[WARNING] [logger_hook_leak_probe] [system] канал 'performance_file' не разрешился "
+        "ни в один из существующих (просмотрено 1)"
+    )
+    REAL = "3235 passed, 1 deselected, 1 xfailed, 2 warnings in 132.60s (0:02:12)"
+
+    def test_a_plain_summary_is_parsed(self) -> None:
+        """Обычный случай: сводка и есть последняя строка."""
+        assert _parse_summary(f"...\n{self.REAL}\n") == {"passed": 3235}
+
+    def test_a_stray_line_after_the_summary_does_not_hide_it(self) -> None:
+        """Предмет починки: посторонняя строка ПОСЛЕ сводки. До правки давало ``{}``."""
+        assert _parse_summary(f"...\n{self.REAL}\n\n{self.STRAY}\n") == {"passed": 3235}
+
+    def test_a_nested_summary_earlier_loses_to_the_real_one(self) -> None:
+        """Внутри подпрогона есть тесты, сами запускающие pytest — их сводка идёт РАНЬШЕ.
+
+        Своя сводка всегда последняя по форме, поэтому берётся именно она, а не
+        первая подходящая.
+        """
+        nested = "41 passed, 1 deselected in 3.10s"
+        parsed = _parse_summary(f"{nested}\n...\n{self.REAL}\n{self.STRAY}\n")
+        assert parsed == {"passed": 3235}, parsed
+
+    def test_an_output_without_any_summary_stays_empty(self) -> None:
+        """Контроль: прогон, который не состоялся, обязан по-прежнему читаться как пустой.
+
+        Иначе абсолютный пол теста («ноль наблюдений — тоже результат») перестал бы
+        срабатывать, и совпадение двух пустот снова прочиталось бы как успех.
+        """
+        assert _parse_summary(f"ImportError: боом\n{self.STRAY}\n") == {}
