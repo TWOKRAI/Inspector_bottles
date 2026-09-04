@@ -465,3 +465,68 @@ class TestUnanticipatedDbFailuresAreNamedNotRaised:
             f"а не AttributeError из _history_readonly_uri: {result}"
         )
         assert "db_path" in str(result.get("error", "")).lower()
+
+
+# ===========================================================================
+# Хазард 9 — баг ДРАЙВЕРА не переодевается в отказ о ФАЙЛЕ (Q1 ревью, итерация 2).
+# ===========================================================================
+
+
+class TestOurOwnBugIsNotDisguisedAsAFileProblem:
+    """Что ломается, если это свойство снять: `except sqlite3.Error` шире узкого
+    `OperationalError` на семь классов, и один из них значим — `ProgrammingError`
+    («Incorrect number of bindings supplied») приходит от рассогласования SQL и
+    списка параметров, то есть от НАШЕЙ правки, а не от входа и не от файла.
+
+    Под общей шапкой он читался бы как «чтение истории по '<путь>' провалилось»
+    и отправил бы чинить файл, которым всё в порядке. Атрибуция причины — часть
+    диагностики, а не косметика текста: неверный адрес переживает сам баг.
+
+    Ловится ОБЕ ветки: у ленты и у поиска свои `except`, и вылечить одну, оставив
+    другую, здесь уже случалось (ревью Н-4).
+    """
+
+    @staticmethod
+    def _break_the_bindings(monkeypatch) -> None:
+        """Заплата: лишнее условие БЕЗ парного параметра — ровно баг драйвера."""
+        original = driver_module._history_where_clauses
+
+        def broken(**kwargs):
+            clauses, params = original(**kwargs)
+            prefix = kwargs.get("prefix", "")
+            clauses.append(f"{prefix}kind = ?")  # параметр НЕ добавлен — рассогласование
+            return clauses, params
+
+        monkeypatch.setattr(driver_module, "_history_where_clauses", broken)
+
+    def test_a_binding_mismatch_on_the_listing_branch_is_not_reported_as_a_file_failure(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        db_path, store = _seed(tmp_path, [_log_record("обычная строка")])
+        store.close()
+        self._break_the_bindings(monkeypatch)
+
+        drv = _driver_for(db_path)
+        with pytest.raises(sqlite3.ProgrammingError):
+            drv.history_query(kind="log")
+
+    def test_a_binding_mismatch_on_the_search_branch_is_not_reported_as_a_file_failure(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        db_path, store = _seed(tmp_path, [_log_record("crash случился")])
+        store.close()
+        self._break_the_bindings(monkeypatch)
+
+        drv = _driver_for(db_path)
+        with pytest.raises(sqlite3.ProgrammingError):
+            drv.history_query(text="crash")
+
+    def test_a_broken_file_is_still_a_named_refusal_on_both_branches(self, tmp_path) -> None:
+        """Парная проверка достижимости: сузив except, легко заодно перестать ловить
+        и НАСТОЯЩИЕ отказы файла. Контроль — без заплаты оба входа названы, а не подняты."""
+        not_a_db = tmp_path / "still_not_a_database.txt"
+        not_a_db.write_text("не sqlite", encoding="utf-8")
+
+        drv = _driver_for(str(not_a_db))
+        assert drv.history_query().get("success") is False
+        assert drv.history_query(text="crash").get("success") is False

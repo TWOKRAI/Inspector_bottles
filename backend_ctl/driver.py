@@ -155,6 +155,15 @@ _HISTORY_COLUMNS: tuple = ("id", "kind", "process", "module", "ts", "severity", 
 #: здесь литералом, а не импортировано как приватная константа соседнего модуля.
 _HISTORY_FTS_TABLE = "records_fts"
 
+#: Классы sqlite3, означающие ошибку ДРАЙВЕРА, а не состояние файла (Q1 ревью, итерация 2).
+#: `except sqlite3.Error` шире узкого `OperationalError` на семь классов, и один из них значим:
+#: `ProgrammingError` («Incorrect number of bindings supplied») приходит от рассогласования
+#: SQL и списка параметров — то есть от нашей будущей правки, а не от входа и не от файла.
+#: Под общей шапкой он читался бы как «чтение истории по <путь> провалилось», то есть
+#: обвинял бы ФАЙЛ в баге драйвера, и починку искали бы не там. `InterfaceError` — та же
+#: природа (неверный тип параметра из нашего кода). Обе пробрасываются наружу как есть.
+_HISTORY_OUR_OWN_BUG = (sqlite3.ProgrammingError, sqlite3.InterfaceError)
+
 
 def _history_fail(error: str) -> Dict[str, Any]:
     """Названный отказ history_query — единая форма (К2/К3/К6/К7)."""
@@ -308,12 +317,18 @@ def _history_search_rows(
     )
     try:
         rows = conn.execute(sql, [fts_expr, *params, int(limit)]).fetchall()
+    except _HISTORY_OUR_OWN_BUG:
+        # Q1 (ревью, итерация 2): наши собственные ошибки НЕ переодеваются в отказ о файле.
+        raise
     except sqlite3.Error as exc:
         # Н-4 (ревью): ловить именно OperationalError было мало — «db_path указывает на
         # существующий не-sqlite файл» приходит sqlite3.DatabaseError, а он РОДИТЕЛЬ
         # OperationalError в иерархии исключений sqlite3, не потомок, и уже прежним
         # except'ом не ловился (пробивал историю наружу необработанным исключением).
-        raise ObservabilitySearchError(f"полнотекстовый поиск недоступен или запрос не понят: {exc}") from exc
+        # Q1 (ревью, итерация 2): прежняя редакция называла ДВЕ причины («поиск недоступен или
+        # запрос не понят») и обе мимо, когда файл вообще не sqlite: «file is not a database»
+        # приезжало под шапкой про запрос. Формулировка нейтральна, причину называет сам sqlite.
+        raise ObservabilitySearchError(f"поиск по истории не выполнен: {exc}") from exc
     return [_history_row_to_dict(r) for r in rows]
 
 
@@ -851,6 +866,10 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 )
                 try:
                     rows = _history_list_rows(conn, where_clauses=where_clauses, params=params, limit=effective_limit)
+                except _HISTORY_OUR_OWN_BUG:
+                    # Q1 (ревью, итерация 2): баг драйвера не переодевается в отказ о файле —
+                    # «чтение истории по <путь> провалилось» отправило бы искать причину в файл.
+                    raise
                 except sqlite3.Error as exc:
                     # Н-4 (ревью): sqlite3.DatabaseError («file is not a database») —
                     # РОДИТЕЛЬ OperationalError, не потомок; узкий except его пропускал.
