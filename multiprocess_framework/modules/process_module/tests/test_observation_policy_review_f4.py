@@ -194,7 +194,7 @@ class TestCapReportReachesTheCommandAnswer:
         svc, handlers = _wired(tmp_path)
         svc._state_store_manager = _FakeStoreManager(_Throttle())
         res = handlers["config.reload"](
-            {"observability": {"observation": {"rules": {"processes.*.state.plugins.*.fps": {"interval_sec": 0.02}}}}}
+            {"observability": {"observation": {"rules": {"processes.*.state.plugins.*.fps": {"interval_sec": 1.5}}}}}
         )
         assert res["success"] is True, res
         applied = res["observation_applied"]
@@ -203,14 +203,21 @@ class TestCapReportReachesTheCommandAnswer:
         # находкой З1 — этот синтетический троттл (2.0 с) строже и его дефолтного
         # значения. Дефолт поддерева заявляет 0.0 с (Р-11, Ф2 задача 2.11,
         # 2026-09-03; было 1.0 с до этого решения) — «частоты не заявлено»,
-        # поэтому `detect_throttle_caps` (добор к 2.11, тот же коммит) судит его
-        # по РЕАЛЬНОМУ ask — эффективному тику живого heartbeat'а
-        # (`current_telemetry_tick()`), а не по голому нулю. Такт здесь —
-        # `min(heartbeat_interval=5.0, tick_sec=1.0)` = 1.0 (`BOOT_PUBLISH`,
-        # `test_telemetry_layers.py`) — меньше троттла (2.0), значит троттл
-        # СТРОЖЕ, и предохранитель по-прежнему в отчёте, теперь числом 1.0.
+        # поэтому сверщик судит его по РЕАЛЬНОМУ ask — эффективному тику живого
+        # heartbeat'а (`current_telemetry_tick()`), а не по голому нулю. Такт
+        # здесь — `min(heartbeat_interval=5.0, tick_sec=1.0)` = 1.0
+        # (`BOOT_PUBLISH`, `test_telemetry_layers.py`) — меньше троттла (2.0),
+        # значит троттл СТРОЖЕ, и предохранитель по-прежнему в отчёте числом 1.0.
+        #
+        # Заявка оператора — 1.5 с, ВЫШЕ такта (Ф3, задача 3.0, находка F1
+        # вердикта CTO по Ф2): такт стал НИЖНЕЙ ГРАНИЦЕЙ ask'а, и прежняя 0.02 с
+        # больше не доезжала бы до отчёта своим числом — публикатор физически не
+        # просит чаще такта, отчёт назвал бы 1.0 для ОБОИХ кандидатов, и тест
+        # перестал бы отличать правило оператора от предохранителя по значению
+        # (только по наличию ключа). Число поднято, чтобы связь вход → выход у
+        # правила оператора осталась наблюдаемой: 1.5 в запросе — 1.5 в ответе.
         assert applied["capped_by_throttle"] == {
-            "processes.*.state.plugins.*.fps": {"publisher_interval_sec": 0.02, "throttle_interval_sec": 2.0},
+            "processes.*.state.plugins.*.fps": {"publisher_interval_sec": 1.5, "throttle_interval_sec": 2.0},
             PORT_SUBTREE_PATTERN: {"publisher_interval_sec": 1.0, "throttle_interval_sec": 2.0},
         }, applied
 
@@ -267,12 +274,22 @@ class TestThrottleCapsSeeEveryRuleClass:
         assert caps == {}, caps
 
     def test_the_subtree_default_reaches_the_throttle_report(self, tmp_path) -> None:
-        """Назначенный предохранитель судится ТЕМ ЖЕ отчётом, что и правила оператора."""
+        """Назначенный предохранитель судится ТЕМ ЖЕ отчётом, что и правила оператора.
+
+        Частота поддерева — 1.5 с, ВЫШЕ эффективного такта живого heartbeat'а
+        (1.0 с, ``min(heartbeat_interval=5.0, tick_sec=1.0)`` из ``BOOT_PUBLISH``).
+        Ф3, задача 3.0 (находка F1 вердикта CTO по Ф2) сделала такт НИЖНЕЙ
+        ГРАНИЦЕЙ ask'а публикатора, и прежняя 0.05 с в отчёт своим числом уже не
+        доезжала бы: публикатор не просит чаще такта, отчёт назвал бы 1.0 —
+        то есть сторож остался бы зелёным и при полностью проигнорированном
+        ``subtree_interval_sec``. Число поднято над тактом, чтобы охват
+        («предохранитель судится») по-прежнему доказывался связью вход → выход.
+        """
         svc, _handlers = _wired(tmp_path)
-        applied = apply_observation_policy(svc._heartbeat, {"subtree_interval_sec": 0.05}, store_throttle=_Throttle())
+        applied = apply_observation_policy(svc._heartbeat, {"subtree_interval_sec": 1.5}, store_throttle=_Throttle())
         assert applied["throttle_checked"] is True, applied
         assert applied["capped_by_throttle"] == {
-            PORT_SUBTREE_PATTERN: {"publisher_interval_sec": 0.05, "throttle_interval_sec": 2.0}
+            PORT_SUBTREE_PATTERN: {"publisher_interval_sec": 1.5, "throttle_interval_sec": 2.0}
         }, applied
 
     def test_both_cap_reports_agree_on_the_subtree_default(self) -> None:
@@ -543,9 +560,17 @@ class TestInheritedIntervalIsJudgedToo:
         доказывающий харнесс, этого не видел. Полоса дефекта:
         ``default_interval_sec`` меньше троттла, но не больше подменявшего
         литерала 1.0 — здесь 0.5 против 0.8.
+
+        ``tick_sec: 0.1`` добавлен Ф3, задачей 3.0 (находка F1 вердикта CTO по
+        Ф2): такт стал НИЖНЕЙ ГРАНИЦЕЙ ask'а публикатора, а такт харнесса
+        (``min(heartbeat_interval=5.0, tick_sec=1.0)`` = 1.0 из ``BOOT_PUBLISH``)
+        полосу дефекта накрывал целиком — ask становился 1.0, троттл 0.8 его не
+        режет, и отчёт пустел не потому, что живой дефолт не доехал. Полоса
+        (0.5 против 0.8) оставлена дословно, а такт отодвинут под неё: публикатор,
+        который реально просит 0.5 с, тикает чаще 0.5 с.
         """
         svc, handlers = _wired(tmp_path)
-        prod = {"default_enabled": True, "default_interval_sec": 0.5, "metrics": {}}
+        prod = {"default_enabled": True, "default_interval_sec": 0.5, "tick_sec": 0.1, "metrics": {}}
         svc._config["telemetry"] = {"publish": prod}
         svc._heartbeat._services._config["telemetry"] = {"publish": prod}
         svc._heartbeat._telemetry_gate = svc._heartbeat._build_telemetry_gate()
@@ -567,9 +592,14 @@ class TestInheritedIntervalIsJudgedToo:
 
         Без неё «отчёт назвал» доказано только со стороны «да», и всеядный
         сверщик (называющий потолок всегда) прошёл бы обе проверки.
+
+        ``tick_sec: 0.1`` — тот же, что у первой половины пары, чтобы половины
+        отличались РОВНО одним: унаследованной частотой (0.5 против 3.0). Исход
+        этой половины от такта не зависит вовсе (3.0 доминирует и над 1.0, и над
+        0.1), но разный такт у половин сделал бы пару нечистой.
         """
         svc, handlers = _wired(tmp_path)
-        prod = {"default_enabled": True, "default_interval_sec": 3.0, "metrics": {}}
+        prod = {"default_enabled": True, "default_interval_sec": 3.0, "tick_sec": 0.1, "metrics": {}}
         svc._config["telemetry"] = {"publish": prod}
         svc._heartbeat._services._config["telemetry"] = {"publish": prod}
         svc._heartbeat._telemetry_gate = svc._heartbeat._build_telemetry_gate()

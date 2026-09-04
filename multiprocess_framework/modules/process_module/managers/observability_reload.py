@@ -1517,8 +1517,9 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
     развернула семантику на «пересборку из источников».
 
     **Голос про потолок IPC — здесь, а не только у соседней плоскости.**
-    ``detect_throttle_caps`` судит per-метрика правила ``telemetry.publish`` по
-    ИМЕНИ и правила по ПУТИ не видит вовсе; без этой ветки обещание проекта «no
+    Половина сверщика, работающая с ``publish_section``, судит правила
+    ``telemetry.publish`` по ИМЕНИ и правила по ПУТИ не видит вовсе (её и зовёт
+    оптовый ``telemetry.broadcast``); без этой ветки обещание проекта «no
     silent caps» (ADR-PM-017) стало бы неправдой ровно для тех правил, ради
     которых фаза делалась: оператор просит частоту выше центрального потолка,
     получает ``success=true`` и молча срезанный темп. Отчёт кладётся в ответ, а
@@ -1529,6 +1530,16 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
     центрального троттла — он живёт только на оркестраторе), и это НЕ то же
     самое, что «потолков нет»: пустой отчёт без этого признака читался бы как
     подтверждение, которого никто не давал.
+
+    **``capped_by_throttle_unjudged`` — третье показание того же сверщика** (Ф3,
+    задача 3.0, находка F2 вердикта CTO по Ф2, 2026-09-03). ``throttle_checked``
+    отвечает за ВЫЗОВ, а не за ОХВАТ: сверщик мог быть позван и всё же не
+    рассудить часть кандидатов (заявки нет И такта нет — heartbeat выключен).
+    До правки такие кандидаты пропускались молча, и пустой ``capped_by_throttle``
+    рядом с ``throttle_checked: true`` был неотличим от «потолков нет». Ключ
+    кладётся ТОЛЬКО при непустом списке: пустой словарь завёл бы в ответе
+    показание «не судили никого», которого читатель не просил, и его пришлось
+    бы отличать от отсутствия механизма.
 
     **Возвращённое читается снаружи** (``config.reload`` → ключ
     ``observation_applied``). До находки Б2 ревью Ф4 отчёт вычислялся и
@@ -1547,7 +1558,7 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
     applied["throttle_checked"] = store_throttle is not None
     if store_throttle is not None:
         from ..configs.observation_policy import cap_candidates
-        from .telemetry_reload import detect_throttle_caps
+        from .telemetry_reload import judge_throttle_caps
 
         # ЖИВОЕ значение гейта, а не константа: правило без явного `interval_sec`
         # унаследует именно его, и сверять надо то, что попросит публикатор.
@@ -1568,8 +1579,9 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
             if isinstance(raw, (int, float)) and not isinstance(raw, bool):
                 inherited = float(raw)
         # Ф2 (задача 2.11, Р-11): дефолт поддерева (`cap_candidates(applied)`)
-        # заявляет `interval_sec=0.0` на каждой пересборке — `detect_throttle_caps`
-        # обязан судить его по РЕАЛЬНОМУ ask (тику), а не по голому нулю (см. её
+        # заявляет `interval_sec=0.0` на каждой пересборке — `judge_throttle_caps`
+        # обязан судить его по РЕАЛЬНОМУ ask, а не по голому нулю; Ф3 (задача 3.0,
+        # F1) обобщила это до «такт — нижняя граница ЛЮБОЙ заявки» (см. её
         # докстринг). Тот же осторожный приём, что уже стоит выше для
         # `current_telemetry_publish`: readback не смеет ронять применение политики.
         effective_tick = None
@@ -1581,13 +1593,20 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
                 raw_tick = None
             if isinstance(raw_tick, (int, float)) and not isinstance(raw_tick, bool):
                 effective_tick = float(raw_tick)
-        applied["capped_by_throttle"] = detect_throttle_caps(
+        caps, unjudged = judge_throttle_caps(
             None,
             store_throttle,
             observation_rules=cap_candidates(applied),
             default_interval_sec=inherited,
             effective_tick=effective_tick,
         )
+        applied["capped_by_throttle"] = caps
+        # Ф3, задача 3.0 (находка F2 вердикта CTO по Ф2): ключ появляется ТОЛЬКО
+        # когда есть что назвать. Пустой словарь рядом с `throttle_checked: true`
+        # читался бы как «сверщик посмотрел и не судил ничего» — третье показание
+        # там, где показаний два; отсутствие ключа означает «судить было чем всех».
+        if unjudged:
+            applied["capped_by_throttle_unjudged"] = unjudged
     return applied
 
 
