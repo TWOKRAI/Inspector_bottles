@@ -111,7 +111,13 @@ observation_rules, default_interval_sec, effective_tick)`):
 `statistics_module/observation/observation_manager.py:380-410`, `channel_routing_module/observability/observability_hub.py:170-200`,
 `channel_routing_module/observability/record_display.py:100-330` (один нормализатор), `channel_routing_module/observability/observability_store.py`
 (миграция `user_version` +1: колонка `metric`, индекс `(metric, ts)`, backfill из JSON), `statistics_module/channels/log_stats_channel.py`
-(лог-строка остаётся для человека, в стор не идёт), `process_module/managers/observability_wiring.py:1400-1410` (store-tap не берёт `origin=stats_snapshot`).
+(лог-строка остаётся для человека, в стор не идёт), `process_module/managers/observability_wiring.py:1400-1410` (store-tap не берёт `origin=stats_snapshot`),
+`backend_ctl/driver.py` + `backend_ctl/mcp_tools.py` (**добор 2026-09-05, дыра найдена слепым тестером:**
+К8 требует правки ровно здесь — снять ранний отказ по `metric`, завести фильтр и `series`, — а в списке
+файлов их не было; разработчик, читающий только «Files», пропустил бы правку целиком),
+`backend_ctl/tests/test_task_3_5_history_query.py` (удалить `TestK7MetricNotYetSupported.
+test_metric_filter_is_a_named_refusal_naming_reason_and_task` — он пинит СТАРЫЙ отказ и после К8
+делает регресс-гейт противоречащим самому себе).
 **Steps:**
 1. `NumberRecord{name, kind(counter|gauge|timing|histogram), value|aggregate, tags, unit, ts, writer}` — единственная форма; три диалекта → адаптеры удаляются, а не оборачиваются.
 2. В стор — только через hub (`kind=stats`, `message` = JSON, без усечения по 2048 Б; предел — по строкам); `log_stats` пишет `performance.log` и не попадает в стор.
@@ -206,12 +212,21 @@ observation_rules, default_interval_sec, effective_tick)`):
 - **К7. `severity` числовой записи — одно значение** (`NUMBER_SEVERITY = "number"`),
   `severity_number == UNSPECIFIED (0)`. Старые строки со `snapshot`/`level`/`gauge` **не
   переписываются**: таблица append-only, а читатель различает их по `kind`.
+  **Уточнено после вопроса тестера (2026-09-05): `"number"` едет и у АГРЕГАТА тоже**, всем трём
+  формам (одиночная `stats`, агрегат, `observation`) — иначе смыслов в колонке остаётся два вместо
+  трёх, а задача заявлена как «форма одна». Различие «агрегат или одно число» несут `metric IS NULL`
+  и `extra.aggregate`; держать его ТРЕТЬИМ носителем в `severity` значило бы завести поле, которое
+  на следующей правке разойдётся с двумя первыми.
 - **К8. Долг Task 3.5 закрыт.** `history_query(metric="capture.drops", since=-600)` больше не
   отказывает (критерий К7 задачи 3.5 снимается вместе со своим тестом) и возвращает, сверх
   обычного конверта Task 3.5, ключ **`series`: `[[ts, value], …]`, СТАРЫЕ ПЕРВЫМИ** — обратный
   порядок относительно `rows` (те остаются `ORDER BY id DESC` по К4 задачи 3.5), потому что ряд
   читают как временной, а ленту — как хвост. Строка без числового `extra.value` в `series` не
-  попадает, но остаётся в `rows`; расхождение длин названо, а не молчаливо.
+  попадает, но остаётся в `rows`; **расхождение длин названо ЧИСЛОМ, а не подразумевается**
+  (добор 2026-09-05 — тестер верно указал, что литерала не было): ответ несёт
+  `series_skipped: <int>` — сколько строк не дали точки. Ключ присутствует всегда, когда задан
+  `metric`, в том числе нулём: «пропусков не было» и «пропуски не считали» обязаны различаться,
+  а появляющийся-по-случаю ключ читается как второе.
 
 **Acceptance criteria:**
 - [ ] Живьём 30 мин: `kind=log` строк «metrics snapshot» в сторе = 0 **при `kind=stats` > 0**
