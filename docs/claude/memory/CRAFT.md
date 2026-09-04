@@ -8,6 +8,8 @@
 конкретными провалами.
 
 ## Канон тестирования и инъекции
+- [Две заплаты с одинаковым набором красных = один ассерт](feedback_two_patches_one_red_set_means_one_assert.md) — сверять НАБОРЫ попарно, не числа; совпадение значит «у одного свойства сторожа нет»
+- [Диагностический ответ считается ПОСЛЕДНЕЙ строкой ленты](feedback_a_diagnostic_answer_must_be_computed_last.md) — посчитанный в середине, он судит по состоянию до правки: два одинаковых config.reload дали разные ответы, первый лгал «потолков нет»
 - [pytest владеет threading.excepthook на всю сессию](feedback_pytest_owns_threading_excepthook_for_the_session.md) — «прежний хук печатает в stderr» недостижимо под pytest (0 байт против 648); восстанавливать предпосылку в тесте, проброс проверять спаем, детектор — число PytestUnhandledThreadExceptionWarning
 
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
