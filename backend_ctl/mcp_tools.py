@@ -266,6 +266,30 @@ def _introspect_observability(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return narrowed
 
 
+def _history_query(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    """Task 3.5: тонкая проекция аргументов на driver.history_query — без логики.
+
+    ``full`` из схемы здесь НЕ читается и driver'у не передаётся: это ключ
+    байтового потолка MCP-ответа (`dispatch._cap_heavy` читает его из СЫРЫХ
+    `arguments`, независимо от того, прочёл ли его handler) — число строк это
+    поле не ограничивает, ограничивает `limit`.
+    """
+    return drv.history_query(
+        kind=args.get("kind"),
+        metric=args.get("metric"),
+        process=args.get("process"),
+        module=args.get("module"),
+        severity=args.get("severity"),
+        min_severity=args.get("min_severity"),
+        since=args.get("since"),
+        until=args.get("until"),
+        text=args.get("text"),
+        limit=args.get("limit"),
+        pm_name=args.get("pm_name", "ProcessManager"),
+        **_kw_timeout(args),
+    )
+
+
 def _introspect_memory(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return _jsonable(drv.introspect_memory(args["process"], **_kw_timeout(args)))
 
@@ -644,6 +668,65 @@ TOOLS: List[ToolSpec] = [
             ["process"],
         ),
         _introspect_observability,
+    ),
+    ToolSpec(
+        "history_query",
+        "История наблюдаемости из sqlite-стора ОДНИМ вызовом, без чтения файла и без "
+        "отдельного драйвера (Task 3.5, T6/CTL-F6) — «что БЫЛО», в отличие от log_tail/"
+        "observability_tail (те про «что сейчас», живой push-хвост подпиской). Путь к БД "
+        "берётся ТОЛЬКО из readback introspect.observability(pm_name).history.db_path — "
+        "истории нет/отключена → названный отказ, sqlite не открывается вовсе. Соединение "
+        "read-only. Фильтры сужают: kind/process/module/severity(список членства)/"
+        "min_severity(порог)/since/until(отрицательное — окно последних N секунд ОТ СЕЙЧАС, "
+        "ноль — абсолютная эпоха, не «сейчас»)/text(полнотекстовый поиск FTS5, не подстрока — "
+        "запрос без слов или недоступный индекс отвечают названным отказом, а не пустым "
+        "списком). metric — до Task 3.1 отвечает названным отказом (колонки ещё нет), не "
+        "тихим полным дампом. limit по умолчанию 100 (не вся БД); full снимает байтовый "
+        "потолок ОТВЕТА, число строк не трогает. Строка: id/kind/process/module/ts/severity/"
+        "severity_number/message/extra(dict). Свежие первыми (id DESC).",
+        _obj(
+            {
+                "kind": {"type": "string", "description": "Фильтр по kind: log/error/stats. Опц."},
+                "metric": {
+                    "type": "string",
+                    "description": "Имя метрики для ряда [ts, value] — до Task 3.1 названный отказ "
+                    "(колонки metric в сторе ещё нет). Опц.",
+                },
+                "process": {"type": "string", "description": "Фильтр по процессу-источнику записи. Опц."},
+                "module": {"type": "string", "description": "Фильтр по модулю-источнику записи. Опц."},
+                "severity": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Членство по severity (например ['error','critical']). "
+                    "Пустой/опущен — не фильтрует.",
+                },
+                "min_severity": {
+                    "type": "integer",
+                    "description": "Порог по severity_number (например 17 — ERROR и выше). Опц.",
+                },
+                "since": {
+                    "type": "number",
+                    "description": "Отрицательное — окно последних |N| секунд ОТ СЕЙЧАС; 0/положительное — "
+                    "абсолютный unix-ts (0 — эпоха, не «сейчас»). Опц.",
+                },
+                "until": {
+                    "type": "number",
+                    "description": "Та же семантика, что since, верхняя граница окна. Опц.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Полнотекстовый поиск (FTS5, не подстрока) по message/module/process. "
+                    "Запрос без слов — названный отказ, не пустой список. Опц.",
+                },
+                "limit": {"type": "integer", "description": "Максимум строк (по умолчанию 100)."},
+                "pm_name": {
+                    "type": "string",
+                    "description": "Процесс, у которого спрашивается history.db_path (по умолчанию 'ProcessManager').",
+                },
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _history_query,
     ),
     ToolSpec(
         "introspect_memory",
@@ -1376,6 +1459,8 @@ TOOL_SAFETY: Dict[str, str] = {
     # Task 0.4 (M3): зеркало introspect.observability. Команда объявлена
     # читающей (аудит она не пополняет), класс тот же — read.
     "introspect_observability": SAFETY_READ,
+    # Task 3.5: чтение sqlite-стора истории read-only соединением — бэкенд не мутируется.
+    "history_query": SAFETY_READ,
     "supervision_status": SAFETY_READ,
     "register_snapshot": SAFETY_READ,
     "register_rollback_log": SAFETY_READ,

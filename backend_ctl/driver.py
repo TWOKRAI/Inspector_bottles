@@ -22,9 +22,12 @@ request_id (или не матчащие ни один pending) — наприм
 from __future__ import annotations
 
 import fnmatch
+import json
 import logging
 import socket
+import sqlite3
 import threading
+import time
 from collections import deque  # noqa: F401 — используется в аннотации back-compat property _rollback_journal
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
@@ -36,6 +39,17 @@ from multiprocess_framework.modules.telemetry_readmodel_module import (
 from multiprocess_framework.modules.message_module import (
     build_command_message,
     build_system_command_message,
+)
+
+# Task 3.5: history_query читает БД истории СВОИМ read-only соединением (К3),
+# не через ObservabilityStore (тот открывает файл на запись — WAL/synchronous —
+# чужой контракт). fts_query/ObservabilitySearchError — переиспользуемая часть
+# разбора текстового запроса (те же правила «обычный текст — точная фраза»,
+# что и у живой панели); импорт из подмодуля, а не из фасада пакета — эти два
+# имени не входят в его публичный __all__, но не приватны (без ведущего "_").
+from multiprocess_framework.modules.channel_routing_module.observability.observability_store import (
+    ObservabilitySearchError,
+    fts_query,
 )
 
 from .endpoint_config import resolve_endpoint
@@ -120,6 +134,183 @@ def _is_process_batch(process: Any) -> bool:
         return True
     text = str(process).strip()
     return text == "all" or any(ch in text for ch in _PROCESS_GLOB_METACHARS)
+
+
+# ---------------------------------------------------------------------------
+# Task 3.5 (T6/CTL-F6): history_query — свободные функции над read-only sqlite3-
+# соединением. Вынесены из класса, потому что не трогают состояние driver'а —
+# вся связь с ним ограничена одним send_command в самом методе (readback пути к БД).
+# ---------------------------------------------------------------------------
+
+#: К8: не заданный limit → 100 (не «вся БД»). full снимает БАЙТОВЫЙ потолок MCP-ответа
+#: (dispatch._cap_heavy) — это другой рубеж, число строк он не трогает.
+_HISTORY_DEFAULT_LIMIT = 100
+
+#: Колонки строки стора в порядке, дословно совпадающем с К4.
+_HISTORY_COLUMNS: tuple = ("id", "kind", "process", "module", "ts", "severity", "severity_number", "message", "extra")
+
+#: Имя теневой FTS5-таблицы — деталь СХЕМЫ БД (её заводит ``ObservabilityStore._init_fts``),
+#: не приватный символ Python. history_query читает файл собственным SQL-соединением
+#: (К3: read-only, чужое для стора), а не через API стора, поэтому имя продублировано
+#: здесь литералом, а не импортировано как приватная константа соседнего модуля.
+_HISTORY_FTS_TABLE = "records_fts"
+
+
+def _history_fail(error: str) -> Dict[str, Any]:
+    """Названный отказ history_query — единая форма (К2/К3/К6/К7)."""
+    return {"success": False, "error": error}
+
+
+def _history_resolve_ts(value: Optional[float]) -> Optional[float]:
+    """К5: отрицательное значение — окно последних ``|value|`` секунд ОТ СЕЙЧАС;
+    ноль и положительное — абсолютный unix-ts (ноль — эпоха, а не «сейчас»).
+
+    **Часы читателя, не часы писателя.** «Сейчас» здесь — это `time.time()` МАШИНЫ
+    ДРАЙВЕРА в момент вызова history_query, а строки в БД несут `ts` часов
+    ПРОЦЕССА-ЭМИТЕНТА (могло быть записано другим хостом/контейнером). На одной
+    машине (все живые стенды проекта) расхождение — обычные сотые доли секунды NTP-
+    дрейфа и внутри любого разумного окна `since=-N`; распределённый стенд с разъехавшимися
+    часами узнать по одному этому вызову НЕЛЬЗЯ — history_query не сверяет часы писателя
+    и читателя и не может заявить, что окно точное. Названо как открытый вопрос в отчёте
+    задачи, а не молчаливо предположено.
+    """
+    if value is None:
+        return None
+    numeric = float(value)
+    return time.time() + numeric if numeric < 0 else numeric
+
+
+def _history_readonly_uri(db_path: str) -> str:
+    """URI read-only соединения (К3): ``file:<путь>?mode=ro``.
+
+    Обратные слэши Windows-путей заменяются на прямые ДО сборки URI: sqlite3
+    разбирает ``file:``-имя как URI-компонент, а голый backslash в нём — это
+    просто байт, не разделитель, и путь с ним не резолвится (проверено на этом
+    стенде — без замены `sqlite3.connect` кидал `unable to open database file`
+    на реальном Windows-пути с обратными слэшами). Пробел/`%`/`?` внутри имени
+    файла НЕ percent-кодируются — вне периметра задачи: `ObservabilityStore`
+    сама таких путей не порождает (см. `resolve_default_db_path`).
+    """
+    return f"file:{db_path.replace(chr(92), '/')}?mode=ro"
+
+
+def _history_where_clauses(
+    *,
+    kind: Optional[str],
+    module: Optional[str],
+    process: Optional[str],
+    severity_in: Optional[List[str]],
+    min_severity: Optional[int],
+    since: Optional[float],
+    until: Optional[float],
+    prefix: str = "",
+) -> "tuple[List[str], List[Any]]":
+    """WHERE-условия history_query — тот же набор фильтров (К4), что у
+    ``ObservabilityStore._filter_clauses``, но СВОЯ реализация: history_query не
+    инстанцирует стор (тот открывает файл на запись — WAL/synchronous — и это его,
+    не наш, контракт read-only соединения К3). Все значения — через ``?``-плейсхолдеры
+    (страховка от SQL-инъекции через имена фильтров, hazard-тест автора); в SQL
+    склеиваются только ЛИТЕРАЛЬНЫЕ имена колонок отсюда.
+
+    ``severity_in`` — членство (К4): **пустой список — «не фильтровать», а не
+    «ничего не показывать»** (тот же выбор, что у стора: `if severity_in:` —
+    пустой список фальшив в Python, и решение здесь то же самое, не случайное
+    совпадение). Хазард-тест автора закрепляет это явно.
+    """
+    clauses: List[str] = []
+    params: List[Any] = []
+    if kind is not None:
+        clauses.append(f"{prefix}kind = ?")
+        params.append(kind)
+    if module is not None:
+        clauses.append(f"{prefix}module = ?")
+        params.append(module)
+    if process is not None:
+        clauses.append(f"{prefix}process = ?")
+        params.append(process)
+    if severity_in:
+        placeholders = ",".join("?" for _ in severity_in)
+        clauses.append(f"{prefix}severity IN ({placeholders})")
+        params.extend(str(s).lower() for s in severity_in)
+    if min_severity is not None:
+        clauses.append(f"{prefix}severity_number >= ?")
+        params.append(int(min_severity))
+    if since is not None:
+        clauses.append(f"{prefix}ts >= ?")
+        params.append(float(since))
+    if until is not None:
+        clauses.append(f"{prefix}ts <= ?")
+        params.append(float(until))
+    return clauses, params
+
+
+def _history_row_to_dict(row: "sqlite3.Row") -> Dict[str, Any]:
+    """Строка sqlite → dict К4 (``extra`` распакован, не JSON-строка).
+
+    **Хазард автора:** ``extra`` в БД — TEXT с JSON. Битая строка (ручная правка
+    файла, обрыв записи вживую) НЕ должна ронять весь ответ ради одной строки —
+    но и тихий ``{}`` вместо неё выглядел бы как «extra не было», хотя данные
+    БЫЛИ и потерялись при разборе (тот же класс, что «ноль наблюдений — тоже
+    результат наблюдения»). Помеченный ``_corrupted_extra`` с сырым текстом —
+    видимый, а не молчаливый компромисс.
+    """
+    raw_extra = row["extra"]
+    if raw_extra:
+        try:
+            extra: Any = json.loads(raw_extra)
+        except (ValueError, TypeError):
+            extra = {"_corrupted_extra": raw_extra}
+    else:
+        extra = {}
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        # process=NULL в дореформенных строках (миграция 5.21 стора) → падаем на module,
+        # тем же правилом, что ObservabilityStore._row_to_dict.
+        "process": row["process"] if row["process"] else row["module"],
+        "module": row["module"],
+        "ts": row["ts"],
+        "severity": row["severity"],
+        "severity_number": row["severity_number"] if row["severity_number"] is not None else 0,
+        "message": row["message"],
+        "extra": extra,
+    }
+
+
+def _history_list_rows(
+    conn: "sqlite3.Connection", *, where_clauses: List[str], params: List[Any], limit: int
+) -> List[Dict[str, Any]]:
+    """К4: страница записей, свежие первыми (``ORDER BY id DESC`` — id, не ts, см. докстрок history_query)."""
+    where = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    sql = f"SELECT {', '.join(_HISTORY_COLUMNS)} FROM records{where} ORDER BY id DESC LIMIT ?"  # nosec B608
+    cur = conn.execute(sql, [*params, int(limit)])
+    return [_history_row_to_dict(r) for r in cur.fetchall()]
+
+
+def _history_search_rows(
+    conn: "sqlite3.Connection", text: str, *, where_clauses: List[str], params: List[Any], limit: int
+) -> List[Dict[str, Any]]:
+    """К6: полнотекстовый поиск (FTS5), не подстрока.
+
+    Raises:
+        ObservabilitySearchError: запрос без единого слова (:func:`fts_query`) ИЛИ
+            поиск недоступен (индекс/модуль FTS5 отсутствует в сборке sqlite3) —
+            оба случая всплывают как ``sqlite3.OperationalError`` на самом запросе
+            (нет своей таблицы `records_fts`) и здесь получают одно имя.
+    """
+    fts_expr = fts_query(text.strip())
+    qualified = ", ".join(f"r.{col}" for col in _HISTORY_COLUMNS)
+    where = " AND ".join([f"{_HISTORY_FTS_TABLE} MATCH ?", *where_clauses])
+    sql = (
+        f"SELECT {qualified} FROM {_HISTORY_FTS_TABLE} "  # nosec B608
+        f"JOIN records r ON r.id = {_HISTORY_FTS_TABLE}.rowid "
+        f"WHERE {where} ORDER BY r.id DESC LIMIT ?"
+    )
+    try:
+        rows = conn.execute(sql, [fts_expr, *params, int(limit)]).fetchall()
+    except sqlite3.OperationalError as exc:
+        raise ObservabilitySearchError(f"полнотекстовый поиск недоступен или запрос не понят: {exc}") from exc
+    return [_history_row_to_dict(r) for r in rows]
 
 
 class BackendDriver(_TransportMixin, _EventChannelMixin):
@@ -496,6 +687,165 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         args = {"flush": True} if flush else None
         res = self.send_command(process, "introspect.observability", args, timeout=timeout)
         return ObservabilityCounters.from_response(res)
+
+    def history_query(
+        self,
+        *,
+        kind: Optional[str] = None,
+        metric: Optional[str] = None,
+        process: Optional[str] = None,
+        module: Optional[str] = None,
+        severity: Optional[List[str]] = None,
+        min_severity: Optional[int] = None,
+        since: Optional[float] = None,
+        until: Optional[float] = None,
+        text: Optional[str] = None,
+        limit: Optional[int] = None,
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """История наблюдаемости из sqlite-стора БЕЗ отдельного драйвера/файла (Ф3 Task 3.5, T6/CTL-F6).
+
+        Закрывает разрыв, названный ревью Ф1 (2026-09-01): все прочие обёртки этого
+        файла отвечают на «что происходит СЕЙЧАС» (``log_tail``/``observability_tail`` —
+        живой хвост, push-подписка); «что БЫЛО» до этой задачи читалось только руками
+        через sqlite-файл — агент открывал БД сам, драйвером тут было нечего звать.
+
+        **Путь к БД — ТОЛЬКО из readback (К2), никакого запасного резолвера.**
+        ``resolve_default_db_path()`` (тот же, что использует сам стор при дефолтной
+        конфигурации) сюда осознанно не подмешан: он угадывает путь по env, а не
+        спрашивает ЭТОТ процесс, где реально лежит ЕГО файл (свой ``db_path`` на
+        процесс — не общий на систему). Опрашивается ``introspect.observability``
+        адресата ``pm_name`` → секция ``history``; ``history.enabled is False`` или
+        отсутствующий ``history.db_path`` — названный отказ, sqlite при этом НЕ
+        открывается вовсе (тест шпионит monkeypatch на ``sqlite3.connect`` именно
+        на этих путях).
+
+        **Соединение — read-only (К3):** ``sqlite3.connect(f"file:{db_path}?mode=ro",
+        uri=True)``, вызвано как атрибут МОДУЛЯ ``sqlite3`` (не
+        ``from sqlite3 import connect``) — так открытие видно шпиону снаружи, и
+        реальная попытка INSERT через это же соединение отказывает по факту, а не
+        по обещанию (испытано тестом, не только описано). Несуществующий путь —
+        именованная ошибка, файл при этом на диске НЕ создаётся.
+
+        **WAL-хазард (испытан живьём, не только описан).** ``ObservabilityStore``
+        держит файл в режиме WAL: активный писатель может в этот самый момент
+        иметь незакоммиченные страницы в ``-wal``/``-shm``. Read-only соединение
+        читает ПОСЛЕДНИЙ ЗАКОММИЧЕННЫЙ снимок (WAL-режим это позволяет без блокировки
+        писателя) — новые, ещё не закоммиченные пишущим потоком строки в ответе не
+        появятся ДО коммита, но соединение не подвисает и не роняет ошибку из-за
+        параллельной записи. Если рядом с файлом БД нет ``-shm``/``-wal`` (писатель
+        никогда не открывал файл в этом процессе) — sqlite и в read-only режиме сам
+        заводит недостающий `-shm`, если каталог доступен на запись; на каталоге,
+        доступном ТОЛЬКО на чтение, это уже провал открытия — именованная ошибка тем
+        же путём, что «несуществующий файл» (не отдельный код).
+
+        **Фильтры сужают (К4), не расширяют.** ``severity`` — СПИСОК (членство, не
+        порог) — пустой список читается как «не фильтровать» (см. хазард-тест автора:
+        решение явное, не случайность truthy-проверки). ``min_severity`` — порог по
+        ``severity_number``. ``since``/``until`` — К5: отрицательное — окно последних
+        ``|N|`` секунд ОТ ЧАСОВ ДРАЙВЕРА (не писателя — см. :func:`_history_resolve_ts`),
+        ноль и положительное — абсолютный unix-ts (ноль — эпоха, не «сейчас»).
+        Порядок ответа — ``ORDER BY id DESC`` (свежие первыми): при доливке старых
+        записей батчем ``ts`` и ``id`` расходятся, и сортировка держится на ``id``,
+        как у самого стора (``ObservabilityStore.list_records``/``search``).
+
+        ``text`` (К6) ищет ПОЛНОТЕКСТОВО (FTS5 — токен целиком), не подстрокой:
+        ``text="ash"`` не находит «crash». Запрос без единого слова (``"!!!"``) и
+        отсутствие индекса в сборке sqlite3 — оба именованный отказ, а не пустой
+        список: «ничего не нашлось» и «искать было нечем» — разные факты.
+
+        ``metric`` (К7) — назван отказом до Task 3.1: колонки ``metric`` в сторе ещё
+        нет, молчаливый пропуск фильтра отдал бы весь стор вместо среза по метрике —
+        тот же класс дефекта, что «фильтр не сузил». Уходит первой же строкой метода,
+        ДО readback'а — метрика не появится раньше колонки независимо от процесса.
+
+        ``limit`` (К8) — не задан → 100 (не «вся БД»). Байтовый потолок MCP-ответа
+        (``full=true`` его снимает) — другой рубеж, применяется в ``dispatch.py``
+        поверх ЛЮБОГО инструмента и к числу строк отношения не имеет; здесь не
+        реализуется намеренно (иначе тот же факт судился бы в двух местах и мог
+        разойтись — как уже случилось однажды со схемами `full`, M2 Task 0.4).
+
+        Returns:
+            Успех: ``{"success": True, "rows": [...], "db_path": <из readback>,
+            "count": len(rows)}``. Строка — ``id/kind/process/module/ts/severity/
+            severity_number/message/extra`` (``extra`` — dict, не JSON-строка).
+            Отказ: ``{"success": False, "error": <причина с адресом>}``, в проверяемых
+            К2/К3/К6/К7 случаях — до открытия БД либо без единой доехавшей строки.
+        """
+        # К7 — первой строкой: metric не ждёт readback, колонки нет независимо от процесса.
+        if metric is not None:
+            return _history_fail(
+                f"history_query(metric={metric!r}) пока не поддержан: колонки metric в сторе "
+                "истории ещё нет — появится в Task 3.1 (ряд [ts, value] по имени метрики). "
+                "Молчаливый пропуск фильтра выглядел бы как «фильтр не сузил», а не как отказ."
+            )
+
+        # К2: путь к БД — только из readback; resolve_default_db_path() НЕ зовётся.
+        readback = _leaf_result(self.send_command(pm_name, "introspect.observability", timeout=timeout))
+        history = readback.get("history") if isinstance(readback, dict) else None
+        if not isinstance(history, dict):
+            return _history_fail(f"introspect.observability({pm_name!r}) не вернул секцию history вовсе: {readback!r}")
+        if not history.get("enabled"):
+            reason = history.get("reason") or "history.enabled=False (причина не названа процессом)"
+            return _history_fail(f"история недоступна на процессе {pm_name!r}: {reason}")
+        db_path = history.get("db_path")
+        if not db_path:
+            return _history_fail(
+                f"история недоступна на процессе {pm_name!r}: introspect.observability отдал "
+                "history.enabled=True, но без history.db_path — читать нечего"
+            )
+
+        effective_limit = int(limit) if limit is not None else _HISTORY_DEFAULT_LIMIT
+        resolved_since = _history_resolve_ts(since)
+        resolved_until = _history_resolve_ts(until)
+
+        # К3: sqlite3.connect как атрибут МОДУЛЯ (не from-import) — открытие видно
+        # шпиону теста снаружи; read-only URI — до этой строки БД не открывается вовсе.
+        try:
+            conn = sqlite3.connect(_history_readonly_uri(db_path), uri=True)
+        except sqlite3.Error as exc:
+            return _history_fail(f"не удалось открыть историю read-only по пути {db_path!r}: {exc}")
+
+        try:
+            conn.row_factory = sqlite3.Row
+            if text is not None:
+                where_clauses, params = _history_where_clauses(
+                    kind=kind,
+                    module=module,
+                    process=process,
+                    severity_in=severity,
+                    min_severity=min_severity,
+                    since=resolved_since,
+                    until=resolved_until,
+                    prefix="r.",
+                )
+                try:
+                    rows = _history_search_rows(
+                        conn, text, where_clauses=where_clauses, params=params, limit=effective_limit
+                    )
+                except ObservabilitySearchError as exc:
+                    return _history_fail(str(exc))
+            else:
+                where_clauses, params = _history_where_clauses(
+                    kind=kind,
+                    module=module,
+                    process=process,
+                    severity_in=severity,
+                    min_severity=min_severity,
+                    since=resolved_since,
+                    until=resolved_until,
+                )
+                try:
+                    rows = _history_list_rows(conn, where_clauses=where_clauses, params=params, limit=effective_limit)
+                except sqlite3.OperationalError as exc:
+                    return _history_fail(f"чтение истории по {db_path!r} провалилось: {exc}")
+        finally:
+            # Хазард автора: соединение обязано закрыться и на пути с исключением —
+            # иначе неудачный вызов агента копит открытые read-only хэндлы на файл.
+            conn.close()
+
+        return {"success": True, "rows": rows, "db_path": db_path, "count": len(rows)}
 
     def introspect_capabilities(self, process: str, **kw: Any) -> Dict[str, Any]:
         """Карточка процесса (сырой dict): команды+descriptions, регистры, handlers."""
