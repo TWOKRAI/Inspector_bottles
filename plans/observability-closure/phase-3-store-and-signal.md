@@ -4,6 +4,65 @@
 
 ## Ф3 — Стор и сигнал
 
+**Порядок исполнения фазы:** 3.0 (добор вердикта CTO Ф2, один файл механизма) → 3.5
+(`history_query`, половина `kind=log/error` не ждёт 3.1) → 3.1 → 3.2 → 3.3 → 3.4 → 3.6 → 3.7 → 3.8.
+Merge Ф2 в `main` — после 3.0 (условие вердикта CTO от 2026-09-03,
+[`review-phase-2-cto.md`](./review-phase-2-cto.md)).
+
+### Task 3.0 — Сверщик потолков: реальный ask и честное «не судил» (F1, F2 вердикта CTO Ф2)
+**Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
+**Goal:** отчёт `capped_by_throttle` называет потолок, который реально сработает (публикатор не может
+просить чаще такта), а кандидаты, которых сверщик не судил, называются вслух, а не пропускаются молча.
+
+**Откуда:** вердикт CTO по Ф2 (2026-09-03), находки F1 и F2. F1 — ошибка модели в безопасную сторону:
+при `interval_sec=1.0`, такте `5.0` и троттле `2.0` отчёт называет потолок, хотя публикатор попросит
+`5.0` и троттл его не режет; Task 2.11 заместила тактом только ноль, положительная заявка ниже такта
+осталась дословной. F2 — развилка вынесена CTO в вариант **(б)**: ответ веера на «такта нет» сейчас
+неотличим от «потолков нет» (класс «`checked` отвечает за вызов, не за охват»); вариант (в) — публикация
+такта ребёнка в payload heartbeat'а — это новое поле payload и задача Ф4 рядом с 4.11, здесь не делается.
+
+**Files:** `multiprocess_framework/modules/process_module/managers/telemetry_reload.py`
+(`_publisher_ask`, `_judge`, новый `judge_throttle_caps`, `detect_throttle_caps` → обёртка, `__all__`),
+`multiprocess_framework/modules/process_module/managers/observability_reload.py:1584`
+(вызывающий кладёт поле только при непустом списке), тесты модуля,
+`multiprocess_framework/modules/process_module/README.md` + `STATUS.md`,
+`multiprocess_framework/docs/OBSERVABILITY_MAP.md`, `CONTROL_PANEL.md` (описание поля ответа `config.reload`).
+
+**Steps:**
+1. **Реальный ask (F1).** `_publisher_ask`: при пригодном такте (`effective_tick > 0`) ask =
+   `max(pub_interval, tick)` — публикатор не публикует чаще такта; при `pub_interval > 0` и
+   такте неизвестном/непригодном ask = заявка (поведение до правки, без регресса); при
+   `pub_interval <= 0` и такте неизвестном/непригодном — не судим.
+2. **Один проход (F2).** `judge_throttle_caps(...) -> (caps, unjudged)` — единственный проход по
+   обеим половинам (`metrics.<имя>` и правила по пути); `unjudged` — `{ключ: причина}`, причина —
+   литерал (`"no_tick"` для непригодного/неизвестного такта при `pub_interval <= 0`).
+   `detect_throttle_caps` остаётся обёрткой с прежней сигнатурой и прежним типом ответа —
+   вызывающие вне этой задачи не правятся.
+3. **Ответ.** `apply_observation_policy` кладёт `capped_by_throttle_unjudged` в `applied` **только**
+   при непустом списке. GUI-presenter не трогается.
+4. Докстринги `_publisher_ask` и `detect_throttle_caps` приводятся в соответствие: замер F1
+   (вход → вывод) переносится в текст, «замещение при нуле» переформулируется в «нижняя граница —
+   такт».
+
+**Acceptance criteria** (контракт для независимого тестера; `store_throttle` — объект с атрибутом
+`rules: dict[glob → interval_sec]`, сигнатура `detect_throttle_caps(publish_section, store_throttle, *,
+observation_rules, default_interval_sec, effective_tick)`):
+- [ ] `interval_sec=1.0`, `effective_tick=5.0`, троттл `2.0` → потолок **не** называется (было: назывался).
+- [ ] `interval_sec=1.0`, `effective_tick=5.0`, троттл `6.0` → потолок назван, `publisher_interval_sec == 5.0`
+      (реальный ask, не заявленная 1.0).
+- [ ] `interval_sec=1.0`, `effective_tick=None`, троттл `2.0` → потолок назван, `publisher_interval_sec == 1.0`
+      (регресса нет: без такта судим по заявке).
+- [ ] `interval_sec=0.0` (дефолт поддерева), `effective_tick=0.0` → кандидат не судится **и** назван
+      в `unjudged` с причиной-литералом.
+- [ ] `judge_throttle_caps` возвращает пару; `detect_throttle_caps` возвращает только `caps` и
+      сохраняет прежний тип (страж «обёртка не сменила контракт»).
+- [ ] `apply_observation_policy`: при пустом `unjudged` ключа `capped_by_throttle_unjudged` в ответе
+      **нет**; при непустом — есть и содержит причину.
+- [ ] Пара на диагностический ответ (правило §3 плана): «срез есть, отчёт пуст» и «среза нет, отчёт
+      непуст» — обе инъекции с предсказанием до прогона.
+**Out of scope:** публикация такта ребёнка в payload heartbeat'а (Ф4, рядом с 4.11); GUI; авто-ослабление
+троттла (отвергнуто ADR-PM-017); переименование поля `capped_by_throttle`.
+
 ### Task 3.1 — Одна числовая запись `NumberRecord`; снапшот в стор один раз и структурно (M6, M11-часть)
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
 **Goal:** число ходит одной схемой от порта до стора; в сторе — одна строка на снапшот, JSON, колонка `metric`, запрос по имени.
