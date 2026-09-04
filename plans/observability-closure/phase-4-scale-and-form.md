@@ -175,5 +175,27 @@
 - [ ] Число оставшихся `emergency_log` в ошибочной позиции — **0**, посчитано грепом; для трёх пограничных записано решение с доводом.
 **Out of scope:** трёхстадийность `config.reload` (сознательное решение B2/5.7, не трогать); контракт самого `emergency_log` (он остаётся дверью для самоотчёта сломавшегося маршрута).
 
+### Task 4.12 — Оптовый путь `telemetry.broadcast` знает такт ребёнка (вторая половина F1; вариант «в» развилки F2)
+**Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework
+**Goal:** сверщик потолков отвечает одинаково на обеих дорогах — розничной (`config.reload` внутри процесса) и оптовой (`telemetry.broadcast` с оркестратора).
+
+**Откуда.** Task 3.0 закрыла F1 только там, где такт известен — внутри процесса. Оптовый вызов
+`process_manager_module/process/process_manager_process.py:3151` зовёт `detect_throttle_caps(args["publish"],
+resolve_store_throttle(self))` **без `effective_tick`**, потому что оркестратор такта ребёнка не знает
+структурно: `current_telemetry_tick()` — метод `ProcessHeartbeat` внутри процесса, наружу такт уходит
+только ответом `introspect.telemetry` (`tick_effective_sec`, `builtin_commands.py:1414`), в payload
+heartbeat'а его нет (проверено грепом 2026-09-04). Поэтому на оптовой дороге ask по-прежнему дословная
+заявка (та же ошибка модели F1), а веер «не судил» не показывается вовсе — при заявке `<= 0` кандидат
+пропускается молча. Это тот самый вариант **(в)** развилки F2, который CTO отложил в Ф4: новое поле payload.
+
+**Files:** `process_module/heartbeat/telemetry.py` (такт в payload heartbeat'а), `process_manager_module/process/process_manager_process.py:3151`
+(вызов `judge_throttle_caps` с тактом ребёнка + `capped_by_throttle_unjudged` в ответе), реестр телеметрии оркестратора,
+`CONTROL_PANEL.md`.
+**Acceptance criteria:**
+- [ ] Одинаковая пара вход→выход на обеих дорогах: `interval_sec=1.0` при такте ребёнка `5.0` и троттле `2.0` → потолок не назван ни `config.reload`, ни `telemetry.broadcast`.
+- [ ] Такт ребёнка, которого оркестратор ещё не видел (процесс не отчитался) → кандидат в `capped_by_throttle_unjudged` с причиной-литералом, а не молча.
+- [ ] Инъекция: убрать такт из payload → красный сторож паритета дорог; инъекция «такт есть, а вызов его не берёт» → красный по числу `publisher_interval_sec`.
+**Out of scope:** переименование полей ответа; авто-ослабление троттла (ADR-PM-017).
+
 ### Task 4.8 — Живой стенд Ф4 (20 процессов) + ревью фазы
 - [ ] Числа масштаба в отчёте: дельт/с, CPU ПМ, `hub.dropped`, `evicted` — все нули с контролем «нагрузка есть» (дельты > 0).
