@@ -332,3 +332,71 @@ class TestAnUnreadableRuleIsNamedNotSwallowed:
 
         assert caps == {"fps": {"publisher_interval_sec": 0.5, "throttle_interval_sec": 2.0}}, caps
         assert unjudged == {}, unjudged
+
+
+class TestNamedIsNotTheSameFactAsNamedWithThisLiteral:
+    """Находка A ревью (итерация 2): два свойства жили на одном ассерте.
+
+    Матрица лида дала ОДИНАКОВЫЙ набор красных на двух РАЗНЫХ заплатах —
+    S3 («нечитаемое правило читается как отсутствие правила») и S4 («обе
+    причины веера одним литералом»). Причина: оба теста класса
+    ``TestAnUnreadableRuleIsNamedNotSwallowed`` сверяют словарь ЦЕЛИКОМ вместе
+    с литералом, поэтому подмена причины на соседнюю неотличима от полного
+    молчания — то есть у «названности» своего сторожа не было.
+
+    Здесь она получает свой: словарь не сверяется целиком, литерал не
+    упоминается. Тест обязан ПЕРЕЖИТЬ подмену литерала и УМЕРЕТЬ на молчании —
+    ровно то различение, которого не хватало матрице.
+    """
+
+    def test_the_candidate_is_named_at_all_whatever_the_literal_says(self) -> None:
+        """Кандидат назван — независимо от того, какой литерал причины выбран."""
+        _caps, unjudged = judge_throttle_caps(
+            {"metrics": {"fps": {"interval_sec": 0.0}}},
+            _Throttle({"processes.**.state.fps": "0.05"}),
+            effective_tick=None,
+        )
+
+        assert "fps" in unjudged, unjudged
+
+    def test_a_nan_interval_is_unreadable_too(self) -> None:
+        """Находка B ревью: ``NaN`` — число по типу и не число по употреблению.
+
+        Пара: контроль тем же входом с читаемым правилом обязан дать потолок.
+        Без контроля «пусто» здесь неотличимо от «сверщик не сработал вовсе».
+        """
+        caps, unjudged = judge_throttle_caps(
+            {"metrics": {"fps": {"interval_sec": 0.5}}},
+            _Throttle({"processes.**.state.fps": float("nan")}),
+            effective_tick=None,
+        )
+
+        assert caps == {}, caps
+        assert unjudged == {"fps": "unreadable_rule"}, unjudged
+
+        control_caps, control_unjudged = judge_throttle_caps(
+            {"metrics": {"fps": {"interval_sec": 0.5}}},
+            _Throttle({"processes.**.state.fps": 9.0}),
+            effective_tick=None,
+        )
+
+        assert control_caps == {"fps": {"publisher_interval_sec": 0.5, "throttle_interval_sec": 9.0}}, control_caps
+        assert control_unjudged == {}, control_unjudged
+
+    def test_a_non_string_rule_key_does_not_bring_the_whole_command_down(self) -> None:
+        """Находка C ревью: ключ-нестрока ронял `config.reload` целиком.
+
+        До правки половина по ИМЕНИ звала ``pattern.rsplit`` на КАЖДОМ ключе
+        (после выделения ``_narrow_rule`` короткое замыкание по ``isinstance``
+        исчезло) и падала с ``AttributeError: 'int' object has no attribute
+        'rsplit'``. Половина по ПУТИ иммунна — она делает ``str(...)``.
+        Литерал ожидания — тишина, а не отказ.
+        """
+        caps, unjudged = judge_throttle_caps(
+            {"metrics": {"fps": {"interval_sec": 0.5}}},
+            _Throttle({42: "0.05"}),
+            effective_tick=None,
+        )
+
+        assert caps == {}, caps
+        assert unjudged == {}, unjudged

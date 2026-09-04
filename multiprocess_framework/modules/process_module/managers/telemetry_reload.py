@@ -22,6 +22,7 @@ Fan-out на ВСЕХ детей (broadcast ``process=all``) — Task 3.2, зд�
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 
 from ...state_store_module import split_pattern
@@ -251,7 +252,15 @@ def _narrow_rule(matched: list) -> Any:
     """
     if not matched:
         return None
-    readable = [float(interval) for interval in matched if isinstance(interval, (int, float))]
+    # `isfinite` — не придирка к типу, а ЧИТАЕМОСТЬ по употреблению (находка B
+    # ревью 3.0a): `NaN` проходит `isinstance(..., float)`, но `max([nan])` даёт
+    # `nan`, и обе ветки сравнения в `_judge` (`== 0`, `> asked`) ложны — правило
+    # на адресе есть, а отчёт молчит. Ровно тот класс, ради которого заведён
+    # `_UNREADABLE_RULE`. Замер: правило `nan` при заявке 0.5 → `caps={} unjudged={}`,
+    # контроль правилом 9.0 на том же входе → потолок назван.
+    readable = [
+        float(interval) for interval in matched if isinstance(interval, (int, float)) and math.isfinite(float(interval))
+    ]
     if not readable:
         return _UNREADABLE_RULE
     # 0 (полная блокировка) — строжайшее; иначе максимальный интервал.
@@ -288,7 +297,12 @@ def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Any:
         адресует метрику; :data:`_UNREADABLE_RULE`, если правило есть, а его
         интервал не число (Ф3, задача 3.0a, находка Н3 — см. :func:`_narrow_rule`).
     """
-    matched = [interval for pattern, interval in rules.items() if pattern.rsplit(".", 1)[-1] == metric]
+    # `str(pattern)` — симметрия с половиной по пути (находка C ревью 3.0a):
+    # до неё `isinstance` в списковом включении короткозамыкал `rsplit`, а
+    # после выделения `_narrow_rule` он зовётся на КАЖДОМ ключе, и правило
+    # `{42: '0.05'}` роняло весь `config.reload` через `AttributeError`
+    # вместо тихого пропуска.
+    matched = [interval for pattern, interval in rules.items() if str(pattern).rsplit(".", 1)[-1] == metric]
     return _narrow_rule(matched)
 
 
