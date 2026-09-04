@@ -718,7 +718,12 @@ TOOLS: List[ToolSpec] = [
                     "description": "Полнотекстовый поиск (FTS5, не подстрока) по message/module/process. "
                     "Запрос без слов — названный отказ, не пустой список. Опц.",
                 },
-                "limit": {"type": "integer", "description": "Максимум строк (по умолчанию 100)."},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Максимум строк (по умолчанию 100). SQLite читает LIMIT<=0 как "
+                    "«без предела» — driver дополнительно клэмпит к 1, minimum здесь для схемы.",
+                },
                 "pm_name": {
                     "type": "string",
                     "description": "Процесс, у которого спрашивается history.db_path (по умолчанию 'ProcessManager').",

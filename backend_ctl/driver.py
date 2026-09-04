@@ -308,7 +308,11 @@ def _history_search_rows(
     )
     try:
         rows = conn.execute(sql, [fts_expr, *params, int(limit)]).fetchall()
-    except sqlite3.OperationalError as exc:
+    except sqlite3.Error as exc:
+        # Н-4 (ревью): ловить именно OperationalError было мало — «db_path указывает на
+        # существующий не-sqlite файл» приходит sqlite3.DatabaseError, а он РОДИТЕЛЬ
+        # OperationalError в иерархии исключений sqlite3, не потомок, и уже прежним
+        # except'ом не ловился (пробивал историю наружу необработанным исключением).
         raise ObservabilitySearchError(f"полнотекстовый поиск недоступен или запрос не понят: {exc}") from exc
     return [_history_row_to_dict(r) for r in rows]
 
@@ -790,13 +794,22 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             reason = history.get("reason") or "history.enabled=False (причина не названа процессом)"
             return _history_fail(f"история недоступна на процессе {pm_name!r}: {reason}")
         db_path = history.get("db_path")
-        if not db_path:
+        if not isinstance(db_path, str) or not db_path:
+            # Н-4 (ревью): раньше сюда проходил ЛЮБОЙ truthy db_path (число/список/dict),
+            # и падал уже позже, необработанным AttributeError, внутри
+            # _history_readonly_uri (".replace" у не-строки нет). Тип проверяется здесь,
+            # у границы readback'а — там, где и положено ловить форму чужого ответа.
             return _history_fail(
                 f"история недоступна на процессе {pm_name!r}: introspect.observability отдал "
-                "history.enabled=True, но без history.db_path — читать нечего"
+                f"history.db_path={db_path!r} ({type(db_path).__name__}) — ожидалась непустая "
+                "строка пути, читать нечего"
             )
 
-        effective_limit = int(limit) if limit is not None else _HISTORY_DEFAULT_LIMIT
+        # Н-3 (ревью): limit уходит в SQL как есть, а SQLite читает LIMIT -1 как «без
+        # предела» — на сторе у потолка ретенции (200 000 строк) это ~145 МБ одним ответом.
+        # Схема объявляет limit integer без нижней границы, поэтому клэмп — здесь, а не
+        # только описанием в схеме (описание не исполняется).
+        effective_limit = max(1, int(limit)) if limit is not None else _HISTORY_DEFAULT_LIMIT
         resolved_since = _history_resolve_ts(since)
         resolved_until = _history_resolve_ts(until)
 
@@ -838,7 +851,9 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 )
                 try:
                     rows = _history_list_rows(conn, where_clauses=where_clauses, params=params, limit=effective_limit)
-                except sqlite3.OperationalError as exc:
+                except sqlite3.Error as exc:
+                    # Н-4 (ревью): sqlite3.DatabaseError («file is not a database») —
+                    # РОДИТЕЛЬ OperationalError, не потомок; узкий except его пропускал.
                     return _history_fail(f"чтение истории по {db_path!r} провалилось: {exc}")
         finally:
             # Хазард автора: соединение обязано закрыться и на пути с исключением —

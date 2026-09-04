@@ -374,3 +374,94 @@ class TestSearchUnavailableIsIsolatedFromPlainListing:
         listed = drv.history_query(limit=10)
         assert listed["success"] is True, f"обычная лента упала из-за отсутствия FTS-таблицы: {listed}"
         assert [r["message"] for r in listed["rows"]] == ["crash при старте камеры"]
+
+
+# ===========================================================================
+# Хазард 8 (Н-3 добора ревью 2026-09-04) — отрицательный limit не должен снимать предел.
+# ===========================================================================
+
+
+class TestNegativeLimitDoesNotUnboundTheQuery:
+    """Что ломается, если это свойство снять: SQLite читает ``LIMIT -1`` как «без
+    предела» — схема объявляла ``limit`` целым числом без нижней границы, то есть
+    значение агенту доступно. На сторе у потолка ретенции (200 000 строк) ответ на
+    ``history_query(limit=-1)`` разросся бы до сотен мегабайт в памяти driver'а
+    вместо страницы. ``effective_limit`` обязан клэмпиться к ``>= 1`` ДО того, как
+    число попадёт в SQL, а не только описываться как опасное в docstring/схеме."""
+
+    def test_negative_limit_returns_at_most_one_row(self, tmp_path) -> None:
+        db_path, store = _seed(
+            tmp_path,
+            [_log_record("раз", ts=1.0), _log_record("два", ts=2.0), _log_record("три", ts=3.0)],
+        )
+        store.close()
+        drv = _driver_for(db_path)
+        result = drv.history_query(limit=-1)
+        assert result["success"] is True
+        assert len(result["rows"]) == 1, (
+            f"limit=-1 отдал {len(result['rows'])} строк из 3 вместо клэмпа к 1 (SQLite читает "
+            f"LIMIT<=0 как «без предела»): {result['rows']}"
+        )
+
+    def test_zero_limit_also_returns_at_most_one_row(self, tmp_path) -> None:
+        """Тот же класс ``LIMIT<=0`` — не только строго отрицательный вход."""
+        db_path, store = _seed(
+            tmp_path,
+            [_log_record("раз", ts=1.0), _log_record("два", ts=2.0)],
+        )
+        store.close()
+        drv = _driver_for(db_path)
+        result = drv.history_query(limit=0)
+        assert result["success"] is True
+        assert len(result["rows"]) == 1, f"limit=0 отдал {len(result['rows'])} строк вместо клэмпа к 1"
+
+
+# ===========================================================================
+# Хазард 9 (Н-4 добора ревью 2026-09-04) — sqlite3.DatabaseError не пробивает метод
+# необработанным исключением; readback с db_path не-строкой — тоже названный отказ.
+# ===========================================================================
+
+
+class TestUnanticipatedDbFailuresAreNamedNotRaised:
+    """Что ломается, если это свойство снять: ``sqlite3.DatabaseError`` («file is
+    not a database») — РОДИТЕЛЬ ``sqlite3.OperationalError`` в иерархии исключений
+    sqlite3 (``Error → DatabaseError → OperationalError``), не потомок. Узкий
+    ``except sqlite3.OperationalError`` его не ловит: history_query падает
+    необработанным исключением наружу вместо ``{"success": False, "error": ...}`` —
+    для инструмента, объявленного read-only и «безопасным» в MCP-реестре, чужое
+    исключение снаружи функции — это дефект того же класса, что непойманный отказ
+    IPC. Второй сценарий — readback вернул ``db_path`` не строкой (баг на стороне
+    процесса/протокола): ``_history_readonly_uri`` тогда падает ``AttributeError``
+    (у int/list/dict нет ``.replace``), тоже необработанным."""
+
+    def test_a_non_sqlite_file_is_a_named_refusal_not_an_exception(self, tmp_path) -> None:
+        not_a_db = tmp_path / "not_a_database.txt"
+        not_a_db.write_text("это обычный текстовый файл, не sqlite", encoding="utf-8")
+
+        drv = _driver_for(str(not_a_db))
+        result = drv.history_query()  # не должно бросить исключение наружу теста
+        assert result.get("success") is False, f"не-sqlite файл обязан быть НАЗВАННЫМ отказом: {result}"
+        assert "not_a_database" in str(result.get("error", "")), f"ошибка не называет путь: {result}"
+
+    def test_a_non_sqlite_file_is_a_named_refusal_on_the_text_search_branch_too(self, tmp_path) -> None:
+        """Тот же дефект жил в ДВУХ ветках (ревью Н-4): без ``text=`` и с ``text=`` —
+        у поиска свой ``except``, и widening одной ветки не чинит другую."""
+        not_a_db = tmp_path / "not_a_database_search.txt"
+        not_a_db.write_text("тоже не sqlite", encoding="utf-8")
+
+        drv = _driver_for(str(not_a_db))
+        result = drv.history_query(text="crash")
+        assert result.get("success") is False, f"не-sqlite файл на ветке поиска обязан быть отказом: {result}"
+
+    @pytest.mark.parametrize("bad_db_path", [123, ["a", "b"], {"x": 1}])
+    def test_non_string_db_path_from_readback_is_a_named_refusal(self, bad_db_path) -> None:
+        drv = BackendDriver()
+        drv.send_command = _FakeSendCommand(  # type: ignore[assignment]
+            {"success": True, "process": "ProcessManager", "history": {"enabled": True, "db_path": bad_db_path}}
+        )
+        result = drv.history_query()
+        assert result.get("success") is False, (
+            f"нестроковый history.db_path={bad_db_path!r} обязан быть НАЗВАННЫМ отказом, "
+            f"а не AttributeError из _history_readonly_uri: {result}"
+        )
+        assert "db_path" in str(result.get("error", "")).lower()

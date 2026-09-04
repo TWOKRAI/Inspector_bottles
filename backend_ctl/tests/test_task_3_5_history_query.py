@@ -592,6 +592,25 @@ class TestK4FiltersAndRowShape:
         result = drv.history_query(limit=2)
         assert len(_rows(result)) == 2
 
+    def test_success_envelope_carries_db_path_literally_matching_readback_and_count(self, tmp_path) -> None:
+        """Н-1 (добор ревью 2026-09-04): конверт К4 дословно — «db_path в ответе
+        обязателен, иначе К2 нечем сверить снаружи» — не был застрахован НИ ОДНИМ
+        тестом; мутационный прогон ревьюера снял оба поля из успешного ответа и
+        получил 48/48 зелёных. Проверяется дословное равенство с ПУТЁМ ИЗ READBACK
+        (не просто «есть строка»), и count как ИМЕННО len(rows), а не число сбоку."""
+        db_path, _ = _seed_small_store(tmp_path)
+        drv = _driver_with_response(_ok_response(db_path))
+        result = drv.history_query(limit=10)
+        assert result.get("success") is True
+        assert result.get("db_path") == db_path, (
+            f"db_path ответа разошёлся с путём из readback: {result.get('db_path')!r} != {db_path!r}"
+        )
+        rows = _rows(result)
+        assert rows is not None
+        assert result.get("count") == len(rows), (
+            f"count={result.get('count')!r} не равен len(rows)={len(rows)} — числа разошлись"
+        )
+
 
 # ===========================================================================
 # К5 — отрицательные since/until — относительные секунды от «сейчас»; 0 — абсолют.
@@ -668,6 +687,27 @@ class TestK6TextSearchIsFTS:
             f"настоящее слово без совпадений — это НЕ отказ поиска, а пустая выдача: {result}"
         )
         assert _rows(result) == []
+
+    def test_text_search_combined_with_module_filter_does_not_raise_ambiguous_column(self, tmp_path) -> None:
+        """Н-2 (добор ревью 2026-09-04): ветка ``text=`` JOIN'ит теневую FTS5-таблицу
+        (несёт СВОИ колонки ``message``/``module``/``process``) с ``records r`` —
+        WHERE-условие фильтра ``module`` обязано быть квалифицировано (``r.module``),
+        иначе sqlite отвечает ``ambiguous column name: module`` вместо результата.
+        Ни один из прежних 48 тестов не сочетал ``text=`` с фильтром — заплата
+        (``prefix=""`` вместо ``"r."``), форсированная ревьюером, проходила молча."""
+        db_path, _ = _seed_small_store(tmp_path)
+        drv = _driver_with_response(_ok_response(db_path))
+        result = drv.history_query(text="crash", module="widgets")
+        assert result.get("success") is True, f"text+module дал отказ вместо результата: {result}"
+        assert _messages(result) == ["widget crash detected"]
+
+    def test_text_search_combined_with_process_filter_does_not_raise_ambiguous_column(self, tmp_path) -> None:
+        """Та же дыра (Н-2), другая из ambiguous-колонок теневой таблицы — ``process``."""
+        db_path, _ = _seed_small_store(tmp_path)
+        drv = _driver_with_response(_ok_response(db_path))
+        result = drv.history_query(text="crash", process="gui")
+        assert result.get("success") is True, f"text+process дал отказ вместо результата: {result}"
+        assert _messages(result) == ["widget crash detected"]
 
 
 # ===========================================================================
