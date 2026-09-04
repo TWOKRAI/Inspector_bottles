@@ -1465,10 +1465,12 @@ def _rebuild_and_apply(
     # Секция `observation` остаётся в `resolved` по тому же доводу, что `events`
     # и `flight`. Получатель — живой гейт heartbeat'а: без этой ветки правка
     # легла бы в слой, была бы видна в провенансе и НЕ действовала.
+    # Отчёт о потолках IPC здесь НЕ считается (Ф3, задача 3.0a, находка Н1
+    # ревью): он читает такт и publish-секцию, а обе величины правят СОСЕДНИЕ
+    # стадии ниже. Считается он в конце ленты — `observation_throttle_report`.
     observation_applied = apply_observation_policy(
         heartbeat,
         resolved.get(OBSERVATION_SECTION_KEY),
-        store_throttle=store_throttle,
     )
     if observation_applied is not None:
         expanded[OBSERVATION_SECTION_KEY] = observation_applied
@@ -1495,6 +1497,15 @@ def _rebuild_and_apply(
     )
     if telemetry_applied is not None:
         expanded[TELEMETRY_KEY] = telemetry_applied
+
+    # Ф3, задача 3.0a (находка Н1 ревью): отчёт о потолках IPC — ПОСЛЕДНЯЯ
+    # строка ленты применений, потому что он целиком считается по readback'у
+    # состояния, которое правят обе стадии выше (такт — `apply_heartbeat_interval`,
+    # `tick_sec`/`default_interval_sec` — телеметрийная). Стоя раньше, он отвечал
+    # по состоянию ДО правки, и два ОДИНАКОВЫХ `config.reload` подряд давали
+    # РАЗНЫЕ ответы: первый утверждал «потолков нет» там, где потолок уже был.
+    if observation_applied is not None:
+        observation_applied.update(observation_throttle_report(heartbeat, observation_applied, store_throttle))
 
     if log_info is not None:
         held = ", ".join(layers.session_keys()) or "—"
@@ -1555,59 +1566,108 @@ def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: An
     if not callable(apply):
         return None
     applied = dict(apply(section) or {})
-    applied["throttle_checked"] = store_throttle is not None
-    if store_throttle is not None:
-        from ..configs.observation_policy import cap_candidates
-        from .telemetry_reload import judge_throttle_caps
-
-        # ЖИВОЕ значение гейта, а не константа: правило без явного `interval_sec`
-        # унаследует именно его, и сверять надо то, что попросит публикатор.
-        # Второй проход ревью итерации 2: здесь стоял `None`, поэтому сверщик
-        # никогда не видел `default_interval_sec` процесса и судил по литералу —
-        # при 0.5 против троттла 0.8 срез был реален, а отчёт отдавал пустой
-        # список рядом с `throttle_checked: true`.
-        live_publish = None
-        current = getattr(heartbeat, "current_telemetry_publish", None)
-        if callable(current):
-            try:
-                live_publish = current()
-            except Exception:  # noqa: BLE001 — readback не смеет ронять применение политики
-                live_publish = None
-        inherited = None
-        if isinstance(live_publish, dict):
-            raw = live_publish.get("default_interval_sec")
-            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-                inherited = float(raw)
-        # Ф2 (задача 2.11, Р-11): дефолт поддерева (`cap_candidates(applied)`)
-        # заявляет `interval_sec=0.0` на каждой пересборке — `judge_throttle_caps`
-        # обязан судить его по РЕАЛЬНОМУ ask, а не по голому нулю; Ф3 (задача 3.0,
-        # F1) обобщила это до «такт — нижняя граница ЛЮБОЙ заявки» (см. её
-        # докстринг). Тот же осторожный приём, что уже стоит выше для
-        # `current_telemetry_publish`: readback не смеет ронять применение политики.
-        effective_tick = None
-        current_tick = getattr(heartbeat, "current_telemetry_tick", None)
-        if callable(current_tick):
-            try:
-                raw_tick = current_tick()
-            except Exception:  # noqa: BLE001 — readback не смеет ронять применение политики
-                raw_tick = None
-            if isinstance(raw_tick, (int, float)) and not isinstance(raw_tick, bool):
-                effective_tick = float(raw_tick)
-        caps, unjudged = judge_throttle_caps(
-            None,
-            store_throttle,
-            observation_rules=cap_candidates(applied),
-            default_interval_sec=inherited,
-            effective_tick=effective_tick,
-        )
-        applied["capped_by_throttle"] = caps
-        # Ф3, задача 3.0 (находка F2 вердикта CTO по Ф2): ключ появляется ТОЛЬКО
-        # когда есть что назвать. Пустой словарь рядом с `throttle_checked: true`
-        # читался бы как «сверщик посмотрел и не судил ничего» — третье показание
-        # там, где показаний два; отсутствие ключа означает «судить было чем всех».
-        if unjudged:
-            applied["capped_by_throttle_unjudged"] = unjudged
+    applied.update(observation_throttle_report(heartbeat, applied, store_throttle))
     return applied
+
+
+def observation_throttle_report(heartbeat: Any, applied: Dict[str, Any], store_throttle: Any) -> Dict[str, Any]:
+    """Отчёт о потолках IPC по СНЯТОМУ СЕЙЧАС состоянию процесса (Ф3, задача 3.0a, Н1).
+
+    Отделено от :func:`apply_observation_policy` не ради красоты, а потому что
+    отчёт и применение обязаны стоять в РАЗНЫХ точках ленты команды. Отчёт
+    целиком считается по двум readback'ам — ``current_telemetry_tick()`` и
+    ``current_telemetry_publish()``, — а обе величины меняют СОСЕДНИЕ стадии
+    того же ``config.reload``: такт правит ``apply_heartbeat_interval``
+    (``observability.heartbeat_interval_sec``), а ``tick_sec`` и
+    ``default_interval_sec`` — телеметрийная стадия
+    (``_apply_telemetry_from_layers``). Пока отчёт считался внутри применения
+    политики порта, он читал состояние ДО этих стадий, и один и тот же вызов
+    отвечал по-разному в зависимости от того, каким он был по счёту.
+
+    Воспроизведение (находка Н1 ревью, два ОДИНАКОВЫХ ``config.reload`` подряд,
+    троттл ``{'processes.*.state.plugins.**': 0.5}``, такт харнесса 1.0)::
+
+        reload#1 {"heartbeat_interval_sec": 0.2} -> capped_by_throttle={}
+        reload#2 тот же вход                     -> {'processes.*.state.plugins.**':
+                                                     {'publisher_interval_sec': 0.2,
+                                                      'throttle_interval_sec': 0.5}}
+
+    То есть первый ответ утверждал «потолков нет» там, где потолок уже был. Та же
+    болезнь достижима и без ``heartbeat_interval_sec`` — через ``telemetry.publish.tick_sec``
+    в той же команде, — поэтому ``apply_observability_layers`` зовёт отчёт ПОСЛЕ
+    ОБЕИХ стадий, а не только после такта.
+
+    Почему не переехало само применение политики: ``reconfigure_telemetry``
+    (телеметрийная стадия) внутри себя зовёт ``_warn_capped_metrics`` — соседний
+    голос о потолках, который считает по ЖИВОЙ политике порта. Переставь стадии
+    местами — и этот голос заговорит по политике ПРОШЛОЙ правки. Порядок
+    применений остаётся прежним, переехал только отчёт.
+
+    Args:
+        heartbeat: ``ProcessHeartbeat`` процесса (источник обоих readback'ов).
+        applied: применённая политика порта — из неё собираются кандидаты
+            (:func:`~..configs.observation_policy.cap_candidates`).
+        store_throttle: живой центральный троттл оркестратора либо ``None``.
+
+    Returns:
+        Ключи для ответа: ``throttle_checked`` всегда; ``capped_by_throttle`` —
+        когда троттл есть; ``capped_by_throttle_unjudged`` — только непустым.
+    """
+    report: Dict[str, Any] = {"throttle_checked": store_throttle is not None}
+    if store_throttle is None:
+        return report
+
+    from ..configs.observation_policy import cap_candidates
+    from .telemetry_reload import judge_throttle_caps
+
+    # ЖИВОЕ значение гейта, а не константа: правило без явного `interval_sec`
+    # унаследует именно его, и сверять надо то, что попросит публикатор.
+    # Второй проход ревью итерации 2: здесь стоял `None`, поэтому сверщик
+    # никогда не видел `default_interval_sec` процесса и судил по литералу —
+    # при 0.5 против троттла 0.8 срез был реален, а отчёт отдавал пустой
+    # список рядом с `throttle_checked: true`.
+    live_publish = None
+    current = getattr(heartbeat, "current_telemetry_publish", None)
+    if callable(current):
+        try:
+            live_publish = current()
+        except Exception:  # noqa: BLE001 — readback не смеет ронять применение политики
+            live_publish = None
+    inherited = None
+    if isinstance(live_publish, dict):
+        raw = live_publish.get("default_interval_sec")
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            inherited = float(raw)
+    # Ф2 (задача 2.11, Р-11): дефолт поддерева (`cap_candidates(applied)`)
+    # заявляет `interval_sec=0.0` на каждой пересборке — `judge_throttle_caps`
+    # обязан судить его по РЕАЛЬНОМУ ask, а не по голому нулю; Ф3 (задача 3.0,
+    # F1) обобщила это до «такт — нижняя граница ЛЮБОЙ заявки» (см. её
+    # докстринг). Тот же осторожный приём, что уже стоит выше для
+    # `current_telemetry_publish`: readback не смеет ронять применение политики.
+    effective_tick = None
+    current_tick = getattr(heartbeat, "current_telemetry_tick", None)
+    if callable(current_tick):
+        try:
+            raw_tick = current_tick()
+        except Exception:  # noqa: BLE001 — readback не смеет ронять применение политики
+            raw_tick = None
+        if isinstance(raw_tick, (int, float)) and not isinstance(raw_tick, bool):
+            effective_tick = float(raw_tick)
+    caps, unjudged = judge_throttle_caps(
+        None,
+        store_throttle,
+        observation_rules=cap_candidates(applied),
+        default_interval_sec=inherited,
+        effective_tick=effective_tick,
+    )
+    report["capped_by_throttle"] = caps
+    # Ф3, задача 3.0 (находка F2 вердикта CTO по Ф2): ключ появляется ТОЛЬКО
+    # когда есть что назвать. Пустой словарь рядом с `throttle_checked: true`
+    # читался бы как «сверщик посмотрел и не судил ничего» — третье показание
+    # там, где показаний два; отсутствие ключа означает «судить было чем всех».
+    if unjudged:
+        report["capped_by_throttle_unjudged"] = unjudged
+    return report
 
 
 def apply_heartbeat_interval(heartbeat: Any, value: Any) -> Optional[float]:

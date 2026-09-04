@@ -211,7 +211,56 @@ def resolve_store_throttle(holder: Any) -> Any:
     return store_manager.get_middleware("throttle")
 
 
-def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Optional[float]:
+#: Правило на адресе ЕСТЬ, но его интервал не число (Ф3, задача 3.0a, находка Н3).
+#: Отдельно от ``None`` («правила нет») потому, что это РАЗНЫЕ факты и разная
+#: судьба записи в живом троттле: непокрытый путь пропускается без ограничений,
+#: а нечисловое правило ломает ``ThrottleMiddleware`` со ВТОРОГО вызова.
+_UNREADABLE_RULE: Any = object()
+
+
+def _narrow_rule(matched: list) -> Any:
+    """Строжайшее из отобранных правил, либо ``None``, либо :data:`_UNREADABLE_RULE`.
+
+    Общая половина обоих матчеров: они по-разному РЕШАЮТ, какие правила
+    адресуют кандидата (суффикс имени против пересечения глобов), но одинаково
+    выбирают из отобранного — иначе на одном входе получились бы две дисциплины.
+
+    **``bool`` — валидное правило, а не мусор** (Ф3, задача 3.0a, находка Н2).
+    Половина по ПУТИ исключала его, половина по ИМЕНИ принимала; замер на живом
+    ``ThrottleMiddleware`` (три ``before_set`` подряд) снял вопрос — троттл
+    исполняет оба значения::
+
+        {'…fps': True}  -> [(True,0), (False,1), (False,2)]   # как интервал 1.0
+        {'…fps': 0.05}  -> [(True,0), (False,1), (False,2)]   # так же
+        {'…fps': False} -> полная блокировка (ветка `interval == 0`)
+
+    Раз троттл правило исполняет — сверщик обязан его видеть, иначе РАБОТАЮЩЕЕ
+    правило падало бы в «судили, потолка нет».
+
+    **Нечисловой интервал — не «правила нет»** (находка Н3). Замер на том же
+    стенде::
+
+        {'…fps': '0.05'} -> [(True,0), TypeError("unsupported operand type(s) for /: 'float' and 'str'"), …]
+
+    То есть строка не троттлит, а ЛОМАЕТ троттл со второго вызова, и молчание
+    сверщика скрыло бы не потолок, а сломанное правило.
+
+    Названный потолок: если адрес покрыт И читаемым, и нечитаемым правилом,
+    судим по читаемым, а сломанное молчит — сузить это до «называть оба» нельзя,
+    не заведя второй список в ответе.
+    """
+    if not matched:
+        return None
+    readable = [float(interval) for interval in matched if isinstance(interval, (int, float))]
+    if not readable:
+        return _UNREADABLE_RULE
+    # 0 (полная блокировка) — строжайшее; иначе максимальный интервал.
+    if any(c == 0 for c in readable):
+        return 0.0
+    return max(readable)
+
+
+def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Any:
     """Найти интервал central-правила для метрики по СУФФИКСУ паттерна (generic).
 
     Central-правила троттла авторятся как листовые глобы вида ``processes.**.state.fps``
@@ -235,19 +284,12 @@ def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Optional[flo
     ``multiprocess_prototype/backend/state/tests/test_throttle_rules_cover_plugin_paths.py``.
 
     Returns:
-        Интервал строжайшего правила метрики либо ``None``, если правил нет.
+        Интервал строжайшего правила метрики; ``None``, если ни одно правило не
+        адресует метрику; :data:`_UNREADABLE_RULE`, если правило есть, а его
+        интервал не число (Ф3, задача 3.0a, находка Н3 — см. :func:`_narrow_rule`).
     """
-    candidates = [
-        interval
-        for pattern, interval in rules.items()
-        if isinstance(interval, (int, float)) and pattern.rsplit(".", 1)[-1] == metric
-    ]
-    if not candidates:
-        return None
-    # 0 (полная блокировка) — строжайшее; иначе максимальный интервал.
-    if any(c == 0 for c in candidates):
-        return 0.0
-    return max(candidates)
+    matched = [interval for pattern, interval in rules.items() if pattern.rsplit(".", 1)[-1] == metric]
+    return _narrow_rule(matched)
 
 
 def _globs_intersect(a: Tuple[str, ...], b: Tuple[str, ...]) -> bool:
@@ -284,7 +326,7 @@ def _globs_intersect(a: Tuple[str, ...], b: Tuple[str, ...]) -> bool:
     return False
 
 
-def _central_rule_for_path_pattern(pattern: str, rules: Dict[str, Any]) -> Optional[float]:
+def _central_rule_for_path_pattern(pattern: str, rules: Dict[str, Any]) -> Any:
     """Строжайшее central-правило, чьи пути ПЕРЕСЕКАЮТСЯ с правилом порта.
 
     Отличается от :func:`_central_rule_for_metric` не капризом, а входом: там
@@ -295,19 +337,16 @@ def _central_rule_for_path_pattern(pattern: str, rules: Dict[str, Any]) -> Optio
 
     Строжайшее (макс. интервал, ``0`` = полная блокировка) — по тому же доводу,
     что у соседа: узкое место оператору называется то, которое реально сработает.
+    Выбор из отобранного и обе особые формы значения (``bool``, нечисло) — общие
+    с соседом, см. :func:`_narrow_rule`: раньше эта половина исключала ``bool``,
+    а соседняя принимала, и на одном входе жили две дисциплины (находка Н2).
     """
-    candidates = [
-        float(interval)
+    matched = [
+        interval
         for throttle_pattern, interval in rules.items()
-        if isinstance(interval, (int, float))
-        and not isinstance(interval, bool)
-        and _globs_intersect(split_pattern(str(pattern)), split_pattern(str(throttle_pattern)))
+        if _globs_intersect(split_pattern(str(pattern)), split_pattern(str(throttle_pattern)))
     ]
-    if not candidates:
-        return None
-    if any(c == 0 for c in candidates):
-        return 0.0
-    return max(candidates)
+    return _narrow_rule(matched)
 
 
 def judge_throttle_caps(
@@ -390,7 +429,9 @@ def judge_throttle_caps(
           рядом с «троттл строже» частоту, которой публикатор не попросит, было бы
           противоречием по смыслу для читателя отчёта;
         * ``unjudged`` — ``{ключ: причина}`` для кандидатов, которых рассудить нечем.
-          Причина — литерал; сейчас он один: ``"no_tick"``.
+          Причина — литерал, их два: ``"no_tick"`` (нет ни заявки, ни такта) и
+          ``"unreadable_rule"`` (правило на адресе есть, а его интервал не число —
+          Ф3, задача 3.0a, находка Н3; см. :func:`_narrow_rule`).
 
         Оба словаря пусты → поднятие частоты дойдёт до дерева без среза, и это
         УТВЕРЖДЕНИЕ, а не молчание.
@@ -502,7 +543,7 @@ def judge_throttle_caps(
             return tick
         return max(claim, tick)
 
-    def _judge(key: str, pub_interval: Any, throttle_interval: Optional[float]) -> None:
+    def _judge(key: str, pub_interval: Any, throttle_interval: Any) -> None:
         """Одна развилка на ОБЕ половины: капнут / потолка нет / не судили.
 
         Порядок проверок — не косметика. Central-правило смотрится ПЕРВЫМ:
@@ -510,7 +551,17 @@ def judge_throttle_caps(
         неоткуда взяться при любом ask'е, и такой кандидат определён без такта —
         в ``unjudged`` он не идёт, иначе веер «не судил» заполнился бы всем
         деревом и перестал бы что-либо значить.
+
+        Нечитаемое правило (:data:`_UNREADABLE_RULE`) — третий исход того же
+        вопроса и вторая причина веера (Ф3, задача 3.0a, находка Н3): правило на
+        адресе ЕСТЬ, но интервал не число, и это НЕ «правила нет». Замер живого
+        троттла — в докстринге :func:`_narrow_rule`: строка не троттлит, а
+        роняет ``ThrottleMiddleware`` со второго вызова, поэтому молчание здесь
+        скрывало бы сломанное правило, а не отсутствие потолка.
         """
+        if throttle_interval is _UNREADABLE_RULE:
+            unjudged[key] = "unreadable_rule"
+            return
         if throttle_interval is None:
             return
         if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
@@ -562,6 +613,15 @@ def judge_throttle_caps(
     # строковое совпадение возможно — и тогда один и тот же ключ утверждал бы в
     # одном ответе и «потолок вот такой», и «рассудить было нечем». Утверждение
     # сильнее: рассуждённое побеждает.
+    #
+    # Развязка ОДНОСТОРОННЯЯ намеренно (Ф3, задача 3.0a, находка Н4 ревью): пара
+    # «не судил» ↔ «судил, потолка нет» ею не разводится, потому что второе
+    # показание вообще не имеет записи в ответе — разводить нечего. Достижимость
+    # столкновения сегодня НУЛЕВАЯ ни на одной живой дороге: `apply_observation_policy`
+    # шлёт `publish_section=None`, а оптовый `telemetry.broadcast`
+    # (`process_manager_process.py`) не шлёт `observation_rules` — две половины
+    # никогда не заполняются одновременно. Строка стоит как страж на день, когда
+    # дороги сойдутся (Task 4.12), а не как лечение живого дефекта.
     for judged_key in caps:
         unjudged.pop(judged_key, None)
 
