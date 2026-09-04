@@ -122,6 +122,9 @@ observation_rules, default_interval_sec, effective_tick)`):
 - [ ] Горизонт стора при INFO на 8 процессах ≥ 24 ч (экстраполяция по замеренному темпу, число в отчёте).
 - [ ] Инъекция: вернуть store-tap на `log_stats` → тест «снапшот один раз» красный; снять индекс → тест плана запроса красный (EXPLAIN).
 - [ ] Ни одного `getattr` по форме числовой записи в `record_display.py` (AST-страж).
+- [ ] **Долг из Task 3.5:** `history_query(metric="capture.frames", since=-600)` перестаёт отказывать
+      (критерий К7 задачи 3.5 снимается) и отдаёт ряд `[ts, value]` ≥ 50 точек живьём. Пока колонки нет,
+      инструмент отказывает НАЗВАННО — эта задача обязана убрать и отказ, и его тест.
 **Out of scope:** `telemetry.db` (Task 3.7).
 
 ### Task 3.2 — Уровни логов и раскладка файлов: болтовня → DEBUG, `messages.log` без дубля (M6, m1, Р-7)
@@ -166,8 +169,37 @@ observation_rules, default_interval_sec, effective_tick)`):
 **Files:** `backend_ctl/driver.py` (метод `history_query`), `backend_ctl/mcp_tools.py`, `channel_routing_module/observability/observability_store.py:481-533`
 (`_filter_clauses` + `metric`), `CONTROL_PANEL.md`, `backend_ctl/AGENTS.md`.
 **Steps:** путь к БД — из `introspect.observability.history.db_path` (readback, не догадка); read-only соединение; фильтры `kind/metric/process/module/severity/min_severity/since/until/text(FTS)/limit`; кап + `full`; для `kind=stats` — ряд `[ts, value]` по `metric`.
+**Контракт уточнён до старта (2026-09-04, решения ведущего — это ТЗ слепого тестера):**
+
+- **К1. Инструмент существует в обеих формах.** `BackendDriver.history_query(...)` и MCP-инструмент
+  `history_query` в реестре `TOOLS`; схема закрыта (`additionalProperties: false`) и объявляет
+  `kind / metric / process / module / severity / min_severity / since / until / text / limit / full / pm_name / timeout`.
+- **К2. Путь к БД — из readback, не из догадки.** Драйвер зовёт `introspect.observability` на `pm_name`
+  и берёт `history.db_path`. Запасного `resolve_default_db_path()` НЕТ. Ответ без `history.db_path`
+  (или `history.enabled is False`) → `{"success": false, "error": …}` с адресом (какой процесс спрашивали
+  и чего не пришло), sqlite при этом не открывается вовсе.
+- **К3. Соединение только на чтение** — URI `file:<путь>?mode=ro`. Два следствия, каждое проверяемо
+  отдельно: (a) запись через это соединение отказывает; (b) несуществующий путь → названная ошибка,
+  а не созданный пустой файл (после вызова файла на диске НЕТ).
+- **К4. Фильтры сужают, а строка распакована.** `kind/process/module/severity(список)/min_severity/since/until/limit`
+  — каждый сужает выдачу; строки несут `id,kind,process,module,ts,severity,severity_number,message,extra`,
+  где `extra` — dict, а не JSON-строка; порядок — свежие первыми.
+- **К5. Отрицательные `since`/`until` — относительные секунды от «сейчас».** `since=-600` = окно последних
+  600 с; положительное значение — абсолютный unix-ts; `0` — абсолютный ноль, а не «сейчас».
+- **К6. `text` ищет FTS**, а не подстрокой. Отказ поиска (индекс недоступен, в запросе нет слов) — названная
+  ошибка с причиной: «ничего не нашлось» и «искать было нечем» — разные факты.
+- **К7. `metric` до Task 3.1 — названный отказ, а не тихий пропуск.** Колонки `metric` в сторе ещё нет;
+  `history_query(metric=…)` отвечает отказом с адресом задачи 3.1. Молча вернуть всё подряд — дефект
+  того же класса, что «фильтр не сузил».
+- **К8. Кап и `full`.** Не заданный `limit` → дефолт 100 (не «вся БД»); `full` объявлен в схеме
+  (механизмом `_declare_full_param`) и снимает байтовый потолок ответа.
+
 **Acceptance criteria:**
-- [ ] Живьём: `history_query(metric="capture.frames", since=-600)` → ряд ≥ 50 точек; `history_query(kind="error", since=-3600)` → строки с `trace_id` колонкой.
+- [ ] К1–К8 закрыты тестами: слепой `tester` от критериев + hazard-тесты автора.
+- [ ] Живьём: `history_query(kind="error", since=-3600)` → строки с `trace_id`; путь БД сверен литералом
+      с `introspect.observability(...).history.db_path`. Ряд по метрике (`metric="capture.frames"`) —
+      после Task 3.1, здесь ожидается названный отказ К7.
+- [ ] Живьём проверен WAL-хазард: read-only соединение к БД, которую в этот момент пишут (WAL + `-shm`).
 - [ ] Инъекция: путь БД захардкожен → тест «путь из readback» красный.
 
 ### Task 3.6 — Сигнал: восемь метрик и второй эмитент wide event (Н-1, Н-7, Н-9 ревью)
