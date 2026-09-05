@@ -1,0 +1,1230 @@
+{
+  "success": true,
+  "rows": [
+    {
+      "id": 528,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632147.1835968,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 523,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632142.1811938,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 520,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632137.1789746,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 515,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632132.1771834,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 512,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632127.1760027,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 507,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632122.1747162,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 504,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632117.171932,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 499,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632112.170761,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 496,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632107.1678548,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 491,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632102.1664906,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 488,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632097.165316,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 483,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632092.1635027,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 480,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632087.1623886,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 475,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632082.1612823,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 472,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632077.1599028,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 467,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632072.1566913,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 464,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632067.1553605,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 459,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632062.1452672,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 456,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632057.1435502,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 451,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632052.1422539,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 448,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632047.140131,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 443,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632042.1387277,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 440,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632037.1374445,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 435,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632032.1344948,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 432,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632027.1329505,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 427,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632022.1310167,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 424,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632017.1293635,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 419,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632012.1267643,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 416,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632007.125348,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 411,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788632002.123874,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 408,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631997.1220639,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 403,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631992.1208324,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 400,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631987.1193817,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 395,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631982.1175508,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 392,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631977.1156023,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 387,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631972.1140497,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 384,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631967.1125689,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 379,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631962.1109924,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 376,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631957.1099918,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 371,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631952.1087198,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 368,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631947.107615,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 363,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631942.1044078,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 360,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631937.1029224,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 355,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631932.1008484,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 352,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631927.098877,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 347,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631922.0972881,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 344,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631917.0956326,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 339,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631912.094403,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 336,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631907.092798,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 331,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631902.0921795,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 328,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631897.0897195,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 323,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631892.0870156,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 320,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631887.0845156,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 315,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631882.0830255,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 312,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631877.0809085,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 307,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631872.0790203,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 304,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631867.0761173,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 297,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631862.0748358,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 276,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631857.0717266,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 182,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631852.0686948,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    },
+    {
+      "id": 90,
+      "kind": "observation",
+      "process": "camera_0",
+      "module": "camera_0",
+      "ts": 1788631847.0627031,
+      "severity": "number",
+      "severity_number": 0,
+      "metric": "capture.drops",
+      "message": "capture.drops",
+      "extra": {
+        "writer": "capture",
+        "metric": "drops",
+        "value": 0
+      }
+    }
+  ],
+  "db_path": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\logs_live\\f3_t32_1788631836\\observability.db",
+  "count": 61,
+  "series": [
+    [
+      1788631847.0627031,
+      0.0
+    ],
+    [
+      1788631852.0686948,
+      0.0
+    ],
+    [
+      1788631857.0717266,
+      0.0
+    ],
+    [
+      1788631862.0748358,
+      0.0
+    ],
+    [
+      1788631867.0761173,
+      0.0
+    ],
+    [
+      1788631872.0790203,
+      0.0
+    ],
+    [
+      1788631877.0809085,
+      0.0
+    ],
+    [
+      1788631882.0830255,
+      0.0
+    ],
+    [
+      1788631887.0845156,
+      0.0
+    ],
+    [
+      1788631892.0870156,
+      0.0
+    ],
+    [
+      1788631897.0897195,
+      0.0
+    ],
+    [
+      1788631902.0921795,
+      0.0
+    ],
+    [
+      1788631907.092798,
+      0.0
+    ],
+    [
+      1788631912.094403,
+      0.0
+    ],
+    [
+      1788631917.0956326,
+      0.0
+    ],
+    [
+      1788631922.0972881,
+      0.0
+    ],
+    [
+      1788631927.098877,
+      0.0
+    ],
+    [
+      1788631932.1008484,
+      0.0
+    ],
+    [
+      1788631937.1029224,
+      0.0
+    ],
+    [
+      1788631942.1044078,
+      0.0
+    ],
+    [
+      1788631947.107615,
+      0.0
+    ],
+    [
+      1788631952.1087198,
+      0.0
+    ],
+    [
+      1788631957.1099918,
+      0.0
+    ],
+    [
+      1788631962.1109924,
+      0.0
+    ],
+    [
+      1788631967.1125689,
+      0.0
+    ],
+    [
+      1788631972.1140497,
+      0.0
+    ],
+    [
+      1788631977.1156023,
+      0.0
+    ],
+    [
+      1788631982.1175508,
+      0.0
+    ],
+    [
+      1788631987.1193817,
+      0.0
+    ],
+    [
+      1788631992.1208324,
+      0.0
+    ],
+    [
+      1788631997.1220639,
+      0.0
+    ],
+    [
+      1788632002.123874,
+      0.0
+    ],
+    [
+      1788632007.125348,
+      0.0
+    ],
+    [
+      1788632012.1267643,
+      0.0
+    ],
+    [
+      1788632017.1293635,
+      0.0
+    ],
+    [
+      1788632022.1310167,
+      0.0
+    ],
+    [
+      1788632027.1329505,
+      0.0
+    ],
+    [
+      1788632032.1344948,
+      0.0
+    ],
+    [
+      1788632037.1374445,
+      0.0
+    ],
+    [
+      1788632042.1387277,
+      0.0
+    ],
+    [
+      1788632047.140131,
+      0.0
+    ],
+    [
+      1788632052.1422539,
+      0.0
+    ],
+    [
+      1788632057.1435502,
+      0.0
+    ],
+    [
+      1788632062.1452672,
+      0.0
+    ],
+    [
+      1788632067.1553605,
+      0.0
+    ],
+    [
+      1788632072.1566913,
+      0.0
+    ],
+    [
+      1788632077.1599028,
+      0.0
+    ],
+    [
+      1788632082.1612823,
+      0.0
+    ],
+    [
+      1788632087.1623886,
+      0.0
+    ],
+    [
+      1788632092.1635027,
+      0.0
+    ],
+    [
+      1788632097.165316,
+      0.0
+    ],
+    [
+      1788632102.1664906,
+      0.0
+    ],
+    [
+      1788632107.1678548,
+      0.0
+    ],
+    [
+      1788632112.170761,
+      0.0
+    ],
+    [
+      1788632117.171932,
+      0.0
+    ],
+    [
+      1788632122.1747162,
+      0.0
+    ],
+    [
+      1788632127.1760027,
+      0.0
+    ],
+    [
+      1788632132.1771834,
+      0.0
+    ],
+    [
+      1788632137.1789746,
+      0.0
+    ],
+    [
+      1788632142.1811938,
+      0.0
+    ],
+    [
+      1788632147.1835968,
+      0.0
+    ]
+  ],
+  "series_skipped": 0
+}
