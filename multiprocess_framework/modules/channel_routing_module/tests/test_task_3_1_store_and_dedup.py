@@ -480,19 +480,34 @@ class TestK5MigrationBackfillsLegacyFileWithoutCorruptingOldRows:
         """
         db_path = str(tmp_path / "legacy.db")
         legacy = ObservabilityStore(db_path)
-        legacy.append_records(
+        legacy.append_records([_log_record(message="legacy log line — do not touch", ts=3.0)])
+        # ВСЕ дореформенные строки вписываются СЫРЫМ SQL, с ``metric`` пустым —
+        # вторая правка ведущего (2026-09-05), найденная СОБСТВЕННОЙ матрицей
+        # инъекций, а не чтением. Заплата «засыпка не выполняется вовсе» убила
+        # ровно ОДИН тест — hazard-тест автора, — а этот приёмочный остался
+        # зелёным: строку наблюдения писал сегодняшний ``append_records``, и
+        # ``metric`` ей проставлял нормализатор ПРИ ВСТАВКЕ. Засыпке нечего было
+        # делать, и «backfill засыпал легаси-строку» было верно вхолостую.
+        # Легаси-строка обязана прийти в файл БЕЗ имени — иначе тест сторожит
+        # не миграцию, а нормализатор, который проверяют соседние тесты.
+        legacy._conn.executemany(
+            "INSERT INTO records (kind, process, module, ts, severity, severity_number, message, extra, metric) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, NULL)",
             [
-                _observation_record(writer="capture", metric="drops", value=9, ts=1.0),
-                _log_record(message="legacy log line — do not touch", ts=3.0),
-            ]
-        )
-        # Дореформенная строка-агрегат: severity='snapshot' — слово, которое
-        # сегодняшний нормализатор уже не производит. Вписывается напрямую,
-        # потому что предмет проверки — «засыпка не тронет то, что лежало ДО неё».
-        legacy._conn.execute(
-            "INSERT INTO records (kind, process, module, ts, severity, severity_number, message, extra) "
-            "VALUES ('stats', 'seg', 'seg', 2.0, 'snapshot', 0, 'metrics snapshot (count=1): fps', ?)",
-            ('{"aggregate": true, "metrics": [{"name": "fps", "type": "gauge", "tags": {}, "value": 30}]}',),
+                # Наблюдение: имя вычислимо из message — засыпка ОБЯЗАНА его поставить.
+                ("observation", "camera_0", "camera_0", 1.0, "level", "capture.drops", '{"value": 9}'),
+                # Агрегат: severity='snapshot' — слово, которого сегодняшний
+                # нормализатор уже не производит; имя невычислимо, останется NULL.
+                (
+                    "stats",
+                    "seg",
+                    "seg",
+                    2.0,
+                    "snapshot",
+                    "metrics snapshot (count=1): fps",
+                    '{"aggregate": true, "metrics": [{"name": "fps", "type": "gauge", "tags": {}, "value": 30}]}',
+                ),
+            ],
         )
         legacy._conn.commit()
         legacy.close()
@@ -513,6 +528,12 @@ class TestK5MigrationBackfillsLegacyFileWithoutCorruptingOldRows:
         assert aggregate_row["severity"] == "snapshot", (
             f"backfill НЕ имеет права переписать severity старой агрегатной строки — "
             f"было 'snapshot', стало {aggregate_row['severity']!r}"
+        )
+        # К4 на дороге ЗАСЫПКИ, а не только на дороге вставки (правка ведущего:
+        # заплата «агрегат получает имя» убивала ровно один тест — тот, что
+        # смотрит на нормализатор; засыпку в этой точке не сторожил никто).
+        assert aggregate_row["metric"] is None, (
+            f"у агрегата единственного имени нет — засыпка обязана оставить NULL, получено {aggregate_row['metric']!r}"
         )
         log_row = reopened.list_records(kind="log")[0]
         assert log_row["message"] == "legacy log line — do not touch", (
