@@ -511,8 +511,10 @@ observability:
       channels:
         flight_ring: {type: memory, capacity: 500}
       scopes:                       # ось channels ЗАМЕЩАЮЩАЯ — дефолты перечисляются рядом
+                                    # `system_file` в BUSINESS НЕ перечислять: Р-7(а),
+                                    # Task 3.2 — иначе вернётся снятый дубль
         SYSTEM:   {channels: [console, system_file, flight_ring]}
-        BUSINESS: {channels: [system_file, messages_file, flight_ring]}
+        BUSINESS: {channels: [messages_file, flight_ring]}
       flight: {enabled: true, sink: flight_ring, keep: 5}
 ```
 

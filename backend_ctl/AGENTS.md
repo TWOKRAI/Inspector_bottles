@@ -50,7 +50,7 @@
 BACKEND_CTL=1 INSPECTOR_GUI_UNATTENDED=1 QT_MCP_PROBE=1 .venv/Scripts/python.exe multiprocess_prototype/frontend/run.py
 ```
 
-Проверка, что дорога жива: в `<log_dir>/gui/system.log` есть `qt-mcp probe installed on
+Проверка, что дорога жива: в `<log_dir>/gui/messages.log` есть `qt-mcp probe installed on
 localhost:9142`, а `mcp__qt-mcp__qt_list_windows` отвечает. Отсутствие строки — теперь WARNING
 с причиной, а не тишина.
 

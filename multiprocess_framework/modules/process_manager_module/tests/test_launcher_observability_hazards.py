@@ -184,7 +184,7 @@ class TestOrderingAndSingleRaise:
         _within_deadline(lambda: launcher._log_info(marker), "первая запись")
 
         assert marker in _messages_log(log_root), (
-            f"первая запись лаунчера не доехала до {log_root / 'launcher' / 'system.log'}"
+            f"первая запись лаунчера не доехала до {log_root / 'launcher' / 'messages.log'}"
         )
 
     def test_journal_is_raised_exactly_once_for_many_records(self, log_root: Any, launchers: Any) -> None:
