@@ -7,7 +7,9 @@
 > [ADR-LOG-005](../multiprocess_framework/modules/logger_module/DECISIONS.md) (`scope` ≠ `InstrumentationScope`, ревизия Р-6 от 2026-08-11),
 > [ADR-PM-028](../multiprocess_framework/modules/process_module/DECISIONS.md) (реализация строкой из конфига).
 > **Статус:** **ред. 4 (2026-09-05)** — переработан по [ревью плана](../docs/reviews/2026-09-05_otel-export-plan-review.md) после Ф0–Ф3.1 `observability-closure`.
-> Сделано на сегодня: Task 0.1 (стенд-арбитр), Task 0.2 шаг 1 (extras `[otel]`), **Task 0.3** (ветка, якоря, синхронизация — 2026-09-05).
+> **Ф0 ЗАКРЫТА 2026-09-05, вердикт CTO 7/10 ACCEPT WITH CONDITIONS** (условия исполнены Task 0.5).
+> Сделано: 0.1 стенд-арбитр · 0.2 шаги 1–2 (extras + ленивый SDK) · 0.3 ветка и якоря · 0.4 контракт · 0.5 условия вердикта.
+> Следующее — **Ф1**, она от находок Ф0 не зависит и может стартовать сразу.
 > **База ветки: `feat/observability-closure` = `9d9cb8e1`** (2026-09-05, closure Task 3.2 контракт). Порядок слияния: otel → closure → `main`.
 > Работа идёт в worktree `.claude/worktrees/otel-f0`: общее дерево занято соседней живой сессией (closure Ф3).
 > Границы захода: **Ф0 и Ф1 — сейчас**; Ф2–Ф4 — чередуя со стендами closure; Task 2.4 — строго после closure Task 3.3.
@@ -80,7 +82,7 @@ multiprocess_prototype/backend/topology/otel_export.yaml   подключаем�
 |---|---|---|
 | **Хост — плагин, не подкласс `ProcessModule`** | `OtelExportPlugin(ProcessModulePlugin)` в `GenericProcessApp` | так устроены ВСЕ прикладные процессы (`devices`, `telemetry_sink`, `camera_*`); в `Services/` нет ни одного подкласса `ProcessModule` — заводить первый ради экспортёра значило бы плодить вторую форму процесса |
 | **Подключение — фрагментом топологии** | `topology/otel_export.yaml` + строка в `app.yaml → base:` | ровно как `observability_sink.yaml`: кто не подключил — не платит ни процессом, ни строками golden-снимков; ноль правок `base.yaml`, ноль флагов в коде (замер 2026-08-23 в шапке фрагмента) |
-| **Дверь конфига — регистры плагина** | `OtelExportRegisters(SchemaBase)`: `endpoint` (обязателен), `level`, `compression`, `headers` (`${ENV}`), `service_namespace`, параметры батчера, `resource_pool_size` — полный состав в Task 0.4 | стандартная дверь плагина: ключи из blueprint → Pydantic внутри → readback → GUI-регистры → `set_config`. Секция `observability.otel_export` **отвергнута**: с closure Task 2.2 незнакомый ключ секции на L3 — отказ слоя, на файловых слоях — голос «ВНЕ КОНТРАКТА», а поле схемы без читателя во фреймворке режет страж |
+| **Дверь конфига — регистры плагина** | `OtelExportRegisters(OtelExportConfig)`: производная схемы сервиса. `endpoint` обязателен **в схеме сервиса**, в регистре — дефолт `""` (вердикт CTO, вариант (а)): фреймворк строит managed-регистр **без аргументов** (`plugin_orchestrator.py:325`), и обязательное поле означало бы отсутствие регистра вовсе. Плагин в `configure()` строит `OtelExportConfig(**reg.model_dump())` и на пустом уходит в `error` с адресом ключа | стандартная дверь плагина: ключи из blueprint → Pydantic внутри → readback → GUI-регистры → `set_config`. Секция `observability.otel_export` **отвергнута**: с closure Task 2.2 незнакомый ключ секции на L3 — отказ слоя, на файловых слоях — голос «ВНЕ КОНТРАКТА», а поле схемы без читателя во фреймворке режет страж |
 | **Счётчики — числовая плоскость** | `ctx.declare_metric(...)` + `ctx.record_metric(...)`: `received`, `exported`, `skipped_numbers`, `dropped_overflow`, `export_failed`, `resource_evicted` | не своя команда-интроспекция, а числа, которые уже видны в `introspect.telemetry`, `history_query(metric=...)`, GUI. Тождество потерь (3.4) сводится из них |
 | **Голоса — окном фреймворка** | `log_windowed` (`windowed_voice.py`, окно из `observability.voices.default_window_sec`) | свой литерал окна запрещён правилом closure «ни одного нового литерала-потолка» |
 | **Петля усиления — страж фреймворка** | `ProcessModule.subscribe_observability_tail` отказывает подписке процесса на собственный хвост (`core/process_module.py:1209`, причина названа) | свой фильтр «записи ≠ моё имя» не заводится, пока петля не предъявлена красной (Р-3) |
@@ -186,7 +188,11 @@ Baseline 2026-09-05: `grep -r opentelemetry multiprocess_framework/ --include=*.
 стенд не доказывает, в README стенда; Task 4.2 ограничивает выводы им.
 Свежий релиз коллектора — v0.160.0 (2026-09-02); обновлять не нужно, факт записан.
 
-### Task 0.2 — extras `[otel]` с пином + громкий отказ без него
+### Task 0.2 — extras `[otel]` с пином + ленивый импорт SDK — **[x] ЗАКРЫТА 2026-09-05 (шаги 1–2)**
+> **Расщеплена вердиктом CTO.** Шаг 3 и три критерия про `configure()` / `error` / `ready` описывают
+> поведение **плагина**, которого в Ф0 не существует (`plugin.py` пишется в Task 2.1) — в Ф0 они
+> физически недостижимы. Перенесены подпунктом в **Task 2.1**. Инъекция «импорт на уровень модуля»
+> имеет две половины: сторож `sys.modules` (сделан, Ф0) и «процесс не поднялся» (Ф2.1).
 **Level:** Middle+ · **Assignee:** developer · **Layer:** infra, services, plugins
 **Files:** `pyproject.toml` (шаг 1 — сделан), `Services/otel_export/exporter.py`, `Plugins/io/otel_export/plugin.py`
 **Steps:**
@@ -203,11 +209,16 @@ Baseline 2026-09-05: `grep -r opentelemetry multiprocess_framework/ --include=*.
    `error` с причиной, `ctx.health.report_error(...)`, readback регистров несёт
    `sdk: "missing: uv pip install --inexact '.[otel]'"`. Команда владельцу:
    `uv pip install --inexact '.[otel]'` (`--inexact` — иначе `uv sync` сносит необъявленное).
-**Acceptance criteria:**
+**Acceptance criteria (Ф0, закрыты):**
 - [x] `[otel]` в `optional-dependencies`; core не изменился ни строкой.
-- [ ] Без установленного extra: процесс `otel_export` поднялся, плагин в `error` с текстом, называющим extra и команду; предъявить фактический ответ `introspect_plugins`/`system_overview`.
-- [ ] Инъекция: перенести импорт SDK на уровень модуля → тест громкости красный (процесс не поднялся ИЛИ причина не названа).
-- [ ] Пара: SDK установлен → состояние `ready`, `sdk: "1.44.0"` в readback.
+- [x] Ни одного module-level `import opentelemetry` в `Services/otel_export/*` и `Plugins/io/otel_export/*` — сторож разбором AST, не грепом.
+- [x] Импорт пакета не тянет `opentelemetry` в `sys.modules`: проверено в подпроцессе, `[]` на всех трёх точках входа.
+- [x] `sdk_available() -> (True, "1.44.0")` при установленном SDK; при смоделированном отсутствии — `(False, INSTALL_HINT)`, `ImportError` наружу не выпускается.
+- [x] Инъекции I-5 (импорт на уровень модуля) и I-12/I-14 (ответ вместо факта) убили ровно предсказанные тесты.
+
+**Перенесено в Task 2.1** (требует `plugin.py`): без extra процесс `otel_export` поднялся и плагин
+в `error` с текстом, называющим extra и команду (предъявить `introspect_plugins`/`system_overview`);
+пара — SDK установлен → `ready`, `sdk: "1.44.0"` в readback.
 **Out of scope:** gRPC-экспортёр.
 
 ### Task 0.3 — ветка, якоря, синхронизация планов — **[x] СДЕЛАНА 2026-09-05**
@@ -257,7 +268,7 @@ closure в полёте**. Ред. 4 писалась сегодня же и у�
 работа Ф0 идёт в отдельном worktree `.claude/worktrees/otel-f0` на `feat/otel-export`.
 **Out of scope:** правки кода.
 
-### Task 0.4 — контракт сервиса ДО кода (module-contract, уровень full) **(новая, ред. 4)**
+### Task 0.4 — контракт сервиса ДО кода — **[x] ЗАКРЫТА 2026-09-05** (`61bb7496`)
 **Level:** Senior · **Assignee:** teamlead · **Layer:** services, plugins
 **Goal:** будущий читатель понимает сервис по README + `interfaces.py` + контракт-тестам, не открывая реализацию; исполнители Ф1–Ф2 пишут код под уже названные имена.
 **Files:** `Services/otel_export/{__init__.py, README.md, STATUS.md, DECISIONS.md, interfaces.py, config.py, tests/test_contract.py}`, `Plugins/io/otel_export/{__init__.py, README.md, STATUS.md, registers.py}`
@@ -267,10 +278,63 @@ closure в полёте**. Ред. 4 писалась сегодня же и у�
 3. Словарь счётчиков литералами (имена метрик и их смысл) — в README сервиса и `CONNECTORS.md`; тесты Ф2–Ф3 ссылаются на эти имена.
 4. `STATUS.md` = `contract`; `tests/test_contract.py` — читается как документация: «`None` от маппера ⇒ счётчик пропуска растёт», «отсутствующее поле Resource ⇒ атрибута нет».
 **Acceptance criteria:**
-- [ ] README с разделами Purpose / Public API / Usage / Boundaries / Stability; `__all__` совпадает с реэкспортом из `interfaces.py`.
-- [ ] `python scripts/validate.py` зелёный на пустом сервисе (стандарт слоя: `__init__.py`, `interfaces.py`, `STATUS.md`, `README.md`, `tests/`).
-- [ ] `endpoint` без значения → `ValidationError` с адресом поля (тест литералом).
+- [x] README с разделами Purpose / Public API / Usage / Boundaries / Stability; `__all__` совпадает с реэкспортом из `interfaces.py`.
+- [x] `python scripts/validate.py` зелёный (exit 0); сервис **зарегистрирован** в `SERVICES` и
+  `SERVICES_REQUIRED_INTERFACES` — без регистрации критерий был бы **молчащим детектором**:
+  `validate.py` даёт exit 0 и на отсутствующем сервисе.
+- [x] `endpoint` без значения → `ValidationError` с адресом поля (тест литералом).
+
+**Исполнение:** слепой тестер (worktree на pre-implementation коммите `5294c20c`) написал **26 красных**
+тестов ДО кода; teamlead довёл до зелёного, добавив 27 авторских на опасные места. Итог — **53 зелёных**.
+Инъекционная матрица ведущего — **17 заплат, ни одного пустого сторожа**. `sentrux check .` (CLI, не MCP):
+36 правил, все проходят.
+
+**Найдено при исполнении — четыре факта, каждый прогоном:**
+1. `plugin_orchestrator` строит регистр всегда без аргументов → блокер двери конфига (закрыт Task 0.5).
+2. `str(ValidationError)` у pydantic 2.13 печатает вход целиком → отвергнутый токен уезжал бы в `system.log`.
+3. `PluginContext` **не** удовлетворяет `ObservabilityPort`: `report_error` живёт на `ctx.health`, не на
+   контексте. Разрыв закрывает хост тонким адаптером в Ф2.1 (ADR-OTEL-004).
+4. `declare_metric` отвергает точку в имени (ADR-PM-038) — `otel_export.received` уронил бы плагин на старте.
+
+**Ошибки самого плана, снятые сверкой с установленным SDK 1.44.0:** `schedule_delay` = **1000**, а не 5000;
+`export_timeout_millis` SDK **игнорирует** (`# Not used. No way currently to pass timeout to export.`),
+у `force_flush` — `TODO: Fix force flush so the timeout is used` (issue 4568). Реальный таймаут —
+`OTLPLogExporter(timeout=...)`, в секундах. `LogRecord` живёт в `opentelemetry._logs._internal`,
+а не в `opentelemetry.sdk._logs`.
 **Out of scope:** реализация.
+
+### Task 0.5 — условия вердикта CTO — **[x] ЗАКРЫТА 2026-09-05**
+**Level:** Middle · **Assignee:** developer · **Layer:** services, plugins
+**Goal:** снять два дефекта контракта, найденных ревью и CTO, до старта Ф2.1.
+**Steps:**
+1. **[x]** `OtelExportRegisters.endpoint` получает дефолт `""` (вариант (а)). Механизм: у `SchemaBase`
+   нет `validate_default`, поэтому регистр строится пустым и все три дороги его создания выживают.
+   `FieldMeta` переобъявлен вместе с полем — иначе pydantic v2 стирает метаданные родителя.
+2. **[x]** `model_config = ConfigDict(hide_input_in_errors=True)` на `OtelExportConfig`. Проверено:
+   pydantic мёржит `model_config` по MRO, `validate_assignment` родителя не затирается.
+3. **[x]** Пин-тест развёрнут: сторожил **опасность** («pydantic печатает вход»), стал сторожить
+   **защиту** — секрет отсутствует в `str(exc)` на трёх дорогах, имя ключа `headers` остаётся.
+4. **[x]** README и ADR-OTEL-005 переписаны: `format_validation_error` — форматтер читаемости,
+   **не** предохранитель; «единственный безопасный способ» снято.
+**Acceptance criteria:**
+- [x] 53 зелёных сохранены; инъекция «снять флаг» даёт красный с текстом «секрет утёк в str(exc) целиком».
+- [x] `hidden=True` **не** годится (замер CTO): `can_modify` (`field_meta.py:234`) смотрит только
+  `readonly`; `readonly=True` закрывает лишь live-write и делает поле нередактируемым.
+- [x] `hide_input_in_errors` закрывает **все три** дороги, включая `from_plugins`, до которой ни плагин,
+  ни форматтер не дотягиваются.
+**Out of scope:** правки фреймворка (три долга вынесены в `observability-closure`).
+
+---
+
+## Долги во фреймворк, найденные в Ф0 (идут в `observability-closure`, здесь НЕ чинятся)
+
+| # | Дефект | Репродукция | Цена молчания |
+|---|---|---|---|
+| Д-1 | `plugin_orchestrator._collect_register_schemas` строит managed-регистр **без аргументов** и глотает исключение `except Exception` | `plugin_orchestrator.py:325`, `instance = reg_item()` | плагин с обязательным полем регистра теряет GUI-дверь молча, одной строкой `log_error` на буте |
+| Д-2 | `RegistersManager.set_field_value` возвращает `str(exc)` — печатает **вход** для любого регистра с валидатором секретов | `manager.py:165`; четыре вызывающих печатают строку | отвергнутый токен в `system.log`; починка — `errors(include_input=False)` |
+| Д-3 | `FieldMeta` докстринг обещает `can_modify() → False` при `hidden`, код смотрит только `readonly` | `field_meta.py:95` против `:234` | защита, которой нет; ревьюер предложил её как рабочую |
+| Д-4 | `generic_process_config.from_plugins` строит `reg_cls(**reg_fields)` **без `try`** | `generic_process_config.py:229` | плохой фрагмент роняет сборку топологии, а не плагин; возможно намеренно, но нигде не названо |
+| Д-5 | `scripts/validate.py` кладёт «нет `interfaces.py`» в `warnings`, а `main()` возвращает `1 if errors else 0` | `validate.py:211` | **гейт стандарта слоя молчащий**: `make gate` зелёный на сервисе без контракта. Сегодня без `interfaces.py` один сервис — `device_hub`, и его нет в `SERVICES_REQUIRED_INTERFACES`, значит правка `warnings → errors` бесплатна. Идёт **отдельным коммитом**, не внутри задачи фазы |
 
 ---
 
@@ -364,6 +428,20 @@ closure в полёте**. Ред. 4 писалась сегодня же и у�
 - [ ] `observed_ts` проставлен у всех принятых записей; уже стоящий — сохранён.
 - [ ] Намерение подтверждено ответом брокера; предъявить ответ. Пара: брокер недоступен → три попытки, голос один, состояние `degraded`.
 - [ ] Инъекция: убрать `stamp_observed` → красный. Инъекция: `subscriber` константой → красный в тесте адреса.
+
+**Перенесено из Task 0.2 (в Ф0 недостижимо — требует `plugin.py`):**
+- [ ] Без установленного extra `[otel]`: процесс `otel_export` **поднялся**, плагин в состоянии `error`
+  с текстом, называющим extra и команду `uv pip install --inexact '.[otel]'`; предъявить фактический
+  ответ `introspect_plugins` / `system_overview`.
+- [ ] Пара: SDK установлен → состояние `ready`, `sdk: "1.44.0"` в readback.
+- [ ] Инъекция: перенести импорт SDK на уровень модуля → **процесс не поднялся ИЛИ причина не названа**
+  (вторая половина инъекции I-5; первая — сторож `sys.modules` — закрыта в Ф0).
+
+**Перенесено из Task 0.5 (вердикт CTO, открытый вопрос фазы):**
+- [ ] Есть ли у плагина путь записи в managed-регистр через `ctx`. Критерий:
+  `introspect_registers otel_export` показывает `endpoint` **из фрагмента**, не `""`.
+  Если пути нет — долг Д-1 (`plugin_orchestrator.py:325`) становится **условием** этой задачи,
+  а не долгом closure, и GUI-дверь до его починки показывает дефолты.
 **Out of scope:** свой поток приёма, heartbeat, команды сверх двух.
 
 ### Task 2.2 — отказ доставки СЛЫШЕН (перед 2.3 и 2.4)
@@ -427,6 +505,16 @@ closure в полёте**. Ред. 4 писалась сегодня же и у�
 - [ ] С фрагментом → процесс поднялся, намерение объявлено, `capabilities` показывает `otel_export.status`/`flush`.
 - [ ] `endpoint` из фрагмента доезжает: пара значений, где ветки расходятся (не дефолт против дефолта), предъявлена адресом фактического HTTP-запроса.
 - [ ] Фрагмент без `endpoint` → процесс поднялся, плагин в `error` с адресом ключа (не тихий дефолт).
+  **Механизм этого критерия установлен вердиктом CTO 2026-09-05, вариант (а)** — прежняя формулировка
+  задачи («`endpoint` — обязательный ключ **регистра** без дефолта») делала критерий **недостижимым**:
+  фреймворк строит managed-регистр без аргументов (`plugin_orchestrator.py:325`), и до состояния `error`
+  дело не доходило — регистр умирал раньше, а исключение глоталось `except Exception`.
+  Сейчас: обязательность живёт **в схеме сервиса** `OtelExportConfig`, у регистра дефолт `""`,
+  и в `error` с адресом ключа плагин уходит из `configure()`, строя
+  `OtelExportConfig(**reg.model_dump())`. Дефолт `""` **не** тихий: он не проходит валидатор
+  `_endpoint_not_blank` схемы сервиса.
+- [ ] Пара к предыдущему: фрагмент **с** `endpoint` → плагин `ready`, и `introspect_registers otel_export`
+  показывает значение **из фрагмента**, а не `""` (открытый вопрос Ф2.1 — путь записи плагина в регистр).
 **Out of scope:** GUI-вкладка управления, hot-apply endpoint (смена — через `set_config` регистров, если понадобится — отдельная задача).
 
 ### Task 3.2 — цена названа числами

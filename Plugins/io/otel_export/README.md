@@ -18,13 +18,24 @@
 
 | Файл | Что в нём |
 |---|---|
-| `registers.py` | `OtelExportRegisters` — подкласс `Services.otel_export.config.OtelExportConfig` с `@register_schema`. **Ни одного переобъявленного поля** |
+| `registers.py` | `OtelExportRegisters` — подкласс `Services.otel_export.config.OtelExportConfig` с `@register_schema`. Переопределён ОДИН дефолт (`endpoint = ""`, Task 0.5 по вердикту CTO — см. ниже), остальные поля не переобъявлены |
 | `config.py` | `OtelExportPluginConfig(PluginConfig)` — identity + `register_bindings` |
 
-Состав полей, дефолты, валидация и `readback()` — в
+Состав полей, дефолты и валидация — в
 [`Services/otel_export/README.md`](../../../Services/otel_export/README.md), раздел
 `Public API`. Здесь их **нет намеренно**: два места объявления полей разъезжаются молча
 (ADR-OTEL-003).
+
+### Дверь конфига — регистр с дефолтом `""`, наполняется плагином в Ф2.1
+
+`OtelExportConfig.endpoint` (сервис) обязателен без дефолта; `OtelExportRegisters.endpoint`
+(эта дверь) переопределяет ТОЛЬКО дефолт на `""` — иначе managed-регистр не строился бы
+вовсе (`plugin_orchestrator` зовёт `reg_item()` без аргументов, ADR-OTEL-003). Следствие:
+на стадии `contract`, пока `plugin.py` (Ф2.1) не написан, GUI-панель регистра покажет
+`endpoint=""` — это ОЖИДАЕМО, а не факт готовности экспорта. Плагин обязан на старте
+(`configure()`) построить `OtelExportConfig(**self.model_dump())`: пустой `endpoint`
+отвергнется там с именем ключа, и эффективные значения из `readback()` появятся в панели
+только после того, как плагин их запишет.
 
 ## Чего нет
 

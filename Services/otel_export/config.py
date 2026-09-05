@@ -19,7 +19,7 @@ import re
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import ValidationError, field_validator, model_validator
+from pydantic import ConfigDict, ValidationError, field_validator, model_validator
 
 from multiprocess_framework.modules.channel_routing_module.levels import normalize_level_name
 from multiprocess_framework.modules.process_module.plugins import FieldMeta, SchemaBase
@@ -35,20 +35,24 @@ ENV_PLACEHOLDER_RE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
 
 
 def format_validation_error(error: ValidationError) -> str:
-    """Текст отказа схемы для ЖУРНАЛА — без входных значений.
+    """Компактный текст отказа схемы для ЖУРНАЛА — `loc: msg`, без шума.
 
-    **Единственный безопасный способ показать отказ этого конфига.** Обычный
-    `str(exc)` у pydantic 2.13 печатает вход целиком:
+    **Это форматтер читаемости, а НЕ предохранитель.** Предохранитель —
+    `hide_input_in_errors=True` в `model_config` ниже: он снимает входные
+    значения на всех дорогах построения модели, включая те, куда эта функция
+    не дотягивается (сборка топологии `generic_process_config.from_plugins`
+    строит регистр без `try` вовсе, а `RegistersManager.set_field_value`
+    форматирует исключение сам — `manager.py:165`, `str(exc)`).
 
-        Value error, заголовок 'authorization': … [type=value_error,
-        input_value={'authorization': 'Bearer VerySecretValue999'}, input_type=dict]
+    Историю ошибки не переписываю: до флага `str(exc)` у pydantic 2.13 печатал
+    вход целиком (`input_value={'authorization': 'Bearer …'}`), и эта функция
+    была объявлена «единственным безопасным способом» — формулировка оказалась
+    шире факта, потому что звать её мог только хост. Замер трёх дорог и разбор,
+    почему `hidden=True` не работает (`can_modify` смотрит только `readonly`),
+    — в ADR-OTEL-005.
 
-    То есть валидатор, поставленный ради правила «секреты в env», сам утащил бы
-    отвергнутый (а значит, чаще всего настоящий) токен в `system.log`. Найдено
-    авторским тестом опасных мест, а не в проде — но нашлось бы в проде.
-
-    Хост (Ф2.1) обязан звать эту функцию, а не форматировать исключение сам:
-    `ctx.log_error(f"конфиг отвергнут: {format_validation_error(exc)}")`.
+    Хосту (Ф2.1) она по-прежнему полезна: `str(exc)` со скрытым входом остаётся
+    многострочным, а здесь одна строка `endpoint: <msg>; headers: <msg>`.
     """
     parts: list[str] = []
     for item in error.errors(include_url=False, include_context=False, include_input=False):
@@ -63,6 +67,20 @@ class OtelExportConfig(SchemaBase):
     Все значения-потолки живут ЗДЕСЬ и видны в `readback()` — правило трека
     «ни одного нового литерала-потолка внутри механизма».
     """
+
+    #: Предохранитель против утечки секрета через текст ValidationError (ADR-OTEL-005).
+    #: pydantic 2.13 по умолчанию печатает `input_value` целиком в `str(exc)` —
+    #: отвергнутый (и потому чаще всего настоящий) заголовок утёк бы в лог первой
+    #: же естественной строкой `log_error(f"... {exc}")`. `hide_input_in_errors`
+    #: закрывает это на ВСЕХ трёх дорогах построения (конструктор, `model_validate`,
+    #: `set_field_value`/`validate_assignment`) — в том числе на `from_plugins`
+    #: (`reg_cls(**reg_fields)`, без `try`), до которой не дотягивается ни плагин,
+    #: ни `format_validation_error`. Цена: вход скрывается для ВСЕХ полей схемы,
+    #: включая числовые — сообщения валидаторов называют значения сами, где нужно.
+    #: `SchemaBase.model_config` (validate_assignment, populate_by_name) не
+    #: перетирается: pydantic v2 мёржит `model_config` по MRO, а не заменяет
+    #: (проверено прогоном — см. отчёт Task 0.5).
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     endpoint: Annotated[
         str,

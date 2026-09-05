@@ -91,26 +91,52 @@ class TestHeadersEnvOnly:
         assert "VerySecretValue999" not in text, "значение утекло в текст ошибки целиком"
         assert "VerySecret" not in text, "значение утекло в текст ошибки частично"
 
-    def test_plain_str_of_the_error_does_leak_hence_the_formatter_exists(self) -> None:
-        """ПИН факта: `str(ValidationError)` у pydantic 2.13 печатает вход целиком.
+    def test_secret_is_absent_from_str_of_the_error_on_all_three_roads(self) -> None:
+        """Предохранитель `hide_input_in_errors` закрывает утечку секрета на ТРЁХ дорогах.
 
-        Из-за этого и существует `format_validation_error`. Тест — не претензия
-        к pydantic, а адрес грабли для Ф2.1: естественная строка
-        `log_error(f"конфиг не принят: {exc}")` утаскивает токен в журнал.
+        До этого теста здесь стоял пин факта «`str(ValidationError)` у pydantic
+        2.13 печатает вход целиком» — он сторожил ОПАСНОСТЬ, а не защиту
+        (см. git-историю файла). Вердикт CTO по Task 0.5: предохранитель —
+        не `format_validation_error` (он не дотягивается до `from_plugins`,
+        строящего схему как `reg_cls(**reg_fields)` БЕЗ `try`), а
+        `model_config = ConfigDict(hide_input_in_errors=True)` на самой схеме
+        (ADR-OTEL-005). Этот тест сторожит именно его — на всех трёх дорогах,
+        которыми схема вообще строится или меняется.
 
-        **Красный здесь — хорошая новость, а не поломка:** значит pydantic
-        перестал печатать `input_value`, и обёртку можно упростить. Проверить
-        и переписать ADR-OTEL-005, а не «чинить» тест.
+        Имя ключа `headers` в тексте ОБЯЗАНО остаться: если защита скроет и
+        его, диагностировать отказ станет нечем — это была бы немота, а не
+        безопасность.
+
+        Как краснеет (доказано прогоном при написании — см. отчёт Task 0.5):
+        убрать `hide_input_in_errors=True` из `OtelExportConfig.model_config` —
+        секрет возвращается в текст всех трёх исключений ниже.
         """
         from Services.otel_export.config import OtelExportConfig
 
         secret = "Bearer VerySecretValue999"
-        with pytest.raises(ValidationError) as exc_info:
-            OtelExportConfig(endpoint=ENDPOINT, headers={"authorization": secret})
+        bad_headers = {"authorization": secret}
 
-        assert secret in str(exc_info.value), (
-            "pydantic больше не печатает входное значение — перепроверить format_validation_error и ADR-OTEL-005"
-        )
+        with pytest.raises(ValidationError) as exc_ctor:
+            OtelExportConfig(endpoint=ENDPOINT, headers=bad_headers)
+
+        with pytest.raises(ValidationError) as exc_validate:
+            OtelExportConfig.model_validate({"endpoint": ENDPOINT, "headers": bad_headers})
+
+        # Присваивание: validate_assignment=True унаследован от SchemaBase —
+        # дорога поддержана, третий вариант не нужен.
+        cfg = OtelExportConfig(endpoint=ENDPOINT)
+        with pytest.raises(ValidationError) as exc_assign:
+            cfg.headers = bad_headers
+
+        for road, exc_info in (
+            ("конструктор", exc_ctor),
+            ("model_validate", exc_validate),
+            ("присваивание", exc_assign),
+        ):
+            text = str(exc_info.value)
+            assert secret not in text, f"{road}: секрет утёк в str(exc) целиком"
+            assert "VerySecret" not in text, f"{road}: секрет утёк в str(exc) частично"
+            assert "headers" in text, f"{road}: адрес поля пропал из текста — диагностировать отказ стало нечем"
 
 
 class TestConfigBoundary:

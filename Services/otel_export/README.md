@@ -40,7 +40,7 @@
 ```python
 from Services.otel_export import MappedRecord, RecordMapper   # контракт
 from Services.otel_export.config import OtelExportConfig      # схема параметров
-from Services.otel_export.config import format_validation_error  # безопасный текст отказа
+from Services.otel_export.config import format_validation_error  # читаемый текст отказа
 from Services.otel_export.exporter import sdk_available       # факт наличия SDK
 ```
 
@@ -66,14 +66,21 @@ from Services.otel_export.exporter import sdk_available       # факт нал�
 `readback()` отдаёт **эффективные** значения, а не сконфигурированные:
 `headers` замаскированы `***`, и добавлен ключ `export_timeout_sec`.
 
-### Отказ конфига печатать только через `format_validation_error`
+### Предохранитель от утечки секрета — `hide_input_in_errors` на схеме, не форматтер
 
 `str(ValidationError)` у pydantic 2.13 печатает вход целиком —
 `input_value={'authorization': 'Bearer …'}`. То есть естественная строка
 `ctx.log_error(f"конфиг не принят: {exc}")` утащит отвергнутый токен в `system.log`, и
-правило «секреты в env» защитит YAML, потеряв секрет в журнале. Найдено авторским тестом,
-закрыто функцией `format_validation_error(exc)` — зовите её, а не форматируйте исключение
-сами (ADR-OTEL-005).
+правило «секреты в env» защитит YAML, потеряв секрет в журнале. Найдено авторским тестом.
+
+Предохранитель — `model_config = ConfigDict(hide_input_in_errors=True)` на
+`OtelExportConfig`. Он закрывает утечку на ВСЕХ дорогах построения схемы: конструктор,
+`model_validate`, присваивание (`validate_assignment`) — и, что важнее всего, на
+`generic_process_config.from_plugins` (`reg_cls(**reg_fields)`, без `try`), до которой не
+дотягивается ни плагин, ни форматтер. `format_validation_error(exc)` остаётся — это
+форматтер ЧИТАЕМОГО ТЕКСТА для хоста (убирает URL и context, оставляет только `loc` + `msg`),
+а не предохранитель; звать его по-прежнему стоит везде, где нужен человекочитаемый текст
+отказа (ADR-OTEL-005).
 
 ### Оговорка про `export_timeout_ms` — стоит дороже остального списка
 
