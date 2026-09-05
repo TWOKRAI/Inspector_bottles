@@ -21,7 +21,8 @@
   об уборке, и вызывающий обязан говорить это вслух рядом с числом.
 
   Вызывающий (`SystemLauncher._cleanup_shm_at_startup`) печатает это число в
-  `{база логов}/launcher/system.log` (`cleanup_stale_shm: очищено N SHM-сегментов`, на
+  `{база логов}/launcher/messages.log` (`cleanup_stale_shm: очищено N SHM-сегментов` —
+  строка уровня INFO, (Task 3.2, решение Р-7(а): INFO лежит в `launcher/messages.log`, `system.log` — WARNING+ и DEBUG-скоуп); на
   не-POSIX — с пояснением «уборка на этой платформе недоступна…»). Прежнее
   поведение при отказе сохранено: исключения наружу не уходят. Не путать с одноимённой
   `buffers/cleanup.py::cleanup_stale_shm(known_names: list) -> list[str]` — это ДРУГАЯ функция с

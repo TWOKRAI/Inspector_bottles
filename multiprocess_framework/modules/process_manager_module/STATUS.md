@@ -148,7 +148,8 @@
   Подъём ленивый, на первой записи. До правки INFO лаунчера уходил в stdlib-фолбэк без
   хендлеров, то есть в никуда (находка ревью M14).
 - Побочный эффект назван: после первой записи `get_std_logger`/`FallbackLogger` ГЛАВНОГО
-  процесса (в первую очередь `spawner`) тоже пишут в `launcher/system.log`.
+  процесса (в первую очередь `spawner`) тоже пишут в файлы `launcher/`: INFO — в
+  `messages.log`, WARNING+ — в `system.log` (Task 3.2, решение Р-7(а): INFO лежит в `launcher/messages.log`, `system.log` — WARNING+ и DEBUG-скоуп).
 - Отказ уборки SHM больше не `except: pass`: `launcher/errors.log` с трассой + счётчик
   `get_stats()["startup"]["shm_cleanup_failures"]`; успех называет число сегментов
   (`shm_cleanup_segments`).

@@ -17,13 +17,23 @@ class TestSystemLauncher:
         assert launcher._spawner is None
 
     def test_log_without_spawner_reaches_launcher_file(self, tmp_path, monkeypatch) -> None:
-        """_log_info/_log_warning без spawner попадают в ``{база}/launcher/system.log``.
+        """_log_info и _log_warning без spawner доезжают до файлов — но до РАЗНЫХ.
 
         Task 1.2 (M14) заменила прежний контракт этого теста. Прежде он утверждал
         «уходит в stdlib logging» — то есть закреплял САМ ДЕФЕКТ: у главного
         процесса корневой stdlib-логгер без хендлеров, и записи лаунчера не
-        доезжали ни до какого файла. Проверяем то, ради чего правка делалась:
-        файл существует и содержит обе строки.
+        доезжали ни до какого файла.
+
+        Task 3.2 (решение владельца Р-7(а)) развела файлы: ``BUSINESS`` перестал
+        писать в ``system_file``. Поскольку ``_LEVEL_DEFAULT_SCOPE`` отображает
+        ``INFO -> BUSINESS`` и ``WARNING -> SYSTEM``, две строки этого теста
+        расходятся по двум файлам — и это делает его точной проверкой инварианта
+        «``messages.log`` = INFO, ``system.log`` = WARNING+ и явный SYSTEM»,
+        одинакового в каждом каталоге, включая ``launcher/``.
+
+        Проверяются ЧЕТЫРЕ факта, а не два: каждая строка обязана быть в своём
+        файле И отсутствовать в чужом. Без пары «отсутствует» тест согласился бы
+        с возвратом дубля, ради снятия которого правка и делалась.
         """
         monkeypatch.setenv("MULTIPROCESS_LOG_DIR", str(tmp_path))
         monkeypatch.setenv("INSPECTOR_LOG_DIR", str(tmp_path))
@@ -34,9 +44,24 @@ class TestSystemLauncher:
         finally:
             launcher._shutdown_observability()
 
-        content = (tmp_path / "launcher" / "system.log").read_text(encoding="utf-8", errors="replace")
-        assert "[SystemLauncher] test info" in content
-        assert "[SystemLauncher] test warning" in content
+        def _read(name: str) -> str:
+            path = tmp_path / "launcher" / name
+            return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+        messages = _read("messages.log")
+        system = _read("system.log")
+        assert "[SystemLauncher] test info" in messages, (
+            f"INFO лаунчера не доехал до launcher/messages.log: {messages!r}"
+        )
+        assert "[SystemLauncher] test warning" in system, (
+            f"WARNING лаунчера не доехал до launcher/system.log: {system!r}"
+        )
+        assert "[SystemLauncher] test info" not in system, (
+            f"INFO вернулся в system.log — дубль, снятый решением Р-7(а), восстановлен: {system!r}"
+        )
+        assert "[SystemLauncher] test warning" not in messages, (
+            f"WARNING утёк в messages.log — скоуп SYSTEM перестал быть системным: {messages!r}"
+        )
 
     def test_add_process_name_and_dict(self) -> None:
         """add_process(name, proc_dict)."""

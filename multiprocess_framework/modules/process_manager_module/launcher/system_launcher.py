@@ -150,7 +150,8 @@ class SystemLauncher:
         self._pid_registry_failures: int = 0
 
     def _ensure_observability(self) -> None:
-        """Поднять журнал лаунчера: ``{база логов}/launcher/`` — system.log + errors.log.
+        """Поднять журнал лаунчера: ``{база логов}/launcher/`` — messages.log (INFO),
+        system.log (WARNING+ и DEBUG-скоуп) + errors.log.
 
         **Тем же конфигом слоёв, что у процессов, а не своим механизмом**
         (Task 1.2, M14). Пара конфигов берётся у :func:`managers_from_log_dir` —
@@ -179,7 +180,8 @@ class SystemLauncher:
         **Побочный эффект назван вслух:** ``LoggerManager.__init__`` ставит
         процессный синглтон, поэтому после этого вызова ``get_std_logger`` и
         ``FallbackLogger`` ГЛАВНОГО процесса (в частности ``spawner``) тоже
-        начинают писать в ``launcher/system.log``. Это не побочный ущерб, а
+        начинают писать в файлы ``launcher/`` (INFO — в ``messages.log``,
+        WARNING+ — в ``system.log``; Task 3.2, Р-7(а)). Это не побочный ущерб, а
         вторая половина той же находки: до Task 1.2 их записи уходили в
         stdlib-фолбэк без хендлеров, то есть в никуда.
 

@@ -141,6 +141,21 @@ def _system_log(root: Any) -> str:
     return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
 
 
+def _messages_log(root: Any) -> str:
+    """Файл INFO-плоскости лаунчера.
+
+    До Task 3.2 записи INFO лежали в ``system.log``: скоуп ``BUSINESS`` писал
+    в ОБА файла, и ``messages.log`` был строгим подмножеством ``system.log``
+    (замер на восьми процессах: 368 строк, 0 уникальных). Решение владельца
+    Р-7(а) убрало ``system_file`` из ``BUSINESS``, а ``_LEVEL_DEFAULT_SCOPE``
+    отображает ``INFO -> BUSINESS`` — поэтому INFO лаунчера теперь здесь.
+    Инвариант одинаков во всех каталогах, включая ``launcher/``:
+    ``messages.log`` = INFO, ``system.log`` = WARNING+ и DEBUG-скоуп.
+    """
+    path = root / "launcher" / "messages.log"
+    return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+
 def _errors_log(root: Any) -> str:
     path = root / "launcher" / "errors.log"
     return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
@@ -168,7 +183,7 @@ class TestOrderingAndSingleRaise:
         marker = f"первая запись {uuid.uuid4().hex[:8]}"
         _within_deadline(lambda: launcher._log_info(marker), "первая запись")
 
-        assert marker in _system_log(log_root), (
+        assert marker in _messages_log(log_root), (
             f"первая запись лаунчера не доехала до {log_root / 'launcher' / 'system.log'}"
         )
 
@@ -188,7 +203,7 @@ class TestOrderingAndSingleRaise:
 
         _within_deadline(_emit, "пять записей")
 
-        content = _system_log(log_root)
+        content = _messages_log(log_root)
         starts = len(re.findall(r"LoggerManager initialized", content))
         assert starts == 1, f"журнал поднялся {starts} раз(а) вместо одного:\n{content}"
         for i in range(5):
@@ -282,7 +297,7 @@ class TestStopIsTerminal:
         marker = "ПОСЛЕ_ЗАКРЫТИЯ"
         _within_deadline(lambda: launcher._log_info(marker), "запись после закрытия")
 
-        content = _system_log(log_root)
+        content = _messages_log(log_root)
         assert content.count("LoggerManager initialized") == 1, (
             f"журнал поднялся заново после stop() — «закрыт» ничего не значит:\n{content}"
         )
@@ -310,7 +325,7 @@ class TestJournalClosesLast:
         launcher._spawner = _FakeSpawner()
         _within_deadline(launcher.stop, "остановка с журналом")
 
-        content = _system_log(log_root)
+        content = _messages_log(log_root)
         assert "Stopping system..." in content, f"строка начала остановки не доехала:\n{content}"
         assert "System stopped" in content, (
             f"«System stopped» не доехала — журнал закрылся раньше строк, которые обязан был принять:\n{content}"
@@ -447,7 +462,7 @@ class TestSegmentCountIsReal:
                 "уборка висящего сегмента",
             )
             assert launcher.get_stats()["startup"]["shm_cleanup_segments"] == 1
-            assert "cleanup_stale_shm: очищено 1 SHM-сегментов" in _system_log(log_root)
+            assert "cleanup_stale_shm: очищено 1 SHM-сегментов" in _messages_log(log_root)
             with pytest.raises(FileNotFoundError):
                 shared_memory.SharedMemory(name=f"{region}_0", create=False)
         finally:
@@ -483,7 +498,7 @@ class TestSegmentCountIsReal:
                 assert still.buf[0] == 42, "сегмент изменился — «уборка» на этой платформе что-то трогает"
             finally:
                 still.close()
-            assert "уборка на этой платформе недоступна" in _system_log(log_root), (
+            assert "уборка на этой платформе недоступна" in _messages_log(log_root), (
                 "строка журнала выдаёт свойство платформы за показание об уборке"
             )
         finally:
@@ -617,11 +632,18 @@ class TestOneConnectorPerPoint:
         _within_deadline(launcher._shutdown_observability, "закрытие журнала")
 
         errors = _errors_log(log_root)
-        system = _system_log(log_root)
+        # Task 3.2 (Р-7(а)): плоскость логов лежит теперь в ДВУХ файлах —
+        # `messages.log` (INFO) и `system.log` (WARNING+ и DEBUG-скоуп).
+        # Утверждение об отсутствии обязано покрывать обе половины: проверяя
+        # только `system.log`, тест согласился бы с дублем, приехавшим по
+        # INFO-дороге, и остался бы зелёным — то есть ослеп бы ровно на том
+        # классе, ради которого написан.
+        log_plane = _system_log(log_root) + _messages_log(log_root)
         assert marker in errors, f"errors.log не содержит маркер отказа: {errors!r}"
-        assert marker not in system, (
-            "тот же инцидент попал ВТОРОЙ строкой в system.log — «сколько раз это случилось» "
-            f"перестаёт иметь ответ: {system!r}"
+        assert marker not in log_plane, (
+            "тот же инцидент попал ВТОРОЙ строкой в плоскость логов "
+            "(system.log или messages.log) — «сколько раз это случилось» "
+            f"перестаёт иметь ответ: {log_plane!r}"
         )
 
 
@@ -651,7 +673,7 @@ class TestPrefixCleanupTellsThePlatform:
 
         _within_deadline(lambda: launcher._cleanup_shm_at_startup({}), "уборка с префиксным блоком")
 
-        content = _system_log(log_root)
+        content = _messages_log(log_root)
         assert "cleanup_orphaned_by_prefix: очищено 0 SHM-сегментов" in content, (
             f"строки префиксной уборки нет в журнале вовсе: {content!r}"
         )

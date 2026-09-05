@@ -1539,7 +1539,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -1929,7 +1928,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -2271,7 +2269,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -2710,7 +2707,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -3107,7 +3103,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -4095,7 +4090,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -4463,7 +4457,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
