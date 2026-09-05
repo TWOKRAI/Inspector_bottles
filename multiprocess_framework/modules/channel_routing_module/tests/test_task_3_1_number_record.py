@@ -473,3 +473,93 @@ class TestMetricIdentityDependsOnWhetherThereIsAWriter:
         )
         assert num is not None
         assert num.metric_identity == "drops"
+
+
+class TestTheFormSitsOnTheWRITEPathAndMustNotKillABatch:
+    """Два свойства, ставшие НЕСУЩИМИ только после переезда формы (находки ревью N-1 и N-2).
+
+    До переезда ``NumberRecord`` был классом без боевых потребителей, и его
+    внутренние предохранители сторожили пустоту. Теперь форма стоит внутри
+    ``hub_record_to_display``, который зовёт ``ObservabilityStore.append_records``
+    для КАЖДОЙ записи пачки, — и любое исключение оттуда уносит ВСЮ пачку, а не
+    одну строку. Оба теста заведены ведущим по находкам ревью итерации 2: обе
+    заплаты ревьюера (``float(value)`` снят; ``severity`` берётся у формы)
+    не убили ни одного теста.
+    """
+
+    @staticmethod
+    def _store(tmp_path):
+        from multiprocess_framework.modules.channel_routing_module.observability.observability_store import (
+            ObservabilityStore,
+        )
+
+        return ObservabilityStore(str(tmp_path / "obs.db"))
+
+    def test_a_non_numeric_value_in_the_middle_does_not_take_the_whole_batch_down(self, tmp_path) -> None:
+        """N-1: пачка из трёх, средняя с нечисловым ``value`` — в сторе обязаны быть ТРИ.
+
+        Достижимость не гипотетическая: ``_emit_stat(metric_name, value: Any, …)``
+        и порт наблюдений типом значения не ограничены. Репродукция ревью со
+        снятым предохранителем: ``ValueError: could not convert string to float:
+        'no data'`` и **ноль** строк в сторе вместо трёх.
+
+        Проверяется не только число строк: у средней записи обязаны уцелеть имя
+        (иначе строка ненаходима поиском навсегда) и СЫРОЕ значение в ``extra`` —
+        «не число» и «числа не было» это разные факты.
+        """
+        store = self._store(tmp_path)
+        written = store.append_records(
+            [
+                {"kind": "observation", "module": "cam", "ts": 1.0, "writer": "capture", "metric": "drops", "value": 1},
+                {
+                    "kind": "observation",
+                    "module": "cam",
+                    "ts": 2.0,
+                    "writer": "capture",
+                    "metric": "state",
+                    "value": "no data",
+                },
+                {"kind": "observation", "module": "cam", "ts": 3.0, "writer": "capture", "metric": "fps", "value": 30},
+            ]
+        )
+
+        assert written == 3, f"пачка обязана дойти целиком, записано {written}"
+        assert store.count() == 3, f"в сторе {store.count()} строк вместо трёх — нечисловое значение унесло пачку"
+        rows = store.list_records(kind="observation")
+        middle = [r for r in rows if r["ts"] == 2.0]
+        assert middle, "средняя запись пропала из стора"
+        assert middle[0]["metric"] == "capture.state", (
+            f"имя средней записи обязано уцелеть, получено {middle[0]['metric']!r}"
+        )
+        assert middle[0]["extra"]["value"] == "no data", (
+            f"сырое значение обязано доехать как есть, получено {middle[0]['extra'].get('value')!r}"
+        )
+        store.close()
+
+    def test_severity_belongs_to_the_kind_even_when_the_form_refuses_to_build(self) -> None:
+        """N-2: форма не собралась — запись всё равно числовая, ``severity`` не меняется.
+
+        Заявлено комментарием в ``record_display`` («через форму идёт
+        идентичность, а не КЛАСС записи»), но не сторожилось: соседний
+        инвариантный тест различает ветки по составу конверта, а не по
+        ``severity``, поэтому заплата «``severity`` берётся у формы» проходила
+        мимо него. Цена поломки — в колонке снова ДВА словаря у нечитаемых
+        записей, ровно то, что К7 и убирал.
+
+        Вход подобран так, чтобы форма отказала: род метрики вне четырёх
+        литералов. Имени при этом нет — и это ожидаемо, сторожится отдельно.
+        """
+        from multiprocess_framework.modules.channel_routing_module.observability.record_display import (
+            NUMBER_SEVERITY,
+            hub_record_to_display,
+        )
+
+        display = hub_record_to_display(
+            {"kind": "stats", "module": "seg", "ts": 1.0, "metric": "fps", "value": 30, "metric_type": "невнятный род"}
+        )
+
+        assert display["severity"] == NUMBER_SEVERITY, (
+            f"класс записи задаёт kind, а не удача сборки формы: получено {display['severity']!r}"
+        )
+        assert display["severity_number"] == 0, "оси важности у числа нет ни при каком роде"
+        assert display["metric"] is None, "имени у несобравшейся формы нет — это ожидаемо и проверяется здесь же"
