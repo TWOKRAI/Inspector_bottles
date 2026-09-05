@@ -63,9 +63,13 @@ register_sink_factory("sql", MySqlChannel)      # класс-наследник 
 | Скоуп | Приёмники | Файл |
 |---|---|---|
 | `SYSTEM` | `console`, `system_file` | `system.log` |
-| `BUSINESS` | `system_file`, `messages_file` | `system.log` + `messages.log` |
+| `BUSINESS` | `messages_file` | `messages.log` |
 | `PERFORMANCE` | `performance_file` | `performance.log` |
 | `DEBUG` | `system_file` | `system.log` |
+
+**Task 3.2 (Р-7(а)):** `BUSINESS` лишился `system_file`. Замер на живом стенде (8 процессов, бут)
+показал, что `messages.log` был строгим подмножеством `system.log` — 368 строк, 0 уникальных, —
+потому что оба скоупа делили канал `system_file`; после фикса файлы больше не дублируют друг друга.
 
 `console` **не подключён к `BUSINESS`** намеренно: пер-кадровые INFO воркеров уходят только в
 файлы. `PERFORMANCE` вынесен в свой файл в Ф2.6 — у скоупа один писатель (снапшот метрик), и он же

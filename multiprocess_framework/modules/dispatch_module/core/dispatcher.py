@@ -266,7 +266,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             )
 
             if result:
-                self._log_info(f"Handler '{key}' registered successfully", module=LOG_SOURCE)
+                self._log_debug(lambda: f"Handler '{key}' registered successfully", module=LOG_SOURCE)
                 self._record_metric("dispatcher.handler.registration.success", tags={"key": key})
             else:
                 self._log_warning(f"Failed to register handler '{key}'", module=LOG_SOURCE)

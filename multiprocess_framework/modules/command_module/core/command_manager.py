@@ -210,7 +210,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         )
 
         if result:
-            self._log_info(f"Command '{command_name}' registered successfully", module=LOG_SOURCE)
+            self._log_debug(lambda: f"Command '{command_name}' registered successfully", module=LOG_SOURCE)
             self._record_metric("command_manager.command.registration.success", tags={"command": command_name})
         else:
             self._log_warning(f"Failed to register command '{command_name}'", module=LOG_SOURCE)
