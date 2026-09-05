@@ -22,9 +22,11 @@ ObservabilityHub (Ф5.15) — эфемерный in-memory буфер: посл�
   stats: {kind:'stats', module, ts, metric, value, metric_type, tags}
 
 Нормализация в строку — ЕДИНЫМ ``record_display.hub_record_to_display`` (5.21 (b),
-без дубля): общие колонки (kind/process/module/ts/severity/message) + JSON `extra`
-со всем остальным (для stats severity=metric_type, message=metric). Колонка
-`process` (5.21 (c)) — имя процесса-источника, для старых БД доливается ALTER'ом.
+без дубля): общие колонки (kind/process/module/ts/severity/metric/message) + JSON
+`extra` со всем остальным. Колонка `process` (5.21 (c)) — имя процесса-источника,
+колонка `metric` (Task 3.1) — полное имя метрики (``capture.drops``) у строк,
+которые ЕСТЬ одно число, и NULL у агрегата окна / лога / ошибки; для старых БД обе
+доливаются ALTER'ом.
 """
 
 from __future__ import annotations
@@ -60,6 +62,13 @@ _AUTO_VACUUM_SCHEMA_VERSION = 1
 #: auto_vacuum увидела бы ``2 >= 1`` и пропустила себя молча на унаследованном
 #: файле. Порядок здесь — не стиль, а условие.
 _FTS_SCHEMA_VERSION = 2
+
+#: Версия схемы после заведения колонки ``metric`` (Task 3.1, К5). Тот же гейт
+#: ``user_version``, следующее число — и по той же причине, что у FTS,
+#: :meth:`_migrate_add_metric` зовётся ПОСЛЕ :meth:`_init_fts`: поставь версию 3
+#: раньше, и backfill полнотекстового индекса увидел бы ``3 >= 2`` и пропустил
+#: себя молча на унаследованном файле.
+_METRIC_SCHEMA_VERSION = 3
 
 #: Имя теневой таблицы полнотекстового индекса.
 _FTS_TABLE = "records_fts"
@@ -169,6 +178,12 @@ def _row_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
         # так и построен. Задержка живёт там, где известны ОБА конца — в
         # display-виде живого пути.
         "message": d["message"],
+        # Task 3.1 (К4). Имя считает ТОТ ЖЕ нормализатор, что и живой хвост
+        # (:func:`..record_display.number_metric_identity`) — второй способ
+        # вычисления дал бы строку, найденную по тексту и не найденную фильтром
+        # по метрике. ``None`` здесь означает «строка не есть одно число»
+        # (агрегат/лог/ошибка) и ложится в колонку как SQL NULL.
+        "metric": d.get("metric"),
         "extra": json.dumps(d["extra"], ensure_ascii=False, default=str),
     }
 
@@ -233,15 +248,22 @@ class ObservabilityStore:
             )
             self._migrate_add_process()
             self._migrate_add_severity_number()
+            self._migrate_add_metric()
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_records_kind_id ON records(kind, id)")
             # Ф3.6: индекс под пороговый запрос «всё от WARNING и выше». Без него
             # выигрыш числа перед membership-фильтром по строкам был бы только
             # выразительным, но не быстрым.
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_records_severity_number ON records(severity_number, id)")
+            # Task 3.1 (К4): индекс под ряд по метрике («покажи `capture.drops`
+            # за последние 10 минут») — ``(metric, ts)``, а не ``(metric, id)``:
+            # ряд читают как ВРЕМЕННОЙ, порядок точек задаёт ``ts``.
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_records_metric_ts ON records(metric, ts)")
             self._conn.commit()
             self._migrate_auto_vacuum()
             # ПОСЛЕ миграции auto_vacuum — см. комментарий у _FTS_SCHEMA_VERSION.
             self._init_fts()
+            # ПОСЛЕ _init_fts — см. комментарий у _METRIC_SCHEMA_VERSION.
+            self._migrate_backfill_metric()
 
     def _migrate_auto_vacuum(self) -> None:
         """Разовая миграция унаследованных БД на реально работающий ``auto_vacuum`` (D3).
@@ -312,9 +334,16 @@ class ObservabilityStore:
         (drain-петля и store-tap), и «не забыть позвать» в каждом из них — это
         договорённость, а триггер — свойство схемы.
 
-        **UPDATE-триггера нет намеренно:** таблица append-only, строки не
-        правятся (проверяется тестом ``test_the_store_never_updates_a_row``).
-        Появится правка — тест покраснеет раньше, чем индекс разойдётся с текстом.
+        **UPDATE-триггера нет намеренно:** таблица append-only ПО ИНДЕКСИРУЕМЫМ
+        колонкам — ``message``/``module``/``process`` не правятся никогда
+        (проверяется тестом ``test_no_update_ever_touches_an_indexed_column``;
+        прежняя редакция этого абзаца ссылалась на ``test_the_store_never_updates_
+        a_row``, какого в дереве нет — Task 3.1, К6). ``UPDATE`` над НЕ
+        индексируемыми колонками законен и уже применяется дважды: засыпка
+        ``severity_number`` (Ф3.6) и засыпка ``metric``
+        (:meth:`_migrate_backfill_metric`, Task 3.1). Появится правка
+        индексируемой колонки — тест покраснеет раньше, чем индекс разойдётся с
+        текстом.
 
         **Отсутствие FTS5 в сборке SQLite — законное состояние**: причина
         запоминается и называется в :meth:`search`, поиск отключается, всё
@@ -434,6 +463,115 @@ class ObservabilityStore:
             """
         )
 
+    def _migrate_add_metric(self) -> None:
+        """Аддитивная миграция Task 3.1 (К4/К5), ПЕРВАЯ половина: сама колонка ``metric``.
+
+        Разделена с засыпкой (:meth:`_migrate_backfill_metric`) не для красоты:
+        ``ALTER TABLE`` обязан отработать ДО ``CREATE INDEX ... (metric, ts)``
+        строкой ниже — на унаследованном файле колонки ещё нет, и индекс по ней
+        не создался бы вовсе. Засыпка же обязана идти ПОСЛЕ :meth:`_init_fts`
+        (см. :data:`_METRIC_SCHEMA_VERSION`), то есть в другом месте порядка.
+
+        Идемпотентно, тем же приёмом, что :meth:`_migrate_add_process`.
+        """
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(records)")}
+        if "metric" not in cols:
+            self._conn.execute("ALTER TABLE records ADD COLUMN metric TEXT")
+
+    def _migrate_backfill_metric(self) -> None:
+        """Аддитивная миграция Task 3.1 (К4/К5), ВТОРАЯ половина: засыпка ``metric``.
+
+        **Засыпка БЕЗУСЛОВНАЯ, гейт — состояние ДАННЫХ, а не «колонку только что
+        добавили».** Тот же урок, что записан у :meth:`_migrate_add_severity_number`
+        и воспроизведён ревью Ф3: sqlite3 в legacy-режиме коммитит DDL сразу, а
+        ``UPDATE`` едет в транзакции до ``commit()``. Падение в этом окне
+        оставило бы файл в состоянии «колонка есть, значения NULL» НАВСЕГДА —
+        при следующем открытии гейт «колонки не было» видел бы колонку и
+        засыпку пропускал, а ``where metric='capture.drops'`` молча не находил бы
+        дореформенную историю.
+
+        **Отличие от засыпки ``severity_number``, и оно существенное.** Там
+        значение получала КАЖДАЯ строка, и множество ``WHERE severity_number IS
+        NULL`` опустошало себя за один проход. Здесь ``NULL`` — законное
+        конечное состояние агрегата, лога и ошибки (К4), поэтому голое
+        ``WHERE metric IS NULL`` не опустошается никогда: оно переписывало бы
+        NULL поверх NULL у всей ленты на КАЖДОМ открытии процесса. Условие
+        поэтому двойное — «значения нет И оно вычислимо»; свойство, ради
+        которого гейт держится на данных (починка после падения посередине),
+        при этом сохраняется полностью.
+
+        **Признак агрегата — ``extra.aggregate``**, тот же
+        :data:`..observability_hub.STATS_AGGREGATE_KEY`, что читают нормализатор
+        и drain-адаптер. Второй независимый признак того же класса (скажем,
+        «текст начинается с ``metrics snapshot``») разошёлся бы с первым молча —
+        и разошёлся бы прямо сейчас: у строк, записанных ПОСЛЕ этой задачи,
+        ``severity`` у агрегата и у одиночной метрики одинаков (``number``,
+        К7), то есть по нему их уже не различить.
+
+        **``json_valid`` перед ``json_extract``, и именно через ``CASE``.**
+        ``json_extract`` на непарсимом тексте не возвращает NULL, а роняет
+        ``OperationalError`` («malformed JSON»): одна битая строка ``extra``
+        (ручная правка файла, обрыв записи) не дала бы открыть стор вовсе.
+        ``CASE`` здесь несущий — только он гарантированно не вычисляет ветку,
+        которую не выбрал; порядок операндов ``AND`` такой гарантии не даёт.
+
+        **Непрочитанный конверт значит «не знаю», а НЕ «не агрегат».** Первая
+        редакция этого условия читала битый ``extra`` как отсутствие маркера
+        агрегата, и хазард-тест автора поймал результат: строке-снапшоту
+        доставалось имя ``metric = 'metrics snapshot (count=1): fps'`` — ряд по
+        такому имени существует, состоит из одной точки и берётся из строки, в
+        которой числа нет вовсе. Битая строка остаётся с ``metric IS NULL``:
+        видимой недостачей, а не выдуманным именем.
+
+        Отсутствие расширения json1 в сборке SQLite — законное состояние, как и
+        отсутствие FTS5: засыпка пропускается с названной причиной в аварийный
+        журнал, колонка и всё остальное работают.
+        """
+        # Версия НЕ поднимается через ступень: :meth:`_init_fts` мог вернуться
+        # раньше времени (в сборке нет FTS5) и свою версию 2 не выставить. Скакни
+        # мы отсюда сразу на 3 — при следующем открытии уже НА ДРУГОЙ сборке
+        # backfill полнотекстового индекса увидел бы ``3 >= 2`` и пропустил себя,
+        # оставив индекс пустым для всех прежних строк. Лестница монотонна:
+        # ступень 3 берётся только со ступени 2.
+        version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+
+        # Литералы ``observation``/``stats`` — те же, что :data:`KIND_STATS` и
+        # ``KIND_OBSERVATION``; в SQL они пишутся строкой, как и числа уровней в
+        # засыпке ``severity_number``, а сверяет их с живыми константами тест.
+        #
+        # Предикат «строка ЕСТЬ одно число» написан ОДИН раз и подставляется в
+        # обе половины: разойдись ``SET`` и ``WHERE``, засыпка обновляла бы одни
+        # строки, а находила другие — то есть писала бы NULL там, где имя есть.
+        # ``ELSE 1`` у непрочитанного конверта значит «считаю агрегатом»: не
+        # знаю — не называю.
+        is_one_number = (
+            "(kind = 'observation' AND message <> '') "
+            "OR (kind = 'stats' AND message <> '' AND "
+            "(CASE WHEN json_valid(extra) THEN json_extract(extra, '$.aggregate') ELSE 1 END) IS NULL)"
+        )
+        backfill = (
+            f"UPDATE records SET metric = CASE WHEN {is_one_number} THEN message ELSE NULL END "  # nosec B608
+            f"WHERE metric IS NULL AND ({is_one_number})"
+        )
+        try:
+            self._conn.execute(backfill)
+        except sqlite3.OperationalError as exc:
+            # json1 отсутствует в сборке (или иная беда SQL): молчать нельзя —
+            # «ряд по метрике пуст» иначе читался бы как «данных не было».
+            emergency_log(
+                _EMERGENCY_NAME,
+                "WARNING",
+                "ObservabilityStore: засыпка колонки metric на %s не выполнена (%s) — "
+                "ряд по имени метрики не увидит записей, сделанных до этой версии",
+                self._db_path,
+                exc,
+            )
+            return
+        if version >= _FTS_SCHEMA_VERSION:
+            # PRAGMA не принимает `?`-плейсхолдеры — константа модуля, не пользовательский ввод.
+            self._conn.execute(f"PRAGMA user_version = {_METRIC_SCHEMA_VERSION}")
+        self._conn.commit()
+
     def _migrate_add_process(self) -> None:
         """Аддитивная миграция: колонка ``process`` в старых БД (5.21 (c)).
 
@@ -461,8 +599,8 @@ class ObservabilityStore:
             try:
                 self._conn.executemany(
                     "INSERT INTO records "
-                    "(kind, process, module, ts, severity, severity_number, message, extra) "
-                    "VALUES (:kind, :process, :module, :ts, :severity, :severity_number, :message, :extra)",
+                    "(kind, process, module, ts, severity, severity_number, metric, message, extra) "
+                    "VALUES (:kind, :process, :module, :ts, :severity, :severity_number, :metric, :message, :extra)",
                     rows,
                 )
                 self._conn.commit()
@@ -484,6 +622,7 @@ class ObservabilityStore:
         kind: Optional[str] = None,
         module: Optional[str] = None,
         process: Optional[str] = None,
+        metric: Optional[str] = None,
         severity_in: Optional[List[str]] = None,
         min_severity: Optional[int] = None,
         since: Optional[float] = None,
@@ -513,6 +652,12 @@ class ObservabilityStore:
         if process is not None:
             clauses.append("r.process = ?")
             params.append(process)
+        if metric is not None:
+            # Task 3.1 (К4): РЯД по имени метрики. Точное равенство, не LIKE:
+            # имена в этой колонке полные (``capture.drops``), а подстрочный
+            # фильтр молча склеил бы ряды двух писателей с одинаковым хвостом.
+            clauses.append("r.metric = ?")
+            params.append(metric)
         if severity_in:
             placeholders = ",".join("?" for _ in severity_in)
             clauses.append(f"r.severity IN ({placeholders})")
@@ -542,6 +687,7 @@ class ObservabilityStore:
         newest_first: bool = True,
         *,
         process: Optional[str] = None,
+        metric: Optional[str] = None,
         since: Optional[float] = None,
         until: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
@@ -557,15 +703,20 @@ class ObservabilityStore:
             offset/limit: пагинация.
             newest_first: True → ORDER BY id DESC.
             process: фильтр по процессу-источнику (1.6; общий набор с :meth:`search`).
+            metric: точное имя метрики (Task 3.1, К4) — ``capture.drops``. Строки
+                без имени (агрегат окна, лог, ошибка) в такой срез не попадают
+                вовсе: у них колонка NULL, а ``metric = ?`` NULL не равен.
             since/until: окно по ``ts`` (wall-часы писателя), включительно.
 
         Returns:
-            Список dict-строк: {id,kind,module,ts,severity,message,extra(dict)}.
+            Список dict-строк: {id,kind,process,module,ts,severity,severity_number,
+            metric,message,extra(dict)}.
         """
         clauses, params = self._filter_clauses(
             kind=kind,
             module=module,
             process=process,
+            metric=metric,
             severity_in=severity_in,
             min_severity=min_severity,
             since=since,
@@ -580,7 +731,8 @@ class ObservabilityStore:
         # файле и до Ф3.6 — хук сканирует только изменённые файлы, поэтому
         # всплыло при первой же правке стора.
         sql = (
-            "SELECT r.id, r.kind, r.process, r.module, r.ts, r.severity, r.severity_number, r.message, r.extra "
+            "SELECT r.id, r.kind, r.process, r.module, r.ts, r.severity, r.severity_number, r.metric, "
+            "r.message, r.extra "
             "FROM records r"
             f"{where} ORDER BY r.id {order} LIMIT ? OFFSET ?"  # nosec B608
         )
@@ -598,6 +750,7 @@ class ObservabilityStore:
         kind: Optional[str] = None,
         module: Optional[str] = None,
         process: Optional[str] = None,
+        metric: Optional[str] = None,
         severity_in: Optional[List[str]] = None,
         min_severity: Optional[int] = None,
         since: Optional[float] = None,
@@ -659,6 +812,7 @@ class ObservabilityStore:
             kind=kind,
             module=module,
             process=process,
+            metric=metric,
             severity_in=severity_in,
             min_severity=min_severity,
             since=since,
@@ -669,7 +823,8 @@ class ObservabilityStore:
         where = " AND ".join([f"{_FTS_TABLE} MATCH ?", *clauses])
         order = "DESC" if newest_first else "ASC"
         sql = (
-            "SELECT r.id, r.kind, r.process, r.module, r.ts, r.severity, r.severity_number, r.message, r.extra "
+            "SELECT r.id, r.kind, r.process, r.module, r.ts, r.severity, r.severity_number, r.metric, "
+            "r.message, r.extra "
             f"FROM {_FTS_TABLE} JOIN records r ON r.id = {_FTS_TABLE}.rowid "  # nosec B608
             f"WHERE {where} ORDER BY r.id {order} LIMIT ? OFFSET ?"  # nosec B608
         )
@@ -814,6 +969,11 @@ class ObservabilityStore:
             # Дореформенные строки читаются: колонки нет → 0 (UNSPECIFIED), то
             # есть «важность неизвестна», а не «самый низкий уровень».
             "severity_number": _column_or(row, "severity_number", 0),
+            # Task 3.1 (К4). Ключ присутствует ВСЕГДА, в том числе значением
+            # ``None``: «у этой строки нет имени метрики» и «поле не читали»
+            # обязаны различаться, а отсутствующий ключ читается как второе —
+            # ``dict.get("metric")`` вернул бы ``None`` в обоих случаях.
+            "metric": row["metric"],
             # ``observed_ts`` из ответа снят (Ф5.2, Б-3): у колонки не было писателя
             # и быть не могло. Поле, которое всегда ``None``, читается как «задержки
             # не было», а не как «её здесь не измеряют» — и именно так его читали.

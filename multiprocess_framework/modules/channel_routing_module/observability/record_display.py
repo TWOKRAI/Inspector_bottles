@@ -9,8 +9,9 @@ record_display — единый нормализатор записей набл
 поэтому форма live == форма history по построению (5.21 (b): убран дубль
 ``_row_from_record``).
 
-Display-вид: ``{kind, process, module, ts, severity, message, extra(dict)}``
-(стор добавляет ``id``). Собирается из двух живых источников:
+Display-вид: ``{kind, process, module, ts, severity, severity_number, metric,
+message, extra(dict)}`` (стор добавляет ``id``). Собирается из двух живых
+источников:
 
   - hub-запись (дренаж log/stats):   {kind, module, ts, severity|metric_type, ...}
   - LogRecord-dict (error-tap):       {timestamp, level, scope, message, module, extra}
@@ -27,7 +28,7 @@ Display-вид: ``{kind, process, module, ts, severity, message, extra(dict)}``
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ..levels import ERROR_SEVERITY, UNKNOWN_SEVERITY, UNSPECIFIED, severity_of
 from .observability_hub import KIND_OBSERVATION, KIND_STATS, STATS_AGGREGATE_KEY
@@ -45,23 +46,36 @@ _ENVELOPE_KEYS = ("kind", "module", "process", "ts", "severity", "message", "obs
 #: сокращению — одно написание на display-вид, а не ``ts`` + ``observed_timestamp``.
 OBSERVED_TS_KEY = "observed_ts"
 
-#: Значение колонки ``severity`` у записи-агрегата (задача 2.1). У сырой
-#: stats-записи там лежит ``metric_type`` (``counter``/``gauge``), у агрегата
-#: типа нет — в нём метрики РАЗНЫХ типов. Пустая строка сделала бы колонку
-#: неотличимой от «тип не проставлен»; слово называет класс записи.
-STATS_SNAPSHOT_SEVERITY = "snapshot"
-
 #: Ключи записи-агрегата, которые нормализатор читает по имени. Остальное
 #: содержимое едет в ``extra`` целиком — правилом конверта, как у лога.
 SNAPSHOT_METRICS_KEY = "metrics"
 SNAPSHOT_TOTAL_KEY = "total_count"
 
-#: Значение колонки ``severity`` у записи порта наблюдений (задача 3.2, находка
-#: ревью — было пусто из общего ``else``). У уровня плагина оси важности нет
-#: ровно по той же причине, что у stats (см. :func:`severity_number_for`): это
-#: «сколько СЕЙЧАС», а не событие с уровнем тревожности. Слово называет класс
-#: записи вместо пустой строки, которая читалась бы как «severity не проставлен».
-OBSERVATION_LEVEL_SEVERITY = "level"
+#: Значение колонки ``severity`` у ЛЮБОЙ числовой записи (Task 3.1, К7).
+#:
+#: До этой задачи в колонке жили ТРИ разных словаря сразу: ``gauge``/``counter``
+#: (тип метрики у одиночной stats-записи), ``snapshot`` (агрегат окна) и
+#: ``level`` (запись порта наблюдений). Читателю приходилось знать все три и
+#: держать в голове, что ни одно из них не уровень тревожности — а колонка
+#: называется ``severity``.
+#:
+#: Под одной формой числа (:class:`NumberRecord`, К3) значение тоже одно.
+#: Колонка называет **КЛАСС записи**, а не важность: у плоскостей статистики и
+#: наблюдений оси важности нет вовсе, и :func:`severity_number_for` отдаёт им
+#: ``UNSPECIFIED`` по ``kind`` независимо от этой строки.
+#:
+#: Слово ``info`` сюда НЕ поставлено сознательно (К7, «третье исправление
+#: спеки»): оно дало бы либо ``severity_number = 9`` — и числа затопили бы
+#: всякий запрос «от INFO и выше», — либо ``severity='info'`` при
+#: ``severity_number = 0``, то есть две колонки одной строки, противоречащие
+#: друг другу.
+#:
+#: Различие «агрегат или одно число» несут ДВА носителя и ровно два: колонка
+#: ``metric`` (``NULL`` у агрегата — см. :func:`number_metric_identity`) и
+#: ``extra.aggregate``. Третьим носителем это различие сюда не возвращается:
+#: поле, дублирующее уже существующий признак, расходится с ним на первой же
+#: правке (тот же довод, что у :data:`..observability_hub.STATS_AGGREGATE_KEY`).
+NUMBER_SEVERITY = "number"
 
 
 def severity_number_for(kind: str, severity: str) -> int:
@@ -92,6 +106,45 @@ def severity_number_for(kind: str, severity: str) -> int:
         return UNSPECIFIED
     number = severity_of(severity)
     return UNSPECIFIED if number == UNKNOWN_SEVERITY else number
+
+
+def number_metric_identity(writer: str, name: str) -> Optional[str]:
+    """Идентичность одного числа — то, что ложится в колонку ``metric`` (Task 3.1, К4).
+
+    **Одно правило на всю плоскость, в одном месте.** Строку строят ДВА
+    потребителя — колонка ``metric`` стора и ``message`` записи наблюдения, — и
+    два независимых написания «writer точка metric» разошлись бы молча: запрос
+    ``where metric='capture.drops'`` перестал бы находить строку, чей текст
+    по-прежнему читается как ``capture.drops``. Поэтому идентичность считается
+    здесь, а обе колонки берут ГОТОВОЕ значение.
+
+    **Писатель обязателен там, где он есть.** Голое ``drops`` столкнулось бы
+    между процессами: у ``camera_0`` и у ``devices`` метрика с одним именем — это
+    ДВА разных ряда, а в общем сторе они слились бы в один. Полная идентичность
+    (``capture.drops``) — та же, что несёт лист дерева
+    (``state.plugins.<writer>.<metric>``), без префикса ``plugins``: он одинаков
+    у каждой записи этого рода и поиску ничего не добавляет.
+
+    **Пусто → ``None``, а не пустая строка.** Колонка ``metric`` различает «это
+    одно число, вот его имя» и «имени нет» (агрегат окна, лог, ошибка). Пустая
+    строка была бы третьим состоянием, неотличимым в SQL от первого: она
+    попадает в ``metric = ''`` и НЕ попадает в ``metric IS NULL``, то есть
+    строка без имени тихо оседала бы в ряду по имени ``''``.
+
+    Args:
+        writer: писатель числа (плагин/компонент) — пусто, если писателя нет
+            (одиночная stats-запись менеджера).
+        name: имя метрики.
+
+    Returns:
+        ``"<writer>.<name>"`` при непустом писателе, ``name`` без него,
+        ``None`` — если имени нет вовсе.
+    """
+    name = str(name or "").strip()
+    if not name:
+        return None
+    writer = str(writer or "").strip()
+    return f"{writer}.{name}" if writer else name
 
 
 def stamp_observed(records: Any, now: float) -> Any:
@@ -198,10 +251,15 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
     JSON-строка), стор сериализует его в JSON только на границе БД.
 
     У ``stats`` веток ДВЕ, и назвать одну значило бы описать не ту, что едет:
-      * агрегат окна (``aggregate=true``) → ``severity="snapshot"``,
-        ``message`` — строка снапшота; так выглядят ВСЕ записи живого стенда
-        (замер 2026-08-14: 112 строк вкладки, снапшоты раз в 10 с);
-      * одиночная метрика → ``severity=metric_type``, ``message=metric``.
+      * агрегат окна (``aggregate=true``) → ``message`` — строка снапшота,
+        ``metric=None``; так выглядят ВСЕ записи живого стенда (замер
+        2026-08-14: 112 строк вкладки, снапшоты раз в 10 с);
+      * одиночная метрика → ``message=metric``, ``metric`` — то же имя.
+
+    ``severity`` у ОБЕИХ, как и у ``observation``, — :data:`NUMBER_SEVERITY`
+    (Task 3.1, К7): форма числа одна, значит и слово в колонке одно. Прежние
+    три (``metric_type`` / ``"snapshot"`` / ``"level"``) различали то, что уже
+    различают ``kind`` и ``metric IS NULL``.
 
     ``observation`` (задача 3.2) — уровень порта наблюдений, СВОЯ ветка, а не
     общий ``else``. До этой ветки запись падала в ``else`` и читала ключи
@@ -226,31 +284,57 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
     ts = float(record.get("ts", 0.0) or 0.0)
     proc = process or record.get("process") or module
 
+    # Колонка ``metric`` (Task 3.1, К4): заполнена там, где строка ЕСТЬ одно
+    # число, и NULL там, где нет. Значение по умолчанию — именно ``None``:
+    # ветки лога/ошибки/агрегата его не переопределяют, и это не «забыли», а
+    # ответ «имени у этой строки нет».
+    metric_column: Optional[str] = None
+
     if kind == KIND_STATS and record.get(STATS_AGGREGATE_KEY):
         # Задача 2.1. Запись-АГРЕГАТ (снапшот окна) — не метрика, и «четыре
         # ключа» ниже её уничтожают: ни ``metric``, ни ``value`` у неё нет, и
         # в БД уехала бы строка `message="" extra={"value": null}` при зелёном
         # «kind=stats > 0». Дефект найден ревью №2 спеки ЧТЕНИЕМ КОДА — живой
         # прогон его бы не заметил: строка-то есть.
-        severity = STATS_SNAPSHOT_SEVERITY
+        #
+        # Task 3.1 (К4): ``metric`` у неё остаётся NULL — в строке 24.8 метрики
+        # в среднем (замер на живом файле, максимум 214), единственного имени у
+        # неё нет. Разложить её на построчные метрики запрещено тем же замером:
+        # горизонт стора упал бы с 47.5 ч до ~1.4 ч.
+        severity = NUMBER_SEVERITY
         message = snapshot_message(record)
         # То же правило конверта, что у лога: всё, что не конверт, — в extra.
         # Перечислять ключи агрегата поимённо значило бы завести второе место,
         # где описан его состав, и потерять поле 2.2 молча.
         extra: Dict[str, Any] = {k: v for k, v in record.items() if k not in _ENVELOPE_KEYS}
     elif kind == KIND_STATS:
-        severity = str(record.get("metric_type", "")).lower()
+        # Одиночная метрика менеджера: писателя у неё нет (пишет сам процесс),
+        # поэтому идентичность — голое имя.
+        severity = NUMBER_SEVERITY
+        metric_column = number_metric_identity("", record.get("metric", ""))
         message = record.get("metric", "")
-        extra = {"value": record.get("value"), "tags": record.get("tags", {})}
+        # ``metric_type`` переехал сюда из колонки ``severity`` (Task 3.1, К7).
+        # Раньше род метрики (``gauge``/``counter``) БЫЛ значением severity, и
+        # снятие трёх словарей из одной колонки уничтожило бы факт: у агрегата
+        # тип каждой метрики лежит в ``extra.metrics[*].type``, а у одиночной
+        # записи его не осталось бы нигде. Колонка называет КЛАСС записи, род
+        # числа живёт в структуре — это разные вопросы, и теперь у них разные
+        # места.
+        extra = {"value": record.get("value"), "tags": record.get("tags", {}), "metric_type": record.get("metric_type")}
     elif kind == KIND_OBSERVATION:
-        severity = OBSERVATION_LEVEL_SEVERITY
-        writer = record.get("writer", "")
-        metric = record.get("metric", "")
+        severity = NUMBER_SEVERITY
         # "<writer>.<metric>" — идентичность листа дерева
         # (``state.plugins.<writer>.<metric>``) без префикса "plugins": он
         # одинаков у КАЖДОЙ записи этого kind и не несёт поисковой ценности,
         # а вот "writer" и "metric" — несут (FTS5 токенизирует по "." отдельно).
-        message = f"{writer}.{metric}" if (writer or metric) else ""
+        #
+        # Task 3.1: ``message`` и колонка ``metric`` берут ОДНУ строку из
+        # :func:`number_metric_identity`, а не считают её каждый по-своему.
+        # Прежняя редакция строила текст здесь (``f"{writer}.{metric}"``) и на
+        # пустом имени давала ``"capture."`` — колонке такое имя не годится, и
+        # два правила разошлись бы ровно на этом входе.
+        metric_column = number_metric_identity(record.get("writer", ""), record.get("metric", ""))
+        message = metric_column or ""
         # Правило конверта общее: всё, что не конверт, — в extra (writer/metric
         # дублируются сюда же — не вредно, а `value` иначе было бы недостижимо
         # ни живым хвостом, ни стором).
@@ -267,6 +351,12 @@ def hub_record_to_display(record: Dict[str, Any], process: str = "") -> Dict[str
         "ts": ts,
         "severity": severity,
         "severity_number": severity_number_for(kind, severity),
+        # Ключ присутствует ВСЕГДА, в том числе значением ``None``. Это не то же
+        # самое, что ``observed_ts`` ниже (тот появляется по факту): «имени нет»
+        # и «поле не считали» обязаны различаться, а появляющийся-по-случаю ключ
+        # читается как второе. Форма живого хвоста и форма истории тем самым
+        # остаются равны по построению — ради этого нормализатор и единый.
+        "metric": metric_column,
         "message": message,
         "extra": extra,
     }
@@ -334,6 +424,11 @@ def log_record_to_display(record_dict: Dict[str, Any], process: str = "") -> Dic
         # ПОСЧИТАННОЕ выше, а не пересчитывается: два вычисления одного поля —
         # это два места, где оно может разойтись.
         "severity_number": number,
+        # Task 3.1 (К4): у лога/ошибки имени метрики нет и быть не может. Ключ
+        # всё равно присутствует — оба нормализатора обязаны давать ОДНУ форму
+        # (тот же довод, что у ``severity_number`` строкой выше), иначе фильтр
+        # по метрике работал бы на половине записей живого хвоста.
+        "metric": None,
         "message": record_dict.get("message", ""),
         # extra под ключом "context" — паритет с историей: StoreTapChannel кладёт
         # LogRecord.extra в "context", и стор сохраняет его как {"context": {...}}.

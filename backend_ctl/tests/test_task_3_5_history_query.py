@@ -711,24 +711,23 @@ class TestK6TextSearchIsFTS:
 
 
 # ===========================================================================
-# К7 — metric пока отвечает названным отказом (колонки metric в сторе ещё нет).
+# К7 — СНЯТ задачей Task 3.1 (К8), вместе со своим тестом.
+#
+# Здесь стоял ``TestK7MetricNotYetSupported.
+# test_metric_filter_is_a_named_refusal_naming_reason_and_task``: он требовал,
+# чтобы ``history_query(metric=...)`` ОТКАЗЫВАЛ, называя причину («колонки
+# metric в сторе ещё нет») и адрес («Task 3.1»). Task 3.1 колонку завела, отказ
+# по этому основанию снят — и тест, оставшись, сделал бы регресс-гейт
+# противоречащим самому себе: два теста в одном прогоне требовали бы от одного
+# вызова и отказа, и ряда.
+#
+# Отказ по ``metric`` НЕ исчез, у него другое основание — «в ЭТОМ файле нет
+# колонки» (read-only соединение мигрировать не вправе), и его сторожит
+# hazard-тест автора Task 3.1
+# (``channel_routing_module/tests/test_task_3_1_hazards.py``). Новое поведение
+# (успех + ``series``) пинит приёмочный набор
+# ``backend_ctl/tests/test_task_3_1_history_series.py``.
 # ===========================================================================
-
-
-class TestK7MetricNotYetSupported:
-    def test_metric_filter_is_a_named_refusal_naming_reason_and_task(self, tmp_path) -> None:
-        db_path, _ = _seed_small_store(tmp_path)
-        drv = _driver_with_response(_ok_response(db_path))
-        result = drv.history_query(metric="capture.frames")
-        assert result.get("success") is False, (
-            f"metric-фильтр обязан назвать отказ (колонки metric в сторе ещё нет, Task 3.1), "
-            f"а НЕ тихо провалить фильтр и отдать всё подряд: {result}"
-        )
-        error_text = str(result.get("error", ""))
-        assert "metric" in error_text.lower(), f"ошибка не называет ПРИЧИНУ (metric): {error_text!r}"
-        assert "3.1" in error_text, f"ошибка не называет АДРЕС (Task 3.1): {error_text!r}"
-        rows = _rows(result)
-        assert not rows, f"отказ обязан быть БЕЗ строк, а не молчаливым полным дампом: {rows}"
 
 
 # ===========================================================================

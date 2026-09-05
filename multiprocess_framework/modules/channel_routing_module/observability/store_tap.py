@@ -38,6 +38,24 @@ ORIGIN_FIELD = "origin"
 #: уже есть, второй раз не заводить».
 ORIGIN_ERROR_MANAGER = "error_manager"
 
+#: Значение маркера: строка — ЧЕЛОВЕЧЕСКАЯ КОПИЯ снапшота метрик (Task 3.1, К1).
+#: Ставит его ``LogStatsChannel``, который пишет снапшот в ``performance.log``
+#: для чтения глазами; в стор тот же снапшот едет ДРУГОЙ дорогой — структурно,
+#: через hub (``HubStatsChannel`` → ``kind=stats``).
+#:
+#: **Правило ДРУГОЕ, чем у :data:`ORIGIN_ERROR_MANAGER`, и копировать прежнее
+#: нельзя.** Там маркер значит «строку берёт РОВНО ОДИН tap — владелец плоскости
+#: ошибок»: у инцидента две дороги, и надо выбрать одну. Здесь — «не берёт НИ
+#: ОДИН tap»: владелец дороги в стор не tap вовсе, а hub, и никакая роль tap'а
+#: не делает лог-копию нужной. Реализация, скопировавшая развилку
+#: ``owns_error_plane``, пропускала бы дубль у не-владельца и писала бы его у
+#: владельца — то есть на боевой раскладке дубль остался бы жив.
+#:
+#: Цена дубля замерена, а не предположена (живой файл ``observability.db``,
+#: 4575 с, 8 процессов): 781 строка/ч и 962 КиБ/ч — **19 % строк и 39 % БАЙТОВ**
+#: стора; горизонт при ``max_rows=200 000`` 47.5 ч → 58.3 ч после снятия.
+ORIGIN_STATS_SNAPSHOT = "stats_snapshot"
+
 
 class StoreTapChannel(IChannel):
     """Tap-sink (IChannel): LogRecord-dict → ObservabilityStore.append_records."""
@@ -88,6 +106,13 @@ class StoreTapChannel(IChannel):
         всеми tap'ами, кроме того, что сам висит на плоскости ошибок
         (``owns_error_plane=True``): у такого инцидента строка стора уже есть.
 
+        Записи с маркером :data:`ORIGIN_STATS_SNAPSHOT` пропускаются БЕЗУСЛОВНО,
+        любым tap'ом — владелец этой дороги не tap, а hub (Task 3.1, К1). Роль
+        tap'а тут ни при чём, поэтому проверка стоит ДО развилки
+        ``owns_error_plane``: любая попытка выразить её через ту же развилку
+        оставила бы дубль живым у tap'а-владельца плоскости ошибок, то есть
+        ровно на боевой раскладке.
+
         Пропуск возвращается как ``success`` — потому что он ИМ И ЯВЛЯЕТСЯ:
         запись учтена, дороги у неё одна, и «отказ» здесь означал бы для читателя
         возврата потерю, которой не было. Довод про счётчик, стоявший здесь
@@ -103,6 +128,14 @@ class StoreTapChannel(IChannel):
         """
         extra = record_dict.get("extra") or {}
         origin = extra.get(ORIGIN_FIELD) if isinstance(extra, dict) else None
+        if origin == ORIGIN_STATS_SNAPSHOT:
+            # ``success`` с НАЗВАННОЙ причиной, а не отказ: запись учтена, дорога
+            # у неё одна (hub), потери нет — та же семантика, что у ``deduplicated``
+            # соседней ветки. Значением ключа едет сам маркер, а не ``True``:
+            # читателю возврата важно, ЧТО именно пропущено, — маркеров у поля
+            # ``origin`` уже два, и «пропущено по origin» без имени пришлось бы
+            # доискивать в исходнике.
+            return {"status": "success", "channel": self._name, "skipped_origin": ORIGIN_STATS_SNAPSHOT}
         if origin == ORIGIN_ERROR_MANAGER and not self._owns_error_plane:
             return {"status": "success", "channel": self._name, "deduplicated": True}
         severity = str(record_dict.get("level", "")).lower()

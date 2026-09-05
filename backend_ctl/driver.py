@@ -149,6 +149,15 @@ _HISTORY_DEFAULT_LIMIT = 100
 #: Колонки строки стора в порядке, дословно совпадающем с К4.
 _HISTORY_COLUMNS: tuple = ("id", "kind", "process", "module", "ts", "severity", "severity_number", "message", "extra")
 
+#: Колонка Task 3.1 (К8) — читается ОТДЕЛЬНО от :data:`_HISTORY_COLUMNS`, потому
+#: что её может не быть В ЭТОМ ФАЙЛЕ. Стор доливает её ALTER'ом при открытии на
+#: запись, а history_query открывает файл ТОЛЬКО НА ЧТЕНИЕ (К3) и мигрировать не
+#: вправе: файл, который с версии Task 3.1 не открывал ни один процесс-писатель,
+#: колонки не имеет. Впиши мы её в общий список — весь инструмент отказывал бы на
+#: таком файле («no such column: metric»), хотя лента, поиск и фильтры к метрике
+#: отношения не имеют.
+_HISTORY_METRIC_COLUMN = "metric"
+
 #: Имя теневой FTS5-таблицы — деталь СХЕМЫ БД (её заводит ``ObservabilityStore._init_fts``),
 #: не приватный символ Python. history_query читает файл собственным SQL-соединением
 #: (К3: read-only, чужое для стора), а не через API стора, поэтому имя продублировано
@@ -212,6 +221,7 @@ def _history_where_clauses(
     min_severity: Optional[int],
     since: Optional[float],
     until: Optional[float],
+    metric: Optional[str] = None,
     prefix: str = "",
 ) -> "tuple[List[str], List[Any]]":
     """WHERE-условия history_query — тот же набор фильтров (К4), что у
@@ -237,6 +247,13 @@ def _history_where_clauses(
     if process is not None:
         clauses.append(f"{prefix}process = ?")
         params.append(process)
+    if metric is not None:
+        # Task 3.1 (К8): срез по имени метрики — точное равенство, как в сторе
+        # (``ObservabilityStore._filter_clauses``). Строки без имени (агрегат
+        # окна, лог, ошибка) несут NULL и в срез не попадают: ``metric = ?``
+        # NULL не равен, и это не потеря — у них имени и нет.
+        clauses.append(f"{prefix}metric = ?")
+        params.append(metric)
     if severity_in:
         placeholders = ",".join("?" for _ in severity_in)
         clauses.append(f"{prefix}severity IN ({placeholders})")
@@ -251,6 +268,61 @@ def _history_where_clauses(
         clauses.append(f"{prefix}ts <= ?")
         params.append(float(until))
     return clauses, params
+
+
+def _history_has_metric_column(conn: "sqlite3.Connection") -> bool:
+    """Есть ли в ЭТОМ файле колонка ``metric`` (Task 3.1, К8).
+
+    Спрашивается у файла, а не предполагается по версии кода: read-only
+    соединение мигрировать не может (К3), и файл, к которому с версии Task 3.1
+    не прикасался ни один процесс-писатель, колонки не имеет. Ответ здесь
+    решает ДВА разных вопроса, и оба отвечать «молча да» нельзя: какие колонки
+    просить у ``SELECT`` и что сказать на ``metric=`` — срез или названный отказ.
+    """
+    try:
+        return any(row[1] == _HISTORY_METRIC_COLUMN for row in conn.execute("PRAGMA table_info(records)"))
+    except sqlite3.Error:
+        # Таблицы нет вовсе / файл не sqlite: пусть об этом скажет сам запрос
+        # ниже — своим текстом ошибки, а не нашей догадкой про колонку.
+        return False
+
+
+def _history_series(rows: List[Dict[str, Any]]) -> "tuple[List[List[float]], int]":
+    """Временной ряд ``[[ts, value], …]`` из страницы записей (Task 3.1, К8).
+
+    **Старые первыми — ОБРАТНЫЙ порядок относительно ``rows``.** Лента читается
+    как хвост («что случилось последним»), поэтому ``rows`` остаются
+    ``ORDER BY id DESC`` (К4 задачи 3.5); ряд читается как ВРЕМЕННОЙ — слева
+    направо, — и любой график/глаз ждёт его по возрастанию. Порядок берётся по
+    ``ts``, а не разворотом списка: ``id`` — порядок ПРИХОДА в стор, и при
+    доливке батчем он с ``ts`` расходится, а ряд по времени обязан идти по
+    времени.
+
+    **Строка без числового ``extra.value`` в ряд не попадает, но остаётся в
+    ``rows``** — и расхождение длин НАЗЫВАЕТСЯ числом (второе значение), а не
+    подразумевается: «пропусков не было» и «пропуски не считали» обязаны
+    различаться, иначе короткий ряд читается как «данных мало», а не как «часть
+    строк не дала точки».
+
+    ``bool`` числом здесь НЕ считается, хотя в Python он подкласс ``int``.
+    Уровень, опубликованный флагом (``connected=True``), превратился бы в
+    ``1.0`` и нарисовал бы тренд там, где его нет; такая строка честнее
+    попадает в счётчик пропусков.
+    """
+    points: List[List[float]] = []
+    skipped = 0
+    for row in rows:
+        extra = row.get("extra")
+        value = extra.get("value") if isinstance(extra, dict) else None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            skipped += 1
+            continue
+        try:
+            points.append([float(row.get("ts") or 0.0), float(value)])
+        except (TypeError, ValueError):
+            skipped += 1
+    points.sort(key=lambda pair: pair[0])
+    return points, skipped
 
 
 def _history_row_to_dict(row: "sqlite3.Row") -> Dict[str, Any]:
@@ -281,23 +353,45 @@ def _history_row_to_dict(row: "sqlite3.Row") -> Dict[str, Any]:
         "ts": row["ts"],
         "severity": row["severity"],
         "severity_number": row["severity_number"] if row["severity_number"] is not None else 0,
+        # Task 3.1 (К8). Ключ есть ВСЕГДА, значением ``None`` в том числе: «у
+        # строки нет имени метрики» (лог, ошибка, агрегат окна) и «колонки нет в
+        # этом файле» отвечают одним и тем же ``None`` в строке — но второе
+        # названо отдельно, отказом на ``metric=``, а не оставлено на догадку по
+        # пустому полю.
+        "metric": row["metric"] if _HISTORY_METRIC_COLUMN in row.keys() else None,
         "message": row["message"],
         "extra": extra,
     }
 
 
+def _history_columns(with_metric: bool, prefix: str = "") -> str:
+    """Список колонок ``SELECT`` — с ``metric`` или без него (Task 3.1, К8).
+
+    Одна сборка на оба чтения (лента и поиск): две копии разошлись бы молча, и
+    «в ленте имя метрики есть, а в поиске нет» читалось бы как дефект поиска.
+    """
+    columns = list(_HISTORY_COLUMNS) + ([_HISTORY_METRIC_COLUMN] if with_metric else [])
+    return ", ".join(f"{prefix}{col}" for col in columns)
+
+
 def _history_list_rows(
-    conn: "sqlite3.Connection", *, where_clauses: List[str], params: List[Any], limit: int
+    conn: "sqlite3.Connection", *, where_clauses: List[str], params: List[Any], limit: int, with_metric: bool = False
 ) -> List[Dict[str, Any]]:
     """К4: страница записей, свежие первыми (``ORDER BY id DESC`` — id, не ts, см. докстрок history_query)."""
     where = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-    sql = f"SELECT {', '.join(_HISTORY_COLUMNS)} FROM records{where} ORDER BY id DESC LIMIT ?"  # nosec B608
+    sql = f"SELECT {_history_columns(with_metric)} FROM records{where} ORDER BY id DESC LIMIT ?"  # nosec B608
     cur = conn.execute(sql, [*params, int(limit)])
     return [_history_row_to_dict(r) for r in cur.fetchall()]
 
 
 def _history_search_rows(
-    conn: "sqlite3.Connection", text: str, *, where_clauses: List[str], params: List[Any], limit: int
+    conn: "sqlite3.Connection",
+    text: str,
+    *,
+    where_clauses: List[str],
+    params: List[Any],
+    limit: int,
+    with_metric: bool = False,
 ) -> List[Dict[str, Any]]:
     """К6: полнотекстовый поиск (FTS5), не подстрока.
 
@@ -308,7 +402,7 @@ def _history_search_rows(
             (нет своей таблицы `records_fts`) и здесь получают одно имя.
     """
     fts_expr = fts_query(text.strip())
-    qualified = ", ".join(f"r.{col}" for col in _HISTORY_COLUMNS)
+    qualified = _history_columns(with_metric, prefix="r.")
     where = " AND ".join([f"{_HISTORY_FTS_TABLE} MATCH ?", *where_clauses])
     sql = (
         f"SELECT {qualified} FROM {_HISTORY_FTS_TABLE} "  # nosec B608
@@ -774,10 +868,23 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         отсутствие индекса в сборке sqlite3 — оба именованный отказ, а не пустой
         список: «ничего не нашлось» и «искать было нечем» — разные факты.
 
-        ``metric`` (К7) — назван отказом до Task 3.1: колонки ``metric`` в сторе ещё
-        нет, молчаливый пропуск фильтра отдал бы весь стор вместо среза по метрике —
-        тот же класс дефекта, что «фильтр не сузил». Уходит первой же строкой метода,
-        ДО readback'а — метрика не появится раньше колонки независимо от процесса.
+        ``metric`` (Task 3.1, К8) — срез по ПОЛНОМУ имени метрики
+        (``capture.drops``, с писателем: без него имена столкнулись бы между
+        процессами) плюс два ключа сверх обычного конверта:
+
+          * ``series`` — ``[[ts, value], …]``, **СТАРЫЕ ПЕРВЫМИ**: обратный
+            порядок относительно ``rows``, потому что ряд читают как временной, а
+            ленту — как хвост;
+          * ``series_skipped`` — сколько строк среза НЕ дали точки (нет числового
+            ``extra.value``). Строка при этом остаётся в ``rows``: она не мусор,
+            она просто не число.
+
+        Оба ключа есть всегда, когда задан ``metric`` — в том числе нулём.
+        Отказ по ``metric`` остался, но у него теперь ДРУГОЕ основание: не «задача
+        не сделана», а «в ЭТОМ файле нет колонки ``metric``» (стор доливает её при
+        открытии на запись, а history_query читает файл read-only и мигрировать не
+        вправе). Довод тот же, что и прежде: отдать весь стор вместо среза значило
+        бы «фильтр не сузил» вместо «фильтровать нечем».
 
         ``limit`` (К8) — не задан → 100 (не «вся БД»). Байтовый потолок MCP-ответа
         (``full=true`` его снимает) — другой рубеж, применяется в ``dispatch.py``
@@ -787,19 +894,13 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         Returns:
             Успех: ``{"success": True, "rows": [...], "db_path": <из readback>,
-            "count": len(rows)}``. Строка — ``id/kind/process/module/ts/severity/
-            severity_number/message/extra`` (``extra`` — dict, не JSON-строка).
+            "count": len(rows)}`` плюс ``series``/``series_skipped`` при заданном
+            ``metric``. Строка — ``id/kind/process/module/ts/severity/
+            severity_number/metric/message/extra`` (``extra`` — dict, не JSON-строка;
+            ``metric`` — ``None`` у лога, ошибки и агрегата окна).
             Отказ: ``{"success": False, "error": <причина с адресом>}``, в проверяемых
             К2/К3/К6/К7 случаях — до открытия БД либо без единой доехавшей строки.
         """
-        # К7 — первой строкой: metric не ждёт readback, колонки нет независимо от процесса.
-        if metric is not None:
-            return _history_fail(
-                f"history_query(metric={metric!r}) пока не поддержан: колонки metric в сторе "
-                "истории ещё нет — появится в Task 3.1 (ряд [ts, value] по имени метрики). "
-                "Молчаливый пропуск фильтра выглядел бы как «фильтр не сузил», а не как отказ."
-            )
-
         # К2: путь к БД — только из readback; resolve_default_db_path() НЕ зовётся.
         readback = _leaf_result(self.send_command(pm_name, "introspect.observability", timeout=timeout))
         history = readback.get("history") if isinstance(readback, dict) else None
@@ -837,11 +938,27 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         try:
             conn.row_factory = sqlite3.Row
+            # К8: колонку спрашиваем у ФАЙЛА. Отказ по ``metric=`` на файле без
+            # колонки — названный, и это тот же довод, которым отказ стоял до
+            # Task 3.1: молчаливый пропуск фильтра отдал бы ВЕСЬ стор вместо
+            # среза по метрике, то есть «фильтр не сузил» вместо «фильтровать
+            # нечем». Изменилось только основание: не «задача не сделана», а
+            # состояние конкретного файла, и оно проверяемо.
+            with_metric = _history_has_metric_column(conn)
+            if metric is not None and not with_metric:
+                return _history_fail(
+                    f"срез по метрике невозможен: в файле истории {db_path!r} нет колонки "
+                    f"{_HISTORY_METRIC_COLUMN!r} (её доливает ObservabilityStore при открытии НА ЗАПИСЬ, "
+                    "с версии Task 3.1). history_query открывает файл только на чтение и мигрировать "
+                    "его не вправе — запустите процесс-владелец этого файла на текущей версии. "
+                    "Отдать весь стор вместо среза значило бы «фильтр не сузил», а не «фильтровать нечем»."
+                )
             if text is not None:
                 where_clauses, params = _history_where_clauses(
                     kind=kind,
                     module=module,
                     process=process,
+                    metric=metric,
                     severity_in=severity,
                     min_severity=min_severity,
                     since=resolved_since,
@@ -850,7 +967,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 )
                 try:
                     rows = _history_search_rows(
-                        conn, text, where_clauses=where_clauses, params=params, limit=effective_limit
+                        conn,
+                        text,
+                        where_clauses=where_clauses,
+                        params=params,
+                        limit=effective_limit,
+                        with_metric=with_metric,
                     )
                 except ObservabilitySearchError as exc:
                     return _history_fail(str(exc))
@@ -859,13 +981,20 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                     kind=kind,
                     module=module,
                     process=process,
+                    metric=metric,
                     severity_in=severity,
                     min_severity=min_severity,
                     since=resolved_since,
                     until=resolved_until,
                 )
                 try:
-                    rows = _history_list_rows(conn, where_clauses=where_clauses, params=params, limit=effective_limit)
+                    rows = _history_list_rows(
+                        conn,
+                        where_clauses=where_clauses,
+                        params=params,
+                        limit=effective_limit,
+                        with_metric=with_metric,
+                    )
                 except _HISTORY_OUR_OWN_BUG:
                     # Q1 (ревью, итерация 2): баг драйвера не переодевается в отказ о файле —
                     # «чтение истории по <путь> провалилось» отправило бы искать причину в файл.
@@ -879,7 +1008,15 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             # иначе неудачный вызов агента копит открытые read-only хэндлы на файл.
             conn.close()
 
-        return {"success": True, "rows": rows, "db_path": db_path, "count": len(rows)}
+        answer = {"success": True, "rows": rows, "db_path": db_path, "count": len(rows)}
+        if metric is not None:
+            # К8: ``series`` и ``series_skipped`` появляются вместе и только при
+            # заданной метрике — ряд без имени метрики был бы смесью разных
+            # величин на одной оси. Оба ключа присутствуют ВСЕГДА, когда метрика
+            # задана, в том числе нулями: появляющийся-по-случаю ключ читается
+            # как «пропусков не считали», а не как «их не было».
+            answer["series"], answer["series_skipped"] = _history_series(rows)
+        return answer
 
     def introspect_capabilities(self, process: str, **kw: Any) -> Dict[str, Any]:
         """Карточка процесса (сырой dict): команды+descriptions, регистры, handlers."""

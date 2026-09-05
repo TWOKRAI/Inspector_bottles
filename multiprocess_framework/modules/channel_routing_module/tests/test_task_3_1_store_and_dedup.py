@@ -431,7 +431,16 @@ class TestK4MetricColumnPopulation:
             "EXPLAIN QUERY PLAN SELECT id FROM records WHERE metric = ? ORDER BY ts", ("capture.drops",)
         ).fetchall()
         plan_text = " ".join(str(tuple(r)) for r in plan_rows).upper()
-        assert "USING INDEX" in plan_text, f"план запроса по metric не использует индекс (metric, ts): {plan_text}"
+        # Сторожим ИМЯ индекса, а не слова «USING INDEX» — правка ведущего (2026-09-05).
+        # Первая редакция требовала подстроку «USING INDEX» и краснела на ЛУЧШЕМ плане:
+        # `SELECT id … WHERE metric=? ORDER BY ts` покрывается индексом целиком (rowid
+        # лежит в самом индексе), и SQLite пишет «USING COVERING INDEX». Проверено
+        # рядом: тот же запрос с `SELECT *` даёт обычное «USING INDEX». То есть литерал
+        # различал не «индекс работает или нет», а форму списка колонок.
+        # Имя индекса — проверка строго СИЛЬНЕЕ: план по таблице его не содержит вовсе.
+        assert "IDX_RECORDS_METRIC_TS" in plan_text, (
+            f"план запроса по metric не использует индекс (metric, ts): {plan_text}"
+        )
         store.close()
 
 
@@ -457,23 +466,35 @@ class TestK5MigrationBackfillsLegacyFileWithoutCorruptingOldRows:
         services.logs» перед проверкой словесной формулировки (см. память
         tester'а: negative-wording-assertion-needs-an-existence-anchor).
 
-        Легаси-файл строю РЕАЛЬНЫМ сегодняшним ``ObservabilityStore`` (не
-        сырым SQL «на глаз») — гарантия побайтовой верности «файл, каким его
-        оставил СЕГОДНЯШНИЙ код», тот же приём, что не подходит здесь: приём
-        `test_migration_adds_process_column_to_legacy_db` строит СХЕМУ руками,
-        потому что там имитируется файл ДО 5.21; здесь нужен файл ровно
-        сегодняшней формы (ПОСЛЕ 5.21, ДО Task 3.1), и сегодняшний класс её
-        и даёт напрямую.
+        **Строка-агрегат заводится СЫРЫМ SQL, и это правка ведущего (2026-09-05).**
+        Первая редакция строила её сегодняшним ``ObservabilityStore`` — приёмом,
+        который здесь не работает и не мог: после Task 3.1 тот же писатель кладёт
+        в ``severity`` слово ``number`` (К7 распространён на агрегат), поэтому
+        фикстура физически не способна произвести строку СТАРОЙ формы, а тест
+        требовал от неё ``snapshot``. Тест краснел не на дефекте миграции, а на
+        собственной невозможности. Свойство при этом настоящее и стоит того,
+        чтобы его сторожили: засыпка не имеет права переписать ``severity`` уже
+        записанных строк. Значит старую форму надо ВПИСАТЬ, а не воспроизвести
+        сегодняшним кодом — ровно как это делает соседний
+        `test_migration_adds_process_column_to_legacy_db` для схемы до 5.21.
         """
         db_path = str(tmp_path / "legacy.db")
         legacy = ObservabilityStore(db_path)
         legacy.append_records(
             [
                 _observation_record(writer="capture", metric="drops", value=9, ts=1.0),
-                _aggregate_stats_record(ts=2.0),  # severity='snapshot' сегодня — см. hub_record_to_display
                 _log_record(message="legacy log line — do not touch", ts=3.0),
             ]
         )
+        # Дореформенная строка-агрегат: severity='snapshot' — слово, которое
+        # сегодняшний нормализатор уже не производит. Вписывается напрямую,
+        # потому что предмет проверки — «засыпка не тронет то, что лежало ДО неё».
+        legacy._conn.execute(
+            "INSERT INTO records (kind, process, module, ts, severity, severity_number, message, extra) "
+            "VALUES ('stats', 'seg', 'seg', 2.0, 'snapshot', 0, 'metrics snapshot (count=1): fps', ?)",
+            ('{"aggregate": true, "metrics": [{"name": "fps", "type": "gauge", "tags": {}, "value": 30}]}',),
+        )
+        legacy._conn.commit()
         legacy.close()
 
         # «Новый процесс» открывает тот же файл — по этому открытию и мигрирует схема.

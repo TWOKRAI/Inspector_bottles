@@ -8,6 +8,7 @@ LogStatsChannel — канал вывода метрик в LoggerManager.
 from typing import Any, Dict, List
 
 from ...channel_routing_module.interfaces import IChannel
+from ...channel_routing_module.observability.store_tap import ORIGIN_FIELD, ORIGIN_STATS_SNAPSHOT
 from ..interfaces import LOG_SOURCE
 
 #: Место, которое резервируется под ГОЛОС потери, чтобы обещание «строка не длиннее
@@ -120,7 +121,27 @@ class LogStatsChannel(IChannel):
         return f"{head}{body} … опущено {dropped} из {len(metrics)} метрик, предел {self._max_bytes} байт"
 
     def write(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Записать снапшот метрик в лог."""
+        """Записать снапшот метрик в лог — и пометить строку как ЧЕЛОВЕЧЕСКУЮ копию.
+
+        **Маркер ``origin=stats_snapshot`` (Task 3.1, К1) — не украшение записи,
+        а единственное, чем эта строка отличима от любой другой INFO.** До него
+        снапшот доезжал до стора ДВАЖДЫ: структурно (hub → ``kind=stats``) и
+        текстом (эта строка → store-tap → ``kind=log``). Замер на живом файле
+        ``logs/prototype_2/observability.db``: 1036 строк ``kind=stats`` и РОВНО
+        1036 строк ``kind=log`` с тем же снапшотом, причём лог-копия ещё и
+        усечена («… опущено 7 из 18 метрик, предел 2048 байт»), то есть дубль
+        нёс МЕНЬШЕ данных, чем оригинал, занимая при этом 39 % байтов стора.
+
+        Строка в ``performance.log`` остаётся — её читают глазами, и файл не
+        предмет этой задачи. Отрезается только вторая дорога в стор:
+        ``StoreTapChannel`` видит маркер и пропускает запись, отвечая
+        ``success`` с ``skipped_origin``.
+
+        Маркер уезжает ``**extra``-параметром ``performance(...)``, тем же
+        механизмом, каким его ставят плоскость ошибок (``ErrorManager``) и
+        ``health.report``: kwargs логгера доезжают до ``LogRecord.extra``, а
+        оттуда их и читает tap.
+        """
         try:
             if not self._logger:
                 return {"status": "error", "error": "LoggerManager not set", "channel": self.name}
@@ -135,7 +156,7 @@ class LogStatsChannel(IChannel):
             from ...logger_module.core.log_config import LogLevel
 
             log_level = getattr(LogLevel, self._level_str, LogLevel.INFO)
-            self._logger.performance(log_level, msg, module=LOG_SOURCE)
+            self._logger.performance(log_level, msg, module=LOG_SOURCE, **{ORIGIN_FIELD: ORIGIN_STATS_SNAPSHOT})
 
             return {"status": "success", "channel": self.name}
         except Exception as e:

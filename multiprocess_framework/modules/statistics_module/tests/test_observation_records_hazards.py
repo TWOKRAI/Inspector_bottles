@@ -366,7 +366,12 @@ class TestObservationRecordRendersAReadableRow:
         # тот же довод, что у stats), не пустая строка, провалившаяся сквозь
         # ранжирование. И число важности НЕ поднимается до порога ошибки (иначе
         # каждый уровень плагина красил бы вкладку «Ошибки»).
-        assert display["severity"] == "level", display
+        # Task 3.1 (К7): одно слово на все три числовые формы. Прежнее "level"
+        # различало то, что уже различают kind и колонка metric.
+        assert display["severity"] == "number", display
+        # К4: полная идентичность, с писателем — без него имена столкнулись бы
+        # между процессами (у camera_0 и devices метрика "fps" — ДВА ряда).
+        assert display["metric"] == "capture.fps", display
         from multiprocess_framework.modules.channel_routing_module.levels import ERROR_SEVERITY
 
         assert display["severity_number"] < ERROR_SEVERITY, display
@@ -400,7 +405,8 @@ class TestObservationRecordRendersAReadableRow:
             assert len(rows) == 1, rows
             row = rows[0]
             assert row["message"] == "capture.fps", row
-            assert row["severity"] == "level", row
+            assert row["severity"] == "number", row
+            assert row["metric"] == "capture.fps", row
             assert row["extra"]["writer"] == "capture"
             assert row["extra"]["value"] == 15.5
 
