@@ -1,13 +1,17 @@
 # План: `Services/otel_export` — OTLP-экспортёр наружу (Ф8.6)
 
 > **Ветка:** `feat/otel-export` · **Slug:** `otel-export`
-> **Refs:** [`plans/observability-unified-routing.md`](observability-unified-routing.md) (Task 8.6 — постановка, ⏸️ отложена владельцем 2026-08-06),
-> [ADR-PM-028](../multiprocess_framework/modules/process_module/DECISIONS.md) (адресация реализации строкой из конфига),
-> [ADR-LOG-005](../multiprocess_framework/modules/logger_module/DECISIONS.md) (`scope` ≠ `InstrumentationScope`)
-> **Статус:** ред. 3 (2026-08-11) — **старт согласован владельцем**, развилка Р-6 закрыта вариантом (б).
-> Исполняется **этапом 7** плана [`observability-roadmap`](observability-roadmap.md) (Р-7: параллельно этапам 1–5).
-> Границы захода: **Ф0 и Ф1 идут сейчас**, Ф2–Ф4 ждут гейта этапа 2 — см. §«Параллельность».
-> ред. 2 — после независимого ревью спеки (6/10, 4 блокера, все подтверждены кодом и учтены).
+> **Refs:** [`plans/observability-unified-routing.md`](observability-unified-routing.md) (Task 8.6 — постановка),
+> [`plans/observability-roadmap.md`](observability-roadmap.md) (этап 7, Р-7),
+> [`plans/observability-closure/plan.md`](observability-closure/plan.md) (Ф1.4 `trace_id`, Ф2.2 контракт секции, Ф3.1 `NumberRecord`, Ф3.3 store-tap батчем — от них здесь зависимости),
+> [ADR-LOG-005](../multiprocess_framework/modules/logger_module/DECISIONS.md) (`scope` ≠ `InstrumentationScope`, ревизия Р-6 от 2026-08-11),
+> [ADR-PM-028](../multiprocess_framework/modules/process_module/DECISIONS.md) (реализация строкой из конфига).
+> **Статус:** **ред. 4 (2026-09-05)** — переработан по [ревью плана](../docs/reviews/2026-09-05_otel-export-plan-review.md) после Ф0–Ф3.1 `observability-closure`.
+> Сделано на сегодня: Task 0.1 (стенд-арбитр), Task 0.2 шаг 1 (extras `[otel]`), **Task 0.3** (ветка, якоря, синхронизация — 2026-09-05).
+> **База ветки: `feat/observability-closure` = `9d9cb8e1`** (2026-09-05, closure Task 3.2 контракт). Порядок слияния: otel → closure → `main`.
+> Работа идёт в worktree `.claude/worktrees/otel-f0`: общее дерево занято соседней живой сессией (closure Ф3).
+> Границы захода: **Ф0 и Ф1 — сейчас**; Ф2–Ф4 — чередуя со стендами closure; Task 2.4 — строго после closure Task 3.3.
+> Состояние closure на 2026-09-05 по коммитам: Ф3 — **3 из 9** (3.0, 3.5, 3.1 закрыты; остаток 3.2, 3.3, 3.4, 3.6, 3.7, 3.8), Ф4–Ф5 не начаты. Полная карта пересечений по задачам — §«Пересечения с observability-closure».
 
 ---
 
@@ -15,387 +19,440 @@
 
 Постановка 8.6 называет побочную выгоду главной, и она же — единственная причина
 делать задачу: **живой экспортёр доказывает, что словарь полей Ф3 настоящий, а не
-заявленный**. Во всех отчётах сегодня стоит «соответствие модели записи OTel
-остаётся **заявленным**» — потому что ни один внешний потребитель наши записи не
-разбирал ни разу.
+заявленный**. Во всех отчётах трека стоит «соответствие модели записи OTel остаётся
+**заявленным**» — ни один внешний потребитель наши записи не разбирал ни разу.
+Вердикт 2026-09-04 (доказанность продукта 4/10) эту формулировку не снял — и не мог:
+снять её может только чужой парсер.
 
-**Ревью спеки доказало ценность фазы до единой строки кода** (см. Р-6): требование
-ADR-LOG-005 «экспортёр обязан класть `scope` в `Attributes`» **невыполнимо** — поле
-до экспортёра не доезжает вовсе. Контракт, написанный для потребителя, которого не
-существовало, разошёлся с дорогой, по которой поедут записи. Это ровно тот класс,
-ради которого 8.6 и ставилась, и он найден на спеке. **Провал приёмки — законный
-исход фазы, наравне с успехом.**
+Уже ревью спеки (ред. 2) нашло дефект контракта до единой строки кода: ADR-LOG-005
+требовал от экспортёра положить `scope` в `Attributes`, а поле до экспортёра не доезжает
+(Р-6, закрыта ревизией ADR 2026-08-11). **Провал приёмки — законный исход фазы, наравне
+с успехом.**
 
 ---
 
-## Что уже есть (работать не с нуля)
+## Честная оценка (ред. 4)
 
-| Готовый механизм | Где | Роль в 8.6 |
+**Что фаза даёт.** Внешнего арбитра словаря полей и один готовый выход наружу: любой
+OTLP-приёмник (Grafana/Loki, Elastic, Datadog, Honeycomb) начинает принимать записи
+системы без нашего кода на его стороне. Это портфолио-сигнал и проверка контракта.
+
+**Чего фаза НЕ даёт — сказано, чтобы не ждали.** Это не панель наблюдения (она уже есть:
+вкладка, `backend_ctl`, `history_query`), не фича инспекции, не метрики и не трейсы.
+Балл вердикта 2026-09-04 напрямую двигают P-1 (инспектор с числами) и P-2 (второе
+приложение чужими руками), а не экспорт. Экспорт снимает слово «заявлено» из отчётов и
+даёт вторую линзу на плоскость наблюдаемости — не больше.
+
+**Цена.** Оценка, не обещание: Ф0-остаток ~0.5 дня · Ф1 2–3 дня · Ф2 4–5 дней · Ф3 ~2 дня ·
+Ф4 ~2 дня — около **2.5 недель агентского времени** плюс стендовые окна владельца. Настоящая
+параллельность с closure есть только у Ф0–Ф1 (чистые функции, свой порт `4318`); Ф2–Ф4
+конкурируют за стенд `8765` и за внимание владельца, то есть **чередуются, а не идут рядом**.
+
+**Риски по убыванию.** (1) Logs SDK OpenTelemetry живёт под `_logs` и не обещает
+совместимости в minor — пин и правило «обновление extras = прогон Ф1 заново».
+(2) Объём: подписка `INFO` на 8 процессах гонит по IPC и HTTP то, что сегодня едет только
+в файлы (база Ф6: 4.78 МБ/час логов) — Р-4, замер обязателен ДО включения по умолчанию.
+(3) Словарь может не выдержать арбитра — законный исход, но его надо уметь принять.
+(4) Прецедентов два и оба неполные: плагины ещё не подписывались на хвост наблюдаемости
+(подписчики — GUI-процессы), а в `Services/` нет пакета с внешней бинарной зависимостью
+по цепочке (`protobuf`). Первый заход всегда вскрывает недостающие крючки — это ожидаемая
+находка фазы, а не сбой плана.
+
+**Что я бы не делал.** Не тащить в v1 OTLP-metrics и spans (числовая плоскость —
+отдельная работа с метаданными единиц из closure Task 3.4); не строить свою панель;
+не править фреймворк «под экспортёр» — находки идут долгом в closure.
+
+---
+
+## Форма решения — как сервис, без костылей
+
+Экспортёр собирается из трёх кирпичей по трём слоям, каждый — стандартной формой своего слоя:
+
+```
+Services/otel_export/            SDK без процесса: контракт, конфиг-схема, маппер, Resource, обёртка OTel SDK
+        ▲ импортирует
+Plugins/io/otel_export/          хост: плагин в GenericProcessApp — подписка, приём, счётчики, команды, останов
+        ▲ объявляет
+multiprocess_prototype/backend/topology/otel_export.yaml   подключаемый фрагмент топологии (образец observability_sink.yaml)
+```
+
+| Решение | Форма | Почему так, а не иначе |
 |---|---|---|
-| Брокер подписки 5.11 | [`observability_broker.py`](../multiprocess_framework/modules/process_manager_module/process/observability_broker.py) | экспортёр — обычный подписчик; переподписка свежей инкарнации — забота брокера |
-| Контракт полей | докстринг [`log_types.py:17-74`](../multiprocess_framework/modules/logger_module/core/log_types.py#L17-L74) | **половина** источника истины: описывает `LogRecord`, а не то, что доезжает (см. Task 1.0) |
-| Два нормализатора display-вида | [`record_display.py:115`](../multiprocess_framework/modules/channel_routing_module/observability/record_display.py#L115) (hub) и [`:185`](../multiprocess_framework/modules/channel_routing_module/observability/record_display.py#L185) (tap) | **вторая половина** — фактическая форма записи на входе экспортёра |
-| Resource процесса (Ф3.5+4.4) | [`process_module.py:457-540`](../multiprocess_framework/modules/process_module/core/process_module.py#L457) | пятёрка `proc_name`/`pid`/`fw_version`/`incarnation`/`recipe` |
-| Форма подписчика-процесса | [`frontend/process.py:88-91,155-180`](../multiprocess_prototype/frontend/process.py#L88-L91), [`tail_activator.py`](../multiprocess_prototype/frontend/widgets/tabs/observability/tail_activator.py) | хендлер + объявление намерения + `stamp_observed` |
-| Прецедент «реализация строкой из конфига» | [`Services/documents/wiring.py`](../Services/documents/wiring.py), ADR-PM-028 | та же дисциплина для `[otel]` |
+| **Хост — плагин, не подкласс `ProcessModule`** | `OtelExportPlugin(ProcessModulePlugin)` в `GenericProcessApp` | так устроены ВСЕ прикладные процессы (`devices`, `telemetry_sink`, `camera_*`); в `Services/` нет ни одного подкласса `ProcessModule` — заводить первый ради экспортёра значило бы плодить вторую форму процесса |
+| **Подключение — фрагментом топологии** | `topology/otel_export.yaml` + строка в `app.yaml → base:` | ровно как `observability_sink.yaml`: кто не подключил — не платит ни процессом, ни строками golden-снимков; ноль правок `base.yaml`, ноль флагов в коде (замер 2026-08-23 в шапке фрагмента) |
+| **Дверь конфига — регистры плагина** | `OtelExportRegisters(SchemaBase)`: `endpoint` (обязателен), `level`, `compression`, `headers` (`${ENV}`), `service_namespace`, параметры батчера, `resource_pool_size` — полный состав в Task 0.4 | стандартная дверь плагина: ключи из blueprint → Pydantic внутри → readback → GUI-регистры → `set_config`. Секция `observability.otel_export` **отвергнута**: с closure Task 2.2 незнакомый ключ секции на L3 — отказ слоя, на файловых слоях — голос «ВНЕ КОНТРАКТА», а поле схемы без читателя во фреймворке режет страж |
+| **Счётчики — числовая плоскость** | `ctx.declare_metric(...)` + `ctx.record_metric(...)`: `received`, `exported`, `skipped_numbers`, `dropped_overflow`, `export_failed`, `resource_evicted` | не своя команда-интроспекция, а числа, которые уже видны в `introspect.telemetry`, `history_query(metric=...)`, GUI. Тождество потерь (3.4) сводится из них |
+| **Голоса — окном фреймворка** | `log_windowed` (`windowed_voice.py`, окно из `observability.voices.default_window_sec`) | свой литерал окна запрещён правилом closure «ни одного нового литерала-потолка» |
+| **Петля усиления — страж фреймворка** | `ProcessModule.subscribe_observability_tail` отказывает подписке процесса на собственный хвост (`core/process_module.py:1209`, причина названа) | свой фильтр «записи ≠ моё имя» не заводится, пока петля не предъявлена красной (Р-3) |
+| **SDK — лениво и с громким отказом** | импорт `opentelemetry.*` только внутри `Services/otel_export/exporter.py` при построении; отсутствие → `health.report_error` + состояние плагина `error` + поле readback `sdk: missing` с командой установки | голый `ImportError` на импорте класса глотает `class_loader` (`log.error → None`), и система об отказе не узнаёт |
+| **Команды — авто-регистрация плагина** | `commands = {"otel_export.flush": ..., "otel_export.status": ...}` | попадают в `capabilities` backend_ctl без правок; `set_config` — generic |
+| **Останов** | `shutdown(ctx)` → `force_flush(timeout)` → строка `otel flush: N дожато, M потеряно` литералом | до снятия форвардеров процессом и до останова логгера — порядок `ProcessModule.stop()` (:1149) → `_flush_observability()` (:1166) (`core/process_module.py`) |
 
-Baseline 2026-08-10: `grep -r opentelemetry multiprocess_framework/ --include=*.py` = **0**.
-
----
-
-## Правила исполнения (наследуются от `observability-unified-routing`)
-
-1. **Break-injection — на каждое заявленное свойство.** Ожидаемый набор красных
-   объявляется ДО прогона; расхождение — находка в обе стороны.
-2. **Независимый `tester` — на Ф1** (контракт наблюдаем снаружи), **до** авторских
-   тестов, по критериям приёмки, без доступа к диффу. На Ф2 **пропускается
-   осознанно**: «tester skipped: внутренний механизм — подписка, петля, батчинг».
-3. **Ревью — синхронно** (`run_in_background: false`); вердикт без воспроизведения — advisory.
-4. «Невозможно», «гарантировано», «не может» — только рядом с воспроизведением.
-5. Пакеты ставит владелец; агент выдаёт команду.
-6. Коммиты: Conventional Commits + `Why:`/`Layer:` + `Refs: plans/otel-export.md`.
+**Отвергнутые формы (записать в ADR сервиса):**
+- *tap внутри каждого процесса* (как store-tap): SDK и HTTP-клиент в каждом из 8 процессов, зависимость через фреймворк, N соединений с коллектором; Resource получился бы бесплатно, но цена выше выгоды;
+- *`OtelExportProcess(ProcessModule)` в `Services/`*: вторая форма процесса без прецедента; хост-логика (подписка, команды, останов) уже дана `GenericProcessApp` + `PluginContext`;
+- *секция `observability.otel_export`*: см. таблицу — конфликт с контрактом секции.
 
 ---
 
-## Ф0 — стенд и зависимости
+## Универсальность, масштаб, производительность — рекомендации на сентябрь 2026
 
-### Task 0.1 — приёмник, который умеет ОТКАЗЫВАТЬ, и его слепая зона
-**Level:** Middle+ · **Assignee:** developer
-**Goal:** поднять коллектор и очертить **границу того, что он вообще
-способен опровергнуть**, — иначе приёмка фазы держится на арбитре, согласном на всё.
-**Files:** `tools/otel_stand/collector.yaml`, `tools/otel_stand/README.md`
-**Steps:**
-1. **Дистрибутив `otelcol` (ядро), НЕ `otelcol-contrib`** — поправка ред. 3, проверена
-   фактом. Прежняя редакция звала contrib по привычке; всё, что нужно нашему конфигу,
-   есть в ядре, и это подтверждено самим бинарником (`otelcol.exe components`), а не
-   манифестом: приёмник `otlp`, экспортёры `debug` и **`file`** (`fileexporter` собран
-   в ядро как contrib-модуль). Разница не косметическая — contrib весит **втрое
-   больше** (94.8 против 35.4 МиБ на Windows; 93.0 против 30.8 на `linux_arm64`), а
-   фаза целит в том числе на Jetson/Raspberry. Contrib понадобится **только** при
-   экспорте в Loki/Prometheus/Elasticsearch: меняется бинарник, конфиг остаётся.
-   Один файл, без Docker. Путь и версия — в README, бинарник в репозиторий не класть.
-2. Конфиг: `receivers.otlp.protocols.http` на `127.0.0.1:4318`;
-   `exporters: [debug (verbosity: detailed), file (path: …/otel_records.json)]`; pipeline `logs`.
-3. **Положительный контроль:** валидный OTLP-JSON → лёг в файл.
-4. **Отрицательный контроль формы:** `severityNumber` строкой, отсутствующий
-   `resourceLogs` → HTTP-ошибка, в файл не легло.
-5. **Отрицательный контроль СЕМАНТИКИ (Б-4):** заведомо неверный маппинг, который
-   коллектор **примет** — например, наш `scope` положен в `InstrumentationScope`, а
-   `trace_id` — обычным атрибутом. Записать в README: **это коллектор не отвергает.**
-**Acceptance criteria:**
-- [x] Три контроля предъявлены с фактическим ответом коллектора.
-- [x] README содержит раздел «что этот арбитр НЕ проверяет» — список полей,
-      принимаемых в любом виде. На него ссылается Task 4.2, ограничивая свои выводы.
-**Out of scope:** Grafana/Loki/Tempo, docker-compose, сеть вне `127.0.0.1`.
+Принцип один: **OTLP — единственный контракт наружу, всё остальное — конфиг коллектора, не наш код.**
+Экспортёр остаётся тонким и переиспользуемым (слой `Plugins/` — словарь повторного
+использования между приложениями, ADR-120), а маршрутизация в Loki/Prometheus/Elastic/облако,
+персистентная очередь, ретраи и fan-out живут в `otelcol`. Так второе приложение (P-2 вердикта)
+получает выход наружу той же строкой в манифесте.
 
-**[x] СДЕЛАНА 2026-08-11.** `otelcol` 0.158.0 поднят на `127.0.0.1:4318`, конфиг и
-payload'ы контролей — в [`tools/otel_stand/`](../tools/otel_stand/), фактические ответы
-и разбор слепых зон — в его README.
+| Ось | Рекомендация | Куда в план | Цена/оговорка |
+|---|---|---|---|
+| **Универсальность** | Resource по semconv + **`host.name`** (`socket.gethostname()` — экспортёр знает свой хост, IPC локален). Без него флот из трёх устройств на одном коллекторе неразличим: `service.instance.id = incarnation` — счётчик рестартов процесса, `camera_0`/инкарнация 0 с Jetson и с Pi совпадут | Task 1.2 (обязательно) | одна строка; сверить с semconv `host.name` |
+| | `service.namespace` = имя приложения (дефолт из `app.yaml`, регистр `service_namespace`) — различает два приложения на одном коллекторе | Task 1.2 (опция, решение владельца) | поле регистра с дефолтом; без второго приложения пользы нет |
+| | `schema_url` в Resource (версия semconv) — потребитель знает, по какому словарю читать, и переживает миграции имён | Task 1.2 | константа в сервисе, обновляется с extras |
+| | `headers` регистром для токенов облачных приёмников; значения — **только `${ENV}`**, литералов в YAML нет (правило «секреты в env») | Task 0.4 схема, Task 3.1 | readback маскирует `***` |
+| **Масштаб** | Один экспортёр на машину = fan-in через брокер: N процессов → 1 HTTP-соединение, батчинг SDK. При 20 процессах (closure Ф4.8) объём — сумма; главный рычаг — **уровень подписки** (`INFO` дефолт) и прицельная подписка `subscribe(<процесс>, <уровень>)`, а не фильтры в экспортёре | Task 3.2 замер на 8 и 20 | политика уровней уже есть во фреймворке — не дублировать |
+| | **gzip** на OTLP/HTTP (`Compression.Gzip`, env `OTEL_EXPORTER_OTLP_COMPRESSION`): на Wi-Fi/4G у Pi трафик режется в разы за копейки CPU; регистр `compression`, дефолт `gzip` | Task 0.4 схема, Task 2.4 | измерить CPU на Pi, а не предполагать |
+| | Параметры `BatchLogRecordProcessor` (`max_queue_size`, `schedule_delay_millis`, `max_export_batch_size`, `export_timeout_millis` — дефолты SDK 2048/5000/512/30000, **сверить в 0.4**) — регистрами с readback **эффективного** значения, не литералами внутри SDK | Task 0.4 | правило closure «ни одного нового литерала-потолка» |
+| | Backpressure: bounded очередь, `drop_oldest`, счётчик и голос; поток роутера **никогда не ждёт сеть** | Task 2.4 (уже) | критерий «1000 записей при закрытом коллекторе» |
+| | Эксплуатационная надёжность — на стороне коллектора: `file_storage` + persistent `sending_queue`, retry, экспортёры в бэкенды. Наш код это не дублирует | README стенда, Task 4.3 | contrib нужен только для бэкенд-экспортёров |
+| **Производительность** | Горячий путь без Pydantic: записи — `dict`, маппер — прямые обращения; Pydantic только на конфиг (Dict at Boundary) | Task 1.1 | бенч соло ×3: цена маппинга на запись — число в ADR |
+| | Кэши объектов SDK: `Resource` по `(proc_name, pid, incarnation)` (есть) и `InstrumentationScope` по `module` (LRU) — SDK создаёт объекты, мы их переиспользуем | Task 1.1/1.2 | небольшой выигрыш, дёшево |
+| | Одна трансформация: IPC-dict → protobuf, без промежуточного JSON; JSON — только у файлового экспортёра стенда | Task 2.4 | по построению |
+| | Тесты — на `InMemoryLogExporter` SDK и фейке с отказом; коллектор — только на приёмке | Ф1–Ф2 | быстрее и детерминированнее |
+| **Направление v2** (не в этом плане) | Числа → **OTLP metrics** из `NumberRecord` (gauge/counter/histogram, temporality `delta`) — после closure Task 3.4 (единица/описание/род), иначе метрики безъединичные | Р-8 | отдельный план |
+| | Wide events (`write_event`) → OTel **Events** (`event.name` в логе) — стандартный путь Logs Data Model для структурных событий; `frame_trace` уже даёт 128-битные W3C-совместимые id для будущих spans | Р-8 | как едут wide events по плоскости — не проверял |
+
+**Что не делать ради «масштаба».** Свой persistent-буфер на диске, свои ретраи, свой fan-out
+в несколько бэкендов, свой sampler — всё это коллектор делает лучше, а у нас каждая такая
+строка — новый предохранитель, который надо доказывать парой инъекций.
+
+---
+
+## Механизмы фреймворка, на которые опирается экспортёр (сверено с кодом 2026-09-05)
+
+| Механизм | Где | Роль здесь |
+|---|---|---|
+| Словарь OTel для полей записи | докстринг [`log_types.py:17-74`](../multiprocess_framework/modules/logger_module/core/log_types.py#L17-L74) | контракт «что задумано»: `timestamp→Timestamp`, `level→SeverityText`, `message→Body`, `module→InstrumentationScope`, `extra→Attributes`, `trace_id→TraceId`, пятёрка `→Resource` |
+| Шкала уровней = OTel `SeverityNumber` | [`levels.py`](../multiprocess_framework/modules/channel_routing_module/levels.py): `SEVERITY_NUMBERS` (:61) 5/9/13/17/21, `UNSPECIFIED = 0` (:79), `severity_of` (:116) | `severity_number` записи копируется в `SeverityNumber` как есть — пересчёта нет |
+| Display-вид и нормализаторы | [`record_display.py`](../multiprocess_framework/modules/channel_routing_module/observability/record_display.py): `_ENVELOPE_KEYS` (:40, включает `observed_ts`), `hub_record_to_display` (:210), `log_record_to_display` (:390), `NUMBER_SEVERITY` (:79) | **фактическая форма записи на входе** — вторая половина источника истины |
+| Отметка приёма | `stamp_observed` (`record_display.py:113`) | ставит только приёмник; экспортёр — приёмник |
+| Resource процесса | `core/process_module.py` ~:630-700 (`proc_name`, `pid`, `fw_version`, `incarnation` из `routing_incarnation`, `recipe`; недостающее пропускается, не `"unknown"`) | пятёрка живёт на `extra.context.*` |
+| `trace_id` вне текста | closure Task 1.4: `extra.context.trace_id`, 32 hex W3C | выделенное поле `TraceId`, не атрибут |
+| Брокер подписки | [`observability_broker.py`](../multiprocess_framework/modules/process_manager_module/process/observability_broker.py): `subscribe_all` (:92), `_fan_out` (:234), доигрывание свежей инкарнации | экспортёр — обычный подписчик; команда `observability.tail.subscribe_all` |
+| Батч-форвардер | [`observability_wiring.py:233`](../multiprocess_framework/modules/process_module/managers/observability_wiring.py#L233) `wire_observability_forward` + [`RecordForwardChannel.push_batch`](../multiprocess_framework/modules/channel_routing_module/observability/record_forward_channel.py#L96) (:96 — **другой файл**, не `observability_wiring`) | log + stats + observation пачкой, **без фильтра по уровню**; error/critical — tap'ами с `min_level` подписчика |
+| Отказ подписки на себя | `core/process_module.py:1209` (`subscribe_observability_tail`) | предохранитель петли — уже во фреймворке |
+| Числовая плоскость | `PluginContext.declare_metric/record_metric/gauge` (`plugins/base.py:619-733`), closure Task 3.1 (`NumberRecord`, колонка `metric`) | счётчики экспортёра и их история |
+| Голоса окном | [`windowed_voice.py`](../multiprocess_framework/modules/logger_module/core/windowed_voice.py): `log_windowed` (:514) | «одна строка на окно» без своего литерала |
+| Прецедент side-effect-процесса | [`observability_sink.yaml`](../multiprocess_prototype/backend/topology/observability_sink.yaml), [`Plugins/io/telemetry_sink`](../Plugins/io/telemetry_sink/) | форма фрагмента, регистры, команды, `shutdown` с итогом |
+| Прецедент подписчика хвоста | [`frontend/process.py:94-97, 184-211`](../multiprocess_prototype/frontend/process.py#L184), [`tail_activator.py`](../multiprocess_prototype/frontend/widgets/tabs/observability/tail_activator.py) | хендлер `observability.record`, форма `data.records`/`data.record`, намерение с `MAX_ATTEMPTS = 3` |
+| Готовый стенд-арбитр | [`tools/otel_stand/`](../tools/otel_stand/) (Task 0.1) | коллектор `127.0.0.1:4318`, три контроля, раздел «что арбитр НЕ проверяет» |
+
+Baseline 2026-09-05: `grep -r opentelemetry multiprocess_framework/ --include=*.py` = **0** (упоминания в докстрингах — словарь имён, не импорт).
+
+---
+
+## Правила исполнения (наследуют `observability-closure/plan.md` §3 целиком)
+
+1. **Break-injection — на каждое заявленное свойство**, предсказание красных ДО прогона; расхождение — находка в обе стороны. Инъекции — в отдельном worktree, после коммита реализации.
+2. **Независимый `tester` — на каждом механизме, ДО кода, один раз на механизм**, в `git worktree` на pre-implementation commit (слепоту даёт дерево, не проза). Красный набор = ТЗ исполнителю. Пропуска тестера нет (решение владельца 2026-08-13); прежняя строка «на Ф2 пропускается» снята.
+3. **Пара инъекций на каждый диагностический ответ:** у счётчика — «событие есть, счётчик 0» И «события нет, счётчик растёт»; у readback — «эффекта нет, ответ есть» И наоборот.
+4. **Ревью — синхронно** (`run_in_background: false`), вердикт без воспроизведения вход→выход — advisory.
+5. **Замер — соло ×3, не под нагрузкой**; в отчёте три числа, не одно.
+6. **Документ — часть задачи:** README/STATUS сервиса и плагина, `CONNECTORS.md`/`CONTROL_PANEL.md`/`SINKS_MAP.md` — в том же коммите, что ручка/команда/счётчик.
+7. «Невозможно», «гарантировано», «не может» — только рядом с воспроизведением.
+8. **Границы слоёв — только CLI `sentrux check .`**, не `mcp__sentrux__check_rules` (проверяет 3 правила из 39 и пишет «All pass»).
+9. `if sys.platform` в `Services/otel_export` и `Plugins/io/otel_export` — признак не той задачи. Литералы-потолки — только в регистрах с readback эффективного значения.
+10. Пакеты ставит владелец; агент выдаёт команду. Dict at Boundary: записи и конфиг между процессами — `dict`.
+11. Коммиты: Conventional Commits + `Why:`/`Layer:` + `Refs: plans/otel-export.md`.
+
+---
+
+## Ф0 — стенд, зависимости, ветка, контракт
+
+### Task 0.1 — приёмник, который умеет ОТКАЗЫВАТЬ, и его слепая зона — **[x] СДЕЛАНА 2026-08-11**
+`otelcol` 0.158.0 (ядро, не contrib — втрое легче: 35.4 против 94.8 МиБ на Windows) поднят на
+`127.0.0.1:4318`; конфиг и payload'ы контролей — [`tools/otel_stand/`](../tools/otel_stand/).
 
 | Контроль | Ответ | Легло в файл |
 |---|---|---|
 | валидная запись | `HTTP 200` | да |
-| `severityNumber` строкой | **`HTTP 400`** с адресом поля в теле ошибки | нет |
+| `severityNumber` строкой | **`HTTP 400`** с адресом поля | нет |
 | нет конверта `resourceLogs` | **`HTTP 200`** | нет (записей ноль) |
-| семантически неверный маппинг | `HTTP 200` | **да** |
+| семантически неверный маппинг (`scope` в `InstrumentationScope`, `trace_id` атрибутом) | `HTTP 200` | **да** |
 
-**Спека здесь ошибалась, и это записано, а не подогнано.** Шаг 4 ожидал HTTP-ошибку на
-отсутствующий `resourceLogs` — её нет: тело без конверта это законный запрос с нулём
-записей. Следствие для всей фазы: **`200` от арбитра не значит «доставлено»**, оно значит
-«в пришедшем не нашлось неразбираемого». Отличить «доехало 100» от «доехало 0» по коду
-ответа нельзя — на это работают тождество потерь Task 3.4 и содержимое файла, и приёмка
-4.1 обязана смотреть туда, а не на код ответа.
-
-Семантический контроль (шаг 5) отработал ровно как задумано: `scope=BUSINESS` в
-`InstrumentationScope` и `trace_id` обычным атрибутом приняты **молча**, запись легла в
-файл без `traceId` вовсе. Список того, что зелёный стенд не доказывает, — в README.
+**Спека ошибалась, и это записано:** отсутствующий `resourceLogs` — законный запрос с нулём
+записей, а не ошибка. Следствие для всей фазы: **`200` от арбитра не значит «доставлено»**;
+отличить «доехало 100» от «доехало 0» можно только по содержимому файла и тождеству потерь
+(Task 3.4). Семантически неверный маппинг коллектор принимает молча — список того, что зелёный
+стенд не доказывает, в README стенда; Task 4.2 ограничивает выводы им.
+Свежий релиз коллектора — v0.160.0 (2026-09-02); обновлять не нужно, факт записан.
 
 ### Task 0.2 — extras `[otel]` с пином + громкий отказ без него
-**Level:** Middle+ · **Assignee:** developer
-**Goal:** объявить зависимость, не втащив её в core, и сделать её отсутствие видимым.
-**Files:** `pyproject.toml`, `Services/otel_export/process.py`
+**Level:** Middle+ · **Assignee:** developer · **Layer:** infra, services, plugins
+**Files:** `pyproject.toml` (шаг 1 — сделан), `Services/otel_export/exporter.py`, `Plugins/io/otel_export/plugin.py`
 **Steps:**
-1. `otel = ["opentelemetry-sdk>=1.44,<1.45", "opentelemetry-exporter-otlp-proto-http>=1.44,<1.45"]`
-   (версии сверены с PyPI 2026-08-11: обе — 1.44.0).
-   **Пин minor обязателен:** Logs SDK живёт под `opentelemetry.sdk._logs`
-   (подчёркивание в имени), backward-compat в minor не гарантирована самим проектом.
-   Прецедент — `ctl = ["mcp>=1.27,<1.28"]` ([`pyproject.toml:111`](../pyproject.toml#L111)).
-   **Кроссплатформенность проверена по колёсам, а не по обещанию:** оба пакета —
-   `py3-none-any` (платформы для них не существует); единственная бинарная зависимость
-   по цепочке, `protobuf`, даёт `manylinux2014_aarch64` (Jetson, Pi-64) и `win_amd64`,
-   а для 32-битного `armv7` колеса нет — но там же лежит `py3-none-any` фолбэк, то есть
-   встанет и заработает, медленнее лишь сериализация. См. §«Три платформы».
-2. **М-3:** импорт SDK — **ленивый, в `initialize()`**, а не на уровне модуля.
-   Голый ImportError на импорте класса процесса глотает
-   [`class_loader.py:23-33`](../multiprocess_framework/modules/process_manager_module/runner/class_loader.py#L23)
-   (`log.error` → `None`), а [`process_runner.py:145`](../multiprocess_framework/modules/process_manager_module/runner/process_runner.py#L145)
-   выходит **до** перевода процесса в статус `error` — то есть система об отказе не
-   узнаёт вовсе.
-3. Выдать владельцу команду: `uv pip install --inexact '.[otel]'` (`--inexact` —
-   иначе `uv sync` сносит необъявленное в venv).
+1. **[x]** `otel = ["opentelemetry-sdk>=1.44,<1.45", "opentelemetry-exporter-otlp-proto-http>=1.44,<1.45"]`
+   (`3c50e9df`; PyPI 2026-09-05 — по-прежнему 1.44.0). Пин minor обязателен: Logs SDK живёт
+   под `opentelemetry.sdk._logs`. Оба пакета `py3-none-any`; единственная бинарная
+   зависимость по цепочке — `protobuf` (`manylinux2014_aarch64`, `win_amd64`; на `armv7` —
+   `py3-none-any` фолбэк).
+2. Импорт SDK — **ленивый**, внутри `Services/otel_export/exporter.py` при построении
+   экспортёра; функция `sdk_available() -> tuple[bool, str]` возвращает факт и команду
+   установки. На уровне модулей `Services/otel_export/*` и плагина — ни одного
+   `import opentelemetry`.
+3. Плагин при отсутствии SDK: `configure()` завершается, процесс жив, состояние плагина
+   `error` с причиной, `ctx.health.report_error(...)`, readback регистров несёт
+   `sdk: "missing: uv pip install --inexact '.[otel]'"`. Команда владельцу:
+   `uv pip install --inexact '.[otel]'` (`--inexact` — иначе `uv sync` сносит необъявленное).
 **Acceptance criteria:**
-- [ ] `[otel]` в `optional-dependencies`; core не изменился ни строкой.
-- [ ] **Без установленного extra:** процесс поднялся и объявил отказ ГРОМКО —
-      статус процесса не «молча не стартовал», строка отказа называет extra и команду
-      установки. Предъявить фактический статус из `system_overview`.
-- [ ] Инъекция: вернуть импорт на уровень модуля → тест громкости красный.
-**Out of scope:** gRPC-экспортёр (второй транспорт ради одного стенда).
+- [x] `[otel]` в `optional-dependencies`; core не изменился ни строкой.
+- [ ] Без установленного extra: процесс `otel_export` поднялся, плагин в `error` с текстом, называющим extra и команду; предъявить фактический ответ `introspect_plugins`/`system_overview`.
+- [ ] Инъекция: перенести импорт SDK на уровень модуля → тест громкости красный (процесс не поднялся ИЛИ причина не названа).
+- [ ] Пара: SDK установлен → состояние `ready`, `sdk: "1.44.0"` в readback.
+**Out of scope:** gRPC-экспортёр.
+
+### Task 0.3 — ветка, якоря, синхронизация планов — **[x] СДЕЛАНА 2026-09-05**
+**Level:** Middle · **Assignee:** developer (солo — 0 строк кода) · **Layer:** docs, infra
+**Goal:** убрать расхождение между тремя документами и старой базой ветки до первого коммита кода.
+**Steps:**
+1. **[x]** `feat/otel-export` пересоздана от `feat/observability-closure`:
+   `git branch -f feat/otel-export feat/observability-closure`. Старый единственный коммит
+   `3c50e9df` — предок closure (`git merge-base --is-ancestor` = 0), терять было нечего.
+2. **[x]** Якоря сверены с кодом — **ред. 4 говорила «сверено 2026-09-05», и это было неверно**:
+   восемь якорей из тринадцати не совпали, два из них — не номером строки, а **путём и файлом**.
+3. **[x]** `plans/QUEUE.md` §3 и `observability-roadmap.md` §«Этап 7» уже несли ред. 4 в рабочем
+   дереве (не закоммичены); сверено по содержимому, закоммичено этим же коммитом.
+
+**Таблица сдвига якорей (факт `git grep`, 2026-09-05):**
+
+| Якорь | Ред. 4 говорила | Факт | Класс |
+|---|---|---|---|
+| `subscribe_observability_tail`, `stop()`, `_flush_observability`, Resource | `process_module.py` | **`core/process_module.py`** — файла по заявленному пути нет вовсе | путь |
+| `RecordForwardChannel.push_batch` | `observability_wiring.py:217-228` | **`record_forward_channel.py:96`** — другой модуль | файл |
+| `subscribe_observability_tail` | :1240 | :1209 | строка |
+| `stamp_observed` | `record_display.py:150` | :113 | строка |
+| `hub_record_to_display` | :247 | :210 | строка |
+| `log_record_to_display` | :398 | :390 | строка |
+| `_ENVELOPE_KEYS` / `NUMBER_SEVERITY` | :39 / :78 | :40 / :79 | строка |
+| `wire_observability_forward` | :233-295 | :233 | верно |
+| `observability_broker.subscribe_all` / `_fan_out` | :92 / :234 | :92 / :234 | верно |
+| `plugins/base.py` `record_metric` / `declare_metric` | :619-733 | :619 / :733 | верно |
+| `frontend/process.py` хендлер / `_on_observability_record` | :94-97 / :184-211 | :97 / :184 | верно |
+| `windowed_voice.py` | `windowed_suppressed` | символа нет; есть `log_windowed` (:514) | имя |
+| `levels.py` `SEVERITY_NUMBERS` | без строки | :61, `UNSPECIFIED` :79, `severity_of` :116 | уточнено |
+
+**Acceptance criteria:**
+- [x] `git merge-base feat/otel-export feat/observability-closure` = `9d9cb8e1` = HEAD closure
+  на момент ветвления (`docs(plans): контракт Task 3.2`, 2026-09-05 15:36:52). Предъявлено хэшем.
+- [x] Три документа называют ред. 4 и базу `feat/observability-closure`: `otel-export.md` шапка,
+  `QUEUE.md` §3, `observability-roadmap.md` §«Этап 7».
+- [x] Baseline подтверждён заново: `grep -rE '^\s*(import|from) opentelemetry' multiprocess_framework/ --include=*.py` = **0**.
+
+**Вывод, который дороже самой задачи:** якоря `файл:строка` в этом плане — **расходники, пока
+closure в полёте**. Ред. 4 писалась сегодня же и уже промахнулась восемь раз из тринадцати,
+причём дважды — путём, а не номером. Первый шаг каждой задачи Ф1–Ф4 сверяет якорь **по имени
+символа** (`git grep -n "def <имя>"`), а не доверяет числу в таблице.
+
+**Оговорка по дереву:** рабочее дерево делится с соседней живой сессией (её коммиты
+`9bbf74cd`, `9d9cb8e1` — closure Task 3.1/3.2). Общее дерево оставлено на `feat/observability-closure`;
+работа Ф0 идёт в отдельном worktree `.claude/worktrees/otel-f0` на `feat/otel-export`.
+**Out of scope:** правки кода.
+
+### Task 0.4 — контракт сервиса ДО кода (module-contract, уровень full) **(новая, ред. 4)**
+**Level:** Senior · **Assignee:** teamlead · **Layer:** services, plugins
+**Goal:** будущий читатель понимает сервис по README + `interfaces.py` + контракт-тестам, не открывая реализацию; исполнители Ф1–Ф2 пишут код под уже названные имена.
+**Files:** `Services/otel_export/{__init__.py, README.md, STATUS.md, DECISIONS.md, interfaces.py, config.py, tests/test_contract.py}`, `Plugins/io/otel_export/{__init__.py, README.md, STATUS.md, registers.py}`
+**Steps:**
+1. `interfaces.py` — Protocol'ы с pre/post в докстринге: `RecordMapper.to_otlp(display_record) -> MappedRecord | None` (None = «не экспортируется», причина в счётчике), `ResourceResolver.resolve(context) -> Resource`, `LogExporter.export(records) -> ExportOutcome(accepted, failed, reason)`, `LogExporter.force_flush(timeout) -> FlushOutcome(flushed, lost)`. Контекст наблюдаемости для сервиса — **минимальный Protocol `ObservabilityPort`** (`log_info/log_warning/log_error`, `record_metric`, `report_error`), которому удовлетворяют `PluginContext` сегодня и `ServiceContext` после closure 4.5; своего контекста сервис не заводит.
+2. `config.py` — `OtelExportConfig(SchemaBase)`: `endpoint: str` (обязателен, без дефолта), `level: "INFO"`, `compression: "gzip"`, `headers: dict = {}` (значения — только `${ENV}`, readback маскирует `***`), `service_namespace` (дефолт — имя приложения), параметры батчера `max_queue_size` / `schedule_delay_ms` / `max_export_batch_size` / `export_timeout_ms` (дефолты = дефолтам SDK, **сверить по установленному 1.44.0**), `resource_pool_size`. Регистры плагина (`registers.py`) — те же поля + `FieldMeta` для GUI; одно определение полей, второе — производное (не две таблицы). Readback отдаёт **эффективные** значения (что реально передано в SDK), не сконфигурированные.
+3. Словарь счётчиков литералами (имена метрик и их смысл) — в README сервиса и `CONNECTORS.md`; тесты Ф2–Ф3 ссылаются на эти имена.
+4. `STATUS.md` = `contract`; `tests/test_contract.py` — читается как документация: «`None` от маппера ⇒ счётчик пропуска растёт», «отсутствующее поле Resource ⇒ атрибута нет».
+**Acceptance criteria:**
+- [ ] README с разделами Purpose / Public API / Usage / Boundaries / Stability; `__all__` совпадает с реэкспортом из `interfaces.py`.
+- [ ] `python scripts/validate.py` зелёный на пустом сервисе (стандарт слоя: `__init__.py`, `interfaces.py`, `STATUS.md`, `README.md`, `tests/`).
+- [ ] `endpoint` без значения → `ValidationError` с адресом поля (тест литералом).
+**Out of scope:** реализация.
 
 ---
 
-## Ф1 — маппер (чистая функция, без сети)
+## Ф1 — маппер (чистые функции, без сети)
 
-> Независимый **tester** работает здесь и только здесь — до авторских тестов.
+> Тестер — на каждом механизме Ф1 (маппер, Resource-пул, фильтр плоскостей), до кода, в worktree.
 
-### Task 1.0 — форма записи на входе: живой снимок, а не догадка **(блокирующая всю Ф1)**
-**Level:** Middle+ · **Assignee:** developer
-**Goal:** приложить к плану **настоящую** запись с настоящей дороги. Первая
-редакция спеки описывала маппер над плоским `extra` — и была неверна на обеих
-дорогах сразу.
+### Task 1.0 — форма записи на входе: живой снимок, а не догадка **(блокирует Ф1)**
+**Level:** Middle+ · **Assignee:** developer · **Layer:** docs
+**Goal:** приложить к плану настоящие записи с настоящей дороги. Ред. 1 описывала маппер над плоским `extra` и была неверна на обеих дорогах; ред. 3 не знала `kind=observation`, `origin`, `NUMBER_SEVERITY`.
 **Files:** `docs/audits/<дата>_otel-input-shape.md`
 **Steps:**
-1. Снять живьём (через `backend_ctl` `observability_tail` или временный хендлер)
-   по одной записи каждого рода: `kind=error`, `kind=log`, `kind=stats`.
-2. Зафиксировать **обе** формы `extra` и их происхождение:
-   - tap-дорога — [`record_display.py:219`](../multiprocess_framework/modules/channel_routing_module/observability/record_display.py#L219):
-     `"extra": {"context": record_dict.get("extra", {}) or {}}`;
-   - hub-дорога — [`observability_hub.py:113`](../multiprocess_framework/modules/channel_routing_module/observability/observability_hub.py#L113)
-     кладёт `{"severity","message","context"}`, а сборка `extra` идёт по остатку вне
-     `_ENVELOPE_KEYS` ([`record_display.py:38`](../multiprocess_framework/modules/channel_routing_module/observability/record_display.py#L38)).
-   **Итог обеих: `trace_id` и пятёрка Resource лежат на `extra.context.*`, а не на `extra.*`.**
-3. Зафиксировать **отсутствующие** поля: `scope` в display-вид не копируется
-   (см. `log_record_to_display`, [`record_display.py:185-220`](../multiprocess_framework/modules/channel_routing_module/observability/record_display.py#L185)),
-   `observed_ts` появляется только если его уже поставил приёмник, `kind` живёт в
-   конверте, а не в `extra`.
-4. Зафиксировать конверт сообщения: `data.record` против `data.records`
-   (образец разбора — [`frontend/process.py:164-168`](../multiprocess_prototype/frontend/process.py#L164)).
+1. Снять **обе формы** и назвать разницу:
+   - **форвардер** (что получит экспортёр) — `observability_tail` MCP на ближайшем стенде closure (5 минут, свой стенд не поднимать), уровень `DEBUG`; по одной записи `kind=log`, `kind=error`, `kind=stats` (агрегат И одиночная метрика), `kind=observation`;
+   - **стор** (для сверки тождества в 3.4) — `history_query` по живому `observability.db` без стенда; у стора `origin` поднят на верх записи, у форвардера — нет.
+   **Договорённость 2026-09-05 с сессией closure:** сырьё снимает она на стенде живой приёмки closure Task 3.2, **после merge 3.2** (3.2 меняет состав потока, не форму записи; доля потока по родам обязана отражать то, что увидит экспортёр), в `tools/otel_stand/samples/<hash>/` — `tail_debug.json`, `history_rows.json`, `history_series.json`, `introspect_observability_camera_0.json` (ключи счётчиков форвардера для 3.4), `README.md` с хэшем, рецептом, длительностью и числом записей по kind. Карточку аудита пишет этот план. Рода, которого в окне не оказалось, не эмулировать — назвать.
+2. Зафиксировать происхождение `extra`: tap-дорога — `{"context": LogRecord.extra}` (`record_display.py:437`); hub-дорога — остаток вне `_ENVELOPE_KEYS` (`:309, :341`). **Итог: `trace_id`, пятёрка Resource и `origin` лежат на `extra.context.*`.**
+3. Зафиксировать отсутствующие поля: `scope` в display-вид не копируется; `observed_ts` появляется только у приёмника; `kind` — в конверте.
+4. Конверт сообщения: `data.records` (пачка) против `data.record` (одна) — `frontend/process.py:194-197`.
+5. Назвать доли живого потока по родам за 5 минут (ожидание по стенду 3.5: числовых записей не меньше, чем логов).
 **Acceptance criteria:**
-- [ ] Снимки трёх родов записей приложены **целиком**, не пересказом.
-- [ ] Названо, какая доля живого потока идёт какой дорогой (сегодня почти всё — `kind=error` через tap).
+- [ ] Снимки шести форм приложены целиком, не пересказом; обе дороги (форвардер/стор) рядом с diff'ом полей.
 - [ ] Тесты Ф1 строятся на **этих** снимках; синтетический плоский словарь как вход запрещён.
-**Out of scope:** правки фреймворка ради удобной формы — форма принимается как есть.
+**Out of scope:** правки фреймворка ради удобной формы.
 
 ### Task 1.1 — `record_to_otlp`: display-запись → OTel LogRecord
-**Level:** Senior · **Assignee:** teamlead
-**Goal:** перевести запись в модель OTel по двойному источнику истины:
-докстринг `LogRecord` (что задумано) + снимок 1.0 (что доезжает).
-**Files:** `Services/otel_export/mapping.py`, `Services/otel_export/tests/test_mapping.py`
+**Level:** Senior · **Assignee:** teamlead · **Layer:** services
+**Files:** `Services/otel_export/mapping.py`, `tests/test_mapping.py`
+**Предусловие:** на вход маппера попадают только `kind ∈ {log, error}` — числовые роды снимает фильтр 1.3 ДО маппера; маппер на `severity == "number"` **отказывает** (`None` + причина), а не гадает.
 **Steps:**
-1. `ts`→`Timestamp`, `severity`→`SeverityText`, `severity_number`→`SeverityNumber`,
-   `message`→`Body`, `module`→`InstrumentationScope`,
-   **`extra.context.trace_id`**→`TraceId` (32 hex W3C — выделенное поле, не атрибут).
-2. `Attributes` — остаток `extra.context` **после изъятия** `trace_id` и пятёрки
-   Resource (её забирает 1.2). Прямое требование
-   [`log_types.py:52-56`](../multiprocess_framework/modules/logger_module/core/log_types.py#L52):
-   сваливать структурные наборы в атрибуты вместе с остальным **нельзя**.
-3. `kind` (конверт, не `extra`) → атрибут: без него `log`/`error`/`stats` на выходе
-   неразличимы.
+1. `ts→Timestamp`, `severity→SeverityText`, `severity_number→SeverityNumber` (копия, шкала уже OTel — `levels.py`), `message→Body`, `module→InstrumentationScope`, `observed_ts→ObservedTimestamp`, **`extra.context.trace_id→TraceId`** (32 hex W3C, выделенное поле).
+2. `Attributes` — остаток `extra.context` **после изъятия**: `trace_id`, пятёрки Resource (её берёт 1.2) и **`origin`** (внутренний маркер маршрутизации того же класса, что `scope`). Структурные наборы в атрибуты не сваливать (`log_types.py:52-56`).
+3. `kind` (конверт) → атрибут `record.kind`: без него `log`/`error` на выходе неразличимы.
 4. Битый/пустой `trace_id` → поля нет; нулями не заполнять.
 **Acceptance criteria:**
-- [ ] Тест на каждую строку таблицы, значения — литералами; вход — снимок из 1.0.
-- [ ] `trace_id` **не** остался в `Attributes` (изъят, а не скопирован).
-- [ ] Инъекция: читать `extra.trace_id` вместо `extra.context.trace_id` → красный
-      (это ровно тот дефект, который спека ред. 1 содержала).
-- [ ] Инъекция: подменить `severity_number` на ранг 0…4 (шкала до Ф3.1) → красный адресно в тестах severity.
-**Out of scope:** метрики, spans, `scope` (его нет на входе — см. Р-6).
+- [ ] Тест на каждую строку таблицы, значения литералами; вход — снимок из 1.0.
+- [ ] `trace_id`, `origin` и пятёрка **не** остались в `Attributes`.
+- [ ] Инъекция: читать `extra.trace_id` вместо `extra.context.trace_id` → красный (дефект ред. 1).
+- [ ] Инъекция: пересчитать `severity_number` по рангу 0…4 → красный адресно в тестах severity (для логов; у числовых записей 0 законен — они сюда не доходят, тест предусловия отдельный).
+- [ ] Отказ на `severity == "number"` — тест литералом.
+**Out of scope:** метрики, spans, `scope` (Р-6).
 
 ### Task 1.2 — `Resource` на ЗАПИСЬ, а не на провайдер
-**Level:** Senior · **Assignee:** teamlead
-**Goal:** сохранить пятёрку Ф3.5/4.4 живой: в экспортёр приезжают записи **разных**
-процессов, и общий `Resource` провайдера похоронил бы её целиком.
-**Files:** `Services/otel_export/resource_pool.py` (состав предварителен — см. Р-1), tests
+**Level:** Senior · **Assignee:** teamlead · **Layer:** services
+**Files:** `Services/otel_export/resources.py`, tests
 **Steps:**
-1. Ключ пула — `(proc_name, pid, incarnation)`, читается из `extra.context`.
-2. Semconv: `proc_name`→`service.name`, `fw_version`→`service.version`,
-   `incarnation`→`service.instance.id`, `pid`→`process.pid`, `recipe` — свой атрибут.
-3. **Отсутствующее поле пропускается**, не заполняется `"unknown"` — правило
-   действует у источника ([`process_module.py:495-498`](../multiprocess_framework/modules/process_module/core/process_module.py#L495)),
-   экспортёр обязан его сохранить.
-4. **Вытеснение** (minor ревью): экспортёр долгоживущий, ключ растёт с каждым
-   рестартом источника — предел размера пула + выселение по LRU.
+1. Ключ пула — `(proc_name, pid, incarnation)` из `extra.context`.
+2. Semconv: `proc_name→service.name`, `fw_version→service.version`, `incarnation→service.instance.id`, `pid→process.pid`, `recipe` — свой атрибут `inspector.recipe`.
+3. **`host.name`** из `socket.gethostname()` — атрибут экспортёра, не записи (IPC локален, все записи с той же машины). Без него флот устройств на одном коллекторе неразличим: `incarnation` — счётчик рестартов процесса, а не идентификатор машины. `service.namespace` — из регистра `service_namespace` (дефолт — имя приложения). `schema_url` Resource — версия semconv константой сервиса.
+4. **Отсутствующее поле пропускается**, не `"unknown"` — правило источника (`process_module.py` ~:640), экспортёр его сохраняет.
+5. Предел размера пула из конфига (`resource_pool_size`), вытеснение LRU, счётчик `resource_evicted`. Кэш `InstrumentationScope` по `module` — тем же LRU.
+6. API SDK 1.44 (Р-1, проверено живьём 2026-08-11): `ReadableLogRecord(log_record, resource, instrumentation_scope, limits)`; класса `LogRecord` в публичном экспорте `_logs` нет.
 **Acceptance criteria:**
-- [ ] Две записи разных процессов → **два разных** `Resource` (литералы).
-- [ ] Запись без `fw_version` → атрибута `service.version` **нет** (не `"unknown"`, не пустая строка).
-- [ ] Пул не растёт без предела: N+1 источник вытесняет самый старый; предъявить размер.
-- [ ] Инъекция: свести пул к единственному `Resource` → красный в тесте двух
-      процессов, при этом тесты 1.1 **зелены** (граница задач адресна).
-**Out of scope:** `service.namespace`, `host.*`, `os.*` — полей, которых мы не собираем.
+- [ ] Две записи разных процессов → два разных `Resource` (литералы); у обоих один `host.name` и один `service.namespace`.
+- [ ] Запись без `fw_version` → атрибута `service.version` **нет**.
+- [ ] Пул не растёт без предела: N+1 источник вытесняет самый старый, `resource_evicted` = 1; пара: при N источниках счётчик 0.
+- [ ] Инъекция: свести пул к единственному `Resource` → красный в тесте двух процессов при зелёных тестах 1.1.
+- [ ] Инъекция: снять `host.name` → красный в тесте «две записи с двух хостов различимы» (вход — два снимка с разным `host.name`, эмулируется параметром резолвера).
+**Out of scope:** `os.*`, `process.executable.*`, `container.*` — полей, которых не собираем и не нужны для различения.
 
-### Task 1.3 — `kind=stats` не экспортируется, и это слышно
-**Level:** Middle+ · **Assignee:** developer
+### Task 1.3 — числовая плоскость не экспортируется, и это видно числом
+**Level:** Middle+ · **Assignee:** developer · **Layer:** services
 **Files:** `Services/otel_export/mapping.py` (тот же файл, что 1.1 — **не параллелить**), tests
-**Steps:** `kind == "stats"` → не отправляется, счётчик `records_skipped_stats` растёт
-и виден в readback (Task 3.4).
+**Steps:** фильтр родов ДО маппера: `kind ∈ {stats, observation}` (обе формы `severity == "number"`, `severity_number == 0`) → не отправляется, причина `numbers` с разбивкой по kind. Логи и ошибки проходят. Числа приходят при **любом** уровне подписки — батч-форвардер уровнем не фильтрует (`push_batch`), так что фильтр обязан быть здесь, а не в настройке подписки.
 **Acceptance criteria:**
-- [ ] Пачка log+stats → ушли только log; счётчик = числу stats.
+- [ ] Пачка из снимка 1.0 (log + error + stats-агрегат + stats-одиночная + observation) → ушли ровно log и error; пропуск = 3 с разбивкой `{stats: 2, observation: 1}`.
+- [ ] Инъекция: снять `observation` из фильтра → красный (дефект ред. 3).
 - [ ] Инъекция: убрать инкремент → красный.
-**Out of scope:** OTLP-metrics вторым сигналом.
-**Честно:** приёмка синтетическая — batch-дорога hub'а сегодня не вызывается ни разу
-([`observability_wiring.py:212-215`](../multiprocess_framework/modules/process_module/managers/observability_wiring.py#L212)),
-так что задача сторожит дорогу, по которой пока никто не ездит.
+- [ ] После Ф2 — приёмка живьём: за 5 минут стенда `skipped_numbers > 0` при `exported > 0` (стенд 3.5 дал 1036 числовых строк за прогон — пропуск нулём быть не может).
+**Out of scope:** OTLP-metrics вторым сигналом (см. Р-8).
 
 ---
 
-## Ф2 — процесс-хост, подписка, доставка
+## Ф2 — хост: плагин, подписка, доставка
 
-> **tester skipped: внутренний механизм** — подписка, петля и батчинг снаружи не
-> наблюдаемы; независимый агент здесь придумал бы модель вместо контракта.
+> Тестер — на каждом механизме (приём+отметка, слышимость отказа, асинхронная доставка, жизненный цикл), до кода, в worktree. Наблюдаемость механизмов снаружи — счётчики числовой плоскости и readback регистров.
 
-### Task 2.1 — `OtelExportProcess`, намерение брокеру, отметка приёма
-**Level:** Senior · **Assignee:** teamlead
-**Files:** `Services/otel_export/process.py`, `interfaces.py`, tests
+### Task 2.1 — `OtelExportPlugin`: приём записей, намерение брокеру, отметка приёма
+**Level:** Senior · **Assignee:** teamlead · **Layer:** plugins
+**Files:** `Plugins/io/otel_export/plugin.py`, `registers.py`, tests
 **Steps:**
-1. `OtelExportProcess(ProcessModule)`; хендлер `observability.record`
-   (форма — [`frontend/process.py:91`](../multiprocess_prototype/frontend/process.py#L91)).
-2. **Б-3: звать `stamp_observed(records, time.time())` в хендлере.** Экспортёр — и
-   есть приёмник, а отметку ставит только он
-   ([`record_display.py:81-85`](../multiprocess_framework/modules/channel_routing_module/observability/record_display.py#L81)).
-   Без этого `ObservedTimestamp` пуст во всех экспортированных записях, а тест
-   маппера на своём словаре — зелёный.
-3. **М-4: намерение шлётся не «на старте», а по факту готовности.** Команды
-   регистрируются в `run()`, а не в `initialize()`
-   ([`process_module.py:899-901`](../multiprocess_framework/modules/process_module/core/process_module.py#L899)),
-   и ранняя отправка уходит в пустоту молча
-   ([`tail_activator.py:19-22`](../multiprocess_prototype/frontend/widgets/tabs/observability/tail_activator.py#L19)).
-   Триггер назвать явно; отказ отправки — WARNING с адресом, повтор с пределом.
-4. Отписка на teardown — симметрично.
+1. `configure(ctx)`: регистры → `OtelExportConfig`; проверка SDK (0.2); построение маппера/пула/экспортёра из `Services/otel_export`.
+2. `start(ctx)`: `ctx.router_manager.register_message_handler("observability.record", ...)` — форма `data.records`/`data.record` как у `frontend/process.py:184-211`; хендлер зовёт `stamp_observed(records, time.time())` — экспортёр и есть приёмник, отметку ставит только он; **не перетирает** уже стоящий `observed_ts`.
+3. Намерение брокеру: команда `observability.tail.subscribe_all` с `level` из регистров, адресат `ProcessManager`; триггер назвать явно (плагин стартует в процессе, уже порождённом PM); подтверждение — ответ брокера `success`; отказ/молчание — повтор с пределом `MAX_ATTEMPTS = 3` (дисциплина `tail_activator`), после — голос ERROR + `health.report_error`.
+4. `shutdown(ctx)`: `unsubscribe_all` симметрично, затем `force_flush` (2.4).
+5. Команды: `otel_export.status` (readback: состояние SDK, endpoint эффективный, счётчики), `otel_export.flush`.
+6. Счётчики — `ctx.declare_metric` + `ctx.record_metric`, имена из словаря Task 0.4 (нейтральные, без CV-лексики — closure 4.6). Если closure 3.4 уже в дереве — объявлять с `unit`/`description`/`kind`; если нет — имена, и плагин вносится в список миграции closure 3.4 явной строкой в её спеке.
 **Acceptance criteria:**
-- [ ] Тест на настоящем `ProcessModule` (не на фейках): хендлер зарегистрирован,
-      адрес подписчика == имя процесса.
-- [ ] `observed_ts` проставлен у всех принятых записей; **не перетирает** уже
-      стоящий (пересылка через несколько рук сохраняет отметку первого).
-- [ ] Инъекция: убрать `stamp_observed` → красный.
-- [ ] Инъекция: заменить `subscriber` на константу → красный в тесте адреса.
-**Out of scope:** свой поток, свой heartbeat, команды кроме приёма записей.
+- [ ] Тест на настоящем `GenericProcessApp` (не на фейках): хендлер зарегистрирован, адрес подписчика == имя процесса.
+- [ ] Счётчики видны в `introspect_telemetry(otel_export)` и `history_query(metric="otel_export.received")` — предъявить ответ.
+- [ ] `observed_ts` проставлен у всех принятых записей; уже стоящий — сохранён.
+- [ ] Намерение подтверждено ответом брокера; предъявить ответ. Пара: брокер недоступен → три попытки, голос один, состояние `degraded`.
+- [ ] Инъекция: убрать `stamp_observed` → красный. Инъекция: `subscriber` константой → красный в тесте адреса.
+**Out of scope:** свой поток приёма, heartbeat, команды сверх двух.
 
-### Task 2.2 — отказ доставки СЛЫШЕН **(перед 2.3, а не после)**
-**Level:** Senior · **Assignee:** teamlead
-**Goal:** сделать отказ экспорта наблюдаемым — иначе и «потеря-с-голосом»
-нарушена, и предохранитель петли (2.3) нечем проверить.
-**Files:** `Services/otel_export/exporter.py`, tests
+### Task 2.2 — отказ доставки СЛЫШЕН (перед 2.3 и 2.4)
+**Level:** Senior · **Assignee:** teamlead · **Layer:** services, plugins
+**Files:** `Services/otel_export/exporter.py`, `Plugins/io/otel_export/plugin.py`, tests
 **Steps:**
-1. **М-1:** отказы, о которых SDK сообщает через stdlib-`logging`, у нас уходят в
-   `logging.lastResort` — у корневого логгера в процессе фреймворка нет ни одного
-   хендлера ([`std_facade.py:6-8`](../multiprocess_framework/modules/logger_module/adapters/std_facade.py#L6)).
-   То есть при закрытом коллекторе экспортёр **молчит**.
-2. Отказ экспорта → счётчик + запись через `LoggerManager` процесса, **одна на окно**,
-   а не на запись.
+1. Отказы SDK уходят в stdlib-`logging` → `logging.lastResort` (у корневого логгера процесса фреймворка нет хендлеров, `std_facade.py:6-8`) — то есть при закрытом коллекторе экспортёр **молчит**. Перехватить исход `export()` по возвращаемому результату, не по чужому логу.
+2. Отказ → `export_failed` (+число записей) через `ctx.record_metric` + голос **`log_windowed`** (ключ `otel_export.export_failed`, окно политики), текст несёт endpoint и число подавленных.
 **Acceptance criteria:**
-- [ ] Живьём: коллектор закрыт → счётчик растёт, в журнале процесса одна строка на
-      окно. Предъявить строку и число.
-- [ ] Инъекция: вернуть отказ в голый stdlib → тест слышимости красный.
+- [ ] Живьём: коллектор закрыт → `export_failed` растёт, в журнале одна строка на окно с числом подавленных; предъявить строку и число. Пара: коллектор открыт → 0 и ни одной строки.
+- [ ] Инъекция: вернуть отказ в голый stdlib → тест слышимости красный. Инъекция: свой литерал окна вместо `log_windowed` → тест «окно из политики» красный.
 **Out of scope:** ретраи сверх тех, что делает SDK.
 
-### Task 2.3 — предохранитель петли усиления
-**Level:** Senior · **Assignee:** teamlead
-**Goal:** собственные записи экспортёра не экспортируются — иначе отказ сети
-кормит сам себя: экспортёр подписан на «всё», значит на **его** процессе висит
-форвардер, пушащий ему его же записи.
-**Files:** `Services/otel_export/process.py`, tests
-**Steps:** отбрасывать записи, чей `process` == собственное имя; счётчик `records_skipped_self`.
+### Task 2.3 — петля усиления: страж фреймворка предъявлен, свой не заводится
+**Level:** Middle+ · **Assignee:** developer · **Layer:** plugins, docs
+**Goal:** записи самого экспортёра не должны экспортироваться, иначе отказ сети кормит сам себя. Фреймворк уже отказывает процессу в подписке на собственный хвост (`process_module.py:1240`, причина «петля»); задача — **предъявить**, что это работает для нашего подписчика, а не поверить.
+**Steps:** живьём: `subscribe_all` от `otel_export` → у процесса `otel_export` в журнале отказ с причиной; собственные записи экспортёра (`module=otel_export`) в файле коллектора отсутствуют при том, что в `system.log` они есть. Число исходящих попыток за 60 с при закрытом коллекторе не растёт от собственных голосов.
 **Acceptance criteria:**
-- [ ] **Петля сперва предъявлена красной** (правило «молчащий детектор не
-      доказывает»): с механизмом 2.2, но без фильтра — число исходящих попыток за
-      60 с растёт; с фильтром — не растёт. Два числа рядом.
-- [ ] Тест лавины — в daemon-потоке с дедлайном join: тест, который **виснет**,
-      хуже отсутствующего.
-- [ ] Если петля **не воспроизводится** — предохранитель не заводить и записать это
-      в ADR (правило «ноль красных = лишний слой»; предохранитель-НЕ-операция хуже
-      отсутствия, он создаёт ложное чувство защиты).
-**Out of scope:** глушение собственных логов экспортёра (он обязан быть слышен в
-файлах и GUI — не экспортируется, а не молчит).
+- [ ] Отказ подписки на себя предъявлен строкой журнала; записи `module=otel_export` в `otel_records.json` = 0 при ≥ 1 в файлах логов (пара).
+- [ ] Если петля **воспроизводится** (страж не сработал) — это находка фреймворка: долг в closure, здесь — временный фильтр по `process == своё имя` с датой снятия и тестом лавины в daemon-потоке с дедлайном join.
+- [ ] Если не воспроизводится — предохранитель не заводить, записать в ADR сервиса (правило «ноль красных = лишний слой»).
+**Out of scope:** глушение собственных логов экспортёра.
 
-### Task 2.4 — асинхронная отправка, переполнение и место в останове
-**Level:** Senior · **Assignee:** teamlead
-**Files:** `Services/otel_export/exporter.py`, tests
+### Task 2.4 — асинхронная отправка, переполнение и место в останове **(после closure Task 3.3)**
+**Level:** Senior · **Assignee:** teamlead · **Layer:** services, plugins
+**Files:** `Services/otel_export/exporter.py`, `Plugins/io/otel_export/plugin.py`, tests
+**Зависимость:** closure Task 3.3 строит ту же форму для store-tap (bounded-канал, ёмкость из политики, `drop_oldest`, счётчик с голосом, `flush: N записано, M потеряно`). Здесь — та же форма и та же лексика, иначе на одной плоскости два разных предохранителя.
 **Steps:**
-1. `BatchLogRecordProcessor` поверх `OTLPLogExporter` (HTTP `…/v1/logs`).
-2. Переполнение считать **своим** счётчиком до передачи в процессор: полагаться на
-   чужую метрику отброса, которую мы не проверяли, нельзя.
-3. **М-6:** `force_flush`/`shutdown` — в **установленный** порядок останова
-   (Task B3 соседнего плана: command → router → error → stats → итоговая INFO →
-   логгер последним), а не «на teardown» вообще.
+1. `BatchLogRecordProcessor` поверх `OTLPLogExporter` (HTTP `/v1/logs`, `compression` из регистров, дефолт gzip); параметры батчера — из регистров (0.4), readback эффективных значений.
+2. Переполнение считать **своим** счётчиком `dropped_overflow` ДО передачи в процессор; голос `log_windowed`.
+3. `shutdown`: `force_flush(export_timeout_ms)` → строка `otel flush: N дожато, M потеряно` литералом, до снятия форвардеров и останова логгера.
 **Acceptance criteria:**
-- [ ] Приём 1000 записей при **закрытом** коллекторе не блокирует поток роутера
-      дольше, чем без экспортёра (числа до/после).
-- [ ] Переполнение → счётчик растёт, строка одна на окно.
-- [ ] Исход финального `flush` **записан** (сколько дожато, сколько потеряно) —
-      предъявить строку из файла.
-- [ ] Инъекция: дубль-экспортёр, отвечающий мгновенным успехом, **обязан уметь
-      отказывать** — иначе тест переполнения зелен по построению.
-**Out of scope:** persistent queue на диске, дедупликация, гарантия доставки.
+- [ ] Приём 1000 записей при закрытом коллекторе не блокирует поток роутера дольше, чем без экспортёра — три числа соло до/после.
+- [ ] Переполнение → `dropped_overflow` растёт, строка одна на окно; пара: ёмкость не достигнута → 0.
+- [ ] Исход финального flush записан; предъявить строку из файла процесса.
+- [ ] gzip против без сжатия: байты на проводе и CPU процесса `otel_export` — по три числа на dev-стенде; на Pi/Jetson — когда появится устройство (до тех пор дефолт gzip стоит на доводе, не на замере — записать так).
+- [ ] Инъекция: фейковый экспортёр **обязан уметь отказывать** — иначе тест переполнения зелен по построению; инъекция «фейк всегда успешен» → тест переполнения красный.
+**Out of scope:** persistent queue, дедупликация, гарантия доставки.
 
 ### Task 2.5 — жизненный цикл подписки: рестарт самого экспортёра
-**Level:** Senior · **Assignee:** teamlead
-**Goal:** закрыть асимметрию: брокер доигрывает намерения свежим **источникам**, но
-о смерти самого **подписчика** узнаёт только по снятию с топологии.
-**Steps:** разобрать по коду брокера
-([`observability_broker.py:128-202`](../multiprocess_framework/modules/process_manager_module/process/observability_broker.py#L128))
-три сценария: (а) штатный рестарт экспортёра — teardown стёр намерение, новый старт
-объявляет заново; (б) экспортёр убит SIGKILL — намерение живо, процесса нет;
-(в) намерение живо, экспортёр не поднялся (нет extra).
+**Level:** Senior · **Assignee:** teamlead · **Layer:** plugins, docs
+**Steps:** по коду брокера (`observability_broker.py:92-270`) разобрать три сценария: (а) штатный рестарт — `shutdown` снял намерение, новый старт объявил; (б) экспортёр убит SIGKILL — намерение живо, процесса нет; (в) процесс поднялся, плагин в `error` (нет SDK) — намерение не объявлено, форвардеров нет.
+**Сценарий (б) — предмет closure Task 4.4** (реестр намерений в брокере, `forget_session`, replay на
+`instance.started`): здесь не чинить и не обходить своим механизмом.
 **Acceptance criteria:**
-- [ ] Живьём: рестарт экспортёра → хвост восстановился; предъявить записи до и после.
-- [ ] Сценарий (б): назвать, кто снимает форвардеры-сироты и через сколько;
-      если никто — записать как долг явной строкой, а не умолчанием.
-**Out of scope:** правки брокера (это фреймворк — вне границ фазы; находка идёт долгом).
+- [ ] Живьём: `process_restart_verified(otel_export)` → хвост восстановился; записи до/после.
+- [ ] Сценарий (б): если closure 4.4 уже в дереве — проверить его механизмом (форвардеры-сироты сняты, через сколько — число); если нет — назвать, кто снимает сироты сегодня и через сколько, и записать ссылкой на 4.4, не долгом «кому-нибудь».
+- [ ] Сценарий (в): плагин в `error` → намерение не объявлено, форвардеров у источников нет (пара с (а)).
+**Out of scope:** правки брокера (это closure 4.4).
 
 ---
 
 ## Ф3 — включение, цена, readback
 
-### Task 3.1 — включается рецептом, по умолчанию отсутствует
-**Level:** Middle+ · **Assignee:** developer
-**Files:** рецепт стенда, `multiprocess_prototype/backend/config/system.yaml`
-**Steps:** процесс `otel` в `blueprint.processes`,
-`process_class: Services.otel_export.process.OtelExportProcess`; настройки в
-`observability.otel_export`, читаются через `read_process_config`
-([`observability_layers.py`](../multiprocess_framework/modules/process_module/configs/observability_layers.py)) —
-форма доставки конфига у оркестратора и ребёнка различается, голое чтение молча теряет ключ.
-**`endpoint` — обязательный ключ конфига, а не константа** (ред. 3): дефолт
-`http://127.0.0.1:4318/v1/logs` годится ровно для dev-стенда, а на Jetson/Raspberry
-зашитый `127.0.0.1` означал бы «стучаться в себя» — коллектор там не стоит и стоять не
-должен (см. §«Три платформы»). Ключ читается тем же `read_process_config`.
+### Task 3.1 — включается фрагментом топологии; по умолчанию отсутствует
+**Level:** Middle+ · **Assignee:** developer · **Layer:** prototype
+**Files:** `multiprocess_prototype/backend/topology/otel_export.yaml`, `multiprocess_prototype/app.yaml` (закомментированная строка-образец, как у `observability_sink`), `Plugins/io/otel_export/registers.py`
+**Steps:** фрагмент по образцу `observability_sink.yaml`: процесс `otel_export`, `process_class: multiprocess_prototype.generic_process_app.GenericProcessApp`, `priority: low`, плагин `Plugins.io.otel_export.plugin.OtelExportPlugin` с `endpoint` в записи плагина. **`endpoint` — обязательный ключ без дефолта**: `127.0.0.1:4318` годится только dev-стенду, на Jetson/Raspberry коллектор стоит на другой машине (§«Три платформы»).
 **Acceptance criteria:**
-- [ ] Рецепт без `otel` → система работает как раньше. Проверка `sys.modules`
-      снимается **в конкретном процессе** и он назван (процессы отдельные, spawn —
-      иначе критерий зелен по построению).
-- [ ] Рецепт с `otel` → экспортёр поднялся, намерение объявлено.
-- [ ] `endpoint` из рецепта доезжает до экспортёра: пара значений, где ветки
-      расходятся (не дефолт против дефолта), предъявлена фактическим адресом запроса.
-**Out of scope:** GUI-вкладка управления, hot-apply смены endpoint.
+- [ ] Манифест без фрагмента → система как раньше; `sys.modules` без `opentelemetry` снимается **в названном процессе** (`camera_0`) через `send_command`, не в оркестраторе.
+- [ ] С фрагментом → процесс поднялся, намерение объявлено, `capabilities` показывает `otel_export.status`/`flush`.
+- [ ] `endpoint` из фрагмента доезжает: пара значений, где ветки расходятся (не дефолт против дефолта), предъявлена адресом фактического HTTP-запроса.
+- [ ] Фрагмент без `endpoint` → процесс поднялся, плагин в `error` с адресом ключа (не тихий дефолт).
+**Out of scope:** GUI-вкладка управления, hot-apply endpoint (смена — через `set_config` регистров, если понадобится — отдельная задача).
 
 ### Task 3.2 — цена названа числами
-**Level:** Senior · **Assignee:** teamlead
-**Steps:** один рецепт с экспортёром и без; `proc_dict` сверяется **ключ-в-ключ**
-(идентичность сборки, а не сравнение двух шумных прогонов); дельта объёма IPC и CPU.
-База Ф6 — 4.78 МБ/час логов; подписка на DEBUG гонит этот объём ещё и в экспортёр.
+**Level:** Senior · **Assignee:** teamlead · **Layer:** docs
+**Steps:** одна топология с фрагментом и без; `proc_dict` сверяется ключ-в-ключ (идентичность сборки); дельта объёма IPC (`RecordForwardChannel` written-байты у источников) и CPU процесса `otel_export` — соло ×3. База Ф6: 4.78 МБ/час логов; уровень подписки по умолчанию `INFO`, `DEBUG` — только на время проверки словаря.
 **Acceptance criteria:**
-- [ ] Дельта объёма и CPU — числами в плане и ADR, не словом «незаметно».
-- [ ] `proc_dict` без экспортёра идентичен HEAD-сборке.
+- [ ] Дельта объёма и CPU — тремя числами каждая, в плане и ADR.
+- [ ] `proc_dict` без фрагмента идентичен HEAD-сборке (golden-снимки рецептов не изменились).
 
-### Task 3.3 — фреймворк не получил зависимости
-**Level:** Junior+ · **Assignee:** developer
+### Task 3.3 — фреймворк не получил зависимости; границы слоёв целы
+**Level:** Junior+ · **Assignee:** developer · **Layer:** tests
 **Acceptance criteria:**
-- [ ] Контракт-тест `grep opentelemetry` в `multiprocess_framework/` = 0.
-      **Честно:** он зелен уже сегодня и останется зелёным при любом исходе фазы —
-      это страж на будущее, а не доказательство работы.
-- [ ] `mcp__sentrux__check_rules` зелёный; `python scripts/validate.py` зелёный.
+- [ ] Контракт-тест: `grep opentelemetry multiprocess_framework/ --include=*.py` = 0 импортов. **Честно:** зелен уже сегодня — страж на будущее, не доказательство работы.
+- [ ] **CLI `sentrux check .`** зелёный (Services → Plugins → prototype; `Plugins/io/otel_export` импортирует `Services/otel_export`, обратного импорта нет); `python scripts/validate.py` зелёный.
 
-### Task 3.4 — сквозной учёт потерь в одном readback
-**Level:** Senior · **Assignee:** teamlead
-**Goal:** «записи доехали» без учёта потерь не отличает «доехали все» от «доехала половина».
-**Steps:** свести в одну команду интроспекции четыре точки:
-1. `observability_evicted` у **источника** — очередь `observability` имеет
-   `maxsize=256` и политику `drop_oldest`
-   ([`process_launch_config.py:31`](../multiprocess_framework/modules/process_module/configs/process_launch_config.py#L31));
-   при подписке на DEBUG первым теряет именно источник;
-2. `records_skipped_stats` (1.3), 3. `records_skipped_self` (2.3),
-4. переполнение процессора (2.4).
+### Task 3.4 — сквозной учёт потерь сходится
+**Level:** Senior · **Assignee:** teamlead · **Layer:** docs, plugins
+**Goal:** «записи доехали» без учёта потерь не отличает «все» от «половина».
+**Steps:** свести тождество `Σ отправлено источниками = принято коллектором + Σ потерь` из уже существующих чисел, ключи — литералами в README:
+1. у **источников**: `queue_observability_evicted` (`heartbeat/telemetry.py:251`, `router_manager.py:1775`) и счётчик канала форвардера `observability_forward::otel_export::batch` — из readback `introspect.observability`; **после closure 4.3 — по протоколу `ObservabilityReadback.counters()`**, до него — ключи по факту с пометкой «до 4.3»; ёмкость источника брать **эффективную** (после closure 4.1 она из политики `observability.hub.capacity`, не литерал);
+2. у **экспортёра** (числовая плоскость, `history_query(metric=...)`): `received`, `skipped_numbers`, `dropped_overflow`, `export_failed`, `exported`;
+3. у **коллектора**: число записей в `otel_records.json`.
 **Acceptance criteria:**
-- [ ] Одна команда отдаёт все четыре числа; имя команды и ключей записано в README.
-- [ ] Тождество сходится на живом прогоне: `эмитировано = принято коллектором + сумма потерь`.
-**Out of scope:** новые счётчики во фреймворке — `observability_evicted` уже есть.
+- [ ] Тождество сходится на живом прогоне 5 минут; расхождение — либо найденная потеря без счётчика (находка), либо ошибка модели (записать).
+- [ ] Все числа читаются агентом через MCP (`introspect_telemetry`, `history_query`, `introspect_observability(full)`) без драйвера из скрипта.
+**Out of scope:** новые счётчики во фреймворке.
 
 ---
 
@@ -403,137 +460,152 @@ payload'ы контролей — в [`tools/otel_stand/`](../tools/otel_stand/)
 
 ### Task 4.1 — живой прогон
 **Acceptance criteria:**
-- [ ] Записи предъявлены **целиком** из `otel_records.json`: `service.name`,
-      `service.instance.id`, `process.pid`, `severityNumber`, `traceId`, `body`,
-      `observedTimeUnixNano`.
+- [ ] Записи предъявлены целиком из `otel_records.json`: `service.name`, `service.instance.id`, `process.pid`, `severityNumber`, `traceId`, `body`, `observedTimeUnixNano`, `instrumentationScope.name`.
 - [ ] Записи двух разных процессов различаются `Resource`-ом.
 - [ ] Рестарт **источника** → новый `service.instance.id` (переподписку делает брокер).
-- [ ] Рестарт **экспортёра** (Task 2.5) → хвост восстановился.
-- [ ] Тождество потерь из 3.4 сходится.
+- [ ] Рестарт **экспортёра** (2.5) → хвост восстановился.
+- [ ] Тождество потерь 3.4 сходится; `skipped_numbers > 0`.
 
 ### Task 4.2 — вердикт: что словарь Ф3 не выдержал
-**Goal:** главный отчёт фазы.
 **Acceptance criteria:**
-- [ ] `docs/audits/<дата>_otel-dictionary-verdict.md`: что приёмник разобрал, что
-      отверг, что принял, но не так, как мы думали.
-- [ ] Выводы **ограничены** разделом «что арбитр не проверяет» из Task 0.1: то, что
-      коллектор принимает в любом виде, доказанным не считается.
-- [ ] Формулировка «соответствие модели OTel остаётся заявленным» снимается
-      **только** по факту отчёта и ровно в покрытой им части.
+- [ ] `docs/audits/<дата>_otel-dictionary-verdict.md`: что приёмник разобрал, что отверг, что принял не так, как мы думали.
+- [ ] Выводы **ограничены** разделом «что арбитр НЕ проверяет» из Task 0.1.
+- [ ] Формулировка «соответствие модели OTel остаётся заявленным» снимается **только** по факту отчёта и ровно в покрытой им части — в `real-state-map`, roadmap и `CONNECTORS.md`.
 
-### Task 4.3 — документация
+### Task 4.3 — документация по стандарту двух слоёв
 **Acceptance criteria:**
-- [ ] ADR в `Services/otel_export/DECISIONS.md`. **М-7:** `python -m scripts.sync`
-      сканирует только `multiprocess_framework/modules/*/DECISIONS.md`
-      ([`adr_modules.py:329-331`](../scripts/sync/adr_modules.py#L329)) — шесть
-      существующих `Services/*/DECISIONS.md` в индекс не входят. Зелёный sync здесь
-      ничего не доказывает; ссылку в индекс внести **вручную** и записать долг
-      «sync не видит слой Services».
-- [ ] `README.md`, `STATUS.md`, `interfaces.py`, `tests/` — стандарт слоя `Services`.
-- [ ] Строка в [`Services/STATUS.md`](../Services/STATUS.md); отметка 8.6 в
-      `observability-unified-routing.md`; строка в `plans/QUEUE.md`.
+- [ ] `Services/otel_export/DECISIONS.md`: ADR формы (плагин + фрагмент, отвергнутые формы), ADR пина SDK («обновление extras = прогон Ф1 заново»), ADR Р-3. **`python -m scripts.sync` слой `Services` не сканирует** (`adr_modules.py:329-331`) — ссылку в индекс внести вручную, долг «sync не видит Services» записать.
+- [ ] `README.md`/`STATUS.md` сервиса и плагина; строки в `Services/STATUS.md` и `Plugins/io/STATUS.md` (или эквиваленте слоя).
+- [ ] `CONNECTORS.md` (словарь счётчиков), `SINKS_MAP.md` (экспортёр как подписчик, **не** логгер-sink), `CONTROL_PANEL.md` (команды `otel_export.*`) — своими разделами, каждое утверждение с числом/именем/дефолтом получает проверку в `scripts/docs_verify` по схеме closure 5.1; если 5.1 уже в дереве — её стражи расширяются, а не дублируются.
+- [ ] Отметка 8.6 в `observability-unified-routing.md`; строка в `plans/QUEUE.md`; этап 7 roadmap.
 
 ---
 
-## Три платформы: Windows, Jetson, Raspberry (ред. 3, требование владельца 2026-08-11)
+## Три платформы: Windows, Jetson, Raspberry (требование владельца 2026-08-11)
 
-Вопрос «как заставить работать везде» распадается на два, и ответы у них разные.
+**Экспортёр кроссплатформенен по построению**: обычный Python-процесс топологии, зависимости
+чистые (Task 0.2). `if sys.platform` в коде сервиса/плагина — признак не той задачи.
 
-**1. Наш экспортёр — кроссплатформенный по построению.** Это обычный Python-процесс
-рецепта; зависимости чистые (см. Task 0.2). Особых веток кода под платформу не нужно и
-заводить их запрещено: появление `if sys.platform` в `Services/otel_export` — признак,
-что решается не та задача.
+**Коллектор на устройстве жить не обязан**: экспортёр шлёт OTLP/HTTP на `endpoint` из
+фрагмента, один коллектор принимает записи со всех устройств и различает их по
+`service.name`/`service.instance.id`. Локальный коллектор на устройстве — буфер при рваной
+сети, это эксплуатация, вне фазы.
 
-**2. Коллектор на устройстве жить НЕ обязан.** Экспортёр шлёт OTLP/HTTP на адрес из
-конфига, поэтому один коллектор принимает записи со всех устройств сразу и различает их
-по `service.name` / `service.instance.id` из Resource (Task 1.2). На Jetson и Pi крутится
-только Python-процесс. Локальный коллектор на устройстве осмыслен лишь как буфер при
-рваной сети — это эксплуатация, вне границ фазы.
-
-Отсюда единственное требование к коду: **`endpoint` — ключ конфига** (Task 3.1).
-
-**Артефакты коллектора v0.158.0** (сверено с API релиза 2026-08-11; дистрибутив
-`otelcol`, не contrib):
-
-| Машина | Файл | Как проверить разрядность |
+| Машина | Артефакт коллектора (0.158.0, `otelcol`, не contrib) | Разрядность |
 |---|---|---|
-| Windows (dev-стенд) | `otelcol_0.158.0_windows_amd64.tar.gz` — распаковывается встроенным `tar -xzf`, установки не требует | — |
-| Jetson (Orin/Nano, Ubuntu arm64) | `otelcol_0.158.0_linux_arm64.tar.gz` или `.deb` | `uname -m` → `aarch64` |
-| Raspberry Pi, 64-битная ОС | тот же `linux_arm64` | `uname -m` → `aarch64` |
-| Raspberry Pi, 32-битная Pi OS | `otelcol_0.158.0_linux_armv7.tar.gz` | `uname -m` → `armv7l` |
+| Windows (dev) | `otelcol_0.158.0_windows_amd64.tar.gz` (встроенный `tar -xzf`, без установки) | — |
+| Jetson (Ubuntu arm64) | `otelcol_0.158.0_linux_arm64.tar.gz` / `.deb` | `uname -m` → `aarch64` |
+| Raspberry Pi 64-бит | тот же `linux_arm64` | `aarch64` |
+| Raspberry Pi 32-бит | `otelcol_0.158.0_linux_armv7.tar.gz` | `armv7l` |
 
-MSI для Windows существует (`windows_x64.msi`), но ставит службу в систему — для стенда
-избыточно и мешает правилу «бинарник в репозиторий не класть, путь в README».
+**Не проверено и потому не заявляется:** экспортёр на Jetson и Pi не запускался ни разу;
+проверка сделана по колёсам PyPI и артефактам релиза. Здесь стоит «препятствий не найдено».
 
-**Не проверено и потому не заявляется:** сам экспортёр на Jetson и Pi ещё не запускался
-ни разу — вся проверка выше сделана по колёсам PyPI и артефактам релиза. Строку «работает
-на трёх платформах» имеет право написать только тот, кто предъявит запись, доехавшую с
-устройства. До тех пор здесь стоит «препятствий не найдено», а это другое утверждение.
+---
 
 ## Риски и развилки
 
 | # | Риск / развилка | Как закрывается |
 |---|---|---|
-| **Р-1** | `Resource` в SDK привязан к `LoggerProvider`, а нужен на запись | **[x] ЗАКРЫТА 2026-08-11 проверкой на живом API** (SDK 1.44.0 установлен): вариант **(а)** — `resource` задаётся **на запись**. Пул провайдеров (б) и свои батчи (в) не нужны. Заодно вскрылось расхождение спеки с API: класса **`LogRecord` в публичном экспорте `opentelemetry.sdk._logs` нет** (он остался в `_internal`), `__all__` даёт **`ReadableLogRecord`** и **`ReadWriteLogRecord`** с сигнатурой `(log_record, resource, instrumentation_scope, limits)`. Тексты 1.1/1.2, написанные под имя `LogRecord`, читать как `ReadableLogRecord`. Это ровно та причина, по которой пин minor обязателен |
-| **Р-2** | Logs SDK экспериментальный (`_logs`) | Пин в 0.2; ADR фиксирует: обновление extras = прогон Ф1 заново |
-| **Р-3** | Петля усиления | Task 2.3 — но **сперва предъявить красной**; не воспроизвелась → предохранитель не заводить |
-| **Р-4** | Объём: DEBUG-подписка гонит весь лог по IPC, очередь 256 `drop_oldest` | Замер 3.2 + учёт 3.4; дефолт уровня `INFO`, `DEBUG` только на время проверки словаря |
-| **Р-5** | Приёмник принимает всё → приёмка фиктивна | Task 0.1, три контроля включая семантический |
-| **Р-6** | **`scope` до экспортёра не доезжает — ADR-LOG-005 требует невыполнимого.** `log_record_to_display` его не копирует ([`record_display.py:185-220`](../multiprocess_framework/modules/channel_routing_module/observability/record_display.py#L185)), а ADR-LOG-005 пишет «экспортёр обязан класть его в `Attributes`» | **[x] ЗАКРЫТА 2026-08-11 — владелец выбрал (б).** Требование снято из ADR-LOG-005 (ревизия в тексте решения): `scope` — внутреннее понятие маршрутизации, наружу не едет; экспортёр его не экспортирует, и это **граница, а не пробел**. Правка фреймворка (вариант «а») отвергнута — она отменила бы «0 правок фреймворка» и вместе с ней параллельность фазы. Отвергнутые: (а) доставить `scope` в display-вид; (в) оставить расхождение долгом |
+| **Р-1** | `Resource` в SDK привязан к `LoggerProvider`, а нужен на запись | **[x] закрыта 2026-08-11 на живом API 1.44.0**: `resource` задаётся на запись через `ReadableLogRecord(log_record, resource, instrumentation_scope, limits)`; класса `LogRecord` в публичном экспорте `_logs` нет |
+| **Р-2** | Logs SDK экспериментальный (`_logs`) | пин minor (0.2); ADR: обновление extras = прогон Ф1 заново |
+| **Р-3** | Петля усиления | страж фреймворка (`process_module.py:1240`) **предъявить** в 2.3; свой фильтр — только если петля воспроизведена |
+| **Р-4** | Объём: `INFO` с 8 процессов по IPC и HTTP, очередь источника 256 `drop_oldest` | замер 3.2 соло ×3, тождество 3.4; дефолт `INFO`, `DEBUG` — только на время проверки словаря |
+| **Р-5** | Приёмник принимает всё → приёмка фиктивна | Task 0.1: три контроля, включая семантический; выводы 4.2 ограничены списком слепых зон |
+| **Р-6** | `scope` не доезжает до экспортёра | **[x] закрыта 2026-08-11 — (б)**: требование снято ревизией ADR-LOG-005; `scope` — внутреннее понятие маршрутизации, наружу не едет; отвергнуты (а) правка display-вида, (в) оставить долгом |
+| **Р-7** (ред. 4) | Дверь конфига: `observability.otel_export` против контракта секции (closure 2.2) | **закрыта формой**: регистры плагина в записи фрагмента; секция `observability.*` не трогается |
+| **Р-8** (ред. 4) | Числовая плоскость выросла (два рода, колонка `metric`, `NumberRecord`) — соблазн экспортировать метрики; этап 6 передал числа экспортёру «в display-форме без правок» | v1 — только логи, числа считаются (1.3); вход для v2 «OTLP metrics» — closure Task 3.4 (единица/описание/род), без неё экспорт чисел безъединичный. Записать как будущий план, не задачу |
+| **Р-9** (ред. 4) | Первый плагин-подписчик хвоста и первый Services-пакет с бинарной цепочкой | недостающие крючки (`PluginContext`, конверт команды брокеру) — находки; фреймворк не правится здесь, долг в closure с датой |
+| **Р-10** (ред. 4) | Один стенд на два плана | §«Пересечения с observability-closure»: Ф0–Ф1 сейчас, Task 1.0 — 5 минут на стенде closure, Ф2–Ф4 чередуя |
 
 ---
 
-## Параллельность с `observability-roadmap` (ред. 3, 2026-08-11)
+## Пересечения с `observability-closure` (ред. 4, сверено по файлам фаз 2026-09-05)
 
-Прежняя редакция мерила параллельность **файлами** и заключала «конфликт возможен ровно
-в `pyproject.toml`». Файлы — не тот дефицит. Настоящий дефицит назван в правилах
-исполнения roadmap: **живые прогоны одиночные, стенд один (порт 8765)**. Все гейты Ф2–Ф4
-здесь и все живые приёмки этапов 2–3 там конкурируют за него, и параллельно их не сдать —
-только чередовать, платя переключением контекста владельца.
+Прежний гейт «Ф2–Ф4 после гейта этапа 2 roadmap» формально пройден 2026-08-12, но дефицит тот
+же: **один живой стенд (порт 8765)**, за него конкурируют стенды closure Ф3 (3.2, 3.3, 3.6,
+3.7, 3.8) и Ф4 (4.8 на 20 процессах).
 
-| Ось | Оценка |
-|---|---|
-| Файлы фреймворка | **0 правок** — Р-6 закрыта вариантом (б), который эту границу и сохранил |
-| Пересечение файлов | `pyproject.toml` (строка extras; у этапа 3.3 возможна pytest-секция того же файла), один рецепт |
-| **Стенд `webcam_sketch` / порт 8765** | **вот здесь конфликт.** Ф2–Ф4 без него не сдаются, этапы 2–3 тоже |
-| Семантическая связка | Task C1 (stats-разъём) снят границей «v1 только логи» (1.3); этап 6 меняет плоскость stats — v1 её не экспортирует, пересечения нет |
-| Внутри плана | 1.1 и 1.3 правят один файл — **не параллелить** |
+### Порядок исполнения
 
-**Граница захода, решение владельца 2026-08-11:**
-
-| Фаза | Идёт сейчас | Почему |
+| Что | Когда | Почему |
 |---|---|---|
-| **Ф0** (0.1 стенд коллектора, 0.2 extras) | **да** | своя песочница `127.0.0.1:4318`, чужого порта не трогает |
-| **Ф1** (1.1, 1.2, 1.3 — чистые функции) | **да** | сеть не нужна |
-| Task **1.0** (снимок живой формы записи) | да, но требует стенда ~5 мин разово | блокирует всю Ф1, поэтому идёт первым окном |
-| **Ф2–Ф4** | **нет — после гейта этапа 2** | конкурируют за стенд с живыми приёмками 2.2/2.3 и 3.1/3.2 |
+| **Ф0** (0.2 шаги 2–3, 0.3, 0.4) | сейчас | стенда не требует |
+| **Task 1.0** (снимок) | ближайший стенд closure (3.2/3.3/3.8), 5 минут `observability_tail`; половина (стор) — `history_query` без стенда | свой стенд не поднимать |
+| **Ф1** (1.1, 1.2, 1.3) | сейчас, после 1.0 | чистые функции; 1.1 и 1.3 правят один файл — **не параллелить** |
+| **Ф2** 2.1–2.3, 2.5 | чередуя со стендами Ф3 closure | стенд `4318` свой, стенд `8765` — общий |
+| **Task 2.4** | **после closure Task 3.3** | одна форма предохранителя на плоскость |
+| **Task 3.4** | после closure Task 4.3, либо по протоколу `counters()`, если 4.3 уже в дереве | форма readback меняется |
+| **Ф3–Ф4 остальное** | после закрытия Ф3 closure или в его паузах | живые приёмки конкурируют за стенд и внимание владельца |
 
-**Ветка отходит от `feat/observability-roadmap`, а НЕ от `main`** — отступление от прежней
-редакции, названное явно. Причина фактическая: задача 1.4 (`7543dfb2`, инцидент несёт
-`module` и Resource-context) живёт только в roadmap-ветке, на `main` её нет. Маппер,
-построенный на снимке с `main`, читал бы форму записи, которой уже не существует —
-ровно тот дефект, из-за которого ред. 1 этой спеки оказалась неверна на обеих дорогах
-сразу. Цена решения: слияние обратно идёт через roadmap-ветку, а не напрямую в `main`.
+### Карта пересечений по задачам closure
+
+Правило одно: **что делает closure — здесь не делается и не дублируется**; что нужно раньше, чем
+closure успеет, — записывается ссылкой на его задачу, не своим механизмом.
+
+| Задача closure | Что меняет | Отношение к этому плану | Что делать здесь |
+|---|---|---|---|
+| **3.2** уровни: болтовня → DEBUG, `messages.log` без дубля | объём `INFO` падает (цель < 100 строк на бут) | база для замера цены (otel 3.2) | замер otel 3.2 — после closure 3.2, иначе число протухнет через неделю; базу назвать хэшем |
+| **3.3** store-tap батчем: bounded-канал, `history.queue_capacity`, `store_evicted`, `flush: N/M` | форма предохранителя на плоскости | **прямая зависимость otel 2.4** | та же форма и лексика; 2.4 не стартует раньше 3.3 |
+| **3.4** метаданные метрик: `declare_metric(name, *, owner, unit, description, kind)` | сигнатура объявления счётчиков | счётчики экспортёра объявляются через `ctx.declare_metric` (otel 2.1) | если 3.4 в дереве — объявлять с единицей/родом; если нет — имена, и плагин вносится в список миграции 3.4 явной строкой |
+| **3.6** восемь метрик + второй wide event | больше числовых записей | ничего: числа v1 не экспортирует (1.3) | `skipped_numbers` вырастет — это ожидаемо, не дефект |
+| **3.7** уборка стора, ретенция `telemetry.db` | стор | нет пересечения | — |
+| **3.8** живой стенд Ф3 | стенд 8765 | окно для Task 1.0 | подсадить снимок, 5 минут |
+| **4.1** hub: карта последних значений, ёмкость/каденция из политики (`observability.hub.capacity`) | вход батч-форвардера: `changed_only` у observation, ёмкость каналов | источник потерь в тождестве otel 3.4 | тождество читает **эффективную** ёмкость из readback, не литерал 1024 |
+| **4.3** протокол `ObservabilityReadback` (`readback()/sinks()/counters()`), распил хендлера, `flare` | форма `introspect.observability` | otel 3.4 берёт счётчики форвардера оттуда | после 4.3 — по протоколу; до — ключи по факту с пометкой «до 4.3» |
+| **4.4** точечные подписки переживают рестарт и креш клиента: реестр намерений, `forget_session`, replay на `instance.started` | брокер | **закрывает сценарий (б) otel 2.5** (форвардеры-сироты после SIGKILL) | в 2.5 не чинить и не обходить: если 4.4 в дереве — проверить им; если нет — записать ссылкой на 4.4 |
+| **4.5** `ServiceContext` — разъём наблюдаемости для авторов сервисов | как сервис логирует и считает | `Services/otel_export` — библиотека, ей нужен контекст | свой контекст не заводить: `interfaces.py` принимает минимальный Protocol (`log_*`, `record_metric`, `report_error`), которому удовлетворят и `PluginContext` сейчас, и `ServiceContext` после 4.5 |
+| **4.6** нейтральный словарь, литералы в политику, `frame_trace` → `register_sink_factory` | имена метрик; реестр фабрик логгер-стоков | экспортёр — **не логгер-sink** | не регистрировать экспортёр через `register_sink_factory` (это отвергнутая форма «tap в каждом процессе»); имена счётчиков нейтральные с первого коммита |
+| **4.7** реестр объявлений — объект процесса | module-level API → фасад | `ctx.declare_metric` не меняется | — |
+| **4.9** `KnobManager` | универсальные ручки | параметры батчера — регистры плагина | не заводить свою ручку-механику; при появлении адаптера «регистр ↔ ручка» — принять его |
+| **4.10–4.12** словарь политики, голос конфига, `telemetry.broadcast` | внутренности фреймворка | нет пересечения | — |
+| **4.8** стенд Ф4 на 20 процессах | стенд | замер otel 3.2 на 20 процессах | подсадить, не поднимать своё |
+| **5.1** четыре справочника под HEAD + стражи `docs_verify` | `CONNECTORS`/`CONTROL_PANEL`/`SINKS_MAP`/`NEW_MODULE_RECIPE` | otel 4.3 правит те же файлы | свои разделы — с проверками `docs_verify` по схеме 5.1; правки после 5.1 — отдельными разделами, чтобы merge был чистым |
+| **5.4** переприёмка гейта Ф6 этапа 6 — **«без OTel-части»** | закрытие трека closure | нет зависимости в обе стороны | OTel-часть мерила 6 roadmap снимает **только** otel 4.2 своим отчётом |
+
+**Из `telemetry-stage6.md` (out of scope этапа 6):** «интеграционная точка с OTel одна и пассивная —
+записи `kind=stats` идут в display-форме, маппер этапа 7 получает их без правок». Здесь это
+принято так: числа **доезжают** до экспортёра (форма — снимок 1.0), но v1 их **не экспортирует**
+логами, а считает (1.3); экспорт чисел — метриками в v2 (Р-8). Расхождения с этапом 6 нет —
+он передавал форму, а не требовал экспорта.
+
+### Пересечение по файлам
+
+Код: **ноль общих файлов** — otel пишет только в `Services/otel_export/`, `Plugins/io/otel_export/`,
+`backend/topology/otel_export.yaml` и одну закомментированную строку `app.yaml`; extras в
+`pyproject.toml` уже в closure. Документы: справочники `multiprocess_framework/docs/observability/*`
+общие с closure 5.1 (см. таблицу), `plans/QUEUE.md` и roadmap — общие по одной строке. Файлов
+фреймворка — **0 правок**; находки во фреймворке идут долгом в closure, не задачами сюда.
 
 ---
 
 ## Out of scope (весь план)
 
-- Трейсы (spans) и метрики в OTLP — только логи.
-- Внешняя инфраструктура сбора (Grafana, Loki, облачные бэкенды).
-- Структурный формат **файлов** (ECS/OTLP-JSON) — отдельная ось, не экспорт.
-- Error-grouping класса Sentry-issue.
-- Автоинструментация (`opentelemetry-instrumentation-*`).
-- Экспорт плоскости документов (аудит/вердикты) — у неё своё правило допуска и своё
-  хранилище (ADR-PM-028), OTLP-логи ей не адресат.
-- Правки брокера подписки и `record_display` — находки идут долгом, не задачами фазы.
+- Трейсы (spans) и метрики в OTLP — только логи (Р-8).
+- Внешняя инфраструктура сбора (Grafana, Loki, облачные бэкенды); docker-compose; сеть вне `127.0.0.1` на dev-стенде.
+- Структурный формат **файлов** (ECS/OTLP-JSON) — отдельная ось.
+- Error-grouping класса Sentry; автоинструментация `opentelemetry-instrumentation-*`.
+- Экспорт плоскости документов (аудит/вердикты) — своё хранилище (ADR-PM-028), OTLP-логи ей не адресат.
+- Правки брокера, `record_display`, `PluginContext` — находки идут долгом в closure.
+- GUI-вкладка управления экспортёром (регистры плагина видны стандартной панелью — этого достаточно для v1).
 
 ---
 
 ## Отход от постановки 8.6 — объявлен явно
 
-Постановка требует «настоящий приёмник OTLP, а не **стенд ради теста**». Ф0 строит
-именно стенд. Отход осознан: ценность фазы здесь — **не эксплуатация, а проверка
-контракта Ф3 внешним арбитром**, и она достигается стендом. Если владелец считает,
-что без эксплуатационного приёмника фазу делать не стоит, — это законное «нет»,
-и план остаётся в очереди без изменений.
+Постановка требует «настоящий приёмник OTLP, а не стенд ради теста». Ф0 строит именно стенд.
+Отход осознан: ценность фазы — **проверка контракта внешним арбитром**, она достигается
+стендом, а фрагмент топологии с `endpoint` из конфига делает переход к эксплуатационному
+приёмнику сменой одной строки. Если владелец считает, что без эксплуатационного приёмника
+фазу делать не стоит, — это законное «нет», план остаётся в очереди.
+
+---
+
+## История редакций
+
+| Ред. | Дата | Что изменилось |
+|---|---|---|
+| 1 | 2026-08-06 | постановка из 8.6; маппер над плоским `extra` (неверно на обеих дорогах) |
+| 2 | 2026-08-10 | после независимого ревью спеки (6/10, 4 блокера): двойной источник истины, Task 1.0, Б-3 `stamp_observed`, М-1…М-7 |
+| 3 | 2026-08-11 | старт согласован; Р-6 закрыта (б); `otelcol` вместо contrib; три платформы; `endpoint` — ключ конфига; Task 0.1 сделана; Р-1 проверена живьём |
+| **4** | **2026-09-05** | по [ревью](../docs/reviews/2026-09-05_otel-export-plan-review.md): база ветки — closure; форма «SDK в Services + плагин в Plugins + фрагмент топологии»; дверь конфига — регистры плагина (Р-7); числовая плоскость двумя родами (1.3); `origin` изымается; голоса через `log_windowed`; счётчики — числовая плоскость; Р-3 — страж фреймворка; тестер на всех фазах, пары инъекций, замер соло ×3, sentrux CLI; Task 0.3/0.4; 2.4 после closure 3.3; честная оценка; рекомендации 2026-09 (`host.name`, gzip, параметры батчера регистрами); карта пересечений с closure по задачам (3.3→2.4, 3.4→2.1, 4.3→3.4, 4.4→2.5, 4.5→0.4, 5.1→4.3) |
