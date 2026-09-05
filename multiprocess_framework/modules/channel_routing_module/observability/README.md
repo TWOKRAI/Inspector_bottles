@@ -30,6 +30,15 @@
   (`drop_oldest` | `drop_newest`) и растит счётчик потерь.
 - **`protocols.py`** — `LoggerLike` / `StatsLike` / `ErrorLike`: контракт слотов
   `ObservableMixin`, который hub реализует целиком.
+- **`NumberRecord` (`number_record.py`)** — ОДНА форма числа плоскости
+  (Task 3.1, ADR-CRM-017). `NumberRecord.from_hub_record(record)` — единственная
+  точка чтения трёх диалектов (агрегат `MetricRecord.aggregate()`, hub-запись
+  `metric/value/metric_type`, запись порта `writer/metric/value`); снапшот окна
+  числом не является и читается как `None`. Рядом — `number_metric_identity`,
+  одно правило имени числа (`"<writer>.<name>"` / голое имя / `None`) для колонки
+  `metric` стора и для `message` записи наблюдения. Форма живёт ЗДЕСЬ, а не в
+  `statistics_module`, потому что она про то, что ляжет в стор и в display-вид:
+  владелец персистентности — этот пакет (ADR-CRM-009).
 
 ## Использование (drop-in, ноль правок в модулях)
 

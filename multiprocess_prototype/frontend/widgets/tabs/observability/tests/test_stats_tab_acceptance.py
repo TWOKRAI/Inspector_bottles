@@ -71,7 +71,11 @@ def make_stats_record(ts: float, message: str, *, process: str = "camera_0") -> 
         "process": process,
         "module": process,
         "ts": ts,
-        "severity": "snapshot",
+        # Task 3.1 (К7): у ВСЕХ трёх числовых форм в колонке ``severity`` одно
+        # слово — ``"number"``. Значения ``"snapshot"`` система больше не пишет:
+        # прежние три словаря (``gauge``/``counter``, ``"snapshot"``, ``"level"``)
+        # различали то, что уже различают ``kind`` и ``metric IS NULL``.
+        "severity": "number",
         "severity_number": 0,
         "message": message,
         "extra": {
@@ -340,7 +344,8 @@ def test_stats_panel_has_no_severity_level_filter(qtbot):
     qtbot.addWidget(panel)
 
     assert not has_severity_level_combo(panel), (
-        "у панели kind=stats фильтр уровня бессмыслен (severity='snapshot', "
-        "не уровень логирования) и не должен присутствовать, но найден combo "
+        "у панели kind=stats фильтр уровня бессмыслен (severity='number' — "
+        "КЛАСС записи, а не уровень тревожности: у плоскости статистики оси "
+        "важности нет вовсе) и не должен присутствовать, но найден combo "
         f"с пересечением {sorted(LEVEL_TOKENS)}"
     )

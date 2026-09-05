@@ -179,7 +179,7 @@ def _row_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
         # display-виде живого пути.
         "message": d["message"],
         # Task 3.1 (К4). Имя считает ТОТ ЖЕ нормализатор, что и живой хвост
-        # (:func:`..record_display.number_metric_identity`) — второй способ
+        # (:func:`..number_record.number_metric_identity`) — второй способ
         # вычисления дал бы строку, найденную по тексту и не найденную фильтром
         # по метрике. ``None`` здесь означает «строка не есть одно число»
         # (агрегат/лог/ошибка) и ложится в колонку как SQL NULL.

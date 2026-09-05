@@ -919,6 +919,14 @@ hub_record_to_display(hub.drain_all()["observation"][0])
 `severity_number_for` получила `KIND_OBSERVATION` в тот же явный branch, что и `KIND_STATS`
 («у плоскости нет оси важности»), с причиной в докстринге.
 
+> **ОТМЕНЕНО частично (2026-09-05, ADR-CRM-017).** Значение `severity = OBSERVATION_LEVEL_SEVERITY
+> = "level"` снято: у ВСЕХ трёх числовых форм в колонке теперь одно слово `NUMBER_SEVERITY =
+> "number"`. Симметрия с `STATS_SNAPSHOT_SEVERITY` была верна, а вывод из неё — нет: симметричными
+> оказались ТРИ разных значения в одной колонке, то есть три смысла на одном месте, при том что
+> класс записи у всех трёх один — «это число». Остальное в этом ADR (отдельная ветка
+> `KIND_OBSERVATION`, `message = "<writer>.<metric>"`, `severity_number_for` по `kind`) в силе.
+> Разбор — [`channel_routing_module/DECISIONS.md`](../channel_routing_module/DECISIONS.md), ADR-CRM-017.
+
 **Тест, зафиксировавший дефект.** Первая редакция авторских hazard-тестов держала для
 observation ТУ ЖЕ проверку, что и для по-настоящему неизвестного kind'а — «не падает,
 `message==""`». Тест был доказан («если сломать эмиссию — краснеет»), но проверял не то

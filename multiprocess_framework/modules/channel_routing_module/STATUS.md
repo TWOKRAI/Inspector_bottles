@@ -54,6 +54,7 @@ ChannelRoutingManager
 
 | Дата | Изменение | Фаза |
 |------|-----------|------|
+| 2026-09-05 | **Task 3.1, добор по вердикту CTO: форма числа переехала В базу.** `observability/number_record.py` — `NumberRecord(SchemaBase)` и ЕДИНСТВЕННАЯ точка чтения трёх диалектов `from_hub_record()`; вместе с ней переехало правило идентичности `number_metric_identity` (было в `record_display`). `hub_record_to_display` теперь берёт имя числа У ФОРМЫ — ветки одиночной `stats` и `observation` свёрнуты в одну, ветка снапшота осталась отдельной (агрегат не одно число). Через форму идёт ИДЕНТИЧНОСТЬ, а не класс записи: `severity`/`extra` остаются за `kind`. Причина переезда — кольцо импортов (воспроизведено): `observability/__init__ → observability_store → record_display → statistics_module/__init__ → log_stats_channel → store_tap → observability_store`. Цена замерена: лог −0.03 мкс (шум, бюджет Task 3.3 не тронут), числа +2.7 мкс на запись при темпе 0.82 записи/с, ветка снапшота сама стоит 4.2–4.3 мкс. **ADR-CRM-017** (отменяет `OBSERVATION_LEVEL_SEVERITY = "level"` из `statistics_module/DECISIONS.md`). | Ф3 |
 | 2026-03-12 | Фаза 1: создан channel_routing_module (interfaces, CRM, buffers, тесты, README) | 1 |
 | 2026-03-12 | Фаза 2: ChannelRoutingConfig, observable_config, dispatcher_strategy в CRM | 2 |
 | 2026-03-12 | Фаза 2: ILogChannel(IChannel), LogChannel(ILogChannel), LoggerManager мигрирован | 2 |

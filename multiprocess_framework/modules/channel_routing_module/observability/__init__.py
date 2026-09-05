@@ -9,6 +9,8 @@ heartbeat в LoggerManager / ErrorManager / StatsManager.
 Публичный API:
     ObservabilityHub  — перехватчик наблюдаемости одного модуля (3 канала)
     BoundedChannel    — потокобезопасный bounded-канал с drop-политикой
+    NumberRecord      — ОДНА форма числа плоскости (Task 3.1, К3): три диалекта
+                        сходятся в ней, а не в ветках каждого читателя
     LoggerLike / StatsLike / ErrorLike — duck-type контракты слотов ObservableMixin
 
 См. README.md и DECISIONS.md (ADR ObservabilityHub).
@@ -29,7 +31,8 @@ from .observability_hub import (
 from .drain_adapter import ObservabilityDrainAdapter
 from .observability_store import ObservabilityStore, resolve_default_db_path
 from .store_tap import ORIGIN_ERROR_MANAGER, ORIGIN_FIELD, ORIGIN_STATS_SNAPSHOT, StoreTapChannel
-from .record_display import NUMBER_SEVERITY, hub_record_to_display, log_record_to_display, number_metric_identity
+from .number_record import NumberKind, NumberRecord, number_metric_identity
+from .record_display import NUMBER_SEVERITY, hub_record_to_display, log_record_to_display
 from .record_forward_channel import FORWARD_COMMAND, RecordForwardChannel
 from .protocols import ErrorLike, LoggerLike, StatsLike
 
@@ -42,6 +45,8 @@ __all__ = [
     "ORIGIN_ERROR_MANAGER",
     "ORIGIN_STATS_SNAPSHOT",
     "NUMBER_SEVERITY",
+    "NumberRecord",
+    "NumberKind",
     "number_metric_identity",
     "RecordForwardChannel",
     "FORWARD_COMMAND",

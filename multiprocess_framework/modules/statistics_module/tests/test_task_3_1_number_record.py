@@ -59,8 +59,15 @@ import pytest
 
 
 def _import_number_record():
-    """Единая точка локального импорта — чтобы имя модуля не дублировалось семь раз."""
-    from multiprocess_framework.modules.statistics_module.core.number_record import NumberRecord
+    """Единая точка локального импорта — чтобы имя модуля не дублировалось семь раз.
+
+    Путь правлен лидом 2026-09-05 (вердикт CTO): форма переехала из
+    ``statistics_module/core/`` в ``channel_routing_module/observability/`` —
+    к владельцу персистентности, чтобы нормализатор ``record_display`` мог
+    ходить через неё без кольца импортов. Тесты тестера содержательно не
+    менялись, изменился только путь модуля.
+    """
+    from multiprocess_framework.modules.channel_routing_module.observability.number_record import NumberRecord
 
     return NumberRecord
 
@@ -238,3 +245,231 @@ class TestToDictIsPlainPickleSafe:
         )
         d = rec.to_dict()
         assert pickle.loads(pickle.dumps(d)) == d
+
+
+# ===========================================================================
+# ДОПИСАНО ЛИДОМ 2026-09-05 (добор Task 3.1, блокер 1 ревью) — НЕ тестером.
+#
+# Набор выше проверяет КОНСТРУКТОР формы и ни разу не зовёт
+# ``from_hub_record`` — то есть «единственная точка чтения трёх диалектов»
+# не была сторожена ничем. Проверено инъекцией: ``from_hub_record`` →
+# ``return None`` первой строкой оставляет весь файл выше ЗЕЛЁНЫМ (при 14
+# красных в channel_routing/statistics — те ловят её опосредованно, через
+# колонку ``metric`` display-вида). Здесь она сторожится прямо: по одному
+# тесту на каждый диалект плюс отказы.
+# ===========================================================================
+
+
+class TestFromHubRecordReadsEachDialect:
+    """«Три диалекта сходятся к ней» — проверено чтением, а не конструктором."""
+
+    def test_observation_dialect_is_read_as_a_gauge_that_knows_its_writer(self) -> None:
+        """Диалект порта наблюдений: ``{writer, metric, value}``.
+
+        Сломается: если ветка observation исчезнет (получим ``None``), если род
+        перестанет быть ``gauge`` (порт публикует «сколько СЕЙЧАС», иного рода
+        у него нет) или если писатель потеряется — тогда идентичность станет
+        голым ``drops`` и столкнётся с чужим ``drops`` в общем сторе.
+        """
+        NumberRecord = _import_number_record()
+        num = NumberRecord.from_hub_record(
+            {"kind": "observation", "module": "camera_0", "ts": 7.0, "writer": "capture", "metric": "drops", "value": 3}
+        )
+        assert num is not None, "запись порта наблюдений обязана читаться формой"
+        assert num.name == "drops"
+        assert num.kind == "gauge"
+        assert num.value == 3.0
+        assert num.writer == "capture"
+        assert num.aggregate is None
+        assert num.ts == 7.0
+        assert num.metric_identity == "capture.drops"
+
+    def test_single_stats_dialect_keeps_its_declared_kind_and_has_no_writer(self) -> None:
+        """Диалект одиночной метрики менеджера: ``{metric, value, metric_type, tags}``.
+
+        Сломается: если род перестанет браться из ``metric_type`` (получим не
+        ``counter``), если теги потеряются (серия = имя × теги — без тегов две
+        серии сольются в одну) или если писатель начнёт откуда-то браться:
+        у записи менеджера его нет, и идентичность обязана быть голым именем.
+        """
+        NumberRecord = _import_number_record()
+        num = NumberRecord.from_hub_record(
+            {
+                "kind": "stats",
+                "module": "seg",
+                "ts": 2.0,
+                "metric": "frames",
+                "value": 219,
+                "metric_type": "counter",
+                "tags": {"plugin": "capture"},
+            }
+        )
+        assert num is not None, "одиночная stats-запись обязана читаться формой"
+        assert num.name == "frames"
+        assert num.kind == "counter"
+        assert num.value == 219.0
+        assert num.writer == ""
+        assert num.tags == {"plugin": "capture"}
+        assert num.aggregate is None
+        assert num.metric_identity == "frames"
+
+    def test_aggregate_of_one_metric_is_read_as_a_distribution(self) -> None:
+        """Диалект агрегата ОДНОЙ метрики: ``{name, type, tags, count/min/max/p95/…}``.
+
+        Агрегат строю НАСТОЯЩИМ ``MetricRecord`` (не выдуманной формой словаря) —
+        связь «то, что уже отдаёт ``MetricRecord.aggregate()``» проверена на
+        реальном объекте. Сломается: если третья ветка (запись БЕЗ ``kind``,
+        элемент списка ``metrics`` снапшота) исчезнет — распределение перестанет
+        читаться вовсе.
+        """
+        from multiprocess_framework.modules.statistics_module.core.metric_record import MetricRecord, MetricType
+
+        metric = MetricRecord(name="dispatch.duration", metric_type=MetricType.TIMING)
+        for observation in (0.001, 0.002, 0.003):
+            metric.observe(observation)
+        payload = metric.aggregate()
+        assert payload["count"] == 3  # контроль: фикстура сама не собралась бы иначе
+
+        NumberRecord = _import_number_record()
+        num = NumberRecord.from_hub_record(payload)
+        assert num is not None, "агрегат одной метрики обязан читаться формой"
+        assert num.name == "dispatch.duration"
+        assert num.kind == "timing"
+        assert num.aggregate is not None and num.aggregate["count"] == 3
+        assert num.value is None, "у распределения скалярного значения нет"
+
+    def test_a_gauge_aggregate_fills_both_value_and_aggregate(self) -> None:
+        """Оба поля разом — правило «value is not None → скаляр» НЕВЕРНО.
+
+        Записано отдельным тестом, потому что первая редакция ``FieldMeta``
+        обещала «``None`` у скаляра» и читатель вывел бы из неё обратное
+        правило. У ``gauge``-агрегата значение ЕСТЬ (оно и есть показание),
+        а окно при этом никуда не делось.
+        """
+        from multiprocess_framework.modules.statistics_module.core.metric_record import MetricRecord, MetricType
+
+        payload = MetricRecord(name="fps", metric_type=MetricType.GAUGE, value=29.7).aggregate()
+        assert payload["value"] == 29.7  # контроль фикстуры
+
+        NumberRecord = _import_number_record()
+        num = NumberRecord.from_hub_record(payload)
+        assert num is not None
+        assert num.value == 29.7, "скаляр gauge-агрегата обязан подняться в value"
+        assert num.aggregate is not None, "и окно обязано остаться в aggregate"
+
+
+class TestFromHubRecordRefusesWhatIsNotOneNumber:
+    """Отказ — ОТВЕТ («это не одно число»), а не исключение и не пустая форма."""
+
+    def test_window_snapshot_is_not_one_number(self) -> None:
+        """Снапшот окна несёт НАБОР метрик, единственного имени у него нет.
+
+        Сломается: если маркер агрегата перестанут смотреть — снапшот прочитается
+        как число с чужим именем (или с пустым), и колонка ``metric`` получит
+        имя, которого у строки не существует.
+        """
+        NumberRecord = _import_number_record()
+        num = NumberRecord.from_hub_record(
+            {
+                "kind": "stats",
+                "module": "seg",
+                "ts": 3.0,
+                "aggregate": True,
+                "metrics": [{"name": "fps", "type": "gauge", "tags": {}, "value": 30}],
+                "total_count": 1,
+                "window_ts": 3.0,
+            }
+        )
+        assert num is None, "снапшот окна — не одно число, форма обязана вернуть None"
+
+    def test_the_aggregate_marker_wins_over_a_readable_single_metric_shape(self) -> None:
+        """Тот же отказ, но доказанный: маркер СИЛЬНЕЕ пригодной формы одиночной метрики.
+
+        **Запись синтетическая, и это единственный способ проверить сторож.**
+        Инъекция «маркер агрегата не смотрят» на реалистичном снапшоте (тест
+        выше) не убивает НИ ОДНОГО теста: у настоящего снапшота нет ни
+        ``metric``, ни ``metric_type``, поэтому форма всё равно отказала бы —
+        только по другой причине («имени нет»). Зелёный там доказывает не
+        сторож, а совпадение двух отказов.
+
+        Здесь запись несёт маркер И пригодные ключи одиночной метрики разом.
+        Такую hub не производит; она отвечает на вопрос о ПОРЯДКЕ проверок:
+        что перевесит, если оба признака налицо. Правильный ответ — маркер: он
+        объявлен владельцем различия «агрегат или одно число»
+        (``STATS_AGGREGATE_KEY``), а ``metric`` в такой записи — уже второй
+        носитель того же различия, то есть источник расхождения.
+        """
+        NumberRecord = _import_number_record()
+        num = NumberRecord.from_hub_record(
+            {
+                "kind": "stats",
+                "module": "seg",
+                "ts": 4.0,
+                "aggregate": True,
+                "metric": "fps",
+                "value": 30,
+                "metric_type": "gauge",
+                "metrics": [{"name": "fps", "type": "gauge", "tags": {}, "value": 30}],
+                "total_count": 1,
+            }
+        )
+        assert num is None, (
+            "маркер агрегата обязан перевесить пригодную форму одиночной метрики, "
+            f"получено {num!r} — иначе снапшот уехал бы в колонку metric под именем одной из своих метрик"
+        )
+
+    @pytest.mark.parametrize(
+        "metric_type,label",
+        [("not_a_real_kind", "опечатка"), ("", "пусто"), (None, "нет ключа"), (17, "не строка")],
+    )
+    def test_an_unusable_metric_type_gives_none_instead_of_raising(self, metric_type, label) -> None:
+        """Вход чужой, схема строгая — но ронять дренаж пачки нельзя.
+
+        ``metric_type`` приезжает с провода; ``ValidationError``, поднятая из
+        нормализатора, уронила бы весь дренаж пачки, то есть плоскость
+        наблюдаемости упала бы от того, что кто-то неверно назвал метрику.
+        Сломается: если ``_build`` перестанет проверять членство строкой и
+        отдаст решение Pydantic'у — получим исключение вместо ответа.
+        """
+        NumberRecord = _import_number_record()
+        record = {"kind": "stats", "module": "seg", "ts": 1.0, "metric": "fps", "value": 1}
+        if metric_type is not None:
+            record["metric_type"] = metric_type
+        num = NumberRecord.from_hub_record(record)  # исключения быть не должно
+        assert num is None, f"{label}: непригодный род обязан дать None, получено {num!r}"
+
+    @pytest.mark.parametrize("record,label", [({}, "пустой dict"), ("не dict", "не dict"), (None, "None")])
+    def test_a_record_that_is_not_a_number_at_all_gives_none(self, record, label) -> None:
+        NumberRecord = _import_number_record()
+        assert NumberRecord.from_hub_record(record) is None, f"{label}: обязан дать None"
+
+    def test_an_empty_metric_name_gives_none_not_a_nameless_record(self) -> None:
+        """Имени нет — числа нет. Иначе в колонку ``metric`` уехала бы пустая строка."""
+        NumberRecord = _import_number_record()
+        assert (
+            NumberRecord.from_hub_record(
+                {"kind": "observation", "module": "m", "ts": 1.0, "writer": "capture", "metric": "   ", "value": 1}
+            )
+            is None
+        )
+
+
+class TestMetricIdentityDependsOnWhetherThereIsAWriter:
+    """Пара «писатель есть / писателя нет» — та самая развилка колонки ``metric``."""
+
+    def test_with_a_writer_the_identity_is_writer_dot_name(self) -> None:
+        NumberRecord = _import_number_record()
+        num = NumberRecord.from_hub_record(
+            {"kind": "observation", "module": "m", "ts": 1.0, "writer": "capture", "metric": "drops", "value": 1}
+        )
+        assert num is not None
+        assert num.metric_identity == "capture.drops"
+
+    def test_without_a_writer_the_identity_is_the_bare_name(self) -> None:
+        """И НЕ '.drops': ведущая точка сделала бы из одного ряда два."""
+        NumberRecord = _import_number_record()
+        num = NumberRecord.from_hub_record(
+            {"kind": "stats", "module": "seg", "ts": 1.0, "metric": "drops", "value": 1, "metric_type": "counter"}
+        )
+        assert num is not None
+        assert num.metric_identity == "drops"

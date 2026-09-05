@@ -32,27 +32,90 @@ GUI — своими. Каждая такая ветка есть место, г
 ``histogram``: «за окно 214 наблюдений, p95 = 3 мс»). Свернуть их в одно поле
 значило бы заставить каждого читателя проверять тип значения перед чтением —
 то есть вернуть развилку, ради снятия которой форма и заводится.
+
+**Почему форма живёт в базе, а не в ``statistics_module`` (вердикт CTO,
+2026-09-05).** Первая редакция положила файл в ``statistics_module/core/``, по
+владельцу СМЫСЛА метрики. Персистентность и транспорт записей принадлежат
+``channel_routing_module/observability`` (ADR-CRM-009), и там же — единый
+нормализатор ``record_display``, который обязан ходить через эту форму. Пока
+форма лежала слоем выше, кольцо импортов было воспроизводимо:
+``observability/__init__ → observability_store → record_display →
+statistics_module/__init__ → channels/log_stats_channel → store_tap →
+observability_store`` (частично загруженный). Форма персистируемого числа
+принадлежит владельцу персистентности; ``statistics_module`` остаётся владельцем
+АГРЕГАЦИИ (та же граница, что провёл ADR-CRM-009), и ничего из этого файла ему
+не нужно. Цена перевода нормализатора на форму замерена и названа в ADR-CRM-017.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Dict, Literal, Optional
 
-from ...channel_routing_module.observability.observability_hub import (
+from ...data_schema_module import FieldMeta, SchemaBase
+from .observability_hub import (
     KIND_OBSERVATION,
     KIND_STATS,
     METRIC_GAUGE,
     STATS_AGGREGATE_KEY,
 )
-from ...channel_routing_module.observability.record_display import number_metric_identity
-from ...data_schema_module import FieldMeta, SchemaBase
 
-#: Роды числа — те же четыре, что у :class:`..core.metric_record.MetricType`.
+#: Роды числа — те же четыре, что у ``statistics_module.core.metric_record.MetricType``.
 #: Продублированы литералами намеренно: ``Literal[...]`` в аннотации Pydantic
 #: требует констант времени определения класса, а импорт ``MetricType`` сюда
-#: втянул бы весь ``metric_record`` в модуль-схему. Расхождение с живым
-#: перечислением ловит контракт-тест, а не глаз.
+#: втянул бы весь ``metric_record`` в модуль-схему — и вернул бы зависимость
+#: базы от слоя выше, ради снятия которой форма сюда и переехала.
+#:
+#: Расхождение ловит контракт-тест, а не глаз:
+#: ``statistics_module/tests/test_number_kind_contract.py`` (сверяет множества и
+#: прогоняет каждое живое значение ``MetricType`` через :meth:`NumberRecord.from_hub_record`).
+#: Файл заведён добором 2026-09-05 — до него это обещание было пустым: теста,
+#: на который ссылалась строка, не существовало.
 NumberKind = Literal["counter", "gauge", "timing", "histogram"]
+
+
+def number_metric_identity(writer: str, name: str) -> Optional[str]:
+    """Идентичность одного числа — то, что ложится в колонку ``metric`` (Task 3.1, К4).
+
+    **Одно правило на всю плоскость, в одном месте.** Строку строят ДВА
+    потребителя — колонка ``metric`` стора и ``message`` записи наблюдения, — и
+    два независимых написания «writer точка metric» разошлись бы молча: запрос
+    ``where metric='capture.drops'`` перестал бы находить строку, чей текст
+    по-прежнему читается как ``capture.drops``. Поэтому идентичность считается
+    здесь, а обе колонки берут ГОТОВОЕ значение.
+
+    **Живёт рядом с формой, а не в нормализаторе.** Правило отвечает на вопрос
+    «как зовут ЭТО ЧИСЛО», то есть принадлежит форме числа; после перевода
+    ``hub_record_to_display`` на :class:`NumberRecord` (вердикт CTO, 2026-09-05)
+    нормализатор импортирует правило отсюда. Обратный порядок замкнул бы кольцо
+    внутри пакета: ``record_display`` → ``number_record`` → ``record_display``.
+
+    **Писатель обязателен там, где он есть.** Голое ``drops`` столкнулось бы
+    между процессами: у ``camera_0`` и у ``devices`` метрика с одним именем — это
+    ДВА разных ряда, а в общем сторе они слились бы в один. Полная идентичность
+    (``capture.drops``) — та же, что несёт лист дерева
+    (``state.plugins.<writer>.<metric>``), без префикса ``plugins``: он одинаков
+    у каждой записи этого рода и поиску ничего не добавляет.
+
+    **Пусто → ``None``, а не пустая строка.** Колонка ``metric`` различает «это
+    одно число, вот его имя» и «имени нет» (агрегат окна, лог, ошибка). Пустая
+    строка была бы третьим состоянием, неотличимым в SQL от первого: она
+    попадает в ``metric = ''`` и НЕ попадает в ``metric IS NULL``, то есть
+    строка без имени тихо оседала бы в ряду по имени ``''``.
+
+    Args:
+        writer: писатель числа (плагин/компонент) — пусто, если писателя нет
+            (одиночная stats-запись менеджера).
+        name: имя метрики.
+
+    Returns:
+        ``"<writer>.<name>"`` при непустом писателе, ``name`` без него,
+        ``None`` — если имени нет вовсе.
+    """
+    name = str(name or "").strip()
+    if not name:
+        return None
+    writer = str(writer or "").strip()
+    return f"{writer}.{name}" if writer else name
 
 
 class NumberRecord(SchemaBase):
@@ -78,7 +141,12 @@ class NumberRecord(SchemaBase):
     ] = None
     aggregate: Annotated[
         Optional[Dict[str, Any]],
-        FieldMeta("Распределение", info="Агрегат окна (count/min/max/avg/p95/…); None у скаляра"),
+        # ``value is not None`` НЕ означает «это скаляр»: у ``gauge``-агрегата
+        # заполнены ОБА поля (само значение поднимается в ``value``, а окно
+        # остаётся в ``aggregate``). Правило читается в одну сторону: «есть
+        # ``aggregate`` → число пришло агрегатом окна», и ровно так его и
+        # проверяют — иначе читатель вывел бы обратное правило и потерял окно.
+        FieldMeta("Распределение", info="Агрегат окна (count/min/max/avg/p95/…); None, если числа пришли не окном"),
     ] = None
     tags: Annotated[
         Dict[str, Any],
@@ -105,14 +173,11 @@ class NumberRecord(SchemaBase):
     def metric_identity(self) -> Optional[str]:
         """Полное имя числа — то, что ложится в колонку ``metric`` стора (К4).
 
-        Считается НЕ здесь: правило живёт в
-        :func:`...channel_routing_module.observability.record_display.number_metric_identity`,
-        потому что тем же правилом пользуется нормализатор display-вида, а он
-        лежит слоем ниже и импортировать ``statistics_module`` не может (обратный
-        импорт замкнул бы кольцо ``statistics → channel_routing → statistics``).
-        Второе написание «writer точка name» разошлось бы с первым молча — и
-        разошлось бы именно на пустых значениях, где разница между ``None`` и
-        ``"capture."`` решает, найдётся ли ряд.
+        Правило — :func:`number_metric_identity`, одно на всю плоскость: тем же
+        правилом пользуется нормализатор display-вида (``record_display``), и
+        второе написание «writer точка name» разошлось бы с первым молча — именно
+        на пустых значениях, где разница между ``None`` и ``"capture."`` решает,
+        найдётся ли ряд.
         """
         return number_metric_identity(self.writer, self.name)
 
@@ -135,7 +200,12 @@ class NumberRecord(SchemaBase):
         * агрегат ОДНОЙ метрики (``{name, type, tags, …}``, как его отдаёт
           ``MetricRecord.aggregate()``) → распределение в поле ``aggregate``.
           Скалярное ``value`` у ``gauge``-агрегата поднимается в ``value``: там
-          оно и есть значение, а не статистика.
+          оно и есть значение, а не статистика. **У этого диалекта сегодня нет
+          боевого кормильца** — единственный вызывающий вне тестов,
+          ``hub_record_to_display``, приходит сюда только с ``kind`` stats или
+          observation. Ветка держится потому, что К3 требует схождения ТРЁХ
+          диалектов, а разложение снапшота на записи по метрике — вопрос
+          открытый; читать её как «живой путь» не надо.
 
         **Снапшот окна (``kind='stats'`` С маркером агрегата) — НЕ число, и
         здесь возвращается ``None``.** Он несёт 24.8 метрики в среднем (замер на

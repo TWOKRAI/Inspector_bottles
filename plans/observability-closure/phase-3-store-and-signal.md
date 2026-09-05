@@ -107,7 +107,7 @@ observation_rules, default_interval_sec, effective_tick)`):
 ### Task 3.1 — Одна числовая запись `NumberRecord`; снапшот в стор один раз и структурно (M6, M11-часть)
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
 **Goal:** число ходит одной схемой от порта до стора; в сторе — одна строка на снапшот, JSON, колонка `metric`, запрос по имени.
-**Files:** новый `statistics_module/core/number_record.py` (SchemaBase), `statistics_module/core/stats_manager.py:960-1060`,
+**Files:** новый `channel_routing_module/observability/number_record.py` (SchemaBase; спека называла `statistics_module/core/`, переехал 2026-09-05 по вердикту CTO — ADR-CRM-017), `statistics_module/core/stats_manager.py:960-1060`,
 `statistics_module/observation/observation_manager.py:380-410`, `channel_routing_module/observability/observability_hub.py:170-200`,
 `channel_routing_module/observability/record_display.py:100-330` (один нормализатор), `channel_routing_module/observability/observability_store.py`
 (миграция `user_version` +1: колонка `metric`, индекс `(metric, ts)`, backfill из JSON), `statistics_module/channels/log_stats_channel.py`
@@ -191,7 +191,7 @@ test_metric_filter_is_a_named_refusal_naming_reason_and_task` — он пини�
   `COUNT(kind='log' AND message LIKE 'metrics snapshot%') == 0` и `COUNT(kind='stats') == N`.
   Ноль здесь — подтверждающий, поэтому он засчитывается ТОЛЬКО в паре с контролем: тот же
   прогон обязан показать `kind='stats' > 0`, иначе «ноль дублей» неотличим от «снапшотов не было».
-- **К3. `NumberRecord` — одна форма числа.** `statistics_module/core/number_record.py`, `SchemaBase`:
+- **К3. `NumberRecord` — одна форма числа.** ~~`statistics_module/core/number_record.py`~~ → **`channel_routing_module/observability/number_record.py`** (правка 2026-09-05, вердикт CTO: форма персистируемого числа принадлежит владельцу персистентности; из `statistics_module` нормализатор через неё не провести — кольцо импортов, ADR-CRM-017), `SchemaBase`:
   `name, kind(counter|gauge|timing|histogram), value | aggregate, tags, unit, ts, writer`.
   Три диалекта (агрегат `MetricRecord.aggregate()`, hub-запись `metric/value/metric_type`,
   запись порта `writer/metric/value`) сходятся к ней, и адаптеры **удаляются, а не оборачиваются**.
