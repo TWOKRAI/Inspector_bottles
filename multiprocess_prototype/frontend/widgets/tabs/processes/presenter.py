@@ -33,7 +33,8 @@ from .data import (  # noqa: F401  (реэкспорт констант для �
 # корневого stdlib-логгера нет хендлеров, поэтому WARNING о расхождении конфига
 # и рантайма (см. delete_process) не попадал ни в logs/<proc>/gui.log, ни в
 # консоль — живая проверка 2026-07-26 показала пустоту в обоих местах.
-# module="gui" → logs/<proc>/gui.log плюс scope-каналы (console/system.log).
+# module="gui" → logs/<proc>/gui.log плюс каналы скоупа: INFO — messages.log,
+# WARNING+ — console/system.log (Task 3.2, Р-7(а)).
 logger = get_std_logger("gui")
 
 

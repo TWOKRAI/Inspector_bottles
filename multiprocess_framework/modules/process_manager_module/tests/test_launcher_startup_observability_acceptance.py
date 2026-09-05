@@ -103,13 +103,18 @@ def _release(shm: "shared_memory.SharedMemory") -> None:
 
 
 # ---------------------------------------------------------------------------
-# Критерий 1: launcher/system.log содержит "cleanup_stale_shm: очищено N"
+# Критерий 1: launcher/messages.log содержит "cleanup_stale_shm: очищено N"
+# (до Task 3.2 — system.log; решение Р-7(а) увело INFO в messages.log)
 # ---------------------------------------------------------------------------
 
 
 class TestLauncherShmCleanupMessageReachesAFile:
     """Акцептанс: сообщение об очистке устаревшего SHM (буквальный текст критерия
-    ``cleanup_stale_shm: очищено N``) обязано лечь в ``{log_root}/launcher/system.log``.
+    ``cleanup_stale_shm: очищено N``) обязано лечь в ``{log_root}/launcher/messages.log``.
+
+    Адрес файла сменился в Task 3.2 (решение владельца Р-7(а)): скоуп ``BUSINESS``
+    перестал писать в ``system_file``, а ``_LEVEL_DEFAULT_SCOPE`` отображает
+    ``INFO -> BUSINESS``. Литерал критерия НЕ менялся — сменился только файл.
 
     Сегодня НЕ ложится по ДВУМ независимым причинам сразу: (а) у лончера нет
     привязанного ``LoggerManager`` — записи через ``FallbackLogger`` уходят в
@@ -120,7 +125,7 @@ class TestLauncherShmCleanupMessageReachesAFile:
     из ``SystemLauncher._cleanup_shm_at_startup`` вовсе).
     """
 
-    def test_cleanup_message_with_a_number_reaches_launcher_system_log(
+    def test_cleanup_message_with_a_number_reaches_launcher_messages_log(
         self, tmp_path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _isolated_log_dir(monkeypatch, tmp_path)
@@ -137,13 +142,13 @@ class TestLauncherShmCleanupMessageReachesAFile:
             launcher._prepare_pid_registry()
             launcher._cleanup_shm_at_startup(processes_config)
 
-            log_file = tmp_path / "launcher" / "system.log"
+            log_file = tmp_path / "launcher" / "messages.log"
             assert log_file.exists(), (
-                f"launcher/system.log не создан ({tmp_path}) — записи лончера по-прежнему никуда не попадают"
+                f"launcher/messages.log не создан ({tmp_path}) — записи лончера по-прежнему никуда не попадают"
             )
             content = log_file.read_text(encoding="utf-8", errors="replace")
             assert re.search(r"cleanup_stale_shm: очищено \d+", content), (
-                "в launcher/system.log нет строки вида 'cleanup_stale_shm: очищено N' "
+                "в launcher/messages.log нет строки вида 'cleanup_stale_shm: очищено N' "
                 f"(литерал критерия). Содержимое файла:\n{content}"
             )
         finally:

@@ -123,9 +123,20 @@ class TestTheStandRecipeRaisesARealRing:
         assert section["flight"]["sink"] == RING
         routed = [name for name, body in section["scopes"].items() if RING in body["channels"]]
         assert sorted(routed) == ["BUSINESS", "SYSTEM"], "кольцо обязано быть в маршруте, иначе оно пусто"
-        for scope, defaults in (("SYSTEM", ("console", "system_file")), ("BUSINESS", ("system_file", "messages_file"))):
+        # Литералы, а не чтение дефолтов из схемы: тест, берущий ожидание из
+        # предмета проверки, согласится с любым ответом. Значения переехали в
+        # Task 3.2 вместе с решением владельца Р-7(а) — `BUSINESS` перестал
+        # писать в `system_file`, и в боевой секции инспектора его тоже больше
+        # нет. Сторож при этом остался тем же самым: ось `channels` замещающая,
+        # и он ловит АВТОРА yaml, выронившего приёмник, который выронить не
+        # хотел. Именно этим он и сработал на правке 3.2 — правильно сработал.
+        for scope, defaults in (("SYSTEM", ("console", "system_file")), ("BUSINESS", ("messages_file",))):
             missing = [ch for ch in defaults if ch not in section["scopes"][scope]["channels"]]
             assert not missing, f"ось channels ЗАМЕЩАЮЩАЯ: {scope} потерял бы {missing}"
+        assert "system_file" not in section["scopes"]["BUSINESS"]["channels"], (
+            "`system_file` вернулся в BUSINESS боевой секции — дубль "
+            "`messages.log` ⊆ `system.log`, снятый решением Р-7(а), восстановлен"
+        )
 
     def test_the_stand_recipe_end_to_end_produces_a_non_empty_dump(self, tmp_path: Path) -> None:
         """Боевая секция → живой процесс → непустой файл дампа.

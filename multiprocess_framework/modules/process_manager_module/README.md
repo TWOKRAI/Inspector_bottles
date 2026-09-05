@@ -113,7 +113,10 @@ launcher.get_stats() -> Dict    # spawner, startup, shared_resources
 
 **Журнал лаунчера (Task 1.2, ADR-PMM-029).** Записи `SystemLauncher` (и всех
 `get_std_logger`/`FallbackLogger` ГЛАВНОГО процесса, включая `spawner`) идут в
-`{база логов}/launcher/system.log`, отказы — в `launcher/errors.log` с трассой. База берётся
+`{база логов}/launcher/messages.log` (INFO) и `launcher/system.log` (WARNING+), отказы — в
+`launcher/errors.log` с трассой. Разделение — Task 3.2, решение владельца Р-7(а):
+`_LEVEL_DEFAULT_SCOPE` отображает `INFO -> BUSINESS`, а `BUSINESS` больше не пишет в
+`system_file`. База берётся
 `resolve_base_log_dir()` — тем же резолвером, что и слой L0 процессов:
 `MULTIPROCESS_LOG_DIR` → `INSPECTOR_LOG_DIR` → системный temp. Журнал поднимается ЛЕНИВО, на
 первой записи, и закрывается в `stop()`.
@@ -121,7 +124,7 @@ launcher.get_stats() -> Dict    # spawner, startup, shared_resources
 **Окно названо (ревью Task 1.2, F3): маршрут действует между первой записью и `stop()`.**
 Подъём — ровно один за жизнь лаунчера, и на успехе, и на отказе; `stop()` терминален, второй
 раз журнал не поднимается. Записи ПОСЛЕ `stop()` в файл не идут — они уходят в аварийный выход
-(stdlib напрямую, префикс `(журнал закрыт)`), и в `launcher/system.log` их искать бесполезно.
+(stdlib напрямую, префикс `(журнал закрыт)`), и в файлах `launcher/` их искать бесполезно.
 **Что именно выживает — измерено (ревью Task 1.2, Р1), а не обещано:** WARNING и ERROR доходят
 до stderr, INFO при ненастроенном stdlib отбрасывается — у ветки нет хендлеров, эффективный
 уровень корня WARNING, и запись гибнет раньше `lastResort`. Во встройке, где stdlib настроен
