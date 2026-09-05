@@ -284,6 +284,42 @@ class Dispatcher(BaseManager, ObservableMixin):
             self._record_metric("dispatcher.handler.registration.errors", tags={"key": key})
             return False
 
+    def log_registration_summary(self) -> None:
+        """
+        INFO-сводка регистрации — ОДНА строка, снимок таблицы хендлеров НА
+        МОМЕНТ ВЫЗОВА, а не «итог бута»: следующий ``register_handler()``
+        делает эту сводку устаревшей, и это ожидаемо — метод не хранит
+        прошлое значение, каждый вызов считает таблицу заново.
+
+        «Ровно один раз за процесс» — свойство ТОЧКИ ВЫЗОВА, а не этого
+        метода: флага «уже вызывалась» здесь нарочно нет (Task 3.2, К2, см.
+        ``ICommandManager.log_registration_summary`` и её докстринг у
+        ``CommandManager`` — та же семантика).
+
+        Поздняя регистрация (горячая пересборка) сводкой не покрывается —
+        о ней по-прежнему говорит построчный DEBUG у ``register_handler()``.
+        Механизм, который приносит пачку регистраций, обязан сам сказать
+        «+N/-M» (только он знает границы своей пачки) и вправе позвать эту
+        сводку после неё — в Task 3.2 это не делается.
+
+        У этого метода сегодня в проде НЕТ вызывающего: ``ProcessModule.run()``
+        зовёт сводку регистрации только у ``CommandManager`` — вердикт CTO
+        (Task 3.2, К2). ``CommandManager.register_command`` делегирует РОВНО
+        в один вызов ``self.dispatcher.register_handler`` (этого класса),
+        поэтому счётчики двух менеджеров равны по построению (стенд: 71/71,
+        93/93 на всех восьми процессах прототипа) — вторая INFO-строка с тем
+        же числом под другим существительным была бы загадкой для читателя
+        лога, а не информацией. Метод остаётся публичным контрактом класса
+        для самостоятельных владельцев ``Dispatcher`` вне ``CommandManager``
+        (например, будущий прямой потребитель модуля) — отсутствие вызова
+        из ``run()`` не значит «вызов потерян».
+        """
+        count = len(self.get_all_handlers())
+        self._log_info(
+            f"Dispatcher '{self.manager_name}' registration summary: {count} handlers",
+            module=LOG_SOURCE,
+        )
+
     def _find_handler_in_strategy(self, key: str, strategy: DispatchStrategy) -> Optional[HandlerInfo]:
         """Поиск обработчика в конкретной стратегии."""
         strategy_impl = self._strategies[strategy]

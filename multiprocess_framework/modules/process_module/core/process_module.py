@@ -1117,6 +1117,26 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # ре-синк в event_dispatcher больше не нужен — kind-router в receive()
         # диспатчит type=="command" напрямую в CommandManager.
 
+        # Task 3.2 К2 (вердикт CTO): ровно одна INFO-сводка регистрации на
+        # процесс, сразу после последней бутовой регистрации. Зовём её
+        # ТОЛЬКО у CommandManager — Dispatcher.log_registration_summary()
+        # нарочно не зовётся: register_command делегирует РОВНО в один
+        # вызов dispatcher.register_handler, счётчики равны по построению
+        # (стенд: 71/71, 93/93 на всех восьми процессах), и вторая строка
+        # с тем же числом под другим существительным была бы загадкой для
+        # читателя лога, а не информацией. Фейковый/отсутствующий
+        # command_manager в тестах — не повод падать: метод посчитан
+        # (WARNING с именем объекта), а не проглочен молча и не фатален.
+        if hasattr(self.command_manager, "log_registration_summary"):
+            self.command_manager.log_registration_summary()
+        else:
+            cm_name = getattr(self.command_manager, "manager_name", type(self.command_manager).__name__)
+            self._log_warning(
+                f"ProcessModule '{self.name}': command_manager '{cm_name}' не поддерживает "
+                "log_registration_summary() — сводка регистрации пропущена",
+                module="lifecycle",
+            )
+
         # Heartbeat (composition)
         from ..heartbeat.process_heartbeat import ProcessHeartbeat
 
