@@ -45,6 +45,7 @@
 - [Commit msg format](feedback_commit_msg_format.md) — хук терпит перенос; ruff → re-stage · [commit забирает весь индекс](feedback_commit_takes_the_whole_index.md) · [agent commit quality](feedback_agent_commit_quality.md) · [ruff сносит свежий импорт](feedback_ruff_strips_unused_import.md) — импорт и использование ОДНИМ Edit
 - [API MCP дрейфует](feedback_mcp_tool_api_drift.md) — ROUTING.md может врать · [sentrux depth непрозрачна](feedback_sentrux_depth_opaque.md) · [sentrux gate сужен](feedback_sentrux_gate_narrowed.md) — блок только циклы↑/god↑
 - [Атрибутируй источник до реза](feedback_attribute_the_source_before_cutting.md) — агенты/команды с ДВУХ уровней (.claude/ и ~/.claude/); сверять состав множеств; экономию заявлять после прогона
+- [Спасение патчем теряет untracked](feedback_a_diff_based_rescue_omits_untracked_files.md) — «патчи сохранены» умолчало о тесте на 454 строки; спасать веткой от HEAD, пересечение считать числом
 - [Dual-write разъехался по содержимому](feedback_dual_write_by_copy_destroys_the_other_side.md) — правды нет ни в одной копии; **правку вносить в обе копии отдельно, `cp` затирает молча**, diff ДО записи
 - [devseed перетирает .claude/](project_devseed_overwrites_claude_dir.md) — preserved: CLAUDE.md, modes/_stack.md, settings.local · [миграция на claude-kit](project_claude_kit_migration.md)
 
