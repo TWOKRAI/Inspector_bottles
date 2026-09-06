@@ -1,2 +1,5 @@
 - [Road lenses — what each sees](project_road_lenses_what_each_sees.md) — count_calls blind to constructors; tracemalloc peak depends on coverage core; INSTRUCTION count sees all, coverage-independent
 - [emergency_log is stderr-only](project_emergency_log_is_stderr_only.md) — validator voices via emergency_log never reach logs/; FallbackLogger buffers+drains; reload parses ×6 by design
+- [pytest shows captured output only for failures](feedback_pytest_shows_captured_output_only_for_failures.md) — 0→N warning counts across trees are display artefacts; count with log_cli on both sides
+- [Shared-tree provenance forensics](project_shared_tree_provenance_forensics.md) — pre-commit patch files + fsck WIP stashes reconstruct authorship; explicit-path staging fails inside a shared file
+- [Lock-hold claims need a lock-free control (GIL)](feedback_lock_hold_time_claims_need_a_lock_free_control_under_the_gil.md) — writer p99 identical HEAD vs deque-swap; lock-free competitor shows same tail; judge by hold time inside CS
