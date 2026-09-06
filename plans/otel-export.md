@@ -85,7 +85,7 @@ multiprocess_prototype/backend/topology/otel_export.yaml   подключаем�
 | **Дверь конфига — регистры плагина** | `OtelExportRegisters(OtelExportConfig)`: производная схемы сервиса. `endpoint` обязателен **в схеме сервиса**, в регистре — дефолт `""` (вердикт CTO, вариант (а)): фреймворк строит managed-регистр **без аргументов** (`plugin_orchestrator.py:325`), и обязательное поле означало бы отсутствие регистра вовсе. Плагин в `configure()` строит `OtelExportConfig(**reg.model_dump())` и на пустом уходит в `error` с адресом ключа | стандартная дверь плагина: ключи из blueprint → Pydantic внутри → readback → GUI-регистры → `set_config`. Секция `observability.otel_export` **отвергнута**: с closure Task 2.2 незнакомый ключ секции на L3 — отказ слоя, на файловых слоях — голос «ВНЕ КОНТРАКТА», а поле схемы без читателя во фреймворке режет страж |
 | **Счётчики — числовая плоскость** | `ctx.declare_metric(...)` + `ctx.record_metric(...)`: `received`, `exported`, `skipped_numbers`, `dropped_overflow`, `export_failed`, `resource_evicted` | не своя команда-интроспекция, а числа, которые уже видны в `introspect.telemetry`, `history_query(metric=...)`, GUI. Тождество потерь (3.4) сводится из них |
 | **Голоса — окном фреймворка** | `log_windowed` (`windowed_voice.py`, окно из `observability.voices.default_window_sec`) | свой литерал окна запрещён правилом closure «ни одного нового литерала-потолка» |
-| **Петля усиления — страж фреймворка** | `ProcessModule.subscribe_observability_tail` отказывает подписке процесса на собственный хвост (`core/process_module.py:1209`, причина названа) | свой фильтр «записи ≠ моё имя» не заводится, пока петля не предъявлена красной (Р-3) |
+| **Петля усиления — страж фреймворка** | `ProcessModule.subscribe_observability_tail` отказывает подписке процесса на собственный хвост (`core/process_module.py`, символ `subscribe_observability_tail` — причина названа) | свой фильтр «записи ≠ моё имя» не заводится, пока петля не предъявлена красной (Р-3) |
 | **SDK — лениво и с громким отказом** | импорт `opentelemetry.*` только внутри `Services/otel_export/exporter.py` при построении; отсутствие → `health.report_error` + состояние плагина `error` + поле readback `sdk: missing` с командой установки | голый `ImportError` на импорте класса глотает `class_loader` (`log.error → None`), и система об отказе не узнаёт |
 | **Команды — авто-регистрация плагина** | `commands = {"otel_export.flush": ..., "otel_export.status": ...}` | попадают в `capabilities` backend_ctl без правок; `set_config` — generic |
 | **Останов** | `shutdown(ctx)` → `force_flush(timeout)` → строка `otel flush: N дожато, M потеряно` литералом | до снятия форвардеров процессом и до останова логгера — порядок `ProcessModule.stop()` (:1149) → `_flush_observability()` (:1166) (`core/process_module.py`) |
@@ -141,7 +141,7 @@ multiprocess_prototype/backend/topology/otel_export.yaml   подключаем�
 | `trace_id` вне текста | closure Task 1.4: `extra.context.trace_id`, 32 hex W3C | выделенное поле `TraceId`, не атрибут |
 | Брокер подписки | [`observability_broker.py`](../multiprocess_framework/modules/process_manager_module/process/observability_broker.py): `subscribe_all` (:92), `_fan_out` (:234), доигрывание свежей инкарнации | экспортёр — обычный подписчик; команда `observability.tail.subscribe_all` |
 | Батч-форвардер | [`observability_wiring.py:233`](../multiprocess_framework/modules/process_module/managers/observability_wiring.py#L233) `wire_observability_forward` + [`RecordForwardChannel.push_batch`](../multiprocess_framework/modules/channel_routing_module/observability/record_forward_channel.py#L96) (:96 — **другой файл**, не `observability_wiring`) | log + stats + observation пачкой, **без фильтра по уровню**; error/critical — tap'ами с `min_level` подписчика |
-| Отказ подписки на себя | `core/process_module.py:1209` (`subscribe_observability_tail`) | предохранитель петли — уже во фреймворке |
+| Отказ подписки на себя | `core/process_module.py`, символ `subscribe_observability_tail` | предохранитель петли — уже во фреймворке |
 | Числовая плоскость | `PluginContext.declare_metric/record_metric/gauge` (`plugins/base.py:619-733`), closure Task 3.1 (`NumberRecord`, колонка `metric`) | счётчики экспортёра и их история |
 | Голоса окном | [`windowed_voice.py`](../multiprocess_framework/modules/logger_module/core/windowed_voice.py): `log_windowed` (:514) | «одна строка на окно» без своего литерала |
 | Прецедент side-effect-процесса | [`observability_sink.yaml`](../multiprocess_prototype/backend/topology/observability_sink.yaml), [`Plugins/io/telemetry_sink`](../Plugins/io/telemetry_sink/) | форма фрагмента, регистры, команды, `shutdown` с итогом |
@@ -239,7 +239,14 @@ Baseline 2026-09-05: `grep -r opentelemetry multiprocess_framework/ --include=*.
 |---|---|---|---|
 | `subscribe_observability_tail`, `stop()`, `_flush_observability`, Resource | `process_module.py` | **`core/process_module.py`** — файла по заявленному пути нет вовсе | путь |
 | `RecordForwardChannel.push_batch` | `observability_wiring.py:217-228` | **`record_forward_channel.py:96`** — другой модуль | файл |
-| `subscribe_observability_tail` | :1240 | :1209 | строка |
+| `subscribe_observability_tail` | :1240 | **символ, без номера** | строка |
+
+> **Поправка 2026-09-06.** Номер `:1209`, поставленный этой таблицей вчера, сегодня уже `:1229` —
+> closure дописала код выше по файлу. Вдобавок в Ф0 я заменил его в **двух** местах плана из четырёх
+> (строки 460 и 600 остались на `:1240`). Оба дефекта лечатся одним: у символов, живущих в файле,
+> который правит соседний трек, ссылка — **имя символа**, номер строки не ставится вовсе.
+> Остальные якоря таблицы сверены сегодня и держатся: `push_batch` :96, `stamp_observed` :113,
+> `hub_record_to_display` :210, `log_record_to_display` :390.
 | `stamp_observed` | `record_display.py:150` | :113 | строка |
 | `hub_record_to_display` | :247 | :210 | строка |
 | `log_record_to_display` | :398 | :390 | строка |
@@ -457,7 +464,7 @@ closure в полёте**. Ред. 4 писалась сегодня же и у�
 
 ### Task 2.3 — петля усиления: страж фреймворка предъявлен, свой не заводится
 **Level:** Middle+ · **Assignee:** developer · **Layer:** plugins, docs
-**Goal:** записи самого экспортёра не должны экспортироваться, иначе отказ сети кормит сам себя. Фреймворк уже отказывает процессу в подписке на собственный хвост (`process_module.py:1240`, причина «петля»); задача — **предъявить**, что это работает для нашего подписчика, а не поверить.
+**Goal:** записи самого экспортёра не должны экспортироваться, иначе отказ сети кормит сам себя. Фреймворк уже отказывает процессу в подписке на собственный хвост (`core/process_module.py`, символ `subscribe_observability_tail`, причина «петля»); задача — **предъявить**, что это работает для нашего подписчика, а не поверить.
 **Steps:** живьём: `subscribe_all` от `otel_export` → у процесса `otel_export` в журнале отказ с причиной; собственные записи экспортёра (`module=otel_export`) в файле коллектора отсутствуют при том, что в `system.log` они есть. Число исходящих попыток за 60 с при закрытом коллекторе не растёт от собственных голосов.
 **Acceptance criteria:**
 - [ ] Отказ подписки на себя предъявлен строкой журнала; записи `module=otel_export` в `otel_records.json` = 0 при ≥ 1 в файлах логов (пара).
@@ -597,7 +604,7 @@ closure в полёте**. Ред. 4 писалась сегодня же и у�
 |---|---|---|
 | **Р-1** | `Resource` в SDK привязан к `LoggerProvider`, а нужен на запись | **[x] закрыта 2026-08-11 на живом API 1.44.0**: `resource` задаётся на запись через `ReadableLogRecord(log_record, resource, instrumentation_scope, limits)`; класса `LogRecord` в публичном экспорте `_logs` нет |
 | **Р-2** | Logs SDK экспериментальный (`_logs`) | пин minor (0.2); ADR: обновление extras = прогон Ф1 заново |
-| **Р-3** | Петля усиления | страж фреймворка (`process_module.py:1240`) **предъявить** в 2.3; свой фильтр — только если петля воспроизведена |
+| **Р-3** | Петля усиления | страж фреймворка (`core/process_module.py`, символ `subscribe_observability_tail`) **предъявить** в 2.3; свой фильтр — только если петля воспроизведена |
 | **Р-4** | Объём: `INFO` с 8 процессов по IPC и HTTP, очередь источника 256 `drop_oldest` | замер 3.2 соло ×3, тождество 3.4; дефолт `INFO`, `DEBUG` — только на время проверки словаря |
 | **Р-5** | Приёмник принимает всё → приёмка фиктивна | Task 0.1: три контроля, включая семантический; выводы 4.2 ограничены списком слепых зон |
 | **Р-6** | `scope` не доезжает до экспортёра | **[x] закрыта 2026-08-11 — (б)**: требование снято ревизией ADR-LOG-005; `scope` — внутреннее понятие маршрутизации, наружу не едет; отвергнуты (а) правка display-вида, (в) оставить долгом |
