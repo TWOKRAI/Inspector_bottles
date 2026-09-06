@@ -100,5 +100,8 @@ class TestSkippedOriginCarriesTheMarkerNotABareTrue:
         assert result["skipped_origin"] == ORIGIN_STATS_SNAPSHOT, (
             f"значением обязан ехать сам маркер, а не флаг: {result.get('skipped_origin')!r}"
         )
+        # Дожать очередь ОБЯЗАТЕЛЬНО (Task 3.3): без этого «ноль строк» ниже
+        # означал бы «очередь ещё не слита», а не «строка пропущена».
+        tap.flush(timeout=2.0)
         assert store.count() == 0, "пропущенная строка не имеет права оказаться в сторе"
         store.close()

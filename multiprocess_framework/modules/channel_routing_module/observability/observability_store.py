@@ -36,7 +36,8 @@ import os
 import sqlite3
 import threading
 import time
-from typing import Any, Dict, List, Optional
+import weakref
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..._fallback import emergency_log
 from .record_display import hub_record_to_display
@@ -204,6 +205,12 @@ class ObservabilityStore:
         # Счётчик потерянных при записи строк (busy_timeout/locked) — терять можно,
         # молчать нельзя (5.20 review #3). Виден через .dropped.
         self._dropped = 0
+        # Асинхронные писатели (Task 3.3): очередь store-tap'а живёт СНАРУЖИ
+        # стора и сливается своим потоком, поэтому «записал» и «лежит в БД»
+        # разъехались во времени. Ссылки СЛАБЫЕ: стор переживает tap'ы, и
+        # сильная ссылка держала бы мёртвый воркер вместе с его потоком.
+        self._writers: List["weakref.ReferenceType[Any]"] = []
+        self._writers_lock = threading.Lock()
         if self._db_path not in (":memory:", "") and os.path.dirname(self._db_path):
             os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         # Полнотекстовый индекс (1.6): доступен не в каждой сборке SQLite, и
@@ -586,6 +593,67 @@ class ObservabilityStore:
     # ------------------------------------------------------------------
     # Запись
     # ------------------------------------------------------------------
+
+    def register_writer(self, writer: Any) -> None:
+        """Запомнить асинхронного писателя (объект с ``flush(timeout)``).
+
+        **Вызывающих в проде у этой пары НЕТ, и это намеренно — не мёртвый
+        путь.** Дожимать очередь обязан её ВЛАДЕЛЕЦ (tap на своём останове,
+        поток дренажа по такту), а не читатель: авто-дожатие на чтении
+        спрятало бы смену контракта Task 3.3 («``write()`` больше не доводит
+        строку до БД») ровно там, где её нужно видеть, и сажало бы читателя на
+        дедлайн чужой очереди. Дверь существует для тех, кто читает СВОИ ЖЕ
+        записи в том же процессе: тесты и диагностика. Не удалять как
+        неиспользуемое — у неё именно такая роль.
+
+        Кросс-процессному читателю (``history_query`` из ``backend_ctl``) она не
+        поможет ничем: чужую очередь дожать нельзя, и записи там видны с
+        задержкой до такта дренажа.
+        """
+        with self._writers_lock:
+            # Подметаем ЗДЕСЬ, а не только в ``flush_writers``: его в проде не
+            # зовёт никто, а ``config.reload`` ставит новый tap на каждый вызов —
+            # замер ревью: после подъёма 1 ссылка, после пяти reload'ов 6.
+            self._writers = [ref for ref in self._writers if ref() is not None]
+            self._writers.append(weakref.ref(writer))
+
+    def flush_writers(self, timeout: float = 2.0) -> Tuple[int, int]:
+        """Дожать очереди всех живых писателей. Возвращает суммарные ``(записано, потеряно)``.
+
+        Мёртвые ссылки подметаются здесь же: пересборка проводки
+        (``reapply_observability_store_level``) ставит новый tap вместо
+        прежнего, и список иначе рос бы на каждый ``config.reload``.
+        """
+        with self._writers_lock:
+            alive = [ref() for ref in self._writers]
+            self._writers = [ref for ref, obj in zip(self._writers, alive) if obj is not None]
+        written = lost = 0
+        for writer in alive:
+            if writer is None:
+                continue
+            try:
+                writer_written, writer_lost = writer.flush(timeout)
+            except Exception as exc:  # noqa: BLE001 — дожатие чужой очереди не роняет читателя
+                self._log_writer_flush_error(exc)
+                continue
+            written += int(writer_written)
+            lost += int(writer_lost)
+        return written, lost
+
+    def _log_writer_flush_error(self, exc: BaseException) -> None:
+        """Отказ дожатия — факт, а не тишина (ленивый импорт: цикл на пакетных ``__init__``)."""
+        try:
+            from ...logger_module.core.windowed_voice import log_windowed
+
+            log_windowed(
+                "observability_store.flush_writers",
+                None,
+                "warning",
+                "дожать очередь писателя не удалось",
+                reason=type(exc).__name__,
+            )
+        except Exception:  # nosec B110 — голос не имеет права ронять чтение
+            pass
 
     def append_records(self, records: List[Dict[str, Any]]) -> int:
         """Добавить пачку hub-записей. Возвращает число вставленных строк.

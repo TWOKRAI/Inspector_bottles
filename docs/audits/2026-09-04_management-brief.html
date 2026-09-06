@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Докладная записка руководству, 2026-09-04. Источник цифр: docs/audits/2026-09-04_honest-verdict-bus-and-niche.md.
+     Шрифты грузятся с fonts.googleapis.com; без сети страница откроется системными шрифтами. -->
+<title>Инспектор на Python</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f3f5f7;
+    --surface: #ffffff;
+    --surface-2: #e9edf1;
+    --ink: #1a2026;
+    --ink-2: #4a545e;
+    --ink-3: #7a848e;
+    --line: #d5dbe1;
+    --accent: #c97b12;
+    --accent-ink: #8a5208;
+    --accent-soft: #fbefdc;
+    --good: #2f7d4f;
+    --good-soft: #e3f1e8;
+    --bad: #b23a3a;
+    --bad-soft: #f6e3e3;
+    --warn: #8a6a12;
+    --warn-soft: #f7efd6;
+    --chart-a: #3b5266;
+    --chart-b: #c97b12;
+    --chart-c: #8fa2b3;
+    --display: "Fira Sans Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+    --body: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+    --mono: "IBM Plex Mono", Consolas, "Courier New", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151a1f;
+      --surface: #1d232a;
+      --surface-2: #262e36;
+      --ink: #e8ecf0;
+      --ink-2: #b4bcc5;
+      --ink-3: #7f8993;
+      --line: #343d47;
+      --accent: #e8a33d;
+      --accent-ink: #f0bb6a;
+      --accent-soft: #3a2c14;
+      --good: #6cc48f;
+      --good-soft: #1f3327;
+      --bad: #e07a7a;
+      --bad-soft: #3b2020;
+      --warn: #d9b34a;
+      --warn-soft: #362e15;
+      --chart-a: #7f9bb5;
+      --chart-b: #e8a33d;
+      --chart-c: #4b5c6c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151a1f;
+    --surface: #1d232a;
+    --surface-2: #262e36;
+    --ink: #e8ecf0;
+    --ink-2: #b4bcc5;
+    --ink-3: #7f8993;
+    --line: #343d47;
+    --accent: #e8a33d;
+    --accent-ink: #f0bb6a;
+    --accent-soft: #3a2c14;
+    --good: #6cc48f;
+    --good-soft: #1f3327;
+    --bad: #e07a7a;
+    --bad-soft: #3b2020;
+    --warn: #d9b34a;
+    --warn-soft: #362e15;
+    --chart-a: #7f9bb5;
+    --chart-b: #e8a33d;
+    --chart-c: #4b5c6c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1040px; margin: 0 auto; padding: 48px 24px 96px; }
+  @media (max-width: 640px) { .page { padding: 28px 16px 64px; } body { font-size: 16px; } }
+
+  header.top { display: grid; gap: 14px; padding-bottom: 28px; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  h1 {
+    font-family: var(--display); font-weight: 600; font-size: clamp(34px, 5vw, 54px);
+    line-height: 1.05; margin: 0; text-wrap: balance; letter-spacing: -.01em;
+  }
+  .lede { max-width: 68ch; font-size: 19px; color: var(--ink-2); margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  section { padding: 40px 0 8px; }
+  section + section { border-top: 1px solid var(--line); }
+  h2 {
+    font-family: var(--display); font-weight: 600; font-size: 30px; line-height: 1.15;
+    margin: 0 0 6px; text-wrap: balance;
+  }
+  .sub { color: var(--ink-2); max-width: 68ch; margin: 0 0 22px; }
+  p { max-width: 68ch; margin: 0 0 14px; }
+  ul { max-width: 68ch; padding-left: 22px; margin: 0 0 14px; }
+  li { margin-bottom: 6px; }
+  .note { font-size: 14px; color: var(--ink-3); max-width: 78ch; margin-top: 10px; }
+
+  /* big number tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 22px 0 8px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); padding: 16px 18px 14px; display: grid; gap: 4px; }
+  .tile .n {
+    font-family: var(--display); font-weight: 600; font-size: 40px; line-height: 1; letter-spacing: -.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  .tile .n small { font-size: 20px; color: var(--ink-2); font-weight: 500; margin-left: 2px; }
+  .tile .l { font-size: 14px; color: var(--ink-2); }
+  .tile.accent .n { color: var(--accent-ink); }
+
+  /* tables */
+  .tw { overflow-x: auto; margin: 18px 0 8px; border: 1px solid var(--line); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; background: var(--surface-2); }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.num { font-size: 14.5px; }
+  td.hl { color: var(--accent-ink); font-weight: 600; }
+  tr.total td { font-weight: 600; background: var(--accent-soft); }
+
+  /* pills */
+  .pill { display: inline-block; font-family: var(--mono); font-size: 12px; padding: 2px 8px; border-radius: 3px; white-space: nowrap; }
+  .pill.good { background: var(--good-soft); color: var(--good); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.neutral { background: var(--surface-2); color: var(--ink-2); }
+
+  /* frame budget bar */
+  .budget { margin: 22px 0 6px; }
+  .budget .bar { display: flex; height: 44px; width: 100%; border: 1px solid var(--line); overflow: hidden; }
+  .budget .seg { display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 13px; color: #fff; white-space: nowrap; }
+  .budget .seg.a { background: var(--chart-a); flex: 0 0 88%; }
+  .budget .seg.b { background: var(--chart-b); flex: 0 0 5%; font-size: 0; }
+  .budget .seg.c { background: var(--chart-c); flex: 0 0 7%; font-size: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 10px; font-size: 14px; color: var(--ink-2); }
+  .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -1px; }
+  .legend .la::before { background: var(--chart-a); }
+  .legend .lb::before { background: var(--chart-b); }
+  .legend .lc::before { background: var(--chart-c); }
+
+  /* headline numbers */
+  .headline { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 26px 0 0; }
+  .hd { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--accent); padding: 18px 20px 16px; display: grid; gap: 6px; }
+  .hd .big { font-family: var(--display); font-weight: 600; font-size: 52px; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .hd .big small { font-size: 22px; color: var(--ink-2); font-weight: 500; }
+  .hd .what { font-size: 16px; font-weight: 600; }
+  .hd .how { font-size: 13.5px; color: var(--ink-3); }
+
+  /* paired score bars */
+  .score .srow { display: grid; grid-template-columns: minmax(150px, 240px) 1fr 70px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .score .srow:last-of-type { border-bottom: 0; }
+  .score .sl { font-size: 14.5px; }
+  .score .sl small { display: block; color: var(--ink-3); font-size: 12.5px; }
+  .score .pair { display: grid; gap: 4px; }
+  .score .pb { position: relative; height: 14px; background: var(--surface-2); }
+  .score .pb i { position: absolute; left: 0; top: 0; bottom: 0; }
+  .score .pb.py i { background: var(--chart-b); }
+  .score .pb.cpp i { background: var(--chart-a); }
+  .score .sv { font-family: var(--mono); font-size: 13px; display: grid; gap: 4px; text-align: right; font-variant-numeric: tabular-nums; }
+  .score .sv .py { color: var(--accent-ink); }
+  .score .total { font-weight: 600; background: var(--accent-soft); margin-top: 8px; padding: 10px 8px; }
+  .score .total .big { font-family: var(--display); font-size: 26px; }
+
+  /* horizontal bar charts */
+  .chart { background: var(--surface); border: 1px solid var(--line); padding: 18px 20px 14px; margin: 20px 0 8px; }
+  .chart h3 { font-family: var(--display); font-weight: 600; font-size: 21px; margin: 0 0 4px; }
+  .chart .cap { font-size: 14px; color: var(--ink-2); margin: 0 0 14px; max-width: 78ch; }
+  .hrow { display: grid; grid-template-columns: minmax(150px, 220px) 1fr 96px; gap: 12px; align-items: center; padding: 6px 0; }
+  .hrow .hl { font-size: 14.5px; color: var(--ink); }
+  .hrow .hl small { display: block; color: var(--ink-3); font-size: 12.5px; }
+  .hrow .track { position: relative; height: 22px; background: var(--surface-2); overflow: hidden; }
+  .hrow .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--chart-a); min-width: 2px; }
+  .hrow .fill.acc { background: var(--chart-b); }
+  .hrow .fill.dim { background: var(--chart-c); }
+  .hrow .hv { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .hrow .hv small { color: var(--ink-3); font-size: 12px; }
+  .axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); margin: 4px 0 0; grid-column: 2; }
+  .axis-wrap { display: grid; grid-template-columns: minmax(150px, 220px) 1fr 96px; gap: 12px; }
+  @media (max-width: 600px) { .hrow, .axis-wrap { grid-template-columns: 110px 1fr 70px; gap: 8px; } }
+
+  /* two-column compare */
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0 6px; }
+  @media (max-width: 720px) { .cmp { grid-template-columns: 1fr; } }
+  .col { background: var(--surface); border: 1px solid var(--line); padding: 18px 20px; }
+  .col h3 { font-family: var(--display); font-weight: 600; font-size: 21px; margin: 0 0 10px; }
+  .col ul { padding-left: 20px; margin: 0; }
+  .col li { margin-bottom: 8px; font-size: 15.5px; }
+
+  /* callout */
+  .callout { background: var(--accent-soft); border-left: 4px solid var(--accent); padding: 16px 20px; margin: 22px 0 10px; max-width: 78ch; }
+  .callout p { margin: 0 0 8px; }
+  .callout p:last-child { margin: 0; }
+
+  /* ask list */
+  .ask { display: grid; gap: 10px; margin: 18px 0 6px; max-width: 78ch; }
+  .ask .row { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; background: var(--surface); border: 1px solid var(--line); padding: 14px 16px; }
+  .ask .k { font-family: var(--display); font-weight: 600; font-size: 22px; color: var(--accent-ink); line-height: 1.1; }
+  .ask .t { font-weight: 600; }
+  .ask .d { color: var(--ink-2); font-size: 15px; margin-top: 2px; }
+
+  footer { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--ink-3); max-width: 78ch; }
+  a { color: var(--accent-ink); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div class="eyebrow">Докладная записка · 4 сентября 2026 · Inspector_bottles</div>
+    <h1>Инспектор с машинным зрением на Python: что построено, чего это стоит и что просим одобрить</h1>
+    <p class="lede">Главный вопрос: «не проиграет ли Python по скорости C++?» Ответ измерен, а не предположен. <strong>Тяжёлые вычисления и так идут на скорости C, а обвязка на Python занимает меньше 5% времени кадра.</strong> Ниже цифры, где они взяты и что ещё не доказано.</p>
+    <div class="headline">
+      <div class="hd"><div class="big">5–10<small>%</small></div><div class="what">Настолько C++ был бы быстрее на одном кадре</div><div class="how">Измерено: обвязка на Python занимает 2–4 мс из 33. Остальное считает видеокарта, ей язык безразличен.</div></div>
+      <div class="hd"><div class="big">×3–5</div><div class="what">Во столько дороже та же система на C++</div><div class="how">Оценка: год одного инженера с ИИ-агентами против 12–18 месяцев команды из 3–5 человек.</div></div>
+      <div class="hd"><div class="big">1 → 0</div><div class="what">Мест, где Python реально тормозил инспекцию</div><div class="how">Было одно, обход контура. Закрыто за день: в 42 раза быстрее, без смены языка.</div></div>
+    </div>
+  </header>
+
+  <section>
+    <div class="eyebrow">Раздел 1</div>
+    <h2>Что построено за год</h2>
+    <p class="sub">Один инженер с ИИ-агентами в паре: сначала Cursor, затем Claude Code. Цифры сняты с репозитория 4 сентября 2026.</p>
+    <div class="tiles">
+      <div class="tile"><div class="n">1<small>год</small></div><div class="l">текущая история кода с 30 апреля 2026: 2974 сохранения</div></div>
+      <div class="tile"><div class="n">243<small>тыс.</small></div><div class="l">строк рабочего кода</div></div>
+      <div class="tile"><div class="n">279<small>тыс.</small></div><div class="l">строк автотестов, больше, чем кода</div></div>
+      <div class="tile"><div class="n">27</div><div class="l">модулей ядра, у каждого описание, статус и тесты</div></div>
+      <div class="tile"><div class="n">52</div><div class="l">сменных блоков обработки изображения</div></div>
+      <div class="tile"><div class="n">13</div><div class="l">сервисов: камеры, робот, привод, база, обучение</div></div>
+      <div class="tile"><div class="n">17</div><div class="l">готовых сценариев работы (рецептов)</div></div>
+      <div class="tile"><div class="n">147</div><div class="l">записанных архитектурных решений с обоснованием</div></div>
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Слой системы</th><th>Что это</th><th class="num">Файлов .py</th><th class="num">Строк .py, с тестами</th></tr></thead>
+        <tbody>
+          <tr><td>Ядро (multiprocess_framework)</td><td>процессы, общая память, маршрутизация, конфиг, состояние, телеметрия</td><td class="num">1 501</td><td class="num">318 270</td></tr>
+          <tr><td>Сервисы (Services)</td><td>камеры Hikvision, робот, привод, Modbus, база данных, обучение моделей</td><td class="num">323</td><td class="num">44 454</td></tr>
+          <tr><td>Блоки обработки (Plugins)</td><td>52 блока: захват, фильтры, сегментация, контуры, вывод на робота</td><td class="num">367</td><td class="num">33 885</td></tr>
+          <tr><td>Приложение-инспектор</td><td>интерфейс, редактор схем, рецепты, режим без экрана</td><td class="num">692</td><td class="num">128 815</td></tr>
+          <tr class="total"><td>Весь репозиторий, Python</td><td>включая скрипты и удалённое управление; 476 тыс. строк без пустых и комментариев</td><td class="num">3 163</td><td class="num">589 286</td></tr>
+          <tr><td>Документация</td><td>описания модулей, решения, планы, отчёты о приёмке</td><td class="num">1 673 файла</td><td class="num">276 779</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Счёт штатным скриптом проекта scripts/code_stats 4 сентября 2026. Размер сам по себе не достоинство: см. недостатки в разделе 5.</p>
+    <p>Это не одна программа, а конструктор. Сценарий инспекции описывается в одном текстовом файле: какая камера, какие блоки обработки, куда отправлять результат. Блоки переставляются без изменения кода, параметры меняются на ходу с пульта.</p>
+    <div class="cmp">
+      <div class="col">
+        <h3>Уже работает</h3>
+        <ul>
+          <li>Несколько процессов на всех ядрах процессора, кадры между ними без копирования</li>
+          <li>Автоматический перезапуск упавшего блока без остановки линии</li>
+          <li>Изменение настроек на ходу, без перезапуска</li>
+          <li>Встроенные журналы, телеметрия и удалённое управление по сети</li>
+          <li>Подключение промышленных устройств: робот, частотный привод, Modbus</li>
+          <li>Графический редактор схемы обработки и режим без экрана для встраиваемых устройств</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3>Качество, которое проверяется автоматически</h3>
+        <ul>
+          <li>Архитектурная проверка: 0 циклических зависимостей, 0 «монстров», оценка 7023 из 10000</li>
+          <li>Каждое заявленное свойство подтверждено тестом, который краснеет, если свойство сломать</li>
+          <li>Независимая приёмка каждой задачи отдельным агентом-ревьюером с воспроизведением</li>
+          <li>Границы между слоями системы контролируются инструментом, а не договорённостью</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Раздел 2</div>
+    <h2>Куда уходит время одного кадра</h2>
+    <p class="sub">Рабочий сценарий: веб-камера → нейросеть выделяет контуры → точки для робота. 30 кадров в секунду, на кадр есть 33 миллисекунды.</p>
+    <div class="budget">
+      <div class="bar">
+        <div class="seg a">Нейросеть на видеокарте · 25–35 мс</div>
+        <div class="seg b">шина</div>
+        <div class="seg c">обвязка</div>
+      </div>
+      <div class="legend">
+        <span class="la">Нейросеть на видеокарте: 25–35 мс, одинаково для Python и C++</span>
+        <span class="lb">Передача кадров между процессами: 1–2 мс</span>
+        <span class="lc">Обвязка на Python внутри блоков: 1–3 мс, оценка</span>
+      </div>
+    </div>
+    <div class="chart">
+      <h3>Сколько стоит передача кадра между процессами на фоне всего кадра</h3>
+      <p class="cap">Одна шкала для всех строк: 0–33 мс, столько есть на один кадр при 30 кадрах в секунду. Столбики шины почти не видны, и это сам результат.</p>
+      <div class="hrow"><div class="hl">Время на один кадр<small>30 кадров в секунду</small></div><div class="track"><div class="fill dim" style="width:100%"></div></div><div class="hv">33 мс</div></div>
+      <div class="hrow"><div class="hl">Нейросеть на видеокарте<small>одинаково для Python и C++</small></div><div class="track"><div class="fill" style="width:90%"></div></div><div class="hv">25–35 мс</div></div>
+      <div class="hrow"><div class="hl">Три передачи кадра, Python<small>измерено, худший из ста</small></div><div class="track"><div class="fill acc" style="width:5.4%"></div></div><div class="hv">1,8 мс</div></div>
+      <div class="hrow"><div class="hl">Три передачи кадра, C++<small>справочно</small></div><div class="track"><div class="fill acc" style="width:0.5%"></div></div><div class="hv">0,15 мс</div></div>
+      <div class="axis-wrap"><div></div><div class="axis"><span>0</span><span>8</span><span>16</span><span>25</span><span>33 мс</span></div><div></div></div>
+    </div>
+    <p>Одна передача кадра между процессами стоит <strong>0,3 мс в типичном случае и 0,6 мс в худшем из ста</strong>. Замер сделан на синтетическом тракте 640×480 в июле, кадр читается без копирования. Три передачи на кадр дают 1–2 мс из 33.</p>
+    <p>На C++ те же передачи стоили бы примерно 0,05 мс каждая. Разница есть, но она составляет 5–10% времени кадра и не превращается в скорость: скорость упирается в видеокарту, которая одинаково быстра из любого языка.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Раздел 3</div>
+    <h2>Где Python честно проигрывает C++, и на сколько</h2>
+    <p class="sub">Левые столбцы измерены на рабочем компьютере 4 сентября 2026. Столбец C++ это справочные величины для сравнения, не замер соседней команды.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Что стоит времени</th><th class="num">Python, замер</th><th class="num">C++, справочно</th><th class="num">Разница</th><th>Влияние на инспекцию</th></tr></thead>
+        <tbody>
+          <tr><td>Копирование кадра Full HD в общую память</td><td class="num">0,20 мс</td><td class="num">0,20 мс</td><td class="num">нет</td><td><span class="pill good">не влияет</span> одна и та же операция</td></tr>
+          <tr><td>Обработка пикселей через OpenCV и NumPy</td><td class="num">0,18 мс</td><td class="num">0,20 мс</td><td class="num">нет</td><td><span class="pill good">не влияет</span> внутри это C</td></tr>
+          <tr><td>Передача служебного сообщения между процессами</td><td class="num">0,05 мс</td><td class="num">0,003 мс</td><td class="num">15×</td><td><span class="pill good">0,2% кадра</span></td></tr>
+          <tr><td>Пауза уборки памяти при миллионе объектов</td><td class="num">4–7 мс</td><td class="num">нет</td><td class="num">—</td><td><span class="pill good">снято</span> уборка заморожена после старта</td></tr>
+          <tr><td>Цикл по пикселям на чистом Python</td><td class="num">18 мс</td><td class="num">0,2 мс</td><td class="num hl">100×</td><td><span class="pill good">закрыто</span> одна функция в системе, ускорена в 42×, см. ниже</td></tr>
+          <tr><td>Память одного процесса без нейросети</td><td class="num">37 МБ</td><td class="num">5–15 МБ</td><td class="num">3–5×</td><td><span class="pill neutral">не критично</span> на ПК</td></tr>
+          <tr><td>Память процесса с нейросетью</td><td class="num">406 МБ</td><td class="num">100–200 МБ</td><td class="num">2–3×</td><td><span class="pill warn">важно</span> для Raspberry Pi</td></tr>
+          <tr><td>Запуск процесса с нейросетью</td><td class="num">3,0 с</td><td class="num">0,3–0,5 с</td><td class="num">6–10×</td><td><span class="pill neutral">только при старте</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Единственное место, где Python проигрывает в сто раз, это цикл по пикселям, написанный на самом Python. В системе такая функция <strong>одна</strong>: обход контура для построения траектории робота. Проверено поиском по всему коду. 4 сентября она закрыта за один день в два шага, и это показывает, как в Python лечится такая проблема: без смены языка, без компилятора на машине, тем же кодом.</p>
+    <div class="chart">
+      <h3>Одна медленная функция: до и после</h3>
+      <p class="cap">Обход контура на детальном кадре 640×480 (35 тыс. точек скелета). Шаг 1: переписать структуру данных. Шаг 2: включить компилятор Numba на ту же функцию, одна строка. Оба шага прошли одни и те же 104 теста.</p>
+      <div class="hrow"><div class="hl">Было<small>обычный Python, множества и кортежи</small></div><div class="track"><div class="fill dim" style="width:100%"></div></div><div class="hv">420 мс</div></div>
+      <div class="hrow"><div class="hl">Шаг 1: целые индексы<small>тот же Python, другая структура</small></div><div class="track"><div class="fill" style="width:20.2%"></div></div><div class="hv">85 мс <small>5×</small></div></div>
+      <div class="hrow"><div class="hl">Шаг 2: + Numba<small>компилируется при первом запуске</small></div><div class="track"><div class="fill acc" style="width:2.4%"></div></div><div class="hv">10 мс <small>42×</small></div></div>
+      <div class="axis-wrap"><div></div><div class="axis"><span>0</span><span>100</span><span>200</span><span>300</span><span>420 мс</span></div><div></div></div>
+    </div>
+    <p>На кадре обычной детализации (13 тыс. точек) та же функция ушла с 154 мс до 4 мс. Всё остальное в системе уже исполняется на скорости C.</p>
+    <div class="callout">
+      <p><strong>Формула, которую можно повторять на совещании.</strong> Всё тяжёлое (обработка изображений, нейросеть) в Python и так исполняется на C и CUDA. На самом Python написана только логика соединения блоков, и она занимает меньше 5% времени кадра.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Раздел 4</div>
+    <h2>Что покупается за эти проценты</h2>
+    <p class="sub">Оценка трудозатрат для C++ приблизительная, основана на объёме построенного, а не на замере другой команды.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Критерий</th><th>Python, этот проект</th><th>C++, типичный подход</th></tr></thead>
+        <tbody>
+          <tr><td>Срок до конструктора с 17 сценариями</td><td class="num">1 год, 1 инженер + ИИ-агенты</td><td class="num">оценка: 12–18 месяцев, 3–5 человек</td></tr>
+          <tr><td>Новый сценарий инспекции</td><td>текстовый файл, без компиляции, часы</td><td>код, сборка, выпуск, дни</td></tr>
+          <tr><td>Изменение параметров на работающей линии</td><td>с пульта, без остановки</td><td>обычно перезапуск</td></tr>
+          <tr><td>Разработка с ИИ-агентами</td><td>ежедневно, агент пишет блок по описанию</td><td>ограниченно: сборка, типы, память</td></tr>
+          <tr><td>Нейросети и обучение</td><td>PyTorch, ONNX, YOLO встроены</td><td>отдельная связка через C++-API</td></tr>
+          <tr><td>Windows и Linux, Jetson, Raspberry Pi</td><td>один код, режим без экрана есть</td><td>отдельная сборка под каждую платформу</td></tr>
+          <tr><td>Кто сможет поддерживать</td><td>инженер-технолог с базовым Python</td><td>только программист C++</td></tr>
+          <tr><td>Предельная скорость</td><td>30–60 кадров/с при 3–5 процессах; сотни кадров/с и отклик быстрее 1 мс — нативный блок</td><td>выше потолок для сверхбыстрых линий</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Для сверхбыстрых участков предусмотрен выход: отдельный блок пишется на C++ или Rust и подключается к той же шине кадров, вся остальная система не переписывается. Это тот же приём, что у ROS 2 и NVIDIA DeepStream.</p>
+
+    <div class="chart score">
+      <h3>Итог по категориям: Python против C++ для этой задачи</h3>
+      <p class="cap">Шкала 0–10. Две строки скорости взяты из замеров, остальные это экспертная оценка автора и помечены так. Оранжевый: Python, этот проект. Серо-синий: C++, типичный подход.</p>
+      <div class="srow"><div class="sl">Скорость на одном кадре<small>замер</small></div><div class="pair"><div class="pb py"><i style="width:90%"></i></div><div class="pb cpp"><i style="width:100%"></i></div></div><div class="sv"><span class="py">9</span><span>10</span></div></div>
+      <div class="srow"><div class="sl">Предельная скорость линии<small>сотни кадров/с, отклик &lt; 1 мс</small></div><div class="pair"><div class="pb py"><i style="width:60%"></i></div><div class="pb cpp"><i style="width:100%"></i></div></div><div class="sv"><span class="py">6</span><span>10</span></div></div>
+      <div class="srow"><div class="sl">Скорость разработки<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:100%"></i></div><div class="pb cpp"><i style="width:30%"></i></div></div><div class="sv"><span class="py">10</span><span>3</span></div></div>
+      <div class="srow"><div class="sl">Новый сценарий без программиста<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:90%"></i></div><div class="pb cpp"><i style="width:30%"></i></div></div><div class="sv"><span class="py">9</span><span>3</span></div></div>
+      <div class="srow"><div class="sl">Работа с ИИ-агентами<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:100%"></i></div><div class="pb cpp"><i style="width:50%"></i></div></div><div class="sv"><span class="py">10</span><span>5</span></div></div>
+      <div class="srow"><div class="sl">Нейросети и обучение<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:100%"></i></div><div class="pb cpp"><i style="width:60%"></i></div></div><div class="sv"><span class="py">10</span><span>6</span></div></div>
+      <div class="srow"><div class="sl">Windows, Linux, Jetson, Raspberry<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:90%"></i></div><div class="pb cpp"><i style="width:60%"></i></div></div><div class="sv"><span class="py">9</span><span>6</span></div></div>
+      <div class="srow"><div class="sl">Кто сможет поддерживать<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:90%"></i></div><div class="pb cpp"><i style="width:40%"></i></div></div><div class="sv"><span class="py">9</span><span>4</span></div></div>
+      <div class="srow"><div class="sl">Память и время старта<small>замер</small></div><div class="pair"><div class="pb py"><i style="width:60%"></i></div><div class="pb cpp"><i style="width:100%"></i></div></div><div class="sv"><span class="py">6</span><span>10</span></div></div>
+      <div class="srow total"><div class="sl">Сумма из 90</div><div class="pair"><div class="pb py"><i style="width:87%"></i></div><div class="pb cpp"><i style="width:63%"></i></div></div><div class="sv"><span class="py big">78</span><span class="big">57</span></div></div>
+      <p class="cap" style="margin:12px 0 0">C++ выигрывает две категории: предельную скорость и память. Обе важны для сверхбыстрых линий и слабых устройств, и обе закрываются нативным блоком на той же шине, без переписывания системы. Python выигрывает всё, что связано со временем людей.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Раздел 5</div>
+    <h2>Преимущества и недостатки</h2>
+    <p class="sub">Обе колонки одинаково честные. Недостатки названы теми же словами, что и в внутреннем аудите.</p>
+    <div class="cmp">
+      <div class="col">
+        <h3>Преимущества</h3>
+        <ul>
+          <li><strong>Скорость разработки.</strong> Конструктор с 17 сценариями за год одним инженером вместо команды. Новый блок обработки агент пишет по описанию за часы.</li>
+          <li><strong>Сценарий без программиста.</strong> Инспекция описывается текстовым файлом, параметры меняются с пульта на ходу.</li>
+          <li><strong>Всё тяжёлое уже на скорости C.</strong> OpenCV, NumPy, PyTorch. Обвязка меньше 5% кадра, измерено.</li>
+          <li><strong>Промышленная обвязка встроена.</strong> Журналы, телеметрия, удалённое управление, автоперезапуск, Modbus, робот, привод.</li>
+          <li><strong>Один код для Windows, Linux, Jetson, Raspberry Pi.</strong> Режим без экрана: устройство работает, оператор смотрит с ПК.</li>
+          <li><strong>Проверяемое качество.</strong> Тестов больше, чем кода; 0 циклических зависимостей; каждое решение записано с обоснованием.</li>
+          <li><strong>Выход в C++ или Rust предусмотрен.</strong> Сверхбыстрый блок подключается к той же шине, система не переписывается.</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3>Недостатки</h3>
+        <ul>
+          <li><strong>Один носитель знаний.</strong> Систему знает один человек. Документация большая, но второй человек её ещё не проходил.</li>
+          <li><strong>Ядро больше приложения.</strong> 318 тыс. строк ядра против 129 тыс. приложения. Часть слоёв держится на дисциплине, а не на необходимости.</li>
+          <li><strong>Нет чисел с реальной линии.</strong> Замеры на синтетике и веб-камере. Проект называется «инспектор бутылок», а показывает рисующего робота.</li>
+          <li><strong>Память и старт.</strong> Процесс с нейросетью 400 МБ и 3 с старта. На Raspberry Pi это ограничивает число процессов.</li>
+          <li><strong>Потолок скорости.</strong> Сотни кадров в секунду и отклик быстрее 1 мс на чистом Python недостижимы, нужен нативный блок.</li>
+          <li><strong>Linux не проверялся автоматически.</strong> Одно известное место в общей памяти надо исправить до первого Jetson. Версия Python прибита к 3.12, на Jetson Orin стоит 3.10.</li>
+          <li><strong>Файл сценария многословен.</strong> Рабочий рецепт 529 строк, треть из них пульт. Адресация блоков по номеру ломается при вставке нового.</li>
+          <li><strong>Документации 1 673 файла.</strong> Такой объём дорого держать в актуальном состоянии одному человеку.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Раздел 6</div>
+    <h2>Как это соотносится с готовыми системами</h2>
+    <p class="sub">Почему не взять готовое и что из готового стоит перенять.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Система</th><th>В чём сильна</th><th>Почему не подходит целиком</th><th>Что перенимаем</th></tr></thead>
+        <tbody>
+          <tr><td>Cognex, Halcon</td><td>готовые инструменты, статистика годен/брак</td><td>лицензии, закрытость, не встраиваются в свои процессы</td><td>счётчики брака, галерея дефектов, отклик на сигнал линии</td></tr>
+          <tr><td>ROS 2</td><td>стандарт в робототехнике, транспорт</td><td>Windows второстепенен, диктует весь способ установки</td><td>типизированные контракты сообщений, запись и повтор</td></tr>
+          <tr><td>NVIDIA DeepStream</td><td>всё на видеокарте, очень быстро</td><td>только NVIDIA, только Linux, только Docker</td><td>данные на видеокарте между соседними блоками</td></tr>
+          <tr><td>Node-RED</td><td>удобный редактор схем</td><td>не для видеопотока, нет общей памяти</td><td>составные блоки, применение из редактора</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Ниша проекта: конструктор инспекции для обычного промышленного ПК на Windows или Linux, без Docker и лицензий, где новый сценарий собирает инженер, а не программист. Ни одна из систем выше эту задачу не решает.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Раздел 7</div>
+    <h2>Что ещё не доказано</h2>
+    <p class="sub">Честный список. Именно его закрывает следующий этап.</p>
+    <ul>
+      <li><span class="pill bad">нет</span> Числа с реальной линии: бутылок в минуту, пропущенный брак, ложные срабатывания. Замеры пока на синтетическом тракте и веб-камере.</li>
+      <li><span class="pill bad">нет</span> Второй сценарий, собранный другим человеком. Все 17 рецептов написал автор.</li>
+      <li><span class="pill warn">частично</span> Скорость измерена при 640×480 на Windows. Full HD и Linux оценены расчётом, не замером.</li>
+      <li><span class="pill warn">частично</span> Linux ещё не был в автоматической проверке. Есть одно известное место в работе с общей памятью, которое на Linux надо исправить до первого Jetson.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="eyebrow">Раздел 8</div>
+    <h2>Что просим одобрить</h2>
+    <p class="sub">Направление и один измеримый этап, после которого оценка становится не оценкой, а фактом.</p>
+    <div class="ask">
+      <div class="row"><div class="k">1</div><div><div class="t">Стенд с реальной камерой и бутылками на 6–8 недель</div><div class="d">Результат: бутылок в минуту, доля пропущенного брака, доля ложных срабатываний, видео работы. Это единственное, что закрывает вопрос «правильно ли потрачено время».</div></div></div>
+      <div class="row"><div class="k">2</div><div><div class="t">Опубликовать таблицу скорости</div><div class="d">Три разрешения, до пяти передач между процессами, Windows и Linux. Две недели параллельно со стендом. После этого спор «Python или C++» ведётся по таблице.</div></div></div>
+      <div class="row"><div class="k">3</div><div><div class="t">Проверка «второй руками»</div><div class="d">Коллега или ИИ-агент собирает новый сценарий по документации. Измеряем время до рабочего результата. Так проверяется, что это конструктор, а не одна программа.</div></div></div>
+      <div class="row"><div class="k">4</div><div><div class="t">Считать команду C++ не конкурентом, а второй линией</div><div class="d">Сверхбыстрые блоки могут писаться на C++ и подключаться к этой же шине. Одна система, два языка там, где каждый сильнее.</div></div></div>
+    </div>
+    <div class="callout">
+      <p><strong>Вывод.</strong> Выбор Python не стоил скорости там, где скорость нужна. Он купил год одного инженера вместо года команды, сценарии без программиста и разработку с ИИ-агентами. Что осталось доказать, доказывается за один этап со стендом.</p>
+    </div>
+  </section>
+
+  <footer>
+    Источники: замеры тракта июль 2026 (внутренний отчёт по фазе G, синтетический тракт 640×480, Windows); микрозамеры 4 сентября 2026 на рабочем ПК (Python 3.12, NumPy 2.4, Numba 0.67); статистика репозитория 4 сентября 2026; архитектурная оценка sentrux. Справочные значения для C++ взяты из открытых замеров библиотек iceoryx и protobuf. Оценки помечены словом «оценка».
+  </footer>
+</div>
+</body>
+</html>

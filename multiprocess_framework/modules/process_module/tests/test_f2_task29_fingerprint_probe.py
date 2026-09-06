@@ -159,6 +159,7 @@ _NAMED_AT_ITS_OWN_DEFAULT: Dict[Tuple[str, ...], List[str]] = {
     ("history", "max_age_sec"): ["history.max_age_sec"],
     ("history", "purge_interval_sec"): ["history.purge_interval_sec"],
     ("history", "db_path"): ["history.db_path"],
+    ("history", "queue_capacity"): ["history.queue_capacity"],
 }
 
 _LEAF_PATHS = _schema_leaf_paths(ObservabilityConfig)

@@ -494,6 +494,10 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             self._warn_about_idle_sinks()
             if self._buffer:
                 self._buffer.stop()
+            # Tap'ы — ДО каналов и до снятия ``is_initialized``: закрытие tap'а
+            # с очередью выпускает строку об исходе, и ей нужен живой логгер
+            # (Task 3.3, критерий 7).
+            self.close_all_taps()
             self._close_all_channels()
             self.is_initialized = False
             return True
@@ -839,6 +843,36 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         подписки пришлось бы проверять её разрушением.
         """
         return name in self._tap_sinks
+
+    def close_all_taps(self) -> int:
+        """Снять и ЗАКРЫТЬ все tap'ы. Возвращает, сколько их было. Только на ОСТАНОВЕ.
+
+        **Зачем отдельный метод, а не строчка в ``shutdown``.** Tap — механизм,
+        параллельный реестру каналов: он в реестр не попадает намеренно (чтобы
+        пережить ``reconfigure``), и потому ``_close_all_channels`` его не
+        видит. До Task 3.3 это было безвредно — ``close()`` у tap'ов не делал
+        ничего, — а с очередью и фоновым дренажем стало дырой: ни один путь
+        останова не звал ``close()`` у tap'а (греп по ``_tap_sinks`` в связке с
+        ``close``/``shutdown`` — ноль совпадений), значит очередь исчезала бы
+        молча, а строка об исходе не появлялась бы в проде НИКОГДА. Тест,
+        зовущий ``close()`` рукой, при этом оставался бы зелёным — ровно тот
+        случай, когда проверен харнесс, а не проводка.
+
+        **Место — ``shutdown``, а НЕ ``_close_all_channels``**, хотя закрытие
+        соседей живёт там: тот метод зовут ещё и ``reconfigure`` с
+        ``_rollback_to``, то есть пересборка конфига. Tap, снятый пересборкой,
+        назад не встаёт (его ставит проводка процесса, а не конфиг), и
+        ``config.reload`` тихо обрывал бы историю до перезапуска.
+
+        Порядок закрытия не важен, но закрытие соседа МОЖЕТ породить запись
+        (``StoreTapChannel.close`` выпускает строку об исходе), поэтому tap
+        снимается из словаря ДО своего ``close()`` — иначе он получил бы
+        собственный прощальный голос уже после того, как дожал очередь.
+        """
+        names = list(self._tap_sinks)
+        for name in names:
+            self.remove_tap(name)
+        return len(names)
 
     def remove_tap(self, name: str) -> bool:
         """Отключить tap по имени. Возвращает True, если он был."""

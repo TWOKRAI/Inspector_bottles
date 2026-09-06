@@ -66,6 +66,7 @@ class TestHistoryLevelReappliesLiveOnConfigReload:
                     # часть обработки команды, а не пробный сигнал теста), и без
                     # фильтра засоряли бы счётчик ПАРЫ, которую проверяет этот тест.
                     logger.info("до правки: рутина", module="probe")
+                    store.flush_writers()  # Task 3.3: дожать очередь store-tap'а ДО чтения
                     before = store.list_records(process=process.name, module="probe", severity_in=["info"])
                     assert len(before) == 1, f"порог INFO обязан пропускать INFO ДО правки: {before}"
 
@@ -83,6 +84,7 @@ class TestHistoryLevelReappliesLiveOnConfigReload:
                     # лечь в стор (вторая половина критерия приёмки, ранее не
                     # закрытая — см. ADR-PM-047).
                     logger.info("после правки: рутина", module="probe")
+                    store.flush_writers()  # Task 3.3: дожать очередь store-tap'а ДО чтения
                     after_info = store.list_records(process=process.name, module="probe", severity_in=["info"])
                     assert len(after_info) == 1, (
                         f"стор ПРОДОЛЖИЛ принимать INFO после config.reload history.level=WARNING "
@@ -91,6 +93,7 @@ class TestHistoryLevelReappliesLiveOnConfigReload:
 
                     # WARNING по-прежнему проходит — порог поднят, а не заглушен целиком.
                     logger.warning("после правки: тревога", module="probe")
+                    store.flush_writers()  # Task 3.3: дожать очередь store-tap'а ДО чтения
                     after_warning = store.list_records(process=process.name, module="probe", severity_in=["warning"])
                     assert len(after_warning) == 1, f"WARNING обязан лечь в стор при пороге WARNING: {after_warning}"
                 finally:

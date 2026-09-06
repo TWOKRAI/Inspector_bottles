@@ -76,11 +76,23 @@ class TestDefaults:
 
 class TestFromConfig:
     def test_section_values_win(self) -> None:
-        svc = _Svc({"level": "warning", "max_rows": 50, "max_age_sec": 60, "purge_interval_sec": 5})
+        svc = _Svc(
+            {"level": "warning", "max_rows": 50, "max_age_sec": 60, "purge_interval_sec": 5, "queue_capacity": 64}
+        )
 
         policy = resolve_history_policy(svc)
 
-        assert policy == {"level": "WARNING", "max_rows": 50, "max_age_sec": 60.0, "purge_interval_sec": 5.0}
+        # Task 3.3: пятый ключ секции — ёмкость очереди store-tap'а. Сверка идёт
+        # РАВЕНСТВОМ словаря целиком (а не по ключам), поэтому новый ключ обязан
+        # быть назван здесь: иначе «политика отдаёт ровно эти пять значений»
+        # перестало бы быть утверждением.
+        assert policy == {
+            "level": "WARNING",
+            "max_rows": 50,
+            "max_age_sec": 60.0,
+            "purge_interval_sec": 5.0,
+            "queue_capacity": 64,
+        }
         assert svc.warnings == [], "нормальная секция не имеет права шуметь"
 
     def test_unknown_level_falls_back_loudly(self) -> None:

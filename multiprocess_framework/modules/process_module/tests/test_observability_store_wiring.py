@@ -80,6 +80,7 @@ class TestWireStore:
         store, _ = wire_observability_store(err, None, db_path=str(tmp_path / "obs.db"))
         err.emit_error("crash-1")
         err.emit_error("crash-2", level="CRITICAL")
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         rows = store.list_records(kind="error")
         assert [r["message"] for r in rows] == ["crash-2", "crash-1"]
         assert rows[0]["severity"] == "critical"
@@ -90,6 +91,7 @@ class TestWireStore:
         log = FakeLoggerCore()
         store, _ = wire_observability_store(None, log, db_path=str(tmp_path / "obs.db"))
         log.emit_error("camera open failed", module="camera_0")
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         rows = store.list_records(kind="error")
         assert len(rows) == 1
         assert rows[0]["message"] == "camera open failed"
@@ -114,6 +116,7 @@ class TestWireStore:
         log.emit("камера не открылась", level="ERROR")
         log.emit("процесс умирает", level="CRITICAL")
 
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         rows = store.list_records(kind="error")
         assert [r["message"] for r in rows] == ["процесс умирает", "камера не открылась"], (
             "ниже ERROR в стор попадать не имеет права"
@@ -145,10 +148,15 @@ class TestDrainToStore:
 
         drain_process_observability(hub, None, store)
 
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         assert store.count(kind="log") == 1
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         assert store.count(kind="stats") == 1
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         assert store.count(kind="error") == 0
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         assert store.list_records(kind="log")[0]["message"] == "hello"
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         assert store.list_records(kind="stats")[0]["message"] == "fps"
         store.close()
 
@@ -159,6 +167,7 @@ class TestDrainToStore:
         drain_process_observability(hub, None, store)
         # Второй drain — каналы уже осушены, стор не растёт.
         drain_process_observability(hub, None, store)
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         assert store.count(kind="log") == 1
         store.close()
 
@@ -197,6 +206,7 @@ class TestExactlyOneTapOwnsTheErrorPlane:
             assert {name for _, name in taps} == {STORE_LOGGER_TAP}
             for channel, _ in log._taps.values():
                 channel.write(self._marked_record())
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             rows = store.list_records(process="camera_0")
             assert len(rows) == 1, f"маркированную запись не принял никто: {rows}"
         finally:
@@ -214,9 +224,11 @@ class TestExactlyOneTapOwnsTheErrorPlane:
             assert {name for _, name in taps} == {STORE_ERROR_TAP, STORE_LOGGER_TAP}
             for channel, _ in log._taps.values():
                 channel.write(self._marked_record())
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             assert store.list_records(process="camera_0") == [], "логгер-tap перестал пропускать маркер — будет дубль"
             for channel, _ in err._taps.values():
                 channel.write(self._marked_record())
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             assert len(store.list_records(process="camera_0")) == 1
         finally:
             unwire_observability_store(store, taps)
@@ -271,18 +283,21 @@ class TestReapplyStoreLevel:
         )
         try:
             log.emit("до правки: рутина", level="INFO")
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             before = store.list_records(process="seg", severity_in=["info"])
             assert len(before) == 1, f"порог INFO обязан пропускать INFO ДО переустановки: {before}"
 
             taps = reapply_observability_store_level(store, None, log, "seg", "WARNING")
 
             log.emit("после правки: рутина", level="INFO")
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             after_info = store.list_records(process="seg", severity_in=["info"])
             assert len(after_info) == 1, (
                 f"порог поднят до WARNING — вторая INFO-запись не имела права лечь в стор: {after_info}"
             )
 
             log.emit("после правки: тревога", level="WARNING")
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             after_warning = store.list_records(process="seg", severity_in=["warning"])
             assert len(after_warning) == 1, f"WARNING обязан лечь в стор при пороге WARNING: {after_warning}"
         finally:
@@ -297,12 +312,14 @@ class TestReapplyStoreLevel:
         )
         try:
             log.emit("до правки: рутина", level="INFO")
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             before = store.list_records(process="seg", severity_in=["info"])
             assert before == [], f"порог WARNING обязан ГЛУШИТЬ INFO ДО переустановки: {before}"
 
             taps = reapply_observability_store_level(store, None, log, "seg", "INFO")
 
             log.emit("после правки: рутина", level="INFO")
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             after = store.list_records(process="seg", severity_in=["info"])
             assert len(after) == 1, f"порог понижен до INFO — запись обязана лечь: {after}"
         finally:

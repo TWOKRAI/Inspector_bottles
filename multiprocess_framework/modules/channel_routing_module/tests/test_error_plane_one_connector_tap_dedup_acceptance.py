@@ -51,6 +51,7 @@ class TestLoggerTapDoesNotDuplicateAnAlreadyRecordedIncident:
         # её принять, как и делает сегодня. Это ДОЛЖНО оставаться верным и после
         # фикса, поэтому проверяется тут же, а не отдельным вечнозелёным тестом.
         tap.write(_log_record_dict(message="обычная диагностика, не инцидент"))
+        tap.flush(timeout=2.0)  # Task 3.3: дожать очередь перед чтением своих же строк
         after_control = store.list_records(process="camera_0")
         assert len(after_control) == 1, f"контроль сломан ещё ДО позитива: {after_control}"
 
@@ -59,6 +60,7 @@ class TestLoggerTapDoesNotDuplicateAnAlreadyRecordedIncident:
         # строка на инцидент). Сегодня StoreTapChannel.write() маркер не читает
         # и добавит вторую строку.
         tap.write(_log_record_dict(message="дубль инцидента здоровья", origin="error_manager"))
+        tap.flush(timeout=2.0)  # Task 3.3: дожать очередь перед чтением своих же строк
         rows = store.list_records(process="camera_0")
         assert len(rows) == 1, (
             f"logger-tap задублировал запись с маркером origin=error_manager в extra "

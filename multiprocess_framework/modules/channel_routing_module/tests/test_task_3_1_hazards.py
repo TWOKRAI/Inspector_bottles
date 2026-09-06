@@ -322,6 +322,7 @@ class TestNewOriginMarkerDoesNotEatItsNeighbours:
             result = tap.write(self._line("some_future_plane"))
             assert result.get("status") == "success"
             assert "skipped_origin" not in result, f"чужой маркер прочитан как наш: {result}"
+            tap.flush(timeout=2.0)  # Task 3.3: дожать очередь перед чтением своих же строк
             rows = store.list_records()
             assert len(rows) == 1, f"запись с ТРЕТЬИМ значением origin потерялась: {rows}"
             assert rows[0]["extra"]["context"] == {ORIGIN_FIELD: "some_future_plane"}
@@ -344,6 +345,11 @@ class TestNewOriginMarkerDoesNotEatItsNeighbours:
             outsider.write(self._line(ORIGIN_ERROR_MANAGER))  # остальные пропускают
             owner.write(self._line(ORIGIN_STATS_SNAPSHOT))  # снапшот не берёт НИКТО,
             outsider.write(self._line(ORIGIN_STATS_SNAPSHOT))  # включая владельца
+
+            # Дожать ОБА tap'а (Task 3.3): «ровно одна строка» ниже — утверждение
+            # и о наличии, и об отсутствии; с неслитыми очередями оно вакуумно.
+            owner.flush(timeout=2.0)
+            outsider.flush(timeout=2.0)
 
             assert store.count() == 1, (
                 f"ожидалась РОВНО одна строка (запись плоскости ошибок у её владельца), "
@@ -634,6 +640,12 @@ class TestGoldenPathOnRealObjects:
 
             inserted = store.append_records(hub.drain_stats())
             assert inserted == 1, "фикстура сама не собралась: снапшот не доехал структурной дорогой"
+
+            # Task 3.3: снять tap = дожать его очередь (``remove_tap`` зовёт
+            # ``close()`` канала). Сам объект tap'а отсюда недостижим — он
+            # живёт внутри менеджера, — и это ровно та дорога, которой обязан
+            # ходить останов в проде.
+            assert logger.remove_tap("store_tap") is True
 
             stats_rows = store.count(kind="stats")
             snapshot_logs = [

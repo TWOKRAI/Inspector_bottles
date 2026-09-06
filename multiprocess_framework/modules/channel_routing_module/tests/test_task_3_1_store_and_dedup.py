@@ -100,6 +100,7 @@ class TestK1StoreTapSkipsStatsSnapshotOrigin:
         result_marked = tap.write(marked)
 
         assert result_control.get("status") == "success", f"контроль сам не записался: {result_control}"
+        tap.flush(timeout=2.0)  # Task 3.3: без дожатия «ноль строк» ниже вакуумен
         assert store.count() == 1, (
             f"ожидалась РОВНО одна строка (контроль); snapshot-строка обязана быть пропущена "
             f"tap'ом, а не записана — фактически строк: {store.count()}, ответ на marked: {result_marked}"
@@ -154,6 +155,7 @@ class TestK1StoreTapSkipsStatsSnapshotOrigin:
             "extra": {"origin": ORIGIN_STATS_SNAPSHOT},
         }
         tap_owner.write(marked)
+        tap_owner.flush(timeout=2.0)  # Task 3.3: без дожатия «ноль строк» ниже вакуумен
         assert store.count() == 0, (
             "tap с owns_error_plane=True тоже обязан пропустить stats_snapshot — правило "
             "не завязано на владение плоскостью ошибок (К1: 'не берёт НИ ОДИН tap')"
@@ -179,6 +181,7 @@ class TestK1StoreTapSkipsStatsSnapshotOrigin:
         }
         result = tap_non_owner.write(marked_error)
         assert result.get("deduplicated") is True
+        tap_non_owner.flush(timeout=2.0)  # Task 3.3: без дожатия «ноль строк» ниже вакуумен
         assert store.count() == 0
         store.close()
 
@@ -262,6 +265,7 @@ class TestK2CountsProveDedupWithControl:
 
         inserted = store.append_records(hub.drain_stats())
         assert inserted == n, f"фикстура сама не собралась: дренаж hub'а дал {inserted}, ожидалось {n}"
+        tap.flush(timeout=2.0)  # Task 3.3: без дожатия «ноль строк» ниже вакуумен
 
         stats_count = store.count(kind="stats")
         log_rows = store.list_records(kind="log", limit=1000)

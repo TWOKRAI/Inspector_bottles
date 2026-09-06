@@ -227,8 +227,11 @@ class TestA1ThreadExceptionWritesOneErrorRecord:
             thread.start()
             _join_or_fail(thread)
 
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             assert store.count() == 1
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             assert store.count(kind="error") == 1
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             rows = [r for r in store.list_records(kind="error") if message in r["message"]]
             assert len(rows) == 1, f"ожидалась ровно одна запись с {message!r}"
             row = rows[0]
@@ -281,6 +284,7 @@ class TestA2WarningBecomesLogRecord:
                 warnings.simplefilter("always")
                 warnings.warn(text, UserWarning)
 
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             rows = [r for r in store.list_records(kind="log") if text in r["message"]]
             assert len(rows) == 1, f"ожидалась ровно одна запись с {text!r}, получено {len(rows)}"
             row = rows[0]
@@ -402,6 +406,7 @@ class TestA4UninstallStopsDelivery:
             assert hooks.installed is False
 
             before_counters = dict(hooks.counters())
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             before_store_count = store.count()
 
             message = f"after-uninstall-{uuid.uuid4().hex}"
@@ -412,6 +417,7 @@ class TestA4UninstallStopsDelivery:
             _join_or_fail(thread)
 
             assert hooks.counters() == before_counters
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             assert store.count() == before_store_count
 
             captured = capfd.readouterr()
@@ -469,6 +475,7 @@ class TestA5DoubleInstallIsIdempotent:
             thread.start()
             _join_or_fail(thread)
 
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             assert store.count(kind="error") == 1, "повторный install не должен задваивать доставку"
             assert hooks_1.counters()["thread_exceptions"] == 1
 

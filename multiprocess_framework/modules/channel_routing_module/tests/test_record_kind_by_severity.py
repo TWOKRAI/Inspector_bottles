@@ -91,7 +91,9 @@ class TestBothRoadsAgree:
         try:
             record = _log_record("INFO", "снимок метрик")
 
-            StoreTapChannel(store, process="camera_0").write(record)
+            tap = StoreTapChannel(store, process="camera_0")
+            tap.write(record)
+            tap.flush(timeout=2.0)  # Task 3.3: дожать очередь перед чтением своих же строк
             RecordForwardChannel(router=router, subscriber="gui", sender="camera_0").write(record)
 
             history = store.list_records()
@@ -110,7 +112,9 @@ class TestBothRoadsAgree:
         try:
             record = _log_record("ERROR", "упало")
 
-            StoreTapChannel(store, process="camera_0").write(record)
+            tap = StoreTapChannel(store, process="camera_0")
+            tap.write(record)
+            tap.flush(timeout=2.0)  # Task 3.3: дожать очередь перед чтением своих же строк
             RecordForwardChannel(router=router, subscriber="gui", sender="camera_0").write(record)
 
             assert store.list_records(kind="error")[0]["message"] == "упало"
