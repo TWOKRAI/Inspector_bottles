@@ -212,6 +212,13 @@ class BatchDrainWorker:
                 return {"status": "dropped", "channel": self._name, "closed": True}
             before = self._channel.dropped
             result = self._channel.write(record)
+        # ВНИМАНИЕ: голос идёт СТРОГО вне ``_intake_lock`` — и перенести его на две
+        # строки вверх, под лок, нельзя. ``threading.Lock`` не реентрантен, а голос
+        # уходит в ``logger_module``, который вправе вернуться в этот же воркер
+        # (сток, пишущий обратно, — штатный сценарий). Ревью итерации 2 (Н-4)
+        # воспроизвело: перенос под лок ВЕШАЕТ процесс на 20 с со стеком на
+        # ``with self._intake_lock``, и НИ ОДИН тест этого не ловит. Правка
+        # выглядит безобидной уборкой, а стоит молчаливого зависания логирования.
         if self._channel.dropped != before:
             self._voice_overflow()
 
@@ -446,8 +453,13 @@ class BatchDrainWorker:
 
     def totals(self) -> Tuple[int, int]:
         """``(записано, потеряно)`` — накопленные итоги за жизнь экземпляра."""
-        # Все слагаемые — ПОД ОДНИМ локом (ревью, М-4): та же дисциплина, что у
+        # Свои слагаемые — под одним локом (ревью, М-4): та же дисциплина, что у
         # ``BoundedChannel.get_info`` этажом ниже и у ``counters()`` рядом.
+        # ЧУЖОЙ счётчик ``self._channel.dropped`` читается БЕЗ лока канала, и
+        # ``_counters_lock`` его не защищает (ревью итерации 2, Н-3: прежняя
+        # редакция говорила «все слагаемые», и это было шире правды). Значение
+        # от этого не портится — счётчик монотонный, сверки идут через ``>=``,
+        # — но снимок пары может разъехаться на запись, летящую в этот момент.
         with self._counters_lock:
             lost = self._lost_sink + self._lost_closed + self._dropped_after_close + self._channel.dropped
             written = self._written
