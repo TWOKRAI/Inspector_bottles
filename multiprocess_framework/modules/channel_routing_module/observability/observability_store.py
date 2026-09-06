@@ -611,6 +611,10 @@ class ObservabilityStore:
         задержкой до такта дренажа.
         """
         with self._writers_lock:
+            # Подметаем ЗДЕСЬ, а не только в ``flush_writers``: его в проде не
+            # зовёт никто, а ``config.reload`` ставит новый tap на каждый вызов —
+            # замер ревью: после подъёма 1 ссылка, после пяти reload'ов 6.
+            self._writers = [ref for ref in self._writers if ref() is not None]
             self._writers.append(weakref.ref(writer))
 
     def flush_writers(self, timeout: float = 2.0) -> Tuple[int, int]:

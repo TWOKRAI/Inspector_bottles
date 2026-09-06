@@ -344,11 +344,15 @@ def test_a_sink_that_writes_back_into_the_worker_does_not_deadlock() -> None:
 
 
 def test_nothing_vanishes_under_concurrent_writers_and_an_immediate_close() -> None:
-    """Инвариант «принято = записано + потеряно» под конкуренцией.
+    """Инвариант «принято = записано + потеряно» на 4000 записях восьми потоков.
 
-    Восемь писателей и немедленный ``close()`` — та же форма, что у девятого
-    критерия, но на самом механизме и при живой гонке. Третьего исхода быть не
-    должно ни у одной из 4000 записей.
+    **Гонки здесь НЕТ, и докстринг это признаёт (находка ревью).** Писатели
+    дожидаются ``join``, и только потом зовётся ``close()`` — тест
+    детерминирован и стережёт учёт при конкурентной ЗАПИСИ, а не при
+    конкурентном останове. Останов посреди работы писателей проверяет
+    ``test_nothing_vanishes_when_close_arrives_while_writers_are_still_running``
+    ниже; прежняя редакция этого докстринга обещала гонку, которой в теле не
+    было, — то есть девятый критерий на конкуренции не стерёг никто.
     """
     sink = _CollectingSink()
     w = BatchDrainWorker(sink, 512, counter_name="evicted", batch_size=32, flush_interval_sec=0.01)
@@ -628,3 +632,161 @@ def _median_lock_hold(capacity: int, repeats: int = 7) -> float:
         holds.append(max(meter.holds) * 1e6)
     holds.sort()
     return holds[len(holds) // 2]
+
+
+# ---------------------------------------------------------------------------
+# Гонки, найденные ревью: окно расширяется на ЭКЗЕМПЛЯРЕ, предмет не трогается
+# ---------------------------------------------------------------------------
+
+
+def test_flush_does_not_return_before_the_batch_reached_the_sink() -> None:
+    """Б-1: ``flush()`` не имеет права сказать «дожимать нечего», пока пачка в пути.
+
+    Между «канал опустошён» и «пачка отмечена в полёте» есть зазор, в котором
+    условие ожидания видит 0 и 0. ``flush``/``flush_writers`` — ЕДИНСТВЕННАЯ
+    дверь читателя к своим же записям (на неё опираются 18 правленых тестов),
+    и дверь, умеющая соврать «пусто», возвращает ровно ту вакуумность, которую
+    эти правки снимали.
+
+    Окно расширяется задержкой в ``drain()`` ЭКЗЕМПЛЯРА канала — предмет не
+    трогается. На естественном прогоне ложь редка (2 % при
+    ``switchinterval=1e-6``, 0 из 12 000 при штатном), и сторож на везении
+    смысла не имеет.
+    """
+    sink = _CollectingSink()
+    slow_sink_delay = 0.4
+
+    class _SlowSink:
+        def append_records(self, records: List[Dict[str, Any]]) -> int:
+            time.sleep(slow_sink_delay)
+            return sink.append_records(records)
+
+    w = BatchDrainWorker(_SlowSink(), 64, counter_name="evicted", flush_interval_sec=0.02)
+    w.write(_rec(1))
+
+    original_drain = w._channel.drain
+    gate = threading.Event()
+
+    def slow_drain():
+        items = original_drain()
+        if items and not gate.is_set():
+            gate.set()
+            time.sleep(0.3)  # канал уже пуст, пачка ещё не отмечена «в полёте»
+        return items
+
+    w._channel.drain = slow_drain  # белый ящик: расширяем окно, не меняя предмет
+
+    try:
+        assert gate.wait(timeout=JOIN_DEADLINE), "поток дренажа не забрал пачку"
+        t0 = time.perf_counter()
+        written, lost = w.flush(timeout=JOIN_DEADLINE)
+        elapsed = time.perf_counter() - t0
+
+        assert (written, lost) == (1, 0), (
+            f"flush() отчитался {written}/{lost}, а запись одна — он вернулся до её доставки"
+        )
+        assert sink.flat, "flush() вернулся, а у стока пусто — «дожимать нечего» было ложью"
+        assert elapsed >= slow_sink_delay * 0.5, (
+            f"flush() вернулся за {elapsed * 1000:.1f} мс при стоке, которому нужно "
+            f"{slow_sink_delay * 1000:.0f} мс — он не дождался пачки"
+        )
+    finally:
+        w._channel.drain = original_drain
+        w.close(timeout=2.0)
+
+
+def test_a_write_racing_the_close_lands_in_exactly_one_bucket() -> None:
+    """Б-2: у записи, принятой в зазоре с ``close()``, нет третьего исхода.
+
+    ``write()`` решает «я открыт» и кладёт в канал; если между этими шагами
+    прошёл останов, запись ложится в канал ПОСЛЕ последнего ``drain()`` — её
+    нет ни в сторе, ни в ``written``, ни в ``lost``. Окно расширяется
+    задержкой в ``write()`` ЭКЗЕМПЛЯРА канала: естественным прогоном ревью не
+    поймало гонку и на 2.75 млн вызовов, а инвариант либо держится, либо нет.
+    """
+    sink = _CollectingSink()
+    w = BatchDrainWorker(sink, 64, counter_name="evicted", flush_interval_sec=5.0)
+    w.write(_rec(0))
+
+    original_write = w._channel.write
+    entered = threading.Event()
+
+    def slow_write(record):
+        entered.set()
+        time.sleep(0.4)  # расширенное окно ВНУТРИ постановки
+        return original_write(record)
+
+    w._channel.write = slow_write
+    outcome: List[Any] = []
+
+    def emitter() -> None:
+        outcome.append(w.write(_rec(999)))
+
+    t = threading.Thread(target=emitter, daemon=True)
+    t.start()
+    assert entered.wait(timeout=JOIN_DEADLINE), "эмитент не вошёл в постановку"
+
+    w.close(timeout=2.0)
+    t.join(timeout=JOIN_DEADLINE)
+    w._channel.write = original_write
+
+    assert not t.is_alive(), "поток эмитента завис на закрытии"
+    assert outcome, "эмитент не вернул ответ"
+    accepted = 2 if outcome[0].get("status") == "success" else 1
+    written, lost = w.totals()
+    assert written + lost == accepted, (
+        f"принято {accepted} (ответ эмитента {outcome[0].get('status')!r}), "
+        f"а записано+потеряно = {written}+{lost} = {written + lost}: третий исход существует. "
+        f"Осиротевшая очередь: {len(w._channel)}"
+    )
+
+
+def test_nothing_vanishes_when_close_arrives_while_writers_are_still_running() -> None:
+    """Девятый критерий ПРИ ЖИВОЙ ГОНКЕ: останов приходит, пока писатели пишут.
+
+    Сосед выше (``..._and_an_immediate_close``) дожидается писателей и только
+    потом закрывает — он детерминирован, но гонки в нём нет вовсе. Здесь
+    ``close()`` зовётся из середины работы восьми потоков.
+    """
+    sink = _CollectingSink()
+    w = BatchDrainWorker(sink, 256, counter_name="evicted", batch_size=32, flush_interval_sec=0.01)
+    threads = 8
+    per_thread = 400
+    accepted = [0] * threads
+    errors: List[str] = []
+    started = threading.Barrier(threads + 1)
+
+    def writer(tid: int) -> None:
+        try:
+            started.wait(timeout=JOIN_DEADLINE)
+            taken = 0
+            for i in range(per_thread):
+                # Считаем ПРИНЯТЫЕ ответы: после закрытия write() отвечает
+                # "dropped", и такие вызовы в инвариант не входят — воркер их
+                # учитывает своей корзиной, а не принимает.
+                if w.write({"n": tid * per_thread + i}).get("status") == "success":
+                    taken += 1
+            accepted[tid] = taken
+        except Exception as exc:
+            errors.append(repr(exc))
+
+    pool = [threading.Thread(target=writer, args=(t,), daemon=True) for t in range(threads)]
+    for t in pool:
+        t.start()
+    started.wait(timeout=JOIN_DEADLINE)
+    time.sleep(0.01)  # дать писателям войти в работу — останов приходит В СЕРЕДИНЕ
+    written, lost = w.close(timeout=3.0)
+    for t in pool:
+        t.join(timeout=JOIN_DEADLINE)
+
+    assert not errors, errors
+    assert all(not t.is_alive() for t in pool), "писательский поток завис на закрытии"
+
+    final_written, final_lost = w.totals()
+    total_accepted = sum(accepted)
+    assert final_written + final_lost >= total_accepted, (
+        f"принято {total_accepted}, учтено {final_written}+{final_lost} = {final_written + final_lost}: "
+        "часть записей исчезла молча"
+    )
+    assert len(sink.flat) == final_written, f"сток принял {len(sink.flat)}, воркер насчитал {final_written}"
+    assert len({r["n"] for r in sink.flat}) == len(sink.flat), "запись доехала до стока ДВАЖДЫ"

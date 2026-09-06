@@ -402,7 +402,16 @@ class TestCriterionKT3CounterNameIsAParameter:
         )
 
     def test_class_source_has_no_hardcoded_store_evicted_literal(self, worker_class):
-        source = inspect.getsource(worker_class)
+        """Читается ВЕСЬ модуль, а не только тело класса (правка ведущего по ревью).
+
+        ``inspect.getsource(worker_class)`` возвращал 386 строк из 499: шапку
+        модуля, константы и ``_resolve_sink`` он не видел. А шапка предмета
+        обещает «ни одного имени плоскости в этом файле нет, включая
+        докстринги — сторож читает их наравне с кодом»: обещание было ШИРЕ
+        сторожа. Приём уже применён у соседа (``test_class_module_source_has_no_
+        observability_store_import``) — здесь он применён туда же.
+        """
+        source = inspect.getsource(inspect.getmodule(worker_class))
         # достижимость: страж обязан реально читать файл класса, а не молчать по любой причине
         assert "counter_name" in source, (
             "страж не видит 'counter_name' в исходнике класса — проверка ниже была бы пустой (нечего сверять)"

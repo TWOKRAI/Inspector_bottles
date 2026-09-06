@@ -2,12 +2,15 @@
 """BatchDrainWorker — дренаж пачкой из фонового потока поверх :class:`BoundedChannel`.
 
 **Что это.** Разъём между быстрым эмитентом и медленным стоком. Эмитент зовёт
-:meth:`BatchDrainWorker.write` и платит только цену постановки в кольцевой буфер
-(≈0.3 мкс); собственный поток забирает накопленное пачками и отдаёт стоку —
+:meth:`BatchDrainWorker.write` и платит только цену постановки в кольцевой буфер;
+собственный поток забирает накопленное пачками и отдаёт стоку —
 одним вызовом на пачку, а не на запись. Задача Task 3.3 плана
 ``observability-closure``: последняя строка ``StoreTapChannel.write`` звала
 ``store.append_records([rec])`` — ``executemany`` на ОДИН ряд и ``commit`` на
-КАЖДУЮ запись, синхронно в потоке эмитента (замерено: +95…120 мкс на запись).
+КАЖДУЮ запись, синхронно в потоке эмитента. Числа «до/после» живут в ОДНОМ
+месте — ``channel_routing_module/STATUS.md``, раздел «Цена лог-записи у
+эмитента»; копия здесь разошлась бы с ним на первом же перезамере (замеров у
+этой задачи было три, и все настоящие).
 
 **Класс не знает про свой сток.** Ни класса стора наблюдаемости, ни SQLite, ни
 сети здесь нет вовсе — и это утверждение стережёт тест, читающий ИСХОДНИК этого
@@ -173,6 +176,8 @@ class BatchDrainWorker:
         self._dropped_after_close = 0
 
         self._wake = threading.Event()
+        # Приёмный лок: закрывает окно между «я ещё открыт» и «положил в канал».
+        self._intake_lock = threading.Lock()
         self._closed = False
         self._thread: Optional[threading.Thread] = None
         self._thread_lock = threading.Lock()
@@ -188,15 +193,25 @@ class BatchDrainWorker:
             Ответ ``BoundedChannel.write`` (``status``/``channel``/``dropped``)
             либо ``{"status": "dropped", ...}``, если воркер уже закрыт.
         """
-        if self._closed:
-            # Запись после останова — потеря, а не тишина: её считает
-            # ОТДЕЛЬНАЯ корзина, потому что переполнением она не является.
-            with self._counters_lock:
-                self._dropped_after_close += 1
-            return {"status": "dropped", "channel": self._name, "closed": True}
-
-        before = self._channel.dropped
-        result = self._channel.write(record)
+        # Решение «принимаю» и сама постановка — под ОДНИМ локом (ревью, Б-2).
+        # Прежняя редакция читала флаг, а клала в канал уже вне его: эмитент,
+        # вытесненный планировщиком между двумя шагами, получал ``success``, а
+        # запись ложилась в канал ПОСЛЕ последнего ``drain()`` останова — её не
+        # было ни в сторе, ни в ``written``, ни в ``lost``. Воспроизведено с
+        # расширенным окном: принято 2, записано+потеряно 1. Считать её
+        # постфактум было нельзя: на другом исходе гонки ту же запись досчитал
+        # бы ``close()`` остатком канала, и она уехала бы в потери ДВАЖДЫ.
+        # Приёмный лок берётся только на постановку (O(1) у обоих участников),
+        # поэтому цена эмитента остаётся ценой постановки.
+        with self._intake_lock:
+            if self._closed:
+                # Запись после останова — потеря, а не тишина: её считает
+                # ОТДЕЛЬНАЯ корзина, потому что переполнением она не является.
+                with self._counters_lock:
+                    self._dropped_after_close += 1
+                return {"status": "dropped", "channel": self._name, "closed": True}
+            before = self._channel.dropped
+            result = self._channel.write(record)
         if self._channel.dropped != before:
             self._voice_overflow()
 
@@ -269,11 +284,29 @@ class BatchDrainWorker:
         if items:
             self._push(items)
 
-    def _note_inflight_taken(self, count: int) -> None:
-        """Записи покинули очередь, но стоку ещё не отданы."""
+    def _take_batch(self) -> List[Dict[str, Any]]:
+        """Забрать пачку из канала И отметить её «в полёте» — ОДНОЙ секцией (ревью, Б-1).
+
+        Прежняя редакция делала это двумя шагами, и в зазоре между ними
+        ``flush()`` видел пустой канал при нулевом ``_inflight_items`` — то есть
+        «дожимать нечего» при непереданной стоку пачке. Воспроизведение с
+        расширенным окном: ``flush(timeout=5.0)`` вернул за 0.0 мс с
+        ``(0, 0)``, а запись приехала к стоку через 500 мс; естественным
+        прогоном при ``switchinterval=1e-6`` — 81 ложь на 4000 повторов (2 %).
+
+        Это важнее, чем выглядит: ``flush``/``flush_writers`` — единственная
+        дверь читателя к своим же записям, и дверь, умеющая соврать «пусто»,
+        возвращает ровно ту вакуумность, которую снимали правки тестов.
+
+        Порядок локов (``_progress`` → лок канала) тот же, что у :meth:`flush`,
+        обратного нигде нет; ``drain()`` под ним O(1).
+        """
         with self._progress:
-            self._inflight_items += count
+            items = self._channel.drain()
+            if items:
+                self._inflight_items += len(items)
             self._progress.notify_all()
+        return items
 
     def _note_inflight_done(self, count: int) -> None:
         """Судьба пачки решена (записана либо потеряна) — полёт окончен."""
@@ -291,9 +324,8 @@ class BatchDrainWorker:
             self._wake.wait(self._interval)
             self._wake.clear()
             closing = self._closed
-            items = self._channel.drain()
+            items = self._take_batch()
             if items:
-                self._note_inflight_taken(len(items))
                 try:
                     self._push(items)
                 finally:
@@ -361,7 +393,11 @@ class BatchDrainWorker:
         """Закрыть приём, дожать остаток, назвать исход. Идемпотентно."""
         with self._thread_lock:
             already = self._closed
-            self._closed = True
+            # Флаг ставится под ПРИЁМНЫМ локом (Б-2): пока он взят, ни одна
+            # запись не может пройти проверку «открыт» и лечь в канал после
+            # того, как останов уже посчитал остаток.
+            with self._intake_lock:
+                self._closed = True
             thread = self._thread
         if already:
             return self.totals()
@@ -410,9 +446,12 @@ class BatchDrainWorker:
 
     def totals(self) -> Tuple[int, int]:
         """``(записано, потеряно)`` — накопленные итоги за жизнь экземпляра."""
+        # Все слагаемые — ПОД ОДНИМ локом (ревью, М-4): та же дисциплина, что у
+        # ``BoundedChannel.get_info`` этажом ниже и у ``counters()`` рядом.
         with self._counters_lock:
-            lost = self._lost_sink + self._lost_closed + self._dropped_after_close
-        return self._written, lost + self._channel.dropped
+            lost = self._lost_sink + self._lost_closed + self._dropped_after_close + self._channel.dropped
+            written = self._written
+        return written, lost
 
     def counters(self) -> Dict[str, int]:
         """Счётчики под ИМЕНАМИ плоскости: ``counter_name`` — вытеснения."""
