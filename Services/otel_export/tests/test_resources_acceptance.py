@@ -69,7 +69,9 @@ class TestFieldMapping:
 
         assert resource.attributes["service.name"] == "camera_0"
         assert resource.attributes["service.version"] == "2.0.0+1f40ce0d.dirty"
-        assert resource.attributes["service.instance.id"] == 0
+        # `service.instance.id` больше не копия `incarnation` — вердикт CTO по О-6
+        # (2026-09-06), правка акта Task 1.2. Проверяется отдельно, литералом формы,
+        # в TestInstanceIdIsAStringAndIdentifiesTheRun ниже.
         assert resource.attributes["process.pid"] == 2692
         assert resource.attributes["inspector.recipe"] == "region_pipeline"
 
@@ -96,7 +98,9 @@ class TestFieldMapping:
         resolver = _resolver()
         resource = resolver.resolve(real_context)
         assert "service.instance.id" in resource.attributes
-        assert resource.attributes["service.instance.id"] == 0
+        # Свойство прежнее — ноль не выпадает по проверке истинности; изменилась
+        # только форма значения (вердикт CTO по О-6): составная строка вместо int.
+        assert resource.attributes["service.instance.id"].endswith(":2692:0")
 
     def test_missing_fw_version_omits_service_version_not_unknown(self, real_context: dict[str, Any]) -> None:
         """Запись без `fw_version` -> ключа `service.version` НЕТ (инвариант из interfaces.py:53-56)."""
@@ -182,3 +186,77 @@ class TestEviction:
         resolver.resolve(dict(ctx))
 
         assert resolver.evicted == 0
+
+
+class TestInstanceIdIsAStringAndIdentifiesTheRun:
+    """О-6, вердикт CTO 2026-09-06: `service.instance.id` — СТРОКА и составная.
+
+    Два отдельных свойства, и они разделены намеренно (предсказание CTO для
+    инъекционной матрицы): откат на голый `incarnation`-int обязан красить
+    **только** тест типа; тесты формы на `str()` остались бы зелёными, потому
+    что `"3" != "4"` истинно и для чисел, приведённых к строке.
+    """
+
+    def test_encoded_attribute_is_string_value_not_int(self, real_context: dict[str, Any]) -> None:
+        """У ЗАКОДИРОВАННОГО ресурса атрибут — `string_value`, литералом.
+
+        Проверяется у кодировщика OTLP, а не у Python-объекта: `Resource` хранит
+        что дали, а расходится с semconv именно провод. Доступ **по ключу, а не
+        по индексу** — `Resource.create` подмешивает `telemetry.sdk.*`, и
+        `attributes[0]` читает чужой атрибут. На этом уже ошиблась первая
+        проверка CTO, поймал он сам.
+        """
+        from opentelemetry.exporter.otlp.proto.common._internal import _encode_resource
+
+        resolver = _resolver()
+        encoded = _encode_resource(resolver.resolve(real_context))
+        found = [kv for kv in encoded.attributes if kv.key == "service.instance.id"]
+        assert len(found) == 1, f"ожидался ровно один service.instance.id, получено {len(found)}"
+        assert found[0].value.WhichOneof("value") == "string_value"
+
+    def test_restart_of_the_source_yields_a_different_id(self, real_context: dict[str, Any]) -> None:
+        """Рестарт источника -> другой id. Критерий Task 4.1."""
+        resolver = _resolver()
+        before = resolver.resolve({**real_context, "incarnation": 0})
+        after = resolver.resolve({**real_context, "incarnation": 1})
+        assert before.attributes["service.instance.id"] != after.attributes["service.instance.id"]
+
+    def test_two_hosts_yield_different_ids(self, real_context: dict[str, Any]) -> None:
+        """Два хоста -> разные id. Без этого флот устройств на одном коллекторе сливается."""
+        from Services.otel_export.resources import PooledResourceResolver
+
+        a = PooledResourceResolver(resource_pool_size=8, service_namespace="inspector", host_name="node-a").resolve(
+            real_context
+        )
+        b = PooledResourceResolver(resource_pool_size=8, service_namespace="inspector", host_name="node-b").resolve(
+            real_context
+        )
+        assert a.attributes["service.instance.id"] != b.attributes["service.instance.id"]
+
+    def test_two_launches_at_incarnation_zero_yield_different_ids(self, real_context: dict[str, Any]) -> None:
+        """ДВА ЗАПУСКА системы при `incarnation=0` -> разные id.
+
+        Это тот сторож, ради которого форма и составная. `incarnation` живёт в
+        памяти ProcessManager (`process_manager_process.py:93`) и пуст при каждом
+        старте лаунчера, поэтому форма `host:proc:incarnation` дала бы
+        `host:camera_0:0` на КАЖДОМ запуске, и два разных экземпляра склеились бы
+        в один временной ряд. Компонент запуска — `pid`.
+
+        Честный остаток, названный и здесь: если ОС переиспользует тот же `pid`
+        для того же имени с той же инкарнацией на том же хосте — id совпадёт.
+        Сужение, не устранение.
+        """
+        resolver = _resolver()
+        run_one = resolver.resolve({**real_context, "pid": 2692, "incarnation": 0})
+        run_two = resolver.resolve({**real_context, "pid": 3001, "incarnation": 0})
+        assert run_one.attributes["service.instance.id"] != run_two.attributes["service.instance.id"]
+
+    def test_a_missing_part_drops_the_attribute_entirely(self, real_context: dict[str, Any]) -> None:
+        """Нет хотя бы одной части -> атрибута НЕТ вовсе.
+
+        Полуидентификатор хуже отсутствующего: он выглядит рабочим и склеивает
+        чужие ряды молча, а отсутствие атрибута видно сразу.
+        """
+        resolver = _resolver()
+        without_pid = {k: v for k, v in real_context.items() if k != "pid"}
+        assert "service.instance.id" not in resolver.resolve(without_pid).attributes

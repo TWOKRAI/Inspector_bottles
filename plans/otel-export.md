@@ -528,11 +528,36 @@ semconv ожидает строку-идентификатор. Цена сей�
 **Files:** `Services/otel_export/resources.py`, tests
 **Steps:**
 1. Ключ пула — `(proc_name, pid, incarnation)` из `extra.context`.
-2. Semconv: `proc_name→service.name`, `fw_version→service.version`, `incarnation→service.instance.id`, `pid→process.pid`, `recipe` — свой атрибут `inspector.recipe`.
+2. Semconv: `proc_name→service.name`, `fw_version→service.version`, `pid→process.pid`, `recipe` — свой атрибут `inspector.recipe`. **`service.instance.id` СОБИРАЕТСЯ, а не копируется из `incarnation`** — вердикт CTO по О-6 (2026-09-06), правка этого акта по находке ревью Ф1. Форма `"{host}:{proc_name}:{pid}:{incarnation}"`.
 3. **`host.name`** из `socket.gethostname()` — атрибут экспортёра, не записи (IPC локален, все записи с той же машины). Без него флот устройств на одном коллекторе неразличим: `incarnation` — счётчик рестартов процесса, а не идентификатор машины. `service.namespace` — из регистра `service_namespace` (дефолт — имя приложения). `schema_url` Resource — версия semconv константой сервиса.
 4. **Отсутствующее поле пропускается**, не `"unknown"` — правило источника (`process_module.py` ~:640), экспортёр его сохраняет.
 5. Предел размера пула из конфига (`resource_pool_size`), вытеснение LRU, счётчик `resource_evicted`. Кэш `InstrumentationScope` по `module` — тем же LRU.
 6. API SDK 1.44 (Р-1, проверено живьём 2026-08-11): `ReadableLogRecord(log_record, resource, instrumentation_scope, limits)`; класса `LogRecord` в публичном экспорте `_logs` нет.
+**Правка акта по вердикту CTO (О-6, 2026-09-06) — `service.instance.id`:**
+
+Прежняя формулировка `incarnation→service.instance.id` отвергнута по двум замерам:
+- **тип:** `Resource(attributes={"service.instance.id": 3})` уезжает `int_value` — SDK не приводит,
+  semconv требует строку. Менять тип ресурсного атрибута ПОСЛЕ первой строки в приёмнике = порвать
+  все ряды, сгруппированные по инстансу;
+- **содержание:** `incarnation` живёт в памяти PM (`process_manager_process.py:93`) и **пуст при
+  каждом старте лаунчера**. Форма `"{host}:{proc}:{incarnation}"` дала бы `host:camera_0:0` на
+  каждом запуске системы — два разных экземпляра в одном ряду.
+
+Идентичности запуска в снимке нет: греп по `launch_id|session_id|run_id` в PM нашёл только
+`session_id` подписчика (`:2783`), к запуску отношения не имеющий. Поэтому компонент запуска —
+`pid`. **Честный остаток:** коллизия при переиспользовании ОС того же `pid` для того же имени с той
+же инкарнацией на том же хосте. Сужение, не устранение.
+
+Дополнительные критерии, оба зелёные:
+- [x] У **закодированного** ресурса `service.instance.id` — `WhichOneof("value") == "string_value"`,
+      доступ **по ключу, не по индексу** (`Resource.create` подмешивает `telemetry.sdk.*`; на этом
+      ошиблась первая проверка CTO, поймал он сам).
+- [x] Рестарт → другой id; два хоста → разные; **два запуска при `incarnation=0` → разные**;
+      отсутствие любой части → атрибута нет вовсе (полуидентификатор хуже отсутствующего).
+- [x] Инъекции с доказанной живостью оси: полный откат к `int` → **5** красных (среди них сторож
+      типа — условие CTO выполнено); снятие `host` → **1**, ровно межхостовый; снятие `pid` → **3**,
+      среди них межзапусковый.
+
 **Acceptance criteria:**
 - [ ] Две записи разных процессов → два разных `Resource` (литералы); у обоих один `host.name` и один `service.namespace`.
 - [ ] Запись без `fw_version` → атрибута `service.version` **нет**.

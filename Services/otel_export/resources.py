@@ -59,14 +59,43 @@ __all__ = [
 CONTEXT_TO_SEMCONV: dict[str, str] = {
     "proc_name": "service.name",
     "fw_version": "service.version",
-    "incarnation": "service.instance.id",
     "pid": "process.pid",
     "recipe": "inspector.recipe",
 }
 
-#: Ключи `extra.context`, которые забирает Resource. Всё остальное (кроме
+#: `service.instance.id` собирается, а НЕ копируется из `incarnation` — вердикт
+#: CTO по О-6 (2026-09-06), правка акта Task 1.2. Две причины, обе замерены:
+#:
+#: 1. *Тип.* `Resource(attributes={"service.instance.id": 3})` уезжает в
+#:    `int_value` — SDK не приводит, а semconv требует строку. Менять тип
+#:    ресурсного атрибута ПОСЛЕ того, как данные легли в приёмник, значит
+#:    порвать все ряды, сгруппированные по инстансу.
+#: 2. *`incarnation` не идентифицирует экземпляр между запусками.* Он живёт в
+#:    памяти ProcessManager (`process_manager_process.py:93` —
+#:    `self._incarnations: dict[str, int] = {}`) и пуст при каждом старте
+#:    лаунчера. Форма `"{host}:{proc}:{incarnation}"` дала бы `host:camera_0:0`
+#:    на КАЖДОМ запуске системы, и два разных экземпляра склеились бы в один ряд.
+#:
+#: Идентичности самого запуска в снимке нет: грепом по
+#: `launch_id|session_id|run_id` в PM нашлось только `session_id` подписчика
+#: (`:2783`), к запуску отношения не имеющий. Поэтому компонент запуска — `pid`.
+#:
+#: **Честный остаток:** коллизия остаётся, если ОС переиспользует тот же `pid`
+#: для процесса с тем же именем и той же инкарнацией на том же хосте. Это
+#: сужение, а не устранение; форма выбрана один раз до первой строки в
+#: приёмнике и дальше не меняется.
+INSTANCE_ID_PARTS = ("host", "proc_name", "pid", "incarnation")
+
+#: Ключи `extra.context`, которые ПОТРЕБЛЯЕТ Resource. Всё остальное (кроме
 #: `trace_id` и `origin`) — атрибуты записи.
-RESOURCE_CONTEXT_KEYS = frozenset(CONTEXT_TO_SEMCONV)
+#:
+#: Не равно `frozenset(CONTEXT_TO_SEMCONV)`: `incarnation` прямого имени semconv
+#: не имеет (он ушёл в составной `service.instance.id`), но Resource его
+#: потребляет, и в атрибутах записи ему делать нечего. Правка О-6 это на себе и
+#: поймала — три теста атрибутов покраснели ровно потому, что `incarnation`
+#: потёк наружу, стоило вывести множество из таблицы имён вместо списка
+#: потребляемых полей.
+RESOURCE_CONTEXT_KEYS = frozenset(CONTEXT_TO_SEMCONV) | frozenset(part for part in INSTANCE_ID_PARTS if part != "host")
 
 #: Ключ пула — **все** поля, из которых собирается `Resource`, а не подмножество.
 #:
@@ -92,7 +121,12 @@ RESOURCE_CONTEXT_KEYS = frozenset(CONTEXT_TO_SEMCONV)
 #: Ключ по всей таблице снимает межмодульную зависимость целиком. Цена нулевая:
 #: значения скалярны по построению, а на живой системе `recipe` и `fw_version`
 #: постоянны в пределах процесса — мощность ключа та же, что была.
-POOL_KEY_FIELDS = tuple(CONTEXT_TO_SEMCONV)
+#: Ключ пула — ровно то, что Resource потребляет. Выводится из
+#: :data:`RESOURCE_CONTEXT_KEYS`, а не переписывается рядом: инвариант Н-1
+#: («ключ покрывает всё, из чего собран результат») обязан держаться сам, а не
+#: за счёт того, что кто-то не забудет обновить второй список. Сортировка —
+#: чтобы ключ был воспроизводим между запусками (у frozenset порядка нет).
+POOL_KEY_FIELDS = tuple(sorted(RESOURCE_CONTEXT_KEYS))
 
 #: Версия словаря semconv, по которой собран `attributes`. Литерал, а не импорт
 #: из `opentelemetry.semconv.schemas`: пакет обязан импортироваться без extra
@@ -215,6 +249,19 @@ class PooledResourceResolver:
             if value is None:
                 continue
             attributes[semconv_name] = value
+
+        # `service.instance.id` — СТРОКА и составная (см. INSTANCE_ID_PARTS).
+        # Собирается из тех же полей, что уже разобраны выше, плюс host: если
+        # хоть одна часть отсутствует, атрибута нет вовсе — полуидентификатор
+        # хуже отсутствующего, он выглядит рабочим и склеивает чужие ряды.
+        parts = (
+            self._host_name,
+            context.get("proc_name"),
+            context.get("pid"),
+            context.get("incarnation"),
+        )
+        if all(part is not None and part != "" for part in parts):
+            attributes["service.instance.id"] = ":".join(str(part) for part in parts)
 
         # Атрибуты ЭКСПОРТЁРА — одни и те же у всех записей всех источников.
         if self._host_name:

@@ -274,6 +274,11 @@ class TestPoolKeyCoversEveryResourceField:
         довод, по которому `mapping.py` импортирует `RESOURCE_CONTEXT_KEYS`, а не
         держит свой список.
         """
-        from Services.otel_export.resources import CONTEXT_TO_SEMCONV, POOL_KEY_FIELDS
+        from Services.otel_export.resources import POOL_KEY_FIELDS, RESOURCE_CONTEXT_KEYS
 
-        assert set(POOL_KEY_FIELDS) == set(CONTEXT_TO_SEMCONV)
+        # Сравнение с ПОТРЕБЛЯЕМЫМ, а не с таблицей имён semconv: после правки О-6
+        # `incarnation` прямого имени не имеет (ушёл в составной
+        # `service.instance.id`), но Resource его потребляет — и в ключе он обязан
+        # быть. Инвариант тот же, что был: ключ покрывает всё, из чего собран
+        # результат.
+        assert set(POOL_KEY_FIELDS) == set(RESOURCE_CONTEXT_KEYS)
