@@ -1375,6 +1375,15 @@ DEFAULT_HISTORY_MAX_AGE_SEC = ObservabilityConfig().history.max_age_sec
 #: минутами), но не на каждый такт: уборка — хозяйство, а не горячий путь.
 DEFAULT_HISTORY_PURGE_INTERVAL_SEC = ObservabilityConfig().history.purge_interval_sec
 
+#: Потолок очереди записей, ждущих слива в стор (Task 3.3).
+#:
+#: Число из схемы, а не второй литерал: ``store_tap.DEFAULT_STORE_QUEUE_CAPACITY``
+#: — тот же 4096 на случай, когда tap поднимают без конфига (тест, утилита).
+#: Читается той же дорогой, что ``level``/``max_rows``, и по той же причине:
+#: плоского ключа мимо секции не заводится, иначе его пришлось бы класть в двух
+#: конструкторах ассемблера.
+DEFAULT_HISTORY_QUEUE_CAPACITY = ObservabilityConfig().history.queue_capacity
+
 _HISTORY_POLICY_ATTR = "_observability_history_policy"
 _HISTORY_PURGE_DEADLINE_ATTR = "_observability_history_purge_at"
 
@@ -1436,11 +1445,33 @@ def resolve_history_policy(svc: Any) -> Dict[str, Any]:
             f"взят дефолт {DEFAULT_HISTORY_LEVEL}",
         )
         level = DEFAULT_HISTORY_LEVEL
+    # Ёмкость очереди читается ОТДЕЛЬНО от `_number`, и это не небрежность:
+    # у ретеншена «0 и меньше» значит «предела нет» (объявленный отказ от
+    # защиты), а у очереди безлимитности не бывает вовсе — ноль там означал бы
+    # либо рост памяти без потолка, либо отказ `BoundedChannel` на подъёме
+    # процесса. Поэтому непонятое и неположительное значение здесь ГРОМКО
+    # падает на дефолт, а не проходит как есть.
+    raw_capacity = section.get("queue_capacity")
+    queue_capacity = DEFAULT_HISTORY_QUEUE_CAPACITY
+    if raw_capacity is not None:
+        try:
+            candidate = int(raw_capacity)
+        except (TypeError, ValueError):
+            candidate = 0
+        if candidate >= 1:
+            queue_capacity = candidate
+        else:
+            _process_warn(
+                svc,
+                f"[observability] {HISTORY_CONFIG_ADDRESS}.queue_capacity={raw_capacity!r} — "
+                f"очередь не бывает без потолка, взят дефолт {DEFAULT_HISTORY_QUEUE_CAPACITY}",
+            )
     return {
         "level": level,
         "max_rows": _number("max_rows", DEFAULT_HISTORY_MAX_ROWS, integer=True),
         "max_age_sec": _number("max_age_sec", DEFAULT_HISTORY_MAX_AGE_SEC, integer=False),
         "purge_interval_sec": _number("purge_interval_sec", DEFAULT_HISTORY_PURGE_INTERVAL_SEC, integer=False),
+        "queue_capacity": queue_capacity,
     }
 
 
@@ -1531,6 +1562,7 @@ def wire_observability_store(
     db_path: Optional[str] = None,
     process: str = "",
     min_level: str = "ERROR",
+    queue_capacity: int = DEFAULT_HISTORY_QUEUE_CAPACITY,
 ) -> Tuple[ObservabilityStore, list]:
     """Создать персистентный стор и повесить store-tap на менеджеры ошибок (Ф5.20a).
 
@@ -1556,6 +1588,8 @@ def wire_observability_store(
         error_manager: реальный ErrorManager (LoggerCore с add_tap).
         logger_manager: реальный LoggerManager (LoggerCore с add_tap).
         db_path: путь к SQLite-файлу стора. None → resolve_default_db_path().
+        queue_capacity: потолок очереди записей, ждущих слива в стор
+            (`observability.history.queue_capacity`, Task 3.3).
         process: имя процесса-источника (5.21 (c)) — tap проставит колонку
             ``process`` в стор-записи (иначе виден только ``module`` — имя
             источника внутри процесса).
@@ -1579,7 +1613,7 @@ def wire_observability_store(
         ``ProcessModule._wire_observability_hub``).
     """
     store = ObservabilityStore(db_path)
-    taps = _attach_store_taps(store, error_manager, logger_manager, process, min_level)
+    taps = _attach_store_taps(store, error_manager, logger_manager, process, min_level, queue_capacity)
     return store, taps
 
 
@@ -1589,6 +1623,7 @@ def _attach_store_taps(
     logger_manager: Optional[Any],
     process: str,
     min_level: str,
+    queue_capacity: int = DEFAULT_HISTORY_QUEUE_CAPACITY,
 ) -> list[Tuple[Any, str]]:
     """Повесить store-tap'ы (error+logger) на СУЩЕСТВУЮЩИЙ стор с заданным порогом.
 
@@ -1631,7 +1666,13 @@ def _attach_store_taps(
         # см. докстринг `reapply_observability_store_level` про гонку двух
         # `config.reload`.
         mgr.add_tap(
-            StoreTapChannel(store, name=tap_name, process=process, owns_error_plane=owns_error_plane),
+            StoreTapChannel(
+                store,
+                name=tap_name,
+                process=process,
+                owns_error_plane=owns_error_plane,
+                queue_capacity=queue_capacity,
+            ),
             min_level=min_level,
             name=tap_name,
         )
@@ -1646,6 +1687,7 @@ def reapply_observability_store_level(
     logger_manager: Optional[Any],
     process: str,
     min_level: str,
+    queue_capacity: int = DEFAULT_HISTORY_QUEUE_CAPACITY,
 ) -> list[Tuple[Any, str]]:
     """Переустановить ПОРОГ store-tap'ов на `config.reload`, стор не трогая.
 
@@ -1723,7 +1765,7 @@ def reapply_observability_store_level(
     """
     if store is None:
         return []
-    return _attach_store_taps(store, error_manager, logger_manager, process, min_level)
+    return _attach_store_taps(store, error_manager, logger_manager, process, min_level, queue_capacity)
 
 
 def error_plane_store_warning(process_name: str, taps: Optional[list]) -> Optional[str]:

@@ -273,6 +273,9 @@ _EXPECTED_CONFIRMED_UNDER_REAL_WIRING: frozenset = frozenset(
         ("history", "max_rows"),
         ("history", "max_age_sec"),
         ("history", "purge_interval_sec"),
+        # Task 3.3: ёмкость очереди store-tap'а — тот же путь, что у
+        # соседей по секции (политика → проводка → живой объект).
+        ("history", "queue_capacity"),
     }
 )
 

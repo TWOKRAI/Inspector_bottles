@@ -93,6 +93,7 @@ class TestHealthReportIsOneIncidentOneRow:
             result = _fire_health_report(process)
             assert result["success"] is True, result
 
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             rows = store.list_records(process="camera_0", since=ts_before - 1.0, limit=50)
             assert len(rows) == 1, (
                 f"health.report(level=ERROR) обязан дать РОВНО одну строку в сторе на один "

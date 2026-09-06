@@ -190,6 +190,7 @@ class TestCameraOpenFailureReachesTheErrorPlane:
         # camera_id=3 / device_id=7 обязаны доехать СТРУКТУРНО (context/extra записи
         # стора), а не только быть вплетены в текст f-строки, которую полнотекстовый
         # поиск найдёт, а фильтр по полю — нет.
+        store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         since_records = store.list_records(process="camera_0", since=ts_before - 1.0, limit=50)
         assert since_records, "ни одной записи в сторе по инциденту открытия камеры"
         blob = _rows_dump(since_records)

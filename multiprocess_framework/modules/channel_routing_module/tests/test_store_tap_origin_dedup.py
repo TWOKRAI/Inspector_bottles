@@ -41,6 +41,7 @@ class TestTheErrorPlaneTapKeepsWhatOthersSkip:
         tap = StoreTapChannel(store, name="tap_err", process="camera_0", owns_error_plane=True)
         try:
             tap.write(_log_record_dict(message="инцидент", origin="error_manager"))
+            tap.flush(timeout=2.0)  # Task 3.3: дожать очередь перед чтением своих же строк
             rows = store.list_records(process="camera_0")
             assert len(rows) == 1, f"tap плоскости ошибок потерял свою же запись: {rows}"
             assert rows[0]["kind"] == "error", rows[0]
@@ -53,6 +54,9 @@ class TestTheErrorPlaneTapKeepsWhatOthersSkip:
         tap = StoreTapChannel(store, name="tap_log", process="camera_0")
         try:
             result = tap.write(_log_record_dict(message="инцидент", origin="error_manager"))
+            # Task 3.3: БЕЗ этого дожатия утверждение об отсутствии стало бы
+            # вакуумным — стор пуст просто потому, что очередь ещё не слита.
+            tap.flush(timeout=2.0)
             assert store.list_records(process="camera_0") == []
             # Пропуск — успех, а не отказ, и это утверждение о СМЫСЛЕ возврата,
             # а не о счётчике: раздача tap'ам судит только факт исключения и
@@ -73,6 +77,7 @@ class TestTheErrorPlaneTapKeepsWhatOthersSkip:
         tap = StoreTapChannel(store, name="tap_log", process="camera_0")
         try:
             tap.write(_log_record_dict(message="чужой origin", origin="modbus_driver"))
+            tap.flush(timeout=2.0)  # Task 3.3
             rows = store.list_records(process="camera_0")
             assert len(rows) == 1, f"запись с чужим origin проглочена дедупом: {rows}"
             assert (rows[0].get("extra") or {}).get("origin") == "modbus_driver", rows[0]
@@ -90,6 +95,7 @@ class TestTheErrorPlaneTapKeepsWhatOthersSkip:
         tap = StoreTapChannel(store, name="tap_err", process="camera_0", owns_error_plane=True)
         try:
             tap.write(_log_record_dict(message="инцидент", origin="error_manager", context="grab_frame"))
+            tap.flush(timeout=2.0)  # Task 3.3
             row = store.list_records(process="camera_0")[0]
             assert (row.get("extra") or {}).get("origin") == "error_manager", row
         finally:

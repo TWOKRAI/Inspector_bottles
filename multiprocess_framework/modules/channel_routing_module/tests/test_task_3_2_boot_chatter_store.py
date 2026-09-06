@@ -50,7 +50,7 @@ from multiprocess_framework.modules.process_module.managers.observability_wiring
 )
 
 
-def _wired(tmp_path: Path) -> Tuple[LoggerManager, ObservabilityStore]:
+def _wired(tmp_path: Path) -> Tuple[LoggerManager, ObservabilityStore, list]:
     """Реальный LoggerManager с одним файловым каналом на все скоупы + реальный
     ObservabilityStore, повешенный tap'ом на logger_manager с порогом INFO
     (см. докстринг файла — почему именно INFO, не дефолт функции).
@@ -80,14 +80,14 @@ def _wired(tmp_path: Path) -> Tuple[LoggerManager, ObservabilityStore]:
         },
     )
     log_mgr.initialize()
-    store, _taps = wire_observability_store(
+    store, taps = wire_observability_store(
         None,
         log_mgr,
         db_path=str(tmp_path / "obs.db"),
         process="probe",
         min_level="INFO",
     )
-    return log_mgr, store
+    return log_mgr, store, taps
 
 
 class TestK1StoreNeverGetsTheHandlerRegisteredRow:
@@ -103,7 +103,7 @@ class TestK1StoreNeverGetsTheHandlerRegisteredRow:
     """
 
     def test_two_handlers_leave_zero_matching_rows_while_the_control_line_lands(self, tmp_path: Path) -> None:
-        log_mgr, store = _wired(tmp_path)
+        log_mgr, store, taps = _wired(tmp_path)
         try:
             disp = Dispatcher("probe_disp", managers={"logger": log_mgr}, config={"logger": True})
             disp.initialize()
@@ -116,6 +116,14 @@ class TestK1StoreNeverGetsTheHandlerRegisteredRow:
 
             # Контрольная строка — тот же logger_manager, тот же уровень INFO.
             log_mgr.info("control line reaches the store", module="probe")
+
+            # Task 3.3: запись в стор ушла в очередь с фоновым дренажем. Снять
+            # tap = дожать её (``remove_tap`` зовёт ``close()`` канала); сам
+            # объект tap'а отсюда недостижим — он живёт внутри менеджера.
+            # Без этого «ноль целевых строк» ниже означал бы «очередь ещё не
+            # слита», а контрольная строка не нашлась бы вовсе.
+            for mgr, tap_name in taps:
+                assert mgr.remove_tap(tap_name) is True, f"tap {tap_name} не был поставлен"
 
             recs = store.list_records(limit=1000)
             texts = [str(r.get("message", "")) for r in recs]

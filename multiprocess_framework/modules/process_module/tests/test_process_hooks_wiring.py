@@ -157,6 +157,7 @@ class TestProcessReportErrorCarriesFields:
                 hook="threading.excepthook",
             )
 
+            store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
             rows = [r for r in store.list_records(kind="error") if message in r["message"]]
             assert len(rows) == 1, f"ожидалась одна запись с {message!r}, получено {len(rows)}"
             inner = rows[0]["extra"].get("context", {})

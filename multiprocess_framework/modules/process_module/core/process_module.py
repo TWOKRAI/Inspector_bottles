@@ -593,6 +593,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                     db_path=store_settings["db_path"] or None,
                     process=self.name,
                     min_level=policy["level"],
+                    # Task 3.3: ёмкость очереди tap'а — из той же политики, что
+                    # порог и пределы ретеншена (`observability.history`).
+                    queue_capacity=policy["queue_capacity"],
                 )
                 # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
                 # Дырка в плоскости ошибок → вкладка «Ошибки» молча беднеет —

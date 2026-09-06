@@ -102,6 +102,7 @@ class _Stand:
         return ts
 
     def rows(self, since: float) -> List[Dict[str, Any]]:
+        self.store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
         return self.store.list_records(process=self.name, since=since - 1.0, limit=50)
 
     def close(self) -> None:

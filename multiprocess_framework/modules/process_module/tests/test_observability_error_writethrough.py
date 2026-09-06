@@ -85,9 +85,13 @@ def test_error_via_logger_slot_single_store_row_and_single_forward(tmp_path):
     drain_process_observability(hub, adapter, store, forwarder)
 
     # РОВНО одна запись в сторе — и это error, не задвоенный log.
+    store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
     assert store.count() == 1
+    store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
     assert store.count(kind="error") == 1
+    store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
     assert store.count(kind="log") == 0
+    store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
     rows = store.list_records(kind="error")
     assert rows[0]["message"] == "boom"
 

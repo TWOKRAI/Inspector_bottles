@@ -276,6 +276,15 @@ class ObservabilityHistoryConfig(SchemaBase):
         str,
         FieldMeta("Путь к SQLite-файлу стора (пусто — resolve_default_db_path())"),
     ] = ""
+    queue_capacity: Annotated[
+        int,
+        FieldMeta(
+            "Потолок очереди записей, ждущих слива в стор (Task 3.3); 0 и меньше — дефолт, "
+            "очереди без потолка не бывает",
+            min=0,
+            max=1_000_000,
+        ),
+    ] = 4096
 
     @field_validator("level", mode="before")
     @classmethod

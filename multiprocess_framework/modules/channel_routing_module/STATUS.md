@@ -12,6 +12,14 @@
 | Связанность | 10 | Зависит только от base_manager + dispatch_module + data_schema_module. Нет циклов |
 | Работоспособность | 9 | Все наследники мигрированы; 155 тестов зелёные |
 
+**Task 3.3 (2026-09-06):** `observability/batch_drain.py` — `BatchDrainWorker`
+(очередь + фоновый дренаж пачкой + `flush(timeout) -> (записано, потеряно)`);
+`StoreTapChannel.write()` стала асинхронной (цена у эмитента 91.8 → 1.3 мкс/запись,
+темп 678 000 зап/с, медиана трёх соло-прогонов); `close_all_taps()` в обоих путях
+останова; у `BoundedChannel` `close()` засчитывает остаток в потери, `get_info()`
+снимает все числа под одним локом, `drain()` не копирует буфер под локом.
+Каталог `channel_routing_module/observability/tests` внесён в `modules/pytest.ini`.
+
 ## Чеклист рефакторинга
 
 - [x] Этап 0: interfaces.py (IChannel, IBufferStrategy, IChannelRoutingManager)

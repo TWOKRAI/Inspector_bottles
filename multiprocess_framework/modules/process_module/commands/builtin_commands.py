@@ -2242,6 +2242,11 @@ class BuiltinCommands:
                             _logger,
                             getattr(svc, "name", ""),
                             new_history_policy["level"],
+                            # Task 3.3: НОВЫЕ tap'ы создаются здесь же, и без
+                            # ёмкости из той же политики они молча вернулись бы
+                            # к дефолту — ручка `queue_capacity` действовала бы
+                            # только до первого `config.reload`.
+                            new_history_policy["queue_capacity"],
                         )
                     svc._observability_history_policy = new_history_policy
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}

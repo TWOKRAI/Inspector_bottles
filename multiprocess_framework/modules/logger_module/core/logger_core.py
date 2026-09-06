@@ -500,6 +500,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # на ГЛАВНОЙ плоскости — поймано тестом. Повтор защищён флагом.
             self._warn_about_idle_sinks()
 
+            # Task 3.3: tap'ы закрываются ЗДЕСЬ, а не в базе, потому что этот
+            # shutdown — полный override и базовый не вызывается вовсе. Store-tap
+            # висит на ДВУХ наследниках LoggerCore (LoggerManager и ErrorManager),
+            # и с очередью внутри его закрытие перестало быть no-op: неснятый tap
+            # унёс бы накопленное молча. Порядок — до закрытия каналов: строка
+            # `store flush: N записано, M потеряно` ещё должна найти приёмник.
+            self.close_all_taps()
+
             for channel in self._channel_registry.clear():
                 try:
                     channel.close()

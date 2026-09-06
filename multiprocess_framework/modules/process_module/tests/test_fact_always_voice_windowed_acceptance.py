@@ -397,6 +397,7 @@ def test_one_incident_gives_exactly_one_observability_store_row(real_process_wit
 
     state.report_error(HealthSelfTestError("single-incident"), context="grab_frame")
 
+    store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
     rows = store.list_records(limit=100)
     assert len(rows) == 1, (
         f"один инцидент обязан дать ОДНУ строку в сторе, получено {len(rows)}: "
@@ -418,6 +419,7 @@ def test_the_surviving_store_row_carries_the_error_manager_origin_marker(real_pr
 
     state.report_error(HealthSelfTestError("single-incident"), context="grab_frame")
 
+    store.flush_writers()  # Task 3.3: очередь store-tap'а дожать ДО чтения (write() больше не синхронна)
     rows = store.list_records(limit=100)
     markers = [(r.get("extra") or {}).get("origin") for r in rows]
     assert "error_manager" in markers, (
