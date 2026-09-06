@@ -216,3 +216,64 @@ class TestResolverHazards:
         """Пул размера 0 вытесняет каждую запись: счётчик вытеснения стал бы счётчиком вызовов."""
         with pytest.raises(ValueError, match="resource_pool_size"):
             PooledResourceResolver(resource_pool_size=0)
+
+
+class TestPoolKeyCoversEveryResourceField:
+    """Н-1 ревью Ф1: ключ пула обязан покрывать ВСЕ поля, из которых собран Resource.
+
+    Класс дефекта — не «кэш промахнулся», а «кэш попал, куда не следовало»: при
+    ключе из подмножества полей две записи с разными `recipe`/`fw_version`
+    получают ОДИН `Resource`, и наружу уезжают значения первой. Ни один сторож
+    этого не видит по построению: счётчик вытеснения молчит (вытеснения не было),
+    объект тот же — что и является замыслом кэша.
+
+    Отдельно опасно тем, что до правки корректность держалась на инварианте
+    ЧУЖОГО модуля: `_build_resource` собирает базовый контекст один раз, поэтому
+    `recipe` при той же тройке де-факто не менялся. Инвариант нигде не записан,
+    а рецепт в приложении переключается в рантайме.
+    """
+
+    def test_same_triple_but_different_recipe_gets_its_own_resource(self) -> None:
+        """Тройка та же, `recipe` другой -> обязан быть ДРУГОЙ Resource."""
+        from Services.otel_export.resources import PooledResourceResolver
+
+        resolver = PooledResourceResolver(resource_pool_size=8, service_namespace="inspector")
+        base = {"proc_name": "camera_0", "pid": 1, "incarnation": 0}
+        first = resolver.resolve({**base, "fw_version": "2.0.0", "recipe": "A"})
+        second = resolver.resolve({**base, "fw_version": "9.9.9", "recipe": "B"})
+
+        assert first is not second
+        # Литералы, а не сравнение с входом: тест, выводящий ожидание из предмета,
+        # согласится и с подменой.
+        assert second.attributes["inspector.recipe"] == "B"
+        assert second.attributes["service.version"] == "9.9.9"
+        assert first.attributes["inspector.recipe"] == "A"
+        assert first.attributes["service.version"] == "2.0.0"
+
+    def test_two_sources_without_any_key_field_are_not_glued(self) -> None:
+        """Парный случай: ключевых полей нет вовсе — источники всё равно разные.
+
+        До правки оба давали ключ `(None, None, None)` и склеивались в один
+        Resource. Пара нужна, чтобы правка не свелась к «добавили recipe в ключ»:
+        свойство в том, что ключ покрывает таблицу целиком, а не в конкретном поле.
+        """
+        from Services.otel_export.resources import PooledResourceResolver
+
+        resolver = PooledResourceResolver(resource_pool_size=8, service_namespace="inspector")
+        first = resolver.resolve({"recipe": "A", "fw_version": "1.0"})
+        second = resolver.resolve({"recipe": "B", "fw_version": "2.0"})
+
+        assert first is not second
+        assert second.attributes["inspector.recipe"] == "B"
+
+    def test_the_key_is_the_semconv_table_itself_not_a_second_copy(self) -> None:
+        """Ключ выведен из таблицы, а не переписан рядом с ней.
+
+        Вторая копия списка полей разъехалась бы с таблицей на первой же правке —
+        молча, потому что обе остались бы «правильными» каждая по себе. Это тот же
+        довод, по которому `mapping.py` импортирует `RESOURCE_CONTEXT_KEYS`, а не
+        держит свой список.
+        """
+        from Services.otel_export.resources import CONTEXT_TO_SEMCONV, POOL_KEY_FIELDS
+
+        assert set(POOL_KEY_FIELDS) == set(CONTEXT_TO_SEMCONV)
