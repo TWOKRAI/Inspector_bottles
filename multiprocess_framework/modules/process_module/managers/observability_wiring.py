@@ -1558,9 +1558,15 @@ def sweep_observability_history(svc: Any, now: Optional[float] = None) -> Option
     Свести их в одну строку значило бы построить сторожа, который отвечает за вызов,
     а не за охват.
 
-    Голос стоит ЗА пределами ``try`` вокруг ``purge``: попади он внутрь, отказ самого
-    голоса был бы доложен как «уборка истории не удалась» — то есть механизм врал бы
-    о соседе.
+    **Отказ голоса не имеет права выглядеть отказом уборки — и для этого нужны ДВА
+    предохранителя, а не один.** Голос стоит за пределами ``try`` вокруг ``purge``
+    (иначе сломанный логгер докладывался бы как «уборка истории не удалась» прямо
+    здесь) **и** обёрнут собственным ``try`` (иначе то же исключение улетело бы к
+    вызывающему — ``ProcessHeartbeat._sweep_observability_history`` ловит ЛЮБОЕ и
+    говорит «уборка истории сорвалась», то есть ложь производилась бы на кадр выше).
+    Первой редакции хватало только внутри функции; вторую половину нашло ревью фазы
+    воспроизведением, а не чтением. Если сказать не удалось ничем — механизм молчит:
+    молчание честнее ложного диагноза, отправляющего чинить БД вместо логгера.
     """
     store = getattr(svc, "_observability_store", None)
     purge = getattr(store, "purge", None)
@@ -1586,16 +1592,33 @@ def sweep_observability_history(svc: Any, now: Optional[float] = None) -> Option
         _process_warn(svc, f"[observability] уборка истории не удалась: {exc!r}")
         return None
     if isinstance(report, dict):
-        by_age = int(report.get("by_age") or 0)
-        by_rows = int(report.get("by_rows") or 0)
-        removed = by_age + by_rows
-        process_say(
-            svc,
-            f"[observability] уборка истории: снято {removed} "
-            f"(по возрасту {by_age}, по числу строк {by_rows}), "
-            f"осталось {int(report.get('remaining') or 0)}",
-            "INFO" if removed else "DEBUG",
-        )
+        try:
+            by_age = int(report.get("by_age") or 0)
+            by_rows = int(report.get("by_rows") or 0)
+            removed = by_age + by_rows
+            remaining = report.get("remaining")
+            # «осталось» печатается только когда ключ ЕСТЬ: подставив ноль вместо
+            # отсутствующего значения, строка сообщала бы «в сторе пусто» там, где
+            # на самом деле «сколько осталось — не сказано». Найдено ревью фазы.
+            tail = "" if remaining is None else f", осталось {int(remaining)}"
+            process_say(
+                svc,
+                f"[observability] уборка истории: снято {removed} "
+                f"(по возрасту {by_age}, по числу строк {by_rows}){tail}",
+                "INFO" if removed else "DEBUG",
+            )
+        except Exception as exc:  # noqa: BLE001
+            # **Отказ ГОЛОСА — не отказ уборки, и это приходится удерживать явно.**
+            # Уборка к этой строке уже отработала и отчёт вернёт. Пропусти исключение
+            # выше — и вызывающий (`process_heartbeat.py:536`) доложит «уборка истории
+            # сорвалась», отправив оператора чинить БД вместо логгера. Прежняя редакция
+            # полагалась на то, что голос стоит ЗА `try` вокруг `purge`, и этого хватало
+            # ВНУТРИ функции; ревью фазы воспроизвело ложь на кадр выше — свойство не
+            # было проверено у второго участника.
+            try:
+                _process_warn(svc, f"[observability] голос уборки истории не удался: {exc!r}")
+            except Exception:  # noqa: BLE001 — сказать нечем; молчание честнее ложного диагноза
+                pass
     return report
 
 

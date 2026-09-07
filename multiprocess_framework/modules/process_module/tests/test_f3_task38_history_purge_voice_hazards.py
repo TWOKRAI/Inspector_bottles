@@ -121,22 +121,55 @@ class TestDebugLadderDoesNotClimbToInfo:
 
 
 class TestVoiceDoesNotLieAboutItsNeighbour:
-    """Отказ голоса не имеет права выглядеть отказом уборки."""
+    """Отказ голоса не имеет права выглядеть отказом уборки — НИ ЗДЕСЬ, НИ У СОСЕДА.
+
+    Первая редакция этого класса проверяла свойство только внутри функции, и этого
+    было мало: ревью фазы воспроизвело ложь на кадр выше, у вызывающего
+    ``ProcessHeartbeat._sweep_observability_history``, который ловит ЛЮБОЕ исключение
+    и говорит «уборка истории сорвалась». Свойство не было проверено у второго
+    участника — отсюда второй тест ниже.
+    """
 
     def test_a_broken_logger_does_not_produce_the_purge_failed_warning(self) -> None:
-        """Голос стоит ЗА пределами try вокруг purge — проверяем это наблюдаемо.
+        """Уборка отработала, исключение логгера наружу НЕ уходит, ложь не сказана.
 
-        Если голос уедет внутрь try, RuntimeError логгера будет доложен как
-        «уборка истории не удалась», и оператор пойдёт чинить БД вместо логгера.
+        Отказ голоса называется отказом ГОЛОСА (``_process_warn`` уцелел у этого
+        двойника — у него ломаются только info и debug), а не отказом уборки.
         """
         store = _Store({"by_age": 1, "by_rows": 0, "remaining": 2})
         svc = _SvcWhoseLoggerExplodes(store)
 
-        with pytest.raises(RuntimeError):
-            sweep_observability_history(svc)
+        report = sweep_observability_history(svc)
 
-        assert store.calls == 1, "уборка обязана была отработать ДО падения голоса"
-        assert svc.warning_messages == [], "отказ голоса доложен как отказ уборки — механизм врёт о соседе"
+        assert store.calls == 1, "уборка обязана была отработать"
+        assert report == {"by_age": 1, "by_rows": 0, "remaining": 2}, "отчёт обязан вернуться"
+        assert len(svc.warning_messages) == 1, "отказ голоса обязан быть назван"
+        line = svc.warning_messages[0]
+        assert "голос" in line, f"названо не то, что сломалось: {line!r}"
+        assert "не удалась" not in line or "голос" in line
+
+    def test_the_caller_does_not_report_a_purge_failure_when_only_the_voice_broke(self) -> None:
+        """Свойство у ВТОРОГО участника: реальный вызывающий из heartbeat.
+
+        Он ловит любое исключение и произносит «уборка истории сорвалась». Улети
+        исключение голоса сюда — оператор пошёл бы чинить БД вместо логгера.
+        Тест зовёт настоящий метод, а не его копию: иначе он стерёг бы форму, а не
+        проводку.
+        """
+        from multiprocess_framework.modules.process_module.heartbeat.process_heartbeat import (
+            ProcessHeartbeat,
+        )
+
+        store = _Store({"by_age": 5, "by_rows": 0, "remaining": 9})
+        svc = _SvcWhoseLoggerExplodes(store)
+        heartbeat = ProcessHeartbeat.__new__(ProcessHeartbeat)
+        heartbeat._services = svc  # noqa: SLF001 — зовём один метод, полная сборка не нужна
+
+        heartbeat._sweep_observability_history()  # noqa: SLF001
+
+        assert store.calls == 1, "уборка обязана была отработать"
+        said = " | ".join(svc.warning_messages + svc.info_messages + svc.debug_messages)
+        assert "сорвалась" not in said, f"вызывающий доложил отказ уборки, которого не было: {said!r}"
 
 
 class TestReportShapeIsNotAssumed:
@@ -162,6 +195,35 @@ class TestReportShapeIsNotAssumed:
         assert svc.info_messages == []
         assert len(svc.debug_messages) == 1
         assert "0" in svc.debug_messages[0]
+
+    def test_a_non_numeric_value_does_not_escape_to_the_caller(self) -> None:
+        """``{'by_age': 'много'}`` роняло ValueError НАРУЖУ — и такт докладывал отказ уборки.
+
+        Найдено ревью фазы: класс назывался «форме отчёта не верим», а стерёг только
+        не-словарь и отсутствующие ключи. Значение неверного ТИПА пролетало мимо.
+        """
+        svc = _SvcWithDebugLogger(_Store({"by_age": "много", "by_rows": 0, "remaining": 5}))
+
+        report = sweep_observability_history(svc)
+
+        assert report == {"by_age": "много", "by_rows": 0, "remaining": 5}
+        assert len(svc.warning_messages) == 1, "сбой разбора отчёта обязан быть назван"
+        assert "голос" in svc.warning_messages[0]
+
+    def test_missing_remaining_is_not_reported_as_zero(self) -> None:
+        """Отсутствующий ``remaining`` НЕ печатается нулём.
+
+        Прежняя редакция подставляла 0 и говорила «осталось 0» там, где на самом деле
+        «сколько осталось — неизвестно». Ноль и молчание — разные факты (ревью фазы).
+        """
+        svc = _SvcWithDebugLogger(_Store({"by_age": 0, "by_rows": 0}))
+
+        sweep_observability_history(svc)
+
+        assert len(svc.debug_messages) == 1
+        assert "осталось" not in svc.debug_messages[0], (
+            f"сфабриковано «осталось» при отсутствующем ключе: {svc.debug_messages[0]!r}"
+        )
 
     def test_none_valued_keys_are_read_as_zero(self) -> None:
         """``{"by_age": None}`` не должен превращаться в TypeError внутри такта."""
