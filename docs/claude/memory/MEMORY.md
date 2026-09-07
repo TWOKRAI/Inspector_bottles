@@ -4,6 +4,8 @@
 - [CRAFT.md](CRAFT.md) — ремесло: тесты, инъекции, предохранители, классы дефектов, конфиг/схемы, Qt (~110 записей)
 - [ARCHIVE.md](ARCHIVE.md) — история закрытых фаз и треков; спящие треки перенесены туда 2026-09-05
 
+**Новая сессия начинает отсюда: `docs/sessions/2026-09-07_handoff-parallel-start.md`** — карта четырёх полос (ветка, worktree, следующая задача, что не трогать), два решения владельца с числами, три команды уборки. Полос независимых четыре, дерево общее одно: **одно дерево — один писатель**.
+
 Ни один из них не грузится сам — читать по триггеру, указанному в блоке-указателе.
 Правило не архивируется никогда: оно обязано сработать раньше, чем о нём вспомнят.
 
@@ -45,6 +47,7 @@
 - [Commit msg format](feedback_commit_msg_format.md) — хук терпит перенос; ruff → re-stage · [commit забирает весь индекс](feedback_commit_takes_the_whole_index.md) · [agent commit quality](feedback_agent_commit_quality.md) · [ruff сносит свежий импорт](feedback_ruff_strips_unused_import.md) — импорт и использование ОДНИМ Edit
 - [API MCP дрейфует](feedback_mcp_tool_api_drift.md) — ROUTING.md может врать · [sentrux depth непрозрачна](feedback_sentrux_depth_opaque.md) · [sentrux gate сужен](feedback_sentrux_gate_narrowed.md) — блок только циклы↑/god↑
 - [Атрибутируй источник до реза](feedback_attribute_the_source_before_cutting.md) — агенты/команды с ДВУХ уровней (.claude/ и ~/.claude/); сверять состав множеств; экономию заявлять после прогона
+- [Спасение патчем теряет untracked](feedback_a_diff_based_rescue_omits_untracked_files.md) — «патчи сохранены» умолчало о тесте на 454 строки; спасать веткой от HEAD, пересечение считать числом
 - [Dual-write разъехался по содержимому](feedback_dual_write_by_copy_destroys_the_other_side.md) — правды нет ни в одной копии; **правку вносить в обе копии отдельно, `cp` затирает молча**, diff ДО записи
 - [devseed перетирает .claude/](project_devseed_overwrites_claude_dir.md) — preserved: CLAUDE.md, modes/_stack.md, settings.local · [миграция на claude-kit](project_claude_kit_migration.md)
 
@@ -66,7 +69,7 @@
 ## Активные проекты и долги
 - [Вердикт 2026-09-04: 6.5/10, доказанность продукта 4/10](project_honest_verdict_2026_09.md) — шина ~0.3/0.6 мс на хоп (<5% кадра, потолок FPS = таймер Windows); балл меняют P-1 инспектор с числами и P-2 второе приложение чужими руками; очередь в QUEUE 5b; ADR про ROS 2 уже есть в TECH_STACK §3
 - [otel-export ред. 4](project_otel_export_plan_state.md) — 2026-09-06: **Ф0 закрыта** и влита в closure (`0024b6f7`), 56 зелёных, `validate.py` exit 0; Ф1 разблокирована снимком стенда `1f40ce0d`; трек живёт в своём worktree `.claude/worktrees/otel`, слияние одностороннее closure → otel; 2.4 стартует по признаку «3.3 **принята ревью**», не «закоммичена», и **импортирует** предохранитель closure, свой не пишет
-- [observability-closure: Ф0+Ф1+Ф2 закрыты, Ф3 — 4 из 9](project_observability_closure_progress.md) — 2026-09-05: закрыты 3.0, 3.5, 3.1; дубль снапшота снят (A/B 2140→1257 КиБ/ч), форма числа переехала в базу вердиктом CTO (ADR-CRM-017), гейт 9757; за владельцем — merge в main и telemetry.broadcast
+- [observability-closure: Ф0+Ф1+Ф2 закрыты, Ф3 — 5 из 9](project_observability_closure_progress.md) — 2026-09-06: 3.3 ПРИНЯТА ревью (запись в стор ушла в фоновую пачку, +96.9 → +1.52 мкс при 585 000 зап/с, гейт **9810**); контракт с otel вынесен в `docs/sessions/2026-09-06_closure-otel-contract.md`; **merge в main — это ДВА разных действия:** 196 коммитов до границы `6309cbe0` (ровно Ф2) или 255 (плюс пять девятых незакрытой Ф3), оба ff-only, ревью Ф2 оформлено тремя документами; рез Ф3 до 6 задач — 3.6 и 3.7 бесплатны (0 из 8 литералов; «нет пересечения»), **3.4 нет**: 103 вызывающих `declare_metric` без единицы и вход v2 otel
 - [Голос конфига принадлежит стадии «применяю»](project_config_voice_belongs_to_the_apply_stage.md) — config.reload разбирает секцию ШЕСТЬ раз тремя стадиями; окно маскирует; дом — Task 4.11
 - [Универсальный механизм ручек — KnobManager](project_knobs_universal_manager.md) — 2026-09-02: ручка = одно объявление; observability первый потребитель; Task 4.9, при ≥3 потребителях свой план · [Сначала наблюдаемость, потом ponytail-audit](project_sequencing_observability_then_audit.md) — узкий проход после merge Ф2, полный после Ф5
 - [line_sim: план создан](project_line_sim_vision.md) — буквы первыми; встроенная сборка; plans/line-sim/ Ф0–Ф6 (19 задач), ветка feat/line-sim
