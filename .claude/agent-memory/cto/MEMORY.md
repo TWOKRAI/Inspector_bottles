@@ -6,3 +6,5 @@
 - [Cross-track dependency can name the wrong plane](feedback_a_cross_track_dependency_can_name_the_wrong_plane.md) — grep the consumers of the named function; declare_metric = levels, NumberRecord.unit = numbers
 - [Ф3 cut verdict 2026-09-07](project_f3_cut_verdict_2026_09_07.md) — 3.4/3.6/3.7 cut, shrink rejected; four conditions; F3 mis-parked by me, needs own home
 - [Store retention bounds rows, not bytes](project_store_retention_bounds_rows_not_bytes.md) — purge leaves FTS tombstones (21 MiB/35 rows live); optimize after purge 192 ms, 0 drops; (b)-levers max -30%
+- [Task 4.11 TTL-sweep voice verdict 2026-09-08](project_task_4_11_ttl_sweep_voice_verdict_2026_09_08.md) — (b) gate by origin; ttl-sweeper only authorless road; 6 call sites not 2; retry road floods
+- [State predicate at a seam counts rebuilds](feedback_a_state_predicate_at_a_seam_counts_rebuilds_not_actions.md) — verify "once per action" by origin inventory; probe sweep + retry roads; scratchpad copy breaks __file__-relative REPO_ROOT

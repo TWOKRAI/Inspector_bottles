@@ -388,8 +388,9 @@ class ObservabilityStore:
         except sqlite3.OperationalError as exc:
             self._fts_reason = f"полнотекстовый индекс недоступен в этой сборке SQLite: {exc}"
             # Task 4.11, часть B: тот же довод, что у миграции auto_vacuum выше —
-            # __init__ ещё не отдал стор register_writer()'у, самоотчёт через
-            # собственный дренаж исключён по построению. ADR-CRM-018.
+            # __init__ ещё не отдал стор register_writer()'у, поэтому получателем
+            # собственного дренажа он здесь ещё не значится (проверено порядком
+            # вызовов, не зондом — оговорка в ADR-CRM-018). ADR-CRM-018.
             emergency_log(
                 _EMERGENCY_NAME,
                 "WARNING",

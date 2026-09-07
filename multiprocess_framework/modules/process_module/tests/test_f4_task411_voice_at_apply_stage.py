@@ -53,6 +53,9 @@ from multiprocess_framework.modules.process_module.core.process_module import Pr
 
 #: Корень репозитория — ЭТОГО worktree (файл лежит внутри него), не главного дерева.
 REPO_ROOT = Path(__file__).resolve().parents[4]
+#: Перенос строки отдельной константой: сообщение стража ниже собирается join'ом,
+#: чтобы в многострочном литерале не заводить escape-последовательностей.
+NL = chr(10)
 
 #: Маркер строки голоса ADR-PM-046 — стабильнее полного текста (переживёт правку
 #: формулировки), но не настолько общий, чтобы ловить чужие WARNING.
@@ -251,14 +254,25 @@ class TestSuppressedCountsActionsNotParses:
 
 
 class TestBootRoadVoicesTheSameWayAsReload:
-    """``apply_observability_layers`` — ЕДИНАЯ функция применения (её собственный
-    докстринг: «И hot-reload watcher, и IPC-команда config.reload зовут именно
-    её») — ``process_managers.py`` (дорога boot) зовёт ТУ ЖЕ функцию. Тест зовёт
-    её напрямую с ``origin="boot:layers"`` и слоем L1, заполненным ДО вызова —
-    минимальный воспроизводимый эквивалент «прототип поднялся со старым
-    конфигом», без веса полного ``_apply_boot_observability_layers`` (тому
-    нужен настоящий ``config_handler``/``ConfigStore``, не относящийся к предмету
-    проверки).
+    """Дорога ПЕРЕСБОРКИ (``apply_observability_layers`` с ``origin="boot:layers"``).
+
+    **Что этот класс проверяет, а что НЕТ — исправлено добором ревью Task 4.11.**
+    Прежний докстринг утверждал, что ``process_managers.py`` (дорога boot) зовёт
+    «ТУ ЖЕ функцию». Это неверно: грепом ``apply_observability_layers`` в
+    ``process_managers.py`` не встречается ни разу — там своя дорога через
+    ``compose_managers_payload`` (строка 160). То есть класс всё это время
+    проверял дорогу пересборки, а называл её дорогой рождения.
+
+    Цена ошибки была не теоретической: живой стенд (`stand-task-4-11.md`, §1)
+    показал, что на боевом blueprint ЕДИНСТВЕННАЯ строка голоса, которую видит
+    оператор, рождается как раз на дороге ``_managers_config_for_creation`` — и
+    она оставалась без сторожа. Пара тестов на неё — в
+    :class:`TestBirthRoadVoicesWhenTheProcessComposesItsOwnManagers` ниже.
+
+    Здесь остаётся то, что класс и проверял: пересборка со слоем L1, заполненным
+    ДО вызова, — минимальный воспроизводимый эквивалент «прототип поднялся со
+    старым конфигом», без веса полного ``_apply_boot_observability_layers``
+    (тому нужен настоящий ``config_handler``/``ConfigStore``).
     """
 
     def test_boot_road_voices_once_and_names_zero_suppressed(self, tmp_path: Path) -> None:
@@ -290,6 +304,113 @@ class TestBootRoadVoicesTheSameWayAsReload:
             )
             assert "подавлено" not in lines[0], (
                 "первый голос процесса ничего не подавлял до себя — число 0 словом не называется"
+            )
+        finally:
+            logger.shutdown()
+
+
+class _CreationConfigHandler:
+    """Носитель ДВУХ ответов, от которых зависит дорога рождения менеджеров.
+
+    Подменяется здесь именно то, что и является ПРЕДМЕТОМ проверки
+    (``get_managers_config`` — объявлены ли менеджеры заранее), а не окружение
+    вокруг него: процесс, логгер и ``ProcessManagers`` в тестах ниже настоящие,
+    и голос читается из настоящего файла журнала.
+    """
+
+    def __init__(self, declared: Dict[str, Any], config: Dict[str, Any]) -> None:
+        self._declared = declared
+        self._config = config
+
+    def get_managers_config(self) -> Dict[str, Any]:
+        return self._declared
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._config.get(key, default)
+
+
+class TestBirthRoadVoicesWhenTheProcessComposesItsOwnManagers:
+    """Дорога РОЖДЕНИЯ менеджеров — ``ProcessManagers._managers_config_for_creation``.
+
+    Заведена добором ревью Task 4.11: до неё эта дорога не сторожилась ничем,
+    хотя живой стенд показал, что на боевом blueprint голос приходит ИМЕННО
+    отсюда (`stand-task-4-11.md`, §1). Заплата «замолчать только на этой дороге»
+    давала **0 красных** при 217 собранных, парная «замолчать только на дороге
+    пересборки» — **13**. Пара и назвала дыру.
+
+    Тестов два, и второй не украшение: он закрепляет ПРИЧИНУ, по которой на
+    боевом стенде голос звучит один раз, а не семь. У детей секция ``managers``
+    приезжает уже разложенной ассемблером, поэтому дорога выходит на первой
+    строке и до голоса не доходит. Без этого теста «один голос» выглядел бы
+    решением, а он — следствие сегодняшней раскладки.
+    """
+
+    @staticmethod
+    def _wire(proc: Any, declared: Dict[str, Any]) -> None:
+        """Отдать процессу конфиг слоёв И СНЯТЬ уже собранный пустой стек.
+
+        Второе — не формальность. ``process_observability_layers`` кэширует стек
+        НА ОБЪЕКТЕ процесса (``LAYERS_ATTR``), потому что L3 — это состояние, и
+        пересборка теряла бы ручку оператора. ``_boot`` поднимает процесс раньше,
+        чем тест выдаёт ему конфиг, — то есть к этому моменту на процессе уже
+        лежит стек, собранный из пустоты. Без снятия кэша тест мерил бы молчание
+        пустых слоёв и был бы зелёным по неверной причине (ровно это и случилось
+        при первом прогоне: ``composed`` вернулся пустым).
+        """
+        from multiprocess_framework.modules.process_module.configs.observability_layers import (
+            LAYERS_ATTR,
+        )
+
+        proc.config_handler = _CreationConfigHandler(
+            declared,
+            {"observability_app": {"stats": {"enabled": False}}, "observability_override": {}},
+        )
+        if hasattr(proc, LAYERS_ATTR):
+            delattr(proc, LAYERS_ATTR)
+
+    def test_orchestrator_without_declared_managers_voices_once(self, tmp_path: Path) -> None:
+        from multiprocess_framework.modules.process_module.managers.process_managers import (
+            ProcessManagers,
+        )
+
+        proc, logger, _handler = _boot(tmp_path, "birth_road")
+        try:
+            self._wire(proc, {})
+            composed = ProcessManagers(proc)._managers_config_for_creation()
+
+            assert set(composed) >= {"logger", "error", "stats", "command"}, (
+                f"дорога рождения обязана собрать конфиг менеджеров, а не выйти пустой: {sorted(composed)}"
+            )
+            lines = _voice_lines(_read_log(tmp_path, "birth_road"))
+            assert len(lines) == 1, (
+                "процесс, собирающий менеджеры САМ, обязан прозвучать ровно один раз о "
+                f"перепрофилированном ключе; строк: {lines!r}"
+            )
+            assert "подавлено" not in lines[0], (
+                "первый голос процесса ничего не подавлял до себя — число 0 словом не называется"
+            )
+        finally:
+            logger.shutdown()
+
+    def test_child_with_managers_already_composed_by_assembler_stays_silent(self, tmp_path: Path) -> None:
+        from multiprocess_framework.modules.process_module.managers.process_managers import (
+            ProcessManagers,
+        )
+
+        proc, logger, _handler = _boot(tmp_path, "birth_road_child")
+        try:
+            declared = {"logger": {"log_directory": str(tmp_path)}}
+            self._wire(proc, declared)
+            composed = ProcessManagers(proc)._managers_config_for_creation()
+
+            assert composed == declared, (
+                "объявленный ассемблером конфиг обязан вернуться КАК ЕСТЬ — иначе дорога "
+                f"собирает его второй раз и расходится с родителем: {composed!r}"
+            )
+            lines = _voice_lines(_read_log(tmp_path, "birth_road_child"))
+            assert lines == [], (
+                "ребёнок, чьи менеджеры разложил ассемблер, до стадии «применяю» не доходит — "
+                f"голос здесь означал бы вторую дорогу к конфигу; строк: {lines!r}"
             )
         finally:
             logger.shutdown()
@@ -370,27 +491,105 @@ class TestNoEmergencyLogInOperatorFacingPositions:
     )
 
     @staticmethod
-    def _emergency_log_calls_in_function(path: Path, func_name: str) -> int:
+    def _emergency_log_calls_in_function(path: Path, func_name: str) -> Tuple[bool, int]:
+        """Returns: ``(функция НАЙДЕНА, число вызовов в ней)``.
+
+        Первый элемент — добор ревью Task 4.11, и он не косметика. Прежняя
+        редакция возвращала одно число, и утверждение об ОТСУТСТВИИ вызова
+        оказалось слепым к переименованию: воспроизведено заплатой — вернуть
+        ``emergency_log`` в ту же функцию и переименовать ``_declare`` →
+        ``_declare_rule`` с сохранением алиаса (поведение модуля не меняется)
+        дало **0 красных**, а тот же возврат БЕЗ переименования — **1** красный.
+        То есть страж считал ноль там, где просто не нашёл, куда смотреть.
+        """
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        found = False
         calls = 0
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+                found = True
                 for inner in ast.walk(node):
                     if isinstance(inner, ast.Call):
                         func = inner.func
                         name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
                         if name == "emergency_log":
                             calls += 1
-        return calls
+        return found, calls
 
     @pytest.mark.parametrize("rel_path,func_name", _TARGETS)
     def test_operator_facing_function_has_zero_emergency_log_calls(self, rel_path: Path, func_name: str) -> None:
         full_path = REPO_ROOT / rel_path
         assert full_path.exists(), f"файл сместился, страж указывает не туда: {full_path}"
-        count = self._emergency_log_calls_in_function(full_path, func_name)
+        found, count = self._emergency_log_calls_in_function(full_path, func_name)
+        assert found, (
+            f"функция {func_name} в {rel_path} НЕ НАЙДЕНА — страж смотрит не туда, и его ноль "
+            f"ничего не значит. Переименовали? Перенесли? Обновите _TARGETS осознанно, иначе "
+            f"операторский emergency_log вернётся в неё молча"
+        )
         assert count == 0, (
             f"{func_name} в {rel_path} обязана перейти на ВИД (FallbackLogger) — это адрес "
             f"ОПЕРАТОРУ, а не самоотчёт сломавшегося маршрута; найдено {count} вызов(ов)"
+        )
+
+    #: Боевой инвентарь `emergency_log` на момент закрытия Task 4.11 (2026-09-07).
+    #: Разбивка и довод по каждому файлу — `plans/observability-closure/stand-task-4-11.md`, §5.
+    #: Было 21, пять операторских переехали на вид, осталось 16 = 12 законных
+    #: (самоотчёт сломавшегося маршрута) + 4 пограничных в `observability_store.py`
+    #: с записанным решением ADR-CRM-018.
+    _INVENTORY = {
+        "multiprocess_framework/modules/process_manager_module/launcher/system_launcher.py": 4,
+        "multiprocess_framework/modules/channel_routing_module/observability/observability_store.py": 4,
+        "multiprocess_framework/modules/logger_module/core/process_hooks.py": 3,
+        "multiprocess_framework/modules/channel_routing_module/core/channel_registry.py": 2,
+        "multiprocess_framework/modules/process_module/lifecycle/process_lifecycle.py": 1,
+        "multiprocess_framework/modules/logger_module/channels/log_channel.py": 1,
+        "multiprocess_framework/modules/channel_routing_module/core/channel_routing_manager.py": 1,
+    }
+
+    def test_emergency_log_inventory_is_pinned_by_file(self) -> None:
+        """Новый операторский `emergency_log` В ЛЮБОМ файле обязан покраснеть здесь.
+
+        Страж выше адресный: он смотрит в три функции, которые задача переводила.
+        Его нуля недостаточно — вызов, добавленный в четвёртом файле, суите не
+        виден вовсе (находка ревью Task 4.11). Этот сторож закрывает именно
+        ЭТУ дыру: он пинует ПОФАЙЛОВЫЙ инвентарь целиком.
+
+        Красный здесь — не обязательно дефект. Это требование СКАЗАТЬ, чем новый
+        вызов является: самоотчётом сломавшегося маршрута (тогда обновить число
+        и написать почему) или сообщением оператору (тогда его дом — вид).
+        """
+        roots = ("multiprocess_framework", "Services", "Plugins", "backend_ctl", "multiprocess_prototype")
+        actual: Dict[str, int] = {}
+        for root in roots:
+            for path in (REPO_ROOT / root).rglob("*.py"):
+                rel = path.relative_to(REPO_ROOT).as_posix()
+                if "/tests/" in f"/{rel}" or rel.endswith("/_fallback.py"):
+                    continue
+                try:
+                    tree = ast.parse(path.read_text(encoding="utf-8"))
+                except (SyntaxError, OSError):
+                    continue
+                calls = sum(
+                    1
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and (
+                        (isinstance(node.func, ast.Name) and node.func.id == "emergency_log")
+                        or getattr(node.func, "attr", None) == "emergency_log"
+                    )
+                )
+                if calls:
+                    actual[rel] = calls
+
+        assert actual == self._INVENTORY, NL.join(
+            [
+                "инвентарь боевых emergency_log сдвинулся.",
+                f"  было:  {sorted(self._INVENTORY.items())}",
+                f"  стало: {sorted(actual.items())}",
+                "Сообщение ОПЕРАТОРУ живёт на виде (FallbackLogger); аварийный выход — только "
+                "самоотчёт сломавшегося маршрута. Решите, чем является новый вызов, и обновите "
+                "число с доводом (ADR-CRM-018 — образец того, как это записывается)",
+            ]
         )
 
     def test_scanner_reachability_control_still_finds_a_real_call_elsewhere(self) -> None:
