@@ -4,10 +4,17 @@
 
 ## Ф3 — Стор и сигнал
 
-**Порядок исполнения фазы:** 3.0 (добор вердикта CTO Ф2, один файл механизма) → 3.5
-(`history_query`, половина `kind=log/error` не ждёт 3.1) → 3.1 → 3.2 → 3.3 → 3.4 → 3.6 → 3.7 → 3.8.
+**Порядок исполнения фазы (ред. 2026-09-07, после реза):** 3.0 (добор вердикта CTO Ф2, один файл
+механизма) → 3.5 (`history_query`, половина `kind=log/error` не ждёт 3.1) → 3.1 → 3.2 → 3.3 → **3.8**.
 Merge Ф2 в `main` — после 3.0 (условие вердикта CTO от 2026-09-03,
-[`review-phase-2-cto.md`](./review-phase-2-cto.md)).
+[`review-phase-2-cto.md`](./review-phase-2-cto.md)); выполнен, `main` = `1f6a13a1`.
+
+**Фаза урезана с 9 задач до 6 — вердикт CTO от 2026-09-07** («метрики объявляет потребитель, а не
+фреймворк за него»). Сняты **3.4, 3.6, 3.7**; их карточки оставлены на месте зачёркнутыми, с доводом
+и воспроизведением, потому что довод дороже задачи. Промежуточный вариант ведущего «ужать 3.4 до
+подписи» отклонён как костыль — разбор в карточке 3.4. Ненулевые остатки не испарились, а получили
+адреса: голос уборки → Task 3.8 (в); писатель `NumberRecord.unit` → Ф4.6 либо план otel v2;
+находка F3 → Ф4.1 или 4.10.
 
 ### Task 3.0 — Сверщик потолков: реальный ask и честное «не судил» (F1, F2 вердикта CTO Ф2)
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
@@ -774,15 +781,65 @@ Task 3.2, и приходит она изнутри SDK, куда наш кла�
 от первого коммита означал бы переписывание имён вслед за нами. Сигнал: `[x]` с хэшем принимающего
 коммита здесь же плюс `merged` в closure.
 
-### Task 3.4 — Метаданные метрик: единица, описание, род (M12)
-**Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework, plugins, docs
-**Files:** `multiprocess_framework/modules/observability_declarations.py:220-260`, `process_module/plugins/base.py` (`declare_metric`),
-`process_module/commands/builtin_commands.py` (`introspect.telemetry`/`introspect.observability` — `metadata`), `Plugins/sources/capture/plugin.py:103-105`,
-`multiprocess_prototype/frontend/widgets/tabs/observability/*` (единица в таблице), `CONNECTORS.md`.
-**Steps:** `declare_metric(name, *, owner, unit="", description="", kind="gauge")`; все объявления фреймворка и `capture` получают единицы; `record_timing` — страж единицы (`unit="s"`; объявление с `unit="ms"` для timing → отказ с адресом); readback отдаёт metadata; GUI показывает.
-**Acceptance criteria:**
-- [ ] `introspect.telemetry(camera_0).metadata.capture_fps == {unit:"Hz", kind:"gauge", description:...}` живьём.
-- [ ] Инъекция: `declare_metric("x_ms", kind="timing", unit="ms")` → отказ с адресом (тест литералом).
+### ~~Task 3.4 — Метаданные метрик: единица, описание, род (M12)~~ — **СНЯТА** (вердикт CTO, 2026-09-07)
+
+**Решение:** срезана целиком. Рассматривался и промежуточный вариант ведущего — «ужать до подписи
+`declare_metric(name, *, owner, unit="", description="", kind="gauge")` плюс страж единицы у
+`record_timing`». **Отклонён как костыль**, довод воспроизведён прогоном на `aa1b91d1`.
+
+**Почему костыль — адрес не тот.** `declare_metric` живёт на плоскости **уровней состояния**
+(`observability_declarations.py:230` и `PluginContext.declare_metric` → `port.for_plugin(writer).declare(name)`,
+`base.py:733`; собственный докстринг `:750`: «не путать с `record_metric`/`gauge` — те пишут в плоскость
+stats, здесь дерево состояния»). Единица нужна на плоскости **чисел**, а у каталога уровней на ней
+**нет ни одного читателя**: потребители каталога — `gated_metrics()` (`telemetry_publish_config.py:97`),
+publisher-gate (`heartbeat/telemetry.py:785, 930`), readback `introspect.telemetry.gated_metrics`
+(`builtin_commands.py:1386, 1506`) и строки GUI (`_telemetry_controls.py:92`, `_panels.py:792`).
+
+Четыре замера, каждый — прогон, а не чтение:
+
+| # | вход | наблюдаемый выход | что ломает |
+|---|---|---|---|
+| а | `declare_metric("zz_probe_fps", owner="a")`, затем `owner="b"` | каталог хранит `('a', None)` — второе объявление молчаливый no-op по замыслу ADR-PM-038 (`_declare:117-128`) | единица второго писателя терялась бы **без голоса** |
+| б | `PluginContext.declare_metric(None, "capture.fps")` | `ValueError` (точка в имени, `:790`) | все 33 боевых `record_timing` и три `capture.*` — точечные; из контекста плагина stats-имя объявить **нельзя вовсе** |
+| в | `declare_metric("topology.apply", owner=…)` | принято; `declared_metrics()` содержит `topology.apply` | уехало бы в `gated_metrics()` → readback и GUI: строка гейта для уровня, который никогда не публикуется |
+| г | страж единицы у `record_timing` | 0 из 33 боевых имён объявлены где-либо | ось пуста; инцидент ADR-SM (`topology.apply_ms` ×1000, `statistics_module/DECISIONS.md:528`) объявления не имел — страж бы его не поймал |
+
+Плюс `kind="gauge"` дефолтом на плоскости, где род ровно один (`from_hub_record:195-197`: «иного рода
+у порта нет вовсе»).
+
+**Счёт (`grep -F`, не `grep`):** `declare_metric(` — **105** вхождений, **13** вне тестов, из них
+**8 боевых объявлений** (`heartbeat/telemetry.py:59-62` ×4, `process_heartbeat.py:21`,
+`capture/plugin.py:104-106` ×3) плюс 2 форвардера и определения; `unit=` рядом — **0**.
+Прежняя оценка ведущего «103 / 11» расходится с этой определением счёта, не сутью.
+
+**Настоящий адрес дыры — писатель `NumberRecord.unit`.** Слот уже существует
+(`number_record.py:155-158`, `unit: str = ""`), заполняется литералом `""` (`_build:309`), ключ —
+`metric_identity` (`writer.name`, `number_record.py:76`). Task 3.1 сама это записала: «поле инертно
+→ Task 3.4» (`phase-3:300`).
+
+**Про otel: утверждение «вход v2 упирается в 3.4» верно по намерению и неверно по адресу.**
+`otel-export.md:123, 605, 638` называют сигнатуру `declare_metric(...unit...)`, но собственные README
+трека (`Services/otel_export/README.md §Counters`, `Plugins/io/otel_export/README.md «Ловушка»`) уже
+установили, что счётчики экспортёра идут через `ctx.record_metric` — метаданные каталога до
+`otel_export.received` не доехали бы. Род у записи уже есть; для своих счётчиков экспортёр сам
+писатель и читатель.
+
+**Условия реза (обязательны, иначе рез не считается принятым):**
+- **(i)** ADR-строка: «метаданные числа живут на плоскости чисел, ключ `metric_identity`, слот
+  `NumberRecord.unit`; каталог уровней их не несёт; род = `metric_type`». Дом — глобальный
+  `multiprocess_framework/DECISIONS.md`.
+- **(ii)** Писатель `unit` получает адрес: шаг Ф4.6 (она трогает ровно эти имена — пять уровней
+  фреймворка несут единицу в имени: `latency_ms`, `cycle_duration_ms`, `effective_hz`, `fps`, `shm`)
+  **либо** план первого потребителя (otel v2). Выбор владельца; адрес фиксируется сейчас, а не «потом».
+- **(iii)** Трек otel правит у себя Р-8 / `:123` / `:638` через §6 контракта: «вход v2 — писатель
+  `NumberRecord.unit`, не сигнатура `declare_metric`».
+
+**Отдельно: находка F3 вердикта Ф2 была припаркована сюда — и парковка была ошибочной.** Посылка
+«объявленное имя делает множество конечным структурно» на HEAD ложна: `ObservationPolicy(ObservationPolicyConfig())`,
+3000 `resolve()` необъявленных имён → `_cache` = **3000** при `declared_metrics() == ()`; гейт берёт
+`set(gated_metrics()) | extra` (`telemetry.py:930`). F3 нужен свой дом — потолок с голосом у
+`ObservationPolicy._cache` / `NumbersGate._dropped` / `PathSchedule._due`, **Ф4.1 или 4.10**. Рез 3.4
+её не сиротит: она сирота уже.
 
 ### Task 3.5 — `history_query`: история для агентов и операторов (T6/CTL-F6)
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** tests (backend_ctl)
@@ -830,6 +887,12 @@ Task 3.2, и приходит она изнутри SDK, куда наш кла�
 - [x] Живьём: `history_query(kind="error", since=-3600)` → строки с `trace_id`; путь БД сверен литералом
       с `introspect.observability(...).history.db_path`. Ряд по метрике (`metric="capture.frames"`) —
       после Task 3.1, здесь ожидается названный отказ К7.
+      **Ред. 2026-09-07 (рез Ф3):** имя `capture.frames` в сторе не существует и после Task 3.1 —
+      живой файл даёт три идентичности: `capture.capture_fps`, `capture.frame_count`, `capture.drops`.
+      Отказ К7 здесь получен на несуществующем имени, то есть проверено «имени нет», а не «ряда нет».
+      Ряд по СУЩЕСТВУЮЩЕЙ метрике сегодня всё равно пуст по другой причине — у снапшота
+      `metric = NULL` (`from_hub_record`), одиночная `kind=stats` в проде не производится.
+      Это долг (б) задачи 3.8, там он называется числом.
       **Поправка по факту стенда:** `trace_id` — не «колонка», как было написано в первой редакции
       критерия, а вложенный ключ `extra["context"]["trace_id"]`. Выполнено по существу: 4 ошибки из 4
       несут его, две строки делят один `trace_id` (два лица одного инцидента).
@@ -906,26 +969,86 @@ Task 3.2, и приходит она изнутри SDK, куда наш кла�
 3. **Каталог, доступный только на чтение** (нет доступа завести `-shm` рядом с WAL-файлом) — ветка
    отказа открытия не покрыта: на Windows не нашлось надёжного способа воспроизвести это в прогоне.
 
-### Task 3.6 — Сигнал: восемь метрик и второй эмитент wide event (Н-1, Н-7, Н-9 ревью)
-**Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework, plugins, services
-**Goal:** плоскость чисел обслуживает не 3 вызова, а работу машины: задержки, отказы, ресурсы.
-**Files:** `Services/ml_inference/*`, `Services/hikvision_camera/*`, `Plugins/sources/capture/plugin.py`, `router_module/core/router_manager.py`,
-`worker_module/*`, `chain_module/metrics/latency.py`, `process_module/heartbeat/telemetry.py` (ресурсы процесса), `Plugins/processing/segmentation/*` или `chain_executor` (второй `write_event`).
-**Метрики (литералы, единицы):** `inference.latency` (s, timing), `inference.model_load` (s, timing), `camera.open_failed` (counter),
-`router.send.duration` (s, timing), `worker.cycle.duration` (s, timing), `chain.stage.duration` (s, timing), `queue.evicted` (counter),
-`process.rss` (MiB, gauge — из heartbeat, с политикой по умолчанию 1 раз/такт).
-**Acceptance criteria:**
-- [ ] Живьём каждая метрика ≠ 0 при контроле (например, `camera.open_failed == 0` с камерой и `> 0` без — пара).
-- [ ] Второй `write_event` на стенде: запись находится поиском по `trace_id` ровно одной строкой (как А4 гейта Ф6).
-- [ ] Цена каждой точки — дельтой против базы, три прогона; бюджет `record_timing` на горячем пути ≤ 5 мкс.
+### ~~Task 3.6 — Сигнал: восемь метрик и второй эмитент wide event~~ — **СНЯТА** (вердикт CTO, 2026-09-07)
 
-### Task 3.7 — Уборка стора голосом; `telemetry.db` с ретенцией по умолчанию (m14, T7)
-**Level:** Middle (Sonnet) · **Assignee:** developer · **Layer:** framework, plugins
-**Files:** `process_module/heartbeat/process_heartbeat.py:485-500`, `process_module/managers/observability_wiring.py:1340-1360`,
-`Plugins/io/telemetry_sink/registers.py:38-46`, `Plugins/io/telemetry_sink/plugin.py` (PRAGMA `auto_vacuum=INCREMENTAL` при создании).
-**Acceptance criteria:**
-- [ ] Живьём: `purge` пишет INFO с числом удалённых строк (пара: 0 при пустом, N при заполненном).
-- [ ] `telemetry_sink` с `retention_days=0` отказывается стартовать с адресом ключа (или дефолт 7 — решение в задаче с доводом); `PRAGMA auto_vacuum` у нового файла ≠ 0.
+**Решение:** срезана целиком, цена реза — **ноль**. Довод CTO: метрики машины объявляет **потребитель**,
+а не фреймворк придумывает их за продукт. Проверено двумя способами, не одним:
+
+- **Дерево.** `grep -rF` восьми литералов (в трёх формах: `"…"`, `'…'`, без кавычек) по
+  `multiprocess_framework Services Plugins multiprocess_prototype backend_ctl tools`, файлы
+  `*.py/*.yaml/*.toml/*.json` — **0 из 8**.
+- **Живой стор** (закрывает дыру «имя собрано на лету», которую греп не видит):
+  `logs/prototype_2/observability.db` от 2026-09-05, 24.8 МБ, 6 725 строк
+  (`log 4802 / observation 1401 / stats 508 / error 14`) → `SELECT COUNT(*) WHERE metric=<литерал>`
+  = **0 для всех восьми**. Уникальных числовых идентичностей в файле **три**: `capture.capture_fps`,
+  `capture.drops`, `capture.frame_count` (по 467, все `kind=observation`).
+- **Трек otel:** «3.6 → ничего, числа v1 не экспортирует» (`otel-export.md:639`) — подтверждено.
+
+**Находка сверх цены реза, она дороже самой задачи.** Строк с идентичностью и `kind=stats` в сторе —
+**ноль**. Путь `record_timing` → `ObservabilityHub._emit_stat` → drain → окно `StatsManager` →
+снапшот, а у снапшота `metric = NULL` (`from_hub_record` → `None`, `number_record.py:210-217`);
+одиночная `kind=stats` в проде не производится (собственная запись Task 3.1, `phase-3:301`).
+Следствие: `history_query(metric="router.send.duration")` после 3.6 вернул бы **пусто** — задача
+не даёт «историю метрики» без отдельного решения «разложить снапшот», которое Task 3.1 оценила
+горизонтом 47.5 ч → ~1.4 ч. Это решение потребителя ряда. **Долг унаследован Task 3.8** (пункт «б»).
+
+**Второй эмитент `write_event` уже есть.** В проде ровно один вызывающий —
+`Plugins/control/robot_control/plugin.py:285` (`"inspection"`, `decisive=`, `reject_seq`), и это как раз
+событие отбраковки. Критерий Task 3.8 «почему изделие забраковано» достижим им, топология
+`inspection_full.yaml:101`.
+
+### ~~Task 3.7 — Уборка стора голосом; `telemetry.db` с ретенцией по умолчанию~~ — **СНЯТА** (вердикт CTO, 2026-09-07)
+
+**Решение:** срезана как задача; **один ненулевой остаток перенесён в Task 3.8** (условие iv).
+
+Что уже построено раньше и работает — проверено прогоном, а не чтением:
+
+- **Ретенция стора жива.** `ObservabilityStore.purge()` (`observability_store.py:920`) зовётся тактом
+  heartbeat: `process_heartbeat.py:272 → :535 → observability_wiring.sweep_observability_history`
+  (`:1524-1556`), политика `max_rows / max_age_sec / purge_interval_sec` из секции `observability.history`.
+  **Грепом `.purge(` это не видно** — вызов идёт через `getattr(store, "purge")`; отсюда прежняя оценка
+  «не построено».
+- **`PRAGMA auto_vacuum` живого файла = 2**, `user_version = 3` — миграция D3 отработала.
+
+**Ненулевой остаток — голос, ~3 строки фреймворка.** `sweep_observability_history` возвращает отчёт
+`{by_age, by_rows, remaining}`, а вызывающий `_sweep_observability_history` (`process_heartbeat.py:535`)
+его **выбрасывает**; единственный голос — `_process_warn` при отказе. `grep -F "by_age" "by_rows"` вне
+стора → 0. Уборка молчит: сколько строк снято, не знает никто.
+
+**Половина `telemetry.db` — у потребителя, и сток по умолчанию выключен** (`app.yaml:35`):
+`data/telemetry.db` → `PRAGMA auto_vacuum = 0`, `user_version = 0`, 40 строк; `retention_days` дефолт
+`0` (`Plugins/io/telemetry_sink/registers.py:38-46`); `purge_old` число уже голосит (`plugin.py:361`);
+хелпер миграции существует — `Services/sql/adapters/sqlite.py:30 migrate_to_incremental_auto_vacuum`,
+плагин его не зовёт. Это работа потребителя, во фреймворк не возвращается.
 
 ### Task 3.8 — Живой стенд Ф3 + ревью фазы
-- [ ] Горизонт стора и МиБ/ч — числами на 8 процессах с включёнными wide events (`every_mth` как в гейте Ф6 А6): цель ≥ 24 ч, ≤ ~4 МиБ/ч; агентская сессия: `history_query` отвечает «почему изделие забраковано» без драйвера.
+**Level:** Senior (Opus) · **Assignee:** ведущий (стенд) + `reviewer` (ревью фазы, синхронно) · **Layer:** mixed
+
+**После реза Ф3 (2026-09-07) она — следующая и последняя задача фазы.** Содержание расширено
+вердиктом CTO: рез не изъял из неё ничего, а добавил четыре пункта, потому что срезанные задачи
+оставили долги, которые обязан назвать именно живой стенд.
+
+- [ ] **Горизонт стора и МиБ/ч** — числами на 8 процессах с включёнными wide events (`every_mth` как
+      в гейте Ф6 А6): цель ≥ 24 ч, ≤ ~4 МиБ/ч.
+- [ ] **(а) Долг Task 3.3 — живого стенда у неё не было.** Предъявить на стенде: счётчик
+      `store_evicted`, строку исхода `store flush: N записано, M потеряно` на останове, лаг
+      `history_query` (замер до реза: 94–112 мс).
+- [ ] **(б) Долг Task 3.1 и находка реза 3.6:** одиночная `kind=stats` в проде не производится
+      (`metric = NULL` у снапшота). Назвать это числом на стенде — сколько строк с идентичностью и
+      сколько без — и записать решение: раскладывать снапшот или объявить «истории метрики нет»
+      явным отказом `history_query`.
+- [ ] **(в) Условие (iv) реза Task 3.7 — голос уборки.** Отчёт `{by_age, by_rows, remaining}` из
+      `sweep_observability_history` перестаёт выбрасываться в `process_heartbeat.py:535`: INFO с числом
+      снятых строк. Соло-правка ≤ 3 строк (названа вслух по правилу солo-исключения), **обязательна
+      пара инъекций 0/N** — пусто → «0», заполнено → N, предсказание до прогона.
+- [ ] **(г) Критерий «почему изделие забраковано»** — агентская сессия отвечает через `history_query`
+      без драйвера. **Достижим только на топологии с `robot_control`** (`inspection_full.yaml:101`,
+      единственный боевой `write_event`). Если стенд поднят на другой топологии — критерий
+      недостижим, и это надо сказать вслух, а не тихо пропустить.
+- [ ] **(д) Открытый вопрос Task 3.5** (`limit=100` против байтового потолка 12 000) — решается при
+      приёмке фазы, не раньше.
+- [ ] Ревью фазы — `reviewer`, синхронно (`run_in_background: false`), находки с воспроизведением
+      вход → выход.
+
+**Out of scope:** писатель `NumberRecord.unit` (условие (ii) реза Task 3.4 — дом Ф4.6 либо план otel v2);
+дом находки F3 (Ф4.1 или 4.10); метрики машины (уехали к потребителю вместе с 3.6).

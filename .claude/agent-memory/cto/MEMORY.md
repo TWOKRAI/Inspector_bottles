@@ -3,3 +3,5 @@
 - [pytest shows captured output only for failures](feedback_pytest_shows_captured_output_only_for_failures.md) — 0→N warning counts across trees are display artefacts; count with log_cli on both sides
 - [Shared-tree provenance forensics](project_shared_tree_provenance_forensics.md) — pre-commit patch files + fsck WIP stashes reconstruct authorship; explicit-path staging fails inside a shared file
 - [Lock-hold claims need a lock-free control (GIL)](feedback_lock_hold_time_claims_need_a_lock_free_control_under_the_gil.md) — writer p99 identical HEAD vs deque-swap; lock-free competitor shows same tail; judge by hold time inside CS
+- [Cross-track dependency can name the wrong plane](feedback_a_cross_track_dependency_can_name_the_wrong_plane.md) — grep the consumers of the named function; declare_metric = levels, NumberRecord.unit = numbers
+- [Ф3 cut verdict 2026-09-07](project_f3_cut_verdict_2026_09_07.md) — 3.4/3.6/3.7 cut, shrink rejected; four conditions; F3 mis-parked by me, needs own home
