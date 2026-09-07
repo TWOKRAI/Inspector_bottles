@@ -85,10 +85,6 @@ from multiprocess_framework.modules.logger_module.core.windowed_voice import (
     reset_voice_counters,
 )
 
-from multiprocess_framework.modules.process_module.configs.observability_config import (
-    ObservabilityConfig,
-)
-
 from .test_observation_policy_review_f4 import _wired
 
 #: Подстроки, по которым запись засчитывается как «голос про смену смысла
@@ -249,55 +245,62 @@ class TestWindowExpiryReVoicesAfterSilence:
 # 4 — Возобновившийся голос называет число подавленных                       #
 # =========================================================================== #
 class TestReactivatedVoiceNamesSuppressedCount:
-    """Свойство 4: голос, прозвучавший после окна, называет, сколько СОБЫТИЙ
-    было подавлено с прошлой записи. Иначе подавленные исчезают бесследно, и
-    оператор не узнаёт, что правило вообще срабатывало, пока молчало.
+    """Свойство 4: голос, прозвучавший после окна, называет, сколько ДЕЙСТВИЙ
+    оператора было подавлено с прошлой записи. Иначе подавленные исчезают
+    бесследно, и оператор не узнаёт, что правило вообще срабатывало, пока
+    молчало.
 
-    **Дверь здесь ДРУГАЯ, чем у свойств 1-3, и это правка координатора поверх
-    набора тестера — с причиной, а не для удобства.** Тестер написал этот тест
-    через ``config.reload`` и ждал литерала ``4`` («четыре подавленных
-    reload'а»). Модель неверна, и замер это показывает: один ``config.reload``
-    даёт **6** срабатываний валидатора, а прямой ``ObservabilityConfig.
-    model_validate`` — ровно **1** (числа сняты зондом координатора и совпали с
-    независимым зондом тестера). Через операторскую дверь литерал был бы не
-    ``4``, а ``5 + 4*6 = 29`` — то есть тест дал бы ЛОЖНЫЙ КРАСНЫЙ на верной
-    реализации, причём по числу, которое зависит от внутреннего устройства
-    пути reload, а не от свойства.
-
-    Правая модель — **событие, а не действие оператора**: окно живёт у
-    валидатора, и «подавлено» считает попытки голоса. Знать границы reload'а
-    валидатор не может, а число попыток честно. Поэтому счётная семантика
-    проверяется у двери, где одно событие = ровно одно событие; «одно действие
-    оператора — один голос» проверяют свойства 1 и 2 через настоящий
-    ``config.reload``, и та половина контракта не ослаблена.
+    **Дверь здесь — Task 4.11, ``compose_managers_payload``, а не прежний
+    ``ObservabilityConfig.model_validate``.** До задачи 4.11 голос жил внутри
+    валидатора схемы, который сам зовётся ТРИЖДЫ на одно действие оператора
+    (стадии ``config.reload``: проверить → применить → сверить), поэтому
+    прежняя редакция этого теста была вынуждена звать валидатор НАПРЯМУЮ и
+    называть «подавлено» число РАЗБОРОВ, а не действий — «событие, а не
+    действие оператора» было принятой половинчатостью, а не итогом. Задача
+    4.11 сняла саму причину половинчатости: голос переехал на
+    :func:`~..managers.observability_reload.compose_managers_payload` —
+    функцию, которая зовётся РОВНО один раз на действие (её докстринг и
+    докстринг ``_voice_repurposed_stats_enabled`` — тому доказательство), и
+    свойства 1-4 теперь проверяют ОДНУ и ТУ ЖЕ вещь: «подавлено» считает
+    действия. Дверь этого теста при этом ниже, чем полный ``config.reload``
+    (``_wired`` + ``handlers["config.reload"]``) свойств 1-3: тест мельче
+    единицы работы («одно применение секции»), и это довод в пользу
+    ``compose_managers_payload`` как более узкого, более быстрого способа
+    проверить ИМЕННО текст возобновившегося голоса, не поднимая процесс.
     """
 
     def test_the_re_voice_after_the_window_names_how_many_were_suppressed(
-        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            compose_managers_payload,
+        )
+
         clock = _fake_clock(monkeypatch)
         caplog.set_level(logging.WARNING)
+        section = {"stats": {"enabled": False}}
+        log_dir = str(tmp_path)
 
-        ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        compose_managers_payload(section, log_dir=log_dir)
         assert len(_voice_records(caplog)) == 1, "первый голос обязан прозвучать — базы сравнения иначе нет"
         caplog.clear()
 
         suppressed_events = 4
         for i in range(suppressed_events):
-            ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+            compose_managers_payload(section, log_dir=log_dir)
         assert _voice_records(caplog) == [], (
             "внутри окна голос не имеет права прозвучать — иначе число подавленных "
             "ниже посчитано неверно и проверка бессмысленна"
         )
 
         clock.advance(1_000_000.0)
-        ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        compose_managers_payload(section, log_dir=log_dir)
 
         voices = _voice_records(caplog)
         assert len(voices) == 1, f"возобновившийся голос обязан быть РОВНО одним: {voices!r}"
         text = voices[0]
         assert re.search(rf"(?<!\d){suppressed_events}(?!\d)", text), (
-            f"возобновившийся голос не называет число подавленных ({suppressed_events}): "
+            f"возобновившийся голос не называет число подавленных действий ({suppressed_events}): "
             f"{text!r} — подавленные исчезли бесследно, оператор не узнает, что правило "
             "срабатывало, пока молчало"
         )

@@ -160,6 +160,69 @@ def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
     return managers_payload_for_proc(managers_from_log_dir(resolve_base_log_dir(log_dir), model_cls=ManagersConfig))
 
 
+def _voice_repurposed_stats_enabled(resolved: Any) -> None:
+    """Голос ADR-PM-046 (смена смысла ``stats.enabled``) — на стадии «применяю».
+
+    Task 4.11 (вердикт CTO 2026-09-03, корень m1): голос переехал сюда ИЗ
+    валидатора схемы
+    (``ObservabilityStatsConfig._complain_about_repurposed_enabled`` — полная
+    история диагноза в его докстринге, включая замеры «6 срабатываний на один
+    reload / 18 на три подряд»). Причина переезда — не косметика: валидатор
+    зовётся ТРИЖДЫ на каждое действие оператора (стадии ``config.reload``:
+    проверить → применить → сверить, решение B2/Task 5.7), и окно
+    (Task 2.12) дросселировало РАЗБОРЫ, а не действия — «подавлено: N» после
+    трёх ``config.reload`` называло 17 вместо 2.
+
+    **Почему именно здесь, а не внутри** :func:`~..configs.observability_config.
+    expand_observability` **и не внутри модели схемы.** Эта функция —
+    ЕДИНСТВЕННАЯ, что зовётся РОВНО один раз на действие оператора:
+
+    * boot — раз на создание менеджеров процесса
+      (``ProcessManagers._managers_config_for_creation``, ``process_managers.py``);
+    * ``config.reload`` / hot-reload watcher — раз на стадии «применить»
+      (:func:`_rebuild_and_apply`, вызванная из :func:`apply_observability_layers`).
+
+    Стадии «проверить» и «сверить» её НЕ зовут — они читают
+    ``expand_observability`` НАПРЯМУЮ (:func:`observability_verified` и
+    ``unknown_section_keys``), минуя эту обёртку. Голос внутри самой
+    ``expand_observability`` прозвучал бы и на стадии «сверить» тоже — то есть
+    дважды на один ``config.reload`` (применить + сверить), и число снова стало
+    бы не тем, которое ждёт читатель.
+
+    Args:
+        resolved: СЫРОЙ словарь секции ``observability`` (тот же, что уйдёт в
+            ``ObservabilityConfig.model_validate`` внутри ``expand_observability``
+            следующей строкой) — не раскладка. Секция ``stats`` может отсутствовать
+            вовсе (молчащий слой) — тогда функция молчит.
+
+    Не падает и не голосит ни на каком постороннем входе (мусор вместо словаря,
+    ``stats`` не словарь, ``enabled`` не булев ``False`` буквально) — вход сюда
+    приходит из разрешённых слоёв, а не напрямую от оператора, но граница
+    остаётся защищённой той же дисциплиной, что была у валидатора
+    (``is False``, а не ``== False``: строка ``"false"``/``0``/``None`` — не тот
+    же факт, что булев ``False``).
+    """
+    section = resolved.get("stats") if isinstance(resolved, dict) else None
+    if not isinstance(section, dict) or section.get("enabled") is not False:
+        return
+
+    from ..._fallback import FallbackLogger
+    from ...logger_module.core.windowed_voice import compose_voice_text, process_voices
+
+    voiced, suppressed = process_voices().take("stats.enabled.repurposed", None)
+    if voiced:
+        FallbackLogger(__name__).warning(
+            compose_voice_text(
+                "stats.enabled: false — с Ф2 этот ключ означает ПЛОСКОСТЬ ЧИСЕЛ: "
+                "метрики не будут собираться вовсе (окно пустое, все каналы "
+                "статистики молчат). Прежний смысл «не писать снапшоты в журнал» "
+                "переехал в stats.log_snapshots — если вы хотели именно его, "
+                "замените на 'enabled: true, log_snapshots: false' (ADR-PM-046)",
+                suppressed,
+            )
+        )
+
+
 def compose_managers_payload(
     resolved: Dict[str, Any],
     *,
@@ -212,10 +275,15 @@ def compose_managers_payload(
     Returns:
         ``{"logger": …, "error": …, "stats": …, "command": …}`` — слои, наложенные
         на базу L0 машинного контекста.
+
+    Task 4.11: эта функция — единственный адресат голоса ADR-PM-046
+    (:func:`_voice_repurposed_stats_enabled`), потому что она — единственная,
+    что зовётся РОВНО один раз на действие оператора (см. докстринг голоса).
     """
     from ...data_schema_module import deep_merge
     from ..configs.managers_config import merge_managers
 
+    _voice_repurposed_stats_enabled(resolved)
     expanded = expand_observability(resolved)
     base = base_managers_payload(log_dir)
 

@@ -20,14 +20,18 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
-from multiprocess_framework.modules._fallback import emergency_log
+from multiprocess_framework.modules._fallback import FallbackLogger
 from Services.sql.core.adapter_factory import create_sync_adapter
 
 from .store import DocumentStore
 
 __all__ = ["make_document_sink", "DEFAULT_DB_PATH", "DEFAULT_BUSY_TIMEOUT_SEC"]
 
-_EMERGENCY_NAME = __name__
+# Task 4.11: адресат этих строк — оператор/интегратор, читающий журнал (цена
+# миграции, отказ, тихий ноль), а не самоотчёт сломавшегося маршрута
+# наблюдаемости — поэтому вид (`FallbackLogger`), а не аварийный выход
+# (`emergency_log`). Имя стока — `__name__`, как у остальных видов дерева.
+_logger = FallbackLogger(__name__)
 
 #: Файл БД по умолчанию. Не в каталоге логов намеренно: у логов свой ретеншен
 #: (7 дней / 200 МБ, Ф6.9), и документ, положенный рядом, однажды уедет вместе с ними.
@@ -170,9 +174,7 @@ def _migrate_auto_vacuum(adapter: Any, db_path: str) -> int:
     outcome = migrate(SCHEMA_VERSION)
     mode = int(outcome.get("mode", 0))
     if outcome.get("error"):
-        emergency_log(
-            _EMERGENCY_NAME,
-            "WARNING",
+        _logger.warning(
             "documents: миграция auto_vacuum на %s не выполнена (%s); плоскость работает "
             "на auto_vacuum=%s — удаление документов не уменьшит файл, попробуем на следующем старте",
             db_path,
@@ -180,17 +182,13 @@ def _migrate_auto_vacuum(adapter: Any, db_path: str) -> int:
             mode,
         )
     elif outcome.get("migrated"):
-        emergency_log(
-            _EMERGENCY_NAME,
-            "WARNING",
+        _logger.warning(
             "documents: миграция auto_vacuum на %s заняла %.3f с (VACUUM унаследованной БД, писатели ждали столько же)",
             db_path,
             float(outcome.get("duration_sec", 0.0)),
         )
     elif mode == 0:
-        emergency_log(
-            _EMERGENCY_NAME,
-            "WARNING",
+        _logger.warning(
             "documents: %s остался с auto_vacuum=0 без отказа — PRAGMA проигнорирована молча; "
             "удаление документов не уменьшит файл",
             db_path,

@@ -310,6 +310,10 @@ class ObservabilityStore:
             started = time.monotonic()
             self._conn.execute("VACUUM")
             duration = time.monotonic() - started
+            # Task 4.11, часть B: остаётся аварийным выходом СОЗНАТЕЛЬНО — вызов
+            # звучит внутри __init__, до register_writer(), то есть до того, как
+            # стор способен принять СВОЙ ЖЕ голос обратно через дренаж (стор —
+            # адресат собственного kind='log'). Довод — ADR-CRM-018.
             emergency_log(
                 _EMERGENCY_NAME,
                 "WARNING",
@@ -383,6 +387,9 @@ class ObservabilityStore:
             self._conn.commit()
         except sqlite3.OperationalError as exc:
             self._fts_reason = f"полнотекстовый индекс недоступен в этой сборке SQLite: {exc}"
+            # Task 4.11, часть B: тот же довод, что у миграции auto_vacuum выше —
+            # __init__ ещё не отдал стор register_writer()'у, самоотчёт через
+            # собственный дренаж исключён по построению. ADR-CRM-018.
             emergency_log(
                 _EMERGENCY_NAME,
                 "WARNING",
@@ -405,6 +412,7 @@ class ObservabilityStore:
         self._conn.execute(f"PRAGMA user_version = {_FTS_SCHEMA_VERSION}")
         self._conn.commit()
         if rows:
+            # Task 4.11, часть B: тот же довод — ADR-CRM-018.
             emergency_log(
                 _EMERGENCY_NAME,
                 "WARNING",
@@ -565,6 +573,8 @@ class ObservabilityStore:
         except sqlite3.OperationalError as exc:
             # json1 отсутствует в сборке (или иная беда SQL): молчать нельзя —
             # «ряд по метрике пуст» иначе читался бы как «данных не было».
+            # Task 4.11, часть B: тот же довод, что у трёх соседей выше —
+            # ADR-CRM-018.
             emergency_log(
                 _EMERGENCY_NAME,
                 "WARNING",

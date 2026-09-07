@@ -71,6 +71,7 @@ from ...channel_routing_module.observability.observability_hub import Observabil
 from ...process_module.configs.observability_config import ObservabilityConfig, expand_observability
 from ...process_module.configs.observation_policy import ObservationPolicy, ObservationPolicyConfig
 from ...process_module.configs.telemetry_publish_config import MetricRule
+from ...process_module.managers.observability_reload import compose_managers_payload
 from .. import StatsManager
 from ..observation.observation_manager import ObservationManager
 
@@ -454,12 +455,19 @@ def test_c6_policy_rebuild_reaches_the_port_new_rule_takes_effect_after_reload()
 # ====================================================================== #
 
 
-def test_c7_reading_old_stats_enabled_false_warns_loudly_about_meaning_change(caplog):
+def test_c7_reading_old_stats_enabled_false_warns_loudly_about_meaning_change(tmp_path, caplog):
     """Старый смысл ``stats.enabled: false`` — «не логировать снапшоты»; новый —
     «плоскость выключена целиком» (Р-3а). Конфиг, написанный ДО этой задачи,
-    обязан быть замечен и назван вслух — тем же жестом, что уже применяется в
-    этом же файле к ``REMOVED_BATCHING_KEYS`` (``_fallback.emergency_log`` →
-    ``logging.getLogger(...).warning(...)``, перехватывается ``caplog``).
+    обязан быть замечен и назван вслух.
+
+    **Дверь — Task 4.11, а не ``ObservabilityConfig.model_validate``.** До
+    задачи 4.11 голос жил в валидаторе схемы и звучал на каждый разбор секции
+    (три раза на один ``config.reload`` — дефект, который 4.11 и закрыла). Он
+    переехал на стадию «применяю»
+    (:func:`~process_module.managers.observability_reload.compose_managers_payload`,
+    :func:`~process_module.managers.observability_reload._voice_repurposed_stats_enabled`);
+    прямой ``model_validate`` больше не голосит — валидатор стал чистым
+    парсером (см. его докстринг).
 
     **Сброс окна голоса — не косметика, а условие осмысленности теста (Task 2.12,
     m1).** С задачи 2.12 это предупреждение дросселируется окном по ключу
@@ -475,7 +483,7 @@ def test_c7_reading_old_stats_enabled_false_warns_loudly_about_meaning_change(ca
 
     reset_process_voices()
     with caplog.at_level("WARNING"):
-        ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        compose_managers_payload({"stats": {"enabled": False}}, log_dir=str(tmp_path))
 
     messages = "\n".join(r.message for r in caplog.records)
     assert "stats.enabled" in messages or "log_snapshots" in messages, (
