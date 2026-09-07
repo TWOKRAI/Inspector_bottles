@@ -20,6 +20,7 @@
 - [Прототипируй страж до фиксации формулировки](feedback_prototype_the_guard_before_fixing_its_wording.md) — «в одной функции» было методом инвентаря и пережило основание: красно по построению, выход только whitelist
 - [Ревью ловит стык своих кусков](feedback_review_finds_the_seam_between_own_pieces.md) · [ревью спеки — независимым](feedback_spec_review_needs_independent_agent.md) — автор находит карту, не форму
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) · [вердикт по одному маркеру врёт](feedback_single_marker_verdict_lies.md) — пара маркеров + признак жизни
+- [Зонд, гадающий о темпе, говорит «нет» вместо «не знаю»](feedback_a_probe_that_guesses_tempo_says_no_when_it_means_dont_know.md) — пять ложных опровержений подряд на ИСПРАВНОМ механизме: форма, темп, темп, готовность, вакуум; недобор фактов = «не доказано»
 - [Subagent live = синхронно](feedback_subagent_live_test_monitor_hang.md)
 - [Красный — сперва на main](feedback_check_red_on_main_first.md) · [подпись гейта живёт на HEAD](feedback_gate_signature_lives_on_a_head.md) — коммит после подписи = пере-прогон
 - [Два зелёных гейта прячут красную пару](feedback_two_green_gates_can_hide_a_red_pair.md) — уборка сняла ЧУЖОЕ объявление; нарушитель и жертва в разных testpaths, красное только в совмещённом прогоне
