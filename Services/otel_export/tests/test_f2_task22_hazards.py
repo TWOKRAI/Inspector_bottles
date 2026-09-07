@@ -37,6 +37,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -59,6 +60,17 @@ VALID_TRACE_ID_BYTES = bytes.fromhex(VALID_TRACE_ID)
 #: Трасса «активного спана» для проверки места 6. Отличается от VALID_TRACE_ID:
 #: совпадение сделало бы утверждение слепым к самой ошибке, которую оно ловит.
 AMBIENT_TRACE_ID = 0xDEADBEEFDEADBEEFDEADBEEFDEADBEEF
+
+#: Дедлайн ЛЮБОГО ожидания между потоками. Тест, который ВИСНЕТ вместо падения,
+#: хуже отсутствующего: он прячет регрессию за таймаутом прогона.
+HANDOFF_DEADLINE_SEC = 5.0
+
+#: Схема semconv наших записей — та же, что кладёт резолвер (`resources.py`).
+OUR_SCHEMA_URL = "https://opentelemetry.io/schemas/1.43.0"
+
+#: ЧУЖАЯ непустая схема для проверки ловушки Р-24. Обязана отличаться от
+#: OUR_SCHEMA_URL: равные схемы мержатся без конфликта, и ось стала бы пустой.
+FOREIGN_SCHEMA_URL = "https://opentelemetry.io/schemas/1.26.0"
 
 
 @pytest.fixture(autouse=True)
@@ -95,7 +107,7 @@ def _mapped(**overrides: Any) -> MappedRecord:
         trace_id=VALID_TRACE_ID,
         resource=Resource(
             attributes={"service.name": "inspector", "process.pid": 4242},
-            schema_url="https://opentelemetry.io/schemas/1.43.0",
+            schema_url=OUR_SCHEMA_URL,
         ),
     )
     base.update(overrides)
@@ -163,6 +175,31 @@ class TestStrictTranslationFailsLoudly:
 
         assert outcome.failed == 1, f"важность вне словаря OTel принята молча: {outcome!r}"
         assert "severity_number" in outcome.reason, f"{outcome.reason!r}"
+
+    def test_one_bad_record_fails_the_WHOLE_batch_and_this_is_pinned_deliberately(self) -> None:
+        """Усиление отказа: 1 битая запись из 5 -> `failed == 5`. Не дефект — решение.
+
+        Контракт маппера слабее Pre экспортёра: `_as_severity_number`
+        (`mapping.py`) копирует int, не сверяя его со словарём OTel, а перевод
+        здесь сверяет. Живой дороги сегодня нет (оба писателя идут через
+        `severity_number_for`, чья шкала 0/5/9/13/17/21 словарю принадлежит), но
+        пара контрактов не сходится, и цена расхождения — весь батч, до
+        `max_queue_size` записей.
+
+        Тест пришпиливает ЦЕНУ числом, чтобы она перестала быть прозой: изменится
+        решение (маппер начнёт валидировать или экспортёр научится ронять одну
+        запись) — тест покраснеет и потребует переписать вместе с ADR-OTEL-006.
+        """
+        sdk = _SdkDouble()
+        exporter = OtlpHttpExporter(_cfg(), sdk_factory=lambda: sdk)
+        batch = [_mapped(body=f"good-{i}") for i in range(4)]
+        batch.insert(2, _mapped(severity_number=99, body="bad"))
+
+        outcome = exporter.export(batch)
+
+        assert outcome.failed == 5, f"цена одной битой записи изменилась — сверить с ADR-OTEL-006: {outcome!r}"
+        assert outcome.accepted == 0, f"{outcome!r}"
+        assert sdk.batches == [], "в SDK уехал батч, часть которого не переведена"
 
     def test_endpoint_is_named_in_every_failure_reason(self) -> None:
         """Причина без адреса бесполезна там, где приёмников на стенде два."""
@@ -293,15 +330,61 @@ class TestTranslationSurvivesTheRealEncoder:
         )
 
     def test_resource_schema_url_and_attributes_reach_the_wire(self) -> None:
+        """Пара БЕЗ конфликта схем: ресурс собран через `Resource.create`.
+
+        `telemetry.sdk.name` кладёт именно `create` (обогащение дефолтным
+        ресурсом SDK), прямой конструктор его не даёт. Утверждение про этот
+        атрибут отличает «создали и сверили» от «всегда собираем напрямую» —
+        без него сторож Р-24 ниже был бы зелёным и на экспортёре, который вовсе
+        не мержит.
+        """
         encoded = _encode([_mapped()])
 
         resource_logs = encoded.resource_logs[0]
-        assert resource_logs.schema_url == "https://opentelemetry.io/schemas/1.43.0", (
+        assert resource_logs.schema_url == OUR_SCHEMA_URL, (
             f"схема semconv потеряна при мерже (ловушка Р-24): {resource_logs.schema_url!r}"
         )
-        names = {attr.key for attr in resource_logs.resource.attributes}
-        assert "service.name" in names, f"{names!r}"
-        assert "process.pid" in names, f"{names!r}"
+        attributes = {attr.key for attr in resource_logs.resource.attributes}
+        assert "service.name" in attributes, f"{attributes!r}"
+        assert "process.pid" in attributes, f"{attributes!r}"
+        assert "telemetry.sdk.name" in attributes, (
+            "ресурс собран мимо Resource.create — обогащение дефолтным ресурсом SDK исчезло, "
+            f"и сверка схемы Р-24 стала проверять несуществующий мерж: {attributes!r}"
+        )
+
+    def test_conflicting_default_schema_does_not_swallow_our_resource(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ловушка Р-24 на ЖИВОЙ оси: дефолтный ресурс SDK с ЧУЖОЙ непустой схемой.
+
+        `Resource.merge` при разных непустых `schema_url` пишет
+        `Failed to merge resources` в stdlib-`logging` (процесс его не слышит) и
+        возвращает только свою сторону. Воспроизведено на 1.44.0 подменой
+        `_DEFAULT_RESOURCE`:
+
+            без сверки схемы: schema 1.26.0, service.name = None   <- ресурс исчез
+            со сверкой:       schema 1.43.0, service.name = inspector
+
+        Дорога живая не только в теории: детектор из
+        `OTEL_EXPERIMENTAL_RESOURCE_DETECTORS` со своей схемой создаёт ровно это
+        столкновение, а признака у него нет ни одного.
+        """
+        import opentelemetry.sdk.resources as sdk_resources
+
+        monkeypatch.setattr(
+            sdk_resources,
+            "_DEFAULT_RESOURCE",
+            sdk_resources.Resource({"telemetry.sdk.name": "opentelemetry"}, FOREIGN_SCHEMA_URL),
+        )
+
+        encoded = _encode([_mapped()])
+
+        resource_logs = encoded.resource_logs[0]
+        assert resource_logs.schema_url == OUR_SCHEMA_URL, (
+            f"схема записи проглочена чужой схемой дефолтного ресурса: {resource_logs.schema_url!r}"
+        )
+        attributes = {attr.key: attr.value.string_value for attr in resource_logs.resource.attributes}
+        assert attributes.get("service.name") == "inspector", (
+            f"вместе со схемой исчезли и атрибуты ресурса — запись уехала без источника: {attributes!r}"
+        )
 
     def test_ambient_span_does_not_stamp_its_trace_on_a_record_without_one(self) -> None:
         """Конструктор SDK берёт трассу ТЕКУЩЕГО спана, если наша пуста.
@@ -475,6 +558,36 @@ def _boot(
 # --------------------------------------------------------------------------- #
 
 
+class TestPluginIsWiredToTheRealExporter:
+    """Фейковый харнесс доказывает харнесс. Один тест — БЕЗ единой подмены.
+
+    Оба харнесса этого файла патчат `plugin_module.OtlpHttpExporter` ДО
+    `configure()`, поэтому заплата «заменить импорт заглушкой под тем же именем»
+    не убила бы ни одного теста: они все разговаривают с дублем. Здесь плагин
+    собирается на настоящем классе.
+
+    Сеть при этом не трогается: конструктор `OtlpHttpExporter` ничего не
+    открывает (Р-18), объект SDK строится лениво при первой НЕПУСТОЙ отправке, а
+    её здесь нет — и это утверждается отдельно, `_sdk is None`.
+    """
+
+    def test_configure_builds_a_real_exporter_and_opens_nothing(self) -> None:
+        from Plugins.io.otel_export.plugin import OtelExportPlugin
+
+        ctx, _voices, _command_manager, _router = _make_ctx()
+        plugin = OtelExportPlugin()
+
+        plugin._do_configure(ctx)
+
+        assert isinstance(plugin._exporter, OtlpHttpExporter), (
+            f"плагин собрал не настоящий экспортёр: {type(plugin._exporter)!r}"
+        )
+        assert plugin._exporter._sdk is None, (
+            "объект SDK построен на configure() — ленивость потеряна, и процесс, "
+            f"который за всю жизнь ничего не отправит, открыл сокет: {plugin._exporter._sdk!r}"
+        )
+
+
 class TestFailureVoiceReachesTheJournal:
     def test_export_failure_puts_a_real_line_into_ctx_log_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Сторожит ЖУРНАЛ, а не форму вызова `log_windowed`.
@@ -496,8 +609,29 @@ class TestFailureVoiceReachesTheJournal:
             f"(проверь `error` в `_voice`). Журнал: {voices!r}"
         )
         line = voices["error"][-1]
-        assert ENDPOINT in line, f"строка отказа не называет endpoint: {line!r}"
-        assert "3" in line, f"строка отказа не называет число потерянных записей: {line!r}"
+        assert f"endpoint={ENDPOINT}" in line, f"строка отказа не называет endpoint: {line!r}"
+        assert "failed=3" in line, (
+            "строка отказа не называет число потерянных записей полем `failed`. "
+            f"Голая проверка «'3' есть в строке» здесь БЕССМЫСЛЕННА: тройка живёт "
+            f"в самом адресе :4318, и утверждение прошло бы при любой цифре. Строка: {line!r}"
+        )
+        assert "collector unreachable" in line, f"строка отказа не несёт причину от экспортёра: {line!r}"
+
+    def test_the_number_in_the_line_is_the_real_count_not_a_constant(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Пара с ДРУГИМ числом: сторож обязан отличать 3 от 7.
+
+        Без неё утверждение `failed=3` можно удовлетворить константой в тексте.
+        """
+        plugin, ctx, voices, command_manager, _router, _double = _boot(
+            monkeypatch, failed=7, reason="collector unreachable"
+        )
+        ctx.router_manager.handlers["observability.record"](_log_envelope(7))
+
+        command_manager.registered["otel_export.flush"]({})
+
+        line = voices["error"][-1]
+        assert "failed=7" in line, f"число в строке не следует за настоящим исходом: {line!r}"
+        assert "failed=3" not in line, f"в строке одновременно два числа потерь: {line!r}"
 
     def test_success_leaves_the_error_journal_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Пара к отказу: на успехе строки нет вовсе, иначе сторож слеп."""
@@ -538,8 +672,14 @@ class TestFlushHazards:
         assert counters["export_failed"] == 1, f"{counters!r}"
         assert result["status"] == "failed", f"частичная потеря не имеет права читаться как ok: {result!r}"
 
-    def test_flush_on_empty_ring_does_not_call_the_exporter(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Дожатие пустого кольца — бесплатная дорога: ни отправки, ни голоса."""
+    def test_flush_on_empty_ring_sends_an_empty_batch_and_stays_silent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Пустое кольцо: плагин зовёт экспортёр ПУСТЫМ батчем и молчит.
+
+        Имя и утверждение обязаны совпадать: плагин отсечки не делает вовсе, он
+        отдаёт пустой список. Бесплатность дороги (SDK не строится, сокет не
+        открывается) сторожит `test_empty_batch_builds_no_sdk_object_at_all` —
+        на уровне сервиса, где эта отсечка и живёт.
+        """
         plugin, ctx, voices, command_manager, _router, double = _boot(monkeypatch)
 
         result = command_manager.registered["otel_export.flush"]({})
@@ -595,6 +735,80 @@ class TestFlushHazards:
         )
         counters = command_manager.registered["otel_export.status"]({})["counters"]
         assert counters["exported"] == 3, f"{counters!r}"
+
+    def test_records_arriving_during_a_slow_export_are_not_lost(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Обмен кольца под локом — НАСТОЯЩИМ вторым потоком, иначе не проверяется.
+
+        Свойство многопоточное: пока идёт синхронная отправка (до
+        `export_timeout_sec`), приёмный поток продолжает класть записи в кольцо.
+        Заплата «отправить `self._pending`, очистить ПОСЛЕ возврата экспортёра»
+        однопоточным тестом не ловится вовсе — она убивает ровно то, что приехало
+        за время запроса, и убивает молча.
+
+        Момент прихода не отдан планировщику: дубль экспортёра сообщает событием,
+        что отправка НАЧАЛАСЬ, и не возвращается, пока сосед не положит свои
+        записи. Ожидания с дедлайном, поток демонский, `join` с дедлайном —
+        зависнуть тест не может.
+
+        Сторожится ТОЖДЕСТВО, а не порядок: `exported + export_failed +
+        dropped_overflow + осталось в кольце` обязано равняться числу принятых.
+        """
+        import Plugins.io.otel_export.plugin as plugin_module
+        from Plugins.io.otel_export.plugin import OtelExportPlugin
+
+        export_started = threading.Event()
+        may_return = threading.Event()
+        sent_sizes: list[int] = []
+
+        class _SlowExporter:
+            def __init__(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+            def export(self, records: Any) -> ExportOutcome:
+                batch = list(records)
+                sent_sizes.append(len(batch))
+                export_started.set()
+                may_return.wait(HANDOFF_DEADLINE_SEC)
+                return ExportOutcome(accepted=len(batch), failed=0, reason="")
+
+        monkeypatch.setattr(plugin_module, "OtlpHttpExporter", _SlowExporter)
+        ctx, _voices, command_manager, router = _make_ctx()
+        plugin = OtelExportPlugin()
+        plugin._do_configure(ctx)
+        plugin._do_start(ctx)
+        handler = router.handlers["observability.record"]
+
+        early, late = 2, 3
+        handler(_log_envelope(early))
+
+        failures: list[BaseException] = []
+
+        def _feed_during_export() -> None:
+            try:
+                assert export_started.wait(HANDOFF_DEADLINE_SEC), "отправка так и не началась"
+                handler(_log_envelope(late))
+            except BaseException as exc:  # noqa: BLE001 — переносим отказ в главный поток
+                failures.append(exc)
+            finally:
+                may_return.set()
+
+        feeder = threading.Thread(target=_feed_during_export, daemon=True)
+        feeder.start()
+        command_manager.registered["otel_export.flush"]({})
+        feeder.join(HANDOFF_DEADLINE_SEC)
+
+        assert not feeder.is_alive(), "поток-сосед не завершился за дедлайн"
+        assert not failures, f"поток-сосед упал: {failures!r}"
+        assert sent_sizes == [early], f"в отправку уехал не тот батч: ожидалось {[early]}, ушло {sent_sizes!r}"
+
+        counters = command_manager.registered["otel_export.status"]({})["counters"]
+        accounted = (
+            counters["exported"] + counters["export_failed"] + counters["dropped_overflow"] + len(plugin._pending)
+        )
+        assert accounted == early + late, (
+            f"записи, приехавшие во время отправки, потеряны без счёта: принято {early + late}, "
+            f"учтено {accounted} (счётчики {counters!r}, в кольце {len(plugin._pending)})"
+        )
 
     def test_shutdown_with_empty_ring_does_not_call_the_exporter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Пара: пустое кольцо на останове не имеет права открывать сокет."""

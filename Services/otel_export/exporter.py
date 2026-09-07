@@ -14,10 +14,13 @@
    ни одного хендлера (`std_facade.py`, замер Ф6.8: 26 тысяч событий потери — ноль
    строк в `logs/`). Поэтому исход берётся из `LogRecordExportResult`, а не из
    чужого лога, и никогда — из «исключения не было».
-2. *Отправка СИНХРОННА и зовётся с потока команды.* Батчер SDK
-   (`BatchLogRecordProcessor`) приходит в Task 2.4; сегодня `export()` блокирует
-   вызывающего на время HTTP-запроса вплоть до `export_timeout_sec` (дефолт 30 с).
-   Звать его с ПРИЁМНОГО потока процесса запрещено — почта встанет.
+2. *Отправка СИНХРОННА, и единственный её боевой вызывающий сидит на ПРИЁМНОМ
+   потоке.* Батчер SDK (`BatchLogRecordProcessor`) приходит в Task 2.4; сегодня
+   `export()` держит вызывающего на время HTTP-запроса вплоть до
+   `export_timeout_sec` (дефолт 30 с). Команда `otel_export.flush` исполняется
+   внутри `RouterManager.receive()`, то есть эта задержка — задержка разбора
+   почты процесса. Запретить это отсюда нечем; цена названа и записана долгом в
+   `Plugins/io/otel_export/STATUS.md`.
 3. *Один битый перевод роняет ВЕСЬ батч.* Перевод `MappedRecord` ->
    `ReadableLogRecord` строгий: отсутствующий `Resource`, `trace_id` не тех 32
    hex-символов, `severity_number` вне словаря OTel — это `ValueError`, то есть
@@ -180,6 +183,10 @@ class OtlpHttpExporter:
             sdk = self._sdk_exporter()
             payload = [self._to_sdk_record(record) for record in batch]
             result = sdk.export(payload)
+            # Чтение исхода — ВНУТРИ try: `_is_success` лениво импортирует
+            # `LogRecordExportResult`, и отказ этого импорта снаружи стал бы
+            # исключением в потоке команды вместо посчитанного `failed`.
+            succeeded = _is_success(result)
         except Exception as exc:
             # Исход отправки, а не падение потока: причина названа и посчитана.
             return ExportOutcome(
@@ -188,7 +195,7 @@ class OtlpHttpExporter:
                 reason=self._reason(f"{type(exc).__name__}: {exc}"),
             )
 
-        if _is_success(result):
+        if succeeded:
             return ExportOutcome(accepted=len(batch), failed=0, reason="")
         return ExportOutcome(
             accepted=0,
@@ -333,13 +340,23 @@ def _is_success(result: Any) -> bool:
     `0`, то есть `if result:` читало бы успех как ложь, а `FAILURE` (`1`) — как
     истину. Ровно наоборот.
     """
-    from opentelemetry.sdk._logs._internal.export import LogRecordExportResult
+    # ПУБЛИЧНЫЙ путь `opentelemetry.sdk._logs.export` — тот же, который щупает
+    # `sdk_available()`. Приватный `._internal.export` дал бы то же имя (сверено:
+    # один и тот же объект на 1.44.0), но развёл бы пробу и горячий путь: проба
+    # «ровно те символы, которыми пользуется Ф2» проверяла бы не тот модуль.
+    from opentelemetry.sdk._logs.export import LogRecordExportResult
 
     return result is LogRecordExportResult.SUCCESS
 
 
 def _trace_id_to_int(value: str | None) -> int | None:
-    """32 hex-символа -> int; отсутствие -> `None`, а не ноль (Р-20).
+    """32 hex-символа -> int; отсутствие -> `None`.
+
+    Ноль на ЭТОМ уровне запрещён: здесь `None` означает «поля у записи нет», и
+    вернуть отсюда ноль значило бы смешать отсутствие с идентификатором. В
+    `INVALID_TRACE_ID` отсутствие переводит ВЫЗЫВАЮЩИЙ, у самой границы SDK, —
+    и почему именно так, сказано в §4 докстринга модуля (буква Р-20 снята
+    решением Р-26: модель SDK отсутствия через `None` не выражает).
 
     Длина проверяется ДО разбора: `int("abc", 16)` успешен и даёт 2748 —
     формально число, фактически чужой идентификатор, по которому приёмник

@@ -2,8 +2,10 @@
 
 > **Стадия:** частичная реализация (план [`plans/otel-export.md`](../../plans/otel-export.md)).
 > Ф1 закрыта: маппер (`mapping.py`), резолвер `Resource` (`resources.py`), фильтр числовой
-> плоскости и приведение атрибутов — есть. `LogExporter` остаётся на стадии `contract`:
-> **ни одна запись этим сервисом ещё не отправлена наружу**, отправка приходит в Ф2.2/2.4.
+> плоскости и приведение атрибутов — есть. Task 2.2 закрыт: `OtlpHttpExporter`
+> (`exporter.py`) отправляет батч **синхронно** и возвращает исход числами. Чего ещё нет:
+> асинхронной пачки по расписанию (`BatchLogRecordProcessor`) — она приходит в Ф2.4, и до
+> неё отправка идёт только по команде `otel_export.flush` и на останове плагина.
 > Заголовки разделов по-английски — литерал шаблона module-contract; тело по-русски.
 
 ## Purpose
@@ -29,7 +31,7 @@
 |---|---|---|
 | `RecordMapper` | Protocol: display-запись → `MappedRecord \| None` | Ф1.1 `mapping.py` |
 | `ResourceResolver` | Protocol: контекст записи → `Resource` (пул + LRU) | Ф1.2 `resources.py` |
-| `LogExporter` | Protocol: `export(records)`, `force_flush(timeout)` | Ф2.2/Ф2.4 `exporter.py` |
+| `LogExporter` | Protocol: `export(records)`, `force_flush(timeout)` | `exporter.py` -> `OtlpHttpExporter` (Task 2.2; `force_flush` станет непустым в Ф2.4) |
 | `ObservabilityPort` | Protocol: минимальный разъём наблюдаемости для сервиса | хост (Ф2) |
 | `MappedRecord` | запись в модели OTel Logs Data Model | — |
 | `Resource` | **наш** тип ресурса (не тип SDK) | — |
@@ -104,12 +106,9 @@ from Services.otel_export.mapping import coerce_attributes    # атрибуты
 
 ## Usage
 
-Сегодня (стадия `contract`) сервис умеет ровно две вещи: назвать контракт и ответить,
-установлен ли SDK.
-
 ```python
 from Services.otel_export.config import OtelExportConfig
-from Services.otel_export.exporter import sdk_available
+from Services.otel_export.exporter import OtlpHttpExporter, sdk_available
 
 available, info = sdk_available()
 # (True, "1.44.0")  либо  (False, "missing: uv pip install --inexact '.[otel]'")
@@ -117,7 +116,32 @@ available, info = sdk_available()
 cfg = OtelExportConfig(endpoint="http://127.0.0.1:4318", headers={"authorization": "${OTEL_TOKEN}"})
 cfg.readback()["headers"]        # {"authorization": "***"}
 cfg.readback()["export_timeout_sec"]  # 30.0 — уйдёт в OTLPLogExporter(timeout=...)
+
+exporter = OtlpHttpExporter(cfg)          # ничего не открывает: объект SDK строится лениво
+outcome = exporter.export(mapped_records)  # синхронно, до export_timeout_sec
+outcome.accepted, outcome.failed, outcome.reason
+# (128, 0, "")  либо  (0, 128, "отправка в http://127.0.0.1:4318 не удалась: ...")
 ```
+
+**Исход берётся из ВОЗВРАЩЁННОГО значения, а не из чужого лога.** Отказы SDK уходят в
+stdlib-`logging`, у корневого логгера процесса фреймворка хендлеров нет — при закрытом
+коллекторе экспортёр молчал бы, а счётчик показывал ноль потерь (замер Ф6.8: 26 тысяч
+событий потери — ноль строк в `logs/`). Успех — ровно
+`LogRecordExportResult.SUCCESS`; `FAILURE`, `None` и любой чужой объект читаются как отказ.
+
+Три свойства, на которые стоит рассчитывать вызывающему:
+
+* `accepted + failed == len(records)` на всех дорогах — включая перевод, построение SDK и
+  исключение внутри него; исключения наружу не выпускаются;
+* пустой батч даёт `(0, 0)` и **не строит объект SDK вовсе** — дожатие пустого кольца
+  сокета не открывает;
+* перевод строгий: отсутствующий `Resource`, `trace_id` не тех 32 hex-символов,
+  `severity_number` вне словаря OTel — это отказ ВСЕГО батча с названной причиной
+  (цена решения и отвергнутые варианты — ADR-OTEL-006).
+
+Отправка синхронна, и её единственный боевой вызывающий (`otel_export.flush`) сидит на
+приёмном потоке процесса — долг с числом записан в
+[`Plugins/io/otel_export/STATUS.md`](../../Plugins/io/otel_export/STATUS.md), закрытие в Ф2.4.
 
 Установка extra (ставит владелец, агент только выдаёт команду):
 

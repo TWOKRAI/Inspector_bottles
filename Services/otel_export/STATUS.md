@@ -1,11 +1,18 @@
 # Services/otel_export — STATUS
 
 **Состояние: частичная реализация.** Ф1 закрыта — маппер, резолвер `Resource`, фильтр
-числовой плоскости и приведение атрибутов работают. На стадии `contract` остался ровно один
-Protocol — `LogExporter`: **ни одна запись наружу ещё не ушла**, отправки в коде нет.
+числовой плоскости и приведение атрибутов работают. Task 2.2 закрыт — `LogExporter`
+реализован классом `OtlpHttpExporter`: батч уходит **синхронно**, исход берётся из
+возвращённого значения SDK, отказ считается и произносится. Асинхронной пачки по расписанию
+ещё нет (Ф2.4), боевого прогона на живом коллекторе — тоже (Ф4.1).
 
-**Обновлено:** 2026-09-07 — Task 2.1 (`OtelExportPlugin`, `coerce_attributes`, правка Р-10 в
-`mapping.py`) плана [`plans/otel-export.md`](../../plans/otel-export.md), ветка `feat/otel-export`.
+На стадии `contract` остались двое, и это не оговорка: `ObservabilityPort` реализации не
+имеет вовсе (ADR-OTEL-004 — сервису контекст не передаётся), а `LogExporter.force_flush` у
+`OtlpHttpExporter` возвращает `(0, 0)`, потому что очереди у синхронной отправки нет —
+непустым он станет вместе с батчером в Ф2.4.
+
+**Обновлено:** 2026-09-07 — Task 2.2 (`OtlpHttpExporter`, `_flush_batch`, голос отказа)
+плана [`plans/otel-export.md`](../../plans/otel-export.md), ветка `feat/otel-export`.
 
 ## Что есть
 
@@ -13,19 +20,21 @@ Protocol — `LogExporter`: **ни одна запись наружу ещё н�
 |---|---|
 | `interfaces.py` | пять `Protocol` (`RecordMapper`, `ResourceResolver`, `LogExporter`, `ObservabilityPort`) и четыре типа контракта (`MappedRecord`, `Resource`, `ExportOutcome`, `FlushOutcome`) |
 | `config.py` | `OtelExportConfig(SchemaBase)` — **единственное** объявление параметров, валидация границы, `to_dict`/`from_dict`, `readback()` |
-| `exporter.py` | только `sdk_available() -> tuple[bool, str]`; ленивый импорт SDK |
+| `exporter.py` | `sdk_available() -> tuple[bool, str]` + **`OtlpHttpExporter`** (Task 2.2): синхронная отправка, исход числами, строгий перевод в `ReadableLogRecord`, сверка схемы `Resource` (Р-24). Импорт SDK — только лениво, внутри методов |
 | `mapping.py` | `DisplayRecordMapper`, `split_exportable`, `coerce_attributes` (Ф1.1/1.3 + Task 2.1) |
 | `resources.py` | `PooledResourceResolver` — пул `Resource`, LRU, счётчик вытеснений (Ф1.2) |
 | `README.md` | Purpose / Public API / Usage / Counters / Boundaries / Stability + словарь счётчиков литералами |
-| `DECISIONS.md` | ADR-OTEL-001..005 |
+| `DECISIONS.md` | ADR-OTEL-001..006 |
 | `tests/` | приёмочные тесты независимого тестера (A/B/D/E, маппер, резолвер, ленивый SDK) + авторские тесты опасных мест |
 
 ## Чего нет — и это по плану, а не забыто
 
 | Чего нет | Чья задача |
 |---|---|
-| реализация `LogExporter` (`BatchLogRecordProcessor` + `OTLPLogExporter`) | Ф2.2, Ф2.4 |
+| асинхронная пачка (`BatchLogRecordProcessor`, выгрузка по `schedule_delay_ms`); с ней же `force_flush` перестанет отдавать `(0, 0)` | Ф2.4 |
+| частичный успех батча: одна битая запись сегодня роняет весь батч (ADR-OTEL-006) | Ф2.4 / Ф3.4 |
 | фрагмент топологии `backend/topology/otel_export.yaml` | Ф3.1 |
+| боевой прогон на живом коллекторе | Ф4.1 |
 
 ## Открытые вопросы фазы
 
@@ -47,8 +56,14 @@ Protocol — `LogExporter`: **ни одна запись наружу ещё н�
 3a. **Отказ конфига нельзя печатать как `str(exc)`** — pydantic 2.13 выводит входное
    значение целиком, и отвергнутый токен уехал бы в `system.log`. Печатать через
    `format_validation_error(exc)`. Найдено авторским тестом, см. ADR-OTEL-005.
-4. **Ни одна запись ещё не отправлена.** Всё, что здесь есть, — контракт и проверка наличия
-   SDK; «работает» будет уместно сказать не раньше Ф4.1.
+4. **Отправка есть, боевого прогона нет.** Все тесты Task 2.2 говорят с дублем SDK:
+   настоящий `OTLPLogExporter` в наборе не строится ни разу, коллектор не поднимается, сеть
+   не трогается. Значит проверено ВСЁ, кроме самого разговора по проводу — «работает» будет
+   уместно сказать не раньше Ф4.1.
+4a. **Отправка держит приёмный поток процесса.** `otel_export.flush` исполняется внутри
+   `RouterManager.receive()`, и синхронная отправка удерживает его до `export_timeout_sec`
+   (дефолт 30.0 с). Смягчение сегодня — конфигурация (`export_timeout_ms`), закрытие — Ф2.4.
+   Долг с замером — в [`Plugins/io/otel_export/STATUS.md`](../../Plugins/io/otel_export/STATUS.md).
 5. **Блокер Ф2.1 закрыт (Task 0.5), но у двери конфига остался соседний дефект.**
    `OtelExportRegisters` несёт дефолт `endpoint = ""`, поэтому managed-регистр строится, а
    пустое значение отвергается на шаг позже — в `configure()` плагина, с именем ключа.
