@@ -106,3 +106,72 @@ counter'ом предохранителя — не отступление от �
 - **Долги Task 3.3**, которые otel унаследует вместе с классом: оба сторожа гонок держатся на
   искусственно расширенном окне, а не на естественной конкуренции; `weakref.finalize` не покрыт
   тестом; финализатор зовёт `close()` с `join(2.0)` синхронно внутри `config.reload`.
+
+
+---
+
+## 7. Найдено полосой otel в зоне closure (Task 2.1, 2026-09-07)
+
+Три факта в коде фреймворка. Ни один здесь не чинится — зона closure; записаны,
+чтобы не жить в одной голове. Все три воспроизведены запуском, не чтением.
+
+### 7.1 `PluginTestBench` мёртв — им нельзя пользоваться и он этого не говорит
+
+`multiprocess_framework/modules/process_module/plugins/plugin_test_bench.py`
+строит контекст вызовом `PluginContext(process_name=..., process=..., ...)`,
+которого в сегодняшней сигнатуре `(services, config, io, registers, plugin_name)`
+нет. Стенд принимает КЛАСС плагина, и при правильном употреблении падает:
+
+```
+класс      -> TypeError: PluginContext.__init__() got an unexpected keyword argument 'process_name'
+экземпляр  -> TypeError: 'P' object is not callable
+```
+
+Цена молчания: единственный штатный стенд для плагинов не работает, и каждый, кто
+пишет тесты плагина, изобретает свой харнесс заново (это уже сделали и слепой
+тестер, и реализатор Task 2.1, независимо друг от друга). Отдельно это значит, что
+**критерий «тест на настоящем `GenericProcessApp`, не на фейках» сегодня нечем
+закрыть** — готового образца сборки живого процесса в дереве нет.
+
+### 7.2 `introspect_plugins` не несёт состояния экземпляра — только каталог
+
+`_cmd_introspect_plugins` (`process_module/commands/builtin_commands.py:869`)
+отдаёт `plugins` (name → category), `manifest`, `failed_imports`, `count` — всё из
+`PluginRegistry`. Поля состояния конкретного плагина там нет вовсе, а `PluginState`
+(`plugins/base.py:70`) знает пять значений (`idle/ready/running/paused/stopped`) и
+не знает ни `error`, ни `degraded`.
+
+Для otel это снято переносом критерия на свою команду `otel_export.status`
+(правка плана 2026-09-07). Для closure это вопрос, стоит ли вообще выставлять
+наружу runtime-состояние плагина — сегодня «плагин жив, но отказал» видно только
+по строке `log_error` на буте.
+
+### 7.3 Дверь конфига плагина отказывает БРОСКОМ, а не состоянием
+
+`ProcessModulePlugin._init_register` (`plugins/base.py:1419-1422`) применяет
+overrides фрагмента топологии поле за полем через `setattr` при
+`validate_assignment=True`. Любое невалидное ЗНАЧЕНИЕ во фрагменте (не отсутствие
+ключа — именно значение) даёт `ValidationError` из `configure()`. Оркестратор его
+ловит (`plugin_orchestrator.py:175`), процесс поднимается, но плагин остаётся в
+`IDLE`: его команд не существует, и причина живёт одной строкой `log_error`.
+
+Замер на `OtelExportRegisters`, пять значений из семи реалистичных:
+
+```
+endpoint = ''                  -> ValidationError
+level = 'TRACE'                -> ValidationError
+headers с литеральным секретом -> ValidationError
+max_queue_size = 2             -> ValidationError   (пара с max_export_batch_size=512)
+max_queue_size = 0             -> ValidationError
+endpoint отсутствует           -> override не применяется, отказ переезжает дальше
+endpoint = 'localhost:4318'    -> принят (валидатора схемы URL нет)
+```
+
+Ещё одна грань того же: порядок полей берётся из `model_fields`, поэтому
+кросс-полевой инвариант (`max_export_batch_size <= max_queue_size`) ломается на
+ПРОМЕЖУТОЧНОМ состоянии модели — фрагмент с малой очередью не применится ни при
+каком порядке ключей.
+
+Плагин otel обходит это своим `try/except` вокруг `_init_register`; обход
+локальный, механизм общий. Родственник — долг Д-1 плана otel
+(`plugin_orchestrator._collect_register_schemas` строит регистр без аргументов).

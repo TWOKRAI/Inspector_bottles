@@ -603,7 +603,12 @@ semconv ожидает строку-идентификатор. Цена сей�
 **Перенесено из Task 0.2 (в Ф0 недостижимо — требует `plugin.py`):**
 - [ ] Без установленного extra `[otel]`: процесс `otel_export` **поднялся**, плагин в состоянии `error`
   с текстом, называющим extra и команду `uv pip install --inexact '.[otel]'`; предъявить фактический
-  ответ `introspect_plugins` / `system_overview`.
+  ответ **`otel_export.status`** (+ `system_overview` как пара «процесс жив»).
+  **Правка формулировки 2026-09-07:** прежний критерий требовал ответа `introspect_plugins`, а он
+  состояния экземпляра не несёт вовсе — `_cmd_introspect_plugins` (`builtin_commands.py:869`) отдаёт
+  каталог `PluginRegistry` (`plugins`, `manifest`, `failed_imports`, `count`), и `PluginState`
+  (`plugins/base.py:70`) не знает ни `error`, ни `degraded`. Проверено чтением и прогоном; факт
+  записан в контрактный файл §7.2.
 - [ ] Пара: SDK установлен → состояние `ready`, `sdk: "1.44.0"` в readback.
 - [ ] Инъекция: перенести импорт SDK на уровень модуля → **процесс не поднялся ИЛИ причина не названа**
   (вторая половина инъекции I-5; первая — сторож `sys.modules` — закрыта в Ф0).
