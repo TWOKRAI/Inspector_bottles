@@ -1,0 +1,59 @@
+# otel_export — экспорт записей наблюдаемости наружу по OTLP (трек otel-export, Ф2)
+#
+# Pipeline:
+#   camera_0    — CameraServicePlugin (simulator): источник записей и чисел,
+#                 нужен только чтобы хвост наблюдаемости был непустым
+#   otel_export — OtelExportPlugin: принимает observability.record от брокера,
+#                 ставит observed_ts, считает счётчики, объявляет намерение
+#                 подписки. Отправки наружу на Task 2.1 ещё НЕТ — она в 2.2/2.4
+#
+# Side-effect процесс: ни inputs, ни outputs, в потоке кадров не участвует.
+#
+# ВАЖНО — фрагмент подключается ЯВНО и по умолчанию отсутствует (Task 3.1):
+# экспорт наблюдаемости наружу не должен включаться сам собой, а без extra
+# `[otel]` плагин уходит в состояние `error` (процесс при этом поднимается).
+#
+# Запуск (headless, без GUI):
+#   python multiprocess_prototype/run.py \
+#       multiprocess_prototype/backend/topology/otel_export.yaml
+#
+# Состояние и счётчики читаются командой процесса `otel_export.status`
+# (не `introspect_plugins` — он отдаёт каталог реестра без состояния экземпляра,
+# см. docs/sessions/2026-09-06_closure-otel-contract.md §7.2).
+
+name: otel_export
+description: "Экспорт записей наблюдаемости в приёмник OTLP/HTTP"
+
+processes:
+  - process_name: camera_0
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    source_target_fps: 10
+    plugins:
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
+        plugin_name: camera_service
+        category: source
+        camera_type: simulator
+        camera_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        auto_start: true
+
+  # --- Экспортёр: подписка на хвост всех процессов через брокер PM ---
+  - process_name: otel_export
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: low
+    plugins:
+      - plugin_class: Plugins.io.otel_export.plugin.OtelExportPlugin
+        plugin_name: otel_export
+        category: output
+        # Адрес приёмника OTLP/HTTP. Обязателен фактически: пустое значение
+        # отвергается на шаге configure() с именем ключа, и плагин уходит
+        # в `error` — тихого дефолта здесь нет намеренно (на устройстве
+        # коллектор живёт на другом хосте, и запись ушла бы в никуда).
+        endpoint: http://127.0.0.1:4318
+        # DEBUG включают на время сверки словаря, не насовсем: уровень —
+        # главный рычаг объёма. Дефолт схемы INFO.
+        level: INFO
+
+wires: []
