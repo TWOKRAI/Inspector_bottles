@@ -574,3 +574,90 @@ class TestSecondHandlerThreadIsVoicedOnce:
         assert len(plugin._cmd_status({})["handler_threads"]) == 3, (
             "в показании должны быть все увиденные идентификаторы потоков"
         )
+
+
+# ---------------------------------------------------------------------------
+# Плоскость уровней — сторож дописан ВЕДУЩИМ после инъекции I7 (ноль умерших).
+# ---------------------------------------------------------------------------
+
+
+class TestLevelPlaneIsDeclaredAndPublished:
+    """Решение Р-7: счётчики живут в ДВУХ плоскостях, и вторая не была сторожена.
+
+    Инъекционная матрица Task 2.1, заплата I7: снятие из `configure()` всего
+    цикла `ctx.declare_metric(counter)` убило **0 тестов из 155**. Ось живая —
+    объявление реально происходит и реально влияет на процесс, — то есть ноль
+    означал отсутствующий сторож, а не место, где свойство не может измениться.
+
+    Почему это не мелочь. Секция `levels` ответа `introspect.telemetry` собирает
+    ТОЛЬКО объявленные уровни (`builtin_commands.py`, `_cmd_introspect_telemetry`);
+    stats-плоскость там не видна вовсе. Сними объявление — и критерий приёмки
+    «счётчики видны в `introspect_telemetry(otel_export)`» перестаёт держаться,
+    причём молча: `history_query` продолжит отвечать, а пульт опустеет.
+
+    Дубль стоит на ГРАНИЦЕ фреймворка (`ctx.declare_metric` / `ctx.publish_metric`)
+    — это тот же законный случай, что `register_message_handler`: имя метода
+    контекста и есть контракт, а не деталь реализации.
+    """
+
+    def _ctx_with_metric_spies(self, **kwargs: Any) -> tuple[Any, list[str], list[tuple[str, Any]]]:
+        ctx, _voices = _make_ctx(**kwargs)
+        declared: list[str] = []
+        published: list[tuple[str, Any]] = []
+        ctx.declare_metric = lambda name: (declared.append(name), name)[1]
+        ctx.publish_metric = lambda name, value: published.append((name, value))
+        return ctx, declared, published
+
+    def test_every_counter_is_declared_as_a_dotless_level(self) -> None:
+        """Объявлены все восемь имён словаря, и ни одно не несёт точку."""
+        ctx, declared, _published = self._ctx_with_metric_spies(config={"endpoint": "http://127.0.0.1:4318"})
+
+        OtelExportPlugin()._do_configure(ctx)
+
+        assert set(declared) == {
+            "received",
+            "exported",
+            "skipped_numbers",
+            "mapper_rejected",
+            "attr_coerced",
+            "dropped_overflow",
+            "export_failed",
+            "resource_evicted",
+        }, f"каталог уровней разошёлся со словарём счётчиков: {declared!r}"
+        dotted = [name for name in declared if "." in name]
+        assert not dotted, (
+            f"уровень с точкой в имени: {dotted!r}. declare_metric отвергает такое ValueError "
+            "(ADR-PM-038) — плагин упал бы на старте, а точечные имена законны только в stats"
+        )
+
+    def test_level_carries_the_running_total_not_the_increment(self) -> None:
+        """Уровень отвечает «сколько СЕЙЧАС»: после двух пачек там сумма, не приращение."""
+        router = _RouterDouble()
+        ctx, _declared, published = self._ctx_with_metric_spies(
+            router=router, config={"endpoint": "http://127.0.0.1:4318"}
+        )
+
+        plugin = OtelExportPlugin()
+        plugin._do_configure(ctx)
+        plugin._do_start(ctx)
+        handler = router.handlers["observability.record"]
+
+        def _batch(n: int) -> dict:
+            record = {
+                "kind": "log",
+                "severity": "INFO",
+                "severity_number": 9,
+                "message": "m",
+                "module": "x",
+                "ts": 1000.0,
+            }
+            return {"data": {"records": [dict(record) for _ in range(n)]}}
+
+        handler(_batch(2))
+        handler(_batch(3))
+
+        received = [value for name, value in published if name == "received"]
+        assert received == [2, 5], (
+            f"уровень 'received' обязан нести накопленное (2, затем 5), получено {received!r} — "
+            "приращение вместо суммы делает пульт бессмысленным: два тика подряд покажут одно число"
+        )
