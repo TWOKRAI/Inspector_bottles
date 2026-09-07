@@ -190,6 +190,40 @@ def _started(**kwargs: Any) -> tuple[OtelExportPlugin, Any, dict[str, list[str]]
     return plugin, ctx, voices
 
 
+def _install_exporter_double(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    failed: int,
+    reason: str = "",
+) -> list[list[Any]]:
+    """Подменить `OtlpHttpExporter` в namespace плагина дублем с ЗАДАННЫМ исходом.
+
+    Всегда-успешный дубль делает тест отказа зелёным по построению, поэтому исход
+    задаётся числом `failed`, а не выводится из батча. Сеть не трогается: настоящий
+    экспортёр открыл бы сокет к `endpoint`.
+    """
+    from Services.otel_export.interfaces import ExportOutcome
+
+    calls: list[list[Any]] = []
+
+    class _ExporterDouble:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def export(self, records: Any) -> ExportOutcome:
+            batch = list(records)
+            calls.append(batch)
+            failed_now = min(failed, len(batch))
+            return ExportOutcome(
+                accepted=len(batch) - failed_now,
+                failed=failed_now,
+                reason=reason if failed_now else "",
+            )
+
+    monkeypatch.setattr(plugin_module, "OtlpHttpExporter", _ExporterDouble)
+    return calls
+
+
 def _log_record(**overrides: Any) -> dict:
     record = {"kind": "log", "severity": "INFO", "severity_number": 9, "message": "m", "module": "x", "ts": 1.0}
     record.update(overrides)
@@ -870,20 +904,44 @@ class TestFlushIsHonestNotOk:
 
     Заплата «вернуть `{"status": "ok", ...}`» — ровно тот соблазн, против
     которого написан докстринг `_cmd_flush`, — убила 0 тестов. Слово «ok» у
-    команды дожатия читается как «всё отправлено», а отправки в Task 2.1 нет
-    вовсе.
+    команды дожатия читается как «всё отправлено».
+
+    **Переписано в Task 2.2 (решение Р-21), и это не подгонка под реализацию.**
+    Прежняя редакция требовала `status == "noop"` — она пришпиливала СОСТОЯНИЕ
+    Task 2.1 («отправлять нечем»), а не свойство. Task 2.2 это состояние снимает:
+    отправка появилась, и `noop` стал бы теперь враньём наоборот. Свойство,
+    которое проверялось и проверяется, то же самое: **статус обязан различать
+    исходы, а не быть вежливым словом**, и числа обязаны быть настоящими. Плюс
+    отправка идёт через дубль экспортёра: прежняя редакция после Task 2.2
+    полезла бы в сеть на 127.0.0.1:4318 (три попытки SDK с backoff, ~4 с
+    впустую) — тест, который ходит в сеть, либо виснет, либо врёт.
     """
 
-    def test_flush_reports_noop_and_the_real_ring_depth(self) -> None:
+    def test_flush_reports_real_numbers_and_drains_the_ring(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Успешное дожатие: `ok`, число отправленных, кольцо опустело."""
+        _install_exporter_double(monkeypatch, failed=0)
         plugin, ctx, _voices = _started()
         handler = ctx.router_manager.handlers["observability.record"]
         handler(_envelope([_log_record(message="a"), _log_record(message="b")]))
 
         result = plugin._cmd_flush({})
 
-        assert result["status"] == "noop", f"дожимать нечем — статус обязан говорить это прямо, а не 'ok': {result!r}"
-        assert result["pending"] == 2, f"flush не показывает настоящую глубину кольца: {result!r}"
-        assert result["flushed"] == 0
+        assert result["status"] == "ok", f"на успешном дожатии статус обязан быть ok: {result!r}"
+        assert result["flushed"] == 2, f"flush не показывает настоящее число отправленных: {result!r}"
+        assert result["pending"] == 0, f"кольцо не опустело после дожатия: {result!r}"
+
+    def test_flush_with_failed_delivery_says_failed_not_ok(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Пара: отказ доставки обязан быть виден в статусе, а не спрятан за `ok`."""
+        _install_exporter_double(monkeypatch, failed=2, reason="collector unreachable")
+        plugin, ctx, _voices = _started()
+        handler = ctx.router_manager.handlers["observability.record"]
+        handler(_envelope([_log_record(message="a"), _log_record(message="b")]))
+
+        result = plugin._cmd_flush({})
+
+        assert result["status"] == "failed", f"недоставленные записи не имеют права читаться как ok: {result!r}"
+        assert result["failed"] == 2, f"{result!r}"
+        assert result["flushed"] == 0, f"{result!r}"
 
     def test_flush_in_error_state_says_error_with_the_reason(self) -> None:
         """Пара: у плагина в `error` дожатие — не `noop`, а отказ с причиной."""

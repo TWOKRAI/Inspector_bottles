@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
-"""`OtelExportPlugin` — хост экспортёра OTLP: приём хвоста, отметка, счётчики (Task 2.1).
+"""`OtelExportPlugin` — хост экспортёра OTLP: приём хвоста, отметка, отправка (Task 2.1/2.2).
 
 Side-effect плагин (нет `inputs`/`outputs`) в обычном `GenericProcessApp`, по
 форме — как `telemetry_sink`. Что он делает сегодня: объявляет брокеру намерение
 подписаться на хвост наблюдаемости ВСЕХ процессов, принимает пачки записей,
 ставит им отметку приёма, отбрасывает числовую плоскость, приводит записи к
-модели OTel и считает восемь величин в двух плоскостях.
+модели OTel, считает восемь величин в двух плоскостях и СИНХРОННО отправляет
+накопленное в приёмник OTLP по команде `otel_export.flush` и на останове.
 
-**Чего он ещё НЕ делает, и это осознанно, а не забыто.** Наружу не уходит ни
-одна запись: `LogExporter` появляется в Task 2.2/2.4. Отображённые записи
-копятся в кольце ограниченного размера (`max_queue_size` из конфига), и
-переполнение считается счётчиком `otel_export.dropped_overflow` — то есть уже
-сегодня видно, сколько бы потерялось. Говорить «экспорт работает» до Ф4.1
-нельзя.
+**Чего он ещё НЕ делает, и это осознанно, а не забыто.** Отправка идёт только по
+команде и на останове: асинхронный `BatchLogRecordProcessor` (пачка по расписанию
+`schedule_delay_ms`) приходит в Task 2.4. До тех пор отображённые записи копятся
+в кольце ограниченного размера (`max_queue_size` из конфига), переполнение
+считается счётчиком `otel_export.dropped_overflow`, а сама отправка блокирует
+поток вызывающего вплоть до `export_timeout_sec`. Говорить «экспорт работает» до
+Ф4.1 нельзя.
 
 **Что здесь может сломаться, учитывая, как оно устроено.**
 
@@ -73,7 +75,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 
 from Services.otel_export.config import OtelExportConfig, format_validation_error
-from Services.otel_export.exporter import sdk_available
+from Services.otel_export.exporter import OtlpHttpExporter, sdk_available
 from Services.otel_export.mapping import DisplayRecordMapper, coerce_attributes, split_exportable
 from Services.otel_export.resources import PooledResourceResolver
 
@@ -211,6 +213,12 @@ class OtelExportPlugin(ProcessModulePlugin):
         #: хендлере хочется держать ровно вокруг счётчиков.
         self._handler_threads: dict[int, bool] = {}
         self._pending: list[Any] = []
+        #: Лок кольца. Приём кладёт записи с ПРИЁМНОГО потока, а `flush` забирает
+        #: их с потока команды — это два разных потока, и `list.append` рядом с
+        #: `del self._pending[:n]` теряет записи молча. Держится ТОЛЬКО вокруг
+        #: самого списка: чужие вызовы (`_bump`, экспортёр) под ним не идут,
+        #: иначе получился бы порядок захвата двух локов.
+        self._pending_lock = threading.Lock()
         self._stopped = False
         self._subscribed = False
         self._subscribe_attempts = 0
@@ -221,6 +229,7 @@ class OtelExportPlugin(ProcessModulePlugin):
         self._cfg: OtelExportConfig | None = None
         self._mapper: DisplayRecordMapper | None = None
         self._resolver: PooledResourceResolver | None = None
+        self._exporter: Any = None
         self._voice: Any = None
 
     def configure(self, ctx: PluginContext) -> None:
@@ -253,7 +262,15 @@ class OtelExportPlugin(ProcessModulePlugin):
         # УРОВНЯ (`emit_voice`: getattr(logger, "warning")), а у контекста методы
         # зовутся `log_warning`. Тонкий переходник вместо своей копии окна.
         # Ставится ПЕРВЫМ вместе с ctx: `_fail` ниже уже нуждается в голосе.
-        self._voice = SimpleNamespace(warning=ctx.log_warning, info=ctx.log_info)
+        #
+        # `error` в переходнике ОБЯЗАТЕЛЕН, и его отсутствие было тихим (Р-25).
+        # `emit_voice` не находит метод уровня, пробует запасной `getattr(target,
+        # "log")` — у `SimpleNamespace` нет и его — и строка ТЕРЯЕТСЯ, а
+        # `log_windowed` при этом возвращает True («голос прозвучал»). Замер:
+        # переходник без `error` -> вернул True, строк долетело 0; с `error` ->
+        # True и 1. То есть возврат функции сторожем быть не может, сторожить
+        # обязано ДОЛЕТЕВШУЮ строку.
+        self._voice = SimpleNamespace(warning=ctx.log_warning, info=ctx.log_info, error=ctx.log_error)
 
         # Каталог уровней объявляется ДО разбора конфига: объявление — каталожная
         # запись, и она осмысленна даже у плагина, который дальше уйдёт в `error`
@@ -285,6 +302,12 @@ class OtelExportPlugin(ProcessModulePlugin):
             resource_pool_size=self._cfg.resource_pool_size,
             service_namespace=self._cfg.service_namespace,
         )
+        # Экспортёр строится ЗДЕСЬ, а объект SDK внутри него — лениво, при первой
+        # непустой отправке. Разница существенна: конструктор здесь ничего не
+        # открывает и упасть не может (Р-18), поэтому `configure()` не обзаводится
+        # третьей точкой отказа, а сокет к коллектору не появляется у процесса,
+        # который за всю жизнь так ничего и не отправит.
+        self._exporter = OtlpHttpExporter(self._cfg)
         ctx.log_info(
             f"otel_export: конфиг принят, endpoint={self._cfg.endpoint}, level={self._cfg.level}, SDK {detail}"
         )
@@ -332,6 +355,15 @@ class OtelExportPlugin(ProcessModulePlugin):
                 {"subscriber": ctx.process_name},
                 self._on_unsubscribe_answer,
             )
+
+        # Дожатие ПОСЛЕ снятия намерения и ДО итоговой строки (Р-21). Порядок не
+        # переставим: снятие уходит fire-and-forget и не ждёт, а дожатие
+        # синхронно — обратный порядок задержал бы снятие на время HTTP-запроса,
+        # и хвост продолжал бы ехать в останавливающийся процесс.
+        # Цена названа: останов блокируется вплоть до `export_timeout_sec`
+        # (дефолт 30 с). Ограничить его нечем до Task 2.4 — это не забыто.
+        if self._exporter is not None and self._pending:
+            self._flush_batch()
 
         with self._counters_lock:
             snapshot = dict(self._counters)
@@ -578,21 +610,87 @@ class OtelExportPlugin(ProcessModulePlugin):
         return self._resolver.resolve(context) if self._resolver is not None else None
 
     def _enqueue(self, mapped: Any) -> None:
-        """Положить отображённую запись в кольцо до появления отправки (Task 2.4).
+        """Положить отображённую запись в кольцо до ближайшего дожатия.
 
         **Что здесь может сломаться.** Список без предела — утечка на долгом
-        прогоне: хвост идёт непрерывно, а забирать записи пока некому. Предел —
-        `max_queue_size` из конфига (то же число, которое потом уедет в
-        `BatchLogRecordProcessor`), вытеснение — самое старое, и оно СЧИТАЕТСЯ:
-        `drop_oldest` без счётчика — это тихая потеря, ровно тот класс, ради
-        которого заведено тождество Task 3.4.
+        прогоне: хвост идёт непрерывно, а забирает записи только `flush`
+        (асинхронная пачка — Task 2.4). Предел — `max_queue_size` из конфига (то
+        же число, которое потом уедет в `BatchLogRecordProcessor`), вытеснение —
+        самое старое, и оно СЧИТАЕТСЯ: `drop_oldest` без счётчика — это тихая
+        потеря, ровно тот класс, ради которого заведено тождество Task 3.4.
+
+        Лок держится только вокруг списка, а `_bump` зовётся ПОСЛЕ его отпускания:
+        `_bump` берёт свой лок и уходит в чужие механизмы, и удержание нашего на
+        время чужого вызова — готовый порядок захвата двух локов.
         """
         limit = self._cfg.max_queue_size if self._cfg is not None else 2048
-        self._pending.append(mapped)
-        if len(self._pending) > limit:
+        with self._pending_lock:
+            self._pending.append(mapped)
             overflow = len(self._pending) - limit
-            del self._pending[:overflow]
+            if overflow > 0:
+                del self._pending[:overflow]
+        if overflow > 0:
             self._bump("dropped_overflow", overflow)
+
+    # ------------------------------------------------------------------ #
+    # Отправка (Task 2.2 — синхронная, по команде и на останове)
+    # ------------------------------------------------------------------ #
+
+    def _take_batch(self) -> list[Any]:
+        """Забрать кольцо целиком, оставив на его месте пустое.
+
+        **Что здесь может сломаться.** Соблазн — отправить `self._pending` и
+        очистить его ПОСЛЕ возврата экспортёра: отправка синхронна и длится до
+        `export_timeout_sec`, а приёмный поток всё это время продолжает класть
+        записи в тот же список — и очистка после отправки убила бы всё, что
+        приехало за время запроса, не посчитав. Обмен под локом делает окно
+        нулевым: то, что приедет после обмена, ляжет в новое кольцо и уедет
+        следующим дожатием.
+        """
+        with self._pending_lock:
+            batch = self._pending
+            self._pending = []
+        return batch
+
+    def _flush_batch(self) -> Any:
+        """Отправить всё накопленное, посчитать исход и произнести отказ (Р-19, Р-22, Р-23).
+
+        **Что здесь может сломаться.** Три ловушки, и все три тихие.
+
+        1. *Исход берётся из ВОЗВРАЩЁННОГО значения.* Отказы SDK уходят в
+           stdlib-`logging`, у корневого логгера процесса хендлеров нет — при
+           закрытом коллекторе экспортёр молчал бы, а счётчик показывал ноль
+           потерь. Поэтому считается `outcome.failed`, а не «было ли исключение».
+        2. *Голос — ОДИН на пачку, а не один на запись.* Иначе недоступный
+           коллектор превращает 512 записей в 512 строк, и журнал становится
+           непригоден ровно в тот момент, когда он нужен. `interval=None` — это и
+           есть «окно из политики процесса» (Р-23); литеральное число здесь
+           запрещено, потому что оно увело бы окно экспортёра из-под общей
+           политики молча.
+        3. *Переменная часть — в `ctx`, а не в тексте.* Ключ дросселя постоянен, и
+           endpoint с числом внутри `msg` разошлись бы с ним: одна и та же
+           жалоба с разными числами читалась бы как разные события.
+
+        Возвращает `ExportOutcome` — числа нужны и команде, и останову.
+        """
+        batch = self._take_batch()
+        outcome = self._exporter.export(batch)
+
+        if outcome.accepted:
+            self._bump("exported", outcome.accepted)
+        if outcome.failed:
+            self._bump("export_failed", outcome.failed)
+            log_windowed(
+                key="otel_export.export_failed",
+                interval=None,
+                level="error",
+                msg="otel_export: записи не доставлены приёмнику OTLP",
+                logger=self._voice,
+                endpoint=self._cfg.endpoint if self._cfg is not None else "?",
+                failed=outcome.failed,
+                reason=outcome.reason,
+            )
+        return outcome
 
     def _sync_resource_evictions(self) -> None:
         """Перенести вытеснения пула в числовую плоскость ДЕЛЬТОЙ, не значением.
@@ -683,21 +781,38 @@ class OtelExportPlugin(ProcessModulePlugin):
         }
 
     def _cmd_flush(self, data: dict | None = None) -> dict:
-        """`otel_export.flush` — дожать очередь. Сегодня дожимать НЕЧЕМ.
+        """`otel_export.flush` — отправить накопленное и ответить ЧИСЛАМИ (Р-21).
 
         **Что здесь может сломаться.** Соблазн — ответить `{"status": "ok"}` и
         нулями: команда есть, ошибки нет. Но «ok» у команды дожатия читается как
-        «всё отправлено», а отправки в Task 2.1 нет вовсе — экспортёр появляется
-        в Task 2.2/2.4. Поэтому статус `noop` и число записей, которые сейчас
-        лежат в кольце: оно честно говорит, сколько бы дожималось.
+        «всё отправлено», и статус обязан различать три исхода — отправлено,
+        часть не доехала, отправлять нечем. Поэтому `ok` ставится ровно при
+        `failed == 0`, а не при «вызов вернулся».
+
+        **Отправка синхронна и блокирует поток команды** до
+        `export_timeout_sec` (дефолт 30 с). Это осознанная цена Task 2.2: пачка
+        уходит по команде и на останове, асинхронный батчер приходит в Task 2.4.
+        Звать этот метод с приёмного потока нельзя — почта процесса встанет.
+
+        В состоянии `error` отправлять нечем и не через что (`_exporter` там не
+        построен): ответ — отказ с причиной, а не пустой успех.
         """
-        if self._state == STATE_ERROR:
-            return {"status": "error", "reason": self._reason, "pending": len(self._pending)}
+        if self._state == STATE_ERROR or self._exporter is None:
+            return {
+                "status": "error",
+                "reason": self._reason or "экспортёр не построен",
+                "pending": len(self._pending),
+                "flushed": 0,
+                "failed": 0,
+            }
+
+        outcome = self._flush_batch()
         return {
-            "status": "noop",
+            "status": "ok" if outcome.failed == 0 else "failed",
+            "flushed": outcome.accepted,
+            "failed": outcome.failed,
             "pending": len(self._pending),
-            "flushed": 0,
-            "reason": "отправка наружу появляется в Task 2.2/2.4; сейчас записи только копятся",
+            "reason": outcome.reason,
         }
 
 
