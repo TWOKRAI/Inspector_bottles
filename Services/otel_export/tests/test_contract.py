@@ -26,7 +26,7 @@ SUBJECT_DIRS = (
     REPO_ROOT / "Plugins" / "io" / "otel_export",
 )
 
-ENDPOINT = "http://127.0.0.1:4318"
+ENDPOINT = "http://127.0.0.1:4318/v1/logs"
 
 
 # ---------------------------------------------------------------------------

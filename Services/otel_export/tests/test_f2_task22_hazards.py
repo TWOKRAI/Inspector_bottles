@@ -48,7 +48,7 @@ from Services.otel_export.config import OtelExportConfig
 from Services.otel_export.exporter import OtlpHttpExporter
 from Services.otel_export.interfaces import ExportOutcome, MappedRecord, Resource
 
-ENDPOINT = "http://127.0.0.1:4318"
+ENDPOINT = "http://127.0.0.1:4318/v1/logs"
 
 #: 32 hex — валидный по форме W3C trace_id.
 VALID_TRACE_ID = "0123456789abcdef0123456789abcdef"
@@ -203,7 +203,7 @@ class TestStrictTranslationFailsLoudly:
 
     def test_endpoint_is_named_in_every_failure_reason(self) -> None:
         """Причина без адреса бесполезна там, где приёмников на стенде два."""
-        cfg = _cfg(endpoint="http://collector.example.internal:4318")
+        cfg = _cfg(endpoint="http://collector.example.internal:4318/v1/logs")
         sdk = _SdkDouble()
         exporter = OtlpHttpExporter(cfg, sdk_factory=lambda: sdk)
 

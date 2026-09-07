@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import ConfigDict, ValidationError, field_validator, model_validator
 
@@ -87,9 +88,10 @@ class OtelExportConfig(SchemaBase):
         FieldMeta(
             "Endpoint",
             info=(
-                "Адрес приёмника OTLP/HTTP, напр. http://127.0.0.1:4318. "
-                "Обязателен: dev-адрес годится только стенду, на Jetson/Raspberry "
-                "коллектор стоит на другой машине"
+                "Адрес приёмника OTLP/HTTP ВМЕСТЕ С ПУТЁМ СИГНАЛА, "
+                "напр. http://127.0.0.1:4318/v1/logs — SDK шлёт по нему дословно, "
+                "адрес без пути даёт 404. Обязателен: dev-адрес годится только стенду, "
+                "на Jetson/Raspberry коллектор стоит на другой машине"
             ),
         ),
     ]
@@ -186,9 +188,51 @@ class OtelExportConfig(SchemaBase):
         stripped = value.strip()
         if not stripped:
             raise ValueError(
-                "endpoint пуст: адрес приёмника OTLP обязателен (напр. http://127.0.0.1:4318). Тихого дефолта здесь нет"
+                "endpoint пуст: адрес приёмника OTLP обязателен "
+                "(напр. http://127.0.0.1:4318/v1/logs). Тихого дефолта здесь нет"
             )
         return stripped
+
+    @field_validator("endpoint")
+    @classmethod
+    def _endpoint_carries_signal_path(cls, value: str) -> str:
+        """Адрес обязан нести путь сигнала — SDK шлёт по нему **дословно**.
+
+        **Замер, из-за которого валидатор появился (2026-09-07, Task 2.3).** Против
+        настоящего `otelcol` 0.158.0 с включённым конвейером логов:
+
+        | POST | ответ |
+        |---|---|
+        | ``http://127.0.0.1:4318`` | **404** |
+        | ``http://127.0.0.1:4318/v1/logs`` | **200** |
+        | ``http://127.0.0.1:4318/v1/traces`` | 404 (контроль: дело в пути, не в теле) |
+
+        Причина в SDK и она односторонняя: явный аргумент уходит без изменений
+        (``_log_exporter/__init__.py:91`` — ``self._endpoint = endpoint or ...``), а
+        путь дописывается ТОЛЬКО на дороге переменной окружения
+        ``OTEL_EXPORTER_OTLP_ENDPOINT``. То есть наше поле по смыслу равно
+        ``OTEL_EXPORTER_OTLP_LOGS_ENDPOINT``, у которого путь входит в значение.
+
+        **Почему отказ, а не дописывание пути.** Прямой прецедент — вердикт CTO о
+        форме ``${ENV_VAR}``: не заводить свой разворачиватель для того, что SDK уже
+        определил. Дописывание пути «когда его нет» тихо переписало бы адрес и тому,
+        кто целил в шлюз на корне, а цена ошибки здесь несимметрична: отказ виден на
+        старте одной строкой, а тихо неверный адрес выглядит как отказ сети — и до
+        сегодня выглядел им 28 раз подряд.
+
+        **Чем это скрывалось.** Заглушка стенда Task 2.2 принимала POST по любому
+        пути и отвечала 200, поэтому ``exported`` рос, а до настоящего приёмника не
+        доезжало ничего. Ровно правило проекта «фейковая оснастка доказывает
+        оснастку»: приёмка обязана хоть раз пройти через настоящего потребителя.
+        """
+        path = urlparse(value).path.strip("/")
+        if not path:
+            raise ValueError(
+                f"endpoint {value!r} без пути сигнала: SDK шлёт по адресу ДОСЛОВНО, и настоящий "
+                "приёмник отвечает 404 (замерено на otelcol 0.158.0). Допишите путь логов, "
+                "напр. http://127.0.0.1:4318/v1/logs"
+            )
+        return value
 
     @field_validator("level")
     @classmethod

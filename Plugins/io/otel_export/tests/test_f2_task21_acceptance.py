@@ -279,7 +279,7 @@ class TestHandlerRegistersOnRealRouter:
         try:
             command_manager = _FakeCommandManager()
             services = _make_services("camera_7", router_manager=router, command_manager=command_manager)
-            ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+            ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
             # Граница фреймворка (framework boundary): наблюдаем ЭФФЕКТ реальной
             # диспетчеризации через легитимную точку — ctx.record_metric, а не
@@ -331,7 +331,7 @@ class TestHandlerRegistersOnRealRouter:
 
         router = _RouterHandlerSpy()
         services = _make_services("camera_42", router_manager=router)
-        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
         plugin = OtelExportPlugin()
         plugin._do_configure(ctx)
@@ -364,7 +364,7 @@ class TestObservedTimestamp:
         OtelExportPlugin = _import_plugin_class()
         router = _RouterHandlerSpy()
         services = _make_services("proc_ots", router_manager=router)
-        ctx = _make_ctx(services, config=config or {"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config=config or {"endpoint": "http://127.0.0.1:4318/v1/logs"})
         plugin = OtelExportPlugin()
         plugin._do_configure(ctx)
         plugin._do_start(ctx)
@@ -411,7 +411,7 @@ class TestCounters:
         OtelExportPlugin = _import_plugin_class()
         router = _RouterHandlerSpy()
         services = _make_services("proc_counters", router_manager=router)
-        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
         recorded: list[tuple[str, Any]] = []
         ctx.record_metric = lambda name, value=1, tags=None: recorded.append((name, value))
         plugin = OtelExportPlugin()
@@ -508,7 +508,7 @@ class TestSubscribeIntentConfirmationAndRetries:
         router = _RouterHandlerSpy(answers=[{"success": True, "result": {"success": True}}])
         command_manager = _FakeCommandManager()
         services = _make_services("camera_1", router_manager=router, command_manager=command_manager)
-        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
         plugin = OtelExportPlugin()
         plugin._do_configure(ctx)
@@ -530,7 +530,7 @@ class TestSubscribeIntentConfirmationAndRetries:
         router = _RouterHandlerSpy(answers=[refusal, refusal, refusal, refusal])
         command_manager = _FakeCommandManager()
         services = _make_services("camera_9", router_manager=router, command_manager=command_manager)
-        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
         plugin = OtelExportPlugin()
         plugin._do_configure(ctx)
@@ -586,7 +586,7 @@ class TestSdkAvailability:
         try:
             command_manager = _FakeCommandManager()
             services = _make_services("proc_nosdk", command_manager=command_manager)
-            ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+            ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
             plugin = OtelExportPlugin()
             plugin._do_configure(ctx)  # НЕ обязан бросать (Р-14)
@@ -607,7 +607,7 @@ class TestSdkAvailability:
 
         command_manager = _FakeCommandManager()
         services = _make_services("proc_sdk_ok", command_manager=command_manager, send_message=_make_send_message(True))
-        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
         plugin = OtelExportPlugin()
         plugin._do_configure(ctx)
@@ -748,7 +748,7 @@ class TestHandlerThreads:
         router = _RouterHandlerSpy()
         command_manager = _FakeCommandManager()
         services = _make_services("proc_threads", router_manager=router, command_manager=command_manager)
-        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
         plugin = OtelExportPlugin()
         plugin._do_configure(ctx)
@@ -778,7 +778,7 @@ class TestCommands:
 
         command_manager = _FakeCommandManager()
         services = _make_services("proc_cmds", command_manager=command_manager)
-        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
         plugin = OtelExportPlugin()
         plugin._do_configure(ctx)
@@ -795,7 +795,7 @@ class TestCommands:
 
         command_manager = _FakeCommandManager()
         services = _make_services("proc_flush", command_manager=command_manager)
-        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318"})
+        ctx = _make_ctx(services, config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
         plugin = OtelExportPlugin()
         plugin._do_configure(ctx)

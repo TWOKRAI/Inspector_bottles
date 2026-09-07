@@ -51,7 +51,7 @@ VALID_TRACE_ID = "0123456789abcdef0123456789abcdef"
 
 
 def _cfg(**overrides: Any) -> OtelExportConfig:
-    data: dict[str, Any] = {"endpoint": "http://127.0.0.1:4318"}
+    data: dict[str, Any] = {"endpoint": "http://127.0.0.1:4318/v1/logs"}
     data.update(overrides)
     return OtelExportConfig(**data)
 
@@ -119,7 +119,7 @@ class TestExportOutcomeFromReturnedResult:
         from Services.otel_export.exporter import OtlpHttpExporter
         from opentelemetry.sdk._logs._internal.export import LogRecordExportResult
 
-        cfg = _cfg(endpoint="http://collector.example.internal:4318")
+        cfg = _cfg(endpoint="http://collector.example.internal:4318/v1/logs")
         fake = _FakeSdkExporter(results=[LogRecordExportResult.FAILURE])
         exp = OtlpHttpExporter(cfg, sdk_factory=lambda: fake)
         records = [_mapped_record()]
@@ -382,7 +382,7 @@ def _boot_plugin(config: dict | None = None) -> tuple[Any, Any, _RouterHandlerSp
     router = _RouterHandlerSpy()
     command_manager = _FakeCommandManager()
     services = _make_services("proc_t22", router_manager=router, command_manager=command_manager)
-    ctx = _make_ctx(services, config=config or {"endpoint": "http://127.0.0.1:4318"})
+    ctx = _make_ctx(services, config=config or {"endpoint": "http://127.0.0.1:4318/v1/logs"})
     recorded: list[tuple[str, Any]] = []
     ctx.record_metric = lambda name, value=1, tags=None: recorded.append((name, value))
 
@@ -472,7 +472,9 @@ class TestExportFailedIsHeardWithWindowedVoice:
         """Критерий 5: 3 отказавшие записи в ОДНОМ flush -> export_failed += 3, ОДНА строка."""
         _install_fake_exporter(
             monkeypatch,
-            results=[ExportOutcome(accepted=0, failed=3, reason="collector unreachable: http://127.0.0.1:4318")],
+            results=[
+                ExportOutcome(accepted=0, failed=3, reason="collector unreachable: http://127.0.0.1:4318/v1/logs")
+            ],
         )
         log_calls = _install_log_windowed_spy(monkeypatch)
 

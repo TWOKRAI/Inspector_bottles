@@ -62,7 +62,7 @@ from multiprocess_framework.modules.process_module.plugins import PluginContext
 from Plugins.io.otel_export import plugin as plugin_module
 from Plugins.io.otel_export.plugin import MAX_ATTEMPTS, OtelExportPlugin
 
-ENDPOINT = "http://127.0.0.1:4318"
+ENDPOINT = "http://127.0.0.1:4318/v1/logs"
 
 JOIN_DEADLINE_SEC = 5.0
 """Дедлайн `join` для каждого вспомогательного потока. Тест, который ВИСНЕТ
@@ -667,7 +667,7 @@ class TestLevelPlaneIsDeclaredAndPublished:
 
     def test_every_counter_is_declared_as_a_dotless_level(self) -> None:
         """Объявлены все восемь имён словаря, и ни одно не несёт точку."""
-        ctx, declared, _published = self._ctx_with_metric_spies(config={"endpoint": "http://127.0.0.1:4318"})
+        ctx, declared, _published = self._ctx_with_metric_spies(config={"endpoint": "http://127.0.0.1:4318/v1/logs"})
 
         OtelExportPlugin()._do_configure(ctx)
 
@@ -691,7 +691,7 @@ class TestLevelPlaneIsDeclaredAndPublished:
         """Уровень отвечает «сколько СЕЙЧАС»: после двух пачек там сумма, не приращение."""
         router = _RouterDouble()
         ctx, _declared, published = self._ctx_with_metric_spies(
-            router=router, config={"endpoint": "http://127.0.0.1:4318"}
+            router=router, config={"endpoint": "http://127.0.0.1:4318/v1/logs"}
         )
 
         plugin = OtelExportPlugin()
@@ -739,7 +739,7 @@ class TestConfigureNeverThrowsOnBadFragmentValues:
     Воспроизведено ревьюером и мной встречно, ДО правки::
 
         {"endpoint": ""}                              -> БРОСИЛ ValidationError
-        {"endpoint": "http://x:4318", "level": "TRACE"} -> БРОСИЛ ValidationError
+        {"endpoint": "http://x:4318/v1/logs", "level": "TRACE"} -> БРОСИЛ ValidationError
         {}                                            -> НЕ бросил, state=error
 
     Цена броска — не только состояние: плагин остаётся в `IDLE`, команд

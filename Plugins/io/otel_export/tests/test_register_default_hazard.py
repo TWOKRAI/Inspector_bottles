@@ -51,7 +51,7 @@ class TestRegisterBuildsWithoutArguments:
         тихий дефолт».
 
         Покраснеет в обе стороны: если дефолт регистра станет рабочим адресом
-        (`http://127.0.0.1:4318`) — исключения не будет; если у схемы сервиса снимут
+        (`http://127.0.0.1:4318/v1/logs`) — исключения не будет; если у схемы сервиса снимут
         валидатор пустоты — тоже. Обе поломки прошли бы мимо остальных 53 тестов.
         """
         from Services.otel_export.config import OtelExportConfig
@@ -77,7 +77,7 @@ class TestRegisterBuildsWithoutArguments:
         from Services.otel_export.config import OtelExportConfig
         from Plugins.io.otel_export.registers import OtelExportRegisters
 
-        filled = OtelExportRegisters(endpoint="http://collector.local:4318")
+        filled = OtelExportRegisters(endpoint="http://collector.local:4318/v1/logs")
         cfg = OtelExportConfig(**filled.model_dump())
 
-        assert cfg.endpoint == "http://collector.local:4318"
+        assert cfg.endpoint == "http://collector.local:4318/v1/logs"
