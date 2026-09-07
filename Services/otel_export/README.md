@@ -1,7 +1,9 @@
 # Services/otel_export — экспорт записей наблюдаемости наружу по OTLP
 
-> **Стадия:** `contract` (план [`plans/otel-export.md`](../../plans/otel-export.md), Task 0.4 + Task 0.2 шаг 2).
-> Реализации экспорта, маппера и резолвера Resource ЗДЕСЬ ЕЩЁ НЕТ — они приходят в Ф1–Ф2.
+> **Стадия:** частичная реализация (план [`plans/otel-export.md`](../../plans/otel-export.md)).
+> Ф1 закрыта: маппер (`mapping.py`), резолвер `Resource` (`resources.py`), фильтр числовой
+> плоскости и приведение атрибутов — есть. `LogExporter` остаётся на стадии `contract`:
+> **ни одна запись этим сервисом ещё не отправлена наружу**, отправка приходит в Ф2.2/2.4.
 > Заголовки разделов по-английски — литерал шаблона module-contract; тело по-русски.
 
 ## Purpose
@@ -42,7 +44,16 @@ from Services.otel_export import MappedRecord, RecordMapper   # контракт
 from Services.otel_export.config import OtelExportConfig      # схема параметров
 from Services.otel_export.config import format_validation_error  # читаемый текст отказа
 from Services.otel_export.exporter import sdk_available       # факт наличия SDK
+from Services.otel_export.mapping import coerce_attributes    # атрибуты -> то, что кодировщик примет
 ```
+
+`coerce_attributes(attributes) -> (dict, count)` живёт в `mapping.py` рядом с маппером и в
+`__all__` пакета не входит по тому же доводу: это шаг ХОСТА между маппером и экспортёром, а
+не контракт. Скаляры (`str`/`bool`/`int`/`float`) и однородные их последовательности едут как
+есть; всё прочее приводится к строке и считается (`otel_export.attr_coerced`). Инвариант —
+**ни одно значение не исчезает**: замер ревью Ф1 (Н-3) показал, что кодировщик SDK роняет
+`Path`/`datetime`/`set` целиком, а исключение уходит в stdlib-`logging`, которого процесс
+фреймворка не слышит.
 
 ### `OtelExportConfig` — единственное объявление параметров
 
@@ -118,31 +129,50 @@ uv pip install --inexact '.[otel]'
 
 ## Counters
 
-Словарь счётчиков — **литералы**, на которые будут ссылаться тесты Ф2–Ф3 и тождество
-потерь Task 3.4. Плоскость — числовая (`ctx.record_metric`), то есть счётчики видны в
-`introspect_telemetry`, `history_query(metric=...)` и GUI; своей команды-интроспекции у
-экспортёра нет и не заводится.
+Словарь счётчиков — **литералы**, на которые ссылаются тесты Ф2–Ф3 и тождество потерь
+Task 3.4. Своей команды-интроспекции у экспортёра нет и не заводится: показания отдаёт
+`otel_export.status` плюс штатные дороги наблюдаемости процесса.
+
+**Счётчик живёт в ДВУХ плоскостях, и это не дубль (Р-7, Task 2.1).** Прежняя редакция
+этого раздела утверждала, что числовой плоскости достаточно — «счётчики видны в
+`introspect_telemetry`». **Это неверно, сверено по коду:** секция `levels` ответа
+`introspect.telemetry` собирается из УРОВНЕЙ дерева состояния (`declare_metric` +
+`publish_metric`), а плоскости stats там нет вовсе (`builtin_commands.py`, перечень
+секций). Отсюда обе дороги, у каждой своя:
+
+| Дорога | Имя | Кто читает |
+|---|---|---|
+| `ctx.record_metric` | точечное (`otel_export.received`) | `history_query(metric="otel_export.received")`, агрегаты окна, история в сторе |
+| `ctx.declare_metric` + `ctx.publish_metric` | БЕЗ точки и без префикса (`received`) | `introspect.telemetry` → `levels`, GUI-строки; лист ложится в `state.plugins.otel_export.received` |
 
 | Имя в плоскости чисел | Что означает |
 |---|---|
 | `otel_export.received` | запись принята от брокера и отмечена `observed_ts` |
 | `otel_export.exported` | запись принята приёмником OTLP (`ExportOutcome.accepted`) |
-| `otel_export.skipped_numbers` | числовой род (`kind ∈ {stats, observation}`) не экспортируется — штатный отказ маппера, с разбивкой по `kind` |
-| `otel_export.dropped_overflow` | запись выброшена своим bounded-каналом ДО передачи в SDK (`drop_oldest`) |
+| `otel_export.skipped_numbers` | числовой род (`kind ∈ {stats, observation}`) не экспортируется — штатный отказ фильтра, с разбивкой по `kind` |
+| `otel_export.mapper_rejected` | `split_exportable` признал запись экспортируемой, а `to_otlp` вернул `None` — сработал ВТОРОЙ сторож числовой плоскости (`severity == "number"` при не-числовом `kind`). Это НЕ `skipped_numbers`: смешать их значило бы спрятать расхождение двух сторожей за общим числом |
+| `otel_export.attr_coerced` | значение атрибута приведено к строке (`coerce_attributes`): `dict`/`set`/`Path`/`datetime`/разнородная последовательность/`None`. **Не потеря, а искажение** — ключ доехал, тип изменён |
+| `otel_export.dropped_overflow` | запись выброшена своим bounded-кольцом ДО передачи в SDK (`drop_oldest`) |
 | `otel_export.export_failed` | отправка отвергнута приёмником или не доехала (`ExportOutcome.failed`) |
-| `otel_export.resource_evicted` | из пула `Resource` вытеснен самый старый источник (LRU) |
+| `otel_export.resource_evicted` | из пула `Resource` вытеснен самый старый источник (LRU). Считается ДЕЛЬТОЙ свойства `PooledResourceResolver.evicted`: `record_metric` — counter, и абсолютное значение сложилось бы само с собой |
 
 Тождество потерь (Task 3.4) сводится из них:
-`received = exported + skipped_numbers + dropped_overflow + export_failed + (в очереди)`.
 
-**Ловушка именования, найденная при сверке с кодом 2026-09-05.** План говорит «счётчики —
-`ctx.declare_metric(...)` + `ctx.record_metric(...)`», но это ДВЕ разные плоскости с разными
-правилами имён: `record_metric` берёт точечное имя (`otel_export.received` — им же адресует
-`history_query`), а `declare_metric` — это УРОВЕНЬ дерева состояния и **точку в имени
-отвергает `ValueError`** (`plugins/base.py`, ADR-PM-038: точечное имя даёт вечно-мёртвый
-лист-двойник). Значит в Ф2.1 либо объявляется уровень с коротким именем (`received` — он
-ляжет в `state.plugins.otel_export.received`), либо `declare_metric` не зовётся вовсе.
-Дословный перенос строки плана даст `ValueError` на старте плагина.
+```
+received = exported + skipped_numbers + mapper_rejected + dropped_overflow + export_failed + (в кольце)
+```
+
+`attr_coerced` в тождество **не входит** и входить не может: приведение не теряет записи и
+не теряет ключа — оно меняет тип значения. Своя ось, свой вопрос («насколько приёмник
+получил не то, что было»).
+
+**Ловушка именования, найденная при сверке с кодом 2026-09-05 и снятая в Task 2.1.** План
+говорит «счётчики — `ctx.declare_metric(...)` + `ctx.record_metric(...)`», но это ДВЕ разные
+плоскости с разными правилами имён: `record_metric` берёт точечное имя, а `declare_metric` —
+это УРОВЕНЬ дерева состояния и **точку в имени отвергает `ValueError`**
+(`plugins/base.py`, ADR-PM-038: точечное имя даёт вечно-мёртвый лист-двойник). Дословный
+перенос строки плана уронил бы плагин на старте; в `plugin.py` имена разведены константой
+`METRIC_PREFIX`, и она же — единственное место, где префикс написан.
 
 ## Boundaries
 
