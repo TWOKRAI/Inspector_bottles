@@ -536,6 +536,25 @@ def _log_envelope(count: int) -> dict:
     return {"command": "observability.record", "data": {"records": records}}
 
 
+#: Литерал, по которому стенд опознаёт штатный останов плагина. Живёт здесь ОДИН
+#: раз: тест, выводящий его из предмета проверки, согласился бы с любым текстом.
+STOP_LINE_PREFIX = "otel_export: остановлен"
+
+
+def _stop_line(voices: dict[str, list[str]]) -> str | None:
+    """Найти строку итога останова в журнале ЛЮБОГО уровня.
+
+    Уровень проверяется отдельным утверждением: сначала «строка вообще доехала»,
+    потом «сказана тем уровнем, каким положено». Слитая проверка не различала бы
+    «строки нет» и «строка не того уровня» — два разных дефекта.
+    """
+    for level_lines in voices.values():
+        for line in level_lines:
+            if line.startswith(STOP_LINE_PREFIX):
+                return line
+    return None
+
+
 def _boot(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -723,18 +742,41 @@ class TestFlushHazards:
         counters = command_manager.registered["otel_export.status"]({})["counters"]
         assert counters["exported"] == 2, f"счётчик посчитал те же записи дважды: {counters!r}"
 
-    def test_shutdown_flushes_the_ring(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Р-21: останов дожимает накопленное, а не роняет его вместе с процессом."""
-        plugin, ctx, _voices, command_manager, _router, double = _boot(monkeypatch)
+    def test_shutdown_does_not_send_and_says_the_loss_as_a_number(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Останов НЕ отправляет: считает оставшееся потерей и произносит число.
+
+        Первая редакция Task 2.2 дожимала кольцо здесь, и стенд показал цену
+        (замер CTO, коллектор мёртв): `flush` жил 22.85-24.36 с при бюджете
+        останова **5 с** (`process_registry.stop_all`, `spawner.stop_timeout`),
+        процесс убивали внутри retry-цикла SDK, и строк «otel_export: остановлен»
+        в журнале оказывалось **0** — то есть последняя пачка выпадала из
+        тождества потерь целиком. Контроль с живым коллектором: строка есть (1).
+
+        Сторожатся три свойства сразу, и все три наблюдаемы снаружи: экспортёр не
+        позван вовсе, кольцо не тронуто (записи не «исчезли»), а строка итога
+        доехала и НАЗЫВАЕТ число потерянных.
+        """
+        plugin, ctx, voices, command_manager, _router, double = _boot(monkeypatch)
         ctx.router_manager.handlers["observability.record"](_log_envelope(3))
 
         plugin._do_shutdown(ctx)
 
-        assert [len(batch) for batch in double.batches] == [3], (
-            f"останов не дожал кольцо (или дожал не тем батчем): {[len(b) for b in double.batches]!r}"
+        assert double.batches == [], (
+            f"останов отправил пачку — процесс успеет убить внутри retry-цикла SDK: {double.batches!r}"
         )
         counters = command_manager.registered["otel_export.status"]({})["counters"]
-        assert counters["exported"] == 3, f"{counters!r}"
+        assert counters["exported"] == 0, f"на останове что-то отправлено: {counters!r}"
+        assert len(plugin._pending) == 3, f"кольцо на останове опустело, хотя отправки не было: {len(plugin._pending)}"
+
+        line = _stop_line(voices)
+        assert line is not None, (
+            f"строка итога останова не доехала — по ней стенд отличает штатный останов "
+            f"от процесса, убитого внутри чужого цикла. Журнал: {voices!r}"
+        )
+        assert "3" in line.split("счётчики")[0], f"строка итога не называет число потерянных записей: {line!r}"
+        assert voices["warning"] and line in voices["warning"], (
+            f"потеря сказана уровнем INFO — она уравнена с обычным остановом: {line!r}"
+        )
 
     def test_records_arriving_during_a_slow_export_are_not_lost(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Обмен кольца под локом — НАСТОЯЩИМ вторым потоком, иначе не проверяется.
@@ -810,10 +852,19 @@ class TestFlushHazards:
             f"учтено {accounted} (счётчики {counters!r}, в кольце {len(plugin._pending)})"
         )
 
-    def test_shutdown_with_empty_ring_does_not_call_the_exporter(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Пара: пустое кольцо на останове не имеет права открывать сокет."""
-        plugin, ctx, _voices, _command_manager, _router, double = _boot(monkeypatch)
+    def test_shutdown_with_empty_ring_reports_zero_at_info_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Пара без потери: строка та же, число ноль, уровень INFO.
+
+        Без этой пары утверждение «потеря сказана WARNING» удовлетворяется
+        плагином, который говорит WARNING всегда, — и уровень перестаёт что-либо
+        различать.
+        """
+        plugin, ctx, voices, _command_manager, _router, double = _boot(monkeypatch)
 
         plugin._do_shutdown(ctx)
 
         assert double.batches == [], f"на пустом кольце останов позвал отправку: {double.batches!r}"
+        line = _stop_line(voices)
+        assert line is not None, f"строка итога останова не доехала: {voices!r}"
+        assert line in voices["info"], f"штатный останов сказан не уровнем INFO: {line!r}"
+        assert "0" in line.split("счётчики")[0], f"строка итога не называет ноль потерь: {line!r}"

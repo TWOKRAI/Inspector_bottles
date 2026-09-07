@@ -18,12 +18,22 @@ Task 0.1: **`HTTP 200` не значит «доставлено»** — запр
 (`ExportOutcome`), а приёмник здесь нужен только чтобы отличить «сеть ответила»
 от «сети нет».
 
-**Про таймаут.** С мёртвым коллектором каждый `flush` держит приёмный поток до
-`export_timeout_sec` — команда исполняется ВНУТРИ `receive()`, другого
-вызывающего у неё нет (находка ревью Task 2.2; долг закрывает Task 2.4).
-Поэтому проба задаёт короткий таймаут **конфигурацией фрагмента**, а не жёстким
-потолком в коде: вторая позиция дефолта, который уже живёт в схеме, разошлась бы
-с первой молча.
+**Чем эта проба врала в первой редакции — и это класс дефекта, а не опечатка.**
+`BackendDriver` по умолчанию ждёт ответа **5 с**, а `flush` с мёртвым коллектором
+живёт **23-42 с** (замеры CTO). Три вызова вернули
+`{'success': False, 'error': 'timeout'}`, счётчики пришли пустыми, и две проверки
+выдали **ОПРОВЕРГНУТО на исправном механизме**, третья — НЕ ДОКАЗАНО. Правило,
+которое из этого следует: **детектор, чей таймаут короче измеряемой операции,
+сообщает об отказе ПРЕДМЕТА вместо отказа ИЗМЕРЕНИЯ** — и выглядит это как
+находка, а не как поломка прибора. Поэтому здесь таймаут вызова задан заведомо
+больше измеренного потолка (:data:`FLUSH_TIMEOUT_SEC`), а не оставлен дефолтным.
+
+Управлять длительностью через `export_timeout_ms` **нельзя**: у SDK это дедлайн
+расписания ретраев, а не потолок вызова — `_export` повторяет POST на
+`requests.ConnectionError` с исходным таймаутом (замер: 3000 мс -> 4.08 с, то есть
++36% сверх «потолка»; чёрная дыра при 30 с -> 42.08 с). Прежний абзац обещал
+«короткий таймаут конфигурацией фрагмента» — во фрагменте такого ключа нет, и
+пользы от него не было бы; абзац снят.
 
 **Запуск (стенд 8765 эксклюзивен — занять, объявить, освободить):**
 
@@ -47,6 +57,11 @@ COLLECTOR_PORT = 4318
 #: Хвосту надо натечь, иначе кольцо пустое и отправлять нечего — а пустой батч
 #: до SDK не доезжает вовсе (это отдельное свойство, сторожится тестами).
 _SETTLE_SEC = 12.0
+#: Потолок ожидания ответа на `otel_export.flush`. Заведомо больше измеренного
+#: худшего случая (42.08 с на «чёрную дыру»), иначе драйвер отчитается об отказе
+#: ПРЕДМЕТА вместо отказа измерения — см. докстринг модуля.
+FLUSH_TIMEOUT_SEC = 90.0
+
 #: Ключ окна голоса. Литерал: на него же ссылается тест и он же ищется в журнале.
 VOICE_KEY = "otel_export.export_failed"
 #: Постоянная часть строки отказа — переменные части (endpoint, failed, reason)
@@ -103,9 +118,26 @@ def _status(drv: Any) -> dict[str, Any]:
 
 
 def _flush(drv: Any) -> dict[str, Any]:
-    raw = drv.send_command(PROCESS, "otel_export.flush") or {}
+    """Дожать и ДОЖДАТЬСЯ настоящего ответа, а не таймаута драйвера.
+
+    Возвращает разобранный ответ команды; ключ `error` в нём означает, что
+    отказало ИЗМЕРЕНИЕ (не дождались), а не предмет — вызывающий обязан это
+    различать, иначе повторится ложный вердикт первой редакции.
+    """
+    started = time.monotonic()
+    raw = drv.send_command(PROCESS, "otel_export.flush", timeout=FLUSH_TIMEOUT_SEC) or {}
     payload = raw.get("result", raw.get("data", raw))
-    return payload if isinstance(payload, dict) else raw
+    result = payload if isinstance(payload, dict) else raw
+    print(f"[proof]   flush занял {time.monotonic() - started:.2f} с -> {result!r}")
+    return result
+
+
+def _measurement_failed(answers: list[dict[str, Any]]) -> str:
+    """Отказ ИЗМЕРЕНИЯ (таймаут драйвера, транспорт) — или пустая строка."""
+    broken = [a for a in answers if a.get("error") or a.get("success") is False]
+    if not broken:
+        return ""
+    return f"драйвер не дождался ответа ({broken!r}) — отказало измерение, не предмет"
 
 
 def _verdict(name: str, ok: bool | None, detail: str) -> tuple[str, bool | None]:
@@ -192,17 +224,47 @@ def main() -> int:
             # ---------------------------------------------------------------- #
             print(f"\n[proof] поднимаю приёмник на 127.0.0.1:{COLLECTOR_PORT} и повторяю")
             collector = _start_collector()
+
+            # СБРОСОВЫЙ флаш — его исход НЕ засчитывается ни в одну сторону.
+            # Без него половина Б мерила бы не то: коллектор поднимается посреди
+            # retry-цикла SDK, недоигранная пачка половины А доезжает уже по
+            # открытому сокету, и «записи уехали» оказывается правдой о ПРОШЛОМ
+            # батче. Так первая редакция и показала `export_failed = 0` при
+            # неизвестно чьём успехе.
+            print("[proof] сбросовый flush: увожу хвост, накопленный при закрытом коллекторе")
+            discarded = _flush(drv)
+            broken = _measurement_failed([discarded])
+            if broken:
+                print(f"[proof] ОТКАЗ ИЗМЕРЕНИЯ на сбросовом flush: {broken}")
+                results.append(_verdict("измерение состоялось (половина Б)", False, broken))
+                return 2
+
+            print(f"[proof] коплю ЗАВЕДОМО новые записи {_SETTLE_SEC} с...")
             time.sleep(_SETTLE_SEC)
 
             mid = _status(drv).get("counters", {})
             lines_before_open = len(_voice_lines(log_dir))
-            _flush(drv)
+            measured = _flush(drv)
+            broken = _measurement_failed([measured])
+            if broken:
+                print(f"[proof] ОТКАЗ ИЗМЕРЕНИЯ на измеряемом flush: {broken}")
+                results.append(_verdict("измерение состоялось (половина Б)", False, broken))
+                return 2
             time.sleep(1.0)
             end = _status(drv).get("counters", {})
             print(f"[proof] счётчики при открытом коллекторе: {end!r}")
 
             failed_delta = int(end.get("export_failed", 0)) - int(mid.get("export_failed", 0))
             exported_delta = int(end.get("exported", 0)) - int(mid.get("exported", 0))
+            # Ответ ИЗМЕРЯЕМОГО флаша — своя ось: он говорит об ЭТОМ вызове, а не
+            # о сумме за прогон, и потому не зависит от чужих недоигранных ретраев.
+            results.append(
+                _verdict(
+                    "коллектор ОТКРЫТ → измеряемый flush отчитался успехом",
+                    measured.get("status") == "ok" and int(measured.get("failed", -1)) == 0,
+                    f"ответ измеряемого flush: {measured!r}",
+                )
+            )
             results.append(
                 _verdict(
                     "коллектор ОТКРЫТ → export_failed НЕ растёт",

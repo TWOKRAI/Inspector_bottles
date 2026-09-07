@@ -5,7 +5,8 @@
 > плоскости и приведение атрибутов — есть. Task 2.2 закрыт: `OtlpHttpExporter`
 > (`exporter.py`) отправляет батч **синхронно** и возвращает исход числами. Чего ещё нет:
 > асинхронной пачки по расписанию (`BatchLogRecordProcessor`) — она приходит в Ф2.4, и до
-> неё отправка идёт только по команде `otel_export.flush` и на останове плагина.
+> неё отправка идёт **только по команде** `otel_export.flush`: на останове плагин не
+> дожимает, а считает оставшееся потерей и называет число (вердикт CTO по замеру стенда).
 > Заголовки разделов по-английски — литерал шаблона module-contract; тело по-русски.
 
 ## Purpose
@@ -118,7 +119,7 @@ cfg.readback()["headers"]        # {"authorization": "***"}
 cfg.readback()["export_timeout_sec"]  # 30.0 — уйдёт в OTLPLogExporter(timeout=...)
 
 exporter = OtlpHttpExporter(cfg)          # ничего не открывает: объект SDK строится лениво
-outcome = exporter.export(mapped_records)  # синхронно, до export_timeout_sec
+outcome = exporter.export(mapped_records)  # синхронно; 23-42 с, если приёмник недоступен
 outcome.accepted, outcome.failed, outcome.reason
 # (128, 0, "")  либо  (0, 128, "отправка в http://127.0.0.1:4318 не удалась: ...")
 ```
