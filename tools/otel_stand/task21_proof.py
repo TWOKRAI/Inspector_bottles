@@ -15,12 +15,14 @@
 
 **Порядок запуска (стенд 8765 эксклюзивен — занять, объявить, освободить):**
 
-    # окно 1: бэкенд
-    BACKEND_CTL=1 python multiprocess_prototype/run.py \\
-        multiprocess_prototype/backend/topology/otel_export.yaml
+    PYTHONPATH=$PWD BACKEND_CTL=1 python -m tools.otel_stand.task21_proof
 
-    # окно 2: эта проба
-    python -m tools.otel_stand.task21_proof
+Проба поднимает систему сама (`bootstrap` + `launcher.start()`, как
+`backend_ctl/probes/telemetry_sink_proof.py`) и гасит её в `finally`. Через
+`run.py` не запускается намеренно: тот требует `.venv` ВНУТРИ дерева, а в
+worktree его заводить нельзя (`uv sync` притащил бы CPU-torch вместо
+CUDA-колеса). Через `main()` — тоже нет: он пишет активный рецепт в манифест,
+то есть меняет tracked-файл ради диагностики.
 
 Проба НИЧЕГО не чинит и ничего не пишет в дерево — только спрашивает и печатает
 числа. Вердикт по каждому критерию отдельный: «не доказано» и «опровергнуто» —
@@ -29,11 +31,13 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from typing import Any
 
 PROCESS = "otel_export"
+_TOPOLOGY = "multiprocess_prototype/backend/topology/otel_export.yaml"
 #: Даём хвосту натечь: камера-симулятор на 10 fps, брокер разворачивает намерение
 #: на шве старта, история пишется фоновой пачкой с тактом дренажа ~100 мс.
 _SETTLE_SEC = 20.0
@@ -52,6 +56,26 @@ COUNTER_NAMES = (
 )
 
 
+def _flatten(node: Any, prefix: str = "") -> dict[str, Any]:
+    """Развернуть вложенный снимок `levels` в карту `путь -> значение`.
+
+    Форма ответа — дерево (`workers.<имя>.<поле>`, `state.plugins.<писатель>.<имя>`,
+    `state.shm.<имя>`), и считать по верхним ключам значит считать два: `workers`
+    и `state`. Ровно на этом первая редакция пробы вынесла ложное ОПРОВЕРГНУТО
+    при живых числах в дереве.
+    """
+    out: dict[str, Any] = {}
+    if not isinstance(node, dict):
+        return {prefix: node} if prefix else {}
+    for key, value in node.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            out.update(_flatten(value, path))
+        else:
+            out[path] = value
+    return out
+
+
 def _verdict(name: str, ok: bool | None, detail: str) -> tuple[str, bool | None]:
     mark = {True: "ДОКАЗАНО   ", False: "ОПРОВЕРГНУТО", None: "НЕ ДОКАЗАНО"}[ok]
     print(f"[{mark}] {name}\n              {detail}")
@@ -59,10 +83,33 @@ def _verdict(name: str, ok: bool | None, detail: str) -> tuple[str, bool | None]
 
 
 def main() -> int:
+    # Гейт сокета открывается env-флагом; дети наследуют его при spawn, поэтому
+    # ставится ДО bootstrap, а не после.
+    os.environ.setdefault("BACKEND_CTL", "1")
+
     from backend_ctl.driver import BackendDriver
+
+    from multiprocess_prototype.main import bootstrap
 
     results: list[tuple[str, bool | None]] = []
 
+    print(f"[proof] поднимаю топологию headless: {_TOPOLOGY}")
+    launcher = bootstrap(_TOPOLOGY)
+    launcher.start()
+    if not launcher.wait_until_ready(timeout=45.0):
+        print("[proof] ОТКАЗ: система не готова за 45 с — вердиктов не будет, это отказ стенда")
+        launcher.shutdown()
+        return 2
+    print("[proof] система готова")
+
+    try:
+        return _interrogate(BackendDriver, results)
+    finally:
+        print("[proof] гашу систему (PID-specific)...")
+        launcher.shutdown()
+
+
+def _interrogate(BackendDriver: Any, results: list[tuple[str, bool | None]]) -> int:
     with BackendDriver(port=8765) as drv:
         print(f"[proof] подключился к стенду; даю системе {_SETTLE_SEC} с натечь хвостом...")
         time.sleep(_SETTLE_SEC)
@@ -116,14 +163,43 @@ def main() -> int:
         telemetry = drv.introspect_telemetry(PROCESS) or {}
         tp = telemetry.get("result", telemetry.get("data", telemetry))
         levels = (tp or {}).get("levels") if isinstance(tp, dict) else None
+        gated = tp.get("gated_metrics") if isinstance(tp, dict) else None
         if levels is None:
             ok_levels: bool | None = None
             detail = "levels=None — сенсоров нет (нет heartbeat/показаний), это не отказ команды"
         else:
-            flat = {k.split(".")[-1] for k in levels} if isinstance(levels, dict) else set()
+            # `levels` — ВЛОЖЕННЫЙ словарь (`workers` / `state.plugins.<писатель>.<имя>`),
+            # а не плоская карта путь->значение. Первая редакция этой пробы считала
+            # только верхние ключи, получала {'workers','state'} и выносила ложное
+            # ОПРОВЕРГНУТО при живых счётчиках в дереве — сторож, выведенный из
+            # догадки о форме ответа, согласен сам с собой.
+            leaves = _flatten(levels)
+            flat = {path.split(".")[-1] for path in leaves}
             seen = sorted(set(COUNTER_NAMES) & flat)
+            published = {p: v for p, v in leaves.items() if p.split(".")[-1] in COUNTER_NAMES}
             ok_levels = len(seen) > 0
-            detail = f"нашлось {len(seen)} из 8 имён словаря: {seen}; всего листьев в levels: {len(levels)}"
+            detail = (
+                f"опубликовано {len(seen)} из 8 имён словаря: {published}; "
+                f"всего листьев: {len(leaves)}. Счётчик без единого инкремента значения "
+                f"не публикует — объявление проверяется отдельно, ниже"
+            )
+            # Содержимое печатается ВСЕГДА, а не только при отказе: «нашлось 0»
+            # без списка того, что там лежит, не отличает «уровни не доехали» от
+            # «доехали под другим путём», а это разные дефекты.
+            print(f"              levels = {levels!r}")
+            print(
+                f"              gate_active={tp.get('gate_active') if isinstance(tp, dict) else '?'}, "
+                f"gated_metrics={gated!r}"
+            )
+        results.append(
+            _verdict(
+                "Р-7: все восемь имён попали в КАТАЛОГ объявлений (declare_metric)",
+                (set(COUNTER_NAMES) <= set(gated)) if isinstance(gated, list) else None,
+                f"из каталога недостаёт: {sorted(set(COUNTER_NAMES) - set(gated or []))}"
+                if isinstance(gated, list)
+                else "gated_metrics в ответе нет",
+            )
+        )
         results.append(_verdict("Р-7: счётчики видны в introspect.telemetry -> levels", ok_levels, detail))
 
         # ------------------------------------------------------------------ #
