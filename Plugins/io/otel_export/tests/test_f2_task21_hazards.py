@@ -28,6 +28,22 @@
    верхний уровень ответа значило бы считать подтверждением доставленный отказ.
 9. **Второй поток приёма голосит ОКНОМ, а не строкой на каждый приём** (Р-11).
 
+Дописано ВЕДУЩИМ после инъекционной матрицы (заплата I7 убила ноль из 155):
+
+10. **Плоскость уровней объявлена и публикуется накопленным**, а не приращением.
+
+Дописано по находкам ревью, итерация 1:
+
+11. **Н-1: `configure()` не бросает на невалидном ЗНАЧЕНИИ фрагмента.** Отказать
+    умеют ДВЕ точки — `_init_register` (чужой `setattr` при
+    `validate_assignment=True`) и наш конструктор конфига; первая редакция
+    ловила только вторую, и покрытым оказался единственный случай, который и
+    так работал.
+12. **Н-2: `coerce_attributes` действительно ЗОВЁТСЯ плагином**, и результат
+    ложится в кольцо — три заплаты ревьюера по этой ветке убивали ноль.
+13. **Н-3: `flush` отвечает `noop`, а не `ok`** — прежний тест проверял форму
+    ответа, а не свойство.
+
 Ни один тест не имеет права зависнуть: там, где есть ожидание, оно ограничено
 таймаутом барьера, а поток — daemon с дедлайном на `join`.
 """
@@ -482,10 +498,17 @@ class TestResourceEvictionsAndOverflow:
         `validate_assignment=True`, а порядок — из `model_fields`, где
         `max_queue_size` идёт РАНЬШЕ `max_export_batch_size`. Значит присвоение
         `max_queue_size = 2` проверяется против ещё не тронутого батча 512 и
-        отвергается кросс-полевым валидатором — фрагмент топологии с малой
-        очередью не применится вовсе, в каком бы порядке ключи в нём ни стояли.
-        Это находка про дверь конфига, а не про плагин; здесь она обойдена
-        значением, равным дефолту батча.
+        **бросает `ValidationError` прямо в `_init_register`** — в каком бы
+        порядке ключи ни стояли во фрагменте.
+
+        Формулировка исправлена по ревью (Н-5): первая редакция говорила «не
+        применится вовсе», а это читается как тихий no-op и прячет то, что здесь
+        на самом деле происходит. Бросок из `_init_register` — тот же механизм,
+        что блокер Н-1, и с его правкой он больше не убивает `configure()`:
+        плагин уходит в состояние `error` с названной причиной (см.
+        `TestConfigureNeverThrowsOnBadFragmentValues`). Экспортировать он при
+        этом всё равно не будет, поэтому обход здесь остаётся: значение, равное
+        дефолту батча.
         """
         plugin, ctx, _voices = _started(config={"endpoint": ENDPOINT, "max_queue_size": 512})
         handler = ctx.router_manager.handlers["observability.record"]
@@ -661,3 +684,214 @@ class TestLevelPlaneIsDeclaredAndPublished:
             f"уровень 'received' обязан нести накопленное (2, затем 5), получено {received!r} — "
             "приращение вместо суммы делает пульт бессмысленным: два тика подряд покажут одно число"
         )
+
+
+# ---------------------------------------------------------------------------
+# Правки ревью, итерация 1: Н-1 (Р-14 на настоящей дороге конфига),
+# Н-2 (проводка coerce_attributes), Н-3 (честность flush).
+# ---------------------------------------------------------------------------
+
+
+class TestConfigureNeverThrowsOnBadFragmentValues:
+    """Н-1: Р-14 обязан держаться на ЗНАЧЕНИЯХ фрагмента, а не только на их отсутствии.
+
+    Отказать умеют ДВЕ точки, и первая неочевидна: `_init_register` применяет
+    значения фрагмента по одному через `setattr` при `validate_assignment=True`
+    (`base.py:1422`), то есть валидатор схемы срабатывает ТАМ — раньше, чем
+    плагин соберёт `OtelExportConfig`. Первая редакция ловила только вторую
+    точку, и единственный покрытый случай (`config={}`) был ровно тем, где
+    `setattr` не зовётся вовсе.
+
+    Воспроизведено ревьюером и мной встречно, ДО правки::
+
+        {"endpoint": ""}                              -> БРОСИЛ ValidationError
+        {"endpoint": "http://x:4318", "level": "TRACE"} -> БРОСИЛ ValidationError
+        {}                                            -> НЕ бросил, state=error
+
+    Цена броска — не только состояние: плагин остаётся в `IDLE`, команд
+    `otel_export.status`/`flush` не существует вовсе (`_auto_register_commands`
+    идёт ПОСЛЕ `configure`), а `shutdown()` даёт ВТОРОЙ отказ
+    (`AttributeError` на `_subscribed`), маскирующий первый. Поэтому тест
+    проверяет все три следствия, а не только `state`.
+    """
+
+    @pytest.mark.parametrize(
+        ("config", "key_in_reason"),
+        [
+            ({"endpoint": ""}, "endpoint"),
+            ({"endpoint": ENDPOINT, "level": "TRACE"}, "level"),
+            ({"endpoint": ENDPOINT, "max_queue_size": 2}, "max_export_batch_size"),
+            ({"endpoint": ENDPOINT, "resource_pool_size": 0}, "resource_pool_size"),
+        ],
+        ids=["пустой-endpoint", "level-TRACE", "очередь-меньше-батча", "пул-нулевой"],
+    )
+    def test_bad_value_gives_error_state_with_a_named_key_and_a_usable_plugin(
+        self, config: dict, key_in_reason: str
+    ) -> None:
+        """Не бросает, уходит в `error`, причина называет КЛЮЧ, команды живы, останов чист."""
+        command_manager = _CommandManagerDouble()
+        ctx, _voices = _make_ctx(command_manager=command_manager, config=config)
+        plugin = OtelExportPlugin()
+
+        plugin._do_configure(ctx)  # НЕ обязан бросать (Р-14)
+
+        assert "otel_export.status" in command_manager.registered, (
+            "команды не зарегистрированы — значит configure() всё-таки бросил, "
+            "и спросить плагин о причине физически нечем"
+        )
+        status = command_manager.registered["otel_export.status"]({})
+        assert status["state"] == "error", f"состояние на конфиге {config!r}: {status!r}"
+        assert key_in_reason in status["reason"], f"причина не называет ключ {key_in_reason!r}: {status['reason']!r}"
+
+        plugin._do_start(ctx)
+        assert "observability.record" not in ctx.router_manager.handlers, (
+            "в состоянии error хендлер приёма регистрироваться не имеет права"
+        )
+        plugin._do_shutdown(ctx)  # второй отказ здесь и был бы маскировкой первого
+
+    def test_rejected_header_literal_never_reaches_the_reason_text(self) -> None:
+        """Пара к предыдущему: отвергнутый секрет в текст причины НЕ попадает.
+
+        Отказ по `headers` — единственный, где текст ошибки строится рядом с
+        настоящим токеном. Два предохранителя работают вместе:
+        `hide_input_in_errors` на самой схеме (снимает входное значение на ВСЕХ
+        дорогах, включая чужой `setattr` внутри `_init_register`) и сам
+        валидатор, который печатает имя заголовка, но не значение. Утечка здесь
+        стоила бы токена в `system.log` — то есть правило «секреты в env»
+        защитило бы YAML и потеряло секрет в журнале.
+        """
+        secret = "Bearer СЕКРЕТ-СТРАЖА-42"
+        command_manager = _CommandManagerDouble()
+        ctx, voices = _make_ctx(
+            command_manager=command_manager,
+            config={"endpoint": ENDPOINT, "headers": {"authorization": secret}},
+        )
+
+        OtelExportPlugin()._do_configure(ctx)
+
+        status = command_manager.registered["otel_export.status"]({})
+        assert status["state"] == "error"
+        assert "headers" in status["reason"], f"причина не называет ключ headers: {status['reason']!r}"
+        assert secret not in status["reason"], f"СЕКРЕТ утёк в текст причины: {status['reason']!r}"
+        assert not any(secret in line for line in voices["error"]), f"СЕКРЕТ утёк в журнал: {voices['error']!r}"
+
+    def test_valid_fragment_still_reaches_ready(self) -> None:
+        """Пара ко всему классу: правка Н-1 не превратила `configure` в «всегда error».
+
+        Без этого утверждения весь класс удовлетворялся бы плагином, который
+        отвергает любой конфиг, — и заплата «всегда звать `_fail`» осталась бы
+        незамеченной.
+        """
+        command_manager = _CommandManagerDouble()
+        ctx, _voices = _make_ctx(
+            command_manager=command_manager,
+            config={"endpoint": ENDPOINT, "level": "DEBUG", "resource_pool_size": 8},
+        )
+        plugin = OtelExportPlugin()
+        plugin._do_configure(ctx)
+
+        status = command_manager.registered["otel_export.status"]({})
+        assert status["state"] == "ready", f"валидный фрагмент отвергнут: {status!r}"
+        assert status["endpoint"] == ENDPOINT
+        assert plugin._cfg.resource_pool_size == 8, "значение фрагмента до конфига не доехало"
+
+
+class TestCoerceAttributesIsWiredIntoTheHandler:
+    """Н-2: сервисная функция проверена, а её ВЫЗОВ плагином не проверял никто.
+
+    Инъекции ревьюера по этой ветке (выбросить не-скаляры молча / не звать
+    `coerce_attributes` вовсе / положить в `_pending` необогащённую запись)
+    убили **0 тестов из 157** при живой оси — контрольная заплата рядом (не
+    звать пул `Resource`) убила 1. Значит это была дыра, а не место, где
+    свойство не может измениться.
+
+    Литералы выбраны платформонезависимыми намеренно: `str(Path("/etc/x"))` на
+    Windows и POSIX даёт РАЗНЫЕ строки, а `str(datetime(...))` и `str(dict)` —
+    одинаковые, и сравнивать можно с написанным значением, а не с вычисленным
+    из предмета проверки.
+    """
+
+    def test_non_scalar_attributes_are_coerced_counted_and_stored(self) -> None:
+        """Три утверждения на одну ветку: ключ доехал, ЗНАЧЕНИЕ приведено, счётчик вырос."""
+        import datetime
+
+        plugin, ctx, _voices = _started()
+        handler = ctx.router_manager.handlers["observability.record"]
+
+        handler(
+            _envelope(
+                [
+                    _log_record(
+                        extra={
+                            "context": {
+                                "when": datetime.datetime(2026, 1, 1),
+                                "shape": {"nested": 1},
+                                "plain": "как есть",
+                                "numbers": [1, 2, 3],
+                            }
+                        }
+                    )
+                ]
+            )
+        )
+
+        counters = plugin._cmd_status({})["counters"]
+        assert counters["attr_coerced"] == 2, f"приведений должно быть ровно два (datetime и dict): {counters!r}"
+        assert len(plugin._pending) == 1, "отображённая запись не легла в кольцо"
+        attributes = plugin._pending[0].attributes
+        # Сравнение со ЗНАЧЕНИЕМ, а не с типом: утверждение `isinstance(str)`
+        # пережило бы заплату «положить в кольцо необогащённую запись» везде,
+        # где исходное значение и так было строкой.
+        assert attributes["when"] == "2026-01-01 00:00:00", (
+            f"datetime не приведён либо в кольцо легла запись ДО приведения: {attributes!r}"
+        )
+        assert attributes["shape"] == "{'nested': 1}", f"dict не приведён: {attributes!r}"
+        assert attributes["plain"] == "как есть", "скаляр трогать не за что"
+        assert attributes["numbers"] == [1, 2, 3], "однородная последовательность трогаться не должна"
+        assert attributes["record.kind"] == "log", "род записи потерян при обогащении"
+
+    def test_all_scalar_attributes_leave_the_counter_at_zero(self) -> None:
+        """Пара: приводить было нечего — счётчик не растёт.
+
+        Без неё «счётчик вырос на 2» удовлетворялось бы и слепым инкрементом на
+        каждую запись.
+        """
+        plugin, ctx, _voices = _started()
+        handler = ctx.router_manager.handlers["observability.record"]
+
+        handler(_envelope([_log_record(extra={"context": {"plain": "текст", "n": 7, "flag": True}})]))
+
+        assert plugin._cmd_status({})["counters"]["attr_coerced"] == 0
+        assert plugin._pending[0].attributes["n"] == 7
+
+
+class TestFlushIsHonestNotOk:
+    """Н-3: единственный тест `flush` проверял ФОРМУ (`status` есть), а не свойство.
+
+    Заплата «вернуть `{"status": "ok", ...}`» — ровно тот соблазн, против
+    которого написан докстринг `_cmd_flush`, — убила 0 тестов. Слово «ok» у
+    команды дожатия читается как «всё отправлено», а отправки в Task 2.1 нет
+    вовсе.
+    """
+
+    def test_flush_reports_noop_and_the_real_ring_depth(self) -> None:
+        plugin, ctx, _voices = _started()
+        handler = ctx.router_manager.handlers["observability.record"]
+        handler(_envelope([_log_record(message="a"), _log_record(message="b")]))
+
+        result = plugin._cmd_flush({})
+
+        assert result["status"] == "noop", f"дожимать нечем — статус обязан говорить это прямо, а не 'ok': {result!r}"
+        assert result["pending"] == 2, f"flush не показывает настоящую глубину кольца: {result!r}"
+        assert result["flushed"] == 0
+
+    def test_flush_in_error_state_says_error_with_the_reason(self) -> None:
+        """Пара: у плагина в `error` дожатие — не `noop`, а отказ с причиной."""
+        ctx, _voices = _make_ctx(config={"endpoint": ""})
+        plugin = OtelExportPlugin()
+        plugin._do_configure(ctx)
+
+        result = plugin._cmd_flush({})
+
+        assert result["status"] == "error", f"{result!r}"
+        assert "endpoint" in result["reason"]
