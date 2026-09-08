@@ -65,7 +65,7 @@ class TestReadbackMasking:
         from Plugins.io.otel_export.registers import OtelExportRegisters
 
         reg = OtelExportRegisters(
-            endpoint="http://collector.local:4318",
+            endpoint="http://collector.local:4318/v1/logs",
             headers={"authorization": "${OTEL_TEST_SECRET_TOKEN}"},
         )
         result = reg.readback()
@@ -89,7 +89,7 @@ class TestReadbackMasking:
         from Plugins.io.otel_export.registers import OtelExportRegisters
 
         reg = OtelExportRegisters(
-            endpoint="http://collector.local:4318",
+            endpoint="http://collector.local:4318/v1/logs",
             headers={"authorization": "${OTEL_TEST_SECRET_TOKEN}"},
         )
         raw = reg.model_dump()

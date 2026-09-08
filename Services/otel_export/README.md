@@ -1,7 +1,12 @@
 # Services/otel_export — экспорт записей наблюдаемости наружу по OTLP
 
-> **Стадия:** `contract` (план [`plans/otel-export.md`](../../plans/otel-export.md), Task 0.4 + Task 0.2 шаг 2).
-> Реализации экспорта, маппера и резолвера Resource ЗДЕСЬ ЕЩЁ НЕТ — они приходят в Ф1–Ф2.
+> **Стадия:** частичная реализация (план [`plans/otel-export.md`](../../plans/otel-export.md)).
+> Ф1 закрыта: маппер (`mapping.py`), резолвер `Resource` (`resources.py`), фильтр числовой
+> плоскости и приведение атрибутов — есть. Task 2.2 закрыт: `OtlpHttpExporter`
+> (`exporter.py`) отправляет батч **синхронно** и возвращает исход числами. Чего ещё нет:
+> асинхронной пачки по расписанию (`BatchLogRecordProcessor`) — она приходит в Ф2.4, и до
+> неё отправка идёт **только по команде** `otel_export.flush`: на останове плагин не
+> дожимает, а считает оставшееся потерей и называет число (вердикт CTO по замеру стенда).
 > Заголовки разделов по-английски — литерал шаблона module-contract; тело по-русски.
 
 ## Purpose
@@ -27,7 +32,7 @@
 |---|---|---|
 | `RecordMapper` | Protocol: display-запись → `MappedRecord \| None` | Ф1.1 `mapping.py` |
 | `ResourceResolver` | Protocol: контекст записи → `Resource` (пул + LRU) | Ф1.2 `resources.py` |
-| `LogExporter` | Protocol: `export(records)`, `force_flush(timeout)` | Ф2.2/Ф2.4 `exporter.py` |
+| `LogExporter` | Protocol: `export(records)`, `force_flush(timeout)` | `exporter.py` -> `OtlpHttpExporter` (Task 2.2; `force_flush` станет непустым в Ф2.4) |
 | `ObservabilityPort` | Protocol: минимальный разъём наблюдаемости для сервиса | хост (Ф2) |
 | `MappedRecord` | запись в модели OTel Logs Data Model | — |
 | `Resource` | **наш** тип ресурса (не тип SDK) | — |
@@ -42,7 +47,16 @@ from Services.otel_export import MappedRecord, RecordMapper   # контракт
 from Services.otel_export.config import OtelExportConfig      # схема параметров
 from Services.otel_export.config import format_validation_error  # читаемый текст отказа
 from Services.otel_export.exporter import sdk_available       # факт наличия SDK
+from Services.otel_export.mapping import coerce_attributes    # атрибуты -> то, что кодировщик примет
 ```
+
+`coerce_attributes(attributes) -> (dict, count)` живёт в `mapping.py` рядом с маппером и в
+`__all__` пакета не входит по тому же доводу: это шаг ХОСТА между маппером и экспортёром, а
+не контракт. Скаляры (`str`/`bool`/`int`/`float`) и однородные их последовательности едут как
+есть; всё прочее приводится к строке и считается (`otel_export.attr_coerced`). Инвариант —
+**ни одно значение не исчезает**: замер ревью Ф1 (Н-3) показал, что кодировщик SDK роняет
+`Path`/`datetime`/`set` целиком, а исключение уходит в stdlib-`logging`, которого процесс
+фреймворка не слышит.
 
 ### `OtelExportConfig` — единственное объявление параметров
 
@@ -93,20 +107,42 @@ from Services.otel_export.exporter import sdk_available       # факт нал�
 
 ## Usage
 
-Сегодня (стадия `contract`) сервис умеет ровно две вещи: назвать контракт и ответить,
-установлен ли SDK.
-
 ```python
 from Services.otel_export.config import OtelExportConfig
-from Services.otel_export.exporter import sdk_available
+from Services.otel_export.exporter import OtlpHttpExporter, sdk_available
 
 available, info = sdk_available()
 # (True, "1.44.0")  либо  (False, "missing: uv pip install --inexact '.[otel]'")
 
-cfg = OtelExportConfig(endpoint="http://127.0.0.1:4318", headers={"authorization": "${OTEL_TOKEN}"})
+cfg = OtelExportConfig(endpoint="http://127.0.0.1:4318/v1/logs", headers={"authorization": "${OTEL_TOKEN}"})
 cfg.readback()["headers"]        # {"authorization": "***"}
 cfg.readback()["export_timeout_sec"]  # 30.0 — уйдёт в OTLPLogExporter(timeout=...)
+
+exporter = OtlpHttpExporter(cfg)          # ничего не открывает: объект SDK строится лениво
+outcome = exporter.export(mapped_records)  # синхронно; 23-42 с, если приёмник недоступен
+outcome.accepted, outcome.failed, outcome.reason
+# (128, 0, "")  либо  (0, 128, "отправка в http://127.0.0.1:4318/v1/logs не удалась: ...")
 ```
+
+**Исход берётся из ВОЗВРАЩЁННОГО значения, а не из чужого лога.** Отказы SDK уходят в
+stdlib-`logging`, у корневого логгера процесса фреймворка хендлеров нет — при закрытом
+коллекторе экспортёр молчал бы, а счётчик показывал ноль потерь (замер Ф6.8: 26 тысяч
+событий потери — ноль строк в `logs/`). Успех — ровно
+`LogRecordExportResult.SUCCESS`; `FAILURE`, `None` и любой чужой объект читаются как отказ.
+
+Три свойства, на которые стоит рассчитывать вызывающему:
+
+* `accepted + failed == len(records)` на всех дорогах — включая перевод, построение SDK и
+  исключение внутри него; исключения наружу не выпускаются;
+* пустой батч даёт `(0, 0)` и **не строит объект SDK вовсе** — дожатие пустого кольца
+  сокета не открывает;
+* перевод строгий: отсутствующий `Resource`, `trace_id` не тех 32 hex-символов,
+  `severity_number` вне словаря OTel — это отказ ВСЕГО батча с названной причиной
+  (цена решения и отвергнутые варианты — ADR-OTEL-006).
+
+Отправка синхронна, и её единственный боевой вызывающий (`otel_export.flush`) сидит на
+приёмном потоке процесса — долг с числом записан в
+[`Plugins/io/otel_export/STATUS.md`](../../Plugins/io/otel_export/STATUS.md), закрытие в Ф2.4.
 
 Установка extra (ставит владелец, агент только выдаёт команду):
 
@@ -118,31 +154,50 @@ uv pip install --inexact '.[otel]'
 
 ## Counters
 
-Словарь счётчиков — **литералы**, на которые будут ссылаться тесты Ф2–Ф3 и тождество
-потерь Task 3.4. Плоскость — числовая (`ctx.record_metric`), то есть счётчики видны в
-`introspect_telemetry`, `history_query(metric=...)` и GUI; своей команды-интроспекции у
-экспортёра нет и не заводится.
+Словарь счётчиков — **литералы**, на которые ссылаются тесты Ф2–Ф3 и тождество потерь
+Task 3.4. Своей команды-интроспекции у экспортёра нет и не заводится: показания отдаёт
+`otel_export.status` плюс штатные дороги наблюдаемости процесса.
+
+**Счётчик живёт в ДВУХ плоскостях, и это не дубль (Р-7, Task 2.1).** Прежняя редакция
+этого раздела утверждала, что числовой плоскости достаточно — «счётчики видны в
+`introspect_telemetry`». **Это неверно, сверено по коду:** секция `levels` ответа
+`introspect.telemetry` собирается из УРОВНЕЙ дерева состояния (`declare_metric` +
+`publish_metric`), а плоскости stats там нет вовсе (`builtin_commands.py`, перечень
+секций). Отсюда обе дороги, у каждой своя:
+
+| Дорога | Имя | Кто читает |
+|---|---|---|
+| `ctx.record_metric` | точечное (`otel_export.received`) | `history_query(metric="otel_export.received")`, агрегаты окна, история в сторе |
+| `ctx.declare_metric` + `ctx.publish_metric` | БЕЗ точки и без префикса (`received`) | `introspect.telemetry` → `levels`, GUI-строки; лист ложится в `state.plugins.otel_export.received` |
 
 | Имя в плоскости чисел | Что означает |
 |---|---|
 | `otel_export.received` | запись принята от брокера и отмечена `observed_ts` |
 | `otel_export.exported` | запись принята приёмником OTLP (`ExportOutcome.accepted`) |
-| `otel_export.skipped_numbers` | числовой род (`kind ∈ {stats, observation}`) не экспортируется — штатный отказ маппера, с разбивкой по `kind` |
-| `otel_export.dropped_overflow` | запись выброшена своим bounded-каналом ДО передачи в SDK (`drop_oldest`) |
+| `otel_export.skipped_numbers` | числовой род (`kind ∈ {stats, observation}`) не экспортируется — штатный отказ фильтра, с разбивкой по `kind` |
+| `otel_export.mapper_rejected` | `split_exportable` признал запись экспортируемой, а `to_otlp` вернул `None` — сработал ВТОРОЙ сторож числовой плоскости (`severity == "number"` при не-числовом `kind`). Это НЕ `skipped_numbers`: смешать их значило бы спрятать расхождение двух сторожей за общим числом |
+| `otel_export.attr_coerced` | значение атрибута приведено к строке (`coerce_attributes`): `dict`/`set`/`Path`/`datetime`/разнородная последовательность/`None`. **Не потеря, а искажение** — ключ доехал, тип изменён |
+| `otel_export.dropped_overflow` | запись выброшена своим bounded-кольцом ДО передачи в SDK (`drop_oldest`) |
 | `otel_export.export_failed` | отправка отвергнута приёмником или не доехала (`ExportOutcome.failed`) |
-| `otel_export.resource_evicted` | из пула `Resource` вытеснен самый старый источник (LRU) |
+| `otel_export.resource_evicted` | из пула `Resource` вытеснен самый старый источник (LRU). Считается ДЕЛЬТОЙ свойства `PooledResourceResolver.evicted`: `record_metric` — counter, и абсолютное значение сложилось бы само с собой |
 
 Тождество потерь (Task 3.4) сводится из них:
-`received = exported + skipped_numbers + dropped_overflow + export_failed + (в очереди)`.
 
-**Ловушка именования, найденная при сверке с кодом 2026-09-05.** План говорит «счётчики —
-`ctx.declare_metric(...)` + `ctx.record_metric(...)`», но это ДВЕ разные плоскости с разными
-правилами имён: `record_metric` берёт точечное имя (`otel_export.received` — им же адресует
-`history_query`), а `declare_metric` — это УРОВЕНЬ дерева состояния и **точку в имени
-отвергает `ValueError`** (`plugins/base.py`, ADR-PM-038: точечное имя даёт вечно-мёртвый
-лист-двойник). Значит в Ф2.1 либо объявляется уровень с коротким именем (`received` — он
-ляжет в `state.plugins.otel_export.received`), либо `declare_metric` не зовётся вовсе.
-Дословный перенос строки плана даст `ValueError` на старте плагина.
+```
+received = exported + skipped_numbers + mapper_rejected + dropped_overflow + export_failed + (в кольце)
+```
+
+`attr_coerced` в тождество **не входит** и входить не может: приведение не теряет записи и
+не теряет ключа — оно меняет тип значения. Своя ось, свой вопрос («насколько приёмник
+получил не то, что было»).
+
+**Ловушка именования, найденная при сверке с кодом 2026-09-05 и снятая в Task 2.1.** План
+говорит «счётчики — `ctx.declare_metric(...)` + `ctx.record_metric(...)`», но это ДВЕ разные
+плоскости с разными правилами имён: `record_metric` берёт точечное имя, а `declare_metric` —
+это УРОВЕНЬ дерева состояния и **точку в имени отвергает `ValueError`**
+(`plugins/base.py`, ADR-PM-038: точечное имя даёт вечно-мёртвый лист-двойник). Дословный
+перенос строки плана уронил бы плагин на старте; в `plugin.py` имена разведены константой
+`METRIC_PREFIX`, и она же — единственное место, где префикс написан.
 
 ## Boundaries
 
