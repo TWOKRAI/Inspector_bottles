@@ -65,6 +65,7 @@
 - [Число без разброса по повторам — наблюдение, не замер](feedback_a_number_without_spread_across_repeats_is_an_observation.md) — три прогона одного кода: 118.7, 48.8, 0.5 мкс; контроль ловит неверную ПРИЧИНУ, повтор ловит ОТСУТСТВИЕ эффекта
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — инъекция на КАЖДОЕ свойство, предсказание до прогона · [молчащий детектор](feedback_silent_detector_proves_nothing.md) · [Коммит ПЕРЕД инъекциями](feedback_inject_only_after_the_work_is_committed.md) — `git checkout` в харнессе съел незакоммиченное
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без вход→выход = совет · [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки · [Фраза шире команды, которую цитирует](feedback_the_sentence_is_wider_than_the_command_it_quotes.md) — прогон настоящий, `--include=*.py` во фразе стал `**`
+- [Стенд с вердиктом — тоже оснастка](feedback_a_stand_with_a_verdict_is_also_a_harness.md) — приёмником был наш `http.server`, отвечавший 200 на любой путь; настоящий otelcol дал 404, 102 теста из 214 пинили форму, не доставившую ничего
 
 ## Активные проекты и долги
 - [Вердикт 2026-09-04: 6.5/10, доказанность продукта 4/10](project_honest_verdict_2026_09.md) — шина ~0.3/0.6 мс на хоп (<5% кадра, потолок FPS = таймер Windows); балл меняют P-1 инспектор с числами и P-2 второе приложение чужими руками; очередь в QUEUE 5b; ADR про ROS 2 уже есть в TECH_STACK §3

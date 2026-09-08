@@ -63,12 +63,14 @@ from .interfaces import MappedRecord
 from .resources import RESOURCE_CONTEXT_KEYS
 
 __all__ = [
+    "ATTRIBUTE_SCALARS",
     "KIND_ATTRIBUTE",
     "NON_ATTRIBUTE_CONTEXT_KEYS",
     "NUMERIC_KINDS",
     "ORIGIN_KEY",
     "TRACE_ID_KEY",
     "DisplayRecordMapper",
+    "coerce_attributes",
     "split_exportable",
 ]
 
@@ -130,10 +132,21 @@ class DisplayRecordMapper:
             # Форма разъехалась: атрибуты не выдумываем, но и запись не теряем.
             context = {}
 
-        attributes: dict[str, Any] = {KIND_ATTRIBUTE: kind}
+        # Род пишется ПОСЛЕ контекста, а не до (Р-10, Ф2.1). До правки словарь
+        # заводился строкой `{KIND_ATTRIBUTE: kind}`, а цикл ниже шёл следом и
+        # перетирал ЛЮБОЙ ключ, которого нет в чёрном списке, — включая ключ,
+        # буквально названный `record.kind` (в :data:`NON_ATTRIBUTE_CONTEXT_KEYS`
+        # его нет: тот список — поля Resource плюс `trace_id`/`origin`).
+        # Воспроизведено: контекст `{"record.kind": "evil"}` у записи рода
+        # `error` давал `attributes == {'record.kind': 'evil'}` — настоящий род
+        # исчезал целиком, и `log` с `error` на выходе становились неразличимы.
+        # Настоящий род — свойство КОНВЕРТА, а поле контекста пишет источник
+        # записи; спор между ними выигрывает конверт.
+        attributes: dict[str, Any] = {}
         for key, value in context.items():
             if key not in NON_ATTRIBUTE_CONTEXT_KEYS:
                 attributes[key] = value
+        attributes[KIND_ATTRIBUTE] = kind
 
         return MappedRecord(
             timestamp_ns=_to_nanoseconds(display_record.get("ts")),
@@ -177,6 +190,78 @@ def split_exportable(
         else:
             to_send.append(record)
     return to_send, skipped_by_kind
+
+
+#: Что кодировщик OTLP принимает как значение атрибута без приведения. Кортеж
+#: типов, а не «всё, что не dict»: у `bool` и `int` разные ветки кодировщика, но
+#: обе законны, а вот `Path`/`datetime`/`set` законной ветки не имеют вовсе.
+ATTRIBUTE_SCALARS = (str, bool, int, float)
+
+
+def coerce_attributes(attributes: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
+    """Привести значения `Attributes` к тому, что кодировщик OTLP умеет отправить.
+
+    **Что здесь может сломаться, учитывая, как оно устроено.**
+
+    1. *Атрибут исчезает молча — это не гипотеза, а замер ревью Ф1 (Н-3).*
+       `_encode_attributes({"ctx": Path(...)})` у SDK 1.44.0 роняет ключ целиком,
+       а исключение уходит в stdlib-`logging`, которого процесс фреймворка не
+       слышит (`std_facade.py`: у корневого логгера нет хендлеров). То есть
+       потеря атрибута сегодня наблюдаема НИКАК. Отсюда правило этой функции:
+       **ни одно значение не исчезает** — непригодное приводится к тексту, и
+       каждое приведение считается вызывающим (`otel_export.attr_coerced`).
+       Молчаливый пропуск был бы ровно тем дефектом, ради которого функция есть.
+    2. *`bool` — подкласс `int`, и однородность на нём ломается тише всего.*
+       `[True, 1]` выглядит однородным списком чисел, а кодировщик получил бы
+       смесь `bool_value`/`int_value` в одном массиве. Поэтому однородность
+       проверяется `type(x) is type(first)`, а не `isinstance`.
+    3. *Приведение к тексту необратимо, и это цена, а не улучшение.* `str(dict)`
+       у приёмника — строка с кавычками Python, а не JSON: искать по ней нельзя.
+       Пригодная альтернатива (`kvlist` у OTLP) существует, но её выбор — решение
+       уровня контракта приёмника, а не этой функции; здесь задача уже́ — не
+       потерять.
+    4. *`None` тоже приводится, а не пропускается.* «Ключ есть, значения нет» у
+       Resource означает отсутствие поля (см. `resources.py`), а здесь — наоборот:
+       атрибут записи с `None` пришёл от источника осознанно, и выбросить его
+       значило бы потерять факт «поле было и было пустым».
+
+    Args:
+        attributes: значения `MappedRecord.attributes` как их собрал маппер.
+
+    Returns:
+        `(coerced, count)` — новый словарь тех же КЛЮЧЕЙ и число приведённых
+        значений. Тождество `set(coerced) == set(attributes)` держится по
+        построению; `count == 0` означает «всё было пригодно», и это отличимо от
+        «функцию не звали» только по самому словарю — поэтому возвращаются оба.
+    """
+    coerced: dict[str, Any] = {}
+    count = 0
+    for key, value in attributes.items():
+        if isinstance(value, ATTRIBUTE_SCALARS):
+            coerced[key] = value
+            continue
+        if isinstance(value, (list, tuple)) and _is_homogeneous_scalar_sequence(value):
+            coerced[key] = value
+            continue
+        coerced[key] = str(value)
+        count += 1
+    return coerced, count
+
+
+def _is_homogeneous_scalar_sequence(value: Sequence[Any]) -> bool:
+    """Массив скаляров ОДНОГО типа — единственная не-скалярная форма OTLP.
+
+    Пустая последовательность считается однородной: у неё нет элемента, который
+    мог бы разъехаться с соседом, а `str([])` дал бы приёмнику текст `"[]"`
+    вместо пустого массива — то есть приведение здесь потеряло бы больше, чем
+    сохранило.
+    """
+    if not value:
+        return True
+    first = type(value[0])
+    if first not in ATTRIBUTE_SCALARS:
+        return False
+    return all(type(item) is first for item in value)
 
 
 # --------------------------------------------------------------------- #

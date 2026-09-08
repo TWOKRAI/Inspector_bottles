@@ -200,7 +200,7 @@ class TestConfigSchema:
         """
         from Services.otel_export.config import OtelExportConfig
 
-        cfg = OtelExportConfig(endpoint="http://collector.local:4318")
+        cfg = OtelExportConfig(endpoint="http://collector.local:4318/v1/logs")
         assert cfg.level == "INFO"
         assert cfg.compression == "gzip"
         assert cfg.headers == {}
@@ -218,7 +218,7 @@ class TestConfigSchema:
         """
         from Services.otel_export.config import OtelExportConfig
 
-        cfg = OtelExportConfig(endpoint="http://collector.local:4318")
+        cfg = OtelExportConfig(endpoint="http://collector.local:4318/v1/logs")
         assert cfg.max_queue_size == 2048
         assert cfg.schedule_delay_ms == 1000
         assert cfg.max_export_batch_size == 512
@@ -228,7 +228,7 @@ class TestConfigSchema:
         """B4: resource_pool_size — поле есть, дефолт положительный."""
         from Services.otel_export.config import OtelExportConfig
 
-        cfg = OtelExportConfig(endpoint="http://collector.local:4318")
+        cfg = OtelExportConfig(endpoint="http://collector.local:4318/v1/logs")
         assert "resource_pool_size" in type(cfg).model_fields
         assert cfg.resource_pool_size > 0
 
@@ -244,7 +244,7 @@ class TestConfigSchema:
 
         with pytest.raises(ValidationError):
             OtelExportConfig(
-                endpoint="http://collector.local:4318",
+                endpoint="http://collector.local:4318/v1/logs",
                 headers={"authorization": "Bearer secret123"},
             )
 
@@ -253,7 +253,7 @@ class TestConfigSchema:
         from Services.otel_export.config import OtelExportConfig
 
         cfg = OtelExportConfig(
-            endpoint="http://collector.local:4318",
+            endpoint="http://collector.local:4318/v1/logs",
             headers={"authorization": "${OTEL_AUTH_TOKEN}"},
         )
         assert cfg.headers["authorization"] == "${OTEL_AUTH_TOKEN}"
@@ -262,7 +262,7 @@ class TestConfigSchema:
         """B6: Dict at Boundary — from_dict(to_dict()) даёт равный объект."""
         from Services.otel_export.config import OtelExportConfig
 
-        cfg = OtelExportConfig(endpoint="http://collector.local:4318", level="DEBUG")
+        cfg = OtelExportConfig(endpoint="http://collector.local:4318/v1/logs", level="DEBUG")
         as_dict = cfg.to_dict()
         assert isinstance(as_dict, dict)
         restored = OtelExportConfig.from_dict(as_dict)
