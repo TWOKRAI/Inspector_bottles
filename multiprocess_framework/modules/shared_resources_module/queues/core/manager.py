@@ -589,7 +589,9 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         называет в тексте следующего голоса.
         """
         self._never_drop_loss_total += 1  # факт — всегда
-        voiced, suppressed = self._voices().take(f"queue_full:{process_name}:{queue_type}")
+        voices = self._voices()
+        voice_key = f"queue_full:{process_name}:{queue_type}"
+        voiced, suppressed = voices.take(voice_key)
         if not voiced:
             return
         try:
@@ -597,18 +599,28 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         except (NotImplementedError, OSError, AttributeError):
             size = -1  # qsize недоступен (macOS) — не повод молчать о потере
         tail = f" Подавлено с прошлой записи: {suppressed}." if suppressed else ""
-        _loss_logger.error(
-            "ПОТЕРЯ СООБЩЕНИЯ: очередь '%s' процесса-получателя '%s' переполнена "
-            "(размер %s), вытеснение запрещено QoS-профилем (never-drop, "
-            "system_evict_blocked=%d) — сообщение отброшено БЕЗВОЗВРАТНО и не будет "
-            "доставлено. всего: %d.%s",
-            queue_type,
-            process_name,
-            size if size >= 0 else "недоступен",
-            self._stats["system_evict_blocked"],
-            self._never_drop_loss_total,
-            tail,
-        )
+        delivered = False
+        try:
+            _loss_logger.error(
+                "ПОТЕРЯ СООБЩЕНИЯ: очередь '%s' процесса-получателя '%s' переполнена "
+                "(размер %s), вытеснение запрещено QoS-профилем (never-drop, "
+                "system_evict_blocked=%d) — сообщение отброшено БЕЗВОЗВРАТНО и не будет "
+                "доставлено. всего: %d.%s",
+                queue_type,
+                process_name,
+                size if size >= 0 else "недоступен",
+                self._stats["system_evict_blocked"],
+                self._never_drop_loss_total,
+                tail,
+            )
+            delivered = True
+        finally:
+            # Task 4.13: слот, съеденный решением, возвращается вместе с долгом,
+            # если запись до приёмника не дошла. Голос этот — ЕДИНСТВЕННЫЙ на
+            # весь инцидент «система теряет груз безвозвратно», и молчание после
+            # первой же потери приёмника здесь дороже всего.
+            if not delivered:
+                voices.release(voice_key, suppressed)
 
     #: Потолок числа РАЗЛИЧНЫХ отправителей, учитываемых по одной очереди (Ф4 Task 4.3).
     #: Сверх потолка счёт идёт в общее ведро :data:`_SENDER_OTHER_BUCKET`: диагностика

@@ -336,7 +336,8 @@ class HealthState:
             with self._lock:
                 self._breaker_owns_degraded = True
 
-        voiced, suppressed = self._voices.take(f"{etype}|{ctx}", throttle)
+        voice_key = f"{etype}|{ctx}"
+        voiced, suppressed = self._voices.take(voice_key, throttle)
         if voiced:
             # Маркер дедупа ПУТЕЙ — утверждение о ЧУЖОЙ строке: «факт этого
             # инцидента уже уехал в плоскость ошибок, и стор его получит оттуда».
@@ -352,10 +353,16 @@ class HealthState:
             # ``True``, потому что приватный ``_track_error`` глотает молча
             # (см. потолок в докстринге ``_safe_track``). Не сокращать до одной.
             marker = {ORIGIN_FIELD: ORIGIN_ERROR_MANAGER} if recorded else {}
-            self._safe_log(
+            delivered = self._safe_log(
                 compose_voice_text(f"[health] {etype}{where}: {emsg}", suppressed),
                 **marker,
             )
+            if not delivered:
+                # Task 4.13: колбэк голоса не принял вызов — слот, съеденный
+                # решением, возвращается вместе с долгом. Иначе первый же отказ
+                # приёмника делал бы health немым на всё окно, и это молчание
+                # было бы неотличимо от штатного подавления.
+                self._voices.release(voice_key, suppressed)
 
     def record_success(self) -> None:
         """Сигнал успешной итерации loop-раннера (produce/process удались).
@@ -512,8 +519,14 @@ class HealthState:
             return False
         return True
 
-    def _safe_log(self, msg: str, **extra: Any) -> None:
+    def _safe_log(self, msg: str, **extra: Any) -> bool:
         """Сказать вслух. ``extra`` — поля записи (напр. маркер ``origin``).
+
+        Returns:
+            Доехало ли (Task 4.13): ``True``, если колбэк принял вызов и
+            вернулся, ``False`` — если он бросил или ни одна форма вызова ему не
+            подошла. Ответ нужен окну голоса: слот, съеденный решением, обязан
+            вернуться, когда строки не случилось.
 
         Приёмник — утиный колбэк: у процесса это ``log_warning(msg, **kwargs)``,
         а в тестах бывает ``lambda msg: None``. Поэтому форма вызова подбирается
@@ -527,11 +540,14 @@ class HealthState:
         for kwargs in attempts:
             try:
                 self._log(msg, **kwargs)  # type: ignore[call-arg]
-                return
+                return True
             except TypeError:
                 continue
             except Exception:  # noqa: BLE001 — лог health не критичен
-                return
+                return False
+        # Ни одна форма вызова не подошла: колбэк отверг TypeError'ом все три.
+        # Запись потеряна — молчать об этом окну нельзя.
+        return False
 
 
 class HealthReporter:

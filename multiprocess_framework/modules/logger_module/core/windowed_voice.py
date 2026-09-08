@@ -36,6 +36,38 @@
 механизм, и его отказ не имеет права стоить факта. :func:`log_windowed` —
 удобство для частого случая «нужен только голос», а не единственная дверь.
 
+## Слот списывается ДОСТАВКОЙ, а не решением (Task 4.13)
+
+``take()`` возвращает решение — но само решение ещё не означает, что строка
+доехала. До Task 4.13 слот считался съеденным фактом решения: приёмник мог не
+иметь метода уровня или бросить исключение (а три боевых вызывающих гасят
+исключение через ``except: pass``), и первая же потеря давала гарантированное
+молчание на весь интервал — **неотличимое от штатного подавления**.
+
+Форма починки — **резерв → откат**, и она выбрана прогоном, а не вкусом.
+Наивное «сначала доставить, потом списать» замерено: 16 потоков на одном ключе,
+200 раундов → двойной голос в 200 раундах из 200. Поэтому:
+
+* ``take()`` списывает слот КАК ПРЕЖДЕ, под локом — конкуренты видят занятый
+  слот и подавляются законно;
+* если доставка не состоялась, вызывающий зовёт :meth:`WindowedVoices.release`,
+  и тот под ТЕМ ЖЕ локом возвращает ключ в «пора говорить», сложив в него долг:
+  прежний невысказанный счёт + сама несостоявшаяся запись + всё, что успели
+  подавить конкуренты, пока запись была в полёте;
+* **лок на время эмиссии не удерживается** — дисциплина ниже не нарушена.
+
+**Граница «что считать доставкой» — «приёмник принял вызов без исключения»**
+(метод есть и вернулся). Ниже этой границы лежит плоскость логгера со своими
+счётчиками, и тянуть окно до файла значило бы сделать примитив зависимым от
+проводки. Контракт поэтому говорит «передано приёмнику», а не «записано».
+
+Отказ доставки виден двумя способами: числом — процессный счётчик
+``windowed_delivery_failed`` рядом с ``windowed_suppressed`` (он растёт на
+КАЖДУЮ несостоявшуюся доставку), и словами — самоотчёт через
+:func:`~..._fallback.emergency_log` РАЗ НА КЛЮЧ. Аварийный выход здесь законен:
+о поломке сообщает сам сломавшийся маршрут, и рассказывать о ней через ту же
+плоскость означало бы рекурсию.
+
 ## Ключи и память
 
 Состояние живёт по ключу, ключи разных источников независимы. **Обе** карты
@@ -98,7 +130,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from ..._fallback import emergency_log
 
 #: Реестр снятых ручных копий окна журнала: имя копии → задача, которая её сняла.
 #:
@@ -147,7 +181,22 @@ _policy: Dict[str, Any] = {
 }
 
 _totals_lock = threading.Lock()
-_totals: Dict[str, int] = {"windowed_suppressed": 0, "windowed_keys_evicted": 0}
+_totals: Dict[str, int] = {
+    "windowed_suppressed": 0,
+    "windowed_keys_evicted": 0,
+    # Task 4.13: сколько раз решение «голосить» было принято, а доставка до
+    # приёмника не состоялась. Делает предыдущие два числа честными: без него
+    # «подавлено N» одинаково означает и работающее окно, и сломанный приёмник.
+    "windowed_delivery_failed": 0,
+}
+
+#: Метка «этот ключ обязан заговорить при следующем обращении», которую ставит
+#: :meth:`WindowedVoices.release`. ``-inf`` выбран вместо «now минус окно»
+#: сознательно: сравнение в :meth:`WindowedVoices.take` идёт с окном, пришедшим
+#: в ТОТ вызов, а оно у следующего вызывающего может оказаться больше прежнего —
+#: тогда откат «на одно окно назад» снова попал бы внутрь окна и промолчал.
+#: ``now - (-inf)`` больше любого конечного окна, каким бы оно ни пришло.
+_RELEASED_AT: float = float("-inf")
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +317,7 @@ def _bump(key: str, value: int = 1) -> None:
 class WindowedVoices:
     """Состояние окон по ключу. Потокобезопасен, не пиклится (держит лок)."""
 
-    __slots__ = ("_lock", "_state", "_repeats", "_clock")
+    __slots__ = ("_lock", "_state", "_repeats", "_clock", "_reported")
 
     def __init__(self, clock: Optional[Any] = None) -> None:
         """
@@ -290,6 +339,11 @@ class WindowedVoices:
         self._state: Dict[str, List[float]] = {}
         # key -> сколько раз подряд событие повторилось (ось эскалации, без времени)
         self._repeats: Dict[str, int] = {}
+        # ключи, о сломанной доставке которых самоотчёт уже прозвучал (Task 4.13).
+        # Своей карты с потолком не заводит: сюда попадают ТОЛЬКО ключи, которые
+        # в этот же момент лежат в ``_state``, и уходят они вместе с ним — в
+        # подметании и в ``forget``. Потолок поэтому общий, а не второй.
+        self._reported: Set[str] = set()
 
     # -- окно ---------------------------------------------------------------
 
@@ -343,6 +397,64 @@ class WindowedVoices:
         _bump("windowed_keys_evicted", evicted)
         return voiced, suppressed
 
+    def release(self, key: str, suppressed: int = 0) -> int:
+        """Доставка голоса не состоялась — вернуть слот и сложить в него долг (Task 4.13).
+
+        Зовётся вызывающим, который получил от :meth:`take` разрешение говорить,
+        но записи до приёмника не довёл: у приёмника нет метода уровня, либо он
+        бросил исключение. Граница «доставка» именно здесь и проходит — «приёмник
+        принял вызов и вернулся», а не «строка легла в файл».
+
+        Что происходит под локом:
+
+        * ключ получает метку :data:`_RELEASED_AT` — следующее обращение к нему
+          выйдет в ветку «голосить», каким бы окном ни пришли;
+        * в счёт подавленных складываются три слагаемых: ``suppressed``
+          (невысказанный долг, который несла провалившаяся запись), единица за
+          саму эту запись и всё, что конкуренты успели подавить, пока запись
+          была в полёте. Ни одно вхождение из счёта не выпадает.
+
+        Вне лока — процессный счётчик ``windowed_delivery_failed`` (на КАЖДУЮ
+        неудачу) и самоотчёт через :func:`~..._fallback.emergency_log` РАЗ НА
+        КЛЮЧ: сломанный маршрут говорит о себе сам, аварийным выходом, потому
+        что своя плоскость у него сломана по условию задачи. Оба вызова стоят
+        после ``with self._lock`` по той же дисциплине, что ``_bump`` в
+        :meth:`take`.
+
+        Args:
+            key: тот же ключ, что отдавался в :meth:`take`.
+            suppressed: число, которое :meth:`take` вернула вместе с решением.
+
+        Returns:
+            Накопленный долг ключа — то самое число, которое назовёт следующий
+            состоявшийся голос.
+        """
+        # Окно читается ДО лока держателя (дисциплина лока, шапка модуля) и
+        # нужно лишь на случай, когда ключа в карте уже нет: его могли вытеснить
+        # по потолку или забыть через ``forget``, пока запись была в полёте.
+        fallback_window = default_window_sec()
+        first_report = False
+        with self._lock:
+            entry = self._state.get(key)
+            in_flight = int(entry[1]) if entry is not None else 0
+            window = float(entry[2]) if entry is not None else fallback_window
+            debt = int(suppressed) + 1 + in_flight
+            self._state[key] = [_RELEASED_AT, debt, window]
+            if key not in self._reported:
+                self._reported.add(key)
+                first_report = True
+        _bump("windowed_delivery_failed", 1)
+        if first_report:
+            emergency_log(
+                __name__,
+                "warning",
+                "окно голоса: доставка не состоялась, слот возвращён (ключ %s, долг %d). "
+                "Дальнейшие отказы этого ключа считаются в windowed_delivery_failed",
+                key,
+                debt,
+            )
+        return debt
+
     def _sweep_locked(self, now: float, ceiling: int, stale_factor: int, protect: Optional[str] = None) -> int:
         """Подмести карту окон. Вызывается под ``self._lock``. Возвращает выброшенные.
 
@@ -359,6 +471,7 @@ class WindowedVoices:
         for key in [k for k, e in self._state.items() if e[1] == 0 and (now - e[0]) > stale_factor * e[2]]:
             del self._state[key]
             self._repeats.pop(key, None)
+            self._reported.discard(key)
         if len(self._state) <= ceiling:
             # Протухшие не считаются выброшенными: у них не было ни одного
             # неназванного подавления, терять было нечего.
@@ -386,6 +499,7 @@ class WindowedVoices:
         for key, _entry in ordered[: len(self._state) - ceiling]:
             del self._state[key]
             self._repeats.pop(key, None)
+            self._reported.discard(key)
             evicted += 1
         return evicted
 
@@ -394,6 +508,7 @@ class WindowedVoices:
         with self._lock:
             self._state.pop(key, None)
             self._repeats.pop(key, None)
+            self._reported.discard(key)
 
     def tracked_keys(self) -> int:
         with self._lock:
@@ -498,17 +613,32 @@ def _default_logger() -> Any:
     return get_std_logger(__name__, fallback_name=__name__)
 
 
-def emit_voice(logger: Any, level: str, text: str) -> None:
-    """Позвать у приёмника метод по имени уровня. Приёмник — любой утиный логгер."""
+def emit_voice(logger: Any, level: str, text: str) -> bool:
+    """Позвать у приёмника метод по имени уровня. Приёмник — любой утиный логгер.
+
+    Returns:
+        Доехало ли: ``True``, если найденный метод был позван и вернулся.
+        ``False`` — у приёмника нет ни метода уровня, ни ``log()``, то есть
+        запись потеряна молча. До Task 4.13 этот случай не отличался снаружи от
+        успеха, и слот окна съедался наравне с ним; сосед по классу
+        (``ObservableMixin._call_manager``) те же два рода отказа считал и
+        называл ещё с Ф2.3 — здесь приводится к нему.
+
+    Исключение приёмника НЕ гасится и уходит вызывающему — как и до Task 4.13.
+    Вызывающий, которому нужен откат слота, ставит ``release`` в ``finally``
+    (см. :func:`log_windowed`): туда приходят оба рода отказа сразу.
+    """
     target = logger if logger is not None else _default_logger()
     method = getattr(target, str(level).lower(), None)
     if callable(method):
         method(text)
-        return
+        return True
     # Утиный приёмник без метода уровня — не повод потерять запись.
     fallback = getattr(target, "log", None)
     if callable(fallback):
         fallback(logging.getLevelName(str(level).upper()), text)
+        return True
+    return False
 
 
 def log_windowed(
@@ -537,11 +667,22 @@ def log_windowed(
         voices: держатель окон; ``None`` → процессный.
 
     Returns:
-        ``True``, если голос прозвучал.
+        ``True``, если голос прозвучал — то есть был принят приёмником.
+        ``False`` и когда окно закрыто, и когда доставка не состоялась; во
+        втором случае слот возвращён (:meth:`WindowedVoices.release`), и
+        следующее обращение к ключу заговорит, назвав накопленный долг.
     """
     holder = _PROCESS_VOICES if voices is None else voices
     voiced, suppressed = holder.take(key, interval)
     if not voiced:
         return False
-    emit_voice(logger, level, compose_voice_text(msg, suppressed, ctx))
-    return True
+    delivered = False
+    try:
+        delivered = emit_voice(logger, level, compose_voice_text(msg, suppressed, ctx))
+    finally:
+        # ``finally``, а не ``except``: сюда приходят ОБА рода отказа — и
+        # бросок приёмника (уходит вызывающему дальше, как и прежде), и тихое
+        # «метода нет вовсе», у которого исключения не бывает.
+        if not delivered:
+            holder.release(key, suppressed)
+    return delivered

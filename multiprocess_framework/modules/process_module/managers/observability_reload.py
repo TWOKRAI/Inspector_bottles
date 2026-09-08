@@ -249,18 +249,32 @@ def _voice_repurposed_stats_enabled(resolved: Any, origin: Optional[str] = None)
     from ..._fallback import FallbackLogger
     from ...logger_module.core.windowed_voice import compose_voice_text, process_voices
 
-    voiced, suppressed = process_voices().take("stats.enabled.repurposed", None)
+    # Держатель берётся ОДИН раз в локальную переменную: ``process_voices()``
+    # отдаёт процессный синглтон, который фикстуры тестов подменяют целиком, и
+    # взять слот у одного держателя, а вернуть другому значило бы потерять долг.
+    holder = process_voices()
+    voice_key = "stats.enabled.repurposed"
+    voiced, suppressed = holder.take(voice_key, None)
     if voiced:
-        FallbackLogger(__name__).warning(
-            compose_voice_text(
-                "stats.enabled: false — с Ф2 этот ключ означает ПЛОСКОСТЬ ЧИСЕЛ: "
-                "метрики не будут собираться вовсе (окно пустое, все каналы "
-                "статистики молчат). Прежний смысл «не писать снапшоты в журнал» "
-                "переехал в stats.log_snapshots — если вы хотели именно его, "
-                "замените на 'enabled: true, log_snapshots: false' (ADR-PM-046)",
-                suppressed,
+        delivered = False
+        try:
+            FallbackLogger(__name__).warning(
+                compose_voice_text(
+                    "stats.enabled: false — с Ф2 этот ключ означает ПЛОСКОСТЬ ЧИСЕЛ: "
+                    "метрики не будут собираться вовсе (окно пустое, все каналы "
+                    "статистики молчат). Прежний смысл «не писать снапшоты в журнал» "
+                    "переехал в stats.log_snapshots — если вы хотели именно его, "
+                    "замените на 'enabled: true, log_snapshots: false' (ADR-PM-046)",
+                    suppressed,
+                )
             )
-        )
+            delivered = True
+        finally:
+            # Task 4.13: бросок приёмника уходит вызывающему дальше, как и
+            # прежде, но слот при этом обязан вернуться — совет автору ключа
+            # иначе замолчал бы на всё окно после первой же потери.
+            if not delivered:
+                holder.release(voice_key, suppressed)
 
 
 def compose_managers_payload(
@@ -1209,6 +1223,10 @@ PLANE_COUNTER_KEYS: tuple = (
     # вместе с выброшенным по потолку ключом» — второе делает первое честным.
     "windowed_suppressed",
     "windowed_keys_evicted",
+    # Task 4.13 — третий ключ той же тройки, и он делает первые два честными:
+    # «подавлено N» без него одинаково означает работающее окно и приёмника,
+    # который не принял ни одной записи (слот съедался решением, а не доставкой).
+    "windowed_delivery_failed",
     # Ф7.х — карта ключей дышит: подметённые протухшие. Пара к предыдущему ключу:
     # растёт expired — потолок работает как задумано; стоит expired при растущем
     # saturated — карта забита горячими ключами, дроссель по повторяемости против

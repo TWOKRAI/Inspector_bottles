@@ -537,6 +537,15 @@ class TestNoEmergencyLogInOperatorFacingPositions:
     #: (самоотчёт сломавшегося маршрута) + 4 пограничных в `observability_store.py`
     #: с записанным решением ADR-CRM-018.
     _INVENTORY = {
+        # +1 к инвентарю 2026-09-08, Task 4.13. Чем является этот вызов —
+        # сказано, а не проигнорировано: `WindowedVoices.release` сообщает, что
+        # ДОСТАВКА ГОЛОСА не состоялась, то есть о поломке говорит сам
+        # сломавшийся маршрут. Рассказать об этом через ту же плоскость нельзя
+        # по условию — она и сломана. Позиция законная, ровно как у 12 других;
+        # адресат ОПЕРАТОРА тут ни при чём (Task 4.11 снимала именно те).
+        # Звучит РАЗ НА КЛЮЧ, не на попытку — сторож в
+        # test_f4_task413_slot_debited_on_delivery.py::test_criterion4b.
+        "multiprocess_framework/modules/logger_module/core/windowed_voice.py": 1,
         "multiprocess_framework/modules/process_manager_module/launcher/system_launcher.py": 4,
         "multiprocess_framework/modules/channel_routing_module/observability/observability_store.py": 4,
         "multiprocess_framework/modules/logger_module/core/process_hooks.py": 3,

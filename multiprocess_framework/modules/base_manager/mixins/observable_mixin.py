@@ -145,8 +145,29 @@ class ObservableMixin(IObservableMixin):
 
     def _log(self, level: str, message: str, **kwargs) -> None:
         """Логирование через logger manager (любой уровень)."""
+        self._log_checked(level, message, **kwargs)
+
+    def _log_checked(self, level: str, message: str, **kwargs) -> bool:
+        """То же, что :meth:`_log`, но ГОВОРИТ, доехала ли запись (Task 4.13).
+
+        Нужен ровно там, где от ответа зависит чужое состояние: окно голоса
+        обязано вернуть слот, если строка до приёмника не дошла, иначе первая
+        же потеря даёт молчание на весь интервал, неотличимое от штатного
+        подавления.
+
+        Returns:
+            ``False`` в тех и только тех случаях, которые
+            :meth:`_note_manager_call_failure` уже считает отказом с Ф2.3:
+            менеджер бросил, либо у него нет такого метода. Три ТИХИХ допуска
+            (слота нет, менеджер ``None``, слот выключен) дают ``True``: это
+            законное состояние, а не поломка, и считать его потерей доставки
+            значило бы растить ``windowed_delivery_failed`` в каждом процессе,
+            где плоскость логов сознательно выключена — то есть заглушить тем
+            же числом настоящий сигнал.
+        """
         kwargs.setdefault("module", self._observability_source())
-        self._call_manager("logger", level, message, **kwargs)
+        delivered, _result = self._call_manager_result("logger", level, message, **kwargs)
+        return delivered
 
     def _log_debug(self, message: "str | Callable[[], str]", **kwargs) -> None:
         """Логирование уровня DEBUG через logger manager.
@@ -174,10 +195,26 @@ class ObservableMixin(IObservableMixin):
         kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", "warning", message, **kwargs)
 
-    def _log_error(self, message: str, **kwargs) -> None:
-        """Логирование уровня ERROR через logger manager."""
+    def _log_error(self, message: str, **kwargs) -> bool:
+        """Логирование уровня ERROR через logger manager.
+
+        Returns:
+            Доехала ли запись до приёмника (Task 4.13). Возврат ДОБАВЛЕН, а
+            сигнатура вызова не тронута: прежние вызывающие игнорируют его, как
+            игнорировали ``None``.
+
+        **Почему возврат появился здесь, а не у вызывающего.** Первая редакция
+        Task 4.13 увела голос :meth:`report_error` с ``_log_error`` на
+        :meth:`_log_checked` — приёмник в бою тот же (оба идут в
+        ``_call_manager("logger", "error", …)``), но ШОВ стал другим. Это
+        покрасило **13** тестов механизма ``report_error``, и краснота была
+        не пустой: `_log_error` объявлен в ``interfaces.py`` частью протокола и
+        проксируется (`proxies/proxy_creator.py`), то есть внешняя реализация
+        имеет право его переопределить — а голос обходил бы переопределение
+        молча. Возврат на том же методе снимает и то, и другое.
+        """
         kwargs.setdefault("module", self._observability_source())
-        self._call_manager("logger", "error", message, **kwargs)
+        return self._log_checked("error", message, **kwargs)
 
     def _log_critical(self, message: str, **kwargs) -> None:
         """Логирование уровня CRITICAL через logger manager."""
@@ -273,7 +310,10 @@ class ObservableMixin(IObservableMixin):
         текст разъезжаются (находка m2 про ``trace_id``).
 
         Returns:
-            ``True``, если голос прозвучал.
+            ``True``, если голос прозвучал — то есть был принят приёмником.
+            ``False`` и когда окно закрыто, и когда доставка не состоялась;
+            во втором случае слот возвращён держателю (Task 4.13), и следующее
+            обращение к ключу заговорит, назвав накопленный долг.
         """
         voiced, suppressed = self.should_voice(key, interval)
         if not voiced:
@@ -281,8 +321,12 @@ class ObservableMixin(IObservableMixin):
         text = message if not suppressed else f"{message} (подавлено с прошлой записи: {suppressed})"
         if suppressed:
             ctx.setdefault("suppressed_since_last", suppressed)
-        self._log(level, text, **ctx)
-        return True
+        delivered = self._log_checked(level, text, **ctx)
+        if not delivered:
+            # Слот съеден решением, а строки нет — вернуть, иначе первая же
+            # потеря даёт молчание на весь интервал (Task 4.13).
+            self._voices().release(key, suppressed)
+        return delivered
 
     def report_error(
         self,
@@ -372,7 +416,8 @@ class ObservableMixin(IObservableMixin):
         # ПОДМЕНИЛ БЫ исходную ошибку своей. Факт выше уже учтён, а голос
         # дешевле любого искажения разбора.
         try:
-            voiced, suppressed = self.should_voice(f"{etype}|{ctx}", throttle)
+            voice_key = f"{etype}|{ctx}"
+            voiced, suppressed = self.should_voice(voice_key, throttle)
             if not voiced:
                 return
             where = f" @ {ctx}" if ctx else ""
@@ -383,10 +428,33 @@ class ObservableMixin(IObservableMixin):
                 # ``origin``. Здесь маркер обязан выигрывать — он не деталь
                 # инцидента, а утверждение о строке стора.
                 voice_fields[ORIGIN_FIELD] = ORIGIN_ERROR_MANAGER
-            self._log_error(
+            delivered = self._log_error(
                 compose_voice_text(f"{etype}{where}: {safe_exception_message(exc)}", suppressed),
                 **voice_fields,
             )
+            # ``is False``, а НЕ ``not delivered`` — и это не педантизм, а
+            # предохранитель, поставленный по красному тесту. ``_log_error``
+            # объявлен в ``interfaces.py`` и переопределяем снаружи; реализация,
+            # написанная до Task 4.13, возвращает ``None``. Прочитав ``None`` как
+            # «не доставлено», голос откатывал бы слот на КАЖДОМ вхождении — то
+            # есть окно переставало бы дросселировать вовсе, и вместо одной
+            # строки на интервал журнал получал бы поток. Это хуже того дефекта,
+            # который задача чинит.
+            #
+            # Отсюда правило: слот возвращает только тот, кто ЗНАЕТ, что не
+            # доставил. Молчание (``None``) — отсутствие сведений, а не
+            # утверждение о потере, и трактуется как сегодняшнее поведение.
+            # Воспроизведено: два теста механизма ``report_error``
+            # (``test_one_class_repeated_speaks_once_and_names_the_suppressed``,
+            # ``TestConcurrency::test_every_thread_leaves_a_fact_and_only_one_speaks``)
+            # с подменённым ``_log_error``, возвращающим ``None``, давали голос
+            # на каждом вхождении вместо одного.
+            if delivered is False:
+                # Task 4.13: приёмник не принял вызов — слот, съеденный
+                # решением, возвращается вместе с долгом. Без этого отказ
+                # логгера превращал бы КАЖДЫЙ следующий инцидент этого ключа в
+                # молчание, неотличимое от штатного подавления окном.
+                self._voices().release(voice_key, suppressed)
         except Exception as voice_exc:  # noqa: BLE001 — голос не стоит подмены исходной ошибки
             self._note_manager_call_failure("logger", "report_error.voice", exc=voice_exc)
 
@@ -698,9 +766,27 @@ class ObservableMixin(IObservableMixin):
             Результат вызова или None (если менеджер недоступен/выключен/
             упал/не имеет метода)
         """
+        _delivered, result = self._call_manager_result(manager_name, method_name, *args, **kwargs)
+        return result
+
+    def _call_manager_result(self, manager_name: str, method_name: str, *args, **kwargs) -> "tuple[bool, Any]":
+        """Тело :meth:`_call_manager` плюс ОТВЕТ, состоялся ли вызов (Task 4.13).
+
+        Два вида одного механизма, а не две копии: ``_call_manager`` — привычный
+        «результат или None», этот — пара ``(доехало?, результат)`` для
+        вызывающего, у которого от ответа зависит чужое состояние (окно голоса
+        возвращает слот). Разводить их телами нельзя: классификация отказов у
+        них обязана быть одна, иначе счётчик ``_manager_call_failures`` и
+        счётчик ``windowed_delivery_failed`` разъедутся молча.
+
+        Returns:
+            ``(False, None)`` ровно там, где зовётся
+            :meth:`_note_manager_call_failure` — менеджер бросил либо метода
+            нет. Три ТИХИХ допуска дают ``(True, None)``: см. :meth:`_log_checked`.
+        """
         registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
         if registry is None or not registry.is_enabled(manager_name):
-            return None
+            return True, None
 
         manager = registry.get(manager_name)
         # `is None`, а не truthiness — по тому же доводу, что ниже у метода, и
@@ -712,7 +798,7 @@ class ObservableMixin(IObservableMixin):
         # менеджер НАСТОЯЩИЙ, но с ложным ``__bool__``/``__len__``: его записи
         # уходили в никуда и НЕ считались, потому что выглядели как «слот пуст».
         if manager is None:
-            return None
+            return True, None
 
         try:
             method = getattr(manager, method_name, None)
@@ -720,16 +806,16 @@ class ObservableMixin(IObservableMixin):
             # __bool__ (Mock, функтор с __len__) иначе уехал бы в ветку
             # «метода нет» и был бы посчитан отказом, которым не является.
             if method is not None and callable(method):
-                return method(*args, **kwargs)
+                return True, method(*args, **kwargs)
         except Exception as exc:
             self._note_manager_call_failure(manager_name, method_name, exc=exc)
-            return None
+            return False, None
 
         # Сюда попадаем ровно в одном случае: менеджер есть и включён, метода
         # нет (или он не вызываем). exc=None отличает этот отказ от падения
         # внутри менеджера — чинятся они по-разному.
         self._note_manager_call_failure(manager_name, method_name, manager=manager)
-        return None
+        return False, None
 
     def _note_manager_call_failure(
         self,

@@ -195,7 +195,7 @@ class IObservableMixin(ABC):
         """Логирование уровня WARNING."""
 
     @abstractmethod
-    def _log_error(self, message: str, **kwargs) -> None:
+    def _log_error(self, message: str, **kwargs) -> bool:
         """Логирование уровня ERROR."""
 
     @abstractmethod
