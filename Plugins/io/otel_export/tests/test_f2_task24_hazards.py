@@ -26,10 +26,16 @@ from Plugins.io.otel_export.tests.test_f2_task24_acceptance import (
     _log_record,
 )
 
-#: Больше любого правдоподобного потолка: дефолт `BatchDrainWorker` 1024,
-#: дефолт `OtelExportConfig.max_queue_size` 2048. Литерал, а не чтение конфига:
-#: число, выведенное из предмета проверки, согласилось бы с любым потолком.
-_OVERFLOWING = 3000
+#: Потолок числа записей, после которого проба сдаётся. НЕ «сколько нужно для
+#: переполнения»: фиксированное число здесь — догадка о темпе, и она уже подвела.
+#: Прогон ревью показал флейк ~15 % на литерале 3000 (`q_dropped=0` при
+#: `depth=1751 < cap=2048`): сколько записей осядет в канале, а сколько уедет в
+#: полёт к заблокированному стоку, решает планировщик. Поэтому кормим ДО
+#: наблюдаемого переполнения, а число ниже — только страховка от вечного цикла.
+_FEED_CEILING = 40000
+#: Размер порции между проверками. Мельче — дороже проверки, крупнее — грубее
+#: момент остановки; на исход утверждения не влияет ни то, ни другое.
+_FEED_CHUNK = 500
 
 
 class TestLossIsPublishedWhenItHappensNotWhenItIsAsked:
@@ -54,24 +60,37 @@ class TestLossIsPublishedWhenItHappensNotWhenItIsAsked:
                 "метрика потерь уже есть ДО переполнения — сценарий не воспроизведён"
             )
 
-            def _feed() -> None:
-                for i in range(_OVERFLOWING):
-                    boot.handler(
-                        {"command": "observability.record", "data": {"records": [_log_record(f"m{i}", float(i))]}}
-                    )
+            written = 0
 
-            _call_with_deadline(_feed, timeout=10.0, message=f"приём {_OVERFLOWING} записей при висящем стоке")
+            def _feed() -> None:
+                nonlocal written
+                # Кормим ДО наблюдаемого переполнения, а не фиксированным числом:
+                # сток заблокирован, ёмкость конечна, значит переполнение
+                # неизбежно — вопрос лишь в том, сколько записей планировщик
+                # успеет отдать в полёт. Условие выхода — сам предмет проверки.
+                while written < _FEED_CEILING and not self._dropped_metrics(boot.recorded):
+                    for i in range(_FEED_CHUNK):
+                        boot.handler(
+                            {
+                                "command": "observability.record",
+                                "data": {"records": [_log_record(f"m{written + i}", float(i))]},
+                            }
+                        )
+                    written += _FEED_CHUNK
+
+            _call_with_deadline(_feed, timeout=30.0, message="приём записей до переполнения при висящем стоке")
 
             # Статус НЕ опрашивается: в этом всё утверждение.
             published = self._dropped_metrics(boot.recorded)
             assert published, (
-                f"{_OVERFLOWING} записей переполнили очередь, но в числовой плоскости потери НЕТ, "
-                "пока никто не спросил статус: число, заведённое ради видимости потерь, "
-                "откладывает их до момента опроса"
+                f"{written} записей при заблокированном стоке переполнили очередь, но в числовой "
+                "плоскости потери НЕТ, пока никто не спросил статус: число, заведённое ради "
+                "видимости потерь, откладывает их до момента опроса"
             )
             total = sum(int(value) for _name, value in published)
             assert total > 0, f"метрика потерь опубликована с нулём: {published!r}"
         finally:
+            boot.release.set()
             boot.plugin.shutdown(boot.ctx)
 
     def test_pair_no_overflow_publishes_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,4 +116,79 @@ class TestLossIsPublishedWhenItHappensNotWhenItIsAsked:
                 f"{self._dropped_metrics(boot.recorded)!r}"
             )
         finally:
+            boot.release.set()
+            boot.plugin.shutdown(boot.ctx)
+
+
+class TestSyncDoesNotRunOnEveryRecordAfterOneOverflow:
+    """Синхронизация зовётся на НОВОЙ потере, а не «после первой — всегда».
+
+    **Находка второго прохода ревью, и она про мою же починку.** Первая редакция
+    триггера читала `write()["dropped"]` как «вытеснила ли эта запись», а
+    `BoundedChannel.write` возвращает **накопленный** счётчик
+    (`bounded_channel.py:85,99`). Условие «поле ненулевое» после первого же
+    переполнения истинно навсегда, и приёмный путь платил `get_info()` плюс
+    захват лока на КАЖДОЙ записи при нуле новых потерь. Замер ревью: 2000
+    вызовов синхронизации на 0 вытеснений.
+
+    Сторожа не было: заплата «вернуть триггер на накопленное» убивала **0 тестов
+    из 248**. Ноль означал не «слой лишний», а «мы не туда целились» — работа
+    мёртвая, а не наблюдаемая через счётчики. Здесь она наблюдается прямо:
+    считаются вызовы синхронизации после того, как очередь опустела.
+    """
+
+    def test_after_the_queue_drains_further_writes_do_not_resync(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import time
+
+        boot = _boot_blocked_with_pilot(monkeypatch)
+        try:
+            written = 0
+
+            def _feed() -> None:
+                nonlocal written
+                while written < _FEED_CEILING and not boot.plugin._queue.get_info().get("dropped", 0):
+                    for i in range(_FEED_CHUNK):
+                        boot.handler(
+                            {
+                                "command": "observability.record",
+                                "data": {"records": [_log_record(f"m{written + i}", float(i))]},
+                            }
+                        )
+                    written += _FEED_CHUNK
+
+            _call_with_deadline(_feed, timeout=30.0, message="приём записей до переполнения")
+            assert boot.plugin._queue.get_info().get("dropped", 0) > 0, (
+                "переполнения не случилось — сценарий не воспроизведён, сторожить нечего"
+            )
+
+            # Отпускаем сток и ждём, пока очередь ОПУСТЕЕТ: только после этого
+            # новые записи заведомо никого не вытесняют.
+            boot.release.set()
+            deadline = time.monotonic() + 15.0
+            while boot.plugin._queue.depth > 0 and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert boot.plugin._queue.depth == 0, (
+                f"очередь не опустела за 15 с (глубина {boot.plugin._queue.depth}) — "
+                "измерение не состоялось, о предмете не судим"
+            )
+
+            calls: list[int] = []
+            original = boot.plugin._sync_queue_counters
+            monkeypatch.setattr(boot.plugin, "_sync_queue_counters", lambda: (calls.append(1), original())[1])
+
+            def _feed_more() -> None:
+                for i in range(200):
+                    boot.handler(
+                        {"command": "observability.record", "data": {"records": [_log_record(f"tail{i}", float(i))]}}
+                    )
+
+            _call_with_deadline(_feed_more, timeout=15.0, message="приём 200 записей на пустой очереди")
+
+            assert not calls, (
+                f"на 200 записях БЕЗ новых вытеснений синхронизация звана {len(calls)} раз: "
+                "триггер стоит на накопленном счётчике, и приёмный путь платит за неё вечно "
+                "после первого же переполнения"
+            )
+        finally:
+            boot.release.set()
             boot.plugin.shutdown(boot.ctx)
