@@ -232,3 +232,49 @@ class TestProbeDoesNotSwallowTheTransportException:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestStaleOutcomeCannotSurviveIntoABatchThatNeverPosted:
+    """Опасность 2b: SDK отказал, НЕ сходив в сеть — а зонд помнит прошлый батч.
+
+    **Почему этот тест дописан отдельно, хотя рядом уже есть два про залипание.**
+    Матрица инъекций поймала мёртвую зону: заплата «`forget()` ничего не забывает»
+    убила **0 тестов из 245** при живой базе. Разбор показал, что оба соседних
+    теста зелены по ПРИЧИНЕ, ОТЛИЧНОЙ ОТ ЗАЯВЛЕННОЙ в их докстрингах: отказ
+    перевода записи уходит в ветку `except Exception`, где причина строится из
+    самого исключения, а показание зонда не читается вовсе. То есть `forget()`
+    они не сторожили.
+
+    Настоящая дорога к протечке одна: `sdk.export()` вернул FAILURE, **не сходив
+    в сеть**. У настоящего SDK такая ветка есть и она не выдумана — «exporter
+    already shutdown, ignoring batch» (`_log_exporter/__init__.py:197`). POST не
+    случается, зонд молчит, и без `forget()` в причину уедет HTTP-код прошлого
+    батча: диагноз укажет на токен там, где экспортёр просто остановлен.
+    """
+
+    def test_failure_without_a_post_does_not_inherit_the_previous_http_code(self) -> None:
+        sdk = OTLPLogExporter(endpoint=ENDPOINT)
+        posts: list[Any] = []
+
+        def _post(*_a: Any, **_k: Any) -> Any:
+            posts.append(1)
+            return SimpleNamespace(ok=False, status_code=401, reason="Unauthorized")
+
+        sdk._session.post = _post  # type: ignore[attr-defined]
+        exporter = OtlpHttpExporter(_cfg(), sdk_factory=lambda: sdk)
+
+        first = exporter.export([_record()])
+        assert "401" in first.reason, f"сценарий не воспроизведён, первый отказ не 401: {first.reason!r}"
+        posts_after_first = len(posts)
+
+        # SDK остановлен: его `export` вернёт FAILURE, не дойдя до транспорта.
+        sdk._shutdown = True  # type: ignore[attr-defined]
+        second = exporter.export([_record()])
+
+        assert len(posts) == posts_after_first, (
+            f"POST всё-таки случился — сценарий «отказ без сети» не воспроизведён: {len(posts)}"
+        )
+        assert second.failed == 1, f"остановленный SDK обязан дать failed == 1: {second!r}"
+        assert "401" not in second.reason, (
+            f"причина унаследована от прошлого батча, у которого был POST: {second.reason!r}"
+        )
