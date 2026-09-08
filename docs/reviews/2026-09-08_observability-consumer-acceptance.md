@@ -103,7 +103,7 @@
 | L5 запись регистра → readback (5×) | n=5 · медиана **40.84** · мин 22.32 · макс 45.98 | n=5 · медиана **42.7** · мин 19.69 · макс 43.5 | ≈ два RTT (write + introspect.registers) |
 | K4 TTL=20 с → строка возврата | 21.2 с | 22.2 с | в окне (20; 25+1]: срок + такт heartbeat 5 с + шаг опроса 1 с |
 | LC2 рестарт renderer до нового pid | 5.83 с | 5.75 с | graceful-stop 5 с + подъём |
-| L6 путь кадра camera → processor → inspector | — | — | **не измерен: нет поверхности** (см. §4 F1). Что есть — `latency_ms` = время цикла воркера: camera_0 47.0, processor 1.5–4.5, inspector 0.5–0.9 мс |
+| L6 путь кадра camera → processor → inspector | — | — | **не измерен: ~~нет поверхности~~ поверхность есть, но без решающего события до потребителя доезжает 0 спанов** (см. §4 F1 и поправку под ним; Task 4.15). Что есть — `latency_ms` = время цикла воркера: camera_0 47.0, processor 1.5–4.5, inspector 0.5–0.9 мс |
 
 Сравнение с прежними числами: «≈110–125 мс до стора» (AGENTS.md, 10 повторов) — мои медианы 59 и 83 мс при максимумах 118–119: прежний замер ловил верх распределения (ждал первого появления после такта), мой опрос 5 мс видит всё распределение равномерного ожидания такта. Не противоречие, а разная методика; верхняя граница совпала. «Шина ~0.3/0.6 мс на хоп» (вердикт 2026-09-04) — про кадр по SHM, здесь не мерилось.
 
@@ -114,6 +114,16 @@
 ### 4.1. Новое
 
 **F1. Хоп-лаг между модулями по пути кадра ненаблюдаем ни одним потребителем (L6).** `camera_service` кладёт в item `"timestamp": time.monotonic()` (`Plugins/sources/camera_service/plugin.py:184`), но наружу эта отметка не едет: широкая запись берёт из `unit` только `trace_id` (`process_module/plugins/base.py`, `write_event`), а `latency_ms` телеметрии = `max(cycle_duration_ms)` воркера (`heartbeat/telemetry.py:184`) — время ЦИКЛА, не хопа. Наблюдено: `introspect_telemetry(<p>).levels.state.latency_ms` = 47.0 / 1.5 / 0.5 мс у camera_0 / processor / inspector — это длительность их собственных циклов, разность между ними лагом не является. **Именно это владелец просил «замерять, сколько времени между модулями передаются данные»** — сегодня для кадра ответить нечем. Дом не назначен ни в одном плане; записано в OPEN_QUESTIONS.
+> **Поправка ведущего 2026-09-08, после приёмки — F1 шире правды в части «нет поверхности».**
+> Механизм есть: `process_module/generic/frame_trace.py` — спаны `transport` (`stamp_send` → `record_transport`,
+> `data_receiver.py:270`, wall-часы), `process` (`install_tracing`, `perf_counter`), `merge` (stitcher) едут в
+> `item["trace"]` и попадают в широкую запись `write_event` (`plugins/base.py:477`, `spans: "off"` при выключенном);
+> третья дорога — `LoggerCore.frame_trace` → канал `frame_trace_<p>`. **Что верно в F1 и подтверждено прогоном
+> ведущего** (inspection_full, `MULTIPROCESS_FRAME_TRACE=1` до импорта, флаг дошёл до детей, 90 с без брака):
+> `history_query(kind="event")` **0**, стор 268 строк и **0** со `spans`/`transport`, журналы **0**, приёмники
+> `frame_trace_camera_0/processor/inspector` «не приняли ни одной записи». Флаг читается один раз при импорте
+> и не является ручкой (нет в L1/L2/L3, `CONTROL_PANEL.md` молчит), спаны доезжают только с решающим событием,
+> чисел хопа нет. Решение владельца: **Task 4.15** в `phase-4-scale-and-form.md` (волна 2, после 4.6).
 
 **F2. Счётчик потерь стора `store_evicted` не публикуется в readback — потребитель узнаёт о потере стора только строкой на останове.** Греп: `STORE_EVICTED_COUNTER = "store_evicted"` (`store_tap.py:65`) передаётся в `BatchDrainWorker(counter_name=…)` (`:151`); `BatchDrainWorker.counters()` существует (`batch_drain.py:468`), но ни `observability_wiring.py`, ни `builtin_commands.py` его не читают (0 вхождений `.counters()` вне хуков `thread_exceptions`/`warnings_captured`). Живой readback `introspect.observability(inspector)` (прогон 1) содержит `counters.hub.dropped {log,error,stats,observation}` и `history.rows`, ключа `store_evicted` нет. Пара: строка `store flush: N записано, M потеряно` на останове — есть у 7/7 процессов (LC4). Под перегрузкой не воспроизводил — утверждение по грепу и по живому ответу без нагрузки.
 

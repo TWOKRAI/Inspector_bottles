@@ -19,9 +19,14 @@ read directly, log files on disk, `perf_counter_ns` at both ends).
 - Latencies (ms, medians, two runs): RTT to a child 13.8/10.8 (bimodal ~10.5/~21.5), to ProcessManager ~22;
   emit → SQLite 59/83 (drain tick 100 ms); emit → live tail ~21; register write → readback ~41;
   TTL=20 s → revert line 21–22 s; renderer restart to new pid ~5.8 s.
-- **The owner's ask «замерять сколько между модулями едут данные» is NOT satisfiable today**:
-  `latency_ms` is the worker cycle, the frame `timestamp` never leaves the process, wide records carry only
-  `trace_id`. Question to the owner is in `OPEN_QUESTIONS.md` (where the capture mark should live).
+- **The owner's ask «замерять сколько между модулями едут данные» is NOT satisfiable today — but not for
+  the reason F1 gave.** The span mechanism exists (`process_module/generic/frame_trace.py`: transport/process/merge
+  spans in `item["trace"]`, into `write_event.spans`, plus a `frame_trace_<p>` logger channel); measured
+  2026-09-08 with `MULTIPROCESS_FRAME_TRACE=1` for 90 s without rejects: **0 spans reach any consumer** (store,
+  logs, dedicated sinks idle). The env flag is read once at import and is not a knob; there are no hop numbers.
+  Owner's decision 2026-09-08: **Task 4.15** in closure phase 4 (wave 2, after 4.6) — knob in L1/L2/L3 plus
+  per-tick `hop_transport_ms`/`hop_process_ms` aggregates. Lesson: «нет поверхности» was a wrong model; the
+  right claim was «поверхность есть, до потребителя не доезжает» — a mechanism you did not switch on is not absent.
 - Other new findings for lane closure: `store_evicted` not in readback (F2), a single shared `errors.log`
   for all processes (F3), `first_n` counts from process start (F4), `send_command("all")` silent (F5),
   `logger_sink_enable` leaves an L3 key with a 300 s TTL (F6), driver dataclass vs MCP dict (F7).
