@@ -784,6 +784,19 @@ class OtelExportPlugin(ProcessModulePlugin):
         if queue is None:
             return
         result = queue.write(mapped)
+        # Потеря переносится в плоскости СРАЗУ, а не при следующем опросе.
+        #
+        # Находка ревью, предъявленная числом: синхронизация жила только в
+        # `otel_export.status` и на останове, поэтому при 1488 реально вытесненных
+        # записях `record_metric` не звали ни разу, а `history_query` показывал
+        # ноль — до тех пор, пока кто-нибудь не спросит. Метка времени у метрики
+        # оказывалась моментом ОПРОСА, а не моментом потери, то есть число,
+        # заведённое ради видимости потерь, само их и откладывало.
+        # `write` уже вернул «сколько вытеснено» — ходить за этим в `get_info()`
+        # незачем, но синхронизация там остаётся добором: она идемпотентна по
+        # дельте (`_queue_dropped_seen`).
+        if isinstance(result, Mapping) and int(result.get("dropped", 0) or 0):
+            self._sync_queue_counters()
         if isinstance(result, Mapping) and result.get("closed"):
             log_windowed(
                 "otel_export.write_after_close",
@@ -919,11 +932,18 @@ class OtelExportPlugin(ProcessModulePlugin):
         queue = self._queue
         if queue is None:
             return
-        dropped = int(queue.get_info().get("dropped", 0))
-        delta = dropped - self._queue_dropped_seen
-        if delta > 0:
+        # Чтение-правка-запись под тем же локом, что и словарь счётчиков.
+        # С Task 2.4 звать это могут ДВА потока — приёмный (через `status` и
+        # `_enqueue`) и поток останова, — а без лока пара «прочитал 488, записал
+        # 488» разъезжается: замер ревью с искусственно расширенным окном дал
+        # 976 при 488 реально вытесненных.
+        with self._counters_lock:
+            dropped = int(queue.get_info().get("dropped", 0))
+            delta = dropped - self._queue_dropped_seen
+            if delta <= 0:
+                return
             self._queue_dropped_seen = dropped
-            self._bump("dropped_overflow", delta)
+        self._bump("dropped_overflow", delta)
 
     def _sync_resource_evictions(self) -> None:
         """Перенести вытеснения пула в числовую плоскость ДЕЛЬТОЙ, не значением.
@@ -1044,7 +1064,9 @@ class OtelExportPlugin(ProcessModulePlugin):
             # Разность двух показаний очереди: `counters()` складывает
             # «не поместилось» и «пришло после close()» под именем вызывающего,
             # а `get_info()["dropped"]` — только первое.
-            "dropped_after_close": int(info.get("dropped_overflow", 0)) - dropped_overflow,
+            # Имя берётся у очереди, а не пишется литералом: разойдись они —
+            # поле молча уехало бы в отрицательное (находка ревью).
+            "dropped_after_close": int(info.get(queue.counter_name, 0)) - dropped_overflow,
         }
 
     def _cmd_flush(self, data: dict | None = None) -> dict:

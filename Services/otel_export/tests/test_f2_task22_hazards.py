@@ -37,6 +37,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from types import SimpleNamespace
 from typing import Any
@@ -813,9 +814,12 @@ class TestFlushHazards:
             f"строка итога останова не доехала — по ней стенд отличает штатный останов "
             f"от процесса, убитого внутри чужого цикла. Журнал: {voices!r}"
         )
-        assert "0" in line.split("счётчики")[0], (
-            f"строка итога не называет число НЕдожатых записей (их здесь нет): {line!r}"
-        )
+        # Число РАЗБИРАЕТСЯ, а не ищется подстрокой: `"0" in ...` было истинно
+        # всегда — в префиксе стоит «не дожато за 3.0 с», и утверждение прошло бы
+        # при любом числе потерь (находка ревью: заплата `lost + 7` его не убила).
+        lost = re.search(r"не дожато за [\d.]+ с\) (\d+)", line)
+        assert lost is not None, f"строка итога не несёт числа НЕдожатых записей вовсе: {line!r}"
+        assert lost.group(1) == "0", f"строка итога называет {lost.group(1)} недожатых, а здесь их нет: {line!r}"
 
     def test_records_arriving_during_a_slow_export_are_not_lost(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Обмен кольца под локом — НАСТОЯЩИМ вторым потоком, иначе не проверяется.

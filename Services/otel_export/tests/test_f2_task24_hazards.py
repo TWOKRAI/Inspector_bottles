@@ -83,22 +83,41 @@ def _sdk_with_counted_post(status_code: int = 401, reason: str = "Unauthorized")
 class TestProbeIsAttachedExactlyOnce:
     """Опасность 1: повторное навешивание превращает один POST в N настоящих."""
 
-    def test_three_exports_give_three_posts_not_seven(self) -> None:
-        """Литералы, а не «столько же»: 1,2,3 против 1,3,7 у двойной обёртки.
+    def test_the_probe_is_attached_once_and_does_not_grow_a_chain(self) -> None:
+        """Пометка на сессии стережётся ГЛУБИНОЙ обёртки, а не числом POST.
 
-        Заплата, которую тест обязан убить, — снять пометку с сессии (навешивать
-        каждый раз заново). Тогда вторая отправка сделает 2 POST, третья 4, и
-        коллектор получит дубликаты, о которых экспортёр не знает.
+        **Прежняя редакция была зелёной по неверной причине, и её довод неверен**
+        (находка ревью, воспроизведена заплатой «снять пометку»): она считала
+        POST'ы, ожидая 1-2-4, и обещала «коллектор получит дубликаты». Дубликатов
+        не бывает: повторное навешивание оборачивает ПРЕДЫДУЩИЙ зонд, вызов идёт
+        цепочкой probe2 -> probe1 -> post, и настоящий запрос по-прежнему один.
+        Заплата убивала **0 тестов из 246**.
+
+        Настоящая цена потери пометки другая: цепочка обёрток растёт линейно —
+        объект и кадр стека на каждую отправку за всю жизнь процесса. Замер с
+        заплатой: после 5 отправок глубина 5 при 5 POST. То есть утечка и, на
+        горячем пути, `RecursionError`. Сторожим именно это.
         """
+        from Services.otel_export.exporter import _TransportProbe
+
         sdk, calls = _sdk_with_counted_post()
         exporter = OtlpHttpExporter(_cfg(), sdk_factory=lambda: sdk)
 
-        for expected in (1, 2, 3):
+        exporter.export([_record()])
+        first_probe = sdk._session.post
+        assert isinstance(first_probe, _TransportProbe), "зонд не навешен вовсе — сторожить нечего"
+
+        for _ in range(4):
             exporter.export([_record()])
-            assert len(calls) == expected, (
-                f"после {expected}-й отправки POST'ов {len(calls)}, а обязано быть {expected}: "
-                "зонд навешен повторно и удвоил настоящие запросы"
-            )
+
+        assert sdk._session.post is first_probe, (
+            "зонд навешен повторно: цепочка обёрток растёт на каждую отправку — "
+            "объект и кадр стека за всю жизнь процесса"
+        )
+        assert not isinstance(first_probe._post, _TransportProbe), (
+            "под зондом оказался ещё один зонд — обёртка обернула обёртку"
+        )
+        assert len(calls) == 5, f"настоящих POST обязано быть 5, а их {len(calls)}"
 
 
 class TestProbeDoesNotOutliveItsBatch:
