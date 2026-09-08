@@ -192,3 +192,67 @@ class TestSyncDoesNotRunOnEveryRecordAfterOneOverflow:
         finally:
             boot.release.set()
             boot.plugin.shutdown(boot.ctx)
+
+
+class TestOverflowIsPublishedByWindowNotByRecord:
+    """Публикация потерь — ОДНА на окно, но величина не теряется ни одной записью.
+
+    **Откуда взялось.** Второй проход ревью насчитал: 952 вытеснения → 952 вызова
+    `record_metric` плюс столько же `publish_metric`. Работа росла ровно тогда,
+    когда система перегружена, — и это тот самый шаблон, который наш же модуль
+    запрещает голосу двадцатью строками выше («недоступный коллектор превращает
+    512 записей в 512 строк»).
+
+    **Почему нельзя было просто задросселировать.** У голоса подавленная запись
+    выбрасывается — строка повторяет предыдущую, и потеря строки ничего не стоит.
+    У счётчика потерь выбросить нельзя: исчезнет сама ВЕЛИЧИНА, а вместе с ней
+    тождество потерь Task 3.4. Поэтому здесь два утверждения, и второе важнее
+    первого: вызовов мало, а сумма точна.
+
+    Примитив окна (`WindowedVoices.take`) подсказан полосой closure; он к логам не
+    привязан, но его `suppressed` считает ВЫЗОВЫ, а не величину — поэтому дельты
+    копятся у нас, а окно решает только «пора ли говорить».
+    """
+
+    def test_many_evictions_give_few_publications_and_an_exact_sum(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        boot = _boot_blocked_with_pilot(monkeypatch)
+        try:
+            written = 0
+
+            def _feed() -> None:
+                nonlocal written
+                # Кормим, пока вытеснений не станет ЗАМЕТНО много: на десятке
+                # «одна публикация на окно» неотличима от «одна на запись».
+                while written < _FEED_CEILING and int(boot.plugin._queue.get_info().get("dropped", 0)) < 200:
+                    for i in range(_FEED_CHUNK):
+                        boot.handler(
+                            {
+                                "command": "observability.record",
+                                "data": {"records": [_log_record(f"m{written + i}", float(i))]},
+                            }
+                        )
+                    written += _FEED_CHUNK
+
+            _call_with_deadline(_feed, timeout=30.0, message="приём записей до 200+ вытеснений")
+
+            evicted = int(boot.plugin._queue.get_info().get("dropped", 0))
+            assert evicted >= 200, f"вытеснений всего {evicted} — сценарий не воспроизведён"
+
+            published = [item for item in boot.recorded if item[0].endswith("dropped_overflow")]
+            assert len(published) <= 5, (
+                f"{evicted} вытеснений дали {len(published)} публикаций метрики — публикация идёт "
+                "на ЗАПИСЬ, а не на окно: работа растёт именно тогда, когда система перегружена"
+            )
+
+            # Статус форсирует публикацию — поэтому его тут не зовём, а остаток
+            # дожимает останов. Величина обязана сойтись ТОЧНО.
+            boot.release.set()
+            boot.plugin.shutdown(boot.ctx)
+            published_after = [item for item in boot.recorded if item[0].endswith("dropped_overflow")]
+            total = sum(int(value) for _name, value in published_after)
+            assert total == evicted, (
+                f"опубликовано {total} при {evicted} реально вытесненных: окно не имеет права терять "
+                "величину, оно решает только момент"
+            )
+        finally:
+            boot.release.set()
