@@ -541,6 +541,20 @@ def _log_envelope(count: int) -> dict:
 STOP_LINE_PREFIX = "otel_export: остановлен"
 
 
+#: Литерал исхода дожатия из `LogExporter.force_flush` (Post). Ищется дословно:
+#: по нему стенд читает, сколько записей уехало последней волной.
+FLUSH_LINE_PREFIX = "otel flush:"
+
+
+def _flush_line(voices: dict[str, list[str]]) -> str | None:
+    """Найти строку исхода дожатия в журнале любого уровня (уровень судят отдельно)."""
+    for level_lines in voices.values():
+        for line in level_lines:
+            if line.startswith(FLUSH_LINE_PREFIX):
+                return line
+    return None
+
+
 def _stop_line(voices: dict[str, list[str]]) -> str | None:
     """Найти строку итога останова в журнале ЛЮБОГО уровня.
 
@@ -691,22 +705,26 @@ class TestFlushHazards:
         assert counters["export_failed"] == 1, f"{counters!r}"
         assert result["status"] == "failed", f"частичная потеря не имеет права читаться как ok: {result!r}"
 
-    def test_flush_on_empty_ring_sends_an_empty_batch_and_stays_silent(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Пустое кольцо: плагин зовёт экспортёр ПУСТЫМ батчем и молчит.
+    def test_flush_on_empty_queue_does_not_touch_the_sink_at_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Пустая очередь: сток НЕ тревожат вовсе, ответ честный ноль, журнал чист.
 
-        Имя и утверждение обязаны совпадать: плагин отсечки не делает вовсе, он
-        отдаёт пустой список. Бесплатность дороги (SDK не строится, сокет не
-        открывается) сторожит `test_empty_batch_builds_no_sdk_object_at_all` —
-        на уровне сервиса, где эта отсечка и живёт.
+        **Утверждение развёрнуто в Task 2.4, и это не подгонка.** Прежняя
+        редакция требовала обратного — «экспортёр позван ПУСТЫМ батчем
+        (`batches == [[]]`)»: тогда плагин сам держал кольцо и честно отдавал
+        стоку то, что в нём было, хоть и пустоту. Теперь между ними стоит очередь,
+        и пустую пачку она стоку не отдаёт по построению: `_push` зовётся только
+        на непустой выборке. Свойство, которое сторожилось и сторожится, то же —
+        **дожатие на пустой очереди бесплатно и молчаливо**, — а «бесплатно»
+        стало строже: не «пустой запрос», а «запроса нет».
         """
         plugin, ctx, voices, command_manager, _router, double = _boot(monkeypatch)
 
         result = command_manager.registered["otel_export.flush"]({})
 
-        assert double.batches == [[]], f"экспортёр позван не с пустым батчем: {double.batches!r}"
+        assert double.batches == [], f"на пустой очереди сток всё-таки позван: {double.batches!r}"
         assert result["status"] == "ok", f"{result!r}"
         assert result["flushed"] == 0 and result["failed"] == 0, f"{result!r}"
-        assert voices["error"] == [], f"пустое кольцо породило строку отказа: {voices['error']!r}"
+        assert voices["error"] == [], f"пустая очередь породила строку отказа: {voices['error']!r}"
 
     def test_flush_in_error_state_never_builds_an_exporter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Плагин в `error` отправлять нечем и НЕ ЧЕРЕЗ ЧТО — экспортёра там нет."""
@@ -727,14 +745,21 @@ class TestFlushHazards:
     def test_second_flush_in_a_row_sends_nothing_and_does_not_double_count(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Кольцо забирается ОБМЕНОМ: второй подряд флаш не имеет права посчитать то же ещё раз."""
+        """Очередь опустошается ЗАБОРОМ: второй подряд флаш не имеет права посчитать то же ещё раз.
+
+        Ожидание списка батчей поправлено в Task 2.4 с `[2, 0]` на `[2]` по той
+        же причине, что и у соседнего теста про пустую очередь: пустую пачку сток
+        больше не видит вовсе. Проверяемое свойство — «те же записи не уехали
+        дважды и не посчитаны дважды» — не изменилось, и оба его утверждения
+        (число батчей и счётчик `exported`) на месте.
+        """
         plugin, ctx, _voices, command_manager, _router, double = _boot(monkeypatch)
         ctx.router_manager.handlers["observability.record"](_log_envelope(2))
 
         first = command_manager.registered["otel_export.flush"]({})
         second = command_manager.registered["otel_export.flush"]({})
 
-        assert [len(batch) for batch in double.batches] == [2, 0], (
+        assert [len(batch) for batch in double.batches] == [2], (
             f"второй флаш увёз те же записи повторно: {[len(b) for b in double.batches]!r}"
         )
         assert first["flushed"] == 2, f"{first!r}"
@@ -742,40 +767,54 @@ class TestFlushHazards:
         counters = command_manager.registered["otel_export.status"]({})["counters"]
         assert counters["exported"] == 2, f"счётчик посчитал те же записи дважды: {counters!r}"
 
-    def test_shutdown_does_not_send_and_says_the_loss_as_a_number(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Останов НЕ отправляет: считает оставшееся потерей и произносит число.
+    def test_shutdown_flushes_what_it_can_and_says_the_outcome_as_numbers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Останов ДОЖИМАЕТ отвечающий сток и произносит исход числами.
 
-        Первая редакция Task 2.2 дожимала кольцо здесь, и стенд показал цену
-        (замер CTO, коллектор мёртв): `flush` жил 22.85-24.36 с при бюджете
-        останова **5 с** (`process_registry.stop_all`, `spawner.stop_timeout`),
-        процесс убивали внутри retry-цикла SDK, и строк «otel_export: остановлен»
-        в журнале оказывалось **0** — то есть последняя пачка выпадала из
-        тождества потерь целиком. Контроль с живым коллектором: строка есть (1).
-
-        Сторожатся три свойства сразу, и все три наблюдаемы снаружи: экспортёр не
-        позван вовсе, кольцо не тронуто (записи не «исчезли»), а строка итога
-        доехала и НАЗЫВАЕТ число потерянных.
+        **Утверждение развёрнуто в Task 2.4, и вот почему это не отказ от прежнего
+        вердикта, а его условие.** Task 2.2 запретила дожатие на останове, потому
+        что ограничить его было НЕЧЕМ: замер CTO при мёртвом коллекторе — `flush`
+        жил 22.85-24.36 с против бюджета останова **5 с**
+        (`process_registry.stop_all`, `spawner.stop_timeout`), процесс убивали
+        внутри retry-цикла SDK, и строк «otel_export: остановлен» в журнале
+        оказывалось **0**. Task 2.4 дала дедлайн, который держит не SDK, а очередь
+        (`BatchDrainWorker.flush(timeout)` честен и против зависшего стока), —
+        и запрет перестал быть нужен. Что дожатие УКЛАДЫВАЕТСЯ в бюджет против
+        ЗАВИСШЕГО стока, проверяет приёмочный набор Task 2.4; здесь сток
+        отвечает, и сторожится вторая половина: записи не брошены зря, а исход
+        назван числами.
         """
         plugin, ctx, voices, command_manager, _router, double = _boot(monkeypatch)
         ctx.router_manager.handlers["observability.record"](_log_envelope(3))
 
         plugin._do_shutdown(ctx)
 
-        assert double.batches == [], (
-            f"останов отправил пачку — процесс успеет убить внутри retry-цикла SDK: {double.batches!r}"
+        assert [len(batch) for batch in double.batches] == [3], (
+            f"останов не дожал очередь при отвечающем стоке: {double.batches!r}"
         )
         counters = command_manager.registered["otel_export.status"]({})["counters"]
-        assert counters["exported"] == 0, f"на останове что-то отправлено: {counters!r}"
-        assert len(plugin._pending) == 3, f"кольцо на останове опустело, хотя отправки не было: {len(plugin._pending)}"
+        assert counters["exported"] == 3, f"дожатое на останове не посчитано: {counters!r}"
+
+        flush_line = _flush_line(voices)
+        assert flush_line is not None, (
+            f"строка исхода дожатия («otel flush: N дожато, M потеряно», литерал из "
+            f"LogExporter.force_flush) не доехала. Журнал: {voices!r}"
+        )
+        assert "3 дожато" in flush_line and "0 потеряно" in flush_line, (
+            f"строка исхода называет не те числа: {flush_line!r}"
+        )
+        assert flush_line in voices["info"], (
+            f"дожатие без потерь сказано не уровнем INFO — потеря и её отсутствие уравнены: {flush_line!r}"
+        )
 
         line = _stop_line(voices)
         assert line is not None, (
             f"строка итога останова не доехала — по ней стенд отличает штатный останов "
             f"от процесса, убитого внутри чужого цикла. Журнал: {voices!r}"
         )
-        assert "3" in line.split("счётчики")[0], f"строка итога не называет число потерянных записей: {line!r}"
-        assert voices["warning"] and line in voices["warning"], (
-            f"потеря сказана уровнем INFO — она уравнена с обычным остановом: {line!r}"
+        assert "0" in line.split("счётчики")[0], (
+            f"строка итога не называет число НЕдожатых записей (их здесь нет): {line!r}"
         )
 
     def test_records_arriving_during_a_slow_export_are_not_lost(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -841,15 +880,24 @@ class TestFlushHazards:
 
         assert not feeder.is_alive(), "поток-сосед не завершился за дедлайн"
         assert not failures, f"поток-сосед упал: {failures!r}"
-        assert sent_sizes == [early], f"в отправку уехал не тот батч: ожидалось {[early]}, ушло {sent_sizes!r}"
-
-        counters = command_manager.registered["otel_export.status"]({})["counters"]
-        accounted = (
-            counters["exported"] + counters["export_failed"] + counters["dropped_overflow"] + len(plugin._pending)
+        # Ожидание поправлено в Task 2.4 с `[early]` на `[early, late]`. Прежде
+        # дожатие было ОДНИМ обменом кольца: то, что приехало во время отправки,
+        # оставалось лежать до следующего раза. Теперь `flush` ждёт, пока очередь
+        # опустеет, и поздние записи уезжают ВТОРОЙ пачкой — то есть свойство
+        # «не потеряны» стало строже: они не просто уцелели, они доставлены.
+        # Разбивка на две пачки существенна: слить их в одну означало бы, что
+        # отправка забрала записи, приехавшие ПОСЛЕ обмена, — ровно та заплата,
+        # против которой тест и написан.
+        assert sent_sizes == [early, late], (
+            f"в отправку уехали не те батчи: ожидалось {[early, late]}, ушло {sent_sizes!r}"
         )
+
+        status = command_manager.registered["otel_export.status"]({})
+        counters = status["counters"]
+        accounted = counters["exported"] + counters["export_failed"] + counters["dropped_overflow"] + status["pending"]
         assert accounted == early + late, (
             f"записи, приехавшие во время отправки, потеряны без счёта: принято {early + late}, "
-            f"учтено {accounted} (счётчики {counters!r}, в кольце {len(plugin._pending)})"
+            f"учтено {accounted} (счётчики {counters!r}, в очереди {status['pending']})"
         )
 
     def test_shutdown_with_empty_ring_reports_zero_at_info_level(self, monkeypatch: pytest.MonkeyPatch) -> None:

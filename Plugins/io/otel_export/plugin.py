@@ -1,29 +1,39 @@
 # -*- coding: utf-8 -*-
-"""`OtelExportPlugin` — хост экспортёра OTLP: приём хвоста, отметка, отправка (Task 2.1/2.2).
+"""`OtelExportPlugin` — хост экспортёра OTLP: приём хвоста, отметка, отправка (Task 2.1/2.2/2.4).
 
 Side-effect плагин (нет `inputs`/`outputs`) в обычном `GenericProcessApp`, по
-форме — как `telemetry_sink`. Что он делает сегодня: объявляет брокеру намерение
+форме — как `telemetry_sink`. Что он делает: объявляет брокеру намерение
 подписаться на хвост наблюдаемости ВСЕХ процессов, принимает пачки записей,
 ставит им отметку приёма, отбрасывает числовую плоскость, приводит записи к
-модели OTel, считает восемь величин в двух плоскостях и СИНХРОННО отправляет
-накопленное в приёмник OTLP по команде `otel_export.flush`.
+модели OTel, считает восемь величин в двух плоскостях и отдаёт их **очереди
+дренажа**, чей фоновый поток отправляет пачки в приёмник OTLP.
 
-**Чего он ещё НЕ делает, и это осознанно, а не забыто.** Отправка идёт **только по
-команде** `otel_export.flush`: асинхронный `BatchLogRecordProcessor` (пачка по
-расписанию `schedule_delay_ms`) приходит в Task 2.4, а на останове плагин
-принципиально не отправляет — оставшееся в кольце считается потерянным и
-называется числом (вердикт CTO, разбор в докстринге :meth:`shutdown`). До Task 2.4
-отображённые записи копятся в кольце ограниченного размера (`max_queue_size` из
-конфига), переполнение считается счётчиком `otel_export.dropped_overflow`, а сама
-отправка держит поток вызывающего 23-42 с при мёртвом коллекторе (замер CTO;
-верхняя граница — «чёрная дыра», таймаутом не управляется). Говорить «экспорт
-работает» до Ф4.1 нельзя.
+**Отправка АСИНХРОННА с Task 2.4, и очередь взята готовая.** Между хендлером и
+сетью стоит `BatchDrainWorker`
+(`channel_routing_module/observability/batch_drain.py`) — тот же класс, которым
+плоскость истории развязала эмитента и SQLite. Своей очереди здесь нет и быть не
+должно: два буфера на одном пути дают два разных ответа на вопрос «сколько
+записей ждёт», и расходятся они молча. Роли: приём кладёт запись
+(`worker.write`), сток пачки — :meth:`_export_batch` поверх `OtlpHttpExporter`,
+вытеснение — `drop_oldest` со счётчиком `dropped_overflow`, дедлайн дожатия —
+`worker.flush(timeout)`.
+
+**Останов дожимает ОГРАНИЧЕННО, и ограничивает не SDK.** Task 2.2 не дожимала
+вовсе (вердикт CTO: синхронная отправка жила 23-42 с против бюджета останова
+5 с и убивала процесс внутри retry-цикла SDK). Task 2.4 дожатие возвращает,
+потому что дедлайн наконец есть чем держать: `BatchDrainWorker.flush(timeout)`
+честен и против ЗАВИСШЕГО стока — работу делает поток дренажа, а вызывающий
+только ждёт прогресса до дедлайна. Число берётся из конфига
+(`flush_timeout_ms`, дефолт 3 с), а не из литерала в механизме, и исход
+произносится числами: `otel flush: N дожато, M потеряно`.
 
 **Что здесь может сломаться, учитывая, как оно устроено.**
 
 1. *Хендлер живёт на ПРИЁМНОМ потоке процесса.* Пока он работает, почта
    процесса не разбирается. Отсюда запрет внутри него: ни сети, ни ожидания на
-   локах, ни `sleep`. Единственный лок в хендлере — вокруг инкремента счётчиков,
+   локах, ни `sleep`. Цена приёма — постановка в кольцевой буфер, и ровно это
+   свойство проверяет приёмочный тест Task 2.4 зависшим стоком. Единственный лок
+   в хендлере — вокруг инкремента счётчиков,
    он неконкурентен по построению (поток один) и нужен ровно на случай, когда
    построение окажется неверным. Что поток действительно один — не проза, а
    показание: :meth:`_cmd_status` отдаёт `handler_threads`, и появление ВТОРОГО
@@ -51,6 +61,15 @@ Side-effect плагин (нет `inputs`/`outputs`) в обычном `GenericP
    имени он отвергает `ValueError` (ADR-PM-038), и только он виден в
    `introspect.telemetry -> levels`. Дословный перенос строки плана уронил бы
    плагин на старте.
+6. *У счётчика `dropped_overflow` ровно одно обещание — «не поместилось».*
+   Собственный `BatchDrainWorker.counters()` складывает под именем вызывающего
+   ДВА факта — вытеснение переполнением и отказ записи после `close()` (так
+   написано в его докстринге дословно). Числу это безразлично, читателю нет:
+   запись, пришедшая после останова, инфлировала бы «переполнение», которого не
+   было. Поэтому плоскость счётчиков плагина растёт от `get_info()["dropped"]`
+   (это ТОЛЬКО вытеснения канала), а «после закрытия» видно отдельным ключом в
+   `otel_export.status -> queue`. Ровно этот класс путаницы стоил соседней
+   полосе числа «подавлено», за которым не стояло ни одного вызова.
 """
 
 from __future__ import annotations
@@ -64,6 +83,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from multiprocess_framework.modules.channel_routing_module.observability.batch_drain import (
+    BatchDrainWorker,
+)
 from multiprocess_framework.modules.channel_routing_module.observability.record_display import (
     stamp_observed,
 )
@@ -79,6 +101,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 
 from Services.otel_export.config import OtelExportConfig, format_validation_error
 from Services.otel_export.exporter import OtlpHttpExporter, sdk_available
+from Services.otel_export.interfaces import FlushOutcome
 from Services.otel_export.mapping import DisplayRecordMapper, coerce_attributes, split_exportable
 from Services.otel_export.resources import PooledResourceResolver
 
@@ -143,6 +166,62 @@ COUNTER_NAMES = (
 STATE_READY = "ready"
 STATE_DEGRADED = "degraded"
 STATE_ERROR = "error"
+
+
+#: Имя очереди дренажа. Едет в ключ окна голоса (`batch_drain.<имя>.overflow`) и
+#: в имя потока (`batch-drain-<имя>`) — по нему очередь экспортёра отличается в
+#: `introspect` от очереди плоскости истории, которая устроена так же.
+QUEUE_NAME = "otel_export"
+
+
+class _OtelDrainWorker(BatchDrainWorker):
+    """Очередь дренажа с голосом переполнения ПО ФРОНТУ, а не по каждой записи.
+
+    **Зачем понадобилось трогать голос, а не взять класс как есть.** База зовёт
+    `log_windowed` на КАЖДУЮ вытесненную запись; сама строка при этом выходит
+    одна (окно душит остальные), но вызовов ровно столько, сколько вытеснений.
+    Замер на этом же классе: ёмкость 2048, подано 3000 записей — **952 вызова
+    голосовой машинерии на одну долетевшую строку**, и все 952 — в потоке
+    ЭМИТЕНТА. У плоскости истории эмитент — любой поток, и цена размазана; здесь
+    эмитент один и известен: это ПРИЁМНЫЙ поток процесса, где вся конструкция
+    построена ради того, чтобы не платить за запись ничем, кроме постановки в
+    буфер. Шторм вытеснений — ровно тот режим, когда почта процесса и так
+    перегружена.
+
+    Поэтому голос здесь **по фронту**: первое вытеснение эпизода звучит, а
+    дальше очередь молчит, пока не опустеет ниже потолка. `log_windowed`
+    остаётся вторым, политическим предохранителем — окно процесса никто не
+    отменял.
+
+    Отдельная польза, названная честно: приёмочный тест Task 2.4 считает ВЫЗОВЫ
+    `log_windowed`, а не долетевшие строки, и на базовом классе видел бы 952 там,
+    где строка одна. Правка сделана не ради теста — довод про приёмный поток
+    выше стоит сам по себе, — но совпадение стоит назвать, а не умолчать.
+
+    Флаг живёт без лока намеренно: пишет его один поток (приёмный), а цена
+    ошибки — лишний или недостающий ВЫЗОВ голоса, который всё равно судит окно.
+    Лок ради этого на горячем пути был бы дороже дефекта, который он лечит.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._overflow_voiced = False
+
+    def write(self, record: Any) -> Any:
+        result = super().write(record)
+        # Проверка глубины стоит ЗА флагом: `depth` берёт лок канала, и звать его
+        # на каждой записи значило бы вернуть на горячий путь ту самую цену,
+        # ради снятия которой класс и переопределён. Пока эпизод не объявлен,
+        # второе условие не вычисляется вовсе.
+        if self._overflow_voiced and self.depth < self.capacity:
+            self._overflow_voiced = False
+        return result
+
+    def _voice_overflow(self) -> None:
+        if self._overflow_voiced:
+            return
+        self._overflow_voiced = True
+        super()._voice_overflow()
 
 
 class OtelExportSubscribeError(RuntimeError):
@@ -215,13 +294,20 @@ class OtelExportPlugin(ProcessModulePlugin):
         #: конкурентный доступ к ней не теряет ключей даже без лока, а лок в
         #: хендлере хочется держать ровно вокруг счётчиков.
         self._handler_threads: dict[int, bool] = {}
-        self._pending: list[Any] = []
-        #: Лок кольца. Приём кладёт записи с ПРИЁМНОГО потока, а `flush` забирает
-        #: их с потока команды — это два разных потока, и `list.append` рядом с
-        #: `del self._pending[:n]` теряет записи молча. Держится ТОЛЬКО вокруг
-        #: самого списка: чужие вызовы (`_bump`, экспортёр) под ним не идут,
-        #: иначе получился бы порядок захвата двух локов.
-        self._pending_lock = threading.Lock()
+        #: Очередь дренажа. Строится в `configure()` вместе с конфигом (её
+        #: потолки — оттуда), поэтому здесь `None`: до конфига ёмкости не
+        #: существует, а очередь «на дефолтах» приняла бы записи в размер,
+        #: которого оператор не заказывал.
+        self._queue: BatchDrainWorker | None = None
+        #: Сколько вытеснений очереди УЖЕ перенесено в счётчики плагина. Как и у
+        #: пула Resource: канал считает нарастающим итогом, `record_metric` —
+        #: counter, и отдать абсолют значило бы сложить его само с собой.
+        self._queue_dropped_seen = 0
+        #: Причина последнего ОТКАЗА доставки. Живёт здесь, потому что отправка
+        #: ушла в поток дренажа: команда `flush` больше не видит исход
+        #: собственными глазами и без этого поля отвечала бы «failed» без слов.
+        #: Успех её стирает — иначе старая причина пережила бы починку.
+        self._last_export_reason = ""
         self._stopped = False
         self._subscribed = False
         self._subscribe_attempts = 0
@@ -311,6 +397,24 @@ class OtelExportPlugin(ProcessModulePlugin):
         # третьей точкой отказа, а сокет к коллектору не появляется у процесса,
         # который за всю жизнь так ничего и не отправит.
         self._exporter = OtlpHttpExporter(self._cfg)
+        # Очередь строится ПОСЛЕ экспортёра, но потока не заводит: `BatchDrainWorker`
+        # поднимает его на ПЕРВОЙ записи. Процесс, за жизнь не принявший ни одной
+        # записи, не платит потоком — та же дисциплина, что у ленивого объекта SDK.
+        #
+        # Стоком отдан МЕТОД, а не `self._exporter.export`: связанный метод
+        # экспортёра зафиксировал бы объект навсегда, а `_export_batch` достаёт его
+        # при каждом вызове — и в состоянии, где экспортёра нет, отвечает честно.
+        self._queue = _OtelDrainWorker(
+            self._export_batch,
+            self._cfg.max_queue_size,
+            counter_name="dropped_overflow",
+            batch_size=self._cfg.max_export_batch_size,
+            # Такт дренажа — тот же `schedule_delay_ms`, каким его знает оператор
+            # (в SDK он ушёл бы в `BatchLogRecordProcessor`). Ни одного нового
+            # литерала-потолка внутри механизма: все три числа видны в readback().
+            flush_interval_sec=self._cfg.schedule_delay_ms / 1000.0,
+            name=QUEUE_NAME,
+        )
         ctx.log_info(
             f"otel_export: конфиг принят, endpoint={self._cfg.endpoint}, level={self._cfg.level}, SDK {detail}"
         )
@@ -338,7 +442,7 @@ class OtelExportPlugin(ProcessModulePlugin):
         self._announce_intent(1)
 
     def shutdown(self, ctx: PluginContext) -> None:
-        """STOPPED: снять намерение, НЕ отправлять, назвать потерю числом.
+        """STOPPED: снять намерение, дожать ОГРАНИЧЕННО, назвать исход числами.
 
         **Что здесь может сломаться.** `_stopped` ставится ПЕРВЫМ действием, до
         чего бы то ни было: слот `request_async`, заведённый в `start()`, останов
@@ -350,10 +454,9 @@ class OtelExportPlugin(ProcessModulePlugin):
         ответа здесь ждать не на чем — процесс останавливается, и приёмный цикл
         уйдёт раньше, чем брокер успеет ответить.
 
-        **Синхронного дожатия здесь НЕТ, и это вердикт CTO, а не упущение.**
-        Первая редакция Task 2.2 дожимала кольцо на останове, и стенд показал,
-        чем это кончается при мёртвом коллекторе (замер CTO, коллектор не
-        поднят):
+        **Дожатие здесь ОГРАНИЧЕННОЕ, и ограничивает его очередь, а не SDK.**
+        Task 2.2 не дожимала вовсе — вердикт CTO, и вот замер, на котором он
+        стоял (коллектор не поднят):
 
             flush#1 24.36 с (failed=20) · flush#3 22.85 с (failed=4)
             launcher.shutdown() 5.17 с
@@ -369,20 +472,25 @@ class OtelExportPlugin(ProcessModulePlugin):
         коллектором: `shutdown()` 5.12 с, строка «остановлен» есть, запись
         доехала.
 
-        Ограничить дожатие таймаутом нечем: `export_timeout_sec` — дедлайн
+        Тогда ограничить дожатие было нечем: `export_timeout_sec` — дедлайн
         расписания ретраев, а не потолок вызова (замер: при 3000 мс вызов длился
-        4.08 с, при 30 с на чёрную дыру — 42.08 с).
+        4.08 с, при 30 с на чёрную дыру — 42.08 с). **Task 2.4 нашла, чем:**
+        дедлайн держит `BatchDrainWorker.flush(timeout)`, и он честен против
+        зависшего стока по построению — работу делает поток дренажа, а
+        останавливающий поток только ждёт прогресса и уходит по своему времени.
+        Число — `flush_timeout_ms` из конфига (3 с), с запасом к бюджету
+        фреймворка 5 с: после плагина останов ещё снимает намерение и гасит
+        логгер, и забрав весь бюджет, плагин вернул бы ровно тот исход, ради
+        которого дожатие отменяли.
 
-        **Цена решения, названная явно:** одна запись, которая при живом
-        коллекторе сегодня доезжала, доезжать перестанет. Её вернёт Task 2.4 —
-        ограниченным дожатием поверх асинхронной пачки.
+        Что не дожали за дедлайн — потеря, и она произносится числами:
+        `otel flush: N дожато, M потеряно` (литерал из `LogExporter.force_flush`,
+        по нему стенд читает исход останова). Вторая строка,
+        «otel_export: остановлен …», остаётся и обязана доезжать ВСЕГДА: по ней
+        отличают штатный останов от процесса, убитого внутри чужого цикла.
 
-        Оставшееся в кольце — потеря, и она произносится числом. Строка
-        «otel_export: остановлен …» обязана доезжать ВСЕГДА: по ней стенд
-        отличает штатный останов от процесса, убитого внутри чужого цикла.
-        В тождество потерь эти записи входят слагаемым «в кольце», поэтому
-        отдельного счётчика им не заводится — он сложился бы с тем же числом
-        дважды.
+        Порядок обязателен: дожатие идёт ДО строки итога — иначе строка называла
+        бы числа, которые ещё не окончательны.
         """
         self._stopped = True
 
@@ -393,12 +501,22 @@ class OtelExportPlugin(ProcessModulePlugin):
                 self._on_unsubscribe_answer,
             )
 
+        outcome = self._drain_on_stop()
+        # Уровень по факту: недожатое — не рутина. Строка одна на обе ветки,
+        # чтобы стенд искал один литерал, а не два.
+        flush_line = f"otel flush: {outcome.flushed} дожато, {outcome.lost} потеряно"
+        if outcome.lost:
+            ctx.log_warning(flush_line)
+        else:
+            ctx.log_info(flush_line)
+
         with self._counters_lock:
             snapshot = dict(self._counters)
-        lost = len(self._pending)
+        lost = outcome.lost
         message = (
             f"otel_export: остановлен, state={self._state}, "
-            f"потеряно вместе с процессом (осталось в кольце) {lost}, счётчики {snapshot}"
+            f"потеряно вместе с процессом (не дожато за {self._flush_timeout_sec():.1f} с) {lost}, "
+            f"счётчики {snapshot}"
         )
         # Уровень выбирается по факту, а не по месту: потеря — не рутина, и INFO
         # уравнял бы её с обычным остановом. Разъём на ветке один в обоих случаях.
@@ -646,50 +764,50 @@ class OtelExportPlugin(ProcessModulePlugin):
         return self._resolver.resolve(context) if self._resolver is not None else None
 
     def _enqueue(self, mapped: Any) -> None:
-        """Положить отображённую запись в кольцо до ближайшего дожатия.
+        """Отдать отображённую запись очереди дренажа. Цена — постановка в буфер.
 
-        **Что здесь может сломаться.** Список без предела — утечка на долгом
-        прогоне: хвост идёт непрерывно, а забирает записи только `flush`
-        (асинхронная пачка — Task 2.4). Предел — `max_queue_size` из конфига (то
-        же число, которое потом уедет в `BatchLogRecordProcessor`), вытеснение —
-        самое старое, и оно СЧИТАЕТСЯ: `drop_oldest` без счётчика — это тихая
-        потеря, ровно тот класс, ради которого заведено тождество Task 3.4.
+        **Что здесь может сломаться.** Соблазн — держать рядом с очередью ещё и
+        свой список «на всякий случай»: тогда на вопрос «сколько записей ждёт»
+        появляются два ответа, они расходятся на первом же вытеснении, и
+        расходятся молча. Поэтому буфер ровно один, и он чужой — готовый
+        `BatchDrainWorker` с потолком `max_queue_size`, вытеснением `drop_oldest`
+        и счётчиком: `drop_oldest` без счётчика — тихая потеря, ровно тот класс,
+        ради которого заведено тождество Task 3.4.
 
-        Лок держится только вокруг списка, а `_bump` зовётся ПОСЛЕ его отпускания:
-        `_bump` берёт свой лок и уходит в чужие механизмы, и удержание нашего на
-        время чужого вызова — готовый порядок захвата двух локов.
+        Очередь закрыта (останов уже прошёл) или не построена (состояние `error`)
+        — запись не молчит: очередь считает её своей корзиной «после закрытия», а
+        плагин говорит это окном. В `dropped_overflow` она НЕ идёт: тот счётчик
+        обещает «не поместилось», и смешать с ним «пришло после останова» значило
+        бы сделать число ложью, не сказав об этом ни строчки.
         """
-        limit = self._cfg.max_queue_size if self._cfg is not None else 2048
-        with self._pending_lock:
-            self._pending.append(mapped)
-            overflow = len(self._pending) - limit
-            if overflow > 0:
-                del self._pending[:overflow]
-        if overflow > 0:
-            self._bump("dropped_overflow", overflow)
+        queue = self._queue
+        if queue is None:
+            return
+        result = queue.write(mapped)
+        if isinstance(result, Mapping) and result.get("closed"):
+            log_windowed(
+                "otel_export.write_after_close",
+                VOICE_WINDOW_SEC,
+                "warning",
+                "otel_export: запись пришла после останова очереди и не отправлена",
+                logger=self._voice,
+            )
 
     # ------------------------------------------------------------------ #
-    # Отправка (Task 2.2 — синхронная, по команде и на останове)
+    # Отправка (Task 2.4 — фоновая пачка, дожатие по команде и на останове)
     # ------------------------------------------------------------------ #
 
-    def _take_batch(self) -> list[Any]:
-        """Забрать кольцо целиком, оставив на его месте пустое.
+    def _export_batch(self, batch: list[Any]) -> int:
+        """Сток очереди: отправить пачку, посчитать исход, произнести отказ.
 
-        **Что здесь может сломаться.** Соблазн — отправить `self._pending` и
-        очистить его ПОСЛЕ возврата экспортёра: отправка синхронна и длится
-        десятки секунд при мёртвом коллекторе, а приёмный поток всё это время продолжает класть
-        записи в тот же список — и очистка после отправки убила бы всё, что
-        приехало за время запроса, не посчитав. Обмен под локом делает окно
-        нулевым: то, что приедет после обмена, ляжет в новое кольцо и уедет
-        следующим дожатием.
-        """
-        with self._pending_lock:
-            batch = self._pending
-            self._pending = []
-        return batch
+        **Кто сюда приходит.** Поток дренажа очереди, и он у стока ЕДИНСТВЕННЫЙ
+        (обещание `BatchDrainWorker`). Отсюда право ждать сеть сколько угодно: на
+        приёмный поток процесса эта задержка больше не переносится.
 
-    def _flush_batch(self) -> Any:
-        """Отправить всё накопленное, посчитать исход и произнести отказ (Р-19, Р-22, Р-23).
+        Возвращаемое число — контракт очереди: «сколько записей принято стоком».
+        Разницу с длиной пачки очередь зачтёт в свою корзину потерь, поэтому
+        врать здесь нельзя ни в одну сторону — `accepted` берётся из исхода
+        экспортёра, а не из «вызов вернулся».
 
         **Что здесь может сломаться.** Три ловушки, и все три тихие.
 
@@ -706,15 +824,21 @@ class OtelExportPlugin(ProcessModulePlugin):
         3. *Переменная часть — в `ctx`, а не в тексте.* Ключ дросселя постоянен, и
            endpoint с числом внутри `msg` разошлись бы с ним: одна и та же
            жалоба с разными числами читалась бы как разные события.
-
-        Возвращает `ExportOutcome` — числа нужны и команде, и останову.
         """
-        batch = self._take_batch()
-        outcome = self._exporter.export(batch)
+        exporter = self._exporter
+        if exporter is None:
+            # Экспортёра нет (состояние `error`) — пачка не принята НИ ОДНОЙ
+            # записью, и очередь зачтёт её потерей. Молча вернуть длину значило
+            # бы отчитаться об отправке, которой не было.
+            return 0
+        outcome = exporter.export(batch)
 
         if outcome.accepted:
             self._bump("exported", outcome.accepted)
+        if not outcome.failed:
+            self._last_export_reason = ""
         if outcome.failed:
+            self._last_export_reason = outcome.reason
             self._bump("export_failed", outcome.failed)
             log_windowed(
                 key="otel_export.export_failed",
@@ -726,7 +850,80 @@ class OtelExportPlugin(ProcessModulePlugin):
                 failed=outcome.failed,
                 reason=outcome.reason,
             )
-        return outcome
+        return outcome.accepted
+
+    def _flush_timeout_sec(self) -> float:
+        """Дедлайн дожатия в СЕКУНДАХ. Одно место деления на 1000 — `readback()`."""
+        if self._cfg is None:
+            return 0.0
+        return float(self._cfg.readback()["flush_timeout_sec"])
+
+    def _flush_queue(self, timeout: float) -> FlushOutcome:
+        """Дожать очередь до дедлайна и вернуть исход ДЕЛЬТОЙ этого дожатия.
+
+        **Почему дельта, а не то, что отдаёт очередь.** `BatchDrainWorker.totals()`
+        — накопленные итоги за жизнь экземпляра (так написано в его докстринге),
+        и отдать их наружу как исход дожатия значило бы каждый раз называть числа
+        всей жизни процесса: второе дожатие подряд отчиталось бы об отправке того,
+        что уехало первым. Читателю команды и строки останова нужен ответ на
+        вопрос «что сделал ЭТОТ вызов».
+
+        Дельта берётся по счётчикам ОЧЕРЕДИ, а не плагина: в них уже сведены обе
+        корзины (сток не принял / не дожали до дедлайна), а плагин считает только
+        то, до чего экспортёр доехал.
+        """
+        queue = self._queue
+        if queue is None:
+            return FlushOutcome(flushed=0, lost=0)
+        written_before, lost_before = queue.totals()
+        queue.flush(timeout)
+        written_after, lost_after = queue.totals()
+        return FlushOutcome(flushed=written_after - written_before, lost=lost_after - lost_before)
+
+    def _drain_on_stop(self) -> FlushOutcome:
+        """Останов: дожать и ЗАКРЫТЬ очередь, уложившись в общий дедлайн.
+
+        **Дедлайн один на оба шага, и это существенно.** `flush(t)` ждёт прогресса
+        до `t`, `close(t)` join'ит поток ещё до `t` — сложенные наивно, они дают
+        удвоенный бюджет, а бюджет останова у фреймворка один (5 с) и делится
+        между всеми участниками. Поэтому второму шагу достаётся ОСТАТОК, и на
+        зависшем стоке это честный ноль: `join(0)` возвращается сразу, а записи,
+        оставшиеся у потока в руках, очередь объявляет потерянными сама.
+
+        `close()` обязателен и идемпотентен: он закрывает приём — только после
+        него запись, приехавшая с опозданием, попадает в корзину «после
+        закрытия», а не в «переполнение».
+        """
+        queue = self._queue
+        if queue is None:
+            return FlushOutcome(flushed=0, lost=0)
+
+        budget = self._flush_timeout_sec()
+        deadline = time.monotonic() + budget
+        written_before, lost_before = queue.totals()
+        queue.flush(budget)
+        queue.close(max(0.0, deadline - time.monotonic()))
+        written_after, lost_after = queue.totals()
+        self._sync_queue_counters()
+        return FlushOutcome(flushed=written_after - written_before, lost=lost_after - lost_before)
+
+    def _sync_queue_counters(self) -> None:
+        """Перенести вытеснения очереди в счётчики плагина ДЕЛЬТОЙ, не значением.
+
+        Берётся `get_info()["dropped"]` — счётчик КАНАЛА, то есть ровно
+        «не поместилось». Соседний `counters()[counter_name]` для этого не
+        годится: он по собственному докстрингу складывает вытеснение с отказом
+        записи после `close()`, и `dropped_overflow` начал бы расти от записи,
+        для которой в очереди было сколько угодно места.
+        """
+        queue = self._queue
+        if queue is None:
+            return
+        dropped = int(queue.get_info().get("dropped", 0))
+        delta = dropped - self._queue_dropped_seen
+        if delta > 0:
+            self._queue_dropped_seen = dropped
+            self._bump("dropped_overflow", delta)
 
     def _sync_resource_evictions(self) -> None:
         """Перенести вытеснения пула в числовую плоскость ДЕЛЬТОЙ, не значением.
@@ -800,7 +997,17 @@ class OtelExportPlugin(ProcessModulePlugin):
         `handler_threads` — не украшение, а детектор (Р-11): список длиннее
         одного означает, что пул `Resource` работает в условиях, для которых он
         не построен.
+
+        **`queue` отвечает на вопросы, которые счётчики не различают.** У очереди
+        свои корзины потерь, и складывать их в одно число нельзя: «не поместилось»
+        (`dropped_overflow`), «сток не принял» (`sink_failed`), «не дожали на
+        останове» (`lost_on_close`) и «пришло после закрытия»
+        (`dropped_after_close`) требуют РАЗНЫХ действий от читателя. Последнее
+        считается вычитанием: собственный `counters()` очереди отдаёт его
+        сложенным с переполнением под одним именем, и развести их можно только
+        здесь.
         """
+        self._sync_queue_counters()
         with self._counters_lock:
             counters = dict(self._counters)
         endpoint = self._cfg.endpoint if self._cfg is not None else getattr(self._reg, "endpoint", "")
@@ -812,8 +1019,32 @@ class OtelExportPlugin(ProcessModulePlugin):
             "handler_threads": sorted(self._handler_threads),
             "subscribed": self._subscribed,
             "subscribe_attempts": self._subscribe_attempts,
-            "pending": len(self._pending),
+            "pending": self._queue.depth if self._queue is not None else 0,
             "counters": counters,
+            "queue": self._queue_snapshot(),
+        }
+
+    def _queue_snapshot(self) -> dict:
+        """Показания очереди дренажа с РАЗВЕДЁННЫМИ корзинами потерь."""
+        queue = self._queue
+        if queue is None:
+            return {}
+        info = queue.get_info()
+        dropped_overflow = int(info.get("dropped", 0))
+        return {
+            "depth": int(info.get("depth", 0)),
+            "capacity": int(info.get("capacity", 0)),
+            "batch_size": info.get("batch_size"),
+            "flush_interval_sec": info.get("flush_interval_sec"),
+            "closed": bool(info.get("closed")),
+            "written": int(info.get("written", 0)),
+            "dropped_overflow": dropped_overflow,
+            "sink_failed": int(info.get("sink_failed", 0)),
+            "lost_on_close": int(info.get("lost_on_close", 0)),
+            # Разность двух показаний очереди: `counters()` складывает
+            # «не поместилось» и «пришло после close()» под именем вызывающего,
+            # а `get_info()["dropped"]` — только первое.
+            "dropped_after_close": int(info.get("dropped_overflow", 0)) - dropped_overflow,
         }
 
     def _cmd_flush(self, data: dict | None = None) -> dict:
@@ -829,54 +1060,54 @@ class OtelExportPlugin(ProcessModulePlugin):
         вызывающего у него нет.** Команда приезжает конвертом `type=="command"`
         и попадает сюда изнутри `RouterManager.receive()`
         (`router_module/core/router_manager.py:1343` -> `_dispatch_command`);
-        боевых вызовов мимо этой дороги не существует. Прежняя редакция
-        докстринга «звать с приёмного потока нельзя» была предписанием, которое
-        исполнить нечем, — снято.
+        боевых вызовов мимо этой дороги не существует.
 
-        **Цена, измеренная на стенде, а не выведенная из конфига.** Отправка
-        синхронна и удерживает приёмный поток на всё время попыток. Замеры CTO:
+        **Цена ограничена с Task 2.4, и ограничивает её очередь.** Сама отправка
+        ушла в поток дренажа; здесь остаётся ОЖИДАНИЕ прогресса, и оно кончается
+        через `flush_timeout_ms` (3 с) в любом случае — против отвечающего
+        коллектора, против мёртвого и против «чёрной дыры». До этого приёмный
+        поток стоял столько, сколько живёт SDK: замеры CTO — refused при 30000 мс
+        23.44 с, при 3000 мс 4.08 с (+36% сверх «потолка»), чёрная дыра 42.08 с,
+        401 — 0.02 с. То есть `export_timeout_ms` этой границей не управлял и не
+        управляет: у SDK это дедлайн расписания ретраев, а не потолок вызова.
 
-            коллектор refused, таймаут 30000 мс -> 23.44 с
-            коллектор refused, таймаут  3000 мс ->  4.08 с  (+36% сверх «потолка»)
-            чёрная дыра 10.255.255.1, 30000 мс  -> 42.08 с
-            сервер отвечает 401                 ->  0.02 с
-
-        То есть **`export_timeout_ms` этой границей не управляет**: у SDK это
-        дедлайн расписания ретраев, а не потолок вызова, и `_export` повторяет
-        POST на `requests.ConnectionError` с исходным таймаутом, пока Windows
-        отдаёт connect ~21 с. Прежняя редакция этого докстринга обещала
-        «смягчение конфигурацией» — обещание ложно дважды (во фрагменте ключ не
-        задан, и заданный не смягчил бы), снято.
-
-        **Про «в отказе усиливает потерю»: это возможность с порогом, а не
-        состояние.** Пока поток занят, канал `observability` не дренируется, но
-        вытеснение начинается только при темпе больше ~10 сообщений/с. Замер на
-        стенде при темпе 0.17 зап/с: `queue_observability_evicted` у
-        `otel_export`, `camera_0` и `ProcessManager` до и после 24-секундной
-        блокировки — **0, 0, 0**.
-
-        Закрытие — Task 2.4: асинхронная пачка уводит отправку с приёмного потока
-        целиком. Долг записан в `Plugins/io/otel_export/STATUS.md`.
+        **Статусов три, а не два.** Дедлайн, истёкший при непустой очереди, —
+        это не `ok`: записи не отправлены и не потеряны, они всё ещё ждут. Ответ
+        `timeout` отличает «сейчас не доехало» от «доехало» и от «отказано».
 
         В состоянии `error` отправлять нечем и не через что (`_exporter` там не
         построен): ответ — отказ с причиной, а не пустой успех.
         """
-        if self._state == STATE_ERROR or self._exporter is None:
+        if self._state == STATE_ERROR or self._exporter is None or self._queue is None:
             return {
                 "status": "error",
                 "reason": self._reason or "экспортёр не построен",
-                "pending": len(self._pending),
+                "pending": self._queue.depth if self._queue is not None else 0,
                 "flushed": 0,
                 "failed": 0,
             }
 
-        outcome = self._flush_batch()
+        with self._counters_lock:
+            exported_before = self._counters["exported"]
+            failed_before = self._counters["export_failed"]
+        self._flush_queue(self._flush_timeout_sec())
+        with self._counters_lock:
+            flushed = self._counters["exported"] - exported_before
+            failed = self._counters["export_failed"] - failed_before
+
+        pending = self._queue.depth
+        if failed:
+            status = "failed"
+        elif pending:
+            status = "timeout"
+        else:
+            status = "ok"
         return {
-            "status": "ok" if outcome.failed == 0 else "failed",
-            "flushed": outcome.accepted,
-            "failed": outcome.failed,
-            "pending": len(self._pending),
-            "reason": outcome.reason,
+            "status": status,
+            "flushed": flushed,
+            "failed": failed,
+            "pending": pending,
+            "reason": self._last_export_reason,
         }
 
 

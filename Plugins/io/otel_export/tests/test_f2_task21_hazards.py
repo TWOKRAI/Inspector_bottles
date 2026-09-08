@@ -224,6 +224,37 @@ def _install_exporter_double(
     return calls
 
 
+def _install_hanging_exporter(
+    monkeypatch: pytest.MonkeyPatch,
+    entered: threading.Event,
+    release: threading.Event,
+    hang_seconds: float = 30.0,
+) -> None:
+    """Подменить экспортёр стоком, который ЖДЁТ, а не отвечает.
+
+    Нужен там, где проверяется состояние ОЧЕРЕДИ: пока поток дренажа стоит
+    внутри стока, очередь никем не разгружается, и её глубина перестаёт зависеть
+    от планировщика. `entered` взводится на входе (доказательство достижимости —
+    без него «очередь полна» было бы верно и при потоке, который не запустился
+    вовсе), `release` обязан взводиться в `finally`, иначе поток провисит
+    `hang_seconds`.
+    """
+    import Plugins.io.otel_export.plugin as plugin_module
+
+    from Services.otel_export.interfaces import ExportOutcome
+
+    class _HangingExporter:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        def export(self, records: Any) -> ExportOutcome:
+            entered.set()
+            release.wait(hang_seconds)
+            return ExportOutcome(accepted=len(list(records)), failed=0, reason="")
+
+    monkeypatch.setattr(plugin_module, "OtlpHttpExporter", _HangingExporter)
+
+
 def _log_record(**overrides: Any) -> dict:
     record = {"kind": "log", "severity": "INFO", "severity_number": 9, "message": "m", "module": "x", "ts": 1.0}
     record.update(overrides)
@@ -521,11 +552,21 @@ class TestResourceEvictionsAndOverflow:
             f"вытеснения посчитаны не дельтой: {plugin._cmd_status({})['counters']!r}"
         )
 
-    def test_ring_overflow_is_counted_not_silent(self) -> None:
+    def test_ring_overflow_is_counted_not_silent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`drop_oldest` без счётчика — тихая потеря; тождество Task 3.4 не сойдётся.
 
-        Кольцо на 512 записей, подано 515: в кольце обязано остаться 512,
+        Очередь на 512 записей, подано 515: в очереди обязано остаться 512,
         выброшено 3.
+
+        **Переписано в Task 2.4: переполнение стало свойством конструкции, а не
+        удачей планировщика.** Прежняя редакция просто подавала 515 записей и
+        смотрела глубину. С асинхронным дренажом это стало гонкой: поток очереди
+        просыпается на пороге пачки и может забрать 512 записей раньше, чем тест
+        дочитает счётчик, — тогда переполнения не будет вовсе и тест окажется
+        зелёным по причине «до потолка не дошли». Поэтому сток здесь ЖДЁТ:
+        пилотная запись уводит поток дренажа внутрь стока и держит его там, и
+        очередь заведомо никем не разгружается. Пилот отдан ДО замера и в
+        числах ниже не участвует.
 
         **Почему предел не «2», как хотелось бы для наглядности.**
         `_init_register` применяет overrides ПОЛЕ ЗА ПОЛЕМ через `setattr` с
@@ -544,15 +585,29 @@ class TestResourceEvictionsAndOverflow:
         этом всё равно не будет, поэтому обход здесь остаётся: значение, равное
         дефолту батча.
         """
-        plugin, ctx, _voices = _started(config={"endpoint": ENDPOINT, "max_queue_size": 512})
+        entered = threading.Event()
+        release = threading.Event()
+        _install_hanging_exporter(monkeypatch, entered, release)
+
+        plugin, ctx, _voices = _started(
+            # Такт 10 мс вместо секунды: тест ждёт, пока поток дренажа доберётся
+            # до стока, и секунда здесь была бы платой ни за что.
+            config={"endpoint": ENDPOINT, "max_queue_size": 512, "schedule_delay_ms": 10}
+        )
         handler = ctx.router_manager.handlers["observability.record"]
 
-        handler(_envelope([_log_record(message=f"m{i}") for i in range(515)]))
+        try:
+            handler(_envelope([_log_record(message="pilot")]))
+            assert entered.wait(3.0), "поток дренажа не дошёл до стока — сценарий не воспроизведён"
 
-        status = plugin._cmd_status({})
-        assert status["pending"] == 512, f"кольцо не удержало предел: {status!r}"
-        assert status["counters"]["dropped_overflow"] == 3, f"выброшенное не посчитано: {status!r}"
-        assert status["counters"]["received"] == 515
+            handler(_envelope([_log_record(message=f"m{i}") for i in range(515)]))
+
+            status = plugin._cmd_status({})
+            assert status["pending"] == 512, f"очередь не удержала предел: {status!r}"
+            assert status["counters"]["dropped_overflow"] == 3, f"выброшенное не посчитано: {status!r}"
+            assert status["counters"]["received"] == 516, f"пилотная запись не учтена в received: {status!r}"
+        finally:
+            release.set()
 
 
 # --------------------------------------------------------------------------- #
@@ -843,12 +898,21 @@ class TestCoerceAttributesIsWiredIntoTheHandler:
     Windows и POSIX даёт РАЗНЫЕ строки, а `str(datetime(...))` и `str(dict)` —
     одинаковые, и сравнивать можно с написанным значением, а не с вычисленным
     из предмета проверки.
+
+    **Переписано в Task 2.4, и предмет проверки от этого стал ШИРЕ.** Прежняя
+    редакция читала `plugin._pending[0].attributes` — приватный список, который
+    Task 2.4 сняла: кольцо плагина заменено готовой очередью дренажа
+    (`BatchDrainWorker`), и «что лежит внутри» у неё не спрашивают, оттуда
+    забирает поток. Проверять теперь можно то, что и следовало с самого начала:
+    ЧТО ИМЕННО УЕХАЛО В СТОК — батч, который увидел экспортёр. Утверждение о
+    внутреннем поле пережило бы подмену буфера, утверждение о батче — нет.
     """
 
-    def test_non_scalar_attributes_are_coerced_counted_and_stored(self) -> None:
+    def test_non_scalar_attributes_are_coerced_counted_and_stored(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Три утверждения на одну ветку: ключ доехал, ЗНАЧЕНИЕ приведено, счётчик вырос."""
         import datetime
 
+        batches = _install_exporter_double(monkeypatch, failed=0)
         plugin, ctx, _voices = _started()
         handler = ctx.router_manager.handlers["observability.record"]
 
@@ -869,12 +933,14 @@ class TestCoerceAttributesIsWiredIntoTheHandler:
             )
         )
 
+        plugin._cmd_flush({})
+
         counters = plugin._cmd_status({})["counters"]
         assert counters["attr_coerced"] == 2, f"приведений должно быть ровно два (datetime и dict): {counters!r}"
-        assert len(plugin._pending) == 1, "отображённая запись не легла в кольцо"
-        attributes = plugin._pending[0].attributes
+        assert [len(batch) for batch in batches] == [1], f"в сток уехал не один батч из одной записи: {batches!r}"
+        attributes = batches[0][0].attributes
         # Сравнение со ЗНАЧЕНИЕМ, а не с типом: утверждение `isinstance(str)`
-        # пережило бы заплату «положить в кольцо необогащённую запись» везде,
+        # пережило бы заплату «отдать стоку необогащённую запись» везде,
         # где исходное значение и так было строкой.
         assert attributes["when"] == "2026-01-01 00:00:00", (
             f"datetime не приведён либо в кольцо легла запись ДО приведения: {attributes!r}"
@@ -884,19 +950,21 @@ class TestCoerceAttributesIsWiredIntoTheHandler:
         assert attributes["numbers"] == [1, 2, 3], "однородная последовательность трогаться не должна"
         assert attributes["record.kind"] == "log", "род записи потерян при обогащении"
 
-    def test_all_scalar_attributes_leave_the_counter_at_zero(self) -> None:
+    def test_all_scalar_attributes_leave_the_counter_at_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Пара: приводить было нечего — счётчик не растёт.
 
         Без неё «счётчик вырос на 2» удовлетворялось бы и слепым инкрементом на
         каждую запись.
         """
+        batches = _install_exporter_double(monkeypatch, failed=0)
         plugin, ctx, _voices = _started()
         handler = ctx.router_manager.handlers["observability.record"]
 
         handler(_envelope([_log_record(extra={"context": {"plain": "текст", "n": 7, "flag": True}})]))
+        plugin._cmd_flush({})
 
         assert plugin._cmd_status({})["counters"]["attr_coerced"] == 0
-        assert plugin._pending[0].attributes["n"] == 7
+        assert batches[0][0].attributes["n"] == 7
 
 
 class TestFlushIsHonestNotOk:
