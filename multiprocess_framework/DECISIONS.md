@@ -159,6 +159,7 @@
 - [ADR-137](#adr-137-фреймворк-нейтрален-к-продукту-имя-приложения-из-composition-root-инспектор-уходит-из-универсального-слоя): Фреймворк нейтрален к продукту — имя приложения из composition root, «инспектор» уходит из универсального слоя
 - [ADR-138](#adr-138-каталог-логов-материализованный-дефолт-запрещён-молчание-конфига-уводит-логи-из-дерева-репозитория): Каталог логов — материализованный дефолт запрещён; молчание конфига уводит логи ИЗ дерева репозитория
 - [ADR-139](#adr-139-опрос-уровней-телеметрии-вторая-дорога-в-тот-же-read-model-видимость-вкладки-управляет-опросом-а-не-publisher-гейтом): Опрос уровней телеметрии — вторая дорога в тот же read-model; видимость вкладки управляет опросом, а не publisher-гейтом
+- [ADR-140](#adr-140-метаданные-числа-живут-на-плоскости-чисел-numberrecordunit-ключ-metric_identity-а-не-в-каталоге-уровней-declare_metric): Метаданные числа живут на плоскости чисел (`NumberRecord.unit`, ключ `metric_identity`), а не в каталоге уровней `declare_metric`
 <!-- ADR-TOC:END -->
 
 ---
@@ -2382,6 +2383,34 @@
 
 ---
 
+## ADR-140: Метаданные числа живут на плоскости чисел (`NumberRecord.unit`, ключ `metric_identity`), а не в каталоге уровней `declare_metric`
+- Дата: 2026-09-07
+- Статус: принято
+- Контекст: Task 3.4 плана `observability-closure` («Метаданные метрик: единица, описание, род») предлагала расширить `declare_metric(name, *, owner)` до `declare_metric(name, *, owner, unit="", description="", kind="gauge")` и повесить на объявление страж единицы у `record_timing`. Задача снята вердиктом CTO при резе Ф3, и снята не по цене, а потому что **адрес неверен**. `declare_metric` живёт на плоскости **уровней состояния** — это `observability_declarations.declare_metric` (`:230`) и `PluginContext.declare_metric` (`base.py:733`) → `port.for_plugin(writer).declare(name)`; собственный докстринг (`:750`) прямо предупреждает: «не путать с `record_metric`/`gauge` — те пишут в плоскость stats, здесь дерево состояния». Потребители каталога — `gated_metrics()` (`telemetry_publish_config.py:97`), publisher-гейт (`heartbeat/telemetry.py:785, 930`), readback `introspect.telemetry.gated_metrics` (`builtin_commands.py:1386, 1506`) и строки GUI (`_telemetry_controls.py:92`, `_panels.py:792`). **На плоскости чисел у каталога уровней нет ни одного читателя.**
+- Решение: единица, описание и род числа принадлежат **записи числа**, а не объявлению уровня.
+  1. **Дом единицы — слот `NumberRecord.unit`** (`number_record.py:155-158`, `unit: str = ""`), он уже существует и сегодня заполняется литералом `""` (`_build:309`).
+  2. **Ключ — `metric_identity`** (`writer.name`, `number_record.py:76`), то есть единицу называет **писатель числа**, а не тот, кто когда-то объявил имя уровня.
+  3. **Род не заводится заново — он уже есть**: `NumberRecord.kind` из `metric_type` (`from_hub_record:195-197` — «иного рода у порта нет вовсе»).
+  4. **Каталог уровней метаданных не несёт.** `declare_metric` остаётся с прежней сигнатурой `(name, *, owner)`.
+- Причина: четыре замера на `aa1b91d1`, каждый — прогон, не чтение.
+  1. `declare_metric("zz_probe_fps", owner="a")`, затем тот же name с `owner="b"` → каталог хранит `('a', None)`: второе объявление — молчаливый no-op по замыслу ADR-PM-038 (`_declare:117-128`). Повесив на каталог единицу, мы теряли бы единицу второго писателя **без голоса** — ровно класс дефекта «транспорт арбитрирует то, чего не понимает».
+  2. `PluginContext.declare_metric(None, "capture.fps")` → `ValueError` (точка в имени, `:790`). Все 33 боевых `record_timing` и все три `capture.*` — точечные, то есть из контекста плагина stats-имя объявить **нельзя вовсе**: половина адресатов до предлагаемого механизма физически не дотягивалась.
+  3. `declare_metric("topology.apply", owner=…)` принимается, и `declared_metrics()` затем содержит `topology.apply` → уехало бы в `gated_metrics()`, readback и GUI: строка гейта для уровня, который никогда не публикуется.
+  4. Страж единицы у `record_timing` встал бы на **пустую ось**: 0 из 33 боевых timing-имён объявлены где-либо, а исторический инцидент, ради которого страж и задумывался (`topology.apply_ms` ×1000, `statistics_module/DECISIONS.md:528`, ADR-SM), объявления не имел — страж бы его не поймал.
+  Счёт (`grep -F`, не `grep`): `declare_metric(` — 105 вхождений, 13 вне тестов, из них 8 боевых объявлений; `unit=` рядом — **0**.
+- Что НЕ делает и почему:
+  - **не пишет `unit` прямо сейчас** — этот ADR фиксирует ДОМ и КЛЮЧ, а писатель получает задачу отдельно: Ф4.6 плана `observability-closure` (она и так переименовывает ровно те пять уровней, что несут единицу в имени — `latency_ms`, `cycle_duration_ms`, `effective_hz`, `fps`, `shm`) либо план первого потребителя, otel v2. Выбор за владельцем; смысл записи в том, чтобы адрес был назван до того, как потребитель заведёт свою приватную таблицу единиц;
+  - **не трогает `declare_metric`** ни сигнатурой, ни поведением — 105 мест не мигрируют;
+  - **не заводит колонку единицы в GUI** — читателя у неё на плоскости уровней нет, а на плоскости чисел он появится вместе с писателем.
+- Отклонённые альтернативы:
+  - **«Ужать 3.4 до подписи»** (расширить `declare_metric` метаданными, но мигрировать только 11 боевых мест, оставив GUI и readback потребителю) — рекомендация ведущего closure, отклонена CTO как костыль. Видимый признак того, что это костыль, назван заранее: `introspect_telemetry(<proc>).gated_metrics` начал бы расти stats-именами, которых нет в `levels`; второй плагин с тем же голым именем и другой единицей получал бы чужую единицу в readback без голоса; а otel всё равно держал бы свою таблицу единиц, потому что его счётчики идут через `ctx.record_metric` мимо каталога (`Services/otel_export/README.md §Counters`).
+  - **Task 3.4 целиком** (105 мест + колонка GUI + metadata в readback) — тот же дефект плоскости, только дороже.
+- Проверка: воспроизведением, не чтением — четыре прогона выше (`а`–`г`), плюс живой стор `logs/prototype_2/observability.db` (2026-09-05, 6725 строк): числовых строк с заполненным `unit` — 0; уникальных числовых идентичностей — три (`capture.capture_fps`, `capture.drops`, `capture.frame_count`). **Ненадёжное в этой записи названо вслух:** счёт 105/13/8 получен грепом, а не прогоном, и расходится с прежней оценкой ведущего (103/11) определением того, что считать — определения и форвардеры внутри или снаружи.
+- Связанные ADR: ADR-PM-038 (повторное объявление имени — молчаливый no-op; именно оно делает каталог непригодным домом для единицы), ADR-SM (инцидент `topology.apply_ms` ×1000 — исходная мотивация стража единицы), ADR-136 (read-model — потребитель чисел, не каталога).
+- Refs: [plans/observability-closure/phase-3-store-and-signal.md](../plans/observability-closure/phase-3-store-and-signal.md) (Task 3.4 — СНЯТА, условие (i) реза), [plans/observability-closure/plan.md](../plans/observability-closure/plan.md)
+
+---
+
 ## Коммуникационная архитектура (ADR-COMM)
 
 > Кросс-секущая серия решений о шине сообщений (план [`transport-router-hub`](../../plans/_archive/2026-05-31_transport-router-hub/plan.md)).
@@ -2479,7 +2508,7 @@
 | `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-BM-001…007 (Удаление PluginRegistry/ObservablePlugin из base_manager, ..., `_track_error` тотален — мусор на входе становится фактом, а не броском) |
 | `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…009 (Удаление `_compat.py`, ..., `core/metrics.py` — заморозка S-27 с голосом и потолком) |
 | `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-DSP-001…004 (Извлечение ScenarioManager из Dispatcher, ..., Асимметрия дефолта `expects_full_message` (Dispatcher vs RouterManager)) |
-| `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…017 (Паттерн CRM (ChannelRoutingManager), ..., форма персистируемого числа живёт у владельца персистентности; колонка `metric` и ОДНО слово в `severity` (Task 3.1)) |
+| `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…018 (Паттерн CRM (ChannelRoutingManager), ..., `ObservabilityStore` держит `emergency_log` на четырёх миграциях открытия — рекурсия настоящая, не отговорка (Task 4.11, часть B)) |
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-LOG-001…012 (Удаление LogDispatcher, ..., Окно голоса — общий механизм с политикой процесса, факт и голос разделены (Ф1.4 / M17)) |
 | `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-CFG-001…004 (Dict at Boundary для ConfigStore, ..., Env-fallback как опциональная возможность) |
 | `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-MSG-001…010 (Message как value object с опциональной Pydantic-схемой, ..., Единый конверт команд — payload под `data`) |

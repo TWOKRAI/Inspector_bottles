@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Ф2, задача 2.12 — тесты АВТОРА на опасности механизма дросселя ``stats.enabled``.
+"""Ф2/Ф4, задачи 2.12 и 4.11 — тесты АВТОРА на опасности механизма дросселя
+``stats.enabled``.
 
 Приёмка (``test_f2_task212_repurposed_voice_window.py``) проверяет контракт
 СНАРУЖИ: сколько голосов и с каким текстом. Здесь — то, что видно только тому,
@@ -8,10 +9,21 @@
 эмиссии, вход не проверен по типу (произвольный оператор конфига), и потолок
 карты ключей — общий процессный ресурс, за который отвечает не эта функция.
 
-Ключ голоса — ``"stats.enabled.repurposed"`` (Р-12) — тот же, что использует
-``_complain_about_repurposed_enabled``; тесты не привязаны к внутреннему имени
-функции (правило проекта «шпион на имя стережёт имя, а не свойство»): они
-читают ``caplog`` по тексту записи, как и приёмка.
+**Дверь — Task 4.11, не прежний ``ObservabilityConfig.model_validate``.** До
+задачи 4.11 голос жил внутри валидатора схемы
+(``ObservabilityStatsConfig._complain_about_repurposed_enabled``), и этот файл
+звал его напрямую — вызов валидатора БЫЛ единицей события. Задача 4.11 сняла
+голос с валидатора целиком (он стал чистым парсером, см. его докстринг) и
+перенесла на стадию «применяю» —
+:func:`~..managers.observability_reload._voice_repurposed_stats_enabled`,
+вызываемую из :func:`~..managers.observability_reload.compose_managers_payload`.
+Каждый тест ниже переехал на эту дверь; что из старой формы теста перестало
+быть применимо — названо в докстринге соответствующего класса.
+
+Ключ голоса — ``"stats.enabled.repurposed"`` (Р-12) — не изменился при переезде;
+тесты не привязаны к внутреннему имени функции (правило проекта «шпион на имя
+стережёт имя, а не свойство»): они читают ``caplog`` по тексту записи, как и
+приёмка.
 """
 
 from __future__ import annotations
@@ -31,12 +43,22 @@ from multiprocess_framework.modules.logger_module.core.windowed_voice import (
     reset_voices_policy,
     set_voices_policy,
 )
-from multiprocess_framework.modules.process_module.configs.observability_config import (
-    ObservabilityConfig,
-    ObservabilityStatsConfig,
+from multiprocess_framework.modules.process_module.managers.observability_reload import (
+    _voice_repurposed_stats_enabled,
+    compose_managers_payload,
 )
 
 _KEY = "stats.enabled.repurposed"
+
+
+def _apply(section: dict, log_dir: str) -> None:
+    """Позвать новую дверь голоса — тонкая обёртка ради краткости тестов ниже.
+
+    ``compose_managers_payload`` строит полный конфиг менеджеров (побочный
+    эффект — голос), но тестам он не нужен: их предмет — САМ голос, а не
+    раскладка. Возврат отбрасывается сознательно.
+    """
+    compose_managers_payload(section, log_dir=log_dir)
 
 
 @pytest.fixture(autouse=True)
@@ -99,27 +121,29 @@ class TestHolderIsResolvedPerCallNotCapturedAtImport:
     истекло) утекало бы в следующий тест, который ожидает свежий голос.
     """
 
-    def test_reset_process_voices_is_visible_to_the_validator(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_reset_process_voices_is_visible_to_the_validator(self, tmp_path, caplog: pytest.LogCaptureFixture) -> None:
         caplog.set_level(logging.WARNING)
+        section = {"stats": {"enabled": False}}
+        log_dir = str(tmp_path)
 
-        ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        _apply(section, log_dir)
         assert len(_voices(caplog)) == 1, "первый голос обязан прозвучать — иначе тест ничего не проверяет"
         caplog.clear()
 
         # Внутри окна — молчит (используем это как контроль: без сброса
         # следующий вызов остался бы тихим).
-        ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        _apply(section, log_dir)
         assert _voices(caplog) == [], "второй вызов внутри окна не обязан быть тихим — тест не воспроизвёл базу"
         caplog.clear()
 
-        # Сброс держателя. Если валидатор резолвит ``process_voices()`` на
+        # Сброс держателя. Если проверка резолвит ``process_voices()`` на
         # каждый вызов (а не хранит старую ссылку), следующий вызов увидит
         # НОВЫЙ пустой держатель и заговорит немедленно — для него это первый
         # раз по новому ключу.
         reset_process_voices()
-        ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        _apply(section, log_dir)
         assert len(_voices(caplog)) == 1, (
-            "голос не прозвучал сразу после reset_process_voices() — валидатор, похоже, держит "
+            "голос не прозвучал сразу после reset_process_voices() — проверка, похоже, держит "
             "ссылку на держатель, схваченную один раз, а не резолвит process_voices() на каждый вызов"
         )
 
@@ -141,10 +165,12 @@ class TestConcurrentValidationsGiveOneVoiceAndCountEverySuppression:
     """
 
     def test_n_concurrent_validations_count_every_suppression_exactly(
-        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         clock = _fake_clock(monkeypatch)
         caplog.set_level(logging.WARNING)
+        section = {"stats": {"enabled": False}}
+        log_dir = str(tmp_path)
 
         n = 20
         barrier = threading.Barrier(n)
@@ -153,7 +179,7 @@ class TestConcurrentValidationsGiveOneVoiceAndCountEverySuppression:
         def _worker() -> None:
             try:
                 barrier.wait(timeout=5.0)
-                ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+                _apply(section, log_dir)
             except Exception as exc:  # pragma: no cover — диагностика гонки, не ожидаемый путь
                 errors.append(exc)
 
@@ -172,7 +198,7 @@ class TestConcurrentValidationsGiveOneVoiceAndCountEverySuppression:
         caplog.clear()
 
         clock.advance(1_000_000.0)  # заведомо больше любого разумного окна
-        ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        _apply(section, log_dir)
 
         re_voices = _voices(caplog)
         assert len(re_voices) == 1, re_voices
@@ -200,7 +226,9 @@ class TestFirstVoiceSurvivesASaturatedKeyMap:
     конфигов и шума больше всего.
     """
 
-    def test_first_voice_still_sounds_when_the_keymap_is_at_capacity(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_first_voice_still_sounds_when_the_keymap_is_at_capacity(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         caplog.set_level(logging.WARNING)
         holder = process_voices()
         ceiling = max_tracked_keys()
@@ -208,7 +236,7 @@ class TestFirstVoiceSurvivesASaturatedKeyMap:
             holder.take(f"unrelated_saturation_probe_key_{i}", 5.0)
         assert holder.tracked_keys() == ceiling, "проба не насытила карту ключей — тест не воспроизвёл предпосылку"
 
-        ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+        _apply({"stats": {"enabled": False}}, str(tmp_path))
 
         assert len(_voices(caplog)) == 1, (
             "первый голос про stats.enabled не прозвучал при насыщенной карте ключей держателя — "
@@ -220,34 +248,45 @@ class TestFirstVoiceSurvivesASaturatedKeyMap:
 # 4 — вход без типовой дисциплины: не падать, не голосить                     #
 # =========================================================================== #
 class TestMalformedInputNeitherRaisesNorVoices:
-    """Опасность 4: валидатор вызывается ПРЯМО (минуя конструирование Pydantic),
-    потому что интерес здесь — поведение ЭТОЙ функции на входе, которого сама
-    схема не обязана принимать. Для не-словаря/не-булева ``enabled``/пустого
-    входа условие ``data.get("enabled") is False`` обязано остаться ложным —
-    ни падения, ни голоса.
+    """Опасность 4 — переехала на новую дверь целиком, а не только вызовом.
+
+    До задачи 4.11 эта опасность звала валидатор схемы НАПРЯМУЮ, в обход
+    Pydantic, с payload'ом в форме под-словаря ``stats`` (интерес был в
+    поведении именно ЭТОЙ функции на мусорном входе). Тот вызов теперь
+    БЕССМЫСЛЕН как тест: валидатор — чистый парсер (``return data`` всегда,
+    см. его докстринг), и «не падает, не голосит» держится на нём вакуумно,
+    при любом входе, включая корректный.
+
+    Опасность переехала на функцию, где условие ``is False`` реально
+    осталось, — :func:`_voice_repurposed_stats_enabled`. Она принимает
+    словарь ВЕРХНЕГО уровня (``resolved``, тот же вид, что уходит в
+    ``expand_observability``), поэтому форма мусора здесь ДВУХ родов: сам
+    ``resolved`` не словарь, либо ``resolved["stats"]`` не словарь/не булев
+    ``False`` буквально.
     """
 
     @pytest.mark.parametrize(
         "payload",
         [
-            pytest.param(None, id="none"),
-            pytest.param("not-a-dict", id="string"),
-            pytest.param(42, id="int"),
-            pytest.param([], id="empty_list"),
-            pytest.param({}, id="empty_dict_enabled_absent"),
-            pytest.param({"enabled": "false"}, id="enabled_string_false"),
-            pytest.param({"enabled": None}, id="enabled_none"),
-            pytest.param({"enabled": 0}, id="enabled_int_zero_not_bool_false"),
+            pytest.param(None, id="resolved_none"),
+            pytest.param("not-a-dict", id="resolved_string"),
+            pytest.param(42, id="resolved_int"),
+            pytest.param([], id="resolved_empty_list"),
+            pytest.param({}, id="stats_absent"),
+            pytest.param({"stats": "not-a-dict"}, id="stats_not_a_dict"),
+            pytest.param({"stats": {}}, id="enabled_absent"),
+            pytest.param({"stats": {"enabled": "false"}}, id="enabled_string_false"),
+            pytest.param({"stats": {"enabled": None}}, id="enabled_none"),
+            pytest.param({"stats": {"enabled": 0}}, id="enabled_int_zero_not_bool_false"),
         ],
     )
     def test_no_crash_and_no_voice(self, caplog: pytest.LogCaptureFixture, payload: object) -> None:
         caplog.set_level(logging.WARNING)
 
-        result = ObservabilityStatsConfig._complain_about_repurposed_enabled(payload)
+        _voice_repurposed_stats_enabled(payload)  # не должно упасть
 
-        assert result is payload, "before-хук обязан вернуть данные БЕЗ изменений — это не преобразователь"
         assert _voices(caplog) == [], (
-            f"на входе {payload!r} валидатор проголосовал, хотя 'enabled' не равно ИМЕННО False "
+            f"на входе {payload!r} функция проголосовала, хотя 'enabled' не равно ИМЕННО False "
             f"(is False, не ==): {_voices(caplog)!r}"
         )
 
@@ -259,16 +298,27 @@ class TestEmissionOutsideLockAllowsReentry:
     """Опасность 5: докстринг ``windowed_voice`` требует эмиссию ВНЕ лока
     держателя — обработчик записи вправе позвать механизм СНОВА (тот же поток,
     тот же ключ), и удержание лока на время эмиссии превратило бы это в дедлок.
-    Здесь это воспроизводится: обработчик ``logging`` на записи валидатора сам
-    вызывает ``ObservabilityConfig.model_validate`` ещё раз, СИНХРОННО, из того
-    же потока. Правильная реализация не виснет (окно ещё не истекло — второй
-    вызов просто молчит); проверяется join'ом с дедлайном, а не оптимистичным
-    ожиданием.
+    Здесь это воспроизводится: обработчик ``logging`` на записи голоса сам
+    зовёт новую дверь (:func:`compose_managers_payload`) ещё раз, СИНХРОННО,
+    из того же потока. Правильная реализация не виснет (окно ещё не истекло —
+    второй вызов просто молчит); проверяется join'ом с дедлайном, а не
+    оптимистичным ожиданием.
+
+    Обработчик вешается на КОРНЕВОЙ логгер, а не на конкретное имя модуля:
+    задача 4.11 сменила адрес голоса (``FallbackLogger(__name__)`` в
+    ``observability_reload.py``, а не ``FallbackLogger("observability_config")``
+    в схеме), и тест не обязан знать точное имя — запись доходит до root
+    пропагацией в любом случае (тот же приём, что уже применяет соседний
+    ``_voices(caplog)``).
     """
 
-    def test_a_handler_reentering_the_same_key_does_not_deadlock(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_a_handler_reentering_the_same_key_does_not_deadlock(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         caplog.set_level(logging.WARNING)
         reentered = threading.Event()
+        section = {"stats": {"enabled": False}}
+        log_dir = str(tmp_path)
 
         class _ReentrantHandler(logging.Handler):
             def emit(self, record: logging.LogRecord) -> None:
@@ -279,16 +329,16 @@ class TestEmissionOutsideLockAllowsReentry:
                 # поток, тот же ключ, окно ещё не истекло: правильная
                 # реализация не виснет (эмиссия сделана вне лока держателя),
                 # просто молчит на этом повторном вызове.
-                ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+                _apply(section, log_dir)
 
-        logger = logging.getLogger("observability_config")
+        logger = logging.getLogger()  # root — тот же адрес, что слушает caplog
         handler = _ReentrantHandler()
         logger.addHandler(handler)
         try:
             done: list = []
 
             def _run() -> None:
-                ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+                _apply(section, log_dir)
                 done.append(True)
 
             thread = threading.Thread(target=_run, daemon=True)
@@ -331,13 +381,15 @@ class TestTheWindowComesFromProcessPolicyNotALiteral:
     """
 
     def test_moving_the_process_policy_changes_how_often_the_voice_speaks(
-        self, caplog: pytest.LogCaptureFixture
+        self, tmp_path, caplog: pytest.LogCaptureFixture
     ) -> None:
         caplog.set_level(logging.WARNING)
+        section = {"stats": {"enabled": False}}
+        log_dir = str(tmp_path)
 
         # Контроль-половина: при ДЕЙСТВУЮЩЕЙ политике три чтения дают один голос.
         for _ in range(3):
-            ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+            _apply(section, log_dir)
         assert len(_voices(caplog)) == 1, (
             f"контроль не воспроизвёлся: при дефолтной политике три чтения дали "
             f"{len(_voices(caplog))} голосов вместо одного"
@@ -349,7 +401,7 @@ class TestTheWindowComesFromProcessPolicyNotALiteral:
         set_voices_policy(window_sec=0.0)
         try:
             for _ in range(3):
-                ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+                _apply(section, log_dir)
             voices = _voices(caplog)
         finally:
             reset_voices_policy()
@@ -403,7 +455,7 @@ class TestTheVoiceReachesTheLogFileNotOnlyCaplog:
         process.register_manager("logger", logger, enabled=True)
         try:
             reset_process_voices()
-            ObservabilityConfig.model_validate({"stats": {"enabled": False}})
+            _apply({"stats": {"enabled": False}}, str(log_dir))
             logger.flush() if hasattr(logger, "flush") else None
             deadline = time.monotonic() + 5.0
             found: list = []

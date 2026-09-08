@@ -37,6 +37,7 @@ from ..configs.observability_layers import (
 )
 from ..configs.observation_policy import OBSERVATION_SECTION_KEY, normalized_observation_section
 from .observability_flight import FLIGHT_SECTION_KEY, apply_flight_recorder
+from .observability_ttl import AUDIT_ORIGIN as TTL_SWEEPER_ORIGIN
 from .observability_wiring import (
     EVENTS_SECTION_KEY,
     VOICES_SECTION_KEY,
@@ -160,10 +161,127 @@ def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
     return managers_payload_for_proc(managers_from_log_dir(resolve_base_log_dir(log_dir), model_cls=ManagersConfig))
 
 
+def _voice_repurposed_stats_enabled(resolved: Any, origin: Optional[str] = None) -> None:
+    """Голос ADR-PM-046 (смена смысла ``stats.enabled``) — на стадии «применяю», у КОТОРОЙ ЕСТЬ АВТОР.
+
+    Task 4.11 (вердикт CTO 2026-09-03, корень m1): голос переехал сюда ИЗ
+    валидатора схемы
+    (``ObservabilityStatsConfig._complain_about_repurposed_enabled`` — полная
+    история диагноза в его докстринге, включая замеры «6 срабатываний на один
+    reload / 18 на три подряд»). Причина переезда — не косметика: валидатор
+    зовётся ТРИЖДЫ на каждое действие оператора (стадии ``config.reload``:
+    проверить → применить → сверить, решение B2/Task 5.7), и окно
+    (Task 2.12) дросселировало РАЗБОРЫ, а не действия — «подавлено: N» после
+    трёх ``config.reload`` называло 17 вместо 2.
+
+    **Почему здесь, а не внутри** :func:`~..configs.observability_config.
+    expand_observability` **и не внутри модели схемы.** Эта функция зовётся раз
+    на ПЕРЕСБОРКУ, а не раз на разбор. Разница существенная: разборов у одного
+    ``config.reload`` шесть (стадии «проверить» → «применить» → «сверить»,
+    решение B2/Task 5.7), пересборка одна.
+
+    **Дорог пересборки ШЕСТЬ, и это число посчитано грепом, а не выведено**
+    (вердикт CTO 2026-09-08; прежняя редакция этого докстринга называла две и
+    утверждала, что функция «ЕДИНСТВЕННАЯ» и зовётся «РОВНО один раз на действие
+    оператора» — оба слова стояли без воспроизведения, и оба оказались неверны):
+
+    * **рождение менеджеров** — ``ProcessManagers._managers_config_for_creation``
+      (``process_managers.py:160``), зовёт :func:`compose_managers_payload`
+      напрямую, БЕЗ ``origin``;
+    * ``boot:layers`` / ``boot:companion`` — ``process_module.py:478,496``;
+    * ``watcher:app`` / ``watcher:recipe`` — :func:`make_observability_on_reload`
+      в этом модуле (замыкание ``_on_reload``);
+    * ``command:config.reload`` / ``switch:broadcast`` — ``builtin_commands.py``;
+    * ``switch:<reason>`` — ``process_manager_process.py:2419``;
+    * ``ttl-sweeper`` — :mod:`.observability_ttl`, такт heartbeat.
+
+    **Пересборок на одно действие бывает больше одной, и это не дефект.** На boot
+    оркестратора их две — рождение менеджеров и пересборка на boot; живой стенд
+    (`plans/observability-closure/stand-task-4-11.md`, §3) это и намерил: первый
+    ``config.reload`` после boot сказал «подавлено: 1», и эта единица — вторая
+    пересборка boot, а не проглоченное действие человека.
+
+    **``ttl-sweeper`` — единственная дорога БЕЗ АВТОРА, и здесь она молчит**
+    (вердикт CTO 2026-09-08, вариант «б»). Довод не в том, что таймер «менее
+    важен»: текст этого голоса — совет ТОМУ, КТО ПОСТАВИЛ КЛЮЧ («замените на
+    ``enabled: true, log_snapshots: false``). Свип перепрофилированный ключ не
+    вводит: ``false``, который он применяет, пришёл из L1/L2 и уже прозвучал
+    тогда, когда этот слой применял его автор. Свип лишь снимает то, что ключ
+    маскировало, — и об ЭТОМ у него есть собственный голос
+    (``observability_ttl._announce_revert``, WARNING, с именем истёкшего ключа).
+    Дорога не молчит; она перестаёт повторять чужой совет.
+
+    Цена решения названа и записана (ADR-PM-048): если L3-правка
+    ``stats.enabled: true`` маскировала ``false`` из L1 в момент применения L1,
+    а потом истекла — совет не прозвучит до следующего boot. Дом подсказки —
+    ``_announce_revert``, единственное место, где известно, ЧТО именно истекло.
+
+    Стадии «проверить» и «сверить» эту функцию НЕ зовут — они читают
+    ``expand_observability`` НАПРЯМУЮ (:func:`observability_verified` и
+    ``unknown_section_keys``), минуя обёртку. Голос внутри самой
+    ``expand_observability`` прозвучал бы и на стадии «сверить» тоже — то есть
+    дважды на один ``config.reload``, и число снова стало бы не тем, которое
+    ждёт читатель.
+
+    Args:
+        resolved: СЫРОЙ словарь секции ``observability`` (тот же, что уйдёт в
+            ``ObservabilityConfig.model_validate`` внутри ``expand_observability``
+            следующей строкой) — не раскладка. Секция ``stats`` может отсутствовать
+            вовсе (молчащий слой) — тогда функция молчит.
+        origin: признак дороги пересборки. ``ttl-sweeper`` → молчание (см. выше).
+            ``None`` — дорога рождения менеджеров, у неё автор есть (процесс
+            рождается по чьей-то команде), поэтому она голосит.
+
+    Не падает и не голосит ни на каком постороннем входе (мусор вместо словаря,
+    ``stats`` не словарь, ``enabled`` не булев ``False`` буквально) — вход сюда
+    приходит из разрешённых слоёв, а не напрямую от оператора, но граница
+    остаётся защищённой той же дисциплиной, что была у валидатора
+    (``is False``, а не ``== False``: строка ``"false"``/``0``/``None`` — не тот
+    же факт, что булев ``False``).
+    """
+    if origin == TTL_SWEEPER_ORIGIN:
+        return
+
+    section = resolved.get("stats") if isinstance(resolved, dict) else None
+    if not isinstance(section, dict) or section.get("enabled") is not False:
+        return
+
+    from ..._fallback import FallbackLogger
+    from ...logger_module.core.windowed_voice import compose_voice_text, process_voices
+
+    # Держатель берётся ОДИН раз в локальную переменную: ``process_voices()``
+    # отдаёт процессный синглтон, который фикстуры тестов подменяют целиком, и
+    # взять слот у одного держателя, а вернуть другому значило бы потерять долг.
+    holder = process_voices()
+    voice_key = "stats.enabled.repurposed"
+    voiced, suppressed = holder.take(voice_key, None)
+    if voiced:
+        delivered = False
+        try:
+            FallbackLogger(__name__).warning(
+                compose_voice_text(
+                    "stats.enabled: false — с Ф2 этот ключ означает ПЛОСКОСТЬ ЧИСЕЛ: "
+                    "метрики не будут собираться вовсе (окно пустое, все каналы "
+                    "статистики молчат). Прежний смысл «не писать снапшоты в журнал» "
+                    "переехал в stats.log_snapshots — если вы хотели именно его, "
+                    "замените на 'enabled: true, log_snapshots: false' (ADR-PM-046)",
+                    suppressed,
+                )
+            )
+            delivered = True
+        finally:
+            # Task 4.13: бросок приёмника уходит вызывающему дальше, как и
+            # прежде, но слот при этом обязан вернуться — совет автору ключа
+            # иначе замолчал бы на всё окно после первой же потери.
+            if not delivered:
+                holder.release(voice_key, suppressed)
+
+
 def compose_managers_payload(
     resolved: Dict[str, Any],
     *,
     log_dir: Optional[str] = None,
+    origin: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Разрешённые слои → конфиги менеджеров. **Одна сборка на два адресата.**
 
@@ -212,10 +330,23 @@ def compose_managers_payload(
     Returns:
         ``{"logger": …, "error": …, "stats": …, "command": …}`` — слои, наложенные
         на базу L0 машинного контекста.
+
+    Task 4.11: эта функция — единственный адресат голоса ADR-PM-046
+    (:func:`_voice_repurposed_stats_enabled`), потому что она — единственный шов,
+    через который проходит КАЖДАЯ пересборка. Слова «раз на действие оператора»
+    здесь стояли и были неточны: дорог пересборки шесть, на одно действие их
+    бывает две (boot оркестратора), а у одной — ``ttl-sweeper`` — автора нет
+    вовсе. Полный разбор и вердикт — в докстринге самого голоса.
+
+    Args (продолжение):
+        origin: признак дороги, прокидывается в голос. ``None`` у дороги
+            рождения менеджеров — там ``origin`` не заведён, и это не упущение:
+            рождение однозначно, различать его не с чем.
     """
     from ...data_schema_module import deep_merge
     from ..configs.managers_config import merge_managers
 
+    _voice_repurposed_stats_enabled(resolved, origin)
     expanded = expand_observability(resolved)
     base = base_managers_payload(log_dir)
 
@@ -1092,6 +1223,10 @@ PLANE_COUNTER_KEYS: tuple = (
     # вместе с выброшенным по потолку ключом» — второе делает первое честным.
     "windowed_suppressed",
     "windowed_keys_evicted",
+    # Task 4.13 — третий ключ той же тройки, и он делает первые два честными:
+    # «подавлено N» без него одинаково означает работающее окно и приёмника,
+    # который не принял ни одной записи (слот съедался решением, а не доставкой).
+    "windowed_delivery_failed",
     # Ф7.х — карта ключей дышит: подметённые протухшие. Пара к предыдущему ключу:
     # растёт expired — потолок работает как задумано; стоит expired при растущем
     # saturated — карта забита горячими ключами, дроссель по повторяемости против
@@ -1349,6 +1484,7 @@ def apply_observability_layers(
         with layers.lock:
             applied = _rebuild_and_apply(
                 layers,
+                origin=origin,
                 logger=logger,
                 error=error,
                 stats=stats,
@@ -1392,6 +1528,7 @@ def apply_observability_layers(
 def _rebuild_and_apply(
     layers: "ObservabilityLayers",
     *,
+    origin: Optional[str] = None,
     logger: Any,
     error: Any,
     stats: Any,
@@ -1412,7 +1549,7 @@ def _rebuild_and_apply(
     # получатели. Снимаем её до `expand_observability`, иначе `ObservabilityConfig`
     # отверг бы незнакомый ключ, и слой оказался бы невыразим.
     telemetry_layered = resolved.pop(TELEMETRY_KEY, None)
-    expanded = compose_managers_payload(resolved, log_dir=log_dir)
+    expanded = compose_managers_payload(resolved, log_dir=log_dir, origin=origin)
 
     if logger is not None:
         logger.reconfigure(expanded["logger"])

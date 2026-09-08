@@ -307,5 +307,6 @@ headless-шторм в `gui` снят (D8, ADR-PMM-025).
 | «подключаю новый модуль» | [`observability/NEW_MODULE_RECIPE.md`](observability/NEW_MODULE_RECIPE.md) |
 | «куда физически попала запись» | [`observability/SINKS_MAP.md`](observability/SINKS_MAP.md) |
 | «как покрутить на живом стенде» | [`observability/CONTROL_PANEL.md`](observability/CONTROL_PANEL.md) |
+| «принять как потребитель: что есть, чем управлять, что наблюдаемо» | [`observability/ACCEPTANCE_CHECKLIST.md`](observability/ACCEPTANCE_CHECKLIST.md) + зонд `backend_ctl/probes/probe_observability_consumer_acceptance.py` (`/core:quality:observability-acceptance`); эталон [`docs/reviews/2026-09-08_observability-consumer-acceptance.md`](../../docs/reviews/2026-09-08_observability-consumer-acceptance.md) |
 | «какие решения приняты и почему» | [`../DECISIONS.md`](../DECISIONS.md) + локальные `DECISIONS.md` модулей |
 | «что ещё не сделано» | [`plans/observability-review-remediation.md`](../../plans/observability-review-remediation.md) |

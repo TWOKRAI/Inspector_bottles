@@ -31,6 +31,7 @@
 | «Что пользователь нажал в GUI?» (события кнопок/табов агенту) | **backend_ctl** (`ui_tap` → события `ui.event` в `events_page(plane="ui")`) |
 | Состояние **виджетов**, клики, снимок UI | qt-mcp (`QT_MCP_PROBE=1`) — НЕ backend_ctl |
 | Поиск/рефакторинг исходников | qex / Serena / Grep — driver видит только runtime |
+| «Принять наблюдаемость как потребитель» (ручки, стор, хвосты, задержки — таблица вердиктов) | **backend_ctl** зонд [`probe_observability_consumer_acceptance`](probes/probe_observability_consumer_acceptance.py), `/core:quality:observability-acceptance`; чек-лист `multiprocess_framework/docs/observability/ACCEPTANCE_CHECKLIST.md` |
 
 ## Режимы отладки (бэкенд / фронтенд / совместно)
 

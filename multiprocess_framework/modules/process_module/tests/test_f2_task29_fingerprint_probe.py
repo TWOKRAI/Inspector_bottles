@@ -28,6 +28,7 @@ from multiprocess_framework.modules.process_module.configs.observability_config 
     ObservabilityConfig,
 )
 from multiprocess_framework.modules.process_module.managers.observability_reload import (
+    compose_managers_payload,
     observability_verified,
 )
 
@@ -381,25 +382,29 @@ class TestAnExtinguishedSectionIsNamedBySchemaNotByLayout:
 class TestTheProbeDoesNotSpeakForTheOperator:
     """Зонд подставляет ВТОРОЙ ПОЛЮС значения — и не смеет этим шуметь.
 
-    У ``stats`` стоит ``model_validator(mode="before")``, который на ``enabled:
-    false`` пишет оператору предупреждение «метрики не будут собираться вовсе»
+    У ``stats`` стоял ``model_validator(mode="before")``, который на ``enabled:
+    false`` писал оператору предупреждение «метрики не будут собираться вовсе»
     (ADR-PM-046). Собери зонд второй полюс словарём и прогони через
     ``model_validate`` — и оператор, попросивший ``enabled: true``, получил бы в
     журнале голос о ВЫКЛЮЧЕННОЙ плоскости. Ложный голос дороже отсутствующего:
     его читают. Отсюда ``model_copy`` в ``_with_leaf``.
 
-    **Сброс окна голоса обязателен для ОБЕИХ половин пары, и по разным причинам
-    (Task 2.12, m1).** С задачи 2.12 предупреждение дросселируется окном по
-    ключу ``stats.enabled.repurposed``, держатель — процессный синглтон:
+    **Задача 4.11 сняла голос с валидатора ЦЕЛИКОМ** (он стал чистым парсером)
+    и перенесла его на стадию «применяю» —
+    :func:`~.observability_reload.compose_managers_payload`. Стадия «сверить»
+    (``observability_verified``, читает ``expand_observability`` напрямую, эту
+    обёртку не зовёт — см. докстринг :func:`~.observability_reload.
+    _voice_repurposed_stats_enabled`) теперь молчит ВСЕГДА, а не только когда
+    зонд подставляет чужой полюс. Старый контроль «оператор правда гасит —
+    голос на месте» проверял это через ТУ ЖЕ дверь (``observability_verified``)
+    и красился намеренно верно: после переезда голоса эта дверь голосить не
+    обязана НИКОГДА — она не апрув действия, а сверка расхождений.
 
-    * у половины «оператор правда гасит» без сброса голос съедает сосед,
-      прогнавший ту же секцию раньше в том же процессе — измерено, тест краснел
-      в полном прогоне ``process_module/tests/`` (``test_f2_task22_schema_wiring.py``
-      идёт алфавитно раньше и реалит секцию со ``stats.enabled: false``);
-    * у половины «зонд молчит» сброс нужен ЗЕРКАЛЬНО: без него утверждение
-      «записей нет» зелено и тогда, когда голос просто подавлен чужим окном, то
-      есть тест проходил бы, не проверив ничего. Это тот же класс, что «ноль
-      наблюдений выглядит как результат наблюдения».
+    Новый контроль ниже доказывает не «эта дверь голосит на настоящем
+    отключении», а **«тишина здесь — верная граница стадии, а не сломанный
+    механизм»**: та же секция через ПРАВИЛЬНУЮ дверь стадии «применяю»
+    (``compose_managers_payload``) голос даёт. Без этого контроля первый тест
+    был бы зелён и у сломанного механизма, который не голосит вовсе нигде.
     """
 
     @pytest.fixture(autouse=True)
@@ -414,23 +419,29 @@ class TestTheProbeDoesNotSpeakForTheOperator:
     def test_asking_to_enable_the_plane_logs_no_warning_about_disabling_it(self, caplog: Any) -> None:
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="observability_config"):
+        with caplog.at_level(logging.WARNING):
             observability_verified({"stats": {"enabled": True}}, {"stats": {"enabled": True}})
 
         assert caplog.records == [], f"зонд заговорил за оператора: {[r.getMessage()[:80] for r in caplog.records]}"
 
-    def test_the_operators_own_disabling_still_speaks(self, caplog: Any) -> None:
-        """Контроль к тесту выше: голос НА МЕСТЕ, когда оператор правда гасит плоскость.
-
-        Без этой половины тест выше зелен и у механизма, который заглушил
-        предупреждение целиком, — то есть доказывал бы ровно противоположное
-        задуманному.
+    def test_the_verify_stage_never_voices_the_apply_stage_still_does(self, tmp_path, caplog: Any) -> None:
+        """Task 4.11: контроль к тесту выше — стадия «сверить» молчит ВСЕГДА теперь,
+        а не только на подставленном полюсе; стадия «применяю» на ТОЙ ЖЕ секции
+        голосит по-прежнему — тишина выше не значит «механизм сломан».
         """
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="observability_config"):
+        with caplog.at_level(logging.WARNING):
             observability_verified({"stats": {"enabled": False}}, {"stats": {"enabled": False}})
+        assert caplog.records == [], (
+            "стадия «сверить» не имеет права голосить с задачи 4.11 — голос живёт "
+            f"на стадии «применяю»: {[r.getMessage()[:80] for r in caplog.records]}"
+        )
+        caplog.clear()
 
+        compose_managers_payload({"stats": {"enabled": False}}, log_dir=str(tmp_path))
         assert any("stats.enabled" in r.getMessage() for r in caplog.records), (
-            f"предупреждение ADR-PM-046 пропало вовсе: {[r.getMessage()[:80] for r in caplog.records]}"
+            f"та же секция через дверь «применяю» не проголосовала: "
+            f"{[r.getMessage()[:80] for r in caplog.records]} — тишина стадии «сверить» "
+            "выше была бы неотличима от сломанного механизма без этого контроля"
         )

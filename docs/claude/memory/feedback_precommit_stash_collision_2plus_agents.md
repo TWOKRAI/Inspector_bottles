@@ -40,3 +40,17 @@ race near-certain, not theoretical.
 - Before assuming a commit landed, verify: `git log --oneline -3` + `git status --short`.
   "Commit failed" after this failure mode means "re-verify everything in the tree," not
   "nothing changed" — collateral files can revert even though your own commit never ran.
+
+**Refined 2026-09-08 (three failed commits in a row, then reproduced and fixed).** The collision
+does NOT need a second agent to be committing at the same time, and `git diff --name-only` being
+empty proves nothing. `git commit -- <pathspec>` builds a TEMPORARY index from HEAD plus the
+pathspec files; pre-commit computes "unstaged" against that temporary index, so any file that is
+staged in the real index but outside the pathspec (here `docs/sessions/<date>.md`, staged by a
+neighbour's earlier attempt) shows up as an unstaged diff, gets stashed, the session-log hook
+appends to that same file, and the stash fails to re-apply at the hook's insertion point. Fix that
+worked: bring the session file to HEAD in both tree and index (`git show HEAD:path > path && git add path`),
+commit with the pathspec, then realign the index to the new HEAD the same way. The 19 dropped lines
+were the hook's own record of a failed attempt — worthless, but keep a copy before dropping.
+Line endings (CRLF in tree vs LF in index) were the wrong hypothesis; ruled out by the
+`autocrlf=false` diff being empty and the fourth failure. See also
+[[feedback_a_hook_that_writes_a_shared_file_deadlocks_two_writers]].

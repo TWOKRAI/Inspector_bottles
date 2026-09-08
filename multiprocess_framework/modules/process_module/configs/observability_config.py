@@ -30,12 +30,21 @@ from typing import Annotated, Any, Dict, List, Optional
 
 from pydantic import Field, field_validator, model_validator
 
+from ..._fallback import FallbackLogger
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...observability_declarations import declared_rules
 from ...logger_module.configs.logger_manager_config import MIN_BURST_RESET_SEC
 from ...statistics_module import DEFAULT_LOG_LINE_MAX_BYTES, DEFAULT_MAX_SERIES
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 from .observation_policy import ObservationPolicyConfig
+
+#: Task 4.11: адресат голоса `_complain_about_removed_batching_keys` — оператор,
+#: правящий конфиг, а не самоотчёт сломавшегося маршрута наблюдаемости, поэтому
+#: вид (`FallbackLogger`), а не аварийный выход (`emergency_log`). Импорт
+#: `_fallback.py` безопасен на уровне модуля — сам конструктор `FallbackLogger`
+#: не делает ни одного импорта (см. докстринг `_fallback.py`), вид подтягивается
+#: лениво на первой записи.
+_logger = FallbackLogger(__name__)
 
 #: Ключи, снятые Ф7.4 вместе с батчингом записи. Схема принимает лишние ключи
 #: МОЛЧА (проверено), поэтому без сверки конфиг с ``enable_batching: true`` после
@@ -534,35 +543,26 @@ class ObservabilityStatsConfig(SchemaBase):
         чтение после окна тишины) снова говорит вслух и называет, сколько
         попыток голоса было подавлено с прошлой записи.
 
-        Ключ голоса — ``stats.enabled.repurposed`` (решение владельца Р-12,
-        план ``observability-closure``, задача 2.12) — собственный, ни с одним
-        соседним дросселируемым голосом не общий. Держатель
-        (:func:`~.windowed_voice.process_voices`) резолвится НА КАЖДЫЙ вызов, а
-        не захватывается в переменную при импорте:
-        :func:`~.windowed_voice.reset_process_voices` подменяет глобальный
-        держатель целиком, и захваченная ссылка сделала бы фикстуры сброса
-        тестов невидимыми для этого валидатора, а состояние — протекающим
-        между чтениями конфига.
-        """
-        if isinstance(data, dict) and data.get("enabled") is False:
-            from ..._fallback import FallbackLogger
-            from ...logger_module.core.windowed_voice import (
-                compose_voice_text,
-                process_voices,
-            )
+        **Задача 4.11 (вердикт CTO 2026-09-03, корень m1) сняла голос с этого
+        валидатора целиком.** Всё, что написано выше в этом докстринге, —
+        история диагноза, а не описание текущего поведения: причина была не в
+        «Pydantic пересобирает модели», а в том, что голос сидел ВНУТРИ функции,
+        которую зовут как парсер, а парсер вызывается трижды на КАЖДОЕ действие
+        оператора (стадии ``config.reload``: проверить → применить → сверить,
+        решение B2/Task 5.7) — отсюда шесть разборов на reload и «подавлено: 17»
+        после трёх reload'ов за одно окно, число не той величины, которую ждёт
+        читатель («действия», а не «разборы»).
 
-            voiced, suppressed = process_voices().take("stats.enabled.repurposed", None)
-            if voiced:
-                FallbackLogger("observability_config").warning(
-                    compose_voice_text(
-                        "stats.enabled: false — с Ф2 этот ключ означает ПЛОСКОСТЬ ЧИСЕЛ: "
-                        "метрики не будут собираться вовсе (окно пустое, все каналы "
-                        "статистики молчат). Прежний смысл «не писать снапшоты в журнал» "
-                        "переехал в stats.log_snapshots — если вы хотели именно его, "
-                        "замените на 'enabled: true, log_snapshots: false' (ADR-PM-046)",
-                        suppressed,
-                    )
-                )
+        Голос теперь звучит на стадии ПРИМЕНЕНИЯ —
+        :func:`~..managers.observability_reload.compose_managers_payload`
+        (единственная функция с этим смыслом; её докстринг несёт то же имя
+        ключа окна, тот же текст ADR-PM-046 и довод в пользу окна по ключу, а
+        не процессного флага). Этот валидатор — ЧИСТЫЙ ПАРСЕР: никакого
+        ввода-вывода, ни на чтении, ни на записи, никогда. Пустое тело здесь —
+        не заглушка «пока не готово», а окончательная форма: разбор секции не
+        имеет права видеть в момент разбора, применяется ли значение вообще —
+        это знание принадлежит стадии «применяю», и только ей.
+        """
         return data
 
     @field_validator("log_level", mode="before")
@@ -838,17 +838,21 @@ class ObservabilityConfig(SchemaBase):
 
         Отказ (``raise``) был бы честнее по форме, но дороже по существу: конфиг с
         унаследованной ручкой встал бы колом на боевом стенде из-за строки, которая
-        ничего не делает. Поэтому — предупреждение через аварийный вывод (он работает
-        до подъёма логгера, а конфиг читают именно тогда) и продолжение работы.
+        ничего не делает. Поэтому — предупреждение через вид (продолжение работы).
+
+        **Задача 4.11: адресат — ВИД (``FallbackLogger``), а не аварийный выход.**
+        Прежний довод («аварийный выход работает до подъёма логгера, а конфиг
+        читают именно тогда») был тем же ложным выводом, что и у соседнего
+        валидатора ``_complain_about_repurposed_enabled`` (замер задачи 2.12 —
+        см. её докстринг): вид работает до подъёма логгера ТОЖЕ (буфер ранних
+        записей), и вдобавок доезжает до файла журнала, а не только в stderr.
+        Оператор, правящий унаследованную ручку батчинга, — не сломавшийся
+        маршрут наблюдаемости, а адресат обычного предупреждения.
         """
         if isinstance(data, dict):
             stale = [k for k in REMOVED_BATCHING_KEYS if k in data]
             if stale:
-                from ..._fallback import emergency_log
-
-                emergency_log(
-                    "observability_config",
-                    "WARNING",
+                _logger.warning(
                     "конфиг наблюдаемости содержит снятые ключи %s: батчинг записи убран "
                     "(Ф7.4, замер показал ноль экономии на границе ОС и худший хвост p99) — "
                     "запись теперь синхронна ВСЕГДА, эти ключи не делают ничего",
