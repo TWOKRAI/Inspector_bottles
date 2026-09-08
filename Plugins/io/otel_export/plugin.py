@@ -89,7 +89,7 @@ from multiprocess_framework.modules.channel_routing_module.observability.batch_d
 from multiprocess_framework.modules.channel_routing_module.observability.record_display import (
     stamp_observed,
 )
-from multiprocess_framework.modules.logger_module.core.windowed_voice import log_windowed
+from multiprocess_framework.modules.logger_module.core.windowed_voice import log_windowed, process_voices
 from multiprocess_framework.modules.message_module.builders.command_envelopes import (
     build_command_message,
 )
@@ -117,6 +117,9 @@ RECORD_MESSAGE_KEY = "observability.record"
 
 #: Команды брокера подписок. Живут на оркестраторе (`ProcessManager`), имена —
 #: из `command_contracts.ObservabilityTailBrokerParams`.
+#: Ключ окна публикации потерь. Свой, а не общий с голосом отказа доставки:
+#: иначе две разные вещи делили бы один слот и глушили друг друга.
+OVERFLOW_METRIC_KEY = "otel_export.dropped_overflow.metric"
 SUBSCRIBE_COMMAND = "observability.tail.subscribe_all"
 UNSUBSCRIBE_COMMAND = "observability.tail.unsubscribe_all"
 
@@ -303,6 +306,8 @@ class OtelExportPlugin(ProcessModulePlugin):
         #: пула Resource: канал считает нарастающим итогом, `record_metric` —
         #: counter, и отдать абсолют значило бы сложить его само с собой.
         self._queue_dropped_seen = 0
+        #: Накопленная, но ещё не опубликованная потеря (см. `_publish_overflow`).
+        self._overflow_pending = 0
         #: Причина последнего ОТКАЗА доставки. Живёт здесь, потому что отправка
         #: ушла в поток дренажа: команда `flush` больше не видит исход
         #: собственными глазами и без этого поля отвечала бы «failed» без слов.
@@ -922,6 +927,9 @@ class OtelExportPlugin(ProcessModulePlugin):
         queue.close(max(0.0, deadline - time.monotonic()))
         written_after, lost_after = queue.totals()
         self._sync_queue_counters()
+        # Остаток окна публикуется БЕЗУСЛОВНО: последняя порция потерь иначе
+        # исчезнет вместе с процессом, а после падения ищут именно её.
+        self._publish_overflow(force=True)
         return FlushOutcome(flushed=written_after - written_before, lost=lost_after - lost_before)
 
     def _sync_queue_counters(self) -> None:
@@ -947,7 +955,37 @@ class OtelExportPlugin(ProcessModulePlugin):
             if delta <= 0:
                 return
             self._queue_dropped_seen = dropped
-        self._bump("dropped_overflow", delta)
+            self._overflow_pending += delta
+        self._publish_overflow()
+
+    def _publish_overflow(self, *, force: bool = False) -> None:
+        """Опубликовать накопленную потерю ОДНИМ вызовом на окно, не на запись.
+
+        **Зачем окно.** Прежняя редакция звала `record_metric` и `publish_metric`
+        на КАЖДУЮ вытесненную запись: 952 вытеснения — 952 вызова метрики (счёт
+        снят вторым проходом ревью). Это ровно тот шаблон, который модуль
+        запрещает голосу двадцатью строками ниже: работа растёт именно тогда,
+        когда система перегружена, — недоступный приёмник превращает поток
+        вытеснений в поток публикаций.
+
+        **Почему нельзя просто задросселировать.** У голоса подавленная запись
+        выбрасывается, и это законно: строка повторяет предыдущую. У счётчика
+        потерь выбросить нельзя — потеряется сама ВЕЛИЧИНА. Поэтому окно решает
+        только «пора ли говорить», а дельты копятся в `_overflow_pending` и уходят
+        одной суммой. Тождество потерь Task 3.4 от этого не страдает: сумма та же,
+        реже метки времени.
+
+        `force=True` — останов: остаток обязан уйти, иначе последняя порция потерь
+        исчезнет вместе с процессом, а именно её и ищут после падения.
+        """
+        voices = process_voices()
+        voiced, _suppressed = voices.take(OVERFLOW_METRIC_KEY, VOICE_WINDOW_SEC)
+        if not (voiced or force):
+            return
+        with self._counters_lock:
+            pending, self._overflow_pending = self._overflow_pending, 0
+        if pending:
+            self._bump("dropped_overflow", pending)
 
     def _sync_resource_evictions(self) -> None:
         """Перенести вытеснения пула в числовую плоскость ДЕЛЬТОЙ, не значением.
@@ -1032,6 +1070,11 @@ class OtelExportPlugin(ProcessModulePlugin):
         здесь.
         """
         self._sync_queue_counters()
+        # Окно публикации НЕ имеет права занижать ответ оператору: он спросил —
+        # значит число обязано быть текущим. Регрессию поймал существующий сторож
+        # 2.1: при трёх вытеснениях status показывал 1, потому что словарь
+        # счётчиков обновляет только публикация, а её держало окно.
+        self._publish_overflow(force=True)
         with self._counters_lock:
             counters = dict(self._counters)
         endpoint = self._cfg.endpoint if self._cfg is not None else getattr(self._reg, "endpoint", "")
