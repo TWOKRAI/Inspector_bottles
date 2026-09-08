@@ -472,16 +472,28 @@ class TestOverflowCounterHasAnAchievabilityPair:
     ) -> None:
         boot = _boot_blocked_with_pilot(monkeypatch)
         try:
+            written = 0
 
             def _feed() -> None:
-                # > дефолт BatchDrainWorker (1024) И > дефолт OtelExportConfig.max_queue_size (2048) —
-                # переполнение гарантировано независимо от того, замаплен ли конфиг на ёмкость.
-                for i in range(3000):
-                    boot.handler(
-                        {"command": "observability.record", "data": {"records": [_log_record(f"m{i}", float(i))]}}
-                    )
+                # АРБИТРАЖ ВЕДУЩЕГО 2026-09-08 (второй проход ревью): литерал 3000
+                # давал флейк ~15 %. Комментарий обещал «переполнение гарантировано»,
+                # и это оказалось неправдой: замер ревью — `q_dropped=0` при
+                # `depth=1751 < cap=2048`, потому что часть записей уезжает в полёт
+                # к заблокированному стоку, и сколько именно — решает планировщик.
+                # Фраза «гарантировано» без воспроизведения рядом — ровно то, что
+                # правила проекта запрещают. Условие выхода теперь — сам предмет.
+                nonlocal written
+                while written < 40000 and not _read_dropped_overflow(boot.cmd, boot.recorded):
+                    for i in range(500):
+                        boot.handler(
+                            {
+                                "command": "observability.record",
+                                "data": {"records": [_log_record(f"m{written + i}", float(i))]},
+                            }
+                        )
+                    written += 500
 
-            _call_with_deadline(_feed, timeout=10.0, message="приём 3000 записей при висящем стоке")
+            _call_with_deadline(_feed, timeout=30.0, message="приём записей до переполнения при висящем стоке")
 
             dropped = _read_dropped_overflow(boot.cmd, boot.recorded)
             assert dropped is not None, (
@@ -490,8 +502,7 @@ class TestOverflowCounterHasAnAchievabilityPair:
                 "состояние ДО реализации Task 2.4)"
             )
             assert dropped > 0, (
-                f"3000 записей в очередь с ЛЮБЫМ правдоподобным потолком (1024 или 2048) обязаны "
-                f"дать dropped_overflow > 0, получено {dropped!r}"
+                f"{written} записей при заблокированном стоке обязаны дать dropped_overflow > 0, получено {dropped!r}"
             )
             overflow_voices = [c for c in boot.log_windowed if "overflow" in c["key"]]
             assert len(overflow_voices) == 1, (
