@@ -131,9 +131,17 @@ class TestProbeDoesNotOutliveItsBatch:
         assert "trace_id" in second.reason, f"причина не называет настоящий отказ (перевод записи): {second.reason!r}"
 
     def test_success_after_a_failure_leaves_no_reason_at_all(self) -> None:
-        """Пара: починившийся приёмник не имеет права нести причину прошлого отказа."""
+        """Пара: починившийся приёмник не имеет права нести причину прошлого отказа.
+
+        **Код взят НЕповторяемый, и это не деталь.** Первая редакция теста отвечала
+        503 — а его SDK считает временным и ретраит: вторая попытка возвращала 200,
+        отказа не случалось вовсе, и тест падал на своём же предохранителе
+        «сценарий не воспроизведён» (). То есть
+        красным был не предмет, а посылка о чужом поведении. 403 SDK не повторяет,
+        поэтому отказ доезжает до нашего кода и паре есть что проверять.
+        """
         sdk = OTLPLogExporter(endpoint=ENDPOINT)
-        answers = [SimpleNamespace(ok=False, status_code=503, reason="Service Unavailable")]
+        answers = [SimpleNamespace(ok=False, status_code=403, reason="Forbidden")]
 
         def _post(*_a: Any, **_k: Any) -> Any:
             if answers:
@@ -144,7 +152,7 @@ class TestProbeDoesNotOutliveItsBatch:
         exporter = OtlpHttpExporter(_cfg(), sdk_factory=lambda: sdk)
 
         broken = exporter.export([_record()])
-        assert "503" in broken.reason, f"сценарий не воспроизведён: {broken.reason!r}"
+        assert "403" in broken.reason, f"сценарий не воспроизведён: {broken.reason!r}"
 
         healed = exporter.export([_record()])
         assert healed.failed == 0, f"починившийся приёмник отчитался отказом: {healed!r}"
