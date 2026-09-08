@@ -185,15 +185,38 @@ class ObservableMixin(IObservableMixin):
         kwargs.setdefault("module", self._observability_source())
         self._call_manager("logger", "debug", message, **kwargs)
 
-    def _log_info(self, message: str, **kwargs) -> None:
-        """Логирование уровня INFO через logger manager."""
-        kwargs.setdefault("module", self._observability_source())
-        self._call_manager("logger", "info", message, **kwargs)
+    def _log_info(self, message: str, **kwargs) -> bool:
+        """Логирование уровня INFO через logger manager.
 
-    def _log_warning(self, message: str, **kwargs) -> None:
-        """Логирование уровня WARNING через logger manager."""
+        Returns:
+            Доехала ли запись до приёмника. Возврат добавлен ради ОДНООБРАЗИЯ
+            шва (Task 4.13): «одна дверь честная, вторая молчит» — это и есть
+            тот класс дефекта, который задача чинит, и оставлять его на соседнем
+            уровне значило бы завести ловушку заново для следующего.
+        """
         kwargs.setdefault("module", self._observability_source())
-        self._call_manager("logger", "warning", message, **kwargs)
+        return self._log_checked("info", message, **kwargs)
+
+    def _log_warning(self, message: str, **kwargs) -> bool:
+        """Логирование уровня WARNING через logger manager.
+
+        Returns:
+            Доехала ли запись до приёмника (Task 4.13, добор ревью). Возврат
+            добавлен по ТОЙ ЖЕ причине, что у :meth:`_log_error`, и добавлен
+            позже, чем следовало: первая редакция перевела только ERROR, и
+            **дверь `HealthState` осталась немой на боевой проводке**.
+            Воспроизведено ревью: `_resolve_log` (``health/state.py``) выбирает
+            приёмником ПЕРВЫМ ``log_warning``; у боевого процесса это
+            ``ObservableMixin.log_warning`` → ``_call_manager``, который оба
+            рода отказа проглатывал и возвращал ``None``. `_safe_log` читал
+            чистый возврат как доставку, слот не возвращался, и дефект жил
+            дословно в той формулировке, ради которой задача и делалась:
+            первая потеря давала молчание на всё окно, а число называло его
+            «подавлено N» — неотличимо от штатного подавления.
+            Боевых вызывающих через эту дверь — порядка сорока, включая плагины.
+        """
+        kwargs.setdefault("module", self._observability_source())
+        return self._log_checked("warning", message, **kwargs)
 
     def _log_error(self, message: str, **kwargs) -> bool:
         """Логирование уровня ERROR через logger manager.
@@ -216,28 +239,38 @@ class ObservableMixin(IObservableMixin):
         kwargs.setdefault("module", self._observability_source())
         return self._log_checked("error", message, **kwargs)
 
-    def _log_critical(self, message: str, **kwargs) -> None:
-        """Логирование уровня CRITICAL через logger manager."""
+    def _log_critical(self, message: str, **kwargs) -> bool:
+        """Логирование уровня CRITICAL через logger manager.
+
+        Returns:
+            Доехала ли запись до приёмника. Возврат добавлен ради ОДНООБРАЗИЯ
+            шва (Task 4.13): «одна дверь честная, вторая молчит» — это и есть
+            тот класс дефекта, который задача чинит, и оставлять его на соседнем
+            уровне значило бы завести ловушку заново для следующего.
+        """
         kwargs.setdefault("module", self._observability_source())
-        self._call_manager("logger", "critical", message, **kwargs)
+        return self._log_checked("critical", message, **kwargs)
 
     # Публичные алиасы — для внешнего кода, который принимает менеджер
     # как зависимость (например, ChainContext.logger). _log_* остаются
     # каноничным «семейным» путём для наследников BaseManager.
+    # Алиасы ПРОКИДЫВАЮТ ответ о доставке, а не глотают его: `_resolve_log`
+    # у `HealthState` выбирает приёмником именно ПУБЛИЧНЫЙ `log_warning`, и
+    # потерянный здесь ответ означал бы немую дверь (Task 4.13, добор ревью).
     def log_debug(self, message: str, **kwargs) -> None:
         self._log_debug(message, **kwargs)
 
-    def log_info(self, message: str, **kwargs) -> None:
-        self._log_info(message, **kwargs)
+    def log_info(self, message: str, **kwargs) -> bool:
+        return self._log_info(message, **kwargs)
 
-    def log_warning(self, message: str, **kwargs) -> None:
-        self._log_warning(message, **kwargs)
+    def log_warning(self, message: str, **kwargs) -> bool:
+        return self._log_warning(message, **kwargs)
 
-    def log_error(self, message: str, **kwargs) -> None:
-        self._log_error(message, **kwargs)
+    def log_error(self, message: str, **kwargs) -> bool:
+        return self._log_error(message, **kwargs)
 
-    def log_critical(self, message: str, **kwargs) -> None:
-        self._log_critical(message, **kwargs)
+    def log_critical(self, message: str, **kwargs) -> bool:
+        return self._log_critical(message, **kwargs)
 
     # =========================================================================
     # ОКНО ГОЛОСА НА КЛЮЧ (Ф1.4, M17)

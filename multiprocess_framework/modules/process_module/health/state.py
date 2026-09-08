@@ -539,12 +539,22 @@ class HealthState:
         attempts.append({"module": "health"})
         for kwargs in attempts:
             try:
-                self._log(msg, **kwargs)  # type: ignore[call-arg]
-                return True
+                answer = self._log(msg, **kwargs)  # type: ignore[call-arg]
             except TypeError:
                 continue
             except Exception:  # noqa: BLE001 — лог health не критичен
                 return False
+            # Ответ колбэка ЧИТАЕТСЯ, а не выбрасывается (Task 4.13, добор
+            # ревью). Прежняя редакция возвращала True, как только вызов не
+            # бросил, — и на боевой проводке этого было достаточно, чтобы дверь
+            # онемела: `log_warning` миксина отказ проглатывает и не бросает.
+            #
+            # `is False`, а не `not answer`, по тому же доводу, что в
+            # `report_error`: слот возвращает только тот, кто ЗНАЕТ, что не
+            # доставил. Колбэк из тестов (`lambda msg: None`) сведений не даёт,
+            # и трактовать его молчание как потерю значило бы снять дросселя
+            # вовсе.
+            return answer is not False
         # Ни одна форма вызова не подошла: колбэк отверг TypeError'ом все три.
         # Запись потеряна — молчать об этом окну нельзя.
         return False

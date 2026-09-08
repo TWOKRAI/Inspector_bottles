@@ -725,3 +725,228 @@ class TestALegacyOverrideReturningNoneMustNotUnthrottleTheVoice:
         assert "подавлено с прошлой записи: 1" in said[1], (
             f"долг обязан ехать со следующей записью, а не теряться: {said[1]!r}"
         )
+
+
+# ===========================================================================
+# Добор РЕВЬЮ 2026-09-08 (итерация 1, вердикт CHANGES REQUESTED).
+# Четыре свойства, которых не сторожил ни один тест из 4904, и блокер.
+# ===========================================================================
+
+
+class _Deaf:
+    """Приёмник, у которого метода уровня НЕТ ВОВСЕ — тихая потеря без исключения.
+
+    Спека Task 4.13 открывается именно этим случаем («1. приёмник без `error()`:
+    вернул True, долетело 0»), но двери 1 и 2 его не проверяли: обе гоняли
+    `FlakyRecorder`, у которого методы ЕСТЬ и который бросает. Инъекция ревью
+    (`_call_manager_result`: «метода нет» -> доставка) давала **ноль красных на
+    всём гейте 4904**.
+    """
+
+
+class TestDoorsOneAndTwoGuardTheSilentLossToo:
+    """Оба рода отказа, а не только бросок. Второй род тише и потому опаснее."""
+
+    def test_door1_log_windowed_survives_a_receiver_without_the_level_method(self) -> None:
+        widget = _Widget(_Deaf())
+        key = "t413:deaf:door1"
+        assert widget.log_windowed(key, 3600.0, level="warning", message="раз") is False, (
+            "приёмник без метода уровня — доставки не было, и возврат обязан это сказать"
+        )
+        assert widget.log_windowed(key, 3600.0, level="warning", message="два") is False
+        assert voice_counters().get("windowed_delivery_failed", 0) >= 2, (
+            f"обе тихие потери обязаны быть посчитаны: {voice_counters()}"
+        )
+
+    def test_door2_report_error_survives_a_receiver_without_the_level_method(self) -> None:
+        widget = _Widget(_Deaf())
+        for i in range(3):
+            widget.report_error(RuntimeError(f"инцидент {i}"), context="deaf.op", throttle=3600.0)
+        assert voice_counters().get("windowed_delivery_failed", 0) == 3, (
+            "слот, съеденный решением, обязан вернуться на КАЖДОЙ тихой потере — иначе "
+            f"первая же даёт молчание на всё окно: {voice_counters()}"
+        )
+
+    def test_control_a_working_receiver_debits_the_slot_once(self) -> None:
+        """ПАРА к обоим: ось жива — исправный приёмник слот СЪЕДАЕТ."""
+        recorder = FlakyRecorder([])
+        widget = _Widget(recorder)
+        key = "t413:deaf:control"
+        assert widget.log_windowed(key, 3600.0, level="warning", message="раз") is True
+        assert widget.log_windowed(key, 3600.0, level="warning", message="два") is False, (
+            "второй голос в окне обязан быть подавлен ЗАКОННО, а не пройти"
+        )
+        assert len(recorder.calls) == 1, f"доехать обязана ровно одна запись: {recorder.calls}"
+        assert voice_counters().get("windowed_delivery_failed", 0) == 0, (
+            f"исправная доставка не имеет права расти счётчиком потерь: {voice_counters()}"
+        )
+
+
+class TestHealthStateDoorOnProductionWiring:
+    """БЛОКЕР ревью: дверь 3 на боевой проводке не срабатывала вообще.
+
+    `_resolve_log` выбирает приёмником ПЕРВЫМ публичный `log_warning`; у боевого
+    процесса это `ObservableMixin.log_warning`. Первая редакция Task 4.13
+    перевела на новый шов только `_log_error`, поэтому WARNING-дорога отказ
+    проглатывала и возвращала ``None``, `_safe_log` читал это как доставку, и
+    слот не возвращался.
+
+    Числа ревью ДО правки: боевая проводка — 1 попытка доставки,
+    ``windowed_delivery_failed`` **0**, ``windowed_suppressed`` **2**. То есть
+    дефект жил дословно в формулировке задачи: первая потеря давала молчание на
+    всё окно, а число называло его «подавлено 2».
+
+    Прежний тест двери 3 был зелёным, потому что подавал ``HealthState(log=cb)``
+    с колбэком, который бросает САМ. Боевая проводка такой формы не порождает —
+    ровно «fake-harness test proves the harness».
+    """
+
+    class _BrokenLogger:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def warning(self, message, *a, **kw):
+            self.calls += 1
+            raise RuntimeError("приёмник журнала взорвался")
+
+        error = warning
+        info = warning
+        critical = warning
+        debug = warning
+
+    class _Svc(ObservableMixin):
+        def __init__(self, logger: Any) -> None:
+            ObservableMixin.__init__(self, managers={"logger": logger}, config={"logger": True})
+            self.name = "probe_proc"
+
+    def test_broken_logger_manager_returns_the_slot_through_the_real_callback(self) -> None:
+        from multiprocess_framework.modules.process_module.health.state import _resolve_log
+
+        logger = self._BrokenLogger()
+        svc = self._Svc(logger)
+        chosen = _resolve_log(svc)
+        assert getattr(chosen, "__name__", "") == "log_warning", (
+            f"проводка изменилась — тест смотрит не на ту дверь: {chosen!r}"
+        )
+
+        state = HealthState(log=chosen)
+        for i in range(3):
+            state.report_error(RuntimeError(f"инцидент {i}"), context="probe.door3", throttle=3600.0)
+
+        assert logger.calls == 3, (
+            f"слот не вернулся: до приёмника дошла {logger.calls} попытка вместо трёх — "
+            "первая потеря дала молчание на всё окно"
+        )
+        counters = voice_counters()
+        assert counters.get("windowed_delivery_failed", 0) == 3, counters
+        assert counters.get("windowed_suppressed", 0) == 0, (
+            f"ни одно вхождение не подавлено ОКНОМ — все три потеряны доставкой: {counters}"
+        )
+
+    def test_control_a_working_logger_manager_debits_the_slot(self) -> None:
+        """ПАРА: исправный менеджер — одна запись, два подавления окном."""
+        from multiprocess_framework.modules.process_module.health.state import _resolve_log
+
+        recorder = FlakyRecorder([])
+        svc = self._Svc(recorder)
+        state = HealthState(log=_resolve_log(svc))
+        for i in range(3):
+            state.report_error(RuntimeError(f"инцидент {i}"), context="probe.door3.ok", throttle=3600.0)
+
+        assert len(recorder.calls) == 1, f"доехать обязана ровно одна: {recorder.calls}"
+        counters = voice_counters()
+        assert counters.get("windowed_delivery_failed", 0) == 0, counters
+        assert counters.get("windowed_suppressed", 0) == 2, (
+            f"два вхождения обязаны быть подавлены ОКНОМ, а не потеряны: {counters}"
+        )
+
+
+def test_safe_log_returns_the_slot_when_no_call_form_fits() -> None:
+    """Ветка «ни одна форма вызова не подошла» — заведена задачей, не сторожилась.
+
+    Инъекция ревью (финальный ``return False`` -> ``return True``) давала ноль
+    красных на гейте 4904. `_safe_log` подбирает форму сверху вниз: с полями ->
+    без полей -> ``module=``; колбэк, отвергающий все три через ``TypeError``,
+    теряет запись, и молчать об этом окну нельзя.
+    """
+    tries = [0]
+
+    def picky(msg, **kwargs):
+        tries[0] += 1
+        raise TypeError("не принимаю ни одной формы")
+
+    # Форм здесь ДВЕ, а не три, и число выяснено чтением кода после того, как
+    # первая редакция теста дважды покраснела на моей догадке. Третья ступень
+    # («с полями») существует, только когда `extra` непуст, а `extra` — это
+    # маркер плоскости ошибок, он появляется лишь когда ошибка ЗАПИСАНА
+    # (`state.py:355`). У голого `HealthState(log=...)` плоскости нет.
+    # Записано, чтобы следующий читатель не чинил механизм под неверное
+    # ожидание: предмет теста — возврат слота, а не число форм.
+    state = HealthState(log=picky)
+    state.report_error(RuntimeError("инцидент"), context="picky.op", throttle=3600.0)
+    assert tries[0] == 2, f"обязаны быть перебраны обе доступные формы вызова: {tries[0]}"
+
+    state.report_error(RuntimeError("инцидент 2"), context="picky.op", throttle=3600.0)
+    assert tries[0] == 4, "слот не вернулся: второй инцидент того же ключа даже не попытался доставиться"
+    assert voice_counters().get("windowed_delivery_failed", 0) == 2, voice_counters()
+
+
+class TestReportedSetLeavesWithItsKey:
+    """Гигиена ``_reported``: множество уходит вместе с ключом.
+
+    Свойство записано в докстринге держателя как довод НЕ заводить второй
+    потолок. Инъекция ревью (убрать ``discard`` из ``forget``) давала ноль
+    красных — то есть довод держался на честном слове. Это ровно та ось, ради
+    которой существует фаза: утечка на долгом прогоне, о которой никто не узнает.
+    """
+
+    def test_forget_takes_the_report_mark_with_it(self) -> None:
+        voices = WindowedVoices()
+        key = "t413:reported:forget"
+        voiced, suppressed = voices.take(key, 3600.0)
+        assert voiced
+        voices.release(key, suppressed)
+        assert key in voices._reported, "предпосылка теста неверна — отметка не поставлена"
+
+        voices.forget(key)
+        assert key not in voices._reported, (
+            "отметка о самоотчёте пережила ключ — на долгом прогоне это утечка, "
+            "и второго потолка под неё нет по построению"
+        )
+
+    def test_control_the_mark_survives_while_the_key_lives(self) -> None:
+        """ПАРА: ось жива — пока ключ в карте, отметка на месте.
+
+        Без этой половины предыдущий тест прошёл бы и у реализации, которая
+        не ставит отметку вовсе.
+        """
+        voices = WindowedVoices()
+        key = "t413:reported:alive"
+        voiced, suppressed = voices.take(key, 3600.0)
+        voices.release(key, suppressed)
+        voices.take(key, 3600.0)
+        assert key in voices._reported, (
+            "отметка обязана жить, пока живёт ключ — иначе самоотчёт зазвучит на каждой попытке"
+        )
+
+
+def test_released_key_speaks_again_under_a_larger_window() -> None:
+    """Довод в пользу ``-inf`` вместо «отката на одно окно» — с воспроизведением.
+
+    Докстринг ``_RELEASED_AT`` объяснял выбор конкретным сценарием: окно у
+    следующего вызывающего может оказаться БОЛЬШЕ прежнего, и откат на одно окно
+    снова попал бы внутрь. Инъекция ревью (ставить ``now - window``) давала ноль
+    красных — утверждение о поведении жило без сторожа рядом.
+    """
+    voices = WindowedVoices()
+    key = "t413:released:window"
+    voiced, suppressed = voices.take(key, 1.0)
+    assert voiced
+    voices.release(key, suppressed)
+
+    voiced_again, debt = voices.take(key, 60.0)
+    assert voiced_again, (
+        "освобождённый слот обязан заговорить при ЛЮБОМ окне следующего вызывающего — "
+        "откат на одно окно (1 с) утонул бы внутри нового (60 с) и промолчал"
+    )
+    assert debt == 1, f"долг обязан доехать со следующим голосом: {debt}"
