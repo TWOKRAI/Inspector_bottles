@@ -75,9 +75,25 @@ class TestEndpointWithoutSignalPathIsRefused:
             "http://127.0.0.1:4318",
             "http://127.0.0.1:4318/",
             "https://collector.example.internal:4318",
+            # Адреса без схемы — находка ревью. `urlparse` читает номер порта как
+            # путь, поэтому первая редакция валидатора их ПРИНИМАЛА, а доставка
+            # давала accepted=0. Проверка «есть ли path» и проверка «полон ли
+            # адрес» — разные свойства, и заявлено было второе.
+            "127.0.0.1:4318",
+            "localhost:4318",
+            "127.0.0.1:4318/v1/logs",
+            # Схема есть, хоста нет. Своей строки в матрице этот случай требует
+            # отдельно: без него заплата «снять проверку хоста» даёт ноль красных,
+            # то есть ось пуста и сторож существует только на бумаге.
+            "http:///v1/logs",
+            # Схема, хост и путь на месте — но схема НЕ http(s). Своя строка нужна
+            # по той же причине: заплата «снять белый список схем» без неё давала
+            # ноль красных (адреса без схемы ловит проверка хоста), то есть ось
+            # существовала только в коде.
+            "ftp://collector.local:4318/v1/logs",
         ],
     )
-    def test_address_without_a_path_is_refused_and_the_message_names_the_cure(self, bad: str):
+    def test_an_incomplete_address_is_refused_and_the_message_names_the_cure(self, bad: str):
         with pytest.raises(ValidationError) as exc:
             OtelExportConfig(endpoint=bad)
 
@@ -131,3 +147,41 @@ class TestShippedTopologyFragmentPassesTheServiceSchema:
         # Литерал, а не производная от того же файла: значение, выведенное из
         # предмета проверки, согласилось бы с любым ответом, включая 404.
         assert cfg.endpoint == "http://127.0.0.1:4318/v1/logs"
+
+
+class TestTheOperatorFacingHintMatchesTheSchema:
+    """Подсказка в GUI обязана учить той же форме адреса, что требует схема.
+
+    **Находка ревью 2026-09-07.** `FieldMeta` у `endpoint` объявлена ДВАЖДЫ: в схеме
+    сервиса и в регистрах плагина (переобъявление поля в подклассе стирает метаданные
+    родителя — это вынужденная копия, а не небрежность). Правка адреса прошла по
+    сервисной половине; регистровая осталась учить форме без пути — а читает человек
+    именно её. Класс известный: «dual-write разъехался по содержимому», и разошлась
+    та половина, которую видит оператор.
+
+    Сторож смотрит на ОБЩИЙ префикс двух текстов: он и есть то место, где обе копии
+    обязаны говорить одно и то же. Заплата «вернуть сервису старый текст» до этого
+    теста давала ноль красных с обеих сторон.
+    """
+
+    def _info(self, model: type, field: str) -> str:
+        meta = model.model_fields[field].metadata
+        for item in meta:
+            if type(item).__name__ == "FieldMeta":
+                return str(item.info)
+        raise AssertionError(f"у {model.__name__}.{field} нет FieldMeta")
+
+    def test_both_declarations_teach_the_same_address_form(self):
+        from Plugins.io.otel_export.registers import OtelExportRegisters
+
+        service = self._info(OtelExportConfig, "endpoint")
+        registers = self._info(OtelExportRegisters, "endpoint")
+
+        import os
+
+        shared = os.path.commonprefix([service, registers])
+        assert "/v1/logs" in shared, (
+            "общая половина двух подсказок не называет путь сигнала — значит копии разъехались "
+            f"там, где обязаны совпадать. Сервис: {service[:80]!r}; регистры: {registers[:80]!r}"
+        )
+        assert "404" in shared, f"общая половина не называет следствие ошибки: {shared[:120]!r}"

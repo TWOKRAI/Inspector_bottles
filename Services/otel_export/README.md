@@ -114,14 +114,14 @@ from Services.otel_export.exporter import OtlpHttpExporter, sdk_available
 available, info = sdk_available()
 # (True, "1.44.0")  либо  (False, "missing: uv pip install --inexact '.[otel]'")
 
-cfg = OtelExportConfig(endpoint="http://127.0.0.1:4318", headers={"authorization": "${OTEL_TOKEN}"})
+cfg = OtelExportConfig(endpoint="http://127.0.0.1:4318/v1/logs", headers={"authorization": "${OTEL_TOKEN}"})
 cfg.readback()["headers"]        # {"authorization": "***"}
 cfg.readback()["export_timeout_sec"]  # 30.0 — уйдёт в OTLPLogExporter(timeout=...)
 
 exporter = OtlpHttpExporter(cfg)          # ничего не открывает: объект SDK строится лениво
 outcome = exporter.export(mapped_records)  # синхронно; 23-42 с, если приёмник недоступен
 outcome.accepted, outcome.failed, outcome.reason
-# (128, 0, "")  либо  (0, 128, "отправка в http://127.0.0.1:4318 не удалась: ...")
+# (128, 0, "")  либо  (0, 128, "отправка в http://127.0.0.1:4318/v1/logs не удалась: ...")
 ```
 
 **Исход берётся из ВОЗВРАЩЁННОГО значения, а не из чужого лога.** Отказы SDK уходят в

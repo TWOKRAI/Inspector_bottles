@@ -85,6 +85,14 @@ CONTROL_SUBSCRIBER = "stand_probe_ctl"
 LOOP_REASON_MARK = "петля"
 
 
+class _MeasurementAborted(RuntimeError):
+    """Измерение стало невозможным — прогон прекращается, вердикты не выносятся.
+
+    Отдельный тип, а не голое падение: отказ ИЗМЕРЕНИЯ обязан доехать до отчёта
+    строкой «не доказано», а не оборвать прогон трассировкой посреди вывода.
+    """
+
+
 class _RefusingCollector(http.server.BaseHTTPRequestHandler):
     """Приёмник, отвечающий **401** — то есть отказывающий БЫСТРО (0.02 с).
 
@@ -103,10 +111,31 @@ class _RefusingCollector(http.server.BaseHTTPRequestHandler):
         """Приёмник молчит: его шум мешал бы читать наш журнал."""
 
 
-def _start_refusing() -> http.server.HTTPServer:
-    server = http.server.HTTPServer(("127.0.0.1", COLLECTOR_PORT), _RefusingCollector)
-    threading.Thread(target=server.serve_forever, daemon=True, name="stand-401").start()
-    return server
+def _start_refusing(deadline_sec: float = 30.0) -> http.server.HTTPServer | None:
+    """Поднять 401-заглушку, ДОЖДАВШИСЬ освобождения порта. None — не дождались.
+
+    **Зачем ждать, а не спать.** `Popen.terminate()` возвращает управление раньше,
+    чем ОС отдаёт порт: прогон 2 упал здесь с `WinError 10013` после паузы в 1 с,
+    и окно усиления осталось неизмеренным. Пауза фиксированной длины — это опять
+    догадка о темпе вместо ожидания события, то есть ровно тот класс, который эта
+    проба обязана не повторять.
+
+    Возврат `None` — отказ ИЗМЕРЕНИЯ: вызывающий обязан сказать «не доказано», а
+    не вынести вердикт о механизме и не упасть исключением посреди прогона.
+    """
+    deadline = time.monotonic() + deadline_sec
+    last: OSError | None = None
+    while time.monotonic() < deadline:
+        try:
+            server = http.server.HTTPServer(("127.0.0.1", COLLECTOR_PORT), _RefusingCollector)
+        except OSError as exc:
+            last = exc
+            time.sleep(0.5)
+            continue
+        threading.Thread(target=server.serve_forever, daemon=True, name="stand-401").start()
+        return server
+    print(f"[proof] порт {COLLECTOR_PORT} не освободился за {deadline_sec} с: {last!r}")
+    return None
 
 
 def _start_otelcol() -> subprocess.Popen | None:
@@ -397,8 +426,17 @@ def main() -> int:
                 otelcol.wait(timeout=15.0)
             except subprocess.TimeoutExpired:
                 otelcol.kill()
-            time.sleep(1.0)
             refusing = _start_refusing()
+            if refusing is None:
+                results.append(
+                    _verdict(
+                        "собственные голоса отказа НЕ кормят исходящий поток",
+                        None,
+                        f"401-заглушка не заняла порт {COLLECTOR_PORT} — отказало ИЗМЕРЕНИЕ, "
+                        "о механизме проба не судит",
+                    )
+                )
+                raise _MeasurementAborted
 
             voices_before = len(_own_voice_lines(log_dir))
             fail_before = int(_counters(drv).get("received", 0) or 0)
@@ -423,6 +461,8 @@ def main() -> int:
                     + ("" if own_voices >= 2 else " — строк отказа меньше двух, ось пуста"),
                 )
             )
+    except _MeasurementAborted:
+        print("[proof] прогон прерван отказом ИЗМЕРЕНИЯ — набор вердиктов ниже неполон")
     finally:
         if refusing is not None:
             refusing.shutdown()
