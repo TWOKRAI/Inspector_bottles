@@ -189,7 +189,8 @@ def _voice_repurposed_stats_enabled(resolved: Any, origin: Optional[str] = None)
       (``process_managers.py:160``), зовёт :func:`compose_managers_payload`
       напрямую, БЕЗ ``origin``;
     * ``boot:layers`` / ``boot:companion`` — ``process_module.py:478,496``;
-    * ``watcher:app`` / ``watcher:recipe`` — ``observability_reload.py:2160``;
+    * ``watcher:app`` / ``watcher:recipe`` — :func:`make_observability_on_reload`
+      в этом модуле (замыкание ``_on_reload``);
     * ``command:config.reload`` / ``switch:broadcast`` — ``builtin_commands.py``;
     * ``switch:<reason>`` — ``process_manager_process.py:2419``;
     * ``ttl-sweeper`` — :mod:`.observability_ttl`, такт heartbeat.
