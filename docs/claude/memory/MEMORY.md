@@ -48,6 +48,7 @@
 - [API MCP дрейфует](feedback_mcp_tool_api_drift.md) — ROUTING.md может врать · [sentrux depth непрозрачна](feedback_sentrux_depth_opaque.md) · [sentrux gate сужен](feedback_sentrux_gate_narrowed.md) — блок только циклы↑/god↑
 - [Атрибутируй источник до реза](feedback_attribute_the_source_before_cutting.md) — агенты/команды с ДВУХ уровней (.claude/ и ~/.claude/); сверять состав множеств; экономию заявлять после прогона
 - [Спасение патчем теряет untracked](feedback_a_diff_based_rescue_omits_untracked_files.md) — «патчи сохранены» умолчало о тесте на 454 строки; спасать веткой от HEAD, пересечение считать числом
+- [Хук, пишущий в общий файл, блокирует двух писателей](feedback_a_hook_that_writes_a_shared_file_deadlocks_two_writers.md) — три коммита подряд отбиты; pathspec строит ВРЕМЕННЫЙ индекс из HEAD, и пустой git diff этого не видит; MM = обе стороны есть, а не обе целы
 - [Dual-write разъехался по содержимому](feedback_dual_write_by_copy_destroys_the_other_side.md) — правды нет ни в одной копии; **правку вносить в обе копии отдельно, `cp` затирает молча**, diff ДО записи
 - [devseed перетирает .claude/](project_devseed_overwrites_claude_dir.md) — preserved: CLAUDE.md, modes/_stack.md, settings.local · [миграция на claude-kit](project_claude_kit_migration.md)
 
