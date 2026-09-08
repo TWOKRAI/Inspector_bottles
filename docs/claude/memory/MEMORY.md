@@ -27,6 +27,7 @@
 - [MVP для GUI-вкладок](feedback_mvp_pattern.md) — всегда полный · [Tab order](feedback_tab_order.md) — Settings → Recipes → функциональные · [конвенции диалогов](feedback_dialog_conventions.md) — Сохранить (default)/Не сохранять/Отмена
 - [Services vs Plugins](project_services_vs_plugins.md) — крупный SDK vs мелкая обработка; side-effect-процесс = плагин в GenericProcessApp + фрагмент топологии
 - [Флаги не костыли](feedback_flags_must_not_become_crutches.md) — закрыт когда УДАЛЁН · [FW_* реестр](project_feature_flags_registry.md) — ctor>env>default
+- [Ручки наблюдаемости: вкл/выкл на любой границе, ноль нагрузки в выключенном](feedback_observability_knobs_switchable_at_any_boundary_zero_cost_off.md) — решение владельца 2026-09-08: планка для КАЖДОГО параметра; замер: sink disable снимает запись, но не эмиссию (records_without_channels растёт); frame_trace — только env при импорте → Task 4.15
 - [Фичи после доказательства](feedback_tool_features_before_validation.md) — минимум → реальная задача → фичи
 - [Один пишущий логгер](feedback_one_log_writer.md) — остальное вид поверх · [std_facade не используется](project_std_facade_unused.md) — 76 файлов в пустоту
 - [Память одним модулем](project_memory_module_consolidation.md) — фасад/интерфейс, не размазывать по framework
