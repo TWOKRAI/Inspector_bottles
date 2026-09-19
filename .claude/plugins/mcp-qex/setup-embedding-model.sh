@@ -12,9 +12,10 @@
 #   Подменяем оригинальный tag (qwen3-embedding:4b / 8b) этой копией. После
 #   этого qex-launcher без правки кода грузит модель на 100% GPU.
 #
-# Per-platform (обе платформы на 4b с 2026-07-05, см. qex-launcher.py):
+# Per-platform (см. qex-launcher.py):
 #   Windows (RTX 3050 Laptop, 4 GB VRAM)  → qwen3-embedding:4b, num_ctx=2048
-#   macOS   (Apple Silicon, unified)       → qwen3-embedding:4b, num_ctx=2048
+#     (лаунчер на Windows с 2026-08-27 зовёт 0.6b без варианта — этот скрипт для Win устарел)
+#   macOS   (Apple Silicon, unified)       → qwen3-embedding:8b-qex, num_ctx=4096 (с 2026-09-13)
 #
 # Usage: bash setup-embedding-model.sh
 # Re-run: безопасно — повторные запуски только пересоздают вариант, не ломают.
@@ -31,9 +32,9 @@ case "$(uname -s)" in
 esac
 
 if [ "$PLATFORM" = "mac" ]; then
-    BASE="qwen3-embedding:4b"
-    MODELFILE="$TEMPLATES_DIR/qwen3-embedding-4b-mac.Modelfile"
-    VARIANT="qwen3-embedding:4b-qex"
+    BASE="qwen3-embedding:8b"
+    MODELFILE="$TEMPLATES_DIR/qwen3-embedding-8b-mac.Modelfile"
+    VARIANT="qwen3-embedding:8b-qex"
 else
     BASE="qwen3-embedding:4b"
     MODELFILE="$TEMPLATES_DIR/qwen3-embedding-4b-win.Modelfile"

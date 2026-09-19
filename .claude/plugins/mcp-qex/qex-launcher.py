@@ -60,10 +60,19 @@ if platform.system() == "Windows":
     expected_num_ctx = 2048
     default_bin = os.path.join(os.path.expanduser("~"), ".cargo", "bin", "qex.exe")
 else:
-    # macOS: Ollama (qwen3-embedding:4b, dim=2560) на :11434 (GUI Ollama.app).
-    # Выбор 4b вместо 8b (2026-07-05): 2× быстрее индексация И каждый запрос,
-    # разрыв точности на коде <1% (MTEB-Code ~80.1 vs ~80.7). Связи кода даёт
-    # codegraph/graphify/serena, не эмбеддинг — размер модели на них не влияет.
+    # macOS: Ollama (qwen3-embedding:8b-qex, dim=4096) на :11434 (GUI Ollama.app).
+    # 8b вместо 4b (2026-09-13, решение владельца): 500k+ строк кода и много
+    # русских документов — 8b сильнее на многоязычном поиске (MMTEB ~70.6 vs ~69.5),
+    # на коде разрыв <1%. Цена — ~1.7× медленнее индексация и запросы (замер на
+    # M2 Max: 4b 1.7 vs 8b 1.0 чанк/с при powermode=1 на батарее).
+    # 8b-qex — вариант из templates/qwen3-embedding-8b-mac.Modelfile (num_ctx 4096,
+    # num_gpu 999), создаётся setup-embedding-model.sh. Без него базовая 8b берёт
+    # OLLAMA_CONTEXT_LENGTH из настроек приложения (32768) и раздувает KV cache.
+    # Ловушка 2026-08-21..09-13: Ollama.app при старте не нашла GPU («failure during
+    # GPU discovery … timeout») и три недели молча считала на CPU (0.4 чанк/с на 4b).
+    # Проверка: `grep "inference compute" ~/.ollama/logs/server.log` → library=Metal.
+    # Лечение — перезапуск Ollama.app.
+    # (До 2026-09-13 была 4b: 2× быстрее, выбрана 2026-07-05.)
     # Эксперименты 2026-05-10:
     # - mlx-openai-server :1235 → 2.5× медленнее (single inference worker).
     # - OLLAMA_NUM_PARALLEL=4 на CLI Ollama → 0% эффекта (Metal не масштабируется
@@ -71,9 +80,9 @@ else:
     #   независимо от env). Подтверждено повторно 2026-07-05. См. handoff 2026-05-10.
     base_url = "http://localhost:11434/v1"
     api_key = "ollama"
-    model = "qwen3-embedding:4b"
-    dimensions = "2560"
-    expected_num_ctx = 2048  # 4b → 2048 (см. setup-embedding-model.sh)
+    model = "qwen3-embedding:8b-qex"
+    dimensions = "4096"  # нативный максимум 8b
+    expected_num_ctx = 4096  # 8b-qex → 4096 (см. templates/qwen3-embedding-8b-mac.Modelfile)
     default_bin = os.path.join(os.path.expanduser("~"), ".local", "bin", "qex")
 
 

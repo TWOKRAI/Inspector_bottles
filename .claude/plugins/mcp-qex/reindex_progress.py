@@ -22,6 +22,7 @@
     python reindex_progress.py --raw            # не глушить логи qex (диагностика)
 Флаги --total/--raw обрабатываются здесь; --force/--clear/прочее → в reindex.py.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,9 +42,9 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent
 
 IS_WIN = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
-# Win — 0.6b (2026-08-27: 4b не влезала в 4 ГБ VRAM), macOS — 4b (2026-07-05, было 8b).
+# Win — 0.6b (2026-08-27: 4b не влезала в 4 ГБ VRAM), macOS — 8b-qex (2026-09-13, было 4b).
 # Источник истины — qex-launcher.py; здесь дубль нужен только для прогрева keep-alive.
-MODEL = "qwen3-embedding:0.6b" if IS_WIN else "qwen3-embedding:4b"
+MODEL = "qwen3-embedding:0.6b" if IS_WIN else "qwen3-embedding:8b-qex"
 OLLAMA = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 KEEP_ALIVE = os.environ.get("QEX_KEEP_ALIVE", "60m")
 REWARM_EVERY = 180
@@ -72,15 +73,17 @@ def _ollama_log_path() -> Path | None:
 
 def warm_model() -> bool:
     body = json.dumps({"model": MODEL, "input": "warmup", "keep_alive": KEEP_ALIVE}).encode()
-    req = urllib.request.Request(f"{OLLAMA}/api/embed", data=body,
-                                 headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(f"{OLLAMA}/api/embed", data=body, headers={"Content-Type": "application/json"})
     try:
         t0 = time.monotonic()
         with urllib.request.urlopen(req, timeout=180) as r:
             d = json.load(r)
         ok = bool(d.get("embeddings"))
-        print(f"[warm] {MODEL} за {time.monotonic()-t0:.1f}s "
-              f"(keep_alive={KEEP_ALIVE}, dim={len(d['embeddings'][0]) if ok else '?'})", flush=True)
+        print(
+            f"[warm] {MODEL} за {time.monotonic() - t0:.1f}s "
+            f"(keep_alive={KEEP_ALIVE}, dim={len(d['embeddings'][0]) if ok else '?'})",
+            flush=True,
+        )
         return ok
     except Exception as e:  # noqa: BLE001
         print(f"[warm] WARN {MODEL}: {e}", flush=True)
@@ -103,7 +106,7 @@ def count_embeds(log: Path, start_offset: int) -> int:
             f.seek(start_offset)
             data = f.read()
         c = data.count(b'POST     "/v1/embeddings"')
-        return c if c else data.count(b'/v1/embeddings')
+        return c if c else data.count(b"/v1/embeddings")
     except Exception:  # noqa: BLE001
         return 0
 
@@ -132,8 +135,7 @@ def pump_reindex(proc: subprocess.Popen, raw: bool) -> None:
             print(line, flush=True)
 
 
-def progress_loop(log: Path | None, start_offset: int, cli_total: int | None,
-                  stop: threading.Event) -> None:
+def progress_loop(log: Path | None, start_offset: int, cli_total: int | None, stop: threading.Event) -> None:
     t0 = time.monotonic()
     last_warm = t0
     while not stop.is_set():
@@ -147,8 +149,10 @@ def progress_loop(log: Path | None, start_offset: int, cli_total: int | None,
             if cli_total and cli_total > 0:
                 pct = min(100.0, 100 * n / cli_total)
                 eta = (cli_total - n) / rate if rate > 0 and n < cli_total else 0
-                print(f"  [{fmt(elapsed)}] embedded {n}/{cli_total} ({pct:.0f}%) · "
-                      f"{rate:.1f} ч/с · ETA ~{fmt(eta)}", flush=True)
+                print(
+                    f"  [{fmt(elapsed)}] embedded {n}/{cli_total} ({pct:.0f}%) · {rate:.1f} ч/с · ETA ~{fmt(eta)}",
+                    flush=True,
+                )
             else:
                 sc = f" · scope ~{_state['detected']} файлов" if _state["detected"] else ""
                 print(f"  [{fmt(elapsed)}] embedded {n} чанков · {rate:.1f} ч/с{sc}", flush=True)
@@ -166,7 +170,7 @@ def main() -> int:
     if "--total" in args:
         i = args.index("--total")
         cli_total = int(args[i + 1])
-        del args[i:i + 2]
+        del args[i : i + 2]
 
     print("=" * 60)
     print("qex reindex + progress")
@@ -176,15 +180,19 @@ def main() -> int:
     log = _ollama_log_path()
     start_offset = log.stat().st_size if (log and log.exists()) else 0
     if not (log and log.exists()):
-        print(f"[progress] ollama-лог не найден ({log}) — только elapsed. "
-              f"Задай OLLAMA_LOG=/path для per-chunk прогресса.", flush=True)
+        print(
+            f"[progress] ollama-лог не найден ({log}) — только elapsed. "
+            f"Задай OLLAMA_LOG=/path для per-chunk прогресса.",
+            flush=True,
+        )
 
     stop = threading.Event()
     mon = threading.Thread(target=progress_loop, args=(log, start_offset, cli_total, stop), daemon=True)
     mon.start()
 
-    proc = subprocess.Popen([sys.executable, str(REINDEX), *args],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(
+        [sys.executable, str(REINDEX), *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
     pump_reindex(proc, raw)
     rc = proc.wait()
 

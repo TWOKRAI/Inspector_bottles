@@ -35,9 +35,10 @@ if IS_WIN:
     dimensions = "1024"
     default_bin = Path.home() / ".cargo" / "bin" / "qex.exe"
 else:
-    # macOS: 4b выбрана 2026-07-05 (2× скорость, точность на коде ~= 8b). См. qex-launcher.py.
-    model = "qwen3-embedding:4b"
-    dimensions = "2560"
+    # macOS: 8b-qex с 2026-09-13 (было 4b с 2026-07-05). ОБЯЗАНО совпадать с
+    # qex-launcher.py — иначе векторы чужой размерности в индексе.
+    model = "qwen3-embedding:8b-qex"
+    dimensions = "4096"
     default_bin = Path.home() / ".local" / "bin" / "qex"
 
 qex_bin = os.environ.get("QEX_BIN") or shutil.which("qex") or str(default_bin)
@@ -47,7 +48,8 @@ env = {
     "RUST_LOG": "info",
     "WORKSPACE_PATH": str(PROJECT_ROOT),
     "QEX_EMBEDDING_PROVIDER": "openai",
-    "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
+    # Переопределяемо: например, прокси-страховка от NaN-ответов Ollama (2026-09-13).
+    "QEX_OPENAI_BASE_URL": os.environ.get("QEX_OPENAI_BASE_URL", "http://localhost:11434/v1"),
     "QEX_OPENAI_API_KEY": "ollama",
     "QEX_OPENAI_MODEL": model,
     "QEX_OPENAI_DIMENSIONS": dimensions,
@@ -60,7 +62,7 @@ def jsonrpc_request(method: str, params: dict, req_id: int = 1) -> str:
         {
             "jsonrpc": "2.0",
             "id": req_id,
-            "method": f"tools/call",
+            "method": "tools/call",
             "params": {
                 "name": method,
                 "arguments": params,
@@ -204,7 +206,7 @@ def main():
     result = run_qex_rpc("index_codebase", params)
 
     if result:
-        print(f"\nГотово!")
+        print("\nГотово!")
         # Попробуем вытащить текст результата
         content = result.get("content", [])
         for item in content:
