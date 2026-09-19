@@ -69,6 +69,9 @@ report_status = on                             # on | off — off skips the STAT
 agent_context_budget = 100000                  # soft: start + N -> checkpoint (finish or hand off), repeated every +50000; off = none
 agent_context_hard_budget = off                # hard: start + N -> deny all but commit / handoff / report; off (default) = never deny
 
+# qex auto-reindex — read by mcp-qex/hooks/git/post-commit.d/qex-reindex.sh (post-commit part).
+qex_auto_reindex = off                          # on | off — off (default): reindex only by /mcp-qex:qex-reindex; on: after every commit in the main tree
+
 # Document size budget — read by scripts/lint_doc_size.py and hooks/doc-size-guard.sh.
 doc_size = on                                   # on | off — off disables every finding
 doc_size_warn_kb = 32                           # a whole markdown FILE over this many KB is flagged

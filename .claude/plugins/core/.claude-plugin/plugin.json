@@ -83,16 +83,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/filter-test-output.sh",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "Edit|Write",
         "hooks": [
           {

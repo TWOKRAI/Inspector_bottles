@@ -81,7 +81,7 @@ ollama serve &
 - After major code changes — `mcp__qex__index_codebase(path=..., force=true)`.
 - After changing the embedding model — `clear_index` → `index_codebase(force=true)`.
 - After editing `.ignore` — `clear_index` + `index_codebase(force=true)` is mandatory, otherwise excluded files stay in the index.
-- Optional: a git post-commit hook for automatic reindexing — see `hooks/git/post-commit.d/qex-reindex.sh`.
+- Optional: post-commit auto-reindex — **off by default** (`qex_auto_reindex = off` in `.claude/modes/_stack.md`); turn on with `/mcp-qex:install-reindex-hook`. Otherwise the index is rebuilt only by `/mcp-qex:qex-reindex`.
 
 ## When qex is NOT needed
 

@@ -303,29 +303,9 @@
             "timeout": 10
           }
         ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/mcp-sentrux/hooks/sentrux-precheck.sh",
-            "timeout": 30
-          }
-        ]
       }
     ],
     "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/filter-test-output.sh",
-            "timeout": 10
-          }
-        ]
-      },
       {
         "matcher": "Edit|Write",
         "hooks": [

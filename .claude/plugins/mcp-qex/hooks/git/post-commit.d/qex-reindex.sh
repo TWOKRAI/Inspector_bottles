@@ -13,6 +13,31 @@
 # No `set -e`: every branch below ends in an explicit exit / final line, and
 # a mid-script failure must still reach the one required status line.
 
+# --- Opt-in gate: auto-reindex only when the owner asked for it ------------
+# Default OFF (owner's rule, 2026-09-20): a commit must never start a
+# tens-of-minutes embedder run on its own; `/mcp-qex:qex-reindex` is the
+# command. Precedence: env QEX_AUTO_REINDEX (on|off — tests, one-off runs),
+# then key `qex_auto_reindex` in the ```ini block of .claude/modes/_stack.md
+# (read via core's _lib/stack-ini.sh), then off. bash 3.2-safe (no ${var,,}).
+AUTO="${QEX_AUTO_REINDEX:-}"
+if [ -z "$AUTO" ]; then
+  ROOT0="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  STACK_LIB="$ROOT0/.claude/plugins/core/hooks/_lib/stack-ini.sh"
+  if [ -f "$STACK_LIB" ]; then
+    # shellcheck source=/dev/null
+    . "$STACK_LIB"
+    AUTO="$(stack_ini_get qex_auto_reindex off "$ROOT0/.claude/modes/_stack.md" 2>/dev/null || echo off)"
+  fi
+fi
+# No external tools here (the dispatcher may run with a bare PATH): case-insensitive
+# match via nocasematch (bash >= 3.1) instead of `tr`.
+shopt -s nocasematch 2>/dev/null
+case "$AUTO" in
+  on|1|true|yes) ;;
+  *) echo "skip: auto-reindex off (qex_auto_reindex=off; run /mcp-qex:qex-reindex)"; exit 0 ;;
+esac
+shopt -u nocasematch 2>/dev/null
+
 # --- Resolve QEX_BIN: env override, then PATH, then known install dirs -----
 QEX_BIN="${QEX_BIN:-}"
 if [ -z "$QEX_BIN" ]; then

@@ -137,7 +137,7 @@ if [ -f "$SETTINGS_FILE" ]; then
 
         # Check that new hooks are registered (Phase 1 additions)
         MISSING_HOOKS=""
-        for hook in "quality/mcp-health-check.sh" "quality/sentrux-precheck.sh"; do
+        for hook in "quality/mcp-health-check.sh"; do
             if ! grep -q "$hook" "$SETTINGS_FILE"; then
                 MISSING_HOOKS="$MISSING_HOOKS $hook"
             fi
@@ -162,7 +162,6 @@ fi
 REQUIRED_FILES=(
     "$MCP_DIR/ROUTING.md"
     "$ROOT/hooks/quality/mcp-health-check.sh"
-    "$ROOT/hooks/quality/sentrux-precheck.sh"
     "$ROOT/scripts/doctor.sh"
     "$ROOT/commands/quality/doctor.md"
 )
@@ -172,7 +171,6 @@ if [ ! -d "$ROOT/hooks" ] && [ -d "$ROOT/.claude/hooks" ]; then
     REQUIRED_FILES=(
         "$MCP_DIR/ROUTING.md"
         "$ROOT/.claude/plugins/core/hooks/mcp-health-check.sh"
-        "$ROOT/.claude/plugins/mcp-sentrux/hooks/sentrux-precheck.sh"
         "$ROOT/.claude/plugins/core/scripts/doctor.sh"
         "$ROOT/.claude/commands/quality/doctor.md"
     )
