@@ -73,7 +73,6 @@
     "commands/dev/team.md",
     "commands/dev/test-triage.md",
     "commands/dev/test.md",
-    "commands/mcp-graphify/graph-slice.md",
     "commands/mcp-qex/install-reindex-hook.md",
     "commands/mcp-qex/qex-rebuild.md",
     "commands/mcp-qex/qex-reindex.md",

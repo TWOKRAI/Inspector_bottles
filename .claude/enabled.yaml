@@ -73,15 +73,18 @@ plugins:
   lang-python:
     enabled: true
   # Semantic code search MCP (Phase 3, Task 3.4) — BM25 + dense embeddings via ollama.
+  # hooks:false (task H.3, 2026-09-20): post-commit reindex on 8b was loading the machine on
+  # 486k LOC (owner killed the running reindex today) — keeps the MCP server, drops its hooks.
   mcp-qex:
     enabled: true
+    hooks: false
   # LSP-based symbol operations MCP (Phase 3, Task 3.4) — find_symbol, rename, etc.
   # BUNDLED (source: None): kept local despite marketplace availability.
   # Rationale (Task 6.3): upstream oraios/serena explicitly warns against marketplace
   # install ("contain outdated and suboptimal installation commands"); curated local
   # glue with `--project-from-cwd` is more reliable. USP-gate: upstream-caveat.
   mcp-serena:
-    enabled: true
+    enabled: false
   # Library docs lookup MCP (Phase 3, Task 3.4) — user-level, configured via npx.
   # CONSUME (Task 6.3-fix): official context7 plugin in the Anthropic marketplace.
   # source = marketplace-qualified ref "<plugin>@<marketplace>" — the verbatim
@@ -99,7 +102,7 @@ plugins:
     enabled: true
   # Knowledge graph + community detection MCP (Phase 3, Task 3.5). Default-off.
   mcp-graphify:
-    enabled: true
+    enabled: false
   # Qt/PyQt GUI runtime inspection MCP (Phase 3, Task 3.5). Default-off.
   # ENABLED for Inspector_bottles: PySide6 desktop app — runtime widget inspection is core.
   mcp-qt:
@@ -108,11 +111,11 @@ plugins:
   # Default-on (Phase 0, 2026-06-29): local binary, no network/keys — zero-cost
   # enable; backs the teamlead agent's `mcp:ast-grep:scan` codemod route.
   mcp-ast-grep:
-    enabled: true
+    enabled: false
   # Pre-indexed call graph + symbol navigation MCP (Phase 3, Task 3.5). Default-off.
   # ENABLED for Inspector_bottles: developer/investigator agents route through codegraph.
   mcp-codegraph:
-    enabled: true
+    enabled: false
   # Live backend control via backend_ctl driver (constructor-master Ф1 Task 1.7).
   # BUNDLED project-local plugin: official MCP SDK server backend_ctl/mcp_server_sdk.py
   # (BCTL-ADR-001). Launched via `uv run --no-sync` — resolves the project .venv on both
@@ -153,7 +156,7 @@ plugins:
   # Enable for investigator/teamlead agents on complex multi-step tasks.
   # ENABLED for Inspector_bottles: multi-process/IPC debugging is multi-step.
   mcp-sequential-thinking:
-    enabled: true
+    enabled: false
   # Security gates: Semgrep SAST + OSV CVE scan + CycloneDX SBOM (seed-max-improvement
   # Phase 1). BUNDLED, no MCP server — every tool is a CLI the wrappers shell out to.
   # Default-on: inert without the binaries installed (each command/hook skips with a

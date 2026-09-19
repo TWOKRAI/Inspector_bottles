@@ -264,3 +264,94 @@ Full list in the corresponding mode file. Key commands (76 command files in 14 n
 - **Memory:** `/memory:init`, `/memory:search`, `/memory:status`
 - **Infra:** `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`, `/diagrams`
 - **Team:** `/team`, `/hire`, `/handoff`, `/docs`, `/wrap-up`
+
+## MCP routing (orchestrator + subagents)
+
+Available MCP servers — composed from `enabled.yaml` (a disabled plugin is absent; the list is the source of truth for subagents too):
+
+- `qex` — semantic / fuzzy code search; docs: `.claude/plugins/mcp-qex/README.md`
+- `sentrux` — architecture metrics, DSM, cycles, health-gate; docs: `.claude/plugins/mcp-sentrux/README.md`
+- `context7` — up-to-date docs for external libraries; docs: `.claude/plugins/mcp-context7/README.md`
+- `github-mcp` — GitHub state: PR / Issues / Actions; docs: `.claude/plugins/mcp-github/README.md`
+- `qt-mcp` — runtime inspection for PyQt5/PySide6 GUI apps; docs: `.claude/plugins/mcp-qt/README.md`
+- `backend-ctl` — live backend control via `backend_ctl` driver (requires `BACKEND_CTL=1`); docs: `.claude/plugins/mcp-backend-ctl/README.md`
+- `sentry` — error-monitoring MCP (marketplace consume plugin, needs Sentry auth via `/mcp`; no local `.claude/plugins/` docs)
+
+Before first using an MCP tool — `Read` its README (`.claude/plugins/<id>/README.md`): setup, usage, rules.
+
+Not in `.mcp.json` → fallback to `Grep`/`Read`, don't hand the task to a subagent "for nothing". One server
+answered → don't re-check another on the same data.
+
+## Behavioral additions (Karpathy + Pocock gap-fill)
+
+Gaps the default system prompt covers weakly. Apply on non-trivial tasks.
+
+- **Think before coding.** State assumptions; multiple readings of the request → list them, don't
+  pick silently; simpler approach exists → say so; unclear → stop and ask, don't guess.
+- **Goal-driven execution.** Multi-step work → state a brief plan `1. step → verify: check`.
+  Reframe imperatives into verifiable goals ("fix bug" → repro test → green). Weak criteria
+  ("make it work") cause drift.
+- **Smart-zone discipline.** Quality degrades past ~100k tokens (Pocock "dumb zone") — watch the
+  budget proactively, not after the fact. Full protocol (task/phase boundary triggers, `/clear`
+  vs `/compact`) → `project-rules` §8. Don't pad context: 20 files read when 3 matter costs
+  reasoning, not just tokens — use `qex:search_code` / targeted `Grep` instead.
+
+## Token discipline (baseline & tool output)
+
+Lossless habits that shrink baseline + per-command cost (never trade reasoning quality for
+tokens — that's what `caveman` is for, trigger-based, user-facing only).
+
+- MCP tool-search is default-on (schemas load on demand) — don't force `ENABLE_TOOL_SEARCH=true`
+  behind a proxy/Vertex; tune via `ENABLE_TOOL_SEARCH=auto:N` in `settings.json` → `env` if needed.
+- Prefer CLI (`gh`/`git`/`sentrux`/`qex` via `Bash`) over MCP for one-off ops; disable unused
+  servers in `enabled.yaml`. Audit the baseline with `/context` or skill **context-budget**.
+- Lean tool output at the source — hooks can't rewrite it after the fact: `pytest -q --tb=short`,
+  `ruff check -q`, pipe large logs through `grep -E 'ERROR|FAIL'`. Exception: debugger/tester need
+  full output.
+- Unavoidable `/compact` → focus `modified files + test commands + plan path`; at a real boundary
+  prefer `/clear` + handoff (see Smart-zone discipline).
+
+## Project layout — where to write and where to read
+
+| What | Path | Written by |
+|-----|------|-------|
+| Main package | `src/<package>/` | developer |
+| **Module contract** | `src/<package>/<module>/{README.md,interface.py,_impl/}` (full) or `<module>.py` (lite) + `tests/contract/test_<module>.py` | developer (skill `module-contract`) |
+| Tests | `tests/` | tester |
+| Scripts / commit validator | `scripts/`, `scripts/validate_commit/` | developer / seed (autocopy) |
+| Commit guide | `.claude/COMMIT_GUIDE.md` | seed (autocopy) |
+| Session logs | `docs/sessions/YYYY-MM-DD.md` | `/core:team:wrap-up`, pre-commit-session-log hook |
+| Task plans | `plans/YYYY-MM-DD_<slug>.md` (single) or `.../plan.md`+`phase-N.md` (multi-phase) | `/dev:plan` (Manager) |
+| Long-term memory | `.claude/memory/MEMORY.md` + `*.md` | agent (auto-memory rules) |
+| Layer enum | `.claude/commit-layers.txt` | project (manual) |
+| Commands/Agents/Skills | `.claude/{commands,agents,skills}/…` (materialized, gitignored) | `plugin sync` from `plugins/<id>/…` |
+| Hooks | composed in `.claude/settings.json` | `plugin sync` from `plugin.json.hooks` |
+| Living spec | `docs/direction/` | `/dev:spec:spec`, `/dev:spec:spec-sync` |
+| Data (gitignored) | `data/` | runtime |
+
+**Thread:** `/dev:plan` → plan + branch → `/dev:implement Task X.Y` → commit with a `Refs: plans/<slug>.md`
+trailer → `/dev:ship` checks `--grep="Refs:"` and closes the plan → `/core:team:wrap-up` writes
+`docs/sessions/<today>.md`. A new session restores context: branch → plan → commits' `Refs:`
+→ latest `docs/sessions/` → `.claude/memory/`.
+
+## Memory (OVERRIDE)
+
+**Canonical path:** `.claude/memory/` (project-local, git-tracked; `autoMemoryDirectory` in
+`.claude/settings.local.json`, fixed by `plugin doctor --fix`). Index `- [Title](file.md) — hook`;
+an entry is a separate `.md` with frontmatter `name`/`description`/`metadata.type` ∈
+`user`/`feedback`/`project`/`reference`. Lint: `.claude/plugins/core/scripts/memory_lint.py`.
+Commands: `/core:memory:status`, `:search <query>`, `:remember [lesson]`, `:init` (new project).
+Per-project — not shipped in the seed.
+
+**Subagent memory** (CC ≥2.1.59) adds to, does not replace: agent frontmatter `memory: <scope>` →
+CC injects the role's `MEMORY.md` into the system prompt + Read/Write/Edit. `project` (default for
+dev-write agents, see `memory:` in their frontmatter) → `.claude/agent-memory/<name>/`, under git;
+`local` → `.claude/agent-memory-local/<name>/`, gitignored; `user` → `~/.claude/agent-memory/<name>/`,
+machine-local. Isolated per role (reviewer — review patterns, tester — flaky tests); cross-role
+rules stay in `.claude/memory/`.
+
+**Capture rail — when to write.** WHEN: the fix took more than one attempt; a recurring trap;
+the user gave a rule/correction; a non-trivial decision outside code/git/plan. FORBID: what
+code/git/plan/`CLAUDE.md` already store; one-off details; "might come in handy". Before writing —
+`grep` on individual keywords (not the whole phrase); a near-match → UPDATE, not a duplicate.
+Manual trigger — `/core:memory:remember` at a verified transition (red→green, decision made).
