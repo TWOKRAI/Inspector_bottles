@@ -7,9 +7,9 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Modelfile = Join-Path $ScriptDir "templates\qwen3-embedding-4b-win.Modelfile"
-$Base = "qwen3-embedding:4b"
-$Variant = "qwen3-embedding:4b-qex"
+$Modelfile = Join-Path $ScriptDir "templates\qwen3-embedding-0.6b-win.Modelfile"
+$Base = "qwen3-embedding:0.6b"
+$Variant = "qwen3-embedding:0.6b-qex"
 
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Write-Error "ollama не найдена в PATH. Установи Ollama и перезапусти."
@@ -24,7 +24,7 @@ try {
 }
 
 $Tags = (ollama list) -join "`n"
-if ($Tags -notmatch "qwen3-embedding\s+4b") {
+if ($Tags -notmatch "qwen3-embedding\s+0\.6b") {
     Write-Host "-> pulling $Base (первый запуск)..."
     ollama pull $Base
 }
@@ -32,16 +32,12 @@ if ($Tags -notmatch "qwen3-embedding\s+4b") {
 Write-Host "-> создаю GPU-оптимизированный вариант $Variant"
 ollama create $Variant -f $Modelfile
 
-Write-Host "-> подменяю $Base на $Variant"
-ollama stop $Base 2>$null
-ollama rm $Base 2>$null
-ollama cp $Variant $Base
-
-Write-Host "-> прогрев"
-$Body = @{ model = $Base; prompt = "warm-up" } | ConvertTo-Json
+Write-Host "-> прогрев $Variant"
+$Body = @{ model = $Variant; prompt = "warm-up" } | ConvertTo-Json
 Invoke-WebRequest -Uri "http://localhost:11434/api/embeddings" -Method POST -Body $Body -ContentType "application/json" -UseBasicParsing | Out-Null
 
 Write-Host ""
 ollama ps
 Write-Host ""
-Write-Host "OK. PROCESSOR должен быть '100% GPU'. Если 'CPU' — проверь VRAM (nvidia-smi)."
+Write-Host "OK. qex-launcher грузит $Variant напрямую — правки кода не нужны."
+Write-Host "PROCESSOR должен быть '100% GPU'. Если 'CPU' — проверь VRAM (nvidia-smi)."

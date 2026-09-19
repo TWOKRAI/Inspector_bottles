@@ -2,76 +2,76 @@
 module_code: {{CODE}}
 ---
 
-# {{MODULE_NAME}} — Архитектурные решения
+# {{MODULE_NAME}} — Architecture Decisions
 
-Per-module ADR (Architecture Decision Records). Формат заголовков:
+Per-module ADR (Architecture Decision Records). Heading format:
 `## ADR-{{CODE}}-NNN: <title>`. Aggregator (`scripts/aggregate_context`)
-собирает таблицу всех ADR в `docs/PROJECT_CONTEXT.md`.
+collects a table of all ADRs into `docs/PROJECT_CONTEXT.md`.
 
-**Когда создавать ADR:**
-- Решение влияет на дизайн модуля и нетривиально из кода.
-- Были обсуждены альтернативы.
-- Через год хочется помнить **почему** так, а не «как».
+**When to create an ADR:**
+- The decision affects the module's design and isn't obvious from the code.
+- Alternatives were discussed.
+- A year from now you'll want to remember **why**, not just "how".
 
-**Когда НЕ создавать:**
-- Тривиальный fix / rename / format.
-- Очевидное решение без альтернатив.
+**When NOT to create one:**
+- Trivial fix / rename / format.
+- An obvious decision with no alternatives.
 
-**Frontmatter `module_code:`** — обязателен. Используется aggregator'ом для
-индекса и стабильных ссылок. Должен быть уникальным в проекте (см.
-`docs/PROJECT_CONTEXT.md` → таблица «Коды модулей»). Auto-derived из
-имени папки если пропущен (uppercase initials), но явное задание лучше.
-
----
-
-## ADR-{{CODE}}-001: <короткий заголовок>
-
-**Дата:** YYYY-MM-DD
-**Статус:** Принято | Предложено | Устарело | Заменено-ADR-{{CODE}}-NNN
-**PR:** PR-XX (опц., ссылка на pull request)
-
-### Контекст
-
-Что за проблема, какие ограничения её обрамляют, какие силы давят на
-выбор. 2-6 предложений. Хорошо включить hard constraints: deadlines,
-производительность, регуляторика, runtime ограничения.
-
-### Решение
-
-Что мы делаем. Active voice. «Мы используем X» / «Мы НЕ используем Y».
-Если многошаговое — пронумерованный список.
-
-### Альтернативы
-
-Перечисли plausible альтернативы, каждую 1-2 фразы:
-
-- **Вариант A:** _краткое описание_ — отклонён, потому что …
-- **Вариант B:** _краткое описание_ — отклонён, потому что …
-
-### Последствия
-
-Что становится проще / сложнее.
-
-- **+** Положительное (capability, cost reduction)
-- **+** Положительное
-- **−** Отрицательное (trade-off, debt accepted)
-- **−** Отрицательное
-
-### Implementation pointers (опц.)
-
-Где это решение материализуется в коде:
-
-- `interface.py:42` — функция, воплощающая правило
-- `_impl/<file>.py:N` — конкретная реализация
-
-### Revisit when (опц.)
-
-Какое событие заставит переоткрыть решение?
-
-- _Пример: «появится 2-й воркер-пул», «Python 3.13 GA», «throughput > 10k rps»_
+**Frontmatter `module_code:`** — required. Used by the aggregator for the
+index and stable links. Must be unique in the project (see
+`docs/PROJECT_CONTEXT.md` → "Module codes" table). Auto-derived from the
+folder name if omitted (uppercase initials), but setting it explicitly is better.
 
 ---
 
-## ADR-{{CODE}}-002: <следующее решение>
+## ADR-{{CODE}}-001: <short title>
+
+**Date:** YYYY-MM-DD
+**Status:** Accepted | Proposed | Deprecated | Superseded-by-ADR-{{CODE}}-NNN
+**PR:** PR-XX (opt., link to the pull request)
+
+### Context
+
+What the problem is, what constraints frame it, what forces are pushing the
+choice. 2-6 sentences. Good to include hard constraints: deadlines,
+performance, regulatory, runtime constraints.
+
+### Decision
+
+What we're doing. Active voice. "We use X" / "We do NOT use Y".
+If multi-step — a numbered list.
+
+### Alternatives
+
+List the plausible alternatives, each in 1-2 sentences:
+
+- **Option A:** _short description_ — rejected because …
+- **Option B:** _short description_ — rejected because …
+
+### Consequences
+
+What becomes easier / harder.
+
+- **+** Positive (capability, cost reduction)
+- **+** Positive
+- **−** Negative (trade-off, debt accepted)
+- **−** Negative
+
+### Implementation pointers (opt.)
+
+Where this decision materializes in the code:
+
+- `interface.py:42` — the function embodying the rule
+- `_impl/<file>.py:N` — the concrete implementation
+
+### Revisit when (opt.)
+
+What event should trigger reopening this decision?
+
+- _Example: "a 2nd worker pool appears", "Python 3.13 GA", "throughput > 10k rps"_
+
+---
+
+## ADR-{{CODE}}-002: <next decision>
 
 ...

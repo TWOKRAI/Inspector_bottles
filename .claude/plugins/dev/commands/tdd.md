@@ -2,68 +2,69 @@
 description: Focused contract-first RED → GREEN → [REFACTOR] loop for one unit (TDD) — standalone extract of /dev:pipeline §2
 ---
 
-Узкий **TDD-цикл для одного юнита/поведения**: **RED → GREEN → [REFACTOR]**. Это самый
-тонкий из трёх режимов реализации — без планирования (manager), без обязательной
-INTERFACE-ступени, без полного regression-прогона и review-петли.
+A narrow **TDD cycle for one unit/behavior**: **RED → GREEN → [REFACTOR]**. This is the
+thinnest of the three implementation modes — no planning (manager), no mandatory
+INTERFACE stage, no full regression run, no review loop.
 
-**Где он в ряду команд:**
-- `/dev:pipeline` — полный цикл (plan → implement → test → review → ship).
-- `/dev:implement` — одна Task X.Y из плана по contract-ветке (`new-*` → INTERFACE→RED→GREEN),
-  с Refs-трассировкой.
-- `/dev:tdd` (эта) — одна функция/поведение, test-first, когда контракт уже есть
-  (`impl-only`) или нужен быстрый красный→зелёный без церемоний плана.
+**Where it sits among the commands:**
+- `/dev:pipeline` — the full cycle (plan → implement → test → review → ship).
+- `/dev:implement` — one Task X.Y from a plan along the contract branch (`new-*` → INTERFACE→RED→GREEN),
+  with Refs tracing.
+- `/dev:tdd` (this one) — one function/behavior, test-first, when the contract already
+  exists (`impl-only`) or a quick red→green is needed without plan ceremony.
 
-Входные данные: $ARGUMENTS — что покрыть (функция/метод + желаемое поведение / acceptance).
-Если $ARGUMENTS пуст:
-> Укажи юнит и поведение: `/dev:tdd <функция> должна <поведение>` или
-> `/dev:tdd tests/unit/test_x.py::test_y — <ожидаемое>`
+Input: $ARGUMENTS — what to cover (function/method + desired behavior / acceptance).
+If $ARGUMENTS is empty:
+> Specify the unit and behavior: `/dev:tdd <function> should <behavior>` or
+> `/dev:tdd tests/unit/test_x.py::test_y — <expected>`
 
-## Цикл
+## Cycle
 
-**RED** — запусти **tester** (Sonnet) в `MODE: red`. Параметры передаются заголовком первых
-строк промпта (см. `agents/tester.md` → "How the orchestrator passes parameters"): минимум
-`MODE: red`, `TASK:`, и `INTERFACE:`/`MODULE_CONTRACT:` если контракт-в-коде есть.
-- Один failing-тест на **одну** Pre/Post-строку (или один acceptance-критерий, если формального
-  контракта нет — tester это пометит в отчёте).
-- Tester читает **только** контракт/спек, **не** `_impl/`, и **демонстрирует** падение с нужным
-  типом ошибки (`AssertionError` для `impl-only`; `NotImplementedError`/`AttributeError`, если
-  символа ещё нет). `ImportError`/`SyntaxError` = сломан setup, чини его, не засчитывай как RED.
-- Если тест **проходит** → тест неверен (тестирует текущее поведение, не желаемое), переписать.
-- Коммит: `test(<scope>): failing test for <unit>` (+ `Refs:`, если для slug есть план).
+**RED** — run **tester** (Sonnet) in `MODE: red`. Parameters are passed as a header in the
+first lines of the prompt (see `agents/tester.md` → "How the orchestrator passes parameters"): at
+minimum `MODE: red`, `TASK:`, and `INTERFACE:`/`MODULE_CONTRACT:` if an in-code contract exists.
+- One failing test per **one** Pre/Post line (or one acceptance criterion, if there's no formal
+  contract — the tester flags this in the report).
+- The tester reads **only** the contract/spec, **not** `_impl/`, and **demonstrates** the failure with
+  the right error type (`AssertionError` for `impl-only`; `NotImplementedError`/`AttributeError` if
+  the symbol doesn't exist yet). `ImportError`/`SyntaxError` = broken setup, fix it, don't count it as RED.
+- If the test **passes** → the test is wrong (it tests current behavior, not the desired one), rewrite it.
+- Commit: `test(<scope>): failing test for <unit>` (+ `Refs:`, if a plan exists for the slug).
 
-**GREEN** — запусти **developer** (Sonnet) или **teamlead** (Opus, если Senior+):
-- Передай путь к RED-тесту (и к `interface.py`, если есть) — агент **читает**, не угадывает контракт.
-- **Минимальная** реализация в `_impl/`, чтобы RED-тест прошёл и Pre/Post соблюдены. Без
-  over-engineering под будущее.
-- Агент **не правит** RED-тест и контракт под сломанный код (анти-cheat). Неверный контракт →
-  назад к `manager`/INTERFACE, не подгонка.
-- Коммит: `feat(<scope>): impl for <unit>` (+ `Refs:`).
+**GREEN** — run **developer** (Sonnet) or **teamlead** (Opus, if Senior+):
+- Pass the path to the RED test (and to `interface.py`, if it exists) — the agent **reads** the
+  contract, doesn't guess it.
+- **Minimal** implementation in `_impl/`, so the RED test passes and Pre/Post are honored. No
+  over-engineering for the future.
+- The agent **does not edit** the RED test or the contract to fit broken code (anti-cheat). A
+  wrong contract → back to `manager`/INTERFACE, not a patch-up.
+- Commit: `feat(<scope>): impl for <unit>` (+ `Refs:`).
 
-**REFACTOR** (опц.) — если GREEN оставил очевидный долг: чистка в том же контексте, тесты
-зелёные после каждой правки; публичный контракт не трогается.
+**REFACTOR** (optional) — if GREEN left obvious debt: clean up in the same context, tests
+green after each change; the public contract is not touched.
 
-**Канонический алгоритм каждого этапа** (anti-cheat-обоснование Pocock, точные коммит-сообщения,
-типы RED-ошибок по ветке контракта, failure-recovery) — `/dev:pipeline` §2 (single source of
-truth). Не дублируем здесь — при сомнении читай его.
+**The canonical algorithm for each stage** (Pocock anti-cheat rationale, exact commit messages,
+RED error types by contract branch, failure recovery) — `/dev:pipeline` §2 (single source of
+truth). Not duplicated here — read it when in doubt.
 
-## Когда вызывать
+## When to call
 
-- Нужна test-first дисциплина на **одном** юните прямо сейчас, без полного плана/пайплайна.
-- Багфикс по схеме «сначала тест, воспроизводящий баг → потом фикс» (`impl-only`).
-- Контракт (`interface.py` / docstring) уже существует — нужен только красный→зелёный.
+- Test-first discipline is needed on **one** unit right now, without a full plan/pipeline.
+- A bugfix following "test reproducing the bug first → then the fix" (`impl-only`).
+- The contract (`interface.py` / docstring) already exists — only a red→green is needed.
 
-## Когда НЕ вызывать
+## When NOT to call
 
-- Новый публичный модуль (нужна INTERFACE-ступень) → `/dev:implement` (ветка `new-*`).
-- Несколько связанных Task / нужен review и regression → `/dev:pipeline`.
-- Конфиг / docs / dep-bump (`n/a` — TDD неприменим) → правь напрямую.
-- Диагностика падающего теста с неочевидной причиной → `/dev:debug` (skill `systematic-debugging`),
-  а не «писать новый тест».
+- A new public module (needs an INTERFACE stage) → `/dev:implement` (branch `new-*`).
+- Several related Tasks / review and regression needed → `/dev:pipeline`.
+- Config / docs / dep-bump (`n/a` — TDD doesn't apply) → edit directly.
+- Diagnosing a failing test with a non-obvious cause → `/dev:debug` (skill `systematic-debugging`),
+  not "write a new test".
 
-## Refs-трассировка
+## Refs tracing
 
-Если для текущего slug есть план (`plans/YYYY-MM-DD_<slug>.md` или `.../phase-N.md`) — каждый
-этапный коммит несёт trailer `Refs: <точный путь к плану>` (как в `/dev:implement` §3). Нет плана
-(быстрый юнит вне плановой работы) — не блокируй, но предупреди пользователя.
+If a plan exists for the current slug (`plans/YYYY-MM-DD_<slug>.md` or `.../phase-N.md`) — every
+stage commit carries the trailer `Refs: <exact path to the plan>` (as in `/dev:implement` §3). No plan
+(a quick unit outside planned work) — don't block, but warn the user.
 
-Юнит: $ARGUMENTS
+Unit: $ARGUMENTS

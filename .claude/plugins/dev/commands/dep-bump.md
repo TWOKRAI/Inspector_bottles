@@ -2,75 +2,75 @@
 description: Opt-in weekly dependency bump — uv lock --upgrade, run the suite, ai-judge gate on green, open a DRAFT PR (human merges). Falls back to gh CLI / stdout diff. Never auto-runs, never merges.
 ---
 
-**Opt-in weekly dep-bump.** Команда обновляет залоченные зависимости, прогоняет тесты,
-и при зелёном вердикте открывает **draft PR** — но **никогда не мёрджит**. Мёрдж —
-решение человека (`human-merges`).
+**Opt-in weekly dep-bump.** The command updates locked dependencies, runs the tests,
+and on a green verdict opens a **draft PR** — but **never merges**. Merging is
+the human's decision (`human-merges`).
 
-> **OPT-IN — не запускается автоматически.** Выполняется **только** по явному вызову
-> `/dev:dep-bump`. Не зарегистрирована ни в каком hook, cron или scheduled-агенте.
-> «Еженедельно» = человек запускает её раз в неделю, а не harness по таймеру. Граница
-> ответственности: **агент создаёт draft PR, человек ревьюит и мёрджит** (ROADMAP § E.4,
-> человек на необратимом). Команда сама `git push`/merge в `main` не делает.
+> **OPT-IN — does not run automatically.** Runs **only** on an explicit call to
+> `/dev:dep-bump`. Not registered in any hook, cron, or scheduled agent.
+> "Weekly" = a human runs it once a week, not the harness on a timer. Boundary of
+> responsibility: **the agent creates a draft PR, the human reviews and merges** (ROADMAP § E.4,
+> human owns the irreversible). The command itself never does `git push`/merge into `main`.
 
-Аргумент: $ARGUMENTS — опц. конкретные пакеты (`--upgrade-package <name>`). Пусто = полный `--upgrade`.
+Argument: $ARGUMENTS — opt. specific packages (`--upgrade-package <name>`). Empty = full `--upgrade`.
 
-## Цикл
+## Cycle
 
-**1. Ветка** — отделись от свежего `main`, чтобы bump не висел на рабочей ветке:
+**1. Branch** — branch off a fresh `main`, so the bump doesn't hang on a working branch:
 `git checkout main && git pull --ff-only && git checkout -b chore/dep-bump-<YYYY-MM-DD>`.
 
-**2. Upgrade lock** — перересолви зависимости:
-- Полный: `uv lock --upgrade`
-- Точечный: `uv lock --upgrade-package <name>` (из $ARGUMENTS).
-Зафиксируй diff `uv.lock` (`git diff uv.lock`) — это машинный сигнал для судьи (что и куда поднялось).
+**2. Upgrade lock** — re-resolve dependencies:
+- Full: `uv lock --upgrade`
+- Targeted: `uv lock --upgrade-package <name>` (from $ARGUMENTS).
+Capture the `uv.lock` diff (`git diff uv.lock`) — this is the machine signal for the judge (what moved where).
 
-**3. Sync + suite** — установи новый lock и прогони весь suite:
-`uv sync && uv run pytest tests/ -q` (scoped, не bare — см. `_stack.md`).
-Захвати вывод в файл: `... 2>&1 | tee /tmp/depbump_out.txt`.
+**3. Sync + suite** — install the new lock and run the whole suite:
+`uv sync && uv run pytest tests/ -q` (scoped, not bare — see `_stack.md`).
+Capture the output to a file: `... 2>&1 | tee /tmp/depbump_out.txt`.
 
-**4. ai-judge gate (зелёные тесты + нет breaking = PASS)** — запусти агента **ai-judge**
-(Opus, fresh context) с машинным сигналом = `/tmp/depbump_out.txt` (результат suite) +
-`git diff uv.lock` (что поднялось). Судья выдаёт один вердикт:
-- `VERDICT: PASS` → suite зелёный **и** в diff нет рискованных major-скачков без подтверждения →
-  переходи к draft PR.
-- `VERDICT: BLOCK` → suite красный, либо major-bump с вероятным breaking change → **СТОП**:
-  не создавай PR, выведи отчёт (что упало / какой пакет рисковый). Дальше — человек:
-  откатить пакет (`--upgrade-package` точечно) или чинить через `/dev:debug`.
+**4. ai-judge gate (green tests + no breaking = PASS)** — run the **ai-judge** agent
+(Opus, fresh context) with the machine signal = `/tmp/depbump_out.txt` (suite result) +
+`git diff uv.lock` (what moved up). The judge issues one verdict:
+- `VERDICT: PASS` → suite is green **and** the diff has no risky major jumps without confirmation →
+  proceed to the draft PR.
+- `VERDICT: BLOCK` → suite is red, or a major bump with a likely breaking change → **STOP**:
+  don't create the PR, print a report (what failed / which package is risky). Next — a human:
+  roll back the package (`--upgrade-package` targeted) or fix it via `/dev:debug`.
 
-ai-judge здесь — bounded owner gate-решения (см. `agents/ai-judge.md`): он судит сигнал
-(suite + lock-diff), он не правит зависимости и не мёрджит.
+ai-judge here is the bounded owner of the gate decision (see `agents/ai-judge.md`): it judges
+the signal (suite + lock-diff), it does not fix dependencies and does not merge.
 
-**5. Commit + draft PR (human-merges)** — только при `VERDICT: PASS`:
-- Коммит: `chore(deps): weekly dependency bump (uv lock --upgrade)` с телом — список
-  поднятых пакетов `name old → new` из `uv.lock` diff.
-- Открой **draft** PR в `main` (3-уровневый fallback):
-  1. **github MCP** доступен (`enabled.yaml` → `github`) → создай PR через MCP с флагом draft.
-  2. Иначе **`gh` CLI**: `gh pr create --draft --base main --title "chore(deps): weekly dependency bump" --body <…>`.
-  3. **Fallback (нет ни github MCP, ни `gh`)**: НЕ создавай PR. Выведи в stdout:
-     `git diff main...HEAD --stat` + список bump'ов + готовую инструкцию:
-     «PR не создан автоматически (github MCP / gh CLI недоступны). Запушь ветку
-     `chore/dep-bump-<date>` и открой draft PR в `main` вручную.» Это не ошибка — это
-     graceful degrade.
+**5. Commit + draft PR (human-merges)** — only on `VERDICT: PASS`:
+- Commit: `chore(deps): weekly dependency bump (uv lock --upgrade)` with a body — the list
+  of bumped packages `name old → new` from the `uv.lock` diff.
+- Open a **draft** PR into `main` (3-level fallback):
+  1. **github MCP** available (`enabled.yaml` → `github`) → create the PR via MCP with the draft flag.
+  2. Otherwise **`gh` CLI**: `gh pr create --draft --base main --title "chore(deps): weekly dependency bump" --body <…>`.
+  3. **Fallback (neither github MCP nor `gh`)**: do NOT create the PR. Print to stdout:
+     `git diff main...HEAD --stat` + the list of bumps + a ready-made instruction:
+     "PR not created automatically (github MCP / gh CLI unavailable). Push the branch
+     `chore/dep-bump-<date>` and open a draft PR into `main` manually." This is not an error —
+     it's a graceful degrade.
 
-PR создаётся **draft** намеренно: человек ревьюит changelog'и поднятых пакетов и сам
-переводит из draft в ready + мёрджит.
+The PR is created as **draft** intentionally: the human reviews the changelogs of the bumped
+packages and moves it from draft to ready + merges it themselves.
 
-## Отчёт
+## Report
 
-- `VERDICT`: `PASS` (draft PR #N создан / инструкция выведена) / `BLOCK` (что упало или рисковый пакет).
-- Поднятые пакеты: `name old → new` (особо пометь major-скачки).
+- `VERDICT`: `PASS` (draft PR #N created / instruction printed) / `BLOCK` (what failed or which package is risky).
+- Bumped packages: `name old → new` (flag major jumps specifically).
 - Suite: passed/failed.
-- Следующий шаг для человека: ссылка на draft PR или команда запушить ветку.
+- Next step for the human: link to the draft PR or the command to push the branch.
 
-## Когда вызывать
+## When to call
 
-- Раз в неделю / перед спринтом — подтянуть патчи безопасности и minor-обновления под защитой suite.
-- После долгой паузы в проекте — разовый контролируемый bump с draft PR на ревью.
+- Once a week / before a sprint — pull in security patches and minor updates under the suite's protection.
+- After a long pause in the project — a one-off controlled bump with a draft PR for review.
 
-## Когда НЕ вызывать
+## When NOT to call
 
-- Нужен конкретный пакет под фичу → ставь его напрямую (`uv add <pkg>`), это не «weekly bump».
-- Suite уже красный до bump'а → сначала `/dev:test-triage` / `/dev:debug`, не маскируй падения апгрейдом.
-- Нужно немедленно влить в `main` без ревью — **намеренно не поддерживается** (human-merges, только draft PR).
+- Need a specific package for a feature → install it directly (`uv add <pkg>`), this is not a "weekly bump".
+- Suite is already red before the bump → first `/dev:test-triage` / `/dev:debug`, don't mask failures with an upgrade.
+- Need to merge into `main` immediately without review — **intentionally not supported** (human-merges, draft PR only).
 
-Пакеты / фокус: $ARGUMENTS
+Packages / focus: $ARGUMENTS

@@ -19,7 +19,7 @@ The orchestrator (Director / `/dev:pipeline`) tells you which mode to run in. De
 | **`MODE: red`** | BEFORE `/dev:implement` (TDD-first). Pipeline step 2a. | Test MUST fail at the END of your run with the expected error type. If it passes — you wrote the wrong test. |
 | **`MODE: regression`** | AFTER `/dev:implement` (Pipeline step 3). | Full relevant suite must be green. Confirms the new code didn't break neighbors. |
 
-**Why two modes** (not one big "write tests" step): if implementation is written first, the agent unconsciously fits tests to the broken code (Pocock — "algorithmic optimization, not bad intent"). RED mode is a structural anti-cheat — it forces the contract to exist before the implementation can be massaged.
+**Why two modes** (not one "write tests" step): if implementation is written first, the agent unconsciously fits tests to the broken code. RED mode is a structural anti-cheat — it forces the contract to exist before the implementation can be massaged.
 
 ### How the orchestrator passes parameters
 
@@ -38,11 +38,13 @@ PLAN: <path to plans/YYYY-MM-DD_<slug>.md or .../phase-N.md>
 Rules:
 - If the header is missing or malformed → fall back to `MODE: regression` (safe default — runs full suite, never modifies code) and report the fallback to the orchestrator.
 - `MODULE_CONTRACT` tells you which RED workflow branch to follow (see step 1 below) — don't re-derive it from the plan file.
-- Always **echo the parsed header** in your first response so the orchestrator sees you understood: `Parsed: MODE=red, INTERFACE=src/foo/interface.py, MODULE_CONTRACT=new-full, TASK=1.1, PLAN=plans/2026-05-25_foo.md`.
+- Always **echo the parsed header** in your first response so the orchestrator sees you understood: `Parsed: MODE=red, INTERFACE=src/foo/interface.py, MODULE_CONTRACT=new-full, TASK=1.1, PLAN=plans/2026-05-25_foo.md`. Below the header the brief is the form in `dev/templates/executor-brief.md`: FILES = the test files you may create or change, REDS = the contract lines each test pins (≤ 10 — more is a split, not a longer run). First test within your first 5 tool calls; read only the contract source and FILES.
 
 ### `MODE: red` workflow
 
 **Source of truth = `interface.py` (or module docstring for lite modules), not the spec text.** The spec describes intent; `interface.py` is the formal contract in code (Protocol + Pre/Post). Test the contract, not the prose.
+
+**If spawned with `isolation: "worktree"`** (see `core/agents/_WORKTREE_PATTERN.md`): you run in an isolated worktree at the pre-implementation commit; the implementation does not exist in your tree by construction; name the forbidden paths anyway (a report that says which paths you did not read is auditable).
 
 1. **Identify contract source.** Orchestrator hands you the path. Cases:
    - `new-full` / `new-lite` Task → `interface.py` (or module docstring) was created in step 2-INTERFACE. Read it.
@@ -98,38 +100,16 @@ def test_sorting_is_idempotent(xs):
 
 ## MCP routing (self-contained)
 
-**Finding edge cases and context for tests:**
-1. Always → `qex:search_code` for semantic search of edge cases in related code.
-2. **If codegraph is connected** → `codegraph_explore` on the symbol under test — exact list of callers → suggests real usage scenarios and edge inputs.
-3. **If the function uses a library and context7 is connected** → `context7:query-docs` for known edge cases and documented limitations.
-4. Fallback (MCP not connected) → Grep by symbol + read related code.
+**Edge cases and context:** always `qex:search_code` for semantic search in related code; codegraph connected → `codegraph_explore` on the symbol under test for real call sites/edge inputs; library + context7 connected → `context7:query-docs` for documented edge cases and limitations; fallback → Grep by symbol + read related code.
 
-**GUI/PySide6 tests (if qt-mcp is connected):**
-1. `qt_snapshot` or `qt_find_widget` — get a ref to the widget under test (find is cheaper when class/name is known).
-2. `qt_batch` — atomic action+verify in a single round-trip (click + wait_for + snapshot) instead of separate calls.
-3. `qt_get_text` / `qt_widget_details` — assert on state (preferred over `qt_screenshot` for text/properties).
-4. `qt_screenshot` — ONLY for visual content (rendered plots, custom drawing, images).
-5. `qt_messages` — collect Qt warnings/errors after the test (find thread-violations, signal-leaks).
-6. `qt_wait_for` — for async transitions (instead of `time.sleep` or `QTest.qWait`).
-7. Fallback (qt-mcp not connected) → `pytest-qt` (`qtbot`, `QSignalSpy`) — standard path for unit GUI tests.
-
-**Backend integration tests (if backend-ctl is connected):**
-1. Launch/connect to the running backend with `BACKEND_CTL=1` (process manager socket, port 8765 by default). Inspect system shape with `capabilities` — understand processes, available commands, registers, channels.
-2. Test backend scenarios: use `send_command` to trigger operations, `state_get` / `state_subscribe` to verify state changes, `events` to trace message routing between processes.
-3. Validate concurrency & timing: `log_tail` for event sequence and timing, `debug_session` for one-button reproduction of complex interaction scenarios.
-4. Spot-check error paths: `state_get` after sending invalid commands to verify error handling.
-5. Inspect process health: `get_status` for incarnation/epoch (stale-message fencing).
-6. **Critical rule:** backend-ctl for backend scenarios; qt-mcp for UI interaction. Do NOT spawn two backends at once (shared PID registry + SHM cleanup conflict) — connect one test client to the running backend.
-7. Fallback (backend-ctl not connected) → `pytest` with mocked driver (in-process simulation, limited scope).
-
-**Do not duplicate:** if codegraph gave you callers → don't Grep for the same. If `qt_snapshot` already gives state → don't run `qt_screenshot` to check text/properties.
+**GUI tests (qt-mcp connected):** `qt_snapshot`/`qt_find_widget` for a widget ref, `qt_batch` for one-round-trip click+wait+verify, `qt_get_text`/`qt_widget_details` for state assertions (preferred over `qt_screenshot`, which is only for visual content), `qt_messages` for thread-violations/signal-leaks, `qt_wait_for` instead of `time.sleep`/`QTest.qWait`. Fallback → `pytest-qt` (`qtbot`, `QSignalSpy`). Do not duplicate: a tool that already gave call paths or state is not re-derived by Grep or a second screenshot.
 
 ## Workflow
 
 1. Determine what to test from acceptance criteria.
 2. **Search for context**: apply MCP routing above — codegraph (if available) gives an exact caller list, qex gives semantic results.
 3. Create/update test file.
-4. Write tests: one test = one check.
+4. Write tests: one test targets one property — pinned where it can break (both sides of a boundary, empty and maximal input, the step where rounding or a unit changes). A single example assertion pins nothing and review rejects it.
 5. Run: `pytest <path> -v`.
 6. If tests fail — determine if it's a code bug or test bug.
 7. Report result: what passed, what didn't.
@@ -142,6 +122,9 @@ def test_sorting_is_idempotent(xs):
 - For floats: `pytest.approx()` or `numpy.testing.assert_allclose`, not `==`
 - Fixtures for shared initialization
 - Mock only for external dependencies, not internal logic
+- **A hanging test is worse than none** — `pytest-timeout` is on project-wide (see the `lang-python` `pyproject.toml`); tighten a slow test with `@pytest.mark.timeout(<seconds>)`
+- **Assert the observable effect, not the API name** — check what the call actually did, not that a method or attribute exists
+- **Expected values are literals** — write the answer out; never recompute it from the code under test (that green-lights a wrong implementation)
 
 ## What to test (YES)
 
@@ -155,19 +138,13 @@ def test_sorting_is_idempotent(xs):
 ## What NOT to test (NO)
 
 - Trivial getters/setters
-- Trivial UI property rendering without business logic (e.g., a widget's text right after setting it)
+- Trivial widget rendering without business logic (e.g., a widget's text right after setting it)
 - `__init__` without logic
 - Third-party libraries
 
 ## What NOT to do
 
-- DO NOT change application logic (only tests)
-- DO NOT fix bugs — report them
-- DO NOT write tests just for coverage (only per acceptance criteria)
+- DO NOT change application logic (only tests); DO NOT fix bugs — report them; DO NOT write
+  tests just for coverage (only per acceptance criteria).
 
-## Project rules
-
-The standing project rules (qex freshness, honesty over plausibility, MCP availability,
-commit trailers, subagent and language discipline) come from the `project-rules` skill
-preloaded through `skills:` in the frontmatter. If that text is not in your context, Read
-`.claude/skills/project-rules/SKILL.md` before starting.
+> Project rules preloaded via `skills:`; if absent from context, read `.claude/skills/project-rules/SKILL.md`.

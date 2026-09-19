@@ -2,47 +2,47 @@
 description: Search project memory (.claude/memory/ + docs/sessions/) — grep + optional qex
 ---
 
-Поиск по долговременной памяти проекта и журналам сессий.
+Search the project's long-term memory and session logs.
 
-## Аргументы
+## Arguments
 
-`$ARGUMENTS` — поисковый запрос (фраза или ключевые слова).
-Если пусто — спроси у пользователя что искать.
+`$ARGUMENTS` — the search query (a phrase or keywords).
+If empty — ask the user what to search for.
 
-## Шаги
+## Steps
 
-1. **Лексический слой (primary).** Это основной механизм — работает всегда, не требует индекса:
+1. **Lexical layer (primary).** This is the main mechanism — always works, needs no index:
    ```bash
    grep -rinl --include='*.md' "$ARGUMENTS" .claude/memory/ docs/sessions/ 2>/dev/null
    ```
-   Для каждого hit-файла вытащи 2-3 строки контекста вокруг совпадения.
+   For each hit file, pull 2-3 lines of context around the match.
 
-2. **Семантический слой (опционально, если поможет).** Вызови tool `mcp__qex__search_code` с:
+2. **Semantic layer (optional, when it helps).** Call the `mcp__qex__search_code` tool with:
    - `query` = `$ARGUMENTS`
    - `limit` = 10
-   - **не** передавай `extension_filter` — у markdown нет tree-sitter AST-chunking,
-     фильтр по расширению тут только срезает валидные хиты, ничего не давая взамен.
+   - **don't** pass `extension_filter` — markdown has no tree-sitter AST chunking,
+     the extension filter here only cuts valid hits, giving nothing back in return.
 
-   Затем отфильтруй результаты: оставь только пути под `.claude/memory/` или `docs/sessions/`.
+   Then filter the results: keep only paths under `.claude/memory/` or `docs/sessions/`.
 
-   **Caveat:** qex заточен под код (tree-sitter chunking) и может не индексировать Markdown в `.claude/`. **Пусто = норма**, не ошибка — grep (шаг 1) и так покрывает корпус. Не предлагай `/mcp-qex:qex-reindex` ради этой команды.
+   **Caveat:** qex is tuned for code (tree-sitter chunking) and may not index Markdown under `.claude/`. **Empty is normal**, not an error — grep (step 1) already covers the corpus. Don't suggest `/mcp-qex:qex-reindex` for this command.
 
-3. **Объедини и переранжируй.** Дедуп по пути (grep ∪ qex), затем сортировка по убыванию полезности:
-   1. **по типу записи** (`metadata.type` из frontmatter memory-файла):
-      `feedback` → `project` → `user` → `reference` (actionable-правила выше, чем
-      справочный контекст); хиты из `docs/sessions/` (журналы, без type) — после memory-записей;
-   2. внутри одного типа — **свежие выше** (по mtime файла).
+3. **Merge and re-rank.** Dedup by path (grep ∪ qex), then sort by decreasing usefulness:
+   1. **by entry type** (`metadata.type` from the memory file's frontmatter):
+      `feedback` → `project` → `user` → `reference` (actionable rules rank above
+      reference context); hits from `docs/sessions/` (logs, no type) — after memory entries;
+   2. within the same type — **newer ranks higher** (by file mtime).
 
-   Выведи топ-5:
+   Print the top 5:
    ```
    [memory:<type>|session] <relative-path>:<line>
-   <2-3 строки контекста>
+   <2-3 lines of context>
    ```
 
-4. Если ничего не нашлось — честно скажи "по запросу '<...>' в памяти и сессиях ничего нет". Не выдумывай.
+4. If nothing was found — honestly say "nothing found in memory or sessions for query '<...>'". Don't make things up.
 
-## Когда использовать
+## When to use
 
-- Перед началом задачи: "что я уже знаю про X?"
-- При повторяющемся вопросе пользователя: "мы это обсуждали — что решили?"
-- В начале сессии для re-priming контекста.
+- Before starting a task: "what do I already know about X?"
+- On a repeated user question: "we discussed this — what did we decide?"
+- At the start of a session, to re-prime context.

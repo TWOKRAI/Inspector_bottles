@@ -185,7 +185,7 @@ until touched. When touched, raise the level if cheap; if not, document
 4. Create `tests/contract/test_<module>.py` with at least one given/when/then
    test per Pre/Post line in the docstring.
 5. Only then write the implementation.
-6. Smoke: `python -m compileall src/<package>/<module>` + run contract tests.
+6. Smoke: `uv run python -m compileall src/<package>/<module>` + run contract tests.
 
 The slash-command `/dev:scaffold-module` is **not** required — it's a
 convenience wrapper (currently out of scope, see plan backlog). For now,
@@ -226,7 +226,7 @@ module's decisions, gotchas, or open questions — rebuild the registry with
 
 For tracking formal ADR with numbered history → `<module>/DECISIONS.md`
 (see `.claude/plugins/core/templates/DECISIONS.template.md`). For one-off global
-architectural decisions → use `/dev:adr` (creates in `docs/decisions/`).
+architectural decisions → use `/dev:adr` (creates in `docs/claude/DECISIONS/`).
 
 ## Output format (when agent reports)
 

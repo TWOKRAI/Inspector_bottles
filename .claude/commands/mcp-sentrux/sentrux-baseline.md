@@ -2,19 +2,19 @@
 description: Record a quality baseline before refactoring (session_start)
 ---
 
-Зафиксируй точку отсчёта перед началом рефакторинга/правок:
+Record the reference point before starting a refactor/changes:
 
-1. Вызови `mcp__sentrux__scan` с `path` = абсолютный путь к корню проекта (свежие метрики).
-2. Вызови `mcp__sentrux__session_start` (без параметров).
+1. Call `mcp__sentrux__scan` with `path` = the absolute path to the project root (fresh metrics).
+2. Call `mcp__sentrux__session_start` (no parameters).
 
-Покажи пользователю:
+Show the user:
 - `quality_signal` baseline (0–10000).
-- Текущий bottleneck.
-- Напоминание: после правок запусти `/mcp-sentrux:sentrux-diff` чтобы увидеть, улучшилось или деградировало.
+- The current bottleneck.
+- A reminder: after the changes, run `/mcp-sentrux:sentrux-diff` to see whether it improved or degraded.
 
-Используй перед задачами уровня:
-- крупный рефакторинг (>5 файлов или смена API между процессами),
-- разрыв циклов,
-- миграция модуля.
+Use before tasks at the level of:
+- a major refactor (>5 files or an API change between processes),
+- breaking cycles,
+- a module migration.
 
 $ARGUMENTS

@@ -1,132 +1,89 @@
 ---
 name: project-rules
-description: Standing rules shared by every dev agent in this repository — qex freshness check, honesty over plausibility, MCP availability, commit trailers, subagent and language discipline, and the escalation ladder (junior → developer → teamlead → cto → owner). Preloaded into agents through `skills:` in their frontmatter; Read it manually if it is not already in your context.
+description: >
+  Standing rules shared by every dev agent in this project — qex freshness
+  check, honesty over plausibility, MCP availability, commit trailers,
+  subagent and language discipline, and the escalation ladder (junior →
+  developer → teamlead → cto → owner). Preloaded into agents through
+  `skills:` in their frontmatter; read it manually if it is not already
+  in your context.
 ---
 
 # Project rules (apply on top of your role)
 
-Sections 1 (qex), 3 (MCP) and 4 (commits) apply only to roles that have the tools they name;
-a role restricted to Read/Write/Edit/Glob/Grep (for example `docs-writer`) skips them and
-follows sections 2, 5, 6 and 7 in full.
+Sections 1, 3, 4 need those tools; other roles skip them and follow the rest.
 
-These rules used to be pasted verbatim into all twelve agent files; they now live here only.
-Source of truth: `.claude/plugins/dev/skills/project-rules/SKILL.md`, materialized to
-`.claude/skills/project-rules/`. Edit the plugin source, then re-materialize — there are no
-per-agent copies to keep in sync anymore.
+## 1. qex — check freshness first
 
-## 1. qex — check index freshness BEFORE using it
+`mcp__qex__get_indexing_status` before `search_code`; compare `last_indexed` to today. Fresh →
+qex-first. Stale → `Grep`, verify any NUMBER by grep, say the index age up front.
 
-`mcp__qex__get_indexing_status` is the **first step of any qex use**, before the first
-`search_code`. Compare `last_indexed` with today's date.
+## 2. Honesty over plausibility — "I don't know" is a successful outcome
 
-The index does not announce its age: with `indexed: true` and `vector_search_available` the
-results look healthy and answer confidently — with old data. (Until 2026-08-27 the index was
-weeks stale by owner's decision; it is now rebuilt and cheap to refresh, ~7 min incremental —
-but only the date tells you which state you are in.)
+Stuck, unsure, or unverified — **say so plainly**; a hidden guess costs more.
 
-- Fresh (days) → the usual "qex-first" rule applies: search before modifying a symbol.
-- Stale (weeks) → qex is a hint "where to look"; the truth is `Grep`/`rg` and reading the file.
-  Re-check line numbers from the results instead of copying them. Any NUMBER ("how many
-  callers", an inventory) is counted by grep only — a stale hit does not count.
-- **Announce the index age before a review or a verdict and ask whether to refresh**, in one
-  line: "index from <date>, N days old; refresh?" A verdict built on a stale index without
-  that line is not accepted.
-- When you launch a subagent, **pass the index age as a number in its prompt**. It does not
-  know the age and will trust the results; "check it yourself" is weaker than a date.
-- Semantic queries to `search_code` work best in English with code-like vocabulary; exact
-  Russian terms still hit through BM25, abstract Russian paraphrase misses.
+**Forbidden:** inventing an explanation instead of checking; silence about low-confidence work;
+a green run as proof over a known-weak test; "impossible"/"guaranteed" without a reproduction.
 
-## 2. Honesty is the rewarded outcome — "I don't know" beats plausible
-
-If you are stuck, do not know something, could not verify it, or doubt your own result —
-**say so plainly**. That is a successful outcome of the task, not a failure.
-
-It is also cheaper for you: a hidden guess does not disappear, it comes back as a review
-finding, a re-run, a second iteration, sometimes a redo of the whole task. Naming a doubt
-costs one sentence; hiding it costs the work twice, the second time with someone else's time
-and with less trust in the rest of your report. Measured on phase Ф5 of `observation-port`,
-both sides on the same day: the agent that handed in its own hazard test as unreliable
-redid nothing — the caveat was simply recorded; the agent that confidently declared "this
-test cannot pass" instead of "I do not understand what it wants" earned a whole extra
-iteration, because the claim had to be checked by hand and turned out half true.
-
-**Forbidden:**
-- inventing a plausible explanation instead of checking ("most likely because…");
-- staying silent about work that is unfinished or done without confidence;
-- presenting a green run as proof when you know the test is weak;
-- writing "impossible", "guaranteed", "cannot" without a reproduction next to it.
-
-**Required:**
-- a non-empty section **"What I left open and what I know is unreliable in my own work"** in
-  every final report;
-- if a question outlives your task (needs access, an owner's decision, the live stand, another
-  agent) — record it in `docs/claude/OPEN_QUESTIONS.md` in the format given at the top of that
-  file. A recorded question gets picked up; an unspoken one does not;
-- if your own check is weak — say in what way, and what would count as real proof.
-
-Handing in your own test as unreliable is the right move. A false guard is more expensive
-than a missing one, because people rely on it.
+**Required:** a non-empty **"What I left open / unreliable"** section in every report;
+unresolved questions go to `docs/sessions/<today>.md` Open questions; a weak check says how it's
+weak and what real proof looks like.
 
 ## 3. MCP availability follows `enabled.yaml`
 
-A server named in your role prompt is usable only when its plugin is enabled in
-`.claude/enabled.yaml`; disabled servers are simply absent — take the `Grep`/`Read` fallback
-your role lists. Before the first use of any MCP tool, `Read` its plugin README
-(`.claude/plugins/<id>/README.md`) for setup, usage and rules. Tool schemas are deferred: load
-them with `ToolSearch` before calling.
+A server named in your role prompt exists only if enabled in `.claude/enabled.yaml`; otherwise
+fall back to `Grep`/`Read`. First use: `Read` `.claude/plugins/<id>/README.md`, load its schema
+via `ToolSearch`. Mutating/index-building MCP ops — who, where:
+`team-protocol` §7.
 
 ## 4. Commits, pushes and pull requests
 
-- Commit only if your role says you commit **and** the lead's brief did not say otherwise.
-  Never push, never open a pull request, never `git add -A` — stage the explicit paths you
-  changed. A second session or teammate may have uncommitted work in the same tree, and
-  `-A` sweeps it into your commit under your message.
-- Message format: Conventional Commits plus the mandatory trailers `Why:` and `Layer:`, and
-  `Refs: plans/<slug>.md` when the task comes from a plan. The `commit-msg` hook rejects
-  anything else. Full guide: `docs/claude/COMMIT_GUIDE.md`; `Layer:` values in
-  `.claude/modes/_stack.md`.
-- After every commit run `git show --stat HEAD` and check that the diff matches the message.
-  The pre-commit hook stages the session log, so a commit can carry more than you staged.
+- Commit only if your role commits **and** the brief didn't say otherwise. Never push, never
+  open a PR, never `git add -A` (stage explicit paths; the tree may be shared).
+- Conventional Commits + mandatory `Why:`/`Layer:` trailers, `Refs: plans/<slug>.md` from a
+  plan; `commit-msg` hook rejects anything else. Guide: `.claude/COMMIT_GUIDE.md`.
+- After committing, `git show --stat HEAD` — the pre-commit hook may also stage the session log.
 
 ## 5. Subagents and scope
 
-- Spawn a subagent only for a sizeable, genuinely independent track (a wide multi-file sweep).
-  Do not delegate work you can finish in a handful of tool calls, and do not use subagents to
-  verify or double-check your own work. Pass `run_in_background: false` when you need the
-  answer before continuing.
-- Apply every instruction to every listed file, not only the first one. Keep changes to what
-  the task names; a pre-existing bug or an improvement you notice is a follow-up line in your
-  report, not a change in this task.
-- Prefer targeted edits over whole-file rewrites: same result, fewer tokens, smaller diff.
+- Spawn a subagent only for a sizeable, independent track, never to verify your own work;
+  `run_in_background: false` only when the answer blocks you.
+- Apply every instruction to every listed file; keep changes to what the task names — a
+  pre-existing bug or improvement is a follow-up line in your report, not a change here.
+  Targeted edits, not whole-file rewrites.
+
+**Brief = form** (`dev/templates/executor-brief.md`: DESIGN / FILES / REDS): first edit within 5
+tool calls, never re-derive DESIGN, a file outside FILES → stop and ask.
+**Test radius, not the whole suite:** blast-radius tests + `ruff check` + type checker, in the
+foreground; the full suite runs once, at the lead, on the merge point. Exception: a shared-infra
+change (registry, model tier, index format) — the suite is the radius.
+**Environment finding** (venv, shared file, tool) → `SendMessage` to `main` now, keep working.
+**Evidence or nothing:** every "green"/"red"/"fixed" carries the command and its output (predicted
+RED set, break-injection output, preflight paths). **Don't chain unrelated `Bash` commands** —
+one unmatched piece sends the whole chain to the owner; fix = an allow rule or a shorter chain,
+never a gate-skipping flag.
 
 ## 6. Language
 
-Agent prompts, skills, settings and memory files are English. Everything the owner reads is
-Russian: chat output, code comments and docstrings, README/STATUS/DECISIONS, plans, guides.
-Technical terms stay in English inside Russian text. Do not mix languages inside one file.
+User replies follow the native `language` key (`.claude/settings.json`). Agent prompts, skills,
+settings and memory stay English regardless; don't mix languages in one file.
 
-## 7. Escalation ladder — a question goes one level up, never sideways, never into a guess
+## 7. Escalation ladder — one level up, never sideways, never a guess
 
-When you cannot finish — a decision you are not allowed to make, an ambiguity whose two
-readings give different work, a third failed iteration, a contradiction between the spec and
-the code — the task ends neither with a guess nor with silence. It goes one level up, exactly
-as in a company: a junior asks a developer, a developer asks the teamlead, the teamlead asks
-the technical director, the director asks the owner.
+Escalate one level (junior → developer → teamlead → cto → owner) when **blocked**, after a
+third failed iteration, on spec-vs-code conflict, or when a decision **outlives your task**
+(narrows an owner's decision, inherited architecture, changed acceptance, a defect outside
+`Files:`) — say so **before** you act.
 
-| You are | You escalate to | Typical reason |
+| You are | Escalate to | Typical reason |
 |---|---|---|
-| `junior`, `docs-writer` | `developer` / `tech-writer` | the change needs a choice the task did not write down |
-| `developer`, `tester`, `debugger`, `tech-writer`, `spec-writer` | `teamlead` | design question, spec contradicts the code, two failed iterations; `debugger` may go to `investigator` first for the diagnosis |
-| `teamlead`, `reviewer`, `investigator`, `manager`, `integrator`, `ai-judge` | `cto` | architecture, ownership or invariant decision; `teamlead` and `reviewer` still disagree after two iterations; an ADR-level choice |
-| `cto` | the owner, through the lead | scope, priority, hardware, budget — anything only the owner decides; also recorded in `docs/claude/OPEN_QUESTIONS.md` |
+| `junior`, `docs-writer` | `developer` / `tech-writer` | change needs a choice the task didn't specify |
+| `developer`, `tester`, `debugger`, `tech-writer`, `spec-writer` | `teamlead` | design question, spec vs. code, two failed iterations (`debugger` → `investigator` first) |
+| `teamlead`, `reviewer`, `investigator`, `manager`, `integrator`, `ai-judge` | `cto` | architecture/ownership/invariant decision, or `teamlead`/`reviewer` disagree after two iterations |
+| `cto` | owner, via the lead | scope/priority/hardware/budget — record in `docs/sessions/<today>.md` Open questions |
 
-How to escalate:
-- **In a team** — `SendMessage` to the higher role by name if it is on the team; otherwise the
-  same text to the lead, who spawns that role. Mark your task blocked; do not go idle silently.
-- **As a subagent** — end your report with the block below; the lead spawns the higher role.
-- One level at a time: a junior never writes to the cto. The answer comes back the same way.
-  The higher level answers the question within its scope; it does not take over the task
-  unless it says so explicitly.
+**Team:** `SendMessage` to the higher role or lead; mark your task blocked. **Subagent:** the
+moment the fork appears, send the block below to `main`, and repeat it in your final report.
 
 ```
 ESCALATION -> <role>
@@ -136,6 +93,12 @@ Blocked on: <the decision or information you need>
 Files: <paths>
 ```
 
-Why this shape: a question with "tried" and "observed output" is answered in one reply; a bare
-"it does not work" costs the higher level a re-investigation, and a silent guess costs a
-review iteration.
+## 8. Session boundaries — offer the reset, don't wait to be asked
+
+A finished task is the cheapest moment to shed context. End your report with exactly one line:
+
+| Situation | The line you end with |
+|---|---|
+| More of the same task, context still modest | nothing — keep working |
+| Task closed, next task same plan/area | `Boundary: task closed. /compact (focus: files + tests + plan path).` |
+| Phase closed, feature merged, or next task elsewhere | `Boundary: <what closed>. Better: new chat — branch <b>, plan <path>, SHA <sha>, state "<line>".` |

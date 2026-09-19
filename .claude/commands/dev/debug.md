@@ -2,48 +2,49 @@
 description: Run the Debugger agent (Sonnet) — diagnose failing tests, regressions, puzzling errors
 ---
 
-Запусти агента **debugger** (Sonnet) для диагностики проблемы.
+Run the **debugger** agent (Sonnet) to diagnose the problem.
 
-Входные данные: $ARGUMENTS — описание бага, команда воспроизведения, или путь к failing-тесту.
+Input: $ARGUMENTS — description of the bug, a reproduction command, or a path to the failing test.
 
-## Алгоритм
+## Algorithm
 
-1. **Проверь аргументы**
-   Если $ARGUMENTS пустой:
-   > Укажи проблему: `/dev:debug <описание>` или `/dev:debug pytest <путь>::<тест>`
-   > Например: `/dev:debug pytest tests/test_router.py::test_channel_dispatch`
+1. **Check the arguments**
+   If $ARGUMENTS is empty:
+   > Specify the problem: `/dev:debug <description>` or `/dev:debug pytest <path>::<test>`
+   > For example: `/dev:debug pytest tests/test_router.py::test_channel_dispatch`
 
-2. **Собери контекст**
-   - Последние коммиты: `git log -5 --oneline`
-   - Последние изменения: `git diff HEAD~1` (если регрессия)
-   - Если есть failing-тест: `pytest <путь> -v -x --tb=short` (короткий трейс)
+2. **Gather context**
+   - Recent commits: `git log -5 --oneline`
+   - Recent changes: `git diff HEAD~1` (if a regression)
+   - If there's a failing test: `pytest <path> -v -x --tb=short` (short traceback)
 
-3. **Вызови debugger**
+3. **Call the debugger**
    ```
-   Agent(subagent_type: "debugger", prompt: "<описание + собранный контекст>")
+   Agent(subagent_type: "debugger", prompt: "<description + gathered context>", run_in_background: false)
    ```
+   Synchronous call — the diagnosis is needed to decide the next step in the same turn.
 
-4. **Обработай результат**
-   - Если **FIXED** → debugger сам всё починил и закоммитил
-   - Если **ROOT CAUSE FOUND** (без фикса) → передай диагноз нужному агенту:
-     - Уровень Junior/Middle → `developer` (Sonnet)
-     - Уровень Senior+ → `teamlead` (Opus)
-   - Если **не воспроизвёлся** → сообщи пользователю, что нужен точный сценарий
+4. **Handle the result**
+   - If **FIXED** → the debugger fixed and committed everything itself
+   - If **ROOT CAUSE FOUND** (without a fix) → hand the diagnosis to the right agent:
+     - Junior/Middle level → `developer` (Sonnet)
+     - Senior+ level → `teamlead` (Opus)
+   - If it **didn't reproduce** → tell the user an exact scenario is needed
 
-## Типовые вызовы
+## Typical calls
 
 ```
 /dev:debug pytest tests/unit/test_models.py::test_spec_from_dict
-/dev:debug после merge main упал test_workspace_flow
-/dev:debug AttributeError в gui/toolbar_router.py при загрузке проекта
+/dev:debug test_workspace_flow fails after merging main
+/dev:debug AttributeError in gui/toolbar_router.py while loading a project
 ```
 
-## Когда НЕ вызывать
+## When NOT to call
 
-- Очевидная опечатка → просто правь сам
-- Задача ещё не реализована → это не debug, а implement
-- Нужен полный рефакторинг → это teamlead, не debugger
+- An obvious typo → just fix it yourself
+- The task isn't implemented yet → that's not debug, that's implement
+- A full refactor is needed → that's teamlead, not debugger
 
-## Автоматическая активация
+## Automatic activation
 
-`/dev:pipeline` автоматически вызывает debugger при FAIL от tester (итерации 1 и 2). Ручной `/dev:debug` нужен когда цикл `/dev:pipeline` не запущен, или Director хочет диагностику вне пайплайна.
+`/dev:pipeline` automatically calls the debugger on a FAIL from the tester (iterations 1 and 2). A manual `/dev:debug` is needed when the `/dev:pipeline` cycle isn't running, or the Director wants a diagnosis outside the pipeline.

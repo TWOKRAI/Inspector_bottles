@@ -58,7 +58,7 @@ Wait for the user. They will: (a) accept your default, (b) override with their a
 
 If a question can be answered by reading the code, **read the code** instead of
 asking the user. Same for MCP-backed questions:
-- Callers / impact of changing a signature → `codegraph_explore`
+- Callers / impact of changing a signature → `codegraph_explore` on the symbol
 - Architectural fit (cycles, layer violations) → `sentrux:dsm` / `sentrux:check_rules`
 - Library API / version-specific behavior → `context7:query-docs`
 - Semantic neighborhood ("where else does this concept live") → `qex:search_code`

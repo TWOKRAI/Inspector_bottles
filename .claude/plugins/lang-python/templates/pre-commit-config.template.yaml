@@ -40,7 +40,11 @@ repos:
   # ─── Gitleaks: secret scanning (pre-commit, blocks committed secrets) ──────
   # Scans staged files for API keys, tokens, private keys. Pinned version for
   # reproducibility. To allowlist a false positive, add a comment with
-  # `gitleaks:allow` on the same line, or extend .gitleaks.toml.
+  # `gitleaks:allow` on the same line, or extend .gitleaks.toml (read from the
+  # repo root; delivered by claude-kit, yours to edit). The hook reads the WHOLE
+  # staged diff itself (pass_filenames: false): the global `exclude:` above only
+  # decides whether any staged file triggers it, never what it scans — so
+  # allowlisting in .gitleaks.toml is the only way to exempt a path.
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
     hooks:
@@ -83,18 +87,14 @@ repos:
         exclude: ^(tests/|\.claude/|scripts/)
 
   # ─── Sentrux: architectural rule check (pre-push, after pyright) ───────────
-  # Runs `sentrux check` against .sentrux/rules.toml. Pass-through (exit 0) when
-  # the sentrux binary is missing OR no .sentrux/rules.toml exists yet — so
-  # projects that have not adopted architectural rules are never false-blocked
-  # (mirrors the sentrux-precheck.sh guard). When a ruleset IS present, a real
-  # violation (`sentrux check` exit 1) BLOCKS the push — never swallowed.
-  # NB: use an explicit `|| exit 0` guard, NOT `A && B || C` — the latter runs
-  # the fallback when B (the check) fails, silently passing a violating push.
+  # Runs `sentrux check` against .sentrux/rules.toml. If sentrux binary is
+  # missing, the hook degrades gracefully (warns + exits 0) — not a hard
+  # dependency for projects that haven't adopted architectural rules yet.
   - repo: local
     hooks:
       - id: sentrux-check
         name: sentrux check (architectural rules)
-        entry: "bash -c 'command -v sentrux >/dev/null 2>&1 || exit 0; [ -f .sentrux/rules.toml ] || exit 0; sentrux check'"
+        entry: "bash -c 'command -v sentrux >/dev/null 2>&1 && sentrux check || echo skip-sentrux-not-installed'"
         language: system
         stages: [pre-push]
         pass_filenames: false
@@ -125,10 +125,7 @@ repos:
         # fresh project's FIRST commit is never blocked by a missing optional hook
         # (pre-commit hard-fails on "Executable not found" before the script's own
         # always-exit-0 guard can run). Same bash-c style as the sentrux hook above.
-        # Gate on `-f` (exists) and invoke via `bash`, NOT `-x` + `exec $p`: the
-        # seed ships its hooks 100644 (non-executable), so an `-x` gate would
-        # silently skip the script and the journal would never be written.
-        entry: "bash -c 'p=.claude/plugins/core/hooks/git/pre-commit-session-log.sh; c=.claude/hooks/git/pre-commit-session-log.sh; [ -f $p ] && exec bash $p; [ -f $c ] && exec bash $c; exit 0'"
+        entry: "bash -c 'p=.claude/plugins/core/hooks/git/pre-commit-session-log.sh; c=.claude/hooks/git/pre-commit-session-log.sh; [ -x $p ] && exec $p; [ -x $c ] && exec $c; exit 0'"
         language: system
         pass_filenames: false
         always_run: true

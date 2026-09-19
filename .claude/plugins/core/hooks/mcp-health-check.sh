@@ -38,6 +38,7 @@ fi
 OUT="$OUT ollama=$OLLAMA_STATE"
 
 # --- sentrux (architectural metrics)
+# No post-commit PART for sentrux: `sentrux scan` opens a GUI, no headless rescan exists.
 SENTRUX_STATE="DOWN"
 if command -v sentrux >/dev/null 2>&1; then
     SENTRUX_STATE="UP"
@@ -60,6 +61,26 @@ if [ -f "$PWD/.mcp.json" ]; then
             OUT="$OUT $srv=cfg"
         fi
     done
+fi
+
+# --- Index freshness — post-commit PARTS write a `<name>.sha` after each
+#     successful run; report how many commits HEAD has moved since then.
+SHA_DIR="$PWD/.claude/logs/post-commit.d"
+if [ -d "$SHA_DIR" ]; then
+    IDX=""
+    for sha_file in "$SHA_DIR"/*.sha; do
+        [ -e "$sha_file" ] || continue
+        name="$(basename "$sha_file" .sha)"
+        sha="$(cat "$sha_file" 2>/dev/null)"
+        if [ -n "$sha" ] && count="$(git rev-list --count "$sha"..HEAD 2>/dev/null)"; then
+            IDX="$IDX $name=$count"
+        else
+            IDX="$IDX $name=?"
+        fi
+    done
+    if [ -n "$IDX" ]; then
+        OUT="$OUT idx:$IDX"
+    fi
 fi
 
 echo "$OUT"

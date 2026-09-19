@@ -3,10 +3,10 @@
 # Назначение:
 #   Голый каркас на случай, когда ни один из готовых архетипов не подходит и правила
 #   пишутся с нуля. В большинстве проектов проще взять готовый архетип:
-#     templates/rules.src-package.toml   (дефолт seed — разворачивается `claude-kit-project new`)
+#     templates/rules.src-package.toml   (дефолт seed — разворачивается `claude-kit new`)
 #     templates/rules.layered.toml       (классический n-tier)
 #     templates/rules.hexagonal.toml     (ports & adapters / clean)
-#   См. README.md → "Стартовые архетипы правил".
+#   См. README.md → "Starter rule archetypes".
 #
 # Как использовать этот каркас:
 #   cp .claude/plugins/mcp-sentrux/rules.template.toml .sentrux/rules.toml

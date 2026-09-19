@@ -36,3 +36,17 @@
 uv.lock        linguist-generated=true
 package-lock.json linguist-generated=true
 poetry.lock    linguist-generated=true
+
+# Журнал сессий только дополняется (одна запись в конец за сессию), поэтому при
+# merge/rebase двух веток, писавших в один день, нужны обе записи, а не «наша».
+# union склеивает стороны вместо конфликта. Годится ТОЛЬКО для append-only
+# файлов: для обычного кода union молча слепит обе версии в мусор.
+docs/sessions/*.md merge=union
+
+# Per-role agent memory index (Task 2.4, "Коллизия параллельной записи"): two
+# parallel worktrees of the SAME role each append one line to their own
+# agent-memory/<role>/MEMORY.md -- same append-only class as docs/sessions/*.md
+# above, same fix. Verified empirically: without this, two branches each
+# appending at the same insertion point produce a real `CONFLICT (content)` on
+# a plain sequential `git merge` (see tests/integration/test_memory_index_merge.py).
+.claude/agent-memory/*/MEMORY.md merge=union

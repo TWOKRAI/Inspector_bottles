@@ -1,0 +1,21 @@
+{
+  "_comment": "per-project; extended by hand, like commit-layers.txt. Read by the official security-guidance plugin's per-edit pattern check (docs: code.claude.com/docs/en/security-guidance) — schema: patterns[] of {rule_name, reminder, regex|substrings, paths?, exclude_paths?}. Not read by claude-kit itself.",
+  "patterns": [
+    {
+      "rule_name": "hardcoded_secret_prefix",
+      "substrings": ["sk-", "ghp_", "AKIA"],
+      "reminder": "Hardcoded API/token key prefix in this edit. Load credentials from env/secrets — never commit a live key (project constitution, Base Rules)."
+    },
+    {
+      "rule_name": "skip_commit_hooks",
+      "regex": "--no-verify|git\\s+commit\\s+-n\\b",
+      "reminder": "This edit references bypassing commit hooks (--no-verify / -n). The commit-msg/pre-commit hooks are load-bearing — do not script around them without an explicit owner decision."
+    },
+    {
+      "rule_name": "edit_knowledge_raw",
+      "regex": ".*",
+      "paths": ["**/knowledge/raw/**"],
+      "reminder": "Editing knowledge/raw/** — raw sources are never modified after ingestion (project constitution, Prohibitions). If this is a correction, route it through the ingestion pipeline instead of hand-editing the raw file."
+    }
+  ]
+}

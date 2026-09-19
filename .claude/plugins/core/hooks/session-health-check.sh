@@ -4,7 +4,7 @@
 
 # Проверка Ollama
 if ! curl -s --max-time 2 http://localhost:11434/ 2>/dev/null | grep -q "running"; then
-  echo "⚠ Ollama не запущена. qex/семантический поиск недоступен. Запусти: ollama serve"
+  echo "⚠ Ollama is not running. qex/semantic search is unavailable. Start it: ollama serve"
 fi
 
 exit 0

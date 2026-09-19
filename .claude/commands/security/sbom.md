@@ -7,17 +7,17 @@ description: Generate a CycloneDX SBOM (Software Bill of Materials) via syft/cdx
 Dependency-Track или GitHub dependency-review.
 
 ```bash
-python .claude/plugins/security/scripts/sbom_gen.py            # -> sbom.cdx.json
+uv run --no-project python .claude/plugins/security/scripts/sbom_gen.py            # -> sbom.cdx.json
 ```
 
 Варианты:
-- `python .claude/plugins/security/scripts/sbom_gen.py --output -` — в stdout (для пайпа).
-- `python .claude/plugins/security/scripts/sbom_gen.py --root . --output build/sbom.json` — путь артефакта.
+- `uv run --no-project python .claude/plugins/security/scripts/sbom_gen.py --output -` — в stdout (для пайпа).
+- `uv run --no-project python .claude/plugins/security/scripts/sbom_gen.py --root . --output build/sbom.json` — путь артефакта.
 
 Связка с CVE-сканом:
 
 ```bash
-python .claude/plugins/security/scripts/sbom_gen.py --output sbom.cdx.json
+uv run --no-project python .claude/plugins/security/scripts/sbom_gen.py --output sbom.cdx.json
 osv-scanner --sbom=sbom.cdx.json
 ```
 

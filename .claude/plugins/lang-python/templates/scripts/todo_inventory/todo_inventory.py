@@ -23,7 +23,7 @@ import sys
 import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("todo_inventory.toml")
@@ -158,7 +158,7 @@ _BLAME_CACHE: dict[tuple[str, int], tuple[str, str]] = {}
 
 
 def annotate_blame(hits: list[Hit], cwd: Path) -> None:
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     # Группируем по файлу — один subprocess на файл с --porcelain даёт все строки сразу,
     # но проще: один вызов на хит, кэш не нужен (хиты редко повторяются).
     by_file: dict[str, list[Hit]] = defaultdict(list)
@@ -221,7 +221,7 @@ def annotate_blame(hits: list[Hit], cwd: Path) -> None:
                 author, ts = info[h.line]
                 h.author = author
                 if ts:
-                    d = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+                    d = datetime.fromtimestamp(ts, tz=UTC).date()
                     h.date = d.isoformat()
                     h.age_days = (today - d).days
 

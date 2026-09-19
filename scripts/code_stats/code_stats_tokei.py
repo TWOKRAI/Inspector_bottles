@@ -10,7 +10,7 @@
 
 Запуск:
     python scripts/code_stats/code_stats_tokei.py
-    python scripts/code_stats/code_stats_tokei.py --root multiprocess_framework --format json
+    python scripts/code_stats/code_stats_tokei.py --root src --format json
     python scripts/code_stats/code_stats_tokei.py --config scripts/code_stats/code_stats.toml
 """
 
@@ -25,16 +25,17 @@ from pathlib import Path
 # Переиспользуем парсер конфига и форматтеры из соседнего модуля.
 sys.path.insert(0, str(Path(__file__).parent))
 from code_stats import (  # type: ignore[import-not-found]
+    DEFAULT_CONFIG_PATH,
     Config,
     GroupRow,
-    DEFAULT_CONFIG_PATH,
     apply_overrides,
-    build_parser as build_base_parser,
     load_config,
     render,
     total_row,
 )
-
+from code_stats import (
+    build_parser as build_base_parser,
+)
 
 # Расширение → имя языка в tokei (полный список: `tokei --languages`).
 # Не претендует на полноту — расширяй по мере необходимости.
@@ -118,7 +119,7 @@ def run_tokei(tokei: str, cfg: Config) -> dict:
         proc = subprocess.run(argv, capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError as e:
         print(f"error: tokei exited {e.returncode}\nstderr:\n{e.stderr}", file=sys.stderr)
-        raise SystemExit(e.returncode)
+        raise SystemExit(e.returncode) from e
     return json.loads(proc.stdout)
 
 

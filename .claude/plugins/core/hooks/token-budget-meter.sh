@@ -48,11 +48,20 @@ METRICS_DIR="${PIPELINE_METRICS_DIR:-$REPO_ROOT/data}"
 METRICS_FILE="$METRICS_DIR/pipeline-metrics.jsonl"
 mkdir -p "$METRICS_DIR" 2>/dev/null || true
 
-HOOK_INPUT="$INPUT" "$PY" - "$METRICS_FILE" <<'PYEOF'
+HOOK_INPUT="$INPUT" HOOK_LIB="$(dirname "$0")/_lib" "$PY" - "$METRICS_FILE" <<'PYEOF'
 import datetime
 import json
 import os
 import sys
+
+sys.path.insert(0, os.environ.get("HOOK_LIB", ""))
+# _lib ships next to this hook under ${CLAUDE_PLUGIN_ROOT}. A copy of the hook
+# without _lib skips the transcript tally and records 0/0/0 — accepted
+# (review 2.6 R8, won't fix).
+try:
+    from transcript_usage import usage_context
+except Exception:
+    usage_context = None
 
 metrics_file = sys.argv[1]
 
@@ -81,8 +90,11 @@ tokens_out = _env_int("PIPELINE_TOKENS_OUT")
 tool_calls = _env_int("PIPELINE_TOOL_CALLS")
 
 # When not overridden, tally the LAST assistant turn from the transcript JSONL.
-if (tokens_in is None or tokens_out is None or tool_calls is None) and transcript and os.path.exists(
-    transcript
+if (
+    (tokens_in is None or tokens_out is None or tool_calls is None)
+    and transcript
+    and os.path.exists(transcript)
+    and usage_context is not None
 ):
     last_in = last_out = last_calls = 0
     try:
@@ -99,11 +111,7 @@ if (tokens_in is None or tokens_out is None or tool_calls is None) and transcrip
                 if not isinstance(msg, dict) or msg.get("role") != "assistant":
                     continue
                 usage = msg.get("usage", {}) or {}
-                ti = (
-                    (usage.get("input_tokens", 0) or 0)
-                    + (usage.get("cache_read_input_tokens", 0) or 0)
-                    + (usage.get("cache_creation_input_tokens", 0) or 0)
-                )
+                ti = usage_context(usage)
                 to = usage.get("output_tokens", 0) or 0
                 if ti or to:
                     last_in, last_out = ti, to

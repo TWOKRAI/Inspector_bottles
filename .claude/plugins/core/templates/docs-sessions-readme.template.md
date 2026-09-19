@@ -20,5 +20,5 @@ Each entry covers:
 ## Don't
 
 - Don't write code rationale here — that goes in commit messages (`Why:`).
-- Don't write architecture decisions here — those go in `docs/decisions/`.
+- Don't write architecture decisions here — those go in `docs/decisions/` or `docs/claude/`.
 - Sessions are ephemeral context, not authoritative documentation.

@@ -16,7 +16,7 @@
 #   archetype — there `domain` is the centre and `adapters` point inward to it.
 #
 # ★ WHAT'S ACTIVE OUT OF THE BOX ★
-#   Opt-in archetype — `claude-kit-project new` auto-deploys `src-package` by default; switch
+#   Opt-in archetype — `claude-kit new` auto-deploys `src-package` by default; switch
 #   to this one with `cp` (see README) and replace `your_package` by hand. Active
 #   from day one: `max_cycles` and `no_god_files` — both green on clean code. The
 #   [[boundaries]] block at the bottom ships COMMENTED on purpose (see ★ ENABLE

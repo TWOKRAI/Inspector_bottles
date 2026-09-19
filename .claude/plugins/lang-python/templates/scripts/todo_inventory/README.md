@@ -5,11 +5,11 @@
 ## Запуск
 
 ```bash
-python scripts/todo_inventory/todo_inventory.py                       # все теги, с git blame
-python scripts/todo_inventory/todo_inventory.py --no-blame            # быстро, без авторов
-python scripts/todo_inventory/todo_inventory.py --group-by author     # сводка по авторам
-python scripts/todo_inventory/todo_inventory.py --sort-by age --limit 20  # топ-20 старейших
-python scripts/todo_inventory/todo_inventory.py --format json         # для парсинга
+uv run --no-project python scripts/todo_inventory/todo_inventory.py                       # все теги, с git blame
+uv run --no-project python scripts/todo_inventory/todo_inventory.py --no-blame            # быстро, без авторов
+uv run --no-project python scripts/todo_inventory/todo_inventory.py --group-by author     # сводка по авторам
+uv run --no-project python scripts/todo_inventory/todo_inventory.py --sort-by age --limit 20  # топ-20 старейших
+uv run --no-project python scripts/todo_inventory/todo_inventory.py --format json         # для парсинга
 ```
 
 ## Вывод

@@ -2,43 +2,43 @@
 description: Show the current development team — agents, models, roles
 ---
 
-Покажи текущий состав агентов проекта (автообнаружение).
+Show the project's current agent roster (auto-discovery).
 
-## Шаги
+## Steps
 
-1. Прочитай содержимое `.claude/plugins/*/agents/` (агенты раскиданы по плагинам: `core`, `dev`, `knowledge`).
-2. Для каждого `*.md` файла извлеки frontmatter: `name`, `model`, `description`.
-3. Сгруппируй по подпапке (или по флаг-полю в frontmatter, если есть).
-4. Выведи таблицу:
+1. Read the contents of `.claude/plugins/*/agents/` (agents are spread across plugins: `core`, `dev`, `knowledge`).
+2. For each `*.md` file extract the frontmatter: `name`, `model`, `description`.
+3. Group by subfolder (or by a flag field in the frontmatter, if present).
+4. Print a table:
 
 ```
 ## Agents
 
-| Категория | Агент | Модель | Когда вызывать (description) |
+| Category  | Agent | Model  | When to call (description)   |
 |-----------|-------|--------|------------------------------|
-| dev       | manager     | sonnet | Декомпозиция задачи, написание ТЗ |
-| dev       | developer   | sonnet | Реализация по ТЗ |
-| dev       | reviewer    | opus   | Код-ревью PR |
-| dev       | tester      | sonnet | Тесты по acceptance criteria |
+| dev       | manager     | sonnet | Task decomposition, writing the spec |
+| dev       | developer   | sonnet | Implementation per spec |
+| dev       | reviewer    | opus   | PR code review |
+| dev       | tester      | sonnet | Tests from acceptance criteria |
 | ...       | ...         | ...    | ... |
 ```
 
-5. В конце — общая сводка:
+5. At the end — an overall summary:
    ```
-   Всего: N агентов (по категориям: dev=K, knowledge=M, ...)
+   Total: N agents (by category: dev=K, knowledge=M, ...)
    ```
 
-## Правила вывода
+## Output rules
 
-- Если frontmatter сломан — пометь агент `[malformed]` и продолжай.
-- Если в подпапке только `_template.md` или `README.md` — пропусти, не считай агентом.
-- Не выдумывай агентов, которых нет на диске.
+- If the frontmatter is broken — mark the agent `[malformed]` and continue.
+- If a subfolder contains only `_WORKTREE_PATTERN.md` or `README.md` — skip it, don't count it as an agent.
+- Don't make up agents that aren't on disk.
 
-## Workflow подсказки
+## Workflow hints
 
-Если есть стандартные `manager`, `developer`, `tester`, `reviewer` — подскажи стандартный pipeline:
+If the standard `manager`, `developer`, `tester`, `reviewer` exist — suggest the standard pipeline:
 ```
 /dev:plan → /dev:implement → /dev:test → [FAIL → /dev:debug] → /dev:review → /core:team:docs → /dev:ship
 ```
 
-Нанять нового агента: `/core:team:hire <role>` (создаст по шаблону `.claude/plugins/core/agents/_template.md`).
+Hire a new agent: `/core:team:hire <role>` (creates it from the template `.claude/plugins/core/templates/agent.template.md`).

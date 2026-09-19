@@ -2,16 +2,16 @@
 description: Compare current state against the recorded baseline (session_end)
 ---
 
-Сравни текущее качество с baseline, который был сохранён через `/mcp-sentrux:sentrux-baseline`:
+Compare the current quality against the baseline saved via `/mcp-sentrux:sentrux-baseline`:
 
-1. Вызови `mcp__sentrux__rescan` с `path` = абсолютный путь к корню проекта (или `mcp__sentrux__scan` если rescan недоступен).
-2. Вызови `mcp__sentrux__session_end` (без параметров).
+1. Call `mcp__sentrux__rescan` with `path` = the absolute path to the project root (or `mcp__sentrux__scan` if rescan is unavailable).
+2. Call `mcp__sentrux__session_end` (no parameters).
 
-Покажи пользователю:
-- `signal_before` → `signal_after` (с дельтой и направлением: ✅ улучшилось / ⚠️ без изменений / ❌ деградация).
-- Какая метрика двинулась сильнее всего и в какую сторону.
-- Краткое резюме: можно ли коммитить или стоит откатить часть правок.
+Show the user:
+- `signal_before` → `signal_after` (with delta and direction: ✅ improved / ⚠️ unchanged / ❌ degraded).
+- Which metric moved the most, and in which direction.
+- A short summary: safe to commit, or should part of the changes be rolled back.
 
-Если pass=false (деградация) — рекомендуй `/mcp-sentrux:sentrux-dsm` чтобы найти, где появились новые связи/циклы.
+If pass=false (degradation) — recommend `/mcp-sentrux:sentrux-dsm` to find where new couplings/cycles appeared.
 
 $ARGUMENTS

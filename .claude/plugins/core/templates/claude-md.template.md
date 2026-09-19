@@ -1,168 +1,123 @@
 # {{PROJECT_NAME}}
 
-## Цель
+## Goal
 
 {{DESCRIPTION}}
 
-## Архитектура
+## Architecture
 
-> Замени на реальные слои/модули. Если простой скрипт — можно удалить секцию.
+> Replace with the real layers/modules. If this is a simple script, you can delete this section.
 
-- **Layer 1:** что делает
-- **Layer 2:** что делает
+- **Layer 1:** what it does
+- **Layer 2:** what it does
 
-## Ключевые пути
+## Key paths
 
-| Что | Путь | Кто читает / пишет |
+| What | Path | Who reads / writes |
 |-----|------|-----|
-| Главный пакет | `src/{{PACKAGE}}/` | код проекта |
-| Тесты | `tests/` | pytest, tester-агент |
-| Скрипты | `scripts/` | makefile, dev-команды |
-| Валидатор коммитов | `scripts/validate_commit/` | `commit-msg` hook |
-| Документация | `docs/` | люди + агенты |
-| Карта проекта | `docs/PROJECT_CONTEXT.md` + `src/{{PACKAGE}}/CONTEXT.md` | агенты (orient first); ребилд `/quality:sync-context` |
-| Гайд по коммитам | `.claude/COMMIT_GUIDE.md` | агенты при коммите |
-| Журналы сессий | `docs/sessions/YYYY-MM-DD.md` | `/core:team:wrap-up`, `/core:memory:search` |
-| Планы задач (Plan-Driven Dev) | `plans/YYYY-MM-DD_<slug>.md` (single) или `plans/YYYY-MM-DD_<slug>/plan.md`+`phase-N.md` (multi-phase) | `/dev:plan`, `/dev:implement`, `/dev:ship` |
-| Долговременная память | `.claude/memory/MEMORY.md` + `*.md` | агент (auto-memory rules) |
-| Конфиг Layer-enum | `.claude/commit-layers.txt` | validate_commit.py |
-| Данные (gitignored) | `data/` | runtime |
+| Main package | `src/{{PACKAGE}}/` | project code |
+| Tests | `tests/` | pytest, tester agent |
+| Scripts | `scripts/` | makefile, dev commands |
+| Commit validator | `scripts/validate_commit/` | `commit-msg` hook |
+| Documentation | `docs/` | people + agents |
+| Project map | `docs/PROJECT_CONTEXT.md` + `src/{{PACKAGE}}/CONTEXT.md` | agents (orient first); rebuild via `/core:quality:sync-context` |
+| Commit guide | `.claude/COMMIT_GUIDE.md` | agents when committing |
+| Session logs | `docs/sessions/YYYY-MM-DD.md` | `/core:team:wrap-up`, `/core:memory:search` |
+| Task plans (Plan-Driven Dev) | `plans/YYYY-MM-DD_<slug>.md` (single) or `plans/YYYY-MM-DD_<slug>/plan.md`+`phase-N.md` (multi-phase) | `/dev:plan`, `/dev:implement`, `/dev:ship` |
+| Long-term memory | `.claude/memory/MEMORY.md` + `*.md` | agent (auto-memory rules) |
+| Layer-enum config | `.claude/commit-layers.txt` | validate_commit.py |
+| Data (gitignored) | `data/` | runtime |
 
-**Принцип:** одна папка — одна ответственность. Plan-driven workflow связывает их через `Refs: plans/<slug>.md` trailer в каждом коммите задачи. См. [`.claude/COMMIT_GUIDE.md`](.claude/COMMIT_GUIDE.md), [`plans/README.md`](plans/README.md), [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Memory (OVERRIDE)".
+**Principle:** one folder — one responsibility. The plan-driven workflow links them via the `Refs: plans/<slug>.md` trailer in every task commit. See [`.claude/COMMIT_GUIDE.md`](.claude/COMMIT_GUIDE.md), [`plans/README.md`](plans/README.md), [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Memory (OVERRIDE)".
 
-## `.claude/` lifecycle — `claude-kit`
+## `.claude/` lifecycle — `claude-kit-project` / `claude-kit-claude`
 
-> `.claude/` инфраструктура (agents, commands, hooks, MCP, skills, templates)
-> сгенерирована **claude-kit** и обновляется через него, а **не** правкой файлов
-> вручную. Тулза установлена глобально (`uv tool install --from <seed-repo> claude-kit`)
-> и доступна как команды `claude-kit-project` / `claude-kit-claude` в PATH.
->
-> Если команды не найдены — переустанови из canonical clone:
-> `python <seed-clone>/scripts/install-global.py`.
+> `.claude/` (agents, commands, hooks, MCP, skills, templates) is generated
+> and updated **only** via `claude-kit-project`/`claude-kit-claude`
+> (`console_scripts` of the `claude-kit` package), never by hand-editing
+> files. Commands not found → `uv run --no-project python <seed-clone>/scripts/install-global.py`.
+> Full guide (install, MCP, VS Code, sanity checks, troubleshooting) — `.claude/BOOTSTRAP.md`.
+> Legacy `claude-kit` 0.x (schema=1, before 0.7.0) on PATH — `plugin doctor` will warn
+> in the "Legacy CLI" section; remove it with the manager you installed it with (`pipx`/`pip
+> uninstall claude-kit`), not `uv tool uninstall` (that would remove the current tooling).
 
-### Команды (для агента)
+### Commands (for the agent)
 
-| Задача | Команда |
+| Task | Command |
 |--------|---------|
-| Диагностика окружения и `.claude/` | `claude-kit-claude plugin doctor` (+`--verbose`, `--fix`) |
-| Превью обновления seed (без изменений) | `claude-kit-claude plugin upgrade . --dry-run` |
-| Применить обновление seed | `claude-kit-claude plugin upgrade . --apply` |
-| Список доступных компонентов | `claude-kit-claude plugin list` |
-| Добавить MCP / skill / integration | `claude-kit-claude plugin enable <plugin-id>` |
-| Удалить компонент | `claude-kit-claude plugin remove <name>` |
-| Версия пакета и bundled template | `claude-kit-claude version` |
-| Реконструировать SETUP-отчёт | `claude-kit-project show --regenerate` |
-| Интерактивное меню (TUI) | `claude-kit-claude menu` |
+| Bootstrap a new project | `claude-kit-project new <target>` |
+| Add/update `.claude/` in a project | `claude-kit-project init <target> --apply` |
+| Diagnose environment/plugins/`.claude/` | `claude-kit-claude plugin doctor <target>` (+`--verbose`, `--fix`) |
+| Preview / apply a seed update | `claude-kit-claude plugin upgrade <target> --dry-run` / `--apply` |
+| List plugins | `claude-kit-claude plugin list <target>` |
+| Enable / disable a plugin + recompose | `claude-kit-claude plugin enable <id> <target>` / `claude-kit-claude plugin disable <id> <target>` |
+| Recompose `.mcp.json`/`settings.json` | `claude-kit-claude plugin sync <target>` |
+| Migrate schema=1 → schema=2 | `claude-kit-claude plugin migrate <target> --apply` (default — dry-run) |
+| Package version | `claude-kit-claude --version` |
 
-### Что НЕ редактировать руками (перетрётся при `upgrade`)
+**Legacy layout** (`manifest.yaml` schema=1, or fully flat with no `enabled.yaml`) →
+`plugin migrate --apply` (automatic, tar.gz backup + rollback), or, for a fully flat one,
+`claude-kit-project init --apply --force` on top + your own agents/commands — as a third-party
+plugin (`<seed-clone>/docs/PLUGIN_GUIDE.md` → the third-party plugin section, β-path vs vendoring), don't mix it with the managed tree.
 
-- `.claude/plugins/<id>/` — весь контент плагинов (`agents/`, `commands/`, `hooks/`, `skills/`, `templates/`, `scripts/`, `mcp/`)
-- `.claude/COMMIT_GUIDE.md`, `.claude/BOOTSTRAP.md`, `.claude/STACK.md`, `.claude/CLAUDE.md`
-- `.claude/docs/` (SYSTEM_OVERVIEW.md, ROADMAP.md, VSCODE_EXTENSIONS.md, CLAUDE-SETUP.md)
+**Do not hand-edit** (overwritten on `upgrade`): `.claude/plugins/<id>/**`,
+`.claude/{COMMIT_GUIDE,BOOTSTRAP,STACK,CLAUDE}.md`, `.claude/docs/`. Edit seed content —
+in the canonical seed (`plugins/<id>/`), then `plugin upgrade . --apply` in the project.
 
-**Workflow для правки seed-контента:** правишь напрямую в canonical seed (`plugins/<id>/`) → `claude-kit-claude plugin upgrade . --apply` в этом проекте.
+**Preserved on `upgrade`** (your files): `.claude/memory/`, `.claude/modes/_stack.md`,
+`.claude/commit-layers.txt`, `.claude/settings.local.json`, `.claude/readonly-paths`,
+`.claude/protected-branches`, `.claude/security-patterns.json`, the root `CLAUDE.md`.
 
-### Per-project артефакты (preserved при `upgrade`)
+**Something broke:** `plugin doctor . --verbose` → `--fix` → `plugin upgrade . --dry-run`
+if it diverges from the seed → check `claude-kit-claude --version`.
 
-Эти файлы — твои, upgrade их **не трогает**:
+## Stack
 
-- `.claude/memory/` — долговременная память агента
-- `.claude/modes/_stack.md` — кастомизация под стек проекта
-- `.claude/commit-layers.txt` — Layer-enum для validate_commit
-- `.claude/settings.local.json` — локальные настройки CC
-- `.claude/readonly-paths`, `.claude/protected-branches`
-- `.claude/.seed-answers.yml` — машинно-читаемые ответы bootstrap'а (`schema_version=1`, используется `upgrade`/`add`/`remove`)
-- корневой `CLAUDE.md` (этот файл) — содержит проектные плейсхолдеры
+Toolchain, versions, commands — `.claude/modes/_stack.md` (READ FIRST, customized per project).
 
-### Что делать при поломке
+## Project rules
 
-1. `claude-kit-claude plugin doctor --verbose` — первая команда. Секции: System / Project / Components / Services.
-2. `claude-kit-claude plugin doctor --fix` — попытка авто-install отсутствующего (uv tools, MCP servers).
-3. `claude-kit-claude plugin upgrade . --dry-run` — если расхождение с seed.
-4. `claude-kit-claude version` — сверить версию пакета и bundled template (могут разойтись после `git pull` в seed без `install-global.py`).
+1. **Style:** ruff format + check automatically in pre-commit
+2. **Types:** type hints required for public functions, pyright `standard` mode
+3. **Tests:** required when logic changes
+4. **Secrets:** only in `.env` (gitignored)
+5. **Commit messages:** Conventional Commits, `Why:` trailer always
+6. **Escalation:** one level up, never sideways and never a guess — ladder and format in `project-rules` §7
 
-## Стек
-
-- **Python:** 3.11+
-- **Package manager:** uv
-- **Lint + format:** ruff
-- **Type check:** pyright
-- **Tests:** pytest + pytest-cov
-- **Pre-commit:** ruff (commit) + pyright (push)
-
-## Правила проекта
-
-1. **Стиль:** ruff format + check автоматически в pre-commit
-2. **Типы:** type hints обязательны для публичных функций, pyright `standard` mode
-3. **Тесты:** обязательны при изменении логики
-4. **Секреты:** только в `.env` (gitignored)
-5. **Commit-сообщения:** Conventional Commits, trailer `Why:` всегда
-
-## Команды
+## Commands
 
 ### Makefile
 
-| Команда | Что делает |
+| Command | What it does |
 |---------|-----------|
-| `make install` | Установить deps + pre-commit hooks |
+| `make install` | Install deps + pre-commit hooks |
 | `make check` | Lint (ruff) + typecheck (pyright) |
-| `make test` | pytest с coverage |
-| `make gate` | Полный gate (check + test) перед push |
-| `make format` | Автофикс ruff |
+| `make test` | pytest with coverage |
+| `make gate` | Full gate (check + test) before push |
+| `make format` | Auto-fix via ruff |
 
-### Slash-команды (через Claude Code)
+### Slash commands (via Claude Code)
 
-Команды живут в `.claude/commands/<namespace>/<name>.md`. Полный список —
-`/help` в Claude Code или `ls .claude/commands/`. Ключевые namespace'ы:
-
-| Namespace | Назначение | Ключевые команды |
-|-----------|-----------|------------------|
-| `dev/` | Plan-Driven Dev цикл | `/dev:plan`, `/dev:implement`, `/dev:test`, `/dev:review`, `/dev:debug`, `/dev:ship`, `/dev:pipeline`, `/dev:plan-status`, `/dev:adr` |
-| `spec/` | Living spec (`docs/direction/`) | `/dev:spec:spec`, `/dev:spec:spec-sync` |
-| `team/` | Команда агентов | `/core:team:team`, `/core:team:hire`, `/core:team:handoff`, `/core:team:docs`, `/core:team:wrap-up` |
-| `memory/` | Долговременная память агента | `/core:memory:status`, `/core:memory:search <query>`, `/core:memory:init` |
-| `quality/` | Качество кода + архитектура | `/core:quality:doctor`, `/core:quality:arch-review`, `/core:quality:lint-agents`, `/core:quality:lint-settings`, `/core:quality:code-stats*`, `/core:quality:test-ratio`; tooling-плагины: `/mcp-sentrux:sentrux-*`, `/mcp-qex:qex-*` |
-| `infra/` | Инфраструктурные операции | `/core:infra:clean-cache`, `/core:infra:cold-start`, `/core:infra:diagrams`, `/core:infra:fw-test`, `/core:infra:run-proto` |
-| `analysis/` | Анализ кодовой базы | `/core:analysis:todo-inventory` |
-| `knowledge/` | Knowledge pipeline (если установлен university team) | `/knowledge:transcribe`, `/knowledge:curate`, `/knowledge:synthesize`, `/knowledge:research`, `/knowledge:library`, `/knowledge:translate`, `/knowledge:digest`, `/knowledge:compress`, `/knowledge:search` |
-
-Subagent'ы: `claude-kit` поставляет dev-команду (developer, reviewer, manager,
-teamlead, debugger, tester, docs-writer, tech-writer) и опционально university
-(curator, synthesizer, researcher, librarian, translator). Список — `/core:team:team`.
+Commands live in `.claude/commands/<namespace>/<name>.md`. Full list by
+namespace — `/help` in Claude Code, `ls .claude/commands/`, or
+[`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Commands — quick reference".
+Subagents (developer, reviewer, manager, teamlead, debugger, tester,
+docs-writer, tech-writer, …) — `/core:team:team`.
 
 ## Tool routing (MCP)
 
-Шаблон даёт несколько MCP-инструментов на разные задачи. Правила маршрутизации
-помогают агенту выбрать нужный, не дублируя работу. Активируй только те, что
-реально нужны проекту — см. `.claude/modes/_stack.md` → "MCP".
+Enable only what the project actually needs — `.claude/modes/_stack.md` → "MCP".
+Heuristic: "find / what it does" → **qex** (codebase ≥ 5k LOC); symbol name + refs/rename → **serena**;
+"what relates to what" → **graphify**; metrics/DSM/cycles → **sentrux**; exact string/regex → **Grep**
+(cheapest of all). Project servers and fallback — [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "MCP routing".
 
-| Тип запроса | Инструмент | Когда |
-|-------------|-----------|-------|
-| Семантический / fuzzy поиск по коду ("где у нас валидация прав", "найди код типа X") | **qex** | Codebase ≥ 5k LOC |
-| Точные symbol-операции (refs, definition, rename, move across files) | **serena** (LSP) | Опц., experimental — см. `.claude/plugins/mcp-serena/README.md` |
-| Архитектурный обзор / knowledge graph (god nodes, shortest path, hubs) | **graphify** | По требованию, не постоянно |
-| Архитектурные метрики / DSM / cycles / quality gate | **sentrux** | Перед `/dev:ship`, периодически |
-| Документация библиотек | **context7** | Уточнение API чужих библиотек |
-| Runtime inspection PyQt/PySide GUI (widget tree, screenshots, clicks) | **qt-mcp** | Только в GUI-проектах |
-| Точное имя символа, полный список вхождений (`Grep` достаточно) | **Grep** | Дешевле всех остальных |
+## Agent memory (override)
 
-**Эвристика:** «найди / опиши / что делает» + поведение → **qex**.
-Имя символа + действие (refs/callers/rename) → **serena**.
-"Что с чем связано?" → **graphify**.
-Точная строка / regex → **Grep**.
-
-Подробнее об опциях и установке — `.claude/plugins/core/mcp/README.md`.
-
-## Память агента (override)
-
-Долговременная память живёт в [`.claude/memory/`](.claude/memory/) (под git, портативна между машинами), **а не** в нативном `~/.claude/projects/<project>/memory/`. Правила записи и команды — см. [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Memory (OVERRIDE)".
-
-Помимо общей `.claude/memory/`, dev-агенты с write-доступом копят **role-scoped** subagent-память в `.claude/agent-memory/<name>/` (нативная CC, под git) — конвенция и scope'ы в том же [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Memory (OVERRIDE)".
-
-Команды: `/core:memory:status`, `/core:memory:search <query>`, `/core:memory:init`.
+Paths (`.claude/memory/`, role-scoped `.claude/agent-memory/<name>/`), write rules
+and commands — [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Memory (OVERRIDE)".
 
 ## `.claude/`
 
-- [`.claude/BOOTSTRAP.md`](.claude/BOOTSTRAP.md) — установка с нуля
-- [`.claude/STACK.md`](.claude/STACK.md) — все инструменты
-- [`.claude/modes/_stack.md`](.claude/modes/_stack.md) — кастомизация под проект
+- [`.claude/BOOTSTRAP.md`](.claude/BOOTSTRAP.md) — install from scratch
+- [`.claude/STACK.md`](.claude/STACK.md) — all tools
+- [`.claude/modes/_stack.md`](.claude/modes/_stack.md) — project-specific customization

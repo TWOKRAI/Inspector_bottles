@@ -2,7 +2,7 @@
 Отношение объёма тестов к продакшен-коду на каждый модуль.
 
 Алгоритм:
-1. Из конфига берём список module_roots (multiprocess_framework/modules, Services, …).
+1. Из конфига берём список module_roots (src, lib, …).
 2. Для каждого root: его прямые подкаталоги = модули.
 3. Внутри модуля рекурсивно считаем LOC, разделяя на:
    - test:  файлы в test_dir/ ИЛИ имена по test_file_patterns
@@ -102,7 +102,7 @@ def count_lines(path: Path, mode: str, encoding: str) -> int:
 
 @dataclass
 class ModuleRow:
-    name: str  # "modules/X" или "Services/Y"
+    name: str  # e.g. "src/X" or "lib/Y"
     code_loc: int = 0
     test_loc: int = 0
     code_files: int = 0
@@ -185,16 +185,36 @@ def _health_mark(row: ModuleRow, cfg: Config) -> str:
 
 
 def render_table(rows: list[ModuleRow], cfg: Config) -> str:
-    headers = ["health", "module", "code_loc", "test_loc", "ratio", "code_files", "test_files"]
+    headers = [
+        "health",
+        "module",
+        "code_loc",
+        "test_loc",
+        "ratio",
+        "code_files",
+        "test_files",
+    ]
     data = []
     for r in rows:
         ratio_str = f"{r.ratio:.2f}" if r.code_loc else "—"
-        data.append([_health_mark(r, cfg), r.name, r.code_loc, r.test_loc, ratio_str, r.code_files, r.test_files])
+        data.append(
+            [
+                _health_mark(r, cfg),
+                r.name,
+                r.code_loc,
+                r.test_loc,
+                ratio_str,
+                r.code_files,
+                r.test_files,
+            ]
+        )
 
     widths = [len(h) for h in headers]
     for row in data:
         for i, cell in enumerate(row):
-            widths[i] = max(widths[i], len(f"{cell:,}" if isinstance(cell, int) else str(cell)))
+            widths[i] = max(
+                widths[i], len(f"{cell:,}" if isinstance(cell, int) else str(cell))
+            )
 
     out = io.StringIO()
     sep = "  "
@@ -232,7 +252,16 @@ def render_csv(rows: list[ModuleRow]) -> str:
     w = csv.writer(out)
     w.writerow(["module", "code_loc", "test_loc", "ratio", "code_files", "test_files"])
     for r in rows:
-        w.writerow([r.name, r.code_loc, r.test_loc, f"{r.ratio:.4f}", r.code_files, r.test_files])
+        w.writerow(
+            [
+                r.name,
+                r.code_loc,
+                r.test_loc,
+                f"{r.ratio:.4f}",
+                r.code_files,
+                r.test_files,
+            ]
+        )
     return out.getvalue()
 
 
@@ -242,7 +271,9 @@ def render_csv(rows: list[ModuleRow]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="test_ratio", description="Отношение объёма тестов к коду на модуль.")
+    p = argparse.ArgumentParser(
+        prog="test_ratio", description="Отношение объёма тестов к коду на модуль."
+    )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument(
         "--base",
@@ -251,7 +282,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="База, к которой относятся module_roots (default: текущая директория).",
     )
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
-    p.add_argument("--sort-by", choices=["ratio", "code", "tests", "name"], default=None)
+    p.add_argument(
+        "--sort-by", choices=["ratio", "code", "tests", "name"], default=None
+    )
     p.add_argument("--sort-order", choices=["asc", "desc"], default=None)
     p.add_argument("--limit", type=int, default=None)
     return p

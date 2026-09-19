@@ -1,67 +1,68 @@
 ---
-description: Create a new ADR (Architectural Decision Record) in docs/decisions/
+description: Create a new ADR (Architectural Decision Record) in docs/claude/DECISIONS/
 ---
 
-# /dev:adr — создание ADR через tech-writer
+# /dev:adr — create an ADR via tech-writer
 
-Запускает tech-writer-агента для создания структурированного ADR
-(Architectural Decision Record) на основе текущей задачи или контекста сессии.
+Launches the tech-writer agent to create a structured ADR
+(Architectural Decision Record) based on the current task or the session context.
 
-## Когда использовать `/dev:adr` (этот командой создаётся глобальный, cross-module ADR)
+## When to use `/dev:adr` (this command creates a global, cross-module ADR)
 
-- Принято **архитектурное решение** (выбор фреймворка, паттерна, инструмента, схемы хранения)
-- Решение **влияет на код в нескольких местах** или на будущие решения
-- Хочется зафиксировать **why** + **alternatives considered** + **consequences**, чтобы через год не возвращаться к тому же спору
-- Затрагивает **2+ модуля** или общий стек (cross-module)
+- An **architectural decision** was made (choice of framework, pattern, tool, storage scheme)
+- The decision **affects code in multiple places** or future decisions
+- You want to record **why** + **alternatives considered** + **consequences**, so the same
+  argument doesn't resurface a year later
+- Touches **2+ modules** or the shared stack (cross-module)
 
-НЕ нужно ADR для:
-- Тривиальных правок (rename, format, bugfix без обсуждения альтернатив)
-- Решений уровня одного файла, очевидных из кода
+An ADR is NOT needed for:
+- Trivial edits (rename, format, bugfix with no discussion of alternatives)
+- Single-file-level decisions that are obvious from the code
 
-## Глобальный (`/dev:adr`) vs per-module (`DECISIONS.md`) — куда писать
+## Global (`/dev:adr`) vs per-module (`DECISIONS.md`) — where to write
 
-| Решение | Уровень | Где живёт | Формат |
+| Decision | Level | Where it lives | Format |
 |---------|---------|-----------|--------|
-| Затрагивает 2+ модуля или общий стек | Global | `docs/decisions/NNNN-<slug>.md` (создаёт `/dev:adr`) | `ADR-NNNN` |
-| Внутри одного модуля (выбор паттерна, threading-модели, API shape) | Per-module | `<module>/DECISIONS.md` (создаёт агент из `.claude/plugins/core/templates/DECISIONS.template.md`) | `ADR-{CODE}-NNN` |
+| Touches 2+ modules or the shared stack | Global | `docs/claude/DECISIONS/NNNN-<slug>.md` (created by `/dev:adr`) | `ADR-NNNN` |
+| Within a single module (pattern choice, threading model, API shape) | Per-module | `<module>/DECISIONS.md` (created by the agent from `.claude/plugins/core/templates/DECISIONS.template.md`) | `ADR-{CODE}-NNN` |
 
-Per-module ADR агрегируются в `docs/PROJECT_CONTEXT.md` через
-`scripts/aggregate_context` (slash-command `/core:quality:sync-context`). Глобальные ADR
-живут отдельно и не индексируются этим скриптом — у них своя нумерация.
+Per-module ADRs are aggregated into `docs/PROJECT_CONTEXT.md` via
+`scripts/aggregate_context` (slash-command `/core:quality:sync-context`). Global ADRs
+live separately and aren't indexed by this script — they have their own numbering.
 
-Если сомневаешься — начни с **per-module DECISIONS.md**. Поднять на глобальный
-уровень всегда можно ссылкой из global ADR на module ADR.
+If unsure — start with **per-module DECISIONS.md**. You can always promote it to the
+global level later via a link from the global ADR to the module ADR.
 
-## Как работает
+## How it works
 
-1. Команда определяет следующий номер ADR (по `docs/decisions/NNNN-*.md`).
-2. Берёт `.claude/plugins/core/templates/ADR.template.md`, подставляет `{{NUMBER}}`, `{{TITLE}}`, `{{DATE}}`, `{{AUTHORS}}`.
-3. Передаёт tech-writer-агенту контекст текущей задачи + созданный скелет.
-4. tech-writer заполняет секции **Context**, **Decision**, **Alternatives considered**, **Consequences** на основе истории сессии и переданных аргументов.
-5. Сохраняет в `docs/decisions/NNNN-<slug>.md`, статус по умолчанию `PROPOSED`.
+1. The command determines the next ADR number (from `docs/claude/DECISIONS/NNNN-*.md`).
+2. Takes `.claude/plugins/core/templates/ADR.template.md`, substitutes `{{NUMBER}}`, `{{TITLE}}`, `{{DATE}}`, `{{AUTHORS}}`.
+3. Passes the tech-writer agent the current task's context + the created skeleton.
+4. tech-writer fills in the **Context**, **Decision**, **Alternatives considered**, **Consequences** sections based on the session history and the passed arguments.
+5. Saves it to `docs/claude/DECISIONS/NNNN-<slug>.md`, default status `PROPOSED`.
 
-## Аргументы
+## Arguments
 
-- `$ARGUMENTS` — короткий заголовок ADR (kebab-case или текст). Пример: `/dev:adr embedded-vector-store-vs-qdrant`.
+- `$ARGUMENTS` — a short ADR title (kebab-case or free text). Example: `/dev:adr embedded-vector-store-vs-qdrant`.
 
-## Workflow рекомендация
+## Workflow recommendation
 
 ```
-1. Обсудили решение в сессии → tech-writer уже имеет контекст.
-2. /dev:adr <title>            # создаст PROPOSED ADR
-3. Прочитать ADR, отредактировать руками если нужно.
-4. Сменить status на ACCEPTED после согласования.
-5. В коде/CLAUDE.md/STACK.md добавить ссылку на ADR номер,
-   где правило проявляется.
+1. The decision was discussed in the session → tech-writer already has the context.
+2. /dev:adr <title>            # creates a PROPOSED ADR
+3. Read the ADR, edit it by hand if needed.
+4. Change status to ACCEPTED once agreed.
+5. In the code/CLAUDE.md/STACK.md, add a reference to the ADR number
+   where the rule applies.
 ```
 
-## Связанные команды
+## Related commands
 
-- `/dev:spec:spec` — продуктовое ТЗ (что делает приложение для пользователя), отдельная сущность от ADR
-- `/dev:plan` — план задачи, может ссылаться на ADR в секции "Решения (decisions log)"
-- `tech-writer` (Agent tool) — пишет ADR без обёртки, если хочешь больше контроля
+- `/dev:spec:spec` — product spec (what the application does for the user), a separate entity from ADR
+- `/dev:plan` — task plan, may reference an ADR in the plan's decisions log section
+- `tech-writer` (Agent tool) — writes the ADR without the wrapper, if you want more control
 
-## Шаблон
+## Template
 
-См. `.claude/plugins/core/templates/ADR.template.md` — структура:
+See `.claude/plugins/core/templates/ADR.template.md` — structure:
 **Context → Decision → Alternatives → Consequences → Implementation pointers → Revisit when**.

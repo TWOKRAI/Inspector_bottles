@@ -12,7 +12,7 @@ bash scripts/validate_commit/install_hook.sh
 
 Installs `commit-msg` hook in `.git/hooks/`. Runs on every `git commit` (skipped by `--no-verify`).
 
-`claude-kit-project new` calls this automatically right after `git init`, so a project bootstrapped from the seed already has the hook in place.
+`claude-kit new` calls this automatically right after `git init`, so a project bootstrapped from the seed already has the hook in place.
 
 ## Run manually
 

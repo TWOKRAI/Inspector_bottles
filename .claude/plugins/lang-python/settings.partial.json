@@ -11,6 +11,7 @@
       "Bash(uv lock*)",
       "Bash(pip list*)",
       "Bash(pip show *)",
+      "Bash(pre-commit run*)",
       "Bash(cd * && python -m pytest*)"
     ],
     "ask": [

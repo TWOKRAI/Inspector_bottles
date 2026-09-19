@@ -1,13 +1,13 @@
 # Templates — File templates for new projects
 
-These are **source templates** used by `claude-kit-project new` when bootstrapping a new project. You normally don't copy them by hand — the CLI does it for you.
+These are **source templates** used by `claude-kit new` when bootstrapping a new project. You normally don't copy them by hand — the CLI does it for you.
 
-## How `claude-kit-project new` uses templates
+## How `claude-kit new` uses templates
 
 When you run:
 
 ```bash
-claude-kit-project new ~/Project_code/my_new_app --name "My New App"
+claude-kit new ~/Project_code/my_new_app --name "My New App"
 ```
 
 the script copies the seed and instantiates these templates with placeholder substitution:
@@ -37,7 +37,7 @@ the script copies the seed and instantiates these templates with placeholder sub
 
 ## Manual override
 
-If you want to customize before instantiating (e.g. add `httpx` to default deps), edit the `.template` file in this directory — `claude-kit-project new` will pick it up on next run.
+If you want to customize before instantiating (e.g. add `httpx` to default deps), edit the `.template` file in this directory — `claude-kit new` will pick it up on next run.
 
 ## What is NOT here
 

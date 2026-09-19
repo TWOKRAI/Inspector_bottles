@@ -55,19 +55,19 @@ See [SETUP_GUIDE.md](SETUP_GUIDE.md) for install + per-language LSP setup + smok
 
 Add this to your project's `CLAUDE.md` if Serena passes the smoke test:
 
-> - Запросы по точному символу (refs / definition / rename / move) → **Serena**
-> - Семантические запросы по описанию поведения → **qex**
-> - Архитектурный обзор → **graphify**
-> - При падении Serena (язык без LSP, проект без manifest) → fallback к qex + Grep
+> - Exact-symbol queries (refs / definition / rename / move) → **Serena**
+> - Semantic behavior-description queries → **qex**
+> - Architectural overview → **graphify**
+> - If Serena fails (language without LSP, project without a manifest) → fallback to qex + Grep
 ## Launcher options
 
-**Default** (used automatically by `claude-kit-claude plugin enable mcp-serena`): see `.claude-plugin/plugin.json` → `mcpServers.serena`. Launches through `uvx`, so no separately-installed `serena` binary needs to be on PATH.
+**Default** (used automatically by `claude-kit add serena`): see `.claude-plugin/plugin.json` → `mcpServers.serena`. Runs Serena ephemerally via `uvx` from the pinned upstream tag — no local `serena` binary needs to be on PATH.
 
 ```
 command: uvx
-args: ["--from", "serena-agent", "serena", "start-mcp-server", "--context", "claude-code", "--project", "."]
+args: ["--from", "git+https://github.com/oraios/serena@v1.7.0", "serena", "start-mcp-server", "--context", "claude-code", "--project", "."]
 ```
 
-**Alternative** (only if you've run `uv tool install serena-agent` and prefer the bare binary): `command: serena`, `args: ["start-mcp-server", "--context", "claude-code", "--project", "."]`. The copy-paste `.mcp.json` block is in `templates/mcp-config.json.snippet`.
+**Alternative** (a PyPI-published install instead of git — see `templates/mcp-config.json.snippet`): use `--from serena-agent` instead of the `git+https://...@v1.7.0` source.
 
 Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

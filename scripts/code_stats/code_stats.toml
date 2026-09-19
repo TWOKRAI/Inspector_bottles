@@ -1,32 +1,30 @@
-# Конфигурация для scripts/code_stats/code_stats.py
+# Configuration for scripts/code_stats/code_stats.py
 #
-# Запуск:
+# Run:
 #   python scripts/code_stats/code_stats.py
-#   python scripts/code_stats/code_stats.py --config scripts/code_stats/code_stats.toml
-#   python scripts/code_stats/code_stats.py --root multiprocess_framework --format json
+#   python scripts/code_stats/code_stats.py --root src/<package> --format json
 #
-# CLI-аргументы перекрывают значения из этого файла.
+# CLI args override values from this file.
 
 [scan]
-# Папки для анализа (можно несколько). Относительные пути — от текущей рабочей
-# директории. Перекрывается позиционными аргументами CLI:
-#   python scripts/code_stats/code_stats.py multiprocess_framework Services
+# Paths to scan (one or more). Relative → from the current working directory.
+# Positional CLI args override: python scripts/code_stats/code_stats.py src tests
 paths = ["."]
-# Рекурсивный обход подпапок.
+# Recursive descent into subdirectories.
 recursive = true
-# Следовать ли по симлинкам (false безопаснее: не зациклится).
+# Follow symlinks (false is safer: won't loop).
 follow_symlinks = false
-# Считать только то, что знает git (tracked + untracked не-ignored).
-# true = честная оценка проекта: сгенерированные кэши (graphify-out, дампы,
-# датасеты) из .gitignore не попадают в цифры. false = весь диск как есть.
+# Count only what git knows (tracked + untracked non-ignored): generated caches and
+# everything in .gitignore stay out of the numbers. Outside a git repo this falls
+# back to a filesystem walk with a warning on stderr.
 git_tracked = true
 
 [formats]
-# Расширения, которые учитываем. Регистр не важен. Пустой список = все файлы.
+# Extensions to count. Case insensitive. Empty list = all files.
 include = [".py", ".md", ".toml", ".yaml", ".yml", ".json", ".sh"]
 
 [exclude]
-# Имена директорий, которые пропускаем целиком (быстрый pruning).
+# Directory names to skip entirely (fast pruning).
 dirs = [
     "__pycache__",
     ".git",
@@ -42,42 +40,42 @@ dirs = [
     "build",
     "dist",
     "*.egg-info",
+    "data",
+    "htmlcov",
 ]
-# Glob-паттерны имён файлов, которые пропускаем.
+# Glob patterns for file names to skip.
 file_patterns = ["*.pyc", "*.pyo", "*.so", "*.dylib", "*.dll", ".DS_Store"]
-# Glob-паттерны путей (полный путь относительно root) — для точечных исключений.
+# Glob patterns for paths (full path relative to root) — for precise exclusions.
 path_patterns = []
 
 [count]
-# Считать ли пустые строки.
+# Count blank lines.
 blank_lines = false
-# Считать ли комментарии (см. правила для .py / .md / .sh ниже).
+# Count comments (per-language rules for .py / .md / .sh below).
 comments = true
-# Считать ли docstring-блоки в .py (тройные кавычки на верхнем уровне модуля/функции).
+# Count docstring blocks in .py (triple-quoted at module/function top level).
 docstrings = true
-# Считать ли символы (помимо строк). Незначительные накладные расходы.
+# Count characters (besides lines). Minor overhead.
 chars = true
-# Считать ли слова. Определение как у `wc -w`: последовательности непробельных
-# символов. Для .md это осмысленный объём текста, для .py — грубая мера.
+# Count words (`wc -w` rule: runs of non-whitespace). Meaningful for .md,
+# a rough measure for .py.
 words = true
-# Кодировка для чтения. errors='replace' гарантирует, что бинарь-подобные файлы не уронят скрипт.
+# Read encoding. errors='replace' so binary-like files don't crash the script.
 encoding = "utf-8"
 
 [output]
-# Формат вывода: table | json | csv
+# Output format: table | json | csv
 format = "table"
-# Группировка строк отчёта: extension | directory | none
+# Report row grouping: extension | directory | none
 group_by = "extension"
-# Сортировка: lines | words | chars | files | dirs | name
+# Sort: lines | words | chars | files | dirs | name
 sort_by = "lines"
-# Порядок сортировки: desc | asc
+# Sort order: desc | asc
 sort_order = "desc"
-# Показывать ли итоговую строку TOTAL. TOTAL считается по ВСЕМ группам,
-# даже если вывод обрезан limit'ом.
+# Show TOTAL summary row (computed over ALL groups, even when output is cut by limit).
 show_total = true
-# Максимум строк в выводе (0 = без ограничений). Удобно при group_by = "directory".
+# Max rows in output (0 = unlimited). Useful with group_by = "directory".
 limit = 0
-# Глубина группировки при group_by = "directory":
-#   0 — полный путь (multiprocess_framework/modules/logger_module/tests)
-#   1 — только зона верхнего уровня (multiprocess_framework)
+# Directory grouping depth for group_by = "directory":
+#   0 — full path (src/pkg/sub/tests), 1 — top-level zone only (src)
 dir_depth = 0

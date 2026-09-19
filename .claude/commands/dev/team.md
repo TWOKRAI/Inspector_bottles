@@ -3,137 +3,153 @@ description: Live agent team for one plan phase — PM intake, Task X.Y, teammat
 disable-model-invocation: true
 ---
 
-Запустить **живую команду** на фазу плана или на одну задачу: агенты создаются один раз, живут
-до конца сессии, берут задачи из общего списка, переписываются между собой по имени и отдают
-результат тебе. Ты — лид в роли PM: формулируешь, раздаёшь, наблюдаешь, ломаешь (инъекции) и
-сводишь. Код руками не пишешь.
+Start a **live team** on a plan phase or on one task: agents are created once, live until
+the end of the session, pick up tasks from a shared list, message each other by name and
+hand results back to you. You are the lead, in the PM role: you frame, assign, watch, inject
+(faults) and consolidate. You don't write code by hand.
 
-Механизм — Agent Teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` стоит в `.claude/settings.json`).
-Полный разбор, горячие клавиши, стоимость и ловушки —
-[`docs/claude/AGENT_TEAMS_GUIDE.md`](../../../docs/claude/AGENT_TEAMS_GUIDE.md).
+Mechanism — Agent Teams, plugin `agent-teams` (default-off). Full breakdown, hotkeys,
+cost and traps — `.claude/plugins/agent-teams/README.md`. Entry from `/dev:pipeline --team` —
+lands here too: different transport, same stages and gates.
 
-## 0. Предусловия — 30 секунд, не пропускать
+## 0. Preconditions — 30 seconds, don't skip
 
-1. Инструменты `TeamCreate` / `TaskCreate` доступны? Если нет — переменная не подхватилась
-   (нужен перезапуск сессии). Скажи об этом и работай через `/dev:pipeline` на субагентах;
-   не изображай команду.
-2. `git status` — чужих незакоммиченных правок нет; `ListAgents` — нет второй сессии в этом
-   дереве. Ветка — `<type>/<slug>`, не `main`.
-3. Ollama жива (qex)? Если нет — агенты идут по `Grep`. В любом случае в брифах называй возраст
-   индекса числом: «индекс от такой-то даты, N дней».
-4. Посчитай цену вслух: каждый участник — полная сессия, около 25k токенов контекста до первой
-   строки кода (три `CLAUDE.md` + `MEMORY.md`) плюс работа. Четыре участника — 100k на старте.
+1. Plugin `agent-teams` is enabled in `.claude/enabled.yaml` **and** the variable
+   `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is in the composed `.claude/settings.json`
+   (`claude-kit-claude plugin doctor .` will show the mismatch). If not — enable it
+   and restart the session: the environment variable is only picked up
+   at startup. Enable it by **editing `enabled.yaml` by hand** + `plugin sync .` —
+   `plugin enable` strips the file's comments (trap documented in the plugin's README).
+2. Transport is available — one check, and it's in `/dev:pipeline` §1′ (`commands/pipeline.md`):
+   `ListAgents` exists for you and prints participants by name, `SendMessage` addresses them. **Not
+   `TaskCreate`:** it belongs to the shared task list, which doesn't exist in CC 2.1.222, and gives a
+   false "no" (live run 2026-09-05). Teammates spawn in-process; this version has no separate
+   commands to create and destroy the team — don't expect them, don't call them. Check fails —
+   say so plainly and work on subagents; don't fake a team.
+3. `git status` — no one else's uncommitted changes; `ListAgents` — no second session in this
+   worktree. Branch — `<type>/<slug>`, not `main`.
+4. Is Ollama alive (qex)? If not — agents fall back to `Grep`. Either way, name the index's
+   age as a number in briefs: "index from such-and-such date, N days".
 
-## 1. Intake — роль PM
+5. Say the price out loud: every participant is a full session, measured at ≈56k tokens of
+   context before the first line of code (three `CLAUDE.md` + `MEMORY.md`) plus the work itself.
+   Four participants — 100k at the start.
 
-Перескажи задачу владельца тремя блоками и покажи ему **до** декомпозиции:
-- **Цель** — одно предложение.
-- **Приёмка** — 3–6 проверяемых строк: вход → ожидаемый выход, число, файл.
-- **Вне scope** — что не трогаем.
+## 1. Intake — the PM role
 
-Вопросов — максимум два, и только там, где разные прочтения дают материально разную работу.
-Остальное — назвать предположением и идти дальше.
+Retell the owner's task in three blocks and show it to them **before** decomposition:
+- **Goal** — one sentence.
+- **Acceptance** — 3–6 checkable lines: input → expected output, a number, a file.
+- **Out of scope** — what we don't touch.
 
-## 2. Декомпозиция
+At most two questions, and only where different readings produce materially different work.
+Everything else — name it an assumption and move on.
 
-- Формат Task X.Y из глобального `CLAUDE.md`: Level, Assignee, Goal, Files, Steps, Acceptance,
+## 2. Decomposition
+
+- Task X.Y format from the global `CLAUDE.md`: Level, Assignee, Goal, Files, Steps, Acceptance,
   Out of scope.
-- От четырёх файлов или при архитектурной правке спеку пишет `manager`; иначе пишешь сам.
-- **Гейт независимости:** `Files:` не пересекаются → задачи параллельны; пересекаются → цепочка
-  через `Dependencies:`. Отсутствие поля не доказывает независимость.
-- Уровень → исполнитель: Senior+ → `teamlead`; Middle → `developer`; механика с готовым
-  диффом → `junior`.
+- Four files or more, or an architectural change — `manager` writes the spec; otherwise you
+  write it yourself.
+- **Independence gate:** `Files:` don't overlap → tasks run in parallel; they overlap → chain
+  via `Dependencies:`. A missing field doesn't prove independence.
+- Level → executor: Senior+ → `teamlead`; Middle → `developer`; mechanical work with a
+  ready-made diff → `junior`.
 
-## 3. Состав — минимальный
+## 3. Roster — minimal
 
-| Роль | Агент | Модель | Когда в команде |
-|---|---|---|---|
-| Лид / PM | ты | Opus, effort high | всегда |
-| Техдиректор | `cto` | Fable | приёмка фазы, merge-гейт, спор teamlead ↔ reviewer; **не** на задачу |
-| Тимлид / сеньор | `teamlead` | Opus | Senior+ задачи, эскалация на третьей итерации |
-| Разработчик | `developer` | Sonnet | Middle задачи |
-| Тестер | `tester` | Sonnet | **один раз на механизм, до реализации**, в worktree на pre-impl коммите |
-| Ревьюер | `reviewer` | Opus | после каждой задачи, синхронно |
-| Джуниор | `junior` | Haiku | механика с написанным диффом; не коммитит |
-| Отладчик | `debugger` | Sonnet | по FAIL от tester |
+Role ↔ agent ↔ model — registry `.claude/plugins/dev/modes/dev.md`; who the lead, `cto` and
+`manager` are and what they don't do — skill [`team-protocol`](../skills/team-protocol/SKILL.md) §2;
+executor by task level — §2 above. Here, only what gets decided when assembling the team:
 
-Не спавнь «на всякий случай»: участник без задачи стоит столько же, сколько с задачей.
+- Always: you (lead/PM) and `reviewer` — synchronously after every task.
+- `tester` — **once per mechanism, before implementation**, in a worktree on a pre-impl commit.
+- `debugger` — on a FAIL from the tester. `cto` — phase acceptance, merge gate, `teamlead` ↔
+  `reviewer` dispute; **not** per task.
+- `teamlead` — when you expect escalations (why exactly — `team-protocol` §4).
 
-## 4. Спавн и брифы
+Don't spawn "just in case": an idle participant costs the same as a busy one.
 
-1. Создай команду. Каждому участнику — бриф по шаблону
-   [`.claude/plugins/dev/templates/team-brief.md`](../templates/team-brief.md): на английском,
-   с блоком заметок под конкретную модель (Sonnet исполняет буквально — scope называть явно;
-   Opus не просить «перепроверить»; Haiku — нумерованные шаги и точные якоря; Fable — сказать,
-   какие отчёты о ходе нужны).
-2. **Пишущие** (`developer`, `teamlead`, `tester`, `junior`) — каждому свой worktree от
-   текущего HEAD: `git worktree add .claude/worktrees/team-<task> -b <type>/<slug>-<task>`.
-   Venv в worktree не создавать: CUDA-сборка torch ставится колесом, `uv sync` притащит CPU.
-   Тесты гонять главным `.venv` из корня worktree с `PYTHONPATH=$PWD`; проверка одной строкой:
-   `python -c "import multiprocess_framework.modules.process_module as m; print(m.__file__)"`
-   должна печатать путь внутри worktree.
-3. Читающие (`reviewer`, `cto`, `investigator`) — в общем дереве, файлы не меняют.
-4. Одновременно пишущих — не больше трёх. Больше не ускоряет, а ловит session-limit и гонку
-   коммитов.
+## 4. Spawn and briefs
 
-## 5. Задачи
+1. Spawn participants one at a time. Each gets a brief: the transport wrapper
+   `.claude/plugins/agent-teams/templates/team-brief.md` (role, peers, worktree) + the fields of
+   `.claude/plugins/dev/templates/executor-brief.md` (DESIGN from the lead, FILES, REDS ≤ 10, first
+   edit within the first 5 calls, TESTS radius, BUDGET, REPORT; also notes per model).
+   In English. Nothing to fill DESIGN with → `investigator` first, or a lead decision.
+2. **Writers** (`developer`, `teamlead`, `tester`, `junior`) — each gets their own worktree from
+   the current HEAD, **next to the repo, not under it**:
+   `git worktree add ../<repo>--team-<task> -b <type>/<slug>-<task>` (under `.claude/worktrees/`
+   the first read costs +19…28k in nested `CLAUDE.md` tax — Д45). Two or more writers at <!-- lint-language: allow -->
+   once — otherwise a shared tree (`team-protocol` §6, mode A).
+   Creation/base/venv trap/how to check tests see your code — single source of truth
+   `core/agents/_WORKTREE_PATTERN.md` (the "Live team" row in the transport table); the
+   participant prints that check's result in their report before claiming a test result.
+3. Readers (`reviewer`, `cto`, `investigator`) — in the shared tree, don't change files.
+4. Writer cap — single source, `core/agents/_WORKTREE_PATTERN.md`; we don't keep our own number
+   here.
 
-- `TaskCreate` на каждую Task X.Y; `Dependencies:` из спеки → зависимость задачи.
-- Заголовок задачи тестера начинается с `[RED]`: хук `TaskCompleted` не гоняет на ней pytest
-  (красный набор — это ТЗ, а не дефект). `[docs]` / `[skip-gate]` — то же для документации и
-  для случая, когда гейт блокирует чужой файл.
-- Назначай явно. Самозахват экономит твой ход, но ломает порядок «тестер до кода».
+## 5. Tasks
 
-## 6. Наблюдение — что смотреть и куда нажимать
+- **CC 2.1.222 has no shared task list** (`TaskCreate` and `Ctrl+T` don't exist — live run
+  2026-09-05), and with it no `TaskCompleted` event: the task gate is held by `reviewer`, not a
+  hook. Until they exist, everything below is about the **brief**: the participant gets the task
+  and its prefix as text.
+- `TaskCreate` for every Task X.Y; `Dependencies:` from the spec → task dependency.
+- Spec fields carry over verbatim, not paraphrased: a `Handoff:` line from the plan goes
+  into the task description as-is (the participant uses it to know who to ask and who to
+  hand off to), `Gate:` — into the title prefix (`[RED]` / `[docs]` / `[skip-gate]`).
+- The tester's task title starts with `[RED]`: the `TaskCompleted` hook doesn't run pytest on
+  it (a red set is the spec, not a defect). `[docs]` / `[skip-gate]` — same for documentation and
+  for when the gate would block someone else's file.
+- Assign explicitly. Self-claiming saves you a turn but breaks the "tester before code" order.
 
-| Что | Как |
+## 6. Observation — what to watch and where to click
+
+| What | How |
 |---|---|
-| Список задач и кто что взял | `Ctrl+T` |
-| Транскрипт участника, написать ему | `↑`/`↓` выбрать → `Enter`; `Esc` назад; `x` остановить |
-| Всё, что крутится в сессии | `/tasks` |
-| Журнал стартов и финишей всех агентов | `data/team-journal.jsonl` (хуки `SubagentStart/Stop`) |
-| Гейты | `TaskCompleted` → ruff + pytest на изменённых тестах; `TeammateIdle` → нет незакоммиченного в worktree. Два блока подряд → пропуск с предупреждением (лимит двух итераций). Выключить: `TEAM_GATES=off` |
+| Task list and who took what | `Ctrl+T` — **no list in 2.1.222** — check the roster with `ListAgents` |
+| A participant's transcript, message them | `↑`/`↓` to select → `Enter`; `Esc` back; `x` to stop |
+| Everything running in the session | `/tasks` |
+| Log of every agent's starts and finishes | `data/agent-journal.jsonl` (hooks `SubagentStart/Stop`, plugin `observability`) |
+| Gates | `TaskCompleted` → ruff + pytest on changed tests; `TeammateIdle` → nothing uncommitted in the worktree. Two blocks in a row → skip with a warning (two-iteration cap). Turn off: `TEAM_GATES=off` |
 
-Пока работа делегирована, ты код не пишешь. Исключение — тривиальное (меньше 30 строк, один
-файл), и об этом сказать вслух.
+While work is delegated, you don't write code. Exception — something trivial (under 30 lines, one
+file), and say so out loud.
 
-## 7. Инъекции — только ты
+## 7. Injections — you only
 
-После каждого механизма: предсказание набора → откат каждой гарантии по отдельности → факт.
-Против обоих наборов тестов, авторского и тестерского. Не делегируется. Записать в
-`plans/<slug>/injections-*.md`.
+After every mechanism: predict the set → revert each guarantee one at a time → the fact.
+Against both test sets, the author's and the tester's. Not delegated. Record it, if the project
+keeps an injection log (format and path — per project convention).
 
-## 8. Ревью и эскалация — вопросы идут на уровень вверх, как в компании
+## 8. Review and escalation — questions go up a level, like in a company
 
-- `reviewer` после каждой задачи, синхронно (`run_in_background: false`, если через Agent);
-  находка — это вход → наблюдаемый выход.
-- Две итерации на петлю; на третьей — уровень выше. Цепочка одна для всех и записана в skill
-  `project-rules` §7, агенты её знают:
+- `reviewer` after every task, synchronously (`run_in_background: false` if via Agent);
+  a finding is an input → observable output.
+- Two iterations per loop; on the third — one level up. One chain for everyone, recorded once in
+  skill `project-rules` §7 (not duplicated here), agents know it.
+- In the team, a participant writes to the level above by name (`SendMessage`), if that role is
+  in the team; otherwise — to you, in the same text, and you spawn the needed role. Message
+  format is fixed:
+  `ESCALATION -> <role>` / Question / Tried / Blocked on / Files. One level at a time: a junior
+  doesn't write to the tech director.
+- Your job on escalation is not to answer in place of the role above, but to make sure the
+  question got through and the answer came back to whoever asked. You answer yourself only
+  what the owner decides (and then you ask the owner first). A question that outlives the task
+  (needs access, an owner decision, a live rig) — record it in the session log
+  (`docs/sessions/<today>.md` → Open questions), not only in chat.
+- `cto` — at phase acceptance (three lenses), at the merge gate, and on questions from
+  `teamlead`/`reviewer`. Not on lower-level tasks.
 
-| Кто не справился | К кому идёт вопрос |
-|---|---|
-| `junior`, `docs-writer` | `developer` / `tech-writer` |
-| `developer`, `tester`, `debugger`, `tech-writer`, `spec-writer` | `teamlead` (`debugger` может сначала к `investigator` за диагнозом) |
-| `teamlead`, `reviewer`, `investigator`, `manager`, `integrator`, `ai-judge` | `cto` |
-| `cto` | владелец — через тебя; вопрос ложится в `docs/claude/OPEN_QUESTIONS.md` |
+## 9. Merge-back and shutdown
 
-- В команде участник пишет уровню выше по имени (`SendMessage`), если тот в команде; иначе —
-  тебе тем же текстом, и ты спавнишь нужную роль. Формат сообщения фиксирован:
-  `ESCALATION -> <role>` / Question / Tried / Blocked on / Files. Один уровень за раз: джуниор
-  не пишет техдиректору.
-- Твоя работа при эскалации — не отвечать самому вместо роли выше, а убедиться, что вопрос
-  дошёл и ответ вернулся тому, кто спрашивал. Отвечаешь сам только на то, что решает владелец
-  (и тогда сначала спрашиваешь владельца).
-- `cto` — на приёмке фазы (три линзы), на merge-гейте и на вопросах от `teamlead`/`reviewer`.
-  Не на задачах уровня ниже.
+1. **You** merge worktree branches: one at a time, `git show --stat` on every commit — the diff
+   must match the message. Merge-back and cleanup, including an orphaned worktree — escalate,
+   don't silently delete — single source `core/agents/_WORKTREE_PATTERN.md`.
+2. Ask participants to stop and wait for them. The team lives until the end of the session;
+   `/resume` won't bring it back.
+3. Report to the owner: what's done, what's open, what's unreliable in your own work. Memory —
+   via `/core:memory:remember`, if the WHEN-gate fired.
 
-## 9. Merge-back и выключение
-
-1. Ветки worktree вливаешь **ты**: по одной, `git show --stat` на каждый коммит — diff обязан
-   совпадать с сообщением. Журнал сессий `docs/sessions/*.md` сливается union-merge.
-2. `git worktree remove` после merge; осиротевший worktree — эскалация, не тихое удаление.
-3. Попроси участников остановиться, дождись, удали команду. `/resume` их не вернёт.
-4. Отчёт владельцу: что сделано, что открыто, что ненадёжно в собственной работе. Память —
-   через `/core:memory:remember`, если сработал WHEN-гейт.
-
-Задача или фаза: $ARGUMENTS
+Task or phase: $ARGUMENTS

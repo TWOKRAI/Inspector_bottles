@@ -9,60 +9,60 @@ Each entry follows a fixed format so the agent can scan and apply them.
 ```
 ## N. <Short rule name>
 
-**Правило:** <one sentence that states the rule>
+**Rule:** <one sentence that states the rule>
 
-**❌ Признак нарушения:**
+**❌ Violation signal:**
 - <concrete signal — code shape / comment / structure>
 - ...
 
-**✅ Что делать:**
+**✅ What to do:**
 - <concrete alternative>
 - ...
 
-**Почему:** <reason, ideally with consequence>
+**Why:** <reason, ideally with consequence>
 
-**Где живёт:** <relevant file paths or modules>
+**Where it lives:** <relevant file paths or modules>
 ```
 
-## Когда добавлять запись
+## When to add an entry
 
-- Заметил что агент **дважды или больше** сделал одну и ту же ошибку
-- Заметил что **сам** недавно сделал ошибку которую система не поймала
-- Возник архитектурный паттерн который не очевиден из кода
-- Не для тривиальных стилевых правил (это покрывает ruff/pyright)
+- Noticed the agent make the **same mistake twice or more**
+- Noticed **you yourself** recently made a mistake the system didn't catch
+- An architectural pattern emerged that isn't obvious from the code
+- Not for trivial style rules (that's covered by ruff/pyright)
 
-## Когда удалять запись
+## When to remove an entry
 
-- Правило теперь enforced автоматически (lint, тест, type check)
-- Кодбаза изменилась так что нарушение больше невозможно
-- Запись устарела (deprecated module, удалённая зона)
+- The rule is now enforced automatically (lint, test, type check)
+- The codebase changed so the violation is no longer possible
+- The entry is stale (deprecated module, removed zone)
 
-## Связи
+## Connections
 
-- Ссылка из корневого `CLAUDE.md`: `Project-specific anti-patterns → [EXAMPLES.md](EXAMPLES.md)`
-- Дополняет, но не дублирует комментарии в коде
+- Link from the root `CLAUDE.md`: `Project-specific anti-patterns → [EXAMPLES.md](EXAMPLES.md)`
+- Supplements, but doesn't duplicate, comments in the code
 
 ---
 
-<!-- Удали этот placeholder и добавь реальные правила по мере накопления.
-     Минимальный smoke-пример ниже — для иллюстрации формата. -->
+<!-- Remove this placeholder and add real rules as they accumulate.
+     The minimal smoke example below is for illustrating the format. -->
 
-## 1. (placeholder) Не дублировать в скрипте то, что уже есть в Makefile
+## 1. (placeholder) Don't duplicate in a script what the Makefile already has
 
-**Правило:** разовые команды для запуска тестов / линтера / сборки — через `make <target>`, не через свои bash-скрипты.
+**Rule:** one-off commands for running tests / lint / build — via `make <target>`, not your own bash scripts.
 
-**❌ Признак нарушения:**
+**❌ Violation signal:**
 ```bash
 # scripts/run_tests.sh
 uv run pytest --cov=mypackage --cov-report=term-missing
 ```
 
-**✅ Что делать:**
+**✅ What to do:**
 ```bash
 # Use existing target
 make test
 ```
 
-**Почему:** дублирующие скрипты разъезжаются с Makefile, забываются при обновлении флагов pytest. Единая точка входа — `Makefile`.
+**Why:** duplicate scripts drift from the Makefile and get forgotten when pytest flags change. Single entry point — `Makefile`.
 
-**Где живёт:** `Makefile`, `scripts/`.
+**Where it lives:** `Makefile`, `scripts/`.

@@ -1,11 +1,11 @@
 {
   "name": "mcp-qex",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Semantic code search (BM25 + dense embeddings via ollama)",
   "mcpServers": {
     "qex": {
-      "command": "python3",
-      "args": [".claude/plugins/mcp-qex/qex-launcher.py"]
+      "command": "uv",
+      "args": ["run", "--no-project", "python", ".claude/plugins/mcp-qex/qex-launcher.py"]
     }
   }
 }

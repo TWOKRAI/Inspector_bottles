@@ -2,52 +2,52 @@
 description: Run the project's entry point — via pyproject [project.scripts], make run, or python -m <package>
 ---
 
-Запусти основную точку входа проекта. Определи её по приоритету:
+Run the project's main entry point. Determine it by priority:
 
-## Шаги
+## Steps
 
-1. **Если есть `pyproject.toml` с `[project.scripts]`** — выбери первую запись и запусти через uv:
+1. **If `pyproject.toml` has `[project.scripts]`** — pick the first entry and run via uv:
    ```bash
    uv run <script-name> $ARGUMENTS
    ```
 
-2. **Иначе если есть `Makefile` с целью `run`**:
+2. **Else if there's a `Makefile` with a `run` target**:
    ```bash
    make run ARGS="$ARGUMENTS"
    ```
 
-3. **Иначе если есть `src/<package>/__main__.py`** (или `<package>/__main__.py`):
+3. **Else if there's a `src/<package>/__main__.py`** (or `<package>/__main__.py`):
    ```bash
    uv run python -m <package> $ARGUMENTS
    ```
 
-4. **Иначе если есть `src/<package>/cli.py` или `app.py` или `main.py`**:
+4. **Else if there's a `src/<package>/cli.py` or `app.py` or `main.py`**:
    ```bash
    uv run python -m <package>.<module> $ARGUMENTS
    ```
 
-5. **Если ничего не найдено** — спроси у пользователя путь к точке входа и предложи добавить `[project.scripts]` в `pyproject.toml`.
+5. **If nothing is found** — ask the user for the entry-point path and suggest adding `[project.scripts]` to `pyproject.toml`.
 
-## Подсказки
+## Hints
 
-- Если падает с `ModuleNotFoundError` — выполни `uv sync` (или `make install`).
-- Если падает с UI/GUI ошибкой — проверь что соответствующая optional-группа установлена: `uv sync --group <ui-group>` (см. `pyproject.toml` → `[dependency-groups]`).
-- Если процесс крашится — спроси, нужно ли запустить `/dev:debug` для диагностики.
+- If it fails with `ModuleNotFoundError` — run `uv sync` (or `make install`).
+- If it fails with a UI/GUI error — check that the corresponding optional group is installed: `uv sync --group <ui-group>` (see `pyproject.toml` → `[dependency-groups]`).
+- If the process crashes — ask whether to run `/dev:debug` for diagnosis.
 
-## Smoke-режим (live-smoke для `/dev:pipeline` S5)
+## Smoke mode (live-smoke for `/dev:pipeline` S5)
 
-Когда нужен **не** полный прогон, а лишь проверка «приложение стартует» (S5 live-smoke
-gate перед ревью) — добавь non-destructive флаг к шагам выше, чтобы entrypoint
-поднялся и сразу вышел, не делая реальной работы:
+When you need **not** a full run but just a check that "the app starts" (the S5
+live-smoke gate before review) — add a non-destructive flag to the steps above so
+the entrypoint comes up and exits right away, without doing real work:
 ```bash
-uv run python -m <package> --version   # или --help
+uv run python -m <package> --version   # or --help
 ```
-Цель — поймать import-cycle при старте, broken entrypoint, misconfigured env. Если
-у entrypoint нет `--version`/`--help` — достаточно `uv run python -c "import <package>"`.
-Падение на этом шаге = STOP перед S6 (см. `/dev:pipeline` → шаг 3 Live-smoke).
+The goal is to catch an import cycle at startup, a broken entrypoint, a
+misconfigured env. If the entrypoint has no `--version`/`--help` — `uv run python -c "import <package>"` is enough.
+A failure at this step = STOP before S6 (see `/dev:pipeline` → step 3 Live-smoke).
 
 ## Project-specific override
 
-Если в `.claude/modes/_stack.md` есть секция "Entry point" — следуй ей вместо алгоритма выше.
+If `.claude/modes/_stack.md` has an "Entry point" section — follow it instead of the algorithm above.
 
 $ARGUMENTS

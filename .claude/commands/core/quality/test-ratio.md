@@ -2,31 +2,31 @@
 description: Test-to-code volume ratio per module (LOC-based)
 ---
 
-Запусти подсчёт test-ratio:
+Run the test-ratio count:
 
 ```bash
-python scripts/test_ratio/test_ratio.py
+uv run --no-project python scripts/test_ratio/test_ratio.py
 ```
 
-> Скрипт ставится автоматически через `claude-kit-project new` (из `.claude/plugins/lang-python/templates/scripts/test_ratio/`).
+> The script is installed automatically via `claude-kit new` (from `.claude/plugins/lang-python/templates/scripts/test_ratio/`).
 
-Что считает: на каждый модуль в `scan.module_roots` (настраивается в TOML; разумные дефолты: `src/`, или конкретные подпакеты типа `src/<package>/auth`, `src/<package>/api`) — LOC файлов в `tests/` (или совпадающих с `test_*.py`/`*_test.py`/`conftest.py`) ÷ LOC остального production-кода.
+What it counts: for each module in `scan.module_roots` (configurable in TOML; sensible defaults: `src/`, or specific subpackages like `src/<package>/auth`, `src/<package>/api`) — LOC of files in `tests/` (or matching `test_*.py`/`*_test.py`/`conftest.py`) ÷ LOC of the rest of the production code.
 
-Конфиг: [scripts/test_ratio/test_ratio.toml](../../scripts/test_ratio/test_ratio.toml). Детали в [README.md](../../scripts/test_ratio/README.md).
+Config: [scripts/test_ratio/test_ratio.toml](../../scripts/test_ratio/test_ratio.toml). Details in [README.md](../../scripts/test_ratio/README.md).
 
-**Health-маркеры:**
-- `ok` — ratio ≥ `warn_threshold` (по умолчанию 0.3)
-- `!` — тесты есть, но мало
-- `x` — тестов нет
+**Health markers:**
+- `ok` — ratio ≥ `warn_threshold` (default 0.3)
+- `!` — tests exist but are thin
+- `x` — no tests
 
-Полезные варианты:
-- `python scripts/test_ratio/test_ratio.py --sort-by ratio --limit 10` — топ-10 слабейших.
-- `python scripts/test_ratio/test_ratio.py --format json` — для CI/трендов.
+Useful options:
+- `uv run --no-project python scripts/test_ratio/test_ratio.py --sort-by ratio --limit 10` — the weakest 10.
+- `uv run --no-project python scripts/test_ratio/test_ratio.py --format json` — for CI/trends.
 
-**Когда использовать:**
-- Дополнение к `/mcp-sentrux:sentrux-gaps`: sentrux показывает «есть/нет тестов», `test_ratio` — **насколько**.
-- Перед рефакторингом большого модуля: оценить риск.
+**When to use:**
+- Complement to `/mcp-sentrux:sentrux-gaps`: sentrux shows "tests exist/don't exist", `test_ratio` shows **how much**.
+- Before refactoring a large module: assess the risk.
 
-**Ограничение:** LOC ≠ покрытие. Для настоящего coverage — `pytest --cov`.
+**Limitation:** LOC ≠ coverage. For real coverage — `pytest --cov`.
 
 $ARGUMENTS

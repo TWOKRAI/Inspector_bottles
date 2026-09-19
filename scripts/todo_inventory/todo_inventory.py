@@ -23,7 +23,7 @@ import sys
 import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("todo_inventory.toml")
@@ -158,7 +158,7 @@ _BLAME_CACHE: dict[tuple[str, int], tuple[str, str]] = {}
 
 
 def annotate_blame(hits: list[Hit], cwd: Path) -> None:
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     # Группируем по файлу — один subprocess на файл с --porcelain даёт все строки сразу,
     # но проще: один вызов на хит, кэш не нужен (хиты редко повторяются).
     by_file: dict[str, list[Hit]] = defaultdict(list)
@@ -197,7 +197,11 @@ def annotate_blame(hits: list[Hit], cwd: Path) -> None:
                 cur_final = -1
                 continue
             parts = raw.split(" ", 3)
-            if len(parts) >= 3 and len(parts[0]) == 40 and all(c in "0123456789abcdef" for c in parts[0]):
+            if (
+                len(parts) >= 3
+                and len(parts[0]) == 40
+                and all(c in "0123456789abcdef" for c in parts[0])
+            ):
                 # sha original-line final-line [count]
                 try:
                     cur_final = int(parts[2])
@@ -217,7 +221,7 @@ def annotate_blame(hits: list[Hit], cwd: Path) -> None:
                 author, ts = info[h.line]
                 h.author = author
                 if ts:
-                    d = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+                    d = datetime.fromtimestamp(ts, tz=UTC).date()
                     h.date = d.isoformat()
                     h.age_days = (today - d).days
 
@@ -257,7 +261,9 @@ def render_table(hits: list[Hit], cfg: Config) -> str:
     out.write(sep.join(h.ljust(widths[i]) for i, h in enumerate(headers)) + "\n")
     out.write(sep.join("-" * w for w in widths) + "\n")
     for row in data:
-        out.write(sep.join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)) + "\n")
+        out.write(
+            sep.join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)) + "\n"
+        )
     return out.getvalue()
 
 
@@ -315,14 +321,22 @@ def render_csv(hits: list[Hit]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="todo_inventory", description="Инвентаризация TODO/FIXME с git blame.")
+    p = argparse.ArgumentParser(
+        prog="todo_inventory", description="Инвентаризация TODO/FIXME с git blame."
+    )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
-    p.add_argument("--group-by", choices=["tag", "file", "author", "none"], default=None)
+    p.add_argument(
+        "--group-by", choices=["tag", "file", "author", "none"], default=None
+    )
     p.add_argument("--sort-by", choices=["age", "tag", "file", "author"], default=None)
     p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--no-blame", action="store_true", help="Не запускать git blame (быстрее, но без автора/возраста).")
+    p.add_argument(
+        "--no-blame",
+        action="store_true",
+        help="Не запускать git blame (быстрее, но без автора/возраста).",
+    )
     return p
 
 

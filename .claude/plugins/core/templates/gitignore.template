@@ -50,6 +50,18 @@ coverage.xml
 *.log
 logs/
 
+# ─── Agent runtime output ─────────────────────────────────────────────────────
+# Written by the observability plugin's SubagentStart/Stop hooks. Must be ignored:
+# an untracked journal makes `git status` dirty after the first subagent, and the
+# agent-teams idle gate blocks a teammate on exactly that.
+data/agent-journal.jsonl
+# Strike-counters of the team gates. NOT ignoring them makes the tree dirty
+# after the first block, and the TeammateIdle gate then fires on its own
+# artefact — the same trap the journal line above fixes.
+data/team-gates/
+# Per-stage token metering of /dev:pipeline (opt-in Stop-hook).
+data/pipeline-metrics.jsonl
+
 # ─── Project data (uncomment what applies) ────────────────────────────────────
 # data/*.db
 # data/*.db-journal
@@ -75,9 +87,10 @@ CLAUDE.local.md
 # intentionally TRACKED — curated, version-controlled team knowledge, like
 # .claude/memory/. Only the `local` scope below is ignored.
 .claude/agent-memory-local/
+.claude/logs/
 
 # ─── claude-kit backup / temp artifacts ───────────────────────────────────────
-# Manual unpacks of `claude-kit-claude plugin upgrade` backups (tar.gz) and the optional
+# Manual unpacks of `claude-kit upgrade` backups (tar.gz) and the optional
 # `--backup-dir <path>` target. Never commit — these contain prior-state
 # snapshots of .claude/ that are noisy and large.
 .backup_tmp/

@@ -41,19 +41,7 @@ if ! command -v semgrep &>/dev/null; then
     exit 0
 fi
 
-# Advisory scan of the single edited file — never blocks (hook exits 0 below).
-# semgrep's default is exit-0-even-with-findings, so pass NO --error flag: the old
-# `--error=false` is invalid Click syntax (a boolean flag takes no value) → semgrep
-# exits 2 (usage error) BEFORE scanning, and 2>/dev/null swallowed it, so the hook
-# silently did nothing. Surface findings via PostToolUse `additionalContext` JSON:
-# per code.claude.com/docs/en/hooks a hook that exits 0 only reaches the agent through
-# additionalContext JSON on stdout — plain stdout/stderr on exit 0 go to the debug
-# log, not the transcript. semgrep's own progress/errors → /dev/null.
-FINDINGS=$(semgrep --config auto --quiet --metrics=off "$FILE_PATH" 2>/dev/null)
-if [ -n "$FINDINGS" ]; then
-    $PY -c "import json, sys
-body = sys.stdin.read()
-print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PostToolUse', 'additionalContext': 'Semgrep SAST findings (advisory, non-blocking):\n' + body}}))" <<< "$FINDINGS"
-fi
+# Advisory scan of the single edited file. Findings go to stderr; never block.
+semgrep --config auto --quiet --metrics=off --error=false "$FILE_PATH" 1>&2 2>/dev/null
 
 exit 0

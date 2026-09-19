@@ -26,17 +26,17 @@ Two equivalent paths — pick one.
 ### Option A: global (recommended for daily use)
 
 ```bash
-npm install -g @colbymchenry/codegraph
+npm install -g @colbymchenry/codegraph@1.6.0
 codegraph --version
 ```
 
 ### Option B: zero-install via npx
 
-Skip global install; the MCP server snippet uses `npx -y …` and downloads on first run. Slower first invocation, but no system-wide footprint.
+Skip global install; the MCP server snippet uses `npx -y @colbymchenry/codegraph@1.6.0 …` and downloads on first run. Slower first invocation, but no system-wide footprint. Keep the version pinned — an unpinned `@latest` re-resolves on every cold start.
 
 ---
 
-## 2. Initialize the project
+## 2. Initialize the project (this also builds the first index)
 
 From the project root:
 
@@ -44,7 +44,7 @@ From the project root:
 codegraph init
 ```
 
-Creates `.codegraph/` with the database and config. Add it to `.gitignore`:
+Creates `.codegraph/` with the database and config **and builds the initial index** — there is no separate first-index step. Add it to `.gitignore`:
 
 ```bash
 echo ".codegraph/" >> .gitignore
@@ -54,11 +54,11 @@ echo ".codegraph/" >> .gitignore
 
 ---
 
-## 3. First index
+## 3. Index runtime and verification
 
-```bash
-codegraph index .
-```
+`codegraph init` already indexed the project; `codegraph index .` rebuilds the
+whole index from scratch (same result as a fresh init) and is only needed after
+corruption or a major refactor.
 
 Runtime expectations:
 
@@ -74,6 +74,7 @@ Verify:
 ```bash
 codegraph status
 codegraph query "<some symbol you know exists>"
+codegraph explore "how does <some entry point> work"   # same output as the MCP tool
 ```
 
 ---
@@ -91,13 +92,13 @@ Append the snippet from `templates/mcp-config.json.snippet` to the project's `.m
 }
 ```
 
-Or, without global install (uses npx):
+Or, without global install (uses npx — this is what the plugin manifest ships):
 
 ```json
 {
   "codegraph": {
     "command": "npx",
-    "args": ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
+    "args": ["-y", "@colbymchenry/codegraph@1.6.0", "serve", "--mcp"]
   }
 }
 ```
@@ -125,12 +126,14 @@ Use this if you want a one-shot setup that also targets other AI tools. The seed
    ```
    1. Who calls function <some_function> in this project?
    2. If I rename <some_symbol>, which files break?
-   3. What does <some_function> call (callees, recursive depth 2)?
-   4. Which test files are affected by changes in <some_source_file>?
+   3. How does <some_entry_point> reach <some_deep_function>?
+   4. Survey <some_module>: what is in it and what calls into it?
    5. Which handler serves <some_route_in_a_web_framework>?   (skip if not a web project)
    ```
 
-   Watch the tool calls. If the agent goes through `codegraph_explore` instead of Grep+Read loops, the wire-up works.
+   Watch the tool calls. The server publishes a single tool: if the agent answers
+   from one or two `codegraph_explore` calls instead of Grep+Read loops, the
+   wire-up works.
 
    If the agent ignores codegraph and falls back to Grep — see § Tool routing below.
 
@@ -143,7 +146,7 @@ Without explicit routing, the agent may double-dip (codegraph + Grep on the same
 ```markdown
 ## Tool routing (MCP)
 
-- **codegraph** → callers / callees / impact / rename safety / route→handler
+- **codegraph** → `codegraph_explore`: call paths / blast radius / rename safety / route→handler
 - **qex** → fuzzy intent ("find code that does X")
 - **sentrux** → architectural health, layer rules, cycles
 - **graphify** → visual / structural overview, hubs, shortest path
@@ -167,7 +170,7 @@ codegraph sync .
 Full rebuild (after `.codegraph/` corruption or a major refactor):
 
 ```bash
-codegraph index . --rebuild
+codegraph index .        # rebuilds from scratch; there is no --rebuild flag
 ```
 
 ---
@@ -199,11 +202,9 @@ On Windows you may need `npm i -g windows-build-tools` first (one-time).
 
 ### Indexer hangs on huge directories
 
-codegraph respects `.gitignore` by default but **not** `.ignore` (qex's format). If you have generated code, vendor dumps, or `node_modules/large-tree/` outside `.gitignore`, add them there. Or pass `--exclude`:
+codegraph respects `.gitignore` by default but **not** `.ignore` (qex's format). If you have generated code, vendor dumps, or `node_modules/large-tree/` outside `.gitignore`, add them there — `index` has no `--exclude` flag (only `--force` / `--quiet` / `--verbose`), so `.gitignore` is the single lever.
 
-```bash
-codegraph index . --exclude "data/**" --exclude "**/*.generated.ts"
-```
+If the watcher itself is the problem (WSL2 `/mnt` drives, network shares), start the server with `serve --mcp --no-watch` and sync by hand.
 
 ### Tool calls didn't drop — agent still uses Grep
 

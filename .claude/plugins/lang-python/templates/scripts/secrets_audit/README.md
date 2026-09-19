@@ -12,16 +12,16 @@ basic-auth в URL, generic `password|secret|token = "..."` присваиван�
 
 ```bash
 # Сканировать всё с дефолтным конфигом
-python scripts/secrets_audit/secrets_audit.py
+uv run --no-project python scripts/secrets_audit/secrets_audit.py
 
 # Конкретный подкаталог
-python scripts/secrets_audit/secrets_audit.py --root src
+uv run --no-project python scripts/secrets_audit/secrets_audit.py --root src
 
 # JSON для CI (exit 1 при находках)
-python scripts/secrets_audit/secrets_audit.py --format json
+uv run --no-project python scripts/secrets_audit/secrets_audit.py --format json
 
 # Только отчёт, без падения (CI=soft mode)
-python scripts/secrets_audit/secrets_audit.py --no-strict
+uv run --no-project python scripts/secrets_audit/secrets_audit.py --no-strict
 ```
 
 ## Exit-коды

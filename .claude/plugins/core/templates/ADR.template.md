@@ -48,6 +48,6 @@ Examples: "team grows past 5", "moving to multi-region", "Python 3.13 GA".
 
 ---
 
-> Workflow: `/dev:adr <title>` creates this file at `docs/decisions/NNNN-<slug>.md`.
+> Workflow: `/dev:adr <title>` creates this file at `docs/claude/DECISIONS/NNNN-<slug>.md`.
 > Once status flips to ACCEPTED, reference the ADR number in code/CLAUDE.md/STACK.md
 > where the rule shows up, so the chain is bidirectional.

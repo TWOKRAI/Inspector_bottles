@@ -8,19 +8,19 @@
 
 ```bash
 # Что было бы удалено (dry-run) с дефолтным конфигом — сканирует "."
-python scripts/clean_cache/clean_cache.py
+uv run --no-project python scripts/clean_cache/clean_cache.py
 
 # РЕАЛЬНОЕ удаление
-python scripts/clean_cache/clean_cache.py --apply
+uv run --no-project python scripts/clean_cache/clean_cache.py --apply
 
 # Подсмотреть в подкаталог
-python scripts/clean_cache/clean_cache.py --root multiprocess_framework
+uv run --no-project python scripts/clean_cache/clean_cache.py --root src
 
 # JSON для агентов (machine-readable отчёт + список целей)
-python scripts/clean_cache/clean_cache.py --format json
+uv run --no-project python scripts/clean_cache/clean_cache.py --format json
 
 # Для CI — тихий режим, exit-код 0 (ok) / 1 (ошибки удаления) / 2 (отказ)
-python scripts/clean_cache/clean_cache.py --apply --quiet
+uv run --no-project python scripts/clean_cache/clean_cache.py --apply --quiet
 ```
 
 ## Что настраивается в `clean_cache.toml`
@@ -29,7 +29,7 @@ python scripts/clean_cache/clean_cache.py --apply --quiet
 |--------|----------|------------|
 | `[scan]` | `root`, `follow_symlinks` | Откуда сканировать |
 | `[delete]` | `dirs`, `files` | Что считать кандидатом на удаление (fnmatch-глобы по имени) |
-| `[exclude]` | `dirs`, `path_patterns` | Куда вообще не заходить (`.git`, `.venv`, `multiprocess_prototype_backup` и т.п.) |
+| `[exclude]` | `dirs`, `path_patterns` | Куда вообще не заходить (`.git`, `.venv`, `data` и т.п.) |
 | `[output]` | `format`, `sort_by`, `sort_order`, `limit`, `min_size` | Как показать отчёт |
 | `[safety]` | `forbid_dangerous_roots`, `timeout_sec` | Slow-rails |
 
@@ -40,7 +40,7 @@ CLI-флаги (`--root`, `--format`, `--sort-by`, `--limit`, `--min-size`) пе
 **Удаляемые директории:** `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `htmlcov`, `*.egg-info`.
 **Удаляемые файлы:** `*.pyc`, `*.pyo`, `*.pyd`, `.coverage`, `.coverage.*`, `coverage.xml`.
 
-**Исключения (не сканируются):** `.git`, `.venv`, `venv`, `env`, `node_modules`, `.qex`, `.sentrux`, `multiprocess_prototype_backup` (последнее — по правилу проекта, см. [`CLAUDE.md`](../../CLAUDE.md)).
+**Исключения (не сканируются):** `.git`, `.venv`, `venv`, `env`, `node_modules`, `.qex`, `.sentrux`, `data` (последнее — по правилу проекта, см. [`CLAUDE.md`](../../CLAUDE.md)).
 
 Чтобы добавить свой паттерн — отредактируй `clean_cache.toml` или подключи свой конфиг через `--config path/to/other.toml`.
 

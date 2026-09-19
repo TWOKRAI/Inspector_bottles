@@ -2,32 +2,32 @@
 description: Check architectural invariants from .sentrux/rules.toml
 ---
 
-Запусти проверку правил `.sentrux/rules.toml`:
+Run the `.sentrux/rules.toml` rule check:
 
-1. Проверь, существует ли `.sentrux/rules.toml` в корне проекта. Если нет — сообщи пользователю, что файл нужно создать (см. https://github.com/sentrux/sentrux и [`.claude/plugins/mcp-sentrux/rules.template.toml`](../../.claude/plugins/mcp-sentrux/rules.template.toml) если есть), и покажи минимальный generic-шаблон:
+1. Check whether `.sentrux/rules.toml` exists at the project root. If not — tell the user the file needs to be created (see https://github.com/sentrux/sentrux and [`.claude/plugins/mcp-sentrux/rules.template.toml`](../../.claude/plugins/mcp-sentrux/rules.template.toml) if present), and show the minimal generic template:
 
 ```toml
 [constraints]
 max_cycles   = 0
 no_god_files = true
 
-# Пути в [[boundaries]] — ЛИТЕРАЛЬНЫЕ префиксы директорий: `*` подставляет имя файла
-# и НЕ раскрывает сегмент-директорию ("src/*/domain" не матчит ничего). Используй
-# полный путь src/<pkg>/<layer> без хвостового слэша. Ключи: from/to/reason
-# (ключа `forbidden` НЕТ — sentrux молча игнорирует неизвестные ключи).
+# Paths in [[boundaries]] are LITERAL directory prefixes: `*` stands for a file name
+# and does NOT expand a directory segment ("src/*/domain" matches nothing). Use the
+# full path src/<pkg>/<layer> with no trailing slash. Keys: from/to/reason
+# (there is NO `forbidden` key — sentrux silently ignores unknown keys).
 [[boundaries]]
 from   = "src/your_package/domain"
 to     = "src/your_package/adapters"
-reason = "domain не должен зависеть от adapters (DIP)"
+reason = "domain must not depend on adapters (DIP)"
 ```
 
-> Это generic-пример. Подгони пути под реальную архитектуру (см. `.claude/modes/_stack.md` → "Layers") или возьми готовый архетип из `.claude/plugins/mcp-sentrux/templates/` (`.sentrux/rules.toml` обычно уже развёрнут `claude-kit-project new`).
+> This is a generic example. Fit the paths to the real architecture (see `.claude/modes/_stack.md` → "Layers") or take a ready-made archetype from `.claude/plugins/mcp-sentrux/templates/` (`.sentrux/rules.toml` is usually already deployed by `claude-kit new`).
 
-2. Если файл есть — вызови `mcp__sentrux__check_rules` с `path` = абсолютный путь к корню проекта.
+2. If the file exists — call `mcp__sentrux__check_rules` with `path` = the absolute path to the project root.
 
-Покажи пользователю:
-- Какие правила прошли ✅, какие упали ❌.
-- По каждому failure — конкретные файлы/импорты, нарушающие правило.
-- Подсказку как фиксить (вынести в общий слой, инвертировать зависимость, применить DI).
+Show the user:
+- Which rules passed ✅, which failed ❌.
+- For each failure — the specific files/imports violating the rule.
+- A hint on how to fix it (extract to a shared layer, invert the dependency, apply DI).
 
 $ARGUMENTS

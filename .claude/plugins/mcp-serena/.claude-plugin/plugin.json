@@ -5,7 +5,16 @@
   "mcpServers": {
     "serena": {
       "command": "uvx",
-      "args": ["--from", "serena-agent", "serena", "start-mcp-server", "--context", "claude-code", "--project", "."]
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena@v1.7.0",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "claude-code",
+        "--project",
+        "."
+      ]
     }
   }
 }

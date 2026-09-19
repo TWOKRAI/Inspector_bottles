@@ -13,7 +13,7 @@
 #   Tests live OUTSIDE these rules on purpose — only production code is gated.
 #
 # ★ WHAT'S ACTIVE OUT OF THE BOX ★
-#   `claude-kit-project new` deploys this archetype to `.sentrux/rules.toml` with your real
+#   `claude-kit new` deploys this archetype to `.sentrux/rules.toml` with your real
 #   package name already substituted. Active from day one: `max_cycles` and
 #   `no_god_files` — both green on clean code, no manual edit. The [[boundaries]]
 #   block at the bottom ships COMMENTED on purpose (see ★ ENABLE BOUNDARIES ★).

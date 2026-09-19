@@ -46,7 +46,7 @@
 #       # ref: "v1.2.0"                       # optional branch/tag/sha
 #
 schema: 2
-seed_version: "1.0.0"
+seed_version: "1.2.0"
 plugins:
   # Empty dict = enabled by default. `core` is the always-on base plugin.
   core: {}
@@ -183,3 +183,6 @@ plugins:
     source: "https://github.com/DietrichGebert/ponytail"
     version: "4.8.4"
     enabled: true
+  agent-teams:
+    enabled: true
+    hooks: true

@@ -2,33 +2,33 @@
 description: Run the project's tests (pytest or make test)
 ---
 
-Запусти тесты проекта.
+Run the project's tests.
 
-## Приоритет
+## Priority
 
-1. **Если есть `Makefile` с целью `test`:**
+1. **If there's a `Makefile` with a `test` target:**
    ```bash
    make test
    ```
 
-2. **Иначе если есть `pyproject.toml` / `pytest.ini` / `tests/`:**
+2. **Else if there's a `pyproject.toml` / `pytest.ini` / `tests/`:**
    ```bash
    uv run pytest -q
    ```
 
-3. **Если у проекта свой test runner** (указано в `.claude/modes/_stack.md` → "Test runner"):
-   следуй той инструкции.
+3. **If the project has its own test runner** (given in `.claude/modes/_stack.md` → "Test runner"):
+   follow that instruction.
 
-## После прогона
+## After the run
 
-Покажи итог:
-- Сколько прошло / упало / skipped.
-- Если есть FAIL — выведи короткий список (имена тестов + первая строка ошибки).
-- Предложи `/dev:debug` для диагностики падающих тестов.
+Show the result:
+- How many passed / failed / skipped.
+- If there's a FAIL — print a short list (test names + first error line).
+- Suggest `/dev:debug` to diagnose failing tests.
 
-## Подсказки
+## Hints
 
-- Windows: используй `py -3` или `python3` если `python` указывает на 2.x.
-- Если pytest не установлен — `uv add --group dev pytest pytest-cov`.
+- Windows: use `py -3` or `python3` if `python` points to 2.x.
+- If pytest isn't installed — `uv add --group dev pytest pytest-cov`.
 
 $ARGUMENTS

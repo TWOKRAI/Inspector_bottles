@@ -1,115 +1,116 @@
-# qex — семантический поиск по кодовой базе
+# qex — semantic code search across the codebase
 
-Эта папка — **всё, что нужно для настройки qex + Ollama в новом проекте**.
-Скопируй её целиком в новый проект, пройди 5 шагов ниже, и поиск работает.
+This folder is **everything needed to set up qex + Ollama in a new project**.
+Copy it as a whole into the new project, go through the 5 steps below, and search works.
 
-## Что это
+## What this is
 
-**qex** (v0.0.2, feature `vector`) — локальный MCP-сервер (Rust), который делает
-гибридный (BM25 + dense) семантический поиск по кодовой базе. Встраивается в Claude Code через MCP.
+**qex** (v0.0.2, feature `vector`) is a local MCP server (Rust) that performs
+hybrid (BM25 + dense) semantic search over the codebase. It plugs into Claude Code via MCP.
 
-- **BM25** индексирует Tantivy — локальный файл в `~/.qex/`.
-- **Dense-векторы** считает Ollama (`qwen3-embedding:0.6b`, 1024-dim) и складывает в `~/.qex/` (JSON-файл, brute-force cosine).
-- **Чанкинг** — tree-sitter по AST (классы, функции, методы).
-- **Ignore-правила** читаются из `.gitignore` и `.ignore` (как у ripgrep) автоматически.
+- **BM25** is indexed by Tantivy — a local file under `~/.qex/`.
+- **Dense vectors** are computed by Ollama (Windows — `qwen3-embedding:0.6b-qex`, 1024-dim; macOS — `qwen3-embedding:8b-qex`, 4096-dim) and stored under `~/.qex/` (a JSON file, brute-force cosine).
+- **Chunking** — tree-sitter over the AST (classes, functions, methods).
+- **Ignore rules** are read from `.gitignore` and `.ignore` (like ripgrep) automatically.
 
-Docker и Qdrant **не нужны**. Единственная внешняя зависимость — Ollama.
+Docker and Qdrant are **not needed**. The only external dependency is Ollama.
 
-Полная документация с архитектурой, диагностикой и решениями проблем — в [SETUP_GUIDE.md](./SETUP_GUIDE.md).
+Full documentation with architecture, diagnostics and troubleshooting — in [SETUP_GUIDE.md](./SETUP_GUIDE.md).
 
-## Quick-start (5 шагов)
+## Quick-start (5 steps)
 
-Предполагается, что бинарник `qex` и Ollama уже установлены глобально
-(инструкции в [SETUP_GUIDE.md](./SETUP_GUIDE.md), секции 3–5). Для **нового проекта**:
+Assumes the `qex` binary and Ollama are already installed globally
+(instructions in [SETUP_GUIDE.md](./SETUP_GUIDE.md), sections 3–5). For a **new project**:
 
-### 1. Скопируй шаблон `.ignore` в корень проекта
+### 1. Copy the `.ignore` template into the project root
 
 ```bash
 cp .claude/plugins/mcp-qex/templates/ignore.template .ignore
 ```
 
-Открой `.ignore` и отредактируй whitelist-блок под свой проект — оставь только активные
-рабочие директории, всё остальное исключи. Это критично для качества поиска:
-меньше шума = чище ранжирование. См. комментарии внутри шаблона.
+Open `.ignore` and edit the whitelist block for your project — keep only the active
+working directories, exclude everything else. This is critical for search quality:
+less noise = cleaner ranking. See the comments inside the template.
 
-### 2. Создай `.mcp.json` в корне проекта
+### 2. Create `.mcp.json` in the project root
 
-Скопируй шаблон `templates/mcp-config.json.snippet` в `.mcp.json` (корень проекта).
-Замени два плейсхолдера:
+Copy the `templates/mcp-config.json.snippet` template into `.mcp.json` (project root).
+Replace the two placeholders:
 
-- `<QEX_BINARY_PATH>` — абсолютный путь к `qex` (обычно `~/.cargo/bin/qex` на macOS, `~\.cargo\bin\qex.exe` на Windows)
-- `<PROJECT_ABSOLUTE_PATH>` — абсолютный путь к корню проекта
+- `<QEX_BINARY_PATH>` — absolute path to `qex` (usually `~/.cargo/bin/qex` on macOS, `~\.cargo\bin\qex.exe` on Windows)
+- `<PROJECT_ABSOLUTE_PATH>` — absolute path to the project root
 
-### 3. Запусти Ollama
+### 3. Start Ollama
 
 ```bash
-# Ollama — ОБЯЗАТЕЛЬНО до запуска Claude Code
+# Ollama — REQUIRED before starting Claude Code
 ollama serve &
 
-# Проверка
+# Check
 curl -s http://localhost:11434/ && echo " Ollama OK"
 ```
 
-### 4. Перезапусти Claude Code
+### 4. Restart Claude Code
 
-Чтобы новая MCP-конфигурация подхватилась. В VS Code: `Ctrl/Cmd+Shift+P → Developer: Reload Window`.
+So the new MCP configuration is picked up. In VS Code: `Ctrl/Cmd+Shift+P → Developer: Reload Window`.
 
-### 5. Первая индексация
+### 5. First indexing
 
-В чате с Claude Code:
+In a chat with Claude Code:
 
 ```
 mcp__qex__index_codebase(path="<PROJECT_ABSOLUTE_PATH>", force=true)
 ```
 
-Через 30-40 минут (зависит от размера кодовой базы и GPU) — готово. Проверка:
+After 30-40 minutes (depends on codebase size and GPU) — done. Check:
 
 ```
 mcp__qex__get_indexing_status(path="<PROJECT_ABSOLUTE_PATH>")
-mcp__qex__search_code(path="<PROJECT_ABSOLUTE_PATH>", query="главный класс приложения")
+mcp__qex__search_code(path="<PROJECT_ABSOLUTE_PATH>", query="main application class")
 ```
 
-## Ежедневный запуск
+## Daily startup
 
 ```bash
 ollama serve &
-# Запускаешь Claude Code — qex поднимается автоматически
+# Start Claude Code — qex comes up automatically
 ```
 
-## Когда переиндексировать
+## When to reindex
 
-- После крупных изменений кода — `mcp__qex__index_codebase(path=..., force=true)`.
-- После смены embedding-модели — `clear_index` → `index_codebase(force=true)`.
-- После правок `.ignore` — обязательно `clear_index` + `index_codebase(force=true)`, иначе исключённые файлы останутся в индексе.
-- Опционально: git post-commit hook для автоматической переиндексации — см. `templates/post-commit.hook.sh`.
+- After major code changes — `mcp__qex__index_codebase(path=..., force=true)`.
+- After changing the embedding model — `clear_index` → `index_codebase(force=true)`.
+- After editing `.ignore` — `clear_index` + `index_codebase(force=true)` is mandatory, otherwise excluded files stay in the index.
+- Optional: a git post-commit hook for automatic reindexing — see `hooks/git/post-commit.d/qex-reindex.sh`.
 
-## Когда НЕ нужен qex
+## When qex is NOT needed
 
-- Знаешь точный путь файла → используй Read / Grep напрямую, это быстрее и точнее.
-- Ищешь по точному имени символа, которое уникально → Grep с `-n` быстрее.
-- qex нужен, когда ищешь **по смыслу** или **не помнишь путь**.
+- You know the exact file path → use Read / Grep directly, it's faster and more precise.
+- You're searching by an exact, unique symbol name → Grep with `-n` is faster.
+- qex is needed when you're searching **by meaning** or **don't remember the path**.
 
-## Структура папки
+## Folder structure
 
 ```
 .claude/plugins/mcp-qex/
-├── README.md                       # этот файл
-├── SETUP_GUIDE.md                  # полный гайд (Windows + macOS, диагностика)
+├── README.md                       # this file
+├── SETUP_GUIDE.md                  # full guide (Windows + macOS, diagnostics)
+├── hooks/git/post-commit.d/
+│   └── qex-reindex.sh              # post-commit PART, run by the core dispatcher
 └── templates/
-    ├── ignore.template             # шаблон .ignore для whitelist-фильтра
-    ├── mcp-config.json.snippet     # JSON для .claude/mcp.json
-    └── post-commit.hook.sh         # опциональный git hook для auto-reindex
+    ├── ignore.template             # .ignore template for the whitelist filter
+    └── mcp-config.json.snippet     # JSON for .claude/mcp.json
 ```
 
-## Ссылки
+## Links
 
-- [SETUP_GUIDE.md](./SETUP_GUIDE.md) — полный мануал (архитектура, диагностика, типичные проблемы)
-- [templates/ignore.template](./templates/ignore.template) — шаблон .ignore
-- [templates/mcp-config.json.snippet](./templates/mcp-config.json.snippet) — MCP-конфиг
-- [templates/post-commit.hook.sh](./templates/post-commit.hook.sh) — git hook
+- [SETUP_GUIDE.md](./SETUP_GUIDE.md) — full manual (architecture, diagnostics, common issues)
+- [templates/ignore.template](./templates/ignore.template) — .ignore template
+- [templates/mcp-config.json.snippet](./templates/mcp-config.json.snippet) — MCP config
+- [hooks/git/post-commit.d/qex-reindex.sh](./hooks/git/post-commit.d/qex-reindex.sh) — post-commit PART
 ## Launcher options
 
-**Default** (used automatically by `claude-kit-claude plugin enable mcp-qex`): see `.claude-plugin/plugin.json` → `mcpServers.qex`.
+**Default** (used automatically by `claude-kit add qex`): see `.claude-plugin/plugin.json` → `mcpServers.qex`.
 
 ```
 command: python

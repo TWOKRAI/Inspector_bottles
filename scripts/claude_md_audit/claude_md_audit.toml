@@ -5,6 +5,12 @@
 claude_dir = ".claude"
 # Корень проекта (для разрешения путей в slash-командах: scripts/x.py)
 project_root = "."
+# Имена файлов, которые НЕ считаются агентами/командами — даже если лежат в
+# agents/ или commands/. Glob-паттерны (fnmatch). Дефолт `_*` покрывает
+# документы-паттерны (_WORKTREE_PATTERN.md) — у них нет / не должен
+# проверяться frontmatter. Агентский шаблон-скелет живёт вне agents/, в
+# `.claude/plugins/core/templates/agent.template.md` (Task 3.3).
+ignore_patterns = ["_*"]
 
 [required_fields]
 # Frontmatter поля, обязательные для агентов в .claude/agents/**/*.md

@@ -2,29 +2,29 @@
 description: Inventory of TODO/FIXME/HACK with git blame (author, age)
 ---
 
-Запусти инвентаризацию техдолга:
+Run a tech-debt inventory:
 
 ```bash
-python scripts/todo_inventory/todo_inventory.py
+uv run --no-project python scripts/todo_inventory/todo_inventory.py
 ```
 
-Что собирает: `TODO/FIXME/HACK/XXX/BUG/NOTE` (теги настраиваются) с привязкой к автору и дате последнего изменения строки через `git blame`.
+What it collects: `TODO/FIXME/HACK/XXX/BUG/NOTE` (tags configurable), attributed to the author and the line's last-change date via `git blame`.
 
-Конфиг: [scripts/todo_inventory/todo_inventory.toml](../../scripts/todo_inventory/todo_inventory.toml). Детали в [README.md](../../scripts/todo_inventory/README.md).
+Config: [scripts/todo_inventory/todo_inventory.toml](../../scripts/todo_inventory/todo_inventory.toml). Details in [README.md](../../scripts/todo_inventory/README.md).
 
-Полезные варианты:
-- `python scripts/todo_inventory/todo_inventory.py --no-blame` — быстрый скан без git (без авторов/возраста).
-- `python scripts/todo_inventory/todo_inventory.py --group-by author` — кто оставил больше всего.
-- `python scripts/todo_inventory/todo_inventory.py --sort-by age --limit 20` — топ-20 старейших.
-- `python scripts/todo_inventory/todo_inventory.py --format json` — для CI/нотификаций.
+Useful options:
+- `uv run --no-project python scripts/todo_inventory/todo_inventory.py --no-blame` — fast scan without git (no authors/age).
+- `uv run --no-project python scripts/todo_inventory/todo_inventory.py --group-by author` — who left the most.
+- `uv run --no-project python scripts/todo_inventory/todo_inventory.py --sort-by age --limit 20` — top 20 oldest.
+- `uv run --no-project python scripts/todo_inventory/todo_inventory.py --format json` — for CI/notifications.
 
-**Когда использовать:**
-- Перед спринтом уборки техдолга: что есть, кто оставил, насколько старо.
-- Поиск HACK/XXX старше N дней — критичные пометки на ревизию.
-- Сводка по автору — кому возвращать «свои» TODO.
+**When to use:**
+- Before a tech-debt cleanup sprint: what's there, who left it, how old it is.
+- Finding HACK/XXX older than N days — critical markers for review.
+- Summary by author — who to route "their own" TODOs back to.
 
-**Замечания:**
-- `git blame` медленный на большом числе хитов — используй `--no-blame` для быстрого скана.
-- Скрипт может находить TODO в собственном [todo_inventory.py](../../scripts/todo_inventory/todo_inventory.py) — это не баг, добавь `scripts/todo_inventory/*` в `exclude.path_patterns` своего конфига.
+**Notes:**
+- `git blame` is slow with a large number of hits — use `--no-blame` for a fast scan.
+- The script may find TODOs in its own [todo_inventory.py](../../scripts/todo_inventory/todo_inventory.py) — this is not a bug, add `scripts/todo_inventory/*` to `exclude.path_patterns` in your own config.
 
 $ARGUMENTS

@@ -91,7 +91,6 @@ _SERVER_TO_PLUGIN: dict[str, str] = {
     "qt-mcp": "mcp-qt",
     "playwright": "mcp-playwright",
     "sequential-thinking": "mcp-sequential-thinking",
-    "backend-ctl": "mcp-backend-ctl",
 }
 
 # Fallback-набор включённых плагинов, когда enabled.yaml не найден (например при
@@ -249,6 +248,13 @@ def _collect_agent_refs(
             for lineno, line in enumerate(
                 md_path.read_text(encoding="utf-8").splitlines(), start=1
             ):
+                # A `disallowedTools:` denylist names tools to *remove* from the
+                # inherited pool, not tools the agent routes to — its entries are
+                # not routing grants and must not be required in ROUTING.md. A
+                # read-only role denies the serena mutators (harvest Task 1.2),
+                # several of which are deliberately absent from the canonical set.
+                if line.lstrip().startswith("disallowedTools:"):
+                    continue
                 # Both notations resolve to the same (server, tool) pair so the
                 # canonical/enabled checks are form-agnostic (correction C3).
                 for regex in (_TOOL_REF_RE, _TOOL_REF_DUNDER_RE):

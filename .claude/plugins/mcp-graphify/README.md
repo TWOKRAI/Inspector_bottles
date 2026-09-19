@@ -68,7 +68,7 @@ When graphify is active:
 | "Find the function that parses XML responses" | qex (semantic search) — graphify is structure, not semantics |
 ## Launcher options
 
-**Default** (used automatically by `claude-kit-claude plugin enable mcp-graphify`): see `.claude-plugin/plugin.json` → `mcpServers.graphify` (package `graphifyy`, double-y; console script `graphify-mcp`).
+**Default** (used automatically by `claude-kit add graphify`): see `.claude-plugin/plugin.json` → `mcpServers.graphify` (package `graphifyy`, double-y; console script `graphify-mcp`).
 
 ```
 command: uvx
@@ -78,3 +78,12 @@ args: ["graphify-mcp", "serve", "graphify-out/graph.json"]
 `uvx` is the single canonical launcher upstream supports. Run `graphify .` first to produce `graphify-out/graph.json`.
 
 Switching: edit `.mcp.json` manually.
+
+## graph_slice — module-boundary graph slice
+
+`scripts/graph_slice.py` slices `graphify-out/graph.json` by the module's path prefix and shows
+inbound edges (who you'd affect), outbound edges (what it depends on), and, behind a flag,
+internal ones. It checks `built_at_commit` against HEAD and the working tree — a stale slice is
+marked `stale`, not passed off silently as current.
+Command — `/mcp-graphify:graph-slice`; tests — `tests/unit/test_graph_slice_template.py` in the seed.
+Module layout: `src/<X>` by default, otherwise `--containers` / `GRAPH_SLICE_CONTAINERS`.

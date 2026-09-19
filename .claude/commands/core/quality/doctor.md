@@ -1,78 +1,78 @@
 ---
-description: System test-drive — one command to check MCP, agents, skills, hooks, indexes. After `claude-kit-project new` and periodically.
+description: System test-drive — one command to check MCP, agents, skills, hooks, indexes. After `claude-kit new` and periodically.
 ---
 
-Запусти проверку здоровья всей системы Claude-Kit. Это **read-only diagnostic** — ничего не чинит, только сообщает что работает, что нет, и что требует внимания.
+Run a health check of the whole Claude-Kit system. This is a **read-only diagnostic** — it fixes nothing, it only reports what works, what doesn't, and what needs attention.
 
-## Что проверяется
+## What it checks
 
-1. **MCP layer** — какие MCP-серверы доступны:
-   - qex (binary + Ollama для embeddings)
+1. **MCP layer** — which MCP servers are available:
+   - qex (binary + Ollama for embeddings)
    - sentrux (binary)
-   - context7 (cfg в `~/.claude.json` или `.mcp.json`)
-   - optional MCP из `.mcp.json`: codegraph, ast-grep, serena, graphify, github, qt-mcp, playwright, sequential-thinking
+   - context7 (cfg in `~/.claude.json` or `.mcp.json`)
+   - optional MCP from `.mcp.json`: codegraph, ast-grep, serena, graphify, github, qt-mcp, playwright, sequential-thinking
 
-2. **Config layer** — валидность конфигурации:
-   - `settings.json` — JSON валиден + критичные deny/ask/allow на месте (через `/core:quality:lint-settings`)
-   - `agents/*/*.md` — frontmatter валиден (через `/core:quality:lint-agents`)
+2. **Config layer** — configuration validity:
+   - `settings.json` — JSON is valid + critical deny/ask/allow are in place (via `/core:quality:lint-settings`)
+   - `agents/*/*.md` — frontmatter is valid (via `/core:quality:lint-agents`)
 
-3. **Routing consistency** — согласованность routing-блоков агентов с `.claude/plugins/core/mcp/ROUTING.md`:
-   - Все `mcp__server__tool` упомянутые в агентах есть в ROUTING.md
-   - Нет orphan-инструментов в ROUTING.md (упомянуты, но никто не использует)
+3. **Routing consistency** — agent routing blocks match `.claude/plugins/core/mcp/ROUTING.md`:
+   - Every `mcp:server:tool` mentioned in agents is in ROUTING.md
+   - No orphan tools in ROUTING.md (mentioned but unused by anyone)
 
-3b. **Content lints** — единый язык + неймспейсинг команд:
-   - **Language** (`lint_language.py`) — нет кириллицы в `agents/` и `modes/` (EN-only зоны; FAIL при регрессии). Тела `commands/`/`skills/`, ждущие отложенного EN-прохода, — non-blocking WARN.
-   - **Namespacing** (`lint_namespacing.py`) — нет legacy flat-имён команд (`/plan` → `/dev:plan` и т.п.) в контенте плагинов. <!-- lint-namespacing: ignore -->
+3b. **Content lints** — unified language + command namespacing:
+   - **Language** (`lint_language.py`) — no Cyrillic in `agents/` and `modes/` (EN-only zones; FAIL on regression). Bodies of `commands/`/`skills/`, awaiting a deferred EN pass, are non-blocking WARN.
+   - **Namespacing** (`lint_namespacing.py`) — no legacy flat command names (`/plan` → `/dev:plan` etc.) in plugin content. <!-- lint-namespacing: ignore -->
 
-4. **Indexes** — состояние индексов MCP (если активны):
-   - qex: `qex --version` + (опц.) индекс существует
-   - sentrux: `sentrux --version` + (опц.) свежий scan
+4. **Indexes** — state of MCP indexes (if active):
+   - qex: `qex --version` + (opt.) index exists
+   - sentrux: `sentrux --version` + (opt.) recent scan
 
-5. **Hooks** — исполнимость:
-   - Все `.sh` в `.claude/plugins/*/hooks/` имеют executable bit
-   - Тестовый запуск каждого хука с пустым stdin (smoke check, не должны крашиться)
-   - **Git hooks** (`.git/hooks/`, opt-in, per-machine): установлен ли `post-commit`
-     (qex auto-reindex, `/mcp-qex:install-reindex-hook`) и `pre-push` (sentrux gate,
-     `/mcp-sentrux:install-pre-push`). Отсутствие — норма (не warn, видно в verbose).
+5. **Hooks** — executability:
+   - Every `.sh` in `.claude/plugins/*/hooks/` has the executable bit
+   - Test run of each hook with empty stdin (smoke check, must not crash)
+   - **Git hooks** (`.git/hooks/`, opt-in, per-machine): whether `post-commit`
+     (qex auto-reindex, `/mcp-qex:install-reindex-hook`) and `pre-push` (sentrux gate,
+     `/mcp-sentrux:install-pre-push`) are installed. Missing is normal (not a warn, visible in verbose).
 
-6. **Plans** — целостность планов:
-   - `plans/` существует
-   - Нет orphan-папок (multi-phase без `plan.md` внутри)
-   - Refs-трассировка свежих коммитов: коммиты на текущей ветке с Refs указывают на существующие файлы
+6. **Plans** — plan integrity:
+   - `plans/` exists
+   - No orphan folders (multi-phase without a `plan.md` inside)
+   - Refs traceability of recent commits: commits on the current branch with Refs point to existing files
 
-7. **Harness-bloat** — потолки ROADMAP § J (advisory soft-warning, держит систему в «smart zone»):
-   - **agents ≤ 12** в одном team-плагине (seed: `dev` ровно 12 — у потолка)
-   - **hooks ≤ 15** в одном плагине (seed: `core` ровно 15 — у потолка)
-   - **skills ≤ 15** суммарно по всем плагинам (seed: ~9)
-   - **MCP ≤ 8** настроенных серверов в `.mcp.json` (default: ~4)
-   - Счёт **per-plugin** для agents/hooks (единица bloat — плагин; плоский total
-     сложил бы dev+core и фолс-срабатывал бы на самом seed), **total** для skills/MCP.
-   - **Только WARN, никогда FAIL** — пересечение потолка это сигнал консолидировать
-     (свернуть/объединить), а не сломанная система. Свежий `claude-kit-project new` = чисто
-     (всё ровно у потолка или ниже); WARN появляется, когда проект **перерастает** § J.
+7. **Harness-bloat** — ROADMAP § J ceilings (advisory soft-warning, keeps the system in the "smart zone"):
+   - **agents ≤ 12** in one team plugin (seed: `dev` is exactly 12 — at the ceiling)
+   - **hooks ≤ 15** in one plugin (seed: `core` is exactly 15 — at the ceiling)
+   - **skills ≤ 15** total across all plugins (seed: ~9)
+   - **MCP ≤ 8** configured servers in `.mcp.json` (default: ~4)
+   - Counted **per-plugin** for agents/hooks (the bloat unit is the plugin; a flat total
+     would add dev+core and false-trigger on the seed itself), **total** for skills/MCP.
+   - **Only WARN, never FAIL** — crossing the ceiling is a signal to consolidate
+     (collapse/merge), not a broken system. A fresh `claude-kit new` = clean
+     (everything at or below the ceiling); WARN appears when the project **outgrows** § J.
 
-## Как запускать
+## How to run it
 
 ```bash
-# Запустить из корня проекта (где .claude/)
+# Run from the project root (where .claude/ lives)
 bash .claude/plugins/core/scripts/doctor.sh
 
-# Или с verbose выводом
+# Or with verbose output
 bash .claude/plugins/core/scripts/doctor.sh --verbose
 ```
 
 ## Output
 
-Команда выводит сводную таблицу с метками `[OK]` / `[WARN]` / `[FAIL]` + краткое описание. Финальный verdict в конце.
+The command prints a summary table with `[OK]` / `[WARN]` / `[FAIL]` labels + a short description. Final verdict at the end.
 
-Пример:
+Example:
 ```
 === Claude-Kit System Health ===
 
 MCP servers       [OK]    qex UP  ollama UP  sentrux UP  context7 cfg
 Settings lint     [OK]
 Agents lint       [OK]    19/19 valid
-Routing sync      [OK]    all mcp__server__tool references valid
+Routing sync      [OK]    all mcp:server:tool references valid
 Language lint     [OK]    agents/ + modes/ are EN-clean (N non-blocking warn(s) in deferred bodies)
 Namespacing lint  [OK]    no flat command names
 Indexes           [WARN]  qex index age: 5 days (consider /mcp-qex:qex-reindex)
@@ -84,28 +84,28 @@ Harness-bloat     [OK]    agents:12/12(dev) hooks:15/15(core) skills:9/15 mcp:4/
 Verdict: ✅ Healthy (1 warning — informational)
 ```
 
-## Когда использовать
+## When to use it
 
-- **После `claude-kit-project new`** — убедиться что инфраструктура развернулась корректно.
-- **Периодически** — раз в неделю / при возврате к проекту после паузы (drift check).
-- **Перед длинной сессией работы** — быстрая проверка что MCP UP, чтобы агенты не тратили токены на тихие падения.
-- **При подозрении на проблему** — "почему агенты ведут себя странно?" → `/core:quality:doctor` покажет если MCP не отвечают.
+- **After `claude-kit new`** — confirm the infrastructure deployed correctly.
+- **Periodically** — once a week / when returning to the project after a break (drift check).
+- **Before a long work session** — a quick check that MCP is UP, so agents don't burn tokens on silent failures.
+- **When suspecting a problem** — "why are agents behaving strangely?" → `/core:quality:doctor` will show if MCP isn't responding.
 
-## Exit codes (для CI)
+## Exit codes (for CI)
 
-- `0` — всё OK (могут быть WARN, но критичных проблем нет)
-- `1` — есть FAIL (что-то критичное не работает)
-- `2` — есть FAIL + WARN
+- `0` — everything OK (there can be WARNs, but no critical problems)
+- `1` — there is a FAIL (something critical isn't working)
+- `2` — there is FAIL + WARN
 
-## Auto-fix (out of scope для v1)
+## Auto-fix (out of scope for v1)
 
-Эта команда **только диагностирует**. Для починки см. предложения в выводе:
+This command **only diagnoses**. For fixes, see the suggestions in the output:
 - `WARN qex index age` → `/mcp-qex:qex-reindex`
-- `FAIL Ollama DOWN` → `ollama serve` или `/core:infra:cold-start`
-- `FAIL Settings lint` → исправь `.claude/settings.json` руками
-- `FAIL Routing sync` → правь routing-блоки агентов чтобы упоминать только инструменты из ROUTING.md
-- `FAIL Language lint` → переведи кириллицу в `agents/`/`modes/` на EN (или пометь `<!-- lint-language: allow -->`)
-- `FAIL Namespacing lint` → замени flat-имена команд на namespaced (см. `docs/plugin-namespacing.md`)
-- `WARN Harness-bloat` → проект пересёк потолок § J: сверни/объедини лишние агенты/хуки/skills или отключи неиспользуемые MCP в `enabled.yaml` (advisory — не блокирует)
+- `FAIL Ollama DOWN` → `ollama serve` or `/core:infra:cold-start`
+- `FAIL Settings lint` → fix `.claude/settings.json` by hand
+- `FAIL Routing sync` → edit agent routing blocks to mention only tools from ROUTING.md
+- `FAIL Language lint` → translate the Cyrillic in `agents/`/`modes/` to EN (or mark it `<!-- lint-language: allow -->`)
+- `FAIL Namespacing lint` → replace flat command names with namespaced ones (see `docs/plugin-namespacing.md`)
+- `WARN Harness-bloat` → the project crossed the § J ceiling: collapse/merge the extra agents/hooks/skills or disable unused MCP in `enabled.yaml` (advisory — non-blocking)
 
 $ARGUMENTS

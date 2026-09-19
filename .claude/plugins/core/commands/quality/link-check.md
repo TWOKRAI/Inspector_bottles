@@ -2,30 +2,30 @@
 description: Check Markdown links (relative paths, anchors, optionally HTTP)
 ---
 
-Запусти проверку Markdown-ссылок в проекте:
+Run a check of Markdown links in the project:
 
 ```bash
-python scripts/link_check/link_check.py
+uv run --no-project python scripts/link_check/link_check.py
 ```
 
-Что ловит: битые относительные пути (`[x](../foo.md)`), отсутствующие anchor'ы (`[x](#section)`), нестандартные схемы. HTTP-проверка — опционально (по умолчанию OFF, чтобы не зависеть от сети).
+What it catches: broken relative paths (`[x](../foo.md)`), missing anchors (`[x](#section)`), non-standard schemes. HTTP checking is optional (OFF by default, so it doesn't depend on the network).
 
-Конфиг: [scripts/link_check/link_check.toml](../../scripts/link_check/link_check.toml). Детали и exit-коды — [README.md](../../scripts/link_check/README.md).
+Config: [scripts/link_check/link_check.toml](../../scripts/link_check/link_check.toml). Details and exit codes — [README.md](../../scripts/link_check/README.md).
 
-Полезные варианты:
-- `python scripts/link_check/link_check.py --external` — включить HEAD-проверку HTTP-ссылок (медленнее).
-- `python scripts/link_check/link_check.py --format json --no-strict` — для CI без падения.
-- `python scripts/link_check/link_check.py --no-anchor` — пропустить anchor'ы (полезно если генератор сайта использует свои slug'и).
+Useful options:
+- `uv run --no-project python scripts/link_check/link_check.py --external` — enable a HEAD check of HTTP links (slower).
+- `uv run --no-project python scripts/link_check/link_check.py --format json --no-strict` — for CI without failing.
+- `uv run --no-project python scripts/link_check/link_check.py --no-anchor` — skip anchors (useful if the site generator uses its own slugs).
 
-**Inline-suppression:** `<!-- link-check: ignore -->` в той же строке отключает все проверки.
+**Inline suppression:** `<!-- link-check: ignore -->` on the same line disables all checks.
 
-**Когда использовать:**
-- В `pre-commit` (с `--no-external`) — быстрый gate на правильность относительных путей.
-- В CI как gate на корректность docs.
-- После рефакторинга/переименования файлов — поймать ссылки, оторвавшиеся от целей.
+**When to use:**
+- In `pre-commit` (with `--no-external`) — a fast gate on the correctness of relative paths.
+- In CI as a gate on the correctness of the docs.
+- After refactoring/renaming files — catch links that came detached from their targets.
 
-**Замечания:**
-- Парсер ловит `[text](url)` и `<https://...>`, не парсит reference-style `[text][ref]`.
-- Slug'и заголовков — GitHub-стиль (`# My Heading` → `my-heading`). Для mkdocs-material с custom slug'ами выключи `--no-anchor`.
+**Notes:**
+- The parser catches `[text](url)` and `<https://...>`, it doesn't parse reference-style `[text][ref]`.
+- Heading slugs are GitHub-style (`# My Heading` → `my-heading`). For mkdocs-material with custom slugs, turn anchor checks off with `--no-anchor`.
 
 $ARGUMENTS

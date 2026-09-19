@@ -1,41 +1,41 @@
-# Context7 — актуальная документация библиотек
+# Context7 — up-to-date library documentation
 
-**Context7** — MCP-сервер, который подтягивает актуальную документацию библиотек прямо в контекст Claude Code. Когда агент работает с любой быстро меняющейся либой (frontend frameworks, ORM, GUI toolkits, ML SDK) — Context7 даёт ему свежие доки вместо устаревших из обучающей выборки.
+**Context7** is an MCP server that pulls up-to-date library documentation straight into Claude Code's context. When an agent works with any fast-moving library (frontend frameworks, ORMs, GUI toolkits, ML SDKs) — Context7 gives it fresh docs instead of the stale ones from its training data.
 
-## Отличие от qex и sentrux
+## Difference from qex and sentrux
 
-| Сервер | Уровень | Что делает |
+| Server | Level | What it does |
 |--------|---------|------------|
-| **qex** | проектный (`.mcp.json`) | Семантический поиск по **твоему** коду |
-| **sentrux** | проектный (`.mcp.json`) | Архитектурное здоровье **твоего** проекта |
-| **Context7** | **user-level** (`~/.claude.json`) | Актуальные доки **внешних** библиотек |
+| **qex** | project-level (`.mcp.json`) | Semantic search over **your** code |
+| **sentrux** | project-level (`.mcp.json`) | Architectural health of **your** project |
+| **Context7** | **user-level** (`~/.claude.json`) | Up-to-date docs for **external** libraries |
 
-Context7 настраивается **один раз на машину**, а не на проект. Поэтому он не в `.mcp.json`, а в `~/.claude.json`.
+Context7 is configured **once per machine**, not per project. That's why it's not in `.mcp.json`, but in `~/.claude.json`.
 
-## Установка
+## Installation
 
-> Краткий путь установки — [`SETUP_GUIDE.md`](SETUP_GUIDE.md). Ниже — подробности.
+> Quick install path — [`SETUP_GUIDE.md`](SETUP_GUIDE.md). Details below.
 
-### Требования
+### Requirements
 
 - **Node.js** ≥ 18 + npx
 
-### Шаги
+### Steps
 
 ```bash
-# 1. Запусти setup (откроется браузер для OAuth, free tier без карты)
+# 1. Run setup (a browser opens for OAuth; free tier, no card needed)
 npx -y ctx7 setup --claude
 
-# 2. Перезапусти Claude Code
+# 2. Restart Claude Code
 ```
 
-Setup автоматически добавит блок `context7` в `~/.claude.json`.
+Setup automatically adds the `context7` block to `~/.claude.json`.
 
-### Проверка
+### Verification
 
-В Claude Code выполни `/mcp` — Context7 должен быть в списке серверов.
+In Claude Code run `/mcp` — Context7 should appear in the server list.
 
-Или вручную проверь файл:
+Or check the file manually:
 
 ```bash
 # macOS / Linux
@@ -45,38 +45,38 @@ cat ~/.claude.json | grep -A5 context7
 Get-Content ~\.claude.json | Select-String -Pattern "context7" -Context 0,5
 ```
 
-## Платформенные особенности
+## Platform specifics
 
-| Платформа | Путь конфига | Установка Node |
+| Platform | Config path | Node install |
 |-----------|-------------|----------------|
 | macOS | `~/.claude.json` | `brew install node` |
-| Linux | `~/.claude.json` | nvm или пакетный менеджер |
-| Windows | `%USERPROFILE%\.claude.json` | [nodejs.org](https://nodejs.org) или `winget install OpenJS.NodeJS` |
+| Linux | `~/.claude.json` | nvm or a package manager |
+| Windows | `%USERPROFILE%\.claude.json` | [nodejs.org](https://nodejs.org) or `winget install OpenJS.NodeJS` |
 
-## Когда полезен
+## When it's useful
 
-- Быстро меняющийся фреймворк (frontend, GUI, ORM, ML SDK)
-- Версионные миграции (Pydantic v1 → v2, и т.п.)
-- Любая либа, где LLM-знания устарели
+- A fast-moving framework (frontend, GUI, ORM, ML SDK)
+- Version migrations (Pydantic v1 → v2, etc.)
+- Any library where the LLM's knowledge is outdated
 
-## Когда НЕ нужен
+## When it's NOT needed
 
-- Работа только с внутренним кодом проекта → используй qex
-- Стабильные API (stdlib Python, SQLite) → Claude уже знает
+- Working only with the project's internal code → use qex
+- Stable APIs (Python stdlib, SQLite) → Claude already knows them
 
 ## Troubleshooting
 
-**Context7 не отвечает:**
-- Проверь `~/.claude.json` — должен быть блок с `context7`
-- Перезапусти `npx -y ctx7 setup --claude`
-- Убедись что Node.js ≥ 18: `node --version`
+**Context7 doesn't respond:**
+- Check `~/.claude.json` — there should be a block with `context7`
+- Re-run `npx -y ctx7 setup --claude`
+- Make sure Node.js ≥ 18: `node --version`
 
-**`npx` не найден:**
-- Установи Node.js (см. таблицу выше)
-- После установки перезапусти терминал
+**`npx` not found:**
+- Install Node.js (see the table above)
+- After installing, restart your terminal
 
-**Free tier — есть ли лимиты?**
-- Да, но для обычной разработки хватает. Rate limit мягкий.
+**Free tier — are there limits?**
+- Yes, but it's enough for regular development. The rate limit is lenient.
 ## Launcher options
 
 **Default**: context7 is configured at **user level**, not project level. Setup via `npx -y ctx7 setup --claude` (one-time, per machine). The `.mcp.json` in your project does **not** include context7 — that's intentional.

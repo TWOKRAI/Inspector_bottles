@@ -1,9 +1,9 @@
-# codegraph — pre-indexed call graph + symbol navigation
+# codegraph — pre-indexed code graph, one-call exploration
 
-Optional MCP module. Builds a local SQLite-backed semantic code graph (nodes = functions/classes, edges = calls/imports/inheritance) via tree-sitter, exposes a **single** `codegraph_explore` MCP tool (verbatim source + call path + blast-radius in one call), and keeps itself in sync via a native OS file-watcher.
+Optional MCP module. Builds a local SQLite-backed semantic code graph (nodes = functions/classes, edges = calls/imports/inheritance) via tree-sitter, exposes it to the agent through **one** MCP tool (`codegraph_explore`), and keeps itself in sync via a native OS file-watcher.
 
 > Upstream: <https://github.com/colbymchenry/codegraph>
-> **License:** MIT · **Package:** `@colbymchenry/codegraph` v0.4.x — single-tool API (`codegraph_explore`).
+> **License:** MIT · **Version pinned by this plugin:** 1.6.0 (checked 2026-09-03)
 
 ## When to enable
 
@@ -24,9 +24,9 @@ Optional MCP module. Builds a local SQLite-backed semantic code graph (nodes = f
 
 | Question | Best tool | Why |
 |----------|-----------|-----|
-| "Who calls `Manifest.load()`?" | **codegraph** (`codegraph_explore`) | call path in the response, function-level |
-| "If I rename `parse_args`, what breaks?" | **codegraph** (`codegraph_explore`) | blast-radius section across files |
-| "What tests are affected by changes in `runner.py`?" | **codegraph** (`codegraph_explore`) | covering tests listed in blast-radius |
+| "Who calls `Manifest.load()`?" | **codegraph** (`codegraph_explore`) | exact call graph, function-level |
+| "If I rename `parse_args`, what breaks?" | **codegraph** (`codegraph_explore`) | blast radius arrives with the same answer |
+| "How does the request reach `apply()`?" | **codegraph** (`codegraph_explore`) | call paths, dynamic-dispatch hops included |
 | "Which handler serves `POST /api/seed/apply`?" | **codegraph** (framework routing) | URL → handler mapping |
 | "Find code that parses YAML manifests" (fuzzy intent) | **qex** | dense embeddings, semantic |
 | "Are there import cycles? Layer violations?" | **sentrux** | DSM, architectural rules |
@@ -41,15 +41,22 @@ Optional MCP module. Builds a local SQLite-backed semantic code graph (nodes = f
 
 Framework-aware routing: Django, Flask, FastAPI, Express, Laravel, Rails, Spring, Gin, Axum, ASP.NET, Vapor, React Router, SvelteKit.
 
-## MCP tool exposed (1)
-
-The installed package exposes a **single** tool — one call replaces the whole search/Read/Grep loop:
+## MCP tools exposed (1)
 
 | Tool | Purpose |
 |------|---------|
-| `codegraph_explore(query, maxFiles?, projectPath?)` | `query` = NL question **or** bag of symbol/file names. Returns: verbatim line-numbered source grouped by file (Read-equivalent) + call path (callers/callees) + blast-radius (what depends on it + covering tests) + relationships (extends/instantiates/calls). |
+| `codegraph_explore` | Answers almost any structural question in one call — "how does X work", a flow ("how does X reach Y"), or a survey of an area. Returns the relevant symbols' verbatim source grouped by file, the call paths between them (dynamic-dispatch hops included), and a blast-radius summary. Naming a file or symbol returns its current line-numbered source. |
 
-> Earlier docs listed 8 separate tools (`codegraph_search` / `callers` / `callees` / `impact` / `context` / `node` / `files` / `status`). The current `@colbymchenry/codegraph` collapses all of that into the one `codegraph_explore` call above.
+Upstream measured that one strong tool steers agents better than a menu of narrow
+ones, so since 1.x the seven narrow queries (node, search, callers, callees,
+impact, files, status) ship but stay **unlisted** — everything they return already
+arrives inline with the explore answer. Two ways to reach them anyway:
+
+- put `CODEGRAPH_MCP_TOOLS=explore,node,search,callers` in the server's `env` to
+  re-publish specific ones on the MCP surface;
+- use the CLI equivalents, which are always available: `codegraph node`,
+  `codegraph query`, `codegraph callers`, `codegraph callees`, `codegraph impact`,
+  `codegraph affected`, `codegraph files`, `codegraph status`.
 
 ## Storage and footprint
 
@@ -61,7 +68,7 @@ The installed package exposes a **single** tool — one call replaces the whole 
 ## Tool routing snippet (paste into project `CLAUDE.md`)
 
 > When codegraph is enabled in this project:
-> - Function-level **callers / callees / impact / rename safety** → **codegraph** (`codegraph_explore`)
+> - Function-level **call paths / blast radius / rename safety** → **codegraph** (`codegraph_explore`)
 > - **Fuzzy intent search** ("code that does X") → **qex**
 > - **Architectural health** (cycles, layers, metrics) → **sentrux**
 > - **Visual overview** (hubs, shortest path) → **graphify**
@@ -70,7 +77,7 @@ The installed package exposes a **single** tool — one call replaces the whole 
 
 ## Why honest expectations matter
 
-Upstream advertises "94% fewer tool calls, 77% faster". That bench compares an agent with codegraph against a baseline agent with **only Read + Grep + Glob** — no MCP at all. In this seed the baseline is already qex + sentrux + graphify, so the marginal gain is much smaller. Expect codegraph to help on the **call-graph / impact** class of questions specifically — that is where it has no substitute in the current stack. For everything else, qex / sentrux / graphify remain the right tools.
+Upstream advertises "88% fewer tool calls, 53% faster, 44% cheaper" (re-measured 2026-08). That bench compares an agent with codegraph against a baseline agent with **only Read + Grep + Bash** — no MCP at all. In this seed the baseline is already qex + sentrux + graphify, so the marginal gain is much smaller. Upstream also reports the flip side honestly: one dense answer stays resident in the window, so end-of-session context occupancy runs ~80% **higher** than a grep-and-read agent's. Expect codegraph to help on the **call-graph / impact** class of questions specifically — that is where it has no substitute in the current stack. For everything else, qex / sentrux / graphify remain the right tools.
 
 Run the smoke test in `SETUP_GUIDE.md` § 5 before committing to it — measure on your own questions, not the upstream README.
 
@@ -79,7 +86,7 @@ Run the smoke test in `SETUP_GUIDE.md` § 5 before committing to it — measure 
 See [SETUP_GUIDE.md](SETUP_GUIDE.md) for install, MCP wire-up, first index, and a 5-question smoke test.
 ## Launcher options
 
-**Default** (used automatically by `claude-kit-claude plugin enable mcp-codegraph`): see `.claude-plugin/plugin.json` → `mcpServers.codegraph`.
+**Default** (used automatically by `claude-kit add codegraph`): see `.claude-plugin/plugin.json` → `mcpServers.codegraph`.
 
 ```
 command: npx

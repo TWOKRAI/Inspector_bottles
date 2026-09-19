@@ -1,0 +1,29 @@
+{
+  "name": "agent-teams",
+  "version": "0.1.0",
+  "description": "Agent Teams engine (experimental, default-off): env flag + TaskCompleted/TeammateIdle quality gates. Roles stay in the dev plugin.",
+  "hooks": {
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/team-task-completed-gate.sh",
+            "timeout": 150
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/team-teammate-idle-gate.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

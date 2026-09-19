@@ -56,7 +56,7 @@ The probe is a no-op if `QT_MCP_DISABLE=1` is set (use this in production builds
 
 ## 3. Register the MCP server in `.mcp.json`
 
-Copy the snippet from [templates/mcp-config.json.snippet](templates/mcp-config.json.snippet) into your project's `.mcp.json` (created by `claude-kit-project new` / `claude-kit-claude plugin enable mcp-qt`).
+Copy the snippet from [templates/mcp-config.json.snippet](templates/mcp-config.json.snippet) into your project's `.mcp.json` (created by `claude-kit new` / `claude-kit add qt-mcp`).
 
 The snippet uses **portable invocation** — no absolute paths to your machine:
 

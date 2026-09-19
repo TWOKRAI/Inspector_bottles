@@ -26,17 +26,13 @@ PROJECT_ROOT = MCP_DIR.parent.parent  # корень проекта
 
 IS_WIN = platform.system() == "Windows"
 
+# Тег-вариант (`-qex`), не базовый — см. qex-launcher.py: базовый тег не несёт
+# num_ctx/num_gpu, а подмену базового тега вариантом стирает любой `ollama pull`.
 if IS_WIN:
-    # 0.6b вместо 4b (2026-08-27): 4b весит 3.8-3.9 из 4 ГБ карты, каждый батч
-    # бьётся в зашитый ~10с таймаут qex.exe. Подробности — в qex-launcher.py.
-    # ОБЯЗАНО совпадать с qex-launcher.py: расхождение = векторы чужой
-    # размерности в существующем индексе, гибрид молча деградирует до BM25.
-    model = "qwen3-embedding:0.6b"
+    model = "qwen3-embedding:0.6b-qex"
     dimensions = "1024"
     default_bin = Path.home() / ".cargo" / "bin" / "qex.exe"
 else:
-    # macOS: 8b-qex с 2026-09-13 (было 4b с 2026-07-05). ОБЯЗАНО совпадать с
-    # qex-launcher.py — иначе векторы чужой размерности в индексе.
     model = "qwen3-embedding:8b-qex"
     dimensions = "4096"
     default_bin = Path.home() / ".local" / "bin" / "qex"
@@ -48,8 +44,11 @@ env = {
     "RUST_LOG": "info",
     "WORKSPACE_PATH": str(PROJECT_ROOT),
     "QEX_EMBEDDING_PROVIDER": "openai",
-    # Переопределяемо: например, прокси-страховка от NaN-ответов Ollama (2026-09-13).
-    "QEX_OPENAI_BASE_URL": os.environ.get("QEX_OPENAI_BASE_URL", "http://localhost:11434/v1"),
+    # переопределяется из окружения (правка владельца) — позволяет поставить
+    # прокси перед Ollama, не трогая шипнутый код.
+    "QEX_OPENAI_BASE_URL": os.environ.get(
+        "QEX_OPENAI_BASE_URL", "http://localhost:11434/v1"
+    ),
     "QEX_OPENAI_API_KEY": "ollama",
     "QEX_OPENAI_MODEL": model,
     "QEX_OPENAI_DIMENSIONS": dimensions,
@@ -175,6 +174,13 @@ def check_ollama() -> bool:
 
 
 def main():
+    # Windows-консоль по умолчанию cp1251/cp866: без этого русский вывод и
+    # символы вроде -> x -- роняют скрипт с UnicodeEncodeError ещё до работы.
+    # Тот же приём, что в mcp-graphify/scripts/graph_slice.py.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     force = "--force" in sys.argv
     clear = "--clear" in sys.argv
     project_path = str(PROJECT_ROOT)

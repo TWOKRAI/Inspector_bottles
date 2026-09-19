@@ -2,32 +2,32 @@
 description: Semantic session close — summary in docs/sessions/ + (optional) memory update
 ---
 
-Осознанное завершение рабочей сессии. Дополняет автоматические Stop-хуки семантикой: пишет **что было сделано / что осталось / следующий шаг**.
+Deliberate close of a work session. Complements the automatic Stop hooks with semantics: writes **what was done / what remains / next step**.
 
-## Когда использовать
+## When to use
 
-- Перед закрытием Claude Code после длинной сессии
-- Когда несколько часов работал с одной задачей и хочешь зафиксировать состояние
-- Перед switch'ем на другую задачу — чтобы потом легче вернуться
+- Before closing Claude Code after a long session
+- When you've worked on one task for several hours and want to record the state
+- Before switching to another task — so it's easier to come back later
 
-## Когда НЕ использовать
+## When NOT to use
 
-- После короткого Q&A без изменений в коде (нечего резюмировать)
-- Если уже использовал `/core:team:handoff` в этой сессии (тот делает похожее, но для смены машины)
+- After a short Q&A with no code changes (nothing to summarize)
+- If you already used `/core:team:handoff` in this session (it does something similar, but for switching machines)
 
-## Алгоритм
+## Algorithm
 
-### 1. Собери контекст (параллельно)
+### 1. Gather context (in parallel)
 
-- `git diff --stat HEAD` — что изменилось
-- `git log --oneline -5` — последние коммиты
+- `git diff --stat HEAD` — what changed
+- `git log --oneline -5` — recent commits
 - `git status --short` — uncommitted
-- TodoRead — что в процессе / завершено
-- (опц.) последний файл из `docs/sessions/` — что было раньше
+- TodoRead — what's in progress / done
+- (optional) the latest file from `docs/sessions/` — what happened before
 
-### 2. Сгенерируй резюме (≤150 слов)
+### 2. Generate a summary (≤150 words)
 
-Формат:
+Format:
 ```markdown
 ## [HH:MM] wrap-up | branch=<branch> | commit=<short-sha>
 
@@ -43,16 +43,16 @@ description: Semantic session close — summary in docs/sessions/ + (optional) m
 - <одно конкретное действие для старта следующей сессии>
 ```
 
-Правила:
-- **Конкретика, не абстракции**: "добавил protect-readonly хук + тест" — не "улучшил безопасность"
-- Если ничего значимого не сделано → не натягивай, напиши `сессия информационная / Q&A — не пишу wrap-up`
-- Максимум 150 слов — это резюме, не отчёт
+Rules:
+- **Be concrete, not abstract**: "added protect-readonly hook + test" — not "improved security"
+- If nothing significant was done → don't force it, write `informational / Q&A session — not writing a wrap-up`
+- Max 150 words — this is a summary, not a report
 
-### 3. Запиши в `docs/sessions/`
+### 3. Write to `docs/sessions/`
 
-Путь: `docs/sessions/YYYY-MM-DD.md`
+Path: `docs/sessions/YYYY-MM-DD.md`
 
-Если файла нет — создай с frontmatter:
+If the file doesn't exist — create it with frontmatter:
 ```markdown
 ---
 title: "Сессии YYYY-MM-DD"
@@ -64,32 +64,29 @@ date: YYYY-MM-DD
 
 ```
 
-Append резюме после frontmatter. Несколько wrap-up'ов в день идут друг за другом.
+Append the summary after the frontmatter. Several wrap-ups in one day go one after another.
 
-`mkdir -p docs/sessions` если не существует.
+`mkdir -p docs/sessions` if it doesn't exist.
 
-### 4. (опционально) Обнови project-memory
+### 4. (optional) Update project-memory
 
-Проверь: появились ли в этой сессии **долгоиграющие** факты которые помогут будущим сессиям?
-- Новое решение по архитектуре → memory типа `project`
-- Уточнение workflow или предпочтения пользователя → memory типа `feedback` или `user`
-- Внешний ресурс/ссылка → memory типа `reference`
+Check: did this session produce **long-lived** facts that will help future sessions?
+- New architectural decision → memory of type `project`
+- Clarification of a workflow or user preference → memory of type `feedback` or `user`
+- External resource/link → memory of type `reference`
 
-Если да — сохрани через стандартный memory-механизм. Если нет — пропусти этот шаг.
+If yes — save it through the standard memory mechanism. If no — skip this step.
 
-### 5. (опционально) Обнови карту проекта
+### 5. (optional) Update the project map
 
-Если в этой сессии изменилось **знание уровня модуля** (новое решение, gotcha,
-открытый вопрос) — обнови соответствующий `<module>/CONTEXT.md` (или
-`DECISIONS.md`) и пересобери реестр: `/core:quality:sync-context`. Если знание
-модулей не менялось — пропусти этот шаг.
+If this session changed **module-level knowledge** (a new decision, a gotcha, an open question) — update the corresponding `<module>/CONTEXT.md` (or `DECISIONS.md`) and rebuild the registry: `/core:quality:sync-context`. If module knowledge didn't change — skip this step.
 
-### 6. Выведи резюме в чат
+### 6. Print the summary to the chat
 
-Тот же текст что записал. Без дополнительных преамбул и markdown-обёрток — просто чистый wrap-up.
+The same text that was written. No extra preambles or markdown wrappers — just a clean wrap-up.
 
-## Чего НЕ делать
+## What NOT to do
 
-- Не запускать `make gate` / тесты автоматически — это решение пользователя
-- Не делать `git commit` — wrap-up это **журналирование**, не операция над репо
-- Не писать "сегодня обсудили..." — пиши результаты, не процесс
+- Don't run `make gate` / tests automatically — that's the user's decision
+- Don't do `git commit` — wrap-up is **logging**, not an operation on the repo
+- Don't write "today we discussed..." — write results, not process

@@ -9,14 +9,14 @@
 #   - Matcher in settings.json: "Bash" (parse command from $CLAUDE_TOOL_INPUT inside)
 #   - Only intercepts commands matching `^git[[:space:]]+push\b`.
 #   - If `sentrux` binary not installed → pass-through (do not block).
-#   - If `sentrux check` exits non-zero → block with instruction.
+#   - If `sentrux check_rules` exits non-zero → block with instruction.
 #
 # Exit codes:
 #   0 — allow (push proceeds)
 #   2 — block (PreToolUse contract, agent sees stderr message)
 #
 # Override:
-#   - Loosen or remove the offending rule in .sentrux/rules.toml (permissive)
+#   - Remove sentrux:check_rules from rules.toml to make it permissive
 #   - Disable this hook in .claude/settings.json if false-positives become common
 
 # Resolve python-bin.sh across both template layouts (kept byte-identical by
@@ -42,31 +42,13 @@ if ! command -v sentrux >/dev/null 2>&1; then
     exit 0
 fi
 
-# Run `sentrux check` (rule validation against .sentrux/rules.toml, exit 0/1 —
-# the CI-friendly CLI verb; capture output for the blocked-case message).
-#
-# NOTE: must be `check`, NOT `check_rules`. `check_rules` is the MCP *tool* name
-# (mcp__sentrux__check_rules); as a CLI arg it is not a subcommand, so sentrux
-# misparses it as a positional path target and runs a full deep scan → hangs on
-# every push. The rest of the seed uses `sentrux check "$(git rev-parse …)"`.
-REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
-
-# Pass-through when there is no ruleset to enforce. `sentrux check` exits 1 on a
-# missing .sentrux/rules.toml ("No .sentrux/rules.toml found") — that is "no
-# rules", NOT a violation. Without this guard the block-on-nonzero below would
-# false-positive EVERY push in any project that enabled mcp-sentrux but has not
-# deployed a rules.toml (non-python bootstrap, manual enable, or rules removed).
-# Mirrors the CI template's `hashFiles('.sentrux/rules.toml') != ''` guard.
-if [ ! -f "$REPO_ROOT/.sentrux/rules.toml" ]; then
-    exit 0
-fi
-
-SENTRUX_OUTPUT=$(sentrux check "$REPO_ROOT" 2>&1)
+# Run check_rules; capture output for blocked-case message
+SENTRUX_OUTPUT=$(sentrux check_rules 2>&1)
 SENTRUX_EXIT=$?
 
 if [ $SENTRUX_EXIT -ne 0 ]; then
     cat >&2 <<EOF
-Blocked: 'git push' refused — sentrux check reported rule violations.
+Blocked: 'git push' refused — sentrux:check_rules reported violations.
 
 $SENTRUX_OUTPUT
 

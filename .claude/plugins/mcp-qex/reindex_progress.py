@@ -10,9 +10,11 @@
      падений (cold-load 8b-модели → HTTP timeout внутри qex);
   2) ПЕРИОДИЧЕСКИ ре-прогревает, чтобы модель не выгрузилась посреди прогона;
   3) запускает `reindex.py`, ГЛУШИТ tantivy-шум и показывает live-прогресс:
-        [MM:SS] embedded N/~EST (X%) · R ч/с · ETA ~M:SS
-     EST — оценка числа чанков из строки qex «Detected changes: A added … M modified»
-     (файлы × средних чанков/файл из текущего индекса). Без оценки — только N·R·elapsed.
+        [MM:SS] embedded N/TOTAL (X%) · R ч/с · ETA ~M:SS
+     Проценты и ETA считаются ТОЛЬКО при явном --total: qex-«added» — это файлы,
+     а не чанки, и оценка «файлы × средних чанков/файл» врёт. Без --total
+     печатается честное N · R · elapsed, а строка «Detected changes» показывается
+     отдельно как объём работ.
 
 Использование:
     python reindex_progress.py                 # инкрементальная
@@ -38,19 +40,29 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REINDEX = SCRIPT_DIR / "reindex.py"
+# .claude/plugins/mcp-qex → .claude/plugins → .claude → корень проекта.
+# Сам скрипт корень не использует (всю работу делает reindex.py), константа
+# оставлена якорем раскладки, одинаковым с reindex.py и reindex_retry.py.
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent
 
 IS_WIN = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
-# Win — 0.6b (2026-08-27: 4b не влезала в 4 ГБ VRAM), macOS — 8b-qex (2026-09-13, было 4b).
-# Источник истины — qex-launcher.py; здесь дубль нужен только для прогрева keep-alive.
-MODEL = "qwen3-embedding:0.6b" if IS_WIN else "qwen3-embedding:8b-qex"
+# Источник истины — qex-launcher.py (Windows → 0.6b/dim 1024, иначе → 8b/dim 4096);
+# здесь дубль нужен только для прогрева keep-alive и обязан совпадать с ним:
+# греть не ту модель бесполезно — qex запросит свою и словит cold-load таймаут.
+# QEX_EMBED_MODEL переопределяет выбор, не трогая шипнутый код (например
+# qwen3-embedding:4b на машине с запасом VRAM) — но тогда и qex-launcher.py
+# должен быть переключён на неё же вместе с dimensions.
+# Тег-вариант (`-qex`), не базовый — должен совпадать с qex-launcher.py/reindex.py:
+# базовый тег не несёт num_ctx/num_gpu, греть не тот тег бесполезно.
+MODEL = os.environ.get(
+    "QEX_EMBED_MODEL",
+    "qwen3-embedding:0.6b-qex" if IS_WIN else "qwen3-embedding:8b-qex",
+)
 OLLAMA = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 KEEP_ALIVE = os.environ.get("QEX_KEEP_ALIVE", "60m")
 REWARM_EVERY = 180
 POLL_EVERY = 3
-AVG_CHUNKS_FALLBACK = float(os.environ.get("QEX_AVG_CHUNKS", "15"))
-
 _DETECT_RE = re.compile(r"Detected changes:\s*(\d+)\s*added.*?(\d+)\s*modified")
 # строки qex, которые НЕ показываем (tantivy-внутрянка) — глушим, если не --raw
 _NOISE = ("tantivy::", "managed_directory", "segment_updater", "Garbage", "Deleted ")
@@ -72,8 +84,12 @@ def _ollama_log_path() -> Path | None:
 
 
 def warm_model() -> bool:
-    body = json.dumps({"model": MODEL, "input": "warmup", "keep_alive": KEEP_ALIVE}).encode()
-    req = urllib.request.Request(f"{OLLAMA}/api/embed", data=body, headers={"Content-Type": "application/json"})
+    body = json.dumps(
+        {"model": MODEL, "input": "warmup", "keep_alive": KEEP_ALIVE}
+    ).encode()
+    req = urllib.request.Request(
+        f"{OLLAMA}/api/embed", data=body, headers={"Content-Type": "application/json"}
+    )
     try:
         t0 = time.monotonic()
         with urllib.request.urlopen(req, timeout=180) as r:
@@ -85,19 +101,9 @@ def warm_model() -> bool:
             flush=True,
         )
         return ok
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"[warm] WARN {MODEL}: {e}", flush=True)
         return False
-
-
-def avg_chunks_per_file() -> float:
-    """Средних чанков/файл из закоммиченного индекса (для оценки total)."""
-    try:
-        meta = next(iter((Path.home() / ".qex" / "projects").glob("*/meta.json")), None)
-        # meta.json у tantivy не хранит наши счётчики надёжно → используем fallback.
-    except Exception:  # noqa: BLE001
-        pass
-    return AVG_CHUNKS_FALLBACK
 
 
 def count_embeds(log: Path, start_offset: int) -> int:
@@ -107,7 +113,7 @@ def count_embeds(log: Path, start_offset: int) -> int:
             data = f.read()
         c = data.count(b'POST     "/v1/embeddings"')
         return c if c else data.count(b"/v1/embeddings")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0
 
 
@@ -127,7 +133,10 @@ def pump_reindex(proc: subprocess.Popen, raw: bool) -> None:
             _state["detected"] = files
             # НЕ выводим ETA-оценку из файлов: qex-«added» ≠ число чанков, оценка врёт.
             # Честный ETA только при явном --total. Здесь — лишь контекст объёма работ.
-            print(f"[scope] к переиндексации: {added} added + {modified} modified = {files} файлов", flush=True)
+            print(
+                f"[scope] к переиндексации: {added} added + {modified} modified = {files} файлов",
+                flush=True,
+            )
             continue
         if not raw and any(n in line for n in _NOISE):
             continue
@@ -135,7 +144,9 @@ def pump_reindex(proc: subprocess.Popen, raw: bool) -> None:
             print(line, flush=True)
 
 
-def progress_loop(log: Path | None, start_offset: int, cli_total: int | None, stop: threading.Event) -> None:
+def progress_loop(
+    log: Path | None, start_offset: int, cli_total: int | None, stop: threading.Event
+) -> None:
     t0 = time.monotonic()
     last_warm = t0
     while not stop.is_set():
@@ -150,19 +161,42 @@ def progress_loop(log: Path | None, start_offset: int, cli_total: int | None, st
                 pct = min(100.0, 100 * n / cli_total)
                 eta = (cli_total - n) / rate if rate > 0 and n < cli_total else 0
                 print(
-                    f"  [{fmt(elapsed)}] embedded {n}/{cli_total} ({pct:.0f}%) · {rate:.1f} ч/с · ETA ~{fmt(eta)}",
+                    f"  [{fmt(elapsed)}] embedded {n}/{cli_total} ({pct:.0f}%) · "
+                    f"{rate:.1f} ч/с · ETA ~{fmt(eta)}",
                     flush=True,
                 )
             else:
-                sc = f" · scope ~{_state['detected']} файлов" if _state["detected"] else ""
-                print(f"  [{fmt(elapsed)}] embedded {n} чанков · {rate:.1f} ч/с{sc}", flush=True)
+                sc = (
+                    f" · scope ~{_state['detected']} файлов"
+                    if _state["detected"]
+                    else ""
+                )
+                print(
+                    f"  [{fmt(elapsed)}] embedded {n} чанков · {rate:.1f} ч/с{sc}",
+                    flush=True,
+                )
         else:
-            print(f"  [{fmt(elapsed)}] индексация идёт (ollama-лог недоступен)", flush=True)
+            print(
+                f"  [{fmt(elapsed)}] индексация идёт (ollama-лог недоступен)",
+                flush=True,
+            )
         stop.wait(POLL_EVERY)
 
 
 def main() -> int:
+    # Windows-консоль по умолчанию cp1251/cp866: без этого русский вывод и
+    # символы вроде -> x -- роняют скрипт с UnicodeEncodeError ещё до работы.
+    # Тот же приём, что в mcp-graphify/scripts/graph_slice.py.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        # Раньше всего остального: без этой ветки --help проваливался в reindex.py
+        # и упирался в «Ollama не запущена», прогрев и трёхсекундный цикл прогресса.
+        print(__doc__ or "", end="")
+        return 0
     cli_total = None
     raw = "--raw" in args
     if raw:
@@ -187,11 +221,16 @@ def main() -> int:
         )
 
     stop = threading.Event()
-    mon = threading.Thread(target=progress_loop, args=(log, start_offset, cli_total, stop), daemon=True)
+    mon = threading.Thread(
+        target=progress_loop, args=(log, start_offset, cli_total, stop), daemon=True
+    )
     mon.start()
 
     proc = subprocess.Popen(
-        [sys.executable, str(REINDEX), *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        [sys.executable, str(REINDEX), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
     pump_reindex(proc, raw)
     rc = proc.wait()
@@ -199,7 +238,10 @@ def main() -> int:
     stop.set()
     mon.join(timeout=2)
     if log and log.exists():
-        print(f"\n[итог] embedded ~{count_embeds(log, start_offset)} чанков за прогон, exit={rc}", flush=True)
+        print(
+            f"\n[итог] embedded ~{count_embeds(log, start_offset)} чанков за прогон, exit={rc}",
+            flush=True,
+        )
     return rc
 
 

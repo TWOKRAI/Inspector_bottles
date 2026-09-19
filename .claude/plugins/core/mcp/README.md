@@ -31,7 +31,7 @@
 | **qt-mcp** | Только если проект использует **PyQt5/PySide6 GUI** — runtime inspection (widget tree, скриншоты, клики) | [qt-mcp/](qt-mcp/) |
 | **graphify** | Architectural overview / knowledge graph — для onboarding в новый кодбейз и периодического review | [graphify/](graphify/) |
 | **serena** | Symbol-level операции (refs, renames, moves) через LSP — **experimental**, см. known issues | [serena/](serena/) |
-| **codegraph** | Function-level **callers/callees/impact** + framework routing (URL→handler); SQLite, без Ollama/GPU, file-watcher | [codegraph/](codegraph/) |
+| **codegraph** | Один вызов `codegraph_explore`: исходники символов + call paths + blast radius; framework routing (URL→handler); SQLite, без Ollama/GPU, file-watcher | [codegraph/](codegraph/) |
 | **github** | Official GitHub MCP (Issues/PR/Actions/Projects); remote OAuth или локальный binary + PAT | [github/](github/) |
 | **ast-grep** | Структурный AST-поиск **и переписывание** (codemod) на 20+ языках; rules для проектных линтов | [ast-grep/](ast-grep/) |
 | **playwright** | Browser automation + UI verification (navigate, screenshot, click). Закрывает дыру **web-UI verify-done** | [playwright/](playwright/) |
@@ -77,7 +77,7 @@
 | [qt-mcp/README.md](qt-mcp/README.md) + [SETUP_GUIDE.md](qt-mcp/SETUP_GUIDE.md) | PyQt/PySide runtime inspection — для GUI-проектов |
 | [graphify/README.md](graphify/README.md) + [SETUP_GUIDE.md](graphify/SETUP_GUIDE.md) | Knowledge graph кодбейза — для архитектурного обзора |
 | [serena/README.md](serena/README.md) + [SETUP_GUIDE.md](serena/SETUP_GUIDE.md) | LSP-symbol retrieval — experimental, см. known issues |
-| [codegraph/README.md](codegraph/README.md) + [SETUP_GUIDE.md](codegraph/SETUP_GUIDE.md) | Pre-indexed call graph (callers/callees/impact), framework routing — SQLite, без Ollama |
+| [codegraph/README.md](codegraph/README.md) + [SETUP_GUIDE.md](codegraph/SETUP_GUIDE.md) | Pre-indexed code graph, один инструмент `codegraph_explore`, framework routing — SQLite, без Ollama |
 | [github/README.md](github/README.md) + [SETUP_GUIDE.md](github/SETUP_GUIDE.md) | Official GitHub MCP — Issues/PR/Actions/Projects, OAuth scope filtering |
 | [ast-grep/README.md](ast-grep/README.md) + [SETUP_GUIDE.md](ast-grep/SETUP_GUIDE.md) | Structural search + **rewrite** (codemods) across 20+ languages |
 
@@ -85,10 +85,10 @@
 
 ### Быстрый путь — через claude-kit
 
-`.mcp.json` создаётся автоматически при `claude-kit-project new` (или `claude-kit-claude plugin enable <plugin-id>`).
+`.mcp.json` создаётся автоматически при `claude-kit new` (или `claude-kit add <component>`).
 Генератор берёт `mcp_servers:` блоки выбранных компонентов из `manifest.yaml` и собирает `.mcp.json` с нуля.
 
-После создания проекта через `claude-kit-project new`:
+После создания проекта через `claude-kit new`:
 
 ```bash
 # Если Context7 ещё не настроен (на новой машине)
@@ -138,7 +138,7 @@ ollama pull qwen3-embedding:8b              # macOS / Linux
 # ollama pull qwen3-embedding:4b            # Windows
 
 # 3. .mcp.json генерируется claude-kit из manifest.yaml
-#    (см. `claude-kit-project new` или `claude-kit-claude plugin enable <plugin-id>`)
+#    (см. `claude-kit new` или `claude-kit add <component>`)
 
 # 4. Context7 (user-level, один раз на машину)
 npx -y ctx7 setup --claude

@@ -1,19 +1,19 @@
-# Конфигурация для scripts/clean_cache/clean_cache.py
+# Configuration for scripts/clean_cache/clean_cache.py
 #
-# Безопасность: по умолчанию скрипт работает в режиме dry-run (только показывает,
-# что *было бы* удалено). Чтобы реально удалить — флаг --apply.
+# Safety: by default the script runs in dry-run mode (only shows what *would*
+# be deleted). To actually delete — pass --apply.
 #
-# Удаляются:
-#   - директории, имена которых матчат delete.dirs (рекурсивно, с содержимым);
-#   - файлы, имена которых матчат delete.files;
-# Сопоставление имени — fnmatch (glob: *, ?, [seq]).
+# Deletes:
+#   - directories whose names match delete.dirs (recursively, with contents);
+#   - files whose names match delete.files;
+# Name matching uses fnmatch (glob: *, ?, [seq]).
 
 [scan]
 root = "."
 follow_symlinks = false
 
 [delete]
-# Директории Python-кэша и инструментов
+# Python and tool cache directories
 dirs = [
     "__pycache__",
     ".pytest_cache",
@@ -23,7 +23,7 @@ dirs = [
     "htmlcov",
     "*.egg-info",
 ]
-# Файлы-артефакты компиляции и покрытия
+# Compiled artifacts and coverage files
 files = [
     "*.pyc",
     "*.pyo",
@@ -34,8 +34,7 @@ files = [
 ]
 
 [exclude]
-# Каталоги, в которые вообще не заходим (не сканируем, не удаляем то,
-# что внутри). Поддерживаются glob-паттерны имени каталога.
+# Directories we never descend into.
 dirs = [
     ".git",
     ".venv",
@@ -44,24 +43,21 @@ dirs = [
     "node_modules",
     ".qex",
     ".sentrux",
+    "data",
 ]
-# Glob-паттерны относительных путей (от --root) которые исключаются из удаления.
-# Пример: "vendor/**" — не трогать кэш в vendored зависимостях.
+# Glob patterns for relative paths (from --root) excluded from deletion.
+# Example: "vendor/**" — leave cache inside vendored deps alone.
 path_patterns = []
 
 [output]
 format = "table"   # table | json
-# Сортировка строк отчёта: path | size | files
-sort_by = "size"
+sort_by = "size"   # path | size | files
 sort_order = "desc"
-# Показать первые N групп (0 = все)
 limit = 0
-# Минимальный размер группы для показа в таблице, в байтах. 0 = показать всё.
 min_size = 0
 
 [safety]
-# Дополнительный slow-rails: даже при --apply отказываемся работать,
-# если корень сканирования совпадает с корнем диска или с $HOME.
+# Slow-rails: even with --apply, refuse if root == / or root == $HOME.
 forbid_dangerous_roots = true
-# Тайм-аут общего прохода в секундах (предохранитель, не должен срабатывать).
+# Overall timeout in seconds (safety fuse).
 timeout_sec = 120

@@ -2,18 +2,18 @@
 description: Run the Reviewer agent (Opus) — review the implementation after Developer
 ---
 
-Запусти агента **reviewer** (subagent_type: "reviewer", model: opus).
+Launch the **reviewer** agent (subagent_type: "reviewer", model: opus, `run_in_background: false` — the result is needed in this same turn).
 
-Передай ему:
-1. Что ревьюить: git diff, конкретные файлы или номер Task X.Y
-2. Оригинальное ТЗ задачи (acceptance criteria)
-3. Контекст: «Прочитай CLAUDE.md для архитектурных правил»
+Pass to it:
+1. What to review: git diff, specific files, or a Task X.Y number
+2. The task's original spec (acceptance criteria)
+3. Context: "Read CLAUDE.md for the architectural rules"
 
-Если $ARGUMENTS пуст — ревью последних изменений (`git diff` от последнего коммита).
+If $ARGUMENTS is empty — review the latest changes (`git diff` from the last commit).
 
-После получения результата:
-- Если APPROVED — сообщи пользователю
-- Если CHANGES REQUESTED — покажи список правок, спроси пользователя: отправить Developer'у на исправление?
-- Если Reviewer рекомендует более глубокий security-проход — запусти `/dev:security-review` (тот же reviewer в security-only режиме); IPC/UI-специализации reviewer отрабатывает inline, отдельные агенты для них не нужны
+After getting the result:
+- If APPROVED — inform the user
+- If CHANGES REQUESTED — show the list of fixes, ask the user: send it to Developer for correction?
+- If Reviewer raises security questions — run `/dev:security-review`
 
-Что ревьюить: $ARGUMENTS
+What to review: $ARGUMENTS

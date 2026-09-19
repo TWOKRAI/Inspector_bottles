@@ -2,73 +2,97 @@
 description: Implement one Task per spec with contract-first TDD by default (interface → red → green)
 ---
 
-Реализуй **одну** Task X.Y из плана (или из $ARGUMENTS) по дисциплине **contract-first TDD**.
-Это standalone-вариант шага реализации `/dev:pipeline` §2 — без планирования (manager), полного
-regression-прогона и review-петли. Для полного цикла используй `/dev:pipeline`.
+Implement **one** Task X.Y from the plan (or from $ARGUMENTS) following **contract-first TDD**
+discipline. This is a standalone variant of the implementation step from `/dev:pipeline` §2 —
+without planning (manager), the full regression run, or the review loop. For the full cycle use
+`/dev:pipeline`.
 
-Передавай агентам ТОЛЬКО конкретную Task (не весь план), точные пути файлов и acceptance criteria.
-Если задача зависит от предыдущей — убедись, что та выполнена.
+Pass agents ONLY the specific Task (not the whole plan), exact file paths, and acceptance criteria.
+If the task depends on a previous one — make sure that one is done.
 
-## 1. Определи контракт задачи (развилка этапов)
+## 1. Determine the task contract (stage fork)
 
-Прочитай поле **`Module contract:`** из ТЗ Task (его проставляет `manager` — см.
-`agents/manager.md` → "Module contract"). Оно задаёт развилку:
+Read the **`Module contract:`** field from the Task spec (set by `manager` — see
+`agents/manager.md` → "Module contract"). It determines the fork:
 
-| Module contract | Этапы реализации |
+| Module contract | Implementation stages |
 |---|---|
 | `new-full` / `new-lite` | **INTERFACE → RED → GREEN → [REFACTOR]** |
-| `public-api-change` | **INTERFACE (правка) → RED → GREEN → [REFACTOR]** |
-| `impl-only` | **RED → GREEN → [REFACTOR]** (interface не трогается) |
-| `n/a` | прямая реализация (config / docs / dep-bump — TDD неприменим) |
+| `public-api-change` | **INTERFACE (edit) → RED → GREEN → [REFACTOR]** |
+| `impl-only` | **RED → GREEN → [REFACTOR]** (interface untouched) |
+| `n/a` | direct implementation (config / docs / dep-bump — TDD not applicable) |
 
-Если поле отсутствует (legacy-план, ручной $ARGUMENTS) — **определи ветку сам** по характеру задачи
-(новый публичный модуль → `new-*`; правка `interface.py` / `__init__.py` → `public-api-change`;
-внутренний фикс без смены API → `impl-only`; не-модульное изменение → `n/a`) и **сообщи выбранную
-ветку пользователю** перед началом.
+If the field is missing (legacy plan, manual $ARGUMENTS) — **determine the branch yourself** based
+on the nature of the task (new public module → `new-*`; edit to `interface.py` / `__init__.py` →
+`public-api-change`; internal fix with no API change → `impl-only`; non-module change → `n/a`) and
+**report the chosen branch to the user** before starting.
 
-**Канонический алгоритм каждого этапа** (Pre/Post, anti-cheat-обоснование, точные коммит-сообщения,
-failure-recovery) — `/dev:pipeline` §2 (single source of truth). Это та же contract→stage таблица;
-ниже — оркестрация под standalone-режим.
+**The canonical algorithm for each stage** (Pre/Post, anti-cheat rationale, exact commit messages,
+failure-recovery) — `/dev:pipeline` §2 (single source of truth). This is the same contract→stage
+table; below is the orchestration for standalone mode.
 
-## 2. Этапы (по выбранной ветке)
+## 2. Stages (per the chosen branch)
 
-**INTERFACE** (только `new-*` / `public-api-change`) — запусти **developer** (Sonnet) или
-**teamlead** (Opus, если уровень Senior+) с активным skill `module-contract`: формальный
-контракт-в-коде ПЕРВЫМ (`interface.py` для full / module docstring для lite — `Protocol`/`ABC`
-+ `Pre:`/`Post:`/`Invariants:` на каждую публичную функцию), README модуля **без** Usage-примеров
-(примеры = contract-тесты из RED). Имплементации ещё нет (`_impl/` пуст или `raise NotImplementedError`).
-Коммит: `feat(<scope>): interface for Task X.Y` + `Refs:`.
+**The brief for each executor:**
+- **Plan layout v2** (`tasks/<id>.md` exists under the plan directory): run
+  `python3 scripts/plans_ledger.py brief <id>` (add `--plan <path>` when more
+  than one plan is active). Its stdout IS the spawn prompt — pass it
+  VERBATIM to the executor, plus this transport's own lines (worktree path,
+  peers). To change the brief, edit `tasks/<id>.md` and re-run; never
+  hand-edit the printed text. A refusal (`BriefRefused`) names the missing
+  field(s) — fix `tasks/<id>.md` and re-run; it goes back to the task
+  file's author, not around it.
+- **No `tasks/` directory** (phase layout or single-file plan): fill the
+  form `.claude/plugins/dev/templates/executor-brief.md` by hand — DESIGN
+  from the lead (which function, which call site, what not to touch), FILES
+  — a numbered list of allowed files, REDS — ≤ 10 predicted reds, first
+  edit within the first 5 calls, TESTS — only the task radius, in the
+  foreground (`timeout: 300000`, never in the background).
 
-**RED** — запусти **tester** (Sonnet) в `MODE: red`. Параметры передаются заголовком первых строк
-промпта (см. `agents/tester.md` → "How the orchestrator passes parameters"): `MODE: red`,
-`INTERFACE:`, `MODULE_CONTRACT:`, `TASK:`, `PLAN:`. Tester читает **только** контракт (не `_impl/`),
-пишет один failing-тест на одну Pre/Post строку и **демонстрирует** падение с нужным типом ошибки
-(`NotImplementedError`/`AttributeError` для `new-*`; `AssertionError` для `public-api-change`/`impl-only`).
-Если тест проходит → тест неверен, переписать. Коммит: `test(<scope>): failing test for Task X.Y` + `Refs:`.
+Nothing to fill DESIGN with → `investigator` or a lead decision first, not
+the writer. While the agent works — watch
+`uv run --no-project python scripts/agent_report.py --live`, don't correspond with it (the three stop rules are in the
+form).
 
-**GREEN** — запусти **developer** (Sonnet) или **teamlead** (Opus, если Senior+):
-- Передай путь к `interface.py` (если был INTERFACE) **и** путь к RED-тесту — агент **читает оба**, не угадывает контракт.
-- Цель — **минимальная** реализация в `_impl/`, чтобы RED-тест прошёл и Pre/Post из interface соблюдены. Без over-engineering под будущее.
-- Агент **не правит** `interface.py` и RED-тест. Неверный контракт → назад к INTERFACE / в `manager` на пересмотр ТЗ, **не** подгонка теста под код.
-- Коммит: `feat(<scope>): impl for Task X.Y` + `Refs:`. Обнови статус Task `[PENDING]` → `[DONE]`.
+**INTERFACE** (only `new-*` / `public-api-change`) — launch **developer** (Sonnet) or
+**teamlead** (Opus, if Senior+ level) with the `module-contract` skill active: formal
+contract-in-code FIRST (`interface.py` for full / module docstring for lite — `Protocol`/`ABC`
++ `Pre:`/`Post:`/`Invariants:` on every public function), module README **without** Usage examples
+(examples = contract tests from RED). No implementation yet (`_impl/` empty or `raise NotImplementedError`).
+Commit: `feat(<scope>): interface for Task X.Y` + `Refs:`.
 
-**REFACTOR** (опц.) — если GREEN оставил очевидный долг: `developer` чистит в том же контексте, тесты остаются зелёными после каждой правки, `interface.py` не трогается (смена API идёт через отдельный `public-api-change` Task).
+**RED** — launch **tester** (Sonnet) in `MODE: red`. Parameters are passed as a header in the
+first lines of the prompt (see `agents/tester.md` → "How the orchestrator passes parameters"):
+`MODE: red`, `INTERFACE:`, `MODULE_CONTRACT:`, `TASK:`, `PLAN:`. Tester reads **only** the contract
+(not `_impl/`), writes one failing test per Pre/Post line, and **demonstrates** the failure with
+the right error type (`NotImplementedError`/`AttributeError` for `new-*`; `AssertionError` for
+`public-api-change`/`impl-only`). If the test passes → the test is wrong, rewrite it. Commit:
+`test(<scope>): failing test for Task X.Y` + `Refs:`.
 
-Для ветки `n/a` — этапы выше неприменимы: реализуй напрямую (developer/teamlead по уровню), один коммит с `Refs:`.
+**GREEN** — launch **developer** (Sonnet) or **teamlead** (Opus, if Senior+):
+- Pass the path to `interface.py` (if there was an INTERFACE) **and** the path to the RED test — the agent **reads both**, doesn't guess the contract.
+- Goal — the **minimal** implementation in `_impl/` that makes the RED test pass and honors the Pre/Post from the interface. No over-engineering for the future.
+- The agent **does not edit** `interface.py` or the RED test. Wrong contract → back to INTERFACE / to `manager` for a spec revision, **not** massaging the test to fit the code.
+- Commit: `feat(<scope>): impl for Task X.Y` + `Refs:`. Update the Task status `[PENDING]` → `[DONE]`, then refresh the ledger row: `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`. For a plan with `tasks/`, write `tasks/<id>.result.md` (<= 2 KB): the commit SHAs from `git rev-parse`, every acceptance number with the command that produced it, deviations from DESIGN — nothing else.
 
-## 3. Refs-трассировка (plan-driven workflow)
+**REFACTOR** (optional) — if GREEN left obvious debt: `developer` cleans up in the same context, tests stay green after every edit, `interface.py` is untouched (an API change goes through a separate `public-api-change` Task).
 
-- Определи путь к файлу плана: из $ARGUMENTS или по текущей ветке (`git branch --show-current` → извлеки slug → найди в `plans/`):
-  - Single plan: `plans/YYYY-MM-DD_<slug>.md` (ищи через `ls plans/*_<slug>.md`)
-  - Multi-phase: `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md` (ищи через `ls -d plans/*_<slug>`)
-- Каждый коммит этапа — с trailer `Refs: <путь-к-файлу-плана>` (точный путь, с датой).
-  Примеры: `Refs: plans/2026-05-22_auth-rbac.md` или `Refs: plans/2026-05-22_auth-rbac/phase-2.md`.
-- Для multi-phase планов: ссылка на конкретный phase-файл (не на `plan.md` метаплан, не на папку).
-- Если план не найден (legacy ветка, hotfix, плановый файл без даты) — предупреди пользователя, но не блокируй работу.
+For the `n/a` branch — the stages above don't apply: implement directly (developer/teamlead per level), one commit with `Refs:`.
 
-## 4. После выполнения
+## 3. Refs tracing (plan-driven workflow)
 
-- Проверь, что **каждый** коммит этапа несёт `Refs:` trailer и статус Task в плане обновлён `[PENDING]` → `[DONE]`.
-- Напомни про regression-прогон (`/dev:test` в `MODE: regression`) и ревью (`/dev:review`) — в standalone они не запускаются автоматически (это делает `/dev:pipeline`).
+- Determine the plan file path: from $ARGUMENTS or from the current branch (`git branch --show-current` → extract the slug → find it in `plans/`):
+  - Single plan: `plans/YYYY-MM-DD_<slug>.md` (find via `ls plans/*_<slug>.md`)
+  - Multi-phase: `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md` (find via `ls -d plans/*_<slug>`)
+- Every stage commit — with trailer `Refs: <path-to-plan-file>` (exact path, with the date).
+  Examples: `Refs: plans/2026-05-22_auth-rbac.md` or `Refs: plans/2026-05-22_auth-rbac/phase-2.md`.
+- For multi-phase plans: link to the specific phase file (not the `plan.md` metaplan, not the folder).
+- If the plan isn't found (legacy branch, hotfix, undated plan file) — warn the user, but don't block the work.
 
-Задача: $ARGUMENTS
+## 4. After completion
+
+- Verify that **every** stage commit carries the `Refs:` trailer and the Task status in the plan is updated `[PENDING]` → `[DONE]`, then refresh the ledger row: `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`. For a plan with `tasks/`, write `tasks/<id>.result.md` (<= 2 KB): the commit SHAs from `git rev-parse`, every acceptance number with the command that produced it, deviations from DESIGN — nothing else.
+- developer commits on its own; in the subagent brief repeat: never push, never open a PR.
+- Remind about the regression run (`/dev:test` in `MODE: regression`) and review (`/dev:review`) — in standalone they don't run automatically (that's `/dev:pipeline`'s job).
+
+Task: $ARGUMENTS

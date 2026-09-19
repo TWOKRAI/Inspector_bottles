@@ -8,9 +8,15 @@ disappear. This linter is the safety net that catches that drift.
 
 Checks:
   1. Required `deny` patterns are present (--no-verify, push --force, reset --hard, ...)
-  2. `Write`/`Edit` on secrets paths is denied (.env, *.pem, *.key, id_rsa, ...)
+  2. `Edit` on secrets paths is denied (.env, *.pem, *.key, id_rsa, ...) — `Write(path)`
+     rules are NOT checked here because they are a no-op in Claude Code's file
+     permission checks (only `Edit(path)` is matched, and it covers all
+     writing tools); any `Write(...)` deny entry is instead flagged as an
+     ineffective rule (see check 5 below / `check_no_write_path_deny`).
   3. Forbidden patterns are NOT in `allow` (uv add, pip install, npx, cp *, chmod +x*, ...)
   4. Required hooks are wired in (validate-safe-command, protect-readonly, protect-branch, ...)
+  5. No `Write(...)` file-path deny entries — they are silently ineffective;
+     the fix is always `Edit(...)`.
 
 Exit codes:
   0 — all invariants hold
@@ -46,13 +52,20 @@ REQUIRED_DENY: list[tuple[str, str]] = [
     (r"chmod 777", "chmod 777 * must be denied"),
     (r"mkfs", "mkfs* must be denied (disk format)"),
     (r"dd if=", "dd if=* must be denied (disk-level write)"),
+    (r"rm -rf", "rm -rf (recursive force delete) must be denied — catastrophic on wildcard/root paths"),
+    (r"docker system prune", "docker system prune* must be denied (wipes all unused docker data)"),
+    (r"shutdown", "shutdown* must be denied (host power-off)"),
 ]
 
-# Secrets that MUST NOT be writable / editable by the agent.
-# Each entry = path pattern that must appear in BOTH Write(...) and Edit(...) deny.
+# Secrets that MUST NOT be editable by the agent. Each entry = path pattern
+# that must appear in Edit(...) deny. Write(...) is deliberately NOT checked
+# here — Claude Code's file permission checks only match Edit(path) rules
+# (Edit covers all writing tools, Write(path) rules are a no-op) — see
+# check_no_write_path_deny below.
 REQUIRED_SECRET_DENY: list[str] = [
     "**/.env",
     "**/.env.local",
+    "**/.env.*.local",
     "**/*.pem",
     "**/*.key",
     "**/id_rsa",
@@ -138,15 +151,32 @@ def check_deny(deny_list: list[str]) -> tuple[list[str], list[str]]:
 
 def check_secret_protection(deny_list: list[str]) -> list[str]:
     errors = []
-    write_patterns = [d for d in deny_list if d.startswith("Write(")]
     edit_patterns = [d for d in deny_list if d.startswith("Edit(")]
     for secret in REQUIRED_SECRET_DENY:
-        write_entry = f"Write({secret})"
         edit_entry = f"Edit({secret})"
-        if write_entry not in write_patterns:
-            errors.append(f"deny missing Write protection for {secret}")
         if edit_entry not in edit_patterns:
             errors.append(f"deny missing Edit protection for {secret}")
+    return errors
+
+
+def check_no_write_path_deny(deny_list: list[str]) -> list[str]:
+    """Flag ``Write(...)`` file-path deny entries as ineffective.
+
+    Claude Code's file permission checks only match ``Edit(path)`` rules —
+    ``Write(path)`` deny entries are silently never matched by anything, so a
+    project relying on one has zero protection despite the entry existing.
+    ``Edit(...)`` is the correct replacement: it covers all writing tools.
+    """
+    errors = []
+    for d in deny_list:
+        if d.startswith("Write("):
+            suggested = "Edit(" + d[len("Write("):]
+            errors.append(
+                f"ineffective deny rule {d!r}: Write(path) file-permission "
+                f"rules are not matched by Claude Code — only Edit(path) "
+                f"rules are (Edit covers all writing tools); use "
+                f"{suggested!r} instead"
+            )
     return errors
 
 
@@ -196,6 +226,7 @@ def lint(path: Path) -> tuple[list[str], list[str]]:
     warnings += w1
 
     errors += check_secret_protection(deny)
+    errors += check_no_write_path_deny(deny)
     errors += check_forbidden_allow(allow)
     warnings += check_hooks(hooks_root)
 

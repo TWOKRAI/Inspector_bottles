@@ -2,13 +2,13 @@
 // Cross-platform: requires Node 18+ on PATH.
 //
 // Prerequisites:
-//   1. `codegraph init`   — creates .codegraph/ in project root
-//   2. `codegraph index .` — first full index
+//   1. `codegraph init`    — creates .codegraph/ AND builds the first index
+//   2. `codegraph status`  — verify the index exists
 //   3. Add `.codegraph/` to .gitignore
 //
 // Two variants — pick one and strip the comments before merging.
 
-// Variant A: global install (npm install -g @colbymchenry/codegraph)
+// Variant A: global install (npm install -g @colbymchenry/codegraph@1.6.0)
 {
   "codegraph": {
     "command": "codegraph",
@@ -20,6 +20,6 @@
 {
   "codegraph": {
     "command": "npx",
-    "args": ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
+    "args": ["-y", "@colbymchenry/codegraph@1.6.0", "serve", "--mcp"]
   }
 }

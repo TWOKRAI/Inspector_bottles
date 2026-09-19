@@ -76,13 +76,13 @@ Then `ast-grep scan` runs all rules over the codebase. The MCP server exposes th
 See [SETUP_GUIDE.md](SETUP_GUIDE.md) — installs the CLI (`brew` / `cargo` / `winget`), wires the MCP server, includes a smoke test (find + dry-run rewrite).
 ## Launcher options
 
-**Default** (used automatically by `claude-kit-claude plugin enable mcp-ast-grep`): see `.claude-plugin/plugin.json` → `mcpServers.ast-grep`.
+**Default** (used automatically by `claude-kit add ast-grep`): see `.claude-plugin/plugin.json` → `mcpServers.ast-grep`. The MCP wrapper (`ast-grep/ast-grep-mcp`) is a **Python** project, not the `@ast-grep/mcp` npm package that name suggests — it does not exist on the npm registry. Run ephemerally via `uvx` from a pinned commit (upstream ships no tags/releases):
 
 ```
-command: npx
-args: ["-y", "@ast-grep/mcp", "--root", "."]
+command: uvx
+args: ["--from", "git+https://github.com/ast-grep/ast-grep-mcp@149e20d47bb7125fb0c1451feea2f48a98742034", "ast-grep-server"]
 ```
 
-**Alternative** (faster startup, requires `npm i -g @ast-grep/mcp`): see `templates/mcp-config.json.snippet`.
+**Prerequisite:** the `ast-grep` CLI itself must be on PATH — the server shells out to it (`AST_GREP_PATH` overrides the binary name). `plugin doctor` warns if it's missing. Install: macOS `brew install ast-grep` · Windows `winget install ast-grep.ast-grep` · Linux `cargo install ast-grep --locked`.
 
 Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

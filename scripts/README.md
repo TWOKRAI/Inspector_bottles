@@ -1,97 +1,86 @@
-# scripts/ — каталог утилит проекта
+# `scripts/` — каталог утилит проекта
 
-Учётный индекс всего, что лежит в `scripts/`. Один источник истины: какие скрипты есть, для чего и как запускать.
+> **BUNDLE README — НЕ project copy.** Этот README лежит в seed-bundle
+> `.claude/plugins/lang-python/templates/scripts/`. При `claude-kit new` / `claude-kit sync`
+> весь bundle (включая этот файл) auto-копируется в проектный `scripts/`.
+> Project-local правки выигрывают: существующие `scripts/<X>/` НЕ
+> перезаписываются. Детали и trade-off — `docs/decisions/0002-script-bundle-delivery.md`
+> и [BOOTSTRAP.md](../../BOOTSTRAP.md#scripts-bundle-два-уровня).
 
-Все скрипты запускать **из корня проекта** (`/Users/twokrai/Project_code/Inspector_bottles`), иначе `ModuleNotFoundError`. Зависимости — stdlib Python 3.12+ (см. оговорки у конкретных скриптов).
+Учётный индекс того, что лежит в `scripts/`. Один источник истины: какие скрипты есть, для чего и как запускать.
 
----
-
-## 1. Точки входа фреймворка
-
-Тонкие обёртки над тем, что должно запускаться часто и из CI.
-
-| Скрипт | Slash-команда | Назначение | Подробности |
-|--------|---------------|------------|-------------|
-| [`ci.py`](ci.py) | — | **CI-standalone:** все quality gates без LLM (validate + tests + sync + sentrux + ruff). Флаги: `--fast`, `--no-sentrux`, `--verbose`. | docstring в [`ci.py`](ci.py) |
-| [`validate.py`](validate.py) | `/validate` | Структурная валидация фреймворка: импорты модулей, наличие `interfaces.py`, ADR-индекс, sync-дрифт. Exit 0/1. | docstring в [`validate.py`](validate.py) |
-| [`run_framework_tests.py`](run_framework_tests.py) | `/fw-test` | Pytest по `multiprocess_framework/modules/*/tests/` (editable install). | docstring в [`run_framework_tests.py`](run_framework_tests.py) |
-| [`validate_commit/`](validate_commit/) | — (git hook) | Валидация commit-сообщения: Conventional Commits + обязательные trailers `Why:` / `Layer:`. Hook в `.git/hooks/commit-msg` ставит `install_hook.sh`. Формат: [`docs/claude/COMMIT_GUIDE.md`](../docs/claude/COMMIT_GUIDE.md). | [README](validate_commit/README.md) |
+Все скрипты запускать **из корня проекта**, иначе относительные пути в конфигах могут не сработать. Зависимости — stdlib Python 3.12+ (см. оговорки у конкретных подпакетов).
 
 ---
 
-## 2. Метрики и аудит (отчётные подпакеты)
+## 1. Метрики и аудит
 
-Каждый — самостоятельный подпакет: `*.py` + `*.toml` (конфиг) + `README.md` (детальная справка). Без зависимостей сверх stdlib, кроме `code_stats_tokei.py` (нужен бинарь `tokei`).
+Самостоятельные подпакеты: `*.py` + `*.toml` (конфиг) + `README.md` (детальная справка). Без внешних зависимостей сверх stdlib (кроме `code_stats_tokei.py` — нужен бинарь `tokei`).
 
 | Подпакет | Slash | Что показывает | README |
 |----------|-------|----------------|--------|
-| [`code_stats/`](code_stats/) | `/code-stats`, `/code-stats-tokei` | LOC / файлы / символы по расширениям и директориям. Два движка: stdlib (с docstrings и chars) и `tokei` (точный multi-language). | [README](code_stats/README.md) |
-| [`channel_map/`](channel_map/) | `/channel-map` | AST-карта IPC: декларации каналов (`FieldRouting`), отправки (`send_message`), подписки. Поиск разрывов declaration↔send. | [README](channel_map/README.md) |
-| [`message_contracts/`](message_contracts/) | `/message-contracts` | AST-дамп классов `SchemaBase` / `Message` / `BaseModel` с полями. Аудит Dict-at-Boundary и диф контрактов между ветками. | [README](message_contracts/README.md) |
-| [`test_ratio/`](test_ratio/) | `/test-ratio` | LOC-отношение `tests/` к `code/` на каждый модуль. Дополнение к `/sentrux-gaps` (объёмная метрика). | [README](test_ratio/README.md) |
-| [`todo_inventory/`](todo_inventory/) | `/todo-inventory` | Сбор `TODO/FIXME/HACK/XXX/BUG/NOTE` с автором и возрастом через `git blame`. | [README](todo_inventory/README.md) |
-| [`graph_slice/`](graph_slice/) | `/graph-slice` | Срез графа graphify по границе модуля: кто зависит от модуля и от чего зависит он. Проверяет свежесть графа относительно `HEAD`. | [README](graph_slice/README.md) |
-| [`clean_cache/`](clean_cache/) | `/clean-cache` | Чистка `__pycache__/`, `.pytest_cache/`, `*.pyc`, `.coverage` и т.п. **Dry-run по умолчанию**, реальное удаление — `--apply`. | [README](clean_cache/README.md) |
-| [`docs_verify/`](docs_verify/) | — (в гейте: `pytest scripts/docs_verify/tests`) | Сверщик справочников наблюдаемости с кодом: 15 проверок «утверждение документа ↔ факт кода» (сигнатуры, поля схем команд, лестница severity, число модулей). Каждая доказана инъекцией, красящей ровно её. Exit 0/1/2 («не проверено» ≠ «всё хорошо»). | [README](docs_verify/README.md) |
-| [`observability_seal/`](observability_seal/) | — (в гейте) | Проверка пломбы `seq`: объединение номеров по файлам процесса непрерывно от min до max. Дырка = запись прошла гейт, но не легла ни в один файл. Счётчики логгера не спрашиваются. | [README](observability_seal/README.md) |
-| [`transport_boundary/`](transport_boundary/) | — (в `ci.py`) | AST-инвариант transport-router-hub P4.3: прямой queue/SHM-транспорт (`send_to_queue`/`broadcast_message`/SHM) только внутри хаба (`router_module`/`shared_resources_module`). Ratchet с `[[debt]]`. Exit 0/1. | [README](transport_boundary/README.md) |
+| [`code_stats/`](code_stats/) | `/core:quality:code-stats`, `/core:quality:code-stats-tokei` | LOC / файлы / символы по расширениям и директориям. Два движка: stdlib (с docstrings и chars) и `tokei` (точный multi-language). | [README](code_stats/README.md) |
+| [`test_ratio/`](test_ratio/) | `/core:quality:test-ratio` | LOC-отношение `tests/` к `code/` на каждый модуль. Дополнение к `/mcp-sentrux:sentrux-gaps` (объёмная метрика). | [README](test_ratio/README.md) |
+| [`clean_cache/`](clean_cache/) | `/core:infra:clean-cache` | Чистка `__pycache__/`, `.pytest_cache/`, `*.pyc`, `.coverage` и т.п. **Dry-run по умолчанию**, реальное удаление — `--apply`. | [README](clean_cache/README.md) |
+| [`todo_inventory/`](todo_inventory/) | `/core:analysis:todo-inventory` | Сбор `TODO/FIXME/HACK/XXX/BUG/NOTE` с автором и возрастом через `git blame`. | [README](todo_inventory/README.md) |
+| [`secrets_audit/`](secrets_audit/) | `/core:quality:secrets-audit` | Аудит утечек secrets по regex: AWS / GCP / GitHub PAT / OpenAI / JWT / private keys / generic password assignments. Entropy-фильтр для generic-паттернов. Exit 1 при находках — пригодно для CI/pre-push. | [README](secrets_audit/README.md) |
+| [`link_check/`](link_check/) | `/core:quality:link-check` | Проверка Markdown-ссылок: relative paths, `#anchor`'ы, опционально HTTP-проверка через HEAD. Inline-suppression `<!-- link-check: ignore -->`. | [README](link_check/README.md) |
+| [`claude_md_audit/`](claude_md_audit/) | `/core:quality:claude-md-audit` | Meta-аудит `.claude/`: frontmatter агентов/команд, осиротевшие slash-скрипты, ссылки в MEMORY.md, хуки в settings.json. | [README](claude_md_audit/README.md) |
+| [`changelog_gen/`](changelog_gen/) | `/core:quality:changelog-gen` | Генератор changelog из Conventional Commits: парсит `git log <from>..<to>`, группирует по type, рендерит markdown/plain/json. Breaking changes — отдельной секцией. | [README](changelog_gen/README.md) |
 
 Конфиг подпакета лежит рядом с `*.py` (например, [`code_stats/code_stats.toml`](code_stats/code_stats.toml)) — CLI-флаги перекрывают значения из конфига.
 
 ---
 
-## 3. Авто-синхронизация ADR-документации
+## 2. Валидация коммитов
 
 | Подпакет | Запуск | Что делает | README |
 |----------|--------|------------|--------|
-| [`sync/`](sync/) | `python -m scripts.sync` (write), `python -m scripts.sync --check` (CI), `python -m scripts.sync --list` | Пересборка генерируемых разделов в `multiprocess_framework/DECISIONS.md` и `docs/ADR_REGISTRY.md` (оглавление, модульные решения, «Устарело», коды модулей). Источник истины — заголовки `## ADR-…` в локальных `modules/*/DECISIONS.md`. | [README](sync/README.md) |
-
-Slash-команды у `sync/` нет — это инфраструктурный скрипт, упомянутый в CLAUDE.md (правило 8). Дрифт ловит `/validate`.
+| [`validate_commit/`](validate_commit/) | git hook `commit-msg` (ставит `install_hook.sh`) | Валидация commit-сообщения: Conventional Commits + обязательные trailers `Why:` / `Layer:`. Формат: `.claude/COMMIT_GUIDE.md`. | [README](validate_commit/README.md) |
 
 ---
 
-## 4. Архив (`_archive/`)
+## 3. Git hooks
 
-Устаревшие и экспериментальные скрипты перенесены в [`_archive/`](_archive/). Не использовать без явной необходимости.
+| Файл | Slash | Что делает |
+|------|-------|------------|
+| [`hooks/pre-push`](hooks/pre-push) + [`install_pre_push_hook.sh`](install_pre_push_hook.sh) | `/mcp-sentrux:install-pre-push` | Перед `git push` запускает `sentrux check` (правила) и `sentrux gate` (регрессия vs baseline). Блокирует push при провале. Тихо пропускается если sentrux не установлен. |
 
-| Файл | Статус | Почему устарел |
-|------|--------|----------------|
-| `reorganize_decisions.py` | **DEPRECATED** | Заменён на [`scripts/sync/`](sync/) |
-| `check-qex-env.sh` | **OUTDATED** | Заменён на `/cold-start` (qex без Docker) |
-| `_test_bundle_queue.py` | **EXPERIMENT** | Разведка `multiprocessing.Queue` на Windows |
-| `_test_queue_isolation.py` | **EXPERIMENT** | Изоляция Queue между subprocess |
-| `_test_queue_nested.py` | **EXPERIMENT** | Queue в mid_process → воркеры |
+Установка хука одной командой:
 
----
+```bash
+bash scripts/install_pre_push_hook.sh
+```
 
-## 6. Конвенции для новых скриптов
-
-Если добавляешь новый скрипт — придерживайся стиля проекта:
-
-1. **Подпакет, а не один файл.** Если у скрипта есть конфиг, тесты, или больше одной функции — выноси в `scripts/<name>/` с `<name>.py`, `<name>.toml`, `README.md`, опционально `tests/`.
-2. **README обязателен.** Минимум: «Что находит / Запуск / Колонки / Когда полезно / Ограничения» — единый стиль с существующими подпакетами.
-3. **Конфиг через TOML.** CLI-флаги перекрывают значения, дефолтный конфиг рядом с `.py`.
-4. **Запуск из корня.** Все пути относительные от `Inspector_bottles/`. Не использовать `cd`.
-5. **Stdlib first.** Внешние зависимости — только если без них нельзя (`tokei`, `ollama`). Указать в README раздел «Требования».
-6. **Slash-команда для частого.** Если скрипт планируется к регулярному вызову — завести `.claude/commands/<slash>.md` с однострочным описанием и шорткатом.
-7. **Учёт здесь.** После создания добавить строку в подходящий раздел этого README.
+Хук работает **локально** (не уезжает в репозиторий) — на новой машине переустановить.
 
 ---
 
-## 7. Быстрая навигация по slash-командам
+## 4. Быстрая навигация по slash-командам
 
 | Slash | Скрипт |
 |-------|--------|
-| `/validate` | [`validate.py`](validate.py) |
-| `/fw-test` | [`run_framework_tests.py`](run_framework_tests.py) |
-| `/code-stats` | [`code_stats/code_stats.py`](code_stats/code_stats.py) |
-| `/code-stats-tokei` | [`code_stats/code_stats_tokei.py`](code_stats/code_stats_tokei.py) |
-| `/channel-map` | [`channel_map/channel_map.py`](channel_map/channel_map.py) |
-| `/message-contracts` | [`message_contracts/message_contracts.py`](message_contracts/message_contracts.py) |
-| `/test-ratio` | [`test_ratio/test_ratio.py`](test_ratio/test_ratio.py) |
-| `/todo-inventory` | [`todo_inventory/todo_inventory.py`](todo_inventory/todo_inventory.py) |
-| `/graph-slice` | [`graph_slice/graph_slice.py`](graph_slice/graph_slice.py) |
-| `/clean-cache` | [`clean_cache/clean_cache.py`](clean_cache/clean_cache.py) |
+| `/core:quality:code-stats` | [`code_stats/code_stats.py`](code_stats/code_stats.py) |
+| `/core:quality:code-stats-tokei` | [`code_stats/code_stats_tokei.py`](code_stats/code_stats_tokei.py) |
+| `/core:quality:test-ratio` | [`test_ratio/test_ratio.py`](test_ratio/test_ratio.py) |
+| `/core:infra:clean-cache` | [`clean_cache/clean_cache.py`](clean_cache/clean_cache.py) |
+| `/core:analysis:todo-inventory` | [`todo_inventory/todo_inventory.py`](todo_inventory/todo_inventory.py) |
+| `/core:quality:secrets-audit` | [`secrets_audit/secrets_audit.py`](secrets_audit/secrets_audit.py) |
+| `/core:quality:link-check` | [`link_check/link_check.py`](link_check/link_check.py) |
+| `/core:quality:claude-md-audit` | [`claude_md_audit/claude_md_audit.py`](claude_md_audit/claude_md_audit.py) |
+| `/core:quality:changelog-gen` | [`changelog_gen/changelog_gen.py`](changelog_gen/changelog_gen.py) |
+| `/mcp-sentrux:install-pre-push` | [`install_pre_push_hook.sh`](install_pre_push_hook.sh) |
 
-Полный список slash-команд проекта — в корневом [`CLAUDE.md`](../CLAUDE.md) (раздел «Slash-команды»)
-и в [`.claude/CLAUDE.md`](../.claude/CLAUDE.md). Прежний адрес `.claude/README.md` мёртв — файла нет.
+---
+
+## 5. Конвенции для новых скриптов
+
+Если добавляешь новый скрипт — придерживайся стиля шаблона:
+
+1. **Подпакет, а не один файл.** Если у скрипта есть конфиг, тесты, или больше одной функции — выноси в `scripts/<name>/` с `<name>.py`, `<name>.toml`, `README.md`, опционально `tests/`.
+2. **README обязателен.** Минимум: «Что находит / Запуск / Колонки / Когда полезно / Ограничения».
+3. **Конфиг через TOML.** CLI-флаги перекрывают значения, дефолтный конфиг рядом с `.py`.
+4. **Запуск из корня.** Все пути относительные от корня проекта. Не использовать `cd`.
+5. **Stdlib first.** Внешние зависимости — только если без них нельзя. Указать в README раздел «Требования».
+6. **Slash-команда для частого.** Если скрипт планируется к регулярному вызову — завести `.claude/commands/<ns>/<name>.md` с однострочным описанием.
+7. **Учёт здесь.** После создания добавить строку в подходящий раздел этого README.

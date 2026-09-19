@@ -3,17 +3,17 @@ description: Install a plugin — consume form <plugin>@<marketplace> (α, deleg
 allowed-tools: Bash(claude-kit-claude plugin install*)
 ---
 
-Команда `plugin install` различает источник по аргументу и направляет в нужную ветку (`classify_source`). Две формы:
+The `plugin install` command distinguishes the source by argument and routes to the right branch (`classify_source`). Two forms:
 
-**α (consume) — `<plugin>@<marketplace>`.** Делегат-установка: файлы качает сам Claude Code из marketplace-кэша. Команда лишь пишет пин в enabled.yaml и печатает шаг `/plugin install <ref>`, который нужно выполнить внутри Claude Code, чтобы реально поставить плагин.
+**α (consume) — `<plugin>@<marketplace>`.** Delegated install: Claude Code itself downloads the files from the marketplace cache. The command only writes the pin to enabled.yaml and prints the step `/plugin install <ref>`, which you must run inside Claude Code to actually install the plugin.
 
-**β (git) — `<git-url>` (любой `https://…`, `git@…`, `.git`, `file://…`).** Мы сами `git clone` репозиторий в `.claude/plugins/_external/<id>/`, удаляем чужой `.git/`, и **наш** composer wireит плагин — его mcpServers / hooks / permissions попадают в `.mcp.json` / `settings.json`. Установка чужого плагина = выполнение чужого кода: перед вливанием показывается diff (что добавится в артефакты) и запрашивается подтверждение. В неинтерактивной среде confirm недоступен → передай `--yes`.
+**β (git) — `<git-url>` (any `https://…`, `git@…`, `.git`, `file://…`).** We `git clone` the repository ourselves into `.claude/plugins/_external/<id>/`, remove its `.git/`, and **our** composer wires the plugin — its mcpServers / hooks / permissions land in `.mcp.json` / `settings.json`. Installing a third-party plugin = running third-party code: before merging, a diff is shown (what will be added to the artifacts) and confirmation is requested. Confirm is unavailable in a non-interactive environment → pass `--yes`.
 
-Использование:
+Usage:
 - consume: `/core:plugin:install <plugin>@<marketplace> [--id <id>] [--version X]`
 - git β: `/core:plugin:install <git-url> [--ref <branch|tag|sha>] [--subdir <relpath>] [--id <id>] [--yes]`
 
-Опции β: `--ref` — ветка/тег/sha для clone; `--subdir` — путь к `.claude-plugin/plugin.json`, если он НЕ в корне репо (без `--subdir` и при отсутствии манифеста в корне команда подскажет точный путь); `--id` — имя в managed-namespace (default — из repo-name); `--yes` — пропустить confirm (CI / неинтерактив).
+β options: `--ref` — branch/tag/sha to clone; `--subdir` — path to `.claude-plugin/plugin.json` if it's NOT at the repo root (without `--subdir`, and if the manifest is missing at the root, the command suggests the exact path); `--id` — name in the managed namespace (default — from repo-name); `--yes` — skip confirm (CI / non-interactive).
 
 ```bash
 claude-kit-claude plugin install $ARGUMENTS

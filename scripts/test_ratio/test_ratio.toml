@@ -1,43 +1,43 @@
-# Конфигурация для scripts/test_ratio/test_ratio.py
+# Configuration for scripts/test_ratio/test_ratio.py
 #
-# Считает на модуль: LOC в test-зонах ÷ LOC в продакшен-коде.
-# Цель — быстрый снимок «насколько модуль покрыт тестами по объёму».
+# Per module: LOC in test zones ÷ LOC in production code.
+# Goal: quick snapshot of "how well-tested a module is by volume".
 
 [scan]
-# Корни, в которых каждый подкаталог — отдельный модуль.
-# Можно перечислить несколько (multiprocess_framework/modules, Services, Plugins).
+# Roots where each direct subdirectory is treated as a separate module.
+# Common defaults for a src-layout Python project:
 module_roots = [
-    "multiprocess_framework/modules",
-    "Services",
-    "Plugins",
+    "src",
 ]
+# If your project uses a flat layout instead, replace with the actual roots, e.g.:
+#   module_roots = ["app", "lib"]
 
 [detect]
-# Папка-маркер тестов внутри модуля.
+# Test directory marker inside a module.
 test_dir = "tests"
-# Дополнительные test-маркеры (используется fnmatch по имени файла).
+# Additional test markers (fnmatch on filename).
 test_file_patterns = ["test_*.py", "*_test.py", "conftest.py"]
 
 [exclude]
-# Имена директорий внутри модуля, которые не считаем ни как тесты, ни как код.
+# Subdirectories inside a module not counted as either tests or code.
 dirs = [
     "__pycache__", ".git", ".venv", "venv",
     "node_modules", ".qex", ".sentrux",
     ".mypy_cache", ".pytest_cache", ".ruff_cache",
     "build", "dist",
-    "docs", "archive", "_examples",  # документация и примеры не считаются "кодом" в смысле test-ratio
+    "docs", "archive", "_examples",
 ]
-file_patterns = ["__init__.py"]   # __init__.py — обычно пустые, искажают ratio
+file_patterns = ["__init__.py"]   # usually empty, skews ratio
 
 [count]
-# Что считать строкой "кода": non_blank | non_blank_non_comment | all
+# What counts as a "code" line: non_blank | non_blank_non_comment | all
 mode = "non_blank_non_comment"
 encoding = "utf-8"
 
 [output]
 format = "table"        # table | json | csv
 sort_by = "ratio"       # ratio | code | tests | name
-sort_order = "asc"      # asc — модули с минимальным покрытием наверху
+sort_order = "asc"      # asc — modules with lowest coverage on top
 limit = 0
-# Порог для пометки HEALTH-колонки: ratio >= warn_threshold → ✓, < warn → ⚠, нет тестов → ✗
+# HEALTH column threshold: ratio >= warn_threshold → ok, < warn → !, no tests → x
 warn_threshold = 0.3
