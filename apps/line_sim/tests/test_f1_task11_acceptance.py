@@ -423,6 +423,13 @@ def test_without_pymodbus_plugin_errors_process_lives(tmp_path: Path) -> None:
             f"errors.log={errors_text_bad!r}, anomalies={_anomalies_text(overview_bad)!r}"
         )
 
+        # Инъекция I6 (lead, 2026-09-20): если _fail ПРОБРАСЫВАЕТ исключение, оркестратор
+        # ловит его сам и тоже пишет «modbus» в плоскость ошибок — прежняя форма теста
+        # выживала. Деградация «плагин жив и отвечает state=error» — отдельное свойство.
+        plugin_status = _result(drv_bad.send_command(_ROBOT_PROCESS, _STATUS_COMMAND))
+        assert plugin_status.get("state") == "error" and plugin_status.get("running") is False, (
+            f"без pymodbus плагин должен жить в state='error' и отвечать на sim_robot.status: {plugin_status!r}"
+        )
         entry = _find_process_entry(overview_bad, _ROBOT_PROCESS)
         status_res = drv_bad.introspect_status(_ROBOT_PROCESS)
         status_ok = isinstance(status_res, dict) and status_res.get("success") is not False
