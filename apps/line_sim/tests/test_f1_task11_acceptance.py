@@ -121,6 +121,26 @@ def _modbus_mentioned(*texts: str) -> bool:
     return any(pattern.search(t) for t in texts if t)
 
 
+#: Запись плоскости ошибок — строка вида ``#13 2026-09-20 22:46:01,729 [ERROR] ...``.
+#: Строки продолжения (traceback) отступом не совпадают и в счёт не идут.
+_ERROR_RECORD_RE = re.compile(r"^#\d+\s+\d{4}-\d{2}-\d{2}", re.MULTILINE)
+
+
+def _modbus_record_count(errors_text: str, overview: dict) -> int:
+    """Сколько ОТДЕЛЬНЫХ записей об отказе modbus видит потребитель (обе плоскости).
+
+    Считаются записи, а не вхождения слова: у одной записи есть traceback, в котором
+    "modbus" встречается трижды, и счёт по вхождениям согласился бы с чем угодно.
+    """
+    pattern = re.compile(r"modbus", re.IGNORECASE)
+    starts = [m.start() for m in _ERROR_RECORD_RE.finditer(errors_text)]
+    bounds = list(zip(starts, starts[1:] + [len(errors_text)]))
+    from_log = sum(1 for a, b in bounds if pattern.search(errors_text[a:b]))
+    anomalies = overview.get("anomalies") if isinstance(overview, dict) else None
+    from_anomalies = sum(1 for a in anomalies if pattern.search(str(a))) if isinstance(anomalies, list) else 0
+    return from_log + from_anomalies
+
+
 def _errors_log_text(log_dir: Path, process: str) -> str:
     """Текст errors.log процесса под MULTIPROCESS_LOG_DIR. Отсутствие файла -> "" (не отказ:
     вторая проверка — anomalies — реальный якорь существования, см. критерий 5)."""
@@ -421,6 +441,23 @@ def test_without_pymodbus_plugin_errors_process_lives(tmp_path: Path) -> None:
             f"без pymodbus ожидали упоминание 'modbus' в errors.log процесса robot или в "
             f"system_overview()['anomalies'] за 10с — не нашли ни там, ни там: "
             f"errors.log={errors_text_bad!r}, anomalies={_anomalies_text(overview_bad)!r}"
+        )
+
+        # Критерий Ф1 Task 1.1 требует РОВНО ОДНУ запись, а не «хотя бы одну» (ревью
+        # 2026-09-21, FIX-3): прежняя форма осталась бы зелёной и при десяти дублях
+        # одного отказа. Замер на живом стенде (lead, инъекция K7, обе половины):
+        # без pymodbus — 1 запись в errors.log и 0 упоминаний в anomalies; с pymodbus — 0
+        # и 0. Инъекцию I6 счёт НЕ ловит — проверено, а не предположено: с пробрасывающим
+        # _fail тест остаётся зелёным (счёт по-прежнему 1), умирает только hazard-тест
+        # автора test_port_busy_reports_error_not_crash. Предсказание lead'а было
+        # обратным («оркестратор допишет вторую запись про modbus»); замер 2026-09-21 его
+        # не подтвердил, вопрос записан в OPEN_QUESTIONS. Свойство «start не бросает»
+        # по-прежнему пришпилено только hazard-тестом.
+        record_count = _modbus_record_count(errors_text_bad, overview_bad)
+        assert record_count == 1, (
+            f"без pymodbus ожидали РОВНО одну запись об отказе modbus в плоскости ошибок, "
+            f"насчитали {record_count}: errors.log={errors_text_bad!r}, "
+            f"anomalies={_anomalies_text(overview_bad)!r}"
         )
 
         # Инъекция I6 (lead, 2026-09-20): если _fail ПРОБРАСЫВАЕТ исключение, оркестратор

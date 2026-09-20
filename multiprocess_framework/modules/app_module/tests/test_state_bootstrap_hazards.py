@@ -43,6 +43,7 @@ from multiprocess_framework.modules.app_module import (
     default_blueprint_loader,
     default_state_bootstrap,
 )
+from multiprocess_framework.modules.app_module.builder import SystemBuilder
 from multiprocess_framework.modules.app_module.orchestrator import GenericProcessManagerApp
 from multiprocess_framework.modules.state_store_module.testing.in_memory_router import (
     InMemoryRouter,
@@ -224,3 +225,56 @@ def test_explicit_hook_receives_same_blueprint_as_default() -> None:
     # Дефолт на ТОМ ЖЕ аргументе даёт непустое дерево — значит «явный выиграл»
     # означает победу над работающим дефолтом, а не над пустотой.
     assert set(default_state_bootstrap(got)["processes"]) == names
+
+
+# --------------------------------------------------------------------------- #
+# Опасность 4: factory-дорога — прикладной посев не трогать                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_factory_road_keeps_application_seed_untouched(tmp_path: Path) -> None:
+    """Factory-дорога (прототип): посев приложения доезжает ЦЕЛЫМ, дефолт не применяется.
+
+    Свойство «прототип выигрывает у дефолта» держится не ``AppSpec.state_bootstrap``,
+    а ранним ``return`` в :meth:`SystemBuilder.build` до generic-ветки — то есть
+    отсутствием кода, а не его наличием. Такое свойство не краснеет само: измерено
+    инъекцией (дефолтный посев дописан поверх factory-результата) — из 100 тестов
+    ``app_module`` + ``test_run_app_prototype`` + ``minimal_app`` не умер НИ ОДИН.
+    Существующие кандидаты мимо: ``test_factory_mode_delegates_to_launcher_factory``
+    смотрит на тип launcher'а и аргументы фабрики, ``test_run_app_prototype`` — на
+    имена процессов и класс оркестратора; ``initial_state`` не сверяет никто.
+
+    Пинуется НАБЛЮДАЕМЫЙ эффект — тот же объект посева на выходе, — а не имя
+    невызванной функции: спай на ``default_state_bootstrap`` охранял бы имя и
+    протух бы при любой равносильной замене.
+
+    Ветка ``system`` в образце значима: прикладной посев её строит, дефолт по
+    контракту НЕ строит (см. ``_APP_ONLY_BRANCHES``). Её исчезновение — признак
+    того, что посев подменён дефолтным.
+    """
+    (tmp_path / "pipeline.yaml").write_text(
+        f"name: p\nprocesses:\n  - process_name: {_TICKER}\nwires: []\n", encoding="utf-8"
+    )
+    manifest = tmp_path / "app.yaml"
+    manifest.write_text("name: FactorySeedApp\npipeline: pipeline.yaml\n", encoding="utf-8")
+
+    app_seed = {
+        "system": {"mode": "prototype-own"},
+        "processes": {_TICKER: {"state": {"status": "seeded-by-app"}}},
+    }
+
+    class _FakeLauncher:
+        def __init__(self) -> None:
+            self._orchestrator_config = {"initial_state": app_seed}
+
+    spec = AppSpec(manifest_path=manifest, launcher_factory=lambda m, override: _FakeLauncher())
+    launcher = SystemBuilder(spec).build()
+
+    seed = launcher._orchestrator_config["initial_state"]
+    assert seed is app_seed, f"builder подменил объект посева на factory-дороге: {seed!r}"
+    # Литерал, а не сравнение с app_seed: ссылочное равенство выше согласится и с
+    # посевом, который builder изменил НА МЕСТЕ.
+    assert seed == {
+        "system": {"mode": "prototype-own"},
+        "processes": {"ticker": {"state": {"status": "seeded-by-app"}}},
+    }, f"посев приложения изменён на месте: {seed!r}"
