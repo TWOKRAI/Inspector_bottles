@@ -17,7 +17,7 @@
 | факт | где | следствие |
 |---|---|---|
 | Второе приложение = `app.yaml` + `pipeline.yaml` + `run_app()`; процессы на фреймворковом `GenericProcess` | [`examples/minimal_app`](../../examples/minimal_app/), [`app_module/README.md`](../../multiprocess_framework/modules/app_module/README.md) | форма для `apps/line_sim/` готова, копировать нечего |
-| `StateProxy` в процессе создаёт **прототипный** `GenericProcessApp`; фреймворковый `GenericProcess` его не заводит | [`generic_process_app.py:23`](../../multiprocess_prototype/generic_process_app.py#L23), [`plugin_orchestrator.py:59`](../../multiprocess_framework/modules/process_module/generic/plugin_orchestrator.py#L59) | второе приложение без `ctx.state_proxy`. **Ф1 его не требует** → carve-out уезжает в **Task 2.0** (голова Ф2, где нужен канал энкодера), а не раздувает срез |
+| `StateProxy` в процессе создаёт **прототипный** `GenericProcessApp`; фреймворковый `GenericProcess` его не заводит | [`generic_process_app.py:23`](../../multiprocess_prototype/generic_process_app.py#L23), [`plugin_orchestrator.py:59`](../../multiprocess_framework/modules/process_module/generic/plugin_orchestrator.py#L59) | второе приложение без `ctx.state_proxy`. ~~Ф1 его не требует~~ — **ошибка разведки, вскрыта Task 1.1:** `system_overview` читает топологию из state-дерева, которое generic-оркестратор не сеет (`initial_state={}` не проходит гейт `_setup_state_store`). Серверная половина (посев топологии) — **Task 1.0**; клиентская (`ctx.state_proxy` у `GenericProcess`) остаётся Task 2.0 |
 | `SocketChannel`/`SocketBridgeAdapter` — единственная дверь между деревьями: newline-JSON, «Кадры/SHM через сокет НЕ гоняем» | [`socket_channel.py`](../../multiprocess_framework/modules/router_module/channels/socket_channel.py) | «через RouterManager» = управление (`backend_ctl` на своём порту), не кадры |
 | `camera_service` бэкенд `file` = `cv2.VideoCapture(str)` за сторожем `os.path.isfile` | [`file_source.py:35`](../../Plugins/sources/camera_service/backends/file_source.py#L35) | дверь кадров: новый тип `stream` с `url` (~30 строк), FFmpeg внутри cv2 читает MJPEG/RTSP |
 | Боевая `camera_0` рецепта — `Services.hikvision_camera` (MVS SDK), не эмулируется | [`hikvision_letter_robot.yaml:114`](../../multiprocess_prototype/recipes/hikvision_letter_robot.yaml#L114) | для сим-прогона `camera_0` → `camera_service/stream` — правка **данных**, того же класса, что host/port робота |
@@ -40,7 +40,61 @@
 
 ---
 
+### Task 1.0 — Дефолтный `StateBootstrap` в `app_module`: generic-приложение сеет топологию и отвечает на `state.get_subtree`
+
+**Level:** Senior (Opus)
+**Assignee:** teamlead
+**Источник:** [расследование 2026-09-20](../../docs/reviews/2026-09-20_line-sim-generic-app-observability-investigation.md) §4, §6 — зелёное воспроизведение топологическим хуком уже есть.
+**Goal:** `system_overview()` у ЛЮБОГО generic-приложения (`examples/minimal_app`, `apps/line_sim`)
+видит свои процессы; строки `No handler for key 'state.get_subtree'` исчезают; явный
+`AppSpec.state_bootstrap` по-прежнему выигрывает у дефолта.
+
+**DESIGN:** `default_state_bootstrap(blueprint) -> dict` рядом с `default_blueprint_loader`
+([`builder.py:93-115`](../../multiprocess_framework/modules/app_module/builder.py#L93)),
+применяется в `SystemBuilder._build_generic` вместо `initial_state = {}`
+([`builder.py:283-289`](../../multiprocess_framework/modules/app_module/builder.py#L283)):
+`spec.state_bootstrap or default_state_bootstrap`. Строит ТОЛЬКО топологию —
+`{"processes": {<name>: {"config": {"plugins": [...], "chain_targets": [...], "priority": ...},
+"state": {"status": "stopped", "pid": None, "fps": None, "error": None}}}}` — подмножество
+[`bootstrap.py:203-215`](../../multiprocess_prototype/backend/state/bootstrap.py#L203) без
+прикладных веток (`system`/`wires`/`services`/`displays`/`recipes`/`plugins` читают реестры
+прототипа). Только pickle-safe примитивы (`_pickle_sanity`). НЕ менять: гейт
+`_setup_state_store`, `assemble_proc_dicts`, factory-дорогу прототипа. ADR в
+`app_module/DECISIONS.md`.
+
+**Files:** `app_module/{builder.py, __init__.py, README.md, DECISIONS.md, tests/test_contract.py}`;
+`multiprocess_prototype/backend/state/bootstrap.py` — только комментарий-указатель.
+
+**Acceptance criteria** (измеримы тестером вслепую):
+- [ ] `examples/minimal_app`: `drv.system_overview()["processes"]` содержит имя процесса из
+      `pipeline.yaml` со `status == "running"`; в `anomalies` нет `kind == "empty_topology"`.
+- [ ] `apps/line_sim`: `test_backend_ctl_sees_robot_and_status` зелёный БЕЗ правок
+      `Plugins/sim/*` и `apps/line_sim/*`.
+- [ ] `drv.send_command("ProcessManager", "state.get_subtree", {"path": "processes"})` →
+      `success: true`; в stderr прогона нет `No handler for key 'state.get_subtree'`.
+- [ ] Явный `AppSpec(state_bootstrap=my_hook)` выигрывает: посев равен результату `my_hook`.
+- [ ] Blueprint без процессов — решение (пустой `{}` или `{"processes": {}}`) осознанное и
+      пришпилено тестом.
+- [ ] `python scripts/run_framework_tests.py` не ниже baseline; `sentrux check .` — все правила.
+
+**Out of scope:** `ctx.state_proxy` у `GenericProcess` и ветка `processes.<p>.health` (Task 2.0).
+**Dependencies:** нет. **Module contract:** impl-only.
+
+---
+
 ### Task 1.1 — `apps/line_sim/`: второе приложение, процесс `robot` с хостом `SimRobotServer` **[VERTICAL SLICE]**
+
+**Статус (2026-09-20):** код закоммичен `d0d391b2` (developer, 401k токенов — жёсткий потолок
+не был включён, см. память `feedback_agent_hard_budget_is_off_by_default`); приёмка **5/6**,
+критерий 3 ждёт Task 1.0. hazard-тесты автора 4/4, sentrux 37/37, `robot_comm` 127.
+**Арбитражи lead по тестам тестера** (неверные модели — находки, записаны в самих тестах):
+крит. 6 сканировал собственные докстринги → матчим import-формы; крит. 4 пинил
+`history_query(metric=)`, а `record_metric` едет агрегатом окна (`kind=stats`,
+`extra.metrics[].name`) — так и у прототипа (R12); крит. 5 читал `<log_dir>/<process>/errors.log`,
+контракт — общий `<log_dir>/errors.log`, И инъекция «без pymodbus» не доезжала до ребёнка
+(spawn копирует `sys.path` родителя, env не пересчитывается) — заглушка теперь и в `sys.path`.
+Замечание в ревью: `record_metric` зовётся только из `cmd_status`/`shutdown` — без опроса
+статуса числа не текут.
 
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
