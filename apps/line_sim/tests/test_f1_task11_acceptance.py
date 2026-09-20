@@ -123,7 +123,10 @@ def _modbus_mentioned(*texts: str) -> bool:
 def _errors_log_text(log_dir: Path, process: str) -> str:
     """Текст errors.log процесса под MULTIPROCESS_LOG_DIR. Отсутствие файла -> "" (не отказ:
     вторая проверка — anomalies — реальный якорь существования, см. критерий 5)."""
-    path = log_dir / process / "errors.log"
+    # Арбитраж lead (2026-09-20, расследование §3): файлы ошибок — ОБЩИЕ для всех
+    # процессов, в КОРНЕ log_dir (ACCEPTANCE_CHECKLIST.md:61, error_manager_config.py:44).
+    # Прежний путь <log_dir>/<process>/errors.log был допущением тестера (его отчёт, п.79).
+    path = log_dir / "errors.log"
     if not path.is_file():
         return ""
     return path.read_text(encoding="utf-8", errors="replace")
@@ -313,17 +316,33 @@ def test_job_counts_writes_in_status_and_history(line_sim_backend) -> None:
         f"writes_seen не достиг >=1 за 10с после send_job: {status!r}"
     )
 
+    # Арбитраж lead (2026-09-20, расследование §2): `ctx.record_metric` по контракту
+    # фреймворка едет в историю АГРЕГАТОМ окна — строка kind="stats", metric=None,
+    # имена в extra.metrics[].name (record_display.py:213-218, metric_record.py:340).
+    # `history_query(metric=...)` читает только плоскость уровней (publish_metric);
+    # у прототипа так же (замер R12). Прежняя форма запроса пинила контракт, которого нет.
     deadline = time.monotonic() + 10.0
     history: dict = {}
-    rows: list = []
+    matched: list = []
     while time.monotonic() < deadline:
-        history = drv.history_query(metric=_WRITES_METRIC, limit=50)
+        history = drv.history_query(kind="stats", limit=100)
         raw_rows = history.get("rows") if isinstance(history, dict) else None
         rows = raw_rows if isinstance(raw_rows, list) else []
-        if len(rows) >= 1:
+        matched = [
+            r for r in rows
+            if isinstance(r, dict) and r.get("process") == _ROBOT_PROCESS
+            and any(
+                isinstance(m, dict) and m.get("name") == _WRITES_METRIC
+                for m in ((r.get("extra") or {}).get("metrics") or [])
+            )
+        ]
+        if matched:
             break
         time.sleep(1.0)
-    assert len(rows) >= 1, f"history_query(metric={_WRITES_METRIC!r}) не отдал ни одной строки за 10с: {history!r}"
+    assert matched, (
+        f"history_query(kind='stats') не отдал снапшота процесса {_ROBOT_PROCESS!r} с метрикой "
+        f"{_WRITES_METRIC!r} в extra.metrics за 10с: {history!r}"
+    )
 
 
 # --------------------------------------------------------------------------- #
