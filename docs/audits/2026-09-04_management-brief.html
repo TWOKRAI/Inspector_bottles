@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- Докладная записка руководству, 2026-09-04. Источник цифр: docs/audits/2026-09-04_honest-verdict-bus-and-niche.md.
-     Шрифты грузятся с fonts.googleapis.com; без сети страница откроется системными шрифтами. -->
+<!-- Докладная записка руководству. Первая редакция 2026-09-04, источник цифр: docs/audits/2026-09-04_honest-verdict-bus-and-niche.md.
+     Редакция 2026-09-09: круговые диаграммы, баллы системы и автора, сравнение с аналогами в баллах, короткий итог.
+     Файл собирается генератором (scratchpad gen_brief.py); шрифты с fonts.googleapis.com, без сети откроется системными. -->
 <title>Инспектор на Python</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -219,69 +220,88 @@
   footer { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--ink-3); max-width: 78ch; }
   a { color: var(--accent-ink); }
   a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* donuts and gauges */
+  .donuts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 20px 0 8px; }
+  .donuts.two { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .dn { background: var(--surface); border: 1px solid var(--line); padding: 16px 14px 14px; display: grid; justify-items: center; gap: 6px; text-align: center; }
+  .dn.wide { grid-template-columns: 150px 1fr; justify-items: start; text-align: left; align-items: center; gap: 8px 18px; }
+  .dn svg { width: 128px; height: 128px; display: block; }
+  .dn.wide svg { width: 150px; height: 150px; }
+  .dn .bg { fill: none; stroke: var(--surface-2); stroke-width: 5; }
+  .dn .sg { fill: none; stroke-width: 5; }
+  .sg.a { stroke: var(--chart-a); } .sg.b { stroke: var(--chart-b); } .sg.c { stroke: var(--chart-c); }
+  .sg.good { stroke: var(--good); } .sg.bad { stroke: var(--bad); } .sg.warn { stroke: var(--warn); }
+  .sg.tgt { stroke: var(--chart-c); opacity: .55; }
+  .dn .cv { font-family: var(--display); font-weight: 600; font-size: 9.5px; fill: var(--ink); }
+  .dn .cu { font-family: var(--mono); font-size: 3.4px; fill: var(--ink-3); letter-spacing: .04em; }
+  .dn .cl { font-size: 14.5px; font-weight: 600; line-height: 1.25; }
+  .dn .cs { font-size: 12.5px; color: var(--ink-3); line-height: 1.3; }
+  .dn .dl { font-family: var(--mono); font-size: 18px; color: var(--good); }
+  .dn .dl.warn { color: var(--warn); }
+  .dn .lg { display: grid; gap: 6px; font-size: 14px; color: var(--ink-2); }
+  .dn .lg span::before { content: ""; display: inline-block; width: 11px; height: 11px; margin-right: 8px; vertical-align: -1px; }
+  .dn .lg .la::before { background: var(--chart-a); } .dn .lg .lb::before { background: var(--chart-b); } .dn .lg .lc::before { background: var(--chart-c); }
+  .dn .lg b { color: var(--ink); font-family: var(--mono); font-weight: 500; }
+  td.me, th.me { background: var(--accent-soft); }
+  td.tg { color: var(--good); font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .legendline { font-size: 13.5px; color: var(--ink-3); margin: 6px 0 0; }
+  .rank { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 18px 0 8px; }
+  .rank .rk { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--accent); padding: 16px 18px; }
+  .rank .rk .t { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .rank .rk .v { font-family: var(--display); font-weight: 600; font-size: 26px; line-height: 1.15; margin: 6px 0 4px; }
+  .rank .rk .d { font-size: 14px; color: var(--ink-2); }
+  @media print { .page { max-width: none; padding: 0; } section { break-inside: avoid; } }
 </style>
 </head>
 <body>
 <div class="page">
   <header class="top">
-    <div class="eyebrow">Докладная записка · 4 сентября 2026 · Inspector_bottles</div>
+    <div class="eyebrow">Докладная записка · 4 сентября 2026, редакция 9 сентября · Inspector_bottles</div>
     <h1>Инспектор с машинным зрением на Python: что построено, чего это стоит и что просим одобрить</h1>
-    <p class="lede">Главный вопрос: «не проиграет ли Python по скорости C++?» Ответ измерен, а не предположен. <strong>Тяжёлые вычисления и так идут на скорости C, а обвязка на Python занимает меньше 5% времени кадра.</strong> Ниже цифры, где они взяты и что ещё не доказано.</p>
+    <p class="lede">Главный вопрос: «не проиграет ли Python по скорости C++?» Ответ измерен. <strong>Тяжёлые вычисления идут на скорости C, обвязка на Python занимает меньше 5% времени кадра.</strong> Ниже цифры, баллы и что ещё не доказано.</p>
     <div class="headline">
-      <div class="hd"><div class="big">5–10<small>%</small></div><div class="what">Настолько C++ был бы быстрее на одном кадре</div><div class="how">Измерено: обвязка на Python занимает 2–4 мс из 33. Остальное считает видеокарта, ей язык безразличен.</div></div>
+      <div class="hd"><div class="big">5–10<small>%</small></div><div class="what">Настолько C++ был бы быстрее на кадре</div><div class="how">Измерено: обвязка 2–4 мс из 33. Остальное считает видеокарта, ей язык безразличен.</div></div>
       <div class="hd"><div class="big">×3–5</div><div class="what">Во столько дороже та же система на C++</div><div class="how">Оценка: год одного инженера с ИИ-агентами против 12–18 месяцев команды из 3–5 человек.</div></div>
-      <div class="hd"><div class="big">1 → 0</div><div class="what">Мест, где Python реально тормозил инспекцию</div><div class="how">Было одно, обход контура. Закрыто за день: в 42 раза быстрее, без смены языка.</div></div>
+      <div class="hd"><div class="big">6,5 → 8<small>+</small></div><div class="what">Оценка системы сегодня и после стенда, из 10</div><div class="how">Держит только одна ось: нет чисел с реальной линии. Её закрывает план line-sim: симулятор и стенд с числами.</div></div>
     </div>
   </header>
 
   <section>
     <div class="eyebrow">Раздел 1</div>
     <h2>Что построено за год</h2>
-    <p class="sub">Один инженер с ИИ-агентами в паре: сначала Cursor, затем Claude Code. Цифры сняты с репозитория 4 сентября 2026.</p>
+    <p class="sub">Один инженер с ИИ-агентами в паре. Цифры сняты с репозитория 4 сентября 2026.</p>
     <div class="tiles">
-      <div class="tile"><div class="n">1<small>год</small></div><div class="l">текущая история кода с 30 апреля 2026: 2974 сохранения</div></div>
       <div class="tile"><div class="n">243<small>тыс.</small></div><div class="l">строк рабочего кода</div></div>
       <div class="tile"><div class="n">279<small>тыс.</small></div><div class="l">строк автотестов, больше, чем кода</div></div>
       <div class="tile"><div class="n">27</div><div class="l">модулей ядра, у каждого описание, статус и тесты</div></div>
       <div class="tile"><div class="n">52</div><div class="l">сменных блоков обработки изображения</div></div>
       <div class="tile"><div class="n">13</div><div class="l">сервисов: камеры, робот, привод, база, обучение</div></div>
-      <div class="tile"><div class="n">17</div><div class="l">готовых сценариев работы (рецептов)</div></div>
-      <div class="tile"><div class="n">147</div><div class="l">записанных архитектурных решений с обоснованием</div></div>
+      <div class="tile"><div class="n">17</div><div class="l">готовых сценариев инспекции</div></div>
+      <div class="tile"><div class="n">147</div><div class="l">архитектурных решений с обоснованием</div></div>
+      <div class="tile"><div class="n">0</div><div class="l">циклических зависимостей; архитектурная оценка 7013 из 10000 на 9 сентября</div></div>
     </div>
-    <div class="tw">
-      <table>
-        <thead><tr><th>Слой системы</th><th>Что это</th><th class="num">Файлов .py</th><th class="num">Строк .py, с тестами</th></tr></thead>
-        <tbody>
-          <tr><td>Ядро (multiprocess_framework)</td><td>процессы, общая память, маршрутизация, конфиг, состояние, телеметрия</td><td class="num">1 501</td><td class="num">318 270</td></tr>
-          <tr><td>Сервисы (Services)</td><td>камеры Hikvision, робот, привод, Modbus, база данных, обучение моделей</td><td class="num">323</td><td class="num">44 454</td></tr>
-          <tr><td>Блоки обработки (Plugins)</td><td>52 блока: захват, фильтры, сегментация, контуры, вывод на робота</td><td class="num">367</td><td class="num">33 885</td></tr>
-          <tr><td>Приложение-инспектор</td><td>интерфейс, редактор схем, рецепты, режим без экрана</td><td class="num">692</td><td class="num">128 815</td></tr>
-          <tr class="total"><td>Весь репозиторий, Python</td><td>включая скрипты и удалённое управление; 476 тыс. строк без пустых и комментариев</td><td class="num">3 163</td><td class="num">589 286</td></tr>
-          <tr><td>Документация</td><td>описания модулей, решения, планы, отчёты о приёмке</td><td class="num">1 673 файла</td><td class="num">276 779</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="note">Счёт штатным скриптом проекта scripts/code_stats 4 сентября 2026. Размер сам по себе не достоинство: см. недостатки в разделе 5.</p>
-    <p>Это не одна программа, а конструктор. Сценарий инспекции описывается в одном текстовом файле: какая камера, какие блоки обработки, куда отправлять результат. Блоки переставляются без изменения кода, параметры меняются на ходу с пульта.</p>
+    <p class="legendline">Проверено 9 сентября 2026: 27 из 27 модулей ядра с описанием, интерфейсом и тестами; 14 из 14 сервисов с тестами; 36 архитектурных правил зелёные; проверка структуры без ошибок и предупреждений; 630 сохранений за последние 30 дней.</p>
     <div class="cmp">
       <div class="col">
         <h3>Уже работает</h3>
         <ul>
-          <li>Несколько процессов на всех ядрах процессора, кадры между ними без копирования</li>
-          <li>Автоматический перезапуск упавшего блока без остановки линии</li>
-          <li>Изменение настроек на ходу, без перезапуска</li>
-          <li>Встроенные журналы, телеметрия и удалённое управление по сети</li>
-          <li>Подключение промышленных устройств: робот, частотный привод, Modbus</li>
-          <li>Графический редактор схемы обработки и режим без экрана для встраиваемых устройств</li>
+          <li>Процессы на всех ядрах, кадры между ними без копирования</li>
+          <li>Автоперезапуск упавшего блока без остановки линии</li>
+          <li>Настройки меняются на ходу, с пульта</li>
+          <li>Журналы, телеметрия, удалённое управление по сети</li>
+          <li>Робот, частотный привод, Modbus, база данных</li>
+          <li>Редактор схемы обработки и режим без экрана</li>
         </ul>
       </div>
       <div class="col">
-        <h3>Качество, которое проверяется автоматически</h3>
+        <h3>Как это устроено</h3>
         <ul>
-          <li>Архитектурная проверка: 0 циклических зависимостей, 0 «монстров», оценка 7023 из 10000</li>
-          <li>Каждое заявленное свойство подтверждено тестом, который краснеет, если свойство сломать</li>
-          <li>Независимая приёмка каждой задачи отдельным агентом-ревьюером с воспроизведением</li>
-          <li>Границы между слоями системы контролируются инструментом, а не договорённостью</li>
+          <li>Сценарий инспекции: один текстовый файл, камера, блоки, выход</li>
+          <li>Блоки переставляются без изменения кода</li>
+          <li>Каждое заявленное свойство держит тест, который краснеет при поломке</li>
+          <li>Каждую задачу принимает независимый ревьюер с воспроизведением</li>
+          <li>Границы слоёв проверяет инструмент, а не договорённость</li>
         </ul>
       </div>
     </div>
@@ -290,184 +310,174 @@
   <section>
     <div class="eyebrow">Раздел 2</div>
     <h2>Куда уходит время одного кадра</h2>
-    <p class="sub">Рабочий сценарий: веб-камера → нейросеть выделяет контуры → точки для робота. 30 кадров в секунду, на кадр есть 33 миллисекунды.</p>
-    <div class="budget">
-      <div class="bar">
-        <div class="seg a">Нейросеть на видеокарте · 25–35 мс</div>
-        <div class="seg b">шина</div>
-        <div class="seg c">обвязка</div>
-      </div>
-      <div class="legend">
-        <span class="la">Нейросеть на видеокарте: 25–35 мс, одинаково для Python и C++</span>
-        <span class="lb">Передача кадров между процессами: 1–2 мс</span>
-        <span class="lc">Обвязка на Python внутри блоков: 1–3 мс, оценка</span>
-      </div>
-    </div>
-    <div class="chart">
-      <h3>Сколько стоит передача кадра между процессами на фоне всего кадра</h3>
-      <p class="cap">Одна шкала для всех строк: 0–33 мс, столько есть на один кадр при 30 кадрах в секунду. Столбики шины почти не видны, и это сам результат.</p>
-      <div class="hrow"><div class="hl">Время на один кадр<small>30 кадров в секунду</small></div><div class="track"><div class="fill dim" style="width:100%"></div></div><div class="hv">33 мс</div></div>
-      <div class="hrow"><div class="hl">Нейросеть на видеокарте<small>одинаково для Python и C++</small></div><div class="track"><div class="fill" style="width:90%"></div></div><div class="hv">25–35 мс</div></div>
-      <div class="hrow"><div class="hl">Три передачи кадра, Python<small>измерено, худший из ста</small></div><div class="track"><div class="fill acc" style="width:5.4%"></div></div><div class="hv">1,8 мс</div></div>
-      <div class="hrow"><div class="hl">Три передачи кадра, C++<small>справочно</small></div><div class="track"><div class="fill acc" style="width:0.5%"></div></div><div class="hv">0,15 мс</div></div>
-      <div class="axis-wrap"><div></div><div class="axis"><span>0</span><span>8</span><span>16</span><span>25</span><span>33 мс</span></div><div></div></div>
-    </div>
-    <p>Одна передача кадра между процессами стоит <strong>0,3 мс в типичном случае и 0,6 мс в худшем из ста</strong>. Замер сделан на синтетическом тракте 640×480 в июле, кадр читается без копирования. Три передачи на кадр дают 1–2 мс из 33.</p>
-    <p>На C++ те же передачи стоили бы примерно 0,05 мс каждая. Разница есть, но она составляет 5–10% времени кадра и не превращается в скорость: скорость упирается в видеокарту, которая одинаково быстра из любого языка.</p>
+    <p class="sub">Сценарий: камера, нейросеть выделяет контуры, точки для робота. Одна передача кадра между процессами стоит 0,3 мс в типичном случае и 0,6 мс в худшем из ста; замер на тракте 640×480.</p>
+    <div class="donuts two"><div class="dn wide"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg a" cx="21" cy="21" r="15.9155" stroke-dasharray="88.00 12.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="5.00 95.00" stroke-dashoffset="-63.00"/><circle class="sg c" cx="21" cy="21" r="15.9155" stroke-dasharray="7.00 93.00" stroke-dashoffset="-68.00"/><text x="21" y="21.6" text-anchor="middle" class="cv">33</text><text x="21" y="27" text-anchor="middle" class="cu">мс на кадр</text></svg><div><div class="cl">Куда уходит кадр при 30 кадрах/с</div><div class="lg" style="margin-top:8px"><span class="la">Нейросеть на видеокарте <b>25–35 мс</b>, одинаково для Python и C++</span><span class="lb">Три передачи кадра между процессами <b>1,8 мс</b>, худший из ста</span><span class="lc">Обвязка на Python внутри блоков <b>1–3 мс</b>, оценка</span></div></div></div><div class="dn wide"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg a" cx="21" cy="21" r="15.9155" stroke-dasharray="93.00 7.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="7.00 93.00" stroke-dashoffset="-68.00"/><text x="21" y="21.6" text-anchor="middle" class="cv">7</text><text x="21" y="27" text-anchor="middle" class="cu">% кадра</text></svg><div><div class="cl">Что вернуло бы переписывание на C++</div><div class="lg" style="margin-top:8px"><span class="la">Не изменится: видеокарта, OpenCV, NumPy уже на C и CUDA <b>93%</b></span><span class="lb">Станет быстрее: передачи и обвязка <b>5–10%</b>, скорость линии от этого не растёт</span></div></div></div></div>
+    <p class="legendline">Потолок скорости сегодня не Python, а таймер Windows в источнике кадров: 15,6 мс. Это чинится за день, строка B-1 очереди.</p>
   </section>
 
   <section>
     <div class="eyebrow">Раздел 3</div>
-    <h2>Где Python честно проигрывает C++, и на сколько</h2>
-    <p class="sub">Левые столбцы измерены на рабочем компьютере 4 сентября 2026. Столбец C++ это справочные величины для сравнения, не замер соседней команды.</p>
+    <h2>Где Python честно проигрывает C++</h2>
+    <p class="sub">Левые столбцы измерены на рабочем ПК 4 сентября 2026. Столбец C++ справочный.</p>
     <div class="tw">
       <table>
-        <thead><tr><th>Что стоит времени</th><th class="num">Python, замер</th><th class="num">C++, справочно</th><th class="num">Разница</th><th>Влияние на инспекцию</th></tr></thead>
+        <thead><tr><th>Что стоит времени</th><th class="num">Python</th><th class="num">C++</th><th class="num">Разница</th><th>Влияние</th></tr></thead>
         <tbody>
-          <tr><td>Копирование кадра Full HD в общую память</td><td class="num">0,20 мс</td><td class="num">0,20 мс</td><td class="num">нет</td><td><span class="pill good">не влияет</span> одна и та же операция</td></tr>
-          <tr><td>Обработка пикселей через OpenCV и NumPy</td><td class="num">0,18 мс</td><td class="num">0,20 мс</td><td class="num">нет</td><td><span class="pill good">не влияет</span> внутри это C</td></tr>
-          <tr><td>Передача служебного сообщения между процессами</td><td class="num">0,05 мс</td><td class="num">0,003 мс</td><td class="num">15×</td><td><span class="pill good">0,2% кадра</span></td></tr>
-          <tr><td>Пауза уборки памяти при миллионе объектов</td><td class="num">4–7 мс</td><td class="num">нет</td><td class="num">—</td><td><span class="pill good">снято</span> уборка заморожена после старта</td></tr>
-          <tr><td>Цикл по пикселям на чистом Python</td><td class="num">18 мс</td><td class="num">0,2 мс</td><td class="num hl">100×</td><td><span class="pill good">закрыто</span> одна функция в системе, ускорена в 42×, см. ниже</td></tr>
-          <tr><td>Память одного процесса без нейросети</td><td class="num">37 МБ</td><td class="num">5–15 МБ</td><td class="num">3–5×</td><td><span class="pill neutral">не критично</span> на ПК</td></tr>
+          <tr><td>Кадр Full HD в общую память</td><td class="num">0,20 мс</td><td class="num">0,20 мс</td><td class="num">нет</td><td><span class="pill good">не влияет</span></td></tr>
+          <tr><td>Пиксели через OpenCV и NumPy</td><td class="num">0,18 мс</td><td class="num">0,20 мс</td><td class="num">нет</td><td><span class="pill good">внутри это C</span></td></tr>
+          <tr><td>Служебное сообщение между процессами</td><td class="num">0,05 мс</td><td class="num">0,003 мс</td><td class="num">15×</td><td><span class="pill good">0,2% кадра</span></td></tr>
+          <tr><td>Пауза уборки памяти</td><td class="num">4–7 мс</td><td class="num">нет</td><td class="num">—</td><td><span class="pill good">снято</span> уборка заморожена</td></tr>
           <tr><td>Память процесса с нейросетью</td><td class="num">406 МБ</td><td class="num">100–200 МБ</td><td class="num">2–3×</td><td><span class="pill warn">важно</span> для Raspberry Pi</td></tr>
-          <tr><td>Запуск процесса с нейросетью</td><td class="num">3,0 с</td><td class="num">0,3–0,5 с</td><td class="num">6–10×</td><td><span class="pill neutral">только при старте</span></td></tr>
+          <tr><td>Старт процесса с нейросетью</td><td class="num">3,0 с</td><td class="num">0,3–0,5 с</td><td class="num">6–10×</td><td><span class="pill neutral">только при старте</span></td></tr>
         </tbody>
       </table>
     </div>
-    <p>Единственное место, где Python проигрывает в сто раз, это цикл по пикселям, написанный на самом Python. В системе такая функция <strong>одна</strong>: обход контура для построения траектории робота. Проверено поиском по всему коду. 4 сентября она закрыта за один день в два шага, и это показывает, как в Python лечится такая проблема: без смены языка, без компилятора на машине, тем же кодом.</p>
-    <div class="chart">
-      <h3>Одна медленная функция: до и после</h3>
-      <p class="cap">Обход контура на детальном кадре 640×480 (35 тыс. точек скелета). Шаг 1: переписать структуру данных. Шаг 2: включить компилятор Numba на ту же функцию, одна строка. Оба шага прошли одни и те же 104 теста.</p>
-      <div class="hrow"><div class="hl">Было<small>обычный Python, множества и кортежи</small></div><div class="track"><div class="fill dim" style="width:100%"></div></div><div class="hv">420 мс</div></div>
-      <div class="hrow"><div class="hl">Шаг 1: целые индексы<small>тот же Python, другая структура</small></div><div class="track"><div class="fill" style="width:20.2%"></div></div><div class="hv">85 мс <small>5×</small></div></div>
-      <div class="hrow"><div class="hl">Шаг 2: + Numba<small>компилируется при первом запуске</small></div><div class="track"><div class="fill acc" style="width:2.4%"></div></div><div class="hv">10 мс <small>42×</small></div></div>
-      <div class="axis-wrap"><div></div><div class="axis"><span>0</span><span>100</span><span>200</span><span>300</span><span>420 мс</span></div><div></div></div>
-    </div>
-    <p>На кадре обычной детализации (13 тыс. точек) та же функция ушла с 154 мс до 4 мс. Всё остальное в системе уже исполняется на скорости C.</p>
-    <div class="callout">
-      <p><strong>Формула, которую можно повторять на совещании.</strong> Всё тяжёлое (обработка изображений, нейросеть) в Python и так исполняется на C и CUDA. На самом Python написана только логика соединения блоков, и она занимает меньше 5% времени кадра.</p>
-    </div>
+
+    <div class="callout"><p><strong>Формула для совещания.</strong> Всё тяжёлое в Python и так исполняется на C и CUDA. На самом Python написана только логика соединения блоков, и она занимает меньше 5% времени кадра.</p></div>
   </section>
 
   <section>
     <div class="eyebrow">Раздел 4</div>
-    <h2>Что покупается за эти проценты</h2>
-    <p class="sub">Оценка трудозатрат для C++ приблизительная, основана на объёме построенного, а не на замере другой команды.</p>
-    <div class="tw">
-      <table>
-        <thead><tr><th>Критерий</th><th>Python, этот проект</th><th>C++, типичный подход</th></tr></thead>
-        <tbody>
-          <tr><td>Срок до конструктора с 17 сценариями</td><td class="num">1 год, 1 инженер + ИИ-агенты</td><td class="num">оценка: 12–18 месяцев, 3–5 человек</td></tr>
-          <tr><td>Новый сценарий инспекции</td><td>текстовый файл, без компиляции, часы</td><td>код, сборка, выпуск, дни</td></tr>
-          <tr><td>Изменение параметров на работающей линии</td><td>с пульта, без остановки</td><td>обычно перезапуск</td></tr>
-          <tr><td>Разработка с ИИ-агентами</td><td>ежедневно, агент пишет блок по описанию</td><td>ограниченно: сборка, типы, память</td></tr>
-          <tr><td>Нейросети и обучение</td><td>PyTorch, ONNX, YOLO встроены</td><td>отдельная связка через C++-API</td></tr>
-          <tr><td>Windows и Linux, Jetson, Raspberry Pi</td><td>один код, режим без экрана есть</td><td>отдельная сборка под каждую платформу</td></tr>
-          <tr><td>Кто сможет поддерживать</td><td>инженер-технолог с базовым Python</td><td>только программист C++</td></tr>
-          <tr><td>Предельная скорость</td><td>30–60 кадров/с при 3–5 процессах; сотни кадров/с и отклик быстрее 1 мс — нативный блок</td><td>выше потолок для сверхбыстрых линий</td></tr>
-        </tbody>
-      </table>
+    <h2>Python против C++ для этой задачи, в баллах</h2>
+    <p class="sub">Шкала 0–10. Две строки из замеров, остальные экспертная оценка автора.</p>
+    <div class="cmp" style="grid-template-columns: 1.4fr 1fr; align-items: start;">
+      <div class="tw" style="margin:0"><table style="min-width:0">
+        <thead><tr><th>Критерий</th><th class="num">Python</th><th class="num">C++</th></tr></thead>
+        <tbody><tr><td>Скорость на одном кадре<br><small style="color:var(--ink-3)">замер</small></td><td class="num hl">9</td><td class="num ">10</td></tr><tr><td>Предельная скорость линии<br><small style="color:var(--ink-3)">сотни кадров/с</small></td><td class="num hl">6</td><td class="num ">10</td></tr><tr><td>Скорость разработки<br><small style="color:var(--ink-3)">оценка</small></td><td class="num hl">10</td><td class="num ">3</td></tr><tr><td>Сценарий без программиста<br><small style="color:var(--ink-3)">оценка</small></td><td class="num hl">9</td><td class="num ">3</td></tr><tr><td>Работа с ИИ-агентами<br><small style="color:var(--ink-3)">оценка</small></td><td class="num hl">10</td><td class="num ">5</td></tr><tr><td>Нейросети и обучение<br><small style="color:var(--ink-3)">оценка</small></td><td class="num hl">10</td><td class="num ">6</td></tr><tr><td>Windows, Linux, Jetson, Raspberry<br><small style="color:var(--ink-3)">оценка</small></td><td class="num hl">9</td><td class="num ">6</td></tr><tr><td>Кто сможет поддерживать<br><small style="color:var(--ink-3)">оценка</small></td><td class="num hl">9</td><td class="num ">4</td></tr><tr><td>Память и время старта<br><small style="color:var(--ink-3)">замер</small></td><td class="num hl">6</td><td class="num ">10</td></tr><tr class="total"><td>Сумма из 90</td><td class="num hl">78</td><td class="num">57</td></tr></tbody>
+      </table></div>
+      <div class="donuts" style="margin:0; grid-template-columns: 1fr;"><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="86.67 13.33" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">78</text></svg><div class="cl">Python, этот проект</div><div class="cs">сумма по девяти критериям из 90</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg a" cx="21" cy="21" r="15.9155" stroke-dasharray="63.33 36.67" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">57</text></svg><div class="cl">C++, типичный подход</div><div class="cs">сумма по девяти критериям из 90</div></div></div>
     </div>
-    <p>Для сверхбыстрых участков предусмотрен выход: отдельный блок пишется на C++ или Rust и подключается к той же шине кадров, вся остальная система не переписывается. Это тот же приём, что у ROS 2 и NVIDIA DeepStream.</p>
-
-    <div class="chart score">
-      <h3>Итог по категориям: Python против C++ для этой задачи</h3>
-      <p class="cap">Шкала 0–10. Две строки скорости взяты из замеров, остальные это экспертная оценка автора и помечены так. Оранжевый: Python, этот проект. Серо-синий: C++, типичный подход.</p>
-      <div class="srow"><div class="sl">Скорость на одном кадре<small>замер</small></div><div class="pair"><div class="pb py"><i style="width:90%"></i></div><div class="pb cpp"><i style="width:100%"></i></div></div><div class="sv"><span class="py">9</span><span>10</span></div></div>
-      <div class="srow"><div class="sl">Предельная скорость линии<small>сотни кадров/с, отклик &lt; 1 мс</small></div><div class="pair"><div class="pb py"><i style="width:60%"></i></div><div class="pb cpp"><i style="width:100%"></i></div></div><div class="sv"><span class="py">6</span><span>10</span></div></div>
-      <div class="srow"><div class="sl">Скорость разработки<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:100%"></i></div><div class="pb cpp"><i style="width:30%"></i></div></div><div class="sv"><span class="py">10</span><span>3</span></div></div>
-      <div class="srow"><div class="sl">Новый сценарий без программиста<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:90%"></i></div><div class="pb cpp"><i style="width:30%"></i></div></div><div class="sv"><span class="py">9</span><span>3</span></div></div>
-      <div class="srow"><div class="sl">Работа с ИИ-агентами<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:100%"></i></div><div class="pb cpp"><i style="width:50%"></i></div></div><div class="sv"><span class="py">10</span><span>5</span></div></div>
-      <div class="srow"><div class="sl">Нейросети и обучение<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:100%"></i></div><div class="pb cpp"><i style="width:60%"></i></div></div><div class="sv"><span class="py">10</span><span>6</span></div></div>
-      <div class="srow"><div class="sl">Windows, Linux, Jetson, Raspberry<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:90%"></i></div><div class="pb cpp"><i style="width:60%"></i></div></div><div class="sv"><span class="py">9</span><span>6</span></div></div>
-      <div class="srow"><div class="sl">Кто сможет поддерживать<small>оценка</small></div><div class="pair"><div class="pb py"><i style="width:90%"></i></div><div class="pb cpp"><i style="width:40%"></i></div></div><div class="sv"><span class="py">9</span><span>4</span></div></div>
-      <div class="srow"><div class="sl">Память и время старта<small>замер</small></div><div class="pair"><div class="pb py"><i style="width:60%"></i></div><div class="pb cpp"><i style="width:100%"></i></div></div><div class="sv"><span class="py">6</span><span>10</span></div></div>
-      <div class="srow total"><div class="sl">Сумма из 90</div><div class="pair"><div class="pb py"><i style="width:87%"></i></div><div class="pb cpp"><i style="width:63%"></i></div></div><div class="sv"><span class="py big">78</span><span class="big">57</span></div></div>
-      <p class="cap" style="margin:12px 0 0">C++ выигрывает две категории: предельную скорость и память. Обе важны для сверхбыстрых линий и слабых устройств, и обе закрываются нативным блоком на той же шине, без переписывания системы. Python выигрывает всё, что связано со временем людей.</p>
-    </div>
+    <p class="legendline">C++ выигрывает две категории, предельную скорость и память. Обе закрываются нативным блоком на C++ или Rust, подключённым к той же шине кадров, без переписывания системы. Так же устроены ROS 2 и NVIDIA DeepStream.</p>
   </section>
 
   <section>
     <div class="eyebrow">Раздел 5</div>
-    <h2>Преимущества и недостатки</h2>
-    <p class="sub">Обе колонки одинаково честные. Недостатки названы теми же словами, что и в внутреннем аудите.</p>
+    <h2>Честная оценка системы, из 10</h2>
+    <p class="sub">Из внутреннего вердикта 4 сентября 2026. Светло-серое кольцо: цель после планов line-sim (стенд с числами, P-1) и P-2 (второй пользователь).</p>
+    <div class="donuts"><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">8</text></svg><div class="cl">Выбор Python</div><div class="cs">тяжёлое уже на C; шина < 5% кадра</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="70.00 30.00" stroke-dashoffset="-55.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">7</text></svg><div class="cl">Идея и ниша</div><div class="cs">конструктор инспекции на обычном ПК</div><div class="dl">после доработки — 8</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="75.00 25.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">7,5</text></svg><div class="cl">Архитектура</div><div class="cs">0 циклов, правила зелёные; узкое место глубина 7</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="90.00 10.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">9</text></svg><div class="cl">Инженерная дисциплина</div><div class="cs">тест краснеет при поломке свойства</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><circle class="sg bad" cx="21" cy="21" r="15.9155" stroke-dasharray="40.00 60.00" stroke-dashoffset="-55.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">4</text></svg><div class="cl">Доказанность как продукта</div><div class="cs">нет чисел с линии, нет второго пользователя</div><div class="dl">после доработки — 8</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="65.00 35.00" stroke-dashoffset="-55.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">6,5</text></svg><div class="cl">Итог сегодня</div><div class="cs">взвешенно: доказанность тянет вниз</div><div class="dl">после доработки — 8+</div></div></div>
     <div class="cmp">
-      <div class="col">
-        <h3>Преимущества</h3>
-        <ul>
-          <li><strong>Скорость разработки.</strong> Конструктор с 17 сценариями за год одним инженером вместо команды. Новый блок обработки агент пишет по описанию за часы.</li>
-          <li><strong>Сценарий без программиста.</strong> Инспекция описывается текстовым файлом, параметры меняются с пульта на ходу.</li>
-          <li><strong>Всё тяжёлое уже на скорости C.</strong> OpenCV, NumPy, PyTorch. Обвязка меньше 5% кадра, измерено.</li>
-          <li><strong>Промышленная обвязка встроена.</strong> Журналы, телеметрия, удалённое управление, автоперезапуск, Modbus, робот, привод.</li>
-          <li><strong>Один код для Windows, Linux, Jetson, Raspberry Pi.</strong> Режим без экрана: устройство работает, оператор смотрит с ПК.</li>
-          <li><strong>Проверяемое качество.</strong> Тестов больше, чем кода; 0 циклических зависимостей; каждое решение записано с обоснованием.</li>
-          <li><strong>Выход в C++ или Rust предусмотрен.</strong> Сверхбыстрый блок подключается к той же шине, система не переписывается.</li>
-        </ul>
-      </div>
-      <div class="col">
-        <h3>Недостатки</h3>
-        <ul>
-          <li><strong>Один носитель знаний.</strong> Систему знает один человек. Документация большая, но второй человек её ещё не проходил.</li>
-          <li><strong>Ядро больше приложения.</strong> 318 тыс. строк ядра против 129 тыс. приложения. Часть слоёв держится на дисциплине, а не на необходимости.</li>
-          <li><strong>Нет чисел с реальной линии.</strong> Замеры на синтетике и веб-камере. Проект называется «инспектор бутылок», а показывает рисующего робота.</li>
-          <li><strong>Память и старт.</strong> Процесс с нейросетью 400 МБ и 3 с старта. На Raspberry Pi это ограничивает число процессов.</li>
-          <li><strong>Потолок скорости.</strong> Сотни кадров в секунду и отклик быстрее 1 мс на чистом Python недостижимы, нужен нативный блок.</li>
-          <li><strong>Linux не проверялся автоматически.</strong> Одно известное место в общей памяти надо исправить до первого Jetson. Версия Python прибита к 3.12, на Jetson Orin стоит 3.10.</li>
-          <li><strong>Файл сценария многословен.</strong> Рабочий рецепт 529 строк, треть из них пульт. Адресация блоков по номеру ломается при вставке нового.</li>
-          <li><strong>Документации 1 673 файла.</strong> Такой объём дорого держать в актуальном состоянии одному человеку.</li>
-        </ul>
-      </div>
+      <div class="col"><h3>Сильное</h3><ul>
+        <li>Конструктор с 17 сценариями за год одним инженером</li>
+        <li>Новый сценарий: текстовый файл, часы, без программиста</li>
+        <li>Всё тяжёлое на скорости C; обвязка меньше 5% кадра</li>
+        <li>Промышленная обвязка встроена: журналы, телеметрия, автоперезапуск, Modbus</li>
+        <li>Один код для Windows, Linux, Jetson, Raspberry Pi</li>
+        <li>Тестов больше, чем кода; каждое решение записано</li>
+      </ul></div>
+      <div class="col"><h3>Слабое</h3><ul>
+        <li>Один носитель знаний; второй человек документацию не проходил</li>
+        <li>Нет чисел с реальной линии: замеры на синтетике и веб-камере</li>
+        <li>Ядро больше приложения: 318 тыс. строк против 129 тыс.</li>
+        <li>Процесс с нейросетью: 400 МБ и 3 с старта</li>
+        <li>Отклик быстрее 1 мс на чистом Python недостижим</li>
+        <li>Linux ещё не в автоматической проверке; рецепт многословен, 529 строк</li>
+        <li>Тесты сосредоточены в ядре: по файлам покрыт каждый четвёртый (оценка sentrux, 922 из 3876)</li>
+      </ul></div>
     </div>
   </section>
 
   <section>
     <div class="eyebrow">Раздел 6</div>
-    <h2>Как это соотносится с готовыми системами</h2>
-    <p class="sub">Почему не взять готовое и что из готового стоит перенять.</p>
+    <h2>Против аналогов, в баллах по каждому параметру</h2>
+    <p class="sub">Шкала 0–10, оценка автора по открытым данным на 9 сентября 2026. Критерии взяты под нашу задачу: своя линия, свой код, без лицензий. Для типовой задачи с бюджетом веса другие, и там смарт-камера Cognex или Keyence выиграет.</p>
     <div class="tw">
       <table>
-        <thead><tr><th>Система</th><th>В чём сильна</th><th>Почему не подходит целиком</th><th>Что перенимаем</th></tr></thead>
+        <thead><tr><th>Критерий</th><th class="num me">Проект сейчас</th><th class="num me">После доработки*</th><th class="num">Cognex, Keyence</th><th class="num">HALCON, MERLIC</th><th class="num">ROS 2</th><th class="num">DeepStream, Savant</th></tr></thead>
+        <tbody><tr><td>Готовые инструменты инспекции<br><small style=color:var(--ink-3)>счётчики годен/брак, галерея дефектов</small></td><td class="num me hl">4</td><td class="tg me">6 ↑</td><td class="num ">10</td><td class="num ">10</td><td class="num ">1</td><td class="num ">4</td></tr><tr><td>Нейросеть в контуре, свои модели</td><td class="num me hl">9</td><td class="tg me">9</td><td class="num ">8</td><td class="num ">8</td><td class="num ">5</td><td class="num ">9</td></tr><tr><td>Свой код и процессы в контуре</td><td class="num me hl">10</td><td class="tg me">10</td><td class="num ">2</td><td class="num ">6</td><td class="num ">9</td><td class="num ">5</td></tr><tr><td>Связь с ПЛК<br><small style=color:var(--ink-3)>сервис OPC UA</small></td><td class="num me hl">4</td><td class="tg me">7 ↑</td><td class="num ">10</td><td class="num ">6</td><td class="num ">5</td><td class="num ">1</td></tr><tr><td>Гарантированный отклик<br><small style=color:var(--ink-3)>таймер 1 мс, нативный блок на шине</small></td><td class="num me hl">3</td><td class="tg me">5 ↑</td><td class="num ">10</td><td class="num ">6</td><td class="num ">6</td><td class="num ">6</td></tr><tr><td>Стоимость лицензий</td><td class="num me hl">10</td><td class="tg me">10</td><td class="num ">2</td><td class="num ">5</td><td class="num ">10</td><td class="num ">8</td></tr><tr><td>Платформы: Windows, Linux, Jetson, RPi</td><td class="num me hl">9</td><td class="tg me">9</td><td class="num ">7</td><td class="num ">9</td><td class="num ">5</td><td class="num ">2</td></tr><tr><td>Поддержка, второй носитель знаний<br><small style=color:var(--ink-3)>второй пользователь по документации</small></td><td class="num me hl">2</td><td class="tg me">5 ↑</td><td class="num ">10</td><td class="num ">9</td><td class="num ">6</td><td class="num ">5</td></tr><tr><td>Поставка и поддержка в регионе</td><td class="num me hl">10</td><td class="tg me">10</td><td class="num ">3</td><td class="num ">3</td><td class="num ">10</td><td class="num ">5</td></tr><tr><td>Разработка с ИИ-агентами</td><td class="num me hl">10</td><td class="tg me">10</td><td class="num ">1</td><td class="num ">5</td><td class="num ">5</td><td class="num ">5</td></tr><tr class="total"><td>Сумма из 100</td><td class="num me hl">71</td><td class="tg me">81 ↑</td><td class="num">63</td><td class="num">67</td><td class="num">62</td><td class="num">50</td></tr></tbody>
+      </table>
+    </div>
+    <p class="legendline">* Доработка: планы <b>line-sim</b> (симулятор линии и стенд с числами, P-1), <b>Services/opcua</b> (N-5), <b>P-2</b> второй пользователь по документации; параллельно <b>observability-closure Ф4</b> и <b>otel-export</b>. Все стоят в очереди проекта, порядок задан 9 сентября 2026.</p>
+    <div class="donuts"><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="81.00 19.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="71.00 29.00" stroke-dashoffset="-56.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">71</text></svg><div class="cl">Этот проект сегодня</div><div class="dl">после доработки — 81</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg a" cx="21" cy="21" r="15.9155" stroke-dasharray="63.00 37.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">63</text></svg><div class="cl">Cognex, Keyence</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg a" cx="21" cy="21" r="15.9155" stroke-dasharray="67.00 33.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">67</text></svg><div class="cl">HALCON, MERLIC</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg a" cx="21" cy="21" r="15.9155" stroke-dasharray="62.00 38.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">62</text></svg><div class="cl">ROS 2</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg a" cx="21" cy="21" r="15.9155" stroke-dasharray="50.00 50.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">50</text></svg><div class="cl">DeepStream, Savant</div></div></div>
+        <h3 style="font-family: var(--display); font-weight: 600; font-size: 21px; margin: 26px 0 6px;">Кто стоит за аналогами, по открытым данным</h3>
+    <p class="legendline" style="margin:0 0 6px">Баллы выше сравнивают пригодность к нашей задаче, а не размер. По ресурсам это не соревнование: у аналогов сотни и тысячи людей и десятилетия, у нас один инженер и год. Итог сопоставим потому, что тяжёлые части, OpenCV, PyTorch, ONNX, у всех общие, а платят за интеграцию под задачу.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Аналог</th><th>Компания</th><th class="num">Людей</th><th>Деньги в год</th><th class="num">Лет на продукт</th></tr></thead>
         <tbody>
-          <tr><td>Cognex, Halcon</td><td>готовые инструменты, статистика годен/брак</td><td>лицензии, закрытость, не встраиваются в свои процессы</td><td>счётчики брака, галерея дефектов, отклик на сигнал линии</td></tr>
-          <tr><td>ROS 2</td><td>стандарт в робототехнике, транспорт</td><td>Windows второстепенен, диктует весь способ установки</td><td>типизированные контракты сообщений, запись и повтор</td></tr>
-          <tr><td>NVIDIA DeepStream</td><td>всё на видеокарте, очень быстро</td><td>только NVIDIA, только Linux, только Docker</td><td>данные на видеокарте между соседними блоками</td></tr>
-          <tr><td>Node-RED</td><td>удобный редактор схем</td><td>не для видеопотока, нет общей памяти</td><td>составные блоки, применение из редактора</td></tr>
+          <tr><td>Cognex</td><td>Cognex, США, с 1981</td><td class="num">≈ 2 900</td><td>выручка ≈ 1,0 млрд $ (2025); 14% в разработку, ≈ 140 млн $</td><td class="num">45</td></tr>
+          <tr><td>Keyence</td><td>Keyence, Япония, с 1974</td><td class="num">≈ 13 600</td><td>выручка ≈ 7,1 млрд $ (2025), зрение одна из линеек</td><td class="num">50</td></tr>
+          <tr><td>HALCON, MERLIC</td><td>MVTec, Германия, с 1996</td><td class="num">≈ 400</td><td>не раскрывает; лицензии разработчика и runtime</td><td class="num">30</td></tr>
+          <tr><td>ROS 2</td><td>Open Robotics и сообщество; ROS с 2007, ROS 2 с 2017</td><td class="num">сотни компаний</td><td>гранты и вклад корпораций</td><td class="num">19</td></tr>
+          <tr><td>DeepStream, Savant</td><td>NVIDIA, с 2016; Savant небольшая команда поверх</td><td class="num">подразделение NVIDIA</td><td>внутри бюджета NVIDIA</td><td class="num">10</td></tr>
+          <tr class="total"><td>Этот проект</td><td>один инженер с ИИ-агентами</td><td class="num">1</td><td>зарплата одного инженера</td><td class="num">1</td></tr>
         </tbody>
       </table>
     </div>
-    <p>Ниша проекта: конструктор инспекции для обычного промышленного ПК на Windows или Linux, без Docker и лицензий, где новый сценарий собирает инженер, а не программист. Ни одна из систем выше эту задачу не решает.</p>
+<div class="tw">
+      <table>
+        <thead><tr><th>Остальные на рынке</th><th>Что это</th><th>Что берём</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Zebra Aurora</strong> (ex-Matrox)</td><td>ПО инспекции на ПК, конструктор плюс SDK; лицензии по модулям</td><td>ничего критичного; ближайший коммерческий аналог по духу</td></tr>
+          <tr><td><strong>Смарт-камеры</strong> Omron, SICK, Basler</td><td>типовые задачи без ПК: этикетка, укупорка, уровень</td><td>для типовой задачи честно быстрее нас</td></tr>
+          <tr><td><strong>Отечественные интеграторы</strong></td><td>заказные решения, в том числе контроль бутылок; код у интегратора</td><td>список типовых задач розлива как чек-лист стенда</td></tr>
+          <tr><td><strong>Node-RED</strong></td><td>редактор потоков для IoT; не для видео</td><td>составные блоки, правка из редактора на ходу</td></tr>
+          <tr><td><strong>Ultralytics YOLO, Roboflow</strong></td><td>модели и цикл разметка, обучение, выпуск</td><td>уже внутри: YOLO и ONNX; Roboflow как цех разметки</td></tr>
+          <tr><td><strong>LandingLens</strong></td><td>обучение инспекции без программиста; вендор ушёл в документы</td><td>интерфейс «покажи десять дефектов» для галереи</td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section>
     <div class="eyebrow">Раздел 7</div>
-    <h2>Что ещё не доказано</h2>
-    <p class="sub">Честный список. Именно его закрывает следующий этап.</p>
-    <ul>
-      <li><span class="pill bad">нет</span> Числа с реальной линии: бутылок в минуту, пропущенный брак, ложные срабатывания. Замеры пока на синтетическом тракте и веб-камере.</li>
-      <li><span class="pill bad">нет</span> Второй сценарий, собранный другим человеком. Все 17 рецептов написал автор.</li>
-      <li><span class="pill warn">частично</span> Скорость измерена при 640×480 на Windows. Full HD и Linux оценены расчётом, не замером.</li>
-      <li><span class="pill warn">частично</span> Linux ещё не был в автоматической проверке. Есть одно известное место в работе с общей памятью, которое на Linux надо исправить до первого Jetson.</li>
-    </ul>
+    <h2>Куда движется система: следующий этап в баллах</h2>
+    <p class="sub">Каждый шаг поднимает конкретную строку таблицы выше. Порядок этапов задан 9 сентября 2026: симулятор линии и стенд, затем завершение наблюдаемости и экспорта телеметрии, затем робот; улучшения ядра идут параллельно второй полосой.</p>
+    <div class="ask">
+      <div class="row"><div class="k">1</div><div><div class="t">Стенд с реальной камерой и бутылками, 6–8 недель</div><div class="d">Бутылок в минуту, пропуск брака, ложные срабатывания, видео. Счётчики годен/брак и галерея дефектов внутри. <b>Доказанность 4 → 8, инструменты инспекции 4 → 6.</b></div></div></div>
+      <div class="row"><div class="k">2</div><div><div class="t">Второй пользователь по документации</div><div class="d">Коллега или ИИ-агент собирает новый сценарий, измеряем время до результата. <b>Поддержка 2 → 5.</b></div></div></div>
+      <div class="row"><div class="k">3</div><div><div class="t">Сервис OPC UA</div><div class="d">Состояние и результаты инспекции как первоклассный источник для ПЛК и SCADA. <b>Связь с ПЛК 4 → 7.</b></div></div></div>
+      <div class="row"><div class="k">4</div><div><div class="t">Таблица скорости и таймер 1 мс</div><div class="d">Три разрешения, до пяти передач, Windows и Linux; источник кадров без джиттера 15,6 мс. <b>Отклик 3 → 5; спор «Python или C++» ведётся по таблице.</b></div></div></div>
+      <div class="row"><div class="k">5</div><div><div class="t">C++ как вторая линия, не конкурент</div><div class="d">Сверхбыстрые блоки на C++ или Rust подключаются к той же шине. Одна система, два языка там, где каждый сильнее.</div></div></div>
+    </div>
   </section>
 
   <section>
     <div class="eyebrow">Раздел 8</div>
-    <h2>Что просим одобрить</h2>
-    <p class="sub">Направление и один измеримый этап, после которого оценка становится не оценкой, а фактом.</p>
-    <div class="ask">
-      <div class="row"><div class="k">1</div><div><div class="t">Стенд с реальной камерой и бутылками на 6–8 недель</div><div class="d">Результат: бутылок в минуту, доля пропущенного брака, доля ложных срабатываний, видео работы. Это единственное, что закрывает вопрос «правильно ли потрачено время».</div></div></div>
-      <div class="row"><div class="k">2</div><div><div class="t">Опубликовать таблицу скорости</div><div class="d">Три разрешения, до пяти передач между процессами, Windows и Linux. Две недели параллельно со стендом. После этого спор «Python или C++» ведётся по таблице.</div></div></div>
-      <div class="row"><div class="k">3</div><div><div class="t">Проверка «второй руками»</div><div class="d">Коллега или ИИ-агент собирает новый сценарий по документации. Измеряем время до рабочего результата. Так проверяется, что это конструктор, а не одна программа.</div></div></div>
-      <div class="row"><div class="k">4</div><div><div class="t">Считать команду C++ не конкурентом, а второй линией</div><div class="d">Сверхбыстрые блоки могут писаться на C++ и подключаться к этой же шине. Одна система, два языка там, где каждый сильнее.</div></div></div>
+    <h2>Автор системы: оценка, ранг, рыночная стоимость</h2>
+    <p class="sub">Оценка по внутреннему вердикту и рыночным данным 2026 года. Не оффер и не самопрезентация: слабые оси названы теми же словами, что и сильные.</p>
+    <div class="donuts"><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="90.00 10.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">9</text></svg><div class="cl">Системное мышление</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="90.00 10.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">9</text></svg><div class="cl">Инженерная дисциплина</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">8</text></svg><div class="cl">Широта стека</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">8</text></svg><div class="cl">Производство и электроника</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="70.00 30.00" stroke-dashoffset="25.00"/><circle class="sg warn" cx="21" cy="21" r="15.9155" stroke-dasharray="50.00 50.00" stroke-dashoffset="-45.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">5</text></svg><div class="cl">Порядок: потребитель тянет ядро</div><div class="dl">после доработки — 7</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="70.00 30.00" stroke-dashoffset="25.00"/><circle class="sg warn" cx="21" cy="21" r="15.9155" stroke-dasharray="50.00 50.00" stroke-dashoffset="-45.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">5</text></svg><div class="cl">Внедрения и второй пользователь</div><div class="dl">после доработки — 7</div></div><div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="73.00 27.00" stroke-dashoffset="-55.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">7,3</text></svg><div class="cl">Итог</div><div class="cs">среднее по шести осям</div><div class="dl">после доработки — 8</div></div></div>
+    <div class="tw"><table>
+      <thead><tr><th>Ось</th><th class="num">Балл</th><th class="num">После доработки*</th><th>Основание</th></tr></thead>
+      <tbody><tr><td>Системное мышление</td><td class="num hl">9</td><td class="tg"></td><td>своя шина, общая память, супервизия, редактор: уровень архитектора</td></tr><tr><td>Инженерная дисциплина</td><td class="num hl">9</td><td class="tg"></td><td>инъекции поломок на каждое свойство, независимая приёмка</td></tr><tr><td>Широта стека</td><td class="num hl">8</td><td class="tg"></td><td>CV, ML, IPC, GUI, Modbus, робот, привод, база</td></tr><tr><td>Производство и электроника</td><td class="num hl">8</td><td class="tg"></td><td>профиль ведущего инженера АСУТП; цех и протоколы знакомы</td></tr><tr><td>Порядок: потребитель тянет ядро</td><td class="num hl">5</td><td class="tg">7 ↑</td><td>ядро растёт без тяги приложения: наблюдаемость непрерывно с 26 июля, симулятор линии 0 из 5 задач; после симулятора и OPC UA ожидается 7</td></tr><tr><td>Внедрения и второй пользователь</td><td class="num hl">5</td><td class="tg">7 ↑</td><td>линии с числами нет; систему запускал только автор; после стенда и второго пользователя по документации ожидается 7</td></tr></tbody>
+    </table></div>
+    <p class="legendline">* Доработка: планы <b>line-sim</b> (симулятор линии и стенд с числами, P-1), <b>Services/opcua</b> (N-5), <b>P-2</b> второй пользователь по документации; параллельно <b>observability-closure Ф4</b> и <b>otel-export</b>. Все стоят в очереди проекта, порядок задан 9 сентября 2026.</p>
+    <div class="rank">
+      <div class="rk"><div class="t">Ранг</div><div class="v">Ведущий инженер, уровень системного архитектора</div><div class="d">В IT-градации: Senior по глубине, Lead по охвату. Не хватает двух доказательств: линии с числами и второго пользователя, введённого по документации. Оба стоят в ближайших этапах.</div></div>
+      <div class="rk"><div class="t">Редкость профиля</div><div class="v">АСУТП + машинное зрение + ML в одном человеке</div><div class="d">На рынке 2026 эти компетенции живут в разных вакансиях. Инженер, который ставит камеру, пишет модель и подключает ПЛК, закрывает три позиции.</div></div>
+      <div class="rk"><div class="t">Отдельная компетенция</div><div class="v">Методология разработки с ИИ-агентами</div><div class="d">Свой набор ролей и гейтов: независимый тестер до кода, инъекции поломок на каждое свойство, ревью с воспроизведением, хуки-гейты, память проекта. Один инженер держит темп команды, и путь ввода нового участника существует как артефакт, а не как устная традиция.</div></div>
+      <div class="rk"><div class="t">Справедливая вилка</div><div class="v">250–350 тыс. ₽ в месяц</div><div class="d">До вычета налогов, Москва; регионы минус 15–20%. Нижняя граница за уже сделанное, верхняя после чисел со стенда. Выше 350 только с внедрением на линии и вторым пользователем.</div></div>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Рынок 2026, до вычета налогов</th><th class="num">В месяц, тыс. ₽</th><th>Источник</th></tr></thead>
+      <tbody>
+        <tr><td>Инженер по автоматизации, среднее: Россия и Москва</td><td class="num">91 и 127</td><td>ГородРабот</td></tr>
+        <tr><td>Ведущий инженер, Москва: среднее и вилка вакансий</td><td class="num">151; 180–280</td><td>ГородРабот, Рамблер</td></tr>
+        <tr><td>Медиана IT: Москва и регионы, первое полугодие 2026</td><td class="num">235 и 160</td><td>Хабр Карьера</td></tr>
+        <tr><td>Инженер компьютерного зрения, вакансии: Москва и Челябинск</td><td class="num">от 230; 119–224</td><td>hh.ru</td></tr>
+        <tr><td>ML-инженер: среднее и Senior в Москве</td><td class="num">232 и 463</td><td>Хабр Карьера</td></tr>
+        <tr><td>Senior в ИИ, медиана</td><td class="num">400, от 300</td><td>hh.ru, обзор 2026</td></tr>
+      </tbody>
+    </table></div>
+    <p class="legendline">Чистые Senior ML в Москве стоят дороже вилки выше, но это позиции с командой и продакшеном. Профиль автора ближе к «ведущий инженер по системам зрения на производстве», и там вилка 250–350 честная.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Раздел 9</div>
+    <h2>Итог</h2>
+    <p class="sub">Три числа и одно решение.</p>
+    <div class="donuts">
+      <div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="65.00 35.00" stroke-dashoffset="-55.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">6,5</text></svg><div class="cl">Система сегодня</div><div class="cs">потолок держит одна ось: нет чисел с линии</div><div class="dl">после доработки — 8+</div></div>
+      <div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="81.00 19.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="71.00 29.00" stroke-dashoffset="-56.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">71</text></svg><div class="cl">Против аналогов сегодня</div><div class="cs">Cognex 63, HALCON 67, ROS 2 62</div><div class="dl">после доработки — 81</div></div>
+      <div class="dn"><svg viewBox="0 0 42 42" role="img"><circle class="bg" cx="21" cy="21" r="15.9155"/><circle class="sg tgt" cx="21" cy="21" r="15.9155" stroke-dasharray="80.00 20.00" stroke-dashoffset="25.00"/><circle class="sg b" cx="21" cy="21" r="15.9155" stroke-dasharray="73.00 27.00" stroke-dashoffset="-55.00"/><text x="21" y="22.4" text-anchor="middle" class="cv">7,3</text></svg><div class="cl">Автор</div><div class="cs">ведущий инженер, уровень архитектора</div><div class="dl">после доработки — 8</div></div>
     </div>
     <div class="callout">
-      <p><strong>Вывод.</strong> Выбор Python не стоил скорости там, где скорость нужна. Он купил год одного инженера вместо года команды, сценарии без программиста и разработку с ИИ-агентами. Что осталось доказать, доказывается за один этап со стендом.</p>
+      <p><strong>Вывод.</strong> Выбор Python не стоил скорости там, где скорость нужна. Он купил год одного инженера вместо года команды, сценарии без программиста и разработку с ИИ-агентами.</p>
+      <p><strong>Что просим.</strong> Стенд с реальной камерой и бутылками на 6–8 недель. После него оценка системы и цена специалиста перестают быть оценками и становятся числами.</p>
     </div>
   </section>
 
   <footer>
-    Источники: замеры тракта июль 2026 (внутренний отчёт по фазе G, синтетический тракт 640×480, Windows); микрозамеры 4 сентября 2026 на рабочем ПК (Python 3.12, NumPy 2.4, Numba 0.67); статистика репозитория 4 сентября 2026; архитектурная оценка sentrux. Справочные значения для C++ взяты из открытых замеров библиотек iceoryx и protobuf. Оценки помечены словом «оценка».
+    Источники: замеры тракта июль 2026 (внутренний отчёт по фазе G, синтетический тракт 640×480, Windows); микрозамеры 4 сентября 2026 на рабочем ПК (Python 3.12, NumPy 2.4, Numba 0.67); статистика репозитория 4 сентября 2026; архитектурная оценка sentrux; внутренний вердикт 4 сентября 2026. Справочные значения для C++ из открытых замеров iceoryx и protobuf. Рынок систем зрения: обзоры 2026 (Wevolver, Overview.ai, Averroes, Enao, JMAK Automation, ManufacturingTomorrow, Savant, Ultralytics, Lightly, Малленом). Зарплаты: Хабр Карьера (первое полугодие 2026), hh.ru, ГородРабот, Рамблер. Всё, что не замер, помечено словом «оценка».
   </footer>
 </div>
 </body>
