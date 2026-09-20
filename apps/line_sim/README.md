@@ -13,8 +13,10 @@ BACKEND_CTL=1 BACKEND_CTL_PORT=8766 MULTIPROCESS_LOG_DIR=/tmp/line_sim_logs \
     python apps/line_sim/run.py
 ```
 
-Поднимает один процесс `robot`, держащий `SimRobotServer` (Modbus TCP,
-`127.0.0.1:5021`). Остановка — SIGINT (Ctrl+C) или `backend_ctl`
+Поднимает два процесса: `robot`, держащий `SimRobotServer` (Modbus TCP,
+`127.0.0.1:5021`), и `camera` — линейную цепочку `CameraServicePlugin`
+(`camera_type: simulator`) → `MjpegSinkPlugin`, раздающую последний кадр по
+HTTP MJPEG на `127.0.0.1:8090`. Остановка — SIGINT (Ctrl+C) или `backend_ctl`
 `system_command shutdown`.
 
 ## Порты стенда
@@ -26,7 +28,7 @@ BACKEND_CTL=1 BACKEND_CTL_PORT=8766 MULTIPROCESS_LOG_DIR=/tmp/line_sim_logs \
 | `8765` | `backend_ctl` | прототип (эксклюзивен) |
 | `8766` | `backend_ctl` | сим (`apps/line_sim`) |
 | `5021` | Modbus TCP | сим-робот (`SimRobotHostPlugin`) |
-| `8090` | MJPEG | сим-камера (Task 1.2, ещё не реализовано) |
+| `8090` | MJPEG | сим-камера (`MjpegSinkPlugin`, процесс `camera`, Task 1.2) |
 
 ## Как направить прототип на сим
 
@@ -49,8 +51,21 @@ robot_main:
 `sim_robot.status` (процесс `robot`) → `{running, host, port, unit_id,
 writes_seen, state}`. Подробности механизма — [`Plugins/sim/robot_host/README.md`](../../Plugins/sim/robot_host/README.md).
 
-## Out of scope (Task 1.1)
+## Дверь кадров (Task 1.2)
 
-Кадры/камера (Task 1.2 — MJPEG-сток на `:8090`), живая скорость энкодера от
-команды ПЧ (Ф2.1), канал энкодера в line-процесс (Ф2.2), `data/devices.yaml` в
-репозитории (runtime-файл).
+Процесс `camera` — линейная внутрипроцессная цепочка: `CameraServicePlugin`
+(`camera_type: simulator`, генерирует кадры) → `MjpegSinkPlugin` (кодирует в
+JPEG, раздаёт последний кадр по `GET http://127.0.0.1:8090/` как
+`multipart/x-mixed-replace`). Открыть в браузере/`cv2.VideoCapture`/`ffplay`
+— обычный MJPEG-клиент. Подробности механизма стока —
+[`Plugins/sim/mjpeg_sink/README.md`](../../Plugins/sim/mjpeg_sink/README.md).
+
+Прототип подключается к этому стоку как к источнику `camera_0` через
+`multiprocess_prototype/recipes/letter_robot_sim.yaml` (сим-вариант боевого
+`hikvision_letter_robot.yaml`, отличается ровно источником `camera_0`).
+
+## Out of scope (Task 1.2)
+
+Живая скорость энкодера от команды ПЧ (Ф2.1), канал энкодера в line-процесс
+(Ф2.2), `data/devices.yaml` в репозитории (runtime-файл), объекты/слои/
+фотометрия и ROI внутри сима (Ф3–Ф4).

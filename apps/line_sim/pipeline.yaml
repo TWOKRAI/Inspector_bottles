@@ -1,11 +1,20 @@
-# apps/line_sim — pipeline (плоская топология, один процесс).
+# apps/line_sim — pipeline (плоская топология, два процесса).
 #
 # `robot` держит SimRobotHostPlugin — Modbus TCP-симулятор робота на
 # 127.0.0.1:5021 (порт зафиксирован планом line-sim §Ф1, "Порты стенда").
-# `wires: []` — кадров в этом процессе нет (та же форма, что examples/minimal_app).
+#
+# `camera` — линейная внутрипроцессная цепочка (Task 1.2 плана line-sim):
+# CameraServicePlugin(camera_type=simulator) генерирует кадры → MjpegSinkPlugin
+# раздаёт последний кадр по HTTP MJPEG на 127.0.0.1:8090 (тот же порт, что
+# прототип читает как источник camera_0 в multiprocess_prototype/recipes/
+# letter_robot_sim.yaml).
+#
+# `wires: []` — оба процесса плоские, межпроцессных кадровых проводов в
+# этом сим-дереве нет (кадр остаётся внутри процесса `camera`, та же форма,
+# что и линейные цепочки внутри процессов боевого рецепта).
 
 name: line_sim
-description: "Симулятор линии: процесс robot держит SimRobotServer (Modbus TCP)"
+description: "Симулятор линии: robot — SimRobotServer (Modbus TCP), camera — MJPEG-сток (:8090)"
 
 processes:
   - process_name: robot
@@ -19,5 +28,20 @@ processes:
         port: 5021
         unit_id: 2
         auto_start: true
+
+  - process_name: camera
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
+        plugin_name: camera_service
+        category: source
+        camera_type: simulator
+        auto_start: true
+      - plugin_class: Plugins.sim.mjpeg_sink.plugin.MjpegSinkPlugin
+        plugin_name: mjpeg_sink
+        category: sink
+        host: 127.0.0.1
+        port: 8090
 
 wires: []
