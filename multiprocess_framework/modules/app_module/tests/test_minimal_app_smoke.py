@@ -57,9 +57,14 @@ def test_minimal_app_boots_headless(tmp_path: Path) -> None:
     assert [n for n, _ in launcher._processes] == ["ticker", "console_sink"]
     # minimal_app бутится на generic-оркестраторе БЕЗ единого хука (Ф5.12).
     assert launcher._orchestrator_class_path == GENERIC_ORCHESTRATOR_CLASS_PATH
-    # Хуков не задано → StateStore/throttle не поднимаются.
+    # Хуков не задано → посев делает дефолт (ADR-APP-007, 2026-09-20): StateStore
+    # поднимается ВСЕГДА, троттл — нет (у него дефолта не появилось). До этой даты
+    # здесь стояло `cfg["initial_state"] == {}`; не «чинить» обратно — пустой посев
+    # означал бы, что minimal_app не отвечает на state.get_subtree и не виден в
+    # system_overview. Имена процессов — литералы контракта, не выводить из pipeline.yaml.
     cfg = launcher._orchestrator_config
-    assert cfg["initial_state"] == {}
+    assert set(cfg["initial_state"]) == {"processes"}
+    assert set(cfg["initial_state"]["processes"]) == {"ticker", "console_sink"}
     assert "state_throttle_rules" not in cfg
     # Task 5.13: адрес слоя L2 оркестратор получает всегда — он выводится из
     # manifest.pipeline, а не задаётся приложением. Слоя L1 у minimal_app нет:

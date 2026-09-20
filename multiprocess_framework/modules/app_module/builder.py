@@ -112,6 +112,68 @@ def default_blueprint_loader(manifest: "AppManifest") -> dict[str, Any]:
     return blueprint
 
 
+def default_state_bootstrap(blueprint: dict[str, Any]) -> dict[str, Any]:
+    """Дефолтный build-time хук: blueprint dict → начальное state-дерево (ТОЛЬКО топология).
+
+    Generic-приложение получает наблюдаемость процессов, не написав ни строки Python:
+    без посева ``initial_state`` пуст → ``GenericProcessManagerApp._setup_state_store``
+    не создаёт ``StateStoreManager`` → команда ``state.get_subtree`` вообще не
+    зарегистрирована (диспетчер отвечает ``No handler for key 'state.get_subtree'``),
+    и ``system_overview`` рапортует пустую топологию.
+
+    Форма ветки ``processes`` — подмножество прикладной
+    (``multiprocess_prototype/backend/state/bootstrap.py::_build_process_entry``):
+    ``{"config": {"plugins", "chain_targets", "priority"}, "state": {"status", "pid",
+    "fps", "error"}}``. Прикладные ветки (``system``/``wires``/``services``/
+    ``displays``/``recipes``/``plugins``) сюда НЕ переезжают: они читают реестры
+    прототипа (DisplaysConfig, каталог рецептов), которых у framework нет.
+
+    ``fps``/``pid``/``error`` сеются ``None``, а не нулём: ``None`` во всей системе
+    означает «показания нет», а ноль — измеренный ноль. Ровно эта разница уже стоила
+    прототипу семи ложных аномалий ``fps_zero_while_running`` (см. комментарий в
+    прикладном ``_build_process_entry``).
+
+    ``status`` сеется ``"stopped"``, хотя потребитель ждёт ``running``: статус
+    обновляет сам ``ProcessManager`` после спавна — посев лишь создаёт лист.
+
+    Пустой blueprint (нет процессов) → ``{"processes": {}}``, а НЕ ``{}``. Непустой
+    dict проходит гейт ``_setup_state_store`` (``if not initial_state and not
+    throttle_rules``), значит store создаётся всегда и команда ``state.get_subtree``
+    отвечает «поддерево пусто» вместо отказа «обработчика нет». Это разные диагнозы:
+    приложение без процессов — законная конфигурация, а «нет обработчика» читается
+    как поломка. Решение пришпилено
+    ``tests/test_state_bootstrap_hazards.py::test_empty_blueprint_decision_is_pinned``.
+
+    Только plain dict/list/str/int/None: результат едет в дочерние процессы через
+    ``spawn`` (``_pickle_sanity`` стоит на дороге в ``_build_generic``).
+    """
+    processes: dict[str, Any] = {}
+    for proc in blueprint.get("processes") or []:
+        if not isinstance(proc, dict):
+            continue
+        name = proc.get("process_name") or ""
+        if not name:
+            # Запись без имени адресовать нечем — ключ дерева был бы пустой строкой.
+            continue
+        processes[name] = {
+            "config": {
+                "plugins": list(proc.get("plugins") or []),
+                "chain_targets": list(proc.get("chain_targets") or []),
+                # `or "normal"`, а не `get(..., "normal")`: YAML-редактор пишет
+                # явный `priority:` пустым скаляром → None (та же идиома, что у
+                # прикладного бутстрапа).
+                "priority": proc.get("priority") or "normal",
+            },
+            "state": {
+                "status": "stopped",
+                "pid": None,
+                "fps": None,
+                "error": None,
+            },
+        }
+    return {"processes": processes}
+
+
 def assemble_proc_dicts(
     blueprint: dict[str, Any],
     *,
@@ -280,11 +342,12 @@ class SystemBuilder:
 
         # Build-time хуки: результат (dict) уйдёт в orchestrator_config → пиклится
         # через spawn → потребляется GenericProcessManagerApp child-side.
-        initial_state: dict[str, Any] = {}
-        if spec.state_bootstrap is not None:
-            bootstrap: StateBootstrap = spec.state_bootstrap
-            initial_state = bootstrap(blueprint)
-            _pickle_sanity(initial_state, hook_name="state_bootstrap")
+        # Ф1 Task 1.0: дефолт — топологический посев (:func:`default_state_bootstrap`),
+        # а не пустой dict. Явный хук приложения выигрывает у дефолта целиком (не
+        # мержится): приложение, заявившее своё дерево, получает ровно своё.
+        bootstrap: StateBootstrap = spec.state_bootstrap or default_state_bootstrap
+        initial_state: dict[str, Any] = bootstrap(blueprint)
+        _pickle_sanity(initial_state, hook_name="state_bootstrap")
 
         from multiprocess_framework.modules.process_module.configs.observability_layers import (
             orchestrator_observability_config,

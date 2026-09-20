@@ -34,6 +34,7 @@ relative → boundary ловит только чужие absolute-импорты
 | `discover()` / `DiscoveryResult` / `ServiceManifest` | **единый helper** авто-скана плагинов (`plugin.py`) И сервисов (маркер `service.yaml`) |
 | `SystemBuilder` / `AppSpec` | generic-сборка launcher; `AppSpec` — DI-контейнер точек расширения |
 | `assemble_proc_dicts` | universal-шов blueprint → proc_dicts (framework-символы) |
+| `default_state_bootstrap` | дефолтный build-time хук: blueprint → state-топология `processes.<имя>.{config,state}` (Ф1 Task 1.0) |
 | `GENERIC_ORCHESTRATOR_CLASS_PATH` | import-path generic-оркестратора (дефолт generic-пути) |
 | `apply_env_aliases` | `MULTIPROCESS_*` ↔ `INSPECTOR_*` back-compat (де-брендинг) |
 | Protocol'ы `BlueprintLoader`/`ProcDictsBuilder`/`StateBootstrap`/`ThrottleRules`/`LauncherFactory` | точки расширения (DI вместо наследования) |
@@ -45,9 +46,18 @@ child-side по строке (`GENERIC_ORCHESTRATOR_CLASS_PATH`), а не имп
 ## Два режима сборки
 
 - **generic** (`run_app("app.yaml")` — minimal_app/дефолт): granular build-time хуки с
-  framework-defaults (`default_blueprint_loader` + `assemble_proc_dicts`), оркестратор —
-  `GenericProcessManagerApp`. «Рыба» доказывает самодостаточность без прототипа (бутится
-  без единого хука).
+  framework-defaults (`default_blueprint_loader` + `assemble_proc_dicts` +
+  `default_state_bootstrap`), оркестратор — `GenericProcessManagerApp`. «Рыба» доказывает
+  самодостаточность без прототипа (бутится без единого хука).
+
+  **Дефолтный `state_bootstrap` (Ф1 Task 1.0, ADR-APP-007).** `AppSpec.state_bootstrap`
+  не задан → работает `default_state_bootstrap`: blueprint → ветка `processes` вида
+  `{<имя>: {"config": {plugins, chain_targets, priority}, "state": {status, pid, fps,
+  error}}}`. Так generic-приложение поднимает StateStore, отвечает на `state.get_subtree`
+  и видно в `system_overview` — не написав ни строки Python. Явный хук приложения
+  **выигрывает целиком** (не мержится с дефолтом). Blueprint без процессов даёт
+  `{"processes": {}}`, а не `{}`: непустой dict проходит гейт `_setup_state_store`, и
+  приложение без процессов отвечает «поддерево пусто» вместо «обработчика нет».
 - **factory** (`AppSpec.launcher_factory` — прототип): приложение собирает launcher само
   (его сложившийся `SystemBuilder.build()` — источник истины), `run_app` даёт generic-
   контур (env-алиасы, единая загрузка манифеста). Вход прототипа постепенно выражается

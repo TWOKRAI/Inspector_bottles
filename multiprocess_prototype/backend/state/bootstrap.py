@@ -137,6 +137,16 @@ def _build_wires_section(wires: list[dict]) -> dict:
 # Публичный API
 # ---------------------------------------------------------------------------
 
+# Ф1 Task 1.0 (ADR-APP-007): ТОПОЛОГИЧЕСКАЯ половина этого посева живёт теперь и во
+# фреймворке — `multiprocess_framework.modules.app_module.default_state_bootstrap`.
+# Там ветка `processes` той же формы, что строит `_build_process_entry` выше, и она
+# работает дефолтом для generic-дороги (приложение без своего bootstrap'а).
+# Здесь остаются ПРИКЛАДНЫЕ ветки (system/wires/services/displays/recipes/plugins):
+# они наполняются из реестров прототипа, которых у framework нет. Этот модуль
+# продолжает выигрывать целиком — прототип идёт по factory-дороге (`AppSpec.
+# launcher_factory`), она возвращается из `SystemBuilder.build()` до generic-ветки.
+# Правка формы записи процесса — повод синхронизировать обе половины.
+
 
 def build_initial_state(
     topology_dict: dict,

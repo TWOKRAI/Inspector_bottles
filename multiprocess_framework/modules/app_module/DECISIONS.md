@@ -163,3 +163,80 @@ generic-оркестратор.
 характеризационный снапшот 5.1 и `test_run_app_prototype` зелёные без правок golden).
 **Reversible:** yes (подкласс можно снова «утолстить», generic-класс аддитивен).
 **Refs:** plans/2026-07-06_constructor-master/plan.md (5.12), ADR-APP-005 (вход).
+
+---
+
+## ADR-APP-007: дефолтный `state_bootstrap` — топология процессов, а не пустой dict (Ф1 Task 1.0)
+
+**Дата:** 2026-09-20
+**Статус:** принято
+**Контекст:** `AppSpec.state_bootstrap` был опционален БЕЗ дефолта: приложение, не
+написавшее Python-хук, получало `initial_state = {}`. Дальше по цепочке гейт
+`GenericProcessManagerApp._setup_state_store` (ADR-APP-006) видел пустоту и не поднимал
+`StateStoreManager`; команда `state.get_subtree` не регистрировалась в `CommandManager`
+вовсе — диспетчер отвечал `No handler for key 'state.get_subtree'`, а `system_overview`
+рапортовал пустую топологию с аномалией `empty_topology`. То есть generic-приложение
+(`examples/minimal_app`, `apps/line_sim`) было **ненаблюдаемо по построению**, и цена
+входа в наблюдаемость — написать прикладной bootstrap на Python — противоречила обещанию
+яруса «второе приложение = данные + декларации».
+
+**Решение:** `builder.default_state_bootstrap(blueprint)` — framework-дефолт, который
+строит ТОЛЬКО ветку `processes`:
+`{<имя>: {"config": {plugins, chain_targets, priority}, "state": {status, pid, fps, error}}}`.
+В `SystemBuilder._build_generic` — `spec.state_bootstrap or default_state_bootstrap`:
+**явный хук приложения выигрывает целиком и не мержится** с дефолтом.
+
+**Почему топология, а не пустой dict.** Ветка `processes` — единственная, которую
+framework может построить из своих данных (blueprint), и ровно она нужна потребителям
+вердиктов (`system_overview`, `state.get_subtree`). Значение посева здесь не в данных
+(статусы перетрёт `ProcessManager` после спавна), а в **существовании листьев**: без них
+инструмент отвечает «обработчика нет» — диагноз, читающийся как поломка.
+
+**Почему прикладные ветки не переезжают.** `system`/`wires`/`services`/`displays`/
+`recipes`/`plugins` прикладного `build_initial_state` наполняются из реестров прототипа
+(`SystemConfig`, `DisplaysConfig`, каталог рецептов) — у framework таких источников нет,
+и «переезд» означал бы либо пустые ветки-призраки, либо импорт прототипа снизу вверх
+(нарушение слоёв, правило 9). Топологическая половина живёт в framework, прикладная —
+в `multiprocess_prototype/backend/state/bootstrap.py`.
+
+**Пустой blueprint → `{"processes": {}}`, а не `{}`.** Гейт `_setup_state_store` смотрит
+на истинность dict'а, поэтому выбор решает диагноз приложения без процессов: «поддерево
+пусто» (законная конфигурация) против «обработчика нет» (поломка). Цена — пустой
+StateStore там, где state-plane не используется. Пришпилено
+`tests/test_state_bootstrap_hazards.py::test_empty_blueprint_decision_is_pinned`,
+который прогоняет НАСТОЯЩИЙ гейт в обе стороны.
+
+**Отношение к ADR-APP-006.** Тот ADR отверг «generic-оркестратор ВСЕГДА создаёт
+StateStore» — чтобы хук остался опционален и minimal_app не платил за пустой store.
+Гейт остаётся на месте и не тронут; изменилось то, что generic-дорога теперь подаёт
+в него непустой посев, то есть на практике store у generic-приложения есть всегда.
+Отклонение ADR-APP-006 сужено сознательно: доводом там была цена пустого store, а
+измеренная цена ненаблюдаемости (инструмент вердиктов врёт про топологию) оказалась
+выше. Приложение, которому store не нужен, может вернуть `{}` явным хуком.
+
+**Отменяет контракт:** без хуков `initial_state == {}` и StateStore не создаётся (тесты
+`test_minimal_app_smoke.py:62`, `test_orchestrator.py::TestBuildGenericHookWiring::
+test_no_build_time_hooks_minimal_config` переписаны 2026-09-20 — они пинили именно эту,
+теперь снятую, гарантию).
+
+**Клиентская половина — отдельная задача.** Дефолт сеет дерево у ОРКЕСТРАТОРА. Чтобы
+дочерний `GenericProcess` писал в него свои показания, нужен `ctx.state_proxy` на
+клиентской стороне — Task 2.0 плана `line-sim`, сюда не входит.
+
+**Rejected:**
+- **мерж дефолта с явным хуком** — отвергнут: приложение, заявившее своё дерево,
+  получало бы поверх него чужие ветки, а порядок мержа стал бы неявным контрактом.
+  Победа явного хука целиком — читаемое правило («задал — твоё»).
+- **дефолт внутри `_setup_state_store` (child-side)** — отвергнут: blueprint child-side
+  недоступен, пришлось бы гнать топологию вторым путём через конфиг; шов посева один и
+  живёт в родителе, где blueprint уже есть.
+- **поднимать StateStore всегда, посев оставить пустым** — отвергнут: это прямое
+  отклонение ADR-APP-006 без выигрыша — `state.get_subtree` отвечал бы, но пустотой,
+  и `system_overview` по-прежнему не видел бы процессов.
+
+**Why:** generic-приложение наблюдаемо из коробки — без единого Python-хука.
+**Risk:** low (аддитивно; factory-дорога прототипа возвращается из `build()` до
+`_build_generic` и дефолта не видит вовсе).
+**Reversible:** yes (дефолт снимается возвратом `initial_state = {}`).
+**Refs:** plans/line-sim/phase-1-vertical-slice.md (Task 1.0), ADR-APP-006 (гейт),
+docs/reviews/2026-09-20_line-sim-generic-app-observability-investigation.md.
