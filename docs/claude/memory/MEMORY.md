@@ -21,6 +21,8 @@
 
 - [Жёсткий потолок агентов выключен по умолчанию](feedback_agent_hard_budget_is_off_by_default.md) — soft 100k лишь предупреждает; hard — файл `<id>.budget` или env; developer ушёл до 401k 2026-09-20
 
+- [spawn копирует sys.path родителя](feedback_spawn_child_inherits_parent_sys_path.md) — PYTHONPATH из pytest до ребёнка не доезжает; заглушку «без пакета X» класть в sys.path родителя
+
 ## Стоящие правила владельца
 - [Приоритет — маятник по свободному времени](project_priority_engine_first.md) — 2026-08-18: к стенду за видимым результатом; фреймворк — вторая полоса; окно codemod — по паузе, не по дате
 - [Framework-first](feedback_framework_first.md) — framework универсален, прототип расходный · [Fix forward](feedback_fix_framework_forward.md) — улучшение, не удаление · [FREEZE, не KILL](feedback_freeze_over_kill.md) — мёртвый код замораживать
