@@ -1,0 +1,19 @@
+# apps/line_sim — главный конфиг (манифест) второго приложения (Task 1.1 плана
+# line-sim). Форма — examples/minimal_app/app.yaml один в один. Пути — от
+# этого каталога.
+
+name: Line Sim
+version: 1
+
+# App-специфика pass-through (framework не читает).
+extras: {}
+
+pipeline: pipeline.yaml
+system: system.yaml
+
+# Плагины сима лежат в Plugins/sim и резолвятся plugin_class-путём из
+# pipeline.yaml напрямую — авто-скан здесь не нужен (форма п.2 DESIGN Task 1.1).
+discovery:
+  plugin_paths: []
+  service_paths: []
+  auto_discover: false

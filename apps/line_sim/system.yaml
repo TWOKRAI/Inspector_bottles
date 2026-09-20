@@ -1,0 +1,32 @@
+# apps/line_sim — system.yaml: ТОЛЬКО секция observability (Task 1.1 плана
+# line-sim, DESIGN п.2). Минимальная копия из
+# multiprocess_prototype/backend/config/system.yaml — БЕЗ `system.log_dir`
+# намеренно: тесты ставят MULTIPROCESS_LOG_DIR ДО сборки launcher'а, и дефолт
+# каталога здесь перебил бы env (тот же капкан, что закрыла Task 3.3 minimal_app,
+# см. examples/minimal_app/tests/test_ci_smoke.py).
+#
+# Ключи ниже — минимум, измеренный прогоном тестов 4/5 acceptance-файла
+# (apps/line_sim/tests/test_f1_task11_acceptance.py), не копия всей секции
+# прототипа (там ~250 строк: documents/channels/logger_groups/retention/
+# telemetry — ничего из этого тестам Task 1.1 не нужно):
+#   - errors.enabled — без него errors.log процесса не пишется (тест 5:
+#     "modbus" в errors.log без pymodbus);
+#   - stats.enabled — без него числа не собираются вовсе (счётчик
+#     sim_robot.writes до history_query не доедет);
+#   - stats.flush_interval — ПОЛ темпа записи снапшотов в history
+#     (`max(flush_interval, aggregation_interval)`, дефолт пола 10.0с).
+#     Опущен — тест 4 опрашивает history_query до 10с и попадал бы точно
+#     на границу; 1.0с даёт запас (TRAPS lead'а, п.2);
+#   - history.enabled — схемный дефолт и так True, но объявлен явно, чтобы
+#     секция была самодокументируемой, а не «работает по умолчанию молча».
+observability:
+  errors:
+    enabled: true
+    level: WARNING
+  stats:
+    enabled: true
+    aggregation_interval: 1.0
+    flush_interval: 1.0
+  history:
+    enabled: true
+    level: INFO

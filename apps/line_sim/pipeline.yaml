@@ -1,0 +1,23 @@
+# apps/line_sim — pipeline (плоская топология, один процесс).
+#
+# `robot` держит SimRobotHostPlugin — Modbus TCP-симулятор робота на
+# 127.0.0.1:5021 (порт зафиксирован планом line-sim §Ф1, "Порты стенда").
+# `wires: []` — кадров в этом процессе нет (та же форма, что examples/minimal_app).
+
+name: line_sim
+description: "Симулятор линии: процесс robot держит SimRobotServer (Modbus TCP)"
+
+processes:
+  - process_name: robot
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: Plugins.sim.robot_host.plugin.SimRobotHostPlugin
+        plugin_name: sim_robot_host
+        category: io
+        host: 127.0.0.1
+        port: 5021
+        unit_id: 2
+        auto_start: true
+
+wires: []

@@ -320,8 +320,13 @@ Task 1.1 проходит через recipe → загрузчик рецепт�
 форму; таблица «что переехало из ред. 1» — в конце файла.
 
 - Task 1.1: **[VERTICAL SLICE]** `apps/line_sim/` — второе приложение на `run_app`,
-  процесс `robot` с хостом `SimRobotServer`; инспектор подключается без правок [PENDING]
-  — **Module contract:** new-lite
+  процесс `robot` с хостом `SimRobotServer`; инспектор подключается без правок
+  [BLOCKED, частично] — реализация готова (модуль плагина + приложение, `sentrux
+  check .` 37/37, `Services/robot_comm` 127 passed, 4 авторских hazard-теста
+  зелёные), но 4 из 6 приёмочных тестов независимого тестера красные по причинам вне
+  файлов задачи (генерик-оркестратор без `state.get_subtree`, стор истории не тапает
+  stats-план, errors-каналы не резолвятся; отчёт разработчика —
+  `docs/reviews/2026-09-20_task-1.1-developer.md`) — **Module contract:** new-lite
 - Task 1.2: Дверь кадров — тип `stream` в `camera_service` + MJPEG-сток в симе, рецепт
   `letter_robot_sim.yaml` [PENDING] (зависит от 1.1) — **Module contract:** new-lite
 - Task 1.3: Живой стенд двух приложений (8765 + 8766), отчёт стенда + ревью [PENDING]

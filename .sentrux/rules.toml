@@ -121,6 +121,15 @@ from   = "examples/*"
 to     = "multiprocess_prototype/*"
 reason = "examples — второй потребитель framework уровня 2, не зависит от прикладного прототипа (Ф5.13)"
 
+# apps/ — второй самостоятельный потребитель framework уровня 2 (Task 1.1 плана
+# line-sim). Зеркало правила examples/* выше: сим — автономное процессное дерево,
+# прототип о нём не знает и стыкуется только по внешним протоколам (Modbus TCP).
+# Enforce также grep-контракт-тестом (app_module/tests/test_contract.py).
+[[boundaries]]
+from   = "apps/*"
+to     = "multiprocess_prototype/*"
+reason = "apps — второй потребитель framework уровня 2 (line-sim, Task 1.1), не зависит от прикладного прототипа"
+
 # Services → не знают про вышестоящие слои
 [[boundaries]]
 from   = "Services/*"

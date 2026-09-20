@@ -117,6 +117,12 @@
 - [ ] `pytest apps/line_sim Plugins/sim -q` — 0 failed; `pytest Services/robot_comm -q`
       — число passed не ниже baseline (127 при установленном pymodbus).
 
+**Статус реализации (developer, 2026-09-20):** [BLOCKED, частично] — код готов
+(`apps/line_sim/` + `Plugins/sim/robot_host/`), пункты 1-2 и 6 (частично) зелёные,
+пункты 3-5 и грепп-часть 6 красные по причинам вне файлов задачи (framework-level
+gap, не мой код — воспроизведено байт-в-байт на `examples/minimal_app`). Полный
+разбор с input→output — [`docs/reviews/2026-09-20_task-1.1-developer.md`](../../docs/reviews/2026-09-20_task-1.1-developer.md).
+
 **Out of scope:** живая скорость энкодера от команды ПЧ (Ф2.1), канал энкодера в
 line-процесс (Ф2.2), окно-монитор `SimMonitorWindow` (Ф6), правка `data/devices.yaml`
 в репозитории (это runtime-файл; инструкция — в README).

@@ -6,6 +6,10 @@
 3. Инвариант границы (Ф5.13): examples/* не импортирует multiprocess_prototype/*
    (второй потребитель framework не зависит от конкретного приложения; enforce
    также .sentrux/rules.toml boundary).
+4. Инвариант границы (Task 1.1 плана line-sim): apps/* не импортирует
+   multiprocess_prototype/* — зеркало пункта 3 для второго, независимого от
+   examples потребителя framework уровня 2 (симулятор линии); enforce также
+   .sentrux/rules.toml boundary.
 """
 
 from __future__ import annotations
@@ -101,3 +105,26 @@ def test_examples_does_not_import_prototype() -> None:
         if pattern.search(text):
             offenders.append(str(py.relative_to(repo_root)))
     assert offenders == [], f"examples/* импортирует multiprocess_prototype: {offenders}"
+
+
+def test_apps_does_not_import_prototype() -> None:
+    """Инвариант (Task 1.1 плана line-sim): ``apps/*`` не импортирует ``multiprocess_prototype``.
+
+    Зеркало :func:`test_examples_does_not_import_prototype` для второго,
+    независимого от ``examples`` потребителя ``app_module`` — симулятора линии
+    (``apps/line_sim``, автономное процессное дерево на том же фреймворке).
+    Импорт прототипа здесь означал бы, что сим скрыто зависит от конкретного
+    приложения — тот же инвариант enforced ``.sentrux/rules.toml`` boundary
+    (``apps/* → multiprocess_prototype/*``).
+    """
+    repo_root = _MODULES_ROOT.parents[1]
+    apps_dir = repo_root / "apps"
+    assert apps_dir.is_dir(), f"apps/ не найден: {apps_dir}"
+
+    pattern = re.compile(r"^\s*(from|import)\s+multiprocess_prototype\b", re.M)
+    offenders: list[str] = []
+    for py in apps_dir.rglob("*.py"):
+        text = py.read_text(encoding="utf-8", errors="ignore")
+        if pattern.search(text):
+            offenders.append(str(py.relative_to(repo_root)))
+    assert offenders == [], f"apps/* импортирует multiprocess_prototype: {offenders}"
