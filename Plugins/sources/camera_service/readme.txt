@@ -5,14 +5,15 @@ Inputs:   нет (source plugin)
 Outputs:  frame (image/bgr, H*W*3)
 
 Описание:
-  Полнофункциональный source-плагин с поддержкой 4 backend'ов камеры:
-  simulator (тестовые кадры), webcam (cv2), hikvision (MVS SDK), file (видеофайл).
+  Полнофункциональный source-плагин с поддержкой 5 backend'ов камеры:
+  simulator (тестовые кадры), webcam (cv2), hikvision (MVS SDK), file (видеофайл),
+  stream (сетевой видеопоток — MJPEG/RTSP/... через cv2.VideoCapture(url) как есть).
   Горячее переключение backend'а без перезапуска процесса.
 
 Команды:
   - start_capture       — запустить захват
   - stop_capture        — остановить захват
-  - set_camera_type     — переключить backend (simulator/webcam/hikvision/file)
+  - set_camera_type     — переключить backend (simulator/webcam/hikvision/file/stream)
   - set_fps             — установить целевой FPS (1-120)
   - set_resolution      — установить разрешение
   - set_device_id       — OpenCV device index (webcam)
@@ -33,6 +34,7 @@ Config:
   - hikvision_resolution_height (int, 1080)
   - simulator_image_path (str|None, None) — путь к статическому изображению
   - file_source_path (str, "") — путь к видеофайлу
+  - stream_url (str, "") — URL сетевого видеопотока (MJPEG/RTSP/...), без проверки на файл
   - ring_buffer_size (int, 3) — SHM ring-buffer slots
 
 Зависимости:

@@ -170,9 +170,7 @@ class TestWebcamMock:
         # Первое устройство (индекс 0) — доступно, остальные — нет
         mock_cap.isOpened.side_effect = [True, False, False]
 
-        with patch(
-            "Plugins.sources.camera_service.backends.webcam.cv2"
-        ) as mock_cv2:
+        with patch("Plugins.sources.camera_service.backends.webcam.cv2") as mock_cv2:
             mock_cv2.VideoCapture.return_value = mock_cap
             mock_cv2.CAP_DSHOW = 700
 
@@ -207,9 +205,10 @@ class TestFactory:
         assert isinstance(backend, SimulatorBackend)
 
     def test_camera_types_constant(self):
-        """CAMERA_TYPES содержит все 4 типа."""
+        """CAMERA_TYPES содержит все 5 типов (Task 1.2a добавил ``stream``)."""
         assert "simulator" in CAMERA_TYPES
         assert "webcam" in CAMERA_TYPES
         assert "hikvision" in CAMERA_TYPES
         assert "file" in CAMERA_TYPES
-        assert len(CAMERA_TYPES) == 4
+        assert "stream" in CAMERA_TYPES
+        assert len(CAMERA_TYPES) == 5

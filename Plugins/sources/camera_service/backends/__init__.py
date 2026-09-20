@@ -8,12 +8,13 @@ from .base import CameraBackend
 from .simulator import SimulatorBackend
 from .webcam import WebcamBackend
 from .file_source import FileSourceBackend
+from .stream_source import StreamSourceBackend
 
 if TYPE_CHECKING:
     pass
 
 # Допустимые типы камер
-CAMERA_TYPES: tuple[str, ...] = ("simulator", "webcam", "hikvision", "file")
+CAMERA_TYPES: tuple[str, ...] = ("simulator", "webcam", "hikvision", "file", "stream")
 DEFAULT_CAMERA_TYPE: str = "simulator"
 
 # Задержка после освобождения аппаратного устройства (секунды).
@@ -62,6 +63,11 @@ def create_backend(camera_type: str, **kwargs) -> CameraBackend:
             file_path=kwargs.get("file_path", ""),
         )
 
+    if camera_type == "stream":
+        return StreamSourceBackend(
+            stream_url=kwargs.get("stream_url", ""),
+        )
+
     # default → simulator
     return SimulatorBackend(
         width=kwargs.get("width", 640),
@@ -80,6 +86,7 @@ __all__ = [
     "SimulatorBackend",
     "WebcamBackend",
     "FileSourceBackend",
+    "StreamSourceBackend",
     "create_backend",
     "hw_release_delay",
     "CAMERA_TYPES",
