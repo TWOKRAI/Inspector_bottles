@@ -17,7 +17,7 @@
 - [RU-вывод и wc врут](feedback_ru_output_encoding_and_wc.md) — cp866; 0xA0; PYTHONIOENCODING=utf-8 · [Think EN, speak RU](feedback_think_en_speak_ru.md)
 - [monotonic Win = 15.6 мс](project_monotonic_resolution_windows.md) — разности <100 мс на сетку · [No global taskkill](feedback_no_global_taskkill.md) — только TaskStop или PID
 - [CUDA torch](project_cuda_torch_setup.md) — cu124 колесом; PyPI даёт +cpu · [GPU-мониторинг Win](reference_gpu_monitoring_windows.md) — Task Manager прячет CUDA, смотреть nvidia-smi
-- qex: **[СНАЧАЛА сверить свежесть](feedback_check_qex_freshness_before_use.md)** — last_indexed vs сегодня, устаревший отвечает уверенно · [таймаут реиндекса](project_qex_reindex_timeout.md) · [бюджет реиндекса](feedback_qex_reindex_budget.md) — keep_alive=-1 · [запросы по-английски](feedback_qex_query_english_code_bias.md) — RU-перефраз мимо
+- qex: **[СНАЧАЛА сверить свежесть](feedback_check_qex_freshness_before_use.md)** — last_indexed vs сегодня, устаревший отвечает уверенно · [таймаут реиндекса](project_qex_reindex_timeout.md) · [бюджет реиндекса](feedback_qex_reindex_budget.md) — keep_alive=-1 · [запросы по-английски](feedback_qex_query_english_code_bias.md) — RU-перефраз мимо · [модель по платформам](project_qex_model.md) — macOS 8b-qex/4096 с 2026-09-13, Win 0.6b; ловушка Ollama.app молча на CPU
 
 ## Стоящие правила владельца
 - [Приоритет — маятник по свободному времени](project_priority_engine_first.md) — 2026-08-18: к стенду за видимым результатом; фреймворк — вторая полоса; окно codemod — по паузе, не по дате
