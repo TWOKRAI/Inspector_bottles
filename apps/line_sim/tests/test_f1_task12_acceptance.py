@@ -87,10 +87,37 @@ def _make_sink(port: int):
 
 
 def _read_bounded(port: int, max_bytes: int = 4000, timeout: float = 3.0) -> bytes:
-    """Прочитать ОГРАНИЧЕННОЕ число байт ответа с дедлайном (поток multipart бесконечен)."""
+    """Прочитать ОГРАНИЧЕННОЕ число байт ответа с дедлайном (поток multipart бесконечен).
+
+    ДВЕ ПРАВКИ ВЕДУЩЕГО 2026-09-21 — обе найдены, когда модуль плагина появился и перестал
+    маскировать хелпер собой (до этого все 4 теста файла падали ``ModuleNotFoundError`` на
+    сборке фикстуры, и поломка хелпера была не видна ни в одном прогоне):
+
+    1. Было ``resp.fp._sock.settimeout(timeout)`` — безусловный ``AttributeError`` до
+       единого прочитанного байта: ``resp.fp`` это ``_io.BufferedReader``, ``_sock`` живёт
+       на ``resp.fp.raw`` (``socket.SocketIO``). Эскалировано разработчиком 1.2b,
+       воспроизведено ведущим на голом ``http.server`` вне плагина (Python 3.12.13).
+       Строка не подменена на ``raw._sock``, а УДАЛЕНА: таймаут уже задаёт конструктор
+       ``HTTPConnection(timeout=...)`` и он реально правит чтением тела — замер на
+       молчащем сервере дал ``TimeoutError`` ровно за 2.0 с при ``timeout=2.0``. Лезть в
+       приватные потроха ``http.client`` ради гарантии, которая уже есть, незачем.
+
+    2. Было: ЛЮБОЕ исключение → ``pytest.fail``. Но молчание сервера — это не отказ, а
+       ровно то поведение, которое пинит ``test_no_frame_yet_server_answers_without_boundary``
+       («кадра ещё нет — клиент ждёт»). С прежним хелпером этот тест краснел бы на
+       ПРАВИЛЬНОЙ реализации: ``TimeoutError`` при чтении тела → ``pytest.fail``. Неверная
+       модель в спеке, а не опечатка. Теперь таймаут ЧТЕНИЯ ТЕЛА — штатное завершение,
+       возвращаем накопленное; отказ соединения/ответа по-прежнему валит тест.
+
+    ``read1`` вместо ``read``: ``BufferedReader.read(n)`` блокируется до ровно ``n`` байт
+    или EOF, а у бесконечного multipart-потока EOF не наступает никогда — из-за этого и
+    понадобился когда-то низкоуровневый ``settimeout``. ``read1`` отдаёт что есть за один
+    обход сокета и на частичном кадре не виснет.
+    """
     result: dict = {}
 
     def _read() -> None:
+        conn = None
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
             conn.request("GET", "/")
@@ -98,15 +125,20 @@ def _read_bounded(port: int, max_bytes: int = 4000, timeout: float = 3.0) -> byt
             result["status"] = resp.status
             result["headers"] = dict(resp.getheaders())
             data = b""
-            resp.fp._sock.settimeout(timeout)  # noqa: SLF001 — жёсткая граница на низком уровне сокета
-            while len(data) < max_bytes:
-                chunk = resp.read(max_bytes - len(data))
-                if not chunk:
-                    break
-                data += chunk
+            try:
+                while len(data) < max_bytes:
+                    chunk = resp.read1(max_bytes - len(data))
+                    if not chunk:
+                        break
+                    data += chunk
+            except TimeoutError:
+                pass  # сервер молчит — штатное «клиент ждёт», см. докстринг
             result["body"] = data
         except Exception as exc:  # noqa: BLE001 — отчитываем через result, не роняем поток
             result["error"] = exc
+        finally:
+            if conn is not None:
+                conn.close()
 
     t = threading.Thread(target=_read, daemon=True)
     t.start()
