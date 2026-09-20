@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import re
 import socket
+import sys
 import time
 from pathlib import Path
 
@@ -393,6 +394,13 @@ def test_without_pymodbus_plugin_errors_process_lives(tmp_path: Path) -> None:
     log_dir_bad.mkdir()
     os.environ["MULTIPROCESS_LOG_DIR"] = str(log_dir_bad)
     os.environ["PYTHONPATH"] = os.pathsep.join([str(stub_root), prev_pythonpath]) if prev_pythonpath else str(stub_root)
+    # Арбитраж lead (2026-09-20): при spawn ребёнок получает sys.path РОДИТЕЛЯ
+    # (multiprocessing.spawn.get_preparation_data → sys_path), а не пересчитывает его из
+    # PYTHONPATH — env, выставленный после старта pytest, до ребёнка не доезжал, и
+    # «прогон без pymodbus» шёл с настоящим pymodbus (state=running). Заглушку кладём и
+    # в sys.path родителя: его самого она не трогает (pymodbus уже импортирован), а
+    # свежий интерпретатор ребёнка найдёт её первой.
+    sys.path.insert(0, str(stub_root))
     harness_bad = BackendHarness(launcher_factory=_build_line_sim_launcher, port=_free_port())
     try:
         harness_bad.start()
@@ -424,6 +432,8 @@ def test_without_pymodbus_plugin_errors_process_lives(tmp_path: Path) -> None:
         )
     finally:
         harness_bad.stop()
+        if str(stub_root) in sys.path:
+            sys.path.remove(str(stub_root))
         os.environ["PYTHONPATH"] = prev_pythonpath
         if prev_log2 is None:
             os.environ.pop("MULTIPROCESS_LOG_DIR", None)
