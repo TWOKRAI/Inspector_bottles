@@ -314,19 +314,27 @@ Task 1.1 проходит через recipe → загрузчик рецепт�
 - **Dependencies:** нет.
 - **Module contract:** impl-only.
 
-### Phase 1: Вертикальный срез — топология процессов
+### Phase 1: Вертикальный срез — симулятор как второе приложение (ред. 2, 2026-09-20)
 
-Файл: [`phase-1-vertical-slice.md`](phase-1-vertical-slice.md)
+Файл: [`phase-1-vertical-slice.md`](phase-1-vertical-slice.md) — переписан под автономную
+форму; таблица «что переехало из ред. 1» — в конце файла.
 
-- Task 1.1: **[VERTICAL SLICE]** Секция `sim:` в рецепте + минимальный source-плагин
-  камеры → картинка в дисплее [PENDING] — **Module contract:** new-lite
-- Task 1.2: Робот-процесс — `SimRobotServer` в топологии, инспектор подключается без
-  правок [PENDING] (зависит от 1.1) — **Module contract:** new-lite
+- Task 1.1: **[VERTICAL SLICE]** `apps/line_sim/` — второе приложение на `run_app`,
+  процесс `robot` с хостом `SimRobotServer`; инспектор подключается без правок [PENDING]
+  — **Module contract:** new-lite
+- Task 1.2: Дверь кадров — тип `stream` в `camera_service` + MJPEG-сток в симе, рецепт
+  `letter_robot_sim.yaml` [PENDING] (зависит от 1.1) — **Module contract:** new-lite
+- Task 1.3: Живой стенд двух приложений (8765 + 8766), отчёт стенда + ревью [PENDING]
+  (зависит от 1.1, 1.2; сценарий рестарта — после closure Task 4.4) — **Module
+  contract:** impl-only
 
 ### Phase 2: Общая правда о ленте (один энкодер)
 
 Файл: [`phase-2-belt-truth.md`](phase-2-belt-truth.md)
 
+- Task 2.0: Carve-out `StateProxy` из прототипного `GenericProcessApp` во фреймворковый
+  `GenericProcess` (второе приложение получает `ctx.state_proxy`; заведено разведкой
+  2026-09-20, см. phase-1 §Разведка) [PENDING] — **Module contract:** impl-only
 - Task 2.1: ПЧ-команда → живая скорость энкодера в `RobotSimCore` [PENDING] —
   **Module contract:** impl-only
 - Task 2.2: Канал энкодера робот→line через `StateProxy`, объект едет синхронно со
