@@ -11,9 +11,22 @@ extras: {}
 pipeline: pipeline.yaml
 system: system.yaml
 
-# Плагины сима лежат в Plugins/sim и резолвятся plugin_class-путём из
-# pipeline.yaml напрямую — авто-скан здесь не нужен (форма п.2 DESIGN Task 1.1).
+# Авто-скан НУЖЕН, вопреки решению Task 1.1 (комментарий обновлён, Task 1.2).
+# Причина: валидация блюпринта берёт inputs/outputs плагина из PluginRegistry, а не
+# из plugin_class-пути в pipeline.yaml. Пока все плагины сима лежали в Plugins/sim,
+# это не всплывало; camera_service живёт в Plugins/sources — без скана реестр его не
+# импортирует, порты выглядят пустыми, и цепочка camera_service → mjpeg_sink падает
+# BlueprintError'ом (поймано разработчиком Task 1.2b регрессией test_f1_task11).
+#
+# Пути перечислены ПОШТУЧНО, а не корнем Plugins/. Замер ведущего 2026-09-21:
+# корень — 55 плагинов за 0.33 с, эти два — 3 плагина за 0.08 с, и платит каждый
+# дочерний процесс. Широкий скан вдобавок втащил бы в сим весь словарь прототипа
+# (processing/*, render/*, calibration/*) вопреки границе из Plugins/sim/__init__.py:
+# плагины сима — словарь повторного использования, не Inspector-специфика.
+# Появится третий плагин — добавить строкой сюда, это дешевле неявного сцепления.
 discovery:
-  plugin_paths: ["../../Plugins"]
+  plugin_paths:
+    - "../../Plugins/sim"
+    - "../../Plugins/sources/camera_service"
   service_paths: []
   auto_discover: true

@@ -18,7 +18,7 @@ CameraTypeStr = Literal["simulator", "webcam", "hikvision", "file", "stream"]
 class CameraServiceConfig(PluginConfig):
     """Конфиг плагина multi-backend камеры.
 
-    Поддерживает 4 backend'а: simulator, webcam, hikvision, file.
+    Поддерживает 5 backend'ов: simulator, webcam, hikvision, file, stream.
     SHM ring-buffer для zero-copy передачи кадров.
 
     Структурные/identity-поля — здесь. Tunable-параметры (fps, exposure, gain,
