@@ -420,7 +420,10 @@ def test_without_pymodbus_plugin_errors_process_lives(tmp_path: Path) -> None:
 def _find_prototype_imports(root: Path) -> list[str]:
     """Просканировать *.py под root на "multiprocess_prototype" построчно (grep-подобно)."""
     hits: list[str] = []
-    pattern = re.compile(r"multiprocess_prototype")
+    # Арбитраж lead (2026-09-20): критерий — про ИМПОРТЫ слоя, а не про упоминания
+    # строки; наивный скан находил докстринги этого же файла (7 из 9 совпадений) и
+    # был красен по конструкции. Матчим только import-формы.
+    pattern = re.compile(r"^\s*(from\s+multiprocess_prototype\b|import\s+multiprocess_prototype\b)")
     for path in sorted(root.rglob("*.py")):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
