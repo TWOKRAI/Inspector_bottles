@@ -147,7 +147,12 @@ observability:
         SYSTEM:
           channels: [console, system_file, flight_ring]
         BUSINESS:
-          channels: [system_file, messages_file, flight_ring]
+          # Task 3.2 (Р-7(а)): `system_file` УБРАН из BUSINESS. Ось `channels`
+          # замещающая, поэтому дефолт фреймворка сюда не доезжает: пока он
+          # стоял здесь, `messages.log` инспектора оставался подмножеством его
+          # `system.log` — ровно тот дубль, ради снятия которого решение и
+          # принималось. Не возвращать: это не «потерянный дефолтный приёмник».
+          channels: [messages_file, flight_ring]
       flight:
         enabled: true
         sink: flight_ring

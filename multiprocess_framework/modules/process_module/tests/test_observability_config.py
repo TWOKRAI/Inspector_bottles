@@ -53,10 +53,28 @@ def test_error_dict_validates_and_nonempty() -> None:
 
 
 def test_stats_dict_validates() -> None:
+    """Ф2/Р-3а: `enabled` — ПЛОСКОСТЬ, лог-канал решает `log_snapshots`.
+
+    Тест держал прежний контракт (`stats.enabled: false` → `enable_logging: False`)
+    и покраснел ровно на смене смысла — той единственной, что фаза Ф2 вносит в
+    существующий ключ (план §11 п.1). Обе половины проверяются рядом, чтобы
+    «переехало» не читалось как «пропало»: ключ `enabled` доезжает до менеджера
+    (плоскость выключена), а лог-канал остаётся включённым, потому что
+    `log_snapshots` дефолтом `True`.
+    """
     out = expand_observability({"stats": {"aggregation_interval": 10.0, "enabled": False}})
     cfg = StatsManagerConfig.model_validate(out["stats"])
     assert cfg.aggregation_interval == 10.0
-    assert cfg.enable_logging is False
+    assert cfg.enabled is False, "плоскость обязана доехать до StatsManagerConfig (четвёртая точка дороги ключа)"
+    assert cfg.enable_logging is True, (
+        "log_snapshots (дефолт True) — единственный решатель судьбы лог-канала; "
+        "прежний смысл enabled на него больше не влияет"
+    )
+
+    off = StatsManagerConfig.model_validate(expand_observability({"stats": {"log_snapshots": False}})["stats"])
+    assert off.enable_logging is False and off.enabled is True, (
+        "обратная половина: log_snapshots гасит канал, плоскость при этом жива"
+    )
 
 
 class TestStatsFlushIntervalIsOperable:

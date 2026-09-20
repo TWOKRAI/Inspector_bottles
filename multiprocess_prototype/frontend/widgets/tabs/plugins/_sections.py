@@ -315,30 +315,34 @@ def _make_plugin_factory(
 # ---------------------------------------------------------------------------
 
 
-# Модульный кэш singleton-секций «Пути» по id(services).
-# Замыкание в _make_paths_factory не работает между вызовами
-# build_plugin_sections() — каждый refresh_catalog() создавал бы новую секцию
-# с новым PathsSubtabWidget, что ломало бы подписку catalog_updated.
-_PATHS_SECTION_CACHE: "dict[int, _PathsSection]" = {}
-
-
 def _make_paths_factory(
     services: AppServices,
     plugin_manager: Any = None,
 ) -> "Callable[[object], _PathsSection]":
-    """Фабрика singleton-секции «Пути».
+    """Фабрика секции «Пути». Кэша нет — и это намеренно.
 
-    Кэш по id(services) переживает повторные вызовы build_plugin_sections(),
-    что гарантирует сохранение подписки catalog_updated после refresh_catalog().
+    Секция объявлена НЕленивой (``SectionSpec.lazy`` по умолчанию ``False``),
+    поэтому ``BaseTreeNavTab.__init__`` создаёт и подключает её ровно один раз,
+    а ``PluginsTab.refresh_catalog()`` пересобирает только спеки: подключённые
+    секции он не трогает. Измерено счётчиком вызовов фабрики — 1 после
+    ``__init__`` и 1 после двух ``refresh_catalog()``. Подписка секции на
+    ``catalog_updated`` переживает rescan сама, кэш её не спасал и не спасает;
+    свойство закреплено тестом ``test_paths_section_survives_refresh_catalog``.
+
+    Здесь стоял модульный словарь по ``id(services)`` — он был снят как течь:
+    запись не удалялась никогда, каждая пересозданная вкладка оставляла свою
+    секцию жить вечно (замер: 5 секций переживали 5 мёртвых вкладок). Вдобавок
+    ``id`` переиспользуется после сборки мусора, так что новая вкладка могла
+    получить чужую секцию, подписанную на объекты прошлой.
+
+    Держатель уровня вкладки, поставленный вместо словаря, тоже снят: живой
+    путь его не читал ни разу, а неиспользуемый механизм с уверенным
+    объяснением опаснее его отсутствия. Симметрично соседней вкладке
+    «Сервисы» (``tabs/services/_sections.py``), где фабрика тоже без кэша.
     """
-    cache_key = id(services)
 
     def factory(_ctx_arg: object) -> _PathsSection:
-        section = _PATHS_SECTION_CACHE.get(cache_key)
-        if section is None:
-            section = _PathsSection(services, plugin_manager)
-            _PATHS_SECTION_CACHE[cache_key] = section
-        return section
+        return _PathsSection(services, plugin_manager)
 
     return factory
 
@@ -369,6 +373,9 @@ def build_plugin_sections(
         open_sandbox_cb: callback для открытия sandbox в content-панели.
             Сигнатура: ``(plugin_name: str, sandbox_widget: QWidget) -> None``.
             По умолчанию None — кнопка «Тест» disabled (обратная совместимость).
+
+    Модульного состояния функция НЕ заводит: каждый вызов отдаёт свежие спеки, и
+    ничто из созданного здесь не переживает вызывающего — см. :func:`_make_paths_factory`.
     """
     presenter = PluginsPresenter(services)
     plugins = presenter.list_plugins()  # [(name, display, category), ...]

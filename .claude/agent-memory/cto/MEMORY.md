@@ -1,0 +1,10 @@
+- [Road lenses — what each sees](project_road_lenses_what_each_sees.md) — count_calls blind to constructors; tracemalloc peak depends on coverage core; INSTRUCTION count sees all, coverage-independent
+- [emergency_log is stderr-only](project_emergency_log_is_stderr_only.md) — validator voices via emergency_log never reach logs/; FallbackLogger buffers+drains; reload parses ×6 by design
+- [pytest shows captured output only for failures](feedback_pytest_shows_captured_output_only_for_failures.md) — 0→N warning counts across trees are display artefacts; count with log_cli on both sides
+- [Shared-tree provenance forensics](project_shared_tree_provenance_forensics.md) — pre-commit patch files + fsck WIP stashes reconstruct authorship; explicit-path staging fails inside a shared file
+- [Lock-hold claims need a lock-free control (GIL)](feedback_lock_hold_time_claims_need_a_lock_free_control_under_the_gil.md) — writer p99 identical HEAD vs deque-swap; lock-free competitor shows same tail; judge by hold time inside CS
+- [Cross-track dependency can name the wrong plane](feedback_a_cross_track_dependency_can_name_the_wrong_plane.md) — grep the consumers of the named function; declare_metric = levels, NumberRecord.unit = numbers
+- [Ф3 cut verdict 2026-09-07](project_f3_cut_verdict_2026_09_07.md) — 3.4/3.6/3.7 cut, shrink rejected; four conditions; F3 mis-parked by me, needs own home
+- [Store retention bounds rows, not bytes](project_store_retention_bounds_rows_not_bytes.md) — purge leaves FTS tombstones (21 MiB/35 rows live); optimize after purge 192 ms, 0 drops; (b)-levers max -30%
+- [Task 4.11 TTL-sweep voice verdict 2026-09-08](project_task_4_11_ttl_sweep_voice_verdict_2026_09_08.md) — (b) gate by origin; ttl-sweeper only authorless road; 6 call sites not 2; retry road floods
+- [State predicate at a seam counts rebuilds](feedback_a_state_predicate_at_a_seam_counts_rebuilds_not_actions.md) — verify "once per action" by origin inventory; probe sweep + retry roads; scratchpad copy breaks __file__-relative REPO_ROOT

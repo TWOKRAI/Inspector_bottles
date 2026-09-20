@@ -6,11 +6,29 @@
 
 from __future__ import annotations
 
+import builtins
 import os
+import threading
+import warnings
 from typing import TYPE_CHECKING, Any
+
+from ...channel_routing_module.observability.store_tap import ORIGIN_ERROR_MANAGER, ORIGIN_FIELD
 
 if TYPE_CHECKING:
     pass
+
+
+#: Имя потока, который поднимает ``diag.thread_raise`` без ``thread_name``.
+#: Оно же приезжает в ``extra.context.thread`` записи плоскости ошибок — то есть
+#: это АДРЕС события в сторе, а не украшение.
+DIAG_THREAD_NAME = "diag-thread-raise"
+
+#: Предел ожидания потока в ``diag.thread_raise``. Единственный потолок задачи, и
+#: он не молчаливый: результат ожидания едет в ответе ключом ``joined``, поэтому
+#: «счётчик отстал, потому что не дождались» отличимо от «хук не сработал».
+#: Значение — с запасом на порядок: поднять поток, бросить и отработать хук стоит
+#: единиц миллисекунд, две секунды покрывают промах планировщика под нагрузкой.
+DIAG_JOIN_TIMEOUT_SEC = 2.0
 
 
 #: Кого команда sink-control имеет право трогать: плоскость → атрибут в services.
@@ -99,6 +117,72 @@ def _parse_ttl(args: dict) -> tuple[float | None, str | None]:
         return validate_ttl(args.get("ttl")), None
     except ValueError as exc:
         return None, str(exc)
+
+
+class _ManagerLookupFailed:
+    """Маркер: слот не удалось СПРОСИТЬ (Ф5-добор, блокер З6).
+
+    Не ``None`` и не «пусто»: у потребителя (``_plane_counters``) это два
+    РАЗНЫХ факта, и различает он их намеренно (его собственный комментарий:
+    «менеджер сломан» и «менеджера нет» — разные вещи, диагностическая команда
+    не имеет права прятать отказ диагностируемого).
+
+    ``get_stats`` здесь БРОСАЕТ, и это не трюк ради трюка: у ``_plane_counters``
+    уже есть ровно та дорога, по которой отказ доезжает до оператора с
+    причиной (``{"error": repr(exc)}``), и маркер въезжает в неё как обычный
+    сломанный менеджер — вместо того чтобы заводить второй, параллельный
+    словарь причин на этаж выше.
+    """
+
+    __slots__ = ("_slot", "_cause")
+
+    def __init__(self, slot: str, cause: BaseException) -> None:
+        self._slot = slot
+        self._cause = cause
+
+    def get_stats(self) -> dict[str, Any]:
+        raise RuntimeError(f"get_manager({self._slot!r}) бросил {self._cause!r}")
+
+    def __repr__(self) -> str:  # pragma: no cover — диагностика
+        return f"_ManagerLookupFailed(slot={self._slot!r}, cause={self._cause!r})"
+
+
+def _safe_get_manager(svc: Any, name: str) -> Any:
+    """``svc.get_manager(name)`` — не роняет диагностическую команду (Ф5, ревью-блокер S2).
+
+    ``get_manager`` объявлен ``ObservableMixin`` и обычно безопасен, но не у
+    ВСЕХ держателей ``services`` его база инициализирована одинаково —
+    воспроизведено на ``ProcessManagerProcess`` (латентный, не связанный с этой
+    задачей дефект соседнего процесса): атрибут ``callable``, а вызов бросает
+    ``AttributeError: 'ProcessManagerProcess' object has no attribute
+    '_registry'``. Диагностика (``introspect.observability``/``config.reload``)
+    не имеет права падать из-за состояния СОСЕДНЕГО механизма — тот же довод,
+    по которому ``_plane_counters`` глушит отказ ``get_stats()``.
+
+    **Отказ и отсутствие — РАЗНЫЕ возвраты (Ф5-добор, блокер З6).** Первая
+    редакция глушила исключение в ``None``, и этажом ниже секция ``observation``
+    пропадала из ответа ЦЕЛИКОМ. Воспроизведено:
+
+        вход:     services, чей get_manager бросает AttributeError
+        выход:    observability_counters(...).keys() == []  — «плоскости нет»
+        контроль: services, чей get_stats бросает →
+                  {'observation': {'error': "RuntimeError(...)"}}
+
+    То есть правка S2, чинившая падение команды, взамен сделала отказ
+    невидимым — тот самый класс, ради которого написан весь план. Теперь
+    возврат — :class:`_ManagerLookupFailed`, и секция остаётся С ПРИЧИНОЙ.
+
+    ``None`` сохранён ровно за «менеджера нет»: держатель без ``get_manager``
+    или слот, отдавший ``None``. Это НЕ отказ, и секции у такого процесса
+    правильно не быть.
+    """
+    get_manager = getattr(svc, "get_manager", None)
+    if not callable(get_manager):
+        return None
+    try:
+        return get_manager(name)
+    except Exception as exc:  # noqa: BLE001 — диагностика не должна падать из-за чужого состояния
+        return _ManagerLookupFailed(name, exc)
 
 
 #: Команды, чьи параметры судятся ПО ТИПАМ до входа в хендлер (Task 2.2, Р-3а).
@@ -908,6 +992,7 @@ class BuiltinCommands:
             EVENT_SELECTOR_ATTR,
             document_plane_report,
             event_plane_report,
+            observation_plane_report,
             stats_plane_report,
         )
 
@@ -918,6 +1003,12 @@ class BuiltinCommands:
         logger = getattr(svc, "logger_manager", None)
         error = getattr(svc, "error_manager", None)
         stats = getattr(svc, "stats_manager", None)
+        # Ф5, ревью-блокер S2: та же дорога, которой резолвер порта достаёт
+        # слот ``observation`` (``observation_port`` ступень 1) — здесь нужен
+        # именно МЕНЕДЖЕР (у него есть ``get_stats()``), а не бесхозный вид
+        # ступени 2, поэтому напрямую через ``get_manager``, а не через
+        # ``observation_port(svc)``.
+        observation = _safe_get_manager(svc, "observation")
         layers = process_observability_layers(svc)
         try:
             audit_limit = int(args.get("audit_limit", 20))
@@ -961,6 +1052,11 @@ class BuiltinCommands:
                 # Ф5 (5.1): ручки дампа — тоже часть действующего состояния
                 # плоскости, и без них `config.reload` не может их подтвердить.
                 flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
+                # Фв4 плана «порт наблюдений» (4.1): действующая политика порта
+                # читается у ЖИВОГО гейта heartbeat'а — без неё правка
+                # ручки порта не может быть подтверждена (`unverifiable`
+                # при `checked=0` читалось бы как норма).
+                heartbeat=getattr(svc, "_heartbeat", None),
             ),
             **({"resolve": resolved} if resolved else {}),
             # `flush` (Task 5.7) — просьба о КОГЕРЕНТНОМ снимке: дожать буферы,
@@ -972,6 +1068,7 @@ class BuiltinCommands:
                 logger=logger,
                 error=error,
                 stats=stats,
+                observation=observation,
                 hub=getattr(svc, "_observability_hub", None),
                 flush=bool(args.get("flush")),
             ),
@@ -991,6 +1088,11 @@ class BuiltinCommands:
             # наблюдаемо ТОЛЬКО отсюда — без этой строки счётчик
             # `without_plane` рос бы в процессе и не читался ничем.
             **stats_plane_report(svc),
+            # Ф3 (задача 3.2, шаг 0): секция порта наблюдений — та же тройка
+            # `effective`/`provenance`/`counters`, что у логгера. `writers`
+            # строится независимо от hub'а (закрывает критерий П4 задачи 3.3
+            # целиком), `counters` читают потери канала `kind=observation`.
+            **observation_plane_report(svc),
             # Ф4 (4.1): третья точка дороги ручек `observability.events` — и
             # единственное место, где видно, СКОЛЬКО широких записей прорежено.
             # Читается ЖИВОЙ селектор, а не конфиг: пересчёт из того же
@@ -1059,7 +1161,14 @@ class BuiltinCommands:
                 }
             )
         try:
-            report["rows"] = {kind: store.count(kind) for kind in ("log", "error", "stats")}
+            # Ф3.2 (находка ревью 2026-08-25): род `observation` добавлен в перечень.
+            # Список был буквальной тройкой, и с появлением четвёртого рода секция
+            # перестала быть счётом ТАБЛИЦЫ: на стенде она называла 18 824 строки,
+            # тогда как в файле лежало 18 938 — двадцать три observation-строки не
+            # считал никто. Это не косметика витрины: `purge` режет по `id` БЕЗ
+            # разбора рода, бюджет `max_rows` общий на все роды и все процессы, и
+            # эта секция — единственное место, откуда оператор видит, кто его съедает.
+            report["rows"] = {kind: store.count(kind) for kind in ("log", "error", "stats", "observation")}
         except Exception as exc:  # noqa: BLE001 — читающая команда не падает из-за счёта
             report["rows_error"] = str(exc)
         return {"history": report}
@@ -1280,6 +1389,11 @@ class BuiltinCommands:
             # «показаний нет» — разные ответы, и потребитель (как и приёмочный тест)
             # обязан их различать. Значение подставляется ниже.
             "levels": None,
+            # M9 (Ф2, задача 2.3): достижимый тик воркера — тот же
+            # `ProcessHeartbeat._telemetry_tick()`, что решает реальную частоту, просто
+            # не выставленный наружу раньше. Ключ присутствует ВСЕГДА, тем же приёмом,
+            # что `levels` строкой выше: у процесса без heartbeat'а спрашивать нечего.
+            "tick_effective_sec": None,
             # Штамп берётся ДО снятия — снимок сделан в этот момент или сразу после,
             # никогда раньше.
             "snapshot_ts": time.time(),
@@ -1292,6 +1406,14 @@ class BuiltinCommands:
             # отказ readback'а гейта (ниже, ветка success=False) не должен уносить с
             # собой единственные живые числа ответа.
             result["snapshot_ts"] = time.time()
+            # M9: тик — тоже НЕ зависит от gate (`_telemetry_tick()` уже сегодня
+            # фолбэчит на `self._interval`, когда gate не собран) — тот же довод, что
+            # у `levels` выше: сломанный readback гейта не должен уносить с собой
+            # число, которое gate вообще не спрашивает.
+            try:
+                result["tick_effective_sec"] = heartbeat.current_telemetry_tick()
+            except Exception:  # noqa: BLE001 — best-effort секция, не отказ команды
+                result["tick_effective_sec"] = None
             try:
                 result["levels"] = heartbeat.current_levels_snapshot()
             except Exception as exc:  # noqa: BLE001 — best-effort секция, не отказ команды
@@ -1328,7 +1450,14 @@ class BuiltinCommands:
             else:
                 result["gate_active"] = True
                 result["publish"] = publish
-                result["resolved"] = self._resolve_gated_metrics(publish)
+                # Блокер Б1 ревью Ф4: вердикт обязан быть про ТОТ путь, решение
+                # по которому эта секция и принимает. Считает ЖИВОЙ гейт (то же
+                # `decide`, что и выдаёт разрешение на тике); readback без гейта
+                # сюда не попадает — ветка под `publish is None` выше.
+                live = getattr(heartbeat, "current_resolved_metrics", None)
+                resolved = live() if callable(live) else None
+                result["resolved"] = resolved if resolved is not None else self._resolve_gated_metrics(publish)
+                result["resolved_plane"] = self._resolved_plane()
                 try:
                     result["unknown_metrics"] = heartbeat.current_unknown_metrics()
                 except Exception:  # noqa: BLE001 — best-effort секция
@@ -1340,6 +1469,28 @@ class BuiltinCommands:
         if isinstance(rules, dict):
             result["throttle_rules"] = dict(rules)
         return result
+
+    @staticmethod
+    def _resolved_plane() -> dict:
+        """Про КАКИЕ пути говорит ``resolved`` — и про какие НЕ говорит.
+
+        Блокер Б1 ревью Ф4: два readback'а одной живой системы противоречили
+        друг другу об ОДНОМ листе. ``resolved`` называл ``frame_count``
+        выключенным (решение легаси-секции по ИМЕНИ), а плагинный лист
+        ``processes.<P>.state.plugins.capture.frame_count`` продолжал шагать —
+        решение по нему принимает политика порта по ПУТИ. Вердикт без адреса
+        читается как вердикт про всё, поэтому адрес называется вслух, а имя
+        поддерева берётся из константы, а не переписывается сюда руками.
+        """
+        from ..configs.observation_policy import PORT_SUBTREE_PATTERN
+
+        return {
+            "paths": "processes.<процесс>.state.<имя>",
+            "decided_by": "telemetry.publish (+ observability.observation, если правило адресует этот путь)",
+            "not_covered": PORT_SUBTREE_PATTERN,
+            "not_covered_decided_by": "observability.observation",
+            "see": "introspect.observability → observation.provenance.sources (решение ПО ПУТИ, с источником)",
+        }
 
     @staticmethod
     def _resolve_gated_metrics(publish: dict) -> dict:
@@ -1719,12 +1870,21 @@ class BuiltinCommands:
                 telemetry_targets,
             )
             from ..managers.observability_flight import FLIGHT_RECORDER_ATTR
-            from ..managers.observability_wiring import EVENT_SELECTOR_ATTR
+            from ..managers.observability_wiring import (
+                EVENT_SELECTOR_ATTR,
+                reapply_observability_store_level,
+                resolve_history_policy,
+            )
 
             layers = process_observability_layers(svc)
             _logger = getattr(svc, "logger_manager", None)
             _error = getattr(svc, "error_manager", None)
             _stats = getattr(svc, "stats_manager", None)
+            # Ф2 (задача 2.2, критерий 3): третья точка дороги `commands.log_success` —
+            # без неё правка легла бы в слой и не действовала бы (см. `_rebuild_and_apply`).
+            _command = getattr(svc, "command_manager", None)
+            # Ф5, ревью-блокер S2 — тот же геттер, что и в introspect.observability.
+            _observation = _safe_get_manager(svc, "observation")
 
             # Task 5.5: ссылки, за которыми нет приёмника. Ответ РАЗНЫЙ по месту, и
             # это не вкус:
@@ -2012,6 +2172,10 @@ class BuiltinCommands:
                         # и не подействовала: рекордер создаётся один раз на
                         # старте, и пересборка обязана донести до него ручки.
                         flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
+                        # Ф2 (2.2): живой CommandManager — получатель ручки
+                        # `observability.commands.log_success` (см. докстринг
+                        # `_rebuild_and_apply`).
+                        command=_command,
                         origin=_ORIGIN_SWITCH if obs_clear else _ORIGIN_RELOAD,
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -2022,6 +2186,69 @@ class BuiltinCommands:
                     result["events_applied"] = expanded["events"]
                 if expanded.get("flight") is not None:
                     result["flight_applied"] = expanded["flight"]
+                # Ф1.4 (M17): ТОТ ЖЕ блокер Б2, что тремя строками ниже у
+                # `observation_applied`, — применённая политика окон голоса
+                # считалась пересборкой и выбрасывалась, за пределами тестов её
+                # не читал никто. Форма — дословно соседние `events_applied` /
+                # `flight_applied`: третьего способа спросить одно и то же у
+                # оператора заводиться не должно.
+                if expanded.get("voices") is not None:
+                    result["voices_applied"] = expanded["voices"]
+                # Блокер Б2 ревью Ф4: отчёт «нет молчаливых потолков» считался
+                # `apply_observation_policy` и выбрасывался — за пределами тестов
+                # его не читал никто, а единственный сторож смотрел во внутренний
+                # словарь `expanded`, то есть доказывал харнесс. Форма — дословно
+                # соседние `events_applied`/`flight_applied`, чтобы у оператора не
+                # завелось третьего способа спросить одно и то же.
+                if expanded.get("observation") is not None:
+                    result["observation_applied"] = expanded["observation"]
+                # Ф2 (задача 2.3, M9): та же форма, теперь для скаляра. `is not None`,
+                # а не «истинно»: `0.0` — легальное применённое значение (гейт heartbeat
+                # выключен), и это не то же самое, что «применять было некому».
+                if expanded.get("heartbeat_interval_sec") is not None:
+                    result["heartbeat_interval_applied"] = expanded["heartbeat_interval_sec"]
+                # Ф2 (задача 2.2): `history.level`/`max_rows`/`max_age_sec`/
+                # `purge_interval_sec` жили в `svc._observability_history_policy`,
+                # выставленном РОВНО ОДИН РАЗ на подъёме (`_wire_observability_hub`) —
+                # такт уборки (`sweep_observability_history`) читает именно этот
+                # кэш, а не слои заново. Без обновления здесь readback показывал
+                # бы применённое значение (см. `history=` в `observability_effective`
+                # ниже), а такт уборки продолжал бы жить прежним — расхождение
+                # ровно того класса, который вся фаза и лечит. `db_path`/`enabled`
+                # сюда НЕ входят: они читаются РОВНО на подъёме стора и решают,
+                # поднимать ли его вовсе — «стор появился/исчез на лету» эта
+                # задача не берёт (см. ADR-PM-047, остаток).
+                store = getattr(svc, "_observability_store", None)
+                if store is not None:
+                    new_history_policy = resolve_history_policy(svc)
+                    old_history_policy = getattr(svc, "_observability_history_policy", None) or {}
+                    # Добор ADR-PM-047: до этой правки ЗДЕСЬ обновлялся ТОЛЬКО
+                    # кэш, который читает такт уборки (max_rows/max_age_sec/
+                    # purge_interval_sec) — `level` подтверждался readback'ом
+                    # (см. `history=` ниже) НЕ действуя: живой SQLite-тап
+                    # (`StoreTapChannel`, `min_level` задан РОВНО ОДИН РАЗ на
+                    # `wire_observability_store` в `_wire_observability_hub`)
+                    # продолжал принимать записи по СТАРОМУ порогу — ложный
+                    # `confirmed`, худший класс вердикта. Порог переустанавливаем
+                    # ТОЛЬКО когда он реально сменился — `reapply_observability_
+                    # store_level` создаёт новые `StoreTapChannel` на каждый
+                    # вызов, и звать её на каждый `config.reload` (в том числе
+                    # тот, что не тронул `history` вовсе) было бы лишней работой
+                    # без наблюдаемого эффекта.
+                    if new_history_policy.get("level") != old_history_policy.get("level"):
+                        svc._observability_store_taps = reapply_observability_store_level(
+                            store,
+                            _error,
+                            _logger,
+                            getattr(svc, "name", ""),
+                            new_history_policy["level"],
+                            # Task 3.3: НОВЫЕ tap'ы создаются здесь же, и без
+                            # ёмкости из той же политики они молча вернулись бы
+                            # к дефолту — ручка `queue_capacity` действовала бы
+                            # только до первого `config.reload`.
+                            new_history_policy["queue_capacity"],
+                        )
+                    svc._observability_history_policy = new_history_policy
                 result["applied"] = {"log_level": expanded["logger"].get("default_level")}
                 # Что держится сессией — в ответе всегда: слой, о котором не сказано,
                 # через час выглядит как необъяснимое поведение процесса.
@@ -2040,6 +2267,15 @@ class BuiltinCommands:
                 stats=_stats,
                 event_selector=getattr(svc, EVENT_SELECTOR_ATTR, None),
                 flight_recorder=getattr(svc, FLIGHT_RECORDER_ATTR, None),
+                # Фв4 (4.1): без этой строки вердикт по секции порта был бы
+                # `unverifiable` при `checked=0` — «никто не смотрел» вместо проверки.
+                heartbeat=getattr(svc, "_heartbeat", None),
+                # Ф2 (задача 2.2, критерий 3): без этих трёх без исключения правка
+                # `commands.log_success`/`session_ttl_sec`/`history.*` отвечала бы
+                # `unverifiable` — путь запроса некому было сравнить с readback'ом.
+                command=_command,
+                session_ttl_sec=layers.effective_session_ttl(),
+                history=resolve_history_policy(svc),
             )
             # Task 5.7: судить, а не только показывать. Readback лежал в ответе, но
             # `success` означал «применение не упало» — запрошенный ключ, перебитый
@@ -2072,7 +2308,9 @@ class BuiltinCommands:
             # самой этой команды (эмитированы до снимка, посчитаны после него —
             # батчинг), и на молчащем процессе поток выглядел бы ненулевым.
             # Замер цены одного опроса — в docstring `observability_counters`.
-            result["counters"] = observability_counters(logger=_logger, error=_error, stats=_stats, flush=True)
+            result["counters"] = observability_counters(
+                logger=_logger, error=_error, stats=_stats, observation=_observation, flush=True
+            )
             # Task 5.8: сроки — в ответе КАЖДОГО reload, включая файловый. Файл L3 не
             # трогает, но именно после reload оператор и спрашивает «что у меня ещё
             # висит»; молчание здесь читалось бы как «ничего не висит».
@@ -3053,12 +3291,20 @@ class BuiltinCommands:
     # ========================================================================
 
     def _register_health_commands(self) -> None:
-        """Зарегистрировать health.report / health.status.
+        """Зарегистрировать health.report / health.status / diag.thread_raise / diag.warn.
 
         ``health.report`` — диагностический впрыск health-события в процесс: даёт
         детерминированный способ проверить канал наблюдаемости (report_error →
         heartbeat → state-дерево → driver), не дожидаясь реального отказа железа.
         ``health.status`` — прочитать текущий снапшот здоровья процесса.
+
+        ``diag.*`` (Ф1.1 / C3) — тот же приём для процессных хуков: впрыснуть
+        НАСТОЯЩЕЕ исключение потока и НАСТОЯЩИЙ ``warnings.warn``, а не сымитировать
+        их вызовом ``report_error``. Имитация проверила бы дорогу от хука вниз и
+        промолчала бы ровно о том, ради чего механизм заведён: стоит ли хук в
+        слоте интерпретатора. Регистрируются здесь, вместе с ``health.*``, потому
+        что предмет один — наблюдаемость отказов, и два места регистрации одной
+        поверхности однажды разъедутся.
         """
         cm = self._services.command_manager
         if not cm:
@@ -3077,8 +3323,22 @@ class BuiltinCommands:
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system", "health"])
+        diag_specs = [
+            (
+                "diag.thread_raise",
+                self._cmd_diag_thread_raise,
+                "Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook",
+            ),
+            (
+                "diag.warn",
+                self._cmd_diag_warn,
+                "Диагностика: позвать warnings.warn — проверка warnings.showwarning",
+            ),
+        ]
+        for name, handler, desc in diag_specs:
+            cm.register_command(name, handler, metadata={"description": desc}, tags=["system", "diagnostics"])
         self._services._log_debug(
-            "Встроенные команды health.report/status зарегистрированы",
+            "Встроенные команды health.report/status и diag.thread_raise/warn зарегистрированы",
             module="lifecycle",
         )
 
@@ -3114,7 +3374,13 @@ class BuiltinCommands:
                     "process": self._services.name,
                     "reason": f"неизвестный level '{level}' (DEBUG|INFO|WARNING|ERROR|CRITICAL)",
                 }
-            log_fn(f"[health.report] {message}", module="diagnostics")
+            # Маркер дедупа ПУТЕЙ (Task 1.3a): инцидент уже записан плоскостью
+            # ошибок строкой выше (``state.report_error``), и эта строка — ВТОРАЯ
+            # дорога того же инцидента. В журнал она идёт как прежде (для того
+            # ``level`` и заведён — провести событие через штатный лог-канал и
+            # live-хвосты), но второй строкой в стор не ложится: замер до правки
+            # давал на одну команду ТРИ строки стора.
+            log_fn(f"[health.report] {message}", module="diagnostics", **{ORIGIN_FIELD: ORIGIN_ERROR_MANAGER})
             log_emitted = True
 
         status = args.get("status")
@@ -3141,6 +3407,104 @@ class BuiltinCommands:
 
         state = get_or_create_health_state(self._services)
         return {"success": True, "process": self._services.name, "health": state.snapshot()}
+
+    def _cmd_diag_thread_raise(self, data=None, **kwargs) -> dict:
+        """Поднять поток, который бросит ``RuntimeError`` — проверка ``threading.excepthook``.
+
+        data: ``message`` (текст исключения), ``thread_name`` (имя потока, по
+        умолчанию :data:`DIAG_THREAD_NAME` — оно же приезжает в ``extra.context.thread``
+        записи плоскости ошибок, поэтому имя стоит задавать своё, когда проверок
+        несколько подряд).
+
+        Ждёт поток :data:`DIAG_JOIN_TIMEOUT_SEC` секунд и возвращает ``joined``:
+        предел ожидания — часть ОТВЕТА, а не молчаливый потолок. ``joined=false``
+        означает «счётчик в ответе может отставать», и без этого признака
+        отставание читалось бы как «хук не сработал».
+        """
+        from ...logger_module.core.process_hooks import installed_hooks
+
+        args = self._merge_args(data, kwargs)
+        hooks = installed_hooks()
+        if hooks is None:
+            # Не KeyError и не ноль: «хуков нет» и «событий не было» — разные
+            # факты, и ноль вместо отказа отправил бы читателя искать дефект
+            # в дороге доставки вместо отсутствующей установки.
+            return {
+                "success": False,
+                "process": self._services.name,
+                "reason": "процессные хуки не установлены — считать событие некому",
+            }
+
+        message = str(args.get("message") or "diagnostic thread exception")
+        thread_name = str(args.get("thread_name") or DIAG_THREAD_NAME)
+
+        def _raise_diagnostic_error() -> None:
+            raise RuntimeError(message)
+
+        thread = threading.Thread(target=_raise_diagnostic_error, name=thread_name, daemon=True)
+        thread.start()
+        thread.join(DIAG_JOIN_TIMEOUT_SEC)
+        joined = not thread.is_alive()
+        return {
+            "success": True,
+            "process": self._services.name,
+            "thread": thread_name,
+            "joined": joined,
+            # Ревью Ф0: потолок ожидания — часть ОТВЕТА, читается эффективным
+            # значением константы, а не задокументирован отдельно молча. Без
+            # этого ключа «не дождались» и «дождались, но заняло 2 с» неотличимы
+            # от «дождались мгновенно» — ключ называет сам предел.
+            "join_timeout_sec": DIAG_JOIN_TIMEOUT_SEC,
+            "thread_exceptions": hooks.counters()["thread_exceptions"],
+        }
+
+    def _cmd_diag_warn(self, data=None, **kwargs) -> dict:
+        """Позвать ``warnings.warn`` — проверка ``warnings.showwarning``.
+
+        data: ``message`` (текст), ``category`` (имя класса-предупреждения из
+        ``builtins``, дефолт ``UserWarning``). Неизвестное имя — адресный отказ,
+        а не молчаливая подмена на ``UserWarning``: подмена дала бы «success» на
+        опечатке в имени категории.
+
+        Фильтры ``warnings`` команда НЕ трогает. Следствие названо, а не
+        умолчано: под штатными фильтрами повторный ``warn`` с тем же текстом из
+        той же строки кода машинерия ``warnings`` подавляет своим реестром, и
+        ``warnings_captured`` в ответе тогда не вырастет. Число в ответе именно
+        поэтому и возвращается — по нему видно, состоялось событие или нет.
+        """
+        from ...logger_module.core.process_hooks import installed_hooks
+
+        args = self._merge_args(data, kwargs)
+        hooks = installed_hooks()
+        if hooks is None:
+            return {
+                "success": False,
+                "process": self._services.name,
+                "reason": "процессные хуки не установлены — считать событие некому",
+            }
+
+        category_name = str(args.get("category") or "UserWarning")
+        category = getattr(builtins, category_name, None)
+        if not (isinstance(category, type) and issubclass(category, Warning)):
+            return {
+                "success": False,
+                "process": self._services.name,
+                "reason": f"неизвестная категория '{category_name}' (имя класса-предупреждения из builtins)",
+            }
+
+        message = str(args.get("message") or "diagnostic warning")
+        # ``stacklevel=1`` (эта строка), а не «свалить на вызывающего»: у
+        # синтетического впрыска источник — сама команда. С ``stacklevel=2``
+        # запись приезжала с адресом внутренностей диспетчера
+        # (``dispatch_module/core/dispatcher.py:413`` — воспроизведено прогоном),
+        # то есть указывала оператору на невиновного.
+        warnings.warn(message, category, stacklevel=1)
+        return {
+            "success": True,
+            "process": self._services.name,
+            "category": category_name,
+            "warnings_captured": hooks.counters()["warnings_captured"],
+        }
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов
@@ -3489,15 +3853,14 @@ class BuiltinCommands:
                 self_meta["routing_refresh_applied"] = int(self_meta.get("routing_refresh_applied", 0) or 0) + 1
             return {"success": True, "epoch": epoch, "reset": sorted(reset), "reset_count": len(reset)}
         except Exception as exc:  # noqa: BLE001 — не ронять message-loop
-            log_error = getattr(svc, "_log_error", None)
-            if callable(log_error):
-                log_error(f"routing.refresh handler упал: {exc}", module="lifecycle")
-            err_mgr = getattr(svc, "error_manager", None)
-            if err_mgr is not None and hasattr(err_mgr, "track_error"):
-                try:
-                    err_mgr.track_error(exc, {"phase": "routing.refresh"})
-                except Exception:  # noqa: BLE001
-                    pass
+            # Task 1.3b: defensive-сайт — svc не гарантированно ObservableMixin,
+            # поэтому report_error резолвится тем же getattr-паттерном, что и
+            # раньше _log_error/error_manager (два коннектора порознь). Один
+            # guarded вызов: report_error уже сам безопасен при отсутствующем
+            # error-слоте, отдельный try/except вокруг track_error больше не нужен.
+            report_error = getattr(svc, "report_error", None)
+            if callable(report_error):
+                report_error(exc, context="routing.refresh", module="lifecycle")
             return {"success": False, "reason": str(exc)}
 
     def _cmd_routing_probe(self, data=None, **kwargs) -> dict:

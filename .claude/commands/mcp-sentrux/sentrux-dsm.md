@@ -2,16 +2,16 @@
 description: Dependency Structure Matrix — module relationships and cycles
 ---
 
-Запусти DSM-анализ:
+Run the DSM analysis:
 
-1. Убедись что был свежий scan (если нет — вызови `mcp__sentrux__scan` с `path` к корню проекта).
-2. Вызови `mcp__sentrux__dsm` с `path` = абсолютный путь к корню проекта.
+1. Make sure there was a fresh scan (if not — call `mcp__sentrux__scan` with `path` to the project root).
+2. Call `mcp__sentrux__dsm` with `path` = the absolute path to the project root.
 
-Покажи пользователю:
-- Список циклов (если есть) — какие модули замкнулись.
-- Top-N сильно связанных модулей (высокая coupling).
-- Кандидатов на разрыв связей: куда вставить интерфейс / DI / событие.
+Show the user:
+- List of cycles (if any) — which modules closed the loop.
+- Top-N heavily coupled modules (high coupling).
+- Candidates for breaking couplings: where to insert an interface / DI / event.
 
-Учитывай контекст проекта: правила архитектуры (если есть `.sentrux/rules.toml`) определяют допустимые слои и границы. Если есть `_stack.md` секция "Layers" — сверяй найденные нарушения с ней.
+Take the project context into account: architecture rules (if `.sentrux/rules.toml` exists) define the allowed layers and boundaries. If there is a `_stack.md` "Layers" section — cross-check the found violations against it.
 
 $ARGUMENTS

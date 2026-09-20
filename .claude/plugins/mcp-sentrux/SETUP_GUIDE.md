@@ -24,8 +24,8 @@
 ## 2. Wire the MCP server
 
 Launcher объявлен **inline** в [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json)
-→ `mcpServers.sentrux` (`command: sentrux`, `args: ["mcp"]`). `claude-kit-project new` /
-`claude-kit-claude plugin enable mcp-sentrux` прописывает его в проектный `.mcp.json` автоматически —
+→ `mcpServers.sentrux` (`command: sentrux`, `args: ["mcp"]`). `claude-kit new` /
+`claude-kit add sentrux` прописывает его в проектный `.mcp.json` автоматически —
 вручную добавлять ничего не нужно. Сниппета у плагина нет намеренно: альтернативного
 launcher'а здесь не предлагается, а дефолтный уже задан в `plugin.json`.
 
@@ -54,7 +54,7 @@ non-manifest содержимого).
 - `session_end` говорит «no baseline» → сначала `/mcp-sentrux:sentrux-baseline`,
   потом правки, потом `/mcp-sentrux:sentrux-diff`.
 
-Полный раздел диагностики — [`README.md`](README.md) → «Диагностика».
+Полный раздел диагностики — [`README.md`](README.md) → «Troubleshooting».
 
 ## Uninstall
 

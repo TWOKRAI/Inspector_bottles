@@ -2,30 +2,30 @@
 description: Count files/lines/characters per a TOML config (scripts/code_stats/)
 ---
 
-Запусти счётчик кодовой статистики:
+Run the code stats counter:
 
 ```bash
-python scripts/code_stats/code_stats.py
+uv run --no-project python scripts/code_stats/code_stats.py
 ```
 
-> Скрипт ставится автоматически через `claude-kit-project new` (из `.claude/plugins/lang-python/templates/scripts/code_stats/`). Если в проекте его нет — скопируй из seed или используй `tokei .` напрямую.
+> The script is installed automatically via `claude-kit new` (from `.claude/plugins/lang-python/templates/scripts/code_stats/`). If it's not in the project — copy it from the seed or use `tokei .` directly.
 
-Полезные варианты вызова:
+Useful invocation options:
 
-- **Конкретная папка:** `python scripts/code_stats/code_stats.py --root src/<package>`
-- **JSON для разбора:** `python scripts/code_stats/code_stats.py --format json`
-- **Топ-N директорий:** `python scripts/code_stats/code_stats.py --group-by directory --limit 20`
-- **Свой конфиг:** `python scripts/code_stats/code_stats.py --config <path>`
+- **Specific folder:** `uv run --no-project python scripts/code_stats/code_stats.py --root src/<package>`
+- **JSON for parsing:** `uv run --no-project python scripts/code_stats/code_stats.py --format json`
+- **Top-N directories:** `uv run --no-project python scripts/code_stats/code_stats.py --group-by directory --limit 20`
+- **Custom config:** `uv run --no-project python scripts/code_stats/code_stats.py --config <path>`
 
-Конфиг по умолчанию: [scripts/code_stats/code_stats.toml](../../scripts/code_stats/code_stats.toml) — расширения, исключения (`__pycache__`, `.git`, `.venv` и т.п.), флаги учёта комментариев / docstrings / пустых строк, формат вывода.
+Default config: [scripts/code_stats/code_stats.toml](../../scripts/code_stats/code_stats.toml) — extensions, exclusions (`__pycache__`, `.git`, `.venv`, etc.), comment/docstring/blank-line counting flags, output format.
 
-Подробности и колонки отчёта: [scripts/code_stats/README.md](../../scripts/code_stats/README.md).
+Report details and columns: [scripts/code_stats/README.md](../../scripts/code_stats/README.md).
 
-**Когда использовать:**
-- «Сколько строк кода в модуле X?»
-- «Какая папка больше всего весит по коду?» (`--group-by directory`)
-- Снимок размера проекта перед рефакторингом.
+**When to use:**
+- "How many lines of code are in module X?"
+- "Which folder weighs the most in code?" (`--group-by directory`)
+- A project-size snapshot before refactoring.
 
-**НЕ использовать** для архитектурного анализа связей — для этого `mcp__sentrux__dsm` / `/mcp-sentrux:sentrux-health`.
+**Do NOT use** for architectural coupling analysis — for that, `mcp__sentrux__dsm` / `/mcp-sentrux:sentrux-health`.
 
 $ARGUMENTS

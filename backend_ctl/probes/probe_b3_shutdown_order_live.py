@@ -4,7 +4,7 @@
 Зачем живьём. Свойство B3 наблюдаемо ТОЛЬКО в файлах после останова: тесты
 судят порядок вызовов на дублях, а «запись доехала» — это байты в журнале
 процесса, которого уже нет. Живой контрпример до правки (прогон B2, тот же
-стенд, `logs/prototype_2/camera_0/system.log`)::
+стенд, `logs/prototype_2/camera_0/messages.log` — INFO; см. Task 3.2, Р-7(а))::
 
     #193 ... [INFO] camera_0: All workers stopped
     #195 ... [INFO] logger_manager: LoggerManager shutting down
@@ -101,7 +101,12 @@ def main() -> int:
         log(f"каталог журналов не найден: {LOG_DIR}")
         return 1
 
-    system_logs = [LOG_DIR / name / "system.log" for name in WATCHED]
+    # Task 3.2 (Р-7(а)): строки останова S1/S2 эмитятся через `_log_info`
+    # (`process_lifecycle.py:216,223`), то есть уровень INFO -> скоуп BUSINESS ->
+    # `messages.log`. До 3.2 BUSINESS писал ещё и в `system_file`, и проба читала
+    # его. Имя переменной оставлено: смысл — «файл плоскости логов», а не
+    # «файл с именем system».
+    system_logs = [LOG_DIR / name / "messages.log" for name in WATCHED]
     perf_logs = [LOG_DIR / name / "performance.log" for name in WATCHED]
 
     harness = BackendHarness(recipe=RECIPE, warmup=8.0)

@@ -2,7 +2,7 @@
 
 Заготовки для machine-specific overrides — отдельно для **macOS** и **Windows**.
 
-> **MCP-сервера НЕ нужно копировать руками под платформу** — кросс-платформенность решает [`../mcp/qex-launcher.py`](../mcp/qex-launcher.py) (auto-detect ОС → правильная модель Ollama). Для создания нового проекта используй `claude-kit-project new`; `.mcp.json` генерируется автоматически из `manifest.yaml`.
+> **MCP-сервера НЕ нужно копировать руками под платформу** — кросс-платформенность решает [`../mcp/qex-launcher.py`](../mcp/qex-launcher.py) (auto-detect ОС → правильная модель Ollama). Для создания нового проекта используй `claude-kit new`; `.mcp.json` генерируется автоматически из `manifest.yaml`.
 
 ---
 
@@ -52,7 +52,7 @@ copy .claude\platforms\settings.local.windows.json .claude\settings.local.json
 
 ## `statusLine` — per-OS поведение
 
-`statusLine.command` в `settings.json` определяется во время `claude-kit-project new` по OS, на которой запускается команда:
+`statusLine.command` в `settings.json` определяется во время `claude-kit new` по OS, на которой запускается команда:
 
 | OS | statusLine.command | Что показывает |
 |----|--------------------|----------------|

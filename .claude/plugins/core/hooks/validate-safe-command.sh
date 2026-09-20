@@ -25,10 +25,17 @@
 # legacy horizontal tree keeps _lib/ one level up (sibling of the category dir).
 _HOOK_DIR="$(dirname "$0")"
 if [ -f "$_HOOK_DIR/_lib/python-bin.sh" ]; then
-    source "$_HOOK_DIR/_lib/python-bin.sh"
+    _PYLIB="$_HOOK_DIR/_lib/python-bin.sh"
 else
-    source "$_HOOK_DIR/../_lib/python-bin.sh"
+    _PYLIB="$_HOOK_DIR/../_lib/python-bin.sh"
 fi
+# Security gate fails CLOSED: without an interpreter the call cannot be inspected.
+# python-bin.sh exits 1, which PreToolUse treats as allow — so resolve in a subshell
+# and block with exit 2 instead (owner decision 2026-09-16, plan debt Д50).
+PY="$(source "$_PYLIB" 2>/dev/null && printf '%s' "$PY")" || {
+    echo "Blocked: validate-safe-command.sh — no working Python interpreter, so this security gate cannot inspect the call. Install Python 3 (or uv), or set CLAUDE_PYTHON_BIN." >&2
+    exit 2
+}
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | $PY -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))" 2>/dev/null)

@@ -220,7 +220,19 @@ with BackendDriver(port=8765) as drv:
   `log_tail`/`log_untail`, `ui_tap`/`ui_untap`/`ui_tap_ping`,
   `config_reload` / `config_reload_verified` (смена + вердикт «действует» и «записи идут», Task 5.7),
   `logger_sink_enable|disable`,
+  `introspect_observability` (Ф0.4/M3: зеркало команды `introspect.observability` —
+  `effective`/`counters`/`provenance`/`history`/`observation`/`audit`/`layers` одним вызовом;
+  `section=<имя>` сужает белым списком до одной секции, неизвестное имя — отказ с перечнем.
+  До этого инструмента полный ответ команды читал только driver, и то одной секцией
+  `counters` через `observability_counters()`),
   `telemetry_reconfigure`/`telemetry_set` (управление частотой/метриками телеметрии — Task 0.5).
+- **`full=true` есть у КАЖДОГО инструмента, чей ответ может быть усечён** (Ф0.4/M2). Байтовый
+  потолок (`RESPONSE_BYTE_CAP`) применяется ко всем, кроме поимённых `_UNCAPPED_TOOLS`
+  (`events`, `events_page`, `register_snapshot`), а параметр раньше объявляли лишь три схемы из
+  пятидесяти — при `additionalProperties: false` подсказка об усечении советовала аргумент,
+  который схема отвергала. Теперь `full` добавляется в схему тем же списком, которым живёт
+  усечение (`_declare_full_param`), а сама подсказка строится из ФАКТИЧЕСКОЙ схемы
+  (`dispatch._tool_accepts_full`) — обещание и возможность больше не могут разъехаться молча.
 - **Жизненный цикл:** driver подключается лениво при первом вызове; бэкенд поднимается
   отдельно (`BACKEND_CTL=1`). Нет бэкенда → инструмент возвращает `isError` с понятным
   текстом (сервер живёт, после подъёма бэкенда переподключается сам). При реконнекте

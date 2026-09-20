@@ -27,9 +27,7 @@
 | Архитектурные метрики, DSM, циклы | `sentrux:dsm` / `sentrux:health` | **core** | руками через `pydeps` |
 | Проверка архитектурных правил | `sentrux:check_rules` | **core** | руками + чек-лист |
 | Документация библиотек (актуальная) | `context7:query-docs` | **core** (user-level) | `WebFetch` для официальных docs |
-| Callers / callees / call path | `codegraph:codegraph_explore` | optional | `Grep` + чтение |
-| Blast radius изменения | `codegraph:codegraph_explore` | optional | руками через git diff + Grep |
-| Verbatim source + структура символов | `codegraph:codegraph_explore` | optional | `Glob` + `Read` |
+| Как работает X / как X доходит до Y / кто зовёт / blast radius | `codegraph:codegraph_explore` | optional | `Grep` + `Read` по символам диффа |
 | Symbol-level refs / rename across files | `serena:find_referencing_symbols` / `serena:rename_symbol` | optional (experimental) | `ast-grep` или ручной Grep+Edit |
 | Structural codemod на N файлов | `ast-grep:scan` / `ast-grep:rewrite` | optional | `Grep` + ручные Edits (опасно) |
 | Architectural overview / hubs | `graphify:query_graph` | optional | `sentrux:dsm` + руками |
@@ -37,7 +35,6 @@
 | PyQt/PySide widget tree, screenshot, click | `qt-mcp:qt_find_widget` / `qt_snapshot` / `qt_screenshot` / `qt_batch` | optional (GUI only) | руками через `pytest-qt` |
 | Browser / web UI verify (navigate, screenshot) | `playwright:browser_navigate` / `screenshot` | optional (web only) | `curl` + проверка HTML |
 | Multi-step reasoning (сложная гипотеза) | `sequential-thinking:sequentialthinking` | optional | внутренний chain-of-thought |
-| Живой бэкенд multiprocess_framework (introspect, команды, state, логи) | `backend-ctl:capabilities` / `backend-ctl:send_command` | optional (framework-only) | `backend_ctl` driver из Bash+Python-сниппета |
 | Поиск по базе знаний / wiki / транскриптам | `knowledgeos:kos_search` / `kos_ask` | optional (knowledge plugin) | `Grep` / `Read` по `docs/` |
 | Точная строка / regex | `Grep` | always | — |
 
@@ -90,19 +87,16 @@
 
 **Canonical refs:** `mcp:context7:resolve-library-id`, `mcp:context7:query-docs`.
 
-### codegraph — code intelligence по индексированному графу (optional)
+### codegraph — one-call code exploration (optional)
 
-**Когда подключён:** проекты ≥5k LOC с активным рефакторингом. Pre-indexed граф символов (`@colbymchenry/codegraph` — SQLite + tree-sitter).
+**Когда подключён:** проекты ≥5k LOC с веб-фреймворком (FastAPI/Django/Express/Rails) или активным рефакторингом.
 
-**Один tool — `codegraph_explore(query, maxFiles?, projectPath?)`:** `query` — это natural-language вопрос ИЛИ bag имён символов/файлов (`"RouterManager send_message channel"`). Отдельных `callers`/`callees`/`impact`/`context`/`files`/`search`/`node`/`status` **нет** — всё это один вызов. Один `codegraph_explore` возвращает:
-- **verbatim** line-numbered исходник релевантных символов, сгруппированный по файлам (Read-эквивалент — не перечитывай эти файлы `Read`'ом);
-- **call path** среди них (кто кого вызывает — заменяет callers/callees);
-- **blast radius** — что зависит от символа + покрывающие тесты (для оценки последствий правки; заменяет impact);
-- **relationships** (extends / instantiates / calls).
+**Ключевые tools:**
+- `codegraph_explore` — **единственный публикуемый инструмент** (v1.6.0). Один вызов возвращает исходники релевантных символов по файлам, call paths между ними (включая dynamic-dispatch переходы) и сводку blast radius. Вопросы «как работает X», «как X доходит до Y», «что сломается, если сменить сигнатуру», обзор области.
 
-**Read-first привычка:** зови `codegraph_explore` ПЕРЕД `Read`/`Grep`-петлёй при «как работает X» и перед правкой символа — один вызов вместо десятков round-trip'ов.
+**Узкие запросы не публикуются:** семь узких инструментов (node, search, callers, callees, impact, files, status) остались в пакете, но по умолчанию скрыты — их ответы уже входят в explore-выдачу. Вернуть на MCP-поверхность — `CODEGRAPH_MCP_TOOLS=explore,node,search,callers` в `env` сервера; CLI-эквиваленты (`codegraph node`, `codegraph query`, `codegraph callers`, …) работают всегда.
 
-**Не дублируй:** codegraph дал источник + callers → не Grep'ай и не Read'ай те же символы.
+**Не дублируй:** codegraph дал call paths → не Grep'ай те же символы.
 
 **Canonical refs:** `mcp:codegraph:codegraph_explore`.
 
@@ -213,21 +207,6 @@
 
 **Canonical refs:** `mcp:sequential-thinking:sequentialthinking`.
 
-### backend-ctl — живой бэкенд multiprocess_framework (optional, framework-only)
-
-**Когда подключён:** проект построен на `multiprocess_framework` и содержит пакет `backend_ctl/` (сервер живёт в репо проекта — плагин лишь лаунчер). Нужен запущенный бэкенд с `BACKEND_CTL=1`; без него инструменты возвращают понятную ошибку.
-
-**Ключевые tools:**
-- `capabilities` — «контактная книжка» системы: процессы, их команды, регистры, каналы (первый вызов сессии — вместо чтения исходников).
-- `get_status`, `introspect_handlers`, `introspect_registers`, `introspect_router_stats`, `introspect_queues` — диагностика процесса («есть ли приёмник команды X»).
-- `send_command`, `system_command`, `set_register` — команды, лайфцикл, live-запись регистров.
-- `state_get`, `state_get_subtree`, `state_subscribe`, `events` — state-дерево и push-события.
-- `log_tail` / `log_untail` — LogRecord'ы процесса с level ≥ порога в `events`.
-
-**Используется:** developer/debugger/tester при отладке бэкенда без GUI (backend-путь до qt-mcp: сперва доказать бэкенд, потом GUI).
-
-**Canonical refs:** `mcp:backend-ctl:capabilities`, `mcp:backend-ctl:get_status`, `mcp:backend-ctl:introspect_handlers`, `mcp:backend-ctl:introspect_registers`, `mcp:backend-ctl:send_command`, `mcp:backend-ctl:set_register`, `mcp:backend-ctl:state_get`, `mcp:backend-ctl:state_subscribe`, `mcp:backend-ctl:events`, `mcp:backend-ctl:log_tail`.
-
 ### knowledgeos — knowledge-base OS (optional, knowledge plugin)
 
 **Когда подключён:** включён плагин `knowledge` (knowledge-mode проекты — Obsidian-vault, wiki, транскрипты). Не входит в дефолтный dev-набор.
@@ -261,7 +240,7 @@
 | qex отвечает ошибкой / пустотой | Проверить Ollama (`curl localhost:11434`) → если down, fallback на `Grep` |
 | sentrux команда не находится | Проверить `command -v sentrux` → если нет, skip architectural-блок ревью, отметить в output |
 | context7 timeout | Fallback на `WebFetch` к официальным docs либо память LLM (с оговоркой) |
-| codegraph index устарел | Подсказать пользователю `codegraph reindex` → пока fallback на `Grep` |
+| codegraph index устарел | Подсказать пользователю `codegraph sync .` (полная пересборка — `codegraph index .`) → пока fallback на `Grep` |
 | serena LSP не стартует | Skip serena, fallback на `qex` + `Grep` |
 
 Health-check выводится при `SessionStart` хуком `hooks/quality/mcp-health-check.sh` — оркестратор знает что доступно в текущей сессии.
@@ -299,7 +278,7 @@ Health-check выводится при `SessionStart` хуком `hooks/quality/
 
 **USP-gate rule:** плагин остаётся BUNDLED, если у него есть явное преимущество (offline, доменные знания, оркестрация, curated setup) ИЛИ upstream-caveat против marketplace-install. Иначе → CONSUME (`source: <plugin>@<marketplace>`).
 
-**Миграция/upgrade:** marketplace-qualified `source` — добавочная семантика. Существующий проект с уже настроенным `mcp-github`/`mcp-context7` локально — не ломается (consume = skip в recompose; пользовательские `mcpServers` в `.mcp.json` не трогаются). Default-набор только для новых проектов (`claude-kit-project new`).
+**Миграция/upgrade:** marketplace-qualified `source` — добавочная семантика. Существующий проект с уже настроенным `mcp-github`/`mcp-context7` локально — не ломается (consume = skip в recompose; пользовательские `mcpServers` в `.mcp.json` не трогаются). Default-набор только для новых проектов (`claude-kit new`).
 
 ---
 

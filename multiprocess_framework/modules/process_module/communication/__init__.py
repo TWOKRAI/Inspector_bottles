@@ -4,5 +4,4 @@
 
 from .process_communication import ProcessCommunication
 
-__all__ = ['ProcessCommunication']
-
+__all__ = ["ProcessCommunication"]

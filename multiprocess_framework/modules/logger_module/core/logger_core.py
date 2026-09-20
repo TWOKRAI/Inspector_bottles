@@ -500,6 +500,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # на ГЛАВНОЙ плоскости — поймано тестом. Повтор защищён флагом.
             self._warn_about_idle_sinks()
 
+            # Task 3.3: tap'ы закрываются ЗДЕСЬ, а не в базе, потому что этот
+            # shutdown — полный override и базовый не вызывается вовсе. Store-tap
+            # висит на ДВУХ наследниках LoggerCore (LoggerManager и ErrorManager),
+            # и с очередью внутри его закрытие перестало быть no-op: неснятый tap
+            # унёс бы накопленное молча. Порядок — до закрытия каналов: строка
+            # `store flush: N записано, M потеряно` ещё должна найти приёмник.
+            self.close_all_taps()
+
             for channel in self._channel_registry.clear():
                 try:
                     channel.close()
@@ -1986,6 +1994,22 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "sampler_keys_expired": self._sampler.keys_expired,
             "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
+
+        # Ф1.4 (M17): окна голоса. Величины ПРОЦЕССНЫЕ, а не собственные для этого
+        # менеджера, и публикуются отсюда сознательно: держатели окон — роутер,
+        # реестр очередей, менеджер процессов, — и ни один из них не является
+        # плоскостью наблюдаемости, чей ``get_stats()`` уезжает в readback. Не
+        # опубликовав их здесь, спросить у живого процесса «сколько голосов
+        # подавлено» было бы нечем — ровно класс дефекта Ф0.3, ради которого
+        # заведён ``PLANE_COUNTER_KEYS``.
+        #
+        # ``windowed_keys_evicted`` — пара к первому ключу, а не украшение:
+        # выброшенный по потолку карты ключ уносит с собой свой неназванный счёт,
+        # и без этого числа «подавлено 0» неотличимо от «счёт потерян вместе с
+        # ключом».
+        from .windowed_voice import voice_counters
+
+        base_stats.update(voice_counters())
 
         # Ф0.4: потери на стыке «имя канала → объект канала». Ключи присутствуют
         # ВСЕГДА (нулями), а не появляются по факту потери: «ключа нет» и

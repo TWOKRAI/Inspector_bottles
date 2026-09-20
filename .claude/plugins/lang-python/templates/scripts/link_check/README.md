@@ -6,16 +6,16 @@
 
 ```bash
 # Проверка относительных путей + anchor'ов (быстро, без HTTP)
-python scripts/link_check/link_check.py
+uv run --no-project python scripts/link_check/link_check.py
 
 # Включить HEAD-запросы к внешним URL
-python scripts/link_check/link_check.py --external
+uv run --no-project python scripts/link_check/link_check.py --external
 
 # JSON для CI
-python scripts/link_check/link_check.py --format json
+uv run --no-project python scripts/link_check/link_check.py --format json
 
 # Отчёт без падения
-python scripts/link_check/link_check.py --no-strict
+uv run --no-project python scripts/link_check/link_check.py --no-strict
 ```
 
 ## Что проверяется

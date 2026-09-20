@@ -9,6 +9,7 @@ None. Здесь проверяется пара «потеря → запись
 
 import logging
 import queue as _queue
+import time
 
 
 from ..queues import QueueRegistry
@@ -16,6 +17,11 @@ from ..state.process_state_registry import ProcessStateRegistry
 
 #: Логгер, в который пишет QueueRegistry о потере (модульный stdlib-fallback).
 _LOGGER_NAME = "multiprocess_framework.modules.shared_resources_module.queues.core.manager"
+
+#: Сдвиг часов, заведомо больший ЛЮБОГО окна голоса (дефолт политики — 5.0 с).
+#: Литерал, а не чтение действующей политики: тест, берущий ожидание из того же
+#: источника, что и код, согласится с любым значением, включая ноль.
+_BEYOND_ANY_WINDOW_SEC = 60.0
 
 
 def _registry_with_queue(maxsize: int = 1, prefill: int = 1, qtype: str = "system"):
@@ -84,30 +90,46 @@ class TestThrottling:
         assert len(_loss_records(caplog)) == 1  # не 50
         assert reg._never_drop_loss_total == 50  # но учтены все
 
-    def test_window_expiry_allows_next_record(self, caplog):
-        """Истекло окно → следующая потеря снова говорит (глушитель не навсегда)."""
+    def test_window_expiry_allows_next_record(self, caplog, monkeypatch):
+        """Истекло окно → следующая потеря снова говорит (глушитель не навсегда).
+
+        Ф1.4: окно держит общий механизм (``logger_module.core.windowed_voice``),
+        собственных ``_never_drop_loss_last_log``/``_NEVER_DROP_LOSS_LOG_INTERVAL_SEC``
+        у реестра больше нет. Проверяемое свойство прежнее, сдвигается теперь не
+        приватная метка, а ЧАСЫ — то есть ближе к настоящему истечению окна, чем
+        было. Живого ``sleep`` по-прежнему нет: на Windows разрешение
+        ``time.monotonic`` 15.6 мс, и разности меньше ~100 мс ложатся на сетку.
+        """
         reg, q = _registry_with_queue()
+        clock = [1_000.0]
+        monkeypatch.setattr(time, "monotonic", lambda: clock[0])
         with caplog.at_level(logging.ERROR, logger=_LOGGER_NAME):
             reg.send_to_queue("consumer", "system", {"cmd": "stop"})
-            # Сдвигаем метку в прошлое — эквивалент истечения окна без sleep.
-            reg._never_drop_loss_last_log -= reg._NEVER_DROP_LOSS_LOG_INTERVAL_SEC + 1
+            clock[0] += _BEYOND_ANY_WINDOW_SEC
             reg.send_to_queue("consumer", "system", {"cmd": "stop"})
 
         assert len(_loss_records(caplog)) == 2
 
-    def test_record_reports_rate_not_just_fact(self, caplog):
+    def test_record_reports_rate_not_just_fact(self, caplog, monkeypatch):
         """Троттлированная запись называет темп: сколько потеряно с прошлой записи."""
         reg, q = _registry_with_queue()
+        clock = [2_000.0]
+        monkeypatch.setattr(time, "monotonic", lambda: clock[0])
         with caplog.at_level(logging.ERROR, logger=_LOGGER_NAME):
             for _ in range(10):
                 reg.send_to_queue("consumer", "system", {"cmd": "stop"})
-            reg._never_drop_loss_last_log -= reg._NEVER_DROP_LOSS_LOG_INTERVAL_SEC + 1
+            clock[0] += _BEYOND_ANY_WINDOW_SEC
             reg.send_to_queue("consumer", "system", {"cmd": "stop"})
 
         records = _loss_records(caplog)
         assert len(records) == 2
         # Первая запись: 1 потеря к моменту записи. Вторая: 10 накопленных за окно.
         assert "всего: 11" in records[1].getMessage()
+        # Ф1.4: и отдельно — ЧИСЛО подавленных с прошлой записи. Раньше эту
+        # величину считал сам реестр (``_never_drop_loss_since_log``), теперь
+        # механизм окна; свойство «запись называет темп, а не только факт»
+        # обязано пережить переезд, иначе переезд его тихо съел.
+        assert "Подавлено с прошлой записи: 9" in records[1].getMessage()
 
 
 def test_loss_report_survives_missing_qsize(caplog, monkeypatch):

@@ -2,14 +2,14 @@
 description: qex index status (file count, chunks, index date, languages)
 ---
 
-Вызови tool `mcp__qex__get_indexing_status` с параметром `path` = абсолютный путь к корню текущего проекта.
+Call the tool `mcp__qex__get_indexing_status` with the parameter `path` = absolute path to the current project root.
 
-Покажи результат пользователю в виде таблицы:
+Show the result to the user as a table:
 - Indexed: ✅/❌
 - Files / Chunks
 - Languages
-- Last indexed (как давно)
+- Last indexed (how long ago)
 - Dense search available
 
-Если `last_indexed` старше 7 дней или были недавние коммиты — порекомендуй `/mcp-qex:qex-reindex` (инкрементальное обновление через Merkle-diff, секунды-минуты).
-Полная переиндексация (`/mcp-qex:qex-rebuild`) нужна только при смене embedding-модели или повреждении индекса.
+If `last_indexed` is older than 7 days or there were recent commits — recommend `/mcp-qex:qex-reindex` (incremental update via Merkle-diff, seconds-minutes).
+A full reindex (`/mcp-qex:qex-rebuild`) is needed only when the embedding model changes or the index is corrupted.

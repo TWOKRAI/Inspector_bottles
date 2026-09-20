@@ -88,5 +88,12 @@ class ManagersBundle:
     stats: Any
     console: Any
     error: Any | None = None
+    #: Порт наблюдений — четвёртый канонический слот (Ф3, задача 3.1).
+    #:
+    #: Дефолт ``None``, хотя сборка создаёт его БЕЗУСЛОВНО (как logger/stats, а
+    #: не как error). Дефолт здесь про совместимость конструкторов bundle'а:
+    #: обязательное поле сломало бы каждую точку, собирающую bundle вручную, —
+    #: а сборка про поле знает и всегда его заполняет.
+    observation: Any | None = None
     config_manager: Any | None = None
     console_enabled: bool = False

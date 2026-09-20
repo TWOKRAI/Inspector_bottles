@@ -1,0 +1,34 @@
+# aggregate_context — опциональный конфиг.
+#
+# ⚠️ PHASE A: ЭТОТ ФАЙЛ — ДОКУМЕНТАЦИЯ. CLI ЕГО ПОКА НЕ ЧИТАЕТ.
+# Парсинг этого TOML появится в Phase B (см. TODO в __main__.py).
+# Сейчас редактировать значения = no-op. Все настройки берутся из дефолтов.
+#
+# Этот файл — НЕ обязателен. Без него работают дефолты:
+#   - sync-модули: render_context, render_adr (оба активны)
+#   - exclude: _archive, node_modules, .venv, __pycache__, .git, .pytest_cache,
+#              .ruff_cache, .mypy_cache, dist, build
+#   - root: cwd
+#   - target: docs/PROJECT_CONTEXT.md
+#
+# Когда нужен этот файл:
+#   - У проекта нестандартный layout (apps/<app>/legacy не сканировать)
+#   - Хочется отключить render_adr (только CONTEXT.md без ADR)
+#   - Нужен другой target (например, docs/ARCHITECTURE.md)
+#
+# Подгружается __main__.py при наличии (опционально, Phase B).
+# В Phase A читается только как документация — CLI пока не парсит TOML.
+
+[discovery]
+# Дополнительные пути для исключения (относительно root)
+extra_excludes = []
+# Пример:
+# extra_excludes = ["apps/legacy", "scripts/_archive"]
+
+[render]
+# Какие sync-модули активны. Удалить из списка чтобы отключить.
+active = ["render_context", "render_adr"]
+
+[target]
+# Куда писать сводный registry
+file = "docs/PROJECT_CONTEXT.md"

@@ -43,7 +43,7 @@ fi
 # Проверка синтаксиса через py_compile
 RESULT=$($PYTHON -m py_compile "$FILE_PATH" 2>&1)
 if [[ $? -ne 0 ]]; then
-    echo "WARNING: Синтаксическая ошибка в $FILE_PATH:"
+    echo "WARNING: syntax error in $FILE_PATH:"
     echo "$RESULT"
 fi
 

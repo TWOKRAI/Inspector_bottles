@@ -111,12 +111,13 @@ def _is_dangerous_root(root: Path) -> str | None:
 @dataclass
 class Target:
     """Кандидат на удаление: путь + тип + размер в байтах + число файлов."""
+
     path: Path
     rel: str
-    kind: str          # "dir" | "file"
-    pattern: str       # какой паттерн сматчился
+    kind: str  # "dir" | "file"
+    pattern: str  # какой паттерн сматчился
     size: int = 0
-    files: int = 0     # для каталога — число файлов внутри, для файла — 1
+    files: int = 0  # для каталога — число файлов внутри, для файла — 1
 
 
 def _match_name(name: str, patterns: tuple[str, ...]) -> str | None:
@@ -180,10 +181,16 @@ def scan(cfg: Config) -> list[Target]:
             pat = _match_name(d, cfg.delete_dirs)
             if pat:
                 size, n = _dir_stats(sub, cfg.follow_symlinks)
-                targets.append(Target(
-                    path=sub, rel=rel, kind="dir", pattern=pat,
-                    size=size, files=n,
-                ))
+                targets.append(
+                    Target(
+                        path=sub,
+                        rel=rel,
+                        kind="dir",
+                        pattern=pat,
+                        size=size,
+                        files=n,
+                    )
+                )
                 continue
 
             keep.append(d)
@@ -205,10 +212,16 @@ def scan(cfg: Config) -> list[Target]:
                 size = fp.lstat().st_size
             except OSError:
                 size = 0
-            targets.append(Target(
-                path=fp, rel=rel, kind="file", pattern=pat,
-                size=size, files=1,
-            ))
+            targets.append(
+                Target(
+                    path=fp,
+                    rel=rel,
+                    kind="file",
+                    pattern=pat,
+                    size=size,
+                    files=1,
+                )
+            )
 
     return targets
 
@@ -292,8 +305,7 @@ def render_table(
         total_files = sum(f for _, _, f in groups.values())
         out.write(f"{'-' * width}  -----  -----  -------\n")
         out.write(
-            f"{'TOTAL'.ljust(width)}  {total_count:5d}  "
-            f"{total_files:5d}  {_human(total_size):>7}\n"
+            f"{'TOTAL'.ljust(width)}  {total_count:5d}  {total_files:5d}  {_human(total_size):>7}\n"
         )
         out.write("\n")
     else:
@@ -356,26 +368,55 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="clean_cache",
         description="Чистка Python-кэшей и артефактов инструментов "
-                    "(__pycache__, .pytest_cache, *.pyc и т.п.).",
+        "(__pycache__, .pytest_cache, *.pyc и т.п.).",
         epilog="По умолчанию работает в dry-run. Реальное удаление — флаг --apply.",
     )
-    p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH,
-                   help="Путь к TOML-конфигу (по умолчанию рядом со скриптом).")
-    p.add_argument("--root", type=Path, default=None,
-                   help="Корень сканирования (перекрывает [scan].root).")
-    p.add_argument("--format", choices=["table", "json"], default=None,
-                   help="Формат вывода (перекрывает [output].format).")
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help="Путь к TOML-конфигу (по умолчанию рядом со скриптом).",
+    )
+    p.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help="Корень сканирования (перекрывает [scan].root).",
+    )
+    p.add_argument(
+        "--format",
+        choices=["table", "json"],
+        default=None,
+        help="Формат вывода (перекрывает [output].format).",
+    )
     p.add_argument("--sort-by", choices=["size", "files", "path"], default=None)
-    p.add_argument("--limit", type=int, default=None,
-                   help="Сколько строк показать в детализации (0 = все).")
-    p.add_argument("--min-size", type=int, default=None,
-                   help="Минимальный размер цели в байтах для показа.")
-    p.add_argument("--apply", action="store_true",
-                   help="РЕАЛЬНО удалить найденное (по умолчанию — только показать).")
-    p.add_argument("--quiet", action="store_true",
-                   help="Подавить отчёт; только exit-код. Полезно в CI.")
-    p.add_argument("--no-safety", action="store_true",
-                   help="Отключить forbid_dangerous_roots. Использовать осознанно.")
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Сколько строк показать в детализации (0 = все).",
+    )
+    p.add_argument(
+        "--min-size",
+        type=int,
+        default=None,
+        help="Минимальный размер цели в байтах для показа.",
+    )
+    p.add_argument(
+        "--apply",
+        action="store_true",
+        help="РЕАЛЬНО удалить найденное (по умолчанию — только показать).",
+    )
+    p.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Подавить отчёт; только exit-код. Полезно в CI.",
+    )
+    p.add_argument(
+        "--no-safety",
+        action="store_true",
+        help="Отключить forbid_dangerous_roots. Использовать осознанно.",
+    )
     return p
 
 

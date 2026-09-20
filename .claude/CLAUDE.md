@@ -168,6 +168,72 @@ claimed property, the three test-authorship roles, `README.md` + `STATUS.md` + `
 module, `Why:`/`Layer:` trailers. ponytail governs **what gets built**, never what gets
 proven or documented.
 
+## Standing rules — one skill, not twelve copies (since 2026-09-02)
+
+The standing rules (qex freshness, honesty over plausibility) plus MCP availability, commit
+trailers, subagent scope, language discipline and the escalation ladder live in ONE file:
+`.claude/plugins/dev/skills/project-rules/SKILL.md`, materialized to `.claude/skills/project-rules/`.
+Every agent in `.claude/agents/dev/` lists `project-rules` in its `skills:` frontmatter (preloads the
+text into its context) and ends with a four-line pointer for the case preload does not happen.
+Change a rule in the skill, never in an agent.
+
+History: before 2026-09-02 the block was pasted verbatim into all 12 agents (~60 lines each, ~650
+lines of duplication), and the plugin sources in `.claude/plugins/dev/agents/` had silently fallen
+60 lines behind the materialized copies — a `claude-kit sync` would have erased the rules from every
+agent. Sources and materialized copies are identical again; keep them so (edit the source, copy to
+the mirror, or run the materializer).
+
+1. **qex freshness** — `get_indexing_status` first; announce the index age before a verdict; pass
+   the age as a number into subagent prompts; counts come from grep.
+2. **Honesty is the rewarded outcome** — every final report carries a non-empty "what I left open
+   and what I know is unreliable in my own work"; questions that outlive the task go to
+   [`docs/claude/OPEN_QUESTIONS.md`](../docs/claude/OPEN_QUESTIONS.md).
+
+Language of agent files: English end to end. Commands, guides and reports: Russian.
+
+## Team mode — agents that live in the session (`/dev:team`, since 2026-09-02)
+
+Agent Teams is enabled: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in the `env` of `.claude/settings.json`
+(source: `.claude/plugins/core/settings.partial.json`). The lead — this session, Opus at `high` by
+project settings — is the PM: intake → Task X.Y → the minimal roster as teammates → tasks with
+dependencies → monitor → break-injection → review → merge. There is no PM agent: the lead has the
+conversation history, an agent would not. Protocol: `.claude/commands/dev/team.md`. Owner's guide
+(Russian): [`docs/claude/AGENT_TEAMS_GUIDE.md`](../docs/claude/AGENT_TEAMS_GUIDE.md). Brief template
+with per-model prompting notes: `.claude/plugins/dev/templates/team-brief.md`.
+
+Roles → models (all 14): `cto` = Fable (verdicts only: phase acceptance, merge gate, arbitration,
+answers to escalations from Opus roles — once per phase, never per task); `teamlead` / `reviewer` /
+`investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` /
+`tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` = Haiku. `junior` never commits. No role exists without a task: spawn the minimal roster.
+
+**Escalation ladder (owner's decision 2026-09-02, `project-rules` §7).** A question goes one level up,
+never sideways, never into a guess: `junior`/`docs-writer` → `developer`/`tech-writer` →
+`teamlead` → `cto` → the owner (through the lead, recorded in `OPEN_QUESTIONS.md`). `debugger` may
+route through `investigator` for the diagnosis. In a team the asker messages the higher role by name;
+outside a team it ends its report with `ESCALATION -> <role>` (question / tried / blocked on / files)
+and the lead spawns that role. The lead relays; it does not answer in place of the higher role.
+
+What does NOT change in team mode: tester once per mechanism BEFORE the code, in a worktree at the
+pre-implementation commit; break-injection by the lead, never delegated; reviewer synchronous after
+every task; Fable only at phase acceptance / merge gate / arbitration / escalation.
+
+Hooks as gates (fail-open after two blocks on the same task or agent; `TEAM_GATES=off` disables):
+`TaskCompleted` runs ruff on changed `.py` and pytest on changed test files — titles *starting*
+with `[RED]`, `[docs]` or `[skip-gate]` skip it (a prefix only, so a task about the RED path is still judged); `TeammateIdle` blocks idling with uncommitted work inside
+a linked worktree and only warns in the shared tree; `SubagentStart` / `SubagentStop` append to
+`data/team-journal.jsonl`. Scripts: `.claude/plugins/dev/hooks/`.
+
+Git in team mode: one worktree per writer (`.claude/worktrees/team-<task>`), at most three writers
+at once, readers in the shared tree; only the lead merges; stage explicit paths; `git show --stat`
+after every commit; `docs/sessions/*.md` merges by union (`.gitattributes`). No per-worktree venv:
+the main `.venv` with `PYTHONPATH=$PWD` from the worktree root — the package is not an editable
+install, and `uv sync` would fetch CPU torch instead of the CUDA wheel.
+
+Engine limits (2.1.222): teammates do not survive `/resume`; one team per session; teammates cannot
+spawn teams or background subagents; split panes are unavailable in Windows Terminal / VS Code —
+in-process only (↑/↓ + Enter opens a teammate, Esc back, x stops, Ctrl+T task list). Each teammate
+is a full session: ~25k tokens of context before its first tool call.
+
 ## Language policy (STRICT)
 
 **All user-facing output MUST be in Russian. No exceptions.**
@@ -187,9 +253,9 @@ proven or documented.
 
 ## Commands — quick reference
 
-Full list in the corresponding mode file. Key commands (46 total in 7 namespaces):
+Full list in the corresponding mode file. Key commands (76 command files in 14 namespaces, counted 2026-09-02):
 
-- **Dev:** `/dev:plan`, `/dev:implement`, `/dev:test`, `/dev:review`, `/dev:debug`, `/dev:ship`, `/dev:pipeline`, `/dev:adr`, `/dev:plan-status`
+- **Dev:** `/dev:plan`, `/dev:implement`, `/dev:test`, `/dev:review`, `/dev:debug`, `/dev:ship`, `/dev:pipeline`, `/dev:team`, `/dev:adr`, `/dev:plan-status`
   (bare `/plan` and `/review` are Claude Code built-ins — plan mode and PR review; the
   global agent-launching copies moved to `/ko:plan` and `/ko:review` on 2026-08-05)
 - **Spec:** `/spec`, `/spec-sync`
@@ -198,3 +264,94 @@ Full list in the corresponding mode file. Key commands (46 total in 7 namespaces
 - **Memory:** `/memory:init`, `/memory:search`, `/memory:status`
 - **Infra:** `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`, `/diagrams`
 - **Team:** `/team`, `/hire`, `/handoff`, `/docs`, `/wrap-up`
+
+## MCP routing (orchestrator + subagents)
+
+Available MCP servers — composed from `enabled.yaml` (a disabled plugin is absent; the list is the source of truth for subagents too):
+
+- `qex` — semantic / fuzzy code search; docs: `.claude/plugins/mcp-qex/README.md`
+- `sentrux` — architecture metrics, DSM, cycles, health-gate; docs: `.claude/plugins/mcp-sentrux/README.md`
+- `context7` — up-to-date docs for external libraries; docs: `.claude/plugins/mcp-context7/README.md`
+- `github-mcp` — GitHub state: PR / Issues / Actions; docs: `.claude/plugins/mcp-github/README.md`
+- `qt-mcp` — runtime inspection for PyQt5/PySide6 GUI apps; docs: `.claude/plugins/mcp-qt/README.md`
+- `backend-ctl` — live backend control via `backend_ctl` driver (requires `BACKEND_CTL=1`); docs: `.claude/plugins/mcp-backend-ctl/README.md`
+- `sentry` — error-monitoring MCP (marketplace consume plugin, needs Sentry auth via `/mcp`; no local `.claude/plugins/` docs)
+
+Before first using an MCP tool — `Read` its README (`.claude/plugins/<id>/README.md`): setup, usage, rules.
+
+Not in `.mcp.json` → fallback to `Grep`/`Read`, don't hand the task to a subagent "for nothing". One server
+answered → don't re-check another on the same data.
+
+## Behavioral additions (Karpathy + Pocock gap-fill)
+
+Gaps the default system prompt covers weakly. Apply on non-trivial tasks.
+
+- **Think before coding.** State assumptions; multiple readings of the request → list them, don't
+  pick silently; simpler approach exists → say so; unclear → stop and ask, don't guess.
+- **Goal-driven execution.** Multi-step work → state a brief plan `1. step → verify: check`.
+  Reframe imperatives into verifiable goals ("fix bug" → repro test → green). Weak criteria
+  ("make it work") cause drift.
+- **Smart-zone discipline.** Quality degrades past ~100k tokens (Pocock "dumb zone") — watch the
+  budget proactively, not after the fact. Full protocol (task/phase boundary triggers, `/clear`
+  vs `/compact`) → `project-rules` §8. Don't pad context: 20 files read when 3 matter costs
+  reasoning, not just tokens — use `qex:search_code` / targeted `Grep` instead.
+
+## Token discipline (baseline & tool output)
+
+Lossless habits that shrink baseline + per-command cost (never trade reasoning quality for
+tokens — that's what `caveman` is for, trigger-based, user-facing only).
+
+- MCP tool-search is default-on (schemas load on demand) — don't force `ENABLE_TOOL_SEARCH=true`
+  behind a proxy/Vertex; tune via `ENABLE_TOOL_SEARCH=auto:N` in `settings.json` → `env` if needed.
+- Prefer CLI (`gh`/`git`/`sentrux`/`qex` via `Bash`) over MCP for one-off ops; disable unused
+  servers in `enabled.yaml`. Audit the baseline with `/context` or skill **context-budget**.
+- Lean tool output at the source — hooks can't rewrite it after the fact: `pytest -q --tb=short`,
+  `ruff check -q`, pipe large logs through `grep -E 'ERROR|FAIL'`. Exception: debugger/tester need
+  full output.
+- Unavoidable `/compact` → focus `modified files + test commands + plan path`; at a real boundary
+  prefer `/clear` + handoff (see Smart-zone discipline).
+
+## Project layout — where to write and where to read
+
+| What | Path | Written by |
+|-----|------|-------|
+| Main package | `src/<package>/` | developer |
+| **Module contract** | `src/<package>/<module>/{README.md,interface.py,_impl/}` (full) or `<module>.py` (lite) + `tests/contract/test_<module>.py` | developer (skill `module-contract`) |
+| Tests | `tests/` | tester |
+| Scripts / commit validator | `scripts/`, `scripts/validate_commit/` | developer / seed (autocopy) |
+| Commit guide | `.claude/COMMIT_GUIDE.md` | seed (autocopy) |
+| Session logs | `docs/sessions/YYYY-MM-DD.md` | `/core:team:wrap-up`, pre-commit-session-log hook |
+| Task plans | `plans/YYYY-MM-DD_<slug>.md` (single) or `.../plan.md`+`phase-N.md` (multi-phase) | `/dev:plan` (Manager) |
+| Long-term memory | `.claude/memory/MEMORY.md` + `*.md` | agent (auto-memory rules) |
+| Layer enum | `.claude/commit-layers.txt` | project (manual) |
+| Commands/Agents/Skills | `.claude/{commands,agents,skills}/…` (materialized, gitignored) | `plugin sync` from `plugins/<id>/…` |
+| Hooks | composed in `.claude/settings.json` | `plugin sync` from `plugin.json.hooks` |
+| Living spec | `docs/direction/` | `/dev:spec:spec`, `/dev:spec:spec-sync` |
+| Data (gitignored) | `data/` | runtime |
+
+**Thread:** `/dev:plan` → plan + branch → `/dev:implement Task X.Y` → commit with a `Refs: plans/<slug>.md`
+trailer → `/dev:ship` checks `--grep="Refs:"` and closes the plan → `/core:team:wrap-up` writes
+`docs/sessions/<today>.md`. A new session restores context: branch → plan → commits' `Refs:`
+→ latest `docs/sessions/` → `.claude/memory/`.
+
+## Memory (OVERRIDE)
+
+**Canonical path:** `.claude/memory/` (project-local, git-tracked; `autoMemoryDirectory` in
+`.claude/settings.local.json`, fixed by `plugin doctor --fix`). Index `- [Title](file.md) — hook`;
+an entry is a separate `.md` with frontmatter `name`/`description`/`metadata.type` ∈
+`user`/`feedback`/`project`/`reference`. Lint: `.claude/plugins/core/scripts/memory_lint.py`.
+Commands: `/core:memory:status`, `:search <query>`, `:remember [lesson]`, `:init` (new project).
+Per-project — not shipped in the seed.
+
+**Subagent memory** (CC ≥2.1.59) adds to, does not replace: agent frontmatter `memory: <scope>` →
+CC injects the role's `MEMORY.md` into the system prompt + Read/Write/Edit. `project` (default for
+dev-write agents, see `memory:` in their frontmatter) → `.claude/agent-memory/<name>/`, under git;
+`local` → `.claude/agent-memory-local/<name>/`, gitignored; `user` → `~/.claude/agent-memory/<name>/`,
+machine-local. Isolated per role (reviewer — review patterns, tester — flaky tests); cross-role
+rules stay in `.claude/memory/`.
+
+**Capture rail — when to write.** WHEN: the fix took more than one attempt; a recurring trap;
+the user gave a rule/correction; a non-trivial decision outside code/git/plan. FORBID: what
+code/git/plan/`CLAUDE.md` already store; one-off details; "might come in handy". Before writing —
+`grep` on individual keywords (not the whole phrase); a near-match → UPDATE, not a duplicate.
+Manual trigger — `/core:memory:remember` at a verified transition (red→green, decision made).

@@ -11,6 +11,12 @@
     ctx.health.report_error  → ['system.log']      # не плоскость ошибок!
     services.track_error     → ['errors.log']      # у PluginContext такого нет
 
+Task 3.2 (Р-7(а)) эти адреса НЕ сдвинула, и это проверено, а не предположено:
+разделение файлов коснулось скоупа ``BUSINESS``, а ``_LEVEL_DEFAULT_SCOPE``
+отображает ``ERROR -> SYSTEM``. Обе строки выше уровня ERROR, значит их дорога
+в ``system.log`` осталась прежней. (Первичный разбор задачи 3.2 назвал этот
+докстринг устаревшим — неверно; ошибка поймана сверкой уровня с таблицей.)
+
 То есть у плагина не было НИ ОДНОЙ дороги в плоскость ошибок, а «report_error»
 было названием без обязательства. Решение — ADR-PM-030 (вариант «б» задачи C2,
 со второй половиной, сделанной правдой):
@@ -130,12 +136,24 @@ def test_the_incident_also_leaves_a_line_in_the_log_plane() -> None:
     assert any("[health]" in line and "плохой кадр" in line for line in svc.logs.records)
 
 
-def test_repeats_are_throttled_in_both_planes_but_counted_in_full() -> None:
-    """Дроссель общий с логом; счётчик health считает ВСЕ — число не теряется."""
+def test_repeats_reach_the_error_plane_in_full_while_the_voice_is_windowed() -> None:
+    """Task 1.3a: факт — всегда, голос — по окну. ПЕРЕПИСАН, контракт обратный прежнему.
+
+    До 1.3a этот тест назывался ``test_repeats_are_throttled_in_both_planes…`` и
+    закреплял ровно тот дефект, который задача чинит: запись плоскости ошибок
+    стояла под окном журнала, и 5 вхождений оставляли в плоскости ОДНО — вместе
+    с четырьмя трассами, четырьмя наборами полей и четырьмя адресами потоков.
+    Счётчик при этом рос на все пять и создавал видимость, что потеря
+    компенсирована числом.
+    """
     ctx, svc = _ctx()
     for _ in range(5):
         ctx.health.report_error(RuntimeError("одна и та же беда"))
-    assert len(svc.errors.incidents) == 1, f"дроссель не сработал: {len(svc.errors.incidents)}"
+    assert len(svc.errors.incidents) == 5, f"факт подавлен окном: {len(svc.errors.incidents)}"
+    # Голоса СВОЕГО ключа: пятое подряд вхождение открывает breaker, и его
+    # "[health] status → degraded" — посторонняя строка, не повтор инцидента.
+    incident_voices = [line for line in svc.logs.records if line.startswith("[health] RuntimeError")]
+    assert len(incident_voices) == 1, f"голос обязан идти по окну: {svc.logs.records}"
     assert ctx.health._state.snapshot()["errors"] == 5
 
 

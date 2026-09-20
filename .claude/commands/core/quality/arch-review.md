@@ -1,37 +1,37 @@
 ---
-description: Комплексный архитектурный обзор проекта.
+description: Comprehensive architecture review — sentrux health, DSM, test gaps, optional diagrams
 ---
 
-Комплексный архитектурный обзор проекта.
+Comprehensive architecture review of the project.
 
-## Что делать
+## What to do
 
-Собери единый отчёт из трёх источников:
+Assemble a single report from three sources:
 
 ### 1. Sentrux Health
-Запусти `mcp__sentrux__scan` + `mcp__sentrux__health` — получи метрики:
+Run `mcp__sentrux__scan` + `mcp__sentrux__health` — get the metrics:
 - modularity, acyclicity, depth, equality
-- общий score и grade (A–F)
-- bottleneck-модули
+- overall score and grade (A–F)
+- bottleneck modules
 
 ### 2. Sentrux DSM
-Запусти `mcp__sentrux__dsm` — покажи:
-- циклические зависимости (если есть)
-- самые связанные модули (fan-in/fan-out)
+Run `mcp__sentrux__dsm` — show:
+- cyclic dependencies (if any)
+- the most connected modules (fan-in/fan-out)
 
 ### 3. Test Gaps
-Запусти `mcp__sentrux__test_gaps` — покажи:
-- модули без тестов
-- модули с низким покрытием
+Run `mcp__sentrux__test_gaps` — show:
+- modules without tests
+- modules with low coverage
 
-### 4. Диаграммы (опционально)
-Если `docs/diagrams/classes/` содержит .puml файлы — упомяни дату последней генерации.
-Если пустые — предложи `make diagrams` или `/core:infra:diagrams`.
+### 4. Diagrams (optional)
+If `docs/diagrams/classes/` contains .puml files — mention the date of the last generation.
+If empty — suggest `make diagrams` or `/core:infra:diagrams`.
 
-## Формат ответа
+## Response format
 
-Структурированный отчёт на русском:
-- **Health:** score/grade + ключевые метрики
-- **Связность:** циклы, hot spots
-- **Покрытие:** gaps
-- **Рекомендации:** 3-5 конкретных действий
+A structured report (reply language follows the `language` key in settings.json):
+- **Health:** score/grade + key metrics
+- **Connectivity:** cycles, hot spots
+- **Coverage:** gaps
+- **Recommendations:** 3-5 concrete actions

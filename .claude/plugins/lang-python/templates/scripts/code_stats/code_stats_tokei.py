@@ -25,15 +25,17 @@ from pathlib import Path
 # Переиспользуем парсер конфига и форматтеры из соседнего модуля.
 sys.path.insert(0, str(Path(__file__).parent))
 from code_stats import (  # type: ignore[import-not-found]
+    DEFAULT_CONFIG_PATH,
     Config,
     GroupRow,
-    DEFAULT_CONFIG_PATH,
     apply_overrides,
-    build_parser as build_base_parser,
     load_config,
     render,
+    total_row,
 )
-
+from code_stats import (
+    build_parser as build_base_parser,
+)
 
 # Расширение → имя языка в tokei (полный список: `tokei --languages`).
 # Не претендует на полноту — расширяй по мере необходимости.
@@ -83,7 +85,8 @@ def ensure_tokei() -> str:
 
 
 def build_tokei_argv(tokei: str, cfg: Config) -> list[str]:
-    argv = [tokei, "--output", "json", str(cfg.scan.root.resolve())]
+    # tokei принимает несколько путей — выбор папок из конфига/CLI работает как есть.
+    argv = [tokei, "--output", "json", *(str(r.resolve()) for r in cfg.scan.roots)]
 
     # --types фильтр (tokei v12+ принимает --types, v11 — --type).
     # Используем длинную форму --types, она поддержана начиная с v12.
@@ -115,14 +118,12 @@ def run_tokei(tokei: str, cfg: Config) -> dict:
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError as e:
-        print(
-            f"error: tokei exited {e.returncode}\nstderr:\n{e.stderr}", file=sys.stderr
-        )
+        print(f"error: tokei exited {e.returncode}\nstderr:\n{e.stderr}", file=sys.stderr)
         raise SystemExit(e.returncode) from e
     return json.loads(proc.stdout)
 
 
-def tokei_to_rows(payload: dict, cfg: Config) -> list[GroupRow]:
+def tokei_to_rows(payload: dict, cfg: Config) -> tuple[list[GroupRow], GroupRow]:
     """Конвертирует JSON tokei в GroupRow-ы, совместимые с render() из code_stats."""
     rows: list[GroupRow] = []
     # tokei v12+ кладёт языки на верхний уровень, ключ "Total" — сумма (её игнорим — мы строим свою).
@@ -151,17 +152,19 @@ def tokei_to_rows(payload: dict, cfg: Config) -> list[GroupRow]:
             )
         )
 
+    # words/chars/dirs tokei не выдаёт — сортировка по ним вырождается в lines.
     sort_key = {
         "lines": lambda r: r.lines_code,
-        "chars": lambda r: r.chars,
         "files": lambda r: r.files,
         "name": lambda r: r.key,
     }.get(cfg.output.sort_by, lambda r: r.lines_code)
     rows.sort(key=sort_key, reverse=(cfg.output.sort_order != "asc"))
 
+    # TOTAL — до обрезки limit'ом, иначе итог сложил бы только видимые языки.
+    total = total_row(rows)
     if cfg.output.limit > 0:
         rows = rows[: cfg.output.limit]
-    return rows
+    return rows, total
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,10 +185,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cfg = apply_overrides(cfg, args)
 
+    if cfg.scan.git_tracked:
+        # Молчать нельзя: пользователь просил git-фильтрацию, а получил бы обычный обход.
+        print(
+            "warning: git_tracked не поддержан в tokei-режиме — считаю всё, что проходит exclude-фильтры конфига.",
+            file=sys.stderr,
+        )
+
     tokei = ensure_tokei()
     payload = run_tokei(tokei, cfg)
-    rows = tokei_to_rows(payload, cfg)
-    sys.stdout.write(render(rows, cfg))
+    rows, total = tokei_to_rows(payload, cfg)
+    sys.stdout.write(render(rows, cfg, total))
     return 0
 
 

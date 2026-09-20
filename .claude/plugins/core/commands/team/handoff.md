@@ -1,5 +1,5 @@
 ---
-description: Create a session handoff document for cross-machine context transfer.
+description: Write a session handoff to docs/handoffs/ for cross-machine context transfer
 ---
 
 Create a session handoff document for cross-machine context transfer.

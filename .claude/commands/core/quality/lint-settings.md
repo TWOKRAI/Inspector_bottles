@@ -2,31 +2,31 @@
 description: Check .claude/settings.json — are critical deny/ask/allow and hooks in place?
 ---
 
-Запусти проверку инвариантов `settings.json`:
+Run the `settings.json` invariant check:
 
 ```bash
-python .claude/plugins/core/scripts/lint_settings.py
+uv run --no-project python scripts/lint_settings.py
 ```
 
-Что проверяет:
+What it checks:
 
-1. **`deny` содержит критичные паттерны:** `--no-verify`, `git push --force`, `git reset --hard`, `git clean -f`, `sudo`, `chmod 777`, `mkfs`, `dd if=`
-2. **Secrets защищены:** `Write/Edit(**/.env)`, `**/*.pem`, `**/*.key`, `**/id_rsa`, `**/id_ed25519`
-3. **`allow` не содержит slop-векторов:** `uv add *`, `pip install *`, `npx *`, `cp *`, `chmod *`, `git merge *`, `git rebase *`, `sudo *`, и др.
-4. **Хуки подключены:** `validate-safe-command`, `protect-readonly`, `protect-branch`, `autoformat-python`, `check-imports`, `restore-context`, `session-health-check` (Stop-хук `session-end-daily-log` убран с v0.4.0 — журналирование переведено на pre-commit)
+1. **`deny` contains critical patterns:** `--no-verify`, `git push --force`, `git reset --hard`, `git clean -f`, `sudo`, `chmod 777`, `mkfs`, `dd if=`
+2. **Secrets are protected:** `Write/Edit(**/.env)`, `**/*.pem`, `**/*.key`, `**/id_rsa`, `**/id_ed25519`
+3. **`allow` doesn't contain slop vectors:** `uv add *`, `pip install *`, `npx *`, `cp *`, `chmod *`, `git merge *`, `git rebase *`, `sudo *`, etc.
+4. **Hooks are wired:** `validate-safe-command`, `protect-readonly`, `protect-branch`, `autoformat-python`, `check-imports`, `restore-context`, `session-health-check` (the `session-end-daily-log` Stop hook was dropped in v0.4.0 — logging moved to pre-commit)
 
 Exit codes:
-- `0` — всё ок
-- `1` — нарушены required invariants (CI должен падать)
-- `2` — только warnings (рекомендуется исправить)
+- `0` — all OK
+- `1` — required invariants violated (CI should fail)
+- `2` — warnings only (fixing recommended)
 
-Запуск в strict-режиме (warnings → fail):
+Run in strict mode (warnings → fail):
 ```bash
-python .claude/plugins/core/scripts/lint_settings.py --strict
+uv run --no-project python scripts/lint_settings.py --strict
 ```
 
-**Когда вызывать:**
-- Перед `/dev:ship` если правил `settings.json` в этой сессии
-- В CI workflow на каждый PR
-- После `claude-kit-claude plugin upgrade --apply` чтобы убедиться что upgrade не уронил защиту
-- Когда подозреваешь что кто-то локально ослабил permissions
+**When to call:**
+- Before `/dev:ship` if `settings.json` was edited in this session
+- In the CI workflow on every PR
+- After `claude-kit upgrade --apply` to make sure the upgrade didn't drop protection
+- When you suspect someone locally weakened permissions

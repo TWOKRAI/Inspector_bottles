@@ -3,9 +3,9 @@ description: Show a detailed card for plugin <id> — version, description, cate
 allowed-tools: Bash(claude-kit-claude plugin info*)
 ---
 
-Показывает детальную карточку плагина: name, version, description, category, status, MCP-серверы, hook-события.
+Shows a detailed card for the plugin: name, version, description, category, status, MCP servers, hook events.
 
-Использование: `/core:plugin:info <id>`
+Usage: `/core:plugin:info <id>`
 
 ```bash
 claude-kit-claude plugin info $ARGUMENTS

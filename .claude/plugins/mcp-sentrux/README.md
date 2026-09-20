@@ -1,106 +1,107 @@
-# sentrux — архитектурный health-gate
+# sentrux — architectural health gate
 
-**sentrux** ([github.com/sentrux/sentrux](https://github.com/sentrux/sentrux)) — структурный анализатор кодовой базы. Один Rust-бинарь, без рантайм-зависимостей. Считает граф импортов, метрики связности, циклы — и сводит всё в один **quality_signal** (0–10000), который удобно использовать как gate перед коммитом или мерджем.
+**sentrux** ([github.com/sentrux/sentrux](https://github.com/sentrux/sentrux)) — a structural analyzer for a codebase. A single Rust binary, no runtime dependencies. Computes the import graph, coupling metrics, cycles — and rolls it all into one **quality_signal** (0–10000), convenient to use as a gate before a commit or merge.
 
-В этом проекте sentrux подключён как **MCP-сервер** (Claude Code умеет его звать) + 8 проектных slash-команд `/mcp-sentrux:sentrux-*`.
+In this project sentrux is wired in as an **MCP server** (Claude Code can call it) + 8 project slash commands `/mcp-sentrux:sentrux-*`.
 
 ---
 
-## Что он даёт
+## What it gives you
 
-| Боль | Как помогает sentrux |
+| Pain | How sentrux helps |
 |------|----------------------|
-| «У нас всё запутано, но непонятно где именно» | Считает 5 метрик (modularity, acyclicity, depth, equality, redundancy), показывает **bottleneck** — главную причину просадки |
-| «Где циклы между модулями?» | `dsm` строит Dependency Structure Matrix и подсвечивает циклы |
-| «Рефакторинг не сделал хуже?» | `session_start` фиксирует baseline → правки → `session_end` показывает дельту качества |
-| «Какие модули без тестов?» | `test_gaps` находит непокрытые узлы графа — приоритезируя те, у кого много зависимостей |
-| «`domain/*` не должен импортировать `adapters/*` — как заставить CI это ловить?» | `.sentrux/rules.toml` + `sentrux check` (exit 0/1, CI-friendly) |
-| «Куда мы движемся по качеству — вверх или вниз?» | `evolution` показывает тренды по времени |
+| "Everything's tangled, but it's unclear exactly where" | Computes 5 metrics (modularity, acyclicity, depth, equality, redundancy), shows the **bottleneck** — the main cause of the drop |
+| "Where are the cycles between modules?" | `dsm` builds a Dependency Structure Matrix and highlights cycles |
+| "Did the refactor make things worse?" | `session_start` records a baseline → make changes → `session_end` shows the quality delta |
+| "Which modules have no tests?" | `test_gaps` finds uncovered nodes in the graph — prioritizing the ones with many dependencies |
+| "`domain/*` must not import `adapters/*` — how do I make CI catch that?" | `.sentrux/rules.toml` + `sentrux check` (exit 0/1, CI-friendly) |
+| "Which way is our quality trending — up or down?" | `evolution` shows trends over time |
 
-**sentrux ортогонален qex:**
+**sentrux is orthogonal to qex:**
 
-- **qex** отвечает на «*где* используется X» (семантический поиск).
-- **sentrux** отвечает на «*насколько здорова* архитектура».
+- **qex** answers "*where* is X used" (semantic search).
+- **sentrux** answers "*how healthy* is the architecture".
 
-Они **не дублируют** друг друга. Не используй sentrux для поиска по коду, не используй qex для оценки связности.
+They **do not duplicate** each other. Don't use sentrux for code search, don't use qex to assess coupling.
 
 ---
 
-## Стартовые архетипы правил
+## Starter rule archetypes
 
-`claude-kit-project new` **автоматически** разворачивает `.sentrux/rules.toml` из архетипа
-`rules.src-package.toml` с уже подставленным именем твоего пакета — вписывать руками
-ничего не нужно, и проект «зелёный» с первого коммита. Активны сразу `max_cycles` и
-`no_god_files`; блок `[[boundaries]]` (граница архитектуры) приезжает **закомментированным**
-с предзаполненным именем пакета — раскомментируешь, когда появятся слои-папки
-(см. «Зелено с дня 1» ниже). В комплекте есть ещё два архетипа на случай другой архитектуры.
+`claude-kit new` **automatically** deploys `.sentrux/rules.toml` from the
+`rules.src-package.toml` archetype with your package name already filled in — nothing
+to fill in by hand, and the project is "green" from the first commit. `max_cycles` and
+`no_god_files` are active right away; the `[[boundaries]]` block (architecture boundary)
+arrives **commented out** with the package name pre-filled — uncomment it once layer
+folders appear (see "Green from day 1" below). Two more archetypes ship in the kit for
+a different architecture.
 
-| Архетип | Когда выбирать | Цепочка зависимостей (сверху вниз) |
+| Archetype | When to pick it | Dependency chain (top to bottom) |
 |---------|----------------|-------------------------------------|
-| **`rules.src-package.toml`** | Дефолт seed-скелета (**разворачивается сам**): один `src/<pkg>/`, разбитый на подпакеты | `cli → services → core → utils` |
-| **`rules.layered.toml`** | Классический n-tier: каждый слой зависит только от нижнего, инфраструктура в основании | `presentation → application → domain → infrastructure` |
-| **`rules.hexagonal.toml`** | Ports & adapters / clean / onion: домен в центре, зависимости направлены внутрь | `app → adapters → ports → domain` |
+| **`rules.src-package.toml`** | Default for the seed skeleton (**deploys itself**): a single `src/<pkg>/` split into subpackages | `cli → services → core → utils` |
+| **`rules.layered.toml`** | Classic n-tier: each layer depends only on the one below, infrastructure at the base | `presentation → application → domain → infrastructure` |
+| **`rules.hexagonal.toml`** | Ports & adapters / clean / onion: the domain at the center, dependencies point inward | `app → adapters → ports → domain` |
 
-(`→` = «разрешено импортировать». Восходящие/наружные импорты запрещены.)
+(`→` = "allowed to import". Upward/outward imports are forbidden.)
 
-Переключиться на другой архетип (выбери одну строку — `src-package` уже развёрнут
-по умолчанию):
+To switch to a different archetype (pick one line — `src-package` is already deployed
+by default):
 
 ```bash
 cp .claude/plugins/mcp-sentrux/templates/rules.layered.toml   .sentrux/rules.toml
 cp .claude/plugins/mcp-sentrux/templates/rules.hexagonal.toml .sentrux/rules.toml
 ```
 
-> **⚠️ При ручном копировании — обязательная правка, иначе правила молча не работают.**
-> (Авто-деплой `claude-kit-project new` подставляет имя пакета сам; ручные шаги нужны только
-> если копируешь архетип руками.) sentrux матчит пути в `[[boundaries]]` как
-> **литеральные префиксы директорий** — `*` подставляет только имя файла и **не**
-> раскрывает сегменты-директории. Поэтому `src/*/core` не матчит ничего, а boundary,
-> который ничего не матчит, **проходит молча** (ложное ощущение защиты). После копирования:
-> 1. замени `your_package` на имя своего пакета под `src/` (напр. `src/acme/core`);
-> 2. **сними `# ` с блока `[[boundaries]]`** — он, как и в авто-деплое, приезжает
->    закомментированным (пока слоёв-папок нет — `активный` boundary молча проходит);
-> 3. проверь, что правила «кусаются» — добавь намеренный восходящий импорт, убедись,
->    что `sentrux check` падает на нём, затем убери его.
+> **⚠️ If you copy manually — a mandatory edit, otherwise the rules silently don't work.**
+> (The `claude-kit new` auto-deploy fills in the package name itself; manual steps are
+> only needed if you copy an archetype by hand.) sentrux matches paths in `[[boundaries]]`
+> as **literal directory prefixes** — `*` stands in only for a file name and does **not**
+> expand directory segments. So `src/*/core` matches nothing, and a boundary that
+> matches nothing **passes silently** (a false sense of protection). After copying:
+> 1. replace `your_package` with your package name under `src/` (e.g. `src/acme/core`);
+> 2. **remove the `# ` from the `[[boundaries]]` block** — like in the auto-deploy, it
+>    arrives commented out (while there are no layer folders yet — an `active` boundary passes silently);
+> 3. check that the rules "bite" — add a deliberate upward import, confirm
+>    `sentrux check` fails on it, then remove it.
 >
-> Для нескольких пакетов под `src/` продублируй блок `[[boundaries]]` на каждый
-> пакет (пути литеральные). Полностью закомментированный «голый» каркас со всеми
-> типами правил — в [`rules.template.toml`](rules.template.toml).
+> For several packages under `src/`, duplicate the `[[boundaries]]` block per
+> package (the paths are literal). A fully commented-out "bare" scaffold with all
+> rule types is in [`rules.template.toml`](rules.template.toml).
 
-### Зелено с дня 1
+### Green from day 1
 
-Архетипы **активны, но не мешают** на старте:
+Archetypes are **active, but don't get in the way** at the start:
 
-- Активны `max_cycles = 0` и `no_god_files = true` — оба зелёные на чистом коде и
-  ловят реальные проблемы сразу.
-- Метрики-минимумы (`min_modularity`, `min_redundancy` и пр.) **закомментированы**:
-  новый/маленький проект законно не дотягивает до них даже без реальных нарушений.
-  Раскомментируй и подними их, когда кодовая база созреет.
-- Блок `[[boundaries]]` (направление зависимостей между слоями) тоже приходит
-  **закомментированным** — намеренно. На свежем проекте слоёв-папок ещё нет, а
-  *активный* boundary, который ничего не матчит, **проходит молча** и создаёт ложное
-  ощущение, что архитектура под защитой. Имя пакета в нём уже подставлено: когда
-  появятся `src/<pkg>/core` и т.д., просто сними `# ` с блока (и проверь, что
-  «кусается» — добавь намеренный плохой импорт, убедись что `sentrux check` падает).
+- `max_cycles = 0` and `no_god_files = true` are active — both are green on clean code
+  and catch real problems right away.
+- The minimum-metric thresholds (`min_modularity`, `min_redundancy`, etc.) are
+  **commented out**: a new/small project legitimately falls short of them even without
+  real violations. Uncomment and raise them once the codebase matures.
+- The `[[boundaries]]` block (dependency direction between layers) also arrives
+  **commented out** — deliberately. A fresh project has no layer folders yet, and an
+  *active* boundary that matches nothing **passes silently** and creates a false sense
+  that the architecture is protected. The package name in it is already filled in: once
+  `src/<pkg>/core` etc. appear, just remove the `# ` from the block (and check that it
+  "bites" — add a deliberate bad import, confirm `sentrux check` fails).
 
-Так нет ни ложного «красного» в день 1, ни ложного «зелёного»: всё, что активно —
-реально работает, а всё, что ещё не применимо — видимо закомментировано.
+This way there's neither a false "red" on day 1 nor a false "green": everything active
+really works, and everything not yet applicable is visibly commented out.
 
-> **⚠️ Слепые зоны sentrux 0.5.7 (boundary молча пропускает).** Когда раскомментируешь
-> `[[boundaries]]`, учти два места, где они **не** срабатывают:
-> - **Relative-импорты не резолвятся:** `from ..cli import x` обходит границу молча.
->   В гейтируемых слоях используй **абсолютные** импорты (`from <pkg>.cli import x`)
->   — или добавь lint-правило, запрещающее relative-импорты.
-> - **Плоский модуль** `src/<pkg>/<layer>.py` **не** матчится dir-путём
->   `src/<pkg>/<layer>` — держи слои подпакетами (`src/<pkg>/<layer>/`) либо добавь
->   суффикс `.py` в путь boundary для плоского слоя.
+> **⚠️ sentrux 0.5.7 blind spots (a boundary passes silently).** When you uncomment
+> `[[boundaries]]`, keep in mind two places where they **don't** trigger:
+> - **Relative imports don't resolve:** `from ..cli import x` bypasses the boundary
+>   silently. In gated layers use **absolute** imports (`from <pkg>.cli import x`)
+>   — or add a lint rule forbidding relative imports.
+> - **A flat module** `src/<pkg>/<layer>.py` is **not** matched by the dir path
+>   `src/<pkg>/<layer>` — keep layers as subpackages (`src/<pkg>/<layer>/`), or add
+>   the `.py` suffix to the boundary path for a flat layer.
 
 ---
 
-## Установка
+## Installation
 
-> Быстрый путь «установить → подключить → проверить» — [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
-> Ниже — подробности по платформам.
+> The fast "install → wire up → verify" path — [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
+> Below are the platform-specific details.
 
 ### macOS
 
@@ -108,7 +109,7 @@ cp .claude/plugins/mcp-sentrux/templates/rules.hexagonal.toml .sentrux/rules.tom
 brew install sentrux/tap/sentrux
 ```
 
-Grammars скачаются при первом запуске автоматически.
+Grammars download automatically on first run.
 
 ### Linux
 
@@ -118,242 +119,253 @@ curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | s
 
 ### Windows
 
-**Вариант 1 — curl (рекомендуется, если есть Rust toolchain):**
+**Option 1 — curl (recommended, if you have the Rust toolchain):**
 
 ```powershell
-# Скачать бинарь в ~/.cargo/bin/ (уже в PATH если Rust установлен)
+# Download the binary into ~/.cargo/bin/ (already on PATH if Rust is installed)
 curl -L -o "%USERPROFILE%\.cargo\bin\sentrux.exe" ^
   https://github.com/sentrux/sentrux/releases/latest/download/sentrux-windows-x86_64.exe
 
-# Проверить
+# Verify
 sentrux --version
 ```
 
-Grammars (51 языковой парсер) скачаются при первом запуске автоматически (~30 MB).
+Grammars (51 language parsers) download automatically on first run (~30 MB).
 
-**Вариант 2 — ручная установка:**
+**Option 2 — manual install:**
 
-1. Скачать `sentrux-windows-x86_64.exe` из [latest release](https://github.com/sentrux/sentrux/releases/latest)
-2. Переименовать в `sentrux.exe`
-3. Положить в любую директорию из PATH (например `%USERPROFILE%\.cargo\bin\` или `%USERPROFILE%\bin\`)
+1. Download `sentrux-windows-x86_64.exe` from the [latest release](https://github.com/sentrux/sentrux/releases/latest)
+2. Rename it to `sentrux.exe`
+3. Place it in any directory on PATH (e.g. `%USERPROFILE%\.cargo\bin\` or `%USERPROFILE%\bin\`)
 
-**Вариант 3 — через claude-kit:**
-
-```bash
-claude-kit-project new        # создаёт проект и генерирует .mcp.json из plugin.json включённых плагинов
-# или, для существующего проекта:
-claude-kit-claude plugin enable mcp-sentrux
-```
-
-`claude-kit` автоматически включит sentrux в `.mcp.json` при выборе соответствующего компонента.
-
-### Проверка установки
+**Option 3 — via claude-kit:**
 
 ```bash
-sentrux --version          # должно показать "sentrux X.Y.Z"
-sentrux check              # должно показать "Quality: NNNN" и список правил
+claude-kit new        # creates the project and generates .mcp.json from the enabled plugins' plugin.json
+# or, for an existing project:
+claude-kit add sentrux
 ```
 
-### MCP-подключение
+`claude-kit` will automatically enable sentrux in `.mcp.json` when you pick the
+corresponding component.
 
-MCP-биндинг прописан в `.mcp.json` (бинарь запускается через `sentrux mcp`). После установки перезапусти Claude Code и проверь: `/mcp` → sentrux должен быть зелёным.
+### Verifying the install
+
+```bash
+sentrux --version          # should print "sentrux X.Y.Z"
+sentrux check              # should print "Quality: NNNN" and the rule list
+```
+
+### MCP connection
+
+The MCP binding is declared in `.mcp.json` (the binary starts via `sentrux mcp`). After
+installing, restart Claude Code and check: `/mcp` → sentrux should be green.
 
 ---
 
-## Метрики и quality_signal
+## Metrics and quality_signal
 
-`quality_signal` — **геометрическое среднее** пяти под-метрик, каждая нормирована в 0–10000.
+`quality_signal` is the **geometric mean** of five sub-metrics, each normalized to
+0–10000.
 
-| Метрика | Что меряет | Низкий score = |
+| Metric | What it measures | A low score means |
 |---------|-----------|----------------|
-| **modularity** | Насколько модули внутренне связаны и слабо связаны между собой | Размытые границы, утечка деталей |
-| **acyclicity** | Отсутствие циклов в графе импортов | Есть циклы → score падает в пол |
-| **depth** | Глубина архитектурных слоёв | Всё в одной плоскости / слишком вложено |
-| **equality** | Равномерность распределения сложности по модулям | God-module / десятки крошечных |
-| **redundancy** | Дубликаты / повторяющийся код | Много копи-пасты |
+| **modularity** | How internally cohesive and loosely coupled modules are | Blurred boundaries, leaking details |
+| **acyclicity** | Absence of cycles in the import graph | Cycles exist → score bottoms out |
+| **depth** | Depth of architectural layers | Everything on one flat level / too deeply nested |
+| **equality** | Even distribution of complexity across modules | A god-module / dozens of tiny ones |
+| **redundancy** | Duplicates / repeated code | A lot of copy-paste |
 
-Шкала `quality_signal`:
+The `quality_signal` scale:
 
-| Диапазон | Интерпретация |
+| Range | Interpretation |
 |----------|---------------|
-| 0–3000 | Архитектура запутана, рефакторинг неизбежен |
-| 3000–6000 | Средне. Видны bottleneck'и, точечные улучшения дадут эффект |
-| 6000–8000 | Хорошо. Поддерживаемо, регулярная гигиена |
-| 8000–10000 | Отлично. Сохранять текущий уровень |
+| 0–3000 | The architecture is tangled, a refactor is unavoidable |
+| 3000–6000 | Medium. Bottlenecks are visible, targeted improvements will help |
+| 6000–8000 | Good. Maintainable, routine hygiene |
+| 8000–10000 | Excellent. Keep the current level |
 
-**Главное правило:** не смотри на абсолютное число — смотри на **дельту** до/после изменений и на **bottleneck**.
-
----
-
-## Slash-команды (`.claude/commands/sentrux-*`)
-
-### Снимки и анализ
-
-| Команда | Что делает | Когда звать |
-|---------|------------|-------------|
-| `/mcp-sentrux:sentrux-health` | scan + health, общий снимок: quality_signal + bottleneck + 5 метрик | В начале сессии, чтобы понять «откуда стартуем» |
-| `/mcp-sentrux:sentrux-dsm` | Dependency Structure Matrix: связи между модулями, циклы | Когда bottleneck = `acyclicity` или нужно понять «кто кого тянет» |
-| `/mcp-sentrux:sentrux-gaps` | Список модулей без тестов (с приоритетом по связности) | Перед `/dev:ship`, перед PR |
-| `/mcp-sentrux:sentrux-evolution` | Тренды метрик во времени | Ретроспектива после крупного рефакторинга |
-
-### Workflow рефакторинга
-
-| Команда | Что делает | Когда звать |
-|---------|------------|-------------|
-| `/mcp-sentrux:sentrux-baseline` | Фиксирует quality_signal как точку отсчёта (`session_start`) | **Перед** началом крупного рефакторинга |
-| `/mcp-sentrux:sentrux-diff` | Сравнивает текущее состояние с baseline (`session_end`), показывает дельту | **После** правок, перед коммитом |
-
-### Правила и CI
-
-| Команда | Что делает | Когда звать |
-|---------|------------|-------------|
-| `/mcp-sentrux:sentrux-rules` | Проверка `.sentrux/rules.toml` через MCP, интерактивный разбор нарушений | После изменения границ слоёв / новых импортов |
-| `/mcp-sentrux:sentrux-check` | CLI `sentrux check` (exit 0/1, для pre-commit и CI) | В скриптах, в pre-commit, в CI |
+**The main rule:** don't look at the absolute number — look at the **delta**
+before/after changes and at the **bottleneck**.
 
 ---
 
-## Типичные сценарии
+## Slash commands (`.claude/commands/sentrux-*`)
 
-### 1. Перед рефакторингом
+### Snapshots and analysis
+
+| Command | What it does | When to call it |
+|---------|------------|-------------|
+| `/mcp-sentrux:sentrux-health` | scan + health, an overall snapshot: quality_signal + bottleneck + 5 metrics | At the start of a session, to understand "where we're starting from" |
+| `/mcp-sentrux:sentrux-dsm` | Dependency Structure Matrix: relations between modules, cycles | When the bottleneck is `acyclicity`, or you need to understand "who pulls in whom" |
+| `/mcp-sentrux:sentrux-gaps` | List of modules with no tests (prioritized by coupling) | Before `/dev:ship`, before a PR |
+| `/mcp-sentrux:sentrux-evolution` | Metric trends over time | A retrospective after a large refactor |
+
+### Refactoring workflow
+
+| Command | What it does | When to call it |
+|---------|------------|-------------|
+| `/mcp-sentrux:sentrux-baseline` | Records quality_signal as a reference point (`session_start`) | **Before** starting a large refactor |
+| `/mcp-sentrux:sentrux-diff` | Compares the current state against the baseline (`session_end`), shows the delta | **After** changes, before a commit |
+
+### Rules and CI
+
+| Command | What it does | When to call it |
+|---------|------------|-------------|
+| `/mcp-sentrux:sentrux-rules` | Checks `.sentrux/rules.toml` via MCP, an interactive breakdown of violations | After changing layer boundaries / new imports |
+| `/mcp-sentrux:sentrux-check` | CLI `sentrux check` (exit 0/1, for pre-commit and CI) | In scripts, in pre-commit, in CI |
+
+---
+
+## Typical scenarios
+
+### 1. Before a refactor
 
 ```
-/mcp-sentrux:sentrux-baseline       # фиксируем точку отсчёта
-... делаешь правки ...
-/mcp-sentrux:sentrux-diff           # видишь signal_before → signal_after
+/mcp-sentrux:sentrux-baseline       # record the starting point
+... make your changes ...
+/mcp-sentrux:sentrux-diff           # see signal_before → signal_after
 ```
 
-Если `signal_after < signal_before` — что-то поломал. Запусти `/mcp-sentrux:sentrux-dsm` чтобы найти, где появились новые связи или циклы.
+If `signal_after < signal_before` — you broke something. Run `/mcp-sentrux:sentrux-dsm`
+to find where new couplings or cycles appeared.
 
-### 2. Поиск циклов
+### 2. Finding cycles
 
 ```
 /mcp-sentrux:sentrux-health         # bottleneck = acyclicity, score 2500/10000
-/mcp-sentrux:sentrux-dsm            # видим какие модули замкнулись
+/mcp-sentrux:sentrux-dsm            # see which modules formed a cycle
 ```
 
-Кандидаты на разрыв цикла:
+Candidates for breaking the cycle:
 
-- вынести общий код в нижний слой;
-- инвертировать зависимость через интерфейс / событие;
-- разбить «толстый» модуль на два.
+- move shared code into a lower layer;
+- invert the dependency through an interface / event;
+- split a "fat" module into two.
 
-### 3. Перед `/dev:ship` (PR)
+### 3. Before `/dev:ship` (PR)
 
 ```
-/mcp-sentrux:sentrux-gaps           # что не покрыто тестами — закрываем критичное
-/mcp-sentrux:sentrux-check          # правила архитектуры не нарушены
-/mcp-sentrux:sentrux-diff           # качество не упало относительно baseline
+/mcp-sentrux:sentrux-gaps           # what tests don't cover — close the critical gaps
+/mcp-sentrux:sentrux-check          # architecture rules are not violated
+/mcp-sentrux:sentrux-diff           # quality has not dropped against the baseline
 ```
 
-### 4. Настройка инвариантов
+### 4. Configuring invariants
 
-Обычно `.sentrux/rules.toml` уже развёрнут `claude-kit-project new` (архетип `src-package`).
-Если правишь руками — минимальный пример (DIP / hexagonal-стиль):
+Usually `.sentrux/rules.toml` is already deployed by `claude-kit new` (the
+`src-package` archetype). If you edit it by hand — a minimal example (DIP /
+hexagonal style):
 
 ```toml
 [constraints]
 max_cycles   = 0
 no_god_files = true
 
-# Пути в [[boundaries]] — ЛИТЕРАЛЬНЫЕ префиксы директорий: `*` подставляет имя файла
-# и НЕ раскрывает сегмент-директорию, поэтому "src/*/domain" не матчит ничего.
-# Используй полный путь src/<pkg>/<layer> (без хвостового слэша). Ключи: from/to/reason
-# (ключа `forbidden` НЕТ — sentrux молча игнорирует неизвестные ключи).
+# Paths in [[boundaries]] are LITERAL directory prefixes: `*` stands for a file name
+# and does NOT expand a directory segment, so "src/*/domain" matches nothing.
+# Use the full path src/<pkg>/<layer> (no trailing slash). Keys: from/to/reason
+# (there is NO `forbidden` key — sentrux silently ignores unknown keys).
 [[boundaries]]
 from   = "src/your_package/domain"
 to     = "src/your_package/adapters"
-reason = "domain не зависит от adapters (DIP)"
+reason = "domain does not depend on adapters (DIP)"
 ```
 
-> Это generic-пример. Подгони пути под реальные слои/пакет своего проекта, либо
-> возьми готовый архетип из `templates/` (см. «Стартовые архетипы правил» выше).
+> This is a generic example. Fit the paths to your project's real layers/package, or
+> take a ready-made archetype from `templates/` (see "Starter rule archetypes" above).
 
-Дальше:
+Next:
 
 ```
-/mcp-sentrux:sentrux-rules          # проверка через MCP — интерактивно
-/mcp-sentrux:sentrux-check          # та же проверка через CLI — для CI
+/mcp-sentrux:sentrux-rules          # check via MCP — interactive
+/mcp-sentrux:sentrux-check          # the same check via CLI — for CI
 ```
 
 ---
 
-## MCP-инструменты (девять)
+## MCP tools (nine)
 
-Slash-команды выше — обёртки над этими MCP-tool'ами. Их можно звать и напрямую (если нужна нестандартная комбинация):
+The slash commands above are wrappers over these MCP tools. You can call them directly
+too (if you need a non-standard combination):
 
-| Tool | Назначение |
+| Tool | Purpose |
 |------|-----------|
-| `mcp__sentrux__scan` | Полный пересчёт метрик (обязателен перед остальными в новой сессии) |
-| `mcp__sentrux__rescan` | Быстрое обновление после правок |
-| `mcp__sentrux__health` | quality_signal + bottleneck + 5 метрик |
+| `mcp__sentrux__scan` | Full metric recompute (required before the others in a new session) |
+| `mcp__sentrux__rescan` | Quick update after changes |
+| `mcp__sentrux__health` | quality_signal + bottleneck + 5 metrics |
 | `mcp__sentrux__dsm` | Dependency Structure Matrix |
-| `mcp__sentrux__test_gaps` | Модули без тестов |
-| `mcp__sentrux__check_rules` | Валидация `.sentrux/rules.toml` |
-| `mcp__sentrux__session_start` | Сохранить baseline |
-| `mcp__sentrux__session_end` | Сравнить с baseline (pass/fail + дельта) |
-| `mcp__sentrux__evolution` | Историческая динамика |
+| `mcp__sentrux__test_gaps` | Modules with no tests |
+| `mcp__sentrux__check_rules` | Validate `.sentrux/rules.toml` |
+| `mcp__sentrux__session_start` | Save the baseline |
+| `mcp__sentrux__session_end` | Compare against the baseline (pass/fail + delta) |
+| `mcp__sentrux__evolution` | Historical dynamics |
 
 ---
 
-## CLI (без MCP)
+## CLI (without MCP)
 
-Полезно для CI / pre-commit / скриптов. Работает одинаково на macOS, Linux, Windows:
+Useful for CI / pre-commit / scripts. Works the same way on macOS, Linux, Windows:
 
 ```bash
-sentrux                        # GUI с live-treemap (если есть дисплей)
-sentrux check                  # валидация rules.toml, exit 0/1
-sentrux gate --save            # сохранить baseline
-sentrux gate                   # сравнить с baseline (CI-режим)
-sentrux mcp                    # запустить MCP-сервер (это и делает .mcp.json)
-sentrux plugin list            # языковые плагины
+sentrux                        # GUI with a live treemap (if a display is available)
+sentrux check                  # validate rules.toml, exit 0/1
+sentrux gate --save            # save the baseline
+sentrux gate                   # compare against the baseline (CI mode)
+sentrux mcp                    # start the MCP server (this is what .mcp.json does)
+sentrux plugin list            # language plugins
 ```
 
-> **Примечание:** в v0.5.7+ путь к проекту определяется автоматически (текущая директория). Аргумент `.` не нужен.
+> **Note:** in v0.5.7+ the project path is determined automatically (the current
+> directory). The `.` argument is not needed.
 
 ---
 
-## Диагностика
+## Troubleshooting
 
-**`/mcp` показывает sentrux как failed**
+**`/mcp` shows sentrux as failed**
 
 ```bash
 # macOS / Linux
-which sentrux                  # бинарь должен быть в PATH
-sentrux mcp --help             # должно быть "Start the MCP server"
+which sentrux                  # the binary must be on PATH
+sentrux mcp --help             # should say "Start the MCP server"
 
 # Windows (Git Bash)
-where sentrux                  # или: which sentrux
+where sentrux                  # or: which sentrux
 sentrux mcp --help
 ```
 
-Если бинарь есть, но MCP всё равно падает — перезапусти Claude Code:
+If the binary is there but MCP still fails — restart Claude Code:
 - VS Code: `Ctrl+Shift+P` (Windows) / `Cmd+Shift+P` (macOS) → `Developer: Reload Window`
-- CLI: перезапустить терминал
+- CLI: restart the terminal
 
-**`scan` слишком долгий**
+**`scan` takes too long**
 
-Большой проект → проверь `.gitignore` и `.ignore`. sentrux уважает их (как ripgrep). Уберите из индексации архивы, бинарники, генерёнку.
+Large project → check `.gitignore` and `.ignore`. sentrux respects them (like
+ripgrep). Exclude archives, binaries, and generated files from indexing.
 
-**`session_end` говорит "no baseline"**
+**`session_end` says "no baseline"**
 
-Сначала `/mcp-sentrux:sentrux-baseline`, потом правки, потом `/mcp-sentrux:sentrux-diff`. Baseline хранится в памяти MCP-сервера — пережить рестарт Claude Code не сможет.
+First `/mcp-sentrux:sentrux-baseline`, then changes, then `/mcp-sentrux:sentrux-diff`.
+The baseline is stored in the MCP server's memory — it won't survive a Claude Code
+restart.
 
-**Метрики не меняются после правок**
+**Metrics don't change after edits**
 
-`mcp__sentrux__rescan` или просто `/mcp-sentrux:sentrux-health` (он зовёт scan заново).
+`mcp__sentrux__rescan`, or just `/mcp-sentrux:sentrux-health` (it calls scan again).
 
 ---
 
-## Источники
+## Sources
 
-- Репозиторий: <https://github.com/sentrux/sentrux>
-- Установка/релизы: <https://github.com/sentrux/sentrux/releases>
-- Pro-версия (продвинутые root-cause диагностики): <https://github.com/sentrux/sentrux> → Upgrade
+- Repository: <https://github.com/sentrux/sentrux>
+- Install/releases: <https://github.com/sentrux/sentrux/releases>
+- Pro version (advanced root-cause diagnostics): <https://github.com/sentrux/sentrux> → Upgrade
 
-Полный список slash-команд проекта — в корневом [`CLAUDE.md`](../../../CLAUDE.md), раздел «Проектные команды».
+The full list of the project's slash commands is in the root [`CLAUDE.md`](../../../CLAUDE.md), in the project commands section.
 ## Launcher options
 
-**Default** (used automatically by `claude-kit-claude plugin enable mcp-sentrux`): declared inline in `.claude-plugin/plugin.json` → `mcpServers.sentrux`.
+**Default** (used automatically by `claude-kit add sentrux`): declared inline in `.claude-plugin/plugin.json` → `mcpServers.sentrux`.
 
 ```
 command: sentrux

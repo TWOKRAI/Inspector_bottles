@@ -1,0 +1,24 @@
+# gitleaks secrets-scan config, read by the pre-commit `gitleaks` hook
+# (`gitleaks protect --staged` picks up ./.gitleaks.toml from the repo root).
+#
+# Delivered by claude-kit as a SEEDED file: written when absent, never replaced —
+# this file is yours. When the seed's template changes, `plugin upgrade --apply`
+# puts the fresh template under .claude/_backups/<ts>/seed/ for a manual merge.
+#
+# Extends the default ruleset (every built-in rule stays active) and allowlists
+# only paths whose content is known not to be a secret.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Seed-delivered paths that look like secrets but are not."
+paths = [
+    # Reviewer-eval fixtures and the env example INTENTIONALLY embed fake
+    # credentials as test data.
+    '''\.claude/plugins/.+/evals/.+''',
+    '''\.env\.example''',
+    # The delivery manifest maps seed-delivered paths to their sha256 — pairs like
+    # `scripts/secrets_audit/…: <64 hex>` match `generic-api-key`. Exactly this
+    # one path, anchored: nothing else under .claude/ is exempt.
+    '''^\.claude/\.delivery-manifest\.json$''',
+]

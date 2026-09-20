@@ -33,6 +33,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from ...base_manager import BaseManager, ObservableMixin
+from ...error_module.interfaces import SubsystemStartFailed
 
 # Тип callback'ов
 DiffFn = Callable[[Optional[Dict], Dict], Dict]
@@ -217,13 +218,30 @@ class TopologyManager(BaseManager, ObservableMixin):
                     cmd_type = cmd.get("cmd", "?")
                     if cmd_type in self._BEST_EFFORT_CMDS:
                         cleanup_failures.append(result)
-                        self._log_error(
-                            f"Топология: cleanup #{idx} ({cmd_type}) неуспешен — "
-                            f"продолжаем cleanup-хвост (компенсация B-4): {result}"
+                        # Task 1.3b (shape 2): отказ пришёл ВОЗВРАТОМ значения
+                        # (_execute_command сам ловит исключения), объекта
+                        # исключения тут нет — фабрикуем типизированный
+                        # SubsystemStartFailed, а не голый RuntimeError (ключ
+                        # окна `(класс, context)` не должен схлопывать разные
+                        # причины отказа команд топологии в один).
+                        self.report_error(
+                            SubsystemStartFailed(
+                                f"Топология: cleanup #{idx} ({cmd_type}) неуспешен — продолжаем cleanup-хвост"
+                            ),
+                            context="topology.apply.cleanup",
+                            cmd_type=cmd_type,
+                            idx=idx,
+                            result=result,
                         )
                         continue
                     elapsed_sec = time.perf_counter() - t_start
-                    self._log_error(f"Топология: команда #{idx} ({cmd_type}) завершилась неуспешно: {result}")
+                    self.report_error(
+                        SubsystemStartFailed(f"Топология: команда #{idx} ({cmd_type}) завершилась неуспешно"),
+                        context="topology.apply.command",
+                        cmd_type=cmd_type,
+                        idx=idx,
+                        result=result,
+                    )
                     self._record_timing("topology.apply", elapsed_sec)
                     return {
                         "success": False,
@@ -252,8 +270,7 @@ class TopologyManager(BaseManager, ObservableMixin):
             return response
         except Exception as e:
             elapsed_sec = time.perf_counter() - t_start
-            self._log_error(f"Топология: ошибка apply: {e}")
-            self._track_error(e, {"phase": "topology.apply"})
+            self.report_error(e, context="topology.apply")
             self._record_timing("topology.apply", elapsed_sec)
             # results может быть частично заполнен — возвращаем для
             # _teardown_partial в PM (точный откат по факту исполнения)
@@ -419,8 +436,7 @@ class TopologyManager(BaseManager, ObservableMixin):
                 }
 
         except Exception as e:
-            self._log_error(f"Топология: ошибка команды {cmd}: {e}")
-            self._track_error(e, {"phase": "execute_command", "cmd": cmd_type})
+            self.report_error(e, context="topology.execute_command", cmd=cmd)
             return {
                 "cmd": cmd_type,
                 "process_name": process_name,

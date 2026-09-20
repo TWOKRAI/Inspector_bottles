@@ -3,7 +3,7 @@ description: Recompose the project configuration from the current enabled.yaml �
 allowed-tools: Bash(claude-kit-claude plugin sync*)
 ---
 
-Пересобирает артефакты конфигурации (.mcp.json, settings.json) из текущего состояния enabled.yaml. Используй после ручных правок enabled.yaml.
+Rebuilds the configuration artifacts (.mcp.json, settings.json) from the current state of enabled.yaml. Use after manual edits to enabled.yaml.
 
 ```bash
 claude-kit-claude plugin sync $ARGUMENTS

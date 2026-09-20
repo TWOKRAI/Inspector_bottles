@@ -6,7 +6,7 @@ description: Generate a single Russian catalog of this project's factory (agents
 <!-- This command intentionally contains Cyrillic: it specifies Russian OUTPUT
      (section headers, target filename). Whitelisted for lint_language (Task 2.3). -->
 
-Generate `docs/ru/КАТАЛОГ.md` — one Russian-language catalog of every agent, command,
+Generate `docs/ru/КАТАЛОГ.md` — one Russian-language catalog of every agent, command, <!-- lint-language: allow -->
 skill and mode available in this project. Goal: a Russian-speaking owner reads what the
 "factory" does without opening the English prompt files.
 
@@ -34,12 +34,12 @@ regenerable Russian summary** — never hand-edit it; re-run this command instea
   - **Modes:** when to read this mode.
 - Keep identifiers, slash names, paths, model IDs, tool names, flags **AS-IS** (English);
   Russian prose only.
-- Group by plugin; within each plugin by type: `### Агенты` / `### Команды` /
+- Group by plugin; within each plugin by type: `### Агенты` / `### Команды` / <!-- lint-language: allow -->
   `### Skills` / `### Modes` (omit empty groups).
 
 ## Output
 
-Overwrite `docs/ru/КАТАЛОГ.md` **entirely** (idempotent). Header must note: it is
+Overwrite `docs/ru/КАТАЛОГ.md` **entirely** (idempotent). Header must note: it is <!-- lint-language: allow -->
 generated, the regeneration command (`/core:docs:ru-mirror`), and that the English
 originals under `plugins/` are the source of truth. Footer: a coverage line (how many
 items catalogued).

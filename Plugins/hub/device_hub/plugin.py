@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from multiprocess_framework.modules.error_module.interfaces import SubsystemStartFailed
 from multiprocess_framework.modules.process_module.plugins import (
     ExecutionMode,
     PluginContext,
@@ -296,8 +297,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 self._publish_state(f"devices.state.{dev_id}.last_error", str(exc))
                 self._reg.last_error = str(exc)
                 if self._ctx:
-                    self._ctx.health.report_error(exc, context=f"device_hub.{op}")
-                    self._ctx.log_error(f"DeviceHubPlugin: {op} {dev_id} ошибка: {exc}")
+                    self._ctx.health.report_error(exc, context=f"device_hub.{op}", device_id=dev_id)
             self._update_counters()
 
     def _ensure_device_workers(self) -> None:
@@ -398,14 +398,22 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     if ok:
                         self._device_workers[dev_id] = wname
                     elif self._ctx:
-                        self._ctx.log_error(
-                            f"DeviceHubPlugin: create_worker {wname} вернул False "
-                            f"(имя занято?), retry на следующей итерации"
+                        # create_worker вернул False (имя занято?) — отказ ВОЗВРАТОМ
+                        # значения, исключения нет: фабрикуем типизированный отказ,
+                        # чтобы ключ окна голоса не совпал с веткой except ниже.
+                        self._ctx.health.report_error(
+                            SubsystemStartFailed(
+                                f"create_worker {wname} вернул False (имя занято?), retry на следующей итерации"
+                            ),
+                            context="device_hub.create_worker",
+                            device_id=dev_id,
+                            worker=wname,
                         )
                 except Exception as exc:
                     if self._ctx:
-                        self._ctx.health.report_error(exc, context="device_hub.create_worker")
-                        self._ctx.log_error(f"DeviceHubPlugin: не удалось создать воркер {wname}: {exc}")
+                        self._ctx.health.report_error(
+                            exc, context="device_hub.create_worker", device_id=dev_id, worker=wname
+                        )
 
     def _stop_device_worker(self, dev_id: str) -> None:
         """Остановить и ПОЛНОСТЬЮ удалить per-device воркер из WorkerManager.

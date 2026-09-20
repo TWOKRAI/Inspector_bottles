@@ -108,8 +108,52 @@ launcher.stop() -> None         # graceful shutdown
 launcher.shutdown() -> None     # алиас для stop()
 launcher.wait() -> None         # ожидание завершения
 launcher.get_status() -> Dict   # spawner_running, process, registered_processes
-launcher.get_stats() -> Dict    # spawner, shared_resources
+launcher.get_stats() -> Dict    # spawner, startup, shared_resources
 ```
+
+**Журнал лаунчера (Task 1.2, ADR-PMM-029).** Записи `SystemLauncher` (и всех
+`get_std_logger`/`FallbackLogger` ГЛАВНОГО процесса, включая `spawner`) идут в
+`{база логов}/launcher/messages.log` (INFO) и `launcher/system.log` (WARNING+), отказы — в
+`launcher/errors.log` с трассой. Разделение — Task 3.2, решение владельца Р-7(а):
+`_LEVEL_DEFAULT_SCOPE` отображает `INFO -> BUSINESS`, а `BUSINESS` больше не пишет в
+`system_file`. База берётся
+`resolve_base_log_dir()` — тем же резолвером, что и слой L0 процессов:
+`MULTIPROCESS_LOG_DIR` → `INSPECTOR_LOG_DIR` → системный temp. Журнал поднимается ЛЕНИВО, на
+первой записи, и закрывается в `stop()`.
+
+**Окно названо (ревью Task 1.2, F3): маршрут действует между первой записью и `stop()`.**
+Подъём — ровно один за жизнь лаунчера, и на успехе, и на отказе; `stop()` терминален, второй
+раз журнал не поднимается. Записи ПОСЛЕ `stop()` в файл не идут — они уходят в аварийный выход
+(stdlib напрямую, префикс `(журнал закрыт)`), и в файлах `launcher/` их искать бесполезно.
+**Что именно выживает — измерено (ревью Task 1.2, Р1), а не обещано:** WARNING и ERROR доходят
+до stderr, INFO при ненастроенном stdlib отбрасывается — у ветки нет хендлеров, эффективный
+уровень корня WARNING, и запись гибнет раньше `lastResort`. Во встройке, где stdlib настроен
+(`basicConfig` или свой хендлер), INFO выживет. Прежняя формулировка «не теряются» была неверна. До правки такая запись воскрешала журнал целиком, и «закрыт» ничего не
+значило.
+
+Секция `get_stats()["startup"]` доступна ДО появления spawner'а — там живут счётчики стартовой
+части:
+
+```python
+{"shm_cleanup_failures": int,          # отказов уборки SHM (0 = отказов не было)
+ "shm_cleanup_segments": int | None,   # см. три состояния ниже
+ "pid_registry_failures": int}         # отказов реапа/чистки PID-реестра
+```
+
+`shm_cleanup_segments` читается **парой** с `shm_cleanup_failures` — состояний три, а не два
+(F6):
+
+| `segments` | `failures` | Что это значит |
+|---|---|---|
+| `None` | `0` | уборка не выполнялась ни разу |
+| `None` | `≥1` | уборка выполнялась и **упала** — число неизвестно |
+| `int` | — | выполнилась, освободила столько имён |
+
+Два уточнения к самому числу: оно про **первый блок** (config-объявленные имена; у префиксного
+блока за флагом `FW_SHM_PREFIX_CLEANUP` своя строка журнала и своё число, они не складываются),
+и **на Windows оно всегда `0`** — там висящих сегментов не бывает, ОС освобождает mapping при
+закрытии последнего handle (F1). Ноль на этой платформе — свойство платформы, а не показание об
+уборке; строка журнала говорит это вслух.
 
 ### IProcessManagerProcess
 

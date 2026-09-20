@@ -2,17 +2,14 @@
 # Sentrux structural quality gate.
 #
 # Запускается перед `git push`. Блокирует push если:
-#   1) sentrux check  — нарушено архитектурное правило из .sentrux/rules.toml (ВСЕГДА блок)
-#   2) sentrux gate   — структурная регрессия относительно baseline, но СУЖЕННО:
-#        ЖЁСТКО (блок): рост циклов · рост god-файлов;
-#        МЯГКО (warning, НЕ блок): падение aggregate quality · complex-fn / coupling / depth / hotspot и т.п.
-#      Решение владельца 2026-07-15: гейт душил push при ВЫРОСШЕМ quality из-за +1 complex-fn
-#      (ложная тренировка). 2026-07-20: и само падение aggregate quality снято с жёсткого блока
-#      (новые легитимные модули чуть двигают агрегат — та же ложная тренировка). Жёсткими остаются
-#      структурные guardrail'ы (циклы/god); падение quality — warning, фиксируется `sentrux gate --save`.
+#   1) sentrux check       — нарушено архитектурное правило из .sentrux/rules.toml
+#   2) sentrux gate        — структурная регрессия относительно baseline
 #
-# Обновить baseline после намеренного улучшения:  sentrux gate --save
-# Обход целиком (крайний случай):                 git push --no-verify
+# Обновить baseline после намеренного улучшения:
+#   sentrux gate --save
+#
+# Обход (только в крайних случаях, нежелательно):
+#   git push --no-verify
 
 set -e
 
@@ -24,8 +21,14 @@ if ! command -v sentrux >/dev/null 2>&1; then
     exit 0
 fi
 
-echo "[sentrux] check (architectural rules)…"
-if ! sentrux check >/tmp/sentrux-check.log 2>&1; then
+# "Not configured" is not "violated": without .sentrux/rules.toml `sentrux check`
+# exits 1, and without .sentrux/baseline.json so does `sentrux gate` — on a project
+# that never opted in that blocked EVERY push (found 2026-09-18 on the seed repo
+# itself, one day after the hook became auto-installed). Each step runs only when
+# its input file exists; otherwise it says how to enable it and moves on.
+if [ ! -f .sentrux/rules.toml ]; then
+    echo "[sentrux] check skipped — no .sentrux/rules.toml (create it to enforce architectural rules)" >&2
+elif ! { echo "[sentrux] check (architectural rules)…"; sentrux check >/tmp/sentrux-check.log 2>&1; }; then
     echo "❌ sentrux check FAILED — нарушены правила из .sentrux/rules.toml:" >&2
     cat /tmp/sentrux-check.log >&2
     echo "" >&2
@@ -33,55 +36,17 @@ if ! sentrux check >/tmp/sentrux-check.log 2>&1; then
     exit 1
 fi
 
-echo "[sentrux] gate (regression vs baseline)…"
-if ! sentrux gate >/tmp/sentrux-gate.log 2>&1; then
-    # Гейт увидел регрессию хотя бы одной метрики. Классифицируем по summary-строкам
-    # ("Quality:"/"Cycles:"/"God files:") — надёжнее, чем формулировки ✗-строк.
-    _metric() {  # $1=label → "before after" (числа из строки; стрелка ->|→ игнорируется)
-        grep -E "^$1" /tmp/sentrux-gate.log | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' | tr '\n' ' '
-    }
-    read -r q_before q_after <<<"$(_metric 'Quality:')"
-    read -r c_before c_after <<<"$(_metric 'Cycles:')"
-    read -r g_before g_after <<<"$(_metric 'God files:')"
-
-    # Fail-closed: гейт упал, но метрики не распознаны (формат sentrux мог измениться) →
-    # блокируем консервативно, а не тихо пропускаем.
-    if [ -z "$q_after" ] && [ -z "$c_after" ] && [ -z "$g_after" ]; then
-        echo "❌ sentrux gate FAILED и summary-метрики не распознаны (формат мог измениться) —" >&2
-        echo "   блокирую консервативно:" >&2
-        cat /tmp/sentrux-gate.log >&2
-        exit 1
-    fi
-
-    # Падение aggregate quality — БОЛЬШЕ НЕ жёсткий блок (решение владельца 2026-07-20):
-    # новые легитимные модули чуть двигают агрегат, это ложная тренировка. Остаётся
-    # мягким warning ниже. Жёсткими guardrail'ами остаются рост циклов и god-файлов.
-    hard=""
-    if [ -n "$c_after" ] && awk "BEGIN{exit !($c_after > $c_before)}"; then
-        hard="${hard}\n  ✗ циклы выросли: ${c_before} → ${c_after}"
-    fi
-    if [ -n "$g_after" ] && awk "BEGIN{exit !($g_after > $g_before)}"; then
-        hard="${hard}\n  ✗ god-файлы выросли: ${g_before} → ${g_after}"
-    fi
-
-    if [ -n "$hard" ]; then
-        echo "❌ sentrux gate: ЖЁСТКАЯ структурная регрессия — push отменён:" >&2
-        printf '%b\n' "$hard" >&2
-        echo "" >&2
-        echo "Варианты: • поправь код • осознанно: sentrux gate --save • обход: git push --no-verify" >&2
-        exit 1
-    fi
-
-    # Только мягкие метрики (падение quality / complex-fn/coupling/depth/hotspot) — не блокируем.
-    echo "⚠️  sentrux gate: мягкая регрессия — push НЕ блокируется (циклы/god в норме):" >&2
-    if [ -n "$q_after" ] && awk "BEGIN{exit !($q_after < $q_before)}"; then
-        echo "   • aggregate quality: ${q_before} → ${q_after} (мягко, не блок)" >&2
-    fi
-    grep '✗' /tmp/sentrux-gate.log | grep -v DEGRADED >&2 || true
-    echo "   (зафиксировать осознанно: sentrux gate --save)" >&2
-    echo "[sentrux] ✓ check passed (gate: только мягкие метрики, не блок)"
-    exit 0
+if [ ! -f .sentrux/baseline.json ]; then
+    echo "[sentrux] gate skipped — no .sentrux/baseline.json (run: sentrux gate --save)" >&2
+elif ! { echo "[sentrux] gate (regression vs baseline)…"; sentrux gate >/tmp/sentrux-gate.log 2>&1; }; then
+    echo "❌ sentrux gate FAILED — структурная регрессия относительно baseline:" >&2
+    cat /tmp/sentrux-gate.log >&2
+    echo "" >&2
+    echo "Push отменён. Варианты:" >&2
+    echo "  • поправь код, чтобы метрики не падали" >&2
+    echo "  • осознанно обновить baseline: sentrux gate --save" >&2
+    exit 1
 fi
 
-echo "[sentrux] ✓ check + gate passed"
+echo "[sentrux] ✓ structural gate done"
 exit 0

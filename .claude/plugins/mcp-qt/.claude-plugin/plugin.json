@@ -5,17 +5,7 @@
   "mcpServers": {
     "qt-mcp": {
       "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/0xCarbon/qt-mcp",
-        "python",
-        "-m",
-        "qt_mcp.server"
-      ],
-      "env": {
-        "QT_MCP_PROBE_HOST": "127.0.0.1",
-        "QT_MCP_PROBE_PORT": "9142"
-      }
+      "args": ["qt-mcp"]
     }
   }
 }

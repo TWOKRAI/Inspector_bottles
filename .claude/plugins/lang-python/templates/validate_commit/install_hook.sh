@@ -3,8 +3,10 @@
 # Usage: bash scripts/validate_commit/install_hook.sh
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-HOOK_PATH="$REPO_ROOT/.git/hooks/commit-msg"
+# Ask git where it runs hooks from: `.git` is a FILE in a worktree or submodule,
+# so "$REPO_ROOT/.git/hooks" does not exist there.
+HOOK_PATH="$(git rev-parse --git-path hooks/commit-msg)"
+mkdir -p "$(dirname "$HOOK_PATH")"
 
 cat > "$HOOK_PATH" <<'EOF'
 #!/usr/bin/env bash

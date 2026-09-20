@@ -15,12 +15,12 @@ Run via Bash (the harness is a stdlib Python script):
 
 - Suite run — grade the committed reviewer outputs against the golden corpus and
   report pass-rate + Wilson CI:
-  `python .claude/plugins/dev/evals/run_evals.py`
+  `uv run --no-project python .claude/plugins/dev/evals/run_evals.py`
 - Validate the corpus — offline schema + self-consistency check (also runs in CI on
   every PR, no key needed):
-  `python .claude/plugins/dev/evals/run_evals.py --validate-cases`
+  `uv run --no-project python .claude/plugins/dev/evals/run_evals.py --validate-cases`
 - Grade one captured reviewer output against a case:
-  `python .claude/plugins/dev/evals/run_evals.py --output <file> --case cr-001`
+  `uv run --no-project python .claude/plugins/dev/evals/run_evals.py --output <file> --case cr-001`
 
 ## What it reports
 

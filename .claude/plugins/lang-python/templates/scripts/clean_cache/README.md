@@ -8,19 +8,19 @@
 
 ```bash
 # Что было бы удалено (dry-run) с дефолтным конфигом — сканирует "."
-python scripts/clean_cache/clean_cache.py
+uv run --no-project python scripts/clean_cache/clean_cache.py
 
 # РЕАЛЬНОЕ удаление
-python scripts/clean_cache/clean_cache.py --apply
+uv run --no-project python scripts/clean_cache/clean_cache.py --apply
 
 # Подсмотреть в подкаталог
-python scripts/clean_cache/clean_cache.py --root src
+uv run --no-project python scripts/clean_cache/clean_cache.py --root src
 
 # JSON для агентов (machine-readable отчёт + список целей)
-python scripts/clean_cache/clean_cache.py --format json
+uv run --no-project python scripts/clean_cache/clean_cache.py --format json
 
 # Для CI — тихий режим, exit-код 0 (ok) / 1 (ошибки удаления) / 2 (отказ)
-python scripts/clean_cache/clean_cache.py --apply --quiet
+uv run --no-project python scripts/clean_cache/clean_cache.py --apply --quiet
 ```
 
 ## Что настраивается в `clean_cache.toml`

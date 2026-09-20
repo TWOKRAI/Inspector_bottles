@@ -2,26 +2,26 @@
 description: Precise LOC count via tokei (shares the TOML with /core:quality:code-stats)
 ---
 
-Запусти tokei-обёртку:
+Run the tokei wrapper:
 
 ```bash
-python scripts/code_stats/code_stats_tokei.py
+uv run --no-project python scripts/code_stats/code_stats_tokei.py
 ```
 
-Особенности:
-- Использует ТОТ ЖЕ конфиг [scripts/code_stats/code_stats.toml](../../scripts/code_stats/code_stats.toml) — расширения, исключения, формат вывода.
-- Требует бинарь `tokei` (`brew install tokei` / `cargo install tokei`). Если не установлен — скрипт даст подсказку и exit 3.
-- Группировка всегда по языку (не по директории) — особенность tokei.
-- LOC из tokei **точнее** stdlib-варианта: настоящие токенайзеры распознают комментарии и строковые литералы во всех языках.
+Notes:
+- Uses the SAME config [scripts/code_stats/code_stats.toml](../../scripts/code_stats/code_stats.toml) — extensions, exclusions, output format.
+- Requires the `tokei` binary (`brew install tokei` / `cargo install tokei`). If not installed — the script prints a hint and exits 3.
+- Grouping is always by language (not by directory) — a tokei quirk.
+- LOC from tokei is **more precise** than the stdlib variant: real tokenizers recognize comments and string literals across all languages.
 
-Полезные варианты:
-- `python scripts/code_stats/code_stats_tokei.py --root src/<package>`
-- `python scripts/code_stats/code_stats_tokei.py --format json`
+Useful options:
+- `uv run --no-project python scripts/code_stats/code_stats_tokei.py --root src/<package>`
+- `uv run --no-project python scripts/code_stats/code_stats_tokei.py --format json`
 
-**Когда использовать tokei vs stdlib:**
-- tokei — точные цифры, быстрее на больших репо, нужен бинарь.
-- `/core:quality:code-stats` (stdlib) — без зависимостей, можно группировать по директориям.
+**When to use tokei vs stdlib:**
+- tokei — precise numbers, faster on large repos, needs the binary.
+- `/core:quality:code-stats` (stdlib) — no dependencies, can group by directories.
 
-> `scripts/code_stats/` ставится автоматически через `claude-kit-project new`. Без него `tokei .` работает напрямую из любой точки проекта (но без shared TOML-конфига).
+> `scripts/code_stats/` is installed automatically via `claude-kit new`. Without it, `tokei .` works directly from anywhere in the project (but without the shared TOML config).
 
 $ARGUMENTS

@@ -3,9 +3,9 @@ description: Disable plugin <id> — remove it from enabled.yaml and recompose t
 allowed-tools: Bash(claude-kit-claude plugin disable*)
 ---
 
-Отключает плагин и пересобирает артефакты конфигурации. Файлы плагина на диске не удаляются.
+Disables the plugin and rebuilds the configuration artifacts. The plugin's files on disk are not removed.
 
-Использование: `/core:plugin:disable <id>`
+Usage: `/core:plugin:disable <id>`
 
 ```bash
 claude-kit-claude plugin disable $ARGUMENTS

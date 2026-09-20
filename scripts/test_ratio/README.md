@@ -24,15 +24,15 @@ LOC считается в `count.mode`:
 ## Запуск
 
 ```bash
-python scripts/test_ratio/test_ratio.py                       # все модули
-python scripts/test_ratio/test_ratio.py --sort-by ratio       # от худших к лучшим
-python scripts/test_ratio/test_ratio.py --format json
-python scripts/test_ratio/test_ratio.py --limit 10            # топ-10 «слабейших»
+uv run --no-project python scripts/test_ratio/test_ratio.py                       # все модули
+uv run --no-project python scripts/test_ratio/test_ratio.py --sort-by ratio       # от худших к лучшим
+uv run --no-project python scripts/test_ratio/test_ratio.py --format json
+uv run --no-project python scripts/test_ratio/test_ratio.py --limit 10            # топ-10 «слабейших»
 ```
 
 ## Когда полезно
 
-- Дополнение к `/sentrux-gaps`: sentrux показывает «есть/нет тестов», `test_ratio` — **насколько** покрыто по объёму.
+- Дополнение к `/mcp-sentrux:sentrux-gaps`: sentrux показывает «есть/нет тестов», `test_ratio` — **насколько** покрыто по объёму.
 - Перед рефакторингом большого модуля: оценить риск «много кода, мало тестов».
 - Тренд во времени (запускать в CI, складывать в JSON, рисовать график).
 

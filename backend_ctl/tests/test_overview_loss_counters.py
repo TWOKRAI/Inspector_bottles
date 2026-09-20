@@ -48,7 +48,11 @@ class TestQueueDataEvictedSurfaces:
         res = d.system_overview()
 
         assert not [a for a in res["anomalies"] if "queue_data_evicted" in a.get("detail", "")]
-        assert res["anomaly_count"] == 0, "здоровая сводка обязана остаться без сюрпризов"
+        # Ф2 Task 2.8: сцена без подписки легитимно несёт СВОЙ, не относящийся к
+        # этому счётчику, hint telemetry_readmodel_empty — twin-control сверяет
+        # состав, а не голый ноль, иначе не отличить «счётчик молчит» от «сводка
+        # обзавелась посторонней аномалией».
+        assert {a["kind"] for a in res["anomalies"]} <= {"telemetry_readmodel_empty"}, res["anomalies"]
 
 
 class TestQueueNeverDropLossTotalSurfaces:
@@ -73,7 +77,9 @@ class TestQueueNeverDropLossTotalSurfaces:
         res = d.system_overview()
 
         assert not [a for a in res["anomalies"] if "queue_never_drop_loss_total" in a.get("detail", "")]
-        assert res["anomaly_count"] == 0
+        # Ф2 Task 2.8: та же оговорка, что у соседнего twin-control выше — сцена без
+        # подписки несёт свой посторонний hint, сверяем состав, а не голый ноль.
+        assert {a["kind"] for a in res["anomalies"]} <= {"telemetry_readmodel_empty"}, res["anomalies"]
 
 
 class TestPlanesAreDistinguishable:

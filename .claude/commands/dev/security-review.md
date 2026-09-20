@@ -1,59 +1,43 @@
 ---
-description: Доменный security-проход поверх встроенного /security-review — IPC, десериализация, shared-memory, секреты
+description: Run a focused read-only security audit of the diff (deserialization/IPC/injection/secret-leak) — drives the reviewer agent in security-only mode
 ---
 
-**Обёртка, а не замена.** Общие классы уязвимостей (injection, unsafe crypto, XSS, path
-traversal, hardcoded secrets) закрывает встроенный `/security-review` — не дублируй его
-своими глазами. Эта команда добавляет только то, чего встроенный ревью не знает: границы
-доверия **этого** проекта.
+Run the **reviewer** agent (subagent_type: "reviewer", model: opus) in
+**security-only mode** — a focused **read-only** security audit. As of Phase 2 the
+dedicated `security-review` agent has been folded into `reviewer` → `## Specialization: Security`
+(five classes + secrets-audit). The agent only reads and returns a list of findings; fixes
+are applied by `developer`/`teamlead`, not by it.
 
-Входные данные: $ARGUMENTS — что аудировать (git diff, файлы, или номер Task X.Y).
-Если пусто — изменения текущей ветки.
+Input: $ARGUMENTS — what to audit (git diff, specific files, or a Task X.Y number).
+If $ARGUMENTS is empty — audit the latest changes (`git diff` from the last commit).
 
-## Шаг 1 — встроенный проход (обязателен)
+Pass the agent:
+1. What to audit: diff/files/Task.
+2. Mode: "Run ONLY `## Specialization: Security` — this is a dedicated pre-merge
+   security gate, not a full review. Skip the other specializations (architecture, UI, …)".
+3. Context: "Read `CLAUDE.md` + `.claude/modes/_stack.md` — trust boundaries, the IPC map,
+   the serialization rule, secrets conventions".
+4. Reminder: five classes — deserialization, IPC/events, shared-memory, injection, secrets;
+   secrets — via Bash `uv run --no-project python scripts/secrets_audit/secrets_audit.py --format json`
+   (the same script as `/core:quality:secrets-audit`), not a new MCP tool.
 
-Вызови `Skill: security-review`. Дождись его находок **синхронно**, прежде чем идти дальше.
-Его вывод — вход для шага 2, а не отдельный отчёт.
+After getting the result:
+- If there are no findings (security clear) — tell the user (note the fallbacks used,
+  the exit status of `secrets_audit.py`, and what's still worth checking manually).
+- If there are findings (CHANGES REQUESTED) — show them (confirmed blockers first),
+  ask the user: send to `developer`/`teamlead` for fixes?
 
-## Шаг 2 — доменный проход
+## When to call
 
-Запусти агента **reviewer** (`subagent_type: "reviewer"`, model: opus,
-`run_in_background: false` — вердикт нужен в этом же ходу).
+- Before merging a branch that changed code involving deserialization, IPC, user input,
+  HTML rendering, or authorization.
+- When `/dev:review` (full review) recommended a deeper security pass.
+- As part of `/dev:pipeline` before `/dev:ship` for security-sensitive tasks.
 
-Передай ему:
-1. Что аудировать: diff/файлы/Task + находки шага 1 (чтобы не повторял их).
-2. Режим: «`## Specialization: Security`, и **только** три доменных класса ниже.
-   Общие классы уже прошёл встроенный `/security-review` — не переписывай его находки».
-3. Контекст: `CLAUDE.md` + `.claude/modes/_stack.md` — trust boundaries, IPC-карта,
-   правило сериализации.
-4. Три доменных класса:
-   - **Десериализация** — pickle через `shared_resources_module`, `from_dict` без валидации
-     схемы (см. правило Dict at Boundary), `model_copy` вместо схемы.
-   - **IPC / events** — доверие к `msg["channel"]` и `targets` без проверки источника;
-     команда, приходящая с чужого канала; сокет-канал `backend_ctl` мимо receive-мидлвари.
-   - **Shared memory** — запись в чужой регион, отсутствие фенсинга, живой указатель после
-     teardown.
-5. Секреты — Bash `python scripts/secrets_audit/secrets_audit.py --format json`
-   (тот же скрипт, что и `/core:quality:secrets-audit`), не новый MCP-tool.
+## When NOT to call
 
-## Результат
+- No code in the risk zone (pure refactoring, docs, dep-bump) → skip.
+- Only a secrets check is needed → `/core:quality:secrets-audit` directly (cheaper).
+- A fix needs to be APPLIED → that's `developer`/`teamlead`, the security pass only diagnoses.
 
-- Находок нет → сообщи, укажи exit-статус `secrets_audit.py` и использованные fallback'и.
-- Находки есть → confirmed blocker'ы первыми, каждая с воспроизведением (вход → выход);
-  без воспроизведения находка **advisory** и не блокирует merge. Спроси пользователя:
-  отправить `developer`/`teamlead` на исправление? Сам агент правок не применяет.
-
-## Когда вызывать
-
-- Перед merge ветки, где менялся код с десериализацией, IPC, shared-memory или авторизацией.
-- Когда `/dev:review` порекомендовал более глубокий security-проход.
-- В составе `/dev:pipeline` перед `/dev:ship` для security-чувствительных задач.
-
-## Когда НЕ вызывать
-
-- Кода в зоне риска нет (чистый рефакторинг, docs, dep-bump) → пропусти.
-- Нужен только общий security-скан → встроенный `/security-review` напрямую (дешевле).
-- Нужна только проверка секретов → `/core:quality:secrets-audit`.
-- Нужно ПРИМЕНИТЬ фикс → это `developer`/`teamlead`.
-
-Что аудировать: $ARGUMENTS
+What to audit: $ARGUMENTS

@@ -6,7 +6,7 @@ description: Run Semgrep SAST (deterministic code-vuln gate) — injection, dese
 машинно-проверяемым гейтом, который не «забывает» известные паттерны.
 
 ```bash
-python .claude/plugins/security/scripts/sast_scan.py
+uv run --no-project python .claude/plugins/security/scripts/sast_scan.py
 ```
 
 Что ловит (ruleset `auto`): SQL/command/template injection, небезопасная
@@ -14,10 +14,10 @@ python .claude/plugins/security/scripts/sast_scan.py
 `eval`/`exec`, SSRF и др. — по правилам community-реестра Semgrep под язык проекта.
 
 Полезные варианты:
-- `python .claude/plugins/security/scripts/sast_scan.py --root src` — только подкаталог.
-- `python .claude/plugins/security/scripts/sast_scan.py --format json` — для CI/нотификаций.
-- `python .claude/plugins/security/scripts/sast_scan.py --config p/python` — конкретный ruleset вместо `auto`.
-- `python .claude/plugins/security/scripts/sast_scan.py --no-strict` — отчёт без падения (exit 0 даже при находках).
+- `uv run --no-project python .claude/plugins/security/scripts/sast_scan.py --root src` — только подкаталог.
+- `uv run --no-project python .claude/plugins/security/scripts/sast_scan.py --format json` — для CI/нотификаций.
+- `uv run --no-project python .claude/plugins/security/scripts/sast_scan.py --config p/python` — конкретный ruleset вместо `auto`.
+- `uv run --no-project python .claude/plugins/security/scripts/sast_scan.py --no-strict` — отчёт без падения (exit 0 даже при находках).
 - `--exclude '<glob>'` — добавить путь в исключения (поверх дефолтных `.venv/node_modules/...`).
 
 **Exit-коды:** `0` — чисто (или `semgrep` не установлен → skip), `1` — есть находки (strict), `2` — ошибка запуска semgrep.

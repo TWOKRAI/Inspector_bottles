@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...observability_declarations import declare_metric
 
@@ -19,6 +19,46 @@ if TYPE_CHECKING:
 # только после первого вызова публикатора, то есть каталог отвечал бы на вопрос
 # «что бывает» уже после того, как по нему приняли решение.
 METRIC_SHM = declare_metric("shm", owner=__name__)
+
+
+def _observation_port_of(services: Any) -> Any:
+    """Порт наблюдений процесса — ЕДИНСТВЕННАЯ дорога heartbeat к уровням (Ф3).
+
+    До задачи 3.1 состояние доставалось сырым ``getattr(services,
+    PLUGIN_LEVELS_ATTR)`` в трёх местах этого файла, и в каждом стояла своя
+    duck-typed проверка «а есть ли у него нужный метод». Три копии одного
+    вопроса — три места, где ответ может разойтись; теперь вопрос задаётся один
+    раз и не здесь. Часы остались у heartbeat (тик, publisher-гейт, один merge
+    за такт), правда переехала в порт.
+
+    ``create=False``: тик не заводит хранилище. У процесса без единой публикации
+    его нет, и заводить пустое на каждом такте значило бы стереть разницу между
+    «плагины уровней не отдавали» и «отдавали, но всё придержал гейт».
+
+    Флаг доходит до КОНЦА дороги, а не до резолвера: со ступени 1 возвращается
+    менеджер, и решение о создании принимает уже он
+    (``ObservationManager.levels(create=…)``). До правки ревью 2026-08-25 порт из
+    слота заводил хранилище безусловно, и один вызов :meth:`_level_names` на
+    настоящем ``ProcessModule`` поднимал ``plugin_levels`` из ``None`` — то есть
+    обещание держалось везде, КРОМЕ боевой сборки.
+
+    Свободная функция, а не метод, и это не мелочь: три шага тика обязаны
+    зависеть от ``self`` ровно тем, чем зависели до Ф3, — одним ``_services``.
+    Сделай резолв методом — и минимальный носитель ``SimpleNamespace(_services=…)``,
+    которым существующие тесты зовут шаг снятия напрямую, потребовал бы
+    собственной копии резолва, то есть фейк доказывал бы фейк.
+
+    Импорт ЛЕНИВЫЙ — тем же жестом, что у соседних ``from .telemetry import …``
+    ниже: ``statistics_module`` и ``process_module`` тянут друг друга, и порядок
+    загрузки не должен решать, кто получит частично инициализированный пакет.
+
+    Returns:
+        Порт либо ``None`` — «уровней у процесса нет», обычное состояние
+        процесса без плагинов, а не сбой.
+    """
+    from ...statistics_module.observation.observation_manager import observation_port
+
+    return observation_port(services)
 
 
 class ProcessHeartbeat:
@@ -60,6 +100,12 @@ class ProcessHeartbeat:
         # PC 1.2: publisher-gate телеметрии. None → гейт неактивен (нет секции
         # telemetry.publish в конфиге) → все метрики каждый тик (обратная совместимость).
         self._telemetry_gate: Any = None
+        # Ф4 (задача 4.1): политика порта по ПУТЯМ дерева. Держится отдельным
+        # полем, а не только внутри гейта, потому что переживает пересборку
+        # гейта: `telemetry.reconfigure` меняет легаси-секцию и обязан сохранить
+        # действующую политику, иначе правка одной плоскости молча сносила бы
+        # другую (ровно класс «второй писатель сокращает кольцо»).
+        self._observation_policy: Any = None
         # Task 5.8: запущен ли воркер такта. Единственный честный ответ на вопрос
         # «сработает ли авто-возврат TTL» — подметальщик живёт на этом такте, и
         # процесс без него срок принимает, но не исполняет.
@@ -167,10 +213,32 @@ class ProcessHeartbeat:
                 # выдаётся, а не подтверждается данными», что уже описана у
                 # ``TelemetryGate``, и та же задержка, что у публикации сразу после
                 # тика: один тик, то есть секунды.
-                allowed_metrics = gate.due_metrics(extra=self._level_names()) if gate is not None else None
+                #
+                # Ф4 (задача 4.1): решений стало ДВА, потому что плоскостей две.
+                # До Ф4 обе спрашивали одно множество имён — и именно поэтому
+                # правило одной неизбежно задевало другую (решение принималось по
+                # ИМЕНИ, а имя у них общее). Теперь фреймворковую плоскость
+                # решает `due_metrics` (путь `…state.<имя>`), а поддерево порта —
+                # `due_plugin_metrics` (путь `…state.plugins.<писатель>.<имя>`),
+                # и правило адресует ровно ту, которую назвал оператор.
+                if gate is not None:
+                    allowed_metrics = gate.due_metrics()
+                    allowed_levels: Any = gate.due_plugin_metrics(self._level_names_by_writer())
+                    # Ф0.4 (m6): цикл оценки завершён — правила поддерева порта
+                    # получили свой шанс совпасть, и только теперь «ноль
+                    # попаданий» у правила означает «не совпало», а не «ещё не
+                    # спрашивали». Отметка ЯВНАЯ, а не счётчик резолвов:
+                    # диагностическое чтение (`provenance_for`) резолвит с
+                    # `count=False` и тиком не является.
+                    observation_policy = self._observation_policy
+                    if observation_policy is not None:
+                        observation_policy.mark_tick()
+                else:
+                    allowed_metrics = None
+                    allowed_levels = None
                 # Self-publish телеметрии процесса напрямую в дерево StateStore:
                 # воркеры + агрегат + shm + уровни плагинов ОДНИМ merge (Р3.5-12).
-                self._publish_telemetry_to_tree(workers, allowed_metrics)
+                self._publish_telemetry_to_tree(workers, allowed_metrics, allowed_levels)
 
                 # --- Heartbeat-сообщение + хозяйственные self-publish'ы (частота liveness) ---
                 if self._heartbeat_due(now, tick):
@@ -305,15 +373,51 @@ class ProcessHeartbeat:
         (``min(heartbeat_interval, tick_sec)``), настроенная частота недостижима — метрика
         публикуется на каждом тике, но не чаще. Раньше это был тихий no-op (finding D) —
         теперь явный WARNING (не отвергаем секцию: метрика продолжает публиковаться).
-        No-op, если ``tick_sec`` не задан (``None``) — легаси-процессы не шумят.
+
+        Ф4 (задача 4.1): в тот же голос вошли glob-правила порта — их частота
+        упирается в тот же потолок, а через ``config`` они не проходят вовсе.
+
+        Ф2 (задача 2.3, M9, шаг 2). **Больше не no-op при ``tick_sec is None``.**
+        Такт существует и без явного ``tick_sec`` — он тогда просто равен
+        ``heartbeat_interval`` (см. :meth:`_telemetry_tick`, та же формула), и метрика
+        может упираться в НЕГО ровно так же, как в явный ``tick_sec``. Раньше эта ветка
+        возвращалась немедленно (см. историю метода) — голос молчал ВСЕГДА, независимо
+        от того, зажата ли метрика фактическим тактом. Эффективный тик считается ИЗ
+        ``config`` (параметра), а не из :meth:`_telemetry_tick` — на пути
+        :meth:`_build_telemetry_gate` этот метод зовётся ДО того, как ``config``
+        становится живым гейтом (``self._telemetry_gate`` в этот момент ещё старый),
+        поэтому вопрос о такте обязан решаться по тому же ``config``, который проверяется.
+
+        Ф2 (задача 2.11, Р-11, 2026-09-03). **Сужение шага 2 СНЯТО — политика
+        порта идёт в голос в ОБЕИХ ветках, без исключения.** Прежнее сужение
+        держалось на числовом столкновении, которого больше нет: дефолт
+        поддерева порта (:data:`~..configs.observation_policy.DEFAULT_SUBTREE_INTERVAL_SEC`)
+        был ``1.0`` — БЕЗУСЛОВНО меньше дефолта такта (``heartbeat_interval_sec`` =
+        5.0), и без сужения ЛЮБОЙ boot без явной конфигурации кричал бы про
+        предохранитель, которого оператор не трогал (воспроизведено 10 красными в
+        наборе, существовавшем до задачи 2.3 — ``test_metric_catalog_order_gate.py``,
+        ``test_metric_catalog_producer_hazards.py``, ``test_telemetry_gate.py``,
+        ``test_telemetry_tick.py::test_no_warning_when_tick_sec_none``,
+        ``test_writer_subtree_acceptance.py``). Владелец решил (Р-11) не чинить
+        столкновение подгонкой чисел, а снять его источник: дефолт стал ``0.0`` —
+        «поддерево не заявляет частоты вовсе». Тишина на чистом боевом дефолте
+        получается ТЕПЕРЬ ИНАЧЕ: не потому что голос обходит политику порта, а
+        потому что :func:`~.telemetry.capped_metrics` сам не считает нулевой
+        интервал «ограниченным тиком» (ноль — это «не чаще такта», не заявка о
+        частоте, которую тик мог бы срезать, — см. её докстринг). Явное правило
+        оператора (ненулевой ``interval_sec``) по-прежнему упирается в такт и
+        по-прежнему звучит в ОБЕИХ ветках — контроль F5 задачи 2.11 держит это
+        числом: 0 красных из тех же 9 тестов «boot молчит».
         """
         tick_sec = getattr(config, "tick_sec", None)
-        if not isinstance(tick_sec, (int, float)) or tick_sec <= 0:
-            return
-        effective_tick = min(self._interval, float(tick_sec))
+        if isinstance(tick_sec, (int, float)) and tick_sec > 0:
+            effective_tick = min(self._interval, float(tick_sec))
+        else:
+            effective_tick = self._interval
+        policy = self._observation_policy
         from .telemetry import capped_metrics
 
-        capped = capped_metrics(config, effective_tick)
+        capped = capped_metrics(config, effective_tick, policy)
         if not capped:
             return
         _warn = getattr(self._services, "log_warning", None) or getattr(self._services, "log_info", None)
@@ -464,6 +568,11 @@ class ProcessHeartbeat:
         """
         from ..configs.observability_layers import read_process_config
 
+        # Ф4 (задача 4.1): политика порта резолвится ДО гейта и живёт отдельно от
+        # него. Порядок важен: секция `observability.observation` — L0..L3 слоями,
+        # а легаси `telemetry.publish` — именованный источник ТОЙ ЖЕ сборки; гейт
+        # получает обе одним объектом.
+        self._install_observation_policy(self._resolve_observation_policy())
         try:
             telemetry = read_process_config(self._services, "telemetry")
         except Exception:  # noqa: BLE001 — отсутствие/битость конфига не должна ронять heartbeat
@@ -481,7 +590,6 @@ class ProcessHeartbeat:
             return None
         publish = telemetry["publish"]
         from ..configs.telemetry_publish_config import TelemetryPublishConfig
-        from .telemetry import TelemetryGate
 
         try:
             config = TelemetryPublishConfig.from_dict(publish)
@@ -491,7 +599,16 @@ class ProcessHeartbeat:
             return None
         # Task 1.2: WARNING по метрикам, чей interval_sec < эффективного тика (не тихий no-op).
         self._warn_capped_metrics(config)
+        # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
+        # fake-clock тестов каденции; в проде обоим — time.monotonic).
+        gate = self._make_gate(config)
         # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
+        # ПОСЛЕ `_make_gate` (Ф0.3, находка M1) — той же причины, что у соседнего
+        # `_warn_capped_metrics` в `reconfigure_telemetry`: голос судит конфиг по
+        # каталогу, а каталог наполняется ИМПОРТОМ, и именно `_make_gate` тянет
+        # `.telemetry` — производителя четырёх из пяти метрик фреймворка. Голос
+        # раньше импорта видел каталог из одной `shm` и объявлял живые `fps` /
+        # `latency_ms` опечатками (семь ложных WARNING за boot webcam_sketch).
         self._warn_unknown_metrics(config)
         # Голос на УСПЕХЕ — вторая половина пары. Лог только на отказе не отличает
         # «гейт выключен» от «код не исполнялся вовсе».
@@ -500,9 +617,359 @@ class ProcessHeartbeat:
             f"явных правил {len(config.metrics)}, интервал по умолчанию "
             f"{config.default_interval_sec} с"
         )
-        # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
-        # fake-clock тестов каденции; в проде обоим — time.monotonic).
-        return TelemetryGate(config, clock=self._clock)
+        return gate
+
+    def _make_gate(self, config: Any) -> Any:
+        """Собрать ``TelemetryGate`` из легаси-секции и действующей политики порта.
+
+        Одна точка сборки на все три дороги (старт, ``telemetry.reconfigure``,
+        ``config.reload`` с секцией порта): разойдись они хоть в одном
+        аргументе — и правка одной дороги давала бы гейт без политики, то есть
+        молча возвращала бы плоскость порта под старое решение по имени.
+
+        **Счёт попаданий правил переносится в новый объект** (находка З3 ревью
+        Ф4). Сюда приходит КАЖДАЯ правка легаси-плоскости — то есть каждое
+        движение пульта, — а правила порта при этом не менялись. Без переноса
+        соседняя правка обнуляла бы счёт, и работающее правило возвращалось бы
+        в ``rules_matched_nothing``: единственный голос про опечатку в ПУТИ
+        начинал бы кричать на здоровые правила.
+        """
+        from ..configs.observation_policy import ObservationPolicy
+        from .telemetry import TelemetryGate
+
+        policy = self._observation_policy
+        if policy is None:
+            policy = ObservationPolicy(None, config)
+            self._install_observation_policy(policy)
+        else:
+            # Легаси-секция могла смениться этой же командой — политика обязана
+            # держать АКТУАЛЬНУЮ: она читает из неё умолчание и белый список.
+            # Возраст правил переносится вместе со счётом (Ф0.4, m6): иначе
+            # чужая правка возвращала бы все правила в `rules_pending`.
+            policy = ObservationPolicy(
+                policy.config,
+                config,
+                hits=policy.rule_hits(),
+                evaluated_ticks=policy.evaluated_ticks,
+                rule_first_tick=policy.rule_first_tick(),
+            )
+            self._install_observation_policy(policy)
+        return TelemetryGate(
+            config,
+            clock=self._clock,
+            policy=policy,
+            process=str(getattr(self._services, "name", "") or ""),
+        )
+
+    def _install_observation_policy(self, policy: Any) -> None:
+        """Поставить политику на место — ОБА её потребителя, одним швом (Ф2, задача 2.1).
+
+        Потребителя два: гейт УРОВНЕЙ (через поле ``_observation_policy``, из
+        которого его собирает :meth:`_make_gate`) и гейт ЧИСЕЛ (порт наблюдений,
+        :meth:`ObservationManager.attach_numbers_policy`). Механизм при этом ОДИН
+        — один объект политики, одна секция конфига, один счёт попаданий; вторая
+        сборка означала бы две политики с похожими именами, расходящиеся тем
+        тише, чем реже на них смотрят.
+
+        **Шов, а не четыре ветки.** Политика встаёт на место из ЧЕТЫРЁХ мест
+        (загрузочный резолв, две ветки ``_make_gate``, ``apply_observation_policy``),
+        и до этой правки каждое присваивало поле напрямую. Допиши доставку в
+        порт в три из четырёх — и четвёртая дорога тихо оставляла бы числа без
+        политики; ровно этот класс («провод есть, маршрута нет») уже стоил
+        проекту живого разбора.
+
+        Отказ доставки НЕ роняет такт: порт может быть не зарегистрирован
+        (процесс, поднятый не через ``ProcessManagers.register_all``), а ступень 2
+        резолвера отдаёт вид без менеджера, у которого этого метода нет вовсе.
+        Уровни в обоих случаях продолжают работать — и молчание здесь честное:
+        числа такого процесса никуда и не доставляются (см.
+        ``bare_port_number_losses``).
+        """
+        self._observation_policy = policy
+        try:
+            from ...statistics_module.observation.observation_manager import observation_port
+
+            port = observation_port(self._services)
+            attach = getattr(port, "attach_numbers_policy", None)
+            if callable(attach):
+                attach(policy)
+        except Exception as exc:  # noqa: BLE001 — доставка политики чисел не смеет ронять такт
+            self._log_heartbeat(f"[observation] политика чисел не доставлена в порт: {exc!r}")
+
+    def _resolve_observation_policy(self) -> Any:
+        """Политика порта из секции ``observability.observation`` разрешённых слоёв.
+
+        Слои не читаются (процесс без конфига, иммутабельный дубль) → политика
+        дефолтов L0. Это НЕ «механизма нет»: дефолтное правило поддерева порта и
+        есть решение владельца (вариант «в»), и отсутствие секции означает
+        «оператор его не правил», а не «его нет».
+        """
+        from ..configs.observability_layers import process_observability_layers
+        from ..configs.observation_policy import OBSERVATION_SECTION_KEY, ObservationPolicy, ObservationPolicyConfig
+
+        section: Any = None
+        try:
+            section = process_observability_layers(self._services).resolve().get(OBSERVATION_SECTION_KEY)
+        except Exception as exc:  # noqa: BLE001 — процесс без слоёв живёт на дефолтах L0
+            self._log_heartbeat(f"[observation] секция observability.{OBSERVATION_SECTION_KEY} не прочитана: {exc!r}")
+        try:
+            config = ObservationPolicyConfig.from_dict(section)
+        except Exception as exc:  # noqa: BLE001 — негодная секция не смеет ронять такт
+            self._log_heartbeat(
+                f"[observation] секция observability.{OBSERVATION_SECTION_KEY} отвергнута ({exc!r}) — "
+                "действуют дефолты L0"
+            )
+            config = ObservationPolicyConfig()
+        return ObservationPolicy(config, None)
+
+    def apply_observation_policy(self, section: Any) -> Dict[str, Any]:
+        """Применить секцию ``observability.observation`` к ЖИВОМУ гейту (Ф4, 4.1).
+
+        Третья точка дороги ручки — та, без которой ``config.reload`` менял бы
+        слой и не менял поведение: гейт собирается один раз на старте, и правка,
+        не дошедшая до него, осталась бы видимой в провенансе и не действующей
+        (тот же довод, что у ``apply_event_selector``).
+
+        Потокобезопасность — ДОСЛОВНО та же, что у
+        :meth:`reconfigure_telemetry`: новый ``TelemetryGate`` собирается
+        ЦЕЛИКОМ, и только потом ссылка ``self._telemetry_gate`` переприсваивается
+        (атомарно под GIL). ``_loop`` читает эту ссылку в локальную переменную
+        один раз за тик, поэтому такт работает либо со старым гейтом целиком,
+        либо с новым целиком. Расписание (``_next_due``) у нового гейта пустое —
+        как и при смене легаси-секции: одна публикация сразу после правки.
+
+        Returns:
+            Применённая политика (``effective_view``) — она едет в ответ команды
+            и в readback. Гейта нет (нет секции ``telemetry.publish``) → политика
+            всё равно запоминается и подействует, как только гейт появится;
+            ответ несёт ``gate_active: false``, чтобы «применено» не читалось как
+            «действует».
+        """
+        from ..configs.observation_policy import ObservationPolicy, ObservationPolicyConfig
+        from .telemetry import TelemetryGate
+
+        config = ObservationPolicyConfig.from_dict(section)
+        gate = self._telemetry_gate
+        legacy = getattr(gate, "config", None) if gate is not None else None
+        live = self._observation_policy
+        # **Пересборка ТОЛЬКО при реальном расхождении.** Пересборка гейта
+        # обнуляет расписание (`_next_due`), а зовут эту функцию КАЖДЫЙ
+        # `config.reload` — в том числе тот, что менял `log_level` и про порт не
+        # сказал ни слова. Без этой сверки соседняя ручка сбрасывала бы частотный
+        # предохранитель порта, то есть чужая правка молча меняла бы темп
+        # публикации. Сверяется СОДЕРЖИМОЕ политики, а не «упоминал ли кто-то
+        # секцию»: липкий флаг соседней плоскости отвечает на другой вопрос и
+        # здесь дал бы тот же сброс на каждом reload'е после первой правки.
+        if live is not None and live.config.model_dump() == config.model_dump():
+            applied = dict(live.effective_view())
+            applied["gate_active"] = gate is not None
+            return applied
+        # Счёт попаданий переживает пересборку — см. `_make_gate` (находка З3).
+        # Вместе с ним переносится ВОЗРАСТ каждого правила (Ф0.4, m6): правило,
+        # которое эта же правка ДОБАВИЛА, в переносе отсутствует и честно
+        # начинает возраст с нуля — то есть едет в `rules_pending`, а не в
+        # обвиняемые.
+        policy = ObservationPolicy(
+            config,
+            legacy,
+            hits=live.rule_hits() if live is not None else None,
+            evaluated_ticks=live.evaluated_ticks if live is not None else 0,
+            rule_first_tick=live.rule_first_tick() if live is not None else None,
+        )
+        self._install_observation_policy(policy)
+        if gate is not None:
+            # Сборка завершена — только теперь подменяем ссылку (см. докстринг).
+            self._telemetry_gate = TelemetryGate(
+                legacy,
+                clock=self._clock,
+                policy=policy,
+                process=str(getattr(self._services, "name", "") or ""),
+            )
+        if legacy is not None:
+            # Голос про недостижимую частоту — и для новых glob-правил тоже.
+            self._warn_capped_metrics(legacy)
+        applied = dict(policy.effective_view())
+        applied["gate_active"] = gate is not None
+        self._log_heartbeat(
+            f"[observation] политика порта применена: поддерево "
+            f"{applied['subtree']} enabled={applied['subtree_enabled']} "
+            f"частота {applied['subtree_interval_sec']} с, явных правил {len(applied['rules'])}, "
+            f"гейт активен={applied['gate_active']}"
+        )
+        return applied
+
+    def apply_heartbeat_interval(self, value: Any) -> float:
+        """Применить ``observability.heartbeat_interval_sec`` к ЖИВОМУ такту (Ф2, 2.3, шаг 1).
+
+        Третья точка дороги ручки — та же роль, что у :meth:`apply_observation_policy`
+        для секции порта: без неё ``config.reload`` менял бы слой и не менял поведение.
+
+        ``value is None`` — секция слоями не задана (ключ ушёл из L3 по TTL, либо его
+        не было ни в одном слое) — применяется СХЕМНЫЙ дефолт (5.0), а не «оставить как
+        было»: `_rebuild_and_apply` — это пересборка ИЗ ИСТОЧНИКОВ (см. докстринг
+        ``observability_reload.apply_observability_layers``), и снятие ключа обязано
+        вернуть такт к L0 так же, как это уже устроено у соседних плоскостей
+        (``observation``/``voices``/``events``/``flight``).
+
+        НЕЧИСЛО — тот же откат к дефолту, без исключения: readback инициатора и так
+        увидит применённое число, а падать heartbeat'у на кривом ``config.reload``
+        незачем (тот же довод, что у :meth:`start`, где парсинг
+        ``heartbeat_interval`` укрыт тем же ``try``).
+
+        **ОТРИЦАТЕЛЬНОЕ значение проходит НАСКВОЗЬ, и это долг, а не решение**
+        (найдено ревью Task 2.11, 2026-09-03; прежняя редакция этого абзаца
+        обещала откат к дефолту и для него — ветки на знак в коде ниже нет вовсе,
+        проверено прогоном: ``apply_heartbeat_interval(-3.0)`` даёт
+        ``_interval = -3.0`` и ``current_telemetry_tick() = -3.0``). Ноль здесь
+        отбивать НЕЛЬЗЯ — ``heartbeat_interval <= 0`` в этом фреймворке означает
+        «heartbeat отключён» (см. примечание ответа ``introspect.telemetry``), и
+        переписывание нуля в схемный дефолт отменяло бы операторское выключение.
+        Отрицательное же не означает ничего и просто разъезжается по потребителям
+        такта. Потребители, до которых это доезжает сегодня, названы числом в
+        `plans/observability-closure/phase-2-one-policy.md` (Task 2.11, находка 2
+        ревью); ближайший из них — :func:`~..managers.telemetry_reload.detect_throttle_caps`
+        — с той же даты читает непригодный такт как «неизвестен» у себя, а не
+        полагается на страж здесь.
+
+        Никакого рестарта: только атомарное присваивание ``self._interval`` — воркер,
+        если он уже запущен, подхватит новое значение на СЛЕДУЮЩЕЙ итерации `_loop`
+        (та же семантика, что у смены ``tick_sec`` через `reconfigure_telemetry`).
+
+        Returns:
+            Применённое значение (для readback в ответе ``config.reload``).
+        """
+        try:
+            interval = float(value) if value is not None else 5.0
+        except (TypeError, ValueError):
+            interval = 5.0
+        self._interval = interval
+        self._log_heartbeat(f"[heartbeat] такт применён рантайм-командой: {interval} с")
+        return interval
+
+    def current_observation_policy(self) -> Optional[Dict[str, Any]]:
+        """Действующая политика порта — readback для ``introspect``/вердикта.
+
+        Читается ЖИВОЙ объект, а не конфиг: пересчёт из того же источника
+        показывал бы согласие всегда, в том числе когда правка до гейта не
+        доехала.
+        """
+        policy = self._observation_policy
+        if policy is None:
+            return None
+        view = dict(policy.effective_view())
+        view["gate_active"] = self._telemetry_gate is not None
+        view["rules_matched_nothing"] = policy.rules_matched_nothing()
+        # Ф0.4 (m6): правила, ещё не дожившие до цикла оценки, — отдельным
+        # полем. «Свежее» и «не совпало ни с чем» — разные диагнозы, и до этой
+        # задачи они ехали одним списком: правило обвинялось в тот же миг, когда
+        # его применили.
+        view["rules_pending"] = policy.rules_pending()
+        # Счёт, а не «ноль/не ноль»: правило, совпадающее раз в час, и правило,
+        # совпадающее каждый такт, — разные факты (открытый вопрос З3 ревью Ф4).
+        view["rule_hits"] = policy.rule_hits()
+        # Ф2 (задача 2.3, M9, шаг 3): та же «честная каденция», что у
+        # `current_resolved_metrics` ниже, но для правил ПОРТА. `cap_candidates`
+        # (`configs/observation_policy.py`) уже собирает ПОЛНЫЙ охват правил порта,
+        # включая дефолт поддерева, — тем же сборщиком, что и голос
+        # `_warn_capped_metrics` (находка З1 ревью Ф4: два отчёта о потолках,
+        # разошедшихся в охвате). Здесь тот же сборщик даёт readback, а не голос.
+        from ..configs.observation_policy import cap_candidates
+
+        tick = self._telemetry_tick()
+        effective: Dict[str, Dict[str, Any]] = {}
+        for pattern, rule in cap_candidates(view).items():
+            raw = rule.get("interval_sec")
+            interval = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0.0
+            effective[pattern] = {"interval_sec": interval, "effective_interval_sec": max(interval, tick)}
+        view["effective"] = effective
+        return view
+
+    def current_resolved_metrics(self) -> Optional[Dict[str, Any]]:
+        """Решение ЖИВОГО гейта по каждому имени каталога — с ПУТЁМ, о котором оно.
+
+        Существует из-за блокера Б1 ревью Ф4: ``introspect.telemetry.resolved``
+        считался из одной легаси-секции и выдавал вердикт про ИМЯ, а решение по
+        плагинному листу с тем же именем принимает политика порта по ПУТИ. На
+        стенде это дало два взаимно противоречащих readback'а об одном листе:
+        ``resolved`` показывал ``enabled: false`` для ``frame_count``, а лист
+        продолжал шагать. Теперь ответ (а) считается тем же гейтом, что и решает,
+        и (б) НАЗЫВАЕТ путь, к которому относится, — плоскость фреймворка
+        ``processes.<P>.state.<имя>``.
+
+        **Второй заход, живой стенд 2026-08-26.** Одного пути мало: имя из
+        каталога может не жить в этой плоскости вовсе. ``capture_fps`` стоял
+        здесь как ``enabled: false`` по пути ``…state.capture_fps``, куда не
+        пишет никто, — при работающем 21.3 по ``…state.plugins.capture.capture_fps``.
+        Отсылка в соседнюю команду предупреждала, но вердикт всё равно читался
+        как «погашена». Поэтому у имени, живущего в поддереве писателя, рядом
+        стоит ``port_paths`` — вердикт по КАЖДОМУ реальному пути, посчитанный
+        ТЕМ ЖЕ гейтом, — и флаг ``also_decided_by_port``.
+
+        Расписание не двигается: ``decide(..., count=False)`` — ни ``_next_due``,
+        ни счёт попаданий правил.
+
+        **Размер ответа растёт с числом ЖИВЫХ писателей** (названо ревью,
+        итерация 2): у имени, которое публикуют N писателей, будет N вердиктов.
+        Замерено: 200 писателей одного имени → 20 449 байт всего ``resolved``.
+        Живьём это единицы плагинов на процесс, потолка поэтому нет; если
+        писателей станет много, резать надо здесь, а не у читателя.
+
+        Returns:
+            ``{имя: {enabled, interval_sec, path[, port_paths, also_decided_by_port]}}``
+            либо ``None``, если гейта нет.
+        """
+        gate = self._telemetry_gate
+        if gate is None:
+            return None
+        from ..configs.telemetry_publish_config import gated_metrics
+        from .telemetry import plugin_metric_path, state_metric_path
+
+        process = str(getattr(self._services, "name", "") or "")
+        by_writer = self._level_names_by_writer()
+        # Ф2 (задача 2.3, M9, шаг 3): ДОСТИЖИМЫЙ интервал — тот же `_telemetry_tick`,
+        # что решает реальный такт воркера, а не пересчёт его составляющих. Один раз
+        # на весь снимок: тик не меняется между метриками ОДНОГО ответа.
+        tick = self._telemetry_tick()
+        out: Dict[str, Any] = {}
+        for metric in gated_metrics():
+            path = state_metric_path(process, metric)
+            enabled, interval = gate.decide(path, metric, count=False)
+            entry: Dict[str, Any] = {
+                "enabled": bool(enabled),
+                "interval_sec": float(interval),
+                # M9: заявленный `interval_sec` мог и раньше не совпадать с
+                # действующей частотой (тик режет её сверху) — расхождение «сконфигу-
+                # рировано 1с, действует 5с» было слышно только в логе WARNING на
+                # пересборке, а не в этом readback'е.
+                "effective_interval_sec": max(float(interval), tick),
+                "path": path,
+            }
+            # Второй адрес того же ИМЕНИ. Живой стенд 2026-08-26: `capture_fps`
+            # стоял здесь как `enabled: false` по пути `…state.capture_fps`,
+            # которого не пишет никто, — рядом с работающим 21.3 по пути
+            # `…state.plugins.capture.capture_fps`. Вердикт был верен для СВОЕЙ
+            # плоскости и читался как «метрика погашена». Отсылка к соседней
+            # команде (`resolved_plane`) — предупреждение, а не ответ; ответ —
+            # вердикт по КАЖДОМУ реальному пути, посчитанный тем же гейтом.
+            writers = sorted(w for w, names in by_writer.items() if metric in names)
+            if writers:
+                port_paths: Dict[str, Any] = {}
+                for writer in writers:
+                    port_path = plugin_metric_path(process, writer, metric)
+                    p_enabled, p_interval = gate.decide(port_path, metric, count=False)
+                    port_paths[port_path] = {
+                        "enabled": bool(p_enabled),
+                        "interval_sec": float(p_interval),
+                        # M9: тот же тик решает достижимую частоту у ВСЕХ путей
+                        # этого имени — плагинного и фреймворкового (один механизм).
+                        "effective_interval_sec": max(float(p_interval), tick),
+                    }
+                entry["port_paths"] = port_paths
+                # Прямая подсказка оператору: вердикт выше — не про то место,
+                # где это имя реально живёт у ЭТОГО процесса.
+                entry["also_decided_by_port"] = True
+            out[metric] = entry
+        return out
 
     def _log_heartbeat(self, message: str) -> None:
         """Сказать вслух, не уронив такт: у дублёров ``services`` логгера может не быть."""
@@ -525,6 +992,19 @@ class ProcessHeartbeat:
         if gate is None:
             return []
         return sorted(gate.config.unknown_metrics())
+
+    def current_telemetry_tick(self) -> float:
+        """Достижимый тик воркера — readback-обёртка над :meth:`_telemetry_tick` (Ф2, 2.3, M9).
+
+        Сама формула (``min(heartbeat_interval, tick_sec)``, фолбэк на
+        ``heartbeat_interval``) — уже существующий приватный метод; здесь только имя
+        из публичной readback-поверхности (тот же ряд, что `current_observation_policy`
+        / `current_resolved_metrics` / `current_telemetry_publish` ниже), потому что
+        значение это идёт наружу — в ответ команды `introspect.telemetry`
+        (``tick_effective_sec``), а звать приватный метод другого модуля через границу
+        readback'а — не эта дорога.
+        """
+        return self._telemetry_tick()
 
     def current_telemetry_publish(self) -> dict | None:
         """Текущая эффективная секция ``telemetry.publish`` живого gate (Task 1.1).
@@ -604,16 +1084,26 @@ class ProcessHeartbeat:
             )
             return
         from ..configs.telemetry_publish_config import TelemetryPublishConfig
-        from .telemetry import TelemetryGate
 
         config = TelemetryPublishConfig.from_dict(publish_section)
-        # Task 1.2: WARNING по метрикам, чья частота ограничена телеметрийным тиком.
-        self._warn_capped_metrics(config)
-        # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
-        self._warn_unknown_metrics(config)
         # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
         # Gate использует clock heartbeat'а (fake-clock тесты; в проде time.monotonic).
-        self._telemetry_gate = TelemetryGate(config, clock=self._clock)
+        # Ф4: политика порта ПЕРЕЖИВАЕТ пересборку легаси-секции — `_make_gate`
+        # пересобирает её поверх новой легаси-секции, а не выбрасывает.
+        gate = self._make_gate(config)
+        # Task 2.3: WARNING по ключам metrics, отсутствующим в каталоге метрик (опечатка).
+        # ПОСЛЕ `_make_gate` (Ф0.3, находка M1): каталог наполняется импортом, а
+        # `.telemetry` — производителя `fps`/`latency_ms`/`effective_hz`/
+        # `cycle_duration_ms` — тянет именно `_make_gate`. Второй вход сюда попадает
+        # первым, если рантайм-команда пришла раньше первой сборки гейта (гейт при
+        # старте не собран, когда секции `telemetry.publish` в конфиге нет вовсе), —
+        # тогда порядок значит здесь ровно то же, что и на буте.
+        self._warn_unknown_metrics(config)
+        # Task 1.2: WARNING по метрикам, чья частота ограничена телеметрийным тиком.
+        # ПОСЛЕ `_make_gate`: голос считает и glob-правила порта, а они живут в
+        # политике, которую `_make_gate` только что и пересобрал.
+        self._warn_capped_metrics(config)
+        self._telemetry_gate = gate
         self._log_heartbeat(
             f"[telemetry] publisher-gate пересобран рантайм-командой (mode={mode}): "
             f"default_enabled={config.default_enabled}, явных правил {len(config.metrics)}, "
@@ -628,21 +1118,35 @@ class ProcessHeartbeat:
         имена вообще есть (каталог объявлений знает только объявленные — см.
         ``TelemetryGate.due_metrics``). Значения сюда не копируются.
 
-        Хранилища нет (процесс без плагинов, иммутабельный дубль сервисов) →
-        пустое множество: гейт тогда работает ровно по каталогу, как раньше.
+        Порта нет (процесс без плагинов, иммутабельный дубль сервисов) → пустое
+        множество: гейт тогда работает ровно по каталогу, как раньше.
         """
-        from .telemetry import PLUGIN_LEVELS_ATTR
-
-        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
-        names: Any = getattr(store, "names", None)
-        if not callable(names):
+        port = _observation_port_of(self._services)
+        if port is None:
             return set()
         try:
-            return set(names())
+            return set(port.level_names())
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Имена уровней плагинов недоступны: {exc}", module="heartbeat")
             return set()
+
+    def _level_names_by_writer(self) -> Dict[str, set]:
+        """Имена листьев ПО ПИСАТЕЛЯМ — вход гейта Ф4 (решение принимается по пути).
+
+        Адресная форма :meth:`_level_names`: сегмент писателя входит в путь, и
+        плоское множество имён его теряет. Порта нет → пустой словарь: гейт
+        тогда просто не выдаёт разрешений поддерева, как и раньше.
+        """
+        port = _observation_port_of(self._services)
+        if port is None:
+            return {}
+        try:
+            return dict(port.level_names_by_writer())
+        except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Имена уровней плагинов по писателям недоступны: {exc}", module="heartbeat")
+            return {}
 
     def _collect_plugin_levels(self, allowed_metrics: Any = None) -> dict:
         """Поддерево ``plugins.<писатель>.<имя>`` для секции ``state``.
@@ -662,21 +1166,50 @@ class ProcessHeartbeat:
                 все).
 
         Returns:
-            ``{"plugins": {писатель: {имя: значение}}}`` — пусто, если хранилища
-            нет, оно пусто или всё придержал гейт.
+            ``{"plugins": {писатель: {имя: значение}}}`` — пусто, если порта
+            нет, хранилище пусто или всё придержал гейт.
         """
-        from .telemetry import PLUGIN_LEVELS_ATTR, build_plugin_levels
-
-        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
-        publications: Any = getattr(store, "publications", None)
-        if not callable(publications):
+        port = _observation_port_of(self._services)
+        if port is None:
             return {}  # ни один плагин процесса уровней не отдавал
         try:
-            return build_plugin_levels(publications(), allowed_metrics)
+            return port.collect_subtree(allowed_metrics)
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Уровни плагинов недоступны: {exc}", module="heartbeat")
             return {}
+
+    def _emit_observation_hub_records(self, plugin_levels: dict) -> None:
+        """Ф3.2: те же уровни плагинов — записями ``kind=observation`` в ``ObservabilityHub``.
+
+        **Под тем же гейтом, что и лист дерева, и БЕЗ второго гейта.** Аргумент
+        ``plugin_levels`` — РОВНО то поддерево, которое этот же тик уже положил
+        в ``state["plugins"]`` (см. вызов в :meth:`_publish_telemetry_to_tree`,
+        шаг 1) — не пересчитывается и не собирается заново. Разойдись «что в
+        дереве» и «что в хабе» здесь могли бы только два независимых сборщика;
+        второго нет, поэтому и расходиться нечему (Task 3.2, шаг 2).
+
+        **Хаб отсутствует → именованный no-op** (Task 3.2, критерий A5): уровни
+        в дерево едут как ехали (шаг ниже по коду уже отработал), а запись в
+        хаб просто не случается — не заводим второй хаб и не роняем такт.
+
+        Исключения глушим тем же жестом, что и весь такт HB: наблюдаемость
+        порта не критична для доставки самого уровня в дерево, а `hub` —
+        общий ресурс процесса, который могут дренировать конкурентно.
+        """
+        if not plugin_levels:
+            return
+        hub = getattr(self._services, "_observability_hub", None)
+        if hub is None:
+            return
+        from ...statistics_module.observation.observation_manager import records_for_hub
+
+        try:
+            for record in records_for_hub(plugin_levels):
+                hub.emit_observation_record(record)
+        except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Записи наблюдений (kind=observation) не ушли в hub: {exc}", module="heartbeat")
 
     def _delete_departed_subtrees(self, proxy: Any) -> None:
         """Утвердить удаление поддеревьев писателей, ушедших с процесса (Ф2).
@@ -729,14 +1262,13 @@ class ProcessHeartbeat:
         # Путь строится ТОЙ ЖЕ константой, что и поддерево в сборщике: снятие,
         # адресующее другой ключ, чем публикация, чистило бы не то место — и
         # разъезд был бы виден только на стенде.
-        from .telemetry import PLUGIN_LEVELS_ATTR, PLUGINS_SUBTREE_KEY
+        from .telemetry import PLUGINS_SUBTREE_KEY
 
-        store = getattr(self._services, PLUGIN_LEVELS_ATTR, None)
-        departed: Any = getattr(store, "departed_writers", None)
-        if not callable(departed):
+        port = _observation_port_of(self._services)
+        if port is None:
             return  # процесс без порта уровней — снимать нечего
         try:
-            writers = tuple(departed())
+            writers = tuple(port.departed_writers())
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Ведомость ушедших писателей недоступна: {exc}", module="heartbeat")
@@ -750,9 +1282,14 @@ class ProcessHeartbeat:
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Снятие поддерева писателя {writer!r} не ушло: {exc}", module="heartbeat")
                 continue
-            store.note_delete_delivered(writer)
+            port.note_delete_delivered(writer)
 
-    def _publish_telemetry_to_tree(self, workers: dict, allowed_metrics: Any = None) -> None:
+    def _publish_telemetry_to_tree(
+        self,
+        workers: dict,
+        allowed_metrics: Any = None,
+        allowed_levels: Any = None,
+    ) -> None:
         """Вся телеметрия процесса за тик — ОДНИМ ``proxy.merge`` (Р3.5-12).
 
         Здоровый путь телеметрии: процесс САМ репортит свои метрики через
@@ -808,8 +1345,12 @@ class ProcessHeartbeat:
                 Р3.5-12 ранний выход по ``not workers`` жил в отдельном методе и
                 глотал только воркерные листья, а ``shm`` и уровни ехали своими
                 merge. В объединённой сборке тот же выход проглотил бы и их.
-            allowed_metrics: разрешённые на этом тике суффиксы метрик (``None`` →
-                все, обратная совместимость).
+            allowed_metrics: разрешённые на этом тике суффиксы метрик
+                ФРЕЙМВОРКОВОЙ плоскости (``None`` → все, обратная совместимость).
+            allowed_levels: разрешённые листья ПОРТА — ``{писатель: имена}``
+                (Ф4, задача 4.1). ``None`` → падаем обратно на
+                ``allowed_metrics``, то есть на прежнее решение по имени: так
+                ведут себя прямые вызывающие, у которых гейта нет вовсе.
         """
         proxy = getattr(self._services, "_state_proxy", None)
         if proxy is None:
@@ -834,7 +1375,13 @@ class ProcessHeartbeat:
         # ``state``, а не россыпь плоских имён. Столкнуться с агрегатом
         # фреймворка оно больше не может по построению — ``fps`` плагина лежит
         # под ``plugins.<он>.fps``, а не рядом с ``state.fps``.
-        state.update(self._collect_plugin_levels(allowed_metrics))
+        plugin_levels = self._collect_plugin_levels(allowed_levels if allowed_levels is not None else allowed_metrics)
+        state.update(plugin_levels)
+        # Ф3.2: те же уровни — ВТОРЫМ адресатом, записями kind=observation в
+        # ObservabilityHub процесса (см. :meth:`_emit_observation_hub_records`).
+        # Вход — ТО ЖЕ поддерево, что только что легло в ``state`` — второго
+        # гейта здесь нет (шаг 2 задачи 3.2: хаб не становится дорогой мимо гейта).
+        self._emit_observation_hub_records(plugin_levels)
 
         # (2) Воркеры + агрегат фреймворка — поверх.
         if workers:

@@ -290,15 +290,22 @@ fi
 # double-run, no empty FAIL when neither is on PATH).
 CONTENT_PY="$(resolve_python)"
 
-# Language: Cyrillic must not creep into agents/ or modes/ (EN-only zones).
-# Command/skill bodies pending the deferred EN pass are non-blocking warnings.
+# Language: run strict — lint_language.py owns the B0-B4 zone table (Task 4.3).
+# rc=0 -> all zones clean (or nothing pending); rc=2 -> some zones still warn
+# (translation debt tracked per batch, non-blocking); anything else -> a
+# regression in an ERROR-severity zone (agents/ or modes/), which is a real fail.
 LINT_LANG=".claude/plugins/core/scripts/lint_language.py"
 if [ -z "$CONTENT_PY" ]; then
     warn "Language lint" "python not available"
 elif [ -f "$LINT_LANG" ] && [ -n "$AGENT_DIRS" ]; then
-    LANG_OUT=$("$CONTENT_PY" "$LINT_LANG" 2>&1)
-    if [ $? -eq 0 ]; then
+    LANG_OUT=$("$CONTENT_PY" "$LINT_LANG" --strict 2>&1)
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
         ok "Language lint" "$(echo "$LANG_OUT" | grep -E '^\[OK\]' | head -1 | sed 's/^\[OK\] //')"
+    elif [ "$rc" -eq 2 ]; then
+        WARN_MSG=$(echo "$LANG_OUT" | grep -E '^\[WARN\]' | sed 's/^\[WARN\] //' | head -2 \
+            | awk 'BEGIN{sep=""} {printf "%s%s", sep, $0; sep=" | "}')
+        warn "Language lint" "$WARN_MSG"
     else
         fail "Language lint" "$(echo "$LANG_OUT" | grep -E '^\[FAIL\]' | head -2 | tr '\n' '|')"
     fi

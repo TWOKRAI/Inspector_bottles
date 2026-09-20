@@ -94,7 +94,7 @@ class TestEffectiveShowsTheNewResolve:
 
         assert section["loggers"][""]["level"] == "WARNING", "корневое правило не видно пульту"
         assert section["loggers"]["vision.capture"]["level"] == "DEBUG"
-        assert section["groups"]["служебное"] == ["vision.capture.hikvision"]
+        assert section["logger_groups"]["служебное"] == ["vision.capture.hikvision"]
         assert isinstance(section["declared_sources"], dict), "каталога объявленных источников нет в ответе"
 
     def test_resolve_agrees_with_the_hot_path(self, real_logger) -> None:

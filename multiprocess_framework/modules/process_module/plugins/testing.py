@@ -22,6 +22,28 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+# Ф5, ревью-блокер S1: импорт МОДУЛЬНЫЙ, не ленивый.
+#
+# ПРАВКА 2026-09-02 (Р-12, добор Task 2.10): прежняя редакция противопоставляла
+# этот импорт «ленивым ``PluginContext._observation_port`` и
+# ``process_managers._create_observation_manager``». Первый больше НЕ ленив —
+# его импорт поднят на уровень модуля, потому что стоял на дороге каждого
+# вызова фасада и под импорт-хуком стоил четыре профилируемых вызова. Ленивым
+# из названной пары остался только ``_create_observation_manager``.
+#
+# Довод этого файла при этом СОСТАВНОЙ, и вторая его половина к
+# ``plugins/base.py`` неприменима: здесь модульный импорт безопасен ещё и
+# потому, что файл — тестовая утилита, которую боевая загрузка не импортирует
+# вовсе. У ``base.py`` такой половины нет, и его собственное обоснование —
+# отдельный замер, а не ссылка сюда.
+#
+# Цикла тоже нет: ``observation_manager.py`` тянет
+# ``process_module`` обратно ТОЛЬКО лениво (``_telemetry()``), а этот файл —
+# тестовая утилита, которую боевая загрузка процесса не импортирует вовсе
+# (не часть ``process_module/__init__.py``).
+from ...statistics_module.observation.observation_manager import ObservationPort
+from ..heartbeat.telemetry import PluginLevels
+
 
 # ---------------------------------------------------------------------------
 # Mock-менеджеры
@@ -159,6 +181,61 @@ class MockStatsManager:
         self._put("histogram", name, value, tags)
 
 
+class _MockObservationPort(ObservationPort):
+    """Тестовый двойник порта наблюдений — числа фасада форвардит в ``stats_manager``.
+
+    Ф5, задача 5.2: ``PluginContext`` больше не пишет в
+    ``services.stats_manager`` напрямую — четвёрка едет через порт
+    (``_observation_port(create=False)``, резолвер
+    ``observation_manager.observation_port``, ступень 1: ``services.get_manager("observation")``).
+    Существующий парк тестов дороги 1 (``test_plugin_stats_road.py``,
+    ``test_stats_connector_acceptance.py``) строит
+    ``MockProcessServices(stats_manager=...)`` и судит СОДЕРЖИМОЕ записей у
+    :class:`MockStatsManager` — их контракт про то, ЧТО дошло, а не ЧЕРЕЗ ЧТО
+    именно. Этот двойник — тестовый аналог боевой проводки
+    ``ProcessManagers.create_all`` (``stats.attach_observation_port(observation)``):
+    прямой форвард без CRM/tap-механики, чтобы существующий парк остался
+    про контракт фасада, а не про внутренний механизм доставки Ф5.
+
+    **Наследник настоящего ``ObservationPort`` над РЕАЛЬНЫМ ``PluginLevels``
+    (Ф5, ревью-блокер S1), а не дубль по форме.** До этой правки класс не
+    наследовал ``ObservationPort`` вовсе и не имел ``for_plugin`` — резолвер
+    ступени 1 принимал его по протоколу (``collect_subtree`` был, отдавал
+    заглушку ``{}``), но ТРИ дороги уровней (``declare_metric``/
+    ``publish_metric``/``_retract_metrics``, все они зовут
+    ``port.for_plugin(writer)``) падали ``AttributeError`` при первом же
+    вызове через ``MockProcessServices`` с непустым ``stats_manager``. Гейт
+    был зелёным только потому, что НИ ОДИН тест не гонял уровни через мок —
+    дыра пряталась за отсутствием пробы, а не за прошедшей проверкой.
+    Наследование от ``ObservationPort`` закрывает её целиком: ``for_plugin``/
+    ``declare``/``publish``/``retract``/``collect_subtree``/``level_names``
+    теперь настоящие, работающие поверх приватного (не разделяемого со
+    ``services.plugin_levels``) хранилища этого двойника — переопределены
+    только ЧИСЛА, ради которых класс и заводился.
+    """
+
+    __slots__ = ("_stats",)
+
+    def __init__(self, stats_manager: Any) -> None:
+        super().__init__(PluginLevels())
+        self._stats = stats_manager
+
+    def record_metric(self, name: str, value: Any = 1, tags: dict | None = None) -> None:
+        self._stats.record_metric(name, value, tags)
+
+    def increment(self, name: str, tags: dict | None = None) -> None:
+        self.record_metric(name, 1, tags)
+
+    def record_timing(self, name: str, duration: float, tags: dict | None = None) -> None:
+        self._stats.record_timing(name, duration, tags)
+
+    def gauge(self, name: str, value: float, tags: dict | None = None) -> None:
+        self._stats.gauge(name, value, tags)
+
+    def histogram(self, name: str, value: float, tags: dict | None = None) -> None:
+        self._stats.histogram(name, value, tags)
+
+
 class MockProcessServices:
     """Лёгкий mock IProcessServices для изолированного тестирования плагинов.
 
@@ -239,6 +316,12 @@ class MockProcessServices:
         # может быть None. Без атрибута дубль перестал бы удовлетворять
         # IProcessServices, который порт объявил.
         self.logger_manager: Any = logger_manager
+        # Ф5, задача 5.2: седьмой порт, тем же доводом. ``None`` при
+        # ``stats_manager=None`` — «плоскости нет» ровно как раньше (см.
+        # :class:`_MockObservationPort`): без него ``get_manager("observation")``
+        # отдавал бы объект, форвардящий в ``None``, и падал бы там, где раньше
+        # штатно срабатывал ``note_metric_without_plane``.
+        self._observation_port_double: Any = _MockObservationPort(stats_manager) if stats_manager is not None else None
 
         # Менеджеры (создаются автоматически)
         self.worker_manager: MockWorkerManager = MockWorkerManager()
@@ -290,6 +373,22 @@ class MockProcessServices:
     def log_critical(self, msg: str, **kwargs: Any) -> None:
         """Записать CRITICAL-сообщение в self.logs."""
         self._record("CRITICAL", msg, kwargs)
+
+    # --- Слоты менеджеров (Ф5, задача 5.2) ---
+
+    def get_manager(self, name: str) -> Any:
+        """Слот-резолвер — сегодня отвечает ТОЛЬКО за ``"observation"``.
+
+        Единственный вызывающий у боевого кода —
+        ``PluginContext._observation_port`` (через резолвер
+        ``observation_manager.observation_port``, ступень 1). Остальные
+        менеджеры дубль отдаёт своими прямыми атрибутами
+        (``services.worker_manager`` и т.д.) — заводить для них слот-резолвер
+        значило бы вторую дорогу к тем же объектам без единого читателя.
+        """
+        if name == "observation":
+            return self._observation_port_double
+        return None
 
     # --- IPC ---
 

@@ -58,3 +58,25 @@
 - [аудит прототипа 2026-06](project_prototype_audit_2026_06.md) · [carve-out в framework](project_prototype_carveout.md) — domain/adapters отложены · [архивы удалены](project_archives_removed.md) — v1/v2 и backup
 - [baseline sentrux 2026-05](project_sentrux_baseline_2026_05.md) · [миграция на claude-kit v1.0.0](project_claude_kit_migration.md)
 - [settings MVP рефактор](project_settings_mvp_refactor.md) · [handoff sources-виджет](handoff_sources_widget_refactor.md)
+
+
+## Перенесено из индекса 2026-09-05 — закрытые и спящие треки
+
+Сжатие MEMORY.md по требованию хука (22.3k → ≤ 17.1k символов). Строки перенесены дословно,
+урок каждого уже вынесен в MEMORY.md/CRAFT.md. Трек оживает — строка возвращается в индекс.
+
+- [observation-port: Ф0–Ф5 ЗАКРЫТЫ](project_observation_port_progress.md) — порт = единственный писатель чисел, StatsManager стал видом; ревью вернуло 3 блокера, все закрыты; гейт 8930
+- [Transport hub](project_transport_router_hub.md) — P0-P2 DONE; P3 отложен · [иерархический адрес](project_hierarchical_addressing.md) — целевое: процесс → воркер → глубже
+- [Авто-рестарт всех процессов](project_all_process_autorestart.md) — механизм исполнен Ф4-добор (ADR-PMM-015); хаб+chain-health → Ф5
+- [Line filter](project_line_filter_feature.md) — 0-3 DONE; overlay_draw пишет frame
+- [Device hub](project_device_hub.md) — always-on, YAML-протоколы, Ф0-5 DONE; NEXT device-tree-recipe
+- [Draw mode rework](project_draw_mode_rework.md) — feat/draw-mode-rework; hardware pending
+- [Pult panel](project_pult_control_panel.md) — контролы→сигналы; robot_draw live
+- [Phone gateway](project_phone_gateway_service.md) — v1 готов, GUI follow-up
+- [Gorynych PyPI deferred](project_gorynych_pypi_deferred.md) — триггеры: ок работодателя + потребитель + прод
+- [Component Design System](project_component_scoped_styles.md) — DEFERRED
+
+### Закрытые треки — открытые концы (бывшая секция индекса)
+- Observability: [Ф2–Ф8 + роадмап](project_f8_review_and_stitching.md) — актуальное в plans/observability-roadmap.md · [хвост-ремонт](project_observability_tail_repair.md) — гейт 6855×3; вход в этап 6 открыт · [ошибки идут в logger, не error_manager](project_observability_store_error_routing.md) — store-tap нужен на ОБА, live-boot вскрыл · [telemetry read-model ADR-136](project_gui_telemetry_read_model.md) · [self-publish DB-sink](project_telemetry_self_publish.md) · [webcam фриз](project_webcam_sketch_freeze.md) — IPC-шторм · [gui задушен очередью](project_gui_system_queue_storm.md) — гонка тихой потери
+- Конструктор/GUI: [фазы DONE](project_generic_process_vision.md) — GenericProcess deprecated · [Ф7 Phase G 8.0](project_phase_g_final_review.md) — seqlock, QoS-кольца SHM, флип-лесенка · [Registries v2](project_service_registry.md) — ADR-129…132 · [Pipeline recipe-launch](project_pipeline_recipe_driven_launch.md) — hot-apply не подключён · [Switch stale](project_switch_routing_stale.md) — live через PM-хаб
+- [Fencing-тест ADR-SS-019](project_fencing_test_race.md) — ghost-гонка закрыта · [fencing-token топологии](project_topology_fencing_token.md) — исполнено Ф4.2: дроп по per-sender incarnation, НЕ epoch

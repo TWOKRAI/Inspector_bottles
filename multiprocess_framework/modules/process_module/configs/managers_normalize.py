@@ -11,9 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, FrozenSet
 
 # Секции, которые читает ProcessManagers (и ManagersConfig.model_dump).
-MANAGER_SECTION_KEYS: FrozenSet[str] = frozenset(
-    {"logger", "error", "stats", "router", "command", "console"}
-)
+MANAGER_SECTION_KEYS: FrozenSet[str] = frozenset({"logger", "error", "stats", "router", "command", "console"})
 
 
 def _collect_flat_sections(d: Dict[str, Any]) -> Dict[str, Any]:

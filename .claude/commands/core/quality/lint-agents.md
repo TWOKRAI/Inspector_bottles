@@ -2,63 +2,63 @@
 description: Check agent .md files for consistency (frontmatter, model, tools, cross-ref with CLAUDE.md)
 ---
 
-# /quality:lint-agents — линтер агентских определений
+# /quality:lint-agents — agent definition linter
 
-Запускает `python .claude/plugins/core/scripts/lint_agents.py` против `.claude/plugins/*/agents/`.
-Проверяет YAML-frontmatter, наличие обязательных полей, валидность модели,
-соответствие имён файлам и кросс-ссылки из CLAUDE.md.
+Runs `uv run --no-project python scripts/lint_agents.py` against `.claude/plugins/*/agents/`.
+Checks the YAML frontmatter, the presence of required fields, model validity,
+name-to-filename match, and cross-references from CLAUDE.md.
 
-## Когда использовать
+## When to use it
 
-- После переименования / добавления нового агента
-- Периодически (раз в месяц или в pre-merge ревью)
-- При обновлении списка моделей (Opus/Sonnet/Haiku versions)
-- В CI как gate перед merge изменений в `.claude/plugins/*/agents/`
+- After renaming / adding a new agent
+- Periodically (once a month or during pre-merge review)
+- When updating the model list (Opus/Sonnet/Haiku versions)
+- In CI as a gate before merging changes to `.claude/plugins/*/agents/`
 
-## Что проверяет
+## What it checks
 
-1. Frontmatter присутствует и парсится
-2. Обязательные ключи: `name`, `description`, `model`, `tools`
-3. `name` совпадает с именем файла
-4. `model` — известный Claude ID (claude-opus-4-7, claude-sonnet-5, и т.д.)
-5. `tools` — непустой список через запятую
-6. `description` ≤ 500 символов
-7. Тело имеет хотя бы один markdown-заголовок
-8. Cross-check: имена ролей в CLAUDE.md имеют соответствующие файлы
+1. Frontmatter is present and parses
+2. Required keys: `name`, `description`, `model`, `tools`
+3. `name` matches the file name
+4. `model` is a known Claude ID (claude-opus-4-7, claude-sonnet-5, etc.)
+5. `tools` is a non-empty comma-separated list
+6. `description` ≤ 500 characters
+7. The body has at least one markdown heading
+8. Cross-check: role names in CLAUDE.md have corresponding files
 
-## Выходные коды
+## Exit codes
 
-- `0` — всё зелёное
-- `1` — есть ERROR'ы (CI блокирует merge)
-- `2` — только WARN'ы (review рекомендуется, но не блокер)
+- `0` — everything is green
+- `1` — there are ERRORs (CI blocks the merge)
+- `2` — only WARNs (review is recommended, but not a blocker)
 
-С флагом `--strict`: предупреждения тоже становятся `exit 1`.
+With the `--strict` flag: warnings also become `exit 1`.
 
-## Запуск
+## Running it
 
 ```bash
-# Из корня проекта:
-python .claude/plugins/core/scripts/lint_agents.py
+# From the project root:
+uv run --no-project python .claude/plugins/core/scripts/lint_agents.py
 
-# Строгий режим (warns также fail):
-python .claude/plugins/core/scripts/lint_agents.py --strict
+# Strict mode (warnings fail too):
+uv run --no-project python .claude/plugins/core/scripts/lint_agents.py --strict
 
-# Конкретный путь:
-python .claude/plugins/core/scripts/lint_agents.py path/to/agents
+# A specific path:
+uv run --no-project python .claude/plugins/core/scripts/lint_agents.py path/to/agents
 ```
 
-## Реализация
+## Implementation
 
-Чистый Python 3.9+, **без внешних зависимостей** (нет `pyyaml` — свой
-минимальный парсер для flat key:value). 200 строк, легко читать и
-расширять. См. `.claude/plugins/core/scripts/lint_agents.py`.
+Pure Python 3.9+, **no external dependencies** (no `pyyaml` — its own
+minimal parser for flat key:value). 200 lines, easy to read and
+extend. See `scripts/lint_agents.py`.
 
-Альтернатива (рассмотрена в ROADMAP § B.1): `agnix` — comprehensive
-линтер агентских файлов от внешнего автора. Решили писать свой минимальный,
-потому что:
-- Node-based, добавляет лишнюю зависимость
-- Наш use-case узкий (10 файлов, чёткая структура)
-- Свой = можем добавлять project-specific правила (threshold rules из CLAUDE.md)
+Alternative (considered in ROADMAP § B.1): `agnix` — a comprehensive
+agent-file linter by a third-party author. Decided to write our own minimal one,
+because:
+- Node-based, adds an extra dependency
+- Our use case is narrow (10 files, clear structure)
+- Our own = we can add project-specific rules (threshold rules from CLAUDE.md)
 
-Если в будущем потребуется расширение (lint complex YAML, multi-line
-descriptions, etc.) — можно переключиться на agnix или добавить `pyyaml`.
+If extension is needed in the future (lint complex YAML, multi-line
+descriptions, etc.) — we can switch to agnix or add `pyyaml`.

@@ -18,22 +18,75 @@ Observability hot-reload: ConfigFileWatcher → reconfigure(Logger/Error/Stats).
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...config_module.core.config import Config
+from ...logger_module.core.process_hooks import HOOK_COUNTER_KEYS
 from ..configs.observability_audit import ACTION_REBUILD
-from ..configs.observability_config import expand_observability
+from ..configs.observability_config import ObservabilityConfig, expand_observability
 from ..configs.observability_layers import (
     LAYER_APP,
     LAYER_RECIPE,
     ORCHESTRATOR_PROCESS_NAME,
     TELEMETRY_KEY,
     TELEMETRY_LAYERED_SUBSECTION,
+    flatten_section,
     layer_merge,
 )
+from ..configs.observation_policy import OBSERVATION_SECTION_KEY, normalized_observation_section
 from .observability_flight import FLIGHT_SECTION_KEY, apply_flight_recorder
-from .observability_wiring import EVENTS_SECTION_KEY, apply_event_selector
+from .observability_ttl import AUDIT_ORIGIN as TTL_SWEEPER_ORIGIN
+from .observability_wiring import (
+    EVENTS_SECTION_KEY,
+    VOICES_SECTION_KEY,
+    apply_event_selector,
+    apply_voices_policy,
+)
+
+#: Под-секции ``observability``, у которых путь КОНФИГА совпадает с путём
+#: READBACK'а один в один — те, что идут мимо ``expand_observability`` (у них
+#: нет менеджера, в поля которого их надо было бы переводить).
+#:
+#: **Задача 2.9 (M1, добор ревью Ф2): этот перечень БОЛЬШЕ НЕ участвует в
+#: построении ``expected`` внутри ``observability_verified``.** До неё дыра
+#: («секция мимо экспандера — впиши её сюда руками») закрывалась ТРИЖДЫ:
+#: ``events`` (блокер Б2 ревью Ф4), ``flight`` (Ф5), ``voices`` (Task 1.4) — и
+#: на четвёртой (``heartbeat_interval_sec``, скаляр, а не под-секция — этот
+#: перечень его никогда и не покрывал) она открылась снова, потому что
+#: ручной список сам по себе не гарантирует полноты. ``observability_verified``
+#: теперь решает «потребляет ли эту секцию экспандер» ЗОНДОМ у самого
+#: ``expand_observability`` (см. докстринг функции) — и добавляет в ``expected``
+#: КАЖДЫЙ непотреблённый лист любой секции, а не только четырёх перечисленных
+#: здесь. Дыра этого класса больше не открывается «на пятой секции»: у новой
+#: секции схемы просто нет способа остаться неклассифицированной.
+#:
+#: Константа осталась ради ДРУГОГО стража — не про полноту вердикта, а про
+#: осознанную классификацию новой под-секции схемы:
+#: ``test_voices_policy_road_guards.py::TestIdentitySectionsCoverEveryUnexpandedSubsection``
+#: сверяет её (плюс ``EXPANDED``/``EXEMPT`` того теста) с полным списком
+#: SchemaBase-под-секций ``ObservabilityConfig`` и краснеет, если новая секция
+#: не отнесена ни к одной корзине сознательно. Это второй, самостоятельный
+#: класс дефекта («никто не подумал, куда её отнести»), и генерический зонд его
+#: не заменяет: зонд гарантирует, что вердикт не промолчит про лист СЕГОДНЯ,
+#: а этот сторож — что автор следующей под-секции осознанно записал, почему
+#: она обходит экспандер (или почему нет).
+#:
+#: ``observation`` в перечень НЕ входит: у её ключей своя нормализация обоих
+#: берегов (``normalized_observation_section``), и тождественное сравнение по
+#: строкам ей не годится буквально (см. ветку ниже по файлу) — но генерический
+#: зонд про неё тоже верно говорит «не потреблена экспандером», поэтому её
+#: сырые пути и без этого перечня попадают в ``expected`` раньше нормализации
+#: (нормализация переписывает их поверх, см. ниже).
+IDENTITY_SECTION_KEYS = (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY, VOICES_SECTION_KEY, "history")
+
+#: Ф2 (задача 2.3, M9). СКАЛЯР схемы (``float``), не под-секция — тем же родом,
+#: что ``session_ttl_sec`` (``observability_layers.SESSION_TTL_KEY``): у него нет
+#: своего ``SchemaBase``-класса, поэтому страж ``test_identity_sections_...``
+#: (он перебирает ТОЛЬКО поля с аннотацией-подклассом ``SchemaBase``) его не
+#: видит и не обязан — ``IDENTITY_SECTION_KEYS`` выше про НЕГО, не про это имя.
+HEARTBEAT_INTERVAL_KEY = "heartbeat_interval_sec"
 
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
@@ -44,7 +97,17 @@ def resolve_base_log_dir(explicit: Optional[str] = None) -> str:
     """Каталог логов как МАШИННЫЙ контекст пересборки (Task 5.12).
 
     Тот же резолв, что на boot (``ProcessLaunchConfig._resolve_log_dir``): явный
-    аргумент → ``MULTIPROCESS_LOG_DIR`` → ``INSPECTOR_LOG_DIR`` → ``logs``.
+    аргумент → ``MULTIPROCESS_LOG_DIR`` → ``INSPECTOR_LOG_DIR`` →
+    :func:`~...logger_module.core.log_paths.default_log_base_directory`.
+
+    **Последним рубежом стоит общая функция, а не строка ``"logs"``** (ревью
+    Task 1.2, F4). Строка тут пережила задачу 3.3, которая сняла её у boot'а, и
+    расхождение было ровно то, от которого 3.3 и лечила: относительная ``"logs"``
+    резолвится от cwd запускающего, то есть при молчащем окружении пересборка
+    уводила логи в дерево репозитория, тогда как boot тех же менеджеров клал их в
+    системный temp. Один запуск — два дерева, и оба «правильные» с точки зрения
+    своей половины кода. Утверждение в docstring («тот же резолв, что на boot»)
+    при этом было ложным с момента 3.3 и молчало об этом.
 
     Живой конфиг логгера здесь СОЗНАТЕЛЬНО не читается. Он выглядит соблазнительно
     («там же уже лежит резолвнутый путь»), но тогда удаление ``log_directory`` из
@@ -53,7 +116,12 @@ def resolve_base_log_dir(explicit: Optional[str] = None) -> str:
     """
     if explicit:
         return str(explicit)
-    return os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR") or "logs"
+    env_dir = os.environ.get("MULTIPROCESS_LOG_DIR") or os.environ.get("INSPECTOR_LOG_DIR")
+    if env_dir:
+        return env_dir
+    from ...logger_module.core.log_paths import default_log_base_directory
+
+    return str(default_log_base_directory())
 
 
 def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
@@ -93,6 +161,214 @@ def base_managers_payload(log_dir: Optional[str] = None) -> Dict[str, Any]:
     return managers_payload_for_proc(managers_from_log_dir(resolve_base_log_dir(log_dir), model_cls=ManagersConfig))
 
 
+def _voice_repurposed_stats_enabled(resolved: Any, origin: Optional[str] = None) -> None:
+    """Голос ADR-PM-046 (смена смысла ``stats.enabled``) — на стадии «применяю», у КОТОРОЙ ЕСТЬ АВТОР.
+
+    Task 4.11 (вердикт CTO 2026-09-03, корень m1): голос переехал сюда ИЗ
+    валидатора схемы
+    (``ObservabilityStatsConfig._complain_about_repurposed_enabled`` — полная
+    история диагноза в его докстринге, включая замеры «6 срабатываний на один
+    reload / 18 на три подряд»). Причина переезда — не косметика: валидатор
+    зовётся ТРИЖДЫ на каждое действие оператора (стадии ``config.reload``:
+    проверить → применить → сверить, решение B2/Task 5.7), и окно
+    (Task 2.12) дросселировало РАЗБОРЫ, а не действия — «подавлено: N» после
+    трёх ``config.reload`` называло 17 вместо 2.
+
+    **Почему здесь, а не внутри** :func:`~..configs.observability_config.
+    expand_observability` **и не внутри модели схемы.** Эта функция зовётся раз
+    на ПЕРЕСБОРКУ, а не раз на разбор. Разница существенная: разборов у одного
+    ``config.reload`` шесть (стадии «проверить» → «применить» → «сверить»,
+    решение B2/Task 5.7), пересборка одна.
+
+    **Дорог пересборки ШЕСТЬ, и это число посчитано грепом, а не выведено**
+    (вердикт CTO 2026-09-08; прежняя редакция этого докстринга называла две и
+    утверждала, что функция «ЕДИНСТВЕННАЯ» и зовётся «РОВНО один раз на действие
+    оператора» — оба слова стояли без воспроизведения, и оба оказались неверны):
+
+    * **рождение менеджеров** — ``ProcessManagers._managers_config_for_creation``
+      (``process_managers.py:160``), зовёт :func:`compose_managers_payload`
+      напрямую, БЕЗ ``origin``;
+    * ``boot:layers`` / ``boot:companion`` — ``process_module.py:478,496``;
+    * ``watcher:app`` / ``watcher:recipe`` — :func:`make_observability_on_reload`
+      в этом модуле (замыкание ``_on_reload``);
+    * ``command:config.reload`` / ``switch:broadcast`` — ``builtin_commands.py``;
+    * ``switch:<reason>`` — ``process_manager_process.py:2419``;
+    * ``ttl-sweeper`` — :mod:`.observability_ttl`, такт heartbeat.
+
+    **Пересборок на одно действие бывает больше одной, и это не дефект.** На boot
+    оркестратора их две — рождение менеджеров и пересборка на boot; живой стенд
+    (`plans/observability-closure/stand-task-4-11.md`, §3) это и намерил: первый
+    ``config.reload`` после boot сказал «подавлено: 1», и эта единица — вторая
+    пересборка boot, а не проглоченное действие человека.
+
+    **``ttl-sweeper`` — единственная дорога БЕЗ АВТОРА, и здесь она молчит**
+    (вердикт CTO 2026-09-08, вариант «б»). Довод не в том, что таймер «менее
+    важен»: текст этого голоса — совет ТОМУ, КТО ПОСТАВИЛ КЛЮЧ («замените на
+    ``enabled: true, log_snapshots: false``). Свип перепрофилированный ключ не
+    вводит: ``false``, который он применяет, пришёл из L1/L2 и уже прозвучал
+    тогда, когда этот слой применял его автор. Свип лишь снимает то, что ключ
+    маскировало, — и об ЭТОМ у него есть собственный голос
+    (``observability_ttl._announce_revert``, WARNING, с именем истёкшего ключа).
+    Дорога не молчит; она перестаёт повторять чужой совет.
+
+    Цена решения названа и записана (ADR-PM-048): если L3-правка
+    ``stats.enabled: true`` маскировала ``false`` из L1 в момент применения L1,
+    а потом истекла — совет не прозвучит до следующего boot. Дом подсказки —
+    ``_announce_revert``, единственное место, где известно, ЧТО именно истекло.
+
+    Стадии «проверить» и «сверить» эту функцию НЕ зовут — они читают
+    ``expand_observability`` НАПРЯМУЮ (:func:`observability_verified` и
+    ``unknown_section_keys``), минуя обёртку. Голос внутри самой
+    ``expand_observability`` прозвучал бы и на стадии «сверить» тоже — то есть
+    дважды на один ``config.reload``, и число снова стало бы не тем, которое
+    ждёт читатель.
+
+    Args:
+        resolved: СЫРОЙ словарь секции ``observability`` (тот же, что уйдёт в
+            ``ObservabilityConfig.model_validate`` внутри ``expand_observability``
+            следующей строкой) — не раскладка. Секция ``stats`` может отсутствовать
+            вовсе (молчащий слой) — тогда функция молчит.
+        origin: признак дороги пересборки. ``ttl-sweeper`` → молчание (см. выше).
+            ``None`` — дорога рождения менеджеров, у неё автор есть (процесс
+            рождается по чьей-то команде), поэтому она голосит.
+
+    Не падает и не голосит ни на каком постороннем входе (мусор вместо словаря,
+    ``stats`` не словарь, ``enabled`` не булев ``False`` буквально) — вход сюда
+    приходит из разрешённых слоёв, а не напрямую от оператора, но граница
+    остаётся защищённой той же дисциплиной, что была у валидатора
+    (``is False``, а не ``== False``: строка ``"false"``/``0``/``None`` — не тот
+    же факт, что булев ``False``).
+    """
+    if origin == TTL_SWEEPER_ORIGIN:
+        return
+
+    section = resolved.get("stats") if isinstance(resolved, dict) else None
+    if not isinstance(section, dict) or section.get("enabled") is not False:
+        return
+
+    from ..._fallback import FallbackLogger
+    from ...logger_module.core.windowed_voice import compose_voice_text, process_voices
+
+    # Держатель берётся ОДИН раз в локальную переменную: ``process_voices()``
+    # отдаёт процессный синглтон, который фикстуры тестов подменяют целиком, и
+    # взять слот у одного держателя, а вернуть другому значило бы потерять долг.
+    holder = process_voices()
+    voice_key = "stats.enabled.repurposed"
+    voiced, suppressed = holder.take(voice_key, None)
+    if voiced:
+        delivered = False
+        try:
+            FallbackLogger(__name__).warning(
+                compose_voice_text(
+                    "stats.enabled: false — с Ф2 этот ключ означает ПЛОСКОСТЬ ЧИСЕЛ: "
+                    "метрики не будут собираться вовсе (окно пустое, все каналы "
+                    "статистики молчат). Прежний смысл «не писать снапшоты в журнал» "
+                    "переехал в stats.log_snapshots — если вы хотели именно его, "
+                    "замените на 'enabled: true, log_snapshots: false' (ADR-PM-046)",
+                    suppressed,
+                )
+            )
+            delivered = True
+        finally:
+            # Task 4.13: бросок приёмника уходит вызывающему дальше, как и
+            # прежде, но слот при этом обязан вернуться — совет автору ключа
+            # иначе замолчал бы на всё окно после первой же потери.
+            if not delivered:
+                holder.release(voice_key, suppressed)
+
+
+def compose_managers_payload(
+    resolved: Dict[str, Any],
+    *,
+    log_dir: Optional[str] = None,
+    origin: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Разрешённые слои → конфиги менеджеров. **Одна сборка на два адресата.**
+
+    Адресаты:
+
+    * пересборка на boot / reload (:func:`apply_observability_layers`);
+    * **создание** менеджеров процесса
+      (``ProcessManagers._managers_config_for_creation``).
+
+    Почему шов, а не две ветки (Task 1.2, находка живого стенда). Создание
+    собирало конфиг само — голым ``expand_observability(layers.resolve())``, без
+    базы L0. А ``expand_observability`` эмитит **частичный** словарь каналов
+    (только те, что назвал слой): в конфиге прототипа это ``gui_file`` /
+    ``trace_file`` / ``busy_file``. Pydantic на ``LoggerManagerConfig`` заменяет
+    словарь целиком — значит рождавшийся менеджер имел ТРИ канала, а ``scopes``
+    у него оставались дефолтные и вели в ``system_file`` / ``messages_file``,
+    которых в его реестре не было вовсе.
+
+    Следствие измерено на стенде 2026-08-31: у ``ProcessManager`` **12 записей**
+    (``{'system_file': 6, 'messages_file': 6}``) уходили в несуществующие каналы —
+    ровно те, что эмитятся между ``logger.initialize()`` и пересборкой на boot
+    (`LoggerManager initialized`, `RouterManager initialized`, `StatsManager`,
+    порт наблюдений, `StatsAdapter.setup`). Пересборка секундой позже собирала
+    конфиг ПРАВИЛЬНО (``merge_managers(base, expanded)``) — и потери
+    прекращались. То есть дефекта «в логгере» не было: две дороги к одному
+    конфигу расходились, и расходились молча.
+
+    Поэтому сборка живёт здесь одна. Родиться и пересобраться теперь нельзя
+    по-разному: разойтись будет нечему.
+
+    Args:
+        resolved: результат ``ObservabilityLayers.resolve()`` **без** ключа
+            ``telemetry``: её снимает вызывающий, потому что у телеметрии свои
+            получатели. Слова «иначе конфиг её отверг бы» здесь стояли и были
+            неправдой (ревью Task 1.2, F5): ``ObservabilityConfig`` — обычная
+            pydantic-модель с политикой ``extra`` по умолчанию (``ignore``), и
+            незнакомый ключ она молча проглатывает. Замер 2026-08-31: с ключом
+            ``telemetry`` сборка проходит и отдаёт те же четыре секции, а снятие
+            ``pop`` на пути рождения не роняет ни одного теста из 3347. Ключ
+            снимается ради ОДНОЙ формы аргумента у обоих вызывающих, а не ради
+            защиты от отказа, которого нет.
+        log_dir: каталог логов; ``None`` → машинный контекст
+            (``MULTIPROCESS_LOG_DIR`` / ``INSPECTOR_LOG_DIR`` /
+            ``default_log_base_directory()``).
+
+    Returns:
+        ``{"logger": …, "error": …, "stats": …, "command": …}`` — слои, наложенные
+        на базу L0 машинного контекста.
+
+    Task 4.11: эта функция — единственный адресат голоса ADR-PM-046
+    (:func:`_voice_repurposed_stats_enabled`), потому что она — единственный шов,
+    через который проходит КАЖДАЯ пересборка. Слова «раз на действие оператора»
+    здесь стояли и были неточны: дорог пересборки шесть, на одно действие их
+    бывает две (boot оркестратора), а у одной — ``ttl-sweeper`` — автора нет
+    вовсе. Полный разбор и вердикт — в докстринге самого голоса.
+
+    Args (продолжение):
+        origin: признак дороги, прокидывается в голос. ``None`` у дороги
+            рождения менеджеров — там ``origin`` не заведён, и это не упущение:
+            рождение однозначно, различать его не с чем.
+    """
+    from ...data_schema_module import deep_merge
+    from ..configs.managers_config import merge_managers
+
+    _voice_repurposed_stats_enabled(resolved, origin)
+    expanded = expand_observability(resolved)
+    base = base_managers_payload(log_dir)
+
+    explicit_level = resolved.get("log_level")
+    logger_cfg = merge_managers(base.get("logger", {}), expanded["logger"])
+    if explicit_level is not None:
+        # Ф8.1: уровень кладётся ОДНИМ правилом корня и мержится с остальными
+        # правилами, а не заменяет секцию. Прежде здесь стоял танец
+        # «вынуть scopes до merge → положить профиль → вернуть правки поверх»:
+        # он существовал ровно потому, что профиль переписывал набор целиком.
+        # Причина снята — танец снят вместе с ней.
+        #
+        # ``deep_merge``, а не ``update``: у корня может быть и правило приёмников
+        # (``loggers[""].channels``), и замена словаря целиком снесла бы его молча.
+        logger_cfg["loggers"] = deep_merge(logger_cfg.get("loggers") or {}, _root_level_rule(explicit_level))
+        logger_cfg["default_level"] = str(explicit_level).upper()
+    expanded["logger"] = logger_cfg
+    expanded["error"] = merge_managers(base.get("error", {}), expanded["error"])
+    expanded["stats"] = merge_managers(base.get("stats", {}), expanded["stats"])
+    return expanded
+
+
 def _root_level_rule(level: str) -> Dict[str, Dict[str, Any]]:
     """Корневое правило уровня — **вид на общую функцию**, а не вторая реализация.
 
@@ -121,6 +397,10 @@ def observability_effective(
     stats: Any = None,
     event_selector: Any = None,
     flight_recorder: Any = None,
+    heartbeat: Any = None,
+    command: Any = None,
+    session_ttl_sec: Optional[float] = None,
+    history: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Фактическое (readback) состояние менеджеров наблюдаемости — не эхо запроса.
 
@@ -135,7 +415,30 @@ def observability_effective(
         section: Dict[str, Any] = {
             "default_level": getattr(lc, "default_level", None),
             "log_directory": getattr(lc, "log_directory", None),
+            # Ф2 (задача 2.2, критерий 3): ретеншен/компрессия эмитятся
+            # `expand_observability` (`logger.retention_*`/`compress_rotated`), но
+            # readback их не отдавал вовсе — `config_reload_verified` отвечал
+            # `unverifiable` на КАЖДУЮ правку этих четырёх ключей. Читаются у
+            # ЖИВОГО конфига (`self.config` мутируется на `reconfigure`, ретеншен
+            # сам читает `self.config` в момент свипа — расхождения между «что
+            # сказали» и «что действует» здесь нет).
+            "retention_days": getattr(lc, "retention_days", None),
+            "retention_total_mb": getattr(lc, "retention_total_mb", None),
+            "compress_rotated": getattr(lc, "compress_rotated", None),
+            "retention_sweep_interval_sec": getattr(lc, "retention_sweep_interval_sec", None),
         }
+        # Ф2 (2.2, критерий 3): адресные переопределения канала (Task 5.12,
+        # `observability.channels.<имя>.enabled`) эмитятся экспандером, но
+        # readback отдавал только ИМЕНА активных каналов (`channels_active`
+        # ниже), не их `enabled` — правка `channels.messages_file.enabled`
+        # была неподтверждаема. Путь конфига (`channels.<имя>.enabled`) и путь
+        # readback'а обязаны совпадать — иначе тождественное сравнение вердикта
+        # не найдёт свой путь.
+        channels_cfg = getattr(lc, "channels", None)
+        if isinstance(channels_cfg, dict):
+            section["channels"] = {
+                str(name): {"enabled": bool(getattr(ch, "enabled", True))} for name, ch in channels_cfg.items()
+            }
         scopes = getattr(lc, "scopes", None)
         if isinstance(scopes, dict):
             # Ф8.1: у скоупа осталась одна ось — приёмники. Прежний readback отдавал
@@ -156,9 +459,14 @@ def observability_effective(
         # Ф2.5: ярлыки как их ОБЪЯВИЛИ, рядом с раскрытой таблицей выше.
         # Расхождение между ними и есть «ярлык написан, а не действует»: член,
         # у которого нашлось собственное правило, в раскрытии не появится.
+        # Ф2 (2.2, критерий 3): имя readback'а — ИМЯ СХЕМЫ (`logger_groups`), а не
+        # внутреннее `groups`. Оператор правит секцию ключом `logger_groups`
+        # (`ObservabilityConfig.logger_groups`), и старое имя ответа не совпадало
+        # с путём запроса — тождественное сравнение вердикта не находило свой
+        # путь, и `logger_groups.*` был `unverifiable` на любой правке.
         groups_fn = getattr(logger, "logger_groups", None)
         if callable(groups_fn):
-            section["groups"] = groups_fn()
+            section["logger_groups"] = groups_fn()
         # Ф2.7: каталог объявленных источников — что МОЖЕТ писать, в отличие от
         # `sources` (что уже писало). Источник, у которого всё гасится порогом, в
         # журнале не появится вовсе, а разбирают обычно именно его.
@@ -194,9 +502,40 @@ def observability_effective(
     if error is not None and getattr(error, "config", None) is not None:
         out["error"] = {
             "default_level": getattr(error.config, "default_level", None),
+            # Ф2 (2.2, критерий 3): пара к `default_level` (тот уже подтверждался).
+            # `include_stacktrace` живёт НЕ на `error.config` (он превращается в
+            # `LoggerManagerConfig` внутри `ErrorManager` и теряет это поле) — а в
+            # приватном `_include_stacktrace` самого менеджера
+            # (`error_manager.py::_normalize_error_config`), тем же приёмом, что
+            # `_sinks_disabled_by_operator` соседней строкой ниже.
+            "include_stacktrace": getattr(error, "_include_stacktrace", None),
             **_sink_readback(error),
             **_idle_sinks(error),
         }
+    # Ф2 (2.2, критерий 3): `observability_effective` не принимала получателя для
+    # `command` вовсе — `commands.log_success` не мог попасть в readback ни при
+    # каком запросе, и `config_reload_verified` отвечал `unverifiable` всегда.
+    # Читаем ПРИВАТНЫЙ `_log_success_enabled`: у `CommandManager` нет отдельного
+    # публичного геттера (только `set_log_success_enabled`), тем же приёмом, что
+    # `include_stacktrace` строкой выше.
+    if command is not None:
+        log_success = getattr(command, "_log_success_enabled", None)
+        if log_success is not None:
+            out["command"] = {"log_success": bool(log_success)}
+    # Ф2 (2.2, критерий 3): `session_ttl_sec` (Task 5.8) не раскладывается
+    # `expand_observability` (получатель — бухгалтерия слоя L3, не менеджер), и
+    # без этой ветки правка исчезала из вердикта ЦЕЛИКОМ — не `mismatch`, не
+    # даже `unverifiable`. Читается ВЫЗЫВАЮЩИМ у `ObservabilityLayers.
+    # effective_session_ttl()` и передаётся сюда готовым числом: эта функция не
+    # держит ссылку на `layers`.
+    if session_ttl_sec is not None:
+        out["session_ttl_sec"] = float(session_ttl_sec)
+    # Ф2 (2.2, критерий 1): `history` — четвёртая под-секция «своего механизма»
+    # (см. IDENTITY_SECTION_KEYS). Политика приходит готовым словарём
+    # (`resolve_history_policy(svc)`) — той же дорогой, что и `session_ttl_sec`
+    # выше: эта функция читает менеджеров и живые объекты, а не сам процесс.
+    if history is not None:
+        out["history"] = dict(history)
     if stats is not None:
         # B1. Прежде ветка сторожилась `getattr(stats, "config", None) is not None`
         # и НЕ ИСПОЛНЯЛАСЬ НИ РАЗУ: `self.config` ставит `LoggerCore` (общий
@@ -241,7 +580,253 @@ def observability_effective(
         section = flight_effective(flight_recorder)
         if section is not None:
             out[FLIGHT_SECTION_KEY] = section
+    if heartbeat is not None:
+        # Ф4 плана «порт наблюдений» (4.1): действующая политика порта — той же
+        # дорогой и по тому же уроку, что `events`/`flight`. Ручка, которую
+        # нельзя подтвердить, неотличима от неприменённой: без этой ветки КАЖДАЯ
+        # правка политики отвечала бы `unverifiable` при `checked=0`, то есть
+        # «никто не смотрел», и AC задачи прямо требует сторожить эту ловушку.
+        #
+        # Читается ЖИВОЙ гейт (`current_observation_policy`), а не разрешённые
+        # слои: пересчёт из того же источника показывал бы согласие всегда — в
+        # том числе когда правка до гейта не доехала.
+        policy_fn = getattr(heartbeat, "current_observation_policy", None)
+        if callable(policy_fn):
+            section = policy_fn()
+            if section is not None:
+                out[OBSERVATION_SECTION_KEY] = section
+        # Task 2.9 (M1): ``heartbeat_interval_sec`` — скаляр верхнего уровня,
+        # который `expand_observability` не раскладывает (получатель не
+        # менеджер, а этот же живой `heartbeat`, см. докстринг поля схемы).
+        # Без этой ветки правка была неотличима от отсутствия правки: вход
+        # `observability_verified({"heartbeat_interval_sec": 1.0}, eff)` и
+        # `observability_verified({}, eff)` давали ПОБАЙТНО одинаковый ответ
+        # (воспроизведено ревью, M1) — путь никогда не появлялся ни в
+        # `mismatches`, ни в `unverifiable`. Читаем ЖИВОЙ такт (`_interval`,
+        # тот же приватный атрибут, что мутирует `apply_heartbeat_interval`),
+        # а не пересчитываем из конфига — пересчёт показывал бы согласие
+        # всегда, в том числе когда правка до такта не доехала. Публичного
+        # геттера у `_interval` нет (только сеттер `apply_heartbeat_interval`),
+        # тем же приёмом читаем приватный атрибут, что `include_stacktrace` и
+        # `_log_success_enabled` парой экранов выше.
+        interval = getattr(heartbeat, "_interval", None)
+        if isinstance(interval, (int, float)) and not isinstance(interval, bool):
+            out[HEARTBEAT_INTERVAL_KEY] = float(interval)
+    # Ф1.4 (M17): окна голоса — БЕЗУСЛОВНО и без параметра, в отличие от соседей
+    # выше. У этой секции нет живого объекта, который надо было бы прокинуть
+    # сюда вызывающему: механизм процессный, политика существует в любом
+    # процессе с первой секунды, и «получателя не передали» здесь не бывает.
+    #
+    # Читается ДЕЙСТВУЮЩАЯ политика механизма, а не разрешённые слои — по тому
+    # же доводу, что у `events`/`flight`/`observation`: пересчёт из того же
+    # источника показывал бы согласие всегда, в том числе когда правка до
+    # механизма не доехала. Без этой ветки КАЖДАЯ правка `observability.voices`
+    # отвечала бы `unverifiable` при `checked=0` — воспроизведено ревью Task 1.4
+    # на живом стенде, и это ровно тот же блокер Б2, что уже был у `events`.
+    #
+    # Имена ключей — из СХЕМЫ (`ObservabilityVoicesConfig`), а не внутренние
+    # имена политики: путь конфига обязан совпасть с путём readback'а один в
+    # один, иначе тождественное сравнение ниже не найдёт свой путь.
+    #
+    # Task 2.7 (добор ревью Ф1): бывшие литералы MAX_TRACKED_KEYS/_STALE_WINDOWS
+    # читаются той же безусловной дорогой, что и окно/эскалация выше — они
+    # такая же ДЕЙСТВУЮЩАЯ политика механизма, а не параметр менеджера.
+    from ...logger_module.core.windowed_voice import (
+        default_window_sec,
+        escalate_after_repeats,
+        max_tracked_keys,
+        stale_windows,
+    )
+
+    out[VOICES_SECTION_KEY] = {
+        "default_window_sec": float(default_window_sec()),
+        "escalate_after_repeats": int(escalate_after_repeats()),
+        "max_tracked_keys": int(max_tracked_keys()),
+        "stale_windows": int(stale_windows()),
+    }
     return out
+
+
+#: Часовой «значение отсутствует» для сравнения двух раскладок. ``None`` тут не
+#: годится: ``None`` — законное ЗНАЧЕНИЕ листа раскладки, и «пути нет» слилось бы
+#: с «путь есть и в нём null».
+_ABSENT = object()
+
+#: Пробное значение для строк. Канонический уровень, а не ``"<строка>__probe"``:
+#: ровно пять строковых полей схемы (``log_level``, ``errors.level``,
+#: ``stats.log_level``, ``sampling_max_level``, ``history.level``) провалидированы
+#: ``canonical_level_or_raise``, и произвольная строка уронила бы зонд именно на
+#: них — то есть на самых нагруженных ручках. Для НЕ-уровневых строк (пути к
+#: файлам, имена стоков, dotted-путь фабрики) канонический уровень — такая же
+#: годная «другая строка», как любая иная.
+_PROBE_STR = "DEBUG"
+_PROBE_STR_ALT = "ERROR"
+
+
+@lru_cache(maxsize=8)
+def _schema_leaf_paths(model_cls: type) -> frozenset:
+    """Листовые пути схемы: спуск ТОЛЬКО в под-``SchemaBase``.
+
+    ``Dict[str, Any]``-поле (``channels``, ``scopes``, ``loggers``,
+    ``observation.rules``) — ЛИСТ, хотя его значение и словарь: за его формой
+    стоит не под-схема, а свободная карта, и «управляет ли им экспандер» — вопрос
+    про поле целиком, а не про каждое имя внутри. Та же рекурсия по
+    ``issubclass(annotation, SchemaBase)``, что у стражей задач 2.2/2.9 — правило
+    здесь атрибут схемы, а не решение автора, поэтому копии разойтись неоткуда.
+    """
+    from ...data_schema_module import SchemaBase
+
+    out = set()
+    for name, field in model_cls.model_fields.items():
+        ann = field.annotation
+        if isinstance(ann, type) and issubclass(ann, SchemaBase):
+            out.update((name, *rest) for rest in _schema_leaf_paths(ann))
+        else:
+            out.add((name,))
+    return frozenset(out)
+
+
+def _requested_leaves(section: Any, leaf_paths: frozenset, prefix: tuple = ()) -> list:
+    """Листья ЗАПРОСА как ``(кортеж-путь, значение)`` — с резом по границе СХЕМЫ.
+
+    Кортеж, а не строка ``"a.b.c"``: имена внутри свободных карт содержат точки
+    (``loggers``: ``some.prefix``), и восстановить вложенную форму из плоской
+    строки однозначно нельзя. Зонду ниже нужна именно вложенная форма.
+
+    Ключ, которого в схеме нет вовсе (секция не прошла валидацию, и ``survived``
+    остался сырым), листом всё равно становится — его назовёт отдельный сверщик
+    ``unknown_section_keys``, а молча потерять его здесь нельзя.
+    """
+    out: list = []
+    if not isinstance(section, dict):
+        return out
+    for key, value in section.items():
+        path = prefix + (str(key),)
+        if path in leaf_paths or not isinstance(value, dict) or not value:
+            out.append((path, value))
+        else:
+            out.extend(_requested_leaves(value, leaf_paths, path))
+    return out
+
+
+def _other_value(value: Any) -> Any:
+    """Заведомо ДРУГОЕ значение того же рода — второй полюс зонда.
+
+    Про пустоту отдельно, потому что оба случая неочевидны:
+
+    * ``None`` — это «ключ есть, значения нет» (``log_directory``,
+      ``documents.factory``). Другим полюсом берём строку: почти все
+      ``Optional``-листья схемы строковые, а валидации на пути зонда нет вовсе
+      (см. :func:`_with_leaf`), поэтому промах по типу максимум даст неотличимые
+      раскладки — то есть безопасный исход «лист назван», а не тихий пропуск;
+    * пустой словарь ``{}`` — это «слой владеет пустотой» (правило Г3), законное
+      значение ``channels``/``scopes``. Другим полюсом берём непустую карту:
+      экспандер смотрит такие поля через ``if cfg.channels:``, и разница
+      «пусто/непусто» — ровно та ось, которой лист и управляет.
+    """
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value + 1
+    if isinstance(value, str):
+        return _PROBE_STR_ALT if value == _PROBE_STR else _PROBE_STR
+    if value is None:
+        return _PROBE_STR
+    if isinstance(value, (list, tuple)):
+        return [] if value else [_PROBE_STR]
+    if isinstance(value, dict):
+        return {k: _other_value(v) for k, v in value.items()} if value else {_PROBE_STR: {}}
+    return _PROBE_STR
+
+
+def _with_leaf(cfg: Any, path: tuple, value: Any) -> Any:
+    """Копия конфига с ОДНИМ подменённым листом — БЕЗ повторной валидации.
+
+    ``model_copy(update=...)``, а не сборка словаря и ``model_validate``, и это
+    не микро-оптимизация. У схемы есть валидаторы с ПОБОЧНЫМ ДЕЙСТВИЕМ: у
+    ``stats`` стоит ``mode="before"``, который на ``enabled: false`` пишет
+    оператору предупреждение «метрики не будут собираться вовсе» (ADR-PM-046).
+    Зонд подставляет второй полюс сам — и через словарь он вписывал бы это
+    предупреждение оператору, попросившему ровно ОБРАТНОЕ (``enabled: true``).
+    Ложный голос о выключенной плоскости дороже отсутствующего: его читают.
+    Воспроизведено: ``expand_observability({"stats": {"enabled": False}})`` даёт
+    запись ``WARNING observability_config``, тот же вход через ``model_copy`` —
+    ноль записей.
+
+    Второе следствие того же выбора: мутант не может быть отвергнут схемой, то
+    есть ветка «зонд ослеп из-за собственного пробного значения» закрыта не
+    обработкой исключения, а построением. ``expand_observability`` при этом
+    остаётся защищённым ``try`` у вызывающего — он читает поля сам и на
+    бессмысленном значении может упасть.
+    """
+    if not path:
+        return value
+    head = path[0]
+    if len(path) == 1:
+        return cfg.model_copy(update={head: value})
+    node = getattr(cfg, head, None)
+    if not hasattr(node, "model_copy"):
+        raise TypeError(f"{head}: не под-схема, спускаться некуда")
+    return cfg.model_copy(update={head: _with_leaf(node, path[1:], value)})
+
+
+def _controlled_layout_paths(path: tuple, value: Any, layout: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Пути раскладки, которыми управляет ОДИН лист запроса, со значениями из ``layout``.
+
+    Возвращает:
+
+    * ``None`` — раскладка от значения этого листа не зависит ВООБЩЕ (два полюса
+      дали побайтно одно и то же). Экспандер лист не смотрит: его получатель —
+      живой механизм процесса, а не конфиг менеджера. Вызывающий кладёт такой
+      лист в ``expected`` под СХЕМНЫМ именем;
+    * словарь — лист потреблён, и это его отпечаток: пути, которыми полюса
+      расходятся, пересечённые с ПОЛНОЙ раскладкой запроса. Значение берётся из
+      полной раскладки, а не из изолированной: ключи взаимодействуют
+      (``loggers`` объявленных модулей мержится с ``loggers`` запроса), и
+      изолированный полюс тут соврал бы значением;
+    * ПУСТОЙ словарь — лист потреблён, но при ЭТОМ значении экспандер молчит и
+      отдаёт решение дефолту ниже (``console: true`` не эмитит ``channels``
+      вовсе — их подставит ``LoggerManagerConfig``). Проверять нечего: значения,
+      которое надо сравнить с readback'ом, в раскладке просто нет.
+
+    Пустой словарь в самой раскладке (``error: {}`` при ``errors.enabled:
+    false``) в отпечаток НЕ берётся: это не поле, а погашенная СЕКЦИЯ раскладки,
+    и readback такого пути не отдаёт никогда. Без этого реза вердикт называл бы
+    оператору внутреннее имя ``error``, которого нет ни в его конфиге, ни в
+    ответе (находка Д3 ревью).
+    """
+    base = ObservabilityConfig()
+    try:
+        here = flatten_section(expand_observability(_with_leaf(base, path, value)))
+        there = flatten_section(expand_observability(_with_leaf(base, path, _other_value(value))))
+    except Exception:  # noqa: BLE001 — зонд ослеп: назвать лист, а не проглотить
+        return None
+    if here == there:
+        return None
+    owned: Dict[str, Any] = {}
+    # ПЕРЕСЕЧЕНИЕ, а не объединение: утверждаем разницу по ЗНАЧЕНИЮ, разницу по
+    # НАЛИЧИЮ только называем. Объединение давало ложную тревогу, воспроизведённую
+    # на живом стенде: `errors.enabled` переключением ГАСИТ секцию `error`
+    # целиком, поэтому в отпечаток падали все её пути, а значения им доставались
+    # из раскладки запроса, где несмежные соседи стоят на схемных дефолтах.
+    # Оператор спрашивал про ОДИН ключ и получал `failed` с двумя чужими
+    # (`error.default_level`, `error.include_stacktrace`), выставленными им же
+    # секундой раньше. Ложная тревога дороже отсутствующей: на неё полагаются.
+    # Побочно тот же рез снял и ПРЕДСУЩЕСТВУЮЩИЙ шум: `console: false` называл 56
+    # путей стола каналов (на базе `f84817cf` — 47), теперь называет себя одного.
+    # Цена названа вслух: `console`/`file` теряют единственную сверку
+    # (`logger.channels.<имя>.enabled`) и становятся `unverifiable` — сверка
+    # приезжала в комплекте с 56 ложными именами и риском ложного mismatch на
+    # чужом стоке. Честное «не проверил» дешевле проверки, которую не отличить
+    # от вранья; настоящую дорогу этим ключам даст реестр описателей (Task 4.9).
+    for probe_path in set(here) & set(there):
+        if here.get(probe_path, _ABSENT) == there.get(probe_path, _ABSENT):
+            continue
+        got = layout.get(probe_path, _ABSENT)
+        if got is _ABSENT or (isinstance(got, dict) and not got):
+            continue
+        owned[probe_path] = got
+    return owned
 
 
 def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[str, Any]:
@@ -278,9 +863,68 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     а не своим переводом «ключ конфига → поле менеджера». Перевод здесь неочевиден:
     ``log_level`` действует как ``logger.default_level``, и своя копия этого знания
     была бы вторым местом, где оно живёт.
+
+    **«Потреблён ли лист» решает ЗОНД, а не ручной список особых случаев**
+    (задача 2.9, M1/M2). До неё лист, не попавший ни в
+    ``expand_observability(survived)``, ни в ``IDENTITY_SECTION_KEYS``, исчезал
+    из вердикта ЦЕЛИКОМ: запрос, подавший ``heartbeat_interval_sec`` или
+    ``stats.enabled``, отвечал побайтно тем же, что и ПУСТОЙ запрос.
+
+    **Зонд спрашивает про РАЗНИЦУ ДВУХ значений, а не про одно** (добор ревью
+    2.9). Первая редакция сравнивала раскладку ``{ключ: значение}`` с раскладкой
+    пустого запроса — и путала «ключ не просили» с «значение запроса совпало со
+    схемным дефолтом». Совпадение с дефолтом законно (оператор, написавший
+    ``console: true`` поверх выключенной консоли, сказал ровно то, что хотел), а
+    цена ошибки была двойной: 24 листа схемы получали в ``unverifiable`` СЫРОЕ
+    схемное имя, которого readback не отдаёт никогда, и ещё 7 не получали
+    ничего. Ложное имя хуже отсутствующего: отличить его от честного
+    ``documents.factory`` оператору нечем.
+
+    Разница двух значений от значения не зависит — на этом и стоит починка. Для
+    каждого ЛИСТА СХЕМЫ, приехавшего в ``survived``, зонд строит два полюса
+    (``значение`` и :func:`_other_value`), раскладывает ОБА и берёт пути, в
+    которых они расходятся: это ровно те пути раскладки, которыми лист
+    управляет. Полюса собираются ``model_copy`` поверх чистого
+    ``ObservabilityConfig()`` — без повторной валидации, см. :func:`_with_leaf`.
+    Значение для ``expected`` берётся из ПОЛНОЙ раскладки ``expand(survived)``.
+
+    Три исхода зонда и что вердикт с ними делает — в докстринге
+    :func:`_controlled_layout_paths`. Здесь важны следствия:
+
+    * отдельного пропуска «запрос этот путь не менял» больше НЕТ и он не нужен:
+      в ``expected`` попадают ТОЛЬКО пути, которыми запрос управляет, а не вся
+      раскладка. Пропуск сравнивал со схемными дефолтами и глушил ровно те
+      правки, где оператор просит значение, равное дефолту (``stats.enabled:
+      true`` подтверждался только на выключение);
+    * лист, чей отпечаток раскладка при этом значении не материализовала
+      (``console: true`` — экспандер молчит и отдаёт решение дефолту ниже),
+      проверяемого пути не даёт и потому НАЗЫВАЕТСЯ схемным именем — всегда, а
+      не только когда весь запрос состоит из таких листьев. Названность —
+      свойство ЛИСТА: первая редакция ставила её «последним рубежом» при пустом
+      ``expected``, и один и тот же ``console: true`` назывался в одиночку и
+      молчал рядом с проверяемым ключом;
+    * отпечаток берётся по ПЕРЕСЕЧЕНИЮ путей двух полюсов, а не по объединению:
+      разницу по ЗНАЧЕНИЮ утверждаем, разницу по НАЛИЧИЮ только называем.
+      Объединение давало ложную тревогу — переключатель, гасящий секцию
+      раскладки (``errors.enabled``), забирал в отпечаток всю её, и вердикт
+      требовал схемный дефолт от соседних ключей, которых оператор не писал
+      (воспроизведено ревью на живом стенде). Цена реза: ``console``/``file``
+      теряют единственную сверку и становятся ``unverifiable`` — она приезжала
+      в комплекте с 56 ложными именами стола каналов;
+    * раскладка не обязана быть инъективной: если два значения листа дают
+      побайтно одну раскладку (клампинг, насыщение), отпечаток пуст и лист
+      уходит в ``unverifiable`` под схемным именем. Шумно, но честно —
+      сегодняшних примеров в схеме нет, а появится такой лист — вердикт скажет
+      «не проверил», а не «сошлось».
+
+    ``observation`` — секция непотреблённого рода, но её собственная нормализация
+    (``normalized_observation_section``, glob-пути с точками внутри имени)
+    обязана применяться ПОСЛЕ зонда: без этого порядка в ``expected`` лёг бы
+    СЫРОЙ ``rules``-словарь (без достроенных дефолтов ``MetricRule``), и он бы
+    никогда не совпал с тем, что отдаёт readback. Здесь и только здесь более
+    специфичная запись обязана победить более общую.
     """
-    from ..configs.observability_config import ObservabilityConfig, expand_observability
-    from ..configs.observability_layers import flatten_section, unknown_section_keys
+    from ..configs.observability_layers import unknown_section_keys
 
     section = requested if isinstance(requested, dict) else {}
 
@@ -296,33 +940,43 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
     except Exception:  # noqa: BLE001 — невалидную секцию судит применение, не вердикт
         survived = section
 
-    baseline = flatten_section(expand_observability({}))
-    expected = flatten_section(expand_observability(survived))
-    # Ф4 (4.1): секция `events` — единственная, чей путь конфига СОВПАДАЕТ с
-    # путём readback'а один в один (`events.first_n` → `events.first_n`), потому
-    # что у неё нет менеджера, в поля которого её надо переводить. Она идёт мимо
-    # `expand_observability` (как `documents` и `session_ttl_sec`) — и потому
-    # мимо `expected`, а значит и мимо вердикта: живой стенд 2026-08-16 отвечал
-    # `unverifiable` при `checked=0` на всех восьми процессах, хотя ручка
-    # применялась. Тождественное соответствие — не «вторая таблица перевода»,
-    # которую запрещает докстринг выше: переводить здесь нечего, и разойтись
-    # этой строке не с чем.
-    # Ф5 (5.1): `flight` — вторая под-секция с тем же свойством и тем же
-    # доводом. Обе идут мимо `expand_observability` (у них нет менеджера, в поля
-    # которого их надо переводить), поэтому обе обязаны быть названы здесь —
-    # иначе вердикт про них молчит, а молчание читается как «не проверено».
-    for section_key in (EVENTS_SECTION_KEY, FLIGHT_SECTION_KEY):
-        if isinstance(survived.get(section_key), dict):
-            for key, want in survived[section_key].items():
-                expected[f"{section_key}.{key}"] = want
+    # Раскладка ПОЛНОГО запроса — источник ЗНАЧЕНИЙ (какие пути кому
+    # принадлежат, решает зонд по каждому листу отдельно).
+    layout = flatten_section(expand_observability(survived))
+    leaves = _requested_leaves(survived, _schema_leaf_paths(ObservabilityConfig))
+    expected: Dict[str, Any] = {}
+    for leaf_path, leaf_value in leaves:
+        owned = _controlled_layout_paths(leaf_path, leaf_value, layout)
+        if not owned:
+            # ``None`` — раскладка от листа не зависит вовсе (зонд молчит на обоих
+            # полюсах): лист идёт мимо экспандера, его схемный путь и есть путь
+            # readback'а. Пустой словарь — лист УПРАВЛЯЕТ путями раскладки, но при
+            # ЭТОМ значении раскладка их не материализовала (`console: true` —
+            # схемный дефолт, экспандер молчит; `errors.enabled: false` гасит
+            # секцию целиком). Сверять нечего ни там, ни там — и оба случая
+            # обязаны быть НАЗВАНЫ схемным именем.
+            #
+            # Одной веткой, а не «последним рубежом при пустом `expected`»:
+            # рубеж делал названность зависимой от СОСЕДЕЙ по запросу — один и тот
+            # же `console: true` назывался в одиночку и молчал рядом с проверяемым
+            # ключом. Свойство «либо сверен, либо назван, но никогда нигде»
+            # принадлежит ЛИСТУ, а не запросу целиком.
+            expected[".".join(leaf_path)] = leaf_value
+        else:
+            expected.update(owned)
+    # `observation` — секция того же непотреблённого рода, но с СОБСТВЕННОЙ
+    # нормализацией путей (glob-паттерны содержат точки, и голая запись выше
+    # кладёт СЫРОЙ словарь `rules` без достроенных дефолтов `MetricRule`).
+    # Обязана идти ПОСЛЕ зонда: её ключи заменяют только что положенные сырые,
+    # а не соседствуют с ними (см. докстринг функции).
+    if isinstance(survived.get(OBSERVATION_SECTION_KEY), dict):
+        expected.update(normalized_observation_section(survived[OBSERVATION_SECTION_KEY]))
     flat_effective = flatten_section(effective if isinstance(effective, dict) else {})
 
     mismatches: list = []
     unverifiable: list = []
     checked = 0
     for path, want in expected.items():
-        if baseline.get(path) == want:
-            continue  # запрос этот путь не менял
         if path not in flat_effective:
             unverifiable.append(path)
             continue
@@ -330,7 +984,6 @@ def observability_verified(requested: Any, effective: Dict[str, Any]) -> Dict[st
         got = flat_effective[path]
         if got != want:
             mismatches.append({"key": path, "expected": want, "actual": got})
-
     if mismatches or unknown:
         verdict = "failed"
     elif checked:
@@ -509,6 +1162,39 @@ PLANE_COUNTER_KEYS: tuple = (
     # предела рекурсии, — но невидимым быть не вправе: «хвост тихий» и «хвост
     # глушит сам себя» лечатся разным, а выглядят одинаково.
     "tap_reentrant_suppressed",
+    # Ф5, ревью-блокер B3 — tap хвоста бросил при записи; глушится (эмитент не
+    # роняется), но не молчит счётчиком.
+    "tap_write_errors",
+    # Ф5, ревью-блокер B2 — числа плоскости stats, ушедшие МИМО порта наблюдений
+    # (attach_observation_port не вызывался/не удался). В боевой сборке обязан
+    # быть пустым словарём; словарь по МЕТОДУ (record_metric/gauge/…), а не
+    # единое число — см. ``StatsManager.observation_bypasses``.
+    "observation_bypasses",
+    # Ф5, ревью-блокер B3 — собственные счётчики порта наблюдений (только у
+    # ``ObservationManager``, три соседние плоскости их не заводят вовсе):
+    # сколько чисел реально ушло в раздачу tap'ам, сколько потеряно отказом
+    # приёмника и сколько подавлено реентерабельностью. Без них «обходов
+    # ноль» (``observation_bypasses == {}``) неотличимо от «портом никто не
+    # пользовался» — см. ``ObservationManager.get_stats``.
+    "numbers_delivered",
+    # Ф5-добор, блокер Б1 — раздача состоялась и не дошла НИ ДО КОГО.
+    # Пара к ``numbers_delivered``: сам по себе он рос одинаково при живом
+    # приёмнике и при нуле приёмников, то есть различитель живой и мёртвой
+    # плоскости чисел — только ПАРА (delivered > 0 И no_sink == 0). Без этого
+    # ключа спросить у ЖИВОГО процесса нечем: он есть только здесь.
+    "numbers_dropped_no_sink",
+    "numbers_dropped_by_sink_error",
+    "numbers_suppressed_reentrant",
+    # Ф2, задача 2.1 — числа, НЕ собранные по решению политики. Это потеря на
+    # ВХОДЕ (как кардинальность), и она обязана быть спрашиваемой у живого
+    # процесса: без неё «метрики нет в окне» одинаково выглядит и при работающем
+    # правиле оператора, и при сломанном писателе, а лечатся они разным.
+    # Пара к тишине: `stats.enabled: false` без растущего счётчика неотличим от
+    # «никто не писал» — ровно это требует критерий 3 приёмки задачи.
+    # Два ключа, а не сумма: «запрещено правилом» лечится правилом,
+    # «придержано interval_sec» — частотой (см. `StatsManager.numbers_policy_dropped`).
+    "numbers_policy_dropped",
+    "numbers_policy_throttled",
     # Ф4.1 — цепочка процессоров. Поглощение записи процессором ЗАКОННО
     # (ради него заводится сэмплинг Ф7.1), но невидимым быть не вправе:
     # иначе «уровень включён, а записей нет» неотличимо от сломанного
@@ -530,6 +1216,17 @@ PLANE_COUNTER_KEYS: tuple = (
     "records_sampled_out",
     "sampler_keys_tracked",
     "sampler_keys_saturated",
+    # Ф1.4 (M17) — окна голоса на ключ. Родственник дросселя выше, но не он:
+    # тот подавляет по ТЕКСТУ записи, этот — по явному ключу события, и число
+    # подавленных называется в тексте следующего голоса. Пара ключей по тому же
+    # правилу, что у дросселя: «сколько подавлено» и «сколько счётчиков потеряно
+    # вместе с выброшенным по потолку ключом» — второе делает первое честным.
+    "windowed_suppressed",
+    "windowed_keys_evicted",
+    # Task 4.13 — третий ключ той же тройки, и он делает первые два честными:
+    # «подавлено N» без него одинаково означает работающее окно и приёмника,
+    # который не принял ни одной записи (слот съедался решением, а не доставкой).
+    "windowed_delivery_failed",
     # Ф7.х — карта ключей дышит: подметённые протухшие. Пара к предыдущему ключу:
     # растёт expired — потолок работает как задумано; стоит expired при растущем
     # saturated — карта забита горячими ключами, дроссель по повторяемости против
@@ -576,7 +1273,13 @@ PLANE_COUNTER_KEYS: tuple = (
     # оператор читает «<сборка сообщения упала: ...>» и не может спросить,
     # сколько таких было.
     "message_build_failures",
-)
+    # Ф1.1 (C3) — три счётчика процессных хуков приезжают ИМПОРТОМ константы, а
+    # не переписанными строками. Список выше сам объявлен «точкой забывания», и
+    # четвёртая копия трёх имён (реестр, объявление в ErrorManager, документ,
+    # здесь) разошлась бы молча — расхождение видно только тому, кто сверяет
+    # руками. Кортеж склеивается, а не распаковывается внутрь, чтобы имена
+    # оставались там, где они определены.
+) + HOOK_COUNTER_KEYS
 
 
 def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:
@@ -619,10 +1322,19 @@ def observability_counters(
     logger: Any = None,
     error: Any = None,
     stats: Any = None,
+    observation: Any = None,
     hub: Any = None,
     flush: bool = False,
 ) -> Dict[str, Any]:
-    """Потери и глубина буферов трёх плоскостей — «сколько наблюдаемости не доехало».
+    """Потери и глубина буферов ЧЕТЫРЁХ плоскостей — «сколько наблюдаемости не доехало».
+
+    ``observation`` — Ф5, ревью-блокер S2. До этой правки кортеж называл только
+    ``logger``/``error``/``stats``: секция ``observation`` в ответе
+    ``introspect.observability`` существовала (``observation_plane_report``), но
+    отвечала ТОЛЬКО за гейт УРОВНЕЙ (``writers``/``publications``) — счётчиков
+    ЧИСЕЛ порта (``numbers_delivered`` и соседи, B3; ``observation_bypasses``
+    менеджера stats, B2) в ответе не было вовсе, и «один писатель» проверялся
+    только тестами: спросить у ЖИВОГО процесса было нечем.
 
     Отвечает на вопросы, которые до Ф0.3 нельзя было задать живому процессу
     снаружи вообще: ``get_stats()`` менеджеров не читал никто, кроме тестов.
@@ -659,7 +1371,7 @@ def observability_counters(
                     # потерять весь снимок из-за одной несжатой плоскости.
                     pass
     out: Dict[str, Any] = {}
-    for name, manager in (("logger", logger), ("error", error), ("stats", stats)):
+    for name, manager in (("logger", logger), ("error", error), ("stats", stats), ("observation", observation)):
         section = _plane_counters(manager)
         if section is not None:
             out[name] = section
@@ -687,6 +1399,7 @@ def apply_observability_layers(
     boot_rules: Optional[Dict[str, Any]] = None,
     event_selector: Any = None,
     flight_recorder: Any = None,
+    command: Any = None,
     origin: str,
     record_rebuild: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
@@ -717,6 +1430,13 @@ def apply_observability_layers(
     ``test_observability_reload_merge.py``.
 
     None-менеджеры пропускаются (например error/stats отключены).
+
+    Task 2.2 (критерий 3): ``command`` — седьмая плоскость на тех же правах,
+    что ``event_selector``/``flight_recorder``: ручка ``observability.commands.
+    log_success`` раскладывалась ``expand_observability`` и НИКОГДА не
+    доставлялась до живого ``CommandManager`` — правка лежала в слое, была
+    видна в провенансе и не действовала. ``None`` — не отказ (процесс без
+    ``CommandManager`` пропускает ветку).
 
     Task 5.10.f — **четвёртая плоскость в том же стеке.** ``heartbeat`` /
     ``heartbeat`` / ``telemetry_boot`` необязательны ровно так же, как
@@ -755,9 +1475,6 @@ def apply_observability_layers(
         Применённый конфиг ``{"logger": …, "error": …, "stats": …, "command": …}``.
         Фактическое состояние менеджеров — :func:`observability_effective`.
     """
-    from ...data_schema_module import deep_merge
-    from ..configs.managers_config import merge_managers
-
     # Task 5.8: пересборка идёт ПОД ЛОКОМ СТЕКА целиком. Писателей стало четыре
     # (два watcher'а, поток команд, такт heartbeat), а между «прочитал слои» и
     # «применил результат» два шага: без лока последней могла бы примениться
@@ -767,19 +1484,19 @@ def apply_observability_layers(
         with layers.lock:
             applied = _rebuild_and_apply(
                 layers,
+                origin=origin,
                 logger=logger,
                 error=error,
                 stats=stats,
                 log_dir=log_dir,
                 log_info=log_info,
-                deep_merge=deep_merge,
-                merge_managers=merge_managers,
                 heartbeat=heartbeat,
                 telemetry_boot=telemetry_boot,
                 store_throttle=store_throttle,
                 boot_rules=boot_rules,
                 event_selector=event_selector,
                 flight_recorder=flight_recorder,
+                command=command,
             )
             # Task 5.8: пересборка удалась — долг подметальщика погашен, КЕМ БЫ она ни
             # была вызвана. Иначе после неудачного возврата и последующего успешного
@@ -811,19 +1528,19 @@ def apply_observability_layers(
 def _rebuild_and_apply(
     layers: "ObservabilityLayers",
     *,
+    origin: Optional[str] = None,
     logger: Any,
     error: Any,
     stats: Any,
     log_dir: Optional[str],
     log_info: Optional[Callable[[str], None]],
-    deep_merge: Callable[..., Any],
-    merge_managers: Callable[..., Any],
     heartbeat: Any = None,
     telemetry_boot: Optional[Dict[str, Any]] = None,
     store_throttle: Any = None,
     boot_rules: Optional[Dict[str, Any]] = None,
     event_selector: Any = None,
     flight_recorder: Any = None,
+    command: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Тело пересборки (вызывается под локом стека — см. вызывающего)."""
     resolved = layers.resolve()
@@ -832,25 +1549,7 @@ def _rebuild_and_apply(
     # получатели. Снимаем её до `expand_observability`, иначе `ObservabilityConfig`
     # отверг бы незнакомый ключ, и слой оказался бы невыразим.
     telemetry_layered = resolved.pop(TELEMETRY_KEY, None)
-    expanded = expand_observability(resolved)
-    base = base_managers_payload(log_dir)
-
-    explicit_level = resolved.get("log_level")
-    logger_cfg = merge_managers(base.get("logger", {}), expanded["logger"])
-    if explicit_level is not None:
-        # Ф8.1: уровень кладётся ОДНИМ правилом корня и мержится с остальными
-        # правилами, а не заменяет секцию. Прежде здесь стоял танец
-        # «вынуть scopes до merge → положить профиль → вернуть правки поверх»:
-        # он существовал ровно потому, что профиль переписывал набор целиком.
-        # Причина снята — танец снят вместе с ней.
-        #
-        # ``deep_merge``, а не ``update``: у корня может быть и правило приёмников
-        # (``loggers[""].channels``), и замена словаря целиком снесла бы его молча.
-        logger_cfg["loggers"] = deep_merge(logger_cfg.get("loggers") or {}, _root_level_rule(explicit_level))
-        logger_cfg["default_level"] = str(explicit_level).upper()
-    expanded["logger"] = logger_cfg
-    expanded["error"] = merge_managers(base.get("error", {}), expanded["error"])
-    expanded["stats"] = merge_managers(base.get("stats", {}), expanded["stats"])
+    expanded = compose_managers_payload(resolved, log_dir=log_dir, origin=origin)
 
     if logger is not None:
         logger.reconfigure(expanded["logger"])
@@ -861,6 +1560,18 @@ def _rebuild_and_apply(
     if stats is not None:
         stats.reconfigure(expanded["stats"])
         _remark_operator_disabled_sinks(stats, layers, ("stats", "channels"))
+
+    # Ф2 (задача 2.2, критерий 3): третья точка дороги `observability.commands.
+    # log_success`. `expanded["command"]` УЖЕ считается `compose_managers_payload`
+    # выше, но раньше его не забирал никто — правка легла бы в слой, была бы
+    # видна в провенансе (`_schema_keys()` генерик её видит) и НЕ действовала.
+    # Получатель — ЖИВОЙ `CommandManager` (`set_log_success_enabled`), а не
+    # пересоздание: гейт у ИСТОЧНИКА (командный hot-path не должен терять счёт
+    # ради правки конфига).
+    if command is not None:
+        set_log_success_fn = getattr(command, "set_log_success_enabled", None)
+        if callable(set_log_success_fn):
+            set_log_success_fn(bool(expanded["command"].get("log_success", False)))
 
     # Ф4 (4.1), третья точка дороги ручки: живой селектор перенастраивается ИЗ
     # ТЕХ ЖЕ разрешённых слоёв, что прочитала сшивка на старте. Без этой ветки
@@ -880,6 +1591,38 @@ def _rebuild_and_apply(
     if flight_applied is not None:
         expanded[FLIGHT_SECTION_KEY] = flight_applied
 
+    # Ф1.4 (M17), та же третья точка у окон голоса. Отличие от соседей: живой
+    # объект перенастраивать не надо — механизм процессный, и применение это
+    # смена политики, которую все держатели окон читают на следующем голосе.
+    voices_applied = apply_voices_policy(resolved.get(VOICES_SECTION_KEY))
+    if voices_applied is not None:
+        expanded[VOICES_SECTION_KEY] = voices_applied
+
+    # Ф4 плана «порт наблюдений» (4.1), та же третья точка у политики порта.
+    # Секция `observation` остаётся в `resolved` по тому же доводу, что `events`
+    # и `flight`. Получатель — живой гейт heartbeat'а: без этой ветки правка
+    # легла бы в слой, была бы видна в провенансе и НЕ действовала.
+    # Отчёт о потолках IPC здесь НЕ считается (Ф3, задача 3.0a, находка Н1
+    # ревью): он читает такт и publish-секцию, а обе величины правят СОСЕДНИЕ
+    # стадии ниже. Считается он в конце ленты — `observation_throttle_report`.
+    observation_applied = apply_observation_policy(
+        heartbeat,
+        resolved.get(OBSERVATION_SECTION_KEY),
+    )
+    if observation_applied is not None:
+        expanded[OBSERVATION_SECTION_KEY] = observation_applied
+
+    # Ф2 (задача 2.3, M9), седьмая плоскость на тех же правах. Скаляр, а не
+    # под-секция (как `observation`/`voices`/`events`/`flight` выше), поэтому в
+    # `resolved` лежит ПРЯМО под своим именем (как `log_level` в
+    # `compose_managers_payload`), а не под ключом-конвертом. Получатель — ЖИВОЙ
+    # `ProcessHeartbeat`: без этой ветки правка легла бы в слой, была бы видна в
+    # провенансе (`_schema_keys()` генерик её уже видит) и НЕ действовала бы —
+    # ровно тот класс, ради которого «третья точка дороги» здесь и заведена.
+    heartbeat_interval_applied = apply_heartbeat_interval(heartbeat, resolved.get(HEARTBEAT_INTERVAL_KEY))
+    if heartbeat_interval_applied is not None:
+        expanded[HEARTBEAT_INTERVAL_KEY] = heartbeat_interval_applied
+
     telemetry_applied = _apply_telemetry_from_layers(
         telemetry_layered,
         layers=layers,
@@ -892,6 +1635,15 @@ def _rebuild_and_apply(
     if telemetry_applied is not None:
         expanded[TELEMETRY_KEY] = telemetry_applied
 
+    # Ф3, задача 3.0a (находка Н1 ревью): отчёт о потолках IPC — ПОСЛЕДНЯЯ
+    # строка ленты применений, потому что он целиком считается по readback'у
+    # состояния, которое правят обе стадии выше (такт — `apply_heartbeat_interval`,
+    # `tick_sec`/`default_interval_sec` — телеметрийная). Стоя раньше, он отвечал
+    # по состоянию ДО правки, и два ОДИНАКОВЫХ `config.reload` подряд давали
+    # РАЗНЫЕ ответы: первый утверждал «потолков нет» там, где потолок уже был.
+    if observation_applied is not None:
+        observation_applied.update(observation_throttle_report(heartbeat, observation_applied, store_throttle))
+
     if log_info is not None:
         held = ", ".join(layers.session_keys()) or "—"
         log_info(
@@ -899,6 +1651,181 @@ def _rebuild_and_apply(
             f"(log_level={expanded['logger'].get('default_level')}; держится сессией: {held})"
         )
     return expanded
+
+
+def apply_observation_policy(heartbeat: Any, section: Any, *, store_throttle: Any = None) -> Optional[Dict[str, Any]]:
+    """Донести политику порта до ЖИВОГО гейта и вернуть применённое (Ф4, 4.1).
+
+    ``None`` на входе (``heartbeat`` не поднят) — не отказ: пересборка идёт и на
+    процессах, где телеметрию никто не публикует. Секция при этом ВСЕГДА
+    непустая по смыслу, даже когда слои о ней молчат: дефолтное правило поддерева
+    порта — это решение владельца (вариант «в»), а не «механизма нет». Поэтому
+    применяем и при ``section is None`` — иначе снятие ключа из слоя оставляло бы
+    гейт на прошлой правке, ровно та невыразимость, ради устранения которой 5.12
+    развернула семантику на «пересборку из источников».
+
+    **Голос про потолок IPC — здесь, а не только у соседней плоскости.**
+    Половина сверщика, работающая с ``publish_section``, судит правила
+    ``telemetry.publish`` по ИМЕНИ и правила по ПУТИ не видит вовсе (её и зовёт
+    оптовый ``telemetry.broadcast``); без этой ветки обещание проекта «no
+    silent caps» (ADR-PM-017) стало бы неправдой ровно для тех правил, ради
+    которых фаза делалась: оператор просит частоту выше центрального потолка,
+    получает ``success=true`` и молча срезанный темп. Отчёт кладётся в ответ, а
+    троттл НЕ трогается — операторская страховка остаётся нетронутой (auto-relax
+    отвергнут тем же ADR).
+
+    ``throttle_checked=False`` означает «сверять было не с чем» (у процесса нет
+    центрального троттла — он живёт только на оркестраторе), и это НЕ то же
+    самое, что «потолков нет»: пустой отчёт без этого признака читался бы как
+    подтверждение, которого никто не давал.
+
+    **``capped_by_throttle_unjudged`` — третье показание того же сверщика** (Ф3,
+    задача 3.0, находка F2 вердикта CTO по Ф2, 2026-09-03). ``throttle_checked``
+    отвечает за ВЫЗОВ, а не за ОХВАТ: сверщик мог быть позван и всё же не
+    рассудить часть кандидатов (заявки нет И такта нет — heartbeat выключен).
+    До правки такие кандидаты пропускались молча, и пустой ``capped_by_throttle``
+    рядом с ``throttle_checked: true`` был неотличим от «потолков нет». Ключ
+    кладётся ТОЛЬКО при непустом списке: пустой словарь завёл бы в ответе
+    показание «не судили никого», которого читатель не просил, и его пришлось
+    бы отличать от отсутствия механизма.
+
+    **Возвращённое читается снаружи** (``config.reload`` → ключ
+    ``observation_applied``). До находки Б2 ревью Ф4 отчёт вычислялся и
+    выбрасывался: за пределами тестов его не потреблял никто, а единственный
+    сторож смотрел во внутренний ``expanded`` — то есть доказывал харнесс.
+
+    **Охват сверки — ``cap_candidates``, а не ``rules``** (находка З1 того же
+    ревью): дефолт правила поддерева в ``rules`` не лежит, и назначенный
+    предохранитель варианта «в» не судился вовсе, при том что соседний
+    ``capped_metrics`` его учитывал — два отчёта о потолках расходились в охвате.
+    """
+    apply = getattr(heartbeat, "apply_observation_policy", None)
+    if not callable(apply):
+        return None
+    applied = dict(apply(section) or {})
+    applied.update(observation_throttle_report(heartbeat, applied, store_throttle))
+    return applied
+
+
+def observation_throttle_report(heartbeat: Any, applied: Dict[str, Any], store_throttle: Any) -> Dict[str, Any]:
+    """Отчёт о потолках IPC по СНЯТОМУ СЕЙЧАС состоянию процесса (Ф3, задача 3.0a, Н1).
+
+    Отделено от :func:`apply_observation_policy` не ради красоты, а потому что
+    отчёт и применение обязаны стоять в РАЗНЫХ точках ленты команды. Отчёт
+    целиком считается по двум readback'ам — ``current_telemetry_tick()`` и
+    ``current_telemetry_publish()``, — а обе величины меняют СОСЕДНИЕ стадии
+    того же ``config.reload``: такт правит ``apply_heartbeat_interval``
+    (``observability.heartbeat_interval_sec``), а ``tick_sec`` и
+    ``default_interval_sec`` — телеметрийная стадия
+    (``_apply_telemetry_from_layers``). Пока отчёт считался внутри применения
+    политики порта, он читал состояние ДО этих стадий, и один и тот же вызов
+    отвечал по-разному в зависимости от того, каким он был по счёту.
+
+    Воспроизведение (находка Н1 ревью, два ОДИНАКОВЫХ ``config.reload`` подряд,
+    троттл ``{'processes.*.state.plugins.**': 0.5}``, такт харнесса 1.0)::
+
+        reload#1 {"heartbeat_interval_sec": 0.2} -> capped_by_throttle={}
+        reload#2 тот же вход                     -> {'processes.*.state.plugins.**':
+                                                     {'publisher_interval_sec': 0.2,
+                                                      'throttle_interval_sec': 0.5}}
+
+    То есть первый ответ утверждал «потолков нет» там, где потолок уже был. Та же
+    болезнь достижима и без ``heartbeat_interval_sec`` — через ``telemetry.publish.tick_sec``
+    в той же команде, — поэтому ``apply_observability_layers`` зовёт отчёт ПОСЛЕ
+    ОБЕИХ стадий, а не только после такта.
+
+    Почему не переехало само применение политики: ``reconfigure_telemetry``
+    (телеметрийная стадия) внутри себя зовёт ``_warn_capped_metrics`` — соседний
+    голос о потолках, который считает по ЖИВОЙ политике порта. Переставь стадии
+    местами — и этот голос заговорит по политике ПРОШЛОЙ правки. Порядок
+    применений остаётся прежним, переехал только отчёт.
+
+    Args:
+        heartbeat: ``ProcessHeartbeat`` процесса (источник обоих readback'ов).
+        applied: применённая политика порта — из неё собираются кандидаты
+            (:func:`~..configs.observation_policy.cap_candidates`).
+        store_throttle: живой центральный троттл оркестратора либо ``None``.
+
+    Returns:
+        Ключи для ответа: ``throttle_checked`` всегда; ``capped_by_throttle`` —
+        когда троттл есть; ``capped_by_throttle_unjudged`` — только непустым.
+    """
+    report: Dict[str, Any] = {"throttle_checked": store_throttle is not None}
+    if store_throttle is None:
+        return report
+
+    from ..configs.observation_policy import cap_candidates
+    from .telemetry_reload import judge_throttle_caps
+
+    # ЖИВОЕ значение гейта, а не константа: правило без явного `interval_sec`
+    # унаследует именно его, и сверять надо то, что попросит публикатор.
+    # Второй проход ревью итерации 2: здесь стоял `None`, поэтому сверщик
+    # никогда не видел `default_interval_sec` процесса и судил по литералу —
+    # при 0.5 против троттла 0.8 срез был реален, а отчёт отдавал пустой
+    # список рядом с `throttle_checked: true`.
+    live_publish = None
+    current = getattr(heartbeat, "current_telemetry_publish", None)
+    if callable(current):
+        try:
+            live_publish = current()
+        except Exception:  # noqa: BLE001 — readback не смеет ронять применение политики
+            live_publish = None
+    inherited = None
+    if isinstance(live_publish, dict):
+        raw = live_publish.get("default_interval_sec")
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            inherited = float(raw)
+    # Ф2 (задача 2.11, Р-11): дефолт поддерева (`cap_candidates(applied)`)
+    # заявляет `interval_sec=0.0` на каждой пересборке — `judge_throttle_caps`
+    # обязан судить его по РЕАЛЬНОМУ ask, а не по голому нулю; Ф3 (задача 3.0,
+    # F1) обобщила это до «такт — нижняя граница ЛЮБОЙ заявки» (см. её
+    # докстринг). Тот же осторожный приём, что уже стоит выше для
+    # `current_telemetry_publish`: readback не смеет ронять применение политики.
+    effective_tick = None
+    current_tick = getattr(heartbeat, "current_telemetry_tick", None)
+    if callable(current_tick):
+        try:
+            raw_tick = current_tick()
+        except Exception:  # noqa: BLE001 — readback не смеет ронять применение политики
+            raw_tick = None
+        if isinstance(raw_tick, (int, float)) and not isinstance(raw_tick, bool):
+            effective_tick = float(raw_tick)
+    caps, unjudged = judge_throttle_caps(
+        None,
+        store_throttle,
+        observation_rules=cap_candidates(applied),
+        default_interval_sec=inherited,
+        effective_tick=effective_tick,
+    )
+    report["capped_by_throttle"] = caps
+    # Ф3, задача 3.0 (находка F2 вердикта CTO по Ф2): ключ появляется ТОЛЬКО
+    # когда есть что назвать. Пустой словарь рядом с `throttle_checked: true`
+    # читался бы как «сверщик посмотрел и не судил ничего» — третье показание
+    # там, где показаний два; отсутствие ключа означает «судить было чем всех».
+    if unjudged:
+        report["capped_by_throttle_unjudged"] = unjudged
+    return report
+
+
+def apply_heartbeat_interval(heartbeat: Any, value: Any) -> Optional[float]:
+    """Донести ``observability.heartbeat_interval_sec`` до ЖИВОГО такта (Ф2, 2.3, M9).
+
+    Тонкая обёртка — тем же приёмом, что :func:`apply_observation_policy` для
+    соседней плоскости: тело мутации живёт НА ``ProcessHeartbeat``
+    (:meth:`~..heartbeat.process_heartbeat.ProcessHeartbeat.apply_heartbeat_interval`),
+    здесь — только достать получателя и не уронить пересборку, если его нет.
+
+    ``heartbeat is None`` (такт не поднят — паритет с соседями выше) → ``None``,
+    и это НЕ отказ: пересборка идёт и на процессах без heartbeat'а.
+
+    Returns:
+        Применённое значение (для readback в ответе ``config.reload``) либо
+        ``None``, если применять было некому.
+    """
+    apply = getattr(heartbeat, "apply_heartbeat_interval", None)
+    if not callable(apply):
+        return None
+    return apply(value)
 
 
 def telemetry_targets(svc: Any) -> Dict[str, Any]:

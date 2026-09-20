@@ -1,6 +1,6 @@
 {
   "name": "core",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Core infra: lifecycle hooks, shared agents, base commands, memory, scripts",
   "hooks": {
     "SessionStart": [
@@ -59,15 +59,35 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-ceiling.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "WebSearch|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/web-search-routing.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/filter-test-output.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/doc-size-guard.sh",
             "timeout": 10
           }
         ]
@@ -91,6 +111,17 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/restore-context.sh",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop-gate.sh",
+            "timeout": 300
           }
         ]
       }

@@ -15,6 +15,7 @@ import pytest
 from ..observability import (
     KIND_ERROR,
     KIND_LOG,
+    KIND_OBSERVATION,
     KIND_STATS,
     METRIC_COUNTER,
     METRIC_GAUGE,
@@ -136,11 +137,37 @@ class TestDrain:
         hub.info("a")
         hub.increment("c")
         hub.track_error(ValueError("e"))
+        hub.emit_observation_record({"writer": "capture", "metric": "fps", "value": 1.0})
         allrec = hub.drain_all()
         assert len(allrec[KIND_LOG]) == 1
         assert len(allrec[KIND_STATS]) == 1
         assert len(allrec[KIND_ERROR]) == 1
-        assert hub.drain_all() == {KIND_LOG: [], KIND_ERROR: [], KIND_STATS: []}
+        assert len(allrec[KIND_OBSERVATION]) == 1
+        assert hub.drain_all() == {KIND_LOG: [], KIND_ERROR: [], KIND_STATS: [], KIND_OBSERVATION: []}
+
+
+class TestObservationChannel:
+    """Задача 3.2: четвёртый канал — то же поведение, что у stats (форма payload'а своя)."""
+
+    def test_emit_observation_record_goes_only_to_observation_channel(self, hub):
+        hub.emit_observation_record({"writer": "capture", "metric": "fps", "value": 30.0})
+        recs = hub.get_channel(KIND_OBSERVATION).drain()
+        assert len(recs) == 1
+        rec = recs[0]
+        assert rec["kind"] == KIND_OBSERVATION
+        assert rec["module"] == "worker_module"
+        assert rec["writer"] == "capture"
+        assert rec["metric"] == "fps"
+        assert rec["value"] == 30.0
+        assert hub.drain_logs() == []
+        assert hub.drain_errors() == []
+        assert hub.drain_stats() == []
+
+    def test_observation_overflow_increments_its_own_loss_counter(self, hub):
+        for i in range(20):  # capacity=8
+            hub.emit_observation_record({"writer": "w", "metric": "m", "value": i})
+        assert hub.dropped[KIND_OBSERVATION] == 12
+        assert hub.dropped[KIND_LOG] == 0  # каналы не делят счётчик потерь
 
 
 class TestPickleSafe:

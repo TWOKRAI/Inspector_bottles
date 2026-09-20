@@ -272,6 +272,18 @@ observability:
 # плагинного; это ловушка, и она пришпилена тестом
 # backend/state/tests/test_throttle_rules_cover_plugin_paths.py
 # (TestNonEmptyThrottleConfigIsATrap).
+# МИГРАЦИЯ (Ф2, задача 2.5 плана observability-closure, ADR-PM-041 в
+# process_module/DECISIONS.md). Эта секция — легаси-адаптер, а не вторая
+# политика: при сборке гейта она переводится в observation.rules тем же
+# кодом, что резолвит правила оператора (ObservationPolicy._decide,
+# _translate_legacy_rules); провенанс в readback называется
+# "legacy:telemetry.publish", не "whitelist". Смысл ключей не меняется —
+# default_enabled/metrics читаются и действуют так же, как раньше, паритет
+# проверен на ЭТОМ файле (tests/test_observation_policy_task25_legacy_adapter.py).
+# Снятие легаси-чтения — не раньше фазы, СЛЕДУЮЩЕЙ за Ф5 плана
+# observability-closure, и только когда processes.<P>.state.<имя> перестанет
+# быть отдельной пишущей дорогой (условие ADR-PM-041, п.3) — секция мигрирует
+# в observability.observation.rules по тем же путям.
 telemetry:
   publish:
     default_enabled: false

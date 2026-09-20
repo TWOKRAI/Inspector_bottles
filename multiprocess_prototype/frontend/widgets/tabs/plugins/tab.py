@@ -204,7 +204,9 @@ class PluginsTab(BaseTreeNavTab):
         # Пересобрать список секций с актуальным каталогом плагинов
         # Передаём open_sandbox как callback — секции получат кнопку «Тест».
         self._sections_specs = build_plugin_sections(
-            self._services, plugin_manager=self._plugin_manager, open_sandbox_cb=self.open_sandbox
+            self._services,
+            plugin_manager=self._plugin_manager,
+            open_sandbox_cb=self.open_sandbox,
         )
 
         # Очистить дерево и перестроить заново

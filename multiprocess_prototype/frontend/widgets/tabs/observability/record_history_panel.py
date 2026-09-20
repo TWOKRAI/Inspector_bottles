@@ -41,11 +41,12 @@ from .record_history_presenter import RecordHistoryPresenter
 from .record_source import RecordSource
 
 # Опции фильтра уровня по kind. stats → None: фильтр скрыт, потому что severity
-# у метрики не уровень логирования. Веток две, и живьём едет ТОЛЬКО первая
-# (замер стенда 2026-08-14, 112 строк вкладки — все агрегаты):
-#   агрегат окна  → severity="snapshot"      (2.1, `hub_record_to_display`)
-#   одна метрика  → severity=<тип метрики>   (counter/gauge/timing/histogram)
-# Список уровней бессмыслен в обоих случаях, поэтому ветку не различаем.
+# у метрики не уровень логирования. С Task 3.1 (К7) у ВСЕХ числовых форм там
+# одно слово — "number" (класс записи), и различать ветки тем более незачем:
+# «агрегат окна или одно число» отвечает колонка `metric` (NULL у агрегата),
+# а не severity. До 3.1 слов было три ("snapshot" / тип метрики / "level"), и
+# список уровней был бессмыслен при каждом из них — поведение панели этой
+# правкой не меняется.
 LEVEL_OPTIONS = {
     "log": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     "error": ["ERROR", "CRITICAL"],

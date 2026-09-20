@@ -48,8 +48,14 @@ Sink'и передаются в конструктор, вызовы идут п
               ``skipped_aggregates``.
 
     apply_drained(drained)
-        Pre:  drained — выход hub.drain_all(): {'log':[...],'error':[...],'stats':[...]}.
+        Pre:  drained — выход hub.drain_all(): {'log':[...],'error':[...],'stats':[...],
+              'observation':[...]}.
         Post: каждая запись слита соответствующим apply_*; порядок сохранён.
+        Inv:  ключ 'observation' (задача 3.2) сюда НЕ читается — у порта наблюдений
+              нет sink-менеджера, в который его можно было бы переиграть (порт САМ
+              источник истины, переигрыш дал бы петлю по образцу STATS_AGGREGATE_KEY).
+              Доставка этих записей в стор/живой хвост — забота вызывающего
+              (``drain_process_observability``), не адаптера.
 """
 
 from typing import Any, Dict, List, Optional

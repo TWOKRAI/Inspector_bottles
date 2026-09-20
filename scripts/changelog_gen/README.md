@@ -8,25 +8,25 @@
 
 ```bash
 # С последнего tag до HEAD, markdown
-python scripts/changelog_gen/changelog_gen.py
+uv run --no-project python scripts/changelog_gen/changelog_gen.py
 
 # Конкретный диапазон
-python scripts/changelog_gen/changelog_gen.py --from v1.0.0 --to v1.1.0
+uv run --no-project python scripts/changelog_gen/changelog_gen.py --from v1.0.0 --to v1.1.0
 
 # Для релизной заметки
-python scripts/changelog_gen/changelog_gen.py --release-name v1.1.0 --release-date 2026-05-24
+uv run --no-project python scripts/changelog_gen/changelog_gen.py --release-name v1.1.0 --release-date 2026-05-24
 
 # Без хэшей, plain (для email/issue)
-python scripts/changelog_gen/changelog_gen.py --no-hashes --style plain
+uv run --no-project python scripts/changelog_gen/changelog_gen.py --no-hashes --style plain
 
 # Для CI / роботизированной обработки
-python scripts/changelog_gen/changelog_gen.py --style json
+uv run --no-project python scripts/changelog_gen/changelog_gen.py --style json
 
 # Включить commits, не подходящие под known types
-python scripts/changelog_gen/changelog_gen.py --include-unknown
+uv run --no-project python scripts/changelog_gen/changelog_gen.py --include-unknown
 
 # Запись в файл
-python scripts/changelog_gen/changelog_gen.py > CHANGELOG_NEXT.md
+uv run --no-project python scripts/changelog_gen/changelog_gen.py > CHANGELOG_NEXT.md
 ```
 
 ## Формат коммита (Conventional Commits)
@@ -95,7 +95,7 @@ CLI флаги перекрывают конфиг: `--from`, `--to`, `--style`,
 - Перед релизом — сгенерировать черновик CHANGELOG для ревью.
 - В CI на merge в `main` — обновить `CHANGELOG.md` автоматически.
 - Для PR с большим числом коммитов — быстро увидеть «что вообще делали в этой ветке».
-- В команде, где `/ship` создаёт GitHub release — джейсон-выход → API.
+- В команде, где `/dev:ship` создаёт GitHub release — джейсон-выход → API.
 
 ## Ограничения
 

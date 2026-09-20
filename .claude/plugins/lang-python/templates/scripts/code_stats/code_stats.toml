@@ -7,12 +7,17 @@
 # CLI args override values from this file.
 
 [scan]
-# Walk root. Relative path → from current working directory.
-root = "."
+# Paths to scan (one or more). Relative → from the current working directory.
+# Positional CLI args override: python scripts/code_stats/code_stats.py src tests
+paths = ["."]
 # Recursive descent into subdirectories.
 recursive = true
 # Follow symlinks (false is safer: won't loop).
 follow_symlinks = false
+# Count only what git knows (tracked + untracked non-ignored): generated caches and
+# everything in .gitignore stay out of the numbers. Outside a git repo this falls
+# back to a filesystem walk with a warning on stderr.
+git_tracked = true
 
 [formats]
 # Extensions to count. Case insensitive. Empty list = all files.
@@ -52,6 +57,9 @@ comments = true
 docstrings = true
 # Count characters (besides lines). Minor overhead.
 chars = true
+# Count words (`wc -w` rule: runs of non-whitespace). Meaningful for .md,
+# a rough measure for .py.
+words = true
 # Read encoding. errors='replace' so binary-like files don't crash the script.
 encoding = "utf-8"
 
@@ -60,11 +68,14 @@ encoding = "utf-8"
 format = "table"
 # Report row grouping: extension | directory | none
 group_by = "extension"
-# Sort: lines | chars | files | name
+# Sort: lines | words | chars | files | dirs | name
 sort_by = "lines"
 # Sort order: desc | asc
 sort_order = "desc"
-# Show TOTAL summary row.
+# Show TOTAL summary row (computed over ALL groups, even when output is cut by limit).
 show_total = true
 # Max rows in output (0 = unlimited). Useful with group_by = "directory".
 limit = 0
+# Directory grouping depth for group_by = "directory":
+#   0 — full path (src/pkg/sub/tests), 1 — top-level zone only (src)
+dir_depth = 0

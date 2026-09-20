@@ -1,7 +1,7 @@
 # `scripts/` — каталог утилит проекта
 
 > **BUNDLE README — НЕ project copy.** Этот README лежит в seed-bundle
-> `.claude/plugins/lang-python/templates/scripts/`. При `claude-kit-project new` / `claude-kit-claude plugin sync`
+> `.claude/plugins/lang-python/templates/scripts/`. При `claude-kit new` / `claude-kit sync`
 > весь bundle (включая этот файл) auto-копируется в проектный `scripts/`.
 > Project-local правки выигрывают: существующие `scripts/<X>/` НЕ
 > перезаписываются. Детали и trade-off — `docs/decisions/0002-script-bundle-delivery.md`

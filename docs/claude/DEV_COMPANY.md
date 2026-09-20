@@ -42,6 +42,13 @@ Director (главный разговор с Opus) управляет всей �
 > Его инструкции — `.claude/CLAUDE.md`. Все остальные роли — агенты, которых Director
 > вызывает через Agent tool. Агенты не могут вызывать друг друга.
 
+> **Обновление 2026-09-02.** Фраза «агенты не могут вызывать друг друга» устарела: субагенты
+> вкладываются до трёх уровней, а в режиме команды (`/dev:team`, Agent Teams) участники живут в
+> сессии, делят список задач и переписываются по имени. Добавлены роли `cto` (Fable, вердикты и
+> верх цепочки эскалации) и `junior` (Haiku, механика). Общие правила всех агентов — один skill
+> `project-rules`; в нём же цепочка эскалации junior → developer → teamlead → cto → владелец.
+> Подробно: [`AGENT_TEAMS_GUIDE.md`](AGENT_TEAMS_GUIDE.md).
+
 ---
 
 ## Роли
@@ -268,7 +275,7 @@ Claude Code **не имеет** параметров thinking mode или effort
 
 Пример вызова Director'ом:
 ```
-Agent(subagent_type: "developer", model: "sonnet", 
+Agent(subagent_type: "developer", model: "sonnet",
       prompt: "Режим: careful. Task 2.1 — добавить обработку frame_data...")
 ```
 

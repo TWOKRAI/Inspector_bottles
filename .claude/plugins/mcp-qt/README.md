@@ -64,7 +64,7 @@ When qt-mcp is active in a project, prefer it over hand-written Qt introspection
 | Refactoring widget code (rename method, move class) | qex / Serena / Grep (qt-mcp only sees runtime, not source) |
 ## Launcher options
 
-**Default** (used automatically by `claude-kit-claude plugin enable mcp-qt`): see `.claude-plugin/plugin.json` → `mcpServers.qt-mcp`.
+**Default** (used automatically by `claude-kit add qt-mcp`): see `.claude-plugin/plugin.json` → `mcpServers.qt-mcp`.
 
 ```
 command: uvx

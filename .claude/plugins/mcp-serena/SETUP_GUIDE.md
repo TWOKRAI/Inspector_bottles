@@ -104,7 +104,7 @@ Copy the snippet from [templates/mcp-config.json.snippet](templates/mcp-config.j
       "command": "uvx",
       "args": [
         "--from", "serena-agent",
-        "serena", "start-mcp-server",
+        "serena-mcp-server",
         "--context", "claude-code",
         "--project", "."
       ]

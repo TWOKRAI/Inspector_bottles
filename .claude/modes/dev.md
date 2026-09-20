@@ -27,16 +27,24 @@ The `/dev:pipeline` skill runs the full chain with failure-recovery via the debu
 
 | Agent | Model | Skill | When to call |
 |-------|-------|-------|--------------|
-| **spec-writer** | Sonnet 4.6 | `/dev:spec:spec`, `/dev:spec:spec-sync` | Living product spec — from the user's perspective |
-| **manager** | Sonnet 4.6 | `/dev:plan` | Decompose a phase into Task X.Y with complexity levels. Does NOT write code |
-| **developer** | Sonnet 4.6 | `/dev:implement` | Standard Task implementation per spec (Middle/Middle+). Code + smoke-test + commit |
-| **teamlead** | Opus 4.8 | Agent tool | Senior+: architecture, refactoring, integration. Escalation on 3rd review/debug iteration |
-| **tester** | Sonnet 4.6 | `/dev:test` | Pytest against acceptance criteria from spec. Does NOT change logic |
-| **debugger** | Sonnet 4.6 | `/dev:debug` | Reproduce → hypotheses → root cause. Fixes within scope or delivers a diagnosis |
-| **investigator** | Opus 4.8 | Agent tool | Read-only diagnosis of cross-module problems. Does not write code, delivers a report |
-| **reviewer** | Opus 4.8 | `/dev:review` | Full review (10+ files, architecture, security). Max 2 iterations — then escalate to teamlead. Does NOT write code |
+| **cto** | Fable 5.1 | Agent tool / `/dev:team` | Verdicts only: phase acceptance (three lenses), merge gate, arbitration, top of the escalation ladder. Once per phase, never per task. Does NOT write code |
+| **spec-writer** | Sonnet 5 | `/dev:spec:spec`, `/dev:spec:spec-sync` | Living product spec — from the user's perspective |
+| **manager** | Opus 5 | `/dev:plan` | Decompose a phase into Task X.Y with complexity levels. Does NOT write code |
+| **developer** | Sonnet 5 | `/dev:implement` | Standard Task implementation per spec (Middle/Middle+). Code + smoke-test + commit |
+| **teamlead** | Opus 5 | Agent tool | Senior+: architecture, refactoring, integration. Escalation on 3rd review/debug iteration |
+| **junior** | Haiku 4.5 | Agent tool / `/dev:team` | Mechanical, fully specified changes only (rename per list, docstrings, fixture copies, STATUS.md). Stops on any decision. Does NOT commit |
+| **tester** | Sonnet 5 | `/dev:test` | Pytest against acceptance criteria from spec. Does NOT change logic |
+| **debugger** | Sonnet 5 | `/dev:debug` | Reproduce → hypotheses → root cause. Fixes within scope or delivers a diagnosis |
+| **investigator** | Opus 5 | Agent tool | Read-only diagnosis of cross-module problems. Does not write code, delivers a report |
+| **reviewer** | Opus 5 | `/dev:review` | Full review (10+ files, architecture, security). Max 2 iterations — then escalate to teamlead. Does NOT write code |
+| **integrator** | Opus 5 | `/dev:pipeline` S7 | Integration risk after implementation (cycles, god nodes, coverage drop). Does NOT write code |
+| **ai-judge** | Opus 5 | `/dev:pipeline` gates | PASS/BLOCK verdict on a machine signal (S2 contract-complete, S3/S7 edge cases). Does NOT write code |
 | **docs-writer** | Haiku 4.5 | `/core:team:docs` | Simple docs: docstrings, module README, STATUS.md |
-| **tech-writer** | Sonnet 4.6 | Agent tool | Complex docs: DECISIONS.md (ADR), ARCHITECTURE.md, MIGRATION_*.md, RFC-*.md |
+| **tech-writer** | Sonnet 5 | Agent tool | Complex docs: DECISIONS.md (ADR), ARCHITECTURE.md, MIGRATION_*.md, RFC-*.md |
+
+Shared rules for all 14 agents live in one skill, `project-rules` (preloaded via `skills:`).
+Team mode (agents that persist in the session, shared task list, hooks as gates): `/dev:team`,
+guide `docs/claude/AGENT_TEAMS_GUIDE.md`.
 
 ## Boundary rules
 
@@ -45,6 +53,7 @@ The `/dev:pipeline` skill runs the full chain with failure-recovery via the debu
 - **reviewer vs teamlead** — reviewer only reads and points out issues; teamlead writes code (express review for ≤3 files or Senior+ implementation)
 - **docs-writer vs tech-writer** — ADR / ARCHITECTURE / MIGRATION / RFC → tech-writer; everything else → docs-writer
 - **3 iterations — stop** — reviewer does not approve → teamlead escalation; debugger has not found root cause in 3 hypotheses → investigator or teamlead escalation
+- **Escalation ladder** — a question goes one level up, never sideways, never into a guess: `junior`/`docs-writer` → `developer`/`tech-writer` → `teamlead` → `cto` → the owner (`project-rules` §7; format `ESCALATION -> <role>`: question / tried / blocked on / files)
 - **Parallel delegation** — for independent subtasks, call agents in a single message (multiple Agent tool calls), not sequentially. For a whole plan with independent Tasks, `/dev:pipeline` has an opt-in **Parallel mode** (worktree-isolated developer/tester per Task) — see [`commands/pipeline.md`](../commands/pipeline.md)
 
 ## Module Design Discipline (contract-first)

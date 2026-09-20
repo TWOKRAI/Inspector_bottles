@@ -43,6 +43,9 @@ def test_hub_log_record_to_display():
         # Ф3.6: число едет рядом с текстом — в ОБЕИХ формах (live и history),
         # иначе пороговый фильтр работал бы на половине данных.
         "severity_number": 9,
+        # Task 3.1 (К4): ключ есть у КАЖДОЙ записи обеих форм — «имени нет» и
+        # «поле не считали» обязаны различаться.
+        "metric": None,
         "message": "hi",
         "extra": {"context": {"a": 1}},
     }
@@ -61,8 +64,9 @@ def test_hub_stats_record_to_display():
     d = hub_record_to_display(rec)
     assert d["kind"] == "stats"
     assert d["message"] == "fps"  # message = metric
-    assert d["severity"] == "gauge"  # severity = metric_type
-    assert d["extra"] == {"value": 30, "tags": {}}
+    assert d["severity"] == "number"  # Task 3.1 (К7): класс записи, а не род метрики
+    assert d["metric"] == "fps"  # Task 3.1 (К4): строка ЕСТЬ одно число
+    assert d["extra"] == {"value": 30, "tags": {}, "metric_type": "gauge"}
 
 
 def test_log_record_dict_to_display_defaults_error():
@@ -83,6 +87,7 @@ def test_log_record_dict_to_display_defaults_error():
         "ts": 3.0,
         "severity": "critical",
         "severity_number": 21,  # Ф3.6: обе формы несут число
+        "metric": None,  # Task 3.1 (К4): у ошибки имени метрики нет и быть не может
         "message": "boom",
         "extra": {"context": {"rid": 7}},
     }

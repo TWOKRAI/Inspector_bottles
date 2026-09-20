@@ -149,8 +149,11 @@ class Dispatcher(BaseManager, ObservableMixin):
             self._record_metric("dispatcher.initialization.success", tags={"name": self.manager_name})
             return True
         except Exception as e:
-            self._log_error(f"Failed to initialize Dispatcher: {e}")
-            self._track_error("dispatcher.initialization.failed", error=e)
+            # Task 1.3b: прежняя пара `_log_error` + `_track_error("...", error=e)`
+            # роняла сигнатуру `_track_error(error, context=None)` — `error` уезжал
+            # и позиционно, и по имени. `report_error` — один коннектор, этого
+            # класса ошибки в вызывающем коде больше нет.
+            self.report_error(e, context="dispatcher.initialize", name=self.manager_name)
             return False
 
     def shutdown(self) -> bool:
@@ -180,8 +183,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             self._record_metric("dispatcher.shutdown.success", tags={"name": self.manager_name})
             return True
         except Exception as e:
-            self._log_error(f"Error during Dispatcher shutdown: {e}")
-            self._track_error("dispatcher.shutdown.failed", error=e)
+            self.report_error(e, context="dispatcher.shutdown", name=self.manager_name)
             return False
 
     # ========================================================================
@@ -264,7 +266,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             )
 
             if result:
-                self._log_info(f"Handler '{key}' registered successfully", module=LOG_SOURCE)
+                self._log_debug(lambda: f"Handler '{key}' registered successfully", module=LOG_SOURCE)
                 self._record_metric("dispatcher.handler.registration.success", tags={"key": key})
             else:
                 self._log_warning(f"Failed to register handler '{key}'", module=LOG_SOURCE)
@@ -272,10 +274,51 @@ class Dispatcher(BaseManager, ObservableMixin):
 
             return result
         except Exception as e:
-            self._log_error(f"Error registering handler '{key}': {str(e)}", module=LOG_SOURCE)
-            self._track_error(e, {"key": key, "strategy": target_strategy.value})
+            self.report_error(
+                e,
+                context="dispatcher.register_handler",
+                module=LOG_SOURCE,
+                key=key,
+                strategy=target_strategy.value,
+            )
             self._record_metric("dispatcher.handler.registration.errors", tags={"key": key})
             return False
+
+    def log_registration_summary(self) -> None:
+        """
+        INFO-сводка регистрации — ОДНА строка, снимок таблицы хендлеров НА
+        МОМЕНТ ВЫЗОВА, а не «итог бута»: следующий ``register_handler()``
+        делает эту сводку устаревшей, и это ожидаемо — метод не хранит
+        прошлое значение, каждый вызов считает таблицу заново.
+
+        «Ровно один раз за ВОПЛОЩЕНИЕ» — свойство ТОЧКИ ВЫЗОВА, а не этого
+        метода: флага «уже вызывалась» здесь нарочно нет (Task 3.2, К2, см.
+        ``ICommandManager.log_registration_summary`` и её докстринг у
+        ``CommandManager`` — та же семантика).
+
+        Поздняя регистрация (горячая пересборка) сводкой не покрывается —
+        о ней по-прежнему говорит построчный DEBUG у ``register_handler()``.
+        Механизм, который приносит пачку регистраций, обязан сам сказать
+        «+N/-M» (только он знает границы своей пачки) и вправе позвать эту
+        сводку после неё — в Task 3.2 это не делается.
+
+        У этого метода сегодня в проде НЕТ вызывающего: ``ProcessModule.run()``
+        зовёт сводку регистрации только у ``CommandManager`` — вердикт CTO
+        (Task 3.2, К2). ``CommandManager.register_command`` делегирует РОВНО
+        в один вызов ``self.dispatcher.register_handler`` (этого класса),
+        поэтому счётчики двух менеджеров равны по построению (стенд: 71/71,
+        93/93 на всех восьми процессах прототипа) — вторая INFO-строка с тем
+        же числом под другим существительным была бы загадкой для читателя
+        лога, а не информацией. Метод остаётся публичным контрактом класса
+        для самостоятельных владельцев ``Dispatcher`` вне ``CommandManager``
+        (например, будущий прямой потребитель модуля) — отсутствие вызова
+        из ``run()`` не значит «вызов потерян».
+        """
+        count = len(self.get_all_handlers())
+        self._log_info(
+            f"Dispatcher '{self.manager_name}' registration summary: {count} handlers",
+            module=LOG_SOURCE,
+        )
 
     def _find_handler_in_strategy(self, key: str, strategy: DispatchStrategy) -> Optional[HandlerInfo]:
         """Поиск обработчика в конкретной стратегии."""
@@ -422,8 +465,18 @@ class Dispatcher(BaseManager, ObservableMixin):
         except Exception as e:
             duration = time.perf_counter() - start_time
             error_msg = f"Dispatch failed: {str(e)}"
-            self._log_error(error_msg, module=LOG_SOURCE, exception=str(e))
-            self._track_error(e, {"key": key if "key" in locals() else None, "message": str(message)})
+            # Поле называлось "message" в снятом _track_error — здесь оно
+            # "request" ради ЯСНОСТИ, а не ради безопасности: коллизию с
+            # позиционным параметром ``_log_error(self, message, **kwargs)``
+            # механизм закрывает сам (_VOICE_RESERVED_NAMES разводит такое имя
+            # префиксом field_). Именно этот сайт её и обнаружил.
+            self.report_error(
+                e,
+                context="dispatcher.dispatch",
+                module=LOG_SOURCE,
+                key=key if "key" in locals() else None,
+                request=str(message),
+            )
             self._record_timing("dispatcher.dispatch.error_duration", duration)
             self._record_metric("dispatcher.dispatch.errors", tags={"error": "exception"})
             return {"status": "error", "reason": error_msg}

@@ -74,12 +74,14 @@ REQUIRED_INTERFACES = [
 SERVICES = [
     "sql",
     "hikvision_camera",
+    "otel_export",
 ]
 
 # Сервисы, для которых требуется interfaces.py (Protocol-контракт)
 SERVICES_REQUIRED_INTERFACES = [
     "sql",
     "hikvision_camera",
+    "otel_export",
 ]
 
 # Файлы production-кода (без тестов), где нельзя sys.path.insert

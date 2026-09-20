@@ -18,6 +18,7 @@ from typing import Any
 
 from ...config_module.feature_flags import is_enabled
 from ...console_module import ConsoleManager
+from ...error_module.interfaces import SubsystemStartFailed
 from ...logger_module.channels.log_channel import (
     find_foreign_log_roots,
     sweep_log_dir_tree,
@@ -3766,9 +3767,13 @@ class ProcessManagerProcess(ProcessModule):
                 }
                 not_ready = sorted(n for n, ok in ready.items() if not ok)
                 if not_ready:
-                    self._log_error(
-                        f"apply_topology: процессы умерли на старте (initialize-провал?): {not_ready} "
-                        f"— топология применена, но эти процессы НЕ работают"
+                    # Task 1.3b (shape 2): не исключение — readiness-барьер вернул
+                    # список имён, объекта отказа нет. SubsystemStartFailed
+                    # (её докстринг называет именно "initialize вернул отказ").
+                    self.report_error(
+                        SubsystemStartFailed("apply_topology: процессы умерли на старте (initialize-провал?)"),
+                        context="process_manager.apply_topology.not_ready",
+                        not_ready=not_ready,
                     )
                 # B-4 (RS-2): cleanup-хвост доисполнился, но часть старых ресурсов не
                 # освободилась — громко (не тихий WARNING) наверх и в ObservabilityHub
@@ -3776,19 +3781,30 @@ class ProcessManagerProcess(ProcessModule):
                 cleanup_failures = result.get("cleanup_failures") or []
                 if cleanup_failures:
                     failed_names = sorted(r.get("process_name", "?") for r in cleanup_failures if isinstance(r, dict))
-                    self._log_error(
-                        f"apply_topology: cleanup не подтверждён для {failed_names} — "
-                        f"топология применена, но их ресурсы/state могли остаться (ghost-риск)"
+                    # Task 1.3b (shape 2): cleanup_failures — данные из результата
+                    # topology_manager.apply(), не исключение.
+                    self.report_error(
+                        SubsystemStartFailed(
+                            "apply_topology: cleanup не подтверждён — ресурсы/state могли остаться (ghost-риск)"
+                        ),
+                        context="process_manager.apply_topology.cleanup",
+                        failed_names=failed_names,
                     )
                 # B-2 (RS-3): расхождение конфига protected-процесса между живым и
                 # новым blueprint — switch НЕ «тихо успешен»: конфликты в ответе + громко.
                 conflicts = self._collect_protected_conflicts()
                 if conflicts:
                     response["protected_conflicts"] = conflicts
-                    self._log_error(
-                        f"apply_topology: protected-процессы с изменённым конфигом в новом рецепте "
-                        f"{sorted(conflicts)} — protected не перезапускается, изменения НЕ применены "
-                        f"(switch не тихо успешен)"
+                    # Task 1.3b (shape 2): не исключение — расхождение конфига
+                    # protected-процесса. SubsystemStartFailed её докстринг
+                    # называет буквально этот случай: "конфигурация не сошлась".
+                    self.report_error(
+                        SubsystemStartFailed(
+                            "apply_topology: protected-процессы с изменённым конфигом в новом рецепте — "
+                            "protected не перезапускается, изменения НЕ применены (switch не тихо успешен)"
+                        ),
+                        context="process_manager.apply_topology.protected_conflicts",
+                        conflicts=sorted(conflicts),
                     )
                 # B-3 (RS-3): успешный switch без зависших — снять stale unstoppable-alert.
                 self._publish_unstoppable_alert([])
@@ -3817,16 +3833,15 @@ class ProcessManagerProcess(ProcessModule):
                 return response
 
             except Exception as exc:
-                self._log_error(f"apply_topology: exception в manager.apply: {exc}")
+                # Task 1.3b: было _log_error + self.error_manager.track_error(...)
+                # за hasattr/try-except-pass — тот же инцидент двумя коннекторами,
+                # причём второй молча терялся при отсутствующем error_manager.
+                # report_error — один вызов, деградирует безопасно сам (ObservableMixin).
+                self.report_error(exc, context="process_manager.apply_topology.exception")
                 # Состояние исполнения неизвестно (exception вне manager.apply,
                 # который свои ошибки ловит сам) — консервативный полный откат:
                 # stop живых → cleanup → пересоздание snapshot двухфазно.
                 self._rollback_to_snapshot(snapshot, None, blueprint)
-                if hasattr(self, "error_manager") and self.error_manager:
-                    try:
-                        self.error_manager.track_error(exc, {"phase": "apply_topology"})
-                    except Exception:
-                        pass
                 # Ф3.1: rollback пере-провижинил snapshot (новые incarnation) —
                 # разослать refresh, чтобы выжившие сверили снимок.
                 self._bump_routing_epoch()
@@ -3887,6 +3902,12 @@ class ProcessManagerProcess(ProcessModule):
                 if event is not None and event.is_set():
                     ready[name] = True
                     pending.discard(name)
+                    # Ф1.4: штатная готовность РВЁТ серию фолбэков. Без этого
+                    # порог эскалации однажды берётся накопленным за жизнь
+                    # процесса шумом и больше никогда не опускается — то есть
+                    # «подряд» молча превращается в «всего», и WARNING снова
+                    # звучит всегда, только с задержкой.
+                    self._voices().reset_repeat(self._LIVENESS_FALLBACK_KEY)
                     self._log_info(f"{reason}: '{name}' ready via event")
                     continue
                 proc = self._process_registry.get_process_by_name(name)
@@ -3898,8 +3919,45 @@ class ProcessManagerProcess(ProcessModule):
                 time.sleep(0.05)
         for name in pending:
             ready[name] = True  # пережил окно — считаем работающим
-            self._log_warning(f"{reason}: '{name}' ready via liveness-fallback (event не получен за {timeout_s}s)")
+            self._voice_liveness_fallback(name, reason, timeout_s)
         return ready
+
+    #: Ключ серии фолбэков готовности. Один на все процессы СОЗНАТЕЛЬНО: симптом,
+    #: ради которого заведена эскалация, — «ready-event перестал приходить вообще»,
+    #: а он общий. Ключ на имя процесса дал бы серию длины 1 у каждого, и порог не
+    #: сработал бы никогда при поголовном отказе — то есть ровно в худшем случае.
+    _LIVENESS_FALLBACK_KEY = "pm.ready.liveness_fallback"
+
+    def _voice_liveness_fallback(self, name: str, reason: str, timeout_s: float) -> None:
+        """Ф1.4 (m2): фолбэк готовности — INFO; WARNING только за серию подряд.
+
+        Единичный фолбэк — НОРМА старта, а не отклонение: ready-event может не
+        успеть при холодном импорте тяжёлого процесса, и процесс при этом жив
+        (`is_alive()` проверен выше — иначе сюда бы не дошли). Безусловный
+        WARNING на каждое имя делал старт постоянно «жёлтым» и обесценивал
+        уровень: в списке WARNING-констант бута (ревью m2) эта строка была самой
+        частой.
+
+        Отклонение — СЕРИЯ подряд: когда фолбэк перестаёт быть единичным, ready
+        не приходит системно, и это уже симптом. Порог — из конфига
+        (``observability.voices.escalate_after_repeats``), не литерал; строго
+        «больше порога», то есть при 3 громко говорит четвёртый подряд.
+
+        Серия рвётся о любой штатный ready (см. вызывающего): считается именно
+        «подряд», а не «всего за жизнь процесса», иначе порог однажды берётся
+        накопленным шумом и больше никогда не опускается.
+        """
+        from ...logger_module.core.windowed_voice import escalate_after_repeats
+
+        in_a_row = self._voices().note_repeat(self._LIVENESS_FALLBACK_KEY)
+        text = (
+            f"{reason}: '{name}' ready via liveness-fallback (event не получен за {timeout_s}s; "
+            f"подряд таких: {in_a_row})"
+        )
+        if in_a_row > escalate_after_repeats():
+            self._log_warning(text + " — ready-события не приходят системно, это уже не единичный случай")
+        else:
+            self._log_info(text)
 
     def _wait_boot_ready(self) -> None:
         """Ф3.2: boot-барьер — дождаться ready всех стартованных на boot детей.

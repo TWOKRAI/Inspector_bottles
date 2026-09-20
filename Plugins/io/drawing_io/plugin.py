@@ -96,8 +96,7 @@ class DrawingIoPlugin(ProcessModulePlugin):
         try:
             points, bounds, _meta, _img = store.load(full)
         except Exception as exc:  # noqa: BLE001 — ошибку отдаём в результат команды
-            self._ctx.health.report_error(exc, context="drawing_io.load")
-            self._ctx.log_error(f"DrawingIoPlugin: не удалось загрузить {full}: {exc}")
+            self._ctx.health.report_error(exc, context="drawing_io.load", path=full)
             return {"status": "error", "message": str(exc)}
         self._loaded_points = points
         self._loaded_bounds = bounds
@@ -157,6 +156,12 @@ class DrawingIoPlugin(ProcessModulePlugin):
     def _do_save(self, item: dict) -> None:
         pts = item.get(self._reg.points_source)
         if not isinstance(pts, list) or not pts:
+            # ОСТАЁТСЯ строкой журнала сознательно (Task 1.3b, решение автора).
+            # Миграция 1.3b трогает класс A — отказы подсистем; пустой список
+            # точек на команде «сохранить» это класс B: ожидаемая ветка, где
+            # система исправна, а сохранять нечего. Отправить её в плоскость
+            # ошибок значило бы деградировать health процесса и кормить breaker
+            # на промах оператора. Классы B и C задача выносит из области явно.
             self._ctx.log_error("DrawingIoPlugin: нет точек для сохранения")
             return
         bounds = item.get(self._reg.bounds_source)
@@ -175,7 +180,6 @@ class DrawingIoPlugin(ProcessModulePlugin):
             )
         except Exception as exc:  # noqa: BLE001 — сохранение не должно ронять pipeline
             self._ctx.health.report_error(exc, context="drawing_io.save")
-            self._ctx.log_error(f"DrawingIoPlugin: ошибка сохранения: {exc}")
             return
         self._reg.last_saved = path
         self._reg.saves_done += 1

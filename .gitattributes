@@ -1,0 +1,3 @@
+# Журнал сессий только дополняется — union-merge снимает конфликт
+# при merge-back из worktree (pre-commit хук стейджит его в каждый коммит).
+docs/sessions/*.md merge=union

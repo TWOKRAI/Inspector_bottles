@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial project scaffold via `claude-kit-project new`.
+- Initial project scaffold via `claude-kit new`.
 
 ### Changed
 

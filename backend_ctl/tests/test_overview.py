@@ -96,7 +96,11 @@ class TestOverviewShape:
         assert card["workers"] == {"w1": "running"}  # компактно: имя → статус-строка
         assert card["router"]["middleware_dropped"] == 0
         assert "raw" not in json.dumps(card)  # сырые ответы в сводку не протекают
-        assert res["anomaly_count"] == 0
+        # Ф2 Task 2.8: сцена холодная (без watch_like_gui/state_subscribe) — система
+        # здорова, но read-model телеметрии пуст и без подписки, поэтому сводка
+        # обязана назвать это отдельным hint'ом, а не молчать нулём аномалий.
+        assert res["anomaly_count"] == 1
+        assert res["anomalies"][0]["kind"] == "telemetry_readmodel_empty"
 
     def test_zero_new_ipc_commands(self, monkeypatch) -> None:
         """Fan-out только существующими ручками — новых IPC-команд ноль."""
@@ -535,6 +539,7 @@ class TestObservabilitySilence:
         from pathlib import Path
 
         from backend_ctl.protocol import OBSERVABILITY_BUFFER_LOSS_KEYS, OBSERVABILITY_LOSS_KEYS
+        from multiprocess_framework.modules.error_module.core.error_manager import ErrorManager
         from multiprocess_framework.modules.logger_module.core.log_config import LoggerManagerConfig
         from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
         from multiprocess_framework.modules.process_module.managers.observability_reload import (
@@ -554,26 +559,39 @@ class TestObservabilitySilence:
             "series_dropped": "различные серии, не пущенные в живой слой (ADR-SM-011)",
             "window_observations_dropped": "эмиссии, отвергнутые окном агрегации (ADR-SM-011)",
         }
+        # Ф1.1 (C3): та же форма исключения, что STATS_ONLY, и по той же причине.
+        # Процессные хуки считают в плоскость ОШИБОК — там живёт их словарь
+        # (``ErrorManager.stats``, объявление в конструкторе), и требовать это
+        # число от логгера значило бы требовать вечный ноль. Проверка не
+        # ослабляется: ключ обязан быть опубликован своей плоскостью ниже.
+        ERROR_ONLY = {
+            "hook_delivery_failures": "процессный хук не смог доставить событие (Ф1.1 / C3)",
+        }
 
         tmp = Path(tempfile.mkdtemp())
         logger = LoggerManager(config=LoggerManagerConfig(app_name="silence_probe", log_directory=str(tmp)))
         stats = StatsManager(manager_name="SilenceProbeStats", config={"enable_logging": False})
+        error = ErrorManager(manager_name="SilenceProbeError", config={"app_name": "silence_probe_error"})
         try:
-            planes = observability_counters(logger=logger, stats=stats)
+            planes = observability_counters(logger=logger, stats=stats, error=error)
             plane = planes["logger"]
             stats_plane = planes["stats"]
+            error_plane = planes["error"]
         finally:
+            error.shutdown()
             stats.shutdown()
             logger.shutdown()
 
         # Не «хотя бы один», а поимённо: плоскость логов обязана публиковать все
         # ключи перечня, кроме объявленных чужими.
         for key in OBSERVABILITY_LOSS_KEYS:
-            if key in STATS_ONLY:
+            if key in STATS_ONLY or key in ERROR_ONLY:
                 continue
             assert key in plane, f"логгер перестал публиковать {key!r} — детектор 2.V2 ослеп на этот класс"
         for key, reason in STATS_ONLY.items():
             assert key in stats_plane, f"статистика перестала публиковать {key!r} ({reason}) — подсказка ослепла"
+        for key, reason in ERROR_ONLY.items():
+            assert key in error_plane, f"плоскость ошибок перестала публиковать {key!r} ({reason}) — подсказка ослепла"
         # Ф7.х.2: буфера ЗАПИСИ у логгера больше нет — ``BatchBuffer`` снят
         # (Ф7.4), нормализация в ``_plane_counters`` его секцию не производит.
         # Отсутствие и есть контракт: вернувшийся ключ значил бы, что буфер

@@ -23,10 +23,7 @@
 
 from __future__ import annotations
 
-import gc
 import inspect
-import sys
-import time
 
 import pytest
 
@@ -46,6 +43,7 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
     MockStatsManager,
 )
 from multiprocess_framework.modules.statistics_module.core.stats_manager import StatsManager
+from multiprocess_framework.modules.tests._road_cost import count_calls, report as _report, timed_pair
 
 #: Порт, который читает фасад. Имя одно и то же в протоколе, в процессе и в дубле —
 #: рукописные копии одного имени расходятся молча, поэтому копия здесь одна.
@@ -380,49 +378,6 @@ class TestTheSubContextCarriesTheStatsRoad:
 # ==============================================================================
 
 
-def _report(capsys: "pytest.CaptureFixture", line: str) -> None:
-    """Печать замера мимо capture, безопасная для консоли в cp1251.
-
-    Форма взята у ``logger_module/tests/test_gate_cost_bench.py`` дословно и по
-    той же причине: русский текст в дефолтной консоли Windows роняет тест
-    ``UnicodeEncodeError``, и «зелёный прогон» оказывается верным только под
-    utf-8. Кодировка снимается ВНУТРИ ``disabled()`` — снаружи у capture-объекта
-    она всегда ``UTF-8``, и защита была бы тождеством.
-    """
-    with capsys.disabled():
-        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
-        print(line.encode(encoding, errors="replace").decode(encoding, errors="replace"))
-
-
-def _timed_pair(new_fn, old_fn, repeats: int) -> tuple[float, float]:
-    """Секунд на вызов у ДВУХ реализаций, замеренных вперемежку.
-
-    Вперемежку, а не «сначала три прогона одного»: последовательный замер
-    сравнивает не реализации, а два разных окна загрузки машины. ``gc``
-    выключен на окно замера — сборка, попавшая в одну половину, дала бы
-    дельту, которой нет (порог по часам иначе меряет кучу, а не код).
-    """
-    best_new = best_old = None
-    gc.disable()
-    try:
-        for _ in range(5):
-            start = time.perf_counter()
-            for _ in range(repeats):
-                new_fn()
-            new_elapsed = time.perf_counter() - start
-
-            start = time.perf_counter()
-            for _ in range(repeats):
-                old_fn()
-            old_elapsed = time.perf_counter() - start
-
-            best_new = new_elapsed if best_new is None else min(best_new, new_elapsed)
-            best_old = old_elapsed if best_old is None else min(best_old, old_elapsed)
-    finally:
-        gc.enable()
-    return best_new / repeats, best_old / repeats
-
-
 class TestTheCostOfTheHotPath:
     """Что фасад добавляет к вызову менеджера — дельтой, на ОДИНАКОВОЙ работе."""
 
@@ -440,25 +395,223 @@ class TestTheCostOfTheHotPath:
         сравнение с этой базой отвечает не «дорого ли», а «во сколько раз
         дороже самого дешёвого, что есть на горячем пути».
         """
+        # Стенд БОЕВОЙ, а не двойник (находка ревью Ф5, S3). Прежняя редакция
+        # строила ``MockProcessServices(stats_manager=manager)``, то есть меряла
+        # дорогу ``ctx → _MockObservationPort → StatsManager`` — в замер не
+        # входили ни ``_route_number``, ни ``_deliver_number``/``_emit_to_taps``,
+        # ни ``_PortTap``, ни ``_on_port_record``, то есть вся цепочка Ф5,
+        # ради которой бюджет и переписывался. Ревьюер перемерил тем же
+        # харнессом: двойник 3.311 мкс против 4.172 мкс на настоящем порте.
+        # Тот же класс, что фаза сама нашла в дыре P9 — фейковый харнесс
+        # доказывает харнесс, — и здесь он остался незамеченным.
+        from ...statistics_module.observation.observation_manager import ObservationManager
+
         manager = StatsManager(manager_name="cost_probe")
-        ctx = PluginContext(services=MockProcessServices(stats_manager=manager), config={}, plugin_name="bench_plugin")
+        port = ObservationManager(manager_name="cost_probe_port")
+        assert port.initialize(), "стенд сломан ДО замера: порт не поднялся"
+        assert manager.attach_observation_port(port), "стенд сломан ДО замера: порт не подключился"
+
+        class _ServicesWithRealPort(MockProcessServices):
+            """Слот ``observation`` отдаёт НАСТОЯЩИЙ порт, а не форвардящий двойник.
+
+            Подменять надо именно ``get_manager``: резолвер
+            (``observation_manager.observation_port``) ходит первой ступенью
+            туда, и держать ссылку на порт в атрибуте бесполезно — первая
+            редакция этой правки так и сделала, замер не изменился ни на
+            микросекунду, и правка была мнимой.
+            """
+
+            def get_manager(self, slot):
+                if slot == "observation":
+                    return port
+                return super().get_manager(slot)
+
+        ctx = PluginContext(
+            services=_ServicesWithRealPort(stats_manager=manager), config={}, plugin_name="bench_plugin"
+        )
         same_tag = {"plugin": "bench_plugin"}
 
-        through_facade, direct = _timed_pair(
+        through_facade, direct = timed_pair(
             lambda: ctx.record_metric("hot"),
             lambda: manager.record_metric("hot", 1, same_tag),
             repeats=20_000,
         )
         overhead = through_facade - direct
+        ratio = through_facade / direct
 
         _report(capsys, "\nЦена stats-фасада (задача 1.1):")
         _report(capsys, f"  через ctx.record_metric:   {through_facade * 1e6:.3f} мкс")
         _report(capsys, f"  напрямую с тем же тегом:   {direct * 1e6:.3f} мкс")
-        _report(capsys, f"  цена фасада (дельта):      {overhead * 1e6:.3f} мкс")
+        _report(capsys, f"  цена фасада (дельта):      {overhead * 1e6:.3f} мкс  (справочно — НЕ гейтуется)")
+        _report(capsys, f"  отношение facade/direct:   {ratio:.3f}x  (гейтуется)")
         _report(capsys, "  для сравнения, база гейта: 0.26-0.35 мкс (отклонённая запись лога)")
 
-        # Порог с пятикратным запасом к измеренному (~0.38 мкс на штатной машине
-        # проекта). Он ловит не шум, а появление на этом пути новой РАБОТЫ —
-        # копии словаря на вызов, лока, разбора имени: такое стоит единиц мкс и
-        # проходит сквозь любой разумный запас.
-        assert overhead < 2.0e-6, f"фасад подорожал: {overhead * 1e6:.3f} мкс сверх прямого вызова"
+        # Бюджет ПЕРЕПИСАН 2026-08-26 (Ф5, решение владельца) — 2.0 → 5.0 мкс.
+        #
+        # Что было: фасад звал ``self.services.stats_manager`` напрямую, дельта
+        # ~0.38 мкс на штатной машине (A/B на пред-имплементационном коммите
+        # `b9bd8345` дал 0.16-0.18 мкс, 3/3 зелёных), потолок 2.0 мкс.
+        #
+        # Что стало: Ф5 сделала порт единственным писателем чисел, и фасад
+        # теперь идёт ctx → порт → CRM-tap → StatsManager. Замер БОЕВЫМ стендом
+        # (порт подключён у обеих сторон), три прогона: 2.674 / 2.839 / 2.850 мкс.
+        #
+        # **Что этот тест меряет НА САМОМ ДЕЛЕ — и чего не меряет.** Правка по
+        # ревью Ф5 (S3) подключила порт и к ``manager``, то есть порт входит в
+        # ОБЕ стороны разности и сокращается. Значит здесь измеряется цена
+        # ФАСАДА (резолв слота + лишний хоп), а НЕ цена прохода через порт.
+        # Собственная цена порта — около 0.93 мкс на вызов, она снята отдельным
+        # замером и этим сторожем НЕ охраняется. Прежняя редакция комментария
+        # объясняла бюджет «структурной ценой прохода через порт» — это было
+        # неверно дважды: и потому, что мерился двойник, и потому, что разность
+        # цену порта сокращает.
+        #
+        # Почему цена ПРИНЯТА, а не срезана: срезать её значит уплощать слой
+        # записи, то есть отдавать назад ровно ту единственность писателя,
+        # ради которой Ф5 делалась. Слот-вызывающие фреймворка (57 сайтов)
+        # сидят на редких событиях, а не на операциях (``state_proxy`` —
+        # resync/re-adopt, не каждая запись состояния).
+        #
+        # ПРАВКА 2026-09-02 (Р-12, добор Task 2.10): снята формулировка «три
+        # вызова на кадр у плагина захвата, при 60 fps это 0.17 мс в секунду» —
+        # проверено чтением и оказалось неверно. Единственный БОЕВОЙ вызывающий
+        # (``Plugins/sources/capture/plugin.py:246``, метод ``_emit_stats``) не
+        # сидит на кадре: он зовётся из ``_tick_stats``, а та встаёт рано и
+        # выходит по ``elapsed < 1.0: return`` — эмиссия ОКОННАЯ, раз в
+        # секунду, а не на кадр. Горячего пути через фасад НА КАДР в проекте
+        # нет; заменить старое число новым непроверенным замером («вес в
+        # секунду» при оконной эмиссии) здесь не стали — это отдельное
+        # измерение, а не предмет этого теста.
+        #
+        # Почему потолок обязан по-прежнему ловить ПОЯВЛЕНИЕ новой работы на
+        # этом пути — копию словаря на вызов, лишний лок, разбор имени. Такое
+        # стоит единиц мкс на фоне 2.67-2.85 мкс, измеренных Ф5.
+        #
+        # ФОРМА ГЕЙТА ПЕРЕПИСАНА 2026-09-01 (замыкатель класса Н-7, добор ревью
+        # Ф2) — абсолютная дельта заменена на ОТНОШЕНИЕ facade/direct. Порог НЕ
+        # подгонялся: менялась ФОРМА критерия, потому что разность двух шумных
+        # величин шумит СИЛЬНЕЕ каждой из них по отдельности — та же болезнь,
+        # что у бенчмарков вообще.
+        #
+        # Наблюдение, из-за которого форма сменилась. Три соло-замера ревью
+        # (координатор, Ф2): дельта 5.13 / 13.38 / 13.04 мкс — разброс 2.5x, и
+        # ДВА из трёх уже превысили бы старый потолок 5.0 без единой реальной
+        # регрессии. Отношение facade/direct на тех же трёх прогонах: 2.36 /
+        # 2.28 / 2.37 — разброс ~4%, не 2.5x. Мои независимые 4 соло-замера НА
+        # ЭТОЙ машине (2026-09-01, тем же тестом) отношение дословно НЕ
+        # воспроизвели: 1.78 / 1.78 / 1.70 / 1.78 — ниже, чем у координатора, но
+        # с той же тесной кучностью (разброс ~5%, не ~2х у абсолюта). Расхождение
+        # между двумя наборами (1.70-1.79 против 2.28-2.37) не разбиралось —
+        # вероятно, разная загрузка машины/окружения между сессиями; называю
+        # честно, а не тихо ужимаю под один порог без явного запаса.
+        #
+        # ПОТОЛОК ПЕРЕСМОТРЕН 2026-09-02 (Р-12, решение владельца): 4.2 → 3.0.
+        # Число 4.2 держалось на замере координатора (2.28-2.37) — а тот, по
+        # разбору владельца (``plans/observability-closure/plan.md`` §4, Р-12),
+        # СНЯТ НЕ НА ЭТОМ СТЕНДЕ: нагрузочная гипотеза не подтвердилась (три
+        # параллельных экземпляра дают 1.75-1.79, под ``--cov`` отношение падает
+        # до 1.35-1.40), а форма теста ДО правки S3 (двойник вместо боевого
+        # порта) воспроизводимо давала 2.15-2.23 сама по себе. Устарела ПОСЫЛКА
+        # потолка, не только число. Главное следствие решения — тайминг-гейт
+        # ЛЮБОЙ ширины слеп к классу регрессии, ради которого он заявлен (+0.2
+        # мкс на базе 6.3 сдвигает отношение с 1.80 до 1.86 — недостаточно,
+        # чтобы отличить регрессию от дрожи машины), поэтому 3.0 остаётся
+        # ШИРОКИМ сторожем катастроф, а мелочь (копия словаря, лишний лок,
+        # разбор имени) стережёт СЧЁТНЫЙ сторож ниже — числом python-вызовов,
+        # которое от машины и нагрузки не зависит вовсе.
+        assert ratio < 3.0, (
+            f"фасад подорожал ОТНОСИТЕЛЬНО прямого вызова: {ratio:.3f}x "
+            f"(через фасад {through_facade * 1e6:.3f} мкс, напрямую {direct * 1e6:.3f} мкс, "
+            f"дельта {overhead * 1e6:.3f} мкс)"
+        )
+
+    def test_the_facade_call_count_pins_two_invariants(self) -> None:
+        """Счётный сторож (Р-12, добор Task 2.10) — другим объективом, чем тайминг.
+
+        Тайминг-гейт выше слеп к мелкой регрессии на шумной машине (см.
+        комментарий у него: +0.2 мкс на базе 6.3 сдвигает отношение всего с
+        1.80 до 1.86). Число вызовов от машины и нагрузки не зависит — считаются
+        СОБЫТИЯ ВЫЗОВА (:func:`count_calls`), а не часы, — и стережёт ту же
+        мелочь ДВУМЯ литералами, каждый про СВОЙ инвариант:
+
+        * ``direct == (26, 29)`` — на дороге ЕДИНСТВЕННОГО ПИСАТЕЛЯ
+          (``StatsManager.record_metric`` → ``ObservationPort._route_number`` →
+          гейт → ``ObservationManager._deliver_number`` → ``_emit_to_taps`` →
+          тот же менеджер обратно через tap) не появилось новой работы;
+        * ``facade - direct == (4, 6)`` — работа фасада
+          (``PluginContext.record_metric``) сверх прямого вызова. Состав:
+          **+5** кадров (``record_metric`` фасада, ``_stats_call``,
+          ``_observation_port``, резолвер ``observation_port``, ``get_manager``)
+          и **−1** (``StatsManager.record_metric`` — фасад входит в дорогу
+          ступенью ниже, в ``ObservationPort.record_metric``), итого 4.
+
+        **Почему литералы ПАРАМИ, а не одним py-числом.** Замер классов событий:
+        ``d.copy()`` → c+1, py+0; ``with lock:`` → c+1, py+0; ``acquire()`` /
+        ``release()`` → c+2; ``copy.copy(d)`` → py+1, c+2. То есть счётчик
+        только по python-вызовам СЛЕП к двум из трёх регрессий, ради которых
+        сторож заведён (копия словаря и лишний лок в их естественной форме) —
+        их видит только C-половина пары. Честное слепое пятно, которое не
+        закрывает ни одна половина: ``dict(d)`` и ``{**d}`` дают 0/0 — их не
+        поймает ни счётный сторож, ни тайминг-гейт.
+
+        **Почему число стабильно только с версии этого коммита.** До поднятия
+        импорта (см. ``PluginContext._observation_port``) на дороге фасада
+        стояло выражение ``import`` НА КАЖДЫЙ ВЫЗОВ, а под импорт-хуком
+        ``shibokensupport`` оно стоит четыре профилируемых Python-вызова даже
+        когда модуль уже в ``sys.modules``. Литерал из-за этого гулял: 9 под
+        узким прогоном pytest и 5 под полным — состояние ``builtins.__import__``
+        меняет соседний тест (``test_observability_ttl.py::TestMechanismHazards::
+        test_concurrent_writes_and_sweeps_lose_nothing``: гонка импортов из
+        нескольких потоков переводит ``__feature_import__`` в
+        ``__lazy_import__``). После поднятия импорта разница равна **(4, 6)** во
+        всех четырёх состояниях хука — голом, ``__feature_import__``,
+        ``__lazy_import__`` и под ``coverage`` — то есть стала свойством КОДА,
+        а не прогона.
+
+        **Числа сняты на CPython 3.12** (версия пришпилена в ``pyproject``).
+        C-счёт чувствительнее к версии интерпретатора, чем python-счёт;
+        при смене версии литералы обязаны быть пересняты, а не подогнаны.
+
+        Прогрев ОТДЕЛЬНЫМИ именами метрик перед счётом обязателен: первый вызов
+        новой метрики ЗАВОДИТ агрегат (другое число вызовов), а сторож обязан
+        считать УСТОЯВШУЮСЯ дорогу, а не создание записи.
+        """
+        from ...statistics_module.observation.observation_manager import ObservationManager
+
+        manager = StatsManager(manager_name="cost_probe_count")
+        port = ObservationManager(manager_name="cost_probe_count_port")
+        assert port.initialize(), "стенд сломан ДО счёта: порт не поднялся"
+        assert manager.attach_observation_port(port), "стенд сломан ДО счёта: порт не подключился"
+
+        class _ServicesWithRealPort(MockProcessServices):
+            def get_manager(self, slot):
+                if slot == "observation":
+                    return port
+                return super().get_manager(slot)
+
+        ctx = PluginContext(
+            services=_ServicesWithRealPort(stats_manager=manager), config={}, plugin_name="bench_plugin"
+        )
+        same_tag = {"plugin": "bench_plugin"}
+        direct_call = lambda: manager.record_metric("warm_direct", 1, same_tag)  # noqa: E731
+        facade_call = lambda: ctx.record_metric("warm_facade")  # noqa: E731
+
+        # Прогрев — см. докстринг: первый вызов заводит агрегат, это не то,
+        # что стережёт этот тест.
+        direct_call()
+        facade_call()
+
+        direct = count_calls(direct_call)
+        facade = count_calls(facade_call)
+        overhead = (facade[0] - direct[0], facade[1] - direct[1])
+
+        assert direct == (26, 29), (
+            f"дорога единственного писателя завела новую работу: {direct} вместо (26, 29) (python-вызовов, C-вызовов)"
+        )
+        assert overhead == (4, 6), (
+            f"работа фасада сверх прямого вызова изменилась: {overhead} вместо (4, 6) "
+            f"(прямая дорога — {direct}, фасад — {facade})"
+        )
+
+        manager.shutdown()
+        port.shutdown()

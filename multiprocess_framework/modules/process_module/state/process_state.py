@@ -43,12 +43,8 @@ class ProcessState:
                         },
                     },
                 )
-            elif hasattr(shared, "process_state_registry") and hasattr(
-                shared.process_state_registry, "update_state"
-            ):
-                shared.process_state_registry.update_state(
-                    self.process.name, status="initializing"
-                )
+            elif hasattr(shared, "process_state_registry") and hasattr(shared.process_state_registry, "update_state"):
+                shared.process_state_registry.update_state(self.process.name, status="initializing")
 
             self.process._log_info(f"Process state registered: {self.process.name}")
         except Exception as e:

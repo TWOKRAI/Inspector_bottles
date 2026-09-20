@@ -19,7 +19,7 @@ from ..observability import (
     ObservabilityHub,
     hub_record_to_display,
 )
-from ..observability.record_display import STATS_SNAPSHOT_SEVERITY, snapshot_message
+from ..observability.record_display import NUMBER_SEVERITY, SNAPSHOT_TOTAL_KEY, snapshot_message
 
 
 def _aggregate_record(metrics=None, total=None, **extra):
@@ -135,7 +135,9 @@ def test_aggregate_survives_the_normalizer_with_its_content():
     display = hub_record_to_display(_aggregate_record(metrics))
 
     assert display["kind"] == "stats"
-    assert display["severity"] == STATS_SNAPSHOT_SEVERITY
+    # Task 3.1 (К7): у ВСЕХ числовых форм одно слово; прежнее "snapshot" различало
+    # то, что уже различают kind и metric IS NULL.
+    assert display["severity"] == NUMBER_SEVERITY
     # Содержимое ПОИМЁННО: «extra непустой» зеленело бы и на огрызке.
     assert display["extra"]["total_count"] == 2
     assert display["extra"]["window_ts"] == 100.0
@@ -207,9 +209,12 @@ def test_a_raw_metric_record_keeps_its_old_shape():
 
     display = hub_record_to_display(raw)
 
-    assert display["severity"] == "gauge"
+    assert display["severity"] == NUMBER_SEVERITY
     assert display["message"] == "m"
-    assert display["extra"] == {"value": 5, "tags": {}}
+    # Task 3.1: род метрики переехал из колонки severity в структуру — он не
+    # уничтожен снятием трёх словарей из одной колонки, он лежит рядом с числом.
+    assert display["extra"] == {"value": 5, "tags": {}, "metric_type": "gauge"}
+    assert display["metric"] == "m"
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +310,11 @@ def test_normalizer_and_guard_branch_on_the_same_marker(marked):
     display = hub_record_to_display(record)
     guarded = ObservabilityDrainAdapter(stats=_RecordingStats()).apply_stat(record) is False
 
-    normalized_as_aggregate = display["severity"] == STATS_SNAPSHOT_SEVERITY
+    # Признак ветки — СОСТАВ конверта, а не severity: с Task 3.1 (К7) слово в
+    # колонке у обеих веток одно ("number"), и прежний различитель ослеп бы
+    # молча — тест зеленел бы при ЛЮБОМ выборе ветки. Ключ ``total_count``
+    # кладёт в extra ровно ветка агрегата (правило конверта), у сырой метрики
+    # конверт другой: {value, tags, metric_type}.
+    normalized_as_aggregate = SNAPSHOT_TOTAL_KEY in display["extra"]
     assert normalized_as_aggregate is marked
     assert guarded is marked

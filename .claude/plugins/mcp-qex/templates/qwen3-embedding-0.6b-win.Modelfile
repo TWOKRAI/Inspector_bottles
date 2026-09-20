@@ -1,0 +1,18 @@
+# GPU-оптимизированный variant qwen3-embedding:0.6b для Windows.
+# Применяется через setup-embedding-model.sh / setup-embedding-model.ps1.
+#
+# Модель 0.6b выбрана на Windows дефолтом сида: она целиком помещается в VRAM
+# ноутбучных GPU (~1 ГБ против ~2.5 ГБ у 4b), поэтому не уходит в CPU-offload
+# и не даёт таймаутов qex на больших репо. Размерность вектора — 1024
+# (у 4b — 2560, у 8b — 4096); она прописана в qex-launcher.py и reindex.py и
+# ДОЛЖНА совпадать с моделью, иначе qex молча запишет мусор.
+#
+# num_ctx 2048 — embedding-чанки кода почти всегда меньше 2k токенов;
+#                урезание контекста экономит KV cache и оставляет место в VRAM.
+# num_gpu  999 — идиома ollama: "выгрузи все слои модели на GPU".
+#                999 — магическое infinity (число слоёв любой реальной модели
+#                меньше); ollama clamp'нет до фактического. Без этого ollama
+#                применит auto-detection и может оставить часть слоёв на CPU.
+FROM qwen3-embedding:0.6b
+PARAMETER num_ctx 2048
+PARAMETER num_gpu 999

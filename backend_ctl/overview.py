@@ -23,6 +23,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
+# Тот же приём, что в protocol.py: перечень значений — у публикатора, своя копия
+# расходится молча. HealthStatus — контракт health/schema.py, по которому heartbeat
+# и публикует ветку ``processes.<p>.health``.
+from multiprocess_framework.modules.process_module.health.schema import HealthStatus
+
 #: Глубина очереди, с которой подсвечивается backpressure-hint. Снимок — не тренд:
 #: «очередь растёт» без истории не доказать, но глубокая очередь — повод смотреть.
 QUEUE_DEPTH_HINT: int = 50
@@ -82,12 +87,51 @@ def _process_hz(workers: Optional[Dict[str, Any]]) -> tuple[Optional[float], Lis
     return leading, degraded
 
 
+def _health_signals(node: Any, proc: str) -> tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Карточка и подсказки плоскости health из узла state-поддерева процесса.
+
+    Ф1 Task 1.5 (M8-хвост): отказ, доехавший до плоскости ошибок, обязан быть
+    назван сводкой. Источник — ветка ``health`` УЖЕ полученного state-поддерева
+    (самопубликация heartbeat; контракт — ``process_module/health/schema.py``),
+    новых ручек и round-trip'ов нет. Ветки может не быть (старый бэкенд, health
+    ещё не публиковался), узел процесса может оказаться не-dict — тогда
+    ``(None, [])``: отсутствие показания не выдаётся ни за «здоров», ни за
+    аномалию, а сводка — первая команда сессии — не падает.
+
+    Статус и счётчик — НЕЗАВИСИМЫЕ сигналы (живой замер стенда Б 2026-09-01:
+    ``errors=1`` при ``status=ok`` — ``report_error`` растит счётчик, статус
+    меняет breaker на пороге), поэтому подсказки у них раздельные. ``errors``
+    флагается ПОЖИЗНЕННО, как ``observability_loss``: инцидент плоскости ошибок
+    не перестаёт быть фактом от того, что случился давно; свежесть видна по
+    ``ts``/``updated_at`` в detail.
+    """
+    health = node.get("health") if isinstance(node, dict) else None
+    if not isinstance(health, dict):
+        return None, []
+    card = {"status": health.get("status"), "errors": health.get("errors")}
+    hints: List[Dict[str, Any]] = []
+    status_raw = health.get("status")
+    status = status_raw.strip() if isinstance(status_raw, str) else ""
+    last = health.get("last_error") if isinstance(health.get("last_error"), dict) else {}
+    if status and status != HealthStatus.OK.value:
+        reason = health.get("degraded_reason") or last.get("message") or "причина не названа"
+        hints.append({"kind": f"health_{status}", "process": proc, "detail": str(reason)})
+    if _is_positive(health.get("errors")):
+        last_text = (
+            f"последняя: {last.get('type')}: {last.get('message')} (context={last.get('context')}, ts={last.get('ts')})"
+            if last
+            else f"last_error пуст (updated_at={health.get('updated_at')})"
+        )
+        hints.append({"kind": "health_errors", "process": proc, "detail": f"errors={health['errors']}, {last_text}"})
+    return card, hints
+
+
 def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, Any]:
     """Компактная сводка системы + аномалии (см. докстроку модуля).
 
     Returns:
         ``{"success": True, "processes": {name: {ok, status, workers, router,
-        queues, memory_ok, hz, observability_losses, missing?}},
+        queues, memory_ok, hz, observability_losses, missing?, health?}},
         "telemetry": {"fps": {path: value}},
         "driver": {late_replies, event_errors, events_evicted}, "anomalies": [...], "anomaly_count": N}``. Пустая
         топология (бэкенд не прогрет) → ``processes == {}`` + hint.
@@ -99,7 +143,12 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
     anomalies: List[Dict[str, Any]] = []
     processes: Dict[str, Dict[str, Any]] = {}
 
-    procs = drv._discover_processes(timeout=timeout)
+    # Ф1 Task 1.5: поддерево целиком, а не только имена — в нём уже лежит ветка
+    # ``health`` каждого процесса (самопубликация heartbeat, контракт
+    # ``process_module/health/schema.py``). Ноль новых IPC-команд и ноль новых
+    # round-trip: тот же самый вызов, из которого раньше брали одни ключи.
+    topology = drv._state_topology(timeout=timeout)
+    procs = sorted(topology)
     if not procs:
         anomalies.append(
             {"kind": "empty_topology", "detail": "state-топология пуста — бэкенд не прогрет или нет соединения"}
@@ -135,12 +184,18 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
 
     for proc in procs:
         section = collected[proc]
+        # Major 1 ревью 1.5: health зависит только от topology и читается ДО судьбы
+        # секции — упавший fan-out не глушит показание, которое уже в руках.
+        health_card, health_hints = _health_signals(topology.get(proc), proc)
+        anomalies.extend(health_hints)
         if isinstance(section, BaseException):
             processes[proc] = {
                 "ok": False,
                 "error": f"{type(section).__name__}: {section}",
                 "process": proc,
             }
+            if health_card is not None:
+                processes[proc]["health"] = health_card
             anomalies.append(
                 {
                     "kind": "introspect_failed",
@@ -192,6 +247,8 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
         }
         if missing_by_source:
             processes[proc]["missing"] = missing_by_source
+        if health_card is not None:
+            processes[proc]["health"] = health_card
 
         if failed_handles:
             anomalies.append(
@@ -232,6 +289,22 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             detail = ", ".join(f"{key}={value}" for key, value in sorted(hits.items()))
             anomalies.append(
                 {"kind": "observability_loss", "process": proc, "detail": f"плоскость {plane!r}: {detail}"}
+            )
+        # Ф1.1 (C3) — исключение, вышедшее из потока. СВОЙ kind, а не
+        # ``observability_loss``: там речь о записях, которых нет, здесь — о
+        # записи, которая ЕСТЬ и говорит про упавший поток. Слить их в одну
+        # подсказку значило бы предложить оператору чинить журнал вместо
+        # процесса. Читается из СЫРОЙ секции (``planes``), а не из ``nonzero``:
+        # ``nonzero`` — про классы потери, и добавить имя туда значило бы
+        # объявить отказ процесса потерей наблюдаемости.
+        error_plane = (obs.planes or {}).get("error") if obs.ok else None
+        if isinstance(error_plane, dict) and _is_positive(error_plane.get("thread_exceptions")):
+            anomalies.append(
+                {
+                    "kind": "thread_exceptions",
+                    "process": proc,
+                    "detail": f"thread_exceptions={error_plane['thread_exceptions']}",
+                }
             )
         if not obs.ok:
             anomalies.append(
@@ -337,6 +410,36 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
                 anomalies.append({"kind": "fps_zero_while_running", "process": proc, "detail": path})
         elif drv._telemetry_matches_metric(path, "supervisor.event") and rec.get("value") == "recovered":
             anomalies.append({"kind": "recent_recovery", "process": rec.get("process"), "detail": f"{path}=recovered"})
+
+    # Ф2 Task 2.8: находка стенда Ф1.5 — холодная агентская сессия видела
+    # ``telemetry.fps == {}`` МОЛЧА. Причина законная (наполняет ``watch_like_gui``/
+    # ``state_subscribe``, см. докстринг ``telemetry_snapshot``), но сама сводка о
+    # предусловии молчала, и обещание «один вызов = вся картина» держало для
+    # людей-операторов и ломалось ровно для агентов, которые не знают, что
+    # подписаться нужно СНАЧАЛА. Сигнал «подписки нет» берём из уже полученного
+    # ``snapshot["ingest_active"]`` — второй round-trip не нужен, overview и так
+    # делает ровно один ``telemetry_snapshot()`` (комментарий выше). Активная
+    # подписка при пустом снимке — законное «дельт ещё не было» (в т.ч. если
+    # паттерн подписки не покрывает ``processes.**`` — та же оговорка, что в
+    # докстринге ``telemetry_snapshot`` про ``ingest_active``), и здесь НАМЕРЕННО
+    # молчим: ложный hint хуже тишины (прямое требование задачи 2.8).
+    if snapshot.get("count", 0) == 0 and not snapshot.get("ingest_active"):
+        anomalies.append(
+            {
+                "kind": "telemetry_readmodel_empty",
+                # Н-6 (добор ревью Ф2): «наполнит» без оговорки — обещание, а у
+                # пустоты есть ТРЕТЬЯ штатная причина, которую ingest_active не
+                # различает (закрытый publisher-gate в источнике, см. докстринг
+                # ``driver.telemetry_snapshot``) — после неё watch_like_gui не
+                # поможет, а второй подсказки уже не будет (условие anomaly
+                # больше не выполняется под активной подпиской). Вторая дорога
+                # названа здесь заранее, а не после повторной немоты.
+                "detail": (
+                    "state-подписки нет — watch_like_gui наполнит; если после "
+                    "него снимок всё ещё пуст — introspect.telemetry, поле gate_active"
+                ),
+            }
+        )
 
     events_stats = drv.events_stats()
     events_evicted = {plane: st["evicted"] for plane, st in events_stats.get("planes", {}).items() if st.get("evicted")}

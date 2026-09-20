@@ -7,10 +7,10 @@ Meta-аудит инфраструктуры `.claude/`: frontmatter, ссылк
 ## Быстрый старт
 
 ```bash
-python scripts/claude_md_audit/claude_md_audit.py
-python scripts/claude_md_audit/claude_md_audit.py --format json
-python scripts/claude_md_audit/claude_md_audit.py --no-strict
-python scripts/claude_md_audit/claude_md_audit.py --claude-dir ../other-project/.claude
+uv run --no-project python scripts/claude_md_audit/claude_md_audit.py
+uv run --no-project python scripts/claude_md_audit/claude_md_audit.py --format json
+uv run --no-project python scripts/claude_md_audit/claude_md_audit.py --no-strict
+uv run --no-project python scripts/claude_md_audit/claude_md_audit.py --claude-dir ../other-project/.claude
 ```
 
 ## Что проверяется
@@ -20,7 +20,7 @@ python scripts/claude_md_audit/claude_md_audit.py --claude-dir ../other-project/
 | **agents** | Frontmatter `--- ... ---` в `.claude/plugins/*/agents/**/*.md`, обязательные поля (по умолчанию `description`) |
 | **commands** | Frontmatter в `.claude/plugins/*/commands/**/*.md`, обязательные поля (по умолчанию `description`) |
 | **skills** | В каждой `.claude/plugins/*/skills/<name>/` должен быть `SKILL.md` |
-| **slash_scripts** | Slash-команда упоминает `python scripts/x.py` или `bash scripts/x.sh` — файл должен существовать в `project_root` |
+| **slash_scripts** | Slash-команда упоминает `uv run --no-project python scripts/x.py` или `bash scripts/x.sh` — файл должен существовать в `project_root` |
 | **memory_links** | `[Title](file.md)` в `MEMORY.md` → файл существует в той же папке |
 | **hooks_settings** | В `.claude/settings.json` все хуки, ссылающиеся на `.claude/plugins/*/hooks/*.sh|*.py`, существуют |
 
@@ -50,13 +50,13 @@ python scripts/claude_md_audit/claude_md_audit.py --claude-dir ../other-project/
 ## Когда полезно
 
 - Перед merge — pre-commit/CI gate на консистентность `.claude/`.
-- После апдейта `claude-kit-claude plugin upgrade` — поймать рассинхронизацию.
+- После апдейта `claude-kit upgrade` — поймать рассинхронизацию.
 - При проверке чужого репо со seed — узнать, не сломано ли что-то.
 - При правке canonical seed (`plugins/<id>/`) — проверить, что seed не битый перед `upgrade`.
 
 ## Ограничения
 
 - Парсер frontmatter — простой `key: value`, без YAML-вложенности. Многострочные значения (например, `tools:` со списком) учитываются как «есть значение», без проверки структуры.
-- `slash_scripts` ловит только команды формата `python scripts/...` / `bash scripts/...` / `uv run scripts/...`. Команды, упоминающие MCP-инструменты или агентов — не проверяются.
+- `slash_scripts` ловит только команды формата `uv run --no-project python scripts/...` / `bash scripts/...` / `uv run scripts/...`. Команды, упоминающие MCP-инструменты или агентов — не проверяются.
 - `hooks_settings` парсит только `.claude/settings.json` (project). `~/.claude/settings.json` (user-level) — вне scope.
 - Не проверяет содержательную корректность — только наличие файлов и обязательных полей.

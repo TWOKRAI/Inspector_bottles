@@ -63,9 +63,26 @@ register_sink_factory("sql", MySqlChannel)      # класс-наследник 
 | Скоуп | Приёмники | Файл |
 |---|---|---|
 | `SYSTEM` | `console`, `system_file` | `system.log` |
-| `BUSINESS` | `system_file`, `messages_file` | `system.log` + `messages.log` |
+| `BUSINESS` | `messages_file` | `messages.log` |
 | `PERFORMANCE` | `performance_file` | `performance.log` |
 | `DEBUG` | `system_file` | `system.log` |
+
+**Task 3.2 (Р-7(а)):** `BUSINESS` лишился `system_file`. Замер на живом стенде (8 процессов, бут)
+показал, что `messages.log` был строгим подмножеством `system.log` — 368 строк, 0 уникальных, —
+потому что оба скоупа делили канал `system_file`; после фикса файлы больше не дублируют друг друга.
+
+**Инвариант после Р-7(а), одинаковый в КАЖДОМ каталоге, включая `launcher/`:**
+`messages.log` = INFO; `system.log` = WARNING+ (через скоуп `SYSTEM`) и DEBUG-скоуп.
+Он держится не на конфиге отдельного процесса, а на паре «`_LEVEL_DEFAULT_SCOPE`
+(`INFO → BUSINESS`, `WARNING/ERROR/CRITICAL → SYSTEM`, `DEBUG → DEBUG`) + наборы каналов
+скоупов». Компонент, который не передаёт `scope=` явно, подчиняется ей автоматически —
+в том числе `SystemLauncher`, поднимающий логгер на голых дефолтах схемы.
+
+**Следствие, неочевидное при чтении таблицы:** скоуп `DEBUG` пишет в `system_file`. Значит
+при опущенном корневом `default_level` в `system.log` появится DEBUG-поток **без INFO между
+ним** — INFO к тому моменту уже уехал в `messages.log`. Это не дефект раскладки, но читать
+`system.log` на уровне DEBUG как «полный журнал» больше нельзя: полного журнала в одном
+файле теперь нет ни на одном уровне.
 
 `console` **не подключён к `BUSINESS`** намеренно: пер-кадровые INFO воркеров уходят только в
 файлы. `PERFORMANCE` вынесен в свой файл в Ф2.6 — у скоупа один писатель (снапшот метрик), и он же

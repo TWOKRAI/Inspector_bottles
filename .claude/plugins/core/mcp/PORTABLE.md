@@ -24,7 +24,7 @@
 
 | Файл | Причина |
 |------|---------|
-| `.mcp.json` | Генерируется claude-kit из `manifest.yaml` (`claude-kit-project new` / `claude-kit-claude plugin enable`) |
+| `.mcp.json` | Генерируется claude-kit из `manifest.yaml` (`claude-kit new` / `claude-kit add`) |
 | `.sentrux/rules.toml` | Адаптировать из шаблона `sentrux/rules.template.toml` |
 | `.sentrux/baseline.json` | Генерируется `sentrux` при первом сканировании |
 | `.ignore` | Адаптировать из шаблона `qex/templates/ignore.template` |
@@ -44,9 +44,9 @@
    Copy-Item -Recurse C:\path\to\source-project\.claude C:\path\to\new-project\
    ```
 
-2. **Создать проект через `claude-kit-project new`** — сгенерирует `.mcp.json` из `mcp_servers:` блоков
+2. **Создать проект через `claude-kit new`** — сгенерирует `.mcp.json` из `mcp_servers:` блоков
    выбранных компонентов в `manifest.yaml`, а также инициализирует `.sentrux/rules.toml`.
-   Чтобы добавить отдельный компонент в существующий проект — `claude-kit-claude plugin enable <plugin-id>`.
+   Чтобы добавить отдельный компонент в существующий проект — `claude-kit add <component>`.
 
 3. **Адаптировать `.ignore`** под whitelist своего проекта (какие пути qex должен
    индексировать, а какие игнорировать):
@@ -56,7 +56,7 @@
    # затем отредактировать .ignore
    ```
 
-4. **Адаптировать `.sentrux/rules.toml`** — `claude-kit-project new` уже развернул его из
+4. **Адаптировать `.sentrux/rules.toml`** — `claude-kit new` уже развернул его из
    архетипа `src-package` с подставленным именем пакета (активны `max_cycles` +
    `no_god_files`, зелёный с дня 1). Когда появятся слои-папки:
 

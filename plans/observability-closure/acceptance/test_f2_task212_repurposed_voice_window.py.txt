@@ -1,0 +1,478 @@
+# -*- coding: utf-8 -*-
+"""Ф2, задача 2.12 — «одно действие оператора, один голос» про смену смысла
+``stats.enabled``.
+
+**НЕЗАВИСИМЫЙ приёмочный набор (стадия 1), написан ДО реализации.** Тестер
+работал в git worktree на пред-имплементационном коммите ``6281163d``, diff и
+реализацию не видел. Запрещённые файлы (``configs/observability_config.py``,
+``plans/observability-closure/phase-2-one-policy.md``,
+``plans/observability-closure/injections-phase-2.md``) НЕ читались НИ РАЗУ —
+ни `Read`, ни через `grep` по содержимому (только `grep -l` по ИМЕНАМ файлов,
+списки путей, без вывода строк).
+
+Источник контракта — текст задачи, переданный оркестратором (в этом файле нет
+``interface.py``, и это не решение тестера — ADR-046/окно голоса не оформлены
+формальным контрактом, только прозой задачи).
+
+======================================================================
+Дефект, который эти тесты закрывают (замерен САМ, отдельным зондом)
+======================================================================
+
+Сегодня (коммит ``6281163d``) предупреждение о смене смысла ``stats.enabled``
+уже существует (``_fallback.emergency_log`` → ``logging.getLogger(...).warning``,
+подтверждено существующим ``test_c7_reading_old_stats_enabled_false_warns_loudly...``
+в ``statistics_module/tests/test_f2_numbers_policy_acceptance.py`` — ОДИН прямой
+``ObservabilityConfig.model_validate(...)`` даёт РОВНО одно предупреждение), но
+через ЖИВУЮ операторскую дверь (``config.reload``, харнесс ``_wired``) один
+reload со ``stats.enabled: false`` даёт **6** голосов, а три подряд — **18**
+(6+6+6 — то есть между вызовами НЕТ вообще никакого гашения, зонд ниже).
+Причина по задаче: схема валидируется несколько раз за одно чтение конфига, и
+каждая валидация кричит отдельно.
+
+======================================================================
+Различение «флаг на жизнь процесса» vs «дроссель по окну» — НАМЕРЕННО
+======================================================================
+
+Оба способа дают ОДИН голос на первый reload и ОДИН голос суммарно на три
+reload подряд (тесты 1 и 2 их не различают — и не обязаны). Разводит их ТОЛЬКО
+тест 3 (``TestWindowExpiryReVoicesAfterSilence``): после огромного скачка
+часов новое чтение конфига обязано заговорить СНОВА. Набор, зелёный и у флага
+(глушит навсегда), свойства не держит — задача прямо требует не проходить
+мимо этого различия.
+
+======================================================================
+Наблюдение — эффект, а не имя функции
+======================================================================
+
+Канал назван задачей буквально: ``multiprocess_framework.modules._fallback.
+emergency_log``. Он в итоге зовёт ``logging.getLogger(name).warning(message,
+*args)`` (подтверждено чтением ``_fallback.py``) — запись доходит до КОРНЕВОГО
+логгера (подтверждено зондом: обычный ``logging.Handler`` на root поймал все
+6 сегодняшних копий за один reload). Тесты здесь смотрят через ``caplog`` на
+ТЕКСТ дошедшей записи, а не патчат имя ``emergency_log`` — тот способ ловит
+только вызов через КОНКРЕТНЫЙ путь импорта (``from ..._fallback import
+emergency_log`` вяжет имя ЛОКАЛЬНО в вызывающем модуле, и monkeypatch на
+``_fallback.emergency_log`` эту привязку не видит), а ``caplog`` не зависит от
+того, как реализация импортировала функцию.
+
+======================================================================
+Часы — глобальная подмена ``time.monotonic``/``time.time``
+======================================================================
+
+Модуль, который реально считает окно, не назван (задача явно просит не
+привязываться к имени ручки), поэтому часы подменяются ГЛОБАЛЬНО — тот же
+приём, что уже применяет сосед ``channel_routing_module/tests/
+test_windowed_voice_primitive_acceptance.py`` («модуль неизвестен заранее…
+подменяется ГЛОБАЛЬНО»). Скачок — 10**6 секунд (~11.5 суток): заведомо больше
+любого разумного окна «не чаще одного предупреждения о смене смысла ключа».
+Это ДОПУЩЕНИЕ тестера, не факт: если реализация использует независимый
+тик-счётчик, а не ``time.*``, тест 3/4/7 не увидит нужного эффекта — см.
+отчёт, раздел «что недоказано».
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import time
+from typing import List
+
+import pytest
+
+from multiprocess_framework.modules.logger_module.core.windowed_voice import (
+    log_windowed,
+    reset_process_voices,
+    reset_voice_counters,
+)
+
+from .test_observation_policy_review_f4 import _wired
+
+#: Подстроки, по которым запись засчитывается как «голос про смену смысла
+#: stats.enabled» — сверено с реальным текстом сегодняшнего предупреждения
+#: (зонд: "stats.enabled: false ... stats.log_snapshots ... enabled: true,
+#: log_snapshots: false (ADR-PM-046)").
+_VOICE_MARKERS = ("stats.enabled", "log_snapshots")
+
+
+@pytest.fixture(autouse=True)
+def _clean_process_wide_voice_state():
+    """Сбросить процессный держатель окон ``windowed_voice`` до и после теста.
+
+    Если реализация задачи 2.12 заводит голос через
+    ``windowed_voice.process_voices()`` (естественный кандидат — контракт
+    ``WindowedVoices.take()`` совпадает с требованием дословно: первый вызов
+    голосит всегда, внутри окна молчит и копит счёт, по истечении окна голосит
+    снова и называет подавленное), состояние по ключу иначе переживает между
+    тестами ЭТОГО файла и между ним и соседями (``test_health_fact_voice_
+    hazards.py`` и др. используют тот же процессный держатель). Если механизм
+    его вовсе не использует — вызовы ниже безвредный no-op.
+    """
+    reset_process_voices()
+    reset_voice_counters()
+    yield
+    reset_process_voices()
+    reset_voice_counters()
+
+
+class _FakeClock:
+    """Управляемые часы для ``monkeypatch.setattr(time, "monotonic"/"time", ...)``.
+
+    Один и тот же счётчик отдаётся ОБОИМ срезам времени — не потому, что они
+    физически совпадают (не совпадают: ``time.time()`` — эпоха Unix,
+    ``time.monotonic()`` — произвольная точка отсчёта), а потому что тестеру
+    не сказано, какую из двух функций возьмёт окно, и обеим достаточно
+    ОДНОГО согласованного хода времени вперёд.
+    """
+
+    def __init__(self, start: float) -> None:
+        self._now = start
+
+    def __call__(self) -> float:
+        return self._now
+
+    def advance(self, dt: float) -> None:
+        self._now += dt
+
+
+def _fake_clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
+    clock = _FakeClock(time.monotonic())
+    monkeypatch.setattr(time, "monotonic", clock)
+    monkeypatch.setattr(time, "time", clock)
+    return clock
+
+
+def _voice_records(caplog: pytest.LogCaptureFixture) -> List[str]:
+    """WARNING-записи о смене смысла ``stats.enabled``, дошедшие до логгера."""
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.WARNING and any(marker in r.getMessage() for marker in _VOICE_MARKERS)
+    ]
+
+
+# =========================================================================== #
+# 1 — Один config.reload → ровно один голос                                  #
+# =========================================================================== #
+class TestOneReloadOneVoice:
+    """Свойство 1: один ``config.reload`` со ``stats.enabled: false`` даёт
+    РОВНО один голос про смену смысла ключа — не «хотя бы один», не «меньше
+    шести», литерал.
+    """
+
+    def test_single_reload_produces_exactly_one_voice(self, tmp_path, caplog: pytest.LogCaptureFixture) -> None:
+        caplog.set_level(logging.WARNING)
+        _svc, handlers = _wired(tmp_path)
+
+        res = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+
+        assert res.get("success") is True, f"reload не подтвердился: {res!r}"
+        voices = _voice_records(caplog)
+        assert len(voices) == 1, (
+            f"один config.reload дал {len(voices)} голосов вместо 1: {voices!r} — "
+            "схема валидируется несколько раз за одно чтение, и каждая валидация "
+            "кричит отдельно (замер тестера: 6 на один reload у харнесса _wired)"
+        )
+
+
+# =========================================================================== #
+# 2 — Три reload подряд → суммарно один голос                                #
+# =========================================================================== #
+class TestThreeReloadsBackToBackOneVoiceTotal:
+    """Свойство 2: три ``config.reload`` вплотную друг за другом дают СУММАРНО
+    один голос, а не по одному (или по шесть) на каждый.
+    """
+
+    def test_three_reloads_in_a_row_produce_exactly_one_voice_total(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        _svc, handlers = _wired(tmp_path)
+
+        for i in range(3):
+            res = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+            assert res.get("success") is True, f"reload #{i + 1} не подтвердился: {res!r}"
+
+        voices = _voice_records(caplog)
+        assert len(voices) == 1, (
+            f"три config.reload подряд дали {len(voices)} голосов вместо 1: {voices!r} — "
+            "замер тестера: 18 у сегодняшнего харнесса (6+6+6, то есть между вызовами "
+            "нет вообще никакого гашения)"
+        )
+
+
+# =========================================================================== #
+# 3 — По истечении окна голос звучит снова (флаг ≠ дроссель)                  #
+# =========================================================================== #
+class TestWindowExpiryReVoicesAfterSilence:
+    """Свойство 3: по истечении окна новое чтение конфига снова говорит вслух.
+
+    Это тест, который РАЗЛИЧАЕТ флаг («сказать один раз за жизнь процесса») и
+    дроссель («сказать не чаще окна»): у флага после огромного скачка часов
+    голосов ПО-ПРЕЖНЕМУ ноль — набор, зелёный на обоих способах, свойства не
+    держит. Требуемое свойство — дроссель, поэтому здесь ожидается ИМЕННО
+    повторный голос.
+    """
+
+    def test_new_config_read_after_a_huge_time_jump_voices_again(
+        self, tmp_path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = _fake_clock(monkeypatch)
+        caplog.set_level(logging.WARNING)
+        _svc, handlers = _wired(tmp_path)
+
+        first = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert first.get("success") is True, f"первый reload не подтвердился: {first!r}"
+        first_voices = _voice_records(caplog)
+        assert len(first_voices) == 1, (
+            f"первый голос обязан прозвучать РОВНО один раз (иначе не с чем сравнивать "
+            f"«после окна»): {first_voices!r}"
+        )
+        caplog.clear()
+
+        clock.advance(1_000_000.0)  # заведомо больше любого разумного окна
+
+        second = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert second.get("success") is True, f"второй reload не подтвердился: {second!r}"
+        voices_after_window = _voice_records(caplog)
+        assert len(voices_after_window) == 1, (
+            f"после огромного скачка часов новый config.reload дал "
+            f"{len(voices_after_window)} голосов вместо 1: {voices_after_window!r} — "
+            "если 0, это ФЛАГ (глушит навсегда), а не дроссель по окну; требуемое "
+            "свойство держит именно окно, не «сказано один раз за жизнь процесса»"
+        )
+
+
+# =========================================================================== #
+# 4 — Возобновившийся голос называет число подавленных                       #
+# =========================================================================== #
+class TestReactivatedVoiceNamesSuppressedCount:
+    """Свойство 4: голос, прозвучавший после окна, называет, сколько чтений
+    конфига было подавлено с прошлой записи. Иначе подавленные исчезают
+    бесследно, и оператор не узнаёт, что правило вообще срабатывало, пока
+    молчало.
+    """
+
+    def test_the_re_voice_after_the_window_names_how_many_were_suppressed(
+        self, tmp_path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = _fake_clock(monkeypatch)
+        caplog.set_level(logging.WARNING)
+        _svc, handlers = _wired(tmp_path)
+
+        first = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert first.get("success") is True, f"первый reload не подтвердился: {first!r}"
+        assert len(_voice_records(caplog)) == 1, "первый голос обязан прозвучать — база сравнения иначе не с чем"
+        caplog.clear()
+
+        suppressed_calls = 4
+        for i in range(suppressed_calls):
+            res = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+            assert res.get("success") is True, f"подавляемый reload #{i + 1} не подтвердился: {res!r}"
+        assert _voice_records(caplog) == [], (
+            "внутри окна голос не имеет права прозвучать — иначе число подавленных "
+            "ниже посчитано неверно и проверка бессмысленна"
+        )
+
+        clock.advance(1_000_000.0)
+        second = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert second.get("success") is True, f"возобновляющий reload не подтвердился: {second!r}"
+
+        voices = _voice_records(caplog)
+        assert len(voices) == 1, f"возобновившийся голос обязан быть РОВНО одним: {voices!r}"
+        text = voices[0]
+        assert re.search(rf"\b{suppressed_calls}\b", text), (
+            f"возобновившийся голос не называет число подавленных ({suppressed_calls}): "
+            f"{text!r} — подавленные исчезли бесследно, оператор не узнает, что правило "
+            "срабатывало, пока молчало"
+        )
+
+
+# =========================================================================== #
+# 5 — Контроль: ничего не изменилось по смыслу → ноль голосов, всегда         #
+# =========================================================================== #
+class TestControlPairNoVoiceWhenNothingChangedMeaning:
+    """Свойство 5: ``stats.enabled: true`` (явно) и полное отсутствие секции
+    ``stats`` — ОБА дают НОЛЬ голосов, и до, и после окна.
+
+    Без этой пары тест 1 был бы зелён и у поломки, которая ВСЕГДА гасит
+    предупреждение (флаг, никогда не взводимый, или дроссель с окном, которое
+    молчит по построению) — «ноль наблюдений выглядит как результат
+    наблюдения», и этот класс отделяет «правило корректно молчит» от «правило
+    сломано и молчит всегда».
+    """
+
+    @pytest.mark.parametrize(
+        "section",
+        [
+            pytest.param({"stats": {"enabled": True}}, id="explicit_true"),
+            pytest.param({}, id="stats_absent"),
+        ],
+    )
+    def test_no_voice_before_or_after_the_window(
+        self,
+        tmp_path,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        section: dict,
+    ) -> None:
+        clock = _fake_clock(monkeypatch)
+        caplog.set_level(logging.WARNING)
+        _svc, handlers = _wired(tmp_path)
+
+        before = handlers["config.reload"]({"observability": section})
+        assert before.get("success") is True, f"reload (до окна) не подтвердился: {before!r}"
+        assert _voice_records(caplog) == [], (
+            f"{section!r} породил голос ДО окна — предупреждение обязано молчать: "
+            f"смысл ключа не менялся (или ключ вовсе не подан)"
+        )
+
+        clock.advance(1_000_000.0)
+
+        after = handlers["config.reload"]({"observability": section})
+        assert after.get("success") is True, f"reload (после окна) не подтвердился: {after!r}"
+        assert _voice_records(caplog) == [], (
+            f"{section!r} породил голос ПОСЛЕ окна — предупреждение обязано молчать всегда, "
+            "а не заговорить просто потому, что часы сдвинулись"
+        )
+
+
+# =========================================================================== #
+# 6 — Дросселирование не укорачивает текст голоса                            #
+# =========================================================================== #
+class TestVoiceContentIsNotShortenedByThrottling:
+    """Свойство 6: миграционная подсказка (``enabled: true, log_snapshots:
+    false``) и ``ADR-PM-046`` обязаны быть на месте — что на первом голосе,
+    что на возобновившемся после окна. Дроссель имеет право решать, ЗВУЧАТЬ ли
+    голосу, но не имеет права укоротить его, если он звучит.
+    """
+
+    def test_the_first_voice_names_the_migration_path_and_the_adr(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        _svc, handlers = _wired(tmp_path)
+
+        res = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert res.get("success") is True, f"reload не подтвердился: {res!r}"
+
+        voices = _voice_records(caplog)
+        assert len(voices) == 1, voices
+        text = voices[0]
+        assert "ADR-PM-046" in text, f"голос не называет ADR-PM-046: {text!r}"
+        assert "log_snapshots" in text, f"голос не называет миграционный путь (log_snapshots): {text!r}"
+        assert "enabled" in text, f"голос не называет 'enabled' (часть миграционной подсказки): {text!r}"
+
+    def test_the_re_voice_after_the_window_keeps_the_same_content(
+        self, tmp_path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = _fake_clock(monkeypatch)
+        caplog.set_level(logging.WARNING)
+        _svc, handlers = _wired(tmp_path)
+
+        first = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert first.get("success") is True, f"первый reload не подтвердился: {first!r}"
+        caplog.clear()
+        clock.advance(1_000_000.0)
+
+        res = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert res.get("success") is True, f"возобновляющий reload не подтвердился: {res!r}"
+
+        voices = _voice_records(caplog)
+        assert len(voices) == 1, voices
+        text = voices[0]
+        assert "ADR-PM-046" in text, f"возобновившийся голос потерял ADR-PM-046: {text!r}"
+        assert "log_snapshots" in text, f"возобновившийся голос потерял миграционную подсказку: {text!r}"
+
+
+# =========================================================================== #
+# 7 — Окно не общее с чужими дросселируемыми голосами                        #
+# =========================================================================== #
+class TestVoiceWindowIsNotSharedWithOtherThrottledVoices:
+    """Свойство 7: срабатывание другого дросселируемого голоса рядом не имеет
+    права заткнуть этот, и наоборот. Проверяется в ОБЕ стороны через уже
+    существующий в проекте механизм окна (``windowed_voice.log_windowed``) с
+    заведомо ДРУГИМ ключом — если бы окно/флаг этой задачи оказались общей
+    меткой на весь слой (а не собственным состоянием по ``'stats.enabled'``),
+    посторонний голос рядом либо заткнул бы наш, либо наш заткнул бы его.
+    """
+
+    def test_a_neighbor_windowed_voice_right_before_does_not_silence_ours(
+        self, tmp_path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _clock = _fake_clock(monkeypatch)
+        caplog.set_level(logging.WARNING)
+
+        # Чужой голос по СВОЕМУ ключу, СРАЗУ перед нашим — если бы окно/флаг были
+        # общими на весь слой наблюдаемости, эта строка заняла бы слот раньше нас.
+        for _ in range(5):
+            log_windowed(
+                "f2_task212_neighbor_probe_before",
+                5.0,
+                "warning",
+                "соседнее предупреждение, не про stats.enabled",
+            )
+
+        _svc, handlers = _wired(tmp_path)
+        res = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert res.get("success") is True, f"reload не подтвердился: {res!r}"
+
+        voices = _voice_records(caplog)
+        assert len(voices) == 1, (
+            f"наш голос про stats.enabled не прозвучал рядом с чужим голосом того же "
+            f"механизма окна: {voices!r} — окно/флаг оказались общими на весь слой, а "
+            "не собственными у 'stats.enabled'"
+        )
+
+    def test_our_voice_does_not_silence_a_neighbor_windowed_voice_right_after(
+        self, tmp_path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _clock = _fake_clock(monkeypatch)
+        caplog.set_level(logging.WARNING)
+
+        _svc, handlers = _wired(tmp_path)
+        res = handlers["config.reload"]({"observability": {"stats": {"enabled": False}}})
+        assert res.get("success") is True, f"reload не подтвердился: {res!r}"
+        assert len(_voice_records(caplog)) == 1, "наш голос обязан прозвучать — база сравнения иначе не с чем"
+
+        neighbor_key = "f2_task212_neighbor_probe_after"
+        first_neighbor = log_windowed(neighbor_key, 5.0, "warning", "соседнее предупреждение №2")
+        assert first_neighbor is True, (
+            "чужой голос СВОЕГО (нового) ключа обязан прозвучать первым разом всегда — "
+            "если он не прозвучал, наш голос только что заглушил ЕГО окно/флаг"
+        )
+
+
+# =========================================================================== #
+# Доп. свойство, найденное тестером (список задачи не исчерпывающий):        #
+# другие ключи секции в ТОМ ЖЕ reload не имеют права размножить голос         #
+# =========================================================================== #
+class TestOtherSectionKeysDoNotMultiplyTheVoice:
+    """Реалистичный оператор редко правит один голый ``stats.enabled`` — обычно
+    вместе с другими ключами секции в одном вызове. Если починка работает
+    только на «голой» секции из одного ключа (частый случай регрессии у
+    дросселя, реализованного как побочный эффект внутри цикла по ключам), она
+    тихо сломается на первом же реальном операторском вызове.
+    """
+
+    def test_stats_enabled_false_alongside_unrelated_keys_still_gives_one_voice(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        _svc, handlers = _wired(tmp_path)
+
+        res = handlers["config.reload"](
+            {
+                "observability": {
+                    "log_level": "DEBUG",
+                    "session_ttl_sec": 77.0,
+                    "stats": {"enabled": False},
+                }
+            }
+        )
+
+        assert res.get("success") is True, f"reload не подтвердился: {res!r}"
+        voices = _voice_records(caplog)
+        assert len(voices) == 1, (
+            f"stats.enabled=false вместе с другими ключами секции дал {len(voices)} "
+            f"голосов вместо 1: {voices!r}"
+        )

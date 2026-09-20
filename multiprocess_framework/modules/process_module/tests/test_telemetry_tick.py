@@ -203,12 +203,25 @@ class TestCappedMetricWarning:
         hb.reconfigure_telemetry({"tick_sec": 0.5, "default_interval_sec": 1.0})
         assert not any("ограничена" in m for _lvl, m in svc.logs), svc.logs
 
-    def test_no_warning_when_tick_sec_none(self) -> None:
-        """tick_sec не задан → легаси-процессы не шумят (finding D осознанно тихо в None)."""
+    def test_warns_when_tick_sec_none_and_heartbeat_alone_caps_it(self) -> None:
+        """M9 (Ф2, задача 2.3): ``tick_sec`` не задан → такт = ``heartbeat_interval``,
+        и ЯВНО настроенная метрика всё равно может в него упереться — голос обязан
+        прозвучать, а не молчать.
+
+        **Правка исполнителя (стадия 2, Task 2.3).** До этой задачи здесь стоял тест
+        ``test_no_warning_when_tick_sec_none`` с ПРОТИВОПОЛОЖНЫМ ожиданием («finding D
+        осознанно тихо в None») — и это была ровно та дыра, ради которой M9 делается:
+        ``_warn_capped_metrics`` при ``tick_sec is None`` возвращалась раньше вычисления
+        такта, поэтому явно зажатая метрика (``fps`` просит 0.1с при такте 5.0с) молчала
+        НЕЗАВИСИМО от факта зажатости. Задача 2.3 убирает именно этот ранний возврат
+        (см. ``ProcessHeartbeat._warn_capped_metrics``, шаг 2 плана) — старое ожидание
+        стало неверным по построению, тест обязан проверять НОВОЕ намеренное поведение.
+        """
         svc = RecordingServices(_running_workers(1))
         hb = ProcessHeartbeat(svc)
         hb.reconfigure_telemetry({"metrics": {"fps": {"interval_sec": 0.1}}})
-        assert not any("ограничена" in m for _lvl, m in svc.logs), svc.logs
+        warnings = [m for lvl, m in svc.logs if lvl in ("warning", "info")]
+        assert any("fps" in m and "ограничена" in m for m in warnings), svc.logs
 
 
 class TestTelemetryTickHelper:

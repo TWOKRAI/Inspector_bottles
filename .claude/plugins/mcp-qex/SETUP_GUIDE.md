@@ -39,7 +39,7 @@ Claude Code → qex (MCP stdio) → BM25 (Tantivy, локально)
 
 1. qex сканирует файлы воркспейса через tree-sitter
 2. BM25 индекс строится через Tantivy (секунды)
-3. Каждый чанк кода → Ollama `/v1/embeddings` (OpenAI-compatible endpoint) → вектор 4096-dim (macOS) / 2560-dim (Windows)
+3. Каждый чанк кода → Ollama `/v1/embeddings` (OpenAI-compatible endpoint) → вектор 4096-dim (macOS) / 1024-dim (Windows)
 4. Векторы → usearch HNSW → `~/.qex/projects/.../dense/dense.usearch` (~30-40 мин для ~16k chunks)
 
 **Поток при `search_code`:**
@@ -94,9 +94,17 @@ Claude Code → qex (MCP stdio) → BM25 (Tantivy, локально)
 | **CUDA** | Не нужна напрямую | Ollama несёт свои CUDA-библиотеки |
 | **Rust toolchain** | Только при сборке | Для компиляции qex из исходников |
 
-**Модель эмбеддингов** (зависит от платформы):
-- **macOS**: `qwen3-embedding:8b` (4096-dim, ~4.7 GB VRAM)
-- **Windows**: `qwen3-embedding:4b` (2560-dim, ~2.5 GB VRAM)
+**Модель эмбеддингов** (зависит от платформы; qex грузит тег-вариант `-qex`,
+собранный setup-скриптом из Modelfile — см. раздел 7):
+- **macOS**: `qwen3-embedding:8b-qex` (4096-dim, ~4.7 GB VRAM)
+- **Windows**: `qwen3-embedding:0.6b-qex` (1024-dim, ~1 GB VRAM)
+
+> ⚠ **Размерность привязана к модели.** Она продублирована в `qex-launcher.py` и
+> `reindex.py` (`QEX_OPENAI_DIMENSIONS`); qex её не проверяет и при расхождении не
+> падает, а тихо пишет мусор в индекс. Если меняешь модель — меняй и размерность
+> (0.6b → 1024, 4b → 2560, 8b → 4096), и обязательно пересобери индекс:
+> `/mcp-qex:qex-rebuild`. Инкремента недостаточно — векторы прежней размерности
+> нечитаемы, поиск будет молчать.
 
 Установка один раз (пример для macOS):
 ```bash
@@ -112,7 +120,7 @@ ollama pull qwen3-embedding:8b
 1. Скачать с https://ollama.com/download/windows и установить
 2. Загрузить модель:
    ```powershell
-   ollama pull qwen3-embedding:4b
+   ollama pull qwen3-embedding:0.6b
    ```
 3. Проверить:
    ```powershell
@@ -223,7 +231,7 @@ codesign --force --sign - ~/.local/bin/qex
         "QEX_EMBEDDING_PROVIDER": "openai",
         "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
         "QEX_OPENAI_API_KEY": "ollama",
-        "QEX_OPENAI_MODEL": "qwen3-embedding:8b",
+        "QEX_OPENAI_MODEL": "qwen3-embedding:8b-qex",
         "QEX_OPENAI_DIMENSIONS": "4096"
       }
     }
@@ -265,10 +273,14 @@ ollama serve &
 
 | Платформа           | Модель               | Размерность | VRAM    |
 |---------------------|----------------------|-------------|---------|
-| **macOS** (dev)     | `qwen3-embedding:8b` | 4096 dim    | ~4.7 GB |
-| **Windows** (build) | `qwen3-embedding:4b` | 2560 dim    | ~2.5 GB |
+| **macOS** (dev)     | `qwen3-embedding:8b-qex` | 4096 dim    | ~4.7 GB |
+| **Windows** (build) | `qwen3-embedding:0.6b-qex` | 1024 dim  | ~1 GB   |
 
-8b даёт более точный семантический поиск. На Windows используется 4b из-за ограничений VRAM.
+8b даёт более точный семантический поиск. На Windows дефолт сида — 0.6b: она целиком
+помещается в VRAM ноутбучных GPU и не уходит в CPU-offload, из-за которого qex ловит
+таймауты на больших репо. У кого VRAM с запасом — можно вернуться на `qwen3-embedding:4b`
+(2560 dim), переключив `qex-launcher.py`, `reindex.py`, оба `setup-embedding-model.*`
+и пересобрав индекс.
 
 > **Важно при смене модели:** измерения векторов меняются → нужно очистить индекс:
 > `mcp__qex__clear_index` → `mcp__qex__index_codebase(force=true)`
@@ -279,7 +291,7 @@ ollama serve &
 {
   "mcpServers": {
     "qex": {
-      "command": "/Users/<USER>/.local/bin/qex",
+      "command": "/Users/twokrai/.local/bin/qex",
       "args": [],
       "env": {
         "RUST_LOG": "info",
@@ -287,7 +299,7 @@ ollama serve &
         "QEX_EMBEDDING_PROVIDER": "openai",
         "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
         "QEX_OPENAI_API_KEY": "ollama",
-        "QEX_OPENAI_MODEL": "qwen3-embedding:8b",
+        "QEX_OPENAI_MODEL": "qwen3-embedding:8b-qex",
         "QEX_OPENAI_DIMENSIONS": "4096"
       }
     }
@@ -309,8 +321,8 @@ ollama serve &
         "QEX_EMBEDDING_PROVIDER": "openai",
         "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
         "QEX_OPENAI_API_KEY": "ollama",
-        "QEX_OPENAI_MODEL": "qwen3-embedding:4b",
-        "QEX_OPENAI_DIMENSIONS": "2560"
+        "QEX_OPENAI_MODEL": "qwen3-embedding:0.6b-qex",
+        "QEX_OPENAI_DIMENSIONS": "1024"
       }
     }
   }
@@ -319,7 +331,7 @@ ollama serve &
 
 > `QEX_OPENAI_API_KEY=ollama` — Ollama не проверяет ключ, но поле обязательно для
 > OpenAI-compatible API.  
-> `QEX_OPENAI_DIMENSIONS` — обязательно указывать явно (2560 для 4b, 4096 для 8b).
+> `QEX_OPENAI_DIMENSIONS` — обязательно указывать явно (1024 для 0.6b, 2560 для 4b, 4096 для 8b).
 
 ### Проверка что конфиг применился (Windows)
 
@@ -417,8 +429,8 @@ sleep 3600
   QEX_EMBEDDING_PROVIDER="openai" \
   QEX_OPENAI_BASE_URL="http://localhost:11434/v1" \
   QEX_OPENAI_API_KEY="ollama" \
-  QEX_OPENAI_MODEL="qwen3-embedding:4b" \
-  QEX_OPENAI_DIMENSIONS="2560" \
+  QEX_OPENAI_MODEL="qwen3-embedding:0.6b-qex" \
+  QEX_OPENAI_DIMENSIONS="1024" \
   qex 2>&1
 ```
 
@@ -521,12 +533,12 @@ curl http://localhost:11434/
 # Модель установлена?
 ollama list | grep qwen3-embedding
 
-# Тест эмбеддинга (должен вернуть 2560 чисел)
+# Тест эмбеддинга (должен вернуть 1024 числа)
 curl http://localhost:11434/v1/embeddings \
   -H "Content-Type: application/json" \
-  -d '{"model":"qwen3-embedding:4b","input":"hello world"}' | \
+  -d '{"model":"qwen3-embedding:0.6b-qex","input":"hello world"}' | \
   python3 -c "import sys,json; d=json.load(sys.stdin); emb=d['data'][0]['embedding']; print(f'dims={len(emb)}')"
-# Ожидаемо: dims=2560
+# Ожидаемо: dims=1024
 ```
 
 ### Проверка индекса
@@ -544,7 +556,7 @@ dir $HOME\.qex\projects\*\dense\dense.usearch
 
 # Метаданные эмбеддера
 cat ~/.qex/projects/*/dense/dense_meta.json
-# Ожидаемо: {"provider":"openai","dimensions":4096,"model_name":"qwen3-embedding:8b"}
+# Ожидаемо: {"provider":"openai","dimensions":4096,"model_name":"qwen3-embedding:8b-qex"}
 ```
 
 ### Проверка qex процесса (Windows)
@@ -572,7 +584,7 @@ Get-Process | Where-Object {$_.Name -like "*qex*"} | Select-Object Name, Path, I
 codesign --force --sign - ~/.local/bin/qex
 
 # Проверить
-~/.local/bin/qex --version   # должно напечатать версию
+/Users/twokrai/.local/bin/qex --version   # должно напечатать версию
 ```
 
 **Диагностика:**
@@ -614,8 +626,8 @@ ls ~/.qex/projects/                        # директория существ
 | `QEX_EMBEDDING_PROVIDER` | `openai` | Провайдер эмбеддингов (`openai` = OpenAI-compatible API, работает с Ollama) |
 | `QEX_OPENAI_BASE_URL` | `http://localhost:11434/v1` | URL Ollama (OpenAI-compatible endpoint) |
 | `QEX_OPENAI_API_KEY` | `ollama` | API key (Ollama не проверяет, но поле обязательно) |
-| `QEX_OPENAI_MODEL` | `qwen3-embedding:4b` | Модель для эмбеддингов |
-| `QEX_OPENAI_DIMENSIONS` | `2560` | Размерность вектора (зависит от модели, для `qwen3-embedding:4b` = 2560) |
+| `QEX_OPENAI_MODEL` | `qwen3-embedding:0.6b-qex` (Win) / `:8b-qex` (mac) | Модель для эмбеддингов (тег-вариант, не базовый) |
+| `QEX_OPENAI_DIMENSIONS` | `1024` (Win) / `4096` (mac) | Размерность вектора. Привязана к модели: 0.6b -> 1024, 4b -> 2560, 8b -> 4096. qex её не проверяет — при расхождении молча пишет мусор |
 
 ---
 
@@ -661,7 +673,7 @@ cat ~/.qex/projects/*/dense/dense_meta.json
 ```
 
 `dense.usearch` должен существовать и иметь ненулевой размер (для ~16k chunks 4096-dim — около 270-300 MB).
-`dense_meta.json` содержит `{"provider":"openai","dimensions":4096,"model_name":"qwen3-embedding:8b"}`.
+`dense_meta.json` содержит `{"provider":"openai","dimensions":4096,"model_name":"qwen3-embedding:8b-qex"}`.
 
 > **Примечание:** `dense_search_available: true` в ответе `get_indexing_status` означает что ONNX-модель
 > `arctic-embed-s` установлена локально — это НЕ индикатор что Ollama/OpenAI embedder готов.

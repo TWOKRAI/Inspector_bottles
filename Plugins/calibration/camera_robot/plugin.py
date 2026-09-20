@@ -274,8 +274,7 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             except Exception as exc:  # noqa: BLE001 — не валим воркер
                 self._state["error"] = f"внутренняя ошибка: {exc}"
                 if self._ctx is not None:
-                    self._ctx.health.report_error(exc, context=f"camera_robot.{action}")
-                    self._ctx.log_error(f"CameraRobotCalibration: {action} упало: {exc}")
+                    self._ctx.health.report_error(exc, context=f"camera_robot.{action}", action=action)
         self._publish()
 
     # --- Действия (исполняются в воркере) ---

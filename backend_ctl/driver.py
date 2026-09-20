@@ -22,9 +22,12 @@ request_id (или не матчащие ни один pending) — наприм
 from __future__ import annotations
 
 import fnmatch
+import json
 import logging
 import socket
+import sqlite3
 import threading
+import time
 from collections import deque  # noqa: F401 — используется в аннотации back-compat property _rollback_journal
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
@@ -36,6 +39,17 @@ from multiprocess_framework.modules.telemetry_readmodel_module import (
 from multiprocess_framework.modules.message_module import (
     build_command_message,
     build_system_command_message,
+)
+
+# Task 3.5: history_query читает БД истории СВОИМ read-only соединением (К3),
+# не через ObservabilityStore (тот открывает файл на запись — WAL/synchronous —
+# чужой контракт). fts_query/ObservabilitySearchError — переиспользуемая часть
+# разбора текстового запроса (те же правила «обычный текст — точная фраза»,
+# что и у живой панели); импорт из подмодуля, а не из фасада пакета — эти два
+# имени не входят в его публичный __all__, но не приватны (без ведущего "_").
+from multiprocess_framework.modules.channel_routing_module.observability.observability_store import (
+    ObservabilitySearchError,
+    fts_query,
 )
 
 from .endpoint_config import resolve_endpoint
@@ -98,6 +112,14 @@ _LOG_SEVERITY_RANK: Dict[str, int] = {
 #: Метасимволы, при которых адрес процесса читается как узор (Task 5.4).
 _PROCESS_GLOB_METACHARS = "*?["
 
+#: Таймаут ОТПРАВКИ `process.restart` в `process_restart_verified` (Task 0.2, M4).
+#: Сама команда не судится по ответу (graceful-stop штатно дольше) — это не бюджет
+#: ожидания эффекта, а верхняя граница на то, сколько мы готовы стоять на строке
+#: `system_command()`, прежде чем перейти к поллингу подтверждения. 5 секунд — с
+#: запасом на «команда доставлена, ProcessManager принял её в обработку» при любой
+#: разумной нагрузке очереди; дальше решает окно `wait`, а не эта константа.
+_RESTART_REQUEST_TIMEOUT_S = 5.0
+
 
 def _is_process_batch(process: Any) -> bool:
     """Просил ли оператор БАТЧ — или адресовал один процесс (Task 5.4).
@@ -112,6 +134,296 @@ def _is_process_batch(process: Any) -> bool:
         return True
     text = str(process).strip()
     return text == "all" or any(ch in text for ch in _PROCESS_GLOB_METACHARS)
+
+
+# ---------------------------------------------------------------------------
+# Task 3.5 (T6/CTL-F6): history_query — свободные функции над read-only sqlite3-
+# соединением. Вынесены из класса, потому что не трогают состояние driver'а —
+# вся связь с ним ограничена одним send_command в самом методе (readback пути к БД).
+# ---------------------------------------------------------------------------
+
+#: К8: не заданный limit → 100 (не «вся БД»). full снимает БАЙТОВЫЙ потолок MCP-ответа
+#: (dispatch._cap_heavy) — это другой рубеж, число строк он не трогает.
+_HISTORY_DEFAULT_LIMIT = 100
+
+#: Колонки строки стора в порядке, дословно совпадающем с К4.
+_HISTORY_COLUMNS: tuple = ("id", "kind", "process", "module", "ts", "severity", "severity_number", "message", "extra")
+
+#: Колонка Task 3.1 (К8) — читается ОТДЕЛЬНО от :data:`_HISTORY_COLUMNS`, потому
+#: что её может не быть В ЭТОМ ФАЙЛЕ. Стор доливает её ALTER'ом при открытии на
+#: запись, а history_query открывает файл ТОЛЬКО НА ЧТЕНИЕ (К3) и мигрировать не
+#: вправе: файл, который с версии Task 3.1 не открывал ни один процесс-писатель,
+#: колонки не имеет. Впиши мы её в общий список — весь инструмент отказывал бы на
+#: таком файле («no such column: metric»), хотя лента, поиск и фильтры к метрике
+#: отношения не имеют.
+_HISTORY_METRIC_COLUMN = "metric"
+
+#: Имя теневой FTS5-таблицы — деталь СХЕМЫ БД (её заводит ``ObservabilityStore._init_fts``),
+#: не приватный символ Python. history_query читает файл собственным SQL-соединением
+#: (К3: read-only, чужое для стора), а не через API стора, поэтому имя продублировано
+#: здесь литералом, а не импортировано как приватная константа соседнего модуля.
+_HISTORY_FTS_TABLE = "records_fts"
+
+#: Классы sqlite3, означающие ошибку ДРАЙВЕРА, а не состояние файла (Q1 ревью, итерация 2).
+#: `except sqlite3.Error` шире узкого `OperationalError` на семь классов, и один из них значим:
+#: `ProgrammingError` («Incorrect number of bindings supplied») приходит от рассогласования
+#: SQL и списка параметров — то есть от нашей будущей правки, а не от входа и не от файла.
+#: Под общей шапкой он читался бы как «чтение истории по <путь> провалилось», то есть
+#: обвинял бы ФАЙЛ в баге драйвера, и починку искали бы не там. `InterfaceError` — та же
+#: природа (неверный тип параметра из нашего кода). Обе пробрасываются наружу как есть.
+_HISTORY_OUR_OWN_BUG = (sqlite3.ProgrammingError, sqlite3.InterfaceError)
+
+
+def _history_fail(error: str) -> Dict[str, Any]:
+    """Названный отказ history_query — единая форма (К2/К3/К6/К7)."""
+    return {"success": False, "error": error}
+
+
+def _history_resolve_ts(value: Optional[float]) -> Optional[float]:
+    """К5: отрицательное значение — окно последних ``|value|`` секунд ОТ СЕЙЧАС;
+    ноль и положительное — абсолютный unix-ts (ноль — эпоха, а не «сейчас»).
+
+    **Часы читателя, не часы писателя.** «Сейчас» здесь — это `time.time()` МАШИНЫ
+    ДРАЙВЕРА в момент вызова history_query, а строки в БД несут `ts` часов
+    ПРОЦЕССА-ЭМИТЕНТА (могло быть записано другим хостом/контейнером). На одной
+    машине (все живые стенды проекта) расхождение — обычные сотые доли секунды NTP-
+    дрейфа и внутри любого разумного окна `since=-N`; распределённый стенд с разъехавшимися
+    часами узнать по одному этому вызову НЕЛЬЗЯ — history_query не сверяет часы писателя
+    и читателя и не может заявить, что окно точное. Названо как открытый вопрос в отчёте
+    задачи, а не молчаливо предположено.
+    """
+    if value is None:
+        return None
+    numeric = float(value)
+    return time.time() + numeric if numeric < 0 else numeric
+
+
+def _history_readonly_uri(db_path: str) -> str:
+    """URI read-only соединения (К3): ``file:<путь>?mode=ro``.
+
+    Обратные слэши Windows-путей заменяются на прямые ДО сборки URI: sqlite3
+    разбирает ``file:``-имя как URI-компонент, а голый backslash в нём — это
+    просто байт, не разделитель, и путь с ним не резолвится (проверено на этом
+    стенде — без замены `sqlite3.connect` кидал `unable to open database file`
+    на реальном Windows-пути с обратными слэшами). Пробел/`%`/`?` внутри имени
+    файла НЕ percent-кодируются — вне периметра задачи: `ObservabilityStore`
+    сама таких путей не порождает (см. `resolve_default_db_path`).
+    """
+    return f"file:{db_path.replace(chr(92), '/')}?mode=ro"
+
+
+def _history_where_clauses(
+    *,
+    kind: Optional[str],
+    module: Optional[str],
+    process: Optional[str],
+    severity_in: Optional[List[str]],
+    min_severity: Optional[int],
+    since: Optional[float],
+    until: Optional[float],
+    metric: Optional[str] = None,
+    prefix: str = "",
+) -> "tuple[List[str], List[Any]]":
+    """WHERE-условия history_query — тот же набор фильтров (К4), что у
+    ``ObservabilityStore._filter_clauses``, но СВОЯ реализация: history_query не
+    инстанцирует стор (тот открывает файл на запись — WAL/synchronous — и это его,
+    не наш, контракт read-only соединения К3). Все значения — через ``?``-плейсхолдеры
+    (страховка от SQL-инъекции через имена фильтров, hazard-тест автора); в SQL
+    склеиваются только ЛИТЕРАЛЬНЫЕ имена колонок отсюда.
+
+    ``severity_in`` — членство (К4): **пустой список — «не фильтровать», а не
+    «ничего не показывать»** (тот же выбор, что у стора: `if severity_in:` —
+    пустой список фальшив в Python, и решение здесь то же самое, не случайное
+    совпадение). Хазард-тест автора закрепляет это явно.
+    """
+    clauses: List[str] = []
+    params: List[Any] = []
+    if kind is not None:
+        clauses.append(f"{prefix}kind = ?")
+        params.append(kind)
+    if module is not None:
+        clauses.append(f"{prefix}module = ?")
+        params.append(module)
+    if process is not None:
+        clauses.append(f"{prefix}process = ?")
+        params.append(process)
+    if metric is not None:
+        # Task 3.1 (К8): срез по имени метрики — точное равенство, как в сторе
+        # (``ObservabilityStore._filter_clauses``). Строки без имени (агрегат
+        # окна, лог, ошибка) несут NULL и в срез не попадают: ``metric = ?``
+        # NULL не равен, и это не потеря — у них имени и нет.
+        clauses.append(f"{prefix}metric = ?")
+        params.append(metric)
+    if severity_in:
+        placeholders = ",".join("?" for _ in severity_in)
+        clauses.append(f"{prefix}severity IN ({placeholders})")
+        params.extend(str(s).lower() for s in severity_in)
+    if min_severity is not None:
+        clauses.append(f"{prefix}severity_number >= ?")
+        params.append(int(min_severity))
+    if since is not None:
+        clauses.append(f"{prefix}ts >= ?")
+        params.append(float(since))
+    if until is not None:
+        clauses.append(f"{prefix}ts <= ?")
+        params.append(float(until))
+    return clauses, params
+
+
+def _history_has_metric_column(conn: "sqlite3.Connection") -> bool:
+    """Есть ли в ЭТОМ файле колонка ``metric`` (Task 3.1, К8).
+
+    Спрашивается у файла, а не предполагается по версии кода: read-only
+    соединение мигрировать не может (К3), и файл, к которому с версии Task 3.1
+    не прикасался ни один процесс-писатель, колонки не имеет. Ответ здесь
+    решает ДВА разных вопроса, и оба отвечать «молча да» нельзя: какие колонки
+    просить у ``SELECT`` и что сказать на ``metric=`` — срез или названный отказ.
+    """
+    try:
+        return any(row[1] == _HISTORY_METRIC_COLUMN for row in conn.execute("PRAGMA table_info(records)"))
+    except sqlite3.Error:
+        # Таблицы нет вовсе / файл не sqlite: пусть об этом скажет сам запрос
+        # ниже — своим текстом ошибки, а не нашей догадкой про колонку.
+        return False
+
+
+def _history_series(rows: List[Dict[str, Any]]) -> "tuple[List[List[float]], int]":
+    """Временной ряд ``[[ts, value], …]`` из страницы записей (Task 3.1, К8).
+
+    **Старые первыми — ОБРАТНЫЙ порядок относительно ``rows``.** Лента читается
+    как хвост («что случилось последним»), поэтому ``rows`` остаются
+    ``ORDER BY id DESC`` (К4 задачи 3.5); ряд читается как ВРЕМЕННОЙ — слева
+    направо, — и любой график/глаз ждёт его по возрастанию. Порядок берётся по
+    ``ts``, а не разворотом списка: ``id`` — порядок ПРИХОДА в стор, и при
+    доливке батчем он с ``ts`` расходится, а ряд по времени обязан идти по
+    времени.
+
+    **Строка без числового ``extra.value`` в ряд не попадает, но остаётся в
+    ``rows``** — и расхождение длин НАЗЫВАЕТСЯ числом (второе значение), а не
+    подразумевается: «пропусков не было» и «пропуски не считали» обязаны
+    различаться, иначе короткий ряд читается как «данных мало», а не как «часть
+    строк не дала точки».
+
+    ``bool`` числом здесь НЕ считается, хотя в Python он подкласс ``int``.
+    Уровень, опубликованный флагом (``connected=True``), превратился бы в
+    ``1.0`` и нарисовал бы тренд там, где его нет; такая строка честнее
+    попадает в счётчик пропусков.
+    """
+    points: List[List[float]] = []
+    skipped = 0
+    for row in rows:
+        extra = row.get("extra")
+        value = extra.get("value") if isinstance(extra, dict) else None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            skipped += 1
+            continue
+        try:
+            points.append([float(row.get("ts") or 0.0), float(value)])
+        except (TypeError, ValueError):
+            skipped += 1
+    points.sort(key=lambda pair: pair[0])
+    return points, skipped
+
+
+def _history_row_to_dict(row: "sqlite3.Row") -> Dict[str, Any]:
+    """Строка sqlite → dict К4 (``extra`` распакован, не JSON-строка).
+
+    **Хазард автора:** ``extra`` в БД — TEXT с JSON. Битая строка (ручная правка
+    файла, обрыв записи вживую) НЕ должна ронять весь ответ ради одной строки —
+    но и тихий ``{}`` вместо неё выглядел бы как «extra не было», хотя данные
+    БЫЛИ и потерялись при разборе (тот же класс, что «ноль наблюдений — тоже
+    результат наблюдения»). Помеченный ``_corrupted_extra`` с сырым текстом —
+    видимый, а не молчаливый компромисс.
+    """
+    raw_extra = row["extra"]
+    if raw_extra:
+        try:
+            extra: Any = json.loads(raw_extra)
+        except (ValueError, TypeError):
+            extra = {"_corrupted_extra": raw_extra}
+    else:
+        extra = {}
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        # process=NULL в дореформенных строках (миграция 5.21 стора) → падаем на module,
+        # тем же правилом, что ObservabilityStore._row_to_dict.
+        "process": row["process"] if row["process"] else row["module"],
+        "module": row["module"],
+        "ts": row["ts"],
+        "severity": row["severity"],
+        "severity_number": row["severity_number"] if row["severity_number"] is not None else 0,
+        # Task 3.1 (К8). Ключ есть ВСЕГДА, значением ``None`` в том числе: «у
+        # строки нет имени метрики» (лог, ошибка, агрегат окна) и «колонки нет в
+        # этом файле» отвечают одним и тем же ``None`` в строке — но второе
+        # названо отдельно, отказом на ``metric=``, а не оставлено на догадку по
+        # пустому полю.
+        "metric": row["metric"] if _HISTORY_METRIC_COLUMN in row.keys() else None,
+        "message": row["message"],
+        "extra": extra,
+    }
+
+
+def _history_columns(with_metric: bool, prefix: str = "") -> str:
+    """Список колонок ``SELECT`` — с ``metric`` или без него (Task 3.1, К8).
+
+    Одна сборка на оба чтения (лента и поиск): две копии разошлись бы молча, и
+    «в ленте имя метрики есть, а в поиске нет» читалось бы как дефект поиска.
+    """
+    columns = list(_HISTORY_COLUMNS) + ([_HISTORY_METRIC_COLUMN] if with_metric else [])
+    return ", ".join(f"{prefix}{col}" for col in columns)
+
+
+def _history_list_rows(
+    conn: "sqlite3.Connection", *, where_clauses: List[str], params: List[Any], limit: int, with_metric: bool = False
+) -> List[Dict[str, Any]]:
+    """К4: страница записей, свежие первыми (``ORDER BY id DESC`` — id, не ts, см. докстрок history_query)."""
+    where = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    sql = f"SELECT {_history_columns(with_metric)} FROM records{where} ORDER BY id DESC LIMIT ?"  # nosec B608
+    cur = conn.execute(sql, [*params, int(limit)])
+    return [_history_row_to_dict(r) for r in cur.fetchall()]
+
+
+def _history_search_rows(
+    conn: "sqlite3.Connection",
+    text: str,
+    *,
+    where_clauses: List[str],
+    params: List[Any],
+    limit: int,
+    with_metric: bool = False,
+) -> List[Dict[str, Any]]:
+    """К6: полнотекстовый поиск (FTS5), не подстрока.
+
+    Raises:
+        ObservabilitySearchError: запрос без единого слова (:func:`fts_query`) ИЛИ
+            поиск недоступен (индекс/модуль FTS5 отсутствует в сборке sqlite3) —
+            оба случая всплывают как ``sqlite3.OperationalError`` на самом запросе
+            (нет своей таблицы `records_fts`) и здесь получают одно имя.
+    """
+    fts_expr = fts_query(text.strip())
+    qualified = _history_columns(with_metric, prefix="r.")
+    where = " AND ".join([f"{_HISTORY_FTS_TABLE} MATCH ?", *where_clauses])
+    sql = (
+        f"SELECT {qualified} FROM {_HISTORY_FTS_TABLE} "  # nosec B608
+        f"JOIN records r ON r.id = {_HISTORY_FTS_TABLE}.rowid "
+        f"WHERE {where} ORDER BY r.id DESC LIMIT ?"
+    )
+    try:
+        rows = conn.execute(sql, [fts_expr, *params, int(limit)]).fetchall()
+    except _HISTORY_OUR_OWN_BUG:
+        # Q1 (ревью, итерация 2): наши собственные ошибки НЕ переодеваются в отказ о файле.
+        raise
+    except sqlite3.Error as exc:
+        # Н-4 (ревью): ловить именно OperationalError было мало — «db_path указывает на
+        # существующий не-sqlite файл» приходит sqlite3.DatabaseError, а он РОДИТЕЛЬ
+        # OperationalError в иерархии исключений sqlite3, не потомок, и уже прежним
+        # except'ом не ловился (пробивал историю наружу необработанным исключением).
+        # Q1 (ревью, итерация 2): прежняя редакция называла ДВЕ причины («поиск недоступен или
+        # запрос не понят») и обе мимо, когда файл вообще не sqlite: «file is not a database»
+        # приезжало под шапкой про запрос. Формулировка нейтральна, причину называет сам sqlite.
+        raise ObservabilitySearchError(f"поиск по истории не выполнен: {exc}") from exc
+    return [_history_row_to_dict(r) for r in rows]
 
 
 class BackendDriver(_TransportMixin, _EventChannelMixin):
@@ -489,6 +801,240 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         res = self.send_command(process, "introspect.observability", args, timeout=timeout)
         return ObservabilityCounters.from_response(res)
 
+    def history_query(
+        self,
+        *,
+        kind: Optional[str] = None,
+        metric: Optional[str] = None,
+        process: Optional[str] = None,
+        module: Optional[str] = None,
+        severity: Optional[List[str]] = None,
+        min_severity: Optional[int] = None,
+        since: Optional[float] = None,
+        until: Optional[float] = None,
+        text: Optional[str] = None,
+        limit: Optional[int] = None,
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """История наблюдаемости из sqlite-стора БЕЗ отдельного драйвера/файла (Ф3 Task 3.5, T6/CTL-F6).
+
+        Закрывает разрыв, названный ревью Ф1 (2026-09-01): все прочие обёртки этого
+        файла отвечают на «что происходит СЕЙЧАС» (``log_tail``/``observability_tail`` —
+        живой хвост, push-подписка); «что БЫЛО» до этой задачи читалось только руками
+        через sqlite-файл — агент открывал БД сам, драйвером тут было нечего звать.
+
+        **Путь к БД — ТОЛЬКО из readback (К2), никакого запасного резолвера.**
+        ``resolve_default_db_path()`` (тот же, что использует сам стор при дефолтной
+        конфигурации) сюда осознанно не подмешан: он угадывает путь по env, а не
+        спрашивает ЭТОТ процесс, где реально лежит ЕГО файл (свой ``db_path`` на
+        процесс — не общий на систему). Опрашивается ``introspect.observability``
+        адресата ``pm_name`` → секция ``history``; ``history.enabled is False`` или
+        отсутствующий ``history.db_path`` — названный отказ, sqlite при этом НЕ
+        открывается вовсе (тест шпионит monkeypatch на ``sqlite3.connect`` именно
+        на этих путях).
+
+        **Соединение — read-only (К3):** ``sqlite3.connect(f"file:{db_path}?mode=ro",
+        uri=True)``, вызвано как атрибут МОДУЛЯ ``sqlite3`` (не
+        ``from sqlite3 import connect``) — так открытие видно шпиону снаружи, и
+        реальная попытка INSERT через это же соединение отказывает по факту, а не
+        по обещанию (испытано тестом, не только описано). Несуществующий путь —
+        именованная ошибка, файл при этом на диске НЕ создаётся.
+
+        **Записи видны с ЗАДЕРЖКОЙ: наблюдено 94–112 мс, расчётный потолок ≈125 мс
+        (Windows, Task 3.3).**
+        Граница НАБЛЮДЁННАЯ, а не расчётная: замер на живой проводке, 10
+        повторов — 109 94 109 110 109 110 109 109 110 109 мс, медиана 109, то
+        есть девять из десяти больше «такта дренажа». Складывается из такта
+        (``flush_interval_sec``, 100 мс), разрешения системного таймера Windows
+        (15.6 мс) и самой транзакции. Писать «до 100 мс» было бы вредно ровно
+        для того читателя, ради которого строка и написана: он подождал бы
+        такт, перезапросил, снова не увидел записи и пошёл искать дефект.
+        Store-tap процесса больше не пишет в БД синхронно: запись уходит в
+        очередь, а в стор её уносит фоновый поток пачкой. Драйвер живёт в ДРУГОМ
+        процессе и дожать чужую очередь не может (``ObservabilityStore.
+        flush_writers`` работает только внутри процесса-владельца), поэтому
+        сразу после события ряд может быть КОРОЧЕ ожидаемого — и это норма, а не
+        дефект наблюдаемости. Ждать нечего: повторить запрос через такт.
+        Ёмкость очереди — ручка ``observability.history.queue_capacity``.
+
+        **WAL-хазард (испытан живьём, не только описан).** ``ObservabilityStore``
+        держит файл в режиме WAL: активный писатель может в этот самый момент
+        иметь незакоммиченные страницы в ``-wal``/``-shm``. Read-only соединение
+        читает ПОСЛЕДНИЙ ЗАКОММИЧЕННЫЙ снимок (WAL-режим это позволяет без блокировки
+        писателя) — новые, ещё не закоммиченные пишущим потоком строки в ответе не
+        появятся ДО коммита, но соединение не подвисает и не роняет ошибку из-за
+        параллельной записи. Если рядом с файлом БД нет ``-shm``/``-wal`` (писатель
+        никогда не открывал файл в этом процессе) — sqlite и в read-only режиме сам
+        заводит недостающий `-shm`, если каталог доступен на запись; на каталоге,
+        доступном ТОЛЬКО на чтение, это уже провал открытия — именованная ошибка тем
+        же путём, что «несуществующий файл» (не отдельный код).
+
+        **Фильтры сужают (К4), не расширяют.** ``severity`` — СПИСОК (членство, не
+        порог) — пустой список читается как «не фильтровать» (см. хазард-тест автора:
+        решение явное, не случайность truthy-проверки). ``min_severity`` — порог по
+        ``severity_number``. ``since``/``until`` — К5: отрицательное — окно последних
+        ``|N|`` секунд ОТ ЧАСОВ ДРАЙВЕРА (не писателя — см. :func:`_history_resolve_ts`),
+        ноль и положительное — абсолютный unix-ts (ноль — эпоха, не «сейчас»).
+        Порядок ответа — ``ORDER BY id DESC`` (свежие первыми): при доливке старых
+        записей батчем ``ts`` и ``id`` расходятся, и сортировка держится на ``id``,
+        как у самого стора (``ObservabilityStore.list_records``/``search``).
+
+        ``text`` (К6) ищет ПОЛНОТЕКСТОВО (FTS5 — токен целиком), не подстрокой:
+        ``text="ash"`` не находит «crash». Запрос без единого слова (``"!!!"``) и
+        отсутствие индекса в сборке sqlite3 — оба именованный отказ, а не пустой
+        список: «ничего не нашлось» и «искать было нечем» — разные факты.
+
+        ``metric`` (Task 3.1, К8) — срез по ПОЛНОМУ имени метрики
+        (``capture.drops``, с писателем: без него имена столкнулись бы между
+        процессами) плюс два ключа сверх обычного конверта:
+
+          * ``series`` — ``[[ts, value], …]``, **СТАРЫЕ ПЕРВЫМИ**: обратный
+            порядок относительно ``rows``, потому что ряд читают как временной, а
+            ленту — как хвост;
+          * ``series_skipped`` — сколько строк среза НЕ дали точки (нет числового
+            ``extra.value``). Строка при этом остаётся в ``rows``: она не мусор,
+            она просто не число.
+
+        Оба ключа есть всегда, когда задан ``metric`` — в том числе нулём.
+        Отказ по ``metric`` остался, но у него теперь ДРУГОЕ основание: не «задача
+        не сделана», а «в ЭТОМ файле нет колонки ``metric``» (стор доливает её при
+        открытии на запись, а history_query читает файл read-only и мигрировать не
+        вправе). Довод тот же, что и прежде: отдать весь стор вместо среза значило
+        бы «фильтр не сузил» вместо «фильтровать нечем».
+
+        ``limit`` (К8) — не задан → 100 (не «вся БД»). Байтовый потолок MCP-ответа
+        (``full=true`` его снимает) — другой рубеж, применяется в ``dispatch.py``
+        поверх ЛЮБОГО инструмента и к числу строк отношения не имеет; здесь не
+        реализуется намеренно (иначе тот же факт судился бы в двух местах и мог
+        разойтись — как уже случилось однажды со схемами `full`, M2 Task 0.4).
+
+        Returns:
+            Успех: ``{"success": True, "rows": [...], "db_path": <из readback>,
+            "count": len(rows)}`` плюс ``series``/``series_skipped`` при заданном
+            ``metric``. Строка — ``id/kind/process/module/ts/severity/
+            severity_number/metric/message/extra`` (``extra`` — dict, не JSON-строка;
+            ``metric`` — ``None`` у лога, ошибки и агрегата окна).
+            Отказ: ``{"success": False, "error": <причина с адресом>}``, в проверяемых
+            К2/К3/К6/К7 случаях — до открытия БД либо без единой доехавшей строки.
+        """
+        # К2: путь к БД — только из readback; resolve_default_db_path() НЕ зовётся.
+        readback = _leaf_result(self.send_command(pm_name, "introspect.observability", timeout=timeout))
+        history = readback.get("history") if isinstance(readback, dict) else None
+        if not isinstance(history, dict):
+            return _history_fail(f"introspect.observability({pm_name!r}) не вернул секцию history вовсе: {readback!r}")
+        if not history.get("enabled"):
+            reason = history.get("reason") or "history.enabled=False (причина не названа процессом)"
+            return _history_fail(f"история недоступна на процессе {pm_name!r}: {reason}")
+        db_path = history.get("db_path")
+        if not isinstance(db_path, str) or not db_path:
+            # Н-4 (ревью): раньше сюда проходил ЛЮБОЙ truthy db_path (число/список/dict),
+            # и падал уже позже, необработанным AttributeError, внутри
+            # _history_readonly_uri (".replace" у не-строки нет). Тип проверяется здесь,
+            # у границы readback'а — там, где и положено ловить форму чужого ответа.
+            return _history_fail(
+                f"история недоступна на процессе {pm_name!r}: introspect.observability отдал "
+                f"history.db_path={db_path!r} ({type(db_path).__name__}) — ожидалась непустая "
+                "строка пути, читать нечего"
+            )
+
+        # Н-3 (ревью): limit уходит в SQL как есть, а SQLite читает LIMIT -1 как «без
+        # предела» — на сторе у потолка ретенции (200 000 строк) это ~145 МБ одним ответом.
+        # Схема объявляет limit integer без нижней границы, поэтому клэмп — здесь, а не
+        # только описанием в схеме (описание не исполняется).
+        effective_limit = max(1, int(limit)) if limit is not None else _HISTORY_DEFAULT_LIMIT
+        resolved_since = _history_resolve_ts(since)
+        resolved_until = _history_resolve_ts(until)
+
+        # К3: sqlite3.connect как атрибут МОДУЛЯ (не from-import) — открытие видно
+        # шпиону теста снаружи; read-only URI — до этой строки БД не открывается вовсе.
+        try:
+            conn = sqlite3.connect(_history_readonly_uri(db_path), uri=True)
+        except sqlite3.Error as exc:
+            return _history_fail(f"не удалось открыть историю read-only по пути {db_path!r}: {exc}")
+
+        try:
+            conn.row_factory = sqlite3.Row
+            # К8: колонку спрашиваем у ФАЙЛА. Отказ по ``metric=`` на файле без
+            # колонки — названный, и это тот же довод, которым отказ стоял до
+            # Task 3.1: молчаливый пропуск фильтра отдал бы ВЕСЬ стор вместо
+            # среза по метрике, то есть «фильтр не сузил» вместо «фильтровать
+            # нечем». Изменилось только основание: не «задача не сделана», а
+            # состояние конкретного файла, и оно проверяемо.
+            with_metric = _history_has_metric_column(conn)
+            if metric is not None and not with_metric:
+                return _history_fail(
+                    f"срез по метрике невозможен: в файле истории {db_path!r} нет колонки "
+                    f"{_HISTORY_METRIC_COLUMN!r} (её доливает ObservabilityStore при открытии НА ЗАПИСЬ, "
+                    "с версии Task 3.1). history_query открывает файл только на чтение и мигрировать "
+                    "его не вправе — запустите процесс-владелец этого файла на текущей версии. "
+                    "Отдать весь стор вместо среза значило бы «фильтр не сузил», а не «фильтровать нечем»."
+                )
+            if text is not None:
+                where_clauses, params = _history_where_clauses(
+                    kind=kind,
+                    module=module,
+                    process=process,
+                    metric=metric,
+                    severity_in=severity,
+                    min_severity=min_severity,
+                    since=resolved_since,
+                    until=resolved_until,
+                    prefix="r.",
+                )
+                try:
+                    rows = _history_search_rows(
+                        conn,
+                        text,
+                        where_clauses=where_clauses,
+                        params=params,
+                        limit=effective_limit,
+                        with_metric=with_metric,
+                    )
+                except ObservabilitySearchError as exc:
+                    return _history_fail(str(exc))
+            else:
+                where_clauses, params = _history_where_clauses(
+                    kind=kind,
+                    module=module,
+                    process=process,
+                    metric=metric,
+                    severity_in=severity,
+                    min_severity=min_severity,
+                    since=resolved_since,
+                    until=resolved_until,
+                )
+                try:
+                    rows = _history_list_rows(
+                        conn,
+                        where_clauses=where_clauses,
+                        params=params,
+                        limit=effective_limit,
+                        with_metric=with_metric,
+                    )
+                except _HISTORY_OUR_OWN_BUG:
+                    # Q1 (ревью, итерация 2): баг драйвера не переодевается в отказ о файле —
+                    # «чтение истории по <путь> провалилось» отправило бы искать причину в файл.
+                    raise
+                except sqlite3.Error as exc:
+                    # Н-4 (ревью): sqlite3.DatabaseError («file is not a database») —
+                    # РОДИТЕЛЬ OperationalError, не потомок; узкий except его пропускал.
+                    return _history_fail(f"чтение истории по {db_path!r} провалилось: {exc}")
+        finally:
+            # Хазард автора: соединение обязано закрыться и на пути с исключением —
+            # иначе неудачный вызов агента копит открытые read-only хэндлы на файл.
+            conn.close()
+
+        answer = {"success": True, "rows": rows, "db_path": db_path, "count": len(rows)}
+        if metric is not None:
+            # К8: ``series`` и ``series_skipped`` появляются вместе и только при
+            # заданной метрике — ряд без имени метрики был бы смесью разных
+            # величин на одной оси. Оба ключа присутствуют ВСЕГДА, когда метрика
+            # задана, в том числе нулями: появляющийся-по-случаю ключ читается
+            # как «пропусков не считали», а не как «их не было».
+            answer["series"], answer["series_skipped"] = _history_series(rows)
+        return answer
+
     def introspect_capabilities(self, process: str, **kw: Any) -> Dict[str, Any]:
         """Карточка процесса (сырой dict): команды+descriptions, регистры, handlers."""
         return self.send_command(process, "introspect.capabilities", **kw)
@@ -545,11 +1091,64 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         ``reason`` и ``replaced=True`` — она не должна читаться ни как успех, ни как
         «ничего не произошло».
 
+        **``timeout`` vs ``wait`` (Task 0.2, M4) — это два РАЗНЫХ бюджета, не один.**
+        ``timeout`` ограничивает только ОТПРАВКУ команды `process.restart` (сколько мы
+        готовы стоять на сокете, ожидая ответа, который всё равно не судим) — на неё
+        и не завязан дальше ничего. Она ходит с потолком ``min(timeout, 5.0)``
+        (:data:`_RESTART_REQUEST_TIMEOUT_S`), а не с полным ``timeout`` вызывающего —
+        иначе дедлайн окна подтверждения, отсчитанный ДО отправки, оказывался бы
+        частично или полностью съеден медленным запросом ещё до первого опроса.
+        ``wait`` — это окно ПОДТВЕРЖДЕНИЯ, и его дедлайн стартует ПОСЛЕ того, как запрос
+        вернулся (неважно, ответом или таймаутом). Пример на буквальных значениях из
+        acceptance criteria: ``wait=60.0, timeout=90.0`` — запрос честно тянется 70с
+        (graceful-stop, уложился в ``timeout`` вызывающего, но дольше ``wait``); при
+        отсчёте дедлайна ДО отправки (0.0+60.0=60.0) окно оказалось бы уже пройдено
+        к моменту возврата запроса (t=70.0) — ни одного опроса, живой заново поднявшийся
+        процесс отдавался бы как ``restarted: false``. При отсчёте ПОСЛЕ возврата
+        (70.0+60.0=130.0) окно доступно целиком, и `restarted: true` — то, что реально
+        произошло.
+
         Returns:
             ``{restarted, replaced, alive, pid_before, pid_after,
-            instance_restarts_before/after, elapsed, process}`` (+ ``reason`` при неуспехе).
+            instance_restarts_before/after, elapsed, polls, process}``
+            (+ ``reason`` при неуспехе). ``polls`` — сколько снимков ``supervision.status``
+            сделано в окне подтверждения; ноль не может случиться молча (поле есть
+            всегда, даже когда ``wait<=0`` и оно честно равно 0). Опрос, вернувший
+            ``__error__`` («PM моргнул на рестарте»), тоже считается в ``polls`` —
+            это была реальная попытка и реальная секунда из бюджета ``wait``, просто
+            без результата, а не «опроса не было».
         """
         import time
+
+        # Начало ВСЕГО вызова — до первого обращения к PM. Из него считается `elapsed`
+        # (ревью Ф0.5, находка 3): прежде отметка бралась ПОСЛЕ до-снимка, а тот ходит
+        # к PM и может тянуться до `timeout`. Воспроизведение ревьюера: до-снимок 40.0с,
+        # окно 0.5с → реально 40.5с от входа в метод, а `elapsed` показывал 0.5.
+        began = time.monotonic()
+        #: Дедлайн окна подтверждения. До входа в цикл его нет — до тех пор опросов и не
+        #: бывает; `_poll_timeout` это учитывает и отдаёт `timeout` как есть.
+        deadline: Optional[float] = None
+
+        def _poll_timeout() -> Optional[float]:
+            """Таймаут ОДНОГО опроса — не больше остатка окна `wait` (ревью Ф0.5, находка 2).
+
+            Прежде каждый опрос уходил с ПОЛНЫМ `timeout` вызывающего, и при
+            `timeout > wait` один молчащий `supervision.status` съедал окно и вылезал за
+            бюджет оператора. Воспроизведение ревьюера на виртуальных часах:
+            `wait=60, timeout=90`, PM молчит → `polls=1`, `elapsed=90.5`,
+            `restarted=False` при РЕАЛЬНО перезапущенном процессе (pid 100→200,
+            `instance_restarts` 0→1, `alive`). То есть ровно тот класс M4, который задача
+            и закрывала, — просто с другой ноги.
+
+            Опросов при этом НЕ становится больше: молчащий PM законно расходует окно
+            одним долгим опросом, и лишние обращения к молчащему собеседнику ничего не
+            добавляют. Чинится перерасход бюджета, а не число попыток — это разные вещи,
+            и первая редакция сторожа (`polls >= 2`) требовала второго, а не первого.
+            """
+            if deadline is None:
+                return timeout
+            остаток = max(0.0, deadline - time.monotonic())
+            return остаток if timeout is None else min(timeout, остаток)
 
         def _snapshot() -> Dict[str, Any]:
             """Запись процесса из supervision-снимка + провенанс неудачи чтения.
@@ -558,7 +1157,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             Схлопывать их нельзя (ревью Фазы 4, находка 8): при лежащем PM подсказка
             «проверь имя» уводит разбор в сторону.
             """
-            res = _leaf_result(self.supervision_status(process, pm_name=pm_name, timeout=timeout))
+            res = _leaf_result(self.supervision_status(process, pm_name=pm_name, timeout=_poll_timeout()))
             if not isinstance(res, dict) or res.get("success") is False or "processes" not in res:
                 return {"__error__": res}
             procs = res.get("processes")
@@ -581,9 +1180,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         pid_before = before.get("pid")
         restarts_before = before.get("instance_restarts")
 
+        # Две отметки времени, а не одна, и это не педантизм (Task 0.2, M4).
+        # `began` (взят в начале метода, ДО до-снимка) — начало ВСЕГО вызова, из него
+        # считается `elapsed`: оператору нужна полная цена «проверенного рестарта».
+        # `started` — начало окна ПОДТВЕРЖДЕНИЯ, из него считается дедлайн `wait`.
+        # Пока обе роли исполняла одна отметка, взятая ДО отправки, медленный запрос
+        # съедал окно опроса целиком: цикл не делал ни одной итерации, и живой заново
+        # поднявшийся процесс отдавался как `restarted: false`.
+        request_timeout = _RESTART_REQUEST_TIMEOUT_S if timeout is None else min(timeout, _RESTART_REQUEST_TIMEOUT_S)
+        restart_reply = self.system_command(
+            {"cmd": "process.restart", "process_name": process}, timeout=request_timeout
+        )
         started = time.monotonic()
-        # Ответ команды НЕ судим: timeout здесь — норма для медленного рестарта.
-        restart_reply = self.system_command({"cmd": "process.restart", "process_name": process}, timeout=timeout)
 
         def _replaced(snap: Dict[str, Any]) -> bool:
             """Инстанс заменён: сменился pid ЛИБО вырос счётчик замен (маркер Task 2.1)."""
@@ -594,10 +1202,16 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             return isinstance(restarts_now, int) and isinstance(restarts_before, int) and restarts_now > restarts_before
 
         after: Dict[str, Any] = before
+        # С этого момента `_poll_timeout()` режет таймаут опроса остатком окна.
         deadline = started + max(0.0, wait)
+        polls = 0
         while time.monotonic() < deadline:
             time.sleep(0.5)
             snap = _snapshot()
+            # Опрос — реальная попытка и реальная секунда бюджета `wait`, считаем его в
+            # `polls` даже когда PM моргнул на рестарте (см. докстроку метода): молчаливого
+            # нуля не будет ни в успешном, ни в целиком неудачном окне подтверждения.
+            polls += 1
             if "__error__" in snap:
                 continue  # PM моргнул на рестарте — это не вердикт, продолжаем ждать
             after = snap
@@ -618,7 +1232,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "instance_restarts_before": restarts_before,
             "instance_restarts_after": after.get("instance_restarts"),
             "alive": alive,
-            "elapsed": round(time.monotonic() - started, 2),
+            # От `began`, а не от `started`: это цена ВСЕГО вызова для оператора
+            # (отправка + подтверждение), а не длина одного лишь окна опроса.
+            "elapsed": round(time.monotonic() - began, 2),
+            # Сколько снимков supervision.status сделано в окне ПОДТВЕРЖДЕНИЯ (после
+            # возврата запроса). Не включает ДО-снимок — тот не часть ожидания.
+            "polls": polls,
             # Ответ команды сохранён как СПРАВКА, а не как вердикт: он мог быть timeout'ом
             # при успешном рестарте (и наоборот — success при неудавшемся старте нового).
             "restart_reply": restart_reply if isinstance(restart_reply, dict) else None,
@@ -1763,12 +2382,22 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """Синтетическое ui.event тем же путём доставки — проверка цепочки без клика."""
         return _leaf_result(self.send_command(process, "ui.tap.ping", {"note": note}, timeout=timeout))
 
-    def _discover_processes(self, *, timeout: Optional[float] = None) -> List[str]:
-        """Список процессов из state-топологии (общий источник для ``watch_like_gui`` и ``system_overview``)."""
+    def _state_topology(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Поддерево ``processes`` из state-топологии ЦЕЛИКОМ (не только имена).
+
+        Ф1 Task 1.5: ``system_overview`` читает отсюда и имена процессов, и ветку
+        ``health`` (``processes.<p>.health.*`` — контракт ``health/schema.py``),
+        которую heartbeat самопубликует. Тот же самый вызов, что раньше делал
+        ``_discover_processes``, — данные уже приезжали и выбрасывались.
+        """
         st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
         tree = unwrap(st, leaf=True)
         node = tree.get("subtree") or tree.get("value") or {}
-        return sorted(node) if isinstance(node, dict) else []
+        return node if isinstance(node, dict) else {}
+
+    def _discover_processes(self, *, timeout: Optional[float] = None) -> List[str]:
+        """Список процессов из state-топологии (общий источник для ``watch_like_gui`` и ``system_overview``)."""
+        return sorted(self._state_topology(timeout=timeout))
 
     def _expand_processes(
         self,

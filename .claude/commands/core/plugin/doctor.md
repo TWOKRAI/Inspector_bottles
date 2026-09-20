@@ -3,7 +3,7 @@ description: Check plugin configuration integrity — report missing/broken/avai
 allowed-tools: Bash(claude-kit-claude plugin doctor*)
 ---
 
-Read-only диагностика: показывает плагины из enabled.yaml без папки на диске (missing), сломанные манифесты (broken), плагины на диске вне enabled.yaml (available). Ничего не изменяет.
+Read-only diagnostics: shows plugins from enabled.yaml without a folder on disk (missing), broken manifests (broken), plugins on disk outside enabled.yaml (available). Changes nothing.
 
 ```bash
 claude-kit-claude plugin doctor $ARGUMENTS

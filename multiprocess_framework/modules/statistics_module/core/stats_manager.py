@@ -21,6 +21,7 @@ import threading
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from ...channel_routing_module import ChannelRoutingManager
+from ...logger_module import get_std_logger
 from ...channel_routing_module.core.config_normalizer import normalize_config
 from ..configs.stats_config import StatsManagerConfig
 from ..interfaces import IStatsManager
@@ -47,6 +48,71 @@ STATS_FALLBACK_CHANNEL = "file_stats"
 #: процессом»). Пересборка читает hub отсюда и поднимает канал сама.
 HUB_MANAGER_SLOT = "observability_hub"
 
+#: Префикс имени tap'а на порту наблюдений (Ф5, задача 5.3) — по одному на
+#: менеджера, идемпотентно (``add_tap`` идемпотентен по имени сам).
+_OBSERVATION_TAP_PREFIX = "stats_agg_"
+
+#: Род записи → тип метрики. Соответствие значениям
+#: ``observation_manager.RECORD_KIND_*`` (импорт констант, а не дублирование
+#: строк — расхождение стало бы немым: tap получал бы записи, которые эта
+#: таблица не узнаёт, и молча их отбрасывал).
+_METRIC_KIND_TO_TYPE: Dict[str, MetricType] = {
+    "counter": MetricType.COUNTER,
+    "gauge": MetricType.GAUGE,
+    "timing": MetricType.TIMING,
+    "histogram": MetricType.HISTOGRAM,
+}
+
+
+class _PortTap:
+    """Адаптер CRM-tap: канал с ``write()``, транслирующий запись менеджеру.
+
+    :meth:`~...channel_routing_module.core.channel_routing_manager.ChannelRoutingManager.add_tap`
+    ждёт объект с ``write(dict)`` (и best-effort ``close()`` — см. ``remove_tap``,
+    исключение там гасится). Метод менеджера сам этому протоколу не
+    удовлетворяет (сигнатура кода зовущего — ``_on_port_record(self, record)``,
+    а не свободная функция), поэтому нужен тонкий адаптер, а не bound-method
+    напрямую.
+    """
+
+    __slots__ = ("_sink", "name")
+
+    def __init__(self, sink: Any, name: str) -> None:
+        self._sink = sink
+        self.name = name
+
+    def write(self, record: Dict[str, Any]) -> None:
+        self._sink(record)
+
+    def close(self) -> None:  # pragma: no cover — best-effort хук remove_tap
+        pass
+
+
+def _tap_is_registered(port: Any, tap_name: str) -> Optional[bool]:
+    """Жива ли подписка ``tap_name`` на ``port`` — ФАКТ, а не форма (Ф5-добор, З3).
+
+    Три ответа, и третий не сводится к первым двум:
+
+    * ``True`` / ``False`` — порт умеет ``has_tap`` и ответил;
+    * ``None`` — спросить НЕЧЕМ (duck-typed дубль без ``has_tap``).
+
+    ``None`` не приравнено к ``False`` намеренно: «подписки нет» и «порт не
+    умеет о ней рассказать» — разные факты, и слив их в один сделал бы
+    :meth:`StatsManager.attach_observation_port` отказывающим у всех дублей
+    сразу. Решение по ``None`` принимает вызывающий, у него для этого есть
+    второй, более слабый признак (возврат ``add_tap``).
+
+    Отказ самого ``has_tap`` читается как ``False``: порт, который не может
+    ответить на читающий вопрос о себе, доверия к подписке не прибавляет.
+    """
+    has_tap = getattr(port, "has_tap", None)
+    if not callable(has_tap):
+        return None
+    try:
+        return bool(has_tap(tap_name))
+    except Exception:  # noqa: BLE001 — сломанный порт не подтверждает подписку
+        return False
+
 
 def _metric_key(name: str, tags: Optional[Dict] = None) -> str:
     """Ключ для словаря метрик: name или name|k1:v1|k2:v2 (sorted)."""
@@ -62,6 +128,21 @@ def _float_or(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _plane_enabled(cfg: Mapping[str, Any]) -> bool:
+    """Включена ли ПЛОСКОСТЬ чисел (``stats.enabled``, Р-3а) — одна позиция чтения.
+
+    Ключа нет → ``True``, и это не «мягкая проверка», а совместимость: менеджеры,
+    построенные вне фасада ``expand_observability`` (тесты соседних модулей,
+    прямой ``StatsManager(config={...})``), про плоскость ничего не говорят, и
+    молчание обязано значить «как было».
+
+    Функция, а не строка по месту, ровно по доводу :func:`resolve_max_series`:
+    ключ читают конструктор и пересборка конфига, и разъехавшись, они дали бы
+    менеджер, чья плоскость выключена в одном чтении и включена в другом.
+    """
+    return bool(cfg.get("enabled", True))
 
 
 def _schema_default(field_name: str) -> float:
@@ -163,6 +244,34 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         self._default_tags: Dict[str, str] = cfg.get("default_tags") or {}
         self._metrics: Dict[str, MetricRecord] = {}
         self._metrics_lock = threading.Lock()
+        # Ф5, задача 5.3 — порт наблюдений: пока не подключён явно
+        # (:meth:`attach_observation_port`), менеджер работает СТАРОЙ прямой
+        # дорогой (см. докстринг ``record_metric``). Это фолбэк для
+        # МЕНЕДЖЕРА, ПОСТРОЕННОГО ВНЕ СБОРКИ — standalone-конструирование в
+        # тестах соседних модулей, ручной `StatsManager(...)` без
+        # `ProcessManagers.create_all`. В боевой сборке слот "stats" (57
+        # боевых вызывающих дороги 3, инвентарь Task 5.1) резолвится в ЭТОТ
+        # ЖЕ экземпляр, которому `create_all` уже вызвал `attach_observation_port`
+        # — фолбэк им не нужен вовсе, они просто попадают на подключённый
+        # менеджер. Обход СЧИТАЕТСЯ и ГОВОРИТСЯ (см. `_note_observation_bypass`,
+        # `observation_bypasses`) — ровно потому, что тихий обход здесь означал
+        # бы «единственный писатель» на честном слове, а не на факте.
+        self._observation_port: Optional[Any] = None
+        #: Обходы порта — по методу (``record_metric``/``gauge``/``record_timing``/
+        #: ``histogram``). Ноль в боевой сборке — проверяемый факт (см.
+        #: `observation_bypasses`), не предположение.
+        self._observation_bypass_counts: Dict[str, int] = {}
+        # Ф2 (задача 2.1, Р-3а): `stats.enabled` — ПЛОСКОСТЬ, а не лог-канал.
+        # `False` означает «числа не собираются»: окно пусто, каналы молчат,
+        # счётчик растёт. Прежний смысл ключа («писать снапшоты в лог») переехал
+        # в `stats.log_snapshots`, и это ЕДИНСТВЕННАЯ смена поведения
+        # существующего ключа во всей фазе — миграция названа в ADR-PM-046 и
+        # громким голосом схемы (`ObservabilityStatsConfig`).
+        self._plane_enabled: bool = _plane_enabled(cfg)
+        #: Числа, не собранные ВЫКЛЮЧЕННОЙ ПЛОСКОСТЬЮ, по имени метрики. Пара к
+        #: тишине: «выключено» без растущего счётчика неотличимо от «никто не
+        #: писал» (критерий 3 приёмки Task 2.1).
+        self._plane_dropped_counts: Dict[str, int] = {}
 
     # =========================================================================
     # ЖИЗНЕННЫЙ ЦИКЛ
@@ -208,6 +317,12 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         cfg = normalize_config(config, default={})
         self._config_dict = cfg
         self._default_tags = cfg.get("default_tags") or {}
+        # Ф2 (2.1): плоскость включается и выключается ЖИВЬЁМ, тем же
+        # `config.reload`, что и остальные ручки секции. Не обнови это здесь —
+        # ключ выглядел бы применённым (он в конфиге и в readback'е) и не
+        # действовал бы до рестарта: ровно тот класс, которым уже болели темп
+        # (major-3), предел строки (3.4) и потолок серий.
+        self._plane_enabled = _plane_enabled(cfg)
         self._setup_channels()
         # Потолок серий обновляется ОТДЕЛЬНО от подмены окна и БЕЗУСЛОВНО.
         # ``_swap_aggregation_window`` выходит рано, когда темп не изменился, —
@@ -296,6 +411,24 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         ``observability_effective(stats=mgr)`` → ``{}``.
         """
         out: Dict[str, Any] = {}
+        # Ф2 (2.1, Р-3а) + Task 2.9 (M2, добор ревью Ф2): состояние ПЛОСКОСТИ —
+        # ДВУМЯ ключами, не одним. `enabled` — ИМЯ СХЕМЫ (`ObservabilityStatsConfig.
+        # enabled`) с ПРЯМОЙ полярностью (`enabled: False` = плоскость выключена):
+        # без него `observability_verified` не может подтвердить самый сильный
+        # ключ фазы, потому что тождественное сравнение вердикта ищет путь запроса
+        # (`stats.enabled`) в readback'е буквально, а находило только `plane_disabled`
+        # под другим именем и обратным смыслом — воспроизведено ревью (M2):
+        # запрос `{"stats": {"enabled": False}}` отвечал `unverifiable`, `checked: 0`
+        # ДАЖЕ когда плоскость реально выключилась. `plane_disabled` остаётся
+        # РЯДОМ как удобство оператора: он смотрит readback именно тогда, когда
+        # чисел нет, и ответ обязан прочитаться с первого взгляда — «плоскость
+        # выключена», а не «enabled: false» посреди десятка других `enabled`
+        # соседних плоскостей. Оба ключа читают ОДНО и то же живое поле, поэтому
+        # разъехаться им нечем. Читается ЖИВОЕ поле менеджера, а не конфиг: правка,
+        # не доехавшая до пересборки, обязана быть видна расхождением, а не эхом
+        # запроса.
+        out["enabled"] = self._plane_enabled
+        out["plane_disabled"] = not self._plane_enabled
         tempo = getattr(self._buffer, "flush_interval", None)
         if tempo is not None:
             out["aggregation_interval"] = tempo
@@ -622,6 +755,291 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         if self._buffer is not None:
             self._buffer.enqueue(_STATS_SENTINEL, data)
 
+    # =========================================================================
+    # Ф5, задача 5.3 — порт наблюдений: агрегация как ВИД поверх его потока
+    # =========================================================================
+
+    @property
+    def _observation_tap_name(self) -> str:
+        return f"{_OBSERVATION_TAP_PREFIX}{self.manager_name}"
+
+    def attach_observation_port(self, port: Any) -> bool:
+        """Подключить порт наблюдений — числа этого менеджера едут ЧЕРЕЗ него (Ф5, 5.3).
+
+        До этого вызова ``record_metric``/``gauge``/``record_timing``/``histogram``
+        пишут по СТАРОЙ прямой дороге (см. их докстринги) — это фолбэк для
+        менеджера, ПОСТРОЕННОГО ВНЕ СБОРКИ (standalone-конструирование в
+        тестах соседних модулей, ручной ``StatsManager(...)`` без
+        ``ProcessManagers.create_all``), а не постоянное состояние боевого
+        экземпляра: ``create_all`` зовёт ЭТОТ метод сразу после создания
+        обоих менеджеров, и слот ``"stats"`` (57 боевых вызывающих дороги 3,
+        инвентарь Task 5.1) резолвится в УЖЕ ПОДКЛЮЧЁННЫЙ экземпляр — фолбэк
+        им не нужен вовсе. После вызова менеджер становится ВИДОМ: те же
+        четыре метода перестают писать в справочник и буфер напрямую, а
+        форвардят вызов порту; порт раздаёт запись СИНХРОННО ВСЕМ tap'ам
+        (:meth:`ObservationManager._deliver_number` → ``_emit_to_taps``),
+        один из которых — :meth:`_on_port_record` этого же менеджера,
+        зарегистрированный здесь. Тот же самый жест, что
+        :meth:`attach_observability_hub` делает для СТОКА снапшотов — здесь же
+        подключается ВХОД.
+
+        **Обход фолбэка не тихий (владелец, итерация 2).** Запись по прямой
+        дороге БЕЗ attach увеличивает :attr:`observation_bypasses` и один раз
+        говорит WARNING — тем же жестом, что
+        ``ObservableMixin._note_manager_call_failure``. Без этого «единственный
+        писатель чисел» был бы свойством ПРОВОДКИ («там, где не забыли
+        подключить»), а не построения: `attach` мог бы не вызваться нигде — и
+        ни один голос, ни один счётчик этого бы не заметил.
+
+        **Заглушенный порт молчит и здесь, и это не отдельная ветка, а
+        следствие построения.** Замени порт после attach на объект, чей
+        ``_deliver_number``/``_route_number`` не доставляет (муте — М5,
+        Task 5.2 acceptance) — tap этого менеджера просто не получит записи,
+        и ``get_metric``/окно агрегации не увидят числа НИ РАЗУ, хотя
+        ``record_metric`` формально был вызван. Ни второй ветки, ни
+        специального кода для этого случая нет: он покрыт тем же путём, что
+        и живой порт. **Условие для этого — подписка ДОЛЖНА состояться**
+        (см. блокер B2 ниже): муте — это порт, который ПОДПИСАН и молчит на
+        своём шве, а не порт, который вовсе не смог подписаться.
+
+        **Подписка обязана СОСТОЯТЬСЯ, иначе attach — отказ (Ф5, ревью-блокер
+        B2).** До этой правки метод докладывал ``True`` и подменял
+        :attr:`_observation_port` даже когда ``port`` не имел ``add_tap`` —
+        числа честно форвардились в ``port.record_metric(...)``, но обратно
+        В ЭТОТ менеджер уже не возвращались никаким швом (``_on_port_record``
+        не был подписан ни на что), и ``get_metric``/окно не видели их
+        НИКОГДА, при том что ``observation_bypasses`` оставался ``{}`` —
+        ИДЕАЛЬНЫЙ ноль ровно там, где им проверяют «единственного писателя».
+        Воспроизведено (владелец, ревью Ф5, итерация 3): ``bare =
+        ObservationPort(PluginLevels()); attach_observation_port(bare) ->
+        True``, дальше три записи (``record_metric``/``gauge``/
+        ``record_timing``) — ``get_all_metrics() == {}``. Разница с муте-случаем
+        абзацем выше СТРУКТУРНАЯ, а не эмоциональная: муте подписан и решает
+        молчать НА СВОЁМ шве (``_deliver_number``) осознанно — это его контракт,
+        и он назван; порт без ``add_tap`` не может решить ничего, он просто не
+        умеет говорить ни туда, ни обратно. Отказ здесь — менеджер остаётся на
+        ПРЕЖНЕЙ прямой дороге (учтено и посчитано :meth:`_note_observation_bypass`),
+        а не наполовину подключённым к порту, который его никогда не услышит.
+
+        Идемпотентно: повторный ``attach`` тем же объектом — no-op, ЕСЛИ
+        подписка на нём жива; другим — снимает tap со старого порта
+        (best-effort, ``remove_tap`` глушит исключение сама) и ставит на новый.
+        Без снятия старый порт продолжал бы держать tap на менеджера, который
+        его больше не слушает — накопление мёртвых подписок при каждой
+        пересборке топологии.
+
+        **Успех докладывается по ФАКТУ подписки, а не по форме вызова
+        (Ф5-добор, блокер З3).** Три дыры, все воспроизведены ревьюером:
+
+        1. ранняя ветка судила по ТОЖДЕСТВУ объекта (``port is
+           self._observation_port``) и ``add_tap`` не звала вовсе.
+           Вход: ``attach(port)`` → ``port.remove_tap(tap_name)`` →
+           ``attach(тот же port)``. Выход: ``True`` при НУЛЕ приёмников;
+        2. ``callable(add_tap)`` — проверка формы: вызываемый no-op давал
+           ``True``, ``get_all_metrics() == {}``, ``bypasses == {}``;
+        3. ``self._observation_port = port`` присваивался ДО ``add_tap``:
+           брошенное из ``add_tap`` исключение оставляло менеджера навсегда
+           полуподключённым (метрик нет, обходы не считаются — оба нуля
+           читаются как «всё хорошо»).
+
+        Теперь: присвоение — только ПОСЛЕ успешной подписки (при исключении
+        состояние не мутируется, менеджер остаётся на прежней дороге), а сам
+        факт подписки спрашивается у порта — :meth:`ChannelRoutingManager.has_tap`.
+        Порт, который ответить не умеет (duck-typed дубль без ``has_tap``),
+        судится по возврату ``add_tap``: настоящий отдаёт имя tap'а, no-op —
+        ``None``. Это заведомо СЛАБЕЕ (дубль, возвращающий имя и не хранящий
+        ничего, пройдёт), и потому названо здесь, а не подразумевается;
+        боевая дорога — всегда ``ObservationManager``, то есть всегда сильная
+        ветка.
+
+        Args:
+            port: объект с ``add_tap``/``remove_tap`` (типично —
+                :class:`~...statistics_module.observation.observation_manager.ObservationManager`
+                из слота ``observation``) либо ``None`` — явно ОТКЛЮЧИТЬ
+                подписку и вернуться к прямой дороге.
+
+        Returns:
+            ``True`` — подписка СОСТОЯЛАСЬ (``add_tap`` реально вызван).
+            ``False`` — либо ``port=None`` (законное явное отключение), либо
+            ``port`` не умеет ``add_tap`` (B2: половинчатое подключение хуже
+            отказа, и отказом оно и оформлено).
+        """
+        tap_name = self._observation_tap_name
+        if port is None:
+            # Явное отключение, см. Args выше.
+            old = self._observation_port
+            if old is not None:
+                remove = getattr(old, "remove_tap", None)
+                if callable(remove):
+                    remove(tap_name)
+            self._observation_port = None
+            return False
+
+        add_tap = getattr(port, "add_tap", None)
+        if not callable(add_tap):
+            # B2: НЕ трогаем self._observation_port — старая прямая дорога
+            # (посчитанная bypass'ом) честнее подмены на порт, который
+            # никогда не вернёт число обратно.
+            return False
+
+        # Дыра 1: короткое замыкание разрешено ТОЛЬКО когда порт сам
+        # подтвердил живую подписку. «Не подтвердил» и «подтвердил отказ»
+        # ведут в одно место — переподписаться (``add_tap`` идемпотентен по
+        # имени, второго tap'а не появится).
+        if port is self._observation_port and _tap_is_registered(port, tap_name) is True:
+            return True
+
+        # Порядок: СНАЧАЛА подписаться на новый, ПОТОМ снять со старого. Обратный
+        # (он и был здесь) на отказе нового оставлял менеджера при СТАРОМ порте,
+        # с которого tap уже снят, — числа честно форвардились в порт и не
+        # возвращались никуда, при нулевых `observation_bypasses`. Ровно тот
+        # полуподключённый вид, ради которого написана эта правка, только
+        # въезжающий в него с другой стороны.
+        try:
+            handle = add_tap(_PortTap(self._on_port_record, tap_name), min_level="DEBUG", name=tap_name)
+        except Exception:  # noqa: BLE001 — дыра 3: подписка не состоялась, состояние НЕ мутируем
+            return False
+        registered = _tap_is_registered(port, tap_name)
+        if registered is False or (registered is None and handle is None):
+            # Дыра 2: ``add_tap`` вызвался и не подписал никого.
+            return False
+        old = self._observation_port
+        if old is not None and old is not port:
+            remove = getattr(old, "remove_tap", None)
+            if callable(remove):
+                remove(tap_name)
+        self._observation_port = port
+        return True
+
+    @property
+    def observation_bypasses(self) -> Dict[str, int]:
+        """Число записей, ушедших МИМО порта, — по методу (Ф5, владелец, итерация 2).
+
+        В боевой сборке (после ``ProcessManagers.create_all``) этот словарь
+        обязан быть пустым: обход возможен только у менеджера, у которого
+        :meth:`attach_observation_port` не вызывался, а create_all зовёт его
+        всегда. Ноль здесь — проверяемый ФАКТ («один писатель» — свойство
+        построения), а не вера в то, что attach никто не забыл; см.
+        `test_boot_assembly_has_zero_observation_bypasses` (process_module).
+        """
+        return dict(self._observation_bypass_counts)
+
+    def _note_observation_bypass(self, method_name: str) -> None:
+        """Считать и ОДИН раз сказать об обходе порта (Ф5, владелец, итерация 2).
+
+        Образец — ``ObservableMixin._note_manager_call_failure``: счётчик
+        растёт на КАЖДОМ обходе (без него после первого WARNING потери
+        продолжали бы копиться незримо), голос — один раз на метод (иначе
+        горячий путь эмиссии метрики захлебнулся бы логом).
+
+        **Голос идёт через ``get_std_logger``, а НЕ через ``self._log_warning``
+        и не через голый ``logging.getLogger``.** ``_log_warning`` уходит в
+        ``_call_manager("logger", ...)``, у которого три ТИХИХ допуска: слота
+        нет, менеджер ``None``, слот выключен — во всех трёх вызов молча
+        возвращает ``None``. А обход порта случается ровно у менеджера,
+        построенного ВНЕ сборки, — у него слота ``logger`` обычно тоже нет.
+        Первая редакция звала ``_log_warning``, и голос молчал именно там, где
+        был нужен: воспроизведено 2026-08-26 (standalone-менеджер, три обхода,
+        ``observation_bypasses == {'record_metric': 2, 'gauge': 1}`` при НУЛЕ
+        строк лога). Счётчик существовал, контрол был мёртв.
+
+        **Почему вид, а не голый ``logging.getLogger``.** У stdlib-root в
+        процессах фреймворка НЕТ хендлеров — голый логгер пишет в никуда; на
+        этом стояли инцидент 645 МБ (молчащая ротация) и 23% невидимых ошибок,
+        и Ф6.2/Ф6.3 перевели плоскость на вид ``get_std_logger``. Вторая
+        редакция этой правки звала именно голый ``logging.getLogger`` и была
+        поймана двумя сторожами плоскости
+        (``test_no_bare_stdlib_logger_outside_whitelist``,
+        ``test_plane_has_exactly_two_direct_stdlib_writers``): голос звучал бы
+        в тесте под ``caplog`` и молчал бы в бою — тот же класс мёртвого
+        контрола, который эта правка и чинила, только этажом ниже.
+        """
+        counts = self._observation_bypass_counts
+        first = method_name not in counts
+        counts[method_name] = counts.get(method_name, 0) + 1
+        if first:
+            get_std_logger(__name__).warning(
+                f"[{self.manager_name}] {method_name}() записан МИМО порта наблюдений — "
+                "attach_observation_port не вызывался. Штатно у менеджера, построенного "
+                "вне ProcessManagers.create_all (standalone, тесты соседних модулей); "
+                "в боевой сборке слот 'stats' резолвится в УЖЕ подключённый экземпляр, "
+                "и этот голос значит дефект проводки. Дальнейшие обходы этого метода "
+                "считаются в observation_bypasses без повторного голоса."
+            )
+
+    def _on_port_record(self, record: Dict[str, Any]) -> None:
+        """CRM-tap колбэк — единственный вход агрегации, когда порт подключён (Ф5).
+
+        Зовётся СИНХРОННО, в потоке эмитента (``ObservationManager._deliver_number``
+        не буферизует). Слияние ``default_tags`` — ЗДЕСЬ, а не на call-site: запись
+        могла прийти не от этого объекта вовсе (facade ``PluginContext`` тоже
+        пишет в тот же порт и ничего не знает о ``default_tags`` ЭТОГО менеджера) —
+        единая точка слияния для ЛЮБОГО источника и есть то самое «один
+        писатель», ради которого Ф5 существует.
+
+        Незнакомый ``metric_kind`` — молчим: порт раздаёт запись ВСЕМ tap'ам
+        синхронно, а не только stats-агрегатору; фильтр по роду — дело
+        ПРИЁМНИКА, а не признак отказа отправителя.
+        """
+        metric_type = _METRIC_KIND_TO_TYPE.get(record.get("metric_kind"))
+        if metric_type is None:
+            return
+        name = record.get("name", "")
+        value = record.get("value", 1)
+        merged = self._merged_tags(record.get("tags"))
+        self._apply_metric(name, metric_type, value, merged)
+
+    def _apply_metric(self, name: str, metric_type: MetricType, value: Any, merged_tags: Dict[str, str]) -> None:
+        """Общее ядро записи: старая прямая дорога И tap-колбэк порта сходятся сюда.
+
+        Было четыре почти одинаковых тела (по методу); стало одно,
+        диспетчеризуемое ПО ДАННЫМ (``metric_type``) — образец
+        ``ErrorManager._route()`` (``error_manager.py:178``): род значения не
+        заводит вторую машину, а выбирает ветку в одной.
+
+        ``rec is None`` — серия не пущена в живой справочник потолком 2.2.
+        Эмиссия при этом происходит ВСЕГДА: стражи двух позиций независимы, и
+        отказ справочника не имеет права остановить доставку (Р2.2-7).
+
+        **Гейт ПЛОСКОСТИ (``stats.enabled``, Р-3а) стоит здесь, в ШВЕ, а не в
+        четырёх ветках фасада.** Сюда сходятся ОБЕ дороги сбора: прямая (порт не
+        подключён) и tap-колбэк порта (:meth:`_on_port_record`) — а значит и
+        числа плагинов, которые пишут в порт мимо этого менеджера. Поставь
+        проверку в ``record_metric`` и трёх его братьев — получилось бы четыре
+        копии одного правила и дырка ровно на плагинной дороге; поставь её
+        только на приёме порта — портless-менеджер (тесты соседних модулей,
+        standalone) плоскость бы не выключал.
+
+        Цена, названная вслух: при подключённом порте выключенная плоскость
+        всё равно оплачивает дорогу «фасад → порт → раздача tap'ам» и гасится
+        уже здесь. Дешевле было бы отвечать в фасаде, но это вернуло бы четыре
+        ветки; выключенная плоскость — редкая конфигурация, а бенч шага 5 меряет
+        ПРАВИЛО политики (гейт порта), которое стоит ровно один resolve.
+        ``ponytail: гейт плоскости в шве сбора; ранний выход в фасаде — если
+        замер покажет, что дорога до порта на выключенной плоскости чего-то
+        стоит.``
+        """
+        if not self._plane_enabled:
+            self._plane_dropped_counts[name] = self._plane_dropped_counts.get(name, 0) + 1
+            return
+        if metric_type is MetricType.COUNTER:
+            value = float(value)
+        rec = self._ensure_record(name, metric_type, merged_tags)
+        if rec is not None:
+            if metric_type is MetricType.COUNTER:
+                rec.add_counter(value)
+            elif metric_type is MetricType.GAUGE:
+                rec.set_gauge(value)
+            elif metric_type is MetricType.TIMING:
+                rec.add_timing(value)
+            else:
+                rec.add_histogram(value)
+        self._emit_record({"type": metric_type.value, "name": name, "value": value, "tags": merged_tags})
+
+    # =========================================================================
+    # ЗАПИСЬ МЕТРИК — фасад (Ф5: пересылка в порт, если подключён; иначе прямая дорога)
+    # =========================================================================
+
     def record_metric(
         self,
         name: str,
@@ -630,16 +1048,23 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     ) -> None:
         """Записать счётчик (counter).
 
-        ``rec is None`` — серия не пущена в живой справочник потолком 2.2.
-        Эмиссия при этом происходит ВСЕГДА: стражи двух позиций независимы, и
-        отказ справочника не имеет права остановить доставку (Р2.2-7). Так же
-        устроены остальные три дороги ниже.
+        **Ф5.** Порт подключён (:meth:`attach_observation_port`) — форвард
+        ``port.record_metric(...)``, без слияния тегов и без прямой записи:
+        порт синхронно раздаст запись tap'ам, и ЭТОТ ЖЕ менеджер получит её
+        обратно через :meth:`_on_port_record`, где слияние и происходит. Порта
+        нет — старая прямая дорога (:meth:`_apply_metric`), СЧИТАННАЯ и
+        ПОИМЕНОВАННАЯ (:meth:`_note_observation_bypass`,
+        :attr:`observation_bypasses`) — фолбэк для менеджера вне сборки
+        (``ProcessManagers.create_all`` подключает порт всегда), не для 57
+        боевых вызывающих дороги 3, которые в боевой сборке приходят на УЖЕ
+        подключённый экземпляр.
         """
-        merged = self._merged_tags(tags)
-        rec = self._ensure_record(name, MetricType.COUNTER, merged)
-        if rec is not None:
-            rec.add_counter(float(value))
-        self._emit_record({"type": "counter", "name": name, "value": float(value), "tags": merged})
+        port = self._observation_port
+        if port is not None:
+            port.record_metric(name, value, tags)
+            return
+        self._note_observation_bypass("record_metric")
+        self._apply_metric(name, MetricType.COUNTER, value, self._merged_tags(tags))
 
     def increment(self, name: str, tags: Optional[Dict] = None) -> None:
         """Увеличить счётчик на 1."""
@@ -657,28 +1082,42 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         живут в секундах, и миллисекунды, посланные сюда, легли бы в бакет
         ``+Inf`` целиком — p95 стал бы константой при зелёном тесте памяти
         (§2-П7 плана этапа 6).
+
+        Ф5: см. :meth:`record_metric` — тот же выбор дороги (порт/прямая), тот же
+        учёт обхода (:meth:`_note_observation_bypass`).
         """
-        merged = self._merged_tags(tags)
-        rec = self._ensure_record(name, MetricType.TIMING, merged)
-        if rec is not None:
-            rec.add_timing(duration)
-        self._emit_record({"type": "timing", "name": name, "value": duration, "tags": merged})
+        port = self._observation_port
+        if port is not None:
+            port.record_timing(name, duration, tags)
+            return
+        self._note_observation_bypass("record_timing")
+        self._apply_metric(name, MetricType.TIMING, duration, self._merged_tags(tags))
 
     def gauge(self, name: str, value: float, tags: Optional[Dict] = None) -> None:
-        """Записать текущее значение (gauge — перезаписывает предыдущее)."""
-        merged = self._merged_tags(tags)
-        rec = self._ensure_record(name, MetricType.GAUGE, merged)
-        if rec is not None:
-            rec.set_gauge(value)
-        self._emit_record({"type": "gauge", "name": name, "value": value, "tags": merged})
+        """Записать текущее значение (gauge — перезаписывает предыдущее).
+
+        Ф5: см. :meth:`record_metric` — тот же выбор дороги (порт/прямая), тот же
+        учёт обхода (:meth:`_note_observation_bypass`).
+        """
+        port = self._observation_port
+        if port is not None:
+            port.gauge(name, value, tags)
+            return
+        self._note_observation_bypass("gauge")
+        self._apply_metric(name, MetricType.GAUGE, value, self._merged_tags(tags))
 
     def histogram(self, name: str, value: float, tags: Optional[Dict] = None) -> None:
-        """Записать значение в гистограмму (та же механика бакетов, что у timing)."""
-        merged = self._merged_tags(tags)
-        rec = self._ensure_record(name, MetricType.HISTOGRAM, merged)
-        if rec is not None:
-            rec.add_histogram(value)
-        self._emit_record({"type": "histogram", "name": name, "value": value, "tags": merged})
+        """Записать значение в гистограмму (та же механика бакетов, что у timing).
+
+        Ф5: см. :meth:`record_metric` — тот же выбор дороги (порт/прямая), тот же
+        учёт обхода (:meth:`_note_observation_bypass`).
+        """
+        port = self._observation_port
+        if port is not None:
+            port.histogram(name, value, tags)
+            return
+        self._note_observation_bypass("histogram")
+        self._apply_metric(name, MetricType.HISTOGRAM, value, self._merged_tags(tags))
 
     # =========================================================================
     # ЧТЕНИЕ МЕТРИК
@@ -763,4 +1202,68 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         # (`total_count − len(metrics)`), где период однозначен по построению.
         stats["window_observations_dropped"] = window["observations"]
         stats["window_dropped_series"] = window["names"]
+        # Ф5, ревью-блокер S2: `observation_bypasses` был свойством ТОЛЬКО
+        # Python-объекта — ни один тест снаружи (introspect.observability)
+        # не мог его прочитать. Публикуется здесь, а не в `self.stats`
+        # (`LOSS_COUNTER_KEYS`): счётчик по МЕТОДУ и общий для ТРЁХ соседних
+        # плоскостей смысла не имеет — «числа» есть только у stats/observation.
+        stats["observation_bypasses"] = self.observation_bypasses
+        # Ф2 (2.1): ЕДИНСТВЕННЫЙ адрес чтения «сколько чисел не собрано
+        # политикой». Владельцев решения двое — выключенная плоскость судит
+        # здесь, правило по пути судит в гейте порта (до сборки записи), — но
+        # СПРАШИВАЮТ об этом в одном месте: два счётчика с одним именем в двух
+        # объектах читатель складывал бы сам и ошибался бы молча.
+        stats["numbers_policy_dropped"] = self.numbers_policy_dropped
+        stats["numbers_policy_throttled"] = self.numbers_policy_throttled
         return stats
+
+    @property
+    def numbers_policy_dropped(self) -> Dict[str, int]:
+        """``{имя метрики: сколько раз не собрано политикой}`` — плоскость И правило.
+
+        Складываются два источника, и оба — про одно и то же событие «число не
+        доехало до окна по решению политики»:
+
+        * выключенная ПЛОСКОСТЬ (``stats.enabled: false``, Р-3а) — судит этот
+          менеджер, в шве :meth:`_apply_metric`;
+        * ПРАВИЛО по пути (``processes.<P>.stats.<имя>``) — судит гейт порта
+          (``ObservationManager.numbers_gate``) ДО сборки записи.
+
+        Порт спрашивается через уже подключённую ссылку, а не резолвится заново:
+        менеджер и порт живут в одном процессе и связаны
+        :meth:`attach_observation_port`. Порта нет → в сумме только плоскость.
+        """
+        merged = dict(self._plane_dropped_counts)
+        gate = getattr(self._observation_port, "numbers_gate", None)
+        if gate is not None:
+            for name, count in gate.dropped_by_metric().items():
+                merged[name] = merged.get(name, 0) + int(count)
+        return merged
+
+    def numbers_policy_view(self) -> Optional[Dict[str, Any]]:
+        """Действующая политика ЧИСЕЛ — секция ``introspect.observability.stats.policy``.
+
+        Спрашивается ЖИВОЙ гейт порта, а не конфиг: пересчёт из той же секции
+        показывал бы согласие всегда, в том числе когда правка до порта не
+        доехала (тот же довод, что у ``current_observation_policy`` для уровней).
+
+        ``None`` — политики порту не приносили ЛИБО порт не подключён. Два факта
+        под одним ответом, и это огрубление названо: различает их соседний
+        ``observation_bypasses`` (порт не подключён → он растёт), а заводить
+        третье состояние ради readback'а значило бы описывать проводку, а не
+        политику.
+        """
+        gate = getattr(self._observation_port, "numbers_gate", None)
+        return None if gate is None else gate.view()
+
+    @property
+    def numbers_policy_throttled(self) -> Dict[str, int]:
+        """``{имя метрики: сколько раз придержано ``interval_sec``}`` — только гейт порта.
+
+        Отдельно от :attr:`numbers_policy_dropped`, потому что это ДРУГОЙ факт:
+        «запрещено» лечится правилом, «придержано» — частотой, и слитые в одну
+        цифру они не дают оператору понять, что именно он видит. У плоскости
+        второй половины нет: выключенная плоскость не троттлит, она запрещает.
+        """
+        gate = getattr(self._observation_port, "numbers_gate", None)
+        return {} if gate is None else gate.throttled_by_metric()

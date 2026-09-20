@@ -3,13 +3,13 @@ description: Update a pinned plugin <id> — consume (re-pin version/sha) OR git
 allowed-tools: Bash(claude-kit-claude plugin update*)
 ---
 
-Команда `plugin update` различает источник плагина по записи в enabled.yaml и направляет в нужную ветку.
+The `plugin update` command distinguishes the plugin's source by its entry in enabled.yaml and routes to the right branch.
 
-**α (consume).** Перепинивает уже закреплённый плагин: сохраняет существующий `source`, обновляет только `version`/`sha` и пересобирает артефакты. Плагин должен уже иметь `source` (сначала `pin`).
+**α (consume).** Re-pins an already-pinned plugin: keeps the existing `source`, updates only `version`/`sha`, and rebuilds the artifacts. The plugin must already have a `source` (run `pin` first).
 
-**β (git).** Для git-managed плагина (установлен в `.claude/plugins/_external/<id>/`): мы заново клонируем репозиторий на указанный `--ref` (или текущий tracked-ref), атомарно подменяем дерево и обновляем `sha` в lockfile, затем recompose. Перед операцией создаётся backup `.claude/`; на любом сбое — откат дерева И артефактов (транзакционность). Локальные правки в `_external/<id>/` теряются — β-код throwaway (gitignored, воспроизводится re-clone по lockfile).
+**β (git).** For a git-managed plugin (installed in `.claude/plugins/_external/<id>/`): we re-clone the repository at the given `--ref` (or the currently tracked ref), atomically swap the tree, and update `sha` in the lockfile, then recompose. A backup of `.claude/` is created before the operation; on any failure — rollback of both the tree AND the artifacts (transactional). Local edits in `_external/<id>/` are lost — β-code is throwaway (gitignored, reproduced by re-clone from the lockfile).
 
-Использование:
+Usage:
 - consume: `/core:plugin:update <id> [--version X | --sha Y]`
 - git β: `/core:plugin:update <id> [--ref <branch|tag|sha>] [--yes]`
 

@@ -40,3 +40,25 @@ brew install syft                           # SBOM (or: npm i -g @cyclonedx/cdxg
 
 `settings.partial.json` allow-lists `semgrep`, `osv-scanner`, `syft`, `cdxgen`
 so the scans run without a confirmation prompt once the plugin is enabled.
+
+## security-guidance (a separate, CONSUME plugin — Task 4.2)
+
+`security-guidance` is the official Anthropic marketplace plugin for **edit-time**
+regex/substring reminders plus optional model-backed end-of-turn/commit review
+(docs: <https://code.claude.com/docs/en/security-guidance>). It is a **different
+plugin id** in `enabled.yaml` (`security-guidance: source:
+"security-guidance@claude-plugins-official"`) from this `security` plugin (SAST/
+CVE/SBOM CLIs) — CONSUME, so Claude Code installs and wires it; this seed ships
+**no** `plugins/security-guidance/` folder for it (verified empirically: a bare
+lockfile entry with no local plugin directory resolves to `plugin doctor`/`plugin
+list` status `external`, never `missing`/`broken` — see
+`compose/collect.py`'s `consume_external` pass). The one file it needs —
+`templates/security-patterns.template.json`, this plugin's per-edit pattern seed
+(three starter rules: `hardcoded_secret_prefix`, `skip_commit_hooks`,
+`edit_knowledge_raw`) — lives here because it is thematically part of the
+`security` domain, not because `security-guidance` has a plugin folder of its
+own. `init` copies it once to `.claude/security-patterns.json` (idempotent —
+never overwrites an owner's edits, like `commit-layers.txt`).
+
+For the model-backed layers, add `.claude/claude-security-guidance.md` with your
+project's threat model (per-project — not shipped here, see docs above).

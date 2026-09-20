@@ -2,35 +2,35 @@
 description: Regenerate diagrams from code (pyreverse + pydeps, optionally mermaid)
 ---
 
-Регенерация диаграмм из исходного кода.
+Regenerate diagrams from the source code.
 
-## Что делать
+## What to do
 
-1. **Если есть `make diagrams` цель** — используй её:
+1. **If there's a `make diagrams` target** — use it:
    ```bash
    make diagrams
    ```
 
-2. **Иначе — прямой вызов инструментов:**
+2. **Otherwise — call the tools directly:**
    ```bash
-   # UML классов
+   # Class UML
    mkdir -p docs/diagrams/classes
    uv run pyreverse -o png -d docs/diagrams/classes src/<package>
 
-   # Граф зависимостей модулей
+   # Module dependency graph
    mkdir -p docs/diagrams/deps
    uv run pydeps src/<package> --max-bacon=3 -o docs/diagrams/deps/deps.svg --noshow
    ```
 
-3. **Если pyreverse / pydeps не установлены** — предложи:
+3. **If pyreverse / pydeps aren't installed** — suggest:
    ```bash
-   uv add --group diagrams pylint pydeps      # или соответствующая dep-group из pyproject.toml
+   uv add --group diagrams pylint pydeps      # or the matching dep-group from pyproject.toml
    ```
 
-4. После генерации — кратко покажи что обновилось (список файлов + размер).
+4. After generation — briefly show what got updated (file list + size).
 
-5. Если в проекте есть ручная диаграмма (`docs/diagrams/architecture.mmd` или `.puml`) — напомни обновить если архитектура менялась.
+5. If the project has a manual diagram (`docs/diagrams/architecture.mmd` or `.puml`) — remind to update it if the architecture changed.
 
-## Формат ответа
+## Response format
 
-Кратко: что сгенерировано, какие файлы обновились, нужно ли обновить ручные диаграммы.
+Briefly: what was generated, which files were updated, whether the manual diagrams need updating.

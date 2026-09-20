@@ -22,7 +22,10 @@ Fan-out на ВСЕХ детей (broadcast ``process=all``) — Task 3.2, зд�
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+import math
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+
+from ...state_store_module import split_pattern
 
 if TYPE_CHECKING:
     from ...config_module.core.config import Config
@@ -209,7 +212,64 @@ def resolve_store_throttle(holder: Any) -> Any:
     return store_manager.get_middleware("throttle")
 
 
-def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Optional[float]:
+#: Правило на адресе ЕСТЬ, но его интервал не число (Ф3, задача 3.0a, находка Н3).
+#: Отдельно от ``None`` («правила нет») потому, что это РАЗНЫЕ факты и разная
+#: судьба записи в живом троттле: непокрытый путь пропускается без ограничений,
+#: а нечисловое правило ломает ``ThrottleMiddleware`` со ВТОРОГО вызова.
+_UNREADABLE_RULE: Any = object()
+
+
+def _narrow_rule(matched: list) -> Any:
+    """Строжайшее из отобранных правил, либо ``None``, либо :data:`_UNREADABLE_RULE`.
+
+    Общая половина обоих матчеров: они по-разному РЕШАЮТ, какие правила
+    адресуют кандидата (суффикс имени против пересечения глобов), но одинаково
+    выбирают из отобранного — иначе на одном входе получились бы две дисциплины.
+
+    **``bool`` — валидное правило, а не мусор** (Ф3, задача 3.0a, находка Н2).
+    Половина по ПУТИ исключала его, половина по ИМЕНИ принимала; замер на живом
+    ``ThrottleMiddleware`` (три ``before_set`` подряд) снял вопрос — троттл
+    исполняет оба значения::
+
+        {'…fps': True}  -> [(True,0), (False,1), (False,2)]   # как интервал 1.0
+        {'…fps': 0.05}  -> [(True,0), (False,1), (False,2)]   # так же
+        {'…fps': False} -> полная блокировка (ветка `interval == 0`)
+
+    Раз троттл правило исполняет — сверщик обязан его видеть, иначе РАБОТАЮЩЕЕ
+    правило падало бы в «судили, потолка нет».
+
+    **Нечисловой интервал — не «правила нет»** (находка Н3). Замер на том же
+    стенде::
+
+        {'…fps': '0.05'} -> [(True,0), TypeError("unsupported operand type(s) for /: 'float' and 'str'"), …]
+
+    То есть строка не троттлит, а ЛОМАЕТ троттл со второго вызова, и молчание
+    сверщика скрыло бы не потолок, а сломанное правило.
+
+    Названный потолок: если адрес покрыт И читаемым, и нечитаемым правилом,
+    судим по читаемым, а сломанное молчит — сузить это до «называть оба» нельзя,
+    не заведя второй список в ответе.
+    """
+    if not matched:
+        return None
+    # `isfinite` — не придирка к типу, а ЧИТАЕМОСТЬ по употреблению (находка B
+    # ревью 3.0a): `NaN` проходит `isinstance(..., float)`, но `max([nan])` даёт
+    # `nan`, и обе ветки сравнения в `_judge` (`== 0`, `> asked`) ложны — правило
+    # на адресе есть, а отчёт молчит. Ровно тот класс, ради которого заведён
+    # `_UNREADABLE_RULE`. Замер: правило `nan` при заявке 0.5 → `caps={} unjudged={}`,
+    # контроль правилом 9.0 на том же входе → потолок назван.
+    readable = [
+        float(interval) for interval in matched if isinstance(interval, (int, float)) and math.isfinite(float(interval))
+    ]
+    if not readable:
+        return _UNREADABLE_RULE
+    # 0 (полная блокировка) — строжайшее; иначе максимальный интервал.
+    if any(c == 0 for c in readable):
+        return 0.0
+    return max(readable)
+
+
+def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Any:
     """Найти интервал central-правила для метрики по СУФФИКСУ паттерна (generic).
 
     Central-правила троттла авторятся как листовые глобы вида ``processes.**.state.fps``
@@ -233,23 +293,85 @@ def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Optional[flo
     ``multiprocess_prototype/backend/state/tests/test_throttle_rules_cover_plugin_paths.py``.
 
     Returns:
-        Интервал строжайшего правила метрики либо ``None``, если правил нет.
+        Интервал строжайшего правила метрики; ``None``, если ни одно правило не
+        адресует метрику; :data:`_UNREADABLE_RULE`, если правило есть, а его
+        интервал не число (Ф3, задача 3.0a, находка Н3 — см. :func:`_narrow_rule`).
     """
-    candidates = [
+    # `str(pattern)` — симметрия с половиной по пути (находка C ревью 3.0a):
+    # до неё `isinstance` в списковом включении короткозамыкал `rsplit`, а
+    # после выделения `_narrow_rule` он зовётся на КАЖДОМ ключе, и правило
+    # `{42: '0.05'}` роняло весь `config.reload` через `AttributeError`
+    # вместо тихого пропуска.
+    matched = [interval for pattern, interval in rules.items() if str(pattern).rsplit(".", 1)[-1] == metric]
+    return _narrow_rule(matched)
+
+
+def _globs_intersect(a: Tuple[str, ...], b: Tuple[str, ...]) -> bool:
+    """Существует ли путь, который матчат ОБА паттерна (пересечение непусто).
+
+    Нужно там, где сравниваются два ГЛОБА, а не глоб и путь: правило порта по
+    пути против central-правила троттла. Суффиксное сравнение (сосед
+    :func:`_central_rule_for_metric`) на такой паре слепо, и слепота была не
+    частной: ``…plugins.capture.*``, ``…plugins.**`` и дефолтное правило
+    поддерева ``processes.*.state.plugins.**`` возвращали ПУСТО молча — то есть
+    «no silent caps» не действовало ровно для назначенного предохранителя
+    (находка З1 ревью Ф4).
+
+    Семантика сегментов — та же, что у матчера стора
+    (``state_store_module.match_pattern``): ``*`` — ровно один любой сегмент,
+    ``**`` — ноль и больше. Частичных wildcard'ов (``f*``) движок не знает: такой
+    сегмент — обычный литерал, и здесь он сравнивается литералом же.
+
+    Returns:
+        ``True``, если пересечение множеств путей непусто.
+    """
+    if not a and not b:
+        return True
+    if not a or not b:
+        # Хвост из одних `**` поглощает пустоту — иначе пересечения нет.
+        return all(seg == "**" for seg in (a or b))
+    head_a, head_b = a[0], b[0]
+    if head_a == "**":
+        return _globs_intersect(a[1:], b) or _globs_intersect(a, b[1:])
+    if head_b == "**":
+        return _globs_intersect(a, b[1:]) or _globs_intersect(a[1:], b)
+    if head_a == "*" or head_b == "*" or head_a == head_b:
+        return _globs_intersect(a[1:], b[1:])
+    return False
+
+
+def _central_rule_for_path_pattern(pattern: str, rules: Dict[str, Any]) -> Any:
+    """Строжайшее central-правило, чьи пути ПЕРЕСЕКАЮТСЯ с правилом порта.
+
+    Отличается от :func:`_central_rule_for_metric` не капризом, а входом: там
+    ключ — ИМЯ метрики (``metrics.fps``), и что это имя значит в дереве, знает
+    только прикладной слой, поэтому framework обязан остаться на суффиксе. Здесь
+    ключ — сам ПУТЬ, выраженный на языке того же матчера, что и central-правила;
+    сравнивать их напрямую не только можно, но и единственно честно.
+
+    Строжайшее (макс. интервал, ``0`` = полная блокировка) — по тому же доводу,
+    что у соседа: узкое место оператору называется то, которое реально сработает.
+    Выбор из отобранного и обе особые формы значения (``bool``, нечисло) — общие
+    с соседом, см. :func:`_narrow_rule`: раньше эта половина исключала ``bool``,
+    а соседняя принимала, и на одном входе жили две дисциплины (находка Н2).
+    """
+    matched = [
         interval
-        for pattern, interval in rules.items()
-        if isinstance(interval, (int, float)) and pattern.rsplit(".", 1)[-1] == metric
+        for throttle_pattern, interval in rules.items()
+        if _globs_intersect(split_pattern(str(pattern)), split_pattern(str(throttle_pattern)))
     ]
-    if not candidates:
-        return None
-    # 0 (полная блокировка) — строжайшее; иначе максимальный интервал.
-    if any(c == 0 for c in candidates):
-        return 0.0
-    return max(candidates)
+    return _narrow_rule(matched)
 
 
-def detect_throttle_caps(publish_section: Any, store_throttle: Any) -> Dict[str, Dict[str, float]]:
-    """Найти метрики publish-дельты, чью частоту central-троттл молча срезал бы.
+def judge_throttle_caps(
+    publish_section: Any,
+    store_throttle: Any,
+    *,
+    observation_rules: Optional[Dict[str, Any]] = None,
+    default_interval_sec: Optional[float] = None,
+    effective_tick: Optional[float] = None,
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, str]]:
+    """Рассудить кандидатов на молчаливый потолок central-троттла — ОДНИМ проходом.
 
     Инвариант ADR-PM-017: **publisher-gate — единственный авторитет частоты**, central-троттл
     — лишь IPC-предохранитель от СБОЙНОГО публикатора, а не второй авторитет. Если оператор
@@ -260,44 +382,299 @@ def detect_throttle_caps(publish_section: Any, store_throttle: Any) -> Dict[str,
     plane=throttle``). Троттл при этом НЕ трогается автоматически — операторская страховка
     остаётся нетронутой (auto-relax отвергнут, см. ADR-PM-017 «Rejected»).
 
-    Сравнивается только per-метрика явный ``interval_sec`` в ``metrics.<name>`` (``None`` →
-    наследование default — не флагуем, неоднозначно). Central-правило метрики ищется по
-    суффиксу паттерна (:func:`_central_rule_for_metric`).
+    Половин у прохода две, и они судятся РАЗНЫМ сопоставлением, потому что у них разный
+    ВХОД: ключ ``metrics.<имя>`` — это ИМЯ, и что оно значит в дереве, знает только
+    прикладной слой (framework обязан остаться generic), поэтому central-правило метрики
+    ищется пересечением по суффиксу (:func:`_central_rule_for_metric`); ключ правила порта —
+    сам ПУТЬ на языке того же матчера, что и central-правила, поэтому судится пересечением
+    глобов (:func:`_central_rule_for_path_pattern`). Довод целиком — ADR-PM-042.
+
+    **Почему ответ — ПАРА, а не только потолки (Ф3, задача 3.0, находка F2 вердикта CTO
+    по Ф2, 2026-09-03).** Кандидат, которого рассудить нечем (заявки нет И такта нет),
+    до этой правки пропускался МОЛЧА, и пустой ``capped_by_throttle`` был неотличим от
+    «потолков нет» — ровно класс «``checked`` отвечает за вызов, а не за охват»: ответ
+    ``throttle_checked: true`` с пустым списком читается как подтверждение, которого
+    никто не давал. Теперь такой кандидат называется вслух — во второй половине ответа,
+    с причиной-литералом (``"no_tick"``). Молчание осталось ровно там, где ответ
+    ОПРЕДЕЛЁН и без ask'а: если ни одно central-правило на адрес кандидата не
+    пересекается, потолку неоткуда взяться при ЛЮБОМ ask'е, и такой кандидат — не
+    «не судили», а «судили, потолка нет».
+
+    **Ред. по находке З1 ревью Ф4: правила по пути судятся ПЕРЕСЕЧЕНИЕМ ГЛОБОВ**
+    (:func:`_central_rule_for_path_pattern`), а не по последнему сегменту.
+    Прежняя редакция брала ``pattern.rsplit(".", 1)[-1]``, и это молча не судило
+    целые классы: ``…plugins.capture.*``, ``…plugins.**``, ``…plugins.*.f*`` —
+    и, главное, ДЕФОЛТНОЕ ПРАВИЛО ПОДДЕРЕВА, то есть назначенный предохранитель
+    варианта «в». Измерено на прежней редакции: ``…plugins.*.fps`` судилось,
+    три перечисленных формы возвращали ``{}``. Названный потолок «отчёт назовёт
+    потолок, которого на этом пути нет» СУЗИЛСЯ, но не исчез: пересечение
+    считается в языке ПАТТЕРНОВ, а не по живому дереву. Воспроизведение (ревью
+    Ф4, итерация 2): ``processes.*.state.plugins.**`` против central-правила
+    ``**.state.actual_fps`` пересекаются свидетелем
+    ``processes.cam1.state.plugins.capture.state.actual_fps`` — путём, которого в
+    дереве нет, — и отчёт назовёт потолок. Ошибка в безопасную сторону (лишнее
+    предупреждение, не молчание), поэтому оставлена, а не спрятана.
+
+    **Ред. по итерации 2 ревью:** правило БЕЗ явного ``interval_sec`` судится по
+    унаследованному ``default_interval_sec`` — как у соседа. До правки оно
+    пропускалось, и ответ утверждал «сверено, потолков нет» при живом срезе.
 
     Args:
         publish_section: publish-под-секция команды (dict с опциональным ``metrics``).
         store_throttle: живой центральный ``ThrottleMiddleware`` оркестратора (или ``None``).
+        observation_rules: правила порта по пути ``{glob: {enabled, interval_sec}}``
+            — ожидается :func:`~..configs.observation_policy.cap_candidates`
+            (правила оператора ПЛЮС дефолт поддерева) либо ``None``.
+        default_interval_sec: ЖИВОЕ значение гейта, которое унаследует правило порта
+            без явного ``interval_sec``.
+        effective_tick: эффективный телеметрийный тик воркера, сек
+            (``ProcessHeartbeat.current_telemetry_tick()``). При пригодном значении
+            (``> 0``) — НИЖНЯЯ ГРАНИЦА ask'а публикатора (см. ``_publisher_ask``).
+            ``None`` либо непригодный (``<= 0`` — heartbeat отключён или значение слоя
+            отрицательное) → такт в расчёте не участвует.
 
     Returns:
-        ``{metric: {"publisher_interval_sec": p, "throttle_interval_sec": t}}`` — только для
-        метрик, где троттл строже (``t > p`` или ``t == 0`` полная блокировка). Пусто →
-        поднятие частоты дойдёт до дерева без среза (страховка мягче публикатора).
+        Пару ``(caps, unjudged)``:
+
+        * ``caps`` — ``{метрика-или-паттерн: {"publisher_interval_sec": p,
+          "throttle_interval_sec": t}}``, только там, где троттл строже (``t > p``
+          или ``t == 0`` полная блокировка). ``p`` — РЕАЛЬНЫЙ ask публикатора
+          (``max(заявка, такт)``), не сырое заявленное значение конфига: печатать
+          рядом с «троттл строже» частоту, которой публикатор не попросит, было бы
+          противоречием по смыслу для читателя отчёта;
+        * ``unjudged`` — ``{ключ: причина}`` для кандидатов, которых рассудить нечем.
+          Причина — литерал, их два: ``"no_tick"`` (нет ни заявки, ни такта) и
+          ``"unreadable_rule"`` (правило на адресе есть, а его интервал не число —
+          Ф3, задача 3.0a, находка Н3; см. :func:`_narrow_rule`).
+
+        Оба словаря пусты → поднятие частоты дойдёт до дерева без среза, и это
+        УТВЕРЖДЕНИЕ, а не молчание.
     """
-    if not isinstance(publish_section, dict) or store_throttle is None:
-        return {}
-    metrics = publish_section.get("metrics")
-    if not isinstance(metrics, dict):
-        return {}
+    caps: Dict[str, Dict[str, float]] = {}
+    unjudged: Dict[str, str] = {}
+    if store_throttle is None:
+        return caps, unjudged
     rules = getattr(store_throttle, "rules", None)
     if not isinstance(rules, dict) or not rules:
-        return {}
+        return caps, unjudged
 
-    caps: Dict[str, Dict[str, float]] = {}
-    for metric, rule in metrics.items():
-        if not isinstance(rule, dict):
-            continue
-        pub_interval = rule.get("interval_sec")
-        if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
-            continue
-        throttle_interval = _central_rule_for_metric(metric, rules)
+    def _usable_tick() -> Optional[float]:
+        """Такт, пригодный для расчёта, либо ``None``.
+
+        Непригодны: отсутствие (``None``), нечисло, ``bool`` (в Python ``True``
+        это ``1`` — сравнение прошло бы молча), ``NaN`` (``nan > 0`` ложно) и
+        вырожденное значение (``<= 0``: heartbeat отключён либо значение слоя
+        отрицательное).
+        """
+        if not isinstance(effective_tick, (int, float)) or isinstance(effective_tick, bool):
+            return None
+        tick = float(effective_tick)
+        return tick if tick > 0.0 else None
+
+    def _inherited_interval() -> float:
+        """Частота, которую унаследует правило без явного ``interval_sec``.
+
+        Источник — ЖИВОЕ значение гейта, переданное вызывающим
+        (``default_interval_sec``), затем секция запроса, и только потом ``0.0``.
+
+        **Почему не схемный литерал 1.0** (ред. по второму проходу ревью
+        итерации 2). Первая редакция этой правки брала 1.0 «схемным дефолтом» —
+        и была неверна дважды. Во-первых, боевой вызывающий передавал сюда
+        ``None`` вместо секции, поэтому живое число не доходило НИКОГДА и
+        сверщик судил по константе: при ``default_interval_sec: 0.5`` и троттле
+        0.8 реальный срез существовал, а отчёт отдавал пустой список — тот же
+        утвердительный ноль, ради которого пункт и был блокером. Во-вторых,
+        сосед (``capped_metrics``, ``heartbeat/telemetry.py``) и само решение
+        (``ObservationPolicy.resolve``) откатываются к ``0.0``, а не к 1.0:
+        «частоты нет» значит «каждый тик», и любой троттл тогда строже.
+        Разойтись с ними значило бы завести третью дисциплину на том же входе.
+        """
+        if isinstance(default_interval_sec, (int, float)) and not isinstance(default_interval_sec, bool):
+            return float(default_interval_sec)
+        if isinstance(publish_section, dict):
+            raw = publish_section.get("default_interval_sec")
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                return float(raw)
+        return 0.0
+
+    def _publisher_ask(pub_interval: float) -> Optional[float]:
+        """Частота, которую публикатор РЕАЛЬНО запросит у хранилища.
+
+        **Такт — НИЖНЯЯ ГРАНИЦА ask'а, а не замена нулю** (Ф3, задача 3.0,
+        находка F1 вердикта CTO по Ф2, 2026-09-03). Публикатор физически не
+        публикует чаще такта heartbeat'а: между двумя тактами он не просыпается,
+        и заявка «раз в 1.0 с» при такте 5.0 с даёт обращения к хранилищу раз в
+        5.0 с. Поэтому при пригодном такте ask = ``max(заявка, такт)``.
+
+        Замер F1 (вход → вывод), на котором находка и стоит:
+        ``interval_sec=1.0``, ``effective_tick=5.0``, central-правило ``2.0``.
+        До правки: ask ``1.0`` → ``2.0 > 1.0`` → отчёт называл потолок, которого
+        нет — публикатор попросит ``5.0``, и правило ``2.0`` его не режет.
+        После: ask ``max(1.0, 5.0) = 5.0`` → ``2.0 > 5.0`` ложно → потолок не
+        называется. Второй половиной пары: тот же вход при правиле ``6.0`` →
+        потолок назван, и ``publisher_interval_sec`` в нём ``5.0`` (реальный
+        ask), а не заявленная ``1.0``.
+
+        Task 2.11 (Ф2, Р-11) замещала тактом только НОЛЬ; правка 3.0 обобщает
+        замещение до нижней границы, и прежний случай остаётся её частным:
+        ``max(0.0, такт) == такт``.
+
+        Без пригодного такта поведение прежнее — регресса нет: ``pub_interval >
+        0`` — заявка есть, она и есть ask; ``pub_interval <= 0`` — заявки нет
+        тоже, сравнивать не с чем, ``None`` читается вызывающим как «не судили»
+        (причина ``"no_tick"``).
+
+        **«Такта нет» — это НЕ только ``None``** (находка ревью Task 2.11,
+        2026-09-03). Вырожденный такт (``0.0`` или отрицательный) сюда доезжает
+        и достижим не гипотетически: ``ObservabilityConfig.heartbeat_interval_sec``
+        объявлен с ``min=0.0``, а ``ProcessHeartbeat.apply_heartbeat_interval``
+        отбивает только НЕЧИСЛО (``try/except`` на ``float()``), поэтому
+        ``current_telemetry_tick()`` возвращает ``0.0`` при выключенном
+        heartbeat'е и отрицательное при отрицательном значении слоя. Замер
+        ревьюера на боевых правилах троттла: при ``effective_tick=0.0``
+        замещение давало ``{'processes.*.state.plugins.**':
+        {'publisher_interval_sec': 0.0, 'throttle_interval_sec': 0.05}}`` —
+        ДОСЛОВНО тот отчёт, ради снятия которого добор и делался, только
+        вернувшийся через чёрный ход. Ноль здесь не «публикуй бесконечно часто»,
+        а «такта нет вовсе» (``heartbeat_interval <= 0`` в этом фреймворке
+        означает «heartbeat отключён» — см. примечание ``introspect.telemetry``).
+
+        Правку намеренно сделали ЗДЕСЬ, а не в ``apply_heartbeat_interval``:
+        ноль там — законное значение («heartbeat отключён»), и переписывать его
+        в схемный дефолт значило бы отменить операторское выключение. Долг
+        соседа (докстринг ``apply_heartbeat_interval`` обещает откат к дефолту
+        для ОТРИЦАТЕЛЬНОГО, а кода такой ветки нет) назван в плане Task 2.11
+        отдельно и этой правкой не закрывается.
+        """
+        # Заявка берётся ТОЛЬКО положительная: так `NaN` (у которого `> 0` ложно)
+        # читается как «заявки нет», а не подставляется в `max`, откуда вышел бы
+        # `NaN` в отчёте о потолке.
+        claim = float(pub_interval) if pub_interval > 0.0 else None
+        tick = _usable_tick()
+        if tick is None:
+            return claim
+        if claim is None:
+            return tick
+        return max(claim, tick)
+
+    def _judge(key: str, pub_interval: Any, throttle_interval: Any) -> None:
+        """Одна развилка на ОБЕ половины: капнут / потолка нет / не судили.
+
+        Порядок проверок — не косметика. Central-правило смотрится ПЕРВЫМ:
+        если на адрес кандидата не пересекается ни одно правило, потолку
+        неоткуда взяться при любом ask'е, и такой кандидат определён без такта —
+        в ``unjudged`` он не идёт, иначе веер «не судил» заполнился бы всем
+        деревом и перестал бы что-либо значить.
+
+        Нечитаемое правило (:data:`_UNREADABLE_RULE`) — третий исход того же
+        вопроса и вторая причина веера (Ф3, задача 3.0a, находка Н3): правило на
+        адресе ЕСТЬ, но интервал не число, и это НЕ «правила нет». Замер живого
+        троттла — в докстринге :func:`_narrow_rule`: строка не троттлит, а
+        роняет ``ThrottleMiddleware`` со второго вызова, поэтому молчание здесь
+        скрывало бы сломанное правило, а не отсутствие потолка.
+        """
+        if throttle_interval is _UNREADABLE_RULE:
+            unjudged[key] = "unreadable_rule"
+            return
         if throttle_interval is None:
-            continue
+            return
+        if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
+            # `interval_sec: None` в publish-дельте — «наследуй default», а не
+            # «частоты нет»: неоднозначно, не флагуем (поведение до Ф3).
+            return
+        asked = _publisher_ask(float(pub_interval))
+        if asked is None:
+            # Единственная сейчас причина «не судили» — литерал контракта ответа
+            # `config.reload` (`capped_by_throttle_unjudged`).
+            unjudged[key] = "no_tick"
+            return
         # Троттл строже: больший min-интервал (реже пропускает) ИЛИ 0 (полная блокировка).
-        if throttle_interval == 0 or throttle_interval > pub_interval:
-            caps[metric] = {
-                "publisher_interval_sec": float(pub_interval),
+        if throttle_interval == 0 or throttle_interval > asked:
+            caps[key] = {
+                "publisher_interval_sec": asked,
                 "throttle_interval_sec": float(throttle_interval),
             }
+
+    metrics = publish_section.get("metrics") if isinstance(publish_section, dict) else None
+    if isinstance(metrics, dict):
+        for metric, rule in metrics.items():
+            if isinstance(rule, dict):
+                name = str(metric)
+                _judge(name, rule.get("interval_sec"), _central_rule_for_metric(name, rules))
+
+    if isinstance(observation_rules, dict):
+        # Унаследованная частота судится ТАК ЖЕ, как у соседа (`capped_metrics`,
+        # `heartbeat/telemetry.py`): `interval_sec: None` — не «неизвестно», а
+        # «возьми `default_interval_sec`», и публикатор именно её и попросит.
+        # Находка ревью Ф4, итерация 2: прежняя редакция делала здесь `continue`,
+        # и правило вида `{"enabled": true}` (обычный способ переоткрыть лист при
+        # `subtree_enabled: false`) уходило из-под сверки. Отчёт при этом отвечал
+        # `throttle_checked: true` с ПУСТЫМ списком — то есть утверждал «сверено,
+        # потолков нет» там, где троттл резал 0.05 с до 2.0 с, в сорок раз.
+        # Подтверждающий ноль без контроля — худшая форма молчания: его читают
+        # как факт.
+        default_interval = _inherited_interval()
+        for pattern, rule in observation_rules.items():
+            if not isinstance(rule, dict) or rule.get("enabled") is False:
+                continue
+            pub_interval = rule.get("interval_sec")
+            if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
+                pub_interval = default_interval
+            key = str(pattern)
+            _judge(key, pub_interval, _central_rule_for_path_pattern(key, rules))
+
+    # Ключ у половин разный по природе (ИМЯ метрики против ПУТИ-паттерна), но
+    # строковое совпадение возможно — и тогда один и тот же ключ утверждал бы в
+    # одном ответе и «потолок вот такой», и «рассудить было нечем». Утверждение
+    # сильнее: рассуждённое побеждает.
+    #
+    # Развязка ОДНОСТОРОННЯЯ намеренно (Ф3, задача 3.0a, находка Н4 ревью): пара
+    # «не судил» ↔ «судил, потолка нет» ею не разводится, потому что второе
+    # показание вообще не имеет записи в ответе — разводить нечего. Достижимость
+    # столкновения сегодня НУЛЕВАЯ ни на одной живой дороге: `apply_observation_policy`
+    # шлёт `publish_section=None`, а оптовый `telemetry.broadcast`
+    # (`process_manager_process.py`) не шлёт `observation_rules` — две половины
+    # никогда не заполняются одновременно. Строка стоит как страж на день, когда
+    # дороги сойдутся (Task 4.12), а не как лечение живого дефекта.
+    for judged_key in caps:
+        unjudged.pop(judged_key, None)
+
+    return caps, unjudged
+
+
+def detect_throttle_caps(
+    publish_section: Any,
+    store_throttle: Any,
+    *,
+    observation_rules: Optional[Dict[str, Any]] = None,
+    default_interval_sec: Optional[float] = None,
+    effective_tick: Optional[float] = None,
+) -> Dict[str, Dict[str, float]]:
+    """Найти метрики и правила порта, чью частоту central-троттл молча срезал бы.
+
+    Тонкая обёртка над :func:`judge_throttle_caps`: тот же проход, но из пары
+    ``(caps, unjudged)`` наружу отдаётся только ПЕРВАЯ половина. Разделение
+    сделано Ф3 (задача 3.0) ради вызывающих, которым веер «не судил» не нужен:
+    сигнатура и тип ответа здесь прежние, поэтому правка F2 их не коснулась.
+    Полный разбор механизма — в докстринге :func:`judge_throttle_caps`; замер
+    находки F1 (реальный ask публикатора) — в докстринге ``_publisher_ask``
+    внутри неё.
+
+    Кто хочет отличать «потолков нет» от «рассудить было нечем» — обязан звать
+    :func:`judge_throttle_caps` напрямую: здесь эти два случая по-прежнему
+    неотличимы, и это ОСОЗНАННАЯ цена узкого контракта, а не недосмотр.
+
+    Returns:
+        ``{метрика-или-паттерн: {"publisher_interval_sec": p, "throttle_interval_sec": t}}``.
+        Пусто → либо среза нет, либо судить было нечем (см. выше).
+    """
+    caps, _unjudged = judge_throttle_caps(
+        publish_section,
+        store_throttle,
+        observation_rules=observation_rules,
+        default_interval_sec=default_interval_sec,
+        effective_tick=effective_tick,
+    )
     return caps
 
 
@@ -400,6 +777,7 @@ __all__ = [
     "VALID_MODES",
     "apply_telemetry_reconfigure",
     "detect_throttle_caps",
+    "judge_throttle_caps",
     "make_telemetry_on_reload",
     "resolve_store_throttle",
 ]

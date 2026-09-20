@@ -59,6 +59,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from ...channel_routing_module.levels import normalize_level_name
 from ...channel_routing_module.observability import (
     KIND_LOG,
+    KIND_OBSERVATION,
     KIND_STATS,
     ObservabilityDrainAdapter,
     ObservabilityHub,
@@ -67,6 +68,14 @@ from ...channel_routing_module.observability import (
     StoreTapChannel,
     hub_record_to_display,
 )
+
+# Ф2 (задача 2.2): единственный источник дефолтов истории — схема; см.
+# DEFAULT_HISTORY_* ниже и resolve_history_store_settings. Импорт верхнего
+# уровня безопасен: `observability_config.py` не импортирует `managers/*`
+# ни прямо, ни транзитивно (её импорты — data_schema_module,
+# observability_declarations, logger_module.configs, statistics_module,
+# channel_routing_module.levels, .observation_policy).
+from ..configs.observability_config import ObservabilityConfig
 
 # Имена store-tap'ов (хэндлы для remove_tap на teardown). Вешаем на ОБА
 # менеджера: error_manager (track_error/write-through) и logger_manager
@@ -160,7 +169,7 @@ def drain_process_observability(
     forwarders: Union[Callable[[List[dict]], None], Iterable[Callable[[List[dict]], None]], None] = None,
     stats_to_flush: Optional[Any] = None,
 ) -> None:
-    """Слить буфер hub'а (log/stats) в реальные менеджеры, стор и live-хвосты.
+    """Слить буфер hub'а (log/stats/observation) в реальные менеджеры, стор и live-хвосты.
 
     Зовётся по такту heartbeat и финально на graceful-teardown. `drain_all()`
     осушает каналы — вызываем ОДИН раз и разветвляем: adapter → sink-менеджеры,
@@ -199,7 +208,13 @@ def drain_process_observability(
     # stats из hub'а — общий срез для стора и live-хвоста. KIND_LOG у пилота пуст
     # (logger-слот write-through), но ключ читаем: hub — примитив уровня 0, и лог
     # в него вправе положить другой владелец. Пустой список безвреден.
-    records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, [])
+    #
+    # KIND_OBSERVATION (задача 3.2) — записи порта наблюдений (уровни плагинов,
+    # kind=observation), эмитированные heartbeat'ом ПОД ТЕМ ЖЕ гейтом, что и лист
+    # дерева. Адаптер их не трогает (см. docstring apply_drained) — они едут в
+    # стор и живые хвосты той же дорогой, что stats: «хвост и стор видят уровни
+    # без второго механизма» (Task 3.1 §5, обещание, которое эта строка выполняет).
+    records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, []) + drained.get(KIND_OBSERVATION, [])
     if store is not None and records:
         try:
             store.append_records(records)
@@ -377,12 +392,164 @@ def stats_plane_report(svc: Any) -> Dict[str, Any]:
     операция в памяти), поэтому третьего числа, симметричного ``dropped``
     документов, здесь нет — пустая графа «не измерено» врала бы о наличии
     механизма отказа.
+
+    **Ф2 (задача 2.1): ``policy`` — третье число той же плоскости.** Числа
+    теперь режутся правилами по пути, и без этой секции «метрики нет в окне»
+    было бы неотличимо от «метрику никто не писал»: правила, попадания и
+    ``dropped_by_rule`` отвечают на «кто её срезал и сколько раз». Читается
+    ЖИВОЙ гейт порта через плоскость (:meth:`StatsManager.numbers_policy_view`),
+    а не конфиг. Ключ опускается, когда политики нет вовсе, — «правил не
+    приносили» и «правила есть, попаданий ноль» это разные ответы, и пустой
+    словарь склеил бы их.
     """
     stats = getattr(svc, "stats_manager", None)
+    section: Dict[str, Any] = {
+        "declared": callable(getattr(stats, "record_metric", None)),
+        "without_plane": int(getattr(svc, _STATS_WITHOUT_PLANE_ATTR, 0) or 0),
+    }
+    policy_fn = getattr(stats, "numbers_policy_view", None)
+    if callable(policy_fn):
+        try:
+            policy_view = policy_fn()
+        except Exception as exc:  # noqa: BLE001 — readback не смеет ронять команду диагностики
+            policy_view = {"error": repr(exc)}
+        if policy_view is not None:
+            section["policy"] = policy_view
+    return {"stats": section}
+
+
+# ---------------------------------------------------------------------------
+# Ф3 (задача 3.2, шаг 0) — секция порта наблюдений
+# ---------------------------------------------------------------------------
+
+
+def _observation_policy_report(svc: Any, publications: Dict[str, Any]) -> tuple:
+    """``(действующая политика, провенанс)`` порта — читается ЖИВОЙ гейт (Ф4, 4.1).
+
+    Провенанс строится по путям, которые процесс публикует ПРЯМО СЕЙЧАС
+    (``processes.<имя>.state.plugins.<писатель>.<лист>``), а не по перечню
+    правил: оператор спрашивает «почему ЭТОТ лист едет так», и ответ обязан быть
+    про лист, а не про правило, которое, может, ни с чем и не совпало. Про
+    правила, не совпавшие ни с чем, отвечает отдельное поле
+    ``rules_matched_nothing`` — единственный голос про опечатку в ПУТИ.
+    """
+    heartbeat = getattr(svc, "_heartbeat", None)
+    policy_fn = getattr(heartbeat, "current_observation_policy", None)
+    view = policy_fn() if callable(policy_fn) else None
+    if not isinstance(view, dict):
+        return {}, {
+            "declared": False,
+            "reason": (
+                "у процесса нет heartbeat'а с политикой порта — спрашивать некого; "
+                "пустой граф правил ниже означал бы «правил нет», а это другой факт"
+            ),
+        }
+
+    policy = getattr(heartbeat, "_observation_policy", None)
+    sources: Dict[str, Any] = {}
+    if policy is not None and publications:
+        from ..heartbeat.telemetry import plugin_metric_path
+
+        process = str(getattr(svc, "name", "") or "")
+        paths = [
+            plugin_metric_path(process, str(writer), str(leaf))
+            for writer, values in publications.items()
+            for leaf in values
+        ]
+        sources = policy.provenance_for(paths)
+
+    provenance = {
+        "declared": True,
+        "section": "observability.observation",
+        "sources": sources,
+        "rules_matched_nothing": view.get("rules_matched_nothing", []),
+        # Ф0.4 (m6): правила, ещё не дожившие до цикла оценки, и возраст самой
+        # политики. Без второй пары пустой `rules_matched_nothing` читается
+        # одинаково в двух РАЗНЫХ случаях — «правила здоровы» и «судить рано».
+        "rules_pending": view.get("rules_pending", []),
+        "evaluated_ticks": view.get("evaluated_ticks", 0),
+        "legacy_source": view.get("legacy_source"),
+    }
+    return view, provenance
+
+
+def observation_plane_report(svc: Any) -> Dict[str, Any]:
+    """Секция ``observation`` для ``introspect.observability`` (Ф3, задача 3.2, шаг 0).
+
+    Тройка ``effective``/``provenance``/``counters`` — та же форма, что у логгера
+    (перенесено сюда из Task 3.1 шагом 0: у секции не было владельца, а
+    ``counters`` до этой задачи физически не существовали).
+
+    ``writers`` — число писателей порта СЕЙЧАС, строится через
+    :func:`~...statistics_module.observation.observation_manager.observation_port`
+    и НЕЗАВИСИМО от hub'а: критерий П4 задачи 3.3 обязан выполняться и у процесса
+    без ``ObservabilityHub`` (readback не смеет отвечать «писателей нет» только
+    потому, что хаб не поднят — это два разных факта). Поле продублировано и на
+    верхнем уровне секции, и внутри ``effective``: приёмка 3.3 (критерий П4)
+    читает его напрямую с секции, а вложенный ``effective.writers`` держит форму
+    тройки, обещанную шагом 0.
+
+    ``counters`` читает СЧЁТЧИКИ КАНАЛА (``written``/``dropped`` у
+    ``BoundedChannel.get_info()``), а не длину только что слитой пачки: число
+    обязано быть видно и между дренажами, а не только в момент вызова
+    ``introspect`` сразу после такта heartbeat.
+
+    ``counters.hub`` — ЕСТЬ ЛИ КУДА ПИСАТЬ (находка ревью 2026-08-25,
+    воспроизведение: процесс БЕЗ ``_observability_hub`` и процесс С пустым
+    hub'ом отдавали ответ байт-в-байт, оба ``{"records": 0, "dropped": 0}``).
+    Ноль без этого признака читается оператором как показание — «механизм есть,
+    записей не было», — тогда как это могло значить «писать некуда вовсе». Два
+    разных факта одним числом. Форма дословна соседней секции ``history`` в
+    ответе ТОЙ ЖЕ команды (``builtin_commands._history_report``): признак +
+    ``reason``; две секции одного ответа, трактующие «механизма нет»
+    по-разному, — это и был дефект.
+
+    ``provenance`` до Ф4 был пуст осознанно (у порта не было ни одной секции
+    конфига) и с задачей 4.1 наполнился: секция ``observability.observation``
+    существует, и провенанс отвечает на операторский вопрос «КАКОЕ правило
+    решило» — тремя литералами источника (дефолт поддерева / белый список
+    легаси-секции / явное правило). Это не косметика: в секции с ДВУМЯ разными
+    умолчаниями (названная цена варианта «в») отличить «разрешено дефолтом» от
+    «разрешено руками» больше нечем.
+
+    Гейт не поднят (нет heartbeat'а / нет ``telemetry.publish``) → ``declared:
+    false`` с причиной: пустой граф правил читался бы как «правил нет», тогда
+    как это «спрашивать некого». Два разных факта одним видом — тот самый класс,
+    которым уже болел соседний ``counters.hub``.
+    """
+    from ...statistics_module.observation.observation_manager import observation_port
+
+    port = observation_port(svc)
+    publications = port.publications() if port is not None else {}
+    writers = len(publications)
+
+    hub = getattr(svc, "_observability_hub", None)
+    get_channel = getattr(hub, "get_channel", None) if hub is not None else None
+    channel = get_channel(KIND_OBSERVATION) if callable(get_channel) else None
+    info = channel.get_info() if channel is not None else None
+
+    policy_view, provenance = _observation_policy_report(svc, publications)
+
     return {
-        "stats": {
-            "declared": callable(getattr(stats, "record_metric", None)),
-            "without_plane": int(getattr(svc, _STATS_WITHOUT_PLANE_ATTR, 0) or 0),
+        "observation": {
+            "writers": writers,
+            "effective": {"writers": writers, **policy_view},
+            "provenance": provenance,
+            "counters": {
+                "hub": isinstance(info, dict),
+                "records": int(info.get("written", 0)) if isinstance(info, dict) else 0,
+                "dropped": int(info.get("dropped", 0)) if isinstance(info, dict) else 0,
+                **(
+                    {}
+                    if isinstance(info, dict)
+                    else {
+                        "reason": (
+                            "у процесса нет ObservabilityHub — записывать уровни некуда; "
+                            "нули ниже означают «механизма нет», а не «записей не было»"
+                        )
+                    }
+                ),
+            },
         }
     }
 
@@ -724,6 +891,97 @@ def apply_event_selector(selector: Any, section: Any, svc: Any = None) -> Option
     return {"first_n": applied[0], "every_mth": applied[1]}
 
 
+#: Ф1.4 (M17) — политика окон голоса.
+VOICES_CONFIG_ADDRESS = "observability.voices"
+VOICES_SECTION_KEY = "voices"
+
+
+def _voices_knobs(section: Any, svc: Any = None) -> Optional[Dict[str, Any]]:
+    """Разобрать секцию ``voices``. ``None`` — секция молчит, политику не трогаем.
+
+    Молчание НЕ материализуется дефолтом: правило Г3 этого проекта — «слой,
+    который ничего не сказал, ничего и не решает». Иначе пересборка по правке
+    соседнего ключа сбрасывала бы окно, заданное раньше.
+    """
+    if section is None:
+        return None
+    from ..configs.observability_config import ObservabilityVoicesConfig
+
+    try:
+        cfg = (
+            section
+            if isinstance(section, ObservabilityVoicesConfig)
+            else ObservabilityVoicesConfig.model_validate(section)
+        )
+    except Exception as exc:  # noqa: BLE001 — негодная секция не роняет процесс
+        _process_warn(
+            svc,
+            f"[observability] {VOICES_CONFIG_ADDRESS} не принят ({exc!r}) — окна голоса остаются прежними",
+        )
+        return None
+    return {
+        "window_sec": float(cfg.default_window_sec),
+        "escalate_after": int(cfg.escalate_after_repeats),
+        # Task 2.7: бывшие литералы MAX_TRACKED_KEYS/_STALE_WINDOWS — теперь
+        # такая же ручка, идущая той же дорогой (схема → сшивка → механизм).
+        "max_tracked_keys": int(cfg.max_tracked_keys),
+        "stale_windows": int(cfg.stale_windows),
+    }
+
+
+def wire_voices_policy(svc: Any) -> Optional[Dict[str, Any]]:
+    """Ф1.4: применить политику окон голоса на СТАРТЕ процесса.
+
+    Механизм — процессный (:mod:`...logger_module.core.windowed_voice`), поэтому
+    сшивка не создаёт объект и не вешает атрибут на процесс, а задаёт политику,
+    которую читают все держатели окон этого интерпретатора. Тем и отличается от
+    :func:`wire_event_selector`: селектор — вещь, а это правило.
+    """
+    from ..configs.observability_layers import process_observability_layers
+
+    try:
+        layers = process_observability_layers(svc)
+        section = layers.resolve().get(VOICES_SECTION_KEY)
+    except Exception as exc:  # noqa: BLE001 — процесс без конфига живёт на дефолтном окне
+        _process_warn(svc, f"[observability] секция {VOICES_CONFIG_ADDRESS} не прочитана: {exc!r}")
+        return None
+    return apply_voices_policy(section, svc)
+
+
+def apply_voices_policy(section: Any, svc: Any = None) -> Optional[Dict[str, Any]]:
+    """Пересборка: применить окна голоса к ЖИВОМУ механизму. Возвращает применённое.
+
+    Третья точка дороги ручки (после схемы и фасада) — та, без которой
+    ``config.reload`` менял бы слой и не менял поведение.
+
+    **Возвращает имена полей СХЕМЫ, а не внутренние имена политики** — ровно как
+    сосед :func:`apply_event_selector`. Ревью Task 1.4 воспроизвело, чем это
+    было: ``default_window_sec`` уезжал наружу как ``window_sec``, и подача
+    собственного readback'а обратно сбрасывала окно в дефолт молча
+    (``17.25`` → ``5.0``), потому что ``ObservabilityVoicesConfig`` с
+    ``extra=ignore`` незнакомое имя просто съедает. Вторая ось выживала лишь
+    потому, что её имя случайно совпало. Round-trip «применить свой же ответ»
+    обязан быть тождественным: этим ответом пользуются и оператор, и вердикт.
+    """
+    knobs = _voices_knobs(section, svc)
+    if knobs is None:
+        return None
+    from ...logger_module.core.windowed_voice import set_voices_policy
+
+    applied = set_voices_policy(
+        window_sec=knobs["window_sec"],
+        escalate_after=knobs["escalate_after"],
+        max_tracked_keys=knobs["max_tracked_keys"],
+        stale_windows=knobs["stale_windows"],
+    )
+    return {
+        "default_window_sec": float(applied["window_sec"]),
+        "escalate_after_repeats": int(applied["escalate_after_repeats"]),
+        "max_tracked_keys": int(applied["max_tracked_keys"]),
+        "stale_windows": int(applied["stale_windows"]),
+    }
+
+
 def event_plane_report(svc: Any) -> Dict[str, Any]:
     """Секция ``events`` для ``introspect.observability`` (Р4.1-8/Р4.1-10).
 
@@ -858,9 +1116,17 @@ def document_plane_report(svc: Any) -> Dict[str, Any]:
 #: предупреждение — скажем информационным, но не промолчим. Таблица, а не две
 #: копии перебора: голосов стало два (задача 5.1 — вытеснение дампа говорит
 #: INFO), и вторая рукописная лесенка разошлась бы с первой.
+#: DEBUG добавлен задачей 3.8 и его лесенка НАМЕРЕННО не поднимается до INFO.
+#: У остальных уровней запасной ход вверх — страховка от молчания; у DEBUG он был бы
+#: обратной силой: на DEBUG уходит именно болтовня (правило задачи 3.2), и процесс без
+#: debug-логгера начал бы кричать её на INFO — те самые 96 строк «снято 0» в час на восьми
+#: процессах, ради которых уровень и понижали. Нет debug-логгера — строки нет; это
+#: сознательное исключение из «молчание недопустимо ни при каком», и оно ограничено
+#: диагностической болтовнёй, а не фактами.
 _SAY_FALLBACKS: Dict[str, Tuple[str, ...]] = {
     "WARNING": ("_log_warning", "log_warning", "_log_info", "log_info"),
     "INFO": ("_log_info", "log_info", "_log_warning", "log_warning"),
+    "DEBUG": ("_log_debug", "log_debug"),
 }
 
 
@@ -1086,7 +1352,12 @@ HISTORY_CONFIG_ADDRESS = "observability.history"
 #: ровно та находка (Б-8), ради которой задача и заведена. Безопасным INFO делает
 #: не скромность, а предел: :data:`DEFAULT_HISTORY_MAX_ROWS` ограничивает таблицу
 #: сверху независимо от темпа записи.
-DEFAULT_HISTORY_LEVEL = "INFO"
+#:
+#: Ф2 (задача 2.2): дефолт живёт в СХЕМЕ (``ObservabilityHistoryConfig.level``) —
+#: константа здесь читает его атрибутом, а не дублирует число вторым литералом.
+#: Второй литерал разошёлся бы со схемой на первом же новом релизе (тот же
+#: довод, что у ``_default_session_ttl`` в ``observability_layers.py``).
+DEFAULT_HISTORY_LEVEL = ObservabilityConfig().history.level
 
 #: Потолок истории по числу строк.
 #:
@@ -1101,16 +1372,25 @@ DEFAULT_HISTORY_LEVEL = "INFO"
 #: прогона — 5040 строк/час, то есть предел по числу строк наступает примерно
 #: через 40 часов и связывает раньше недельного возраста (7 сут × 5040 ≈ 847 000
 #: строк). Оператору, которому 110 МБ много, ручка — ``max_rows`` в секции.
-DEFAULT_HISTORY_MAX_ROWS = 200_000
+DEFAULT_HISTORY_MAX_ROWS = ObservabilityConfig().history.max_rows
 
 #: Возраст, старше которого запись уходит: неделя. Столько живёт вопрос «что было
 #: в прошлый вторник» на этом стенде; больше хранит файловый журнал, у него своя
 #: ротация и свой объём.
-DEFAULT_HISTORY_MAX_AGE_SEC = 7 * 24 * 3600.0
+DEFAULT_HISTORY_MAX_AGE_SEC = ObservabilityConfig().history.max_age_sec
 
 #: Период уборки истории. Реже документов (там срок в сутках, здесь строки копятся
 #: минутами), но не на каждый такт: уборка — хозяйство, а не горячий путь.
-DEFAULT_HISTORY_PURGE_INTERVAL_SEC = 300.0
+DEFAULT_HISTORY_PURGE_INTERVAL_SEC = ObservabilityConfig().history.purge_interval_sec
+
+#: Потолок очереди записей, ждущих слива в стор (Task 3.3).
+#:
+#: Число из схемы, а не второй литерал: ``store_tap.DEFAULT_STORE_QUEUE_CAPACITY``
+#: — тот же 4096 на случай, когда tap поднимают без конфига (тест, утилита).
+#: Читается той же дорогой, что ``level``/``max_rows``, и по той же причине:
+#: плоского ключа мимо секции не заводится, иначе его пришлось бы класть в двух
+#: конструкторах ассемблера.
+DEFAULT_HISTORY_QUEUE_CAPACITY = ObservabilityConfig().history.queue_capacity
 
 _HISTORY_POLICY_ATTR = "_observability_history_policy"
 _HISTORY_PURGE_DEADLINE_ATTR = "_observability_history_purge_at"
@@ -1173,12 +1453,80 @@ def resolve_history_policy(svc: Any) -> Dict[str, Any]:
             f"взят дефолт {DEFAULT_HISTORY_LEVEL}",
         )
         level = DEFAULT_HISTORY_LEVEL
+    # Ёмкость очереди читается ОТДЕЛЬНО от `_number`, и это не небрежность:
+    # у ретеншена «0 и меньше» значит «предела нет» (объявленный отказ от
+    # защиты), а у очереди безлимитности не бывает вовсе — ноль там означал бы
+    # либо рост памяти без потолка, либо отказ `BoundedChannel` на подъёме
+    # процесса. Поэтому непонятое и неположительное значение здесь ГРОМКО
+    # падает на дефолт, а не проходит как есть.
+    raw_capacity = section.get("queue_capacity")
+    queue_capacity = DEFAULT_HISTORY_QUEUE_CAPACITY
+    if raw_capacity is not None:
+        try:
+            candidate = int(raw_capacity)
+        except (TypeError, ValueError):
+            candidate = 0
+        if candidate >= 1:
+            queue_capacity = candidate
+        else:
+            _process_warn(
+                svc,
+                f"[observability] {HISTORY_CONFIG_ADDRESS}.queue_capacity={raw_capacity!r} — "
+                f"очередь не бывает без потолка, взят дефолт {DEFAULT_HISTORY_QUEUE_CAPACITY}",
+            )
     return {
         "level": level,
         "max_rows": _number("max_rows", DEFAULT_HISTORY_MAX_ROWS, integer=True),
         "max_age_sec": _number("max_age_sec", DEFAULT_HISTORY_MAX_AGE_SEC, integer=False),
         "purge_interval_sec": _number("purge_interval_sec", DEFAULT_HISTORY_PURGE_INTERVAL_SEC, integer=False),
+        "queue_capacity": queue_capacity,
     }
+
+
+def resolve_history_store_settings(svc: Any) -> Dict[str, Any]:
+    """``enabled``/``db_path`` секции истории — судьба СТОРА целиком (Ф2, задача 2.2).
+
+    Отдельная функция от :func:`resolve_history_policy`: та возвращает четыре
+    поля политики уборки (спрашивает их такт heartbeat через
+    :func:`sweep_observability_history`), эти два поля решают, поднимать ли
+    стор вовсе и куда положить файл — читаются РОВНО ОДИН РАЗ, при подъёме
+    (``ProcessModule._wire_observability_hub``), а не на каждом такте.
+    Разделены, чтобы не расширять зрелый контракт ``resolve_history_policy``
+    (``test_observability_history_policy.py::test_section_values_win`` сверяет
+    точным равенством словарь из четырёх ключей) полями, которых такт уборки
+    не спрашивает.
+
+    Читает СХЕМУ атрибутом (``cfg.history.enabled`` / ``cfg.history.db_path``) —
+    критерий 4 задачи 2.2 (страж «каждое поле схемы имеет читателя»): у
+    ``resolve_history_policy`` эти два поля читателя не имели вовсе, ``history``
+    не входит в список секций со своим механизмом (не гейт документов/событий/
+    дампа/наблюдения/голоса — стор не менеджер и своей проводки без этой
+    функции не имел).
+
+    Мусор в секции (например, невалидный ``level`` рядом) не имеет права
+    уронить подъём стора: он падает на дефолты СХЕМЫ целиком, с громким
+    предупреждением, — тем же принципом нетерпимости к тихому мусору, что и у
+    :func:`resolve_history_policy`, но без по-полевого разбора: два независимых
+    парсера одной секции разошлись бы в диагнозах на одном и том же мусоре.
+    """
+    section: Any = {}
+    try:
+        from ..configs.observability_layers import process_observability_layers
+
+        section = process_observability_layers(svc).resolve().get("history") or {}
+    except Exception as exc:  # noqa: BLE001 — процесс без конфига живёт на дефолтах
+        _process_warn(svc, f"[observability] секция {HISTORY_CONFIG_ADDRESS} не прочитана: {exc!r}")
+        section = {}
+    try:
+        cfg = ObservabilityConfig.model_validate({"history": section} if isinstance(section, dict) else {})
+    except Exception as exc:  # noqa: BLE001 — негодная секция не роняет подъём стора
+        _process_warn(
+            svc,
+            f"[observability] {HISTORY_CONFIG_ADDRESS} невалидна для стора ({exc!r}) — "
+            "взяты дефолты схемы (enabled=True, db_path по умолчанию)",
+        )
+        cfg = ObservabilityConfig()
+    return {"enabled": cfg.history.enabled, "db_path": cfg.history.db_path}
 
 
 def sweep_observability_history(svc: Any, now: Optional[float] = None) -> Optional[Dict[str, int]]:
@@ -1190,6 +1538,35 @@ def sweep_observability_history(svc: Any, now: Optional[float] = None) -> Option
 
     Возвращает отчёт :meth:`ObservabilityStore.purge` либо ``None`` — такт пропущен
     (стора нет или срок не наступил).
+
+    **Голос (задача 3.8).** До неё уборка работала молча: отчёт возвращался и
+    выбрасывался вызывающим, поэтому «сколько строк снято» не знал никто, а
+    единственным признаком её существования был WARNING при отказе БД. Теперь
+    исход сказан вслух, и уровень выбирает САМ ИСХОД:
+
+    * снято больше нуля — ``INFO`` с числами (сколько всего, раскладка по возрасту
+      и по числу строк, сколько осталось): это факт хозяйственной работы, оператор
+      обязан его видеть без включения debug;
+    * снято ноль — ``DEBUG``: свип идёт раз в ``purge_interval_sec`` (дефолт 300 с)
+      на КАЖДОМ процессе, и на восьми процессах «снято 0» дало бы 96 строк в час.
+      Болтовня уходит на DEBUG по правилу задачи 3.2;
+    * такт пропущен (стора нет либо срок не наступил) — не сказано ничего.
+
+    Последнее различение — главное в этом голосе, и оно не косметическое:
+    **«не убирали» не должно выглядеть как «убрали ноль»**. Первое означает, что
+    механизм мог и не работать вовсе; второе — что он отработал и резать было нечего.
+    Свести их в одну строку значило бы построить сторожа, который отвечает за вызов,
+    а не за охват.
+
+    **Отказ голоса не имеет права выглядеть отказом уборки — и для этого нужны ДВА
+    предохранителя, а не один.** Голос стоит за пределами ``try`` вокруг ``purge``
+    (иначе сломанный логгер докладывался бы как «уборка истории не удалась» прямо
+    здесь) **и** обёрнут собственным ``try`` (иначе то же исключение улетело бы к
+    вызывающему — ``ProcessHeartbeat._sweep_observability_history`` ловит ЛЮБОЕ и
+    говорит «уборка истории сорвалась», то есть ложь производилась бы на кадр выше).
+    Первой редакции хватало только внутри функции; вторую половину нашло ревью фазы
+    воспроизведением, а не чтением. Если сказать не удалось ничем — механизм молчит:
+    молчание честнее ложного диагноза, отправляющего чинить БД вместо логгера.
     """
     store = getattr(svc, "_observability_store", None)
     purge = getattr(store, "purge", None)
@@ -1210,10 +1587,39 @@ def sweep_observability_history(svc: Any, now: Optional[float] = None) -> Option
     except Exception:  # noqa: BLE001
         pass
     try:
-        return purge(max_rows=policy.get("max_rows"), max_age_sec=policy.get("max_age_sec"))
+        report = purge(max_rows=policy.get("max_rows"), max_age_sec=policy.get("max_age_sec"))
     except Exception as exc:  # noqa: BLE001 — хозяйство не имеет права ронять liveness
         _process_warn(svc, f"[observability] уборка истории не удалась: {exc!r}")
         return None
+    if isinstance(report, dict):
+        try:
+            by_age = int(report.get("by_age") or 0)
+            by_rows = int(report.get("by_rows") or 0)
+            removed = by_age + by_rows
+            remaining = report.get("remaining")
+            # «осталось» печатается только когда ключ ЕСТЬ: подставив ноль вместо
+            # отсутствующего значения, строка сообщала бы «в сторе пусто» там, где
+            # на самом деле «сколько осталось — не сказано». Найдено ревью фазы.
+            tail = "" if remaining is None else f", осталось {int(remaining)}"
+            process_say(
+                svc,
+                f"[observability] уборка истории: снято {removed} "
+                f"(по возрасту {by_age}, по числу строк {by_rows}){tail}",
+                "INFO" if removed else "DEBUG",
+            )
+        except Exception as exc:  # noqa: BLE001
+            # **Отказ ГОЛОСА — не отказ уборки, и это приходится удерживать явно.**
+            # Уборка к этой строке уже отработала и отчёт вернёт. Пропусти исключение
+            # выше — и вызывающий (`process_heartbeat.py:536`) доложит «уборка истории
+            # сорвалась», отправив оператора чинить БД вместо логгера. Прежняя редакция
+            # полагалась на то, что голос стоит ЗА `try` вокруг `purge`, и этого хватало
+            # ВНУТРИ функции; ревью фазы воспроизвело ложь на кадр выше — свойство не
+            # было проверено у второго участника.
+            try:
+                _process_warn(svc, f"[observability] голос уборки истории не удался: {exc!r}")
+            except Exception:  # noqa: BLE001 — сказать нечем; молчание честнее ложного диагноза
+                pass
+    return report
 
 
 def wire_observability_store(
@@ -1222,6 +1628,7 @@ def wire_observability_store(
     db_path: Optional[str] = None,
     process: str = "",
     min_level: str = "ERROR",
+    queue_capacity: int = DEFAULT_HISTORY_QUEUE_CAPACITY,
 ) -> Tuple[ObservabilityStore, list]:
     """Создать персистентный стор и повесить store-tap на менеджеры ошибок (Ф5.20a).
 
@@ -1247,6 +1654,8 @@ def wire_observability_store(
         error_manager: реальный ErrorManager (LoggerCore с add_tap).
         logger_manager: реальный LoggerManager (LoggerCore с add_tap).
         db_path: путь к SQLite-файлу стора. None → resolve_default_db_path().
+        queue_capacity: потолок очереди записей, ждущих слива в стор
+            (`observability.history.queue_capacity`, Task 3.3).
         process: имя процесса-источника (5.21 (c)) — tap проставит колонку
             ``process`` в стор-записи (иначе виден только ``module`` — имя
             источника внутри процесса).
@@ -1256,18 +1665,209 @@ def wire_observability_store(
             таблицы защищает ретеншен (:func:`sweep_observability_history`), а не
             высокий порог.
 
+    **Владение плоскостью ошибок — у того, кто встал, а не у роли.** Записи с
+    маркером ``origin=error_manager`` принимает РОВНО ОДИН tap: обычно error-tap,
+    а если ErrorManager'а нет (или он не поддержал ``add_tap``) — логгер-tap
+    берёт владение на себя. Иначе маркированную строку не принимает никто, и
+    инцидент процесса без ErrorManager исчезает из стора целиком (ревью Task 1.3a
+    воспроизвело: контроль 1 строка, опыт 0).
+
     Returns:
-        (store, taps) — taps: список (manager, tap_name) для unwire.
+        (store, taps) — taps: список (manager, tap_name) для unwire. Отсутствие
+        :data:`STORE_ERROR_TAP` в списке означает «у плоскости ошибок своего
+        tap'а нет» — по нему вызывающий и предупреждает (см.
+        ``ProcessModule._wire_observability_hub``).
     """
     store = ObservabilityStore(db_path)
+    taps = _attach_store_taps(store, error_manager, logger_manager, process, min_level, queue_capacity)
+    return store, taps
+
+
+def _attach_store_taps(
+    store: ObservabilityStore,
+    error_manager: Optional[Any],
+    logger_manager: Optional[Any],
+    process: str,
+    min_level: str,
+    queue_capacity: int = DEFAULT_HISTORY_QUEUE_CAPACITY,
+) -> list[Tuple[Any, str]]:
+    """Повесить store-tap'ы (error+logger) на СУЩЕСТВУЮЩИЙ стор с заданным порогом.
+
+    Общее тело для :func:`wire_observability_store` (подъём — стор создаётся здесь
+    же) и :func:`reapply_observability_store_level` (Ф2, задача 2.2, добор
+    ADR-PM-047 — `config.reload`, стор ПЕРЕЖИВАЕТ правку, переустанавливается
+    только порог tap'ов). Тело одно: развести его на два места означало бы, что
+    порог создания и порог пересборки могут разойтись на следующей правке рядом —
+    тот же довод, что у `compose_managers_payload` («сборка живёт здесь одна»).
+    """
     taps: list[Tuple[Any, str]] = []
-    for mgr, tap_name in ((error_manager, STORE_ERROR_TAP), (logger_manager, STORE_LOGGER_TAP)):
+    error_plane_owned = False
+    for mgr, tap_name, owns_by_role in (
+        (error_manager, STORE_ERROR_TAP, True),
+        (logger_manager, STORE_LOGGER_TAP, False),
+    ):
         if mgr is None or not hasattr(mgr, "add_tap"):
             continue
         # Вид записи (log/error) считает её важность — tap'у он не задаётся (Б-4).
-        mgr.add_tap(StoreTapChannel(store, name=tap_name, process=process), min_level=min_level, name=tap_name)
+        # ``owns_error_plane`` — другое: он говорит, ЧЕЙ этот tap. Записи с
+        # маркером ``origin=error_manager`` кладёт в стор только tap плоскости
+        # ошибок; остальные их пропускают, иначе один инцидент даёт две строки
+        # (Task 1.3a, дедуп ПУТЕЙ).
+        #
+        # Ревью Task 1.3a: владелец вычисляется по тому, кто РЕАЛЬНО встал, а не
+        # по таблице ролей. Прежняя редакция раздавала флаг константой, и на
+        # раскладке «есть logger-tap, нет error-tap» (процесс без ErrorManager:
+        # секции ``error`` в конфиге нет → ``_create_error_manager`` вернул None)
+        # маркированную строку не принимал НИКТО — замер: контроль 1 строка,
+        # опыт 0, инцидент исчезал целиком. Инвариант теперь структурный:
+        # владелец маркированных строк — ровно один, и он есть, пока встал хотя
+        # бы один tap.
+        owns_error_plane = owns_by_role or not error_plane_owned
+        # `add_tap` идемпотентен ПО ИМЕНИ (`ChannelRoutingManager._tap_sinks[tap_name]
+        # = (channel, threshold)` — ОДНО присваивание словаря по уже
+        # СУЩЕСТВУЮЩЕМУ ключу при переустановке, без изменения размера словаря).
+        # Поэтому переустановка порога на `reapply_observability_store_level` не
+        # требует предварительного `remove_tap`: окна «tap снят, новый ещё не
+        # встал», в котором запись потерялась бы молча, здесь нет СТРУКТУРНО —
+        # см. докстринг `reapply_observability_store_level` про гонку двух
+        # `config.reload`.
+        mgr.add_tap(
+            StoreTapChannel(
+                store,
+                name=tap_name,
+                process=process,
+                owns_error_plane=owns_error_plane,
+                queue_capacity=queue_capacity,
+            ),
+            min_level=min_level,
+            name=tap_name,
+        )
+        error_plane_owned = error_plane_owned or owns_error_plane
         taps.append((mgr, tap_name))
-    return store, taps
+    return taps
+
+
+def reapply_observability_store_level(
+    store: Optional[ObservabilityStore],
+    error_manager: Optional[Any],
+    logger_manager: Optional[Any],
+    process: str,
+    min_level: str,
+    queue_capacity: int = DEFAULT_HISTORY_QUEUE_CAPACITY,
+) -> list[Tuple[Any, str]]:
+    """Переустановить ПОРОГ store-tap'ов на `config.reload`, стор не трогая.
+
+    Ф2 (задача 2.2), добор ADR-PM-047 («остаток по history, назван, а не
+    закрыт»). До этой функции `history.level` менял ТОЛЬКО кэш
+    `svc._observability_history_policy` (читает такт уборки) — `min_level`
+    уже поднятого SQLite-тапа (`StoreTapChannel`, поставлен
+    `wire_observability_store` на подъёме) выставлялся РОВНО ОДИН РАЗ и
+    `config.reload` его не видел. Следствие: `config_reload_verified` отвечал
+    `confirmed` (readback честно показывал новый уровень политики), а живой
+    стор ПРОДОЛЖАЛ принимать записи по СТАРОМУ порогу до рестарта — ложный
+    `confirmed`, худший класс вердикта (молчащий `unverifiable` хотя бы не
+    врёт).
+
+    **Стор не пересоздаётся.** Новый `ObservabilityStore(db_path)` открыл бы
+    ВТОРОЕ соединение к тому же SQLite-файлу и потерял бы накопленную историю
+    из вида старого соединения — вместо этого сюда передаётся ЖИВОЙ
+    `svc._observability_store`, и меняется только порог tap'ов поверх него,
+    ровно как переустройство `resolve_history_policy`'ем не создаёт заново
+    очередь уборки.
+
+    **Гонка двух `config.reload` подряд (опасность, названная ADR-PM-047 и НЕ
+    проверенная задачей 2.2).** `_attach_store_taps` НЕ зовёт `remove_tap` —
+    он создаёт НОВЫЙ `StoreTapChannel` и кладёт его в
+    `ChannelRoutingManager._tap_sinks[tap_name]` ОДНИМ присваиванием словаря по
+    уже существующему ключу (без структурного изменения размера — не вставка,
+    а замена значения). Раздельного `remove_tap` перед `add_tap` здесь
+    намеренно НЕТ: он внёс бы РЕАЛЬНОЕ окно между `pop` и следующим `[...] =`,
+    в котором эмиссия, попавшая ровно в этот момент, увидела бы у себя НОЛЬ
+    tap'ов и запись потерялась бы молча — структурная замена по существующему
+    ключу такого окна не имеет вовсе (доказано наблюдением: `reapply` не вызывает
+    `remove_tap` НИ РАЗУ, см. `test_observability_store_wiring.py::
+    TestReapplyStoreLevel::test_reapply_never_calls_remove_tap_no_absence_window`
+    — детерминированное доказательство, не полагающееся на удачу таймингов).
+    Конкурент, оказавшийся МЕЖДУ двумя присваиваниями двух гонящихся `reapply`,
+    увидит ОДНО из двух валидных состояний (старый канал+порог либо новый) —
+    последняя запись выигрывает гонку, тем же приёмом, которым в этом проекте
+    уже принят атомарный rebind у `_observability_forwarders` (см. докстринг
+    `ProcessModule.subscribe_observability_tail`).
+
+    **Честно про то, что НЕ доказано.** Потоковый стресс-тест
+    (`TestReapplyStoreLevelRace`) не уронил ни одного исключения ни на этой
+    реализации, ни на инъекции, воспроизводящей НАИВНЫЙ `remove_tap`+`add_tap`
+    (проверено вручную: 2000×8 переустановок против 6 эмиттеров, уменьшенный
+    `sys.setswitchinterval(0.00001)` — 0 ошибок на ОБЕИХ версиях). Похоже, что
+    `list(dict.values())` в CPython не отдаёт GIL посередине своего C-вызова, и
+    поэтому гонка по КРАШУ не воспроизводится потоковым стрессом ни у одной из
+    двух версий — это наблюдение об интерпретаторе, а не гарантия языка, и
+    полагаться на него как на доказательство было бы неверно. Довод против
+    `remove_tap` в этой функции держится на СТРУКТУРНОМ доказательстве (тест
+    выше, без потоков) — «есть окно потери записи» доказано устройством кода
+    (наивная версия ЗОВЁТ `remove_tap`, эта — нет), «не крашится» доказано
+    отдельно и слабее (потоковый стресс, отрицательный результат которого не
+    отличает эту реализацию от отвергнутой альтернативы).
+
+    Тело — тот же цикл `_attach_store_taps`, что и у подъёма (см. её докстринг):
+    два места, применяющие один и тот же порог, разошлись бы на первой же
+    будущей правке цикла.
+
+    Args:
+        store: живой стор процесса (`svc._observability_store`). ``None`` —
+            стор не поднят (`history.enabled=False` или hub'а нет) — no-op,
+            пустой список (то же самое решение, что у `wire_observability_store`
+            без менеджеров).
+        error_manager/logger_manager: те же живые менеджеры, что на подъёме.
+        process: имя процесса-источника — тем же значением, что и на подъёме
+            (иначе новые записи сменили бы колонку ``process`` посреди истории).
+        min_level: НОВЫЙ порог (`resolve_history_policy(svc)["level"]`).
+
+    Returns:
+        Список `(manager, tap_name)` — та же форма, что у `wire_observability_store`,
+        для замены `svc._observability_store_taps` (менеджеры и имена tap'ов не
+        меняются между вызовами, но вызывающий обязан держать актуальный список,
+        а не выводить его из факта самого вызова).
+    """
+    if store is None:
+        return []
+    return _attach_store_taps(store, error_manager, logger_manager, process, min_level, queue_capacity)
+
+
+def error_plane_store_warning(process_name: str, taps: Optional[list]) -> Optional[str]:
+    """Чего не хватает истории ошибок после :func:`wire_observability_store`.
+
+    Живёт ЗДЕСЬ, а не веткой у вызывающего, ровно потому, что решение читает
+    результат этой проводки и ничего больше: у вызывающего остаются три строки
+    без собственного условия, а сам вопрос «кто владеет плоскостью ошибок»
+    проверяем литералом.
+
+    Возвращает готовый текст предупреждения или ``None``, если у плоскости
+    ошибок есть свой tap. Два разных повода молчать нельзя путать:
+
+    * tap'ов НЕТ вовсе — вкладка «Ошибки» будет пуста, это потеря;
+    * своего tap'а у плоскости ошибок нет, владение взял логгер-tap — инциденты
+      в сторе будут, но приедут дорогой ГОЛОСА. Прежняя редакция условия
+      (у вызывающего, «список tap'ов пуст») эту раскладку пропускала молча — и
+      ревью Task 1.3a показало, что до починки проводки инцидент на ней
+      исчезал целиком.
+    """
+    names = [name for _, name in (taps or [])]
+    if not names:
+        return (
+            f"Process '{process_name}': ObservabilityStore без error-tap "
+            "(ни logger_manager, ни error_manager не поддержали add_tap) "
+            "— ошибки в стор попадать НЕ будут"
+        )
+    if STORE_ERROR_TAP not in names:
+        return (
+            f"Process '{process_name}': у ПЛОСКОСТИ ОШИБОК нет своего store-tap "
+            "(ErrorManager не создан или не поддержал add_tap) — владение "
+            "маркированными записями взял на себя логгер-tap. Инциденты в сторе "
+            "будут, но приедут дорогой ГОЛОСА, а не дорогой факта: без трассы и "
+            "без полей track_error"
+        )
+    return None
 
 
 def unwire_observability_store(

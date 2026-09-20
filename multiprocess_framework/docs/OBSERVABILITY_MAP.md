@@ -44,7 +44,27 @@
 единственная дорога в дерево: прямая запись `state_proxy.merge` кладёт лист плоско, поэтому
 предохранители-троттлы держат ОБЕ формы (`multiprocess_prototype/backend/state/manager_setup.py:62-75`
 — там же назван потолок: разводить интервалы двух форм врозь нельзя, не починив матчинг
-`detect_throttle_caps`). Читая карту как «плоского больше нет», можно снять живой предохранитель.
+`judge_throttle_caps`). Читая карту как «плоского больше нет», можно снять живой предохранитель.
+
+**Сверщик потолков троттла отвечает ТРЕМЯ показаниями, а не двумя** (`managers/telemetry_reload.py`,
+`judge_throttle_caps`; в ответе `config.reload` → `observation_applied`). `throttle_checked` говорит,
+позвали ли сверщика; `capped_by_throttle` — где троттл строже публикатора, причём частота в нём это
+РЕАЛЬНЫЙ ask (`max(заявка, эффективный такт)`: публикатор не публикует чаще такта heartbeat'а);
+`capped_by_throttle_unjudged` — кого рассудить было нечем, с причиной-литералом (`"no_tick"` — нет
+ни заявки, ни такта; `"unreadable_rule"` — правило на адресе есть, а интервал не число). Третий ключ
+появляется только непустым. Класс ошибки, ради которого он заведён
+(Ф3, задача 3.0, находка F2 вердикта CTO по Ф2): пустой `capped_by_throttle` рядом с
+`throttle_checked: true` читался как «потолков нет», хотя часть кандидатов не судил никто. Прежнее
+имя `detect_throttle_caps` живо как тонкая обёртка, отдающая только `capped_by_throttle`.
+
+**Реальный ask доезжает не по всякой дороге.** Такт участвует в расчёте только там, где вызывающий
+его знает: `config.reload` берёт его readback'ом у своего `ProcessHeartbeat`, а оптовый
+`telemetry.broadcast` (`process_manager_process.py`) такта РЕБЁНКА не имеет вовсе и судит по
+заявленному `interval_sec` дословно — то есть на нём ошибка модели F1 ещё живёт. Замер:
+`{"metrics": {"fps": {"interval_sec": 1.0}}}` против правила `2.0` даёт `publisher_interval_sec: 1.0`
+и назван потолок, которого при такте 5.0 с нет. Долг назван Task 4.12
+([`plans/observability-closure/phase-4-scale-and-form.md`](../../plans/observability-closure/phase-4-scale-and-form.md)),
+и до него читать отчёт оптовой дороги как «реальный ask» нельзя.
 
 **Широкая запись о единице работы (`ctx.write_event`, ADR-PM-036) пятой плоскости НЕ заводит.**
 Она едет плоскостью ЛОГОВ (`BUSINESS`/`INFO`), просто несёт весь контекст единицы в одной записи —
@@ -60,6 +80,22 @@
 с ЭТОЙ единицей». Не путать с `backend_ctl record_*` и `telemetry_readmodel.export_history`: те
 кольцуют ТЕЛЕМЕТРИЮ и стоят снаружи процесса. Дефолт — выключено
 (`observability.flight.enabled`).
+
+**Окно голоса (`observability.voices`, ADR-LOG-012) плоскости не заводит — оно решает, КОГДА
+писать.** Повторяющееся состояние (нет маршрута, очередь полна, приоритет не ставится) обязано
+оставлять факт всегда, а строку в журнал — не чаще окна на ключ. Механизм —
+`logger_module/core/windowed_voice.py`; разъём для менеджеров — `ObservableMixin.should_voice`
+(решение без записи) и `ObservableMixin.log_windowed` (удобство, когда голос — это всё, что нужно).
+Не путать с дросселем логгера (`observability.sampling_*`, ADR-LOG-007): тот ключует пару
+«уровень + текст» на выходе плоскости, а здесь ключ выбирает ВЫЗЫВАЮЩИЙ (адрес события), и
+подавляется только голос — счётчики, записи в плоскость ошибок и статистика растут мимо окна.
+Четыре ручки (добор ревью Ф1, Task 2.7 — раньше их было две, `max_tracked_keys`/`stale_windows`
+были литералами без ручки и без readback): `default_window_sec` (окно, дефолт 5.0),
+`escalate_after_repeats` (повторов ПОДРЯД до INFO → WARNING, дефолт 3; ось повторов, а не
+времени), `max_tracked_keys` (потолок карты ключей держателя окон, дефолт 512) и
+`stale_windows` (такт протухания бездолжного ключа в окнах, дефолт 10). Процессные счётчики
+механизма — `windowed_suppressed` и `windowed_keys_evicted` — публикует плоскость логов
+(`introspect.observability`).
 
 **Телеметрия (FPS/latency) — вторая половина плоскости метрик** и живёт мимо `StatsManager`:
 self-publish в дерево состояния по такту heartbeat с publisher-gate (ADR-PM-018), чтение —
@@ -184,10 +220,6 @@ flowchart TB
 
 ### 5.1. Открыто
 
-* **У плагина нет stats-разъёма.** `IProcessServices` не объявляет stats-методов, 0 использований
-  на ~30 плагинов, `kind=stats` до стора не доезжает. Развилка Р-2 решена владельцем как **(в)**:
-  задача C1 уехала первой фазой в план телеметрии. Ветку `KIND_STATS` в drain трогать нельзя — на
-  ней стоит это решение.
 * **`observability.documents` и `observability.history` не действуют на лету.** Слои их принимают,
   но сток документов и политика истории сшиваются один раз на `initialize()`; действуют со
   следующего старта процесса. Найдено при написании справочников (E1).
@@ -218,6 +250,18 @@ flowchart TB
 сетка перестала врать (D2) · миграция `auto_vacuum` (D3, ADR-CRM-014) · доменное имя ушло из
 универсального слоя (D4, ADR-137) · ПМ метёт всё дерево логов (D5) · один писатель в консоли (D7) ·
 headless-шторм в `gui` снят (D8, ADR-PMM-025).
+
+### 5.4. Закрыто планом «порт наблюдений» (Ф3, 2026-08-25)
+
+* **C1 «У плагина нет stats-разъёма» — закрыт, но НЕ дорогой, которую называла запись.**
+  `IProcessServices` по-прежнему не объявляет stats-методов, и `kind=stats` от плагина до стора
+  по-прежнему не доезжает — эта половина посылки не изменилась. Закрыт сам ВОПРОС записи
+  («метрика, которую публикует плагин, доезжает до стора») — другой дорогой: уровни плагина
+  (`ctx.publish_metric`, `state.plugins.<писатель>.<имя>`) с задачи 3.2 дублируются записями
+  `kind=observation` в `ObservabilityHub` процесса и той же дорогой, что `stats`, доезжают до
+  `ObservabilityStore` и живого хвоста (`observability.tail.*`). Ветку `KIND_STATS` в drain
+  трогать не пришлось — четвёртый канал, не правка третьего (ADR-SM-013,
+  `statistics_module/DECISIONS.md`).
 
 ---
 
@@ -263,5 +307,6 @@ headless-шторм в `gui` снят (D8, ADR-PMM-025).
 | «подключаю новый модуль» | [`observability/NEW_MODULE_RECIPE.md`](observability/NEW_MODULE_RECIPE.md) |
 | «куда физически попала запись» | [`observability/SINKS_MAP.md`](observability/SINKS_MAP.md) |
 | «как покрутить на живом стенде» | [`observability/CONTROL_PANEL.md`](observability/CONTROL_PANEL.md) |
+| «принять как потребитель: что есть, чем управлять, что наблюдаемо» | [`observability/ACCEPTANCE_CHECKLIST.md`](observability/ACCEPTANCE_CHECKLIST.md) + зонд `backend_ctl/probes/probe_observability_consumer_acceptance.py` (`/core:quality:observability-acceptance`); эталон [`docs/reviews/2026-09-08_observability-consumer-acceptance.md`](../../docs/reviews/2026-09-08_observability-consumer-acceptance.md) |
 | «какие решения приняты и почему» | [`../DECISIONS.md`](../DECISIONS.md) + локальные `DECISIONS.md` модулей |
 | «что ещё не сделано» | [`plans/observability-review-remediation.md`](../../plans/observability-review-remediation.md) |

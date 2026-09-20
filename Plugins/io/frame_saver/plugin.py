@@ -279,8 +279,7 @@ class FrameSaverPlugin(ProcessModulePlugin):
                 tmp.unlink(missing_ok=True)
             except OSError:  # no-health: best-effort подчистка tmp — исходная ошибка отчитывается ниже
                 pass
-            self._ctx.health.report_error(exc, context="frame_saver.sidecar", throttle=30.0)
-            self._ctx.log_error(f"FrameSaver: sidecar не записан для {path.name}: {exc}")
+            self._ctx.health.report_error(exc, context="frame_saver.sidecar", throttle=30.0, file=path.name)
 
     def _resolve_dir(self) -> Path:
         """Папка дня (output_dir/<date>): ленивое создание + resume индекса при смене суток.
@@ -343,8 +342,7 @@ class FrameSaverPlugin(ProcessModulePlugin):
                 try:
                     shutil.rmtree(sub)
                 except OSError as e:
-                    self._ctx.health.report_error(e, context="frame_saver.retention")
-                    self._ctx.log_error(f"FrameSaver retention: не удалось удалить {sub}: {e}")
+                    self._ctx.health.report_error(e, context="frame_saver.retention", path=str(sub))
 
     def _on_write_error(self, tmp: Path) -> None:
         """Учёт ошибки записи: счётчик + троттлинг логов + подчистка tmp."""

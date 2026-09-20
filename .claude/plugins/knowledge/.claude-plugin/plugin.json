@@ -1,0 +1,11 @@
+{
+  "name": "knowledge",
+  "version": "0.6.1",
+  "description": "Knowledge OS: kos_* MCP tools (engine via launcher) + 9 science agents + curate/synthesize/research/search/kb commands + knowledge mode",
+  "mcpServers": {
+    "knowledgeos": {
+      "command": "uv",
+      "args": ["run", "--no-project", "python", "${CLAUDE_PLUGIN_ROOT}/kos_mcp_launcher.py"]
+    }
+  }
+}

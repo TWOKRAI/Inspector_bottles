@@ -22,15 +22,33 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Optional feature groups (install with `uv sync --extra ml`)
+# Optional feature groups (install with `uv sync --extra <name>`)
 # ml = ["torch>=2.5", "transformers>=4.46"]
 # web = ["fastapi>=0.115", "uvicorn>=0.32"]
+
+# Audio/video transcription stack (used by the sci-transcriber agent). Markers
+# split the deps per-platform - uv installs only what fits the current OS:
+#   - Windows/Linux + NVIDIA GPU -> faster-whisper + CUDA DLLs (cuBLAS, cuDNN)
+#   - macOS Apple Silicon        -> mlx-whisper (Metal GPU + Neural Engine)
+#   - macOS Intel / no GPU       -> faster-whisper falls back to CPU (int8)
+# WITHOUT the nvidia-* packages, CTranslate2 silently falls back to CPU
+# (10-30x slower for large-v3). DO NOT remove the markers - they are the fix.
+# Install:   uv sync --extra transcribe
+# transcribe = [
+#     "faster-whisper>=1.2.1",
+#     "yt-dlp>=2026.0",
+#     "imageio-ffmpeg>=0.5.0",
+#     "nvidia-cublas-cu12>=12.0 ; sys_platform == 'win32' or sys_platform == 'linux'",
+#     "nvidia-cudnn-cu12>=9.0 ; sys_platform == 'win32' or sys_platform == 'linux'",
+#     "mlx-whisper>=0.4.0 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+# ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
     "hypothesis>=6.0",
     "ruff>=0.8",
     "pyright>=1.1.390",
@@ -60,6 +78,10 @@ python_functions = ["test_*"]
 addopts = "-ra --strict-markers --strict-config"
 norecursedirs = [".git", "__pycache__", ".venv", "build", "dist", "data"]
 asyncio_mode = "auto"
+# A hanging test blocks the whole pipeline silently — cap every test. thread method
+# is portable (Windows has no signal-based alarm); tighten per test with @pytest.mark.timeout.
+timeout = 120
+timeout_method = "thread"
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning",

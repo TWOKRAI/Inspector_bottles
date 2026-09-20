@@ -8,13 +8,21 @@
 #   Результат — таймауты на индексации больших репо через qex MCP.
 #
 # Решение:
-#   Создаём Modelfile-вариант базовой модели с явным num_ctx и num_gpu=999.
-#   Подменяем оригинальный tag (qwen3-embedding:4b / 8b) этой копией. После
-#   этого qex-launcher без правки кода грузит модель на 100% GPU.
+#   Создаём Modelfile-вариант базовой модели с явным num_ctx и num_gpu=999
+#   (tag `<base>-qex`). qex-launcher.py и reindex.py ссылаются на этот tag
+#   НАПРЯМУЮ — без копирования варианта поверх базового тега: такую подмену
+#   стирает любой последующий `ollama pull <base>` (перекачивает оригинал без
+#   num_ctx/num_gpu), а вариант после этого остаётся, только код на него уже
+#   не смотрит.
 #
-# Per-platform (обе платформы на 4b с 2026-07-05, см. qex-launcher.py):
-#   Windows (RTX 3050 Laptop, 4 GB VRAM)  → qwen3-embedding:4b, num_ctx=2048
-#   macOS   (Apple Silicon, unified)       → qwen3-embedding:4b, num_ctx=2048
+# Per-platform:
+#   Windows (ноутбучные GPU)         → qwen3-embedding:0.6b, num_ctx=2048, dim=1024
+#   macOS   (Apple Silicon, unified) → qwen3-embedding:8b,   num_ctx=4096, dim=4096
+#
+# ⚠ Размерность вектора привязана к модели и продублирована в qex-launcher.py и
+#   reindex.py (QEX_OPENAI_DIMENSIONS). Меняешь модель — меняй и её, иначе qex
+#   не упадёт, а тихо запишет мусор. Смена размерности делает существующий
+#   индекс нечитаемым: нужен полный /mcp-qex:qex-rebuild, инкремента мало.
 #
 # Usage: bash setup-embedding-model.sh
 # Re-run: безопасно — повторные запуски только пересоздают вариант, не ломают.
@@ -31,13 +39,13 @@ case "$(uname -s)" in
 esac
 
 if [ "$PLATFORM" = "mac" ]; then
-    BASE="qwen3-embedding:4b"
-    MODELFILE="$TEMPLATES_DIR/qwen3-embedding-4b-mac.Modelfile"
-    VARIANT="qwen3-embedding:4b-qex"
+    BASE="qwen3-embedding:8b"
+    MODELFILE="$TEMPLATES_DIR/qwen3-embedding-8b-mac.Modelfile"
+    VARIANT="qwen3-embedding:8b-qex"
 else
-    BASE="qwen3-embedding:4b"
-    MODELFILE="$TEMPLATES_DIR/qwen3-embedding-4b-win.Modelfile"
-    VARIANT="qwen3-embedding:4b-qex"
+    BASE="qwen3-embedding:0.6b"
+    MODELFILE="$TEMPLATES_DIR/qwen3-embedding-0.6b-win.Modelfile"
+    VARIANT="qwen3-embedding:0.6b-qex"
 fi
 
 if ! command -v ollama > /dev/null 2>&1; then
@@ -58,15 +66,11 @@ fi
 echo "→ создаю GPU-оптимизированный вариант $VARIANT из $MODELFILE"
 ollama create "$VARIANT" -f "$MODELFILE"
 
-echo "→ подменяю $BASE на $VARIANT (qex-launcher без правки кода использует обновлённый tag)"
-ollama stop "$BASE" 2>/dev/null || true
-ollama rm "$BASE" 2>/dev/null || true
-ollama cp "$VARIANT" "$BASE"
-
-echo "→ verify: загрузка $BASE с прогревом"
+echo "→ verify: загрузка $VARIANT с прогревом"
 curl -s http://localhost:11434/api/embeddings \
-    -d "{\"model\":\"$BASE\",\"prompt\":\"warm-up\"}" > /dev/null
+    -d "{\"model\":\"$VARIANT\",\"prompt\":\"warm-up\"}" > /dev/null
 echo
 ollama ps
 echo
-echo "✓ done. PROCESSOR должен быть '100% GPU'. Если 'CPU' — проверь VRAM (nvidia-smi)."
+echo "✓ done. qex-launcher грузит $VARIANT напрямую — правки кода не нужны."
+echo "  PROCESSOR должен быть '100% GPU'. Если 'CPU' — проверь VRAM (nvidia-smi)."

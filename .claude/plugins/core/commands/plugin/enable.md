@@ -3,9 +3,9 @@ description: Enable plugin <id> — add it to enabled.yaml and recompose the con
 allowed-tools: Bash(claude-kit-claude plugin enable*)
 ---
 
-Включает плагин и пересобирает артефакты конфигурации проекта.
+Enables the plugin and rebuilds the project's configuration artifacts.
 
-Использование: `/core:plugin:enable <id>`
+Usage: `/core:plugin:enable <id>`
 
 ```bash
 claude-kit-claude plugin enable $ARGUMENTS

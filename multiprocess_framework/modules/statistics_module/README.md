@@ -326,13 +326,135 @@ statistics_module/
 │   └── file_stats_channel.py    # IChannel → JSON/CSV файл
 ├── adapters/
 │   └── stats_adapter.py         # StatsAdapter(BaseAdapter) → CommandManager
+├── observation/
+│   └── observation_manager.py   # ObservationManager — порт уровней, слот `observation` (ADR-SM-012);
+│                                 # + ObservationRecord/records_for_hub — запись kind=observation (ADR-SM-013)
 └── tests/
     ├── test_stats_manager.py    # lifecycle, метрики, теги, N-count, flush
     ├── test_stats_integration.py # каналы, get_metric+tags, thread-safety
     ├── test_stats_adapter.py     # CommandManager registration
     ├── test_aggregation_window.py
+    ├── test_observation_port_hazards.py    # hazard'ы порта наблюдений (ADR-SM-012)
+    ├── test_observation_records_hazards.py # hazard'ы записи kind=observation в хаб (ADR-SM-013)
     └── test_stats_config.py
 ```
+
+---
+
+## Второй житель модуля: порт наблюдений (`observation/`, ADR-SM-012)
+
+Модуль держит **две плоскости метрик, а не одну**, и они соседи по оси, а не слои друг друга
+(ADR-PM-038):
+
+| | `StatsManager` (агрегат) | `ObservationManager` (уровни) |
+|---|---|---|
+| Вопрос | «сколько было за окно» | «сколько СЕЙЧАС» |
+| Хранение | `AggregationWindow` + live-слой, история в сторе | одно значение на имя, перезапись, без истории |
+| Адрес | серия метрики (`name` + теги) | лист дерева `state.plugins.<писатель>.<имя>` |
+| Кто публикует | сам менеджер, по своему темпу flush | тик `ProcessHeartbeat`, под publisher-гейтом |
+| Фасад плагина | `ctx.gauge` / `record_metric` / `record_timing` | `ctx.publish_metric` / `declare_metric` |
+
+`ObservationManager(ChannelRoutingManager, ObservationPort)` — четвёртый канонический слот
+`observation` рядом с logger/stats/error, регистрируется в `ProcessManagers.register_all`
+**безусловно**. Хранилище (`PluginLevels`) он **оборачивает**, а не заводит: живёт оно
+по-прежнему в `process_module/heartbeat/telemetry.py` и остаётся атрибутом процесса — порт
+резолвит его на каждом обращении, поэтому держатель один и разъехаться не с чем.
+
+```python
+port = process.get_manager("observation")
+port.for_plugin("capture").publish("fps", 30.0)   # identity — у хендла, не в аргументе
+port.collect_subtree(allowed_metrics)             # то, что тик кладёт в дерево
+port.departed_writers()                           # чьи поддеревья положено снять (Ф2)
+```
+
+Читателю, у которого может не быть слота (шаг тика, дубль сервисов), дорога одна —
+`observation_port(services)`: слот, а при его отсутствии короткоживущий вид над тем же
+хранилищем. Флаг `create` разделяет читателя (`False` — тик не заводит хранилище) и писателя
+(`True` — публикация из `configure()` идёт раньше, чем у процесса созданы менеджеры; это
+**named-фолбэк**, а не костыль).
+
+Флаг действует до КОНЦА дороги, а не до резолвера: со ступени «слот» возвращается менеджер, и
+решение о создании принимает уже он — `ObservationManager.levels(create=…)`. Следствие, за
+которое читатель платит: `levels()` может вернуть `None`, и каждая читательская дорога отвечает
+пустой проекцией своей формы (`set()` / `{}` / `()` / no-op), а не отказом. Заводит хранилище
+РОВНО ОДНА дорога — `publish`; `retract` этого не делает, иначе остановка плагина, ни разу
+ничего не опубликовавшего, оставляла бы разный след со слотом и без него.
+
+Границы: в `observation/` нет ни агрегации, ни каналов — `AggregationWindow` остаётся у
+`StatsManager` и никуда не переезжает.
+
+### Ф5: `StatsManager` — вид поверх порта; числа — через ОДИН узкий шов (ADR-SM-014)
+
+Порт получил и числовой фасад: `record_metric`/`increment`/`record_timing`/`gauge`/`histogram`
+на `ObservationPort` — тем же жестом, что `publish` для уровней. `StatsManager` подключается к
+нему явно:
+
+```python
+stats.attach_observation_port(observation)   # ProcessManagers.create_all делает это боевым путём
+
+stats.record_metric("checks.ok", 1)          # форвардится порту, доставляется CRM-tap'ом
+observation.record_metric("checks.ok", 1)    # тот же счётчик — любой источник, один порт
+```
+
+После `attach` числа `StatsManager` идут ЧЕРЕЗ порт: доставка — `ChannelRoutingManager.add_tap`/
+`_emit_to_taps` (тот же CRM-tap, что и у логгера/ошибок), а НЕ `ObservabilityHub` — хаб как
+транспорт для чисел дал бы либо потерю (`drop_oldest`), либо петлю через
+`ObservabilityDrainAdapter.apply_stat`. Хаб остаётся СТОКОМ агрегатных снапшотов
+(`HubStatsChannel`, `kind=stats`) — форма не меняется.
+
+**Без `attach` — старая прямая дорога, и это фолбэк для менеджера ВНЕ СБОРКИ** (ручной
+`StatsManager(...)` в тестах соседних модулей), **не для 57 боевых вызывающих слота `"stats"`**
+(инвентарь Task 5.1 плана `observation-port`) — те приходят в боевой сборке на экземпляр,
+которому `ProcessManagers.create_all` уже вызвал `attach_observation_port`, и фолбэк им не
+нужен. Обход СЧИТАЕТСЯ и ГОВОРИТСЯ, а не тихий: `stats.observation_bypasses` — словарь
+`{метод: число}`, растёт при каждой записи мимо порта, WARNING — один раз на метод. В боевой
+сборке `observation_bypasses` обязан быть пустым — это проверяемый факт («единственный писатель»
+— свойство ПОСТРОЕНИЯ), не предположение, см. `test_boot_assembly_has_zero_observation_bypasses`.
+
+### Ф5-добор: живая плоскость чисел различается ПАРОЙ счётчиков, не одним (ADR-SM-015)
+
+`ObservationManager.get_stats()` отдаёт `numbers_delivered` и `numbers_dropped_no_sink` — оба
+считает `_deliver_number` по возврату `_emit_to_taps() -> int` (ADR-CRM-016), а не диффом
+общего состояния до/после вызова:
+
+```python
+observation.get_stats()["numbers_delivered"]        # числа, принятые ХОТЯ БЫ одним tap'ом
+observation.get_stats()["numbers_dropped_no_sink"]   # раздача состоялась, приёмников не нашлось
+```
+
+**Различитель живой и мёртвой плоскости — ПАРА:** `numbers_delivered > 0` И
+`numbers_dropped_no_sink == 0`. Одного `numbers_delivered > 0` НЕДОСТАТОЧНО — до этой правки
+счётчик рос ОДИНАКОВО что при живом приёмнике, что при их полном отсутствии (5 записей → оба
+случая давали `delivered=5`), то есть отвечал на вопрос «сколько раз звали `record_metric`», а
+не «дошло ли». Оба счётчика — **без лока на горячем пути**, годятся как счётный факт «плоскость
+жива/мертва», не годятся как точный аудит под конкуренцией.
+
+**`attach_observation_port` докладывает `True` только при СОСТОЯВШЕЙСЯ подписке** — проверяет
+`has_tap(tap_name)` (ADR-CRM-016) ПОСЛЕ вызова `add_tap`, а не тождество объекта порта или
+`callable(add_tap)`. Порядок при переподключении — сначала подписаться на НОВЫЙ порт, потом
+снять со СТАРОГО: обратный порядок на отказе новой подписки оставлял менеджера при уже
+отвязанном старом, с числами, форвардящимися в пустоту при пустом `observation_bypasses`.
+
+### Записи в хабе наблюдаемости (`kind=observation`, задача 3.2, ADR-SM-013)
+
+Те же уровни, что тик кладёт в дерево, дублируются записями в `ObservabilityHub` процесса —
+ЧЕТВЁРТЫМ каналом рядом с `log`/`error`/`stats`, под ТЕМ ЖЕ publisher-гейтом (второго гейта
+нет). Хвост (`observability.tail.*`) и стор видят уровни без второго механизма — существующим
+дренажом, тем же путём, что и `stats`:
+
+```python
+from multiprocess_framework.modules.channel_routing_module.observability import KIND_OBSERVATION
+
+hub.get_channel(KIND_OBSERVATION).drain()   # [{"kind": "observation", "writer": "capture",
+                                             #   "metric": "fps", "value": 30.0, ...}, ...]
+```
+
+Форма записи — `ObservationRecord(SchemaBase)` (`observation/observation_manager.py`), плоские
+поля `writer`/`metric`/`value`, наружу — `to_dict()` (Dict at Boundary). Цена — верхняя
+граница, не измеренное число: записей за тик не больше, чем гейтованных листьев, то есть
+**≤ (число метрик × число писателей)**. `introspect.observability` называет плоскость секцией
+`"observation"` (`effective`/`provenance`/`counters` — та же тройка, что у логгера) без единой
+новой команды в словаре.
 
 ---
 

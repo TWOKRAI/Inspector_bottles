@@ -1,70 +1,70 @@
 # {{MODULE_NAME}} — Context
 
-Per-module knowledge для агентов и людей. Создаётся в корне модуля
-(`<package>/<module>/CONTEXT.md`). Все разделы **опциональные** — оставь
-только то, что нетривиально и полезно знать перед правкой кода.
+Per-module knowledge for agents and people. Created at the module root
+(`<package>/<module>/CONTEXT.md`). All sections are **optional** — keep
+only what's non-trivial and useful to know before editing the code.
 
-Aggregator (`scripts/aggregate_context`) собирает CONTEXT.md из всех
-модулей в `docs/PROJECT_CONTEXT.md`.
+Aggregator (`scripts/aggregate_context`) collects CONTEXT.md from all
+modules into `docs/PROJECT_CONTEXT.md`.
 
 ---
 
 ## Purpose
 
-Что и зачем делает модуль. 1-3 фразы. Что-то такое, что нельзя получить
-быстрым взглядом на `__init__.py` / `interface.py`.
+What the module does and why. 1-3 sentences. Something that can't be
+picked up from a quick glance at `__init__.py` / `interface.py`.
 
-_Пример: «Координирует маршрутизацию запросов между API и worker pool.
-Управляет backpressure через bounded queue. Точка входа — `dispatch()`.»_
+_Example: "Routes requests between the API and the worker pool.
+Manages backpressure via a bounded queue. Entry point — `dispatch()`."_
 
 ## Key decisions
 
-Ссылки на ADR (этого модуля или глобальные), которые формируют его дизайн.
-Если ADR нет — короткая фраза-якорь.
+Links to ADRs (module-local or global) that shape its design.
+If there's no ADR — a short anchor phrase.
 
-- `ADR-{{CODE}}-001` — выбор threading-модели (см. `DECISIONS.md`)
-- `ADR-007` (глобальный) — единая схема message contracts
-- _или просто:_ «Использует state machine вместо callbacks из-за reentrancy»
+- `ADR-{{CODE}}-001` — choice of threading model (see `DECISIONS.md`)
+- `ADR-007` (global) — unified message contracts schema
+- _or just:_ "Uses a state machine instead of callbacks because of reentrancy"
 
 ## Gotchas
 
-Footguns, неочевидные грабли, surprising behavior. **Это самая ценная
-секция** для агента. Перечисляй то, что не следует из кода и что можно
-случайно сломать.
+Footguns, non-obvious traps, surprising behavior. **This is the most
+valuable section** for an agent. List what doesn't follow from the code
+and what could accidentally break.
 
-- Не вызывать из main thread — блокирует event loop UI.
-- `register()` идемпотентен только при одинаковом `(name, version)`.
-  С разной version — будет тихий conflict.
-- При `close()` не отменяет уже принятые задачи, только не принимает новые.
+- Don't call from the main thread — blocks the UI event loop.
+- `register()` is idempotent only for the same `(name, version)`.
+  With a different version — a silent conflict follows.
+- `close()` doesn't cancel already-accepted tasks, only stops accepting new ones.
 
 ## Glossary
 
-Local terms — слова, которые в этом модуле значат не то же самое, что
-в проекте/индустрии в целом.
+Local terms — words that mean something different in this module than
+in the project/industry at large.
 
-- **Token** — opaque worker id (НЕ JWT, НЕ access token).
-- **Snapshot** — копия очереди без удаления элементов (не git snapshot).
+- **Token** — opaque worker id (NOT a JWT, NOT an access token).
+- **Snapshot** — a copy of the queue without removing elements (not a git snapshot).
 
 ## Open questions
 
-То, что осознанно не решено. Когда агент видит эти вопросы — он знает,
-что трогать без согласования с автором не стоит.
+What's deliberately left unresolved. When an agent sees these questions
+it knows not to touch that area without checking with the author.
 
-- [ ] Backpressure стратегия при failover между регионами — пока NO-OP.
-- [ ] Метрики latency: percentile или mean? Сейчас mean.
+- [ ] Backpressure strategy during regional failover — currently a NO-OP.
+- [ ] Latency metrics: percentile or mean? Currently mean.
 
 ## Migration notes
 
-Важные миграции, на которые код или данные были перевезены. Помогает
-понять артефакты («почему здесь legacy `_old_dispatch()` ещё живёт»).
+Important migrations the code or data went through. Helps make sense of
+artifacts ("why does legacy `_old_dispatch()` still live here").
 
-- 2026-03-15 — мигрировали с `multiprocessing.Queue` на `asyncio.Queue`.
-  `_old_dispatch()` оставлен для обратной совместимости до v3.0.
-- 2026-05-01 — переименовали `submit()` → `enqueue()`. Старое имя удалено.
+- 2026-03-15 — migrated from `multiprocessing.Queue` to `asyncio.Queue`.
+  `_old_dispatch()` kept for backward compatibility until v3.0.
+- 2026-05-01 — renamed `submit()` → `enqueue()`. The old name was removed.
 
 ---
 
-**Stability:** этот файл — рукописный, aggregator его НЕ перезаписывает.
-Обновляй при значимых изменениях модуля. Aggregator только собирает в
-сводный индекс — текст вне маркеров в `docs/PROJECT_CONTEXT.md` тоже не
-трогает.
+**Stability:** this file is hand-written, the aggregator does NOT overwrite it.
+Update it on significant module changes. The aggregator only collects into
+the summary index — text outside the markers in `docs/PROJECT_CONTEXT.md`
+is also left untouched.

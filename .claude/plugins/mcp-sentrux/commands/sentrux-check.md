@@ -2,19 +2,19 @@
 description: CI-friendly architecture rule check (sentrux check, exit 0/1)
 ---
 
-Запусти CLI-валидатор `sentrux check` — он подходит для CI и pre-commit, выходит с кодом 0 (всё ок) или 1 (есть нарушения).
+Run the `sentrux check` CLI validator — it fits CI and pre-commit, exits with code 0 (all clear) or 1 (violations found).
 
-Определи абсолютный путь к корню проекта и запусти:
+Determine the absolute path to the project root and run:
 
 ```bash
 sentrux check "$(git rev-parse --show-toplevel)"
 ```
 
-Покажи пользователю:
-- Итоговый exit code и `Quality: NNNN`.
-- Список упавших правил (если есть) с файлами-нарушителями.
-- Рекомендацию: запустить `/mcp-sentrux:sentrux-rules` для интерактивного разбора, либо поправить точечно.
+Show the user:
+- The final exit code and `Quality: NNNN`.
+- The list of failed rules (if any) with the offending files.
+- A recommendation: run `/mcp-sentrux:sentrux-rules` for an interactive breakdown, or fix it directly.
 
-Если `.sentrux/rules.toml` отсутствует — сообщи и покажи минимальный шаблон (см. `/mcp-sentrux:sentrux-rules`).
+If `.sentrux/rules.toml` is missing — say so and show the minimal template (see `/mcp-sentrux:sentrux-rules`).
 
 $ARGUMENTS

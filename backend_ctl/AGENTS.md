@@ -31,6 +31,7 @@
 | «Что пользователь нажал в GUI?» (события кнопок/табов агенту) | **backend_ctl** (`ui_tap` → события `ui.event` в `events_page(plane="ui")`) |
 | Состояние **виджетов**, клики, снимок UI | qt-mcp (`QT_MCP_PROBE=1`) — НЕ backend_ctl |
 | Поиск/рефакторинг исходников | qex / Serena / Grep — driver видит только runtime |
+| «Принять наблюдаемость как потребитель» (ручки, стор, хвосты, задержки — таблица вердиктов) | **backend_ctl** зонд [`probe_observability_consumer_acceptance`](probes/probe_observability_consumer_acceptance.py), `/core:quality:observability-acceptance`; чек-лист `multiprocess_framework/docs/observability/ACCEPTANCE_CHECKLIST.md` |
 
 ## Режимы отладки (бэкенд / фронтенд / совместно)
 
@@ -50,7 +51,7 @@
 BACKEND_CTL=1 INSPECTOR_GUI_UNATTENDED=1 QT_MCP_PROBE=1 .venv/Scripts/python.exe multiprocess_prototype/frontend/run.py
 ```
 
-Проверка, что дорога жива: в `<log_dir>/gui/system.log` есть `qt-mcp probe installed on
+Проверка, что дорога жива: в `<log_dir>/gui/messages.log` есть `qt-mcp probe installed on
 localhost:9142`, а `mcp__qt-mcp__qt_list_windows` отвечает. Отсутствие строки — теперь WARNING
 с причиной, а не тишина.
 
@@ -105,7 +106,7 @@ PY
 
 | Метод | Назначение |
 |-------|-----------|
-| `system_overview(timeout=)` | **B.3, первая команда сессии**: компактная сводка всех процессов (статус/воркеры/router/очереди/память) + telemetry fps + счётчики driver'а + `anomalies`-подсказки (router_dropped, queue_depth, fps_zero_while_running, recent_recovery, late_replies, events_evicted, …) |
+| `system_overview(timeout=)` | **B.3, первая команда сессии**: компактная сводка всех процессов (статус/воркеры/router/очереди/память) + telemetry fps + счётчики driver'а + `anomalies`-подсказки (router_dropped, queue_depth, fps_zero_while_running, recent_recovery, late_replies, events_evicted, telemetry_readmodel_empty, …). Ф2 Task 2.8: `telemetry_readmodel_empty` — холодная сессия (`telemetry.fps` пуст И нет активной `state.subscribe`) не молчит про предусловие; после `watch_like_gui`/`state_subscribe` подсказка пропадает (пустой снимок под активной подпиской — законное «дельт ещё не было») |
 | `introspect_handlers(process)` | ключи router `message_dispatcher` + команды `CommandManager` |
 | `introspect_registers(process)` | имена регистров + поля (**пусто = нет worker-side приёмника**) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
@@ -136,6 +137,7 @@ PY
 | `record_status()` | активная запись (файл/`events_written`/`dropped`) ЛИБО загруженный реплей (имя/позиция/total/`truncated`) |
 | `record_dump(name)` | one-shot дамп чёрного ящика: снимок + текущее arrival-кольцо (`reason=dump`); грузится тем же `record_load` |
 | `observability_tail(process)` / `observability_untail(process)` | live ЛОГИ+ОШИБКИ+СТАТИСТИКА процесса (то, что GUI получает через `ObservabilityTailActivator`); записи по плоскостям — `observability_records(kind=)` |
+| `history_query(kind=, metric=, process=, module=, severity=, min_severity=, since=, until=, text=, limit=, pm_name=)` | **Ф3 Task 3.5, T6/CTL-F6**: история из sqlite-стора ОДНИМ вызовом — «что БЫЛО», в отличие от `log_tail`/`observability_tail` («что сейчас», push-подписка на живой хвост). Путь к БД — ТОЛЬКО из readback `introspect.observability(pm_name).history.db_path` (никакого `resolve_default_db_path()` в запасе); история выключена/недоступна → названный отказ, sqlite не открывается вовсе. Соединение read-only (`file:...?mode=ro`). `since`/`until` отрицательные — окно последних `\|N\|` секунд ОТ ЧАСОВ ДРАЙВЕРА (не писателя — при разъехавшихся часах запись со скошенным в будущее `ts` не покинет окно НИКОГДА, это открытый вопрос, не гарантия); `0` — абсолютная эпоха, не «сейчас». `text` — полнотекстовый поиск (FTS5, не подстрока): запрос без слов/недоступный индекс — названный отказ, а не пустой список. `metric` (**Task 3.1, К8**) — срез по ПОЛНОМУ имени метрики (`capture.drops`, с писателем: голое `drops` столкнулось бы между процессами) плюс два ключа сверх конверта: `series` — `[[ts, value], …]` **старыми вперёд** (обратный порядок ленте: ряд читают как временной, ленту как хвост) и `series_skipped` — сколько строк среза не дали точки (нет числового `extra.value`; такая строка остаётся в `rows`). Оба ключа есть всегда, когда задан `metric`, в том числе нулём. **Ряд строится из СТРАНИЦЫ ленты и наследует её кап:** `limit` режет строки ДО построения ряда, и усечение окна ничем не видно — `series_skipped` считает только строки без числового значения, а не отброшенные лимитом. Замер ревью 2026-09-05: `since=-600, limit=100` → 100 точек, охват 496 с; `limit=200` → 120 точек, охват 596 с, при `series_skipped=0` в обоих случаях. Правило: на окно `since=-600` при такте 5 с задавайте `limit>=150`. Файл истории без колонки `metric` (его не открывал на запись ни один процесс текущей версии — read-only соединение мигрировать не вправе) → названный отказ, а не тихий полный дамп. `limit` по умолчанию 100 (не вся БД). **Про объём — замер 2026-09-04 на живом сторе:** строка смешанной ленты ~3.0 КБ, `kind=stats` ~6.2 КБ, `kind=log` ~0.6 КБ, `kind=error` ~0.5 КБ. Потолок ответа 12 КБ, то есть под него влезает ≈10 строк смешанной ленты: дефолтный `limit=100` усекается до карты формы, а `full=true` на нём отдаёт ~300 КБ (≈75 тыс. токенов). Практика: `limit<=10` ЛИБО сузить `kind` и листать окнами `since`/`until`. Несогласованность «дефолт в строках — потолок в байтах» записана в OPEN_QUESTIONS. **Задержка (Task 3.3):** записи видны не сразу — store-tap пишет в стор фоновым потоком. Наблюдённая граница на Windows **≈ 110–125 мс** (замер 10 повторов: 109 94 109 110 109 110 109 109 110 109, медиана 109): такт дренажа 100 мс + разрешение системного таймера 15.6 мс + транзакция. Драйвер в другом процессе чужую очередь дожать не может: сразу после события ряд может быть короче — подождите ~125 мс и перезапросите, это не дефект наблюдаемости |
 | `watch_like_gui()` / `unwatch()` | ВЕСЬ приёмный профиль GUI одной командой: state.subscribe (processes/system/devices/calibration) + observability.tail на все процессы + **авто-переподписка** после авто-рестарта |
 | `introspect_memory(process)` | инвентарь памяти (SHM/пул займов/очереди) + **`os` RSS/VMS процесса ОС** (Task 3.1) — только статистика; секции best-effort (`null`, не ошибка) |
 | `introspect_telemetry(process)` | **Ф4.1**: readback телеметрийного gate (read-only) — `gate_active`, эффективная `publish`-секция, `resolved` (per-метрика `enabled`+`interval_sec` с уже применённым наследованием), `unknown_metrics` (опечатки в именах), `throttle_rules` центральной плоскости. Отвечает «публикуется ли `fps` СЕЙЧАС» без гадания по эффекту в дереве |

@@ -55,6 +55,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS = "multiprocess_framework/docs"
 OBS = f"{DOCS}/observability"
 MODULES = "multiprocess_framework/modules"
+BACKEND_CTL = "backend_ctl"
 
 
 class Unverifiable(Exception):
@@ -155,6 +156,72 @@ def _model_fields(src: Sources, rel: str, cls: str) -> Set[str]:
     raise Unverifiable(f"{rel}: схема {cls} не найдена")
 
 
+def _tuple_constant(src: Sources, rel: str, name: str) -> List[str]:
+    """Значения кортежа-константы ``name`` из файла ``rel`` — по AST, без импорта.
+
+    Тем же приёмом, что разбор ``DEFAULT_SEVERITY_ROUTES``: сверщик не имеет
+    права импортировать фреймворк — оракул, падающий вместе с проверяемым,
+    ничего не доказывает.
+    """
+    tree = ast.parse(src.read(rel))
+    for node in ast.walk(tree):
+        named = (
+            isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+        ) or (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == name)
+        if named and node.value is not None:
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError as exc:  # значение не литерал — предпосылка не вычислилась
+                raise Unverifiable(f"{rel}: {name} не разбирается литералом: {exc}") from exc
+            return [str(item) for item in value]
+    raise Unverifiable(f"{rel}: константа {name} не найдена")
+
+
+def _section(text: str, title_fragment: str) -> str:
+    """Текст раздела от заголовка, содержащего ``title_fragment``, до следующего заголовка.
+
+    «Следующий» — того же или более высокого уровня: подразделы остаются внутри.
+
+    Строки внутри ```-блоков кода заголовками не считаются, даже если начинаются
+    с ``#`` (шапка bash-комментария в примере команды) — без этого секция
+    обрывалась на первом же таком комментарии. Найдено добором Н-4 (ревью Ф2,
+    2026-09-01): секция «Flight recorder» в CONTROL_PANEL.md резалась до 87
+    символов строкой ``# что происходило в процессе...`` внутри ```bash``` —
+    первого же примера команды под заголовком.
+    """
+    lines = text.splitlines()
+
+    def _is_fence(line: str) -> bool:
+        return line.lstrip().startswith("```")
+
+    start = None
+    level = 0
+    in_fence = False
+    for index, line in enumerate(lines):
+        if _is_fence(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if line.startswith("#") and title_fragment in line:
+            start = index
+            level = len(line) - len(line.lstrip("#"))
+            break
+    if start is None:
+        raise Unverifiable(f"в документе нет заголовка со словами {title_fragment!r}")
+    in_fence = False
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if _is_fence(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if line.startswith("#") and (len(line) - len(line.lstrip("#"))) <= level:
+            return "\n".join(lines[start:index])
+    return "\n".join(lines[start:])
+
+
 def _md_table_rows(text: str) -> List[List[str]]:
     """Строки markdown-таблиц файла: список ячеек без ведущих/хвостовых пустых."""
     rows: List[List[str]] = []
@@ -243,6 +310,11 @@ def _check_command_params(src: Sources) -> Optional[str]:
         "observability.tail.subscribe": "ObservabilityTailSubscribeParams",
         "observability.tail.unsubscribe": "ObservabilityTailUnsubscribeParams",
         "health.report": "HealthReportParams",
+        # Ф1.1 (C3): команды впрыска в процессные хуки. Судятся тем же
+        # правилом, что соседи, — иначе новая поверхность приехала бы без
+        # сверщика ровно в тот документ, ради которого он заведён.
+        "diag.thread_raise": "DiagThreadRaiseParams",
+        "diag.warn": "DiagWarnParams",
     }
     doc = src.read(f"{OBS}/CONTROL_PANEL.md")
     rows = {}
@@ -268,6 +340,100 @@ def _check_command_params(src: Sources) -> Optional[str]:
                 + (f"; не названы: {sorted(missing)}" if missing else "")
             )
     return "; ".join(bad) or None
+
+
+#: Секции ``observability.*``, для которых CONTROL_PANEL.md обязан назвать
+#: КАЖДОЕ поле Pydantic-схемы (замыкатель класса Н-4, добор ревью Ф2,
+#: 2026-09-01). Ключ — фрагмент заголовка секции в документе, значение — имя
+#: схемы в ``observability_config.py``.
+#:
+#: Список полей ВЫЧИСЛЯЕТСЯ из схемы через ``_model_fields`` (AST, без
+#: импорта фреймворка) — новое поле схемы (как ``max_tracked_keys``/
+#: ``stale_windows`` у Task 2.7) попадёт под проверку САМО, без правки этого
+#: файла. Честная граница (~80%, не 100%, названо явно): СПИСОК СЕКЦИЙ (какая
+#: секция в каком заголовке документа рассказана) остаётся объявленным
+#: руками — вывести его из кода значило бы знать заранее, в каком месте
+#: прозы документа человек решит рассказать о новой секции, а это решение не
+#: в коде. Числительные словом («шесть копий», «две ручки» — Н-3, Н-4) эта
+#: проверка тоже не видит: для них своя дисциплина «число не пишется
+#: словом», другой класс сторожей (см. ``test_f2_task27_manual_window_
+#: registry_matches_claims.py`` в дереве тестов).
+_OBSERVABILITY_SECTION_SCHEMAS: Dict[str, str] = {
+    "Окна голоса": "ObservabilityVoicesConfig",
+    "Flight recorder": "ObservabilityFlightConfig",
+    "История": "ObservabilityHistoryConfig",
+}
+
+
+def _check_observability_section_fields(src: Sources) -> Optional[str]:
+    """CONTROL_PANEL.md называет КАЖДОЕ поле схемы для секций ``observability.*``.
+
+    Находка Н-4 (добор ревью Ф2, 2026-09-01): секции ``observability.voices``
+    не было в документе вовсе — четыре ручки существовали в схеме
+    (``ObservabilityVoicesConfig``, Task 2.7) и ни одна не была названа
+    оператору. Эта проверка — не заплатка под одно расхождение, а вычисляемая
+    проверка КЛАССА: добавь новое поле в схему секции из
+    ``_OBSERVABILITY_SECTION_SCHEMAS`` — проверка покраснеет сама, без правки
+    этого файла (см. ``_model_fields``).
+    """
+    config_file = f"{MODULES}/process_module/configs/observability_config.py"
+    doc = src.read(f"{OBS}/CONTROL_PANEL.md")
+
+    bad: List[str] = []
+    for heading_fragment, schema in _OBSERVABILITY_SECTION_SCHEMAS.items():
+        fields = _model_fields(src, config_file, schema)
+        try:
+            section_text = _section(doc, heading_fragment)
+        except Unverifiable:
+            bad.append(
+                f"{schema}: в CONTROL_PANEL.md нет заголовка со словами {heading_fragment!r} — "
+                "секция не документирована вовсе"
+            )
+            continue
+        named: Set[str] = set()
+        for cells in _md_table_rows(section_text):
+            if cells:
+                named.update(_backticked(cells[0]))
+        missing = fields - named
+        if missing:
+            bad.append(f"{schema}: секция {heading_fragment!r} не называет поля схемы в таблице: {sorted(missing)}")
+    return "; ".join(bad) or None
+
+
+#: Реестр имён счётчиков процессных хуков — там, где он определён.
+_PROCESS_HOOKS = f"{MODULES}/logger_module/core/process_hooks.py"
+
+
+def _check_hook_counter_names(src: Sources) -> Optional[str]:
+    """Имена счётчиков в разделе «Что ловится автоматически» ↔ ``HOOK_COUNTER_KEYS``.
+
+    Ф1.1 (C3). Три имени живут в четырёх местах (константа, объявление в
+    ``ErrorManager``, реестр публикации, документ), и три из четырёх связаны
+    импортом — а документ связать импортом нельзя. Отсюда эта проверка: без неё
+    именно документ и разошёлся бы, причём молча, потому что счётчик,
+    переименованный в коде, продолжает существовать под старым именем на бумаге.
+
+    Сверяется МНОЖЕСТВО имён в первых ячейках таблиц раздела: и лишнее (счётчика
+    нет, а документ обещает), и недостающее (счётчик есть, документ молчит).
+    """
+    keys = set(_tuple_constant(src, _PROCESS_HOOKS, "HOOK_COUNTER_KEYS"))
+    if not keys:
+        raise Unverifiable("HOOK_COUNTER_KEYS пуст — предпосылка не вычислилась")
+    section = _section(src.read(f"{OBS}/CONNECTORS.md"), "Что ловится автоматически")
+    named = {
+        name
+        for cells in _md_table_rows(section)
+        if cells
+        for name in _backticked(cells[0])
+        if re.fullmatch(r"[a-z_]+", name)
+    }
+    if named == keys:
+        return None
+    return (
+        f"документ называет счётчики {sorted(named)}, HOOK_COUNTER_KEYS — {sorted(keys)}"
+        + (f"; лишние: {sorted(named - keys)}" if named - keys else "")
+        + (f"; не названы: {sorted(keys - named)}" if keys - named else "")
+    )
 
 
 def _check_error_floor_wording(src: Sources) -> Optional[str]:
@@ -528,7 +694,234 @@ def _check_recipe_lifecycle_is_named(src: Sources) -> Optional[str]:
     return None
 
 
+def _check_overview_telemetry_readmodel_empty_kind(src: Sources) -> Optional[str]:
+    """Task 2.8: kind ``telemetry_readmodel_empty`` в шпаргалке AGENTS.md ↔ реальный литерал overview.py.
+
+    Ф2 Task 2.8 завела новую аномалию ``system_overview``: холодная сессия (read-model
+    пуст И подписки нет) перестаёт молчать про предусловие. Имя kind'а — inline-строка
+    в ``anomalies.append``, константы под ней нет (единственное место, где он назван
+    в коде, — сам вызов), поэтому проверка сверяет строку документа с текстом файла
+    через ``ast``-парсер было бы избыточно — здесь регулярка по литералу, тем же
+    приёмом, что у остальных «проверка фразы» в этом модуле.
+    """
+    agents = src.read(f"{BACKEND_CTL}/AGENTS.md")
+    row = next((line for line in agents.splitlines() if "system_overview(timeout=)" in line), None)
+    if row is None:
+        raise Unverifiable(f"{BACKEND_CTL}/AGENTS.md: строки со `system_overview(timeout=)` нет — предпосылка ушла")
+    if "telemetry_readmodel_empty" not in row:
+        return "AGENTS.md: строка system_overview не называет kind telemetry_readmodel_empty"
+    overview = src.read(f"{BACKEND_CTL}/overview.py")
+    if not re.search(r'"kind":\s*"telemetry_readmodel_empty"', overview):
+        return "AGENTS.md называет kind telemetry_readmodel_empty, в overview.py такого литерала нет"
+    return None
+
+
+def _module_constant(src: Sources, rel: str, name: str) -> object:
+    """Значение модульной константы ``name`` по AST файла ``rel`` (без импорта)."""
+    tree = ast.parse(src.read(rel))
+    for node in ast.walk(tree):
+        targets = (
+            node.targets if isinstance(node, ast.Assign) else ([node.target] if isinstance(node, ast.AnnAssign) else [])
+        )
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets) and node.value is not None:
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError as exc:  # pragma: no cover — константа перестала быть литералом
+                raise Unverifiable(f"{rel}: {name} не литерал ({exc})") from exc
+    raise Unverifiable(f"{rel}: константа {name} не найдена")
+
+
+def _schema_field_default(src: Sources, rel: str, cls: str, field: str) -> object:
+    """Дефолт поля Pydantic-схемы ``cls.field`` по AST — без импорта фреймворка."""
+    tree = ast.parse(src.read(rel))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.ClassDef) and node.name == cls):
+            continue
+        for stmt in node.body:
+            if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == field:
+                if stmt.value is None:
+                    raise Unverifiable(f"{rel}: {cls}.{field} без дефолта")
+                try:
+                    return ast.literal_eval(stmt.value)
+                except ValueError as exc:
+                    raise Unverifiable(f"{rel}: дефолт {cls}.{field} не литерал ({exc})") from exc
+        raise Unverifiable(f"{rel}: поле {field} не найдено у {cls}")
+    raise Unverifiable(f"{rel}: класс {cls} не найден")
+
+
+def _string_members(src: Sources, rel: str, name: str) -> Set[str]:
+    """Строковые элементы кортежа ``name`` — ЧЛЕНСТВО, а не точное значение.
+
+    ``literal_eval`` здесь не годится: перечень собран конкатенацией
+    (``PLANE_COUNTER_KEYS = (...) + DELIVERY_COUNTER_KEYS``), и узел выражения
+    не литерал. Обходим поддерево и берём все строковые константы — для вопроса
+    «опубликован ли ЭТОТ ключ» этого достаточно, а точный порядок ни один
+    документ не обещает.
+    """
+    tree = ast.parse(src.read(rel))
+    for node in ast.walk(tree):
+        targets = (
+            node.targets if isinstance(node, ast.Assign) else ([node.target] if isinstance(node, ast.AnnAssign) else [])
+        )
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets) and node.value is not None:
+            return {n.value for n in ast.walk(node.value) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    raise Unverifiable(f"{rel}: перечень {name} не найден")
+
+
+def _check_numbers_policy_claims(src: Sources) -> Optional[str]:
+    """CONTROL_PANEL.md о плоскости ЧИСЕЛ ↔ константы и схема (Ф2, задача 2.1).
+
+    Сторожатся ровно те утверждения документа, которые несут ИМЯ, ЧИСЛО или
+    ДЕФОЛТ, — то есть те, что расходятся с кодом молча:
+
+    * форма пути правила (``processes.<процесс>.stats.<имя метрики>``) ↔
+      ``STATS_SUBTREE_PATTERN``;
+    * дефолтный интервал чисел ``0.0`` ↔ ``STATS_SUBTREE_INTERVAL_SEC``;
+    * дефолт ``stats.log_snapshots`` ↔ поле схемы ``ObservabilityStatsConfig``.
+
+    Формулировка «теги правилом не адресуются» структурно не выразима, и
+    сторожится ФРАЗОЙ — но с предпосылкой, вычисленной из кода: пока в паттерне
+    поддерева нет сегмента про теги, документ обязан говорить об этом вслух.
+
+    Task 2.9 (M2, добор ревью Ф2): ``StatsManager.observability_readback`` отдаёт
+    ключ ``enabled`` (имя схемы, прямая полярность) — предпосылка вычисляется
+    структурным поиском по ИСХОДНИКУ ``stats_manager.py`` (``out["enabled"] = ...``),
+    а не константой, иначе проверка продолжила бы обещать факт, который код уже не
+    держит. Документ обязан называть этот ключ рядом с `plane_disabled`.
+    """
+    policy_rel = f"{MODULES}/process_module/configs/observation_policy.py"
+    pattern = _module_constant(src, policy_rel, "STATS_SUBTREE_PATTERN")
+    interval = _module_constant(src, policy_rel, "STATS_SUBTREE_INTERVAL_SEC")
+    log_default = _schema_field_default(
+        src, f"{MODULES}/process_module/configs/observability_config.py", "ObservabilityStatsConfig", "log_snapshots"
+    )
+    # Пробелы и жирный markdown схлопываются ДО сверки: перенос строки в
+    # документе — вопрос вёрстки, и проверка, краснеющая от него, научила бы
+    # обходить себя переносом, а не сверять факт.
+    doc = re.sub(r"\s+", " ", src.read(f"{OBS}/CONTROL_PANEL.md").replace("*", ""))
+    bad: List[str] = []
+
+    # Путь в документе записан человеческой формой с угловыми скобками, а в коде
+    # — glob'ом. Сверяется ЯДРО (`processes` … `stats` …), общее у обеих форм:
+    # сменись корень плоскости в коде — документ обязан покраснеть.
+    if not str(pattern).startswith("processes.") or ".stats." not in str(pattern):
+        raise Unverifiable(f"STATS_SUBTREE_PATTERN сменил форму ({pattern!r}) — проверку нужно переписать")
+    if "`processes.<процесс>.stats.<имя метрики>`" not in doc:
+        bad.append(f"CONTROL_PANEL.md не называет форму пути чисел, а код её держит: {pattern!r}")
+    if f"`{pattern}`" not in doc and "`processes.<процесс>.stats.<имя метрики>`" not in doc:
+        bad.append(f"CONTROL_PANEL.md не сходится с STATS_SUBTREE_PATTERN={pattern!r}")
+    if f"интервал `{interval}`" not in doc:
+        bad.append(f"CONTROL_PANEL.md: дефолтный интервал чисел в коде {interval!r}, в документе его нет")
+    if bool(log_default) is not True:
+        bad.append(f"дефолт log_snapshots в схеме стал {log_default!r} — документ обещает true")
+    elif "log_snapshots` с дефолтом `true`" not in doc:
+        bad.append("CONTROL_PANEL.md не называет дефолт log_snapshots (`true`), а от него зависит миграция")
+    if "Теги в путь НЕ входят и правилом не адресуются" not in doc:
+        bad.append("CONTROL_PANEL.md молчит про Р-2(а): теги правилом не адресуются")
+
+    counters = _string_members(src, f"{MODULES}/process_module/managers/observability_reload.py", "PLANE_COUNTER_KEYS")
+    for key in ("numbers_policy_dropped", "numbers_policy_throttled"):
+        if key not in counters:
+            bad.append(f"{key} обещан документами, но не публикуется через PLANE_COUNTER_KEYS")
+        if f"`{key}`" not in doc:
+            bad.append(f"CONTROL_PANEL.md не называет счётчик {key}")
+
+    # Task 2.9 (M2): предпосылка — структурный факт исходника, не константа: ключ
+    # `enabled` отдаётся `StatsManager.observability_readback` литеральным
+    # присваиванием `out["enabled"] = ...`.
+    stats_manager_src = src.read(f"{MODULES}/statistics_module/core/stats_manager.py")
+    if not re.search(r'out\[["\']enabled["\']\]\s*=', stats_manager_src):
+        raise Unverifiable(
+            "StatsManager.observability_readback не отдаёт ключ 'enabled' структурно — предпосылка Task 2.9 (M2) "
+            "не вычислилась"
+        )
+    # Сверка СКОУПЛЕНА разделом «Политика плоскости ЧИСЕЛ»: и `enabled`, и
+    # `plane_disabled` — обычные слова, живущие в документе и вне этого раздела
+    # (`flight.enabled`, `history.enabled`), и глобальный substring-поиск не
+    # заметил бы, что именно ЭТОТ раздел перестал называть ключ.
+    numbers_section = re.sub(
+        r"\s+", " ", _section(src.read(f"{OBS}/CONTROL_PANEL.md"), "Политика плоскости ЧИСЕЛ").replace("*", "")
+    )
+    if "`enabled`" not in numbers_section or "plane_disabled" not in numbers_section:
+        bad.append("CONTROL_PANEL.md не называет readback-ключ 'enabled' (имя схемы) рядом с 'plane_disabled'")
+    return "; ".join(bad) if bad else None
+
+
+def _check_heartbeat_tick_claims(src: Sources) -> Optional[str]:
+    """CONTROL_PANEL.md о честном такте ↔ схема и код (Ф2, задача 2.3/2.11, M9).
+
+    Три утверждения с ЧИСЛОМ или ИМЕНЕМ, расходящиеся с кодом молча:
+
+    * L0-дефолт ``heartbeat_interval_sec`` (``5.0``) ↔ поле схемы
+      ``ObservabilityConfig``;
+    * имена двух новых readback-полей (``tick_effective_sec``,
+      ``effective_interval_sec``) — оба введены задачей 2.3, документ обязан
+      называть их дословно, иначе оператор не найдёт ключ по документу;
+    * дефолт поддерева порта (``DEFAULT_SUBTREE_INTERVAL_SEC``) — Ф2, задача
+      2.11 (Р-11): «не чаще такта, без дополнительного троттла». Документ
+      обязан называть ЭТО число, а не число сужения, которого больше нет.
+      **Страж переписан, а не расширен** (найдено при подготовке задачи
+      2.11): прежняя форма сравнивала ``subtree_default < heartbeat_default``
+      (``0.0 < 5.0``) — условие осталось истинным и после отмены сужения,
+      то есть страж продолжил бы молчаливо проходить, охраняя утверждение
+      («предохранитель недостижим БЕЗУСЛОВНО»), которого в коде больше нет.
+      Он сторожил СЛЕДСТВИЕ старого столкновения чисел, а не его ПРИЧИНУ, и
+      не заметил бы, что причина снята. Проверяется теперь ПРЯМО: Р-11
+      требует ровно ``0.0`` (поддерево не заявляет частоты вовсе) — любое
+      другое значение обязано остановить сверку, а не проползти мимо
+      арифметики, которая на новом числе тоже сходится.
+    """
+    config_file = f"{MODULES}/process_module/configs/observability_config.py"
+    default = _schema_field_default(src, config_file, "ObservabilityConfig", "heartbeat_interval_sec")
+    if not isinstance(default, (int, float)) or isinstance(default, bool):
+        raise Unverifiable(f"heartbeat_interval_sec: дефолт {default!r} не число — предпосылка не вычислилась")
+
+    policy_rel = f"{MODULES}/process_module/configs/observation_policy.py"
+    subtree_default = _module_constant(src, policy_rel, "DEFAULT_SUBTREE_INTERVAL_SEC")
+    if not isinstance(subtree_default, (int, float)) or isinstance(subtree_default, bool):
+        raise Unverifiable(f"DEFAULT_SUBTREE_INTERVAL_SEC: {subtree_default!r} не число — предпосылка не вычислилась")
+    if float(subtree_default) != 0.0:
+        raise Unverifiable(
+            f"DEFAULT_SUBTREE_INTERVAL_SEC={subtree_default!r} — решение Р-11 (2026-09-03) требует 0.0 "
+            "(«поддерево не заявляет частоты вовсе»); формулировку CONTROL_PANEL.md и код нужно "
+            "пересмотреть вместе"
+        )
+
+    # Пробелы и жирный markdown схлопываются ДО сверки — тем же приёмом, что F2-1:
+    # перенос строки в документе — вопрос вёрстки, а не расхождение с кодом.
+    doc = re.sub(r"\s+", " ", src.read(f"{OBS}/CONTROL_PANEL.md").replace("*", ""))
+    bad: List[str] = []
+
+    if f"(L0 `{default}`)" not in doc:
+        bad.append(f"CONTROL_PANEL.md не называет L0-дефолт heartbeat_interval_sec ({default!r})")
+    # Имя ищется БЕЗ обрамляющих бэктиков: в документе оно законно живёт внутри
+    # более длинного пути (`resolved.<метрика>.effective_interval_sec`), и требовать
+    # изолированного упоминания значило бы сторожить ВЁРСТКУ, а не утверждение.
+    # Предмет проверки — «документ называет это поле», а не «называет его отдельно».
+    for name in ("tick_effective_sec", "effective_interval_sec"):
+        if name not in doc:
+            bad.append(f"CONTROL_PANEL.md не называет readback-поле {name}")
+    if f"поддерева `{subtree_default}` с" not in doc:
+        bad.append(f"CONTROL_PANEL.md не называет дефолт поддерева числом ({subtree_default!r})")
+    return "; ".join(bad) if bad else None
+
+
 CHECKS: Sequence[Check] = (
+    Check(
+        "F2-3",
+        "observability/CONTROL_PANEL.md",
+        "честный такт: L0-дефолт heartbeat_interval_sec, readback tick_effective_sec/effective_interval_sec,"
+        "дефолт поддерева = 0.0 (сужение голоса снято, Р-11)",
+        "Ф2 задача 2.3 (M9) / 2.11 (Р-11)",
+        _check_heartbeat_tick_claims,
+    ),
+    Check(
+        "F2-1",
+        "observability/CONTROL_PANEL.md",
+        "плоскость ЧИСЕЛ: форма пути, дефолтный интервал, дефолт log_snapshots, имена счётчиков",
+        "Ф2 задача 2.1 (Р-2а/Р-3а)",
+        _check_numbers_policy_claims,
+    ),
     Check(
         "F1-1",
         "observability/CONNECTORS.md",
@@ -626,6 +1019,27 @@ CHECKS: Sequence[Check] = (
         "образец шага 1 несёт initialize/shutdown",
         "линза S2",
         _check_recipe_lifecycle_is_named,
+    ),
+    Check(
+        "C3",
+        "observability/CONNECTORS.md",
+        "имена счётчиков раздела «Что ловится автоматически» = HOOK_COUNTER_KEYS",
+        "C3 ревью 2026-08-28 (Task 1.1)",
+        _check_hook_counter_names,
+    ),
+    Check(
+        "T2.8",
+        "backend_ctl/AGENTS.md",
+        "kind telemetry_readmodel_empty (шпаргалка system_overview) — реальный литерал overview.py",
+        "Task 2.8 плана observability-closure (Ф2)",
+        _check_overview_telemetry_readmodel_empty_kind,
+    ),
+    Check(
+        "H3H4-schema",
+        "observability/CONTROL_PANEL.md",
+        "секции observability.* называют КАЖДОЕ поле своей Pydantic-схемы (схемо-управляемо)",
+        "Н-4, добор ревью Ф2 (замыкатель класса, 2026-09-01)",
+        _check_observability_section_fields,
     ),
 )
 

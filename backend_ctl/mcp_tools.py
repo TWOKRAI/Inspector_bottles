@@ -25,6 +25,7 @@ from backend_ctl.capability_render import FORMATS, render_concise, render_help
 from backend_ctl.conditions import DEFAULT_AWAIT_TIMEOUT
 from backend_ctl.driver import BackendDriver
 from backend_ctl.events import ALL_PLANE, PLANES, page_with_reset_retry
+from backend_ctl.protocol import unwrap
 from backend_ctl.recorder import DEFAULT_MAX_EVENTS
 
 #: Handler инструмента: (driver, arguments) → JSON-сериализуемый результат.
@@ -175,6 +176,118 @@ def _introspect_plugins(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 def _introspect_telemetry(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.introspect_telemetry(args["process"], **_kw_timeout(args))
+
+
+#: Секции ответа ``introspect.observability``, которыми умеет сужать
+#: :func:`_introspect_observability`. Список ЗАКРЫТ намеренно: реальный ответ шире
+#: (``documents``/``stats``/``events``/``flight`` и оркестраторская добавка), но эти
+#: семь — те, что названы контрактом Task 0.4, и enum схемы обязан совпадать с тем,
+#: что фильтр реально умеет. Не ставший здесь именем ключ доедет полным ответом
+#: (без ``section``), а не тихой пустотой.
+OBSERVABILITY_SECTIONS: tuple = (
+    "effective",
+    "counters",
+    "provenance",
+    "history",
+    "observation",
+    "audit",
+    "layers",
+)
+
+#: Ключи-конверт, переживающие сужение по ``section``: без них ответ перестал бы
+#: быть ответом (``success`` читает и сервер, и агент).
+_OBSERVABILITY_ENVELOPE: tuple = ("success", "process", "error")
+
+
+def _introspect_observability(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    """Зеркало команды ``introspect.observability`` (M3, Task 0.4).
+
+    До этой задачи полный ответ команды читал ТОЛЬКО драйвер, да и тот через
+    :meth:`~backend_ctl.driver.BackendDriver.observability_counters` — то есть
+    одну секцию из четырнадцати. Агент, живущий MCP-инструментами, о слоях,
+    провенансе, аудите и порте наблюдений узнать не мог вовсе.
+
+    ``section`` — сужение до ОДНОЙ секции (:data:`OBSERVABILITY_SECTIONS`).
+    Фильтр — БЕЛЫЙ список: доезжает конверт (``success``/``process``) плюс
+    запрошенная секция, всё остальное отсекается. Это решение, а не побочный
+    эффект: ответ команды шире семи названных секций, и «сузил до counters, а
+    приехало ещё пять» означало бы, что сужение не работает — ради него
+    инструмент и зовут (контекст агента).
+
+    Секция названа верно, но её нет в ответе процесса (плоскость не поднята) →
+    ответ несёт ``sections_present``: «процесс её не отдал» и «фильтр съел» —
+    разные факты, и различить их обязан ответ, а не догадка читателя.
+    """
+    section = args.get("section")
+    if section is not None and section not in OBSERVABILITY_SECTIONS:
+        return {
+            "success": False,
+            "error": f"неизвестная section {section!r}: ожидаю одну из {list(OBSERVABILITY_SECTIONS)}",
+        }
+    # `send_command` отдаёт СЫРОЙ IPC-конверт (`type`/`sender`/`targets`/`queue_type`/
+    # `_fence`/`_receive_info`), а ответ команды лежит под `result`.
+    #
+    # ПОПРАВКА (ревью Ф0.5, находка 5). Прежняя редакция этого комментария утверждала,
+    # что соседние инструменты конверт разворачивают сами. Это НЕВЕРНО и измерено на
+    # живом стенде (process="points"): конверт отдают шесть из восьми —
+    # introspect_telemetry / handlers / queues / registers / plugins / router_stats;
+    # разворачивают только introspect_observability (после этой правки) и
+    # introspect_memory. Дефект соседей предсуществующий и вне периметра Ф0 — записан в
+    # план, — но уверенное «у соседей этого нет» пережило бы сам дефект, и потому снято.
+    #
+    # Здесь разворачиваем явно, и это не
+    # косметика: без разворота фильтр `section` искал секции на верхнем уровне
+    # КОНВЕРТА и не находил их НИКОГДА — `introspect_observability(seg,
+    # section="observation")` на живом стенде отвечал `sections_present` со списком
+    # транспортных ключей. Фейковый драйвер в тестах отдаёт плоский dict, поэтому
+    # дефект был виден только живым прогоном (Ф0.5, 2026-08-29).
+    # Конверт вдобавок съедал байтовый потолок: 18165 Б против 12000.
+    result = unwrap(
+        drv.send_command(args["process"], "introspect.observability", **_kw_timeout(args)),
+        leaf=True,
+    )
+    if section is None or not isinstance(result, dict):
+        return result
+    # Отказ команды сужать НЕЛЬЗЯ (ревью Ф0.5, находка 4). Прежде на неответившем
+    # процессе выдавалось:
+    #   introspect_observability(process="нет-такого", section="counters")
+    #   -> {"success": false, "error": "timeout", "sections_present": ["correlation_id"]}
+    # Докстрока обещает различать ДВА факта — «процесс секцию не отдал» и «фильтр съел»;
+    # здесь появлялся третий, и читатель, идущий по `sections_present`, решал бы, что
+    # плоскости наблюдаемости лежат, тогда как команда просто не ответила.
+    if result.get("success") is False:
+        return result
+    narrowed = {key: result[key] for key in _OBSERVABILITY_ENVELOPE if key in result}
+    narrowed["section"] = section
+    if section in result:
+        narrowed[section] = result[section]
+    else:
+        narrowed["sections_present"] = sorted(k for k in result if k not in _OBSERVABILITY_ENVELOPE)
+    return narrowed
+
+
+def _history_query(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    """Task 3.5: тонкая проекция аргументов на driver.history_query — без логики.
+
+    ``full`` из схемы здесь НЕ читается и driver'у не передаётся: это ключ
+    байтового потолка MCP-ответа (`dispatch._cap_heavy` читает его из СЫРЫХ
+    `arguments`, независимо от того, прочёл ли его handler) — число строк это
+    поле не ограничивает, ограничивает `limit`.
+    """
+    return drv.history_query(
+        kind=args.get("kind"),
+        metric=args.get("metric"),
+        process=args.get("process"),
+        module=args.get("module"),
+        severity=args.get("severity"),
+        min_severity=args.get("min_severity"),
+        since=args.get("since"),
+        until=args.get("until"),
+        text=args.get("text"),
+        limit=args.get("limit"),
+        pm_name=args.get("pm_name", "ProcessManager"),
+        **_kw_timeout(args),
+    )
 
 
 def _introspect_memory(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -444,7 +557,8 @@ TOOLS: List[ToolSpec] = [
         "«Один вызов = вся картина» (B.3): компактная сводка по всем процессам топологии "
         "(статус/воркеры/router-счётчики/очереди/память) + telemetry fps + счётчики driver'а "
         "+ секция anomalies (подсказки: router_dropped, queue_depth, fps_zero_while_running, "
-        "recent_recovery, late_replies, events_evicted, …). Первая команда сессии после "
+        "recent_recovery, late_replies, events_evicted, health_errors/health_<status> — отказ, "
+        "доехавший до плоскости ошибок процесса, назван с last_error, …). Первая команда сессии после "
         "capabilities: вердикты, не археология. Только существующие introspect-ручки (read-only). "
         "Крупный ответ усекается до карты формы — full=true для полного объёма (E.3).",
         _obj({"timeout": _TIMEOUT, "full": _FULL}),
@@ -526,6 +640,120 @@ TOOLS: List[ToolSpec] = [
         _introspect_telemetry,
     ),
     ToolSpec(
+        "introspect_observability",
+        "Плоскости наблюдаемости процесса ОДНИМ ответом: что настроено и что уже потеряно. "
+        "Зеркало команды introspect.observability — до Task 0.4 её полный ответ читал только "
+        "driver, и то одной секцией counters. Секции: effective (действующая конфигурация — "
+        "пороги скоупов, каналы, ручки истории/событий/дампов), counters (ПОТЕРИ: buffer.dropped, "
+        "errors_to_floor, потери hub'а — «что уже не доехало»), provenance (какой из четырёх слоёв "
+        "framework/app/recipe/session выиграл КАЖДЫЙ действующий ключ и из какого файла — ответ на "
+        "«почему у меня INFO»), history (почему вкладка логов пуста: порог, стор, ретеншен), "
+        "observation (порт наблюдений: политика по ПУТИ, правила, не совпавшие ни с чем, и ещё не "
+        "оценённые), audit (когда и ЧЕМ меняли наблюдаемость, включая неудавшиеся попытки), "
+        "layers (что держит сессия L3 и когда истечёт TTL). "
+        "section=<имя> сужает ответ до одной секции (белый список: конверт + она); неизвестное имя — "
+        "отказ с перечнем, а не молчание. Ответ шире этих семи (documents/stats/events/flight и "
+        "добавка оркестратора) — без section приезжает целиком. Крупный ответ усекается: full=true "
+        "снимает потолок. Не мутирует состояние процесса.",
+        _obj(
+            {
+                "process": _PROCESS,
+                "section": {
+                    "type": "string",
+                    "enum": list(OBSERVABILITY_SECTIONS),
+                    "description": "Сузить ответ до одной секции. Опц. (по умолчанию — весь ответ).",
+                },
+                "timeout": _TIMEOUT,
+            },
+            ["process"],
+        ),
+        _introspect_observability,
+    ),
+    ToolSpec(
+        "history_query",
+        "История наблюдаемости из sqlite-стора ОДНИМ вызовом, без чтения файла и без "
+        "отдельного драйвера (Task 3.5, T6/CTL-F6) — «что БЫЛО», в отличие от log_tail/"
+        "observability_tail (те про «что сейчас», живой push-хвост подпиской). Путь к БД "
+        "берётся ТОЛЬКО из readback introspect.observability(pm_name).history.db_path — "
+        "истории нет/отключена → названный отказ, sqlite не открывается вовсе. Соединение "
+        "read-only. Фильтры сужают: kind/process/module/severity(список членства)/"
+        "min_severity(порог)/since/until(отрицательное — окно последних N секунд ОТ СЕЙЧАС, "
+        "ноль — абсолютная эпоха, не «сейчас»)/text(полнотекстовый поиск FTS5, не подстрока — "
+        "запрос без слов или недоступный индекс отвечают названным отказом, а не пустым "
+        "списком). metric — срез по ПОЛНОМУ имени метрики ('capture.drops', с писателем) "
+        "плюс ключи series ([[ts, value], …], СТАРЫЕ ПЕРВЫМИ — обратный порядок ленте) и "
+        "series_skipped (сколько строк среза не дали точки: нет числового extra.value; "
+        "такая строка остаётся в rows). Оба ключа есть всегда, когда задан metric, в том "
+        "числе нулём. ВАЖНО: ряд строится из СТРАНИЦЫ ленты и наследует её кап — limit "
+        "режет строки ДО построения ряда, и усечение окна ничем не видно (series_skipped "
+        "считает только строки без числового значения, а не отброшенные лимитом). Замер "
+        "ревью 2026-09-05: since=-600 limit=100 → 100 точек, охват 496 с; limit=200 → "
+        "120 точек, охват 596 с, при series_skipped=0 в обоих случаях. Правило: на окно "
+        "since=-600 при такте 5 с задавай limit>=150. Файл истории без колонки metric "
+        "(его не открывал на запись ни один "
+        "процесс текущей версии) отвечает названным отказом, а не тихим полным дампом. "
+        "limit по умолчанию 100 (не вся БД); full снимает байтовый "
+        "потолок ОТВЕТА, число строк не трогает. ВАЖНО ПРО ОБЪЁМ (замер 2026-09-04 на живом "
+        "сторе): строка смешанной ленты ~3.0 КБ, kind=stats ~6.2 КБ, kind=log ~0.6 КБ, "
+        "kind=error ~0.5 КБ. При потолке ответа 12 КБ под него влезает около 10 строк "
+        "смешанной ленты, поэтому дефолтный limit=100 усекается до карты формы, а full=true "
+        "на нём даёт ~300 КБ (≈75 тыс. токенов) — обе двери плохи. Практика: ставь limit<=10 "
+        "ЛИБО сузь kind (для kind=error разумно до ~20) и листай окнами since/until. "
+        "Строка: id/kind/process/module/ts/severity/"
+        "severity_number/message/extra(dict). Свежие первыми (id DESC).",
+        _obj(
+            {
+                "kind": {"type": "string", "description": "Фильтр по kind: log/error/stats. Опц."},
+                "metric": {
+                    "type": "string",
+                    "description": "ПОЛНОЕ имя метрики ('capture.drops' — с писателем, не голое "
+                    "'drops'): срез ленты + ряд series [[ts, value], …] старыми вперёд и "
+                    "series_skipped. Ряд строится из СТРАНИЦЫ ленты и наследует её кап: "
+                    "limit режет ряд молча (series_skipped этого не показывает). На окно "
+                    "since=-600 при такте 5 с ставь limit>=150. Опц.",
+                },
+                "process": {"type": "string", "description": "Фильтр по процессу-источнику записи. Опц."},
+                "module": {"type": "string", "description": "Фильтр по модулю-источнику записи. Опц."},
+                "severity": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Членство по severity (например ['error','critical']). "
+                    "Пустой/опущен — не фильтрует.",
+                },
+                "min_severity": {
+                    "type": "integer",
+                    "description": "Порог по severity_number (например 17 — ERROR и выше). Опц.",
+                },
+                "since": {
+                    "type": "number",
+                    "description": "Отрицательное — окно последних |N| секунд ОТ СЕЙЧАС; 0/положительное — "
+                    "абсолютный unix-ts (0 — эпоха, не «сейчас»). Опц.",
+                },
+                "until": {
+                    "type": "number",
+                    "description": "Та же семантика, что since, верхняя граница окна. Опц.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Полнотекстовый поиск (FTS5, не подстрока) по message/module/process. "
+                    "Запрос без слов — названный отказ, не пустой список. Опц.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Максимум строк (по умолчанию 100). SQLite читает LIMIT<=0 как "
+                    "«без предела» — driver дополнительно клэмпит к 1, minimum здесь для схемы.",
+                },
+                "pm_name": {
+                    "type": "string",
+                    "description": "Процесс, у которого спрашивается history.db_path (по умолчанию 'ProcessManager').",
+                },
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _history_query,
+    ),
+    ToolSpec(
         "introspect_memory",
         "Инвентарь памяти процесса: SHM / пул займов / очереди — только СТАТИСТИКА "
         "(read-only; кадры/содержимое SHM не отдаёт). Секции memory/pool/queues/shm_registry "
@@ -594,7 +822,11 @@ TOOLS: List[ToolSpec] = [
         "Рестарт процесса с PID-ДОКАЗАТЕЛЬСТВОМ за один вызов: pid до → process.restart → "
         "поллинг supervision до живого процесса с ДРУГИМ pid. Ответ команды не судится "
         "(медленный рестарт штатно отвечает timeout'ом при доставленной команде) — вердикт "
-        "выносит факт: {restarted, pid_before, pid_after, instance_restarts_*, elapsed}. "
+        "выносит факт: {restarted, pid_before, pid_after, instance_restarts_*, elapsed, polls}. "
+        "`timeout` и `wait` — РАЗНЫЕ бюджеты (Task 0.2, M4): `timeout` ограничивает только "
+        "отправку process.restart (внутри ещё занижен потолком 5с — ответ всё равно не судится), "
+        "`wait` — окно подтверждения, его дедлайн стартует ПОСЛЕ возврата запроса, а не до отправки. "
+        "`polls` — сколько снимков supervision.status сделано в этом окне (не бывает молча пустым). "
         "Несуществующий процесс → restarted=false + reason. Разрушающий (перезапускает процесс).",
         _obj(
             {
@@ -1188,6 +1420,39 @@ TOOLS: List[ToolSpec] = [
 ]
 
 
+def tool_is_capped(name: str) -> bool:
+    """Касается ли инструмента байтовый потолок ответа (:func:`~backend_ctl.dispatch._cap_heavy`)."""
+    return name not in _UNCAPPED_TOOLS
+
+
+def _declare_full_param(tools: List[ToolSpec]) -> List[ToolSpec]:
+    """Добавить ``full`` в схему КАЖДОГО инструмента, которого касается усечение (M2, Task 0.4).
+
+    **Почему механизм, а не 44 правки руками.** ``_cap_heavy`` читает
+    ``args.get("full")`` у ЛЮБОГО инструмента, кроме :data:`_UNCAPPED_TOOLS`, а
+    ``full`` был объявлен ровно в трёх схемах из пятидесяти. Схема при этом
+    закрыта (``additionalProperties: false``), то есть подсказка об усечении
+    советовала агенту передать параметр, который схема ОТВЕРГАЕТ. Две стороны
+    одного факта — «кого урезают» и «кто может попросить полное» — обязаны
+    выводиться из одного списка, иначе они разъезжаются молча: именно так это и
+    произошло, когда политику усечения инвертировали (Task 3.2), а схемы
+    остались от белого списка тяжёлых.
+
+    ``setdefault``, а не присваивание: три инструмента объявили ``full`` со своим
+    описанием (``system_overview``, ``state_get_subtree``, ``telemetry_history``),
+    и затирать их автодобавкой значило бы менять документацию инструмента ради
+    единообразия. ``required`` не трогается вовсе — параметр опциональный.
+    """
+    for spec in tools:
+        if not tool_is_capped(spec.name):
+            continue
+        spec.input_schema.setdefault("properties", {}).setdefault("full", dict(_FULL))
+    return tools
+
+
+TOOLS = _declare_full_param(TOOLS)
+
+
 # ---------------------------------------------------------------------------
 # Классификация безопасности (Task 3.2) + MCP-annotations (Task 3.1)
 # ---------------------------------------------------------------------------
@@ -1216,6 +1481,11 @@ TOOL_SAFETY: Dict[str, str] = {
     "introspect_plugins": SAFETY_READ,
     "introspect_memory": SAFETY_READ,
     "introspect_telemetry": SAFETY_READ,
+    # Task 0.4 (M3): зеркало introspect.observability. Команда объявлена
+    # читающей (аудит она не пополняет), класс тот же — read.
+    "introspect_observability": SAFETY_READ,
+    # Task 3.5: чтение sqlite-стора истории read-only соединением — бэкенд не мутируется.
+    "history_query": SAFETY_READ,
     "supervision_status": SAFETY_READ,
     "register_snapshot": SAFETY_READ,
     "register_rollback_log": SAFETY_READ,

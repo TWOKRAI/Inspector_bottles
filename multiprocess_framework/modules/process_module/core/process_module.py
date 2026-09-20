@@ -94,6 +94,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     #: классовый словарь не может стать общим состоянием двух процессов.
     _observability_tail_intents: dict = {}
 
+    #: Ф1.1 (C3): установленные процессные хуки (``ProcessHooks``). Атрибут КЛАССА
+    #: со значением ``None`` — по тому же доводу, что у соседей выше: процесс,
+    #: собранный без ``initialize()`` (тестовый стенд, частичная сборка), обязан
+    #: отвечать на ``_uninstall_process_hooks()`` штатным «нечего снимать», а не
+    #: AttributeError. ``None`` — законное «хуки не ставили».
+    _process_hooks: Any = None
+
     def __init__(
         self,
         name: str,
@@ -156,6 +163,8 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.router_manager = None
         self.stats_manager = None
         self.console_manager = None
+        # Ф3, задача 3.1: порт наблюдений — четвёртый канонический слот.
+        self.observation_manager = None
 
         # Внутренние компоненты (композиция)
         self._lifecycle = ProcessLifecycle(self)
@@ -266,6 +275,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         except Exception as e:
             import traceback as _tb
 
+            # Ф1.1 (C3): провал подъёма НЕ зовёт shutdown() — он возвращает False
+            # (см. вызывающих). Без этой строки хуки, поставленные в
+            # ``_apply_managers_bundle``, пережили бы непонявшийся процесс:
+            # слоты интерпретатора остались бы занятыми объектом, чей адресат
+            # доставки полуразобран, и следующий ``install`` в том же
+            # интерпретаторе увидел бы их занятыми.
+            self._uninstall_process_hooks()
             self._log_error(f"Failed to initialize process '{self.name}': {e}")
             self._log_error(f"Traceback: {_tb.format_exc()}")
             return False
@@ -333,11 +349,76 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.stats_manager = bundle.stats
         self.command_manager = bundle.command
         self.console_manager = bundle.console
+        self.observation_manager = bundle.observation
         self._process_managers.register_all(bundle, self)
         self._process_managers.attach_adapters(bundle, self)
         self._process_managers.connect_event_manager(self)
         self._apply_boot_observability_layers()
         self._wire_observability_hub()
+        self._install_process_hooks()
+
+    def _install_process_hooks(self) -> None:
+        """Ф1.1 (C3): поставить три процессных хука — ПОСЛЕ подъёма менеджеров.
+
+        Порядок несущий. До подъёма плоскостей доставлять инцидент было бы
+        некуда, и первое же исключение потока ушло бы в
+        ``hook_delivery_failures`` — счётчик, который в норме обязан стоять на
+        нуле; окно «менеджеров ещё нет» превратилось бы в постоянный ложный
+        сигнал «маршрут ошибок сломан».
+
+        Ставятся и тогда, когда ``ErrorManager`` НЕ создан (``config={}``:
+        секции ошибок нет, ``_create_error_manager`` вернул None). Это не
+        снисхождение к неполной сборке: дорога инцидента —
+        :meth:`report_error` → health, и она есть у любого процесса; плоскость
+        ошибок добавляет к ней запись, а не создаёт её. Счётчики в этом случае
+        приватные (см. ``process_hooks._resolve_counter_store``).
+        """
+        from ...logger_module.core.process_hooks import install_process_hooks
+
+        self._process_hooks = install_process_hooks(self)
+
+    def _uninstall_process_hooks(self) -> None:
+        """Снять процессные хуки. Идемпотентно, падать не имеет права.
+
+        Зовут двое: :class:`ProcessLifecycle` на штатном останове и
+        ``initialize()`` на своём провале — хуки не должны пережить процесс,
+        который не поднялся (иначе следующий ``install`` в том же
+        интерпретаторе увидел бы занятые слоты чужим объектом).
+        """
+        hooks = self._process_hooks
+        if hooks is None:
+            return
+        self._process_hooks = None
+        try:
+            hooks.uninstall()
+        except Exception as exc:  # noqa: BLE001 — отказ уборки не имеет права сорвать останов
+            self._log_error(f"снятие процессных хуков не удалось: {exc}")
+
+    def report_error(self, exc: BaseException, context: str | None = None, **fields: Any) -> None:
+        """Дорога инцидента процесса: health-счётчик + плоскость ошибок + строка журнала.
+
+        Тонкий делегат к процесс-общему :class:`HealthState` — сознательно, а не
+        «пока так»: тремя адресатами инцидента уже владеет health (ADR-PM-030,
+        C2), и второй распределитель рядом означал бы два ответа на вопрос
+        «куда едет отказ». Задача 1.3 обобщит эту дорогу на миксин, чтобы её
+        имели и менеджеры; здесь она нужна процессу, потому что именно процесс —
+        адресат процессных хуков (``services.report_error`` их протокола).
+
+        **Обобщение состоялось (Task 1.3b), и этот метод ПЕРЕКРЫВАЕТ его.**
+        У :meth:`ObservableMixin.report_error` то же имя и та же форма вызова,
+        но у`ProcessModule` дорога богаче: health-счётчик, ``last_error`` и
+        breaker, которых у голого миксина нет. MRO отдаёт приоритет классу, и
+        это ровно то, что нужно, — но два одноимённых метода с разной полнотой
+        обязаны знать друг о друге, иначе разъедутся молча. Сторож на MRO —
+        ``base_manager/tests/test_report_error_mechanism_hazards.py::
+        TestProcessModuleKeepsItsRicherRoad``.
+
+        ``**fields`` уезжают в контекст записи плоскости ошибок (``thread``,
+        ``traceback``, ``hook`` у хука).
+        """
+        from ..health import get_or_create_health_state
+
+        get_or_create_health_state(self).report_error(exc, context=context, **fields)
 
     def _apply_boot_observability_layers(self) -> None:
         """Применить стек слоёв на старте — там, где ассемблер этого не сделал.
@@ -446,11 +527,14 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         пилота (worker_module). log/stats буферизуются в hub и дренируются по
         heartbeat; error-слот остаётся реальным error_manager (write-through)."""
         from ..managers.observability_wiring import (
+            error_plane_store_warning,
             resolve_history_policy,
+            resolve_history_store_settings,
             wire_document_sink,
             wire_event_selector,
             wire_observability_store,
             wire_process_observability,
+            wire_voices_policy,
         )
 
         # Ф8.5: плоскость документов — НЕЗАВИСИМО от наличия hub'а. Аудит смен
@@ -464,6 +548,14 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # `_apply_boot_observability_layers` (см. вызывающего): ручки к этому
         # моменту уже разрешены, и второго резолва не заводится.
         wire_event_selector(self)
+
+        # Ф1.4 (M17): окна голоса — политика процесса, не объект. Ставится
+        # РАНЬШЕ прочих сшивок по существу, а не по вкусу: держатели окон
+        # (роутер, реестр очередей) уже живы к этому моменту и берут окно на
+        # первом же голосе. Опоздай политика — первые голоса процесса ушли бы по
+        # встроенному дефолту, и настройка «тише на линии» не действовала бы ровно
+        # в самый шумный отрезок жизни процесса, на старте.
+        wire_voices_policy(self)
 
         # Ф5 (5.1): рекордер дампов — у каждого процесса и по тому же доводу.
         # ПОСЛЕ `wire_event_selector` только ради читаемости: обе сшивки читают
@@ -488,19 +580,39 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             # безлимитную таблицу — ровно то состояние, которое задача чинит.
             policy = resolve_history_policy(self)
             self._observability_history_policy = policy
-            self._observability_store, self._observability_store_taps = wire_observability_store(
-                self.error_manager, self.logger_manager, process=self.name, min_level=policy["level"]
-            )
-            # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
-            # Ни одного tap → вкладка «Ошибки» молча пуста — предупреждаем
-            # (терять можно, молчать нельзя; 5.20 review #6).
-            if not self._observability_store_taps:
-                self._log_warning(
-                    f"Process '{self.name}': ObservabilityStore без error-tap "
-                    "(ни logger_manager, ни error_manager не поддержали add_tap) "
-                    "— ошибки в стор попадать НЕ будут",
-                    module="observability",
+            # Ф2 (задача 2.2): `history.enabled`/`history.db_path` — вторая пара
+            # полей секции, судьба СТОРА целиком. До этой задачи стор поднимался
+            # ВСЕГДА, когда есть hub, и путь к БД был только машинным дефолтом —
+            # ключи существовали в схеме и не значили ничего (класс дефекта,
+            # который вся задача 2.2 и закрывает).
+            store_settings = resolve_history_store_settings(self)
+            if store_settings["enabled"]:
+                self._observability_store, self._observability_store_taps = wire_observability_store(
+                    self.error_manager,
+                    self.logger_manager,
+                    db_path=store_settings["db_path"] or None,
+                    process=self.name,
+                    min_level=policy["level"],
+                    # Task 3.3: ёмкость очереди tap'а — из той же политики, что
+                    # порог и пределы ретеншена (`observability.history`).
+                    queue_capacity=policy["queue_capacity"],
                 )
+                # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
+                # Дырка в плоскости ошибок → вкладка «Ошибки» молча беднеет —
+                # предупреждаем (терять можно, молчать нельзя; 5.20 review #6).
+                # Само решение и оба текста живут у проводки, которая их и порождает
+                # (`error_plane_store_warning`): ревью Task 1.3a показало, что
+                # прежнее условие «список tap'ов пуст» пропускало молча раскладку
+                # «есть logger-tap, нет error-tap» — ту самую, на которой инцидент
+                # терялся целиком.
+                store_warning = error_plane_store_warning(self.name, self._observability_store_taps)
+                if store_warning:
+                    self._log_warning(store_warning, module="observability")
+            else:
+                # `enabled=False` — операторское решение «истории не держим»,
+                # а не отказ: молчим, как и у соседних гейтов (`flight.enabled`,
+                # `documents.factory` пустой).
+                self._observability_store, self._observability_store_taps = None, []
 
     def _init_communication(self):
         """Инициализация коммуникации процесса."""
@@ -1007,6 +1119,26 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # P4.4.1 (B2): builtins (worker.*/wire.*/introspect.*) живут в CommandManager;
         # ре-синк в event_dispatcher больше не нужен — kind-router в receive()
         # диспатчит type=="command" напрямую в CommandManager.
+
+        # Task 3.2 К2 (вердикт CTO): ровно одна INFO-сводка регистрации на
+        # процесс, сразу после последней бутовой регистрации. Зовём её
+        # ТОЛЬКО у CommandManager — Dispatcher.log_registration_summary()
+        # нарочно не зовётся: register_command делегирует РОВНО в один
+        # вызов dispatcher.register_handler, счётчики равны по построению
+        # (стенд: 71/71, 93/93 на всех восьми процессах), и вторая строка
+        # с тем же числом под другим существительным была бы загадкой для
+        # читателя лога, а не информацией. Фейковый/отсутствующий
+        # command_manager в тестах — не повод падать: метод посчитан
+        # (WARNING с именем объекта), а не проглочен молча и не фатален.
+        if hasattr(self.command_manager, "log_registration_summary"):
+            self.command_manager.log_registration_summary()
+        else:
+            cm_name = getattr(self.command_manager, "manager_name", type(self.command_manager).__name__)
+            self._log_warning(
+                f"ProcessModule '{self.name}': command_manager '{cm_name}' не поддерживает "
+                "log_registration_summary() — сводка регистрации пропущена",
+                module="lifecycle",
+            )
 
         # Heartbeat (composition)
         from ..heartbeat.process_heartbeat import ProcessHeartbeat

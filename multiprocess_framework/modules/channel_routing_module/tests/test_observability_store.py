@@ -80,8 +80,13 @@ class TestNormalization:
         store.append_records([_stat_rec(metric="fps", value=25, metric_type="gauge")])
         row = store.list_records(kind="stats")[0]
         assert row["message"] == "fps"
-        assert row["severity"] == "gauge"  # для stats severity = metric_type
+        # Task 3.1 (К7): severity называет КЛАСС записи, один на все числовые формы.
+        # Род метрики уехал в структуру рядом с числом — фактом он быть не перестал.
+        assert row["severity"] == "number"
+        assert row["extra"]["metric_type"] == "gauge"
         assert row["extra"]["value"] == 25
+        # Task 3.1 (К4): одиночная метрика ЕСТЬ одно число — у неё есть имя.
+        assert row["metric"] == "fps"
         store.close()
 
     def test_log_context_in_extra(self, tmp_path):

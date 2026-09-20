@@ -123,70 +123,262 @@ def _straightness(prev: tuple[int, int], cur: tuple[int, int], nxt: tuple[int, i
     return math.acos(max(-1.0, min(1.0, cosang)))
 
 
-def trace_skeleton(skel: np.ndarray) -> list[np.ndarray]:
+# Таблица «прямизны» для пары направлений (d_in → d_out): угол поворота, как в
+# _straightness, но посчитанный один раз для 64 пар. Шаг обхода всегда к одному
+# из 8 соседей, поэтому угол зависит только от пары направлений, не от координат.
+_TURN = tuple(
+    tuple(_straightness((0, 0), _NB8[a], (_NB8[a][0] + _NB8[b][0], _NB8[a][1] + _NB8[b][1])) for b in range(8))
+    for a in range(8)
+)
+# Обратное направление: _NB8[i] и _NB8[7-i] противоположны (проверяется тестом).
+_REV = tuple(7 - i for i in range(8))
+_TURN_ARR = np.array(_TURN, dtype=np.float64)
+_REV_ARR = np.array(_REV, dtype=np.int64)
+
+try:  # Numba опциональна: без неё работает тот же алгоритм на чистом Python.
+    from numba import njit as _njit
+
+    _HAS_NUMBA = True
+except ImportError:  # pragma: no cover — окружение без numba
+    _HAS_NUMBA = False
+
+
+if _HAS_NUMBA:
+    # boundscheck=True обязателен: без него нарушенный инвариант «каждое ребро один
+    # раз» (например, ошибка в пометке рёбер) пишет за границу out/offs и даёт не
+    # исключение, а порчу кучи — инъекция 2026-09-04 показала зелёный полный набор
+    # тестов и крах 0xC0000374 в следующем процессе. Цена проверки измерена ниже
+    # в отчёте; ядро зависит от неё, а от ядра — траектория робота.
+    @_njit(cache=True, boundscheck=True)
+    def _walk_nb(start, d0, nbr, deg, turn, rev, used, out, pos):  # pragma: no cover — numba
+        """Один штрих от узла start в направлении d0; id узлов пишутся в out с pos."""
+        cur = nbr[start, d0]
+        out[pos] = start
+        out[pos + 1] = cur
+        pos += 2
+        used[start * 8 + d0] = 1
+        used[cur * 8 + rev[d0]] = 1
+        prev = start
+        d_in = d0
+        while True:
+            base = cur * 8
+            nxt = -1
+            nxt_d = -1
+            n_cands = 0
+            best = 0.0
+            for d in range(8):
+                nb = nbr[cur, d]
+                if nb < 0 or nb == prev or used[base + d] != 0:
+                    continue
+                n_cands += 1
+                if n_cands == 1:
+                    nxt = nb
+                    nxt_d = d
+                    best = turn[d_in, d]
+                else:
+                    t = turn[d_in, d]
+                    if t < best:
+                        nxt = nb
+                        nxt_d = d
+                        best = t
+            if n_cands == 0:
+                break
+            used[base + nxt_d] = 1
+            used[nxt * 8 + rev[nxt_d]] = 1
+            out[pos] = nxt
+            pos += 1
+            prev = cur
+            cur = nxt
+            d_in = nxt_d
+            if deg[cur] == 1:
+                break
+        return pos
+
+    @_njit(cache=True, boundscheck=True)
+    def _trace_all_nb(nbr, deg, turn, rev):  # pragma: no cover — numba
+        """Три фазы обхода (концы → развилки → петли). Возвращает (ids, offsets)."""
+        n = nbr.shape[0]
+        deg_sum = 0
+        for i in range(n):
+            deg_sum += deg[i]
+        n_edges = deg_sum // 2
+        used = np.zeros(n * 8, dtype=np.uint8)
+        # Каждый штрих = рёбра + 1 узел, штрихов не больше, чем рёбер.
+        out = np.empty(2 * n_edges + 2, dtype=np.int64)
+        offs = np.empty(n_edges + 2, dtype=np.int64)
+        npoly = 0
+        pos = 0
+        for phase in range(3):
+            for node in range(n):
+                dg = deg[node]
+                if phase == 0 and dg != 1:
+                    continue
+                if phase == 1 and dg < 3:
+                    continue
+                base = node * 8
+                if phase == 2:
+                    if dg != 2:
+                        continue
+                    free = 0
+                    first_d = -1
+                    for d in range(8):
+                        if nbr[node, d] >= 0 and used[base + d] == 0:
+                            free += 1
+                            if first_d < 0:
+                                first_d = d
+                    if free != 2:  # чистая петля — оба ребра не тронуты
+                        continue
+                    offs[npoly] = pos
+                    pos = _walk_nb(node, first_d, nbr, deg, turn, rev, used, out, pos)
+                    npoly += 1
+                    continue
+                # Проверка «ребро не пройдено» в момент итерации: обход по петле
+                # может вернуться в этот же узел и занять его второе направление.
+                for d in range(8):
+                    if nbr[node, d] >= 0 and used[base + d] == 0:
+                        offs[npoly] = pos
+                        pos = _walk_nb(node, d, nbr, deg, turn, rev, used, out, pos)
+                        npoly += 1
+        offs[npoly] = pos
+        return out[:pos], offs[: npoly + 1]
+
+
+def trace_skeleton(skel: np.ndarray, *, use_numba: bool | None = None) -> list[np.ndarray]:
     """Скелет (1px, 0/255) → список полилиний-центральных линий (Nx2, x,y).
 
     Развилки проходятся НАПРЯМУЮ (самое прямое продолжение) — линия не рвётся на
     каждом перекрёстке, получаются длинные непрерывные штрихи и меньше холостых
     ходов. Каждое ребро скелета обходится один раз. Петли тоже извлекаются.
+
+    Реализация на плоских целых индексах (2026-09-04): соседи и степени узлов
+    считаются векторно один раз, использованные рёбра лежат в bytearray по
+    (узел, направление), прямизна на развилке берётся из таблицы _TURN. Хэшей
+    кортежей и frozenset на горячем пути нет. Правило выбора продолжения то же,
+    что в исходной реализации (эталон — tests/_reference_trace.py); отличие
+    одно: узлы перебираются в растровом порядке, а не в порядке set(), поэтому
+    разбиение на штрихи у развилок может отличаться при том же покрытии рёбер.
+    Ядро обхода есть в двух исполнениях с одним алгоритмом: numba (@njit,
+    _trace_all_nb, используется когда numba установлена) и чистый Python
+    (запасной путь для окружений без numba). use_numba=None — авто.
     """
-    ys, xs = np.nonzero(skel)
-    pixels = set(zip(ys.tolist(), xs.tolist()))
-    if not pixels:
+    sk = skel > 0
+    if not sk.any():
         return []
+    h, w = sk.shape
+    # Рамка в 1px снимает проверки границ: у любого узла все 8 соседей внутри массива.
+    padded = np.zeros((h + 2, w + 2), dtype=bool)
+    padded[1:-1, 1:-1] = sk
+    ys, xs = np.nonzero(padded)  # растровый порядок
+    n = int(ys.size)
+    stride = w + 2
+    flat = ys.astype(np.int64) * stride + xs.astype(np.int64)
+    node_of = np.full(padded.size, -1, dtype=np.int64)
+    node_of[flat] = np.arange(n, dtype=np.int64)
+    offs = np.array([dy * stride + dx for dy, dx in _NB8], dtype=np.int64)
+    nbr = node_of[flat[:, None] + offs[None, :]]  # n×8, -1 = соседа нет
+    deg = (nbr >= 0).sum(axis=1).astype(np.int64)
 
-    def neigh(p: tuple[int, int]) -> list[tuple[int, int]]:
-        y, x = p
-        return [(y + dy, x + dx) for dy, dx in _NB8 if (y + dy, x + dx) in pixels]
+    xs_f = xs.astype(np.float64) - 1.0  # минус рамка
+    ys_f = ys.astype(np.float64) - 1.0
 
-    degree = {p: len(neigh(p)) for p in pixels}
-    used_edges: set = set()
-    polylines: list[list[tuple[int, int]]] = []
+    if use_numba is None:
+        use_numba = _HAS_NUMBA
+    if use_numba:
+        if not _HAS_NUMBA:
+            raise RuntimeError("trace_skeleton(use_numba=True): numba не установлена")
+        ids, bounds = _trace_all_nb(np.ascontiguousarray(nbr), deg, _TURN_ARR, _REV_ARR)
+        # Инвариант обхода: узлов записано ровно (рёбер + штрихов). Любое двойное
+        # прохождение ребра ломает равенство — громко, а не тихо (см. boundscheck выше).
+        n_edges = int(deg.sum()) // 2
+        n_poly = int(bounds.size) - 1
+        if int(ids.size) != n_edges + n_poly:
+            raise RuntimeError(
+                f"trace_skeleton: нарушен инвариант обхода — узлов {int(ids.size)}, "
+                f"ожидалось рёбер {n_edges} + штрихов {n_poly}"
+            )
+        # Координаты собираются ОДНИМ массивом, штрихи — срезы-представления по
+        # границам. Сборка по np.stack на каждый штрих стоила ~4 мкс × тысячи
+        # штрихов и съедала выигрыш ядра целиком (замер 2026-09-04: 27 мс против
+        # ~2 мс ядра). Потребители (filter/simplify/resample) массивы не мутируют.
+        pts = np.stack((xs_f[ids], ys_f[ids]), axis=1)
+        b = bounds.tolist()
+        return [pts[b[i] : b[i + 1]] for i in range(len(b) - 1)]
 
-    def walk(start: tuple[int, int], first: tuple[int, int]) -> list[tuple[int, int]]:
-        path = [start, first]
-        used_edges.add(frozenset((start, first)))
-        prev, cur = start, first
+    nbr_l: list[list[int]] = nbr.tolist()
+    deg_l: list[int] = deg.tolist()
+    used = bytearray(n * 8)  # used[node*8 + dir] = ребро в этом направлении пройдено
+    polylines: list[list[int]] = []
+
+    def walk(start: int, d0: int) -> list[int]:
+        cur = nbr_l[start][d0]
+        path = [start, cur]
+        used[start * 8 + d0] = 1
+        used[cur * 8 + _REV[d0]] = 1
+        prev, d_in = start, d0
         while True:
-            cands = [n for n in neigh(cur) if n != prev and frozenset((cur, n)) not in used_edges]
-            if not cands:
+            row = nbr_l[cur]
+            base = cur * 8
+            nxt = -1
+            nxt_d = -1
+            n_cands = 0
+            best = 0.0
+            for d in range(8):
+                nb = row[d]
+                if nb < 0 or nb == prev or used[base + d]:
+                    continue
+                n_cands += 1
+                if n_cands == 1:
+                    nxt, nxt_d = nb, d
+                    best = _TURN[d_in][d]
+                else:
+                    # На развилке — самое прямое продолжение; при равенстве первый по _NB8.
+                    turn = _TURN[d_in][d]
+                    if turn < best:
+                        nxt, nxt_d, best = nb, d, turn
+            if n_cands == 0:
                 break
-            # На развилке — самое прямое продолжение; на линии — единственный сосед.
-            nxt = cands[0] if len(cands) == 1 else min(cands, key=lambda n: _straightness(prev, cur, n))
-            used_edges.add(frozenset((cur, nxt)))
+            used[base + nxt_d] = 1
+            used[nxt * 8 + _REV[nxt_d]] = 1
             path.append(nxt)
-            prev, cur = cur, nxt
-            if degree[cur] == 1:  # дошли до конца линии
+            prev, cur, d_in = cur, nxt, nxt_d
+            if deg_l[cur] == 1:  # дошли до конца линии
                 break
         return path
 
+    def walk_all_unused(node: int) -> None:
+        # Проверка «ребро не пройдено» — в момент итерации, не заранее: обход по
+        # петле может вернуться в этот же узел и занять его второе направление.
+        row = nbr_l[node]
+        base = node * 8
+        for d in range(8):
+            if row[d] >= 0 and not used[base + d]:
+                polylines.append(walk(node, d))
+
     # 1) От концов (degree 1) — естественное начало штриха
-    for node in [p for p in pixels if degree[p] == 1]:
-        for nb in neigh(node):
-            if frozenset((node, nb)) not in used_edges:
-                path = walk(node, nb)
-                if len(path) >= 2:
-                    polylines.append(path)
+    for node in range(n):
+        if deg_l[node] == 1:
+            walk_all_unused(node)
 
     # 2) Оставшиеся рёбра от развилок (degree >= 3)
-    for node in [p for p in pixels if degree[p] >= 3]:
-        for nb in neigh(node):
-            if frozenset((node, nb)) not in used_edges:
-                path = walk(node, nb)
-                if len(path) >= 2:
-                    polylines.append(path)
+    for node in range(n):
+        if deg_l[node] >= 3:
+            walk_all_unused(node)
 
     # 3) Замкнутые петли (все degree==2, не задеты выше)
-    for p in pixels:
-        if degree[p] == 2 and all(frozenset((p, n)) not in used_edges for n in neigh(p)):
-            nbs = neigh(p)
-            if nbs:
-                path = walk(p, nbs[0])
-                if len(path) >= 2:
-                    polylines.append(path)
+    for node in range(n):
+        if deg_l[node] == 2:
+            row = nbr_l[node]
+            base = node * 8
+            dirs = [d for d in range(8) if row[d] >= 0 and not used[base + d]]
+            if len(dirs) == 2:  # оба ребра не тронуты — чистая петля
+                polylines.append(walk(node, dirs[0]))
 
-    # (y, x) → (x, y) float
-    return [np.array([(x, y) for (y, x) in path], dtype=np.float64) for path in polylines]
+    # id узлов → (x, y) float
+    out: list[np.ndarray] = []
+    for path in polylines:
+        ids = np.asarray(path, dtype=np.int64)
+        out.append(np.stack((xs_f[ids], ys_f[ids]), axis=1))
+    return out
 
 
 def image_mm_bounds(

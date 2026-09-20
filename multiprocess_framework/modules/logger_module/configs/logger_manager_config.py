@@ -497,10 +497,17 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         ),
         "BUSINESS": LoggerScopeSchema(
             # console НЕ подключён к BUSINESS: пер-кадровые INFO-логи воркеров
-            # уходят только в файлы (system_file/messages_file), а не засоряют
-            # терминал. В stdout остаётся лишь SYSTEM через свой scope, а какой
+            # уходят только в файл (messages_file), а не засоряют терминал.
+            # В stdout остаётся лишь SYSTEM через свой scope, а какой
             # уровень туда доедет — решает порог правила имени (Ф8.1).
-            channels=["system_file", "messages_file"],
+            #
+            # Р-7(а) (Task 3.2): system_file убран из списка. Замер на живом
+            # стенде (8 процессов, бут) показал, что messages.log был строгим
+            # подмножеством system.log — 368 строк, 0 уникальных, — потому что
+            # оба скоупа делили один и тот же канал system_file. BUSINESS
+            # пишет теперь только в messages_file, файлы больше не дублируют
+            # друг друга.
+            channels=["messages_file"],
         ),
         # Ф2.6: свой файл вместо system_file — обоснование у канала
         # `performance_file` выше. Изменение живого поведения названо вслух:

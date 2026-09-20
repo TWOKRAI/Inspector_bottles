@@ -2,18 +2,18 @@
 description: Snapshot of project architectural health (scan + health), metrics and bottleneck
 ---
 
-Запусти sentrux-проверку здоровья проекта:
+Run the sentrux project health check:
 
-1. Вызови `mcp__sentrux__scan` с `path` = абсолютный путь к корню проекта.
-2. Вызови `mcp__sentrux__health` (без параметров — использует последний scan).
+1. Call `mcp__sentrux__scan` with `path` = the absolute path to the project root.
+2. Call `mcp__sentrux__health` (no parameters — uses the last scan).
 
-Покажи пользователю:
-- **Quality signal** (0–10000) и его интерпретация: <3000 плохо, 3000–6000 средне, 6000–8000 хорошо, >8000 отлично.
-- **Bottleneck** — корневая причина просадки.
-- Таблицу 5 метрик: modularity, acyclicity, depth, equality, redundancy (raw + score).
+Show the user:
+- **Quality signal** (0–10000) and its interpretation: <3000 poor, 3000–6000 average, 6000–8000 good, >8000 excellent.
+- **Bottleneck** — the root cause of the drop.
+- A table of the 5 metrics: modularity, acyclicity, depth, equality, redundancy (raw + score).
 - `cross_module_edges` / `total_import_edges`.
 
-Если bottleneck = `acyclicity` (есть циклы) — порекомендуй `/mcp-sentrux:sentrux-dsm` для разбора связей.
-Если bottleneck = `modularity` — порекомендуй пересмотреть границы модулей.
+If bottleneck = `acyclicity` (there are cycles) — recommend `/mcp-sentrux:sentrux-dsm` to break down the couplings.
+If bottleneck = `modularity` — recommend reviewing module boundaries.
 
 $ARGUMENTS

@@ -29,6 +29,46 @@ from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...observability_declarations import declared_metrics
 
 
+def ensure_framework_producers() -> None:
+    """Втянуть модули-производители метрик ФРЕЙМВОРКА, чтобы каталог был полон к чтению.
+
+    **Почему это вообще нужно.** Каталог наполняется ИМПОРТОМ: ``declare_metric``
+    стоит рядом с вычислением величины. До Ф0.3 «полон ли он» решал порядок
+    импортов вызывающего кода — ``shm`` объявляет ``heartbeat/process_heartbeat.py``
+    на уровне модуля, а ``fps`` / ``latency_ms`` / ``effective_hz`` /
+    ``cycle_duration_ms`` — ``heartbeat/telemetry.py``, который на дороге загрузки
+    процесса втягивался ЛЕНИВО, из ``ProcessHeartbeat._make_gate``. Первая сверка
+    конфига с каталогом случалась РАНЬШЕ этого импорта и объявляла живые метрики
+    опечатками (ревью 2026-08-28, находка M1: семь ложных WARNING за один boot
+    ``webcam_sketch``). Неполный каталог при этом не пуст — ``shm`` в нём уже
+    есть, — поэтому страж «пустой каталог → судить не по чему» в
+    :meth:`TelemetryPublishConfig.unknown_metrics` его не ловил и поймать не мог.
+
+    **Почему функция лежит здесь, а не в ``observability_declarations``.** Тот
+    модуль намеренно сделан листом без зависимостей: он объявляет лог-источники
+    для модулей, которые сам логгер и импортирует, и обратный импорт оттуда
+    замыкал кольцо — воспроизведённый ``ImportError: partially initialized
+    module`` описан в его же докстроке. Здесь зависимость направлена «вверх», к
+    heartbeat, и кольца не образует.
+
+    **Почему импорт локальный, внутри функции.** ``heartbeat/telemetry.py`` сам
+    импортирует :func:`gated_metrics` из ЭТОГО файла на уровне модуля. Импорт
+    производителей на уровне модуля был бы тем самым кольцом; внутри функции он
+    исполняется, когда оба модуля уже собраны.
+
+    **Цена повторного вызова — поиск в ``sys.modules`` и ничего сверх.** Оператор
+    ``import`` после первого раза не исполняет модуль и даже не доходит до
+    ``sys.meta_path``; это измерено, а не предположено — см.
+    ``tests/test_metric_catalog_producer_hazards.py::TestCatalogWarmupCost``.
+
+    **Ошибка импорта не глушится.** Производитель, который не импортируется, —
+    это сломанный фреймворк, а не «каталог чуть беднее»: молчаливый ``except``
+    здесь вернул бы ровно тот дефект, ради которого функция и заведена, только
+    уже без единого следа в логе.
+    """
+    from ..heartbeat import process_heartbeat, telemetry  # noqa: F401
+
+
 def gated_metrics() -> tuple[str, ...]:
     """Каталог метрик под publisher-gate — Ф8.1, вместо кортежа-литерала.
 
@@ -45,7 +85,15 @@ def gated_metrics() -> tuple[str, ...]:
 
     ``status`` воркеров и health/errors в каталог не входят — они публикуются
     всегда (инвариант плана «errors/status always-on»), и гейта у них нет.
+
+    Ф0.3: перед чтением реестра каталог ДОБИРАЕТСЯ до полного
+    (:func:`ensure_framework_producers`) — «функция, а не снимок» защищала от
+    устаревания, но не от чтения раньше производителя. Добор стоит здесь, а не у
+    каждого вызывающего: читателей каталога пятеро (гейт heartbeat, readback
+    ``introspect.telemetry``, строки GUI, ``unknown_metrics``, тесты), и правило
+    «сначала импортируй производителей» пришлось бы помнить всем пятерым.
     """
+    ensure_framework_producers()
     return declared_metrics()
 
 
@@ -171,4 +219,4 @@ class TelemetryPublishConfig(SchemaBase):
         return cls.model_validate(data or {})
 
 
-__all__ = ["gated_metrics", "MetricRule", "TelemetryPublishConfig"]
+__all__ = ["ensure_framework_producers", "gated_metrics", "MetricRule", "TelemetryPublishConfig"]

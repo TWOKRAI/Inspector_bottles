@@ -42,13 +42,13 @@ mirrored change is the reviewer agent's "Severity scale" section.
 
 ```bash
 # Validate the corpus (schema + self-consistency). Runs in CI per PR; no key.
-python run_evals.py --validate-cases
+uv run --no-project python run_evals.py --validate-cases
 
 # Suite run: grade the committed outputs (captured_review.md, else reference_review.md).
-python run_evals.py
+uv run --no-project python run_evals.py
 
 # Grade one captured reviewer output against a case.
-python run_evals.py --output some_review.md --case cr-001
+uv run --no-project python run_evals.py --output some_review.md --case cr-001
 ```
 
 Exit codes: `0` pass / valid, `1` failures, `2` warnings under `--strict`.

@@ -1,0 +1,855 @@
+{
+  "type": "response",
+  "command": "command.response",
+  "sender": "camera_0",
+  "targets": [
+    "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "970a7994-3d61-42b7-a754-c7698544be44",
+  "success": true,
+  "result": {
+    "success": true,
+    "process": "camera_0",
+    "effective": {
+      "logger": {
+        "default_level": "INFO",
+        "log_directory": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\logs_live\\f3_t32_1788631836",
+        "retention_days": 7,
+        "retention_total_mb": 200,
+        "compress_rotated": false,
+        "retention_sweep_interval_sec": 3600.0,
+        "channels": {
+          "system_file": {
+            "enabled": true
+          },
+          "messages_file": {
+            "enabled": true
+          },
+          "performance_file": {
+            "enabled": true
+          },
+          "console": {
+            "enabled": true
+          },
+          "gui_file": {
+            "enabled": true
+          },
+          "trace_file": {
+            "enabled": true
+          },
+          "busy_file": {
+            "enabled": true
+          }
+        },
+        "scopes": {
+          "SYSTEM": {
+            "channels": [
+              "console",
+              "system_file"
+            ]
+          },
+          "BUSINESS": {
+            "channels": [
+              "messages_file"
+            ]
+          },
+          "PERFORMANCE": {
+            "channels": [
+              "performance_file"
+            ]
+          },
+          "DEBUG": {
+            "channels": [
+              "system_file"
+            ]
+          }
+        },
+        "loggers": {
+          "": {
+            "level": "INFO",
+            "channels": null,
+            "channels_extra": null
+          },
+          "gui": {
+            "level": null,
+            "channels": null,
+            "channels_extra": [
+              "gui_file"
+            ]
+          },
+          "trace": {
+            "level": null,
+            "channels": null,
+            "channels_extra": [
+              "trace_file"
+            ]
+          },
+          "multiprocess_framework.modules.command_module": {
+            "level": null,
+            "channels": [
+              "busy_file"
+            ],
+            "channels_extra": null
+          },
+          "multiprocess_framework.modules.dispatch_module": {
+            "level": null,
+            "channels": [
+              "busy_file"
+            ],
+            "channels_extra": null
+          },
+          "multiprocess_framework.modules.shared_resources_module.queues": {
+            "level": null,
+            "channels": [
+              "busy_file"
+            ],
+            "channels_extra": null
+          }
+        },
+        "logger_groups": {
+          "служебное": [
+            "multiprocess_framework.modules.command_module",
+            "multiprocess_framework.modules.dispatch_module",
+            "multiprocess_framework.modules.shared_resources_module.queues"
+          ]
+        },
+        "declared_sources": {
+          "multiprocess_framework.modules.dispatch_module": "multiprocess_framework.modules.dispatch_module.interfaces",
+          "multiprocess_framework.modules.statistics_module": "multiprocess_framework.modules.statistics_module.interfaces",
+          "multiprocess_framework.modules.command_module": "multiprocess_framework.modules.command_module.interfaces"
+        },
+        "sources": [
+          "StatsAdapter",
+          "camera_0",
+          "capture",
+          "heartbeat",
+          "lifecycle",
+          "logger_manager",
+          "multiprocess_framework.modules.command_module",
+          "multiprocess_framework.modules.data_schema_module.core.metrics",
+          "multiprocess_framework.modules.dispatch_module",
+          "multiprocess_framework.modules.shared_resources_module.queues.core.manager",
+          "multiprocess_framework.modules.statistics_module",
+          "observation_camera_0",
+          "router_camera_0",
+          "router_messages",
+          "stats_camera_0"
+        ],
+        "unknown_scopes": [],
+        "sampling_first_n": 0,
+        "sampling_every_mth": 100,
+        "sampling_burst_reset_sec": 5.0,
+        "sampling_max_level": "DEBUG",
+        "channels_active": [
+          "busy_file",
+          "console",
+          "gui_file",
+          "messages_file",
+          "performance_file",
+          "system_file",
+          "trace_file"
+        ],
+        "sinks_disabled_by_operator": [],
+        "idle_sinks": [
+          "gui_file",
+          "trace_file"
+        ]
+      },
+      "error": {
+        "default_level": "WARNING",
+        "include_stacktrace": true,
+        "channels_active": [
+          "critical_file",
+          "errors_file",
+          "warnings_file"
+        ],
+        "sinks_disabled_by_operator": [],
+        "idle_sinks": [
+          "critical_file",
+          "errors_file",
+          "warnings_file"
+        ]
+      },
+      "stats": {
+        "enabled": true,
+        "plane_disabled": false,
+        "aggregation_interval": 10.0,
+        "flush_interval": 10.0,
+        "enable_logging": true,
+        "log_level": "INFO",
+        "log_line_max_bytes": 2048,
+        "max_series": 1000,
+        "channels_active": [
+          "hub_stats",
+          "log_stats"
+        ],
+        "sinks_disabled_by_operator": [],
+        "idle_sinks": []
+      },
+      "events": {
+        "first_n": 0,
+        "every_mth": 0
+      },
+      "flight": {
+        "enabled": false,
+        "sink": "",
+        "keep": 5,
+        "limit": 0
+      },
+      "observation": {
+        "subtree": "processes.*.state.plugins.**",
+        "subtree_enabled": true,
+        "subtree_interval_sec": 0.0,
+        "rules": {},
+        "legacy_source": "telemetry.publish",
+        "evaluated_ticks": 61,
+        "gate_active": true,
+        "rules_matched_nothing": [],
+        "rules_pending": [],
+        "rule_hits": {},
+        "effective": {
+          "processes.*.state.plugins.**": {
+            "interval_sec": 0.0,
+            "effective_interval_sec": 5.0
+          }
+        }
+      },
+      "heartbeat_interval_sec": 5.0,
+      "voices": {
+        "default_window_sec": 5.0,
+        "escalate_after_repeats": 3,
+        "max_tracked_keys": 512,
+        "stale_windows": 10
+      }
+    },
+    "counters": {
+      "logger": {
+        "messages_processed": 14793,
+        "messages_skipped": 14732,
+        "errors_to_floor": 0,
+        "errors_floor_write_failures": 0,
+        "error_floor": null,
+        "unresolved_channel_records": 0,
+        "unresolved_channels": {},
+        "channel_write_errors": 0,
+        "channel_write_errors_by_channel": {},
+        "channel_refused_records": 0,
+        "channel_refused_by_channel": {},
+        "records_without_channels": 0,
+        "tap_reentrant_suppressed": 0,
+        "tap_write_errors": 0,
+        "records_dropped_by_processor": 0,
+        "processor_failures": 0,
+        "records_redacted": 0,
+        "redaction_failures": 0,
+        "records_sampled_out": 0,
+        "sampler_keys_tracked": 0,
+        "sampler_keys_saturated": 0,
+        "windowed_suppressed": 0,
+        "windowed_keys_evicted": 0,
+        "sampler_keys_expired": 0,
+        "channel_written_records": 62,
+        "channel_written_by_channel": {
+          "messages_file": 28,
+          "busy_file": 2,
+          "console": 1,
+          "system_file": 1,
+          "performance_file": 30
+        },
+        "observed_at": 4033.859,
+        "retention_files_deleted": 0,
+        "retention_files_compressed": 0,
+        "retention_delete_failures": 0,
+        "retention_compress_failures": 0,
+        "retention_bytes_freed": 0,
+        "sink_writes_dropped": 0,
+        "sink_slow_writes": 0,
+        "sink_degraded": false,
+        "sink_degraded_channels": [],
+        "sink_writes_dropped_by_channel": {},
+        "message_build_failures": 0
+      },
+      "error": {
+        "messages_processed": 1,
+        "messages_skipped": 1,
+        "errors_to_floor": 0,
+        "errors_floor_write_failures": 0,
+        "error_floor": null,
+        "unresolved_channel_records": 0,
+        "unresolved_channels": {},
+        "channel_write_errors": 0,
+        "channel_write_errors_by_channel": {},
+        "channel_refused_records": 0,
+        "channel_refused_by_channel": {},
+        "records_without_channels": 0,
+        "tap_reentrant_suppressed": 0,
+        "tap_write_errors": 0,
+        "records_dropped_by_processor": 0,
+        "processor_failures": 0,
+        "records_redacted": 0,
+        "redaction_failures": 0,
+        "records_sampled_out": 0,
+        "sampler_keys_tracked": 0,
+        "sampler_keys_saturated": 0,
+        "windowed_suppressed": 0,
+        "windowed_keys_evicted": 0,
+        "sampler_keys_expired": 0,
+        "channel_written_records": 0,
+        "channel_written_by_channel": {},
+        "observed_at": 4033.859,
+        "retention_files_deleted": 0,
+        "retention_files_compressed": 0,
+        "retention_delete_failures": 0,
+        "retention_compress_failures": 0,
+        "retention_bytes_freed": 0,
+        "sink_writes_dropped": 0,
+        "sink_slow_writes": 0,
+        "sink_degraded": false,
+        "sink_degraded_channels": [],
+        "sink_writes_dropped_by_channel": {},
+        "level_routes": {
+          "CRITICAL": "critical_file",
+          "ERROR": "errors_file",
+          "WARNING": "warnings_file"
+        },
+        "message_build_failures": 0,
+        "thread_exceptions": 0,
+        "warnings_captured": 0,
+        "hook_delivery_failures": 0
+      },
+      "stats": {
+        "buffer": {
+          "type": "aggregation",
+          "flush_interval": 10.0,
+          "total_enqueued": 816,
+          "total_flushes": 30,
+          "total_flushed": 60,
+          "flush_failed": 0,
+          "empty_suppressed": 0,
+          "errors": 0,
+          "pending_metrics": 10,
+          "channels": [
+            "__stats__"
+          ],
+          "running": true
+        },
+        "metrics_count": 228,
+        "series_dropped": 0,
+        "observations_dropped": 0,
+        "series_dropped_is_lower_bound": false,
+        "dropped_series": [],
+        "window_observations_dropped": 0,
+        "window_dropped_series": [],
+        "unresolved_channel_records": 0,
+        "unresolved_channels": {},
+        "channel_write_errors": 0,
+        "channel_write_errors_by_channel": {},
+        "channel_refused_records": 0,
+        "channel_refused_by_channel": {},
+        "records_without_channels": 0,
+        "tap_reentrant_suppressed": 0,
+        "tap_write_errors": 0,
+        "observation_bypasses": {},
+        "numbers_policy_dropped": {},
+        "numbers_policy_throttled": {},
+        "channel_written_records": 60,
+        "channel_written_by_channel": {
+          "log_stats": 30,
+          "hub_stats": 30
+        },
+        "observed_at": 4033.859
+      },
+      "observation": {
+        "unresolved_channel_records": 0,
+        "unresolved_channels": {},
+        "channel_write_errors": 0,
+        "channel_write_errors_by_channel": {},
+        "channel_refused_records": 0,
+        "channel_refused_by_channel": {},
+        "records_without_channels": 0,
+        "tap_reentrant_suppressed": 0,
+        "tap_write_errors": 0,
+        "numbers_delivered": 816,
+        "numbers_dropped_no_sink": 0,
+        "numbers_dropped_by_sink_error": 0,
+        "numbers_suppressed_reentrant": 0,
+        "channel_written_records": 0,
+        "channel_written_by_channel": {},
+        "observed_at": 4033.859
+      },
+      "hub": {
+        "dropped": {
+          "log": 0,
+          "error": 0,
+          "stats": 0,
+          "observation": 0
+        },
+        "dropped_total": 0
+      }
+    },
+    "provenance": {
+      "log_level": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "log_directory": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "console": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "file": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "loggers": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "logger_groups": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "session_ttl_sec": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "heartbeat_interval_sec": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "retention_days": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "retention_total_mb": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "compress_rotated": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "retention_sweep_interval_sec": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "sampling_first_n": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "sampling_every_mth": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "sampling_burst_reset_sec": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "sampling_max_level": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "errors.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "errors.level": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "errors.include_stacktrace": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "errors.channels": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "stats.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "stats.log_snapshots": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "stats.aggregation_interval": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "stats.flush_interval": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "stats.log_level": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "stats.log_line_max_bytes": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "stats.max_series": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "stats.channels": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "commands.log_success": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "documents.factory": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "documents.config": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "events.first_n": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "events.every_mth": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "flight.enabled": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "flight.sink": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "flight.keep": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "flight.limit": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "observation.subtree_enabled": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "observation.subtree_interval_sec": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "observation.rules": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "voices.default_window_sec": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "voices.escalate_after_repeats": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "voices.max_tracked_keys": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "voices.stale_windows": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "history.enabled": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "history.level": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "history.max_rows": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "history.max_age_sec": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "history.purge_interval_sec": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "history.db_path": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "channels.gui_file.type": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.gui_file.name_max_len": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.gui_file.file_path": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.trace_file.type": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.trace_file.name_max_len": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.trace_file.file_path": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.busy_file.type": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.busy_file.name_max_len": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.busy_file.file_path": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "loggers.gui.channels_extra": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "loggers.trace.channels_extra": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "loggers.служебное.channels": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "logger_groups.служебное": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "documents.config.db_path": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "documents.config.retention_sec.audit": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "documents.config.retention_sec.verdict": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "documents.config.purge_interval_sec": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.system_file.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.system_file.type": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "channels.messages_file.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.messages_file.type": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "channels.performance_file.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.performance_file.type": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "channels.console.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.console.type": {
+        "layer": "framework",
+        "source": "framework"
+      },
+      "channels.gui_file.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.trace_file.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "channels.busy_file.enabled": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "scopes.SYSTEM.channels": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "scopes.BUSINESS.channels": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "scopes.PERFORMANCE.channels": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      },
+      "scopes.DEBUG.channels": {
+        "layer": "app",
+        "source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml"
+      }
+    },
+    "history": {
+      "enabled": true,
+      "db_path": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\logs_live\\f3_t32_1788631836\\observability.db",
+      "level": "INFO",
+      "max_rows": 200000,
+      "max_age_sec": 604800.0,
+      "purge_interval_sec": 300.0,
+      "rows": {
+        "log": 272,
+        "error": 6,
+        "stats": 67,
+        "observation": 183
+      }
+    },
+    "documents": {
+      "declared": true,
+      "without_sink": 0,
+      "dropped": 0
+    },
+    "stats": {
+      "declared": true,
+      "without_plane": 0,
+      "policy": {
+        "rules": {},
+        "hits": {},
+        "dropped_by_rule": {},
+        "dropped_by_metric": {},
+        "throttled_by_metric": {}
+      }
+    },
+    "observation": {
+      "writers": 1,
+      "effective": {
+        "writers": 1,
+        "subtree": "processes.*.state.plugins.**",
+        "subtree_enabled": true,
+        "subtree_interval_sec": 0.0,
+        "rules": {},
+        "legacy_source": "telemetry.publish",
+        "evaluated_ticks": 61,
+        "gate_active": true,
+        "rules_matched_nothing": [],
+        "rules_pending": [],
+        "rule_hits": {},
+        "effective": {
+          "processes.*.state.plugins.**": {
+            "interval_sec": 0.0,
+            "effective_interval_sec": 5.0
+          }
+        }
+      },
+      "provenance": {
+        "declared": true,
+        "section": "observability.observation",
+        "sources": {
+          "processes.camera_0.state.plugins.capture.capture_fps": {
+            "source": "subtree_default",
+            "pattern": "processes.*.state.plugins.**",
+            "enabled": true,
+            "interval_sec": 0.0
+          },
+          "processes.camera_0.state.plugins.capture.frame_count": {
+            "source": "subtree_default",
+            "pattern": "processes.*.state.plugins.**",
+            "enabled": true,
+            "interval_sec": 0.0
+          },
+          "processes.camera_0.state.plugins.capture.drops": {
+            "source": "subtree_default",
+            "pattern": "processes.*.state.plugins.**",
+            "enabled": true,
+            "interval_sec": 0.0
+          }
+        },
+        "rules_matched_nothing": [],
+        "rules_pending": [],
+        "evaluated_ticks": 61,
+        "legacy_source": "telemetry.publish"
+      },
+      "counters": {
+        "hub": true,
+        "records": 183,
+        "dropped": 0
+      }
+    },
+    "events": {
+      "declared": true,
+      "first_n": 0,
+      "every_mth": 0,
+      "kinds": {},
+      "refused": 0,
+      "kinds_saturated": 0
+    },
+    "flight": {
+      "declared": true,
+      "enabled": false,
+      "sink": "",
+      "keep": 5,
+      "limit": 0,
+      "dumps": 0,
+      "records": 0,
+      "unreadable": 0,
+      "evicted_files": 0,
+      "last_path": "",
+      "refused_disabled": 0,
+      "refused_no_ring": 0,
+      "refused_failed": 0
+    },
+    "audit": {
+      "entries": [],
+      "seq": 0,
+      "dropped": 0
+    },
+    "layers": {
+      "session_keys": [],
+      "app_source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\backend\\config\\system.yaml",
+      "recipe_source": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\multiprocess_prototype\\recipes\\region_pipeline.yaml",
+      "recipe_defaults_applied": true,
+      "ttl": {},
+      "ttl_default_sec": 300.0,
+      "ttl_enforced": true,
+      "reverts": []
+    }
+  },
+  "_fence": {
+    "sender": "camera_0",
+    "inc": 0,
+    "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+    "router_id": "router_ProcessManager",
+    "receive_time": 1788632150.2430959
+  }
+}

@@ -120,9 +120,7 @@ class _MetricsTimer:
             self._metrics.shutdown_ms = elapsed_ms
         else:
             # Произвольная фаза — записываем как команду
-            self._metrics.record_command(
-                self._phase, elapsed_ms, error=exc_type is not None
-            )
+            self._metrics.record_command(self._phase, elapsed_ms, error=exc_type is not None)
 
         if exc_type is not None:
             self._metrics.total_errors += 1

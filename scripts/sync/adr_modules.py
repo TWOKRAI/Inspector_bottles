@@ -27,6 +27,20 @@ _ADR_HEADER_RE = re.compile(
     re.MULTILINE,
 )
 
+# Заголовок уровня ## с "ADR-" сразу после решётки — кандидат на проверку.
+# Небольшой отступ (до 3 пробелов, как в CommonMark ATX-заголовках) и любое
+# число пробелов после "##" допущены НАМЕРЕННО: это типичные опечатки
+# ("##  ADR-XX-001:", " ## ADR-XX-001:"), а не альтернативная легитимная
+# форма — их обязана ловить проверка ниже.
+_ADR_LEVEL2_CANDIDATE_RE = re.compile(r"^\s{0,3}##\s+ADR-")
+
+# Из кандидатов — тот, что похож на попытку код-номера (буквы-код, затем
+# дефис, затем цифра сразу после "ADR-"). Отличает испорченный заголовок ADR
+# ("## ADR-XX-0012(S-27): кривой") от легитимного текстового раздела без
+# код-номера ("## ADR-коды модуля" в ADR_REGISTRY.md — "коды" не матчит
+# [A-Z]+, там нет кириллицы в этом классе символов).
+_ADR_LOOKS_LIKE_CODE_NUM_RE = re.compile(r"^\s{0,3}##\s+ADR-[A-Z]+-\d")
+
 
 # ---------------------------------------------------------------------------
 # Структуры данных
@@ -37,7 +51,7 @@ _ADR_HEADER_RE = re.compile(
 class AdrEntry:
     """Одна запись ADR из заголовка модульного DECISIONS.md."""
 
-    num: int    # Числовой номер (например, 1 для ADR-SS-001)
+    num: int  # Числовой номер (например, 1 для ADR-SS-001)
     title: str  # Заголовок после двоеточия
 
 
@@ -45,8 +59,8 @@ class AdrEntry:
 class ModuleAdrs:
     """Результат сканирования одного modules/X/DECISIONS.md."""
 
-    module_name: str        # Имя модуля (равно decisions_path.parent.name)
-    code: str               # Код ADR (например "SS"); пустая строка если ADR-заголовков нет
+    module_name: str  # Имя модуля (равно decisions_path.parent.name)
+    code: str  # Код ADR (например "SS"); пустая строка если ADR-заголовков нет
     adrs: list[AdrEntry] = field(default_factory=list)  # Отсортированный список ADR
 
 
@@ -77,7 +91,73 @@ def scan_module(decisions_path: Path) -> ModuleAdrs:
         return ModuleAdrs(module_name=module_name, code="", adrs=[])
 
     text = decisions_path.read_text(encoding="utf-8")
-    matches = _ADR_HEADER_RE.findall(text)
+    header_matches = list(_ADR_HEADER_RE.finditer(text))
+    matches = [m.groups() for m in header_matches]
+
+    # Заголовок вида "## ADR-...", который регэксп НЕ разобрал, — это не «ADR
+    # нет», а «ADR есть, и его не увидит индекс». Молчаливый пропуск здесь
+    # ровно один раз уже дал зелёный validate при разъехавшемся индексе:
+    # 2026-08-26 заголовок `## ADR-DS-009 (S-27): ...` не сматчился из-за
+    # суффикса в скобках, сводный раздел остался на ADR-DS-001…008, а
+    # `scripts/validate.py` напечатал «ADR-документация синхронизирована».
+    # Ноль распознанных — тоже результат наблюдения, и он обязан быть отличим
+    # от «наблюдения не было».
+    #
+    # Сравнение — ЦЕЛОЙ строкой, а не префиксом (было исправлено ревью Ф5,
+    # З4): префиксное сравнение слепо к дублям заголовка с тем же кодом-номером
+    # ("## ADR-PM-038: настоящий" делает префиксом и молчаливо пропускает
+    # "## ADR-PM-038 - дубль" / "## ADR-PM-038 — дубль") и к номерам-подстрокам
+    # ("## ADR-XX-001: ..." — префикс для "## ADR-XX-0012(S-27): кривой").
+    # Содержимое ```-фенсов пропускается — иначе ADR-DS-009 не смог бы
+    # показать пример кривого заголовка в собственном тексте (он это делает).
+    #
+    # Заголовки уровня ### сознательно НЕ проверяются здесь: в репозитории
+    # уже есть легитимный паттерн "### ADR-XXX — дополнение" (например
+    # "### ADR-PM-038 — дополнение", 4 места) — подраздел с уточнением к уже
+    # существующему ADR. Визуально он неотличим от заголовка "## ADR-...",
+    # опечатанного на одну решётку меньше, и однозначного правила различить
+    # их нет; ловля ### дала бы ложные срабатывания на существующий легитимный
+    # контент. Такой заголовок просто не попадёт в сводный индекс — это
+    # ожидаемо, индекс строится только по заголовкам уровня "## ADR-...".
+    valid_lines = {m.group(0) for m in header_matches}
+    in_fence = False
+    fence_opened_at = 0
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            if in_fence:
+                fence_opened_at = lineno
+            continue
+        if in_fence:
+            continue
+        if not _ADR_LEVEL2_CANDIDATE_RE.match(line):
+            continue
+        if line in valid_lines:
+            continue
+        if not _ADR_LOOKS_LIKE_CODE_NUM_RE.match(line):
+            # Заголовок начинается с "ADR-", но после него нет пары
+            # код-номер (например "## ADR-коды модуля") — это не заголовок
+            # ADR, а обычный текстовый раздел, проверять нечего.
+            continue
+        raise ValueError(
+            f"В файле '{decisions_path}' заголовок ADR не разобран и потому "
+            f"не попадёт в сводный индекс: {line!r}. "
+            f"Ожидаемая форма: '## ADR-{{КОД}}-{{NNN}}: заголовок' "
+            f"(допустим суффикс '(was ADR-...)'). Уточнения вроде '(S-27)' "
+            f"переносить в тело ADR, а не в заголовок."
+        )
+
+    # НЕЗАКРЫТЫЙ фенс ослеплял сторожа до конца файла: флаг ``in_fence``
+    # оставался поднятым, и КАЖДЫЙ последующий заголовок проходил без
+    # проверки — ровно тот исход, против которого сторож и написан («ADR
+    # есть, и его не увидит индекс»). Молчать здесь нельзя: сторож, который
+    # не может посмотреть, обязан сказать об этом, а не отчитаться зелёным.
+    if in_fence:
+        raise ValueError(
+            f"В файле '{decisions_path}' не закрыт блок ``` (открыт на строке "
+            f"{fence_opened_at}). Заголовки ADR после него НЕ проверены — "
+            f"сторож ослеп бы молча. Закрой блок и повтори."
+        )
 
     if not matches:
         return ModuleAdrs(module_name=module_name, code="", adrs=[])
@@ -91,10 +171,7 @@ def scan_module(decisions_path: Path) -> ModuleAdrs:
         )
 
     code = codes_found.pop()
-    adrs = [
-        AdrEntry(num=int(num), title=title.strip())
-        for _code, num, title in matches
-    ]
+    adrs = [AdrEntry(num=int(num), title=title.strip()) for _code, num, title in matches]
     # Сортируем по номеру ADR
     adrs.sort(key=lambda e: e.num)
 
@@ -254,10 +331,7 @@ def render_index(
             continue
 
         col_module = f"`{module_name}`"
-        col_file = (
-            f"[`modules/{module_name}/DECISIONS.md`]"
-            f"(modules/{module_name}/DECISIONS.md)"
-        )
+        col_file = f"[`modules/{module_name}/DECISIONS.md`](modules/{module_name}/DECISIONS.md)"
         col_layer = layer_label
         col_status = _format_status(mod.adrs, mod.code)
 
@@ -316,9 +390,7 @@ class _AdrModulesSyncModule:
     """Реализация SyncModule Protocol для adr_modules."""
 
     name: str = "adr_modules"
-    description: str = (
-        'Таблицы «Модульные решения» (DECISIONS.md) и «Коды модулей» (ADR_REGISTRY.md)'
-    )
+    description: str = "Таблицы «Модульные решения» (DECISIONS.md) и «Коды модулей» (ADR_REGISTRY.md)"
 
     def render(self) -> dict[Path, dict[str, str]]:
         """Сканирует модули, валидирует и возвращает сгенерированные таблицы.

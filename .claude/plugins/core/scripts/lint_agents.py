@@ -15,9 +15,21 @@ Checks:
   5. `tools` is OPTIONAL: omitting it means the agent inherits the project's full
      enabled tool set (the documented Claude Code inherit path — capability-driven
      agents, plan 2026-06-24 D1/C7). If present, it must be a non-empty list.
-  6. `description` is non-empty and under 500 chars
-  7. Body has at least one markdown heading (## or #)
-  8. Agent names referenced in CLAUDE.md exist as agent files (plugin layout)
+     `disallowedTools` and `skills` follow the same rule: optional, but a present
+     key must carry a non-empty list (a bare key is a typo, not a signal).
+  6. `effort` (optional) is one of low/medium/high/xhigh/max — a typo here is an
+     ERROR because Claude Code drops an unknown value silently.
+  7. `maxTurns` (optional) is a positive integer.
+  8. `description` is non-empty and under 500 chars
+  9. Body has at least one markdown heading (## or #)
+ 10. Agent names referenced in CLAUDE.md exist as agent files (plugin layout)
+ 11. `tools`/`disallowedTools` do not use the dead colon MCP notation
+     (`mcp:server:tool`); a runtime field accepts only `mcp__server__tool` — WARN.
+ 12. For each plugin listed in `ROSTER_FILES` (`dev` today): the model tier in
+     its roster table (`modes/dev.md`'s Team composition), and in each
+     `commands/*.md`'s `description:` that names a role, must match that
+     role's actual frontmatter `model:` — ERROR on drift (Task 1.6 — prose
+     describing a tier must not silently diverge from code).
 
 Exit codes:
   0 — all green
@@ -41,18 +53,16 @@ from pathlib import Path
 # a project may deliberately pin opus-4-6/4-7 for cost. Membership = no warning
 # about typos; freshness is a separate signal (CURRENT_MODELS below).
 KNOWN_MODELS = {
-    # Generation aliases — resolve to the newest model of the tier, so they never
-    # go stale. Preferred form since 2026-08-05 ("последние модели всегда").
+    # Aliases are the PREFERRED form: they resolve to the latest model of the
+    # tier at runtime, so an agent pinned to an alias never goes stale. Dated
+    # IDs stay valid for a deliberate pin (cost, reproducibility).
     "opus",
     "sonnet",
     "haiku",
     "fable",
-    # Pinned IDs — still valid, but they freeze a generation.
-    "claude-opus-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
-    "claude-fable-5",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
@@ -63,20 +73,16 @@ KNOWN_MODELS = {
 # Latest model per tier — the enforce-latest signal ("последние модели везде",
 # plan addendum OQ-A1/OQ-A2). A known-but-not-current model (e.g. opus-4-6) is
 # valid yet stale → soft WARNING here. The HARD gate that every *bundled* seed
-# agent is on a CURRENT model lives in
-# .claude/plugins/core/tests/test_lint_agents_models.py — it is in `testpaths`,
-# so `make gate` runs it. (Until 2026-08-05 this comment named a file that did
-# not exist anywhere in the repo; the gate it promised was never running.)
-# Update the pinned IDs when a new model ships (source of truth: claude-api skill).
-# The generation aliases need no updating — that is the point of preferring them.
-#   Opus → claude-opus-5 · Sonnet → claude-sonnet-5 · Haiku → claude-haiku-4-5
+# agent is on a CURRENT model lives in tests/test_lint_agents_models.py.
+# Update both when a new model ships (source of truth: claude-api skill).
+#   Opus → claude-opus-4-8 · Sonnet → claude-sonnet-5 · Haiku → claude-haiku-4-5
 CURRENT_MODELS = {
-    "opus",  # aliases are current by construction
+    # Aliases can never be stale — they always point at the tier's latest.
+    "opus",
     "sonnet",
     "haiku",
     "fable",
-    "claude-opus-5",
-    "claude-fable-5",
+    "claude-opus-4-8",
     "claude-sonnet-5",
     "claude-haiku-4-5",
     "claude-haiku-4-5-20251001",  # dated alias of the current Haiku
@@ -87,6 +93,12 @@ CURRENT_MODELS = {
 # inherit the project's full enabled tool set (plan 2026-06-24 D1/C7). When
 # present it is still validated (must be a non-empty list — see lint_file).
 REQUIRED_KEYS = ("name", "description", "model")
+
+# Optional list-valued keys: absent = feature unused; present = must be non-empty.
+LIST_KEYS = ("tools", "disallowedTools", "skills")
+
+# Documented `effort` levels (Claude Code 2.1.x agent frontmatter).
+EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.MULTILINE)
 
@@ -110,7 +122,12 @@ def parse_frontmatter(text: str) -> dict[str, str] | None:
         if ":" not in line:
             continue
         key, _, value = line.partition(":")
-        out[key.strip()] = value.strip()
+        value = value.strip()
+        # A YAML scalar carrying a colon must be quoted (`description: "a: b"`).
+        # Strip the wrapper so callers compare the text, not the quoting style.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        out[key.strip()] = value
     return out
 
 
@@ -140,7 +157,9 @@ def lint_file(path: Path) -> tuple[list[str], list[str]]:
 
     model = fm.get("model", "")
     if model and model not in KNOWN_MODELS:
-        warnings.append(f"model {model!r} not in KNOWN_MODELS — typo, or update the linter?")
+        warnings.append(
+            f"model {model!r} not in KNOWN_MODELS — typo, or update the linter?"
+        )
     elif model and model not in CURRENT_MODELS:
         latest = ", ".join(sorted(CURRENT_MODELS - {"inherit"}))
         warnings.append(
@@ -150,13 +169,48 @@ def lint_file(path: Path) -> tuple[list[str], list[str]]:
 
     # `tools` is optional (omit → inherit project tool set). But a *present*
     # key must carry a non-empty list — a bare `tools:` is a mistake, not an
-    # inherit signal; omit the key entirely to inherit.
-    if "tools" in fm:
-        items = [t.strip() for t in fm["tools"].split(",") if t.strip()]
-        if not items:
+    # inherit signal; omit the key entirely to inherit. `disallowedTools` and
+    # `skills` share the rule: an empty value is a half-written edit.
+    for key in LIST_KEYS:
+        if key in fm and not [t.strip() for t in fm[key].split(",") if t.strip()]:
             errors.append(
-                "tools key present but list is effectively empty — "
-                "omit the key entirely to inherit the project tool set"
+                f"{key} key present but list is effectively empty — "
+                f"omit the key entirely"
+            )
+
+    # Runtime `tools:`/`disallowedTools:` accept an MCP tool ONLY as
+    # `mcp__server__tool` (plus the `mcp__server`, `mcp__server__*`, `mcp__*`
+    # patterns). The colon form `mcp:server:tool` is ROUTING.md documentation
+    # notation; in a runtime field Claude Code silently ignores it, so the grant
+    # is dead. WARN (never ERROR): the colon form still lives in out-of-scope
+    # plugins, so this must not hard-fail `--strict` — dev/agents no longer uses
+    # it (harvest Task 1.2, finding 0.3).
+    for key in ("tools", "disallowedTools"):
+        if key in fm and re.search(r"mcp:[a-z]", fm[key]):
+            warnings.append(
+                f"{key} uses the colon MCP notation `mcp:server:tool` — a runtime "
+                f"field accepts only `mcp__server__tool`; the colon form is silently "
+                f"ignored (a dead grant)"
+            )
+
+    effort = fm.get("effort", "")
+    if "effort" in fm and effort not in EFFORT_LEVELS:
+        levels = ", ".join(sorted(EFFORT_LEVELS))
+        errors.append(
+            f"effort {effort!r} is not one of: {levels} — "
+            "Claude Code ignores an unknown value silently"
+        )
+
+    if "maxTurns" in fm:
+        raw = fm["maxTurns"]
+        try:
+            turns = int(raw)
+        except ValueError:
+            turns = 0
+        if turns <= 0:
+            errors.append(
+                f"maxTurns {raw!r} is not a positive integer — "
+                "it caps the agent's agentic turns, so 0 or a word disables nothing"
             )
 
     desc = fm.get("description", "")
@@ -169,6 +223,86 @@ def lint_file(path: Path) -> tuple[list[str], list[str]]:
         warnings.append("no markdown heading in body — is this really an agent prompt?")
 
     return errors, warnings
+
+
+TEAM_TABLE_ROW_RE = re.compile(
+    r"^\|\s*\*\*([a-z][a-z_-]*)\*\*\s*\|\s*([A-Za-z]+)\s*\|", re.MULTILINE
+)
+# Matches command `description:` prose such as
+# "Run the Manager agent (Sonnet) — decompose a task and write the spec".
+COMMAND_TIER_RE = re.compile(r"Run the ([A-Z][A-Za-z-]*) agent \(([A-Za-z]+)\)")
+
+
+def _agent_model(agent_files: dict[str, Path], role: str) -> str | None:
+    """Frontmatter `model:` of the agent registered under `role`, if known."""
+    path = agent_files.get(role)
+    if path is None:
+        return None
+    fm = parse_frontmatter(path.read_text(encoding="utf-8"))
+    return fm.get("model") if fm else None
+
+
+def _tier_matches(tier_word: str, model: str) -> bool:
+    """'Opus' (table/description cell) is consistent with model: opus /
+    claude-opus-4-8 / etc. — a plain substring check on the tier name."""
+    return tier_word.lower() in model.lower()
+
+
+# Plugins that carry a Team-composition roster table under `modes/<file>` —
+# only these are scanned for tier drift (not every plugin's prose). Task 3.2
+# (knowledge/agents up to dev-standard) extends this with one more entry
+# (`"knowledge": "knowledge.md"`) — append a line, don't rewrite the check.
+ROSTER_FILES: dict[str, str] = {
+    "dev": "dev.md",
+}
+
+
+def cross_check_model_tiers(
+    agents_root: Path, agent_files: dict[str, Path]
+) -> list[str]:
+    """A plugin's Team-composition roster table (`modes/<ROSTER_FILES[plugin]>`)
+    and its commands' `description:` tiers must match each role's actual
+    frontmatter `model:` — drift here is exactly the doc/reality split Task 1.6
+    closes (manager documented as Sonnet in prose while its frontmatter
+    already said Opus). Scoped via `ROSTER_FILES` to the plugins that actually
+    carry a roster table.
+    """
+    errors: list[str] = []
+    plugin_root = agents_root.parent
+    roster_name = ROSTER_FILES.get(plugin_root.name)
+    if roster_name is None:
+        return errors
+
+    roster_md = plugin_root / "modes" / roster_name
+    if roster_md.exists():
+        text = roster_md.read_text(encoding="utf-8", errors="ignore")
+        for role, tier in TEAM_TABLE_ROW_RE.findall(text):
+            model = _agent_model(agent_files, role)
+            if model is None:
+                continue  # role not among the discovered agent files
+            if not _tier_matches(tier, model):
+                errors.append(
+                    f"{roster_md}: Team composition lists {role!r} as {tier!r} but "
+                    f"{role}.md has model: {model!r}"
+                )
+
+    commands_dir = plugin_root / "commands"
+    if commands_dir.is_dir():
+        for cmd_path in sorted(commands_dir.rglob("*.md")):
+            cmd_fm = parse_frontmatter(
+                cmd_path.read_text(encoding="utf-8", errors="ignore")
+            )
+            description = (cmd_fm or {}).get("description", "")
+            for role, tier in COMMAND_TIER_RE.findall(description):
+                model = _agent_model(agent_files, role.lower())
+                if model is None:
+                    continue
+                if not _tier_matches(tier, model):
+                    errors.append(
+                        f"{cmd_path}: description says {role!r} agent is {tier!r} "
+                        f"but {role.lower()}.md has model: {model!r}"
+                    )
+    return errors
 
 
 def cross_check_claude_md(claude_md: Path, agent_files: dict[str, Path]) -> list[str]:
@@ -194,7 +328,9 @@ def cross_check_claude_md(claude_md: Path, agent_files: dict[str, Path]) -> list
     mentioned = candidates & known_roles
     missing = mentioned - set(agent_files.keys())
     for name in sorted(missing):
-        warnings.append(f"CLAUDE.md mentions agent {name!r} but no agents/company/{name}.md found")
+        warnings.append(
+            f"CLAUDE.md mentions agent {name!r} but no agents/company/{name}.md found"
+        )
     return warnings
 
 
@@ -213,7 +349,8 @@ def main(argv: list[str]) -> int:
             roots = [c for c in (Path(".claude/agents"), Path("agents")) if c.is_dir()]
         if not roots:
             print(
-                "error: no agent dirs found (.claude/plugins/*/agents or .claude/agents) — pass path explicitly",
+                "error: no agent dirs found "
+                "(.claude/plugins/*/agents or .claude/agents) — pass path explicitly",
                 file=sys.stderr,
             )
             return 1
@@ -258,6 +395,14 @@ def main(argv: list[str]) -> int:
                     print(f"  WARN:  {w}")
                     total_warnings += 1
             break
+
+    for root in roots:
+        tier_errors = cross_check_model_tiers(root, agent_files)
+        if tier_errors:
+            print(f"\n{root.parent} — model tier cross-check:")
+            for e in tier_errors:
+                print(f"  ERROR: {e}")
+                total_errors += 1
 
     print()
     print(f"Checked: {len(agent_files)} agent files")

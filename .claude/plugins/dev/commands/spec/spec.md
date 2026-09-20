@@ -2,37 +2,37 @@
 description: Create or update the living spec (docs/direction/) for the app — a product specification from the user's point of view
 ---
 
-Запусти агента **spec-writer** (subagent_type: "spec-writer").
+Launch the **spec-writer** agent (subagent_type: "spec-writer").
 
-Определи режим работы:
+Determine the mode of operation:
 
-### Режим 1: CREATE (нет аргументов или путь к приложению)
-Если указан путь к приложению или нет docs/direction/ — создать с нуля.
+### Mode 1: CREATE (no arguments, or a path to the application)
+If an application path is given, or docs/direction/ doesn't exist — create from scratch.
 
-Передай агенту:
-1. Путь к приложению
-2. Режим: CREATE
-3. Контекст: «Прочитай CLAUDE.md, изучи все файлы приложения, создай полный набор docs/direction/ файлов»
+Pass to the agent:
+1. Application path
+2. Mode: CREATE
+3. Context: "Read CLAUDE.md, study all the application's files, create a complete set of docs/direction/ files"
 
-### Режим 2: UPDATE (после изменений кода)
-Если docs/direction/ уже существует и были изменения в коде — обновить.
+### Mode 2: UPDATE (after code changes)
+If docs/direction/ already exists and the code has changed — update it.
 
-Передай агенту:
-1. Путь к приложению и docs/direction/
-2. Режим: UPDATE
-3. Какие файлы кода изменились (из git diff или контекста разговора)
-4. Контекст: «Обнови только затронутые секции docs/direction/»
+Pass to the agent:
+1. Application path and docs/direction/
+2. Mode: UPDATE
+3. Which code files changed (from git diff or the conversation context)
+4. Context: "Update only the affected sections of docs/direction/"
 
-### Режим 3: SYNC (пользователь отредактировал direction)
-Если пользователь говорит что отредактировал direction файл — прочитать и вывести нужные изменения кода.
+### Mode 3: SYNC (the user edited a direction file)
+If the user says they edited a direction file — read it and output the code changes needed.
 
-Передай агенту:
-1. Путь к изменённому direction файлу
-2. Режим: SYNC
-3. Контекст: «Сравни direction с кодом, выведи список изменений для кода»
+Pass to the agent:
+1. Path to the changed direction file
+2. Mode: SYNC
+3. Context: "Compare the direction file with the code, output the list of code changes needed"
 
-После выполнения:
-- Покажи пользователю что создано/обновлено
-- Если режим SYNC — покажи список изменений для кода и спроси, применить ли их
+After completion:
+- Show the user what was created/updated
+- If SYNC mode — show the list of code changes and ask whether to apply them
 
-Аргументы: $ARGUMENTS
+Arguments: $ARGUMENTS

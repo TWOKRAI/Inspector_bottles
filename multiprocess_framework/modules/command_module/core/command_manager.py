@@ -130,8 +130,11 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._record_metric("command_manager.initialization.success", tags={"name": self.manager_name})
             return True
         except Exception as e:
-            self._log_error(f"Failed to initialize CommandManager: {e}")
-            self._track_error("command_manager.initialization.failed", error=e)
+            # Task 1.3b: было `_log_error` + `_track_error("...", error=e)` — второй
+            # вызов передавал `error` и позиционно, и по имени (TypeError внутри
+            # except). Один коннектор — `report_error` — не ловит и не может
+            # поймать это же несоответствие сигнатуры.
+            self.report_error(e, context="command_manager.initialize", name=self.manager_name)
             return False
 
     def shutdown(self) -> bool:
@@ -153,8 +156,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._record_metric("command_manager.shutdown.success", tags={"name": self.manager_name})
             return True
         except Exception as e:
-            self._log_error(f"Error during CommandManager shutdown: {e}")
-            self._track_error("command_manager.shutdown.failed", error=e)
+            self.report_error(e, context="command_manager.shutdown", name=self.manager_name)
             return False
 
     # ========================================================================
@@ -208,13 +210,54 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         )
 
         if result:
-            self._log_info(f"Command '{command_name}' registered successfully", module=LOG_SOURCE)
+            self._log_debug(lambda: f"Command '{command_name}' registered successfully", module=LOG_SOURCE)
             self._record_metric("command_manager.command.registration.success", tags={"command": command_name})
         else:
             self._log_warning(f"Failed to register command '{command_name}'", module=LOG_SOURCE)
             self._record_metric("command_manager.command.registration.failed", tags={"command": command_name})
 
         return result
+
+    def log_registration_summary(self) -> None:
+        """
+        INFO-сводка регистрации — ОДНА строка, снимок таблицы команд НА
+        МОМЕНТ ВЫЗОВА, а не «итог бута»: следующий ``register_command()``
+        делает эту сводку устаревшей, и это ожидаемо — метод не хранит
+        прошлое значение, каждый вызов считает таблицу заново.
+
+        Прод зовёт этот метод РОВНО ОДИН РАЗ за ВОПЛОЩЕНИЕ процесса:
+        ``ProcessModule.run()``,
+        сразу после последней бутовой регистрации (``BuiltinCommands.register()``).
+        Слово «воплощение», а не «процесс», выбрано по находке ревью Task 3.2:
+        ``ProcessManagerProcess.restart_process`` поднимает НОВЫЙ OS-процесс, у
+        которого свой ``run()``, — значит в каталоге одного логического процесса
+        после авто-рестарта окажутся ДВЕ сводки, по одной на воплощение, и это
+        правильно. Формулировка «за процесс» отправила бы читателя искать дефект.
+
+        «Ровно один раз» — свойство ТОЙ точки вызова, а не этого метода:
+        флага «уже вызывалась» здесь нарочно нет (Task 3.2, К2).
+
+        Вложенный диспетчер этого менеджера (``self.dispatcher``) СВОЙ
+        ``log_registration_summary()`` из ``run()`` не получает — вердикт
+        CTO: ``register_command`` делегирует РОВНО в один вызов
+        ``self.dispatcher.register_handler``, поэтому счётчики обоих
+        менеджеров равны по построению (стенд Task 3.2: 71/71, 93/93 на всех
+        восьми процессах прототипа). Две INFO-строки с одним и тем же числом
+        под разными существительными были бы загадкой для читателя лога, а
+        не информацией — см. докстринг ``Dispatcher.log_registration_summary``
+        за симметричным объяснением с той стороны.
+
+        Поздняя регистрация (горячая пересборка) сводкой не покрывается —
+        о ней по-прежнему говорит построчный DEBUG у ``register_command()``.
+        Механизм, который приносит пачку регистраций, обязан сам сказать
+        «+N/-M» (только он знает границы своей пачки) и вправе позвать эту
+        сводку после неё — в Task 3.2 это не делается.
+        """
+        count = len(self.get_commands())
+        self._log_info(
+            f"CommandManager '{self.manager_name}' registration summary: {count} commands",
+            module=LOG_SOURCE,
+        )
 
     def handle_command(self, message: Dict) -> Any:
         """

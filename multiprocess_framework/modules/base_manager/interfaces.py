@@ -187,19 +187,19 @@ class IObservableMixin(ABC):
         """Логирование уровня DEBUG."""
 
     @abstractmethod
-    def _log_info(self, message: str, **kwargs) -> None:
+    def _log_info(self, message: str, **kwargs) -> bool:
         """Логирование уровня INFO."""
 
     @abstractmethod
-    def _log_warning(self, message: str, **kwargs) -> None:
+    def _log_warning(self, message: str, **kwargs) -> bool:
         """Логирование уровня WARNING."""
 
     @abstractmethod
-    def _log_error(self, message: str, **kwargs) -> None:
+    def _log_error(self, message: str, **kwargs) -> bool:
         """Логирование уровня ERROR."""
 
     @abstractmethod
-    def _log_critical(self, message: str, **kwargs) -> None:
+    def _log_critical(self, message: str, **kwargs) -> bool:
         """Логирование уровня CRITICAL."""
 
     @abstractmethod

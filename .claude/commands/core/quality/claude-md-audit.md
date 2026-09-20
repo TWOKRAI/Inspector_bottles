@@ -2,35 +2,35 @@
 description: Meta-audit of .claude/ — agent/command frontmatter, orphaned slash scripts, MEMORY links, hooks
 ---
 
-Запусти аудит инфраструктуры `.claude/`:
+Run an audit of the `.claude/` infrastructure:
 
 ```bash
-python scripts/claude_md_audit/claude_md_audit.py
+uv run --no-project python scripts/claude_md_audit/claude_md_audit.py
 ```
 
-Что проверяется:
-- **agents** — frontmatter (`description`) в `.claude/plugins/*/agents/**/*.md`
-- **commands** — frontmatter в `.claude/commands/**/*.md`
-- **skills** — каждая `.claude/skills/<name>/` имеет `SKILL.md`
-- **slash_scripts** — slash-команды, ссылающиеся на `python scripts/x.py` или `bash scripts/x.sh`, не упоминают несуществующих файлов *(закрывает класс багов «висящая команда»)*
-- **memory_links** — `[Title](file.md)` в `MEMORY.md` указывает на существующий файл
-- **hooks_settings** — хуки в `.claude/settings.json` ссылаются на существующие скрипты
+What's checked:
+- **agents** — frontmatter (`description`) in `.claude/plugins/*/agents/**/*.md`
+- **commands** — frontmatter in `.claude/commands/**/*.md`
+- **skills** — every `.claude/skills/<name>/` has a `SKILL.md`
+- **slash_scripts** — slash commands referencing `uv run --no-project python scripts/x.py` or `bash scripts/x.sh` don't mention non-existent files *(closes the "dangling command" class of bugs)*
+- **memory_links** — `[Title](file.md)` in `MEMORY.md` points to an existing file
+- **hooks_settings** — hooks in `.claude/settings.json` reference existing scripts
 
-Конфиг: [scripts/claude_md_audit/claude_md_audit.toml](../../scripts/claude_md_audit/claude_md_audit.toml). Детали и kind'ы issue — [README.md](../../scripts/claude_md_audit/README.md).
+Config: [scripts/claude_md_audit/claude_md_audit.toml](../../scripts/claude_md_audit/claude_md_audit.toml). Details and issue kinds — [README.md](../../scripts/claude_md_audit/README.md).
 
-Полезные варианты:
-- `python scripts/claude_md_audit/claude_md_audit.py --format json` — для CI.
-- `python scripts/claude_md_audit/claude_md_audit.py --no-strict` — отчёт без падения.
-- `python scripts/claude_md_audit/claude_md_audit.py --claude-dir ../other/.claude` — аудитить чужой проект.
+Useful options:
+- `uv run --no-project python scripts/claude_md_audit/claude_md_audit.py --format json` — for CI.
+- `uv run --no-project python scripts/claude_md_audit/claude_md_audit.py --no-strict` — a report without failing.
+- `uv run --no-project python scripts/claude_md_audit/claude_md_audit.py --claude-dir ../other/.claude` — audit another project.
 
-**Когда использовать:**
-- После апдейта/upgrade'а seed'а — проверить, что миграция не оставила висящих ссылок.
-- В CI как gate перед merge в `main`.
-- При onboarding'е репо — быстрый sanity-check инфраструктуры.
-- После добавления нового агента/команды/скилла — убедиться что всё связано.
+**When to use:**
+- After a seed update/upgrade — check that the migration didn't leave dangling links.
+- In CI as a gate before merging into `main`.
+- When onboarding a repo — a quick sanity-check of the infrastructure.
+- After adding a new agent/command/skill — make sure everything is linked.
 
-**Замечания:**
-- Frontmatter parser — простой `key: value`, без YAML-вложенности. Для сложного frontmatter (списки, объекты) — учитывается только «поле есть/нет».
-- `slash_scripts` ловит формат `python scripts/...` / `bash scripts/...` / `uv run scripts/...`. Команды, оркеструющие MCP-инструменты или агентов, — вне scope.
+**Notes:**
+- The frontmatter parser is a simple `key: value`, with no YAML nesting. For complex frontmatter (lists, objects) — only "field present/absent" is tracked.
+- `slash_scripts` catches the format `uv run --no-project python scripts/...` / `bash scripts/...` / `uv run scripts/...`. Commands that orchestrate MCP tools or agents are out of scope.
 
 $ARGUMENTS

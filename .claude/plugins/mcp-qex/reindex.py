@@ -26,14 +26,15 @@ PROJECT_ROOT = MCP_DIR.parent.parent  # корень проекта
 
 IS_WIN = platform.system() == "Windows"
 
+# Тег-вариант (`-qex`), не базовый — см. qex-launcher.py: базовый тег не несёт
+# num_ctx/num_gpu, а подмену базового тега вариантом стирает любой `ollama pull`.
 if IS_WIN:
-    model = "qwen3-embedding:4b"
-    dimensions = "2560"
+    model = "qwen3-embedding:0.6b-qex"
+    dimensions = "1024"
     default_bin = Path.home() / ".cargo" / "bin" / "qex.exe"
 else:
-    # macOS: 4b выбрана 2026-07-05 (2× скорость, точность на коде ~= 8b). См. qex-launcher.py.
-    model = "qwen3-embedding:4b"
-    dimensions = "2560"
+    model = "qwen3-embedding:8b-qex"
+    dimensions = "4096"
     default_bin = Path.home() / ".local" / "bin" / "qex"
 
 qex_bin = os.environ.get("QEX_BIN") or shutil.which("qex") or str(default_bin)
@@ -43,7 +44,11 @@ env = {
     "RUST_LOG": "info",
     "WORKSPACE_PATH": str(PROJECT_ROOT),
     "QEX_EMBEDDING_PROVIDER": "openai",
-    "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
+    # переопределяется из окружения (правка владельца) — позволяет поставить
+    # прокси перед Ollama, не трогая шипнутый код.
+    "QEX_OPENAI_BASE_URL": os.environ.get(
+        "QEX_OPENAI_BASE_URL", "http://localhost:11434/v1"
+    ),
     "QEX_OPENAI_API_KEY": "ollama",
     "QEX_OPENAI_MODEL": model,
     "QEX_OPENAI_DIMENSIONS": dimensions,
@@ -56,7 +61,7 @@ def jsonrpc_request(method: str, params: dict, req_id: int = 1) -> str:
         {
             "jsonrpc": "2.0",
             "id": req_id,
-            "method": f"tools/call",
+            "method": "tools/call",
             "params": {
                 "name": method,
                 "arguments": params,
@@ -169,6 +174,13 @@ def check_ollama() -> bool:
 
 
 def main():
+    # Windows-консоль по умолчанию cp1251/cp866: без этого русский вывод и
+    # символы вроде -> x -- роняют скрипт с UnicodeEncodeError ещё до работы.
+    # Тот же приём, что в mcp-graphify/scripts/graph_slice.py.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     force = "--force" in sys.argv
     clear = "--clear" in sys.argv
     project_path = str(PROJECT_ROOT)
@@ -200,7 +212,7 @@ def main():
     result = run_qex_rpc("index_codebase", params)
 
     if result:
-        print(f"\nГотово!")
+        print("\nГотово!")
         # Попробуем вытащить текст результата
         content = result.get("content", [])
         for item in content:

@@ -34,6 +34,38 @@
       "Bash(git checkout *.md)",
       "Bash(git stash list*)",
       "Bash(git fetch*)",
+      "Bash(git switch *)",
+      "Bash(git merge *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git revert *)",
+      "Bash(git stash *)",
+      "Bash(git tag *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(git cherry*)",
+      "Bash(git worktree list*)",
+      "Bash(git worktree add *)",
+      "Bash(git worktree prune*)",
+      "Bash(git worktree remove *)",
+      "Bash(git merge-base*)",
+      "Bash(git for-each-ref*)",
+      "Bash(git rev-parse*)",
+      "Bash(git cat-file*)",
+      "Bash(git ls-files*)",
+      "Bash(sed -n *)",
+      "Bash(du *)",
+      "Bash(diff *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(cut *)",
+      "Bash(tr *)",
+      "Bash(stat *)",
+      "Bash(printf *)",
+      "Bash(basename*)",
+      "Bash(dirname*)",
+      "Bash(realpath*)",
+      "Bash(pwd)",
+      "Bash(date*)",
       "Bash(ollama *)",
       "Bash(curl http://localhost:11434*)",
       "Bash(curl -s http://localhost:11434*)",
@@ -52,6 +84,7 @@
       "Bash(uv lock*)",
       "Bash(pip list*)",
       "Bash(pip show *)",
+      "Bash(pre-commit run*)",
       "Bash(cd * && python -m pytest*)",
       "mcp__qex__index_codebase",
       "mcp__qex__search_code",
@@ -66,16 +99,6 @@
       "mcp__sentrux__git_stats",
       "mcp__sentrux__session_start",
       "mcp__sentrux__session_end",
-      "mcp__serena__find_symbol",
-      "mcp__serena__find_referencing_symbols",
-      "mcp__serena__find_implementations",
-      "mcp__serena__find_declaration",
-      "mcp__serena__get_symbols_overview",
-      "mcp__serena__get_diagnostics_for_file",
-      "mcp__serena__check_onboarding_performed",
-      "mcp__serena__initial_instructions",
-      "mcp__serena__list_memories",
-      "mcp__serena__read_memory",
       "Bash(semgrep *)",
       "Bash(osv-scanner *)",
       "Bash(syft *)",
@@ -83,19 +106,17 @@
     ],
     "ask": [
       "Bash(git push *)",
-      "Bash(git checkout *)",
-      "Bash(git switch *)",
-      "Bash(git merge *)",
       "Bash(git rebase *)",
-      "Bash(git cherry-pick *)",
       "Bash(git reset *)",
-      "Bash(git revert *)",
-      "Bash(git stash *)",
-      "Bash(git tag *)",
       "Bash(git remote *)",
+      "Bash(git checkout *)",
+      "Bash(git restore *)",
+      "Bash(git stash drop*)",
+      "Bash(git stash clear*)",
+      "Bash(git stash pop*)",
+      "Bash(git worktree remove --force*)",
+      "Bash(git worktree remove -f*)",
       "Bash(rm *)",
-      "Bash(mv *)",
-      "Bash(cp *)",
       "Bash(chmod *)",
       "Bash(curl *)",
       "Bash(wget *)",
@@ -108,23 +129,20 @@
       "Bash(apt *)",
       "Bash(winget *)",
       "Bash(docker *)",
+      "Bash(git switch *)",
+      "Bash(git merge *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git revert *)",
+      "Bash(git stash *)",
+      "Bash(git tag *)",
+      "Bash(mv *)",
+      "Bash(cp *)",
       "Bash(uv add *)",
       "Bash(uv remove *)",
       "Bash(uv pip install *)",
       "Bash(pip install *)",
       "Bash(pip uninstall *)",
-      "mcp__qex__clear_index",
-      "mcp__serena__write_memory",
-      "mcp__serena__edit_memory",
-      "mcp__serena__rename_memory",
-      "mcp__serena__rename_symbol",
-      "mcp__serena__replace_symbol_body",
-      "mcp__serena__replace_content",
-      "mcp__serena__insert_after_symbol",
-      "mcp__serena__insert_before_symbol",
-      "mcp__serena__safe_delete_symbol",
-      "mcp__serena__onboarding",
-      "mcp__serena__delete_memory"
+      "mcp__qex__clear_index"
     ],
     "deny": [
       "Bash(sudo *)",
@@ -149,25 +167,41 @@
       "Bash(mkfs.* *)",
       "Bash(dd if=*)",
       "Bash(dd of=/dev/*)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf $HOME*)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(rmdir /s*)",
+      "Bash(del /s*)",
+      "Bash(del /f*)",
       "Bash(:() { :|: & };:*)",
       "Bash(curl * | sh*)",
       "Bash(curl * | bash*)",
       "Bash(wget * | sh*)",
       "Bash(wget * | bash*)",
-      "Write(**/.env)",
-      "Write(**/.env.local)",
-      "Write(**/.env.*.local)",
-      "Write(**/*.pem)",
-      "Write(**/*.key)",
-      "Write(**/id_rsa)",
-      "Write(**/id_ed25519)",
+      "Bash(docker rm *)",
+      "Bash(docker rmi *)",
+      "Bash(docker system prune*)",
+      "Bash(docker volume rm*)",
+      "Bash(shutdown*)",
+      "Bash(reboot*)",
+      "Bash(format *)",
       "Edit(**/.env)",
       "Edit(**/.env.local)",
       "Edit(**/.env.*.local)",
       "Edit(**/*.pem)",
       "Edit(**/*.key)",
       "Edit(**/id_rsa)",
-      "Edit(**/id_ed25519)"
+      "Edit(**/id_ed25519)",
+      "Write(**/.env)",
+      "Write(**/.env.local)",
+      "Write(**/.env.*.local)",
+      "Write(**/*.pem)",
+      "Write(**/*.key)",
+      "Write(**/id_rsa)",
+      "Write(**/id_ed25519)"
     ]
   },
   "hooks": {
@@ -193,6 +227,23 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/mcp-health-check.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/session-memory-banner.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"\"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/ponytail/hooks/ponytail-activate.js\"",
+            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\ponytail-activate.js\" }",
+            "timeout": 5,
+            "statusMessage": "Loading ponytail mode..."
           }
         ]
       }
@@ -224,23 +275,43 @@
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/mcp-sentrux/hooks/sentrux-precheck.sh",
-            "timeout": 30
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/agent-context-ceiling.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "WebSearch|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/web-search-routing.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/dev/hooks/lint-brief.sh",
+            "timeout": 10
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/filter-test-output.sh",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/doc-size-guard.sh",
             "timeout": 10
           }
         ]
@@ -287,11 +358,89 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/subagent-stop-gate.sh",
+            "timeout": 300
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/observability/hooks/agent-journal.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/agent-teams/hooks/team-task-completed-gate.sh",
+            "timeout": 150
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/agent-teams/hooks/team-teammate-idle-gate.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/observability/hooks/agent-journal.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"\"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/ponytail/hooks/ponytail-subagent.js\"",
+            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\ponytail-subagent.js\" }",
+            "timeout": 5,
+            "statusMessage": "Loading ponytail mode..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"\"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/ponytail/hooks/ponytail-mode-tracker.js\"",
+            "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\ponytail-mode-tracker.js\" }",
+            "timeout": 5,
+            "statusMessage": "Tracking ponytail mode..."
+          }
+        ]
+      }
     ]
   },
   "env": {
     "MCP_TIMEOUT": "7200000",
     "MCP_TOOL_TIMEOUT": "7200000",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "CLAUDE_CODE_ENABLE_TELEMETRY": "1"
   },
   "statusLine": {
@@ -299,7 +448,12 @@
     "command": "printf 'branch: %s | ollama: %s' \"$(git branch --show-current 2>/dev/null)\" \"$(curl -s --max-time 1 http://localhost:11434/ 2>/dev/null | grep -q running && echo UP || echo DOWN)\""
   },
   "alwaysThinkingEnabled": true,
-  "preferredLanguage": "ru",
+  "language": "russian",
+  "worktree": {
+    "baseRef": "head"
+  },
+  "effortLevel": "high",
+  "model": "opus",
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
     "github@claude-plugins-official": true,

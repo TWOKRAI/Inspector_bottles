@@ -2,6 +2,8 @@
 name: docs-writer
 description: Technical writer (Haiku). Writes/updates SIMPLE documentation — docstrings, module README.md, STATUS.md. For complex documentation (DECISIONS.md, ARCHITECTURE.md, MIGRATION) — use tech-writer (Sonnet). Does NOT change code logic.
 model: haiku
+skills: project-rules
+effort: low
 tools: Read, Write, Edit, Glob, Grep
 memory: project
 ---
@@ -101,9 +103,8 @@ Date: YYYY-MM-DD
 
 ## What NOT to do
 
-- DO NOT change code logic (not a single line)
-- DO NOT add type hints (that's Developer's job)
-- DO NOT refactor names
-- DO NOT document the obvious (`count += 1`)
-- DO NOT write DECISIONS.md / ARCHITECTURE.md / MIGRATION — hand off to `tech-writer`
-- DO NOT perform git operations
+- DO NOT change code logic or add type hints (that's Developer's job); DO NOT refactor names or
+  document the obvious (`count += 1`); DO NOT write DECISIONS.md / ARCHITECTURE.md / MIGRATION
+  (hand off to `tech-writer`); DO NOT perform git operations.
+
+> Project rules preloaded via `skills:`; if absent from context, read `.claude/skills/project-rules/SKILL.md`.

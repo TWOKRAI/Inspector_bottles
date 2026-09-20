@@ -2,7 +2,7 @@
 Универсальный счётчик файлов / папок / строк / слов / символов с TOML-конфигом.
 
 Принципы:
-- stdlib-only (Python 3.12+): tomllib, fnmatch, pathlib, argparse, dataclasses.
+- stdlib-only (Python 3.11+): tomllib, fnmatch, pathlib, argparse, dataclasses.
 - Strategy для подсчёта по типу файла (Python / Markdown / Shell / Plain).
 - Pruning исключений на уровне обхода (не читаем то, что отброшено).
 - Правдивость по умолчанию: `git_tracked` считает только то, что реально лежит
@@ -11,7 +11,7 @@
 
 Запуск:
     python scripts/code_stats/code_stats.py
-    python scripts/code_stats/code_stats.py multiprocess_framework Services
+    python scripts/code_stats/code_stats.py src tests
     python scripts/code_stats/code_stats.py --format json --group-by directory
     python scripts/code_stats/code_stats.py --group-by directory --dir-depth 1
     python scripts/code_stats/code_stats.py --config path/to/other.toml
@@ -28,10 +28,9 @@ import os
 import subprocess
 import sys
 import tomllib
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Iterable, Iterator
-
 
 # --------------------------------------------------------------------------- #
 # Конфигурация
@@ -163,11 +162,9 @@ def _dir_excluded(name: str, patterns: tuple[str, ...]) -> bool:
 
 
 def _file_excluded(name: str, rel_path: str, cfg: ExcludeCfg) -> bool:
-    if any(fnmatch.fnmatch(name, pat) for pat in cfg.file_patterns):
-        return True
-    if any(fnmatch.fnmatch(rel_path, pat) for pat in cfg.path_patterns):
-        return True
-    return False
+    return any(fnmatch.fnmatch(name, pat) for pat in cfg.file_patterns) or any(
+        fnmatch.fnmatch(rel_path, pat) for pat in cfg.path_patterns
+    )
 
 
 def iter_files(scan: ScanCfg, formats: FormatsCfg, exclude: ExcludeCfg) -> Iterator[Path]:
@@ -349,10 +346,9 @@ class PythonCounter(Counter):
 
             if in_doc:
                 docstring += 1
+                # закрывающая кавычка (в т.ч. открыть и закрыть на одной строке после входа)
                 if doc_quote in stripped:
-                    # учитываем возможность открыть и закрыть на одной строке после входа
-                    if stripped.count(doc_quote) >= 1:
-                        in_doc = False
+                    in_doc = False
                 continue
 
             # Не внутри docstring
@@ -664,10 +660,10 @@ def render_table(rows: list[GroupRow], total: GroupRow | None) -> str:
 
 def render_json(rows: list[GroupRow], total: GroupRow | None) -> str:
     payload = {
-        "rows": [dict(zip(_HEADERS, _row_to_list(r))) for r in rows],
+        "rows": [dict(zip(_HEADERS, _row_to_list(r), strict=True)) for r in rows],
     }
     if total is not None:
-        payload["total"] = dict(zip(_HEADERS, _row_to_list(total)))
+        payload["total"] = dict(zip(_HEADERS, _row_to_list(total), strict=True))
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
@@ -685,10 +681,10 @@ def render_csv(rows: list[GroupRow], total: GroupRow | None) -> str:
 def render(rows: list[GroupRow], cfg: Config, total: GroupRow | None = None) -> str:
     # total передаётся явно, когда он посчитан ДО обрезки limit'ом: иначе строка
     # TOTAL врала бы, показывая сумму только видимых строк.
-    if cfg.output.show_total:
-        total = total if total is not None else total_row(rows)
-    else:
+    if not cfg.output.show_total:
         total = None
+    elif total is None:
+        total = total_row(rows)
     fmt = cfg.output.format
     if fmt == "json":
         return render_json(rows, total)

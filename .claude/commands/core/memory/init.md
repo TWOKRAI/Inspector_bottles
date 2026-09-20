@@ -2,30 +2,30 @@
 description: Initialize .claude/memory/ for a new project — skeleton MEMORY.md
 ---
 
-Однократная инициализация структуры долговременной памяти. Запускать **один раз** на новый проект, созданный через `claude-kit-project new` (или вручную).
+One-time initialization of the long-term memory structure. Run **once** for a new project created via `claude-kit new` (or manually).
 
-## Идемпотентность
+## Idempotency
 
-Если `.claude/memory/MEMORY.md` уже существует — **ничего не делай**, сообщи "memory already initialized" и покажи `/core:memory:status`.
+If `.claude/memory/MEMORY.md` already exists — **do nothing**, report "memory already initialized" and show `/core:memory:status`.
 
-## Шаги
+## Steps
 
-1. Создай папку `.claude/memory/` если её нет.
-2. Создай `.claude/memory/MEMORY.md` — **скопируй содержимое из bundled
-   seed-template** (single source of truth). Не вписывай skeleton руками,
-   чтобы не дрифтить от canonical-версии.
-   - Новый проект через `claude-kit-project new` уже получает `.claude/memory/MEMORY.md`
-     автоматически (bootstrap материализует skeleton из плагина) — этот шаг нужен
-     только для ручного bootstrap или существующего проекта без `.claude/memory/`.
-   - Скопируй файл целиком из канонического плагинного skeleton:
+1. Create the `.claude/memory/` folder if it doesn't exist.
+2. Create `.claude/memory/MEMORY.md` — **copy the content from the bundled
+   seed template** (single source of truth). Don't type the skeleton by hand,
+   to avoid drifting from the canonical version.
+   - A new project created via `claude-kit new` already gets `.claude/memory/MEMORY.md`
+     automatically (bootstrap materializes the skeleton from the plugin) — this step is
+     only needed for manual bootstrap or an existing project without `.claude/memory/`.
+   - Copy the whole file from the canonical plugin skeleton:
      `cp <claude-kit>/src/claude_kit_claude/template/plugins/core/memory/MEMORY.md .claude/memory/MEMORY.md`
-     (канонический плагинный путь; старый путь монолита `claude_kit` — deprecated).
-3. Если в `.claude/memory/` лежит только `.gitkeep` — удали его (теперь папка не пустая).
-4. Подскажи следующий шаг:
-   - `/core:memory:status` — посмотреть состояние.
-   - Первые записи добавятся **автоматически** по правилам "auto memory" из системного промпта: каждая запись — отдельный `.md` файл с frontmatter, плюс строка в индексе `MEMORY.md` в формате `- [Title](file.md) — hook`.
+     (the canonical plugin path; the old monolith `claude_kit` path is deprecated).
+3. If `.claude/memory/` contains only `.gitkeep` — delete it (the folder is no longer empty).
+4. Suggest the next step:
+   - `/core:memory:status` — check the state.
+   - The first entries will be added **automatically** per the "auto memory" rules from the system prompt: each entry is a separate `.md` file with frontmatter, plus a line in the `MEMORY.md` index in the format `- [Title](file.md) — hook`.
 
-## Не делать
+## Don't
 
-- Не копировать чужие memory-записи из других проектов.
-- Не создавать примеры записей — пусть память наполняется органически.
+- Don't copy other projects' memory entries.
+- Don't create example entries — let memory fill in organically.

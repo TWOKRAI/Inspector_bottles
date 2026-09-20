@@ -1,77 +1,81 @@
-# scripts/validate_commit/ — валидатор commit-сообщений
+# scripts/validate_commit/ — commit message validator
 
-Проверяет формат commit-сообщения по правилам Inspector_bottles
-(Conventional Commits + обязательные trailers `Why:` / `Layer:`).
+Checks Conventional Commits subject + required trailers (`Why:`, `Layer:`) per the project commit guide.
 
-Полный гайд по формату: [`docs/claude/COMMIT_GUIDE.md`](../../docs/claude/COMMIT_GUIDE.md).
+Full format guide: [`.claude/COMMIT_GUIDE.md`](../../.claude/COMMIT_GUIDE.md).
 
-## Установка hook
+## Install the hook
 
 ```bash
 bash scripts/validate_commit/install_hook.sh
 ```
 
-Ставит `commit-msg` hook в `.git/hooks/`. Запускается автоматически на
-каждом `git commit` (кроме `--no-verify`).
+Installs `commit-msg` hook in `.git/hooks/`. Runs on every `git commit` (skipped by `--no-verify`).
 
-## Запуск вручную
+`claude-kit new` calls this automatically right after `git init`, so a project bootstrapped from the seed already has the hook in place.
+
+## Run manually
 
 ```bash
-# Из файла
+# From file
 python3 scripts/validate_commit/validate_commit.py path/to/commit-msg.txt
 
-# Из stdin
+# From stdin
 git log -1 --format=%B | python3 scripts/validate_commit/validate_commit.py -
 ```
 
-Exit code: `0` — OK, `1` — есть ошибки.
+Exit code: `0` — OK, `1` — errors, `2` — bad CLI usage.
 
-## Что проверяется
+## What is checked
 
-| Правило | Тип |
+| Rule | Severity |
 |---|---|
-| Subject в формате `<type>(<scope>): <subject>` | error |
-| `type` из whitelist (feat/fix/refactor/...) | error |
-| Subject ≤ 72 символа | warning |
-| Пустая строка между subject и body | error |
-| Trailer `Why:` присутствует | error |
-| Trailer `Layer:` присутствует | error |
-| `Layer:` значения из whitelist | error |
-| `Risk:` начинается с low/medium/high | warning |
+| Subject in `<type>(<scope>): <subject>` format | error |
+| `type` ∈ {feat, fix, refactor, docs, test, chore, perf, build, ci, style, revert} | error |
+| Blank line between subject and body | error |
+| Trailer `Why:` present | error |
+| Trailer `Layer:` present | error |
+| `Layer:` values whitelisted (see config below) | error |
+| `Risk:` starts with low/medium/high | warning |
 | `Reversible:` ∈ {yes, no, migration-needed} | warning |
-| Неизвестные trailers | warning |
-| Слишком короткий `Why:` (<5 симв) | warning |
+| Unknown trailer key | warning |
+| `Why:` too brief (< 5 chars) | warning |
 
-## Что НЕ проверяется (skip)
+## Skipped
 
-- Merge-коммиты (`Merge ...`)
-- Revert-коммиты (`Revert ...`)
-- Fixup/squash для interactive rebase (`fixup!`, `squash!`, `amend!`)
+- `Merge ...` / `Revert ...` commits
+- `fixup!` / `squash!` / `amend!` (interactive rebase)
 
-## CI-интеграция (опционально)
+## Configuring allowed Layer values
+
+Per-project layers live in `.claude/commit-layers.txt` (one layer per line, `#` for comments). The validator reads this file at runtime; if missing, falls back to generic defaults: `app, lib, tests, docs, scripts, infra, build, ci, mixed`.
+
+Example `.claude/commit-layers.txt`:
+```
+# Match your architecture's actual layers
+api
+domain
+adapters
+tests
+docs
+infra
+mixed
+```
+
+The validator finds this file by walking up from CWD to the first ancestor with `.git`.
+
+## CI integration (optional)
 
 ```bash
-# Проверить все коммиты PR-ветки против main
+# Validate every commit on a PR branch against main
 for sha in $(git log --format=%H main..HEAD); do
     git log -1 --format=%B "$sha" | \
         python3 scripts/validate_commit/validate_commit.py - || exit 1
 done
 ```
 
-## Расширение whitelist'ов
-
-Whitelist'ы захардкожены в [`validate_commit.py`](validate_commit.py):
-
-- `ALLOWED_TYPES` — типы Conventional Commits
-- `ALLOWED_LAYERS` — слои архитектуры (синхронизируй с CLAUDE.md правило 9)
-- `ALLOWED_RISK`, `ALLOWED_REVERSIBLE` — значения trailer'ов
-- `KNOWN_TRAILERS` — все известные trailers (неизвестные → warning)
-
-При расширении: обновить `validate_commit.py` + `.gitmessage` (шаблон) +
-`docs/claude/COMMIT_GUIDE.md`.
-
 ## Bypass
 
 ```bash
-git commit --no-verify  # только для merge/rebase
+git commit --no-verify  # only for merge/rebase
 ```

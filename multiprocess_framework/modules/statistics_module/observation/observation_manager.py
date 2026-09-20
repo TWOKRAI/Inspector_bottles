@@ -1,0 +1,1053 @@
+# -*- coding: utf-8 -*-
+"""Порт наблюдений процесса: ``ObservationManager`` — четвёртый канонический слот.
+
+Ф3 плана «порт наблюдений», задача 3.1. Механика уровней
+(``state.plugins.<писатель>.<имя>`` — «сколько СЕЙЧАС», перезапись, без истории)
+получает менеджера на общей базе трёх братьев и становится доступной ЛЮБОМУ
+компоненту процесса через слот ``observation``, ровно как logger/stats/error.
+
+**Что здесь НЕ происходит: хранилище не переезжает и не переписывается.**
+Значения по-прежнему лежат в :class:`~...process_module.heartbeat.telemetry.PluginLevels`
+(Ф1 — ключ первого уровня писатель; Ф2 — ведомость ушедших), и порт его
+ОБОРАЧИВАЕТ. Переезд самого хранилища в этот модуль — отдельная работа с
+отдельной ценой: у него семь читателей (тик heartbeat, опрос, три дороги
+``PluginContext``, два набора тестов), и смешивать «завести слот» с «переложить
+хранилище» значило бы делать невозможным ответ на вопрос, что именно сломалось.
+Названная цена ЭТОГО решения: файл из ``statistics_module`` тянет
+``process_module`` — направление зависимости, обратное общему
+(``process_module`` тянет ``statistics_module`` ради ``StatsManager``). Кольцо
+разорвано ленивым импортом (:func:`_telemetry`), а не архитектурой; закрывается
+переездом хранилища сюда, когда он будет отдельной задачей (ADR-SM-012).
+
+**Часы у heartbeat, правда у порта.** Публикация в дерево остаётся у
+``ProcessHeartbeat``: он решает КОГДА (тик, publisher-гейт) и шлёт ОДИН merge за
+тик (Р3.5-12). Порт отвечает на «что сейчас в хранилище» — три вопроса тика
+(:meth:`ObservationPort.level_names`, :meth:`ObservationPort.collect_subtree`,
+:meth:`ObservationPort.departed_writers`) и подтверждение доставки снятия
+(:meth:`ObservationPort.note_delete_delivered`). До Ф3 heartbeat доставал
+состояние сам — ``getattr(services, PLUGIN_LEVELS_ATTR)`` в трёх местах, с
+дублированной duck-typed проверкой в каждом; теперь эта константа в heartbeat не
+упоминается вовсе.
+
+**Два класса, и второй — не украшение.** :class:`ObservationPort` — механизм
+(вид на хранилище); :class:`ObservationManager` — тот же механизм плюс
+жизненный цикл ``ChannelRoutingManager`` и место в слоте. Разделены потому, что
+у heartbeat обязана быть ОДНА дорога к уровням, а слот бывает не зарегистрирован
+(процесс, поднятый не через ``ProcessManagers.register_all``: тестовые дубли,
+ранние стадии старта). Строить ради такого случая настоящего
+``ChannelRoutingManager`` на каждом тике — цена ни за что; ронять или молчать —
+регресс (сегодня heartbeat в этом случае читает уровни и публикует их).
+:func:`observation_port` возвращает менеджер из слота, а при его отсутствии —
+короткоживущий вид на то же самое хранилище.
+"""
+
+from __future__ import annotations
+
+import threading
+import weakref
+from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
+
+from ...channel_routing_module import ChannelRoutingManager
+from ...data_schema_module import FieldMeta, SchemaBase
+from ...logger_module import get_std_logger
+from ...observability_declarations import declare_metric as _declare_metric
+
+__all__ = [
+    "OBSERVATION_SLOT",
+    "RECORD_KIND_COUNTER",
+    "RECORD_KIND_GAUGE",
+    "RECORD_KIND_HISTOGRAM",
+    "RECORD_KIND_TIMING",
+    "ObservationManager",
+    "ObservationPort",
+    "ObservationRecord",
+    "PluginObservationHandle",
+    "bare_port_number_losses",
+    "observation_port",
+    "records_for_hub",
+]
+
+#: Роды числовых записей (Ф5, задача 5.2) — ДАННЫЕ маршрутизации, а не вторая
+#: машина. Строки совпадают дословно со значениями
+#: ``statistics_module.core.metric_record.MetricType`` (импорт оттуда сюда не
+#: заводится — этот модуль и так идёт против общего направления зависимости,
+#: см. докстринг файла, а дублирование четырёх строковых констант дешевле
+#: третьего кольца импорта). Совпадение значений проверяется тестом паритета.
+RECORD_KIND_COUNTER = "counter"
+RECORD_KIND_GAUGE = "gauge"
+RECORD_KIND_TIMING = "timing"
+RECORD_KIND_HISTOGRAM = "histogram"
+
+#: Имя канонического слота ``ObservableMixin`` — четвёртого рядом с
+#: ``logger``/``stats``/``error``.
+#:
+#: Константа, а не литерал по месту: имя слота читают ТРИ разных файла в двух
+#: модулях (``process_managers.register_all``, ``plugins/base.py``,
+#: ``process_heartbeat.py`` — через :func:`observation_port`), и разъехавшийся
+#: литерал дал бы «порт зарегистрирован, но никто его не находит» — отказ,
+#: который выглядит как штатный фолбэк и потому не виден ни по одному голосу.
+OBSERVATION_SLOT = "observation"
+
+#: Учёт чисел, потерянных ВИДОМ БЕЗ МЕНЕДЖЕРА — ступень 2 резолвера
+#: :func:`observation_port` (слот ``observation`` не зарегистрирован, процесс
+#: не поднят через ``ProcessManagers.register_all``) — Ф5, ревью-блокер B1.
+#: Ключ — САМО хранилище (``PluginLevels``), а не экземпляр
+#: :class:`ObservationPort`: резолвер минтит новый бесхозный вид на КАЖДЫЙ
+#: вызов ``observation_port(create=False)``, а хранилище живёт весь срок
+#: процесса — дедуп на эфемерном виде не дедуплицировал бы НИЧЕГО (WARNING на
+#: каждый вызов ``_stats_call``). ``WeakKeyDictionary``, а не голый ``dict`` по
+#: ``id()``: совпадение ``id()`` у собранного мусором хранилища и нового —
+#: ровно тот класс «тихой лжи», ради которого весь блокер B1 и пишется.
+_BARE_PORT_NUMBER_LOSSES_LOCK = threading.Lock()
+_BARE_PORT_NUMBER_LOSSES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def bare_port_number_losses(store: Any) -> int:
+    """Сколько чисел потерял бесхозный вид (ступень 2) над ЭТИМ хранилищем (B1).
+
+    Диагностика и тест-опора: у бесхозного вида нет ни ``services``, ни
+    долгоживущего экземпляра (резолвер минтит новый на каждый вызов) — считать
+    некуда, кроме привязки к самому хранилищу. ``store`` — обычно
+    ``services.plugin_levels``.
+
+    ``0`` означает «потерь не было ЛИБО хранилище этому счётчику не
+    встречалось вовсе» — различить эти два факта здесь нечем (то же огрубление,
+    что у :func:`~...process_module.managers.observability_wiring.carrier_failures`).
+    """
+    with _BARE_PORT_NUMBER_LOSSES_LOCK:
+        entry = _BARE_PORT_NUMBER_LOSSES.get(store)
+        return int(entry["count"]) if entry else 0
+
+
+def _telemetry():
+    """Модуль хранилища уровней. Импорт ЛЕНИВЫЙ, и это про порядок, не про стиль.
+
+    ``process_module`` импортирует ``statistics_module`` (``StatsManager`` в
+    ``ProcessManagers.create_all``), а этому файлу нужен ``process_module``
+    (хранилище, которое он оборачивает). Импорт на уровне модуля сделал бы
+    порядок загрузки значимым: кто первым — тот и получает частично
+    инициализированный пакет. Тот же жест и по той же причине уже стоит в
+    ``PluginContext.publish_metric`` и в трёх местах ``ProcessHeartbeat``.
+
+    Цена названа: словарь ``sys.modules`` на вызов. Вызовов — до четырёх на тик
+    процесса (порядка секунды), то есть цена ниже разрешения часов Windows.
+    """
+    from ...process_module.heartbeat import telemetry
+
+    return telemetry
+
+
+class PluginObservationHandle:
+    """Хендл писателя: identity привязана к объекту, а не ездит аргументом.
+
+    Образец — ``ProcessHandle`` у ``SharedResourcesManager``: имя адресата
+    называется ОДИН раз, при получении хендла, и дальше не повторяется на каждом
+    вызове. ``port.for_plugin("capture").publish("fps", 30.0)`` вместо
+    ``port.publish("fps", 30.0, writer="capture")``.
+
+    Почему это не сахар. Писатель — СЕГМЕНТ ПУТИ
+    (``state.plugins.<писатель>.<имя>``, Ф1 «владение = путь»), и три дороги
+    ``PluginContext`` — объявление, публикация, снятие — обязаны назвать один и
+    тот же сегмент. Разойдись они хоть в одном звене, публикация уехала бы в
+    одно поддерево, а снятие чистило другое: уровень остановленного плагина
+    остался бы жить, а симптом («захват остановлен, а частота идёт») искали бы в
+    камере. Хендл делает расхождение невыразимым — сегмент берётся из одного
+    поля.
+
+    ``for_worker(...)`` здесь НЕТ намеренно: план называет его заделом, а не
+    задачей, и у него сегодня нет ни одного вызывающего. Пустой метод-обещание
+    был бы контрактом, за который никто не отвечает.
+    """
+
+    __slots__ = ("_port", "_writer")
+
+    def __init__(self, port: "ObservationPort", writer: str) -> None:
+        self._port = port
+        self._writer = str(writer)
+
+    @property
+    def writer(self) -> str:
+        """Сегмент пути, под которым едут уровни этого хендла."""
+        return self._writer
+
+    def publish(self, name: str, value: Any) -> None:
+        """Отдать текущее значение уровня ``name`` от этого писателя."""
+        self._port.publish(name, value, self._writer)
+
+    def declare(self, name: str) -> str:
+        """Внести имя уровня в каталог телеметрии от этого писателя."""
+        return self._port.declare(name, self._writer)
+
+    def retract(self) -> int:
+        """Снять всё, что опубликовал этот писатель. Возвращает число снятых."""
+        return self._port.retract(self._writer)
+
+    def __repr__(self) -> str:  # pragma: no cover — диагностика
+        return f"PluginObservationHandle(writer={self._writer!r})"
+
+
+class ObservationPort:
+    """Вид на хранилище уровней процесса — механизм без жизненного цикла.
+
+    Держит ОДНУ ссылку на :class:`PluginLevels` и переводит вопросы читателей
+    (тик heartbeat, опрос, будущая секция ``introspect.observability``) в вызовы
+    хранилища. Своего состояния уровней здесь нет ни байта: заведи порт
+    собственную копию — и «сколько сейчас» стало бы двумя разными ответами,
+    расходящимися тем тише, чем реже смотрят.
+
+    **Исключения наружу не глушатся.** Порт — не место для решения «телеметрия
+    не критична для такта»: это решение публикатора, у него есть и лог, и
+    контекст такта, и оно там уже принято (три ``try/except`` в
+    ``ProcessHeartbeat`` с голосом в debug). Второй, молчаливый предохранитель
+    здесь означал бы, что отказ хранилища не увидит никто.
+    """
+
+    __slots__ = ("_levels", "_numbers_gate")
+
+    def __init__(self, levels: Any) -> None:
+        """
+        Args:
+            levels: хранилище :class:`PluginLevels`, которое обслуживает порт.
+        """
+        self._levels = levels
+        # Ф2 (задача 2.1): гейт плоскости чисел. ``None`` — политики не
+        # приносили, порт пропускает все числа (дословно поведение до Ф2).
+        self._numbers_gate: Any = None
+
+    # ------------------------------------------------------------------
+    # Политика чисел (Ф2, задача 2.1)
+    # ------------------------------------------------------------------
+
+    def attach_numbers_policy(self, policy: Any) -> bool:
+        """Подключить/сменить политику плоскости ЧИСЕЛ — ВТОРОЙ ПОТРЕБИТЕЛЬ, не второй механизм.
+
+        Политику собирает и приносит ``ProcessHeartbeat`` — ТОТ ЖЕ объект
+        :class:`~...process_module.configs.observation_policy.ObservationPolicy`,
+        которым решается плоскость уровней, и та же дорога
+        (``apply_observation_policy`` → ``config.reload``). Второй сборки,
+        второй секции конфига и второго счёта попаданий здесь нет: разойдись они
+        хоть в одном правиле — и «одна политика на все плоскости», ради которой
+        существует Ф2, стало бы двумя политиками с похожими именами.
+
+        Имя метода — по образцу соседей ЭТОГО же класса
+        (``StatsManager.attach_observation_port`` / ``attach_observability_hub``):
+        глагол ``attach`` у трёх разных подключений значит одно и то же, и
+        четвёртое имя для того же жеста читателю пришлось бы запоминать
+        отдельно. Повторный вызов — ШТАТНЫЙ (каждый ``config.reload``): счётчики
+        гейта переживают смену, расписание чистится (см.
+        :class:`~.numbers_gate.NumbersGate`).
+
+        Args:
+            policy: политика (duck-typed по ``resolve(path)``) либо ``None`` —
+                снять гейт, вернуть порт к «пропускать всё».
+
+        Returns:
+            ``True`` — политика установлена. ``False`` не возвращается: у
+            подключения нет режима отказа, а возврат существует ради формы,
+            общей с соседними ``attach_*``.
+        """
+        from .numbers_gate import NumbersGate
+
+        gate = self._numbers_gate
+        if gate is None:
+            from ...process_module.configs.observation_policy import PROCESS_UNKNOWN
+
+            name = getattr(getattr(self, "process", None), "name", None)
+            self._numbers_gate = NumbersGate(policy, str(name or PROCESS_UNKNOWN))
+        else:
+            gate.set_policy(policy)
+        return True
+
+    @property
+    def numbers_gate(self) -> Any:
+        """Гейт плоскости чисел (``None`` — политики не приносили). Читают readback и тесты."""
+        return self._numbers_gate
+
+    # ------------------------------------------------------------------
+    # Хранилище
+    # ------------------------------------------------------------------
+
+    def levels(self, create: bool = False) -> Any:
+        """Хранилище, которое обслуживает этот порт.
+
+        **Единственный шов, через который ходят СЕМЬ дорог ниже** — и
+        единственное, что переопределяет :class:`ObservationManager` (ему
+        хранилище выдаёт держатель, а не конструктор). Позови любая из них
+        ``self._levels`` напрямую — и override перестал бы действовать ровно на
+        ней одной; первая редакция так и сделала, и приёмка покраснела на
+        ``AttributeError: 'NoneType' object has no attribute 'publish'``.
+
+        Мимо этого шва идут РОВНО ДВЕ дороги, и обе — не про хранилище значений:
+        :meth:`declare` (пишет в процессный каталог имён
+        ``observability_declarations``, хранилища не касается вовсе) и
+        :meth:`for_plugin` (отдаёт хендл, который сам ходит сюда же). Переопредели
+        наследник ``declare`` — override ``levels`` его не подхватит, и это
+        названо здесь, а не оставлено на «все дороги»: обещание «переопределил
+        один метод — перевёл все» было бы ложным ровно в том месте, куда задача
+        3.2 понесёт порт-специфичное объявление.
+
+        Args:
+            create: завести хранилище, если его ещё нет. У ЭТОГО класса флаг —
+                no-op: вид над хранилищем строится резолвером уже с готовой
+                ссылкой. Параметр существует ради :class:`ObservationManager`,
+                который резолвит держателя на каждом обращении и обязан
+                различать читателя и писателя; принимать его здесь дешевле, чем
+                заводить в каждой дороге ниже развилку «а умеет ли этот порт».
+        """
+        return self._levels
+
+    # ------------------------------------------------------------------
+    # Чтение — вопросы тика и опроса
+    # ------------------------------------------------------------------
+    #
+    # Читатели зовут ``levels()`` БЕЗ ``create`` и обязаны пережить ``None``:
+    # у процесса без единой публикации хранилища нет, и заводить его вопросом
+    # «сколько сейчас» значило бы стереть разницу между «плагины уровней не
+    # отдавали» и «отдавали, но всё сняли или придержал гейт» — различие, ради
+    # которого этот атрибут и читают. Пустая проекция, а не отказ: уровень не
+    # имеет права ронять линию.
+
+    def level_names(self) -> set:
+        """Имена листьев ВСЕХ писателей — кандидаты publisher-гейта на тике.
+
+        Отдельный вопрос от :meth:`collect_subtree`, потому что задаётся РАНЬШЕ:
+        гейт решает «поедет ли имя» до того, как значения собраны, и каталог
+        объявлений на этот вопрос не отвечает (необъявленное имя обязано ехать
+        под дефолтным правилом конфига).
+        """
+        store = self.levels()
+        return set() if store is None else set(store.names())
+
+    def level_names_by_writer(self) -> Dict[str, set]:
+        """Имена листьев ПО ПИСАТЕЛЯМ — адресная форма :meth:`level_names` (Ф4).
+
+        Гейт Ф4 решает по ПУТИ, а путь несёт сегмент писателя: правило
+        ``processes.*.state.plugins.capture.fps`` адресует одного писателя, и
+        плоское множество имён этот адрес теряет. Значения по-прежнему не
+        копируются — вопрос задаётся ДО сборки, каждым тиком.
+
+        Хранилища нет → пустой словарь: у процесса без единой публикации нет ни
+        писателей, ни имён, и заводить хранилище вопросом «кто сейчас пишет»
+        значило бы стереть разницу между «не писали» и «писали и сняли».
+        """
+        store = self.levels()
+        if store is None:
+            return {}
+        by_writer = getattr(store, "names_by_writer", None)
+        if callable(by_writer):
+            return dict(by_writer())
+        # Хранилище-дубль без адресного метода: собираем из снимка публикаций.
+        return {writer: set(values) for writer, values in store.publications().items()}
+
+    def collect_subtree(self, allowed_metrics: Optional[Iterable[str]] = None) -> Dict[str, Any]:
+        """Поддерево ``{"plugins": {писатель: {имя: значение}}}`` для секции ``state``.
+
+        Общий шов push и poll — тот же сборщик, что и до Ф3
+        (``build_plugin_levels``), а не вторая копия проекции: разойдись они,
+        «опрос отдаёт то же, что push» стало бы ложью, которую видно только на
+        стенде (ADR-PM-035).
+
+        Args:
+            allowed_metrics: разрешённые на этом тике ИМЕНА ЛИСТЬЕВ; ``None`` →
+                все (так зовёт опрос — гейт про публикацию, а не про то, что
+                процесс знает о себе).
+
+        Returns:
+            Пустой dict, если хранилища нет, оно пусто или всё придержал гейт.
+        """
+        store = self.levels()
+        publications = {} if store is None else store.publications()
+        return _telemetry().build_plugin_levels(publications, allowed_metrics)
+
+    def publications(self) -> Dict[str, Dict[str, Any]]:
+        """Сырой снимок ``писатель → {имя → значение}`` (двухуровневая копия)."""
+        store = self.levels()
+        return {} if store is None else store.publications()
+
+    def departed_writers(self) -> Tuple[str, ...]:
+        """Писатели, чьё поддерево ещё положено утверждать удалённым (Ф2)."""
+        store = self.levels()
+        return () if store is None else tuple(store.departed_writers())
+
+    def note_delete_delivered(self, writer: str) -> None:
+        """Списать одно утверждение удаления поддерева ``writer``.
+
+        Хранилища нет → списывать нечего: ведомость ушедших живёт в нём же, и
+        пустой шаг здесь не отличим от шага по пустой ведомости.
+        """
+        store = self.levels()
+        if store is not None:
+            store.note_delete_delivered(writer)
+
+    # ------------------------------------------------------------------
+    # Запись — дороги PluginContext
+    # ------------------------------------------------------------------
+
+    def publish(self, name: str, value: Any, writer: str) -> None:
+        """Запомнить текущее значение уровня ``name`` от писателя ``writer``.
+
+        ЕДИНСТВЕННАЯ дорога, зовущая ``levels(create=True)``: публикация — это
+        и есть событие, после которого «хранилища нет» перестаёт быть правдой.
+        Она же идёт из ``configure()`` плагина, то есть раньше, чем у процесса
+        созданы менеджеры, — не заведи она хранилище, первые публикации каждого
+        плагина исчезали бы молча.
+        """
+        self.levels(create=True).publish(name, value, writer)
+
+    def retract(self, writer: str) -> int:
+        """Снять всё, что опубликовал ``writer``. Возвращает число снятых записей.
+
+        ``create=False``, хотя дорога и пишущая: снимать в хранилище, которого
+        нет, нечего, и ответ ``0`` от него не зависит. Довод не про экономию, а
+        про приёмочный П1 «маршрут не меняет наблюдаемое состояние»: вызывающий
+        (``PluginContext._retract_metrics``) резолвит порт с ``create=False``, и
+        заводи снятие хранилище здесь — остановка плагина, ни разу ничего не
+        опубликовавшего, оставляла бы после себя пустой ``plugin_levels`` при
+        зарегистрированном слоте и НЕ оставляла бы без него. Один и тот же
+        сценарий с двумя разными следами — ровно тот класс, который эта фаза
+        разбирает.
+        """
+        store = self.levels()
+        return 0 if store is None else int(store.retract(writer))
+
+    # ------------------------------------------------------------------
+    # Запись — числа (Ф5, задача 5.2). Один маршрутизатор на четыре рода,
+    # образец — ErrorManager._level_to_channel/_route (error_manager.py:178):
+    # род значения — ДАННЫЕ (поле ``metric_kind``), а не вторая машина рядом
+    # с публикацией уровней выше. Событие, а не «сколько сейчас»: каждый
+    # вызов значим (сумма/p95), тиком его схлопнуть нельзя — поэтому у чисел
+    # СВОЯ, по-вызовная дорога записи, отдельная от ``publish``.
+    # ------------------------------------------------------------------
+
+    def record_metric(self, name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
+        """Прибавить к счётчику ``name`` — сигнатура дословно ``StatsManager.record_metric``."""
+        self._route_number(RECORD_KIND_COUNTER, name, value, tags)
+
+    def increment(self, name: str, tags: Optional[Dict[str, str]] = None) -> None:
+        """Увеличить счётчик на 1."""
+        self.record_metric(name, 1, tags)
+
+    def record_timing(self, name: str, duration: float, tags: Optional[Dict[str, str]] = None) -> None:
+        """Записать длительность (секунды) — форма дословно ``StatsManager.record_timing``."""
+        self._route_number(RECORD_KIND_TIMING, name, duration, tags)
+
+    def gauge(self, name: str, value: Any, tags: Optional[Dict[str, str]] = None) -> None:
+        """Записать текущее значение (перезапись у агрегатора, не публикация уровня)."""
+        self._route_number(RECORD_KIND_GAUGE, name, value, tags)
+
+    def histogram(self, name: str, value: Any, tags: Optional[Dict[str, str]] = None) -> None:
+        """Записать наблюдение в распределение — та же механика бакетов, что у timing."""
+        self._route_number(RECORD_KIND_HISTOGRAM, name, value, tags)
+
+    def _route_number(self, metric_kind: str, name: str, value: Any, tags: Optional[Dict[str, str]]) -> None:
+        """Один шов на все четыре рода — не четыре копии одной и той же сборки dict.
+
+        **Гейт политики стоит ЗДЕСЬ и до сборки словаря** (Ф2, задача 2.1, шаг 1).
+        Место выбрано, а не досталось: ``_route_number`` — единственный шов, через
+        который проходят все четыре рода чисел и все три входные дороги
+        (``StatsManager.record_metric``, слот-дорога ``ObservableMixin``, дорога
+        плагина ``PluginContext._stats_call``). Поставь проверку в фасад
+        ``StatsManager`` — числа плагина, идущие в порт мимо менеджера, обошли бы
+        её молча; поставь ПОСЛЕ сборки записи — выключенная метрика продолжала бы
+        стоить словарь на вызов, и обещание «не дороже гейта» осталось бы
+        словами (эту половину сторожит бенч шага 5).
+
+        ``self._numbers_gate is None`` — политики не приносили: дословно
+        поведение до Ф2, ни одной лишней операции на пути.
+        """
+        metric_name = str(name)
+        gate = self._numbers_gate
+        if gate is not None and not gate.allow(metric_name):
+            return
+        self._deliver_number(
+            {
+                "metric_kind": metric_kind,
+                "name": metric_name,
+                "value": value,
+                "tags": dict(tags or {}),
+            }
+        )
+
+    def _deliver_number(self, record: Dict[str, Any]) -> None:
+        """Доставка числовой записи — считаемая потеря у голого вида (Ф5, ревью-блокер B1).
+
+        :class:`ObservationPort` без менеджера — вид без жизненного цикла и без
+        CRM (см. докстринг класса): ни tap'ов, ни каналов у него нет и не
+        заводится, а значит и числу здесь физически некуда лечь.
+        ``ObservationManager`` переопределяет метод на реальную доставку через
+        CRM-tap (:meth:`ChannelRoutingManager._emit_to_taps`); здесь дороги нет
+        и не заводится (отклонённая альтернатива — см.
+        ``statistics_module/DECISIONS.md``, ADR-SM-014).
+
+        **Тихий ``return`` здесь БЫЛ, и это был отдельный дефект, а не
+        то же самое молчание, что у :meth:`publish`.** У ``publish`` молчание
+        честное: значение НЕКУДА положить, и вызывающий узнаёт об этом по
+        отсутствию значения в дереве при опросе. У чисел ``fn = getattr(port,
+        method, None)`` в ``PluginContext._stats_call`` находит метод (он ЕСТЬ
+        на :class:`ObservationPort`, унаследован), считает его успешным
+        (``callable`` истинно) и вызывает — три числа исчезали БЕЗ единого
+        следа: ``note_metric_without_plane`` не срабатывал (метод же нашёлся),
+        ``observation_bypasses`` не рос (это счётчик ``StatsManager``, а не
+        порта, и запись до него не доходила вовсе). Воспроизведено ревью
+        (реальный ``PluginContext`` + реальный ``StatsManager``, слот
+        ``observation`` не зарегистрирован, ``plugin_levels`` заведён
+        публикацией из ``configure()``): три метрики — ``get_all_metrics() ==
+        {}``.
+
+        Считать и один раз сказать — тем же жестом, что
+        :meth:`StatsManager._note_observation_bypass` — но БЕЗ доступа к
+        ``services`` (порт его не держит): дедуп ведётся по хранилищу
+        (:func:`bare_port_number_losses`), а не по ``services`` или по
+        экземпляру этого вида (эфемерен — новый на каждый вызов резолвера).
+        """
+        store = self._levels
+        if store is None:
+            # Вырожденная конструкция (``ObservationPort(None)`` напрямую, не
+            # через резолвер) — считать негде и незачем: в боевой сборке
+            # резолвер такой порт никогда не строит (см. ``observation_port``).
+            return
+        with _BARE_PORT_NUMBER_LOSSES_LOCK:
+            entry = _BARE_PORT_NUMBER_LOSSES.get(store)
+            if entry is None:
+                entry = {"count": 0, "warned": False}
+                _BARE_PORT_NUMBER_LOSSES[store] = entry
+            entry["count"] += 1
+            first = not entry["warned"]
+            entry["warned"] = True
+        if first:
+            get_std_logger(__name__).warning(
+                f"[observation] число {record.get('name')!r} потеряно: слот 'observation' "
+                "не зарегистрирован (резолвер отдал ступень 2 — вид без менеджера), а "
+                "бесхозный вид умеет доставлять только уровни, не числа. Дальше считаем "
+                "молча — bare_port_number_losses(store)."
+            )
+
+    def declare(self, name: str, writer: str) -> str:
+        """Внести имя уровня в каталог телеметрии от имени ``writer``.
+
+        Каталог — процессный и общий для обеих плоскостей объявлений
+        (``observability_declarations``), а не собственность порта: по нему
+        publisher-гейт резолвит правила конфига, и второй каталог означал бы
+        второй ответ на «какие имена бывают». Порт здесь ИМЕНОВАННАЯ ДОРОГА, а
+        не хранилище: он даёт объявлению тот же слот, что и публикации, чтобы у
+        ``PluginContext`` не осталось дороги в обход порта.
+        """
+        return _declare_metric(name, owner=str(writer))
+
+    # ------------------------------------------------------------------
+    # Хендл
+    # ------------------------------------------------------------------
+
+    def for_plugin(self, writer: str) -> PluginObservationHandle:
+        """Хендл писателя ``writer`` — см. :class:`PluginObservationHandle`."""
+        return PluginObservationHandle(self, writer)
+
+    def __repr__(self) -> str:  # pragma: no cover — диагностика
+        return f"ObservationPort(levels={self._levels!r})"
+
+
+class ObservationManager(ChannelRoutingManager, ObservationPort):
+    """Порт наблюдений как менеджер процесса — слот ``observation``.
+
+    Наследник ``ChannelRoutingManager`` по образцу ``StatsManager``
+    (ADR-SM-001), а не прямой наследник ``BaseManager``: общая база трёх братьев
+    даёт реестр каналов, учёт потерь и ``reconfigure`` — то самое хозяйство, в
+    которое задача 3.2 понесёт записи уровней (kind=observation), и заводить его
+    заново значило бы получить четвёртую плоскость с собственным счётом потерь.
+
+    Жизненный цикл — базовый, без единого override: ``initialize`` (буфера нет →
+    просто ``is_initialized = True``) и ``shutdown`` (flush по пустому буферу,
+    закрытие пустого реестра каналов). Переопределять их сейчас было бы
+    переписыванием базы своими словами.
+
+    **Хранилище не создаётся в конструкторе и не кэшируется.**
+    :meth:`levels` резолвит его на КАЖДОМ обращении у держателя
+    (``self.process``), а ЗАВОДИТ — только по ``create=True``, то есть только с
+    дороги публикации; тогда и той же функцией ``get_or_create_plugin_levels``,
+    которой пользуется ленивый фолбэк ``PluginContext``. Два следствия, оба
+    нужны:
+
+    * **одна правда.** Атрибут ``services.plugin_levels`` остаётся единственным
+      держателем состояния; закэшируй порт ссылку в ``__init__`` — и подмена
+      атрибута (её делают три существующих набора тестов) дала бы два
+      расходящихся ответа на «сколько сейчас», причём молча;
+    * **создание не приезжает раньше публикации.** Менеджер рождается в
+      ``ProcessManagers.create_all`` у КАЖДОГО процесса, включая те, у которых
+      плагинов нет вовсе. Создай он хранилище в конструкторе — у таких процессов
+      появился бы пустой ``plugin_levels``, а «атрибута нет» перестало бы
+      отличаться от «атрибут пуст». Того же ради :meth:`levels` различает
+      читателя и писателя: заводить хранилище на вопрос «сколько сейчас» —
+      второй способ прийти к тому же пустому узлу, только тиком позже.
+
+    **Известное расхождение, названное, а не заговорённое.** Менеджер,
+    построенный с ``process=None`` и всё же положенный в слот чужих сервисов,
+    обслуживает СВОЁ хранилище — публикации через порт увидит порт (и heartbeat,
+    который читает через порт), но не увидит прямой
+    ``get_or_create_plugin_levels(services)``. В сборке это не достижимо
+    (``_create_observation_manager`` всегда передаёт процесс), поэтому отказом не
+    оформлено; сторожится авторским hazard-тестом, чтобы расхождение осталось
+    описанным поведением, а не сюрпризом.
+    """
+
+    def __init__(
+        self,
+        manager_name: str = "ObservationManager",
+        config: Optional[Any] = None,
+        process: Optional[Any] = None,
+        managers: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Args:
+            manager_name: имя менеджера (в сборке — ``observation_<процесс>``).
+            config: конфиг CRM. Своей секции у порта пока нет — уровни живут
+                своим гейтом (``telemetry.publish``), а каналы появятся в 3.2.
+            process: сервисы процесса — держатель хранилища уровней.
+            managers: словарь для ``ObservableMixin`` (в сборке — logger).
+        """
+        ChannelRoutingManager.__init__(
+            self,
+            manager_name=manager_name,
+            config=config,
+            managers=managers or {},
+            process=process,
+            **kwargs,
+        )
+        # Локальное хранилище — на случай, когда держателя нет вовсе
+        # (``process=None``) или он не принимает атрибут (иммутабельный дубль,
+        # ``__slots__``). Создаётся не здесь, а в :meth:`levels` по первому
+        # запросу: у процесса без плагинов оно так и не понадобится.
+        ObservationPort.__init__(self, None)
+        self._levels_lock = threading.Lock()
+        # Ф5, ревью-блокер B3: числа, реально ушедшие в раздачу tap'ам —
+        # НЕ каждый вызов :meth:`_deliver_number`, а только те, что раздача
+        # не подавила реентерабельностью (см. override ниже). Свой счётчик,
+        # а не запись в ``self.stats`` (``LOSS_COUNTER_KEYS``/
+        # ``DELIVERY_COUNTER_KEYS``): та пара общая для ВСЕХ ЧЕТЫРЁХ плоскостей
+        # CRM, а «числа» осмысленны только у порта — заведи его там, три
+        # соседние плоскости получили бы вечный ноль без причины (тот же
+        # довод, по которому 2.2 держит кардинальность вне ``LOSS_COUNTER_KEYS``).
+        self._numbers_delivered_count = 0
+        # Ф5-добор, блокер Б1: пара к счётчику выше — раздача СОСТОЯЛАСЬ, но не
+        # дошла ни до одного приёмника. Без него `numbers_delivered` считал
+        # ВЫЗОВЫ, а не доставки, и «плоскость живая» было неотличимо от
+        # «tap'ов ноль» (5 записей → delivered=5 в обоих случаях).
+        self._numbers_dropped_no_sink_count = 0
+
+    # ``_levels`` объявлен в ``__slots__`` у ObservationPort, и слот-дескриптор
+    # приоритетнее ``__dict__``: значение лежит в СЛОТЕ, а не в словаре
+    # менеджера (``'_levels' in self.__dict__`` → False, а
+    # ``type(self)._levels`` → ``member_descriptor``). ``__dict__`` у менеджера
+    # при этом есть — его даёт ChannelRoutingManager без ``__slots__``, — и
+    # именно поэтому остальные поля порта класть в слоты не пришлось.
+
+    def levels(self, create: bool = False) -> Any:
+        """Хранилище уровней процесса — резолвится на каждом обращении.
+
+        Порядок: держатель (``self.process``) → его атрибут ``plugin_levels`` →
+        локальное хранилище порта, если держателя нет или он атрибут не принял.
+
+        **``create`` доведён СЮДА, а не остановлен на резолвере, и это про
+        боевую дорогу.** ``observation_port(services, create=False)`` отдаёт
+        менеджера из слота ПЕРВОЙ ступенью — после чего решение о создании
+        принимает уже этот метод. Останься он безусловным
+        ``get_or_create_plugin_levels`` (так было в первой редакции), обещание
+        «читатель не заводит хранилище» держалось бы ровно там, где порт не
+        зарегистрирован, то есть везде, кроме сборки. Воспроизведено ревью
+        2026-08-25: настоящий ``ProcessModule`` после ``initialize()`` имел
+        ``plugin_levels = None``, а после ОДНОГО ``ProcessHeartbeat._level_names()``
+        — готовый ``PluginLevels``.
+
+        ``create=False`` и хранилища нет → ``None``, и читатели выше обязаны это
+        пережить пустой проекцией. Отказ здесь означал бы, что тик процесса без
+        плагинов падает по штатной конфигурации.
+
+        Лок стоит только на ветке локального хранилища, и не «на всякий случай»:
+        два потока, спросившие уровни впервые одновременно, создали бы ДВА
+        ``PluginLevels``, и публикации разъехались бы по ним — половина значений
+        исчезла бы без единого голоса. Воспроизведено авторским hazard-тестом
+        (класс про одновременный первый доступ), а не выведено рассуждением.
+
+        Ветка держателя своим локом НЕ накрыта, и это названный потолок, а не
+        недосмотр: там ровно та же гонка живёт ВНУТРИ
+        ``get_or_create_plugin_levels`` (два потока, оба не нашедшие атрибут,
+        оба зовут ``setattr``, и проигравший уносит свой экземпляр с собой).
+        Она существует с Ф1, порт её не вносит и не может закрыть отсюда — лок
+        вокруг чужого ``setattr`` не помешал бы третьему вызывающему,
+        обращающемуся к функции напрямую. Закрывается там же, где живёт.
+
+        Args:
+            create: завести хранилище, если его ещё нет. ``True`` — только у
+                публикации (:meth:`ObservationPort.publish`).
+
+        Returns:
+            Хранилище либо ``None`` (только при ``create=False``).
+        """
+        telemetry = _telemetry()
+        host = self.process
+        if host is not None:
+            if create:
+                store = telemetry.get_or_create_plugin_levels(host)
+            else:
+                # Ровно та же проверка, что у ``get_or_create_plugin_levels`` и
+                # у ступени 2 резолвера: у атрибута процесса уже есть владелец с
+                # принятым решением о том, что считать хранилищем, и вторая,
+                # более мягкая проверка означала бы два ответа на один вопрос.
+                store = getattr(host, telemetry.PLUGIN_LEVELS_ATTR, None)
+                if not isinstance(store, telemetry.PluginLevels):
+                    store = None
+            if store is not None:
+                return store
+        if not create:
+            # Локальное хранилище, если оно УЖЕ заведено писателем; иначе
+            # «показаний нет». Лок здесь не нужен: чтение одной ссылки атомарно
+            # под GIL, а гонка первого создания живёт в ветке ниже.
+            return self._levels
+        with self._levels_lock:
+            if self._levels is None:
+                self._levels = telemetry.PluginLevels()
+            return self._levels
+
+    # Чтение/запись УРОВНЕЙ наследуются от ObservationPort целиком — они
+    # обращаются к хранилищу ТОЛЬКО через ``self.levels()``, поэтому override
+    # одного метода переводит на резолв все СЕМЬ дорог сразу. Мимо шва идут
+    # ровно две: ``declare`` (процессный каталог имён, хранилища не касается) и
+    # ``for_plugin`` (отдаёт хендл, который ходит сюда же). Обе названы
+    # поимённо в докстринге ``ObservationPort.levels``.
+
+    def _deliver_number(self, record: Dict[str, Any]) -> None:
+        """Доставка числовой записи — CRM-tap, а НЕ ``ObservabilityHub`` (Ф5, задача 5.3).
+
+        ``ObservationManager`` — наследник ``ChannelRoutingManager``, и у него
+        есть готовая, СИНХРОННАЯ, небюджетируемая дорога «раздать запись всем
+        подписчикам» —
+        :meth:`~...channel_routing_module.core.channel_routing_manager.ChannelRoutingManager._emit_to_taps`
+        (Ф0.6, тот же механизм, которым ``StatsManager`` уже отдаёт tap'ам свои
+        собственные сырые записи). Выбор ИМЕННО этого механизма, а не хаба —
+        решение владельца Ф5, и причина не про удобство:
+
+        1. **Потеря.** ``ObservabilityHub`` — bounded-канал с политикой
+           ``drop_oldest`` (см. ``bounded_channel.py``); кормить агрегаты окна
+           через него значило бы тихо терять слагаемые сумм под нагрузкой —
+           регрессия против сегодняшнего синхронного счёта ``StatsManager``.
+           Tap здесь ничем не ограничен: раздача синхронная, в вызывающем
+           потоке, отказ ОДНОГО tap'а не останавливает остальных
+           (``_emit_to_taps`` глушит исключение приёмника, не эмитента).
+        2. **Петля.** ``drain_adapter.apply_stat`` читает hub-записи рода
+           ``stats`` и сам зовёт ``StatsManager.record_metric`` — заведи числа
+           порта через хаб, и петля «порт → хаб → drain_adapter →
+           StatsManager → окно → хаб» замкнулась бы, а существующий
+           предохранитель (:data:`~...channel_routing_module.observability.STATS_AGGREGATE_KEY`,
+           фильтр в ``drain_adapter.apply_stat``) её НЕ разомкнул бы: он
+           различает СЫРУЮ запись от АГРЕГАТА внутри рода ``stats``, а не род
+           ``observation`` от рода ``stats`` — второй предохранитель пришлось
+           бы городить заново. Не через хаб — и вопрос снят по построению,
+           не заплатой.
+
+        ``min_level`` у tap-подписки роли не играет (числа не несут уровня —
+        см. ``record_severity``), но подписчик обязан назвать порог САМ,
+        достаточно низкий, чтобы его не срезало ``_emit_to_taps`` по умолчанию
+        ("ERROR"); порт здесь не решает за подписчика ничего — только
+        раздаёт.
+
+        **Контракт ``_emit_to_taps`` — «tail не работа», и это правильный
+        контракт (Ф5, ревью-блокер B3): раздача НЕ должна ронять эмитента ни
+        отказом одного tap'а, ни реентерабельным входом.** Но «не роняет» не
+        значит «не считается» — до этой правки оба класса потерь у ЧИСЕЛ были
+        видны только строкой ``tap_reentrant_suppressed``/``tap_write_errors``
+        в ``self.stats``, ОБЩЕЙ для всех четырёх плоскостей CRM и не названной
+        применительно к числам нигде. Три счётчика ниже (:meth:`get_stats`) —
+        не смена механизма (второй, «не глушащий» шов для чисел ОТКЛОНЁН, см.
+        ``DECISIONS.md``), а его наблюдаемость: раздача остаётся ОДНОЙ, просто
+        теперь считаема с обеих сторон — сколько ушло, сколько подавлено,
+        сколько отказал приёмник.
+
+        **«Доставлено» проверяется ДО вызова, флагом глубины, а НЕ диффом
+        общего счётчика ПОСЛЕ.** Первая редакция сравнивала
+        ``self.stats["tap_reentrant_suppressed"]`` до/после вызова —
+        воспроизведено собственным тестом (``test_f5_review_blockers.py``):
+        реентерабельный tap, зовущий ``record_metric`` ИЗНУТРИ своего
+        ``write()``, поднимает ЭТОТ счётчик на вложенном вызове, и внешний,
+        честно доставленный вызов после возврата видит «счётчик изменился»,
+        хотя изменил его НЕ он — 5 внешних вызовов ошибочно давали
+        ``numbers_delivered == 0`` вместо ``5``. Счётчик — общий на менеджер, а
+        не per-call, и диффом его читать нельзя. Флаг ``_tap_depth.active``
+        снят ИМЕННО тем же условием, которым сам ``_emit_to_taps`` решает
+        «подавлять или нет» — тот же предикат, а не его приближение.
+
+        **Инкремент — БЕЗ ``self._miss_lock`` (умышленно, второй раунд правки).**
+        Первая редакция брала лок на КАЖДОЙ доставке — прямое нарушение
+        собственного инварианта этого файла: `_miss_lock` «берётся ТОЛЬКО на
+        пути потери, поэтому на здоровом пути не стоит ничего»
+        (``ChannelRoutingManager.__init__``, комментарий у объявления лока).
+        Доставка — ЗДОРОВЫЙ путь по определению (это его противоположность
+        потере), и лок на нём был РОВНО тем классом «появления новой работы на
+        горячем пути», который стережёт
+        ``test_plugin_stats_road.py::TestTheCostOfTheHotPath`` — воспроизведено:
+        полный гейт (8928 тестов, машина под нагрузкой) покраснел на бюджете
+        5.0 мкс, хотя тест этого файла в изоляции проходил. Плата за снятие
+        лока — **``+= 1`` не атомарен под конкуренцией** (GIL сериализует
+        байткод, но read-modify-write из двух потоков может потерять один
+        инкремент). Для СЧЁТНОГО ФАКТА «плоскость чисел живая» (пара к
+        :attr:`StatsManager.observation_bypasses`, B2) это приемлемо и не
+        заявляется как точное число — не «гарантировано точно», а «заведомо
+        положительно при живой доставке»; для точного счёта существуют локи
+        соседних методов ЭТОГО же файла на пути ПОТЕРИ, где цена лока не на
+        горячем пути.
+
+        **Исход раздачи спрашивается У РАЗДАЧИ, а не предполагается (Ф5-добор,
+        блокер Б1).** Прежняя редакция инкрементила ``numbers_delivered`` ПОСЛЕ
+        вызова, ничего о его исходе не зная, — а ``_emit_to_taps`` выходит на
+        ``if not self._tap_sinks: return`` раньше всякого учёта. Воспроизведено
+        владельцем, пара вход→выход:
+
+            5 записей, tap'ов ноль → delivered=5, приёмник получил 0
+            5 записей, tap живой   → delivered=5, приёмник получил 5
+
+        То есть счётчик, заведённый ОТЛИЧАТЬ живую плоскость чисел от мёртвой,
+        отвечал на вопрос «сколько раз звали» и был к этому различию слеп;
+        вторая пара (ревьюер) — ``attach`` → 1 число → ``remove_tap`` →
+        4 записи: ``delivered`` вырос на 4, все шесть счётчиков говорили «всё
+        хорошо», четыре числа исчезли молча. Теперь исход разведён: ноль
+        принявших — ``numbers_dropped_no_sink``, а не ``numbers_delivered``.
+
+        **Реентрантный вход считается как раньше** — ни туда, ни сюда: он уже
+        назван своим счётчиком (``tap_reentrant_suppressed``), и записать его
+        ещё и в «не дошло до приёмников» значило бы считать одну потерю дважды.
+        Флаг снимается ДО вызова тем же предикатом, что и у самой раздачи
+        (см. абзац выше про диff общего счётчика).
+        """
+        depth_state = self._tap_depth
+        reentrant = bool(getattr(depth_state, "active", False))
+        accepted = self._emit_to_taps(record)
+        if reentrant:
+            return
+        if accepted:
+            self._numbers_delivered_count += 1
+        else:
+            self._numbers_dropped_no_sink_count += 1
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Диагностика порта + СОБСТВЕННЫЕ счётчики плоскости чисел (Ф5, ревью-блокер B3).
+
+        Четыре ключа, которых нет у трёх соседних плоскостей CRM (логгер/ошибки/
+        stats) — «числа» осмысленны только у порта наблюдений:
+
+        * ``numbers_delivered`` — числа, которые ПРИНЯЛ хотя бы один tap.
+          Не «сколько раз звали ``record_metric``»: раздача с нулём приёмников
+          сюда НЕ идёт (Ф5-добор, блокер Б1 — именно этим счётчик был слеп к
+          мёртвой плоскости). **Без лока на горячем пути** (см. докстринг
+          :meth:`_deliver_number`) — под конкуренцией МОЖЕТ недосчитать единицы
+          (GIL не даёт исказить порядки величины): годится как счётный ФАКТ,
+          не годится как точный аудит;
+        * ``numbers_dropped_no_sink`` — раздача состоялась и не дошла НИ ДО
+          КОГО. Три причины сливаются в одну цифру намеренно: приёмников нет
+          вовсе; порог единственного tap'а выше уровня записи; приёмник бросил
+          (эта причина названа отдельно соседним ключом). Общее у них одно и
+          то же и именно оно важно — число потеряно. Тот же счётчик без лока;
+        * ``numbers_dropped_by_sink_error`` — alias ``tap_write_errors``: tap
+          бросил при записи (раздача глушит отказ ПРИЁМНИКА, но считает его) —
+          точный, под ``_miss_lock`` ``ChannelRoutingManager``, путь потери;
+        * ``numbers_suppressed_reentrant`` — alias ``tap_reentrant_suppressed``:
+          вход был реентерабельным, раздача подавлена целиком (D1) — тоже точный.
+          В ``numbers_dropped_no_sink`` НЕ идёт: одна потеря — один счётчик.
+
+        **Различитель живой и мёртвой плоскости — ПАРА, а не одно число:**
+        ``numbers_delivered > 0`` И ``numbers_dropped_no_sink == 0``. Пара к
+        :attr:`StatsManager.observation_bypasses` (B2), у которого «в боевой
+        сборке обходов ноль» само по себе неотличимо от «портом никто не
+        пользовался».
+
+        Прежняя редакция этого докстринга утверждала, что различителем
+        достаточно одного ``numbers_delivered > 0``. Это было ЛОЖНО и
+        воспроизведено дважды (пары вход→выход — в :meth:`_deliver_number`):
+        счётчик рос одинаково при живом приёмнике и при их отсутствии, а на
+        этом утверждении, как на посылке, объявлялись закрытыми ревью-блокеры
+        B2/B3. Утверждение убрано, а не смягчено.
+        """
+        stats = super().get_stats()
+        stats["numbers_delivered"] = self._numbers_delivered_count
+        stats["numbers_dropped_no_sink"] = self._numbers_dropped_no_sink_count
+        stats["numbers_dropped_by_sink_error"] = stats.get("tap_write_errors", 0)
+        stats["numbers_suppressed_reentrant"] = stats.get("tap_reentrant_suppressed", 0)
+        return stats
+
+    def __repr__(self) -> str:  # pragma: no cover — диагностика
+        return f"ObservationManager(manager_name={self.manager_name!r})"
+
+
+def observation_port(services: Any, *, create: bool = False) -> Optional[ObservationPort]:
+    """Порт наблюдений процесса — ЕДИНСТВЕННАЯ дорога читателей к уровням.
+
+    Резолв в три ступени:
+
+    1. слот ``observation`` в реестре ``ObservableMixin`` — боевая дорога после
+       ``ProcessManagers.register_all``;
+    2. существующее хранилище ``services.plugin_levels`` — короткоживущий вид
+       для процесса, поднятого не через ``register_all`` (тестовые дубли, ранние
+       стадии старта). Незарегистрированный слот, как и до Ф3, не роняет
+       вызывающего и не отменяет уровни;
+    3. ``None`` — уровней у этого процесса нет и (при ``create=False``) заводить
+       их незачем.
+
+    **``create`` — это ИМЕНОВАННЫЙ ФОЛБЭК, а не костыль, и он обязан пережить
+    Ф3.** Публикация плагина идёт из ``configure()``, то есть РАНЬШЕ ``start()``
+    — раньше, чем у процесса вообще появились менеджеры. Читатель (тик
+    heartbeat) зовёт с ``create=False``: у процесса без единой публикации
+    создавать хранилище на каждом тике незачем, а «атрибута нет» перестало бы
+    отличаться от «атрибут пуст». Писатель (``PluginContext.publish_metric``)
+    зовёт с ``create=True``: ему хранилище нужно именно сейчас.
+
+    **Флаг действует на ОБЕИХ ступенях, и это не само собой.** Ступень 1 отдаёт
+    менеджера независимо от ``create`` — создавать или нет, решает уже он
+    (:meth:`ObservationManager.levels` принимает тот же флаг от каждой дороги
+    порта). Первая редакция останавливала ``create`` здесь, и менеджер заводил
+    хранилище безусловно: обещание держалось ровно там, где порт не
+    зарегистрирован, то есть везде, кроме сборки (ревью 2026-08-25). Ступень 2
+    строит вид над хранилищем и потому решает флаг сама, здесь и сейчас.
+
+    **Две ступени распознаются РАЗНЫМИ проверками, и это не разнобой.** Слот —
+    ПО ПРОТОКОЛУ (есть вызываемый ``collect_subtree``), довод тот же, что у
+    ``ObservableMixin._manager_has_method``: в слоте может оказаться duck-typed
+    порт, а посторонний объект под именем ``observation`` не должен уводить
+    читателя в тихий отказ — он проваливается на ступень 2, к настоящему
+    хранилищу. Атрибут — по ``isinstance``, дословно как в
+    ``get_or_create_plugin_levels``: у атрибута процесса уже есть владелец с
+    принятым решением о том, что считать хранилищем, и вторая, более мягкая
+    проверка того же атрибута означала бы два ответа на один вопрос.
+
+    Args:
+        services: сервисы процесса (``ProcessModule`` или его дубль).
+        create: завести хранилище, если его ещё нет.
+
+    Returns:
+        Порт либо ``None``. ``None`` = названный no-op у вызывающего, а не
+        исключение: уровень не имеет права ронять линию.
+    """
+    if services is None:
+        return None
+
+    get_manager = getattr(services, "get_manager", None)
+    if callable(get_manager):
+        # Отказ САМОГО резолва слота — не исключение вызывающему (Ф5-добор,
+        # найдено сквозным тестом блокера З6). ``get_manager`` вызываем не
+        # значит «безопасен»: на ``ProcessManagerProcess`` он бросает
+        # ``AttributeError: … no attribute '_registry'`` (латентный дефект
+        # соседнего процесса), и через ``observation_plane_report`` это роняло
+        # ВСЮ команду ``introspect.observability`` — то есть диагностика
+        # умирала ровно там, где её и зовут разбирать инцидент. Правка S2
+        # закрыла этим же доводом путь СЧЁТЧИКОВ (``_safe_get_manager``), а
+        # путь УРОВНЕЙ, идущий сюда, остался открытым.
+        #
+        # Молчание здесь не прячет причину: тем же ответом той же команды
+        # причина едет секцией ``counters.observation.error`` (маркер
+        # ``_ManagerLookupFailed``). А контракт этой функции — «``None`` =
+        # названный no-op, уровень не имеет права ронять линию» (см. Returns);
+        # исключение из ступени 1 ему противоречило.
+        try:
+            manager = get_manager(OBSERVATION_SLOT)
+        except Exception:  # noqa: BLE001 — резолв слота не роняет читателя уровней
+            manager = None
+        if manager is not None and callable(getattr(manager, "collect_subtree", None)):
+            return manager
+
+    telemetry = _telemetry()
+    if create:
+        store = telemetry.get_or_create_plugin_levels(services)
+    else:
+        store = getattr(services, telemetry.PLUGIN_LEVELS_ATTR, None)
+        if not isinstance(store, telemetry.PluginLevels):
+            store = None
+    return None if store is None else ObservationPort(store)
+
+
+# ====================================================================== #
+#  Задача 3.2 — форма записи для ObservabilityHub (kind=observation)      #
+# ====================================================================== #
+
+
+class ObservationRecord(SchemaBase):
+    """Одна публикация уровня — форма записи хаба наблюдаемости (``kind=observation``).
+
+    Dict at Boundary (правило проекта №1): наружу отдаётся только
+    :meth:`to_dict` — plain pickle-safe dict, который и уходит в
+    :meth:`~...channel_routing_module.observability.observability_hub.ObservabilityHub.emit_observation_record`.
+    Внутри процесса — Pydantic-модель, как у всех регистров/конфигов на
+    ``SchemaBase`` (см. ``process_module/plugins/port.py`` — тот же приём).
+
+    Поля плоские и совпадают с сегментами пути дерева (``state.plugins.<writer>.<metric>``
+    = ``значение``), а не вложенным payload'ом: приёмка (Task 3.2, критерий A4)
+    ищет имя писателя и метрики ЧЛЕНСТВОМ в ``record.values()``, и вложенный
+    dict сделал бы их невидимыми для такой проверки — то же самое требование,
+    что уже определило форму stats-записи хаба (``metric``/``value``/…).
+    """
+
+    writer: Annotated[
+        str,
+        FieldMeta("Писатель", info="Сегмент пути — плагин/компонент, опубликовавший уровень"),
+    ]
+    metric: Annotated[
+        str,
+        FieldMeta("Метрика", info="Имя листа — то же имя, что и в дереве StateStore"),
+    ]
+    value: Annotated[
+        Any,
+        FieldMeta("Значение", info="Текущее значение уровня на момент тика"),
+    ]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Plain dict для границы процесса — Dict at Boundary."""
+        return self.model_dump()
+
+
+def records_for_hub(plugin_levels_subtree: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Плоский список hub-записей (``kind=observation``) из поддерева тика.
+
+    Вход — РОВНО то, что :meth:`ObservationPort.collect_subtree` отдаёт
+    сборщику дерева (``{"plugins": {writer: {metric: value}}}``), уже
+    отфильтрованное publisher-гейтом тика. Второго гейта здесь нет и не
+    заводится (Task 3.2, шаг 2: «запись в хаб идёт ПОД ТЕМ ЖЕ гейтом, что и
+    лист в дерево») — вызывающий (``ProcessHeartbeat``) передаёт СЮДА тот же
+    словарь, что уже ушёл в ``state["plugins"]``.
+
+    **Точная область этого утверждения — «второго СБОРЩИКА нет», и только.**
+    Прежняя редакция говорила «расхождение между "что в дереве" и "что в хабе"
+    невозможно по построению», и это было неверно; ревью 2026-08-25 опровергло
+    её двумя запусками, а не чтением:
+
+      1. **Переполнение канала.** ``ObservabilityHub("p", capacity=2)``, шесть
+         тиков с растущим значением: в дерево уехало ``[0.0 … 5.0]``, в хабе
+         осталось ``[4.0, 5.0]``, ``dropped=4``. Это штатная политика
+         ``drop_oldest`` (для уровня «сколько СЕЙЧАС» она верна — уцелевают
+         ПОСЛЕДНИЕ), но расхождение при ней есть, и оно ожидаемо.
+      2. **Проглоченное исключение.** Если ``hub.emit_observation_record``
+         бросит, общий ``except`` в :meth:`ProcessHeartbeat._emit_observation_hub_records`
+         его погасит: в дереве ``{"plugins": {"capture": {"fps": 7.0}}}``, в
+         хабе ``[]``.
+
+    Обе границы наблюдаемы через ``counters`` секции ``observation`` ответа
+    ``introspect.observability`` — ``dropped`` про первую. Уверенное неверное
+    объяснение живёт дольше дефекта: дефект находят по симптому, а объяснению
+    верят, — поэтому граница названа здесь, а не подразумевается.
+
+    Пустое/чужое поддерево (не dict, нет ключа ``plugins``) → пустой список,
+    а не исключение: вызывающий и так не станет звать hub на пустом тике.
+
+    Returns:
+        Список plain dict (:meth:`ObservationRecord.to_dict`), готовых для
+        ``hub.emit_observation_record``. Порядок — порядок обхода
+        ``dict.items()`` поддерева (детерминирован в CPython 3.7+, но не
+        часть контракта — приёмка проверяет МНОЖЕСТВО записей, не порядок).
+    """
+    plugins = (
+        plugin_levels_subtree.get(_telemetry().PLUGINS_SUBTREE_KEY) if isinstance(plugin_levels_subtree, dict) else None
+    )
+    if not isinstance(plugins, dict):
+        return []
+    records: List[Dict[str, Any]] = []
+    for writer, metrics in plugins.items():
+        if not isinstance(metrics, dict):
+            continue
+        for metric, value in metrics.items():
+            records.append(ObservationRecord(writer=str(writer), metric=str(metric), value=value).to_dict())
+    return records

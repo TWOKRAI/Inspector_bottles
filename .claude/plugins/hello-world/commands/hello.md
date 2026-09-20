@@ -1,5 +1,5 @@
 ---
-description: Echo back to the user: **Hello from claude_seed plugin!**
+description: Echo a greeting — smoke-test that the native plugin format loads
 ---
 
 Echo back to the user: **Hello from claude_seed plugin!**

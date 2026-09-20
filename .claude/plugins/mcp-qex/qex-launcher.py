@@ -28,15 +28,21 @@ import subprocess
 import urllib.error
 import urllib.request
 
+# Windows-консоль по умолчанию cp1251/cp866: без этого диагностика лаунчера
+# (она идёт в stderr и содержит символы вроде x --) роняет запуск qex
+# с UnicodeEncodeError. Тот же приём, что в mcp-graphify/scripts/graph_slice.py.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # realpath разрешает симлинк (scripts/qex-launcher.py -> .claude/plugins/mcp-qex/qex-launcher.py)
 _script_dir = os.path.dirname(os.path.realpath(__file__))
-# .claude/plugins/mcp-qex/qex-launcher.py → корень проекта = три уровня вверх
-# (mcp-qex → plugins → .claude → root)
-workspace = os.path.dirname(os.path.dirname(os.path.dirname(_script_dir)))
+# .claude/plugins/mcp-qex/qex-launcher.py → корень проекта = два уровня вверх
+workspace = os.path.dirname(os.path.dirname(_script_dir))
 
 # ── .ignore: создать из template при первом запуске qex (idempotent) ─────────
 _ignore_target = os.path.join(workspace, ".ignore")
-_ignore_template = os.path.join(_script_dir, "templates", "ignore.template")
+_ignore_template = os.path.join(_script_dir, "qex", "templates", "ignore.template")
 if not os.path.exists(_ignore_target) and os.path.exists(_ignore_template):
     try:
         shutil.copy2(_ignore_template, _ignore_target)
@@ -52,32 +58,51 @@ if not os.path.exists(_ignore_target) and os.path.exists(_ignore_template):
 if platform.system() == "Windows":
     base_url = "http://localhost:11434/v1"
     api_key = "ollama"
-    model = "qwen3-embedding:4b"
-    dimensions = "2560"
-    expected_num_ctx = 2048  # см. setup-embedding-model.sh — Win 4b → 2048
+    # 0.6b — дефолт сида на Windows: целиком помещается в VRAM ноутбучных GPU
+    # (~1 ГБ), поэтому не уходит в CPU-offload и не даёт таймаутов на индексации.
+    # dimensions ОБЯЗАНЫ совпадать с моделью (0.6b → 1024, 4b → 2560, 8b → 4096):
+    # qex не проверяет это и при расхождении молча пишет мусор в индекс.
+    # Тег-вариант (`-qex`), не базовый: у базового тега нет num_ctx/num_gpu
+    # (пустые параметры при `ollama show <base> --parameters`), а подмена
+    # базового тега вариантом стирается любым последующим `ollama pull <base>`.
+    model = "qwen3-embedding:0.6b-qex"
+    dimensions = "1024"
+    expected_num_ctx = 2048  # см. setup-embedding-model.sh — Win 0.6b → 2048
     default_bin = os.path.join(os.path.expanduser("~"), ".cargo", "bin", "qex.exe")
 else:
-    # macOS: Ollama (qwen3-embedding:4b, dim=2560) на :11434 (GUI Ollama.app).
-    # Выбор 4b вместо 8b (2026-07-05): 2× быстрее индексация И каждый запрос,
-    # разрыв точности на коде <1% (MTEB-Code ~80.1 vs ~80.7). Связи кода даёт
-    # codegraph/graphify/serena, не эмбеддинг — размер модели на них не влияет.
+    # macOS: Ollama (qwen3-embedding:8b, dim=4096) на :11434 (GUI Ollama.app).
     # Эксперименты 2026-05-10:
     # - mlx-openai-server :1235 → 2.5× медленнее (single inference worker).
     # - OLLAMA_NUM_PARALLEL=4 на CLI Ollama → 0% эффекта (Metal не масштабируется
     #   по parallel calls на одну модель; Ollama embedding-runner грузится с Parallel:1
-    #   независимо от env). Подтверждено повторно 2026-07-05. См. handoff 2026-05-10.
+    #   независимо от env). См. handoff 2026-05-10.
     base_url = "http://localhost:11434/v1"
     api_key = "ollama"
-    model = "qwen3-embedding:4b"
-    dimensions = "2560"
-    expected_num_ctx = 2048  # 4b → 2048 (см. setup-embedding-model.sh)
+    # Тег-вариант (`-qex`), не базовый: та же причина, что в ветке Windows выше —
+    # `qwen3-embedding:8b` (без суффикса) не несёт num_ctx/num_gpu, и подмену тега
+    # стирает `ollama pull qwen3-embedding:8b` (именно так это и произошло на
+    # машине владельца — контекст откатился на дефолт ollama 32768).
+    model = "qwen3-embedding:8b-qex"
+    dimensions = "4096"
+    expected_num_ctx = 4096  # см. setup-embedding-model.sh — Mac 8b → 4096
     default_bin = os.path.join(os.path.expanduser("~"), ".local", "bin", "qex")
+
+# QEX_OPENAI_BASE_URL: переопределяется из окружения (правка владельца) — позволяет
+# поставить прокси перед Ollama, не трогая шипнутый код. Дефолт — тот же для обеих ОС.
+base_url = os.environ.get("QEX_OPENAI_BASE_URL", base_url)
 
 
 # ── health-check ollama embedding-модели (idempotent, non-blocking) ──────────
 # Если модель загружена с раздутым контекстом (например 32768 по дефолту) — она
 # не помещается в VRAM, идёт на CPU и MCP таймаутит при индексации. Не блокируем
 # запуск qex, только подсказываем как починить.
+_SETUP_HINT = (
+    r"powershell .claude\plugins\mcp-qex\setup-embedding-model.ps1"
+    if platform.system() == "Windows"
+    else "bash .claude/plugins/mcp-qex/setup-embedding-model.sh"
+)
+
+
 def _check_embedding_model_health() -> None:
     ollama_base = base_url.rsplit("/v1", 1)[0]
     try:
@@ -89,6 +114,16 @@ def _check_embedding_model_health() -> None:
         )
         with urllib.request.urlopen(req, timeout=2) as resp:
             info = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            # Вариант-тег ещё не создан setup-скриптом. Не блокируем запуск и не
+            # откатываемся молча на базовый тег — только предупреждаем один раз.
+            print(
+                f"[qex-launcher] WARN: модель {model} не найдена в Ollama. "
+                f"Создай вариант: {_SETUP_HINT}",
+                file=sys.stderr,
+            )
+        return
     except (urllib.error.URLError, OSError, ValueError):
         return  # ollama недоступна — qex сам напишет понятную ошибку при первом запросе
     actual_ctx = info.get("parameters", "")
@@ -98,11 +133,10 @@ def _check_embedding_model_health() -> None:
         except (IndexError, ValueError):
             return
         if actual != expected_num_ctx:
-            setup = os.path.join(_script_dir, "setup-embedding-model.sh")
             print(
                 f"[qex-launcher] WARN: модель {model} имеет num_ctx={actual}, "
                 f"ожидается {expected_num_ctx}. Это вызывает CPU-offload и MCP "
-                f"таймауты. Запусти setup: bash '{setup}'  (или .ps1 на Win)",
+                f"таймауты. Запусти setup: {_SETUP_HINT}",
                 file=sys.stderr,
             )
 

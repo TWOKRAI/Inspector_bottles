@@ -311,8 +311,18 @@ class RouterManager(ChannelRoutingManager):
         # Отдельное окно на причину: шторм «нет маршрута» не имеет права
         # заглушить редкое «исключение», иначе диагностика теряет как раз тот
         # случай, ради которого её и читают.
-        self._send_error_last_log: Dict[str, float] = {}
-        self._send_error_suppressed: Dict[str, int] = {}
+        #
+        # Ф1.4: собственного состояния окна здесь БОЛЬШЕ НЕТ. Пара словарей
+        # `_send_error_last_log`/`_send_error_suppressed` была прототипом общего
+        # механизма и переехала в него целиком (`ObservableMixin.should_voice` →
+        # `logger_module.core.windowed_voice`). Ключ окна — по-прежнему причина,
+        # окно — из политики процесса (`observability.voices.default_window_sec`),
+        # а не из константы: шесть СНЯТЫХ ручных копий одного и того же 5.0,
+        # перечисленных в `windowed_voice.REPLACED_MANUAL_WINDOWS`, и были той
+        # причиной, по которой «тише на линии» нельзя было настроить. Число —
+        # про РЕЕСТР снятых копий, а не про инвентаризацию дерева целиком:
+        # живой держатель окна ВНЕ реестра известен (Н-3, ревью Ф2) — см.
+        # docs/claude/OPEN_QUESTIONS.md.
 
     def _inc_stat(self, key: str, value: int = 1) -> None:
         # get(key, 0): счётчики с разбивкой по kind (``sent_via_channel.data`` и т.п.)
@@ -321,13 +331,15 @@ class RouterManager(ChannelRoutingManager):
         with self._stats_lock:
             self._stats[key] = self._stats.get(key, 0) + value
 
-    #: Не чаще одной записи об ошибке отправки НА ПРИЧИНУ за это окно (сек).
+    #: Префикс ключа окна: не чаще одной записи об ошибке отправки НА ПРИЧИНУ.
     #: Троттлинг по времени, а не «каждая N-я»: живой прогон дал 45 ошибок за
     #: 7.7 мин на трёх процессах, но темп зависит от нагрузки, и порог по счёту
     #: при шторме дал бы несколько записей в секунду — вторая беда того же рода,
-    #: что раздула messages.log до 645 МБ. Окно = образец из
-    #: ``shared_resources_module/queues/core/manager.py``.
-    _SEND_ERROR_LOG_INTERVAL_SEC = 5.0
+    #: что раздула messages.log до 645 МБ.
+    #:
+    #: Ф1.4: величина окна больше НЕ живёт здесь константой — она приходит из
+    #: политики процесса (``observability.voices.default_window_sec``).
+    _SEND_ERROR_VOICE_KEY = "router.send_error"
 
     @staticmethod
     def _is_observability_traffic(msg_dict: Dict[str, Any]) -> bool:
@@ -381,24 +393,26 @@ class RouterManager(ChannelRoutingManager):
             self._inc_stat("observability_delivery_failed")
             self._inc_stat(f"observability_errors_{reason}")
             return
+        # ФАКТ — всегда, окно его не касается (Ф1.4: два обязательства разделены).
         self._inc_stat("errors")
         self._inc_stat(f"errors_{reason}")
-        now = time.monotonic()
         with self._stats_lock:
-            last = self._send_error_last_log.get(reason, 0.0)
-            if last and now - last < self._SEND_ERROR_LOG_INTERVAL_SEC:
-                self._send_error_suppressed[reason] = self._send_error_suppressed.get(reason, 0) + 1
-                return
-            suppressed = self._send_error_suppressed.pop(reason, 0)
-            self._send_error_last_log[reason] = now
-            # Ф6.х.7б: чтение под тем же локом, что и инкремент (_inc_stat) —
-            # вне лока число в тексте записи могло отстать от своего момента.
+            # Число снимается СРАЗУ ЗА фактом — то есть «включая это вхождение».
+            # До Task 1.3b оно снималось после решения о голосе, потому что и
+            # запись плоскости стояла ТАМ ЖЕ; вместе с переносом факта наверх
+            # исчезла и причина откладывать замер.
             total = self._stats.get(f"errors_{reason}", 0)
-        tail = f"; подавлено с прошлой записи: {suppressed}" if suppressed else ""
-        self._log_error(f"send [{reason}] {detail} (errors_{reason}={total}{tail})")
-        self._track_error(
+        # ФАКТ + ГОЛОС — одной дверью (Task 1.3b). Прежде здесь стояла ручная
+        # связка, и `if not voiced: return` был ВЫШЕ `_track_error`: замер до
+        # правки — 5 вхождений отказа дали 5 в счётчиках, 1 запись в плоскости
+        # ошибок и 4 потерянных целиком, вместе с трассами. Порядок теперь живёт
+        # в теле `ObservableMixin.report_error`, а не в дисциплине этого сайта.
+        self.report_error(
             error if error is not None else RouterSendError(f"[{reason}] {detail}"),
-            {"reason": reason, "suppressed_since_last": suppressed},
+            context=f"{self._SEND_ERROR_VOICE_KEY}:{reason}",
+            detail=detail,
+            reason=reason,
+            errors_total=total,
         )
 
     def _count_door(self, door: str, msg_dict: Dict[str, Any]) -> None:

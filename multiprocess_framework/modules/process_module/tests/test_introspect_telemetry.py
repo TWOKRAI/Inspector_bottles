@@ -232,3 +232,57 @@ class TestReadOnly:
         _svc, cm = _make()
         assert "introspect.telemetry" in cm.handlers
         assert cm.metadata["introspect.telemetry"]["description"]
+
+
+class TestResolvedNamesThePlaneItDecides:
+    """Блокер Б1 ревью Ф4: вердикт про лист, решение по которому принимает не он.
+
+    Воспроизведение на живом стенде: ``telemetry.broadcast`` с
+    ``{metrics: {frame_count: {enabled: false, interval_sec: 20}}}`` был принят,
+    ``introspect.telemetry.resolved`` показал ``enabled: false``, а плагинный
+    лист ``processes.camera_0.state.plugins.capture.frame_count`` продолжал
+    шагать 4.3/5.0/5.0/5.0 с. Два readback'а одной живой системы противоречили
+    друг другу об ОДНОМ имени, потому что говорили о РАЗНЫХ путях и ни один не
+    называл, о каком.
+    """
+
+    def test_every_verdict_names_its_path(self) -> None:
+        _svc, cm = _make()
+        cm.dispatch("telemetry.reconfigure", {"publish": {"metrics": {"fps": {"enabled": False}}}})
+        res = cm.dispatch("introspect.telemetry")
+        assert res["resolved"]["fps"]["path"] == "processes.camera_0.state.fps", res["resolved"]["fps"]
+        assert res["resolved"]["fps"]["enabled"] is False, res["resolved"]["fps"]
+
+    def test_the_port_subtree_is_named_as_decided_elsewhere(self) -> None:
+        """Про что ответ НЕ говорит — сказано вслух и с адресом, куда идти."""
+        _svc, cm = _make()
+        cm.dispatch("telemetry.reconfigure", {"publish": {"metrics": {"fps": {"enabled": False}}}})
+        plane = cm.dispatch("introspect.telemetry")["resolved_plane"]
+        assert plane["not_covered"] == "processes.*.state.plugins.**", plane
+        assert "observability.observation" in plane["not_covered_decided_by"], plane
+        assert "introspect.observability" in plane["see"], plane
+
+    def test_the_verdict_is_the_live_gate_decision_not_a_recount(self) -> None:
+        """Считает ТОТ ЖЕ гейт: правило по ПУТИ на фреймворковую плоскость видно здесь.
+
+        Пара-контроль небанальности: пересчёт из одной ``publish``-секции
+        (прежняя редакция) этого правила не видел бы вовсе и отвечал бы
+        ``enabled: true`` — то есть согласие с собой, а не с живым решением.
+        """
+        svc, cm = _make()
+        cm.dispatch("telemetry.reconfigure", {"publish": {"metrics": {"fps": {"enabled": True}}}})
+        assert cm.dispatch("introspect.telemetry")["resolved"]["fps"]["enabled"] is True
+
+        svc._heartbeat.apply_observation_policy({"rules": {"processes.*.state.fps": {"enabled": False}}})
+        res = cm.dispatch("introspect.telemetry")
+        assert res["resolved"]["fps"]["enabled"] is False, res["resolved"]["fps"]
+
+    def test_the_readback_does_not_move_the_rule_hit_counter(self) -> None:
+        """Диагностика не считает попаданий (находка З3 — тот же принцип)."""
+        svc, cm = _make()
+        cm.dispatch("telemetry.reconfigure", {"publish": {"metrics": {"fps": {"enabled": True}}}})
+        svc._heartbeat.apply_observation_policy({"rules": {"processes.*.state.fps": {"enabled": False}}})
+        cm.dispatch("introspect.telemetry")
+        cm.dispatch("introspect.telemetry")
+        hits = svc._heartbeat.current_observation_policy()["rule_hits"]
+        assert hits == {"processes.*.state.fps": 0}, hits

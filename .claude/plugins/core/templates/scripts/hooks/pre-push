@@ -21,16 +21,14 @@ if ! command -v sentrux >/dev/null 2>&1; then
     exit 0
 fi
 
-# No ruleset → nothing to enforce. `sentrux check` exits 1 on a missing
-# .sentrux/rules.toml (that is "no rules", not a violation), which would
-# false-block every push here. Skip the gate instead of blocking.
-if [ ! -f "$REPO_ROOT/.sentrux/rules.toml" ]; then
-    echo "warn: .sentrux/rules.toml отсутствует — пропускаю structural-gate" >&2
-    exit 0
-fi
-
-echo "[sentrux] check (architectural rules)…"
-if ! sentrux check >/tmp/sentrux-check.log 2>&1; then
+# "Not configured" is not "violated": without .sentrux/rules.toml `sentrux check`
+# exits 1, and without .sentrux/baseline.json so does `sentrux gate` — on a project
+# that never opted in that blocked EVERY push (found 2026-09-18 on the seed repo
+# itself, one day after the hook became auto-installed). Each step runs only when
+# its input file exists; otherwise it says how to enable it and moves on.
+if [ ! -f .sentrux/rules.toml ]; then
+    echo "[sentrux] check skipped — no .sentrux/rules.toml (create it to enforce architectural rules)" >&2
+elif ! { echo "[sentrux] check (architectural rules)…"; sentrux check >/tmp/sentrux-check.log 2>&1; }; then
     echo "❌ sentrux check FAILED — нарушены правила из .sentrux/rules.toml:" >&2
     cat /tmp/sentrux-check.log >&2
     echo "" >&2
@@ -38,8 +36,9 @@ if ! sentrux check >/tmp/sentrux-check.log 2>&1; then
     exit 1
 fi
 
-echo "[sentrux] gate (regression vs baseline)…"
-if ! sentrux gate >/tmp/sentrux-gate.log 2>&1; then
+if [ ! -f .sentrux/baseline.json ]; then
+    echo "[sentrux] gate skipped — no .sentrux/baseline.json (run: sentrux gate --save)" >&2
+elif ! { echo "[sentrux] gate (regression vs baseline)…"; sentrux gate >/tmp/sentrux-gate.log 2>&1; }; then
     echo "❌ sentrux gate FAILED — структурная регрессия относительно baseline:" >&2
     cat /tmp/sentrux-gate.log >&2
     echo "" >&2
@@ -49,5 +48,5 @@ if ! sentrux gate >/tmp/sentrux-gate.log 2>&1; then
     exit 1
 fi
 
-echo "[sentrux] ✓ check + gate passed"
+echo "[sentrux] ✓ structural gate done"
 exit 0

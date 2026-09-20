@@ -22,6 +22,8 @@
 | [Analysis/ANALYSIS_DEPTH_CAMERA.md](Analysis/ANALYSIS_DEPTH_CAMERA.md) | Depth-камера: Orbbec 335/335L/336/336L/Astra, RealSense, OAK-D. Расчёт точности на близкой дистанции, сценарий 3D-инспекции |
 | [Analysis/ANALYSIS_POWER.md](Analysis/ANALYSIS_POWER.md) | Питание и охлаждение: энергобюджет, шина 12 В против 24 В, выбор БП, вентиляторы, тепловые зоны |
 | [Analysis/ANALYSIS_NETWORK.md](Analysis/ANALYSIS_NETWORK.md) | Внутренняя сеть: гигабит, магнетики, выбор свитча, DHCP/NTP, верификация |
+| [Analysis/ANALYSIS_MANIPULATOR.md](Analysis/ANALYSIS_MANIPULATOR.md) | Манипулятор (Фаза 4): SO-101, приводы STS3215, энергобюджет, частота контура, промышленная адаптация под Delta/SCARA/KUKA, доступность моделей |
+| [Analysis/ANALYSIS_CONVEYOR.md](Analysis/ANALYSIS_CONVEYOR.md) | Мини-конвейер 600×220: лента, мотор, два энкодера, смаз и триггер камеры, контракт с `line_sim` |
 
 > В аналитических документах используется разметка достоверности:
 > **[П]** проверено по источнику · **[Р]** расчёт с явными допущениями · **[О]** оценка,

@@ -262,7 +262,6 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
                 self._sample_once()
             except Exception as exc:
                 self._ctx.health.report_error(exc, context="telemetry_sink.sample")
-                self._ctx.log_error(f"TelemetrySinkPlugin: семпл упал, продолжаю: {exc}")
 
     # Стандартные метрики `processes.<P>.state.<metric>` → колонки.
     # uptime маппится в колонку uptime_s; остальные state.* и все workers.* — в extra.

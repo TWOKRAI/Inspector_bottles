@@ -34,7 +34,8 @@ class ProcessManagers:
 
         Порядок создания менеджеров определён зависимостями:
         worker → logger → error → router(нужен logger) →
-        stats(нужен logger) → command(нужен logger, stats) → console.
+        stats(нужен logger) → observation(нужен logger) →
+        command(нужен logger, stats) → console.
 
         Returns:
             ManagersBundle — контейнер созданных менеджеров.
@@ -46,6 +47,15 @@ class ProcessManagers:
         error = self._create_error_manager(managers_config)
         router = self._create_router_manager(managers_config, logger=logger)
         stats = self._create_stats_manager(managers_config, logger=logger)
+        observation = self._create_observation_manager(logger=logger)
+        # Ф5, задача 5.2/5.3: боевая проводка «StatsManager — вид поверх
+        # порта». Без этого вызова весь механизм (attach_observation_port,
+        # CRM-tap, _on_port_record) существовал бы только в тестах —
+        # ``ProcessManagers`` единственное место, где оба объекта рождаются в
+        # одной сборке. ``observation`` создаётся БЕЗУСЛОВНО (см. довод в
+        # ``register_all`` ниже, «своей секции не имеет вовсе»), поэтому
+        # проверка на ``None`` здесь не нужна.
+        stats.attach_observation_port(observation)
         command = self._create_command_manager(
             managers_config,
             logger=logger,
@@ -61,6 +71,7 @@ class ProcessManagers:
             stats=stats,
             console=console,
             error=error,
+            observation=observation,
             config_manager=self.process.config_manager,
             console_enabled=console_enabled,
         )
@@ -107,18 +118,46 @@ class ProcessManagers:
         ВТОРУЮ ветку — спутник рецепта, записанный ``observability.persist``
         (его на момент создания менеджеров ещё не читали). Эта функция закрывает
         только «родиться правильным»; «дочитать спутник» по-прежнему её работа.
+
+        **Сборка — ТА ЖЕ, что у пересборки (Task 1.2).** Раньше здесь стоял голый
+        ``expand_observability(layers.resolve())``, то есть ВТОРАЯ дорога к тому же
+        конфигу — и она молча расходилась с первой. ``expand_observability`` эмитит
+        частичный словарь каналов (только названные слоем), Pydantic заменяет им
+        набор целиком, а ``scopes`` остаются дефолтные и ведут в ``system_file`` /
+        ``messages_file``, которых в реестре родившегося менеджера нет. Живой замер
+        2026-08-31: **12 записей** оркестратора (``system_file`` 6 + ``messages_file``
+        6) уходили в никуда между ``logger.initialize()`` и пересборкой на boot.
+        Теперь обе дороги зовут :func:`compose_managers_payload` — расходиться нечему.
         """
         declared = self.process.config_handler.get_managers_config()
         if declared:
             return declared
 
-        from ..configs.observability_config import expand_observability
-        from ..configs.observability_layers import layers_are_silent, process_observability_layers
+        from ..configs.observability_layers import (
+            TELEMETRY_KEY,
+            layers_are_silent,
+            process_observability_layers,
+        )
+        from .observability_reload import compose_managers_payload
 
         layers = process_observability_layers(self.process)
         if layers_are_silent(layers):
             return declared
-        return expand_observability(layers.resolve())
+        resolved = layers.resolve()
+        # Телеметрия снимается ДО раскладки: у неё свои получатели, а
+        # `compose_managers_payload` объявляет вход БЕЗ этого ключа — здесь не копия
+        # правила, а исполнение контракта, одинаковое у обоих вызывающих.
+        #
+        # Чего эта строка НЕ делает (ревью Task 1.2, F5): она ничего не спасает.
+        # Прежний комментарий обещал, что `ObservabilityConfig` ключ «отверг бы» —
+        # неправда: политика `extra` у модели дефолтная (`ignore`), незнакомый ключ
+        # проглатывается молча. Замер 2026-08-31: снятие этого `pop` — 0 красных из
+        # 3347. Отсюда же следует находка крупнее, чем сам `pop`: ОПЕЧАТКА в секции
+        # `observability` рецепта исчезает без единого слова. Решение по
+        # `extra="forbid"` — за владельцем (docs/claude/OPEN_QUESTIONS.md), мимоходом
+        # такое не меняют.
+        resolved.pop(TELEMETRY_KEY, None)
+        return compose_managers_payload(resolved)
 
     def register_all(self, bundle: ManagersBundle, process) -> None:
         """Зарегистрировать менеджеры из bundle через ObservableMixin.
@@ -130,6 +169,22 @@ class ProcessManagers:
         process.register_manager("worker", bundle.worker, enabled=True)
         process.register_manager("logger", bundle.logger, enabled=True)
         process.register_manager("stats", bundle.stats, enabled=True)
+        # Ф3, задача 3.1: порт наблюдений — четвёртый канонический слот.
+        #
+        # Регистрация БЕЗУСЛОВНАЯ, как у logger/stats, а не условная, как у
+        # error ниже. Развилка настоящая, и выбор такой: error бывает НЕ СОЗДАН
+        # (его секции нет в конфиге — ``_create_error_manager`` возвращает
+        # None), а порт наблюдений своей секции не имеет вовсе и создаётся
+        # всегда. Условие ``if bundle.observation is not None`` сторожило бы
+        # случай, которого сборка не производит, и в тот день, когда порт
+        # перестал бы создаваться из-за дефекта, оно превратило бы отказ в
+        # тихий фолбэк — ровно тот класс, который эта фаза и разбирает.
+        #
+        # ``None`` в слоте при этом безопасен: ``ManagerRegistry.register``
+        # ставит ``_enabled = enabled and manager is not None``, а ``has()``
+        # отвечает False на None-менеджер. Bundle, собранный вручную без этого
+        # поля (тесты соседних модулей), остаётся рабочим.
+        process.register_manager("observation", bundle.observation, enabled=True)
         process.register_manager("command", bundle.command, enabled=True)
         process.register_manager("router", bundle.router, enabled=True)
         process.register_manager("console", bundle.console, enabled=bundle.console_enabled)
@@ -345,6 +400,35 @@ class ProcessManagers:
         )
         stats.initialize()
         return stats
+
+    def _create_observation_manager(self, logger: Any) -> Any:
+        """Порт наблюдений процесса (Ф3, задача 3.1).
+
+        Конфига у порта пока нет и секции в ``managers`` он не читает: частоту
+        публикации уровней задаёт publisher-гейт (``telemetry.publish``), а
+        каналы придут в задаче 3.2. Пустая секция, заведённая «на будущее», была
+        бы ручкой, которая ничего не делает, — а такие ручки выглядят
+        применёнными.
+
+        Хранилище уровней здесь НЕ создаётся, и не создаётся дальше ничем, кроме
+        ПУБЛИКАЦИИ: менеджер резолвит держателя на каждом обращении, а заводит
+        хранилище только по ``create=True`` (см. ``ObservationManager.levels``).
+        У процесса без плагинов оно так и не появится — ни на старте, ни на
+        тиках heartbeat, — и «атрибута нет» останется отличимым от «атрибут
+        пуст». Сторожится парой тестов через настоящий ``ProcessHeartbeat``
+        (``statistics_module/tests/test_observation_port_hazards.py``, класс про
+        флаг ``create``): до правки ревью 2026-08-25 первый же тик поднимал
+        хранилище именно на боевой раскладке — со слотом.
+        """
+        from ...statistics_module.observation.observation_manager import ObservationManager
+
+        observation = ObservationManager(
+            manager_name=f"observation_{self.process.name}",
+            process=self.process,
+            managers={"logger": logger},
+        )
+        observation.initialize()
+        return observation
 
     def _create_command_manager(
         self,

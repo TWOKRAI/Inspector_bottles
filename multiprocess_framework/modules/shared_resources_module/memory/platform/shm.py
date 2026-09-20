@@ -1,10 +1,11 @@
 """
 Платформенные операции SharedMemory.
 
-Windows: unlink() — no-op; память освобождается при close последнего handle.
-         cleanup_stale_shm: open+close освобождает mapping при последнем handle.
+Windows: unlink() — no-op; память освобождается при close ПОСЛЕДНЕГО handle, то есть
+         сама ОС. Значит висящего сегмента от мёртвого запуска там не бывает, и
+         ``cleanup_stale_shm`` на Windows не убирает ничего — см. её docstring.
          Уникальные имена с PID в create_shm_blocks.
-POSIX (Linux/macOS): unlink() освобождает сегмент; cleanup_stale_shm: open+close+unlink.
+POSIX (Linux/macOS): unlink() снимает ИМЯ сегмента; cleanup_stale_shm: open+close+unlink.
 """
 
 from __future__ import annotations
@@ -46,25 +47,58 @@ def is_posix() -> bool:
     return platform.system() in ("Linux", "Darwin")
 
 
-def cleanup_stale_shm(name: str) -> None:
+def cleanup_stale_shm(name: str) -> bool:
     """
     Попытка удалить устаревший shm сегмент от предыдущих запусков.
 
-    POSIX: открыть + close + unlink (освобождает сегмент).
-    Windows: открыть + close (освобождает mapping, если последний handle).
+    POSIX: открыть + close + unlink — ``unlink`` снимает ИМЯ, и это единственная
+    платформа, где у слова «убрали» есть содержание.
+
+    **Windows: убирать нечего и нечем — функция сразу отдаёт ``False``.**
+    Именованный mapping там живёт ровно пока открыт хоть один handle; когда
+    предыдущий запуск умер (в том числе от ``kill -9``), ОС закрыла его handles
+    и сегмент исчез сам. Значит на Windows успешный ``SharedMemory(create=False)``
+    означает не «нашли мусор», а «сегмент ЖИВОЙ, его кто-то держит» — и прежний
+    открыть+закрыть возвращал на это ``True``, то есть считал ровно НЕ убранное
+    (ревью Task 1.2, F1). Воспроизведение 2026-08-31 на Windows 10::
+
+        cleanup on LIVE segment -> True
+        STILL ALIVE, byte0 = 42      # сегмент читается ПОСЛЕ «уборки»
+        cleanup on CLOSED segment -> False
+
+    Открыть+закрыть при этом не было и безвредным: лишний handle продлевает
+    жизнь сегменту, который ОС в этот момент освобождает.
+
+    Returns:
+        POSIX: ``True`` — сегмент существовал, и его имя снято ``unlink``;
+        ``False`` — его не было либо снять не удалось.
+        Windows: ``False`` ВСЕГДА (см. выше). Ноль освобождённых там —
+        структурный факт платформы, а не признак сломанной уборки.
+
+    Task 1.2 (M14): раньше функция возвращала ``None`` и наружу об уборке не
+    сообщала НИЧЕГО. Из-за этого её вызывающий (``cleanup_known_shm_at_startup``
+    → ``SystemLauncher``) не мог сказать «очищено N сегментов» иначе как
+    выдумав число: «сделано» и «нечего было делать» выглядели одинаково.
+    Возвращаемое значение — не удобство, а единственный способ отличить два
+    исхода, у которых на диске разные последствия.
     """
+    if not is_posix():
+        return False
     try:
         stale = shared_memory.SharedMemory(name=name, create=False)
-        stale.close()
-        if is_posix():
-            try:
-                stale.unlink()
-            except FileNotFoundError:
-                pass
     except FileNotFoundError:
-        pass
-    except Exception:
-        pass
+        return False
+    except Exception:  # noqa: BLE001 — чужой сегмент/права: считаем «не убрали»
+        return False
+    try:
+        stale.close()
+        try:
+            stale.unlink()
+        except FileNotFoundError:
+            pass
+    except Exception:  # noqa: BLE001 — сегмент найден, но освободить не вышло
+        return False
+    return True
 
 
 def _extract_memory_region_names(proc_dict: dict[str, Any]) -> list[str]:
@@ -88,7 +122,7 @@ def _extract_memory_region_names(proc_dict: dict[str, Any]) -> list[str]:
     return list(names_raw.keys()) if isinstance(names_raw, dict) else []
 
 
-def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
+def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> list[str]:
     """
     Очистить известные SharedMemory блоки перед стартом приложения.
 
@@ -99,8 +133,22 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
 
     Args:
         processes_config: {process_name: proc_dict}, proc_dict может содержать "memory".
+
+    Returns:
+        POSIX: имена, у которых уборка сняла ИМЯ через ``unlink`` (порядок обхода).
+        Пустой список означает «висящих сегментов не было», а не «уборка не
+        работала»: у этих двух исходов один и тот же вид на диске, и различить их
+        можно только здесь — поэтому число уезжает наверх, а не остаётся в
+        функции (Task 1.2).
+
+        **Windows: список ВСЕГДА пуст** — там висящих сегментов не бывает
+        (``cleanup_stale_shm`` и её docstring: ОС освобождает mapping при
+        закрытии последнего handle). Ноль на этой платформе — свойство
+        платформы, а не показание об уборке, и вызывающий обязан говорить это
+        вслух рядом с числом (``SystemLauncher._cleanup_shm_at_startup``).
     """
     seen: set = set()
+    cleaned: list[str] = []
     for proc_dict in (processes_config or {}).values():
         if not isinstance(proc_dict, dict):
             continue
@@ -114,7 +162,9 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
                 key = f"{name}_{i}"
                 if key not in seen:
                     seen.add(key)
-                    cleanup_stale_shm(key)
+                    if cleanup_stale_shm(key):
+                        cleaned.append(key)
+    return cleaned
 
 
 def extract_memory_region_names(processes_config: dict[str, Any] | None) -> list[str]:
@@ -199,7 +249,8 @@ def create_shm_block(name: str, size: int) -> ShmType:
     """
     Создать блок SharedMemory.
 
-    Перед созданием всегда выполняется cleanup_stale_shm (все платформы).
+    Перед созданием зовётся cleanup_stale_shm: на POSIX она снимает имя от прошлого
+    запуска, на Windows это no-op (там висящих имён не бывает — см. её docstring).
 
     Returns:
         SharedMemory

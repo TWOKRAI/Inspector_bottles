@@ -1042,7 +1042,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -1077,6 +1076,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -1439,7 +1439,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -1474,6 +1473,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -1811,7 +1811,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -1846,6 +1845,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -2152,7 +2152,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -2187,6 +2186,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -2534,7 +2534,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -2569,6 +2568,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -2892,7 +2892,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -2927,6 +2926,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -3245,7 +3245,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -3280,6 +3279,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -3616,7 +3616,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -3651,6 +3650,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -4035,7 +4035,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -4070,6 +4069,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,
@@ -4450,7 +4450,6 @@
           "scopes": {
             "BUSINESS": {
               "channels": [
-                "system_file",
                 "messages_file"
               ]
             },
@@ -4485,6 +4484,7 @@
           "channels": {},
           "default_tags": {},
           "enable_logging": true,
+          "enabled": true,
           "flush_interval": 10.0,
           "log_level": "INFO",
           "log_line_max_bytes": 2048,

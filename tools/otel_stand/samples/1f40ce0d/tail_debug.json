@@ -1,0 +1,4147 @@
+{
+  "success": true,
+  "plane": "all",
+  "items": [
+    {
+      "seq": 1,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631972.1140497,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631972.1140497,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 2656
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631972.1140497,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 2,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788631974.7541459,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788631975, count=8): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 198.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.317829457361185}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'observability.tail.subscribe'}, 'count': 1.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'observability.tail.subscribe'}, 'count': 1.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'observability.tail.subscribe'}, 'count': 1, 'min': 0.0028788999998141662, 'max': 0.0028788999998141662, 'avg': 0.0028788999998141662, 'p95': 0.0028788999998141662, 'sum': 0.0028788999998141662, 'buckets': [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'observability.tail.subscribe'}, 'count': 1.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'observability.tail.subscribe'}, 'count': 1.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'observability.tail.subscribe'}, 'count': 1, 'min': 0.003043600000182778, 'max': 0.003043600000182778, 'avg': 0.003043600000182778, 'p95': 0.003043600000182778, 'sum': 0.003043600000182778, 'buckets': [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 3,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631974.7541459,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=8): capture.frames, capture.fps, command_manager.command.execution.attempts, dispatcher.dispatch.attempts, dispatcher.dispatch.duration, dispatcher.dispatch.success, command_manager.command.execution.success, command_manager.command.execution.duration",
+              "extra": {
+                "bucket_bounds": [
+                  0.0001,
+                  0.00025,
+                  0.0005,
+                  0.001,
+                  0.002,
+                  0.005,
+                  0.01,
+                  0.017,
+                  0.034,
+                  0.05,
+                  0.1,
+                  0.25,
+                  1.0
+                ],
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 198.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.317829457361185
+                  },
+                  {
+                    "name": "command_manager.command.execution.attempts",
+                    "type": "counter",
+                    "tags": {
+                      "command": "observability.tail.subscribe"
+                    },
+                    "count": 1.0
+                  },
+                  {
+                    "name": "dispatcher.dispatch.attempts",
+                    "type": "counter",
+                    "tags": {
+                      "key": "observability.tail.subscribe"
+                    },
+                    "count": 1.0
+                  },
+                  {
+                    "name": "dispatcher.dispatch.duration",
+                    "type": "timing",
+                    "tags": {
+                      "key": "observability.tail.subscribe"
+                    },
+                    "count": 1,
+                    "min": 0.0028788999998141662,
+                    "max": 0.0028788999998141662,
+                    "avg": 0.0028788999998141662,
+                    "p95": 0.0028788999998141662,
+                    "sum": 0.0028788999998141662,
+                    "buckets": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  },
+                  {
+                    "name": "dispatcher.dispatch.success",
+                    "type": "counter",
+                    "tags": {
+                      "key": "observability.tail.subscribe"
+                    },
+                    "count": 1.0
+                  },
+                  {
+                    "name": "command_manager.command.execution.success",
+                    "type": "counter",
+                    "tags": {
+                      "command": "observability.tail.subscribe"
+                    },
+                    "count": 1.0
+                  },
+                  {
+                    "name": "command_manager.command.execution.duration",
+                    "type": "timing",
+                    "tags": {
+                      "command": "observability.tail.subscribe"
+                    },
+                    "count": 1,
+                    "min": 0.003043600000182778,
+                    "max": 0.003043600000182778,
+                    "avg": 0.003043600000182778,
+                    "p95": 0.003043600000182778,
+                    "sum": 0.003043600000182778,
+                    "buckets": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  }
+                ],
+                "total_count": 8,
+                "window_ts": 1788631974.7541459
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631977.1156023,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631977.1156023,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 2766
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631977.1156023,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 4,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631982.1175508,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631982.1175508,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 2876
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631982.1175508,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 5,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788631984.7547848,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788631985, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 6,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631984.7547848,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788631984.7547848
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631987.1193817,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631987.1193817,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 2964
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631987.1193817,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 7,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631992.1208324,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631992.1208324,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3074
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631992.1208324,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 8,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788631994.7557406,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788631995, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.317829457361185}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 9,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631994.7557406,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.317829457361185
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788631994.7557406
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631997.1220639,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631997.1220639,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3184
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788631997.1220639,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 10,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632002.123874,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632002.123874,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3294
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632002.123874,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 11,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632004.7558734,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632005, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 12,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632004.7564082,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632004.7558734
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632007.125348,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632007.125348,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3404
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632007.125348,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 13,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632012.1267643,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632012.1267643,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3514
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632012.1267643,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 14,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632014.7566726,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632015, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 198.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 15,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632014.7566726,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 198.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632014.7566726
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632017.1293635,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632017.1293635,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3624
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632017.1293635,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 16,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632022.1310167,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632022.1310167,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3712
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632022.1310167,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 17,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632024.7567797,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632025, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 18,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632024.7567797,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632024.7567797
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632027.1329505,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632027.1329505,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3822
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632027.1329505,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 19,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632032.1344948,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632032.1344948,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 3932
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632032.1344948,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 20,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632034.7569275,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632035, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 21,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632034.7569275,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632034.7569275
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632037.1374445,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632037.1374445,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4042
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632037.1374445,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 22,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632042.1387277,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632042.1387277,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4152
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632042.1387277,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 23,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632044.7574146,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632045, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 198.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.317829457361185}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 24,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632044.7574146,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 198.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.317829457361185
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632044.7574146
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632047.140131,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632047.140131,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4262
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632047.140131,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 25,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632052.1422539,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632052.1422539,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4372
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632052.1422539,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 26,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632054.7574148,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632055, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 27,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632054.7574148,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632054.7574148
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632057.1435502,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632057.1435502,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4460
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632057.1435502,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 28,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632062.1452672,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632062.1452672,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4570
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632062.1452672,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 29,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632064.7579124,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632065, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.317829457361185}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 30,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632064.7589128,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.317829457361185
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632064.7579124
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632067.1553605,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632067.1553605,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4680
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632067.1553605,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 31,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632072.1566913,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632072.1566913,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4790
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632072.1566913,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 32,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632074.7592485,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632075, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 198.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 33,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632074.7592485,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 198.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632074.7592485
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632077.1599028,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632077.1599028,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 4900
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632077.1599028,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 34,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632082.1612823,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632082.1612823,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5010
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632082.1612823,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 35,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632084.7596424,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632085, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 36,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632084.7596424,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632084.7596424
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632087.1623886,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632087.1623886,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5098
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632087.1623886,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 37,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632092.1635027,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632092.1635027,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5208
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632092.1635027,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 38,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632094.7600553,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632095, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 219.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.317829457361185}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 39,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632094.7600553,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 219.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.317829457361185
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632094.7600553
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632097.165316,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632097.165316,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5317
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632097.165316,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 40,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632102.1664906,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632102.1664906,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5427
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632102.1664906,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 41,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632104.7603142,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632105, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 42,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632104.7603142,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632104.7603142
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632107.1678548,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632107.1678548,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5537
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632107.1678548,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 43,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632112.170761,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632112.170761,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5647
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632112.170761,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 44,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632114.7612674,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632115, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 198.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 45,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632114.7612674,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 198.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632114.7612674
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632117.171932,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632117.171932,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5757
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632117.171932,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 46,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632122.1747162,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632122.1747162,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5845
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632122.1747162,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 47,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632124.7615423,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632125, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 48,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632124.7615423,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632124.7615423
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632127.1760027,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632127.1760027,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 5955
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632127.1760027,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 49,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632132.1771834,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632132.1771834,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 6065
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632132.1771834,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 50,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632134.7619066,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632135, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 220.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.338506304559736}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 51,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632134.7624788,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 220.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.338506304559736
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632134.7619066
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632137.1789746,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632137.1789746,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 6175
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632137.1789746,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 52,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632142.1811938,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632142.1811938,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 6285
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632142.1811938,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 53,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "record": {
+            "kind": "log",
+            "process": "camera_0",
+            "module": "multiprocess_framework.modules.statistics_module",
+            "ts": 1788632144.7627425,
+            "severity": "info",
+            "severity_number": 9,
+            "metric": null,
+            "message": "metrics snapshot (ts=1788632145, count=2): [{'name': 'capture.frames', 'type': 'counter', 'tags': {'plugin': 'capture', 'camera': '0'}, 'count': 198.0}, {'name': 'capture.fps', 'type': 'gauge', 'tags': {'plugin': 'capture', 'camera': '0'}, 'value': 21.317829457361185}]",
+            "extra": {
+              "context": {
+                "proc_name": "camera_0",
+                "pid": 2692,
+                "fw_version": "2.0.0+1f40ce0d.dirty",
+                "incarnation": 0,
+                "recipe": "region_pipeline",
+                "origin": "stats_snapshot"
+              }
+            }
+          }
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    },
+    {
+      "seq": 54,
+      "event": {
+        "type": "event",
+        "sender": "camera_0",
+        "targets": [
+          "backend_ctl.b76aca53db60"
+        ],
+        "queue_type": "observability",
+        "command": "observability.record",
+        "data": {
+          "process": "camera_0",
+          "records": [
+            {
+              "kind": "stats",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632144.7627425,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": null,
+              "message": "metrics snapshot (count=2): capture.frames, capture.fps",
+              "extra": {
+                "aggregate": true,
+                "metrics": [
+                  {
+                    "name": "capture.frames",
+                    "type": "counter",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "count": 198.0
+                  },
+                  {
+                    "name": "capture.fps",
+                    "type": "gauge",
+                    "tags": {
+                      "plugin": "capture",
+                      "camera": "0"
+                    },
+                    "value": 21.317829457361185
+                  }
+                ],
+                "total_count": 2,
+                "window_ts": 1788632144.7627425
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632147.1835968,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.capture_fps",
+              "message": "capture.capture_fps",
+              "extra": {
+                "writer": "capture",
+                "metric": "capture_fps",
+                "value": 21.3
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632147.1835968,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.frame_count",
+              "message": "capture.frame_count",
+              "extra": {
+                "writer": "capture",
+                "metric": "frame_count",
+                "value": 6395
+              }
+            },
+            {
+              "kind": "observation",
+              "process": "camera_0",
+              "module": "camera_0",
+              "ts": 1788632147.1835968,
+              "severity": "number",
+              "severity_number": 0,
+              "metric": "capture.drops",
+              "message": "capture.drops",
+              "extra": {
+                "writer": "capture",
+                "metric": "drops",
+                "value": 0
+              }
+            }
+          ]
+        },
+        "_fence": {
+          "sender": "ProcessManager",
+          "inc": 0,
+          "epoch": 0
+        },
+        "_address": [
+          "backend_ctl",
+          "b76aca53db60"
+        ],
+        "_relayed": true
+      }
+    }
+  ],
+  "count": 54,
+  "next_cursor": "all:54@014b3e",
+  "dropped": 0,
+  "bookmark": "all:54@014b3e"
+}
