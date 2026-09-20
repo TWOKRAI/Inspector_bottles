@@ -320,7 +320,7 @@ Task 1.1 проходит через recipe → загрузчик рецепт�
 форму; таблица «что переехало из ред. 1» — в конце файла.
 
 - Task 1.0: Дефолтный `StateBootstrap` в `app_module` — generic-приложение сеет топологию,
-  `system_overview` видит процессы [PENDING] (заведена расследованием 2026-09-20) —
+  `system_overview` видит процессы **[DONE]** `eecba231` (заведена расследованием 2026-09-20) —
   **Module contract:** impl-only
 - Task 1.1: **[VERTICAL SLICE]** `apps/line_sim/` — второе приложение на `run_app`,
   процесс `robot` с хостом `SimRobotServer`; инспектор подключается без правок

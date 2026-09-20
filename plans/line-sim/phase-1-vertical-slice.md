@@ -42,6 +42,26 @@
 
 ### Task 1.0 — Дефолтный `StateBootstrap` в `app_module`: generic-приложение сеет топологию и отвечает на `state.get_subtree`
 
+**Статус: [DONE] 2026-09-20** — `eecba231` (teamlead, 190k токенов под потолком 350k).
+`default_state_bootstrap` в `app_module/builder.py:115`, применение `builder.py:348`; ADR-APP-007
+(сужает отклонение ADR-APP-006: store у generic-приложения есть всегда, посев непустой). Пустой
+blueprint → `{"processes": {}}` — пришпилено `test_empty_blueprint_decision_is_pinned` с контрольной
+половиной (`{}` store не поднимает). Два старых теста, пинивших контракт «без хуков —
+`initial_state == {}`», переписаны по решению lead. Числа: `app_module + apps/line_sim +
+examples/minimal_app` — **103 passed / 0 failed**; фреймворк `run_framework_tests.py` — **9871 passed /
+40 skipped / 1 xfailed / 1 failed** (красный `config_module/test_watcher.py::test_foreign_file…` —
+**воспроизводится на чистом main ×3, код модуля идентичен; посторонний, записан в OPEN_QUESTIONS**);
+sentrux 37/37. Критерий 3 Task 1.1 (`test_backend_ctl_sees_robot_and_status`) — зелёный без правок
+плагина и конфига.
+**Break-injection (lead), предсказания до прогона:** J1 дефолт `{}` → умерли 8 (все живые + hazard) ✓;
+J2 прикладная ветка в посеве → 3 ✓; J3 приоритет перевёрнут → 2 (тестерский «явный хук выигрывает»
++ hazard) ✓; J4 `status=running` в посеве → **предсказывал «выживут все», умер
+`test_default_bootstrap_builds_topology_only`** — тестер пришпилил литерал `stopped`, расхождение в
+пользу тестов; J5 непиклябельный объект → 6 (сборка падает на `_pickle_sanity`) ✓.
+**Открыто (teamlead):** «прототип выигрывает у дефолта» держится дорогой `launcher_factory`
+(`builder.py:241`), не `AppSpec.state_bootstrap`, — тестом не пришпилено; `list(proc["plugins"])` —
+поверхностная копия, словари плагинов общие с blueprint'ом (риск оценён, не измерен).
+
 **Level:** Senior (Opus)
 **Assignee:** teamlead
 **Источник:** [расследование 2026-09-20](../../docs/reviews/2026-09-20_line-sim-generic-app-observability-investigation.md) §4, §6 — зелёное воспроизведение топологическим хуком уже есть.
