@@ -8,3 +8,4 @@
 - [Store retention bounds rows, not bytes](project_store_retention_bounds_rows_not_bytes.md) — purge leaves FTS tombstones (21 MiB/35 rows live); optimize after purge 192 ms, 0 drops; (b)-levers max -30%
 - [Task 4.11 TTL-sweep voice verdict 2026-09-08](project_task_4_11_ttl_sweep_voice_verdict_2026_09_08.md) — (b) gate by origin; ttl-sweeper only authorless road; 6 call sites not 2; retry road floods
 - [State predicate at a seam counts rebuilds](feedback_a_state_predicate_at_a_seam_counts_rebuilds_not_actions.md) — verify "once per action" by origin inventory; probe sweep + retry roads; scratchpad copy breaks __file__-relative REPO_ROOT
+- [OTLP timeout is not a call ceiling](project_otlp_http_timeout_is_not_a_call_ceiling.md) — 42 s at T=30 (black hole), 4.08 s at T=3; 401/refused same reason; PM 5 s terminate is pre-existing (control)
