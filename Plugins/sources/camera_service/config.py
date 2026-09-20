@@ -11,7 +11,7 @@ from multiprocess_framework.modules.process_module.plugins import SchemaBase
 
 from .registers import CameraServiceRegisters
 
-CameraTypeStr = Literal["simulator", "webcam", "hikvision", "file"]
+CameraTypeStr = Literal["simulator", "webcam", "hikvision", "file", "stream"]
 
 
 @register_schema("CameraServicePluginConfigV1")
@@ -89,6 +89,12 @@ class CameraServiceConfig(PluginConfig):
     file_source_path: Annotated[
         str,
         FieldMeta(description="Путь к видеофайлу"),
+    ] = ""
+
+    # StreamSource-специфичные
+    stream_url: Annotated[
+        str,
+        FieldMeta(description="URL сетевого видеопотока (MJPEG/RTSP/...)"),
     ] = ""
 
     # SHM ring-buffer

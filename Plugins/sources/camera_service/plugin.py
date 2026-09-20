@@ -107,6 +107,7 @@ class CameraServicePlugin(ProcessModulePlugin):
         self._hik_height: int = cfg.get("hikvision_resolution_height", 1080)
         self._sim_image: str | None = cfg.get("simulator_image_path")
         self._file_path: str = cfg.get("file_source_path", "")
+        self._stream_url: str = cfg.get("stream_url", "")
         # Полный набор CAP_PROP-параметров из рецепта (desired, применяются при open).
         self._params: dict = dict(cfg.get("params", {}) or {})
 
@@ -155,9 +156,7 @@ class CameraServicePlugin(ProcessModulePlugin):
             # contain → report → degrade (Ф2 Task 2.4): ошибку НЕ пробрасываем
             # (проброс обрушит воркер), но честно кормим health — после порога
             # подряд-ошибок breaker сам переведёт процесс в degraded.
-            self._ctx.health.report_error(
-                exc, context=f"camera_service: захват кадра (backend={self._camera_type})"
-            )
+            self._ctx.health.report_error(exc, context=f"camera_service: захват кадра (backend={self._camera_type})")
             return []
 
         if frame is None:
@@ -212,6 +211,7 @@ class CameraServicePlugin(ProcessModulePlugin):
             "camera_index": self._camera_index,
             "image_path": self._sim_image,
             "file_path": self._file_path,
+            "stream_url": self._stream_url,
             # Webcam-специфичные tunable (игнорируются другими backend'ами)
             "fps": self._reg.fps,
             "mjpg": self._reg.mjpg,
@@ -250,7 +250,9 @@ class CameraServicePlugin(ProcessModulePlugin):
             from Plugins.hub.device_hub.client import DeviceHubClient
 
             client = DeviceHubClient(ctx, default_timeout=1.0)
-        except Exception:  # no-health: optional-зависимость (hub-плагин может отсутствовать), best-effort арбитраж уже логируется
+        except (
+            Exception
+        ):  # no-health: optional-зависимость (hub-плагин может отсутствовать), best-effort арбитраж уже логируется
             ctx.log_info("CameraServicePlugin: DeviceHubClient недоступен, пропускаем hik_release")
             return
 
