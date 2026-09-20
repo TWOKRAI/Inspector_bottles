@@ -19,6 +19,8 @@
 - [CUDA torch](project_cuda_torch_setup.md) — cu124 колесом; PyPI даёт +cpu · [GPU-мониторинг Win](reference_gpu_monitoring_windows.md) — Task Manager прячет CUDA, смотреть nvidia-smi
 - qex: **[СНАЧАЛА сверить свежесть](feedback_check_qex_freshness_before_use.md)** — last_indexed vs сегодня, устаревший отвечает уверенно · [таймаут реиндекса](project_qex_reindex_timeout.md) · [бюджет реиндекса](feedback_qex_reindex_budget.md) — keep_alive=-1 · [запросы по-английски](feedback_qex_query_english_code_bias.md) — RU-перефраз мимо · [модель по платформам](project_qex_model.md) — macOS 8b-qex/4096 с 2026-09-13, Win 0.6b; ловушка Ollama.app молча на CPU
 
+- [Жёсткий потолок агентов выключен по умолчанию](feedback_agent_hard_budget_is_off_by_default.md) — soft 100k лишь предупреждает; hard — файл `<id>.budget` или env; developer ушёл до 401k 2026-09-20
+
 ## Стоящие правила владельца
 - [Приоритет — маятник по свободному времени](project_priority_engine_first.md) — 2026-08-18: к стенду за видимым результатом; фреймворк — вторая полоса; окно codemod — по паузе, не по дате
 - [Framework-first](feedback_framework_first.md) — framework универсален, прототип расходный · [Fix forward](feedback_fix_framework_forward.md) — улучшение, не удаление · [FREEZE, не KILL](feedback_freeze_over_kill.md) — мёртвый код замораживать
