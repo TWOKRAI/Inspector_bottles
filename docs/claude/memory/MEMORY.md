@@ -41,6 +41,7 @@
 - [claude-cli бэкенд = полная сессия за вызов](feedback_claude_cli_backend_costs_a_full_session.md) — 53 вызова съели дневной лимит; вызовы × ~50k ДО запуска; мельчить батчи = множить накладные
 - [Оформленное ревью до merge](feedback_formal_review_before_merge.md) — без /code-review в транскрипте merge блокируется
 - [Отлаживать через backend_ctl](feedback_backend_ctl_for_agents.md) — не GUI, не qt-mcp · [Layer: mixed](feedback_backend_ctl_layer_mixed.md) — хук не знает tools · [Оффскрин для агентов](feedback_no_qt_popups_offscreen.md) — QT_QPA_PLATFORM=offscreen
+- [Фоновый ревьюер теряет вердикт](feedback_background_reviewer_loses_the_verdict.md) — фон не дожил до сессии = ни строки; синхронный упал → 154k спасены возобновлением
 - [Резюм агента родит призрака](feedback_agent_resume_ghost.md) — SendMessage может дать ДВА инстанса, проверять mtime зоны
 - worktree: [стейл-база](feedback_worktree_stale_base.md) — проверять базу до старта · [при одном файле](feedback_worktree_for_parallel_samefile.md) — от committed HEAD · [walk исключает .claude/worktrees](feedback_walk_skips_worktrees.md)
 - [Чужая сессия в том же дереве](feedback_a_peer_session_shares_the_tree.md) — `git add -A` затянул чужие 98 строк; сверять ListAgents, стейджить явные пути · [Parallel commit race](feedback_parallel_agents_commit_race.md) — макс 2 без worktree · [pre-commit stash collision](feedback_precommit_stash_collision_2plus_agents.md) — recovery `git show :path > path` · [откат pre-commit ест незастейдженное](feedback_precommit_rollback_drops_unstaged_edits.md)
