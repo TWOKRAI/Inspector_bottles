@@ -337,5 +337,28 @@ def test_live_ticker_no_jump_on_first_vfd_command() -> None:
     assert rate_after == pytest.approx(rate_before, rel=0.03)
 
 
+def test_belt_mm_s_property_reads_exact_commanded_speed() -> None:
+    """Pre/Post: ревью Task 2.2 line-sim — ``RobotSimCore.belt_mm_s`` читает
+    ТОЧНУЮ команду ПЧ (``BeltDrive.mm_s``), а не производную энкодера между
+    внешними тиками публикации (та даёт смешанное среднее на пульсе смены
+    команды — находка ревью №1). 20 Гц из ``freq_max_hz=50`` при
+    ``mm_s_at_max_freq=100`` -> (20/50)*100 = 40.0 мм/с; после «стоп»
+    (``cmd_run=0``) -> 0.0."""
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.tick()
+
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [0])  # вперёд
+    core.write(0x1202, [2000])  # 20.00 Гц (raw*100)
+    core.write(0x1204, [1])  # flag — маркер последним
+    core.tick()
+    assert core.belt_mm_s == pytest.approx(40.0)
+
+    core.write(0x1200, [0])  # cmd_run = 0 -> stop
+    core.write(0x1204, [1])
+    core.tick()
+    assert core.belt_mm_s == 0.0
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

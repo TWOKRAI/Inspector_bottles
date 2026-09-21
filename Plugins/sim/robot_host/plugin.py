@@ -51,11 +51,14 @@ from __future__ import annotations
 import os
 import socket
 import threading
+import time
 from typing import Any
 
 from multiprocess_framework.modules.process_module.plugins import (
+    ExecutionMode,
     PluginContext,
     ProcessModulePlugin,
+    ThreadConfig,
     register_plugin,
 )
 
@@ -63,6 +66,9 @@ from multiprocess_framework.modules.process_module.plugins import (
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 5021
 _DEFAULT_UNIT_ID = 2
+
+#: Период публикации энкодера в общий мир (Task 2.2 плана line-sim, §Task 2.2).
+_DEFAULT_PUBLISH_MS = 50
 
 
 @register_plugin("sim_robot_host", category="io", description="Хост Modbus TCP-симулятора робота (SimRobotServer)")
@@ -90,6 +96,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._port: int = cfg.get("port", _DEFAULT_PORT)
         self._unit_id: int = cfg.get("unit_id", _DEFAULT_UNIT_ID)
         self._auto_start: bool = cfg.get("auto_start", True)
+        self._publish_ms: int = cfg.get("publish_ms", _DEFAULT_PUBLISH_MS)
 
         self._server: Any = None
         self._lock = threading.Lock()
@@ -100,12 +107,32 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._state = "configured"
         self._reason = ""
 
+        # Task 2.0 не влит → ctx.state_proxy is None: запись в общий мир
+        # пропускается (см. _publish_once), но паблишер уровней работает всегда.
+        ctx.declare_metric("encoder")
+        ctx.declare_metric("belt_mm_s")
+        ctx.declare_metric("writes_seen")
+
         ctx.log_info(f"sim_robot_host: конфиг принят, {self._host}:{self._port}, unit_id={self._unit_id}")
 
     def start(self, ctx: PluginContext) -> None:
-        """RUNNING: поднять сервер, если ``auto_start``. Отказ не роняет процесс."""
+        """RUNNING: поднять сервер, если ``auto_start``, и паблишер уровней/мира.
+
+        Паблишер стартует ВСЕГДА (ревью Task 2.2, находка №2): без
+        ``state_proxy`` (Task 2.0 не влита) уровни ``encoder``/``belt_mm_s``/
+        ``writes_seen`` всё равно обязаны течь — молчали они раньше только
+        потому, что ``_publish_once`` возвращалась до вызова
+        ``ctx.publish_metric``, путая «мира нет» с «наблюдать нечего». В
+        общий мир (``ctx.state_proxy.set``) запись пропускается — это делает
+        сама :meth:`_publish_once`.
+        """
         if self._auto_start:
             self._start_server(ctx)
+
+        if ctx.state_proxy is None:
+            ctx.log_info("sim_robot_host: ctx.state_proxy is None — мир недоступен, метрики публикуются без world.set")
+        cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
+        ctx.worker_manager.create_worker("sim_robot_world_publisher", self._publish_loop, cfg, auto_start=True)
 
     def shutdown(self, ctx: PluginContext) -> None:
         """STOPPED: дожать счётчик, остановить сервер симметрично ``start()``."""
@@ -203,11 +230,63 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._ctx.record_metric("sim_robot.writes", delta)
 
     # ------------------------------------------------------------------ #
+    # Паблишер мира (Task 2.2) — энкодер в ``sim.belt.encoder`` + уровни
+    # ------------------------------------------------------------------ #
+
+    def _publish_loop(self, stop_event: Any, pause_event: Any) -> None:
+        """Тик паблишера: ``publish_ms`` (форма — ``TelemetrySinkPlugin._sample_loop``).
+
+        Ошибка одного тика (например, сервер ещё не поднят) не должна убивать
+        воркер — иначе публикация мира молча умирает навсегда.
+        """
+        interval_s = self._publish_ms / 1000.0
+        while not stop_event.is_set():
+            if pause_event.is_set():
+                time.sleep(0.1)
+                continue
+            time.sleep(interval_s)
+            try:
+                self._publish_once()
+            except Exception as exc:  # noqa: BLE001 — тик не должен убить воркер
+                self._ctx.health.report_error(exc, context="sim_robot_host.publish")
+
+    def _publish_once(self) -> None:
+        """Один тик: снять энкодер+скорость сервера, отдать уровни, и (если мир
+        есть) положить те же числа в общий мир.
+
+        ``mm_s`` — ТОЧНАЯ команда ПЧ (``RobotSimCore.belt_mm_s`` ->
+        ``BeltDrive.mm_s``, добавлено ревью Task 2.2), не производная энкодера
+        между двумя тиками публикации: старая производная давала смешанное
+        среднее на пульсе смены команды, а не мгновенную скорость (находка
+        ревью №1).
+
+        Публикация уровней и запись в мир — РАЗНЫЕ дороги (находка ревью №2):
+        без ``ctx.state_proxy`` (Task 2.0 не влита) пропускается ТОЛЬКО
+        ``ctx.state_proxy.set`` — уровни ``encoder``/``belt_mm_s``/
+        ``writes_seen`` публикуются всегда, пока сервер поднят.
+        """
+        if self._server is None:
+            return
+
+        core = self._server.core
+        encoder = core.encoder
+        mm_s = core.belt_mm_s
+
+        if self._ctx.state_proxy is not None:
+            self._ctx.state_proxy.set("sim.belt.encoder", {"value": encoder, "mm_s": mm_s, "t": time.monotonic()})
+
+        with self._lock:
+            writes_seen = self._writes_seen
+        self._ctx.publish_metric("encoder", encoder)
+        self._ctx.publish_metric("belt_mm_s", mm_s)
+        self._ctx.publish_metric("writes_seen", writes_seen)
+
+    # ------------------------------------------------------------------ #
     # Команды
     # ------------------------------------------------------------------ #
 
     def cmd_status(self, data: dict | None = None) -> dict:
-        """``sim_robot.status`` → running/host/port/unit_id/writes_seen/state."""
+        """``sim_robot.status`` → running/host/port/unit_id/writes_seen/state/world."""
         self._sync_writes_metric()
         with self._lock:
             writes_seen = self._writes_seen
@@ -218,4 +297,5 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             "unit_id": self._unit_id,
             "writes_seen": writes_seen,
             "state": self._state,
+            "world": "unavailable" if self._ctx.state_proxy is None else "ok",
         }

@@ -8,7 +8,8 @@
 вовсе не создавался, потом создавался, но источник ему ничего не слал.
 
 **Что этот файл сторожит НА САМОМ ДЕЛЕ (уточнено ревью 2026-09-21):** провод
-``camera.camera_service.frame → mjpeg.mjpeg_sink.frame``, адресацию
+``camera.scene_source.frame → mjpeg.mjpeg_sink.frame`` (источник camera_service
+переведён на scene_source ревью Task 2.2 — см. ниже), адресацию
 ``chain_targets: [mjpeg]`` и то, что объявленное в ``pipeline.yaml`` доезжает до
 конфига процессов. Проверено инъекциями: удаление блока ``wires`` → 3 красных,
 подмена ``chain_targets`` на ``[camera]`` (петля) → 2 красных.
@@ -56,11 +57,12 @@ def test_frame_door_is_wired_source_to_sink() -> None:
 
     raw = yaml.safe_load((_APP_YAML.parent / "pipeline.yaml").read_text(encoding="utf-8"))
     wires = raw.get("wires") or []
+    # Task 2.2 заменила источник camera_service/simulator на scene_source
+    # (энкодер ленты из общего мира) — провод переехал вместе с источником,
+    # форма (два процесса + явный wire) не изменилась.
     assert any(
-        w.get("source") == "camera.camera_service.frame"
-        and w.get("target") == "mjpeg.mjpeg_sink.frame"
-        for w in wires
-    ), f"провод camera.camera_service.frame → mjpeg.mjpeg_sink.frame не объявлен: wires={wires}"
+        w.get("source") == "camera.scene_source.frame" and w.get("target") == "mjpeg.mjpeg_sink.frame" for w in wires
+    ), f"провод camera.scene_source.frame → mjpeg.mjpeg_sink.frame не объявлен: wires={wires}"
 
     # Источник обязан адресовать сток: без chain_targets провод объявлен, но
     # рантайм ничего не шлёт — сборка при этом проходит.
@@ -95,13 +97,7 @@ def test_every_declared_plugin_reaches_its_process(processes_config: dict) -> No
 
     declared_raw = yaml.safe_load((_APP_YAML.parent / "pipeline.yaml").read_text(encoding="utf-8"))
     declared = {
-        proc["process_name"]: [p["plugin_name"] for p in proc.get("plugins", [])]
-        for proc in declared_raw["processes"]
+        proc["process_name"]: [p["plugin_name"] for p in proc.get("plugins", [])] for proc in declared_raw["processes"]
     }
-    built = {
-        name: [p.get("plugin_name") for p in proc["config"]["plugins"]]
-        for name, proc in processes_config.items()
-    }
-    assert built == declared, (
-        f"сборка разошлась с pipeline.yaml.\n  объявлено: {declared}\n  собрано:   {built}"
-    )
+    built = {name: [p.get("plugin_name") for p in proc["config"]["plugins"]] for name, proc in processes_config.items()}
+    assert built == declared, f"сборка разошлась с pipeline.yaml.\n  объявлено: {declared}\n  собрано:   {built}"
