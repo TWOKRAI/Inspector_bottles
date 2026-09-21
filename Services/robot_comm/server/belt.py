@@ -45,6 +45,9 @@ class BeltDrive:
     """
 
     def __init__(self, mm_s_at_max_freq: float = 100.0, freq_max_hz: float = 50.0) -> None:
+        """Pre: см. докстринг класса. Post: ``mm_s == 0.0`` — обычный конструктор
+        не подразумевает движения, пока не пришла команда (:meth:`command`);
+        для готовой движущейся ленты см. :meth:`from_enc_rate`."""
         self._mm_s_at_max_freq = mm_s_at_max_freq
         self._freq_max_hz = freq_max_hz
         self._mm_s = 0.0
@@ -52,7 +55,9 @@ class BeltDrive:
         # "Сырой" режим from_enc_rate: пока не None — advance() возвращает
         # это целое число побитово, БЕЗ remainder-арифметики (float-округление
         # не гарантирует бит-точность на N тиков, см. from_enc_rate). Первая
-        # же command() необратимо выключает режим.
+        # же command() необратимо выключает режим. `mm_s` в этом режиме — НЕ 0
+        # (see from_enc_rate) — раздельные вещи: что возвращает advance() и
+        # что показывает свойство mm_s.
         self._raw_rate: int | None = None
 
     @classmethod
@@ -64,12 +69,20 @@ class BeltDrive:
         побитово на любом числе тиков (старое поведение
         ``RobotSimCore._enc_rate`` — целочисленное приращение, без float —
         воспроизводится точно, а не приближённо через общую формулу
-        mm_s/FACTOR_MM, которая на границах округления даёт дрейф ±1 на 1000
-        тиках). После первой команды ПЧ лента переходит в обычный режим.
+        mm_s/FACTOR_MM: та же формула, гоняемая напрямую при ``enc_rate=7``,
+        ``tick_s=0.01``, даёт `6999` вместо `7000` за 1000 тиков — дрейф
+        округления на границах, проверено численно). "Сырой" режим обходит
+        именно ЭТУ арифметику для :meth:`advance`, а не значение :attr:`mm_s`:
+        оно выставляется сразу (``mm_s_at_max_freq`` — скорость, эквивалентная
+        ``enc_rate`` на этом ``tick_s``), чтобы наблюдатели (например, паблишер
+        Task 2.2) видели реальную скорость ленты и до первой команды ПЧ. После
+        первой команды ПЧ лента переходит в обычный режим (и `advance`, и
+        пересчёт `mm_s` — через `command()`).
         """
         mm_s_at_max_freq = enc_rate * FACTOR_MM / tick_s if tick_s > 0 else 0.0
         belt = cls(mm_s_at_max_freq=mm_s_at_max_freq, freq_max_hz=50.0)
         belt._raw_rate = enc_rate
+        belt._mm_s = mm_s_at_max_freq  # см. докстринг выше — только advance() в "сыром" режиме
         return belt
 
     def command(self, run: bool, freq_hz: float, reverse: bool = False) -> None:

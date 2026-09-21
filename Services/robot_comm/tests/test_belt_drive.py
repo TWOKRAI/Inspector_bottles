@@ -1,8 +1,8 @@
 """Тесты автора (hazard) для Task 2.1 (line-sim, Ф2): `BeltDrive` + интеграция в
 `RobotSimCore`.
 
-Дополняют независимую приёмку тестера (`test_belt_acceptance.py`) тремя
-ловушками механизма, которые она не покрывает (см. бриф Task 2.1):
+Дополняют независимую приёмку тестера (`test_belt_acceptance.py`) ловушками
+механизма, которые она не покрывает (см. бриф Task 2.1 + ревью, итерация 1):
 
 1. Единственный писатель скорости — `tick()`: `write()` сам по себе не должен
    трогать `belt.command()` — реакция только внутри `tick()` (`_handle_vfd`),
@@ -15,6 +15,9 @@
    `BeltDrive` напрямую) — приёмка тестера проверяет `_handle_vfd` только на
    freq=0 (что не отличает «команда применилась» от «лента просто встала»),
    это явно названная тестером дыра (см. `test_belt_acceptance.py` шапка).
+4. `reverse` через полный путь `RobotSimCore` (ревью, п.1) — до этого файла
+   ни один тест не писал `0x1201=1` (cmd_dir), инъекция `reverse=False` в
+   `_handle_vfd` оставляла бы всё зелёным.
 """
 
 from __future__ import annotations
@@ -44,7 +47,9 @@ def test_write_alone_does_not_move_belt() -> None:
     # Прямой вызов write() не должен был сдвинуть энкодер и не должен был
     # тронуть belt — реакция строго внутри tick()/_handle_vfd.
     assert core.encoder == baseline
-    assert core._belt.mm_s == 0.0  # старый режим from_enc_rate ещё активен, mm_s пока не считался
+    # "Сырой" режим from_enc_rate ещё активен (ни одной command() не было),
+    # но mm_s УЖЕ сообщает реальную скорость (ревью Task 2.1, п.2): 7*0.144473/0.01
+    assert core._belt.mm_s == pytest.approx(101.1311, abs=1e-3)
 
 
 def test_advance_accumulates_over_uneven_dt() -> None:
@@ -85,6 +90,34 @@ def test_nonzero_vfd_command_moves_belt_through_core() -> None:
         core.tick()
         total += core.encoder - before
     assert total == pytest.approx(3461, abs=1)
+    assert core.encoder - baseline == total
+
+
+def test_reverse_vfd_command_moves_belt_negative_through_core() -> None:
+    """Pre/Post: закрывает дыру ревью Task 2.1, п.1 — `reverse` через полный путь
+    RobotSimCore (не только прямой BeltDrive). Инъекция `reverse=False` в
+    `sim_core.py:_handle_vfd` (игнорировать `cmd_dir`) оставляла бы все прежние
+    тесты зелёными — ни один из них не писал `0x1201` в 1.
+
+    Та же команда, что в `test_nonzero_vfd_command_moves_belt_through_core`
+    (25 Гц), но `cmd_dir=1` (назад) -> тот же по модулю итог, с минусом.
+    """
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.tick()
+    baseline = core.encoder
+
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [1])  # cmd_dir = 1 -> reverse
+    core.write(0x1202, [2500])  # 25.00 Гц (raw*100)
+    core.write(0x1204, [1])  # flag — маркер последним
+
+    total = 0
+    for _ in range(_N_TICKS):
+        before = core.encoder
+        core.tick()
+        total += core.encoder - before
+    assert total == pytest.approx(-3461, abs=1)
+    assert total < 0
     assert core.encoder - baseline == total
 
 

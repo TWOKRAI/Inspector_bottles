@@ -29,7 +29,6 @@ from Services.robot_comm.server.sim_robot import (
 #: Реалистичные значения железа (Delta SCARA на стенде), мс.
 DEFAULT_JOB_MS = 2500  # полный цикл pick-place: подвод, захват, укладка, дом
 DEFAULT_ACCEPT_MS = 20  # от job_flag=1 до сброса в 0 (робот подхватил mailbox)
-DEFAULT_BELT_MM_S = 100.0  # скорость ленты при 100% частоты ПЧ (mm_s_at_max_freq)
 DEFAULT_BELT_FREQ_MAX_HZ = 50.0  # верхняя граница частоты ПЧ (см. gd20_bridge.yaml cmd_freq.max)
 
 
@@ -50,30 +49,43 @@ def main() -> None:
     parser.add_argument(
         "--belt-mm-s",
         type=float,
-        default=DEFAULT_BELT_MM_S,
-        help="скорость ленты на 100%% частоты ПЧ, мм/с (мод. BeltDrive — Task 2.1)",
+        default=None,
+        help=(
+            "скорость ленты на 100%% частоты ПЧ, мм/с (мод. BeltDrive — Task 2.1); "
+            "не задано -> старое поведение (постоянная скорость по enc_rate, как без ПЧ); "
+            "задано -> лента СТОИТ, пока не придёт первая живая команда пуска ПЧ"
+        ),
     )
     args = parser.parse_args()
 
-    # Task 2.1: лента — модель BeltDrive, скорость задаёт живая команда ПЧ
-    # (mailbox 0x1200..0x1204), а не константа. До первой команды ПЧ лента
-    # стоит (mm_s=0) — как настоящий конвейер без пуска ПЧ.
-    belt = BeltDrive(mm_s_at_max_freq=args.belt_mm_s, freq_max_hz=DEFAULT_BELT_FREQ_MAX_HZ)
-    print(
-        f"тайминг: pick-place {args.job_ms:.0f} мс, приём {args.accept_ms:.0f} мс, "
-        f"лента до {args.belt_mm_s:.0f} мм/с (на {DEFAULT_BELT_FREQ_MAX_HZ:.0f} Гц) — "
-        f"едет только по команде ПЧ",
-        flush=True,
-    )
+    # Task 2.1: без --belt-mm-s — старое поведение (RobotSimCore(enc_rate=...)
+    # по умолчанию, как у голого SimRobotServer()), belt в core_kwargs не
+    # передаём вовсе. С --belt-mm-s — модель BeltDrive, скорость задаёт живая
+    # команда ПЧ (mailbox 0x1200..0x1204); до первой команды лента стоит
+    # (mm_s=0) — как настоящий конвейер без пуска (ревью Task 2.1, п.4).
+    core_kwargs = {
+        "job_ticks": _ms_to_ticks(args.job_ms),
+        "accept_ticks": _ms_to_ticks(args.accept_ms),
+    }
+    if args.belt_mm_s is None:
+        print(
+            f"тайминг: pick-place {args.job_ms:.0f} мс, приём {args.accept_ms:.0f} мс, "
+            f"лента — старое поведение (постоянная скорость, --belt-mm-s не задан)",
+            flush=True,
+        )
+    else:
+        core_kwargs["belt"] = BeltDrive(mm_s_at_max_freq=args.belt_mm_s, freq_max_hz=DEFAULT_BELT_FREQ_MAX_HZ)
+        print(
+            f"тайминг: pick-place {args.job_ms:.0f} мс, приём {args.accept_ms:.0f} мс, "
+            f"лента до {args.belt_mm_s:.0f} мм/с (на {DEFAULT_BELT_FREQ_MAX_HZ:.0f} Гц) — "
+            f"едет только по команде ПЧ",
+            flush=True,
+        )
     run_sim_robot(
         args.host,
         args.port,
         args.unit,
-        core_kwargs={
-            "job_ticks": _ms_to_ticks(args.job_ms),
-            "accept_ticks": _ms_to_ticks(args.accept_ms),
-            "belt": belt,
-        },
+        core_kwargs=core_kwargs,
         gui=args.gui,
     )
 

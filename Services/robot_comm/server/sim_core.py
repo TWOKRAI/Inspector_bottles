@@ -67,11 +67,11 @@ from Services.robot_comm.core.registers import (
 )
 from Services.robot_comm.server.belt import BeltDrive
 
-# Период Motion-цикла — должен совпадать с TICK_INTERVAL_S из sim_robot.py
-# (продублировано намеренно: sim_robot.py импортирует RobotSimCore из этого
-# модуля, обратный импорт создал бы цикл; sim_robot.py вне FILES этой
-# задачи — см. отчёт Task 2.1).
-_TICK_INTERVAL_S = 0.01
+# Период Motion-цикла — единственный источник истины (ревью Task 2.1, п.3:
+# раньше дублировался в sim_robot.py; sim_robot.py уже импортирует
+# RobotSimCore из этого модуля на уровне модуля, поэтому обратного импорта
+# `sim_robot.TICK_INTERVAL_S -> sim_core` здесь нет и не может возникнуть цикл).
+TICK_INTERVAL_S = 0.01
 
 # Масштаб регистра частоты ПЧ (см. Services/vfd_comm/protocols/gd20_bridge.yaml
 # cmd_freq.scale) — 0.01 Гц на LSB, т.е. RAW*100.
@@ -141,7 +141,7 @@ class RobotSimCore:
         self._on_event = on_event
         # Лента — отдельная модель (Task 2.1, line-sim Ф2): без явной инъекции
         # воспроизводит старое поведение enc_rate побитово (см. BeltDrive.from_enc_rate).
-        self._belt = belt if belt is not None else BeltDrive.from_enc_rate(enc_rate, _TICK_INTERVAL_S)
+        self._belt = belt if belt is not None else BeltDrive.from_enc_rate(enc_rate, TICK_INTERVAL_S)
 
         self.regs: list[int] = [0] * REG_SPACE_SIZE
         self._encoder = 0
@@ -218,7 +218,7 @@ class RobotSimCore:
         # (_handle_vfd -> belt.command) и приращение ЭТОГО ЖЕ тика уже должно
         # идти по новой скорости — таково ограничение прошивки, «скорость
         # меняется только в момент пульса», а не с задержкой в один тик.
-        self._encoder += self._belt.advance(_TICK_INTERVAL_S)
+        self._encoder += self._belt.advance(TICK_INTERVAL_S)
         self._write_encoder()
         self._handle_draw()
         self._handle_return()
