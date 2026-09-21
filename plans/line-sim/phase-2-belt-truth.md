@@ -298,7 +298,32 @@ Task 2.0», :222-224) — строкой в отчёт, не правкой.
 
 ---
 
+### Task 2.1b — Лента по реальному времени: `tick(dt_s)` с измеренным dt
+
+**Level:** Middle (Sonnet) · **Assignee:** developer · **Module contract:** impl-only
+**Основание:** ревью 2.1 — тикер `SimRobotServer._ticker` делает `tick()` + `sleep(0.01)`, реальный
+период 11.96 мс (macOS), а лента считает dt = 0.01 → по часам едет на ≈16 % медленнее команды.
+**DESIGN:** `RobotSimCore.tick(dt_s: float | None = None)`, None → `TICK_INTERVAL_S` (все прямые
+вызовы и тесты не меняются); `_ticker` меряет `time.monotonic()` между тиками и передаёт dt,
+ограниченный сверху `_MAX_TICK_DT_S = 0.1` (`# ponytail:` — пауза процесса не превращается в прыжок
+ленты). Сырой режим `from_enc_rate` остаётся «enc_rate за тик» (легаси-смысл параметра).
+**FILES:** `Services/robot_comm/server/sim_core.py`, `sim_robot.py`, `tests/test_belt_drive.py`, `server/README.md`.
+**Acceptance:** `tick(0.02)` ×500 == `tick(0.01)` ×1000 == 3461±1 при 25 Гц; живой `SimRobotServer` с
+лентой 100 мм/с и командой 50 Гц за 2.0 с по часам даёт 1384 ±3 % отсчётов (200 мм / 0.144473; сегодня ≈1160, −16 %);
+`pytest Services/robot_comm -q` — 0 failed. **Dependencies:** 2.1.
+
+---
+
 ### Task 2.2 — Энкодер в общем мире: робот публикует, сцена едет
+
+**Решение ведущего по чтению мира (2026-09-21, по разведке `state_proxy.py:288-345,1307-1337`):**
+кэш `StateProxy` наполняют только дельты подписки, и кладёт он листья; без подписки `get` — всегда
+синхронный IPC (до 5 с), из приёмного потока — `RouterReentrantRequestError`. Поэтому шаг 2 ниже
+меняется: `SceneSourcePlugin` в `configure` делает `subscribe("sim.belt.**", cb, sync=False)`, колбэк
+складывает последнее значение (и цельный dict дельты создания, и полистовые дельты
+`sim.belt.encoder.value`/`.t`) в поле плагина; `produce()` читает поле — ни одного IPC на кадр.
+Прежняя формулировка «без колбэков» исходила из дешёвого `get`, которого нет.
+
 
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
