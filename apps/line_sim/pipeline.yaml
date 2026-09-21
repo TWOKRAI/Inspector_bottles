@@ -1,20 +1,37 @@
-# apps/line_sim — pipeline (плоская топология, два процесса).
+# apps/line_sim — pipeline (три процесса).
 #
 # `robot` держит SimRobotHostPlugin — Modbus TCP-симулятор робота на
 # 127.0.0.1:5021 (порт зафиксирован планом line-sim §Ф1, "Порты стенда").
 #
-# `camera` — линейная внутрипроцессная цепочка (Task 1.2 плана line-sim):
-# CameraServicePlugin(camera_type=simulator) генерирует кадры → MjpegSinkPlugin
-# раздаёт последний кадр по HTTP MJPEG на 127.0.0.1:8091 (тот же порт, что
-# прототип читает как источник camera_0 в multiprocess_prototype/recipes/
-# letter_robot_sim.yaml).
+# === ДВЕРЬ КАДРОВ (Task 1.2, форма выбрана арбитражем CTO 2026-09-21) ===
 #
-# `wires: []` — оба процесса плоские, межпроцессных кадровых проводов в
-# этом сим-дереве нет (кадр остаётся внутри процесса `camera`, та же форма,
-# что и линейные цепочки внутри процессов боевого рецепта).
+# `camera` (источник) → IPC → `mjpeg` (сток, HTTP MJPEG на 127.0.0.1:8091).
+# Прототип читает этот адрес как источник camera_0 в
+# multiprocess_prototype/recipes/letter_robot_sim.yaml.
+#
+# ПОЧЕМУ ДВА ПРОЦЕССА, а не один (прежняя шапка утверждала обратное и была
+# НЕВЕРНА — «кадр остаётся внутри процесса»). У источника внутрипроцессной
+# цепочки не бывает: `SourceProducer` делает
+# `produce() → FrameShmMiddleware.strip_and_write() → IPC send в chain_targets`
+# (`process_module/generic/source_producer.py`, докстринг) и НЕ передаёт items
+# соседнему плагину своего процесса. Линейные цепочки внутри процесса
+# (боевой `vision`: color_convert → roi_crop → hsv_mask → morphology) состоят из
+# processing-плагинов, которые получают item по IPC и крутятся в воркере
+# `message_processor`. Поэтому форма здесь — один в один боевая
+# (`camera_0 → vision`, hikvision_letter_robot.yaml:124-128, 403-406).
+#
+# ОТВЕРГНУТО: `chain_targets: [camera]` (отправка самому себе). Кадры доходят, и
+# критерий приёмки при этом ЗЕЛЁНЫЙ — но это петля: `PipelineExecutor._send_results`
+# шлёт каждый item после цепочки в `chain_targets` без исключения для sink, сток
+# pass-through возвращает item в свою же очередь. Замер CTO: раздача в 3,2 раза
+# быстрее источника (каждый кадр кодируется ~3 раза), в stderr процесса
+# `RouterSendError … delivery_failed … targets=['camera']`, через 20 с не гаснет.
+#
+# `wires:` ОБЯЗАТЕЛЕН: без провода валидатор блюпринта не пускает сборку
+# (`BlueprintError: Вход 'mjpeg.mjpeg_sink.frame' (image/bgr) не подключен`).
 
 name: line_sim
-description: "Симулятор линии: robot — SimRobotServer (Modbus TCP), camera — MJPEG-сток (:8091)"
+description: "Симулятор линии: robot — SimRobotServer (Modbus TCP), camera → mjpeg — MJPEG-дверь кадров (:8091)"
 
 processes:
   - process_name: robot
@@ -32,16 +49,26 @@ processes:
   - process_name: camera
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
     priority: normal
+    chain_targets:
+      - mjpeg
     plugins:
       - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
         plugin_name: camera_service
         category: source
         camera_type: simulator
         auto_start: true
+
+  - process_name: mjpeg
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
       - plugin_class: Plugins.sim.mjpeg_sink.plugin.MjpegSinkPlugin
         plugin_name: mjpeg_sink
         category: sink
         host: 127.0.0.1
         port: 8091
 
-wires: []
+wires:
+  - source: camera.camera_service.frame
+    target: mjpeg.mjpeg_sink.frame
+    description: кадр симулятора → MJPEG-раздача (дверь кадров для прототипа)

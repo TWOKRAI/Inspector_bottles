@@ -37,19 +37,50 @@ def processes_config() -> dict:
     return app._get_processes_config()  # noqa: SLF001 — пин внутреннего контракта сборки
 
 
-def test_camera_process_carries_both_declared_plugins(processes_config: dict) -> None:
-    """Пин: процесс `camera` несёт ОБА объявленных плагина, в порядке цепочки.
+def test_frame_door_is_wired_source_to_sink() -> None:
+    """Пин: дверь кадров проведена ЯВНЫМ проводом `camera` → `mjpeg`.
 
-    Умирает при удалении `Plugins/sim/mjpeg_sink/config.py` — проверено инъекцией:
-    без него сборка отдаёт ['camera_service'], порт 8091 не открывается.
+    Форма выбрана арбитражем CTO 2026-09-21 (вариант «а»): у источника
+    внутрипроцессной цепочки не бывает — `SourceProducer` шлёт результат
+    `produce()` по IPC в `chain_targets`, а не соседнему плагину. Поэтому сток
+    живёт отдельным процессом, а провод объявлен в `wires`.
+
+    Умирает при удалении строки `wires` — проверено инъекцией: сборка падает
+    `BlueprintError: Вход 'mjpeg.mjpeg_sink.frame' (image/bgr) не подключен`.
+    Этот тест сторожит именно провод, а не число плагинов: прежняя его версия
+    пинила одно-процессную форму, которая собиралась успешно и МОЛЧА не работала.
     """
-    camera = processes_config["camera"]
-    names = [p.get("plugin_name") for p in camera["config"]["plugins"]]
-    assert names == ["camera_service", "mjpeg_sink"], (
-        f"процесс camera собран с плагинами {names}, ожидались оба объявленных в "
-        f"pipeline.yaml в порядке цепочки — сток, потерянный здесь, не открывает "
-        f"порт 8091 и не сообщает об этом ни строкой"
+    import yaml
+
+    raw = yaml.safe_load((_APP_YAML.parent / "pipeline.yaml").read_text(encoding="utf-8"))
+    wires = raw.get("wires") or []
+    assert any(
+        w.get("source") == "camera.camera_service.frame"
+        and w.get("target") == "mjpeg.mjpeg_sink.frame"
+        for w in wires
+    ), f"провод camera.camera_service.frame → mjpeg.mjpeg_sink.frame не объявлен: wires={wires}"
+
+    # Источник обязан адресовать сток: без chain_targets провод объявлен, но
+    # рантайм ничего не шлёт — сборка при этом проходит.
+    camera = next(p for p in raw["processes"] if p["process_name"] == "camera")
+    assert camera.get("chain_targets") == ["mjpeg"], (
+        f"camera.chain_targets = {camera.get('chain_targets')!r}; источник шлёт кадры "
+        f"ТОЛЬКО в chain_targets (source_producer.py), провод в wires сам по себе "
+        f"данные не гонит"
     )
+    assert camera.get("chain_targets") != ["camera"], (
+        "chain_targets=[camera] — отправка самому себе: кадры доходят и приёмка "
+        "зеленеет, но сток pass-through возвращает item в свою же очередь "
+        "(петля, замер CTO: раздача ×3.2 от темпа источника, delivery_failed в stderr)"
+    )
+
+
+def test_build_succeeds_with_the_declared_wiring() -> None:
+    """Пин: объявленная проводка ДЕЙСТВИТЕЛЬНО собирается (валидатор блюпринта проходит)."""
+    app = build_app(_APP_YAML)
+    cfg = app._get_processes_config()  # noqa: SLF001 — пин внутреннего контракта сборки
+    assert cfg["mjpeg"]["config"]["plugins"][0]["plugin_name"] == "mjpeg_sink"
+    assert cfg["camera"]["config"]["chain_targets"] == ["mjpeg"]
 
 
 def test_every_declared_plugin_reaches_its_process(processes_config: dict) -> None:
