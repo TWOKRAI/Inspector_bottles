@@ -111,7 +111,7 @@ def test_freq_clamped_to_range() -> None:
     above = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
     above.command(run=True, freq_hz=999.0)
     total_above = sum(above.advance(0.01) for _ in range(_N_TICKS))
-    assert total_above == pytest.approx(692, abs=1)  # эквивалент freq_hz=freq_max_hz=50
+    assert total_above == pytest.approx(6922, abs=1)  # = freq_max_hz: 100 мм/с × 10 с / 0.144473
 
     below = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
     below.command(run=True, freq_hz=-10.0)
