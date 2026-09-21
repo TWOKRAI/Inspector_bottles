@@ -27,7 +27,7 @@
 
 **Порты стенда (фиксируются здесь, чтобы два приложения не толкались):** прототип
 `backend_ctl` **8765** (эксклюзивен, полоса closure); сим `backend_ctl` **8766**; Modbus
-сим-робота **5021**; MJPEG **8090**.
+сим-робота **5021**; MJPEG **8091**.
 
 **Дом сима — `apps/line_sim/`**, новый корень рядом с `multiprocess_prototype/` (сам
 прототип — такой же корень). Движок — `Services/line_sim` (Ф3), плагины-хосты —
@@ -293,12 +293,20 @@ Quality 6972. Правки — только в двух файлах ТЕСТО�
 
 ---
 
-### Task 1.2 — Дверь кадров: тип `stream` в `camera_service` + MJPEG-сток в симе
+### Task 1.2 — Дверь кадров: тип `stream` в `camera_service` + MJPEG-сток
+
+> **Порт изменён 8090 → 8091 (решение владельца 2026-09-21).** На машине владельца
+> 8090 держит сторонний `TorrServer` (`netstat`: `tcp46 *.8090 LISTEN`, процесс
+> `TorrServer-gst-d`), причём на всех интерфейсах — поэтому и `127.0.0.1:8090`
+> недоступен. Юнит-тесты этого не видели: они берут свободный порт через
+> `socket.bind(("127.0.0.1", 0))`. Напоролся только живой стенд — сток честно ушёл в
+> `report_error` («Address already in use»), процесс остался жив, кадров не было.
+ в симе
 
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
-**Goal:** сим отдаёт кадры по HTTP (MJPEG, `multipart/x-mixed-replace`) на `:8090`;
-прототипный `camera_service` с `camera_type: stream`, `url: http://127.0.0.1:8090/`
+**Goal:** сим отдаёт кадры по HTTP (MJPEG, `multipart/x-mixed-replace`) на `:8091`;
+прототипный `camera_service` с `camera_type: stream`, `url: http://127.0.0.1:8091/`
 читает их как обычную камеру. Кадр в Ф1 — заглушка (уже готовый `SimulatorBackend`/
 `FrameGenerator` того же `camera_service`), объектов и слоёв нет (Ф3).
 
@@ -346,7 +354,7 @@ Quality 6972. Правки — только в двух файлах ТЕСТО�
       `produce()`.
 - [ ] `os.path.isfile` не вызывается для `camera_type: stream` (инъекция: вернуть
       сторож → красный).
-- [ ] `curl -s -m 3 http://127.0.0.1:8090/ | head -c 200` содержит `--` boundary и
+- [ ] `curl -s -m 3 http://127.0.0.1:8091/ | head -c 200` содержит `--` boundary и
       `Content-Type: image/jpeg`; `cv2.VideoCapture(url).read()` → `ret=True` ≥ 5 раз
       за 5 с при поднятом `apps/line_sim`.
 - [ ] Живой стенд: `python multiprocess_prototype/run.py letter_robot_sim --headless`

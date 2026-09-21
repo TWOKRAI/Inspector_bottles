@@ -5,7 +5,7 @@
 #
 # `camera` — линейная внутрипроцессная цепочка (Task 1.2 плана line-sim):
 # CameraServicePlugin(camera_type=simulator) генерирует кадры → MjpegSinkPlugin
-# раздаёт последний кадр по HTTP MJPEG на 127.0.0.1:8090 (тот же порт, что
+# раздаёт последний кадр по HTTP MJPEG на 127.0.0.1:8091 (тот же порт, что
 # прототип читает как источник camera_0 в multiprocess_prototype/recipes/
 # letter_robot_sim.yaml).
 #
@@ -14,7 +14,7 @@
 # что и линейные цепочки внутри процессов боевого рецепта).
 
 name: line_sim
-description: "Симулятор линии: robot — SimRobotServer (Modbus TCP), camera — MJPEG-сток (:8090)"
+description: "Симулятор линии: robot — SimRobotServer (Modbus TCP), camera — MJPEG-сток (:8091)"
 
 processes:
   - process_name: robot
@@ -42,6 +42,6 @@ processes:
         plugin_name: mjpeg_sink
         category: sink
         host: 127.0.0.1
-        port: 8090
+        port: 8091
 
 wires: []

@@ -79,9 +79,9 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
 
-#: Дефолты конфига (Task 1.2 плана line-sim; порт 8090 — стенд apps/line_sim).
+#: Дефолты конфига (Task 1.2 плана line-sim; порт 8091 — стенд apps/line_sim).
 _DEFAULT_HOST = "127.0.0.1"
-_DEFAULT_PORT = 8090
+_DEFAULT_PORT = 8091
 _DEFAULT_JPEG_QUALITY = 80
 #: 0 — без троттлинга, раздаём каждый принятый кадр.
 _DEFAULT_FPS_CAP = 0.0

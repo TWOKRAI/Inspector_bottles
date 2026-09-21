@@ -4,12 +4,12 @@
 # hikvision_letter_robot.yaml — источник camera_0 (Task 1.2 плана line-sim,
 # plans/line-sim/phase-1-vertical-slice.md): вместо HikvisionCameraPlugin —
 # CameraServicePlugin(camera_type=stream), читающий MJPEG-сток сима
-# (apps/line_sim, MjpegSinkPlugin на 127.0.0.1:8090). Всё остальное дерево
+# (apps/line_sim, MjpegSinkPlugin на 127.0.0.1:8091). Всё остальное дерево
 # (процессы, провода, конфиги обработки/робота) — байт-в-байт то же самое,
 # что в боевом рецепте; см. multiprocess_prototype/recipes/tests/
 # test_letter_robot_sim_diff.py — тест-дифф, который это проверяет.
 #
-#   camera_0(сим-сток :8090) → vision(свап→ROI→маска→морфо→круги) ─┬→ line(триггер)
+#   camera_0(сим-сток :8091) → vision(свап→ROI→маска→морфо→круги) ─┬→ line(триггер)
 #                                                  ├→ recog(crop→калибровка→нейронка) → layout(раскладка→робот)
 #                                                  ├→ draw(круги+overlay)               (укладка слова)
 #                                                  └→ maskview
@@ -54,7 +54,7 @@
 #   · line_filter center_x/angle(90=вертикаль)/zone_width · center_crop size_mode=radius/output_size=128
 #   · ml_inference model/confidence · word_layout first_x/y + line_angle + pitch + place_z + доворот.
 #
-# Предусловие: apps/line_sim поднят (процесс camera: camera_service→mjpeg_sink на :8090) +
+# Предусловие: apps/line_sim поднят (процесс camera: camera_service→mjpeg_sink на :8091) +
 # сим-робот apps/line_sim (Modbus TCP :5021, см. data/devices.yaml прототипа, apps/line_sim/README.md).
 # Запуск: python multiprocess_prototype/run.py letter_robot_sim
 name: letter_robot_sim
@@ -127,7 +127,7 @@ blueprint:
           category: source
           config:
             camera_type: stream
-            stream_url: http://127.0.0.1:8090/
+            stream_url: http://127.0.0.1:8091/
             auto_start: true
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp

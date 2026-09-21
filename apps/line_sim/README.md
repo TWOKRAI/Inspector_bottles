@@ -16,7 +16,7 @@ BACKEND_CTL=1 BACKEND_CTL_PORT=8766 MULTIPROCESS_LOG_DIR=/tmp/line_sim_logs \
 Поднимает два процесса: `robot`, держащий `SimRobotServer` (Modbus TCP,
 `127.0.0.1:5021`), и `camera` — линейную цепочку `CameraServicePlugin`
 (`camera_type: simulator`) → `MjpegSinkPlugin`, раздающую последний кадр по
-HTTP MJPEG на `127.0.0.1:8090`. Остановка — SIGINT (Ctrl+C) или `backend_ctl`
+HTTP MJPEG на `127.0.0.1:8091`. Остановка — SIGINT (Ctrl+C) или `backend_ctl`
 `system_command shutdown`.
 
 ## Порты стенда
@@ -28,7 +28,7 @@ HTTP MJPEG на `127.0.0.1:8090`. Остановка — SIGINT (Ctrl+C) или 
 | `8765` | `backend_ctl` | прототип (эксклюзивен) |
 | `8766` | `backend_ctl` | сим (`apps/line_sim`) |
 | `5021` | Modbus TCP | сим-робот (`SimRobotHostPlugin`) |
-| `8090` | MJPEG | сим-камера (`MjpegSinkPlugin`, процесс `camera`, Task 1.2) |
+| `8091` | MJPEG | сим-камера (`MjpegSinkPlugin`, процесс `camera`, Task 1.2) |
 
 ## Как направить прототип на сим
 
@@ -55,7 +55,7 @@ writes_seen, state}`. Подробности механизма — [`Plugins/si
 
 Процесс `camera` — линейная внутрипроцессная цепочка: `CameraServicePlugin`
 (`camera_type: simulator`, генерирует кадры) → `MjpegSinkPlugin` (кодирует в
-JPEG, раздаёт последний кадр по `GET http://127.0.0.1:8090/` как
+JPEG, раздаёт последний кадр по `GET http://127.0.0.1:8091/` как
 `multipart/x-mixed-replace`). Открыть в браузере/`cv2.VideoCapture`/`ffplay`
 — обычный MJPEG-клиент. Подробности механизма стока —
 [`Plugins/sim/mjpeg_sink/README.md`](../../Plugins/sim/mjpeg_sink/README.md).

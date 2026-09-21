@@ -17,7 +17,7 @@ Task 1.2b плана [`plans/line-sim/phase-1-vertical-slice.md`](../../../plans
 | Ключ | Дефолт | Смысл |
 |---|---|---|
 | `host` | `127.0.0.1` | адрес HTTP-сервера |
-| `port` | `8090` | порт (стенд `apps/line_sim` фиксирует именно этот) |
+| `port` | `8091` | порт (стенд `apps/line_sim` фиксирует именно этот) |
 | `jpeg_quality` | `80` | `cv2.IMWRITE_JPEG_QUALITY` |
 | `fps_cap` | `0` | максимум кодирований/сек; `0` — без троттлинга |
 
