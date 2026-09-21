@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 
@@ -358,6 +359,136 @@ def test_belt_mm_s_property_reads_exact_commanded_speed() -> None:
     core.write(0x1204, [1])
     core.tick()
     assert core.belt_mm_s == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Task 2.3a — hazard-тесты замка (set_calibration/command) и порядка          #
+# (command_vfd: данные -> флаг последним)                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_set_calibration_races_with_command() -> None:
+    """Hazard (Task 2.3a): гонка ``set_calibration()`` <-> ``command()`` из
+    двух потоков, 10**4 итераций каждая. ``command()`` держит частоту
+    ФИКСИРОВАННОЙ на 25 Гц (freq_max=50); ``set_calibration`` переключает
+    100.0/200.0 — легитимные значения ``mm_s`` при согласованной паре
+    (freq=25, calib) — РОВНО {50.0, 100.0}, никогда ничего другого.
+
+    Наблюдатель снимает ``(mm_s, mm_s_at_max_freq)`` под ТЕМ ЖЕ ``belt._lock``,
+    что обязаны брать оба метода (докстринг ``belt.py``, DESIGN Task 2.3a
+    п.1) — если производственный код лок не берёт (или берёт не тот),
+    внешний захват лока в тесте ничего не защищает, и рассинхрон становится
+    наблюдаемым. ``sys.setswitchinterval(1e-6)`` форсирует переключение
+    потоков (project-rules §2: без репродукции "гонки нет" не пишем —
+    10**4 итераций с форсированным переключением здесь и есть репродукция;
+    ловится НЕ гарантированно каждый прогон на любой машине, поэтому
+    множитель итераций высокий)."""
+    belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
+    belt.command(run=True, freq_hz=25.0, reverse=False)  # первая команда — ДО гонки (mm_s=50.0, не 0.0 по умолчанию)
+    stop = threading.Event()
+    mismatches: list[tuple[float, float]] = []
+    n = 10_000
+
+    def commander() -> None:
+        for _ in range(n):
+            belt.command(run=True, freq_hz=25.0, reverse=False)
+
+    def calibrator() -> None:
+        for i in range(n):
+            belt.set_calibration(200.0 if i % 2 == 0 else 100.0)
+
+    def watcher() -> None:
+        legit = {50.0, 100.0}
+        while not stop.is_set():
+            with belt._lock:
+                mm_s, calib = belt._mm_s, belt._mm_s_at_max_freq
+            expected = (25.0 / 50.0) * calib
+            if mm_s not in legit or mm_s != pytest.approx(expected):
+                mismatches.append((mm_s, calib))
+
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        commander_t = threading.Thread(target=commander, daemon=True)
+        calibrator_t = threading.Thread(target=calibrator, daemon=True)
+        watcher_t = threading.Thread(target=watcher, daemon=True)
+        watcher_t.start()
+        commander_t.start()
+        calibrator_t.start()
+        for t in (commander_t, calibrator_t):
+            t.join(timeout=10.0)
+            assert not t.is_alive(), "поток гонки завис за 10с — похоже на дедлок под self._lock"
+        stop.set()
+        watcher_t.join(timeout=2.0)
+        assert not watcher_t.is_alive()
+    finally:
+        sys.setswitchinterval(old_interval)
+
+    assert not mismatches, f"гонка set_calibration<->command дала рассинхрон (mm_s, calib): {mismatches[:5]}"
+
+
+def test_advance_does_not_block_on_lock() -> None:
+    """Hazard (Task 2.3a): ``advance()`` — горячий путь тикера — НЕ берёт
+    ``self._lock`` (докстринг класса + DESIGN п.1). Эффект: пока другой
+    поток держит замок 0.2с, ``advance()`` из главного потока не блокируется
+    и завершается почти мгновенно (порядок миллисекунд, не 0.2с). Инъекция
+    A9 (``advance()`` берёт замок) обязана провалить этот тест."""
+    belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
+    belt.command(run=True, freq_hz=25.0)
+
+    holder_ready = threading.Event()
+    release = threading.Event()
+
+    def hold_lock() -> None:
+        with belt._lock:
+            holder_ready.set()
+            release.wait(timeout=2.0)
+
+    holder = threading.Thread(target=hold_lock, daemon=True)
+    holder.start()
+    assert holder_ready.wait(timeout=2.0), "поток-держатель не взял замок за 2с"
+
+    start = time.monotonic()
+    belt.advance(0.01)
+    elapsed = time.monotonic() - start
+
+    release.set()
+    holder.join(timeout=2.0)
+    assert not holder.is_alive()
+
+    assert elapsed < 0.05, f"advance() ждал замок {elapsed:.3f}с — похоже, что он его берёт"
+
+
+def test_command_vfd_writes_flag_last() -> None:
+    """Hazard (Task 2.3a): ``RobotSimCore.command_vfd`` пишет данные
+    (RUN/DIR/FREQ), ЗАТЕМ VFD_FLAG ОТДЕЛЬНЫМ последним вызовом ``self.write``
+    (DESIGN п.2). Шпион на ``core.write`` "вклинивает" ручной ``core.tick()``
+    между записью данных и записью флага — если порядок соблюдён, тикер
+    видит FLAG=0 и не применяет полу-записанную команду (докстринг
+    ``_handle_vfd``: ``if self.regs[_REG_VFD_FLAG] != 1: return``). Инъекция
+    A1 (флаг первым) обязана провалить этот тест: FLAG оказался бы уже 1 до
+    завершения записи данных."""
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.tick()
+
+    real_write = core.write
+    addresses: list[int] = []
+
+    def spying_write(address: int, values: list[int]) -> None:
+        addresses.append(address)
+        real_write(address, values)
+        if address != 0x1204:
+            core.tick()  # "тикер" вклинивается между записью данных и флага
+            assert core.read(0x1204, 1) == [0], "FLAG уже стоит ДО завершения записи данных — нарушен порядок"
+
+    core.write = spying_write  # type: ignore[method-assign]
+    try:
+        core.command_vfd(run=True, freq_hz=25.0, reverse=True)
+    finally:
+        core.write = real_write  # type: ignore[method-assign]
+
+    assert addresses[-1] == 0x1204, f"FLAG должен писаться последним отдельным вызовом: {addresses}"
+    assert addresses[:-1] == [0x1200, 0x1201, 0x1202], f"порядок записи данных нарушен: {addresses}"
 
 
 if __name__ == "__main__":

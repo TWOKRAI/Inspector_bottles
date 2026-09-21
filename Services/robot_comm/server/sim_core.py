@@ -86,6 +86,12 @@ _REG_VFD_CMD_RESET = 0x1203
 _REG_VFD_FLAG = 0x1204
 _REG_VFD_ST_BASE = 0x1210  # RUN, OUT_FREQ, CURRENT, DCBUS, FAULT, STATUSW, HB, COMM_ERR
 
+#: Начало блока команды ПЧ в mailbox (RUN, DIR, FREQ — 3 регистра подряд,
+#: тот же порядок, что читает watchdog jog в ``SimRobotHostPlugin``, Task
+#: 2.3a). Публичный алиас ``_REG_VFD_CMD_RUN`` — потребители вне этого
+#: модуля (плагин) не должны дублировать адрес 0x1200 у себя.
+VFD_CMD_ADDR = _REG_VFD_CMD_RUN
+
 # Индексы телеметрии (блок 0x1130)
 _TLM_X, _TLM_Y, _TLM_Z, _TLM_RZ, _TLM_MOVING, _TLM_SPD = 0, 1, 2, 3, 4, 5
 _TLM_HB, _TLM_SERVO = 8, 9
@@ -198,6 +204,32 @@ class RobotSimCore:
         """Записать блок регистров (чистое хранение — реакция в tick())."""
         for i, v in enumerate(values):
             self.regs[address + i] = int(v) & 0xFFFF
+
+    def command_vfd(
+        self,
+        *,
+        run: bool | None = None,
+        freq_hz: float | None = None,
+        reverse: bool | None = None,
+    ) -> None:
+        """Записать частичную команду ПЧ в mailbox — тем же путём (``self.write``),
+        что и Modbus-запись инспектора (Task 2.3a, ``SimRobotHostPlugin``):
+        оба мастера пишут один и тот же mailbox, побеждает последний
+        записавший (см. ``belt.py`` DESIGN п.6, план line-sim Ф2 §Task 2.3a).
+
+        Post: пишутся ТОЛЬКО переданные поля (партиальность — как у
+        ``VfdClient``: ``stop()`` пишет только ``cmd_run``), затем VFD_FLAG —
+        ОТДЕЛЬНЫМ, последним вызовом ``self.write``. Применяется на ближайшем
+        ``tick()`` (:meth:`_handle_vfd`), не немедленно — тот же контракт,
+        что у прямой Modbus-записи.
+        """
+        if run is not None:
+            self.write(_REG_VFD_CMD_RUN, [1 if run else 0])
+        if reverse is not None:
+            self.write(_REG_VFD_CMD_DIR, [1 if reverse else 0])
+        if freq_hz is not None:
+            self.write(_REG_VFD_CMD_FREQ, [round(freq_hz * _VFD_FREQ_SCALE)])
+        self.write(_REG_VFD_FLAG, [1])
 
     # ------------------------------------------------------------------ #
     # «Motion-цикл» — один тик
@@ -520,6 +552,15 @@ class RobotSimCore:
     def encoder(self) -> int:
         """Текущее значение энкодера (для assert'ов в тестах)."""
         return self._encoder
+
+    @property
+    def belt(self) -> BeltDrive:
+        """Модель ленты — публичный доступ для команд ``belt.*`` (Task 2.3a,
+        ``SimRobotHostPlugin``): ``belt.calibrate``/``belt.status`` читают
+        ``state``/``mm_s_at_max_freq`` отсюда напрямую. ``belt_mm_s``/
+        ``encoder`` остаются отдельными аксессорами горячего пути публикации
+        (Task 2.2) — не заменяются этим свойством."""
+        return self._belt
 
     @property
     def belt_mm_s(self) -> float:
