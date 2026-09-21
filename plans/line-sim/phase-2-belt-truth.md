@@ -18,8 +18,6 @@ line→robot не появляется (решение 2026-08-13 в силе): 
 
 ### Task 2.0 — `ctx.state_proxy` у фреймворкового `GenericProcess` (carve-out из прототипа)
 
-**Level:** Senior (Opus)
-**Assignee:** teamlead
 **Goal:** плагин в любом generic-приложении (`apps/line_sim`, `examples/minimal_app`)
 получает рабочий `ctx.state_proxy`: `set` в одном процессе виден через `get`/`subscribe` в
 другом. Прототип продолжает работать без изменений поведения.
@@ -32,27 +30,192 @@ line→robot не появляется (решение 2026-08-13 в силе): 
 клиентская половина. По правилу «запертое в прототипе выделяется, не копируется»
 механизм переезжает во фреймворк, а `GenericProcessApp` становится его потребителем.
 
-**Детальная спека — за `manager` перед стартом задачи.** В этой редакции разведка кода
-carve-out не проводилась: список файлов и шаги ниже намеренно не выписаны, чтобы не
-выдавать догадку за факт. Обязательные вопросы разведки: (1) что именно
-`GenericProcessApp` делает сверх создания прокси (подписки, ветка
-`processes.<p>.health`?); (2) проходит ли `set` по пути вне посеянного дерева
-(`sim.belt.*`) или путь надо сеять через `AppSpec.state_bootstrap`; (3) ADR в
-`process_module/DECISIONS.md` или `app_module/DECISIONS.md`.
+**Разведка (manager, 2026-09-21, HEAD `a0edf74a`; qex не использовался — Ollama лежит, всё ниже —
+Grep/Read по дереву, номера строк сверены на этом SHA).**
 
-**Acceptance criteria** (измеримы тестером вслепую):
-- [ ] В `examples/minimal_app` и `apps/line_sim` плагин видит `ctx.state_proxy is not None`.
-- [ ] Двухпроцессное generic-приложение-фикстура: `set("sim.belt.encoder", {"value": 42})`
-      в процессе A → `get("sim.belt.encoder")` в процессе B возвращает `{"value": 42}` в
-      течение 2 с; `subscribe("sim.belt.*", cb)` в B получает событие.
-- [ ] `backend_ctl` приложения: `state_get("sim.belt.encoder")` возвращает то же значение.
-- [ ] Прототип: тесты `multiprocess_prototype` и `python scripts/run_framework_tests.py`
-      — не ниже baseline (числа в отчёте); в `multiprocess_prototype/generic_process_app.py`
-      не осталось собственного создания прокси — только использование фреймворкового.
-- [ ] `sentrux check .` (CLI) — все правила зелёные.
+*(1) Что `GenericProcessApp` делает сверх создания прокси — ничего.* Весь класс
+(`multiprocess_prototype/generic_process_app.py:23-56`) — четыре действия: создаёт
+`StateProxy(process_name=self.name, router=self.router_manager, server_target="ProcessManager",
+logger=self.logger_manager)` (:37-42), зовёт `initialize()` (:43), регистрирует
+`router_manager.register_message_handler("state.changed", proxy.on_state_changed)` (:46-47) —
+всё это **до** `super()._init_custom_managers()` (:50); в `shutdown()` зовёт `proxy.shutdown()`
+перед `super().shutdown()` (:52-56). Своих подписок и своей ветки `processes.<p>.health` у него
+нет. Ветку здоровья и уровни телеметрии пишет **фреймворковый** heartbeat, и оба пути гейтятся
+одним и тем же `getattr(self._services, "_state_proxy", None)`:
+`_publish_telemetry_to_tree` (`process_module/heartbeat/process_heartbeat.py:1355-1357`) и
+`_publish_health_to_tree` (там же, :1559-1561). Тот же приватный атрибут читают
+`PluginOrchestrator.load_and_configure_managers` (`generic/plugin_orchestrator.py:60-62`, отсюда
+`ctx.state_proxy`), копия контекста (`plugins/base.py:181-186`) и io-peek
+(`generic/generic_process.py:336`). **Вывод:** carve-out — это ~20 строк создания/регистрации/
+останова, а ветки `processes.<p>.health.*` и `processes.<p>.state.*` у generic-приложения
+«включатся сами» побочным эффектом появления `_state_proxy` — это и есть механизм R7/K5, и это же
+главный риск для прототипа (см. «Ловушки»).
 
-**Out of scope:** любые пути состояния, специфичные для симулятора, — их заводит Task 2.2.
-**Dependencies:** Task 1.0. **Module contract:** impl-only.
+*(2) `set` по пути вне посева (`sim.belt.*`) — проходит, сеять не надо.* Цепочка сервера:
+`StateStoreManager.handle_state_set` (`state_store_module/manager/state_store_manager.py:181-218`)
+→ `run_before_set` middleware → `TreeStore.set` (`core/tree_store.py:242-279`), который создаёт
+промежуточные узлы (`_navigate(keys, create=True)`, :258; «как mkdir -p», :245). Единственный
+middleware, который generic-оркестратор ставит без throttle-правил, — `TopologyGateMiddleware`
+(`app_module/orchestrator.py:356-420`, флаг `FW_STATE_TOPOLOGY_GATE`), а он смотрит только на
+`processes.<name>.*` и путь вне `processes` пропускает (`middleware/topology_gate.py:52`).
+**Условие:** store должен существовать — гейт `_setup_state_store` (`app_module/orchestrator.py:368-372`)
+не поднимает его при пустом `initial_state`; generic-дорога после Task 1.0 подаёт непустой
+`{"processes": {...}}` (ADR-APP-007, `app_module/DECISIONS.md:169-224`). Приложение, вернувшее `{}`
+явным хуком, store не получит — `set` уйдёт в PM без обработчика (fire-and-forget, `_send` не
+узнает), `get` вернёт default после таймаута 5 с (`proxy/state_proxy.py:1449`). Живым прогоном
+«`set sim.belt.encoder` → `state_get` видит» **не проверено** — это первый RED тестера.
+
+*(3) Куда ADR — `process_module/DECISIONS.md` (новый `ADR-PM-049`; номер — последний на HEAD
+`ADR-PM-048` на :3784, на других ветках не сверялся).* Код переезжает в `GenericProcess`
+(`process_module`), и оба generic-приложения указывают именно его: `apps/line_sim/pipeline.yaml:38,50,62`,
+`examples/minimal_app/pipeline.yaml:22,33`; он же дефолт `process_class`
+(`generic/generic_process_config.py:72`). **Это отменяет прежнее решение** «`GenericProcessApp` —
+строго в `app_module`» (`plans/2026-07-06_constructor-master/app-template-idea.md:69,77-81,201-202`).
+Его довод — «`process_module` ссылается на state_store только под `TYPE_CHECKING`, перенос создал бы
+новое runtime-ребро» — **устарел на HEAD**: runtime-импорты уже есть
+(`process_module/managers/telemetry_reload.py:28`, `process_module/configs/observation_policy.py:80`),
+а `state_store_module` не импортирует `process_module` (grep: 0), так что цикла не возникает. Вариант
+`app_module` вдобавок требовал бы нового класса-процесса и правки `process_class` в YAML обоих
+приложений. ADR обязан явно назвать отменяемое решение ссылкой на
+`app-template-idea.md` §4; сам тот файл не правится (вне FILES). **Решение о месте — архитектурное и отменяет
+унаследованное; до старта его подтверждает `cto`** (project-rules §7), см. ESCALATION в отчёте manager.
+
+**Status line:** [PENDING] · **Level:** Senior (Opus) · **Assignee:** teamlead
+**Module contract:** impl-only (публичный API `GenericProcess`/`PluginContext` не меняется;
+`ctx.state_proxy` уже есть в контракте — `plugins/interfaces.py:260`).
+**Handoff (CHAIN):** `tester`(RED, worktree на `a0edf74a`) → `teamlead`(GREEN + hazard-тесты) →
+ведущий (break-injection + живой зонд) → `reviewer`(синхронно). Лимит — 2 итерации ревью, третья →
+`cto`; лимит действует и при вложенном запуске.
+
+**DESIGN:**
+- `GenericProcess` (`generic/generic_process.py:52`) получает `_init_custom_managers()` с ровно тем
+  телом, что сейчас в `GenericProcessApp._init_custom_managers` (:23-50): импорт `StateProxy`
+  **внутри метода** (ленивый, как сейчас), `logger=self.logger_manager` (не `self` — Task Т.1,
+  комментарий :29-36 переносится), `initialize()`, регистрация `state.changed` **до**
+  `super()._init_custom_managers()` — оркестратор читает `_state_proxy` внутри этого super-вызова.
+- Инъекция через конструктор (`ProcessModule.__init__(state_proxy=...)`, `core/process_module.py:109,133`)
+  имеет приоритет: если `self.state_proxy is not None` — `self._state_proxy = self.state_proxy`, свой
+  не создаётся и `state.changed` здесь **не** регистрируется (его зарегистрирует шаг 10
+  `_init_state_proxy`, :720-739). Иначе — создать свой и **не** присваивать `self.state_proxy`, чтобы
+  шаг 10 не сделал второй регистрации (`ExactMatchStrategy.register_handler` на дубликат — WARNING и
+  `False`, `dispatch_module/strategies/exact_match.py:33-38`).
+- Нет `router_manager` → прокси не создаётся (`_state_proxy` остаётся `None`, heartbeat молчит как
+  сейчас). Сознательно без опции «выключить прокси»: YAGNI, хук не нужен ни одному приложению сегодня.
+- `GenericProcess.shutdown()`: `self._state_proxy.shutdown()` (если есть) → `super().shutdown()`.
+- `GenericProcessApp` остаётся **пустым подклассом** (`pass` + докстринг «исторический адрес,
+  116 ссылок `process_class` в YAML прототипа, поведение — у `GenericProcess`»): переименование 116
+  ссылок — вне задачи.
+- `generic/generic_process.py:333-336` (комментарий «прототип хранит…» и двойной `getattr`) и
+  `plugin_orchestrator.py:59` (комментарий «устанавливается подклассами») — поправить текст под новую
+  правду; логику io-peek не трогать.
+
+**FILES (6):**
+1. `multiprocess_framework/modules/process_module/generic/generic_process.py`
+2. `multiprocess_framework/modules/process_module/generic/plugin_orchestrator.py` (только комментарий :59)
+3. `multiprocess_prototype/generic_process_app.py`
+4. `multiprocess_framework/modules/process_module/DECISIONS.md` (+ `python -m scripts.sync`)
+5. `multiprocess_framework/modules/process_module/tests/test_generic_process_state_proxy.py` (новый, hazard-тесты автора)
+6. `multiprocess_framework/modules/process_module/tests/test_logger_slot_wiring_order.py` (докстринг :8 называет `GenericProcessApp`)
+
+Файлы тестера (свои, в его worktree): `multiprocess_framework/modules/process_module/tests/test_generic_process_state_proxy_acceptance.py`
+(один процесс, настоящий `RouterManager`, без спавна), `apps/line_sim/tests/test_state_proxy_live.py` и
+приложение-фикстура `apps/line_sim/tests/fixtures/state_proxy_app/` (два процесса на голом `GenericProcess`,
+плагин-писатель в A и плагин-читатель в B; живёт в `apps/`, потому что тесту нужен `app_module.run_app`,
+а `multiprocess_framework/*` импортировать `app_module` не может — `.sentrux/rules.toml:110-113`). Нужен файл вне списка → стоп и вопрос ведущему.
+`README.md`/`STATUS.md` `process_module` и `app_module/DECISIONS.md` (ссылка «клиентская половина —
+Task 2.0», :222-224) — строкой в отчёт, не правкой.
+
+**REDS (предсказание тестера на `a0edf74a`, ≤ 10):**
+- `…_acceptance.py::test_bare_generic_process_plugin_sees_state_proxy`
+- `…_acceptance.py::test_shutdown_unsubscribes_all`
+- `apps/line_sim/tests/test_state_proxy_live.py::test_set_in_robot_visible_in_camera_get`
+- `apps/line_sim/tests/test_state_proxy_live.py::test_subscribe_glob_receives_event_once`
+- `apps/line_sim/tests/test_state_proxy_live.py::test_heartbeat_pushes_camera_fps_to_tree`
+
+**Steps:**
+1. `tester` в worktree на `a0edf74a` пишет три файла выше по Acceptance → красный прогон, число
+   красных сверено с REDS (расхождение — находка, записать).
+2. `teamlead`: baseline до правки — `python scripts/run_framework_tests.py` и
+   `pytest multiprocess_prototype -q` (числа в отчёт); затем перенос по DESIGN.
+3. `teamlead`: hazard-тесты (`test_generic_process_state_proxy.py`, см. «Ловушки»), ADR-PM-049,
+   `python -m scripts.sync`, `python scripts/validate.py`.
+4. Прогоны радиуса: `process_module/tests`, `app_module/tests`, `apps/line_sim/tests`,
+   `examples/minimal_app/tests`, тесты тестера; `ruff check -q`; `sentrux check .` (CLI).
+5. Ведущий: break-injection (матрица ниже) и живой зонд `--app line_sim` + прототип без аргументов.
+6. `reviewer` синхронно, на фиксированном SHA.
+
+**Acceptance criteria** (измеримы тестером вслепую, литералы):
+- [ ] Плагин в процессе на голом `GenericProcess` (`process_class:
+      multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess`) видит
+      `ctx.state_proxy is not None` и в `configure_managers(ctx)`, и в `configure(ctx)` — у
+      `examples/minimal_app` и `apps/line_sim`.
+- [ ] Двухпроцессная фикстура: `set("sim.belt.encoder", {"value": 42})` в A → `get("sim.belt.encoder")`
+      в B возвращает `{"value": 42}` не позже 2.0 с; `subscribe("sim.belt.*", cb)` в B, оформленная
+      **до** `set`, получает событие с путём `sim.belt.encoder` не позже 2.0 с. Путь нигде не посеян
+      (посев — дефолтный, только `processes`).
+- [ ] `backend_ctl` той же фикстуры: `state_get("sim.belt.encoder")` → `{"value": 42}`.
+- [ ] Один `set` в A → колбэк подписки в B вызван **ровно 1 раз** за 2.0 с (не 0 и не 2).
+- [ ] Останов процесса шлёт `state.unsubscribe_all` с `subscriber == <имя процесса>` (ровно 1 сообщение).
+- [ ] Зонд `backend_ctl.probes.probe_observability_consumer_acceptance --app line_sim`:
+      **R7 = PASS** (снимок `count>0` и ≥1 точка истории `processes.camera.state.fps` за ≤ 12 с);
+      **K5 = PASS** (контроль ≥1 дельта `processes.camera.state.{fps,latency_ms}` за 12 с; OFF — 0;
+      ON — ≥1). Механизм: появление `_state_proxy` снимает ранний выход `process_heartbeat.py:1355-1357`.
+      **Оговорка K5 (не проверено):** контроль гасится, если `fps` и `latency_ms` камеры сима
+      стабильны — `TreeStore.set` не даёт дельты на неизменное значение (так строка сама пишет
+      о NOT_REACHED). NOT_REACHED с `контроль=0` при наличии `processes.camera.state.fps` в дереве —
+      не PASS и не молчаливое принятие: ведущий снимает значения `latency_ms` за 12 с и решает, дефект
+      это оси или зонда, с записью в отчёт.
+      Прочие строки сима — не хуже прогона после 1.5/1.6 (PASS 37 / FAIL 2 / PARTIAL 4 / NOT_REACHED 6 /
+      UNVERIFIED 1 / N/A 2 → ожидаемо PASS 39, PARTIAL 3, NOT_REACHED 5; T1 остаётся FAIL — Task 5.1).
+- [ ] Прототип: тот же зонд без аргументов — 51 строка, PASS 41 / FAIL 1 / PARTIAL 3 / NOT_REACHED 5 /
+      UNVERIFIED 1, вердикты по id совпадают с baseline; `pytest multiprocess_prototype` и
+      `python scripts/run_framework_tests.py` — не ниже baseline шага 2 (числа в отчёт).
+- [ ] В `multiprocess_prototype/generic_process_app.py` нет `StateProxy(`, `register_message_handler`
+      и `shutdown` (grep: 0).
+- [ ] `sentrux check .` (CLI) — все правила зелёные; `python scripts/validate.py` — зелёный.
+
+**Break-injection (ведущий; предсказание записать ДО прогона):**
+| # | Инъекция | Должны умереть |
+|---|---|---|
+| I1 | удалить создание прокси в `GenericProcess` | все REDS тестера, R7/K5 зонда |
+| I2 | создавать прокси **после** `super()._init_custom_managers()` | `test_bare_generic_process_plugin_sees_state_proxy` (ctx без прокси), set/get фикстуры |
+| I3 | не регистрировать `state.changed` | `test_subscribe_glob_receives_event`; `get` из кэша — нет, IPC-фолбэк проходит (ожидаемо зелёный — зафиксировать) |
+| I4 | регистрировать и в `_init_custom_managers`, и присвоить `self.state_proxy` | только hazard-тест автора на реестр dispatcher'а: наблюдаемого эффекта нет (первый выигрывает, `_warn_log` стратегии по умолчанию — no-op, `dispatch_module/strategies/base_strategy.py:33`) — тестер это поймать не может, и это ожидаемо |
+| I5 | убрать `proxy.shutdown()` из `GenericProcess.shutdown` | `test_shutdown_unsubscribes_all` |
+| I6 | `logger=self` вместо `self.logger_manager` | hazard-тест автора на слот логгера (см. Т.1) |
+
+**Edge cases:**
+- `router_manager is None` (частичная сборка/тестовый стенд) → `_state_proxy is None`, исключения нет.
+- Прокси, переданный конструктором, — используется он, второй не создаётся, handler один.
+- Приложение с явным `state_bootstrap` → `{}`: store нет, прокси есть. Поведение фиксируется тестом
+  автора как **текущее** (heartbeat шлёт merge в PM без обработчика), не чинится — строка в отчёт.
+- Процесс без плагинов (`config.plugins` пуст): прокси всё равно создаётся — heartbeat пишет здоровье.
+- `GenericProcessApp` в прототипе: тот же объект поведения, 116 YAML-ссылок продолжают резолвиться.
+
+**Ловушки для автора (hazard-тесты):**
+- **Порядок.** `_state_proxy` обязан существовать до `PluginOrchestrator.load_and_configure_managers`
+  (`plugin_orchestrator.py:60`), а `logger_manager` — до создания прокси (шаг 3 `_init_managers`
+  раньше шага 6, `core/process_module.py:227-236`); пиновка — расширить
+  `test_logger_slot_wiring_order.py` (`_CONSUMERS`, :45), а не новый механизм.
+- **Регистрация на живом приёмнике.** Handler ставится на шаге 6, до старта `message_processor`
+  (шаг 7) — окна, где `state.changed` приходит без обработчика, быть не должно; не переносить в шаг 10.
+- **Двойная регистрация** (см. DESIGN): первый выигрывает **молча** (`_warn_log` по умолчанию no-op) —
+  тест автора читает реестр обработчиков dispatcher'а по ключу `state.changed`, не лог.
+- **Реентерабельность.** `get`/`subscribe(sync=True)` из обработчика на приёмном потоке роутера
+  бросает `RouterReentrantRequestError` (`proxy/state_proxy.py:1506`) — это контракт, не глотать;
+  в докстринге `GenericProcess` назвать, что плагин не зовёт синхронный `get` из message-handler.
+- **Прототип получает прокси по новой дороге.** Процессы прототипа, у которых `process_class` не задан
+  (дефолт — `GenericProcess`, `generic_process_config.py:72`), сейчас без прокси и начнут публиковать
+  здоровье/телеметрию в дерево. Есть ли такие — **не проверено** (grep YAML дал 116 `GenericProcessApp`,
+  5 `GenericProcess` только в `apps/`/`examples/`; сборка топологии кодом не просматривалась). Сверить
+  `system_overview` прототипа до/после; новые ветки `processes.<p>.*` — находка, не норма.
+- **Порядок останова.** `proxy.shutdown()` шлёт `state.unsubscribe_all` через роутер — вызывать до
+  `super().shutdown()`, пока роутер жив.
+
+**Out of scope:** пути состояния симулятора (`sim.belt.*` в коде плагинов — Task 2.2); уровни плагинов
+сима (T1 — Task 5.1); переименование 116 ссылок `GenericProcessApp`; поведение приложения без store
+(явный `{}`); правка `app-template-idea.md`, `app_module/DECISIONS.md`, README/STATUS модулей.
+**Dependencies:** Task 1.0, Task 1.5 (гейт телеметрии активен — без него R7/K5 не измеримы).
 
 ---
 
