@@ -5,7 +5,7 @@
 
 Три места отдают ``self.logger_manager`` в слот ``logger`` создаваемого
 компонента вместо ``self``:
-  * ``GenericProcessApp._init_custom_managers`` → ``StateProxy``;
+  * ``GenericProcess._init_custom_managers`` → ``StateProxy`` (ADR-PM-049);
   * ``GuiProcess._init_application_threads``   → ``GuiStateProxy``;
   * ``PluginOrchestrator._build_registers_manager`` (зовётся из
     ``_init_custom_managers``) → ``RegistersManager``.
