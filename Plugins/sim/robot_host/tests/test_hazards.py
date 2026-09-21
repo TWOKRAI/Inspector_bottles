@@ -207,6 +207,10 @@ def test_publish_once_reports_metrics_without_state_proxy() -> None:
     plugin.start(ctx)
     try:
         assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
+        # Вторая половина находки: воркер паблишера поднимается и БЕЗ мира
+        # (ревью итерация 2 — инъекция «старая ветка start» проходила зелёной).
+        workers = _services.worker_manager.calls["create_worker"]
+        assert workers and workers[0][0] == "sim_robot_world_publisher", f"воркер паблишера не создан: {workers!r}"
 
         published: list[tuple[str, object]] = []
         ctx.publish_metric = lambda name, value: published.append((name, value))  # noqa: E731

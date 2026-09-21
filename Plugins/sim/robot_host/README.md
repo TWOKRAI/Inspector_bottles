@@ -34,9 +34,9 @@ TCP-сервер (симулятор робота линии) в процесс�
 сервера в дерево `StateStore` по пути `sim.belt.encoder`
 (`{value, mm_s, t}` — воркер-луп `sim_robot_world_publisher`, как у
 `TelemetrySinkPlugin._sample_loop`) и отдаёт уровни `encoder`/`belt_mm_s`/
-`writes_seen` через `ctx.publish_metric`. `mm_s` — производная энкодера МЕЖДУ
-тиками публикации (не чтение внутреннего состояния `BeltDrive` — у него нет
-публичного аксессора скорости). Потребитель — `Plugins/sim/scene_source`
+`writes_seen` через `ctx.publish_metric`. `mm_s` — точная скорость модели ленты
+(`RobotSimCore.belt_mm_s` → `BeltDrive.mm_s`). Уровни публикуются и без
+`ctx.state_proxy` — тогда пропускается только запись в мир. Потребитель — `Plugins/sim/scene_source`
 (Task 2.2), см. [`apps/line_sim/README.md`](../../../apps/line_sim/README.md#общий-мир-task-22).
 
 ## Деградация без `pymodbus`
