@@ -22,8 +22,12 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
+from Services.robot_comm import ROBOT_AVAILABLE
 from Services.robot_comm.core.registers import FACTOR_MM
 from Services.robot_comm.server.belt import BeltDrive
 from Services.robot_comm.server.sim_core import RobotSimCore
@@ -119,6 +123,129 @@ def test_reverse_vfd_command_moves_belt_negative_through_core() -> None:
     assert total == pytest.approx(-3461, abs=1)
     assert total < 0
     assert core.encoder - baseline == total
+
+
+def test_tick_dt_equivalence() -> None:
+    """Pre/Post: Task 2.1b — `tick(dt_s)` принимает измеренный dt явным
+    параметром; путь по времени не зависит от того, каким шагом его
+    накопили. 500 тиков по 0.02с и 1000 тиков по 0.01с (та же команда ПЧ
+    25 Гц, что и в `test_nonzero_vfd_command_moves_belt_through_core`) дают
+    один и тот же итог — 3461±1, тот же литерал, что при неявном
+    `TICK_INTERVAL_S`."""
+
+    def _run(n_ticks: int, dt: float) -> int:
+        core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+        core.tick()
+        baseline = core.encoder
+
+        core.write(0x1200, [1])  # cmd_run = 1
+        core.write(0x1201, [0])  # вперёд
+        core.write(0x1202, [2500])  # 25.00 Гц (raw*100)
+        core.write(0x1204, [1])  # flag — маркер последним
+
+        for _ in range(n_ticks):
+            core.tick(dt)
+        return core.encoder - baseline
+
+    total_02 = _run(500, 0.02)
+    total_01 = _run(1000, 0.01)
+    assert total_02 == pytest.approx(3461, abs=1)
+    assert total_01 == pytest.approx(3461, abs=1)
+    assert total_02 == pytest.approx(total_01, abs=1)
+
+
+@pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен")
+def test_live_ticker_speed_is_wall_clock() -> None:
+    """Pre/Post: Task 2.1b — живой `SimRobotServer._ticker` меряет реальный dt
+    (`time.monotonic()`), а не считает такт всегда за `TICK_INTERVAL_S`.
+    Лента 100 мм/с (freq_max=50 Гц) с командой ПЧ на полную частоту (50 Гц)
+    за ≥2.0с ПО ЧАСАМ должна дать 100 мм/с / FACTOR_MM = 692.2 отсчёта/с
+    (±3% — реальная ОС-планировка тикера, не считаем себя точнее). До этой
+    задачи было ≈16% медленнее (реальный период тикера ~11.96мс на macOS,
+    dt всегда 0.01с)."""
+    from Services.robot_comm.server.sim_robot import SimRobotServer
+
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [0])  # вперёд
+    core.write(0x1202, [5000])  # 50.00 Гц — полная скорость (freq_max=50)
+    core.write(0x1204, [1])  # flag — маркер последним
+
+    server = SimRobotServer(core=core)
+    ticker = threading.Thread(target=server._ticker, name="test-ticker", daemon=True)
+    ticker.start()
+    try:
+        start_encoder = core.encoder
+        t0 = time.monotonic()
+        time.sleep(2.0)
+        elapsed = time.monotonic() - t0
+        counts = core.encoder - start_encoder
+    finally:
+        server._stop.set()
+        ticker.join(timeout=2.0)
+        assert not ticker.is_alive(), "тикер не остановился — join завис бы дальше"
+
+    rate = counts / elapsed
+    assert rate == pytest.approx(692.2, rel=0.03)
+
+
+@pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен")
+def test_dt_ceiling() -> None:
+    """Pre/Post: Task 2.1b — потолок `_MAX_TICK_DT_S=0.1` не даёт паузе
+    процесса превратиться в прыжок ленты: `time.monotonic()` внутри тикера
+    один раз «скачет» на +5с (симуляция паузы планировщика), применённый к
+    ядру `dt` должен быть зажат до 0.1с — приращение энкодера в ЭТОМ тике
+    <=69.2±1 отсчёта (0.1с * 692.2 отсч/с при 100 мм/с), а не ~3461
+    (5с * 692.2)."""
+    from Services.robot_comm.server import sim_robot
+
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [0])  # вперёд
+    core.write(0x1202, [5000])  # 50.00 Гц — полная скорость (100 мм/с)
+    core.write(0x1204, [1])  # flag — маркер последним
+
+    server = sim_robot.SimRobotServer(core=core)
+
+    real_monotonic = sim_robot.time.monotonic
+    real_tick = core.tick
+    calls = {"n": 0}
+    captured: dict[str, float] = {}
+    jumped = threading.Event()
+
+    def fake_monotonic() -> float:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            return real_monotonic() + 5.0  # один скачок часов — «пауза процесса»
+        return real_monotonic()
+
+    def spying_tick(dt: float | None = None) -> None:
+        if calls["n"] == 2 and "dt" not in captured:
+            before = core.encoder
+            real_tick(dt)
+            captured["dt"] = dt if dt is not None else -1.0
+            captured["moved"] = core.encoder - before
+            jumped.set()
+        else:
+            real_tick(dt)
+
+    sim_robot.time.monotonic = fake_monotonic
+    core.tick = spying_tick
+    try:
+        ticker = threading.Thread(target=server._ticker, name="test-ticker-ceiling", daemon=True)
+        ticker.start()
+        try:
+            assert jumped.wait(timeout=2.0), "тикер не применил скачок часов за 2с"
+        finally:
+            server._stop.set()
+            ticker.join(timeout=2.0)
+            assert not ticker.is_alive(), "тикер не остановился — join завис бы дальше"
+    finally:
+        sim_robot.time.monotonic = real_monotonic
+        core.tick = real_tick
+
+    assert captured["dt"] == pytest.approx(0.1, abs=1e-6)
+    assert captured["moved"] == pytest.approx(69.2, abs=1)
 
 
 if __name__ == "__main__":
