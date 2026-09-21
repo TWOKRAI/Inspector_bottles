@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
-from Plugins.sim.scene_source.plugin import SceneSourcePlugin
+from Plugins.sim.scene_source.plugin import SPRITE_BGR, SceneSourcePlugin
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -195,3 +195,36 @@ def test_callback_vs_produce_concurrency_no_exception() -> None:
         assert not writer.is_alive(), "writer-поток не завершился за 5с — подозрение на дедлок"
 
     assert not errors, f"конкурентный доступ дал исключение: {errors!r}"
+
+
+# --------------------------------------------------------------------------- #
+# (e) Бесконечная лента — спрайт за правым краем въезжает слева, не паркуется  #
+# --------------------------------------------------------------------------- #
+
+
+def test_sprite_wraps_past_right_edge_instead_of_parking() -> None:
+    """Живой дефект первого захода Task 2.2: спрайт упирался в правый край за ~6 с и
+    стоял там, пока лента ехала. Энкодер 5122 при px_per_mm=1.0 → x_px ≈ 740 (> 640):
+    период 640 + 32 = 672, центр = ((740 + 16) % 672) − 16 = 68 px от левого края.
+    Сторож инъекции «зажим у края вместо модуля» (K2 матрицы ведущего, 2026-09-22 —
+    без этого теста она проходила зелёной)."""
+    import numpy as np
+
+    plugin, _ctx, sp = _make_plugin({"stale_ms": 10_000})
+    sp.emit(
+        [
+            Delta(
+                path="sim.belt.encoder",
+                old_value=object(),
+                new_value={"value": 5122, "mm_s": 100.0, "t": time.monotonic()},
+                source="robot",
+            )
+        ]
+    )
+    frame = plugin.produce()[0]["frame"]
+    mask = np.all(np.abs(frame.astype(int) - np.array(SPRITE_BGR)) <= 40, axis=2)
+    cols = np.flatnonzero(mask.any(axis=0))
+    assert cols.size > 0, "спрайт исчез из кадра вместо переноса на левый край"
+    centre = float(cols.mean())
+    assert centre == pytest.approx(68.0, abs=2.0), f"центр спрайта {centre} — ожидали 68 после переноса"
+    assert cols.max() < 640 - 32, "спрайт припаркован у правого края — лента не бесконечна"
