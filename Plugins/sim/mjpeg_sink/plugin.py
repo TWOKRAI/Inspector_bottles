@@ -29,9 +29,14 @@
 плагина, а HTTP-обработчик (``do_GET``) — с потока, который для каждого
 соединения создаёт ``ThreadingHTTPServer`` (``socketserver.ThreadingMixIn``,
 ``daemon_threads = True`` по умолчанию у ``ThreadingHTTPServer`` — сам класс
-это выставляет). Последний закодированный кадр и его порядковый номер
-(``_frame_seq``) читаются/пишутся под ``threading.Lock`` — тот же приём, что
-``self._lock`` в ``robot_host``. ``ctx.record_metric``/``ctx.log_*`` с потока
+это выставляет). Последний закодированный кадр и его порядковый номер живут
+ОДНИМ полем — кортежем ``_latest = (jpeg, seq)``: писатель собирает новый
+кортеж и перепривязывает одну ссылку, читатель берёт ссылку один раз. Пара
+согласована по построению — рассогласовать нечего, лок не нужен. (Раньше тут
+были два поля под ``threading.Lock``; заявленное локом свойство — атомарность
+пары — воспроизвести не удалось ни с ним, ни без, см. OPEN_QUESTIONS.md; одно
+поле снимает и лок, и вопрос.) Писатель один — штатный поток ``process()``,
+поэтому чтение-приращение ``seq`` гонок не имеет. ``ctx.record_metric``/``ctx.log_*`` с потока
 сервера НЕ зовутся (нет гарантии межпотокового вызова у фасада — тот же
 довод, что в докстринге ``robot_host``); обработчик доступа к ``ctx`` не
 имеет вовсе, только к ``self`` (плагину) через замыкание фабрики
@@ -159,9 +164,8 @@ class MjpegSinkPlugin(ProcessModulePlugin):
 
         self._server: http.server.ThreadingHTTPServer | None = None
         self._server_thread: threading.Thread | None = None
-        self._frame_lock = threading.Lock()
-        self._last_frame_jpeg: bytes | None = None
-        self._frame_seq = 0
+        #: (последний JPEG, его номер) — одно поле, см. докстринг модуля.
+        self._latest: tuple[bytes | None, int] = (None, 0)
         self._last_encode_ts = 0.0
         self._state = "configured"
         self._reason = ""
@@ -202,7 +206,7 @@ class MjpegSinkPlugin(ProcessModulePlugin):
         return items
 
     def _encode_and_store(self, frame: np.ndarray) -> None:
-        """Закодировать кадр в JPEG (с троттлингом по ``fps_cap``) и сохранить под локом.
+        """Закодировать кадр в JPEG (с троттлингом по ``fps_cap``) и опубликовать парой.
 
         ``cv2.imencode`` на ПУСТОМ массиве (например, ``shape=(0, 0, 3)``) не
         возвращает ``ok=False`` — бросает ``cv2.error`` (проверено: ``OpenCV
@@ -223,14 +227,11 @@ class MjpegSinkPlugin(ProcessModulePlugin):
             return
         self._last_encode_ts = now
         jpeg_bytes = buf.tobytes()
-        with self._frame_lock:
-            self._last_frame_jpeg = jpeg_bytes
-            self._frame_seq += 1
+        self._latest = (jpeg_bytes, self._latest[1] + 1)
 
     def _get_frame(self) -> tuple[bytes | None, int]:
-        """Прочитать последний кадр + его версию под локом (зовётся с потока сервера)."""
-        with self._frame_lock:
-            return self._last_frame_jpeg, self._frame_seq
+        """Последний кадр + его номер одной парой (зовётся с потока сервера)."""
+        return self._latest
 
     # ------------------------------------------------------------------ #
     # Старт сервера

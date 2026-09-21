@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 
 from Plugins.sources.camera_service.backends.stream_source import StreamSourceBackend
@@ -146,3 +147,86 @@ def test_backend_lock_discipline_on_type_switch(tmp_path) -> None:
         assert result["status"] == "ok"
         assert plugin._camera_type == "stream"
         assert type(plugin._backend).__name__ == "StreamSourceBackend"
+
+
+# --------------------------------------------------------------------------- #
+# OPENCV_FFMPEG_CAPTURE_OPTIONS — что видит ffmpeg в момент открытия          #
+# --------------------------------------------------------------------------- #
+#
+# Польза переменной замерена (см. докстринг `_ensure_ffmpeg_low_latency`): без неё
+# после обрыва доезжает 2 кадра за 0.11 с, с ней — 1 кадр за 0.06 с. Разница в один
+# кадр зависит от машины, порог на неё был бы флаки — поэтому сторожим вход ffmpeg,
+# а не тайминг: значение в окружении В МОМЕНТ конструктора `cv2.VideoCapture`
+# (именно оттуда OpenCV её читает). Имя хелпера и `setdefault` не проверяем.
+
+_ENV = "OPENCV_FFMPEG_CAPTURE_OPTIONS"
+_LOW_LATENCY = "fflags;nobuffer|flags;low_delay"
+
+
+def _env_seen_by_videocapture(monkeypatch) -> list:
+    import os
+
+    seen: list = []
+
+    def _fake_capture(*args, **_kwargs):
+        # Переменная действует только на FFmpeg-бэкенд: без CAP_FFMPEG OpenCV вправе
+        # выбрать другой, и значение в окружении ничего бы не значило.
+        assert args[1:2] == (cv2.CAP_FFMPEG,), f"поток открыт не через FFmpeg: {args!r}"
+        seen.append(os.environ.get(_ENV))
+        return MagicMock()
+
+    monkeypatch.setattr(
+        "Plugins.sources.camera_service.backends.stream_source.cv2.VideoCapture", _fake_capture
+    )
+    return seen
+
+
+def test_videocapture_opens_with_low_latency_ffmpeg_options(monkeypatch) -> None:
+    """Стрим открывается с низколатентными опциями — и при первом, и при повторном start()."""
+    # setenv перед delenv: иначе monkeypatch не запомнит «переменной не было», и значение,
+    # выставленное кодом, утечёт во все следующие тесты сессии.
+    monkeypatch.setenv(_ENV, "x")
+    monkeypatch.delenv(_ENV)
+    seen = _env_seen_by_videocapture(monkeypatch)
+
+    backend = StreamSourceBackend("http://127.0.0.1:1/")
+    backend.start()
+    backend.start()
+
+    assert seen == [_LOW_LATENCY, _LOW_LATENCY]
+
+
+def test_foreign_ffmpeg_options_are_not_overwritten(monkeypatch) -> None:
+    """Значение, выставленное кем-то раньше (оператор, другой плагин), не перебивается."""
+    monkeypatch.setenv(_ENV, "rtsp_transport;tcp")
+    seen = _env_seen_by_videocapture(monkeypatch)
+
+    StreamSourceBackend("http://127.0.0.1:1/").start()
+
+    assert seen == ["rtsp_transport;tcp"]
+
+
+def test_import_does_not_touch_process_environment() -> None:
+    """Радиус — только стрим: импорт плагина (его делает КАЖДЫЙ процесс camera_service,
+    включая hikvision/webcam/file) окружение не меняет. Чистый интерпретатор, иначе
+    модуль уже импортирован этим же процессом."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    env = {k: v for k, v in os.environ.items() if k != _ENV}
+    code = (
+        "import os, Plugins.sources.camera_service.plugin; "
+        f"print(os.environ.get({_ENV!r}))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        cwd=Path(__file__).resolve().parents[4],  # корень репо: пакет Plugins ищется от cwd
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip().splitlines()[-1] == "None"

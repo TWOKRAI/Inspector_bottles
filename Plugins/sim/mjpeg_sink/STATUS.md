@@ -9,7 +9,7 @@
 | `plugin.py` — `MjpegSinkPlugin` | есть: `configure`/`start`/`shutdown`, синхронный `OSError` на занятый порт, multipart-раздача, троттлинг `fps_cap` |
 | Занятый порт | есть: `ThreadingHTTPServer.__init__` биндит синхронно, `OSError` → `report_error`, `state="error"`, процесс живёт |
 | Повторный `start()` | есть: no-op при живом сервере (`self._server is not None`) |
-| Гонка `process()` ↔ чтение сервером | есть: `_last_frame_jpeg`/`_frame_seq` под `threading.Lock` |
+| Гонка `process()` ↔ чтение сервером | есть: пара `(jpeg, seq)` одним полем `_latest` — согласована по построению, лок снят (2026-09-21) |
 | `cv2.imencode` не смог закодировать | есть: пустой кадр (`shape=(0,0,3)`) БРОСАЕТ `cv2.error`, не возвращает `ok=False` — поймано отдельным `try/except cv2.error` |
 | Кадра ещё нет — сервер отвечает без границы | есть: заголовки шлются, соединение закрывается штатно без multipart-части |
 | Тесты | `tests/test_hazards.py` — 5 авторских (a-e); приёмочные независимого тестера — `apps/line_sim/tests/test_f1_task12_acceptance.py` + `multiprocess_prototype/recipes/tests/test_letter_robot_sim_diff.py` (вне этого пакета) |
