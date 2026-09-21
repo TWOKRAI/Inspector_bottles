@@ -1,0 +1,27 @@
+# apps/line_sim/tests/fixtures/state_proxy_app — фикстура тестера Task 2.0
+# (independent RED, worktree на a0edf74a). Два процесса на ГОЛОМ GenericProcess
+# (не прототипный GenericProcessApp): writer пишет sim.belt.encoder по команде
+# извне, reader подписан на sim.belt.* и читает его. Headless dict-IPC (как
+# examples/minimal_app) — wires: [] сознательно пуст, данных-кадров нет.
+
+name: state_proxy_fixture
+description: "Фикстура Task 2.0: writer/reader на голом GenericProcess, sim.belt.* вне посева"
+
+processes:
+  - process_name: writer
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: apps.line_sim.tests.fixtures.state_proxy_app.plugins.belt_writer.plugin.BeltWriterPlugin
+        plugin_name: belt_writer
+        category: utility
+
+  - process_name: reader
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: apps.line_sim.tests.fixtures.state_proxy_app.plugins.belt_reader.plugin.BeltReaderPlugin
+        plugin_name: belt_reader
+        category: utility
+
+wires: []
