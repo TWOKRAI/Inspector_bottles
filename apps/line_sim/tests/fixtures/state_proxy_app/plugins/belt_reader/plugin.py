@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from multiprocess_framework.modules.process_module.plugins import (
@@ -38,6 +39,8 @@ class BeltReaderPlugin(ProcessModulePlugin):
     def configure(self, ctx: PluginContext) -> None:
         self._ctx = ctx
         self._received: list[dict] = []
+        self._reader: threading.Thread | None = None
+        self._last_get: dict = {"status": "ok", "value": None}
         if ctx.state_proxy is not None:
             ctx.state_proxy.subscribe("sim.belt.*", self._on_delta)
 
@@ -53,8 +56,26 @@ class BeltReaderPlugin(ProcessModulePlugin):
         """Прямое чтение ``sim.belt.encoder`` через ``ctx.state_proxy.get``."""
         if self._ctx.state_proxy is None:
             return {"status": "error", "reason": "ctx.state_proxy is None"}
-        value = self._ctx.state_proxy.get("sim.belt.encoder", None)
-        return {"status": "ok", "value": value}
+        # Команда исполняется на приёмном потоке роутера. Синхронный get() там —
+        # нарушение контракта реентерабельности (RouterReentrantRequestError,
+        # state_proxy.py:1506): кэш хранит dict-значение листьями, поэтому
+        # get("sim.belt.encoder") всегда уходит в IPC-фолбэк. Ждать фоновый поток
+        # здесь тоже нельзя: ответ на его запрос разбирает этот же приёмный поток
+        # (join = взаимная блокировка до таймаута). Поэтому команда не блокируется:
+        # запускает чтение в фоне (если оно не идёт) и отдаёт последнее прочитанное;
+        # тест опрашивает get_belt в цикле до дедлайна.
+        if self._reader is None or not self._reader.is_alive():
+            proxy = self._ctx.state_proxy
+
+            def _read() -> None:
+                try:
+                    self._last_get = {"status": "ok", "value": proxy.get("sim.belt.encoder", None)}
+                except Exception as exc:  # noqa: BLE001 — причина уходит в ответ команды
+                    self._last_get = {"status": "error", "reason": repr(exc)}
+
+            self._reader = threading.Thread(target=_read, name="belt_reader_get", daemon=True)
+            self._reader.start()
+        return dict(self._last_get)
 
     def shutdown(self, ctx: PluginContext) -> None:
         pass
