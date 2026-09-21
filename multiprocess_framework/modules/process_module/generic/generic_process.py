@@ -55,7 +55,60 @@ class GenericProcess(ProcessModule):
     GenericProcess = ProcessModule + data pipeline (app-specific).
     Plugin lifecycle (load → configure → start → shutdown) полностью
     обрабатывается ProcessModule через PluginOrchestrator.
+
+    StateProxy (ADR-PM-049): процесс сам заводит клиент дерева состояния в
+    ``_init_custom_managers`` — плагин получает ``ctx.state_proxy``, heartbeat пишет
+    ``processes.<p>.health``/``state`` в дерево. Раньше это делал только прототипный
+    ``GenericProcessApp``. Плагин НЕ зовёт синхронный ``get``/``subscribe(sync=True)``
+    из message-handler: на приёмном потоке роутера это ``RouterReentrantRequestError``
+    (контракт StateProxy, не глотать).
     """
+
+    def _init_custom_managers(self) -> None:
+        """Завести StateProxy ДО super(): оркестратор кладёт ``_state_proxy`` в PluginContext.
+
+        Приоритет у прокси из конструктора (``state_proxy=...``): тогда свой не создаётся
+        и ``state.changed`` здесь не регистрируется — это сделает шаг 10
+        ``_init_state_proxy``. Свой прокси в ``self.state_proxy`` НЕ присваивается, иначе
+        шаг 10 зарегистрировал бы обработчик второй раз (дубликат молча проигрывает).
+        Нет ``router_manager`` → прокси нет, ``_state_proxy`` остаётся None.
+        """
+        # getattr: подклассы/стенды, собранные через __new__, могут не иметь атрибута.
+        injected = getattr(self, "state_proxy", None)
+        if injected is not None:
+            self._state_proxy = injected
+        elif getattr(self, "router_manager", None) is not None:
+            from ...state_store_module.proxy.state_proxy import StateProxy
+
+            # logger=self.logger_manager, а НЕ logger=self (Task Т.1). StateProxy —
+            # носитель ObservableMixin: он кладёт этот объект в слот 'logger' и зовёт
+            # каноничный протокол warning()/error()/…, а сам процесс экспонирует
+            # только log_warning()/log_error(). При logger=self КАЖДАЯ запись
+            # StateProxy исчезала (измерено: 0 строк на 60 живых лог-файлах).
+            # Порядок безопасен: _init_custom_managers — шаг 6 initialize(), а
+            # logger_manager присваивается на шаге 3 (_init_managers) — пины:
+            # test_generic_process_state_proxy.py::test_logger_slot_is_logger_manager_not_process,
+            # test_logger_slot_wiring_order.py.
+            self._state_proxy = StateProxy(
+                process_name=self.name,
+                router=self.router_manager,
+                server_target="ProcessManager",
+                logger=self.logger_manager,
+            )
+            self._state_proxy.initialize()
+            # Шаг 6, до старта message_processor (шаг 7): окна без обработчика нет.
+            self.router_manager.register_message_handler("state.changed", self._state_proxy.on_state_changed)
+        else:
+            self._state_proxy = None
+
+        super()._init_custom_managers()
+
+    def shutdown(self) -> bool:
+        """Останов: ``proxy.shutdown()`` (шлёт state.unsubscribe_all) ПОКА роутер жив, затем база."""
+        state_proxy = getattr(self, "_state_proxy", None)
+        if state_proxy is not None:
+            state_proxy.shutdown()
+        return super().shutdown()
 
     def _init_application_threads(self) -> None:
         """super() делает plugin boot, здесь только data pipeline."""
@@ -330,9 +383,9 @@ class GenericProcess(ProcessModule):
         cfg = app_cfg.get("io_peek", {}) or {}
         if not cfg.get("enabled", True):
             return
-        # Прототип (GenericProcessApp) хранит живой StateProxy в self._state_proxy
-        # (создан в _init_custom_managers ДО _init_application_threads); базовый
-        # self.state_proxy — конструкторный арг (часто None). Берём приватный, затем публичный.
+        # Живой StateProxy — в self._state_proxy (GenericProcess._init_custom_managers,
+        # шаг 6, ДО _init_application_threads; конструкторный прокси туда же). Публичный
+        # self.state_proxy — страховка для подклассов, обходящих _init_custom_managers.
         state_proxy = getattr(self, "_state_proxy", None) or getattr(self, "state_proxy", None)
         if state_proxy is None:
             self._log_info(f"GenericProcess[{self.name}]: io-debug отключён (нет state_proxy)")

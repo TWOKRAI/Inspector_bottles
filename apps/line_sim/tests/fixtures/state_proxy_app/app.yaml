@@ -1,0 +1,16 @@
+# apps/line_sim/tests/fixtures/state_proxy_app — манифест фикстуры тестера
+# Task 2.0. Форма — examples/minimal_app/app.yaml один в один. Пути — от этого
+# каталога.
+
+name: State Proxy Fixture
+version: 1
+
+extras: {}
+
+pipeline: pipeline.yaml
+
+discovery:
+  plugin_paths:
+    - plugins
+  service_paths: []
+  auto_discover: true

@@ -126,8 +126,12 @@ def _modbus_mentioned(*texts: str) -> bool:
 _ERROR_RECORD_RE = re.compile(r"^#\d+\s+\d{4}-\d{2}-\d{2}", re.MULTILINE)
 
 
-def _modbus_record_count(errors_text: str, overview: dict) -> int:
-    """Сколько ОТДЕЛЬНЫХ записей об отказе modbus видит потребитель (обе плоскости).
+def _modbus_record_count(errors_text: str, overview: dict) -> tuple[int, int]:
+    """Сколько ОТДЕЛЬНЫХ записей об отказе modbus видит потребитель — (errors.log, anomalies).
+
+    Плоскости считаются раздельно: с Task 2.0 (ADR-PM-049) у процесса generic-приложения
+    есть плоскость здоровья, и тот же отказ законно виден второй раз как
+    ``health_errors`` в ``system_overview()['anomalies']`` — это другой вид, а не дубль.
 
     Считаются записи, а не вхождения слова: у одной записи есть traceback, в котором
     "modbus" встречается трижды, и счёт по вхождениям согласился бы с чем угодно.
@@ -137,8 +141,14 @@ def _modbus_record_count(errors_text: str, overview: dict) -> int:
     bounds = list(zip(starts, starts[1:] + [len(errors_text)]))
     from_log = sum(1 for a, b in bounds if pattern.search(errors_text[a:b]))
     anomalies = overview.get("anomalies") if isinstance(overview, dict) else None
-    from_anomalies = sum(1 for a in anomalies if pattern.search(str(a))) if isinstance(anomalies, list) else 0
-    return from_log + from_anomalies
+    from_anomalies = 0
+    for a in anomalies if isinstance(anomalies, list) else []:
+        if pattern.search(str(a)):
+            # health_errors — одна подсказка на процесс, число записей внутри (errors=N):
+            # дубль в плоскости здоровья виден только по N (ревью Task 2.0, инъекция A).
+            m = re.search(r"errors=(\d+)", str(a))
+            from_anomalies += int(m.group(1)) if m else 1
+    return from_log, from_anomalies
 
 
 def _errors_log_text(log_dir: Path, process: str) -> str:
@@ -453,10 +463,15 @@ def test_without_pymodbus_plugin_errors_process_lives(tmp_path: Path) -> None:
         # обратным («оркестратор допишет вторую запись про modbus»); замер 2026-09-21 его
         # не подтвердил, вопрос записан в OPEN_QUESTIONS. Свойство «start не бросает»
         # по-прежнему пришпилено только hazard-тестом.
-        record_count = _modbus_record_count(errors_text_bad, overview_bad)
-        assert record_count == 1, (
-            f"без pymodbus ожидали РОВНО одну запись об отказе modbus в плоскости ошибок, "
-            f"насчитали {record_count}: errors.log={errors_text_bad!r}, "
+        # Task 2.0 (2026-09-21): плоскость здоровья у robot включилась — отказ теперь виден и
+        # как health_errors в anomalies (замер teamlead: 1 + 1). Дубль ловится ПО ПЛОСКОСТИ:
+        # в errors.log ровно 1, в anomalies не больше 1 (heartbeat асинхронен — «ровно 1»
+        # там дал бы флак по времени выхода из цикла выше).
+        from_log, from_anomalies = _modbus_record_count(errors_text_bad, overview_bad)
+        assert from_log == 1 and from_anomalies <= 1, (
+            f"без pymodbus ожидали РОВНО одну запись в errors.log и не больше одной в "
+            f"anomalies, насчитали log={from_log}, anomalies={from_anomalies}: "
+            f"errors.log={errors_text_bad!r}, "
             f"anomalies={_anomalies_text(overview_bad)!r}"
         )
 
