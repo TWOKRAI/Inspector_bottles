@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import socket
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ import numpy as np
 import pytest
 
 from backend_ctl.harness import BackendHarness
+from Plugins.sim.scene_source.plugin import SPRITE_BGR
 from Services.robot_comm.core.client import RobotClient
 from Services.robot_comm.core.config import RobotConfig
 from Services.vfd_comm.core.client import VfdClient
@@ -148,21 +150,77 @@ def _make_vfd_client() -> tuple[RobotClient, VfdClient]:
     return robot, VfdClient(transport=robot)
 
 
-def _sprite_centroid_x(frame: np.ndarray, reference: np.ndarray) -> float:
-    diff = np.any(frame != reference, axis=2)
-    weights = diff.sum(axis=0).astype(float)
-    assert weights.sum() > 0, "кадр не отличается от эталона нигде — спрайт не найден"
+#: Допуск канала для цветовой маски спрайта (JPEG — с потерями, точное
+#: совпадение байт-в-байт с SPRITE_BGR не гарантировано).
+_SPRITE_COLOR_TOL = 40
+
+
+def _sprite_centroid_x_by_color(frame: np.ndarray, tol: int = _SPRITE_COLOR_TOL) -> float:
+    """Центр масс столбцов кадра, где цвет близок к ``SPRITE_BGR`` (±tol/канал).
+
+    Решение ведущего 2026-09-21 (взамен общего диффа против эталона): диф
+    против кадра-эталона путал «спрайт сдвинулся» с «фон рядом чуть другой»
+    (JPEG-артефакты, шум кодека) и не различал спрайт от произвольных прочих
+    изменений кадра. Цветовая маска бьёт точно по контрактному цвету спрайта.
+    """
+    b, g, r = SPRITE_BGR
+    frame_i = frame.astype(np.int16)
+    mask = (
+        (np.abs(frame_i[:, :, 0] - b) <= tol)
+        & (np.abs(frame_i[:, :, 1] - g) <= tol)
+        & (np.abs(frame_i[:, :, 2] - r) <= tol)
+    )
+    weights = mask.sum(axis=0).astype(float)
+    assert weights.sum() > 0, f"спрайт цвета SPRITE_BGR={SPRITE_BGR} не найден в кадре (±{tol}/канал)"
     return float(np.average(np.arange(frame.shape[1]), weights=weights))
 
 
-def _capture_frame(cap: cv2.VideoCapture, deadline_s: float = 5.0) -> np.ndarray:
-    deadline = time.monotonic() + deadline_s
-    while time.monotonic() < deadline:
-        ret, frame = cap.read()
-        if ret and frame is not None:
-            return frame
-        time.sleep(0.05)
-    pytest.fail(f"не удалось прочитать кадр с {_MJPEG_URL} за {deadline_s}с")
+def _circular_delta(a: float, b: float, period: float) -> float:
+    """Кратчайшее знаковое расстояние ``b - a`` по кругу длиной ``period``.
+
+    Лента бесконечна (Task 2.2, решение ведущего): спрайт выезжает за правый
+    край и въезжает слева — без этой обёртки переход через край читался бы
+    как огромный скачок назад, а не как продолжение движения вперёд.
+    """
+    d = (b - a + period / 2.0) % period - period / 2.0
+    return d
+
+
+def _capture_frame_http(url: str, timeout_s: float = 5.0) -> np.ndarray:
+    """Прочитать РОВНО один JPEG-кадр сырым HTTP из multipart-потока, декодировать.
+
+    Решение ведущего 2026-09-21: ``cv2.VideoCapture`` на живом MJPEG держит
+    собственный внутренний буфер приёма — два ``cap.read()`` подряд не
+    гарантируют СВЕЖИЕ, РАЗНЕСЁННЫЕ ВО ВРЕМЕНИ кадры (замер разработчика:
+    сырой HTTP-опрос того же потока показывал РАЗНЫЕ байты на каждом снятии,
+    пока ``cv2.VideoCapture`` в тесте отдавал один и тот же кадр). Здесь —
+    свежее соединение на каждый вызов, чтения нет буфера, который можно
+    спутать со старым кадром.
+    """
+    deadline = time.monotonic() + timeout_s
+    conn = urllib.request.urlopen(url, timeout=timeout_s)
+    try:
+        buf = b""
+        while time.monotonic() < deadline:
+            chunk = conn.read(8192)
+            if not chunk:
+                break
+            buf += chunk
+            start = buf.find(b"\xff\xd8")  # JPEG SOI
+            if start == -1:
+                continue
+            end = buf.find(b"\xff\xd9", start)  # JPEG EOI
+            if end == -1:
+                continue
+            jpeg_bytes = buf[start : end + 2]
+            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is not None:
+                return frame
+            buf = buf[end + 2 :]
+    finally:
+        conn.close()
+    pytest.fail(f"не удалось прочитать один JPEG-кадр с {url} за {timeout_s}с")
 
 
 # --------------------------------------------------------------------------- #
@@ -216,33 +274,40 @@ def test_vfd_stop_freezes_and_start_resumes(line_sim_live_backend) -> None:
 
 
 def test_mjpeg_sprite_follows_belt(line_sim_live_backend) -> None:
-    """Пин: центр масс спрайта в кадрах ``http://127.0.0.1:8091/`` смещается, пока лента
-    едет, и неподвижен (±1px), пока лента стоит (после команды ПЧ «стоп»)."""
+    """Пин: центр масс спрайта (по цвету ``SPRITE_BGR``) в кадрах
+    ``http://127.0.0.1:8091/`` смещается, пока лента едет, и неподвижен (±1px),
+    пока лента стоит (после команды ПЧ «стоп»).
+
+    Измерение — решение ведущего 2026-09-21 (замена ``cv2.VideoCapture``/общего
+    диффа против эталона): каждый кадр читается свежим HTTP-соединением
+    (:func:`_capture_frame_http`), позиция — цветовая маска (:func:`_sprite_centroid_x_by_color`),
+    сравнение позиций — по кругу (:func:`_circular_delta`), т.к. лента
+    бесконечна и спрайт может пересечь правый край кадра между двумя снятиями.
+    """
     _harness, drv = line_sim_live_backend
-    cap = cv2.VideoCapture(_MJPEG_URL)
     robot, vfd = _make_vfd_client()
     try:
-        reference = _capture_frame(cap)
-        time.sleep(1.0)
-        moving_a = _capture_frame(cap)
-        time.sleep(1.0)
-        moving_b = _capture_frame(cap)
-        x_a = _sprite_centroid_x(moving_a, reference)
-        x_b = _sprite_centroid_x(moving_b, reference)
-        assert abs(x_b - x_a) > 1.0, f"спрайт не сдвинулся, пока лента едет: x={x_a} -> {x_b}"
+        moving_a = _capture_frame_http(_MJPEG_URL)
+        width = moving_a.shape[1]
+        time.sleep(0.3)
+        moving_b = _capture_frame_http(_MJPEG_URL)
+        x_a = _sprite_centroid_x_by_color(moving_a)
+        x_b = _sprite_centroid_x_by_color(moving_b)
+        delta = _circular_delta(x_a, x_b, width)
+        assert abs(delta) > 1.0, f"спрайт не сдвинулся, пока лента едет: x={x_a} -> {x_b} (Δ={delta})"
 
         assert vfd.stop() is True
         time.sleep(0.5)
-        stopped_ref = _capture_frame(cap)
+        stopped_a = _capture_frame_http(_MJPEG_URL)
         time.sleep(1.0)
-        stopped_next = _capture_frame(cap)
-        x_stop_a = _sprite_centroid_x(stopped_ref, reference)
-        x_stop_b = _sprite_centroid_x(stopped_next, reference)
-        assert x_stop_a == pytest.approx(x_stop_b, abs=1.0), (
-            f"спрайт продолжил ехать после stop(): x={x_stop_a} -> {x_stop_b}"
+        stopped_b = _capture_frame_http(_MJPEG_URL)
+        x_stop_a = _sprite_centroid_x_by_color(stopped_a)
+        x_stop_b = _sprite_centroid_x_by_color(stopped_b)
+        stop_delta = _circular_delta(x_stop_a, x_stop_b, width)
+        assert abs(stop_delta) <= 1.0, (
+            f"спрайт продолжил ехать после stop(): x={x_stop_a} -> {x_stop_b} (Δ={stop_delta})"
         )
     finally:
-        cap.release()
         robot.disconnect()
 
 
@@ -274,10 +339,15 @@ def test_camera_alone_serves_frames() -> None:
 
 def test_introspect_telemetry_levels(line_sim_live_backend) -> None:
     """Пин: ``levels.state.plugins.sim_robot_host`` содержит ``belt_mm_s`` и ``encoder``;
-    после ``stop()`` ПЧ ``belt_mm_s == 0``. Без опроса ``sim_robot.status``."""
+    после ``stop()`` ПЧ ``belt_mm_s == 0``. Без опроса ``sim_robot.status``.
+
+    Разворот конверта — решение ведущего 2026-09-21: ``drv.introspect_telemetry``
+    отдаёт СЫРОЙ ответ команды (конверт ``{..., "result": {..., "levels": ...}}``),
+    ``levels`` живёт в ``result``, а не на верхнем уровне ответа — та же дорога,
+    что уже здесь есть, :func:`_result_field`."""
     _harness, drv = line_sim_live_backend
     res = drv.introspect_telemetry("robot")
-    plugins = (res.get("levels") or {}).get("state", {}).get("plugins", {})
+    plugins = (_result_field(res, "levels") or {}).get("state", {}).get("plugins", {})
     writer = plugins.get("sim_robot_host")
     assert isinstance(writer, dict), f"levels.state.plugins.sim_robot_host отсутствует/не dict: {res!r}"
     assert "belt_mm_s" in writer, f"нет belt_mm_s в levels писателя sim_robot_host: {writer!r}"
@@ -288,7 +358,7 @@ def test_introspect_telemetry_levels(line_sim_live_backend) -> None:
         assert vfd.stop() is True
         time.sleep(1.5)  # дать телеметрийному тику (interval_sec=1.0, system.yaml) обновиться
         res2 = drv.introspect_telemetry("robot")
-        writer2 = (res2.get("levels") or {}).get("state", {}).get("plugins", {}).get("sim_robot_host", {})
+        writer2 = (_result_field(res2, "levels") or {}).get("state", {}).get("plugins", {}).get("sim_robot_host", {})
         assert writer2.get("belt_mm_s") == 0, f"belt_mm_s != 0 после stop(): {writer2!r}"
     finally:
         robot.disconnect()
