@@ -52,36 +52,43 @@ class BeltDrive:
         self._freq_max_hz = freq_max_hz
         self._mm_s = 0.0
         self._remainder = 0.0
-        # "Сырой" режим from_enc_rate: пока не None — advance() возвращает
-        # это целое число побитово, БЕЗ remainder-арифметики (float-округление
-        # не гарантирует бит-точность на N тиков, см. from_enc_rate). Первая
-        # же command() необратимо выключает режим. `mm_s` в этом режиме — НЕ 0
-        # (see from_enc_rate) — раздельные вещи: что возвращает advance() и
-        # что показывает свойство mm_s.
+        # "Сырой" режим from_enc_rate: пока не None — advance() считает по
+        # enc_rate/tick_s (не по mm_s/FACTOR_MM), но ТЕМ ЖЕ remainder-
+        # аккумулятором, что и обычный режим — dt_s == tick_s даёт ровно
+        # enc_rate бит-в-бит (см. from_enc_rate, ревью Task 2.1b: раньше было
+        # безусловное `return self._raw_rate`, глухое к dt_s — быстрый
+        # реальный тик "недодавал" отсчётов). Первая же command() необратимо
+        # выключает режим. `mm_s` в этом режиме — НЕ 0 (see from_enc_rate) —
+        # раздельные вещи: что возвращает advance() и что показывает mm_s.
         self._raw_rate: int | None = None
+        self._raw_tick_s: float = 1.0
 
     @classmethod
     def from_enc_rate(cls, enc_rate: int, tick_s: float) -> "BeltDrive":
         """Лента с постоянной скоростью, эквивалентной старому параметру ``enc_rate``.
 
         Pre: ``tick_s > 0``.
-        Post: до первой :meth:`command` :meth:`advance` возвращает ``enc_rate``
-        побитово на любом числе тиков (старое поведение
-        ``RobotSimCore._enc_rate`` — целочисленное приращение, без float —
-        воспроизводится точно, а не приближённо через общую формулу
-        mm_s/FACTOR_MM: та же формула, гоняемая напрямую при ``enc_rate=7``,
-        ``tick_s=0.01``, даёт `6999` вместо `7000` за 1000 тиков — дрейф
-        округления на границах, проверено численно). "Сырой" режим обходит
-        именно ЭТУ арифметику для :meth:`advance`, а не значение :attr:`mm_s`:
-        оно выставляется сразу (``mm_s_at_max_freq`` — скорость, эквивалентная
-        ``enc_rate`` на этом ``tick_s``), чтобы наблюдатели (например, паблишер
-        Task 2.2) видели реальную скорость ленты и до первой команды ПЧ. После
-        первой команды ПЧ лента переходит в обычный режим (и `advance`, и
-        пересчёт `mm_s` — через `command()`).
+        Post: до первой :meth:`command` :meth:`advance(dt_s)` считает
+        ``enc_rate * dt_s / tick_s`` через remainder-аккумулятор (Task 2.1b,
+        ревью: раньше `advance` игнорировал `dt_s` и всегда возвращал
+        `enc_rate` побитово — с измеренным dt тикера это врало на дельте
+        между `dt_s` и `tick_s`, см. `_ticker`). При ``dt_s == tick_s`` — тот
+        же бит-точный `enc_rate` на любом числе тиков, что и раньше (старое
+        поведение ``RobotSimCore._enc_rate`` — целочисленное приращение, без
+        float-дрейфа: та же формула через общую mm_s/FACTOR_MM при
+        ``enc_rate=7``, ``tick_s=0.01`` даёт `6999` вместо `7000` за 1000
+        тиков — округление на границах, проверено численно; здесь дрейфа нет,
+        т.к. `dt_s/tick_s == 1.0` точно в IEEE754 при равных операндах).
+        :attr:`mm_s` выставляется сразу (``mm_s_at_max_freq`` — скорость,
+        эквивалентная ``enc_rate`` на этом ``tick_s``), чтобы наблюдатели
+        (например, паблишер Task 2.2) видели реальную скорость ленты и до
+        первой команды ПЧ. После первой команды ПЧ лента переходит в обычный
+        режим (и `advance`, и пересчёт `mm_s` — через `command()`).
         """
         mm_s_at_max_freq = enc_rate * FACTOR_MM / tick_s if tick_s > 0 else 0.0
         belt = cls(mm_s_at_max_freq=mm_s_at_max_freq, freq_max_hz=50.0)
         belt._raw_rate = enc_rate
+        belt._raw_tick_s = tick_s
         belt._mm_s = mm_s_at_max_freq  # см. докстринг выше — только advance() в "сыром" режиме
         return belt
 
@@ -110,12 +117,16 @@ class BeltDrive:
     def advance(self, dt_s: float) -> int:
         """Приращение энкодера (отсчётов) за ``dt_s``.
 
-        Post: дробный остаток ``мм_s * dt_s / FACTOR_MM`` копится между
-        вызовами в аккумуляторе и не теряется — см. докстринг класса.
+        Post: дробный остаток копится между вызовами в одном и том же
+        аккумуляторе и не теряется — см. докстринг класса. "Сырой" режим
+        (:meth:`from_enc_rate`) копит ``enc_rate * dt_s / tick_s``, обычный —
+        ``мм_s * dt_s / FACTOR_MM`` (Task 2.1b: раньше "сырой" режим был
+        глух к ``dt_s`` — см. :meth:`from_enc_rate`).
         """
         if self._raw_rate is not None:
-            return self._raw_rate
-        self._remainder += self._mm_s * dt_s / FACTOR_MM
+            self._remainder += self._raw_rate * dt_s / self._raw_tick_s
+        else:
+            self._remainder += self._mm_s * dt_s / FACTOR_MM
         whole = int(self._remainder)
         self._remainder -= whole
         return whole
