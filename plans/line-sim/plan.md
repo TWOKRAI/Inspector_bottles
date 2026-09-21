@@ -114,8 +114,10 @@ boundary и grep-контракт заведены в Task 1.1. Общая ба�
 `processes.<p>.health` — Task 2.0. Проводка секции `observability` и publisher-гейта
 телеметрии у прототипа живёт в `multiprocess_prototype/backend/orchestrator_hooks.py:84-95`,
 observability-watcher — в `multiprocess_prototype/orchestrator.py`; делает ли то же
-`app_module` для generic-приложения — **не проверено**, это выясняет прогон Task 1.4. Сам
-зонд приёмки прибит к прототипу (`PORT = 8765`, стенд поднимает сам).
+`app_module` для generic-приложения — **проверено прогоном Task 1.4 (2026-09-21): нет** —
+`gate_active=False`, `resolved keys=[]` (строки S6/R7/K5), carve-out — Task 1.5. Зонд
+приёмки параметризован (`--app prototype|line_sim`), отчёт —
+[`2026-09-21_line-sim-observability-acceptance.md`](../../docs/reviews/2026-09-21_line-sim-observability-acceptance.md).
 
 **Контракт наблюдаемости для каждой модели устройства:**
 
@@ -135,7 +137,9 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 `MULTIPROCESS_LOG_DIR`**: общий каталог означал бы общий `errors.log` и общий стор истории на
 два приложения. Сводный взгляд на оба — внешним наблюдателем через два `backend_ctl`
 (Task 5.5), а не общим файлом. Если в обоих включён `otel_export`, имена сервисов должны
-различаться; откуда берётся имя — не проверено, шаг разведки Task 1.4.
+различаться. **Проверено Task 1.4:** `service.name` = имя процесса
+(`Services/otel_export/resources.py:60`) — `ProcessManager` двух приложений склеится; различитель —
+`service_namespace` (`Services/otel_export/config.py:132`, по умолчанию пуст): задать `line_sim` у сима.
 
 ## Vertical slice (тонкий срез через все слои)
 
@@ -480,7 +484,17 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   contract:** impl-only
 - Task 1.4 (новая, ред. 3): Приёмка наблюдаемости второго приложения — тот же зонд и
   чек-лист, что у прототипа, по адресу сима; таблица вердиктов, красные строки → задачи
-  carve-out [PENDING] (зависит от 1.1) — **Module contract:** impl-only
+  carve-out [DONE 2026-09-21: прототип без аргументов 51/51 вердикт совпал с baseline; сим 52 строки —
+  PASS 35, N/A 2 с причиной, красные → 1.5/1.6; ревью Fable — 2 итерации, см. отчёт] (зависит от 1.1) —
+  **Module contract:** impl-only
+- Task 1.5 (новая, из прогона 1.4): гейт телеметрии у generic-приложения — carve-out проводки
+  publisher-гейта из `multiprocess_prototype/backend/orchestrator_hooks.py:84-95` в `app_module`
+  по образцу 1.0/2.0, **и** секция `telemetry:` в `apps/line_sim/system.yaml` (у сима её нет —
+  ревью Task 1.4); приёмка — S6/R7/K5 зонда `--app line_sim` зелёные, прототип 51/51 без
+  изменений [PENDING] (зависит от 1.4) — **Module contract:** impl-only
+- Task 1.6 (новая, из прогона 1.4): синк `flight_ring` в конфиге сима (сейчас объявлен только
+  в `inspection_full.yaml` прототипа) + зонд пишет `reason` отказа `sink.tail` в observed; приёмка —
+  R10 зелёная [PENDING] (зависит от 1.4) — **Module contract:** impl-only
 
 ### Phase 2: Общий мир — лента и один энкодер (ред. 2, 2026-09-21)
 
