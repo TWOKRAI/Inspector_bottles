@@ -124,7 +124,7 @@ class _BusyPort:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", self.port))
-            s.listen(1)
+            s.listen(16)  # запас очереди — см. _bind_random_port
             self._sock = s
         except OSError:
             s.close()
@@ -171,7 +171,9 @@ def _bind_random_port() -> tuple[socket.socket, int]:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind(("127.0.0.1", 0))
-    s.listen(1)
+    # Очередь с запасом: зонд и проверка держателя коннектятся без accept(); при backlog 1
+    # второй connect на macOS получал отказ — флак 1 из 15 (замер ведущего 2026-09-21).
+    s.listen(16)
     return s, s.getsockname()[1]
 
 
