@@ -49,3 +49,56 @@ def test_legacy_builder_builds_app_without_telemetry(tmp_path: Path) -> None:
 
     cfg = dict(launcher._processes)["ticker"]["config"]
     assert "telemetry" not in cfg
+
+
+# --------------------------------------------------------------------------- #
+# Правки по ревью 1.5 (итерация 1): свойства переноса, не покрытые спекой      #
+# --------------------------------------------------------------------------- #
+
+
+def _blueprint_one(telemetry=None) -> dict:
+    entry = {
+        "process_name": "ticker",
+        "process_class": _GENERIC_PROCESS,
+        "plugins": [{"plugin_class": _TICK_PLUGIN, "plugin_name": "tick_source_rv", "category": "utility"}],
+    }
+    if telemetry is not None:
+        entry["telemetry"] = telemetry
+    return {"name": "rv", "processes": [entry], "wires": []}
+
+
+def test_per_process_only_builds_section() -> None:
+    """Только per-process override, глобальной секции нет → гейт у процесса всё равно есть."""
+    cfg = assemble_proc_dicts(_blueprint_one({"metrics": {"fps": {"enabled": True}}}))["ticker"]["config"]
+    assert cfg["telemetry"] == {"publish": {"metrics": {"fps": {"enabled": True}}}}
+
+
+def test_explicit_empty_per_process_override_is_kept() -> None:
+    """Явный ``{}`` per-process — «включить с дефолтами»: и секция, и сырой override на месте."""
+    cfg = assemble_proc_dicts(_blueprint_one({}))["ticker"]["config"]
+    assert cfg["telemetry"] == {"publish": {}}
+    assert cfg["telemetry_override"] == {}
+
+
+def test_invalid_telemetry_section_fails_build(tmp_path: Path) -> None:
+    """Невалидная секция роняет сборку, а не выключает гейт молча (паритет с прототипом)."""
+    import pydantic
+    import pytest
+
+    (tmp_path / "pipeline.yaml").write_text(
+        "name: p\nprocesses:\n"
+        "  - process_name: ticker\n"
+        f"    process_class: {_GENERIC_PROCESS}\n"
+        "    plugins:\n"
+        f"      - plugin_class: {_TICK_PLUGIN}\n"
+        "        plugin_name: tick_source_bad\n"
+        "        category: utility\n"
+        "wires: []\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "system.yaml").write_text("telemetry:\n  publish:\n    default_interval_sec: -1\n", encoding="utf-8")
+    manifest = tmp_path / "app.yaml"
+    manifest.write_text("name: Bad\npipeline: pipeline.yaml\nsystem: system.yaml\n", encoding="utf-8")
+
+    with pytest.raises(pydantic.ValidationError):
+        SystemBuilder(AppSpec(manifest_path=manifest)).build()

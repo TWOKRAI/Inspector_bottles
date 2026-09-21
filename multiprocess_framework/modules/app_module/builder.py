@@ -445,13 +445,25 @@ class SystemBuilder:
         ``None`` — секции нет: гейт не строится, все метрики публикуются каждый
         тик (поведение до 1.5). Нечитаемый файл роняет сборку — та же политика,
         что у :meth:`_resolve_app_observability`.
+
+        Невалидная секция тоже роняет сборку (ревью 1.5): иначе процесс молча
+        выключал бы гейт с одной DEBUG-строкой, а прототип на том же файле падает
+        при загрузке ``SystemConfig``. Отдаётся сырой dict, не ``model_dump``:
+        дефолты не материализуются и per-process override мержится поверх дельты.
         """
         if manifest.system is None:
             return None
         raw = _load_yaml_or_json(manifest.system)
         telemetry = raw.get("telemetry") if isinstance(raw, dict) else None
         publish = telemetry.get("publish") if isinstance(telemetry, dict) else None
-        return dict(publish) if isinstance(publish, dict) else None
+        if not isinstance(publish, dict):
+            return None
+        from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+            TelemetryPublishConfig,
+        )
+
+        TelemetryPublishConfig.from_dict(publish)  # ValidationError → сборка падает
+        return dict(publish)
 
     def _print_banner(
         self,
