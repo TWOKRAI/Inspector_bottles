@@ -135,3 +135,48 @@ def test_import_with_foreign_argv_does_not_parse_it(tmp_path):
         [sys.executable, "-c", code], cwd=str(PROJECT_ROOT), env=env, capture_output=True, text=True, timeout=60
     )
     assert proc.returncode == 0 and "ok" in proc.stdout, proc.stderr[-1000:]
+
+
+def test_register_role_prototype_literals_and_sim_target(probe):
+    """K10/L5: прототип — прежние литералы дословно; сим — процесс из своего состава, поле в границах схемы."""
+    assert probe.profile_for("prototype").register == ("inspector", "robot_control", "reject_delay_ms", 1, 0)
+    sim = probe.profile_for("line_sim")
+    proc, reg, fld, v_set, v_back = sim.register
+    assert (proc, reg, fld) == ("camera", "camera_service", "gain")
+    assert proc in sim.expected_procs
+    # L5 пишет v_set и v_set + 1; всё обязано лежать в границах CameraServiceRegisters.gain (0..255).
+    from Plugins.sources.camera_service.registers import CameraServiceRegisters
+
+    for v in (v_set, v_set + 1, v_back):
+        CameraServiceRegisters(gain=v)  # ValidationError, если вне границ
+    assert "регистр" not in sim.na_reason["inspector"], (
+        "причина N/A не должна ссылаться на регистры — K10/L5 теперь меряются"
+    )
+
+
+_I4_PIN = r"""
+import dataclasses, importlib, sys
+probe = importlib.import_module("backend_ctl.probes.probe_observability_consumer_acceptance")
+calls = []
+probe.port_free = lambda port: (calls.append(port), False)[1]
+_orig = probe.profile_for
+def _boom(*a, **k):
+    raise AssertionError("harness must not be built")
+probe.profile_for = lambda app: dataclasses.replace(_orig(app), make_harness=_boom)
+out = []
+for argv in ([], ["--app", "line_sim"], ["--app", "line_sim", "--port", "9999"], ["--port", "9001"]):
+    rc = probe.main(argv)
+    out.append((rc, calls[-1]))
+print("RESULT", out)
+"""
+
+
+def test_abort_checks_the_resolved_port(tmp_path):
+    """I4: абортный порт-чек смотрит на РАЗРЕШЁННЫЙ порт; стенд не строится (офлайн, отдельный процесс)."""
+    env = dict(os.environ, PYTHONPATH=str(PROJECT_ROOT), MULTIPROCESS_LOG_DIR=str(tmp_path))
+    proc = subprocess.run(
+        [sys.executable, "-c", _I4_PIN], cwd=str(PROJECT_ROOT), env=env, capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT "))
+    assert line == "RESULT [(2, 8765), (2, 8766), (2, 9999), (2, 9001)]", line

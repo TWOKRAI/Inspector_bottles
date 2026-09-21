@@ -92,6 +92,9 @@ class AppProfile:
     roles: Dict[str, Optional[str]]
     frame_path: Tuple[str, ...]
     make_harness: Callable[[int, Path], BackendHarness]
+    #: Роль `register` (K10, L5): (процесс, регистр = plugin_name, поле, значение записи, значение возврата).
+    #: L5 чередует `значение записи` и `значение записи + 1`, затем возвращает.
+    register: Tuple[str, str, str, int, int]
     #: Писатели уровней (``ctx.publish_metric``), которые строка T1 ищет в
     #: ``introspect_telemetry → levels``. Пусто → строки T1 нет (прототип: её
     #: роль играет S6, и число строк без аргументов не меняется).
@@ -145,6 +148,7 @@ def profile_for(app: str) -> AppProfile:
             },
             frame_path=("camera_0", "processor", "inspector"),
             make_harness=_prototype_harness,
+            register=("inspector", "robot_control", "reject_delay_ms", 1, 0),
         )
     if app == "line_sim":
         return AppProfile(
@@ -160,10 +164,13 @@ def profile_for(app: str) -> AppProfile:
             },
             frame_path=("camera", "mjpeg"),
             make_harness=_line_sim_harness,
+            # CameraServiceRegisters.gain: int, 0..255, дефолт 0 (Plugins/sources/camera_service/registers.py);
+            # запись 1/2 и возврат в 0 — внутри границ схемы. Имя регистра = plugin_name из pipeline.yaml.
+            register=("camera", "camera_service", "gain", 1, 0),
             level_writers=("sim_robot_host", "mjpeg_sink", "camera_service"),
             na_reason={
-                "inspector": "у line_sim нет роли inspector: нет процесса с широкими записями kind=inspection "
-                "и регистра robot_control.reject_delay_ms (у плагинов Plugins/sim регистров нет) — строка неприменима",
+                "inspector": "у line_sim нет роли inspector: ни один процесс не пишет широкие записи "
+                "kind=inspection (ctx.write_event), поэтому ручки events и ответ на неё неприменимы",
             },
         )
     raise ValueError(f"неизвестное приложение: {app!r}")
@@ -1191,31 +1198,31 @@ def family_knobs(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
         "CONTROL_PANEL.md §7 (окна голоса), ADR-LOG-012 — эффект потребителю (подавление повторов) здесь НЕ воспроизведён",
     )
 
+    # K10: регистр плагина — запись с readback и аудит сессии
+    rp, rreg, rfield, rset, rback = PROFILE.register
+    t0 = time.perf_counter()
+    sr = drv.set_register_verified(rp, rreg, rfield, rset, timeout=15.0)
+    el10 = (time.perf_counter() - t0) * 1000
+    back = drv.set_register_verified(rp, rreg, rfield, rback, timeout=15.0)
+    slog = {
+        "note": "session_log — аудит MCP-сессии (E.1), у голого BackendDriver его нет; проверяется MCP-инструментом"
+    }
+    row(
+        "K10",
+        "ручки",
+        "регистр плагина: запись с readback (set_register_verified) + аудит сессии",
+        f"set_register_verified({rp}, {rreg}, {rfield}, {rset}) → {rback}",
+        "readback introspect.registers (внутри verified) + session_log",
+        f"verified=true, actual={rset}; возврат verified=true, actual={rback}; session_log содержит запись",
+        f"set: verified={sr.get('verified')} expected={sr.get('expected')} actual={sr.get('actual')} за {el10:.0f} мс; back: verified={back.get('verified')} actual={back.get('actual')}; session_log={short(slog, 160)}",
+        "PASS" if (sr.get("verified") and back.get("verified")) else "FAIL",
+        "backend_ctl/AGENTS.md (set_register_verified, session_log)",
+    )
+    LAT["K10_register_write_readback_ms"] = {"single": round(el10, 1)}
+
     if INSP is None:
-        na("K10", "ручки", "регистр плагина: запись с readback (set_register_verified) + аудит сессии", "inspector")
         na("K11", "ручки", "ответ config.reload: `applied` называет применённую секцию events?", "inspector")
     else:
-        # K10: регистр плагина — запись с readback и аудит сессии
-        t0 = time.perf_counter()
-        sr = drv.set_register_verified(INSP, "robot_control", "reject_delay_ms", 1, timeout=15.0)
-        el10 = (time.perf_counter() - t0) * 1000
-        back = drv.set_register_verified(INSP, "robot_control", "reject_delay_ms", 0, timeout=15.0)
-        slog = {
-            "note": "session_log — аудит MCP-сессии (E.1), у голого BackendDriver его нет; проверяется MCP-инструментом"
-        }
-        row(
-            "K10",
-            "ручки",
-            "регистр плагина: запись с readback (set_register_verified) + аудит сессии",
-            "set_register_verified(inspector, robot_control, reject_delay_ms, 1) → 0",
-            "readback introspect.registers (внутри verified) + session_log",
-            "verified=true, actual=1; возврат verified=true, actual=0; session_log содержит запись",
-            f"set: verified={sr.get('verified')} expected={sr.get('expected')} actual={sr.get('actual')} за {el10:.0f} мс; back: verified={back.get('verified')} actual={back.get('actual')}; session_log={short(slog, 160)}",
-            "PASS" if (sr.get("verified") and back.get("verified")) else "FAIL",
-            "backend_ctl/AGENTS.md (set_register_verified, session_log)",
-        )
-        LAT["K10_register_write_readback_ms"] = {"single": round(el10, 1)}
-
         # K11: applied не покрывает events (известное с 3.8) — сверка
         cr = ctx.get("events_reply") or {}
         applied = cr.get("applied")
@@ -1457,30 +1464,28 @@ def family_latency(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
         "backend_ctl/AGENTS.md (state_subscribe, мост push→канал 1.1b)",
     )
 
-    if INSP is None:
-        na("L5", "задержки", "запись регистра → readback подтверждён (set_register_verified), 5 повторов", "inspector")
-    else:
-        # L5: регистр — запись → readback, 5 повторов
-        vals5: List[float] = []
-        for i in range(5):
-            t0 = time.perf_counter_ns()
-            r = drv.set_register_verified(INSP, "robot_control", "reject_delay_ms", (i % 2) + 1, timeout=15.0)
-            t1 = time.perf_counter_ns()
-            if r.get("verified"):
-                vals5.append((t1 - t0) / 1e6)
-        drv.set_register_verified(INSP, "robot_control", "reject_delay_ms", 0, timeout=15.0)
-        LAT["L5_register_write_verified_ms"] = stats_ms(vals5)
-        row(
-            "L5",
-            "задержки",
-            "запись регистра → readback подтверждён (set_register_verified), 5 повторов",
-            "set_register_verified(inspector, robot_control, reject_delay_ms)",
-            "perf_counter_ns вокруг вызова",
-            "5/5 verified; медиана ≈ 2× RTT команды (write + readback)",
-            f"{LAT['L5_register_write_verified_ms']}",
-            "PASS" if LAT["L5_register_write_verified_ms"]["n"] == 5 else "PARTIAL",
-            "backend_ctl/AGENTS.md (set_register_verified)",
-        )
+    # L5: регистр — запись → readback, 5 повторов
+    rp, rreg, rfield, rset, rback = PROFILE.register
+    vals5: List[float] = []
+    for i in range(5):
+        t0 = time.perf_counter_ns()
+        r = drv.set_register_verified(rp, rreg, rfield, (i % 2) + rset, timeout=15.0)
+        t1 = time.perf_counter_ns()
+        if r.get("verified"):
+            vals5.append((t1 - t0) / 1e6)
+    drv.set_register_verified(rp, rreg, rfield, rback, timeout=15.0)
+    LAT["L5_register_write_verified_ms"] = stats_ms(vals5)
+    row(
+        "L5",
+        "задержки",
+        "запись регистра → readback подтверждён (set_register_verified), 5 повторов",
+        f"set_register_verified({rp}, {rreg}, {rfield})",
+        "perf_counter_ns вокруг вызова",
+        "5/5 verified; медиана ≈ 2× RTT команды (write + readback)",
+        f"{LAT['L5_register_write_verified_ms']}",
+        "PASS" if LAT["L5_register_write_verified_ms"]["n"] == 5 else "PARTIAL",
+        "backend_ctl/AGENTS.md (set_register_verified)",
+    )
 
     # L6: путь кадра — что даёт потребителю телеметрия
     lv = {}
@@ -1537,7 +1542,7 @@ def family_errors(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
         f"health.report {NB} {{level: ERROR, message: <маркер>}}",
         "open(<log_dir>/errors.log — общий файл всех процессов); sqlite; drv.subscribe; system_overview.anomalies",
         f"маркер в <log_dir>/errors.log ≤ 3 с; строка в сторе kind=error ≤ 3 с; пуш observability.record kind=error; anomalies упоминают health/{NB}",
-        f"reply={short(hr, 100)}; errors.log={okf} за {elf * 1000:.0f} мс; файлы={files}; стор={rows_}; push={okp} kinds={kinds}; anomalies содержит 'health'={'health' in an_txt} '{NB}'={'{NB}' in an_txt}: {short(anomalies, 200)}",
+        f"reply={short(hr, 100)}; errors.log={okf} за {elf * 1000:.0f} мс; файлы={files}; стор={rows_}; push={okp} kinds={kinds}; anomalies содержит 'health'={'health' in an_txt} '{NB}'={NB in an_txt}: {short(anomalies, 200)}",
         "PASS"
         if (okf and oks and okp and any(r[0] == "error" for r in rows_))
         else ("PARTIAL" if (okf or oks) else "FAIL"),
