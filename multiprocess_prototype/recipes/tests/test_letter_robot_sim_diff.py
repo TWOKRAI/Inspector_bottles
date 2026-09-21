@@ -86,9 +86,20 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # Идентичность файла (решение ведущего, см. докстринг): рецепт грузится по имени
     # файла, но ``name``/``description`` внутри обязаны говорить про сим, а не про бой.
     identity_keys = (".name", ".description")
+    # Провод, АДРЕСУЮЩИЙ заменённый плагин, — следствие той же замены, а не второе
+    # расхождение. Найдено живым стендом 2026-09-21: прототип на сим-рецепте падал
+    # валидацией `Wire: источник 'camera_0.hikvision.frame' не найден среди выходов`,
+    # потому что провод называет плагин ПО ИМЕНИ, а имя сменилось вместе с блоком.
+    # Прежняя буквальная трактовка «ровно один блок» запрещала эту правку и тем самым
+    # требовала заведомо нерабочий рецепт.
+    wire_source_key = ".blueprint.wires[0].source"
     all_diffs = _diff_paths(base, sim)
     real_diffs = [
-        d for d in all_diffs if not d.startswith(allowed_prefix) and d not in identity_keys
+        d
+        for d in all_diffs
+        if not d.startswith(allowed_prefix)
+        and d not in identity_keys
+        and d != wire_source_key
     ]
 
     assert real_diffs == [], (
@@ -114,6 +125,16 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # разве что при точной копии — здесь фиксируем, что копия НЕ считается допустимым
     # прохождением критерия 4: сим-рецепт обязан ОТЛИЧАТЬСЯ, не просто "не отличаться
     # ничем лишним").
+    # Провод обязан адресовать плагин, который в сим-рецепте ДЕЙСТВИТЕЛЬНО есть:
+    # иначе рецепт не собирается (воспроизведено на живом стенде).
+    sim_plugin_name = sim["blueprint"]["processes"][camera_idx]["plugins"][0]["plugin_name"]
+    wire_src = sim["blueprint"]["wires"][0]["source"]
+    assert wire_src == f"camera_0.{sim_plugin_name}.frame", (
+        f"провод источника = {wire_src!r}, а плагин камеры в сим-рецепте называется "
+        f"{sim_plugin_name!r} — провод адресует плагин по имени, рассинхрон роняет "
+        f"сборку прототипа на валидации topology"
+    )
+
     sim_camera_plugin0 = sim["blueprint"]["processes"][camera_idx]["plugins"][0]
     base_camera_plugin0 = base_processes[camera_idx]["plugins"][0]
     assert sim_camera_plugin0 != base_camera_plugin0, (

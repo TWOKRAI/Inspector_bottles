@@ -410,7 +410,7 @@ blueprint:
       metadata:
         source_target_fps: 10
   wires:
-    - source: camera_0.hikvision.frame
+    - source: camera_0.camera_service.frame
       target: vision.color_convert.frame
       description: камера → вход vision (далее ROI→маска→морфо→круги линейно внутри процесса)
     - source: vision.circle_detector.frame
