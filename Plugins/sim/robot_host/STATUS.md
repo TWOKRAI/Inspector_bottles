@@ -10,7 +10,8 @@
 | Деградация без `pymodbus` | есть: `ModbusNotAvailableError` → `report_error`, `state="error"`, процесс живёт |
 | Занятый порт | есть: свой пробный сокет, синхронно, до обращения к `SimRobotServer` |
 | Метрика `sim_robot.writes` | есть: дельта из `cmd_status`/`shutdown`, не с потока `pymodbus` |
-| Тесты | `tests/test_hazards.py` — 4 авторских (a-d); `tests/test_acceptance_time_wait.py` — 4 независимого tester (TIME_WAIT / занятый порт, Task 1.3); приёмочные независимого тестера — `apps/line_sim/tests/test_f1_task11_acceptance.py` (вне этого пакета) |
+| Паблишер мира (Task 2.2) | есть: воркер `sim_robot_world_publisher`, `sim.belt.encoder` каждые `publish_ms`, уровни `encoder`/`belt_mm_s`/`writes_seen` |
+| Тесты | `tests/test_hazards.py` — 4 авторских (a-d); `tests/test_acceptance_time_wait.py` — 4 независимого tester (TIME_WAIT / занятый порт, Task 1.3); приёмочные независимого тестера — `apps/line_sim/tests/test_f1_task11_acceptance.py`, `test_f2_task22_live.py` (вне этого пакета) |
 
 ## Долг / открытые вопросы
 

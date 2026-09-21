@@ -22,10 +22,30 @@ FW_SHM_OWNER_INCARNATION=1 BACKEND_CTL=1 BACKEND_CTL_PORT=8766 \
 > («SHM-кольца на POSIX…»). Из рецепта флаг не задаётся — только env при запуске.
 
 Поднимает три процесса: `robot`, держащий `SimRobotServer` (Modbus TCP,
-`127.0.0.1:5021`); `camera` с `CameraServicePlugin` (`camera_type: simulator`),
-который по `chain_targets` отдаёт кадры процессу `mjpeg`; и `mjpeg` с
+`127.0.0.1:5021`) и публикующий энкодер ленты в общий мир (см. ниже);
+`camera` со `SceneSourcePlugin` (Task 2.2), который рисует тестовый спрайт по
+энкодеру и по `chain_targets` отдаёт кадры процессу `mjpeg`; и `mjpeg` с
 `MjpegSinkPlugin`, раздающим последний кадр по HTTP MJPEG на `127.0.0.1:8091`.
 Остановка — SIGINT (Ctrl+C) или `backend_ctl` `system_command shutdown`.
+
+## Общий мир (Task 2.2)
+
+Процесс `robot` (`Plugins/sim/robot_host`) каждые `publish_ms` (дефолт 50)
+публикует энкодер ленты в дерево `StateStore` по пути **`sim.belt.encoder`**
+(`{value, mm_s, t}`, тик паблишера — `_publish_once`). Процесс `camera`
+(`Plugins/sim/scene_source`) подписывается на `sim.belt.**` и рисует спрайт,
+следующий за `value`. Остановка ПЧ (`VfdClient.stop()`) морозит энкодер — и,
+как следствие, спрайт в MJPEG-потоке.
+
+**Переполнение энкодера (v1, ограничение).** `RobotSimCore.encoder` — 32-битный
+знаковый счётчик (`RegDW(signed=True)`). При типичной скорости ленты (пример:
+50 мм/с, `FACTOR_MM=0.144473` мм/отсчёт → ≈346 отсчётов/с) переполнение
+(`2^31` отсчётов) наступает примерно через `2^31 / 346 ≈ 6.2×10^6` секунд —
+**около 72 суток непрерывной работы**. Для v1 (демо-стенд, короткие прогоны)
+это не обрабатывается — при переполнении энкодер уходит в отрицательные
+значения (сброс не предусмотрен), и позиция спрайта в `scene_source` считается
+по формуле `(encoder - spawn_encoder) * FACTOR_MM * px_per_mm` без какой-либо
+защиты от скачка. Долгие прогоны (недели) — вне области этой задачи.
 
 ## Порты стенда
 
@@ -55,21 +75,21 @@ Modbus TCP. Адрес сим-робота (`127.0.0.1:5021`, `unit_id: 2`) за
 `sim_robot.status` (процесс `robot`) → `{running, host, port, unit_id,
 writes_seen, state}`. Подробности механизма — [`Plugins/sim/robot_host/README.md`](../../Plugins/sim/robot_host/README.md).
 
-## Дверь кадров (Task 1.2)
+## Дверь кадров (Task 1.2, источник — Task 2.2)
 
-Два процесса: `camera` (`CameraServicePlugin`, `camera_type: simulator`,
-генерирует кадры) → по `chain_targets` через SHM-кольцо → `mjpeg`
-(`MjpegSinkPlugin`: кодирует в JPEG, раздаёт последний кадр по
-`GET http://127.0.0.1:8091/` как `multipart/x-mixed-replace`). Открыть в браузере/`cv2.VideoCapture`/`ffplay`
-— обычный MJPEG-клиент. Подробности механизма стока —
-[`Plugins/sim/mjpeg_sink/README.md`](../../Plugins/sim/mjpeg_sink/README.md).
+Два процесса: `camera` (`SceneSourcePlugin`, генерирует кадр сцены сима —
+фон + спрайт по энкодеру ленты, см. «Общий мир» выше) → по `chain_targets`
+через SHM-кольцо → `mjpeg` (`MjpegSinkPlugin`: кодирует в JPEG, раздаёт
+последний кадр по `GET http://127.0.0.1:8091/` как `multipart/x-mixed-replace`).
+Открыть в браузере/`cv2.VideoCapture`/`ffplay` — обычный MJPEG-клиент.
+Подробности механизма источника — [`Plugins/sim/scene_source/README.md`](../../Plugins/sim/scene_source/README.md),
+стока — [`Plugins/sim/mjpeg_sink/README.md`](../../Plugins/sim/mjpeg_sink/README.md).
 
 Прототип подключается к этому стоку как к источнику `camera_0` через
 `multiprocess_prototype/recipes/letter_robot_sim.yaml` (сим-вариант боевого
 `hikvision_letter_robot.yaml`, отличается ровно источником `camera_0`).
 
-## Out of scope (Task 1.2)
+## Out of scope (Task 1.2/2.2)
 
-Живая скорость энкодера от команды ПЧ (Ф2.1), канал энкодера в line-процесс
-(Ф2.2), `data/devices.yaml` в репозитории (runtime-файл), объекты/слои/
-фотометрия и ROI внутри сима (Ф3–Ф4).
+`data/devices.yaml` в репозитории (runtime-файл), объекты/слои/фотометрия и
+ROI внутри сима, спавн/деспавн нескольких объектов, реальные спрайты (Ф3–Ф4).

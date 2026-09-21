@@ -52,11 +52,15 @@ processes:
     chain_targets:
       - mjpeg
     plugins:
-      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
-        plugin_name: camera_service
+      # Task 2.2: заменяет заглушку camera_service/simulator — фон + тестовый
+      # спрайт, следующий за энкодером ленты из общего мира (sim.belt.*).
+      - plugin_class: Plugins.sim.scene_source.plugin.SceneSourcePlugin
+        plugin_name: scene_source
         category: source
-        camera_type: simulator
-        auto_start: true
+        seed: 0
+        spawn_encoder: 0
+        px_per_mm: 1.0
+        stale_ms: 500
 
   - process_name: mjpeg
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
@@ -84,6 +88,6 @@ observability:
           channels: [console, system_file, flight_ring]
 
 wires:
-  - source: camera.camera_service.frame
+  - source: camera.scene_source.frame
     target: mjpeg.mjpeg_sink.frame
-    description: кадр симулятора → MJPEG-раздача (дверь кадров для прототипа)
+    description: кадр сцены сима (спрайт по энкодеру ленты) → MJPEG-раздача (дверь кадров для прототипа)

@@ -22,10 +22,22 @@ TCP-сервер (симулятор робота линии) в процесс�
 
 ## Команда
 
-`sim_robot.status` → `{running, host, port, unit_id, writes_seen, state}`.
+`sim_robot.status` → `{running, host, port, unit_id, writes_seen, state, world}`.
 `state` ∈ `configured` / `running` / `error` / `stopped` — свои состояния, не
 `PluginState` фреймворка (тот же довод, что у `OtelExportPlugin`: «поднялся, но
-не может» его словарём не выразимо).
+не может» его словарём не выразимо). `world` ∈ `ok` / `unavailable`
+(`ctx.state_proxy is None` — Task 2.0 не влита).
+
+## Паблишер мира (Task 2.2)
+
+Каждые `publish_ms` (дефолт 50, конфиг `pipeline.yaml`) плагин кладёт энкодер
+сервера в дерево `StateStore` по пути `sim.belt.encoder`
+(`{value, mm_s, t}` — воркер-луп `sim_robot_world_publisher`, как у
+`TelemetrySinkPlugin._sample_loop`) и отдаёт уровни `encoder`/`belt_mm_s`/
+`writes_seen` через `ctx.publish_metric`. `mm_s` — производная энкодера МЕЖДУ
+тиками публикации (не чтение внутреннего состояния `BeltDrive` — у него нет
+публичного аксессора скорости). Потребитель — `Plugins/sim/scene_source`
+(Task 2.2), см. [`apps/line_sim/README.md`](../../../apps/line_sim/README.md#общий-мир-task-22).
 
 ## Деградация без `pymodbus`
 

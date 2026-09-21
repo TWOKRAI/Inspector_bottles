@@ -51,18 +51,26 @@ from __future__ import annotations
 import os
 import socket
 import threading
+import time
 from typing import Any
 
 from multiprocess_framework.modules.process_module.plugins import (
+    ExecutionMode,
     PluginContext,
     ProcessModulePlugin,
+    ThreadConfig,
     register_plugin,
 )
+
+from Services.robot_comm.core.registers import FACTOR_MM
 
 #: Дефолты конфига (Task 1.1 плана line-sim, §Task 1.1 pipeline.yaml).
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 5021
 _DEFAULT_UNIT_ID = 2
+
+#: Период публикации энкодера в общий мир (Task 2.2 плана line-sim, §Task 2.2).
+_DEFAULT_PUBLISH_MS = 50
 
 
 @register_plugin("sim_robot_host", category="io", description="Хост Modbus TCP-симулятора робота (SimRobotServer)")
@@ -90,6 +98,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._port: int = cfg.get("port", _DEFAULT_PORT)
         self._unit_id: int = cfg.get("unit_id", _DEFAULT_UNIT_ID)
         self._auto_start: bool = cfg.get("auto_start", True)
+        self._publish_ms: int = cfg.get("publish_ms", _DEFAULT_PUBLISH_MS)
 
         self._server: Any = None
         self._lock = threading.Lock()
@@ -100,12 +109,30 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._state = "configured"
         self._reason = ""
 
+        # Паблишер энкодера в общий мир (Task 2.2): последний опубликованный
+        # энкодер/момент — для вычисления mm_s ПРОИЗВОДНОЙ между тиками
+        # публикации, без обращения к приватным полям RobotSimCore/BeltDrive
+        # (Services/robot_comm вне области этой задачи, Task 2.1b его владеет).
+        self._last_pub_encoder: int | None = None
+        self._last_pub_t: float | None = None
+
+        # Task 2.0 не влит → ctx.state_proxy is None: плагин живёт, мир недоступен.
+        ctx.declare_metric("encoder")
+        ctx.declare_metric("belt_mm_s")
+        ctx.declare_metric("writes_seen")
+
         ctx.log_info(f"sim_robot_host: конфиг принят, {self._host}:{self._port}, unit_id={self._unit_id}")
 
     def start(self, ctx: PluginContext) -> None:
-        """RUNNING: поднять сервер, если ``auto_start``. Отказ не роняет процесс."""
+        """RUNNING: поднять сервер, если ``auto_start``, и паблишер мира."""
         if self._auto_start:
             self._start_server(ctx)
+
+        if ctx.state_proxy is None:
+            ctx.log_info("sim_robot_host: ctx.state_proxy is None — мир недоступен, паблишер не запущен")
+        else:
+            cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
+            ctx.worker_manager.create_worker("sim_robot_world_publisher", self._publish_loop, cfg, auto_start=True)
 
     def shutdown(self, ctx: PluginContext) -> None:
         """STOPPED: дожать счётчик, остановить сервер симметрично ``start()``."""
@@ -203,11 +230,66 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._ctx.record_metric("sim_robot.writes", delta)
 
     # ------------------------------------------------------------------ #
+    # Паблишер мира (Task 2.2) — энкодер в ``sim.belt.encoder`` + уровни
+    # ------------------------------------------------------------------ #
+
+    def _publish_loop(self, stop_event: Any, pause_event: Any) -> None:
+        """Тик паблишера: ``publish_ms`` (форма — ``TelemetrySinkPlugin._sample_loop``).
+
+        Ошибка одного тика (например, сервер ещё не поднят) не должна убивать
+        воркер — иначе публикация мира молча умирает навсегда.
+        """
+        interval_s = self._publish_ms / 1000.0
+        while not stop_event.is_set():
+            if pause_event.is_set():
+                time.sleep(0.1)
+                continue
+            time.sleep(interval_s)
+            try:
+                self._publish_once()
+            except Exception as exc:  # noqa: BLE001 — тик не должен убить воркер
+                self._ctx.health.report_error(exc, context="sim_robot_host.publish")
+
+    def _publish_once(self) -> None:
+        """Один тик: снять энкодер сервера, положить в мир, отдать уровни.
+
+        ``mm_s`` — производная энкодера МЕЖДУ ДВУМЯ ТИКАМИ ПУБЛИКАЦИИ, а не
+        чтение внутреннего состояния ``BeltDrive``: ``RobotSimCore``/``BeltDrive``
+        не выставляют публичного ``mm_s``-аксессора (``core.encoder`` — да,
+        ``core._belt`` — приватное поле чужого модуля, Task 2.1b его владеет и
+        трогать его отсюда не входит в область этой задачи). Побочный эффект —
+        то же самое число: пока лента едет с постоянной скоростью, средняя
+        скорость за интервал публикации равна мгновенной; на пульсе смены
+        команды ПЧ (не чаще, чем раз в ``publish_ms``) один тик даёт смешанное
+        среднее — не проверено отдельным тестом, см. отчёт разработчика.
+        """
+        if self._server is None or self._ctx.state_proxy is None:
+            return
+
+        encoder = self._server.core.encoder
+        now = time.monotonic()
+        mm_s = 0.0
+        if self._last_pub_t is not None and self._last_pub_encoder is not None:
+            dt = now - self._last_pub_t
+            if dt > 0:
+                mm_s = (encoder - self._last_pub_encoder) * FACTOR_MM / dt
+        self._last_pub_encoder = encoder
+        self._last_pub_t = now
+
+        self._ctx.state_proxy.set("sim.belt.encoder", {"value": encoder, "mm_s": mm_s, "t": now})
+
+        with self._lock:
+            writes_seen = self._writes_seen
+        self._ctx.publish_metric("encoder", encoder)
+        self._ctx.publish_metric("belt_mm_s", mm_s)
+        self._ctx.publish_metric("writes_seen", writes_seen)
+
+    # ------------------------------------------------------------------ #
     # Команды
     # ------------------------------------------------------------------ #
 
     def cmd_status(self, data: dict | None = None) -> dict:
-        """``sim_robot.status`` → running/host/port/unit_id/writes_seen/state."""
+        """``sim_robot.status`` → running/host/port/unit_id/writes_seen/state/world."""
         self._sync_writes_metric()
         with self._lock:
             writes_seen = self._writes_seen
@@ -218,4 +300,5 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             "unit_id": self._unit_id,
             "writes_seen": writes_seen,
             "state": self._state,
+            "world": "unavailable" if self._ctx.state_proxy is None else "ok",
         }
