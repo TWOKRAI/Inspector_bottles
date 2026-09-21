@@ -55,6 +55,7 @@ _LINE_SIM_PORT = 8766  # литерал контракта (backend_ctl/tests/te
 _ROBOT_HOST = "127.0.0.1"
 _MODBUS_PORT = 5021
 _ROBOT_UNIT_ID = 2
+_MJPEG_PORT = 8091
 _MJPEG_URL = "http://127.0.0.1:8091/"
 _ENCODER_PATH = "sim.belt.encoder.value"
 
@@ -316,20 +317,87 @@ def test_mjpeg_sprite_follows_belt(line_sim_live_backend) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(
-    reason=(
-        "гарнесс собирает apps/line_sim целиком через build_app(app.yaml) — выборочный "
-        "запуск подмножества процессов пайплайна (только camera+mjpeg, без robot) потребовал "
-        "бы отдельного фикстурного pipeline.yaml (аналог apps/line_sim/tests/fixtures/"
-        "state_proxy_app из Task 2.0); вне минимального объёма этого прогона тестера "
-        "(context-бюджет), см. отчёт — критерий остаётся непроверенным этим файлом, не FAIL."
-    ),
-    strict=False,
-)
-def test_camera_alone_serves_frames() -> None:
-    """Пин (НЕ выполнен, см. xfail reason): процесс ``camera`` без ``robot`` -> MJPEG отдаёт
-    кадры, в ``errors.log`` процесса ``camera`` нет исключений."""
-    pytest.fail("требуется отдельный фикстурный pipeline (только camera+mjpeg) — не собран")
+def test_camera_alone_serves_frames(tmp_path: Path) -> None:
+    """Пин (ревью Task 2.2 итерация 1 — снят xfail, тест выполняется по-настоящему):
+    процесс ``camera`` без ``robot`` -> MJPEG отдаёт кадры (спрайт стоит в spawn —
+    энкодер растить некому), в ``errors.log``/``critical.log`` (ОБЩИЕ для всех
+    процессов, в корне ``log_dir`` — ``ACCEPTANCE_CHECKLIST.md:61``, не per-process)
+    нет ни строки.
+
+    Фикстурные ``app.yaml``/``pipeline.yaml`` пишутся в ``tmp_path`` ИЗ РЕАЛЬНЫХ
+    файлов (``yaml.safe_load`` + фильтр процесса ``robot``) — не рукописная копия:
+    расхождение с настоящей проводкой (класс плагина, порт mjpeg, observability)
+    исключено по построению, а не по надежде переписать её дважды одинаково.
+
+    ``discovery.plugin_paths`` и ``system`` — АБСОЛЮТНЫЕ пути на реальные
+    ``Plugins/sim``/``apps/line_sim/system.yaml``: относительный путь исходного
+    ``app.yaml`` (``../../Plugins/sim``) резолвится от каталога МАНИФЕСТА
+    (``manifest.py:_resolve``), а манифест этого теста лежит в ``tmp_path``, на
+    другой глубине от репозитория."""
+    import yaml
+
+    for port in (_LINE_SIM_PORT, _MJPEG_PORT, _MODBUS_PORT):
+        _assert_port_free(port)
+
+    pipeline_raw = yaml.safe_load((_APP_YAML.parent / "pipeline.yaml").read_text(encoding="utf-8"))
+    pipeline_raw["processes"] = [p for p in pipeline_raw["processes"] if p["process_name"] != "robot"]
+    assert {p["process_name"] for p in pipeline_raw["processes"]} == {"camera", "mjpeg"}, (
+        f"фильтр процесса robot промахнулся: {pipeline_raw['processes']!r}"
+    )
+    (tmp_path / "pipeline.yaml").write_text(yaml.safe_dump(pipeline_raw, allow_unicode=True), encoding="utf-8")
+
+    app_raw = yaml.safe_load(_APP_YAML.read_text(encoding="utf-8"))
+    app_raw["discovery"]["plugin_paths"] = [str((_APP_DIR / "../../Plugins/sim").resolve())]
+    app_raw["discovery"]["service_paths"] = []
+    app_raw["pipeline"] = "pipeline.yaml"
+    app_raw["system"] = str((_APP_DIR / "system.yaml").resolve())
+    tmp_app_yaml = tmp_path / "app.yaml"
+    tmp_app_yaml.write_text(yaml.safe_dump(app_raw, allow_unicode=True), encoding="utf-8")
+
+    prev_log = os.environ.get("MULTIPROCESS_LOG_DIR")
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    os.environ["MULTIPROCESS_LOG_DIR"] = str(log_dir)
+
+    def _build_camera_alone_launcher():
+        from multiprocess_framework.modules.app_module import build_app
+
+        return build_app(tmp_app_yaml)
+
+    harness = BackendHarness(launcher_factory=_build_camera_alone_launcher, port=_LINE_SIM_PORT)
+    try:
+        harness.start()
+
+        frame = _capture_frame_http(_MJPEG_URL)
+        assert frame.shape == (480, 640, 3), f"неожиданный размер кадра: {frame.shape}"
+
+        # spawn: x_px=0 -> x_left=((0+16)%672)-32=-16 -> видна ТОЛЬКО правая половина
+        # квадрата, колонки [0,16) -> центр масс (0+15)/2=7.5 (см. докстринг
+        # SceneSourcePlugin._draw_sprite — та же формула бесконечной ленты).
+        centre = _sprite_centroid_x_by_color(frame)
+        assert centre == pytest.approx(7.5, abs=2.0), (
+            f"спрайт не в spawn (энкодер растить некому без robot): центр={centre}, ожидали ~7.5"
+        )
+
+        errors_path = log_dir / "errors.log"
+        critical_path = log_dir / "critical.log"
+        errors_text = errors_path.read_text(encoding="utf-8") if errors_path.is_file() else ""
+        critical_text = critical_path.read_text(encoding="utf-8") if critical_path.is_file() else ""
+        assert errors_text == "", f"errors.log не пуст без robot: {errors_text!r}"
+        assert critical_text == "", f"critical.log не пуст без robot: {critical_text!r}"
+    finally:
+        harness.stop()
+        if prev_log is None:
+            os.environ.pop("MULTIPROCESS_LOG_DIR", None)
+        else:
+            os.environ["MULTIPROCESS_LOG_DIR"] = prev_log
+        for port in (_LINE_SIM_PORT, _MJPEG_PORT, _MODBUS_PORT):
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline and _port_is_open("127.0.0.1", port, timeout=0.3):
+                time.sleep(0.2)
+            assert not _port_is_open("127.0.0.1", port, timeout=0.3), (
+                f"порт {port} всё ещё принимает соединения после harness.stop() — осиротевший процесс"
+            )
 
 
 # --------------------------------------------------------------------------- #
