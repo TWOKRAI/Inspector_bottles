@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -334,7 +335,9 @@ def test_live_line_sim_run(tmp_path):
         f"во всех {len(rows)} строках) — сопоставление по контенту, не по id"
     )
     roster_blob = json.dumps(roster_row, ensure_ascii=False).lower()
-    leaked = [p for p in PROTOTYPE_ONLY_PROCS if p in roster_blob]
+    # Имя — отдельным токеном, не подстрокой: живой прогон 2026-09-21 дал ложный «gui»
+    # из текста аномалии `watch_like_gui` (поправка ведущего).
+    leaked = [p for p in PROTOTYPE_ONLY_PROCS if re.search(rf"(?<!\w){re.escape(p)}(?!\w)", roster_blob)]
     assert not leaked, f"строка о составе процессов сима упоминает прототипные процессы {leaked}: {roster_row}"
 
     assert not _port_accepts(LINE_SIM_PORT), f"порт сима {LINE_SIM_PORT} не освободился после выхода зонда"
