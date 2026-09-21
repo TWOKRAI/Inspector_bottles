@@ -80,10 +80,13 @@ def test_explicit_empty_per_process_override_is_kept() -> None:
     assert cfg["telemetry_override"] == {}
 
 
-def test_invalid_telemetry_section_fails_build(tmp_path: Path) -> None:
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("publish_yaml", ["\n    default_interval_sec: -1", " fast"])
+def test_invalid_telemetry_section_fails_build(tmp_path: Path, publish_yaml: str) -> None:
     """Невалидная секция роняет сборку, а не выключает гейт молча (паритет с прототипом)."""
     import pydantic
-    import pytest
 
     (tmp_path / "pipeline.yaml").write_text(
         "name: p\nprocesses:\n"
@@ -96,7 +99,7 @@ def test_invalid_telemetry_section_fails_build(tmp_path: Path) -> None:
         "wires: []\n",
         encoding="utf-8",
     )
-    (tmp_path / "system.yaml").write_text("telemetry:\n  publish:\n    default_interval_sec: -1\n", encoding="utf-8")
+    (tmp_path / "system.yaml").write_text(f"telemetry:\n  publish:{publish_yaml}\n", encoding="utf-8")
     manifest = tmp_path / "app.yaml"
     manifest.write_text("name: Bad\npipeline: pipeline.yaml\nsystem: system.yaml\n", encoding="utf-8")
 

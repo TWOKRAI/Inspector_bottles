@@ -456,8 +456,8 @@ class SystemBuilder:
         raw = _load_yaml_or_json(manifest.system)
         telemetry = raw.get("telemetry") if isinstance(raw, dict) else None
         publish = telemetry.get("publish") if isinstance(telemetry, dict) else None
-        if not isinstance(publish, dict):
-            return None
+        if publish is None:
+            return None  # не-dict (``publish: fast``) идёт в валидацию и роняет сборку
         from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
             TelemetryPublishConfig,
         )
