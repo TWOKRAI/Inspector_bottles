@@ -65,6 +65,17 @@ from Services.robot_comm.core.registers import (
     SERVO_ON,
     XY_SCALE,
 )
+from Services.robot_comm.server.belt import BeltDrive
+
+# Период Motion-цикла — единственный источник истины (ревью Task 2.1, п.3:
+# раньше дублировался в sim_robot.py; sim_robot.py уже импортирует
+# RobotSimCore из этого модуля на уровне модуля, поэтому обратного импорта
+# `sim_robot.TICK_INTERVAL_S -> sim_core` здесь нет и не может возникнуть цикл).
+TICK_INTERVAL_S = 0.01
+
+# Масштаб регистра частоты ПЧ (см. Services/vfd_comm/protocols/gd20_bridge.yaml
+# cmd_freq.scale) — 0.01 Гц на LSB, т.е. RAW*100.
+_VFD_FREQ_SCALE = 100.0
 
 # Mailbox ПЧ — сторона РОБОТА (Lua-мост). Клиентская карта живёт в vfd_comm;
 # здесь адреса продублированы осознанно: sim эмулирует Lua-скрипт, а не клиента.
@@ -100,7 +111,9 @@ class RobotSimCore:
         job_ticks:    Тиков исполнения задания (после принятия, до free->1).
         draw_ticks:   Тиков прохода рисования (busy 1->0).
         manual_ticks: Тиков ручного хода (man_busy 1->0).
-        enc_rate:     Прирост энкодера за тик.
+        enc_rate:     Прирост энкодера за тик БЕЗ команды ПЧ (см. belt).
+        belt:         Модель ленты (Task 2.1). None -> BeltDrive.from_enc_rate(enc_rate, ...) —
+                      старое поведение воспроизводится побитово, пока не пришла команда ПЧ.
         on_event:     Callback для событий (print-зеркало прошивки). None = молча.
     """
 
@@ -115,6 +128,7 @@ class RobotSimCore:
         toolchange_ticks: int = 3,
         manual_ticks: int = 2,
         enc_rate: int = 7,
+        belt: BeltDrive | None = None,
         on_event: Callable[[str], None] | None = None,
     ) -> None:
         self._word_order = word_order
@@ -124,8 +138,10 @@ class RobotSimCore:
         self._return_ticks = return_ticks
         self._toolchange_ticks = toolchange_ticks
         self._manual_ticks = manual_ticks
-        self._enc_rate = enc_rate
         self._on_event = on_event
+        # Лента — отдельная модель (Task 2.1, line-sim Ф2): без явной инъекции
+        # воспроизводит старое поведение enc_rate побитово (см. BeltDrive.from_enc_rate).
+        self._belt = belt if belt is not None else BeltDrive.from_enc_rate(enc_rate, TICK_INTERVAL_S)
 
         self.regs: list[int] = [0] * REG_SPACE_SIZE
         self._encoder = 0
@@ -189,16 +205,21 @@ class RobotSimCore:
 
     def tick(self) -> None:
         """Одна итерация цикла робота: энкодер, поллинг флагов, таймеры."""
-        self._encoder += self._enc_rate
-        self._write_encoder()
         if self.regs[REG_FREE] == 1:
-            # heartbeat телеметрии живёт ТОЛЬКО в idle (как в Lua)
+            # heartbeat телеметрии живёт ТОЛЬКО в idle (как в Lua) — читает
+            # REG_FREE ДО обработчиков этого тика (как раньше).
             self.regs[REG_TLM_BASE + _TLM_HB] = (self.regs[REG_TLM_BASE + _TLM_HB] + 1) % 32767
 
         self._handle_stop_servo()
         self._handle_job()
         self._handle_config()
         self._handle_vfd()
+        # Энкодер — ПОСЛЕ _handle_vfd: пульс VFD_FLAG применяет команду к belt
+        # (_handle_vfd -> belt.command) и приращение ЭТОГО ЖЕ тика уже должно
+        # идти по новой скорости — таково ограничение прошивки, «скорость
+        # меняется только в момент пульса», а не с задержкой в один тик.
+        self._encoder += self._belt.advance(TICK_INTERVAL_S)
+        self._write_encoder()
         self._handle_draw()
         self._handle_return()
         self._handle_toolchange()
@@ -318,6 +339,10 @@ class RobotSimCore:
         run = self.regs[_REG_VFD_CMD_RUN] == 1
         reverse = self.regs[_REG_VFD_CMD_DIR] == 1
         freq = self.regs[_REG_VFD_CMD_FREQ]
+        # RAW*100 -> Гц (см. gd20_bridge.yaml cmd_freq.scale) — скорость ленты
+        # меняется ТОЛЬКО здесь, по пульсу VFD_FLAG (ограничение прошивки,
+        # разгон/торможение по рампе вне области задачи, см. belt.py).
+        self._belt.command(run=run, freq_hz=freq / _VFD_FREQ_SCALE, reverse=reverse)
         if self.regs[_REG_VFD_CMD_RESET] == 1:
             self.regs[_REG_VFD_CMD_RESET] = 0
         st = _REG_VFD_ST_BASE

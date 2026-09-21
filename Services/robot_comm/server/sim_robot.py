@@ -27,7 +27,7 @@ from typing import Callable
 from Services.modbus.sdk.errors import ModbusNotAvailableError
 
 from Services.robot_comm.core.registers import REG_SPACE_SIZE, ROBOT_UNIT_ID
-from Services.robot_comm.server.sim_core import RobotSimCore
+from Services.robot_comm.server.sim_core import TICK_INTERVAL_S, RobotSimCore
 
 try:  # pragma: no cover - наличие pymodbus зависит от окружения
     from pymodbus.server import ServerStop, StartTcpServer
@@ -44,7 +44,9 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5021  # не 5020 — там тестовый slave Services/modbus
-TICK_INTERVAL_S = 0.01  # период Motion-цикла симулятора
+# TICK_INTERVAL_S — реэкспорт из sim_core.py (ревью Task 2.1, п.3: раньше
+# дублировалось здесь отдельной константой; sim_core.py — источник истины,
+# этот модуль и так импортирует RobotSimCore из него).
 #: Сколько раз печатать сбой наблюдателя обмена, прежде чем замолчать (не спамить в цикле).
 _OBSERVER_ERROR_LIMIT = 3
 
