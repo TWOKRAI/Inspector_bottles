@@ -156,7 +156,9 @@ class CameraServicePlugin(ProcessModulePlugin):
             # contain → report → degrade (Ф2 Task 2.4): ошибку НЕ пробрасываем
             # (проброс обрушит воркер), но честно кормим health — после порога
             # подряд-ошибок breaker сам переведёт процесс в degraded.
-            self._ctx.health.report_error(exc, context=f"camera_service: захват кадра (backend={self._camera_type})")
+            self._ctx.health.report_error(
+                exc, context=f"camera_service: захват кадра (backend={self._camera_type})"
+            )
             return []
 
         if frame is None:
@@ -250,9 +252,9 @@ class CameraServicePlugin(ProcessModulePlugin):
             from Plugins.hub.device_hub.client import DeviceHubClient
 
             client = DeviceHubClient(ctx, default_timeout=1.0)
-        except (
-            Exception
-        ):  # no-health: optional-зависимость (hub-плагин может отсутствовать), best-effort арбитраж уже логируется
+        # no-health: optional-зависимость (hub-плагин может отсутствовать),
+        # best-effort арбитраж уже логируется ниже.
+        except Exception:
             ctx.log_info("CameraServicePlugin: DeviceHubClient недоступен, пропускаем hik_release")
             return
 
