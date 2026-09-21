@@ -203,8 +203,19 @@ class RobotSimCore:
     # «Motion-цикл» — один тик
     # ------------------------------------------------------------------ #
 
-    def tick(self) -> None:
-        """Одна итерация цикла робота: энкодер, поллинг флагов, таймеры."""
+    def tick(self, dt_s: float | None = None) -> None:
+        """Одна итерация цикла робота: энкодер, поллинг флагов, таймеры.
+
+        Args:
+            dt_s: Реальный интервал с прошлого тика (Task 2.1b, line-sim Ф2:
+                  измеряет вызывающая сторона — `SimRobotServer._ticker`).
+                  ``None`` -> `TICK_INTERVAL_S` (старое поведение, все прямые
+                  вызовы/тесты без аргумента не меняются). Влияет только на
+                  ленту (`self._belt.advance`) — счётчики шагов остальных
+                  обработчиков (job/draw/manual/…) по-прежнему считаются
+                  тиками, не временем.
+        """
+        dt = dt_s if dt_s is not None else TICK_INTERVAL_S
         if self.regs[REG_FREE] == 1:
             # heartbeat телеметрии живёт ТОЛЬКО в idle (как в Lua) — читает
             # REG_FREE ДО обработчиков этого тика (как раньше).
@@ -218,7 +229,7 @@ class RobotSimCore:
         # (_handle_vfd -> belt.command) и приращение ЭТОГО ЖЕ тика уже должно
         # идти по новой скорости — таково ограничение прошивки, «скорость
         # меняется только в момент пульса», а не с задержкой в один тик.
-        self._encoder += self._belt.advance(TICK_INTERVAL_S)
+        self._encoder += self._belt.advance(dt)
         self._write_encoder()
         self._handle_draw()
         self._handle_return()
