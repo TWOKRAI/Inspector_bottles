@@ -161,18 +161,22 @@ class SimRobotServer:
 
         Скорость ленты идёт по РЕАЛЬНОМУ времени (Task 2.1b, line-sim Ф2):
         `time.sleep(interval)` не гарантирует ровно `interval` — ОС планирует
-        поток позже (на macOS замерено ≈16-40% сверху), из-за чего лента при
-        фиксированном dt=TICK_INTERVAL_S ехала медленнее команды. Первый тик
-        — по `TICK_INTERVAL_S` (не с чего измерять интервал); дальше `dt` —
-        фактически прошедшее с прошлого тика время, зажатое `_MAX_TICK_DT_S`:
-        пауза процесса (GC, отладчик, свап) не должна прыжком доехать ленту
-        на всю свою длительность.
+        поток позже (замерено на macOS, 2026-09-21: 11.6-12.0 мс без нагрузки,
+        ~20 мс при соседнем потоке, держащем GIL — не абсолютная величина,
+        конкретный запуск), из-за чего лента при фиксированном
+        dt=TICK_INTERVAL_S ехала медленнее команды. Первый тик — по
+        `TICK_INTERVAL_S` (не с чего измерять интервал); дальше `dt` —
+        фактически прошедшее с прошлого тика время (`time.perf_counter()` —
+        точнее `monotonic()` на Windows/Python 3.12, где у `monotonic()`
+        гранулярность ~15.6мс), зажатое `_MAX_TICK_DT_S`: пауза процесса
+        (GC, отладчик, свап) не должна прыжком доехать ленту на всю свою
+        длительность.
         """
-        last = time.monotonic()
+        last = time.perf_counter()
         self.core.tick(TICK_INTERVAL_S)
         while not self._stop.is_set():
             time.sleep(self._tick_interval)
-            now = time.monotonic()
+            now = time.perf_counter()
             dt = min(now - last, _MAX_TICK_DT_S)
             last = now
             self.core.tick(dt)
