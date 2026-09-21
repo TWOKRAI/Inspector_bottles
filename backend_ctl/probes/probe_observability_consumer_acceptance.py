@@ -816,7 +816,9 @@ def family_reading(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
         f"success=true, ≥1 запись из кольца {RING}"
         if PROFILE.name != "prototype"
         else "success=true, ≥1 запись из кольца инспектора",
-        f"success={st.get('success')}; записей={len(recs) if isinstance(recs, list) else recs}; keys={sorted(st.keys())[:10]}",
+        f"success={st.get('success')}; записей={len(recs) if isinstance(recs, list) else recs}; keys={sorted(st.keys())[:10]}"
+        # Task 1.6: причина отказа — в observed, иначе красная строка молчит о корне.
+        + ("" if st.get("success") else f"; reason={st.get('error') or st.get('reason') or st.get('message')!r}"),
         "PASS"
         if (st.get("success") and isinstance(recs, list) and recs)
         else ("PARTIAL" if st.get("success") else "FAIL"),

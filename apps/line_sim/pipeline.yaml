@@ -68,6 +68,21 @@ processes:
         host: 127.0.0.1
         port: 8091
 
+# Task 1.6: кольцо записей flight_ring у camera (роль `ring` зонда приёмки, R10).
+# `type: memory` обязателен — без него под тем же именем поднимется ФАЙЛОВЫЙ
+# приёмник без tail(). Ось `channels` скоупа замещающая: console/system_file
+# перечислены рядом с кольцом, иначе пропал бы system.log процесса.
+observability:
+  processes:
+    camera:
+      channels:
+        flight_ring:
+          type: memory
+          capacity: 500
+      scopes:
+        SYSTEM:
+          channels: [console, system_file, flight_ring]
+
 wires:
   - source: camera.camera_service.frame
     target: mjpeg.mjpeg_sink.frame

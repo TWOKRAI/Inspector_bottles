@@ -181,6 +181,7 @@ def assemble_proc_dicts(
     log_dir: str | None = None,
     app_config_path: str = "",
     recipe_path: str = "",
+    telemetry_section: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Universal-шов сборки: blueprint dict → ``{name: proc_dict}`` (E3/5.3, framework-only).
 
@@ -211,10 +212,19 @@ def assemble_proc_dicts(
     молчании — системный temp (``log_paths.default_log_base_directory``). Явное
     значение работает как прежде.
 
+    ``telemetry_section`` (Task 1.5 плана line-sim) — глобальный дефолт секции
+    ``telemetry.publish``: carve-out ``BlueprintAssembler._resolve_telemetry``
+    прототипа. Без него publisher-гейт (``ProcessHeartbeat``) у generic-приложения
+    не строился вовсе — зонд приёмки видел ``gate_active=False``. Per-process
+    override (``processes[].telemetry``) мержится поверх глубоко; сырой override
+    кладётся отдельно в ``telemetry_override`` (его читает ``config.reload``).
+    Не задано нигде → ключа ``telemetry`` нет; явный ``{}`` — «включить с
+    дефолтами», в «не задано» не схлопывается.
+
     Raises:
         BlueprintError: ``SystemBlueprint.check`` вернул ошибки.
     """
-    from multiprocess_framework.modules.data_schema_module import process
+    from multiprocess_framework.modules.data_schema_module import deep_merge, process
     from multiprocess_framework.modules.data_schema_module.core.helpers import merge_with_defaults
     from multiprocess_framework.modules.process_manager_module.launcher.schema import (
         DEFAULT_PROCESS_SCHEMA,
@@ -233,6 +243,7 @@ def assemble_proc_dicts(
 
     app_layer = observability_section or {}
     topology = SystemBlueprint.model_validate(blueprint)
+    telemetry_overrides = {p.process_name: p.telemetry for p in topology.processes if p.telemetry is not None}
     topology.infer_missing_collectors()
 
     errors = topology.check()
@@ -265,6 +276,11 @@ def assemble_proc_dicts(
             proc_dict["config"]["observability_config_path"] = str(app_config_path)
         if recipe_path:
             proc_dict["config"][RECIPE_PATH_CONFIG_KEY] = str(recipe_path)
+        override = telemetry_overrides.get(name)
+        if telemetry_section is not None or override is not None:
+            proc_dict["config"]["telemetry"] = {"publish": deep_merge(telemetry_section or {}, override or {})}
+        if override is not None:
+            proc_dict["config"]["telemetry_override"] = override
         proc_dict = merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)
         result[name] = proc_dict
     return result
@@ -331,12 +347,20 @@ class SystemBuilder:
         obs_section, obs_source = self._resolve_app_observability(manifest, spec)
         recipe_path = str(manifest.pipeline) if manifest.pipeline else ""
 
+        # Task 1.5: гейт телеметрии из того же system.yaml. Передаётся только
+        # заданным — билдер приложения, написанный до 1.5, остаётся совместим.
+        telemetry_kw: dict[str, Any] = {}
+        telemetry_section = self._resolve_app_telemetry(manifest)
+        if telemetry_section is not None:
+            telemetry_kw["telemetry_section"] = telemetry_section
+
         builder: ProcDictsBuilder = spec.proc_dicts_builder or assemble_proc_dicts
         proc_dicts = builder(
             blueprint,
             observability_section=obs_section,
             app_config_path=obs_source,
             recipe_path=recipe_path,
+            **telemetry_kw,
         )
         _pickle_sanity(proc_dicts, hook_name="proc_dicts_builder")
 
@@ -413,6 +437,21 @@ class SystemBuilder:
         raw = _load_yaml_or_json(manifest.system)
         section = raw.get("observability") if isinstance(raw, dict) else None
         return (dict(section) if isinstance(section, dict) else {}), str(manifest.system)
+
+    @staticmethod
+    def _resolve_app_telemetry(manifest: "AppManifest") -> dict[str, Any] | None:
+        """Секция ``telemetry.publish`` файла ``manifest.system`` (Task 1.5) или ``None``.
+
+        ``None`` — секции нет: гейт не строится, все метрики публикуются каждый
+        тик (поведение до 1.5). Нечитаемый файл роняет сборку — та же политика,
+        что у :meth:`_resolve_app_observability`.
+        """
+        if manifest.system is None:
+            return None
+        raw = _load_yaml_or_json(manifest.system)
+        telemetry = raw.get("telemetry") if isinstance(raw, dict) else None
+        publish = telemetry.get("publish") if isinstance(telemetry, dict) else None
+        return dict(publish) if isinstance(publish, dict) else None
 
     def _print_banner(
         self,

@@ -30,3 +30,16 @@ observability:
   history:
     enabled: true
     level: INFO
+
+# Task 1.5: publisher-гейт телеметрии — тот же белый список, что у прототипа
+# (multiprocess_prototype/backend/config/system.yaml, секция telemetry, ADR-PM-040):
+# push уровней погашен по умолчанию, fps/latency_ms включены (без них пусто
+# кольцо истории read-model). Числа всё равно приходят опросом introspect.telemetry.
+# Без секции гейт не строится вовсе — зонд приёмки 1.4 видел gate_active=False.
+telemetry:
+  publish:
+    default_enabled: false
+    default_interval_sec: 1.0
+    metrics:
+      fps:        {enabled: true, interval_sec: 1.0}
+      latency_ms: {enabled: true, interval_sec: 1.0}

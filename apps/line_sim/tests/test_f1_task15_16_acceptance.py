@@ -112,15 +112,17 @@ def test_camera_system_scope_keeps_console_and_system_file_plus_flight_ring(line
     правки содержит РОВНО {console, system_file, flight_ring} — не {flight_ring} в одиночку
     (что потеряло бы console/system_file при наивной правке).
 
-    Провал сегодня: 'loggers' (правила по скоупам) на camera не содержит 'SYSTEM' с ключом
-    'channels' вовсе -> KeyError/AssertionError.
+    Маршрут скоупа живёт в ``managers.logger.scopes`` (раскладка
+    ``expand_observability``), а не в ``loggers`` — там правила per-module. Первая версия
+    теста (независимый тестер) искала его в ``loggers["SYSTEM"]`` и осталась бы красной
+    при верном конфиге; путь исправлен ведущим, решение — в отчёте тестера Task 1.5/1.6.
     """
     managers = line_sim_processes["camera"].get("managers", {})
     logger = managers.get("logger", {})
-    loggers_rules = logger.get("loggers", {})
-    system_rule = loggers_rules.get("SYSTEM", {})
+    scopes = logger.get("scopes", {})
+    system_rule = scopes.get("SYSTEM", {})
     channels_list = system_rule.get("channels")
-    assert channels_list is not None, f"SYSTEM.channels не задан на camera: {loggers_rules!r}"
+    assert channels_list is not None, f"SYSTEM.channels не задан на camera: {scopes!r}"
     assert set(channels_list) == {"console", "system_file", "flight_ring"}, (
         f"SYSTEM.channels camera потерял console/system_file или не добавил flight_ring: {channels_list!r}"
     )
