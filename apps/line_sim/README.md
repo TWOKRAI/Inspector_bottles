@@ -33,14 +33,10 @@ HTTP MJPEG на `127.0.0.1:8091`. Остановка — SIGINT (Ctrl+C) или 
 ## Как направить прототип на сим
 
 Прототип не знает про сим и подключается к нему как к обычному железу — через
-Modbus TCP. В `data/devices.yaml` прототипа (runtime-файл, **не** в репозитории
-— заводится оператором на стенде):
-
-```yaml
-robot_main:
-  host: 127.0.0.1
-  port: 5021
-```
+Modbus TCP. Адрес сим-робота (`127.0.0.1:5021`, `unit_id: 2`) записан в секции
+`devices:` сим-рецепта `multiprocess_prototype/recipes/letter_robot_sim.yaml`.
+Править руками `data/devices.yaml` бесполезно: при активации рецепт делает upsert
+устройства (`DeviceManager.upsert`) и перезаписывает `transport` в этом файле.
 
 `vfd_belt` отдельной записи не требует — прототип читает частотник как мост
 через самого робота (`Services/device_hub/drivers/robot_driver.py`), тот же

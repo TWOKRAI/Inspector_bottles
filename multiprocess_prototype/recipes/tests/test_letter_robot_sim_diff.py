@@ -93,6 +93,11 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # Прежняя буквальная трактовка «ровно один блок» запрещала эту правку и тем самым
     # требовала заведомо нерабочий рецепт.
     wire_source_key = ".blueprint.wires[0].source"
+    # Адрес робота — второе следствие «сим вместо железа» (найдено при подготовке стенда
+    # Task 1.3, 2026-09-21): upsert рецепта при активации ПЕРЕЗАПИСЫВАЕТ transport в
+    # data/devices.yaml (`DeviceManager.upsert`, merge поверх), так что копия боевого
+    # адреса вела прототип на сим-рецепте к настоящему роботу 192.168.1.7:502.
+    robot_address_keys = (".devices[0].transport.host", ".devices[0].transport.port")
     all_diffs = _diff_paths(base, sim)
     real_diffs = [
         d
@@ -100,6 +105,7 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
         if not d.startswith(allowed_prefix)
         and d not in identity_keys
         and d != wire_source_key
+        and d not in robot_address_keys
     ]
 
     assert real_diffs == [], (
@@ -142,3 +148,11 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
         f"({sim_camera_plugin0!r}) — letter_robot_sim.yaml не может быть точной копией "
         f"hikvision_letter_robot.yaml, camera_0 обязан стать симулятором"
     )
+
+
+def test_sim_recipe_points_robot_at_sim_not_hardware() -> None:
+    """robot_main сим-рецепта адресует сим-робот apps/line_sim, а не боевой робот."""
+    sim = yaml.safe_load(_SIM_PATH.read_text(encoding="utf-8"))
+    robot = next(d for d in sim["devices"] if d["id"] == "robot_main")
+    assert robot["transport"]["host"] == "127.0.0.1"
+    assert robot["transport"]["port"] == 5021
