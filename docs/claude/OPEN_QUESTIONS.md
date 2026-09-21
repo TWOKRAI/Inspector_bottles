@@ -1074,6 +1074,11 @@ CTO (`02beb1bd`) развёл источник и сток по разным п�
 
 ## Сим-робот не поднимается на 5021 ~30 с после останова (TIME_WAIT) (2026-09-21, CTO, стенд Task 1.3)
 
+**[ЗАКРЫТО 2026-09-21]** Подтверждено, что падала проба, а не pymodbus (тот передаёт
+`reuse_address=True`). Фикс — `SO_REUSEADDR` на пробном сокете, только POSIX (на Windows опция
+разрешила бы bind поверх живого слушателя). Тесты `Plugins/sim/robot_host/tests/test_acceptance_time_wait.py`,
+отчёт `docs/reviews/2026-09-21_line-sim-f1-stand.md`. Открытым остался только Windows — не воспроизводили.
+
 Рестарт сима через 27 с после останова → `robot: sim_robot_host.start: [Errno 48] Address already in
 use`, порт никто не слушает, прототип получает `Connection refused`. Кандидат —
 `Plugins/sim/robot_host/plugin.py:154-158`, `_probe_port_free` биндит без `SO_REUSEADDR` (macOS

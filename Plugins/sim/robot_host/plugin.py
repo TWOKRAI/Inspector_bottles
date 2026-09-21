@@ -48,6 +48,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 from typing import Any
@@ -153,6 +154,15 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         """
         probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
+            # SO_REUSEADDR — как у самого сервера (pymodbus передаёт reuse_address=True):
+            # порт в TIME_WAIT после прошлого запуска не считается занятым, а живой
+            # слушатель на том же адресе всё равно даёт EADDRINUSE (тесты AC1/AC2 в
+            # tests/test_acceptance_time_wait.py). Без него рестарт в течение ~30 с на
+            # macOS падал в error при свободном порту (стенд Task 1.3, 2026-09-21).
+            # Только POSIX: на Windows SO_REUSEADDR разрешает bind поверх живого
+            # слушателя, и проба перестала бы замечать ещё живой прошлый сим.
+            if os.name == "posix":
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind((self._host, self._port))
         finally:
             probe.close()

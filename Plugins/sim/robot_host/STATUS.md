@@ -6,11 +6,11 @@
 
 | Что | Состояние |
 |---|---|
-| `plugin.py` — `SimRobotHostPlugin` | есть: `configure`/`start`/`shutdown`, пробный bind порта до `pymodbus`, `_on_write` под локом, `sim_robot.status` |
+| `plugin.py` — `SimRobotHostPlugin` | есть: `configure`/`start`/`shutdown`, пробный bind порта до `pymodbus` (с `SO_REUSEADDR` на POSIX — TIME_WAIT не блокирует рестарт), `_on_write` под локом, `sim_robot.status` |
 | Деградация без `pymodbus` | есть: `ModbusNotAvailableError` → `report_error`, `state="error"`, процесс живёт |
 | Занятый порт | есть: свой пробный сокет, синхронно, до обращения к `SimRobotServer` |
 | Метрика `sim_robot.writes` | есть: дельта из `cmd_status`/`shutdown`, не с потока `pymodbus` |
-| Тесты | `tests/test_hazards.py` — 4 авторских (a-d); приёмочные независимого тестера — `apps/line_sim/tests/test_f1_task11_acceptance.py` (вне этого пакета) |
+| Тесты | `tests/test_hazards.py` — 4 авторских (a-d); `tests/test_acceptance_time_wait.py` — 4 независимого tester (TIME_WAIT / занятый порт, Task 1.3); приёмочные независимого тестера — `apps/line_sim/tests/test_f1_task11_acceptance.py` (вне этого пакета) |
 
 ## Долг / открытые вопросы
 

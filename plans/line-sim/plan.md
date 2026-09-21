@@ -461,7 +461,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   `docs/reviews/2026-09-20_task-1.1-developer.md`) — **Module contract:** new-lite
 - Task 1.2: Дверь кадров — тип `stream` в `camera_service` + MJPEG-сток в симе, рецепт
   `letter_robot_sim.yaml` [PENDING] (зависит от 1.1) — **Module contract:** new-lite
-- Task 1.3: Живой стенд двух приложений (8765 + 8766), отчёт стенда + ревью [PENDING]
+- Task 1.3: Живой стенд двух приложений (8765 + 8766), отчёт стенда + ревью [DONE 2026-09-21, шаг 3 отложен до closure 4.4]
   (зависит от 1.1, 1.2; сценарий рестарта — после closure Task 4.4) — **Module
   contract:** impl-only
 - Task 1.4 (новая, ред. 3): Приёмка наблюдаемости второго приложения — тот же зонд и

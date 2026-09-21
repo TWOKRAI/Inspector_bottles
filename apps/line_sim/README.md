@@ -9,15 +9,23 @@ Task 1.1 плана [`plans/line-sim/phase-1-vertical-slice.md`](../../plans/lin
 ## Запуск
 
 ```bash
-BACKEND_CTL=1 BACKEND_CTL_PORT=8766 MULTIPROCESS_LOG_DIR=/tmp/line_sim_logs \
-    python apps/line_sim/run.py
+FW_SHM_OWNER_INCARNATION=1 BACKEND_CTL=1 BACKEND_CTL_PORT=8766 \
+    MULTIPROCESS_LOG_DIR=/tmp/line_sim_logs python apps/line_sim/run.py
 ```
 
-Поднимает два процесса: `robot`, держащий `SimRobotServer` (Modbus TCP,
-`127.0.0.1:5021`), и `camera` — линейную цепочку `CameraServicePlugin`
-(`camera_type: simulator`) → `MjpegSinkPlugin`, раздающую последний кадр по
-HTTP MJPEG на `127.0.0.1:8091`. Остановка — SIGINT (Ctrl+C) или `backend_ctl`
-`system_command shutdown`.
+> **⚠ `FW_SHM_OWNER_INCARNATION=1` — обязателен на POSIX, и в симе, и в прототипе.**
+> Без него все процессы-владельцы кадровых колец создают сегменты с голыми именами
+> `/output_frames_0..2` и перехватывают их друг у друга: прототип теряет треть кадров
+> и читает чужие сегменты, а `hz` в `system_overview` этого не показывает (замер
+> стенда Task 1.3, 2026-09-21: дверь 8091 отдавала кадры формы `(1,1,3)` при hz 24.5).
+> Это дефект фреймворка, а не сима; задача записана в `docs/claude/OPEN_QUESTIONS.md`
+> («SHM-кольца на POSIX…»). Из рецепта флаг не задаётся — только env при запуске.
+
+Поднимает три процесса: `robot`, держащий `SimRobotServer` (Modbus TCP,
+`127.0.0.1:5021`); `camera` с `CameraServicePlugin` (`camera_type: simulator`),
+который по `chain_targets` отдаёт кадры процессу `mjpeg`; и `mjpeg` с
+`MjpegSinkPlugin`, раздающим последний кадр по HTTP MJPEG на `127.0.0.1:8091`.
+Остановка — SIGINT (Ctrl+C) или `backend_ctl` `system_command shutdown`.
 
 ## Порты стенда
 
@@ -49,10 +57,10 @@ writes_seen, state}`. Подробности механизма — [`Plugins/si
 
 ## Дверь кадров (Task 1.2)
 
-Процесс `camera` — линейная внутрипроцессная цепочка: `CameraServicePlugin`
-(`camera_type: simulator`, генерирует кадры) → `MjpegSinkPlugin` (кодирует в
-JPEG, раздаёт последний кадр по `GET http://127.0.0.1:8091/` как
-`multipart/x-mixed-replace`). Открыть в браузере/`cv2.VideoCapture`/`ffplay`
+Два процесса: `camera` (`CameraServicePlugin`, `camera_type: simulator`,
+генерирует кадры) → по `chain_targets` через SHM-кольцо → `mjpeg`
+(`MjpegSinkPlugin`: кодирует в JPEG, раздаёт последний кадр по
+`GET http://127.0.0.1:8091/` как `multipart/x-mixed-replace`). Открыть в браузере/`cv2.VideoCapture`/`ffplay`
 — обычный MJPEG-клиент. Подробности механизма стока —
 [`Plugins/sim/mjpeg_sink/README.md`](../../Plugins/sim/mjpeg_sink/README.md).
 
